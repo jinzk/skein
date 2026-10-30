@@ -222,6 +222,21 @@ EXP ([Ee][-+]?[0-9]+)
 "trim" { yylval.fn = B_trim; return FUNC; }
 "find" { yylval.fn = B_find; return FUNC; }
 "substr" { yylval.fn = B_substr; return FUNC; }
+"bytes_from_string" { yylval.fn = B_bytes_from_string; return FUNC; }
+"bytes_to_string" { yylval.fn = B_bytes_to_string; return FUNC; }
+"bytes_len" { yylval.fn = B_bytes_len; return FUNC; }
+"bytes_get" { yylval.fn = B_bytes_get; return FUNC; }
+"bytes_slice" { yylval.fn = B_bytes_slice; return FUNC; }
+"bytes_concat" { yylval.fn = B_bytes_concat; return FUNC; }
+"bytes_hex" { yylval.fn = B_bytes_hex; return FUNC; }
+"bytes_from_hex" { yylval.fn = B_bytes_from_hex; return FUNC; }
+"bytes_to_int" { yylval.fn = B_bytes_to_int; return FUNC; }
+"int_to_bytes" { yylval.fn = B_int_to_bytes; return FUNC; }
+"read_bytes" { yylval.fn = B_read_bytes; return FUNC; }
+"write_bytes" { yylval.fn = B_write_bytes; return FUNC; }
+"append_bytes" { yylval.fn = B_append_bytes; return FUNC; }
+"file_read_bytes" { yylval.fn = B_file_read_bytes; return FUNC; }
+"file_write_bytes" { yylval.fn = B_file_write_bytes; return FUNC; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;

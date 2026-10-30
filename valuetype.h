@@ -25,6 +25,7 @@ enum val_type {
     T_int = 1,
     T_float,
     T_string,
+    T_bytes,
     T_list,
     T_dict,
     T_func,
@@ -54,6 +55,11 @@ struct float_value_t {
 struct string_value_t {
     enum val_type type;
     char *value;
+};
+
+struct bytes_value_t {
+    enum val_type type;
+    std::string value;
 };
 
 struct list_value_t {
@@ -94,6 +100,7 @@ struct value_t *newcontinue();
 struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newstrval(const char *s);
+struct value_t *newbytesval(const std::string &data);
 struct value_t *newbuiltinval(int functype);
 struct value_t *newuserdataval(const struct native_type *meta,
                                std::shared_ptr<void> data);

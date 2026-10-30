@@ -191,7 +191,7 @@ adder(3)(4)
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -417,7 +417,7 @@ file_exists("out.txt")
 - `append_file` 创建或追加；
 - 文件以二进制模式打开，不会自动转换 CRLF，也不会去掉末尾换行；
 - 读写内容按 UTF-8 文本处理；
-- `read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；
+- `read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；读取二进制请使用 `read_bytes`；
 - 不会自动创建父目录；
 - 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
 - Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
@@ -454,8 +454,95 @@ file_close(h)
 - `file_read(h)` 读取剩余全部内容，`file_read(h, n)` 最多读取 n 字节；`n = 0` 等价于读取全部；
 - `file_seek` 的 `whence`：`0` 文件开头、`1` 当前位置、`2` 文件末尾；
 - 关闭后继续读写会报 `file is closed`；
-- 读取到 NUL 字节会报错；
+- `file_read` 读取到 NUL 字节会报错；读取二进制请使用 `file_read_bytes`；
 - 最终未关闭的句柄会随进程退出关闭。
+
+### 二进制 buffer
+
+文本字符串按 UTF-8 处理，不能保存任意字节。二进制数据使用独立的 `bytes` 类型：
+
+```text
+bytes_from_string(text)        → bytes
+bytes_to_string(bytes)         → string
+bytes_len(bytes)               → int
+bytes_get(bytes, index)        → 0..255
+bytes_slice(bytes, start[, length]) → bytes
+bytes_concat(a, b)             → bytes
+bytes_hex(bytes)               → 十六进制字符串
+bytes_from_hex(text)           → bytes
+bytes_to_int(bytes, size, byteorder[, offset[, signed]]) → int
+int_to_bytes(value, size, byteorder) → bytes
+read_bytes(path)               → bytes
+write_bytes(path, bytes)       → null，覆盖写入
+append_bytes(path, bytes)      → null，追加写入
+file_read_bytes(handle[, n])   → bytes
+file_write_bytes(handle, bytes) → null
+bytes[index]                   → 0..255
+bytes[index] = 0..255
+```
+
+示例：
+
+```text
+let b = bytes_from_hex("00ff10");
+bytes_len(b)          → 3
+bytes_hex(b)          → "00ff10"
+bytes_get(b, 1)       → 255
+bytes_hex(bytes_slice(b, 1, 2)) → "ff10"
+
+let c = bytes_from_string("abc");
+c[1] = 255;
+bytes_hex(c)          → "61ff63"
+
+bytes_to_int(bytes_from_hex("78563412"), 4, "little")
+                      → 305419896
+bytes_to_int(bytes_from_hex("78563412"), 4, "big")
+                      → 2018915346
+bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 1)
+                      → -1
+bytes_hex(int_to_bytes(305419896, 4, "little"))
+                      → "78563412"
+bytes_hex(int_to_bytes(-1, 2, "little"))
+                      → "ffff"
+```
+
+规则：
+
+- `bytes` 可以保存任意字节，包括 `0x00`，长度由字节数决定；
+- 直接打印 `bytes` 时显示为 `<bytes: N>`，不会把原始二进制写到终端；需要查看内容时使用 `bytes_hex`；
+- `bytes_len`、`bytes_get`、`bytes_slice`、索引和 `file_seek` 都使用**字节下标**，不是 UTF-8 码点；
+- 索引读取返回 `0..255` 的整数，索引赋值只接受 `0..255`；
+- `bytes_slice` 的 `start` / `length` 不能为负数，越界会截断；
+- `bytes_from_hex` 只接受偶数个十六进制数字，大小写均可；
+- `bytes_to_int` 的 `size` 为 1..8，`byteorder` 支持 `"little"` / `"big"`（也接受 `"le"` / `"be"`）；
+- `bytes_to_int` 的 `offset` 默认 0，`signed` 默认 0；`offset + size` 超出 buffer 会报错，不会静默截断；
+- `bytes_to_int(..., signed = 1)` 按二补码解释；无符号 64 位值超过 `int64` 上限时会报错；
+- `int_to_bytes` 的 `size` 为 1..8；值可以落在有符号下限到无符号上限之间，按低 `size` 字节编码；
+- 负数写入使用二补码，例如 `int_to_bytes(-1, 2, "little")` 得到 `ff ff`；
+- `bytes_to_string` 要求内容是合法 UTF-8 且不含 NUL，否则报错；
+- `read_bytes` / `write_bytes` / `append_bytes` 不做文本 NUL 检查；
+- `file_read_bytes(h)` 读取剩余全部内容，`file_read_bytes(h, n)` 最多读取 n 字节；
+- `bytes` 是值类型，赋值和复制都会复制内容。
+
+二进制文件读写：
+
+```text
+let h = file_open("data.bin", "r+b");
+file_seek(h, 8);
+file_write_bytes(h, bytes_from_hex("00ff"));
+file_seek(h, 0);
+bytes_hex(file_read_bytes(h, 16))
+file_close(h)
+```
+
+读取固定宽度整数：
+
+```text
+let h = file_open("data.bin", "rb");
+let magic = bytes_to_int(file_read_bytes(h, 4), 4, "big");
+let length = bytes_to_int(file_read_bytes(h, 4), 4, "little");
+file_close(h);
+```
 
 ### 用 dict + 闭包封装文件对象
 

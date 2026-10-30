@@ -56,6 +56,13 @@ struct value_t *newstrval(const char *s) {
     return (struct value_t *)v;
 }
 
+struct value_t *newbytesval(const std::string &data) {
+    struct bytes_value_t *v = new bytes_value_t;
+    v->type = T_bytes;
+    v->value = data;
+    return (struct value_t *)v;
+}
+
 struct value_t *newbuiltinval(int functype) {
     struct builtin_value_t *v = new builtin_value_t;
     v->type = T_builtin;
@@ -109,6 +116,8 @@ struct value_t *dupval(struct value_t *v) {
             return newfloatval(((struct float_value_t *)v)->value);
         case T_string:
             return newstrval(((struct string_value_t *)v)->value);
+        case T_bytes:
+            return newbytesval(((struct bytes_value_t *)v)->value);
         case T_list: {
             struct list_value_t *src = (struct list_value_t *)v;
             struct list_value_t *dst = newlistval();
@@ -167,6 +176,9 @@ void freeval(struct value_t *v) {
             delete s;
             break;
         }
+        case T_bytes:
+            delete (struct bytes_value_t *)v;
+            break;
         case T_list: {
             struct list_value_t *l = (struct list_value_t *)v;
             for (size_t i = 0; i < l->value.size(); ++i)
@@ -211,6 +223,7 @@ const char *typename_of(const struct value_t *v) {
         case T_int: return "int";
         case T_float: return "float";
         case T_string: return "string";
+        case T_bytes: return "bytes";
         case T_list: return "list";
         case T_dict: return "dict";
         case T_func: return "function";
@@ -257,6 +270,10 @@ std::string value_to_string(const struct value_t *v) {
         case T_string: {
             const char *s = ((const struct string_value_t *)v)->value;
             return s ? s : "";
+        }
+        case T_bytes: {
+            const struct bytes_value_t *b = (const struct bytes_value_t *)v;
+            return "<bytes: " + std::to_string(b->value.size()) + ">";
         }
         case T_list: {
             const struct list_value_t *l = (const struct list_value_t *)v;

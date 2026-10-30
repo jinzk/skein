@@ -37,7 +37,22 @@ enum bifs {
     B_split_ws,
     B_trim,
     B_find,
-    B_substr
+    B_substr,
+    B_bytes_from_string,
+    B_bytes_to_string,
+    B_bytes_len,
+    B_bytes_get,
+    B_bytes_slice,
+    B_bytes_concat,
+    B_bytes_hex,
+    B_bytes_from_hex,
+    B_bytes_to_int,
+    B_int_to_bytes,
+    B_read_bytes,
+    B_write_bytes,
+    B_append_bytes,
+    B_file_read_bytes,
+    B_file_write_bytes
 };
 
 struct ast {

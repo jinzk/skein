@@ -539,6 +539,154 @@ def main():
           stderr="append_file expects 2 arguments")
     check("file_exists type error", "file_exists(1)\n",
           stderr="file_exists expects a string path")
+    check("bytes_from_string display", 'bytes_from_string("abc")\n',
+          stdout="= <bytes: 3>")
+    check("bytes_len", 'bytes_len(bytes_from_string("abc"))\n', stdout="= 3")
+    check("bytes_get", 'bytes_get(bytes_from_string("abc"), 1)\n',
+          stdout="= 98")
+    check("bytes_get out of range",
+          'bytes_get(bytes_from_string("a"), 5)\n',
+          stderr="bytes_get index 5 out of range")
+    check("bytes_get type", 'bytes_get("x", 0)\n',
+          stderr="bytes_get expects bytes")
+    check("bytes_slice", 'bytes_hex(bytes_slice('
+          'bytes_from_string("abcdef"), 1, 3))\n', stdout="= 626364")
+    check("bytes_slice past end",
+          'bytes_len(bytes_slice(bytes_from_string("abc"), 10))\n',
+          stdout="= 0")
+    check("bytes_slice clamps length",
+          'bytes_hex(bytes_slice(bytes_from_string("abc"), 1, 100))\n',
+          stdout="= 6263")
+    check("bytes_concat", 'bytes_hex(bytes_concat('
+          'bytes_from_string("ab"), bytes_from_string("cd")))\n',
+          stdout="= 61626364")
+    check("bytes_hex", 'bytes_hex(bytes_from_hex("00ff10"))\n',
+          stdout="= 00ff10")
+    check("bytes_from_hex odd", 'bytes_from_hex("0")\n',
+          stderr="even number of hex digits")
+    check("bytes_from_hex invalid", 'bytes_from_hex("zz")\n',
+          stderr="invalid hex digit")
+    check("bytes_from_hex type", "bytes_from_hex(1)\n",
+          stderr="bytes_from_hex expects a string")
+    check("bytes_to_string", 'bytes_to_string(bytes_from_hex("68656c6c6f"))\n',
+          stdout="= hello")
+    check("bytes_to_string NUL", 'bytes_to_string(bytes_from_hex("00"))\n',
+          stderr="bytes contain NUL byte")
+    check("bytes_to_string invalid utf8",
+          'bytes_to_string(bytes_from_hex("ff"))\n',
+          stderr="not valid UTF-8")
+    check("bytes_to_string overlong utf8",
+          'bytes_to_string(bytes_from_hex("c080"))\n',
+          stderr="not valid UTF-8")
+    check("bytes_to_string surrogate utf8",
+          'bytes_to_string(bytes_from_hex("eda080"))\n',
+          stderr="not valid UTF-8")
+    check("bytes_to_string utf8 roundtrip",
+          'bytes_to_string(bytes_from_string("你好"))\n',
+          stdout="= 你好")
+    check("bytes_to_string emoji roundtrip",
+          'bytes_to_string(bytes_from_string("😀"))\n',
+          stdout="= 😀")
+    check("bytes_to_int little",
+          'bytes_to_int(bytes_from_hex("78563412"), 4, "little")\n',
+          stdout="= 305419896")
+    check("bytes_to_int big",
+          'bytes_to_int(bytes_from_hex("78563412"), 4, "big")\n',
+          stdout="= 2018915346")
+    check("bytes_to_int signed 16",
+          'bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 1)\n',
+          stdout="= -1")
+    check("bytes_to_int unsigned 16",
+          'bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 0)\n',
+          stdout="= 65535")
+    check("bytes_to_int signed 8",
+          'bytes_to_int(bytes_from_hex("80"), 1, "big", 0, 1)\n',
+          stdout="= -128")
+    check("bytes_to_int offset",
+          'bytes_to_int(bytes_from_hex("00ff80"), 2, "big", 1)\n',
+          stdout="= 65408")
+    check("bytes_to_int signed 64",
+          'bytes_to_int(bytes_from_hex("ffffffffffffffff"), 8, "little", 0, 1)\n',
+          stdout="= -1")
+    check("bytes_to_int unsigned 64 overflow",
+          'bytes_to_int(bytes_from_hex("ffffffffffffffff"), 8, "little")\n',
+          stderr="unsigned 64-bit value is too large")
+    check("bytes_to_int truncated",
+          'bytes_to_int(bytes_from_hex("0102"), 4, "little")\n',
+          stderr="need 4 bytes at offset 0, got 2")
+    check("bytes_to_int size range",
+          'bytes_to_int(bytes_from_hex("01"), 0, "little")\n',
+          stderr="size must be between 1 and 8")
+    check("bytes_to_int byteorder",
+          'bytes_to_int(bytes_from_hex("01"), 1, "middle")\n',
+          stderr='byteorder must be "little" or "big"')
+    check("bytes_to_int negative offset",
+          'bytes_to_int(bytes_from_hex("01"), 1, "little", -1)\n',
+          stderr="offset must be a non-negative integer")
+    check("bytes_to_int type", 'bytes_to_int("x", 1, "little")\n',
+          stderr="bytes_to_int expects bytes")
+    check("bytes_to_int arity",
+          'bytes_to_int(bytes_from_hex("01"))\n',
+          stderr="bytes_to_int expects 3 to 5 arguments")
+    check("int_to_bytes little",
+          'bytes_hex(int_to_bytes(305419896, 4, "little"))\n',
+          stdout="= 78563412")
+    check("int_to_bytes big",
+          'bytes_hex(int_to_bytes(305419896, 4, "big"))\n',
+          stdout="= 12345678")
+    check("int_to_bytes negative",
+          'bytes_hex(int_to_bytes(-1, 2, "little"))\n', stdout="= ffff")
+    check("int_to_bytes negative big",
+          'bytes_hex(int_to_bytes(-2, 4, "big"))\n', stdout="= fffffffe")
+    check("int_to_bytes unsigned 32",
+          'bytes_hex(int_to_bytes(4294967295, 4, "little"))\n',
+          stdout="= ffffffff")
+    check("int_to_bytes range high",
+          'int_to_bytes(256, 1, "little")\n',
+          stderr="does not fit in 1 bytes")
+    check("int_to_bytes range low",
+          'int_to_bytes(-129, 1, "little")\n',
+          stderr="does not fit in 1 bytes")
+    check("int_to_bytes size range",
+          'int_to_bytes(1, 9, "little")\n',
+          stderr="size must be between 1 and 8")
+    check("int_to_bytes byteorder",
+          'int_to_bytes(1, 4, "middle")\n',
+          stderr='byteorder must be "little" or "big"')
+    check("int_to_bytes type", 'int_to_bytes("x", 4, "little")\n',
+          stderr="int_to_bytes expects an integer value")
+    check("int_to_bytes arity", 'int_to_bytes(1, 4)\n',
+          stderr="int_to_bytes expects 3 arguments")
+    check("bytes/int roundtrip",
+          'bytes_to_int(int_to_bytes(-123456789, 8, "big"), '
+          '8, "big", 0, 1)\n',
+          stdout="= -123456789")
+    check("bytes index read", 'bytes_from_string("hello")[1]\n',
+          stdout="= 101")
+    check("bytes index out of range", 'bytes_from_string("a")[5]\n',
+          stderr="bytes index 5 out of range")
+    check("bytes index assignment",
+          'let b = bytes_from_string("abc");\n'
+          'b[1] = 255;\n'
+          'bytes_hex(b)\n',
+          stdout="= 61ff63")
+    check("bytes index assignment range",
+          'let b = bytes_from_string("abc");\n'
+          'b[0] = 256;\n',
+          stderr="bytes value 256 out of range")
+    check("bytes equality",
+          'bytes_from_string("ab") == bytes_from_hex("6162")\n',
+          stdout="= 1")
+    check("bytes arity", "bytes_len()\n",
+          stderr="built-in function expects 1 argument")
+    check("bytes_slice arity", "bytes_slice(bytes_from_string(\"a\"))\n",
+          stderr="bytes_slice expects 2 or 3 arguments")
+    check("read_bytes type", "read_bytes(1)\n",
+          stderr="read_bytes expects a string path")
+    check("write_bytes type", 'write_bytes("x", "text")\n',
+          stderr="write_bytes expects a string path and bytes")
+    check("bytes hex roundtrip type", "bytes_hex(1)\n",
+          stderr="bytes_hex expects bytes")
 
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "io.txt")
@@ -575,6 +723,55 @@ def main():
         quoted_nul = nul_file.replace("\\", "\\\\")
         check("read file with NUL", f'read_file("{quoted_nul}")\n',
               stderr="contains NUL byte")
+        check("read_bytes keeps NUL",
+              f'bytes_hex(read_bytes("{quoted_nul}"))\n',
+              stdout="= 610062")
+        binary_file = os.path.join(tmp, "binary.bin")
+        quoted_binary = binary_file.replace("\\", "\\\\")
+        check("write and read bytes",
+              f'write_bytes("{quoted_binary}", bytes_from_hex("00ff10"));\n'
+              f'bytes_hex(read_bytes("{quoted_binary}"))\n',
+              stdout="= 00ff10")
+        check("append bytes",
+              f'append_bytes("{quoted_binary}", bytes_from_hex("20"));\n'
+              f'bytes_hex(read_bytes("{quoted_binary}"))\n',
+              stdout="= 00ff1020")
+        check("read missing bytes",
+              f'read_bytes("{quoted_binary}.missing")\n',
+              stderr="read_bytes:")
+        check(
+            "file handle binary seek/write",
+            f'let h = file_open("{quoted_binary}", "w+b");\n'
+            f'file_write_bytes(h, bytes_from_hex("01020304"));\n'
+            f'file_seek(h, 1);\n'
+            f'file_write_bytes(h, bytes_from_hex("ff"));\n'
+            f'file_close(h);\n'
+            f'bytes_hex(read_bytes("{quoted_binary}"))\n',
+            stdout="= 01ff0304",
+        )
+        check(
+            "file handle read bytes",
+            f'let h = file_open("{quoted_binary}", "rb");\n'
+            f'bytes_hex(file_read_bytes(h, 2));\n'
+            f'file_tell(h);\n'
+            f'bytes_hex(file_read_bytes(h));\n'
+            f'file_close(h);\n',
+            stdout_all=["= 01ff", "= 2", "= 0304"],
+        )
+        check(
+            "file handle read bytes keeps NUL",
+            f'let h = file_open("{quoted_nul}", "rb");\n'
+            f'bytes_hex(file_read_bytes(h))\n',
+            stdout="= 610062",
+        )
+        check("file_read_bytes arity", "file_read_bytes()\n",
+              stderr="file_read_bytes expects 1 or 2 arguments")
+        check("file_read_bytes type", "file_read_bytes(1)\n",
+              stderr="file_read_bytes expects a file")
+        check("file_write_bytes type",
+              f'let h = file_open("{quoted_binary}", "wb");\n'
+              f'file_write_bytes(h, "x")\n',
+              stderr="file_write_bytes expects bytes data")
 
         handle_path = os.path.join(tmp, "handle.txt")
         quoted_handle = handle_path.replace("\\", "\\\\")

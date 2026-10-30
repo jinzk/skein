@@ -45,6 +45,7 @@ void pushscope_closure(const std::shared_ptr<struct scope_t> &);
 void initscope();
 void popscope();
 void donescope();
+void maybe_collect_cycles();
 struct symbol *lookupsym(const char *);
 bool isrepeated(const char *);
 void savesym(struct symbol *);

@@ -184,6 +184,7 @@ calclist: exp { $$ = $1; }
 docalc: calclist EOL {
         g_runtime_error_count = 0;
         diag_set_location(0, 0);
+        maybe_collect_cycles();
         struct value_t *rslt = eval($1);
         if (rslt && !g_interrupted && rslt->type != T_null) {
             switch (rslt->type) {

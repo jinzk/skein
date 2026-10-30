@@ -267,6 +267,29 @@ def main():
         stdout="= 5",
     )
     check(
+        "cycle collection preserves reachable closures",
+        "func make_counter() {\n"
+        "  let n = 0;\n"
+        "  func inc() { n = n + 1; return n; }\n"
+        "  return inc;\n"
+        "}\n"
+        "let c = make_counter();\n"
+        + "1;\n" * 100
+        + "c()\n"
+        "c()\n",
+        stdout_all=["= 1", "= 2"],
+    )
+    check(
+        "cycle creation does not break execution",
+        "func make_cycle() {\n"
+        "  func f() { return f; }\n"
+        "  return f;\n"
+        "}\n"
+        + "{ let g = make_cycle(); }\n" * 100
+        + 'print("ok");\n',
+        stdout="ok",
+    )
+    check(
         "function value in list",
         "func adder(x) { func add(y) { return x + y; } return add; }\n"
         "let fs = [adder(1), adder(2)];\n"

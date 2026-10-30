@@ -258,6 +258,8 @@ command_status("exit $CODE", {"CODE": "3"})  → 3
 
 环境变量名不能为空，也不能包含 `=`。在 Windows cmd 中引用变量使用 `%FOO%`，POSIX shell 使用 `$FOO`。
 
+Windows/MinGW 下 `command` 使用 `CreateProcessW` 传递 Unicode 命令行和 Unicode 环境块；`command` 捕获的 stdout 约定为 UTF-8，`command_status` 直接继承控制台输出，不做额外编码转换。
+
 示例：
 
 ```text

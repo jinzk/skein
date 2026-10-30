@@ -1,8 +1,13 @@
 #include "platform.h"
 
+#include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <cwchar>
+#include <cwctype>
+#include <string>
+#include <utility>
+#include <vector>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -15,46 +20,6 @@
 #include <io.h>
 
 #include "repl.h"
-
-namespace {
-
-class scoped_environment {
-    struct saved_value {
-        std::string name;
-        std::string value;
-        bool existed;
-    };
-
-    std::vector<saved_value> saved_;
-    bool ok_ = true;
-
-public:
-    explicit scoped_environment(
-        const std::vector<std::pair<std::string, std::string>> &env) {
-        for (const auto &entry : env) {
-            const char *old = std::getenv(entry.first.c_str());
-            saved_.push_back(
-                {entry.first, old ? old : "", old != nullptr});
-            if (_putenv_s(entry.first.c_str(), entry.second.c_str()) != 0) {
-                ok_ = false;
-                break;
-            }
-        }
-    }
-
-    ~scoped_environment() {
-        for (auto it = saved_.rbegin(); it != saved_.rend(); ++it) {
-            if (it->existed)
-                _putenv_s(it->name.c_str(), it->value.c_str());
-            else
-                _putenv_s(it->name.c_str(), "");
-        }
-    }
-
-    bool ok() const { return ok_; }
-};
-
-}  // namespace
 
 static HANDLE main_thread = NULL;
 
@@ -104,31 +69,141 @@ void platform_install_interrupt_handler() {
     SetConsoleCtrlHandler(on_console_ctrl, TRUE);
 }
 
-bool platform_run_command(
-    const std::string &command,
-    const std::vector<std::pair<std::string, std::string>> &env,
-    std::string &output, int &status) {
-    output.clear();
-    status = -1;
+namespace {
 
-    scoped_environment scope(env);
-    if (!scope.ok())
+bool widen_utf8(const std::string &text, std::wstring &wide) {
+    wide.clear();
+    if (text.empty())
+        return true;
+    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                    text.data(), (int)text.size(),
+                                    nullptr, 0);
+    if (count <= 0)
         return false;
+    wide.resize((size_t)count);
+    return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                               text.data(), (int)text.size(),
+                               wide.data(), count) == count;
+}
 
-    FILE *pipe = _popen(command.c_str(), "r");
-    if (!pipe)
+std::wstring command_processor() {
+    wchar_t buffer[32768];
+    DWORD length = GetEnvironmentVariableW(
+        L"ComSpec", buffer, (DWORD)(sizeof buffer / sizeof buffer[0]));
+    if (length > 0 && length < sizeof buffer / sizeof buffer[0])
+        return std::wstring(buffer, length);
+    return L"cmd.exe";
+}
+
+bool build_command_line(const std::string &command, std::wstring &application,
+                        std::wstring &line) {
+    std::wstring wide_command;
+    if (!widen_utf8(command, wide_command))
         return false;
+    application = command_processor();
+    line = L"\"" + application + L"\" /D /S /C \"" + wide_command + L"\"";
+    return true;
+}
 
-    char buffer[4096];
-    size_t n;
-    while ((n = std::fread(buffer, 1, sizeof buffer, pipe)) > 0)
-        output.append(buffer, n);
+bool equal_case_insensitive(const std::wstring &a, const std::wstring &b) {
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::towlower(a[i]) != std::towlower(b[i]))
+            return false;
+    }
+    return true;
+}
 
-    int rc = _pclose(pipe);
-    if (rc != -1)
-        status = rc;
+bool less_case_insensitive(const std::wstring &a, const std::wstring &b) {
+    size_t n = a.size() < b.size() ? a.size() : b.size();
+    for (size_t i = 0; i < n; ++i) {
+        wint_t left = std::towlower(a[i]);
+        wint_t right = std::towlower(b[i]);
+        if (left != right)
+            return left < right;
+    }
+    return a.size() < b.size();
+}
 
-    /* Normalize Windows line endings to the interpreter's '\n'. */
+struct environment_entry {
+    std::wstring name;
+    std::wstring value;
+};
+
+bool build_environment(
+    const std::vector<std::pair<std::string, std::string>> &overrides,
+    std::wstring &block) {
+    std::vector<environment_entry> entries;
+
+    LPWSTR raw = GetEnvironmentStringsW();
+    if (raw) {
+        for (LPWSTR p = raw; *p; p += std::wcslen(p) + 1) {
+            std::wstring item(p);
+            size_t equals;
+            if (!item.empty() && item[0] == L'=')
+                equals = item.find(L'=', 1);
+            else
+                equals = item.find(L'=');
+            if (equals == std::wstring::npos)
+                continue;
+            entries.push_back(
+                {item.substr(0, equals), item.substr(equals + 1)});
+        }
+        FreeEnvironmentStringsW(raw);
+    }
+
+    for (const auto &override_entry : overrides) {
+        std::wstring name;
+        std::wstring value;
+        if (!widen_utf8(override_entry.first, name) ||
+            !widen_utf8(override_entry.second, value))
+            return false;
+
+        entries.erase(
+            std::remove_if(entries.begin(), entries.end(),
+                           [&](const environment_entry &entry) {
+                               return equal_case_insensitive(entry.name, name);
+                           }),
+            entries.end());
+        entries.push_back({name, value});
+    }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const environment_entry &a, const environment_entry &b) {
+                  return less_case_insensitive(a.name, b.name);
+              });
+
+    block.clear();
+    for (const environment_entry &entry : entries) {
+        block += entry.name;
+        block += L'=';
+        block += entry.value;
+        block.push_back(L'\0');
+    }
+    if (entries.empty())
+        block.push_back(L'\0');
+    block.push_back(L'\0');
+    return true;
+}
+
+HANDLE duplicate_inheritable(HANDLE source) {
+    if (!source || source == INVALID_HANDLE_VALUE)
+        return NULL;
+    HANDLE duplicate = NULL;
+    if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(),
+                         &duplicate, 0, TRUE, DUPLICATE_SAME_ACCESS))
+        return NULL;
+    return duplicate;
+}
+
+void close_handle(HANDLE &handle) {
+    if (handle && handle != INVALID_HANDLE_VALUE)
+        CloseHandle(handle);
+    handle = NULL;
+}
+
+void normalize_output(std::string &output) {
     std::string normalized;
     normalized.reserve(output.size());
     for (size_t i = 0; i < output.size(); ++i) {
@@ -138,10 +213,116 @@ bool platform_run_command(
         normalized.push_back(output[i]);
     }
     output.swap(normalized);
-
     while (!output.empty() &&
            (output.back() == '\n' || output.back() == '\r'))
         output.pop_back();
+}
+
+bool spawn_shell(const std::string &command,
+                 const std::vector<std::pair<std::string, std::string>> &env,
+                 bool capture_output, HANDLE &read_pipe,
+                 PROCESS_INFORMATION &process) {
+    read_pipe = NULL;
+    process = {};
+
+    std::wstring application;
+    std::wstring line;
+    std::wstring environment;
+    if (!build_command_line(command, application, line) ||
+        !build_environment(env, environment))
+        return false;
+
+    HANDLE pipe_read = NULL;
+    HANDLE pipe_write = NULL;
+    if (capture_output) {
+        SECURITY_ATTRIBUTES attributes = {};
+        attributes.nLength = sizeof(attributes);
+        attributes.bInheritHandle = TRUE;
+        if (!CreatePipe(&pipe_read, &pipe_write, &attributes, 0))
+            return false;
+        if (!SetHandleInformation(pipe_read, HANDLE_FLAG_INHERIT, 0)) {
+            close_handle(pipe_read);
+            close_handle(pipe_write);
+            return false;
+        }
+    }
+
+    HANDLE dup_in = duplicate_inheritable(GetStdHandle(STD_INPUT_HANDLE));
+    HANDLE dup_err = duplicate_inheritable(GetStdHandle(STD_ERROR_HANDLE));
+    HANDLE dup_out = capture_output
+                         ? NULL
+                         : duplicate_inheritable(GetStdHandle(STD_OUTPUT_HANDLE));
+
+    STARTUPINFOW startup = {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput =
+        dup_in ? dup_in : GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdError =
+        dup_err ? dup_err : GetStdHandle(STD_ERROR_HANDLE);
+    startup.hStdOutput =
+        capture_output ? pipe_write
+                       : (dup_out ? dup_out
+                                  : GetStdHandle(STD_OUTPUT_HANDLE));
+
+    std::vector<wchar_t> line_buffer(line.begin(), line.end());
+    line_buffer.push_back(L'\0');
+    std::vector<wchar_t> environment_buffer(environment.begin(),
+                                            environment.end());
+
+    BOOL ok = CreateProcessW(
+        application.c_str(), line_buffer.data(), NULL, NULL, TRUE,
+        CREATE_UNICODE_ENVIRONMENT, environment_buffer.data(), NULL, &startup,
+        &process);
+
+    close_handle(pipe_write);
+    if (dup_in)
+        CloseHandle(dup_in);
+    if (dup_err)
+        CloseHandle(dup_err);
+    if (dup_out)
+        CloseHandle(dup_out);
+
+    if (!ok) {
+        close_handle(pipe_read);
+        process = {};
+        return false;
+    }
+
+    read_pipe = pipe_read;
+    return true;
+}
+
+}  // namespace
+
+bool platform_run_command(
+    const std::string &command,
+    const std::vector<std::pair<std::string, std::string>> &env,
+    std::string &output, int &status) {
+    output.clear();
+    status = -1;
+
+    HANDLE read_pipe = NULL;
+    PROCESS_INFORMATION process = {};
+    if (!spawn_shell(command, env, true, read_pipe, process))
+        return false;
+
+    char buffer[4096];
+    DWORD received = 0;
+    while (ReadFile(read_pipe, buffer, sizeof buffer, &received, NULL) &&
+           received > 0)
+        output.append(buffer, received);
+    close_handle(read_pipe);
+
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 0;
+    if (GetExitCodeProcess(process.hProcess, &code))
+        status = (int)code;
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+
+    normalize_output(output);
     return true;
 }
 
@@ -151,13 +332,17 @@ bool platform_run_command_status(
     int &status) {
     status = -1;
 
-    scoped_environment scope(env);
-    if (!scope.ok())
+    HANDLE read_pipe = NULL;
+    PROCESS_INFORMATION process = {};
+    if (!spawn_shell(command, env, false, read_pipe, process))
         return false;
 
-    int rc = std::system(command.c_str());
-    if (rc == -1)
-        return false;
-    status = rc;
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 0;
+    if (GetExitCodeProcess(process.hProcess, &code))
+        status = (int)code;
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
     return true;
 }

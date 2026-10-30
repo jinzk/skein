@@ -13,7 +13,10 @@ enum bifs {
     B_abs,
     B_print,
     B_list,
-    B_dict
+    B_dict,
+    B_int,
+    B_float,
+    B_str
 };
 
 struct ast {

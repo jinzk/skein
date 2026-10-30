@@ -2,6 +2,7 @@
 #define _VALUETYPE_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 #include <utility>
 
@@ -87,6 +88,9 @@ void freeval(struct value_t *v);
 
 /* Print a value in a human-readable form (no trailing newline). */
 void printvalue(struct value_t *v);
+
+/* Convert a value to its human-readable string form. */
+std::string value_to_string(const struct value_t *v);
 
 const char *typename_of(const struct value_t *v);
 

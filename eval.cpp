@@ -1,10 +1,13 @@
 #include "eval.h"
+#include "repl.h"
 #include "scopestack.h"
 #include "symbol.h"
 #include "valuetype.h"
 
 #include <climits>
 #include <cmath>
+#include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,10 +18,12 @@ static bool is_numeric(const struct value_t *v) {
     return v && (v->type == T_int || v->type == T_float);
 }
 
-static struct value_t *new_int_or_float(long long n) {
-    if (n >= INT_MIN && n <= INT_MAX)
-        return newintval((int)n);
-    return newfloatval((double)n);
+static struct value_t *new_int_checked(long long n) {
+    if (n < INT_MIN || n > INT_MAX) {
+        yyerror("integer overflow");
+        return NULL;
+    }
+    return newintval((int)n);
 }
 
 static double as_double(const struct value_t *v) {
@@ -26,6 +31,77 @@ static double as_double(const struct value_t *v) {
     if (v->type == T_int) return (double)((struct int_value_t *)v)->value;
     if (v->type == T_float) return ((struct float_value_t *)v)->value;
     return 0.0;
+}
+
+static const char *skip_space(const char *p) {
+    while (*p && std::isspace((unsigned char)*p)) ++p;
+    return p;
+}
+
+static bool parse_int_string(const char *s, int &out) {
+    if (!s) return false;
+    errno = 0;
+    char *end = NULL;
+    long long v = std::strtoll(s, &end, 10);
+    if (end == s || errno == ERANGE) return false;
+    if (*skip_space(end) != '\0') return false;
+    if (v < INT_MIN || v > INT_MAX) return false;
+    out = (int)v;
+    return true;
+}
+
+static bool parse_float_string(const char *s, double &out) {
+    if (!s) return false;
+    errno = 0;
+    char *end = NULL;
+    double v = std::strtod(s, &end);
+    if (end == s) return false;
+    if (errno == ERANGE && (v == HUGE_VAL || v == -HUGE_VAL)) return false;
+    if (*skip_space(end) != '\0') return false;
+    out = v;
+    return true;
+}
+
+static size_t utf8_sequence_length(unsigned char c) {
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static size_t utf8_valid_sequence_length(const char *s, size_t available) {
+    size_t n = utf8_sequence_length((unsigned char)s[0]);
+    if (n > available) return 1;
+    for (size_t i = 1; i < n; ++i) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80)
+            return 1;
+    }
+    return n;
+}
+
+static size_t utf8_length(const char *s) {
+    size_t len = std::strlen(s);
+    size_t count = 0;
+    for (size_t i = 0; i < len; ++count)
+        i += utf8_valid_sequence_length(s + i, len - i);
+    return count;
+}
+
+static bool utf8_char_at(const char *s, size_t index, std::string &out) {
+    size_t len = std::strlen(s);
+    size_t pos = 0;
+    size_t current = 0;
+    while (pos < len) {
+        size_t n = utf8_valid_sequence_length(s + pos, len - pos);
+        if (current == index) {
+            out.assign(s + pos, n);
+            return true;
+        }
+        pos += n;
+        ++current;
+    }
+    return false;
 }
 
 static bool truthy(const struct value_t *v) {
@@ -102,15 +178,23 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
         return NULL;
     }
 
-    int cmp;
     if (is_numeric(l) && is_numeric(r)) {
+        /* Compare directly so NaN follows IEEE 754 (all ordering is false). */
         double a = as_double(l), b = as_double(r);
-        cmp = (a < b) ? -1 : (a > b ? 1 : 0);
-    } else {
-        cmp = std::strcmp(((struct string_value_t *)l)->value,
-                          ((struct string_value_t *)r)->value);
-        cmp = (cmp < 0) ? -1 : (cmp > 0 ? 1 : 0);
+        switch (op) {
+            case 1: return newintval(a > b ? 1 : 0);
+            case 2: return newintval(a < b ? 1 : 0);
+            case 3: return newintval(a != b ? 1 : 0);
+            case 4: return newintval(a == b ? 1 : 0);
+            case 5: return newintval(a >= b ? 1 : 0);
+            case 6: return newintval(a <= b ? 1 : 0);
+            default: return NULL;
+        }
     }
+
+    int cmp = std::strcmp(((struct string_value_t *)l)->value,
+                          ((struct string_value_t *)r)->value);
+    cmp = (cmp < 0) ? -1 : (cmp > 0 ? 1 : 0);
 
     switch (op) {
         case 1: return newintval(cmp > 0 ? 1 : 0);
@@ -187,15 +271,58 @@ static struct value_t *callbuildin(struct fncall *f) {
             if (arg->type == T_int) {
                 long long n = ((struct int_value_t *)arg)->value;
                 if (n < 0) n = -n;
-                if (n > 2147483647LL)
-                    ret = newfloatval((double)n);
-                else
-                    ret = newintval((int)n);
+                ret = new_int_checked(n);
             } else if (arg->type == T_float) {
                 ret = newfloatval(std::fabs(((struct float_value_t *)arg)->value));
             } else {
                 yyerror("abs expects a number, got %s", typename_of(arg));
             }
+            break;
+        case B_int:
+            if (arg->type == T_int) {
+                ret = newintval(((struct int_value_t *)arg)->value);
+            } else if (arg->type == T_float) {
+                double d = ((struct float_value_t *)arg)->value;
+                if (!std::isfinite(d)) {
+                    yyerror("int() value out of range");
+                } else {
+                    d = std::trunc(d);
+                    if (d < (double)INT_MIN || d > (double)INT_MAX)
+                        yyerror("int() value out of range");
+                    else
+                        ret = newintval((int)d);
+                }
+            } else if (arg->type == T_string) {
+                int value = 0;
+                if (parse_int_string(((struct string_value_t *)arg)->value, value))
+                    ret = newintval(value);
+                else
+                    yyerror("int() cannot convert string \"%s\"",
+                            ((struct string_value_t *)arg)->value);
+            } else {
+                yyerror("int() expects int, float, or string, got %s",
+                        typename_of(arg));
+            }
+            break;
+        case B_float:
+            if (arg->type == T_int) {
+                ret = newfloatval((double)((struct int_value_t *)arg)->value);
+            } else if (arg->type == T_float) {
+                ret = newfloatval(((struct float_value_t *)arg)->value);
+            } else if (arg->type == T_string) {
+                double value = 0.0;
+                if (parse_float_string(((struct string_value_t *)arg)->value, value))
+                    ret = newfloatval(value);
+                else
+                    yyerror("float() cannot convert string \"%s\"",
+                            ((struct string_value_t *)arg)->value);
+            } else {
+                yyerror("float() expects int, float, or string, got %s",
+                        typename_of(arg));
+            }
+            break;
+        case B_str:
+            ret = newstrval(value_to_string(arg).c_str());
             break;
         case B_sqrt:
         case B_exp:
@@ -219,11 +346,27 @@ static struct value_t *callbuildin(struct fncall *f) {
     return ret;
 }
 
+static constexpr int MAX_CALL_DEPTH = 1000;
+static int call_depth = 0;
+
+namespace {
+struct call_depth_guard {
+    call_depth_guard() { ++call_depth; }
+    ~call_depth_guard() { --call_depth; }
+};
+}
+
 static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     if (!callee || callee->type != T_func) {
         yyerror("cannot call %s", typename_of(callee));
         return NULL;
     }
+
+    if (call_depth >= MAX_CALL_DEPTH) {
+        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+        return NULL;
+    }
+    call_depth_guard depth_guard;
 
     struct func_value_t *fv = (struct func_value_t *)callee;
     /*
@@ -427,6 +570,7 @@ static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
 
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
+    if (g_interrupted) return NULL;
     struct value_t *ret = NULL;
 
     switch (a->nodetype) {
@@ -561,7 +705,18 @@ struct value_t *eval(struct ast *a) {
                         freeval((struct value_t *)v);
                         return NULL;
                     }
-                    v->value.push_back(std::make_pair(key, val));
+                    bool replaced = false;
+                    for (size_t i = 0; i < v->value.size(); ++i) {
+                        if (value_equals(v->value[i].first, key)) {
+                            freeval(v->value[i].second);
+                            v->value[i].second = val;
+                            freeval(key);
+                            replaced = true;
+                            break;
+                        }
+                    }
+                    if (!replaced)
+                        v->value.push_back(std::make_pair(key, val));
                 }
                 p = (struct dict_node *)p->next;
             }
@@ -574,7 +729,7 @@ struct value_t *eval(struct ast *a) {
             if (!v) break;
             if (v->type == T_int) {
                 long long n = ((struct int_value_t *)v)->value;
-                ret = new_int_or_float(-n);
+                ret = new_int_checked(-n);
             } else if (v->type == T_float) {
                 ret = newfloatval(-((struct float_value_t *)v)->value);
             } else {
@@ -595,7 +750,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_or_float(x + y);
+                ret = new_int_checked(x + y);
             } else if (is_numeric(l) && is_numeric(r)) {
                 ret = newfloatval(as_double(l) + as_double(r));
             } else if (l->type == T_string && r->type == T_string) {
@@ -639,7 +794,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_or_float(a->nodetype == '-' ? x - y : x * y);
+                ret = new_int_checked(a->nodetype == '-' ? x - y : x * y);
             } else {
                 double x = as_double(l), y = as_double(r);
                 ret = newfloatval(a->nodetype == '-' ? x - y : x * y);
@@ -672,7 +827,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_or_float(x / y);
+                ret = new_int_checked(x / y);
             } else {
                 ret = newfloatval(as_double(l) / as_double(r));
             }
@@ -704,7 +859,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = newintval((int)(x % y));
+                ret = new_int_checked(x % y);
             } else {
                 ret = newfloatval(std::fmod(as_double(l), as_double(r)));
             }
@@ -860,6 +1015,7 @@ struct value_t *eval(struct ast *a) {
             struct ast *body = ((struct flow *)a)->tl;
             if (!body) break;
             for (;;) {
+                if (g_interrupted) break;
                 struct value_t *cond = eval(cond_ast);
                 if (!cond) break;
                 bool b = truthy(cond);
@@ -905,6 +1061,7 @@ struct value_t *eval(struct ast *a) {
             }
 
             for (; !leave;) {
+                if (g_interrupted) break;
                 bool cond_true = true;
                 if (f->cond) {
                     struct value_t *cond = eval(f->cond);
@@ -987,12 +1144,13 @@ struct value_t *eval(struct ast *a) {
                 } else {
                     int i = ((struct int_value_t *)index)->value;
                     const char *s = ((struct string_value_t *)container)->value;
-                    int len = (int)std::strlen(s);
-                    if (i < 0 || i >= len) {
+                    size_t len = utf8_length(s);
+                    if (i < 0 || (size_t)i >= len) {
                         yyerror("string index %d out of range", i);
                     } else {
-                        char buf[2] = { s[i], '\0' };
-                        ret = newstrval(buf);
+                        std::string ch;
+                        if (utf8_char_at(s, (size_t)i, ch))
+                            ret = newstrval(ch.c_str());
                     }
                 }
             } else if (container->type == T_dict) {

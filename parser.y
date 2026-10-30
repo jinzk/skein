@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "ast.h"
+#include "repl.h"
 #include "scopestack.h"
 #include "eval.h"
 
@@ -167,7 +168,7 @@ calclist: exp { $$ = $1; }
 
 docalc: calclist EOL {
         struct value_t *rslt = eval($1);
-        if (rslt) {
+        if (rslt && !g_interrupted) {
             switch (rslt->type) {
                 case T_return:
                     yyerror("return outside function");
@@ -184,17 +185,24 @@ docalc: calclist EOL {
                     printf("\n");
                     break;
             }
-            freeval(rslt);
         }
-        printf("> ");
-        fflush(stdout);
+        freeval(rslt);
+        if (!g_interrupted) {
+            printf("> ");
+            fflush(stdout);
+        }
         if ($1) treefree($1);
+        $1 = NULL;
         $$ = NULL;
+        if (g_interrupted)
+            YYABORT;
     }
     | error EOL {
         yyerrok;
-        printf("> ");
-        fflush(stdout);
+        if (!g_interrupted) {
+            printf("> ");
+            fflush(stdout);
+        }
         $$ = NULL;
     }
     ;
@@ -205,6 +213,9 @@ calc: %empty
 %%
 
 void yyerror(const char *s, ...) {
+    if (g_interrupted)
+        return;
+
     va_list ap;
     va_start(ap, s);
 

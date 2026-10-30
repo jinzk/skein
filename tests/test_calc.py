@@ -14,6 +14,7 @@ def run(source, timeout=5):
             [BIN],
             input=source,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             timeout=timeout,
         )
@@ -49,16 +50,25 @@ def check(name, source, *, stdout=None, stdout_all=None, stderr=None, code=0):
 
 def main():
     check("addition", "1+2\n", stdout="= 3")
-    check("float", "1.5*2\n", stdout="= 3")
+    check("float", "1.5*2\n", stdout="= 3.0")
+    check("float keeps type in output", "1.0\n", stdout="= 1.0")
+    check("float shortest round-trip", "1.23456\n", stdout="= 1.23456")
+    check("float binary rounding", "0.1 + 0.2\n",
+          stdout="= 0.30000000000000004")
     check("integer division", "10/4\n", stdout="= 2")
     check("float division", "10/4.0\n", stdout="= 2.5")
-    check("integer overflow falls back to float", "2147483647 + 1\n",
-          stdout="= 2.147e+09")
+    check("integer division truncates toward zero", "-7 / 4\n", stdout="= -1")
+    check("integer overflow", "2147483647 + 1\n",
+          stderr="integer overflow")
+    check("out-of-range integer literal becomes float", "2147483648\n",
+          stdout="= 2147483648.0")
     check("INT_MIN division overflow", "(-2147483647 - 1) / -1\n",
-          stdout="= 2.147e+09")
+          stderr="integer overflow")
 
     check("modulo", "7 % 4\n", stdout="= 3")
     check("float modulo", "7.5 % 2\n", stdout="= 1.5")
+    check("modulo sign follows dividend", "-7 % 4\n", stdout="= -3")
+    check("modulo negative divisor", "7 % -4\n", stdout="= 3")
     check("modulo by zero", "1 % 0\n", stderr="modulo by zero")
     check("logical and", "1 && 2\n", stdout="= 1")
     check("logical and short-circuit", "0 && (1/0)\n", stdout="= 0")
@@ -76,6 +86,13 @@ def main():
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")
+    check("abs overflow", "abs(-2147483647 - 1)\n", stderr="integer overflow")
+
+    check("nan equality is false", "sqrt(-1) == 1\n", stdout="= 0")
+    check("nan inequality is true", "sqrt(-1) != 1\n", stdout="= 1")
+    check("nan is not equal to itself", "sqrt(-1) == sqrt(-1)\n",
+          stdout="= 0")
+    check("nan ordering is false", "sqrt(-1) >= 1\n", stdout="= 0")
 
     check("divide by zero int", "1/0\n", stderr="division by zero")
     check("divide by zero float", "1.0/0\n", stderr="division by zero")
@@ -190,6 +207,10 @@ def main():
     check("string equality", '"a" == "a"\n', stdout="= 1")
     check("string escape", 'print("a\\nb")\n', stdout="a\nb")
     check("string index", '"hello"[1]\n', stdout="= e")
+    check("utf8 string index first", '"你好"[0]\n', stdout="= 你")
+    check("utf8 string index second", '"你好"[1]\n', stdout="= 好")
+    check("utf8 string index out of range", '"你好"[2]\n',
+          stderr="out of range")
 
     check("list expression", "[1+2, 3*4]\n", stdout="= [3, 12]")
     check("empty list", "[]\n", stdout="= []")
@@ -197,6 +218,10 @@ def main():
     check("list equality", "[1,2] == [1,2]\n", stdout="= 1")
     check("dict index", '{1:2, 3:4}[3]\n', stdout="= 4")
     check("dict equality", "{1:2} == {1:2}\n", stdout="= 1")
+    check("dict literal duplicate key last wins", '{1: "a", 1: "b"}\n',
+          stdout="{1: b}")
+    check("dict literal numeric duplicate key",
+          '{1: "a", 1.0: "b"} == {1: "b"}\n', stdout="= 1")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
     check("empty dict builtin", "dict()\n", stdout="= {}")
@@ -279,6 +304,20 @@ def main():
     )
 
     check("call non-function", "let x = 1;\nx(2)\n", stderr="cannot call int")
+    check("recursion depth limit",
+          "def f(n) { return f(n + 1); }\nf(0)\n",
+          stderr="maximum recursion depth")
+    check("int conversion from float", "int(2.9)\n", stdout="= 2")
+    check("int conversion truncates toward zero", "int(-2.9)\n", stdout="= -2")
+    check("int conversion from string", 'int("  -42  ")\n', stdout="= -42")
+    check("float conversion from int", "float(3)\n", stdout="= 3.0")
+    check("float conversion from string", 'float("1.5")\n', stdout="= 1.5")
+    check("str conversion of float", "str(1.0)\n", stdout="= 1.0")
+    check("str conversion of list", "str([1, 2])\n", stdout="= [1, 2]")
+    check("int conversion rejects float string", 'int("4.2")\n',
+          stderr="int() cannot convert")
+    check("int conversion out of range", "int(2147483648.0)\n",
+          stderr="int() value out of range")
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")

@@ -11,10 +11,78 @@
 
 #include "ast.h"
 #include "parser.hpp"
+#include "repl.h"
 
 extern int indent_count;
 
 static std::string string_buffer;
+
+// 当 stdin 不是终端（管道、IDE 运行窗口等）时，内核不会处理退格，
+// 需要自己按行读出并删除 \b / 0x7f 前的一个字符。
+static std::string input_line;
+static size_t input_pos = 0;
+
+enum input_status {
+    INPUT_LINE,       // 读到完整的一行（含 \n）
+    INPUT_PARTIAL,    // 读到 EOF，但还有一行没有换行符
+    INPUT_EOF,        // 真正的输入结束
+    INPUT_INTERRUPTED // 被 Ctrl-C 打断
+};
+
+static input_status read_input_line() {
+    input_line.clear();
+    input_pos = 0;
+
+    for (;;) {
+        if (g_interrupted) {
+            std::clearerr(stdin);
+            return INPUT_INTERRUPTED;
+        }
+
+        errno = 0;
+        int c = std::getchar();
+        if (c == EOF) {
+            if (g_interrupted) {
+                std::clearerr(stdin);
+                return INPUT_INTERRUPTED;
+            }
+            if (std::ferror(stdin) && errno == EINTR) {
+                std::clearerr(stdin);
+                g_interrupted = 1;
+                return INPUT_INTERRUPTED;
+            }
+            return input_line.empty() ? INPUT_EOF : INPUT_PARTIAL;
+        }
+        if (c == '\n') {
+            input_line.push_back('\n');
+            return INPUT_LINE;
+        }
+        if (c == '\b' || c == 0x7f) {
+            if (!input_line.empty())
+                input_line.pop_back();
+            continue;
+        }
+        input_line.push_back(static_cast<char>(c));
+    }
+}
+
+#define YY_INPUT(buf, result, max_size)                     \
+    do {                                                    \
+        if (g_interrupted) {                                \
+            result = YY_NULL;                               \
+        } else {                                            \
+            if (input_pos >= input_line.size()) {           \
+                input_status st = read_input_line();        \
+                if (st == INPUT_EOF)                        \
+                    g_stdin_eof = 1;                        \
+            }                                               \
+            size_t n = 0;                                   \
+            while (n < static_cast<size_t>(max_size) &&     \
+                   input_pos < input_line.size())           \
+                buf[n++] = input_line[input_pos++];         \
+            result = static_cast<int>(n);                   \
+        }                                                   \
+    } while (0)
 
 static void append_unescaped(const char *s, int len) {
     for (int i = 0; i < len; ++i) {
@@ -92,6 +160,9 @@ EXP ([Ee][-+]?[0-9]+)
 "print" { yylval.fn = B_print; return FUNC; }
 "list" { yylval.fn = B_list; return FUNC; }
 "dict" { yylval.fn = B_dict; return FUNC; }
+"int" { yylval.fn = B_int; return FUNC; }
+"float" { yylval.fn = B_float; return FUNC; }
+"str" { yylval.fn = B_str; return FUNC; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;
@@ -175,3 +246,12 @@ EXP ([Ee][-+]?[0-9]+)
 }
 
 %%
+
+void reset_scanner_state(std::FILE *in) {
+    BEGIN(INITIAL);
+    string_buffer.clear();
+    input_line.clear();
+    input_pos = 0;
+    std::clearerr(in);
+    yyrestart(in);
+}

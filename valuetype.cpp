@@ -183,60 +183,74 @@ const char *typename_of(const struct value_t *v) {
     }
 }
 
-void printvalue(struct value_t *v) {
-    if (!v) {
-        std::printf("null");
-        return;
+static std::string format_double(double d) {
+    if (std::isnan(d))
+        return std::signbit(d) ? "-nan" : "nan";
+    if (std::isinf(d))
+        return d < 0 ? "-inf" : "inf";
+
+    char buf[64];
+    for (int precision = 15; precision <= 17; ++precision) {
+        std::snprintf(buf, sizeof buf, "%.*g", precision, d);
+        if (std::strtod(buf, NULL) == d)
+            break;
     }
+
+    std::string s(buf);
+    if (s.find_first_of(".eE") == std::string::npos)
+        s += ".0";
+    return s;
+}
+
+std::string value_to_string(const struct value_t *v) {
+    if (!v) return "null";
     switch (v->type) {
         case T_int:
-            std::printf("%d", ((struct int_value_t *)v)->value);
-            break;
+            return std::to_string(((const struct int_value_t *)v)->value);
         case T_float:
-            std::printf("%.4g", ((struct float_value_t *)v)->value);
-            break;
-        case T_string:
-            std::printf("%s", ((struct string_value_t *)v)->value);
-            break;
+            return format_double(((const struct float_value_t *)v)->value);
+        case T_string: {
+            const char *s = ((const struct string_value_t *)v)->value;
+            return s ? s : "";
+        }
         case T_list: {
-            struct list_value_t *l = (struct list_value_t *)v;
-            std::printf("[");
+            const struct list_value_t *l = (const struct list_value_t *)v;
+            std::string out = "[";
             for (size_t i = 0; i < l->value.size(); ++i) {
-                if (i) std::printf(", ");
-                printvalue(l->value[i]);
+                if (i) out += ", ";
+                out += value_to_string(l->value[i]);
             }
-            std::printf("]");
-            break;
+            out += "]";
+            return out;
         }
         case T_dict: {
-            struct dict_value_t *d = (struct dict_value_t *)v;
-            std::printf("{");
+            const struct dict_value_t *d = (const struct dict_value_t *)v;
+            std::string out = "{";
             for (size_t i = 0; i < d->value.size(); ++i) {
-                if (i) std::printf(", ");
-                printvalue(d->value[i].first);
-                std::printf(": ");
-                printvalue(d->value[i].second);
+                if (i) out += ", ";
+                out += value_to_string(d->value[i].first);
+                out += ": ";
+                out += value_to_string(d->value[i].second);
             }
-            std::printf("}");
-            break;
+            out += "}";
+            return out;
         }
         case T_func:
-            std::printf("<function>");
-            break;
+            return "<function>";
         case T_class:
-            std::printf("<class>");
-            break;
+            return "<class>";
         case T_return:
-            std::printf("<return>");
-            break;
+            return "<return>";
         case T_break:
-            std::printf("<break>");
-            break;
+            return "<break>";
         case T_continue:
-            std::printf("<continue>");
-            break;
+            return "<continue>";
         default:
-            std::printf("<unknown>");
-            break;
+            return "<unknown>";
     }
+}
+
+void printvalue(struct value_t *v) {
+    std::string s = value_to_string(v);
+    std::fputs(s.c_str(), stdout);
 }

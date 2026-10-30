@@ -16,6 +16,24 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Windows / MinGW（64 位 MinGW-w64 GCC）：
+
+```bat
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build
+build\calc-demo.exe
+```
+
+Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison 和 Flex。平台相关代码集中在 `platform_win.cpp`：
+
+- 设置控制台输入输出代码页为 UTF-8；
+- 管道输入使用二进制模式，避免 CRLF / `0x1A` 转换；
+- 使用 `SetConsoleCtrlHandler` 实现 Ctrl-C。
+
+当前只面向 MinGW-w64/GCC，不包含 MSVC 专用适配。
+
+脚本文件建议保存为 UTF-8；输入开头的 UTF-8 BOM 会被忽略。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
+
 交互模式：
 
 - `Ctrl-C` 取消当前输入（包括未闭合的多行块），或中断正在执行的程序，回到 `> ` 提示符。
@@ -217,8 +235,10 @@ tokens.l      Flex 词法分析
 parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
 eval.*        树遍历求值
+format.*      Python 风格格式化
 scopestack.*  词法作用域链与闭包环境
 symbol.*      符号表
 valuetype.*   运行时值类型、深拷贝与释放
+platform.*    POSIX / Windows 平台适配
 tests/        自动化回归测试
 ```

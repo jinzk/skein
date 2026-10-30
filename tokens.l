@@ -1,7 +1,22 @@
-%option noyywrap nodefault yylineno noinput nounput
+%option noyywrap nodefault yylineno noinput nounput nounistd
 %x STRING
 
 %{
+#ifndef YY_NO_UNISTD_H
+#define YY_NO_UNISTD_H
+#endif
+#ifdef _WIN32
+#include <io.h>
+#ifndef isatty
+#define isatty _isatty
+#endif
+#ifndef fileno
+#define fileno _fileno
+#endif
+#else
+#include <unistd.h>
+#endif
+
 #include <cerrno>
 #include <climits>
 #include <cstdio>
@@ -29,6 +44,19 @@ enum input_status {
     INPUT_INTERRUPTED // 被 Ctrl-C 打断
 };
 
+static void strip_utf8_bom_once() {
+    static bool checked = false;
+    if (checked)
+        return;
+    checked = true;
+    if (input_line.size() >= 3 &&
+        (unsigned char)input_line[0] == 0xEF &&
+        (unsigned char)input_line[1] == 0xBB &&
+        (unsigned char)input_line[2] == 0xBF) {
+        input_line.erase(0, 3);
+    }
+}
+
 static input_status read_input_line() {
     input_line.clear();
     input_pos = 0;
@@ -46,15 +74,21 @@ static input_status read_input_line() {
                 std::clearerr(stdin);
                 return INPUT_INTERRUPTED;
             }
+#ifdef EINTR
             if (std::ferror(stdin) && errno == EINTR) {
                 std::clearerr(stdin);
                 g_interrupted = 1;
                 return INPUT_INTERRUPTED;
             }
-            return input_line.empty() ? INPUT_EOF : INPUT_PARTIAL;
+#endif
+            if (input_line.empty())
+                return INPUT_EOF;
+            strip_utf8_bom_once();
+            return INPUT_PARTIAL;
         }
         if (c == '\n') {
             input_line.push_back('\n');
+            strip_utf8_bom_once();
             return INPUT_LINE;
         }
         if (c == '\b' || c == 0x7f) {

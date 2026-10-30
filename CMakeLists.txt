@@ -29,6 +29,22 @@ add_executable(${PROJECT_NAME}
   valuetype.cpp
 )
 
+if(WIN32)
+  target_sources(${PROJECT_NAME} PRIVATE platform_win.cpp)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+  )
+  if(MINGW)
+    # Ensure C99 printf length modifiers such as %lld work with MinGW.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+      __USE_MINGW_ANSI_STDIO=1
+    )
+  endif()
+else()
+  target_sources(${PROJECT_NAME} PRIVATE platform_posix.cpp)
+endif()
+
 target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
@@ -38,7 +54,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 endif()
 
-target_link_libraries(${PROJECT_NAME} PRIVATE m)
+if(UNIX)
+  target_link_libraries(${PROJECT_NAME} PRIVATE m)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)

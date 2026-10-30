@@ -63,6 +63,12 @@ def main():
           stdout="= 9223372036854775807")
     check("integer overflow", "9223372036854775807 + 1\n",
           stderr="integer overflow")
+    check("integer multiplication boundary",
+          "3037000499 * 3037000499\n", stdout="= 9223372030926249001")
+    check("integer multiplication overflow",
+          "3037000500 * 3037000500\n", stderr="integer overflow")
+    check("INT64_MIN times -1", "(-9223372036854775807 - 1) * -1\n",
+          stderr="integer overflow")
     check("out-of-range integer literal becomes float",
           "9223372036854775808\n", stdout="= 9.223372036854776e+18")
     check("INT64_MIN division overflow",
@@ -492,6 +498,8 @@ def main():
 
     check("empty input", "", code=0)
     check("empty block", "{}\n", code=0)
+    check("utf8 bom", "\ufeff1+2\n", stdout="= 3")
+    check("crlf input", "1+2\r\n", stdout="= 3")
 
     print(f"all tests passed for {BIN}")
 

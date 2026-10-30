@@ -2,6 +2,7 @@
 #include <cstdlib>
 
 #include "parser.hpp"
+#include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
 
@@ -10,21 +11,9 @@ volatile std::sig_atomic_t g_stdin_eof = 0;
 
 int indent_count = 0;
 
-static void on_sigint(int) {
-    g_interrupted = 1;
-}
-
-static void install_sigint_handler() {
-    struct sigaction sa = {};
-    sa.sa_handler = on_sigint;
-    sigemptyset(&sa.sa_mask);
-    /* No SA_RESTART: a blocking read must return so we can cancel the line. */
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, nullptr);
-}
-
 int main() {
-    install_sigint_handler();
+    platform_init();
+    platform_install_interrupt_handler();
     initscope();
     std::printf("> ");
     std::fflush(stdout);

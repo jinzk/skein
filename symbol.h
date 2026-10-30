@@ -6,6 +6,7 @@ void yyerror(const char *s, ...);
 
 struct symbol {
     char *name;
+    size_t name_len;
     struct value_t *val;
 };
 
@@ -14,7 +15,7 @@ struct symlist {
     struct symlist *next;
 };
 
-struct symbol *newsym(char *name);
+struct symbol *newsym(const char *name);
 struct symlist *newsymlist(struct symbol *sym, struct symlist *next);
 void symlistfree(struct symlist *sl);
 

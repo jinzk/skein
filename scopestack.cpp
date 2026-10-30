@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 static std::shared_ptr<scope_t> current;
@@ -13,21 +14,49 @@ static std::shared_ptr<scope_t> global_scope;
 static std::vector<std::shared_ptr<scope_t>> restore_stack;
 static std::vector<std::weak_ptr<scope_t>> all_scopes;
 
+struct symbol *symbol_table::find(std::string_view name) const {
+    if (indexed) {
+        auto it = index.find(name);
+        return it == index.end() ? NULL : it->second;
+    }
+    for (struct symbol *sym : small) {
+        if (sym->name_len == name.size() &&
+            std::memcmp(sym->name, name.data(), name.size()) == 0)
+            return sym;
+    }
+    return NULL;
+}
+
+void symbol_table::insert(struct symbol *sym) {
+    std::string_view key(sym->name, sym->name_len);
+    small.push_back(sym);
+
+    if (indexed) {
+        index.emplace(key, sym);
+    } else if (small.size() > linear_limit) {
+        index.reserve(small.size() * 2);
+        for (struct symbol *s : small)
+            index.emplace(std::string_view(s->name, s->name_len), s);
+        indexed = true;
+    }
+}
+
+void symbol_table::clear() {
+    index.clear();
+    small.clear();
+}
+
 static void clear_scope(scope_t *s) {
     if (!s) return;
-    struct symlist *list = s->syms;
-    s->syms = NULL;
-    while (list) {
-        struct symlist *next = list->next;
-        struct symbol *sym = list->sym;
+    s->syms.index.clear();
+    for (struct symbol *sym : s->syms.small) {
         if (sym) {
             freeval(sym->val);
             std::free(sym->name);
             std::free(sym);
         }
-        std::free(list);
-        list = next;
     }
+    s->syms.clear();
 }
 
 scope_t::~scope_t() {
@@ -64,7 +93,8 @@ static void push_scope_impl(bool is_function,
     s->parent = parent;
     s->is_function = is_function;
     s->ret = NULL;
-    s->syms = NULL;
+    s->function_scope =
+        is_function ? s.get() : (parent ? parent->function_scope : NULL);
     register_scope(s);
     restore_stack.push_back(current);
     current = s;
@@ -84,7 +114,7 @@ void initscope() {
     s->parent.reset();
     s->is_function = false;
     s->ret = NULL;
-    s->syms = NULL;
+    s->function_scope = NULL;
     register_scope(s);
     global_scope = s;
     current = s;
@@ -115,43 +145,30 @@ void donescope() {
     all_scopes.clear();
 }
 
-struct symbol *lookupsym(char *sym) {
-    for (std::shared_ptr<scope_t> s = current; s; s = s->parent) {
-        for (struct symlist *sl = s->syms; sl; sl = sl->next) {
-            if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
-                return sl->sym;
-        }
+struct symbol *lookupsym(const char *sym) {
+    if (!sym) return NULL;
+    std::string_view key(sym);
+    for (scope_t *s = current.get(); s; s = s->parent.get()) {
+        if (struct symbol *found = s->syms.find(key))
+            return found;
     }
     return NULL;
 }
 
-bool isrepeated(char *sym) {
-    if (!current) return false;
-    for (struct symlist *sl = current->syms; sl; sl = sl->next) {
-        if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
-            return true;
-    }
-    return false;
+bool isrepeated(const char *sym) {
+    if (!current || !sym) return false;
+    return current->syms.find(std::string_view(sym)) != NULL;
 }
 
 void savesym(struct symbol *sp) {
     if (!current) return;
-    struct symlist *sl = (struct symlist *)std::malloc(sizeof(struct symlist));
-    if (!sl) {
-        std::fprintf(stderr, "out of space\n");
-        std::exit(1);
-    }
-    sl->sym = sp;
-    sl->next = current->syms;
-    current->syms = sl;
+    current->syms.insert(sp);
 }
 
 bool retval(struct value_t *r) {
-    for (std::shared_ptr<scope_t> s = current; s; s = s->parent) {
-        if (s->is_function) {
-            s->ret = r;
-            return true;
-        }
+    if (current && current->function_scope) {
+        current->function_scope->ret = r;
+        return true;
     }
     return false;
 }

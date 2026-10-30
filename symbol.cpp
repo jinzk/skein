@@ -16,13 +16,14 @@ static char *dupstr(const char *s) {
     return p;
 }
 
-struct symbol *newsym(char *name) {
+struct symbol *newsym(const char *name) {
     struct symbol *s = (struct symbol *)std::malloc(sizeof(struct symbol));
     if (!s) {
         yyerror("out of space");
         std::exit(0);
     }
     s->name = dupstr(name);
+    s->name_len = std::strlen(s->name);
     s->val = NULL;
     return s;
 }

@@ -312,6 +312,24 @@ def main():
         stdout="= 2",
     )
 
+    many_globals = "".join(f"let v{i} = {i};\n" for i in range(40))
+    check("large symbol table lookup", many_globals + "v0 + v39\n",
+          stdout="= 39")
+    check("large symbol table duplicate", many_globals + "let v0 = 1;\n",
+          stderr="symbol repeated")
+    check(
+        "large symbol table closure",
+        many_globals
+        + "def make() { let n = 5; def get() { return n + v39; } return get; }\n"
+        + "let g = make();\ng()\n",
+        stdout="= 44",
+    )
+    check(
+        "large symbol table shadowing",
+        many_globals + "let x = 1;\ndef f() { let x = 2; return x; }\nf()\nx\n",
+        stdout_all=["= 2", "= 1"],
+    )
+
     check("call non-function", "let x = 1;\nx(2)\n", stderr="cannot call int")
     check("recursion depth limit",
           "def f(n) { return f(n + 1); }\nf(0)\n",

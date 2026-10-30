@@ -1201,7 +1201,7 @@ static struct value_t *call_builtin(int functype,
             }
             std::string data = ((struct bytes_value_t *)args[0])->value;
             data += ((struct bytes_value_t *)args[1])->value;
-            ret = newbytesval(data);
+            ret = newbytesval(std::move(data));
             break;
         }
         case B_bytes_hex: {
@@ -1240,7 +1240,7 @@ static struct value_t *call_builtin(int functype,
                 data.push_back((char)(unsigned char)((hi << 4) | lo));
             }
             if (ok)
-                ret = newbytesval(data);
+                ret = newbytesval(std::move(data));
             break;
         }
         case B_bytes_to_int: {
@@ -1349,7 +1349,7 @@ static struct value_t *call_builtin(int functype,
                 data[pos] = (char)byte;
                 bits >>= 8;
             }
-            ret = newbytesval(data);
+            ret = newbytesval(std::move(data));
             break;
         }
         case B_read_bytes: {
@@ -1364,7 +1364,7 @@ static struct value_t *call_builtin(int functype,
                     ((struct string_value_t *)arg)->value, data, error))
                 yyerror("read_bytes: %s", error.c_str());
             else
-                ret = newbytesval(data);
+                ret = newbytesval(std::move(data));
             break;
         }
         case B_write_bytes:
@@ -1404,7 +1404,7 @@ static struct value_t *call_builtin(int functype,
             if (!platform_file_read(file->file, limit, data, error))
                 yyerror("file_read_bytes: %s", error.c_str());
             else
-                ret = newbytesval(data);
+                ret = newbytesval(std::move(data));
             break;
         }
         case B_file_write_bytes: {

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
 static char *dupstr(const char *s) {
     if (!s) s = "";
@@ -56,10 +57,10 @@ struct value_t *newstrval(const char *s) {
     return (struct value_t *)v;
 }
 
-struct value_t *newbytesval(const std::string &data) {
+struct value_t *newbytesval(std::string data) {
     struct bytes_value_t *v = new bytes_value_t;
     v->type = T_bytes;
-    v->value = data;
+    v->value = std::move(data);
     return (struct value_t *)v;
 }
 

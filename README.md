@@ -158,6 +158,77 @@ package bb {
 }
 ```
 
+### 内置标准库 std
+
+`import std;` 会加载内置标准库，不需要文件系统目录：
+
+```text
+import std;
+
+std.list.slice([1, 2, 3, 4], 1, 2)
+std.dict.get({"a": 1}, "a")
+std.string.join(["a", "b"], ",")
+std.bytes.hex(bytes_from_hex("00ff"))
+```
+
+模块：
+
+```text
+std.list
+std.dict
+std.string
+std.bytes
+```
+
+当前提供的函数：
+
+```text
+std.list.len
+std.list.slice
+std.list.contains
+std.list.index
+
+std.dict.len
+std.dict.get
+std.dict.has
+std.dict.keys
+std.dict.values
+
+std.string.len
+std.string.find
+std.string.substr
+std.string.split
+std.string.split_ws
+std.string.trim
+std.string.join
+std.string.replace
+std.string.starts_with
+std.string.ends_with
+
+std.bytes.len
+std.bytes.get
+std.bytes.slice
+std.bytes.concat
+std.bytes.hex
+std.bytes.from_hex
+std.bytes.to_int
+std.bytes.from_int
+```
+
+规则：
+
+- `std` 是内置包，不参与文件系统查找，也不需要满足目录名规则；
+- `std` 名称保留，不能通过源码包覆盖；
+- 使用 `import std;` 后通过 `std.list`、`std.string` 等方式访问；
+- 原有全局函数（`find`、`substr`、`split`、`trim`、`bytes_*` 等）保持可用；
+- `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
+- 新函数只通过 `std.*` 提供，不再增加全局函数名；
+- `std.list.slice` 的 `start` / `length` 不能为负数；
+- `std.list.index` 找不到时返回 `-1`，`std.list.contains` 返回 `1` / `0`；
+- `std.dict.get` 缺少键时返回 `null` 或提供的默认值；
+- `std.string.join` 只接受字符串元素；
+- `std.string.replace` 替换全部匹配，空查找串会报错。
+
 ### 查找路径
 
 查找顺序：

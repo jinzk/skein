@@ -575,6 +575,69 @@ def main():
           stderr="range expects 1 to 3 arguments")
     check("range overflow", "range(9223372036854775807, 2)\n",
           stderr="range value overflow")
+    check(
+        "std list helpers",
+        "import std;\n"
+        "std.list.len([1, 2, 3])\n"
+        "std.list.slice([1, 2, 3, 4], 1, 2)\n"
+        "std.list.contains([1, 2, 3], 2)\n"
+        "std.list.index([1, 2, 3], 3)\n",
+        stdout_all=["= 3", "= [2, 3]", "= 1", "= 2"],
+    )
+    check(
+        "std list slice clamps",
+        "import std;\nstd.list.slice([1, 2], 1, 10)\n",
+        stdout="= [2]",
+    )
+    check(
+        "std dict helpers",
+        "import std;\n"
+        'std.dict.get({"a": 1}, "a")\n'
+        'std.dict.get({"a": 1}, "b")\n'
+        'std.dict.get({"a": 1}, "b", 9)\n'
+        'std.dict.has({"a": 1}, "a")\n'
+        'std.dict.keys({"a": 1, "b": 2})\n'
+        'std.dict.values({"a": 1, "b": 2})\n',
+        stdout_all=["= 1", "= 9", "= 1", "= [a, b]", "= [1, 2]"],
+    )
+    check(
+        "std string helpers",
+        "import std;\n"
+        'std.string.join(["a", "b", "c"], ",")\n'
+        'std.string.replace("a-b-c", "-", "_")\n'
+        'std.string.starts_with("hello", "he")\n'
+        'std.string.ends_with("hello", "lo")\n'
+        'std.string.find("hello", "ll")\n'
+        'std.string.trim("  x  ")\n',
+        stdout_all=["= a,b,c", "= a_b_c", "= 1", "= 1", "= 2", "= x"],
+    )
+    check(
+        "std bytes aliases",
+        "import std;\n"
+        'std.bytes.hex(bytes_from_hex("00ff"))\n'
+        'std.bytes.len(bytes_from_hex("00ff"))\n',
+        stdout_all=["= 00ff", "= 2"],
+    )
+    check("std join type", 'import std;\nstd.string.join([1], ",")\n',
+          stderr="expects string elements")
+    check("std replace empty", 'import std;\nstd.string.replace("a", "", "b")\n',
+          stderr="search must not be empty")
+    check("std list slice type", "import std;\nstd.list.slice(1, 0)\n",
+          stderr="std.list.slice expects a list")
+    check("std list slice start", "import std;\nstd.list.slice([1], -1)\n",
+          stderr="start must be a non-negative integer")
+    check("std dict get type", 'import std;\nstd.dict.get([], "a")\n',
+          stderr="std.dict.get expects a dict")
+    check("std import missing module", "std.list.len([1])\n",
+          stderr="symbol not found std")
+    check(
+        "std namespace copy is isolated",
+        "import std;\n"
+        "func mutate(ns) { ns.list = 1; }\n"
+        "mutate(std);\n"
+        "std.list.len([1, 2])\n",
+        stdout="= 2",
+    )
 
     check(
         "break",

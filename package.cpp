@@ -250,10 +250,78 @@ value_t *import_resolved(const std::string &dotted,
     return dupval(namespace_value);
 }
 
+value_t *builtin_module(
+    std::initializer_list<std::pair<const char *, int>> functions) {
+    struct dict_value_t *module = newdictval();
+    module->payload->items.reserve(functions.size());
+    for (const auto &entry : functions) {
+        module->payload->items.push_back(std::make_pair(
+            newstrval(entry.first), newbuiltinval(entry.second)));
+    }
+    return (value_t *)module;
+}
+
+value_t *build_std_namespace() {
+    struct dict_value_t *root = newdictval();
+    root->payload->items.push_back(std::make_pair(
+        newstrval("list"),
+        builtin_module({
+            {"len", B_len},
+            {"slice", B_list_slice},
+            {"contains", B_list_contains},
+            {"index", B_list_index},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("dict"),
+        builtin_module({
+            {"len", B_len},
+            {"get", B_dict_get},
+            {"has", B_dict_has},
+            {"keys", B_dict_keys},
+            {"values", B_dict_values},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("string"),
+        builtin_module({
+            {"len", B_len},
+            {"find", B_find},
+            {"substr", B_substr},
+            {"split", B_split},
+            {"split_ws", B_split_ws},
+            {"trim", B_trim},
+            {"join", B_string_join},
+            {"replace", B_string_replace},
+            {"starts_with", B_string_starts_with},
+            {"ends_with", B_string_ends_with},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("bytes"),
+        builtin_module({
+            {"len", B_bytes_len},
+            {"get", B_bytes_get},
+            {"slice", B_bytes_slice},
+            {"concat", B_bytes_concat},
+            {"hex", B_bytes_hex},
+            {"from_hex", B_bytes_from_hex},
+            {"to_int", B_bytes_to_int},
+            {"from_int", B_int_to_bytes},
+        })));
+    return (value_t *)root;
+}
+
 value_t *package_import_impl(const char *dotted_path, std::string &error) {
     if (!dotted_path || !*dotted_path) {
         error = "empty package path";
         return NULL;
+    }
+
+    if (std::strcmp(dotted_path, "std") == 0) {
+        std::string hidden = package_cache_key("builtin:std");
+        if (value_t *cached = lookup_global_symbol(hidden.c_str()))
+            return dupval(cached);
+        value_t *namespace_value = build_std_namespace();
+        save_global_symbol(hidden.c_str(), namespace_value);
+        return dupval(namespace_value);
     }
 
     resolved_package resolved;

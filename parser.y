@@ -28,6 +28,71 @@ static char *join_import_path(const char *left, const char *right) {
     std::memcpy(path + left_len + 1, right, right_len + 1);
     return path;
 }
+
+static char *copy_text(const char *text) {
+    size_t len = std::strlen(text) + 1;
+    char *copy = (char *)std::malloc(len);
+    if (!copy) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    std::memcpy(copy, text, len);
+    return copy;
+}
+
+static const char *builtin_field_name(int functype) {
+    switch (functype) {
+        case B_sqrt: return "sqrt";
+        case B_exp: return "exp";
+        case B_log: return "log";
+        case B_abs: return "abs";
+        case B_len: return "len";
+        case B_range: return "range";
+        case B_print: return "print";
+        case B_list: return "list";
+        case B_dict: return "dict";
+        case B_int: return "int";
+        case B_float: return "float";
+        case B_str: return "str";
+        case B_format: return "format";
+        case B_command: return "command";
+        case B_command_status: return "command_status";
+        case B_read_file: return "read_file";
+        case B_write_file: return "write_file";
+        case B_append_file: return "append_file";
+        case B_file_exists: return "file_exists";
+        case B_file_open: return "file_open";
+        case B_file_read: return "file_read";
+        case B_file_write: return "file_write";
+        case B_file_seek: return "file_seek";
+        case B_file_tell: return "file_tell";
+        case B_file_eof: return "file_eof";
+        case B_file_close: return "file_close";
+        case B_file_flush: return "file_flush";
+        case B_input: return "input";
+        case B_split: return "split";
+        case B_split_ws: return "split_ws";
+        case B_trim: return "trim";
+        case B_find: return "find";
+        case B_substr: return "substr";
+        case B_bytes_from_string: return "bytes_from_string";
+        case B_bytes_to_string: return "bytes_to_string";
+        case B_bytes_len: return "bytes_len";
+        case B_bytes_get: return "bytes_get";
+        case B_bytes_slice: return "bytes_slice";
+        case B_bytes_concat: return "bytes_concat";
+        case B_bytes_hex: return "bytes_hex";
+        case B_bytes_from_hex: return "bytes_from_hex";
+        case B_bytes_to_int: return "bytes_to_int";
+        case B_int_to_bytes: return "int_to_bytes";
+        case B_read_bytes: return "read_bytes";
+        case B_write_bytes: return "write_bytes";
+        case B_append_bytes: return "append_bytes";
+        case B_file_read_bytes: return "file_read_bytes";
+        case B_file_write_bytes: return "file_write_bytes";
+        default: return NULL;
+    }
+}
 %}
 
 %define parse.error custom
@@ -74,7 +139,7 @@ static char *join_import_path(const char *left, const char *right) {
 %type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
 %type <sl> symlist
-%type <str> importpath
+%type <str> importpath fieldname
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
@@ -107,6 +172,18 @@ importpath: NAME                          { $$ = $1; }
         $$ = join_import_path($1, $3);
         free($1);
         free($3);
+      }
+    ;
+
+fieldname: NAME                           { $$ = $1; }
+    | BUILTIN {
+        const char *name = builtin_field_name($1);
+        if (name) {
+            $$ = copy_text(name);
+        } else {
+            yyerror("invalid field name");
+            $$ = copy_text("");
+        }
       }
     ;
 
@@ -152,7 +229,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
     | exp '(' explist ')'      { $$ = newcall($1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
-    | exp '.' NAME                        { $$ = newast('G', $1, newstr($3)); free($3); }
+    | exp '.' fieldname                   { $$ = newast('G', $1, newstr($3)); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' pairlist '}'                    { $$ = $2; }
     | funcstart '(' symlist ')' '{' list '}'

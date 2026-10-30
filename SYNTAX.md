@@ -555,7 +555,39 @@ import aa.bb.cc;
 
 父目录没有源文件时，也可以作为纯子包容器。
 
-### 6.4 查找路径
+### 6.4 内置标准库 std
+
+```text
+import std;
+```
+
+`std` 是内置包，不需要文件系统目录，也不参与包目录名规则；`std` 名称保留，不能被源码包覆盖。
+
+模块：
+
+```text
+std.list
+std.dict
+std.string
+std.bytes
+```
+
+常用示例：
+
+```text
+std.list.slice([1, 2, 3], 1, 2)
+std.list.contains([1, 2, 3], 2)
+std.dict.get({"a": 1}, "b", 0)
+std.dict.keys({"a": 1, "b": 2})
+std.string.join(["a", "b"], ",")
+std.string.replace("a-b", "-", "_")
+std.string.starts_with("hello", "he")
+std.bytes.hex(bytes_from_hex("00ff"))
+```
+
+原有全局函数仍可使用。
+
+### 6.5 查找路径
 
 优先级：
 

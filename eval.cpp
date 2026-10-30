@@ -697,6 +697,39 @@ static struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_list_slice) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.list.slice expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_contains || functype == B_list_index ||
+               functype == B_dict_has || functype == B_string_join ||
+               functype == B_string_starts_with ||
+               functype == B_string_ends_with) {
+        if (args.size() != 2) {
+            const char *name =
+                functype == B_list_contains ? "std.list.contains" :
+                functype == B_list_index ? "std.list.index" :
+                functype == B_dict_has ? "std.dict.has" :
+                functype == B_string_join ? "std.string.join" :
+                functype == B_string_starts_with ? "std.string.starts_with" :
+                "std.string.ends_with";
+            yyerror("%s expects 2 arguments, got %d", name, (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_dict_get) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.dict.get expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_string_replace) {
+        if (args.size() != 3) {
+            yyerror("std.string.replace expects 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
@@ -784,6 +817,188 @@ static struct value_t *call_builtin(int functype,
             }
             if (list)
                 ret = (struct value_t *)list;
+            break;
+        }
+        case B_list_slice: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.slice expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            if (args[1]->type != T_int ||
+                ((struct int_value_t *)args[1])->value < 0) {
+                yyerror("std.list.slice start must be a non-negative integer");
+                break;
+            }
+            size_t start = (size_t)((struct int_value_t *)args[1])->value;
+            size_t count = std::string::npos;
+            if (args.size() == 3) {
+                if (args[2]->type != T_int ||
+                    ((struct int_value_t *)args[2])->value < 0) {
+                    yyerror("std.list.slice length must be a non-negative integer");
+                    break;
+                }
+                count = (size_t)((struct int_value_t *)args[2])->value;
+            }
+            struct list_value_t *source = (struct list_value_t *)args[0];
+            size_t size = source->payload->items.size();
+            if (start > size)
+                start = size;
+            if (count > size - start)
+                count = size - start;
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(count);
+            for (size_t i = 0; i < count; ++i)
+                out->payload->items.push_back(
+                    dupval(source->payload->items[start + i]));
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_list_contains:
+        case B_list_index: {
+            if (args[0]->type != T_list) {
+                yyerror("%s expects a list, got %s",
+                        functype == B_list_contains ? "std.list.contains"
+                                                   : "std.list.index",
+                        typename_of(args[0]));
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)args[0];
+            long long found = -1;
+            for (size_t i = 0; i < list->payload->items.size(); ++i) {
+                if (value_equals(list->payload->items[i], args[1])) {
+                    found = (long long)i;
+                    break;
+                }
+            }
+            if (functype == B_list_contains)
+                ret = newintval(found >= 0 ? 1 : 0);
+            else
+                ret = newintval(found);
+            break;
+        }
+        case B_dict_get:
+        case B_dict_has: {
+            if (args[0]->type != T_dict) {
+                yyerror("%s expects a dict, got %s",
+                        functype == B_dict_get ? "std.dict.get"
+                                               : "std.dict.has",
+                        typename_of(args[0]));
+                break;
+            }
+            struct dict_value_t *dict = (struct dict_value_t *)args[0];
+            struct value_t *found = NULL;
+            for (auto &entry : dict->payload->items) {
+                if (value_equals(entry.first, args[1])) {
+                    found = entry.second;
+                    break;
+                }
+            }
+            if (functype == B_dict_has) {
+                ret = newintval(found ? 1 : 0);
+            } else if (found) {
+                ret = dupval(found);
+            } else if (args.size() == 3) {
+                ret = dupval(args[2]);
+            } else {
+                ret = newnull();
+            }
+            break;
+        }
+        case B_dict_keys:
+        case B_dict_values: {
+            if (arg->type != T_dict) {
+                yyerror("%s expects a dict, got %s",
+                        functype == B_dict_keys ? "std.dict.keys"
+                                                : "std.dict.values",
+                        typename_of(arg));
+                break;
+            }
+            struct dict_value_t *dict = (struct dict_value_t *)arg;
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(dict->payload->items.size());
+            for (auto &entry : dict->payload->items)
+                out->payload->items.push_back(dupval(
+                    functype == B_dict_keys ? entry.first : entry.second));
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_string_join: {
+            if (args[0]->type != T_list || args[1]->type != T_string) {
+                yyerror("std.string.join expects a list and a string separator");
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)args[0];
+            const char *separator = ((struct string_value_t *)args[1])->value;
+            std::string result;
+            bool bad = false;
+            for (size_t i = 0; i < list->payload->items.size(); ++i) {
+                struct value_t *item = list->payload->items[i];
+                if (item->type != T_string) {
+                    yyerror("std.string.join expects string elements, got %s",
+                            typename_of(item));
+                    bad = true;
+                    break;
+                }
+                if (i)
+                    result += separator;
+                result += ((struct string_value_t *)item)->value;
+            }
+            if (!bad)
+                ret = newstrval(result.c_str());
+            break;
+        }
+        case B_string_replace: {
+            if (args[0]->type != T_string || args[1]->type != T_string ||
+                args[2]->type != T_string) {
+                yyerror("std.string.replace expects three strings");
+                break;
+            }
+            const char *text = ((struct string_value_t *)args[0])->value;
+            const char *old_text = ((struct string_value_t *)args[1])->value;
+            const char *new_text = ((struct string_value_t *)args[2])->value;
+            if (!*old_text) {
+                yyerror("std.string.replace search must not be empty");
+                break;
+            }
+            std::string source(text);
+            std::string old_value(old_text);
+            std::string new_value(new_text);
+            std::string result;
+            size_t position = 0;
+            for (;;) {
+                size_t found = source.find(old_value, position);
+                if (found == std::string::npos) {
+                    result.append(source, position, std::string::npos);
+                    break;
+                }
+                result.append(source, position, found - position);
+                result += new_value;
+                position = found + old_value.size();
+            }
+            ret = newstrval(result.c_str());
+            break;
+        }
+        case B_string_starts_with:
+        case B_string_ends_with: {
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("%s expects two strings",
+                        functype == B_string_starts_with
+                            ? "std.string.starts_with"
+                            : "std.string.ends_with");
+                break;
+            }
+            const char *text = ((struct string_value_t *)args[0])->value;
+            const char *part = ((struct string_value_t *)args[1])->value;
+            size_t text_len = std::strlen(text);
+            size_t part_len = std::strlen(part);
+            bool match = part_len <= text_len;
+            if (match && functype == B_string_starts_with)
+                match = std::memcmp(text, part, part_len) == 0;
+            else if (match)
+                match = std::memcmp(text + text_len - part_len, part,
+                                    part_len) == 0;
+            ret = newintval(match ? 1 : 0);
             break;
         }
         case B_int:

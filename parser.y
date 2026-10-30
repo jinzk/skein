@@ -14,6 +14,20 @@
 
 extern int yylex();
 extern int yyparse();
+
+static char *join_import_path(const char *left, const char *right) {
+    size_t left_len = std::strlen(left);
+    size_t right_len = std::strlen(right);
+    char *path = (char *)std::malloc(left_len + right_len + 2);
+    if (!path) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    std::memcpy(path, left, left_len);
+    path[left_len] = '.';
+    std::memcpy(path + left_len + 1, right, right_len + 1);
+    return path;
+}
 %}
 
 %define parse.error custom
@@ -37,6 +51,7 @@ extern int yyparse();
 %token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null"
+%token IMPORT "import" PACKAGE "package" EXPORT "export"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 
 %right '='
@@ -59,6 +74,7 @@ extern int yyparse();
 %type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
 %type <sl> symlist
+%type <str> importpath
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
@@ -74,7 +90,21 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                                            { $$ = newfor($3, $5, $7, $9); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($2, $4, $7); }
+    | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
+    | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
+    | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc($3, $5, $8, true); }
+    | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
+    | IMPORT importpath ';'               { $$ = newimport($2); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
+    ;
+
+importpath: NAME                          { $$ = $1; }
+    | importpath '.' NAME                 {
+        $$ = join_import_path($1, $3);
+        free($1);
+        free($3);
+      }
     ;
 
 line: RETURN exp                          { $$ = newret($2); }
@@ -184,43 +214,58 @@ calclist: exp { $$ = $1; }
 docalc: calclist EOL {
         g_runtime_error_count = 0;
         diag_set_location(0, 0);
-        maybe_collect_cycles();
-        struct value_t *rslt = eval($1);
-        if (rslt && !g_interrupted && rslt->type != T_null) {
-            switch (rslt->type) {
-                case T_return:
-                    yyerror("return outside function");
-                    break;
-                case T_break:
-                    diag_set_location(g_flow_line, g_flow_column);
-                    yyerror("break outside loop");
-                    break;
-                case T_continue:
-                    diag_set_location(g_flow_line, g_flow_column);
-                    yyerror("continue outside loop");
-                    break;
-                default:
-                    if (g_interactive) {
-                        printf("= ");
-                        printvalue(rslt);
-                        printf("\n");
-                    }
-                    break;
+
+        bool invalid = g_statement_invalid;
+        g_statement_invalid = false;
+        bool skip_eval = invalid || (!g_interactive && g_script_stop);
+        struct value_t *rslt = NULL;
+
+        if (!skip_eval) {
+            if (!g_package_loading)
+                maybe_collect_cycles();
+
+            rslt = eval($1);
+            if (rslt && !g_interrupted && rslt->type != T_null) {
+                switch (rslt->type) {
+                    case T_return:
+                        yyerror("return outside function");
+                        break;
+                    case T_break:
+                        diag_set_location(g_flow_line, g_flow_column);
+                        yyerror("break outside loop");
+                        break;
+                    case T_continue:
+                        diag_set_location(g_flow_line, g_flow_column);
+                        yyerror("continue outside loop");
+                        break;
+                    default:
+                        if (g_interactive) {
+                            printf("= ");
+                            printvalue(rslt);
+                            printf("\n");
+                        }
+                        break;
+                }
             }
+            freeval(rslt);
         }
-        freeval(rslt);
+
         if (g_interactive && !g_interrupted) {
             printf("> ");
             fflush(stdout);
         }
+
         if ($1) treefree($1);
         $1 = NULL;
         $$ = NULL;
-        if (g_interrupted)
+        if (g_interrupted || (!g_interactive && g_script_stop))
             YYABORT;
     }
     | error EOL {
         yyerrok;
+        g_statement_invalid = false;
+        if (!g_interactive && g_script_stop)
+            YYABORT;
         if (g_interactive && !g_interrupted) {
             printf("> ");
             fflush(stdout);
@@ -234,7 +279,17 @@ calc: %empty
     ;
 %%
 
+void parser_begin_nested_parse() {
+    yychar = YYEMPTY;
+    yynerrs = 0;
+}
+
 int yyreport_syntax_error(const yypcontext_t *ctx) {
+    if (diag_lexical_error_on_line(g_token_line)) {
+        clear_func_locations();
+        return 0;
+    }
+
     enum { MAX_EXPECTED = 64, MAX_SHOWN = 6 };
     yysymbol_kind_t expected[MAX_EXPECTED];
 

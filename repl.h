@@ -16,7 +16,24 @@ extern int g_runtime_error_count;
 /* True for the interactive stdin REPL; false when running a script file. */
 extern bool g_interactive;
 
+/* Nonzero while evaluating an imported package source file. */
+extern int g_package_loading;
+
+/* Continue after script errors instead of stopping at the first one. */
+extern bool g_keep_going;
+
+/* Set when a script error requires stopping the current parse. */
+extern bool g_script_stop;
+
+/* Set when the current statement has a lexical error and must not evaluate. */
+extern bool g_statement_invalid;
+
 /* Discard buffered input and repoint the scanner at `in`. */
 void reset_scanner_state(std::FILE *in);
+
+/* Save/restore the scanner between outer source and imported packages. */
+struct scanner_checkpoint;
+scanner_checkpoint *scanner_checkpoint_save();
+void scanner_checkpoint_restore(scanner_checkpoint *checkpoint);
 
 #endif

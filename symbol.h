@@ -8,6 +8,7 @@ struct symbol {
     char *name;
     size_t name_len;
     struct value_t *val;
+    bool exported;
 };
 
 struct symlist {

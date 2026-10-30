@@ -31,6 +31,7 @@ struct symbol_table {
 struct scope_t {
     std::shared_ptr<scope_t> parent;
     bool is_function;
+    bool is_global;
     value_t *ret;
     symbol_table syms;
     scope_t *function_scope;
@@ -41,11 +42,14 @@ struct scope_t {
 struct scope_t *topscope();
 std::shared_ptr<scope_t> current_scope();
 void pushscope();
+void pushscope_isolated();
 void pushscope_closure(const std::shared_ptr<struct scope_t> &);
 void initscope();
 void popscope();
 void donescope();
 void maybe_collect_cycles();
+void save_global_symbol(const char *name, value_t *v);
+value_t *lookup_global_symbol(const char *name);
 struct symbol *lookupsym(const char *);
 bool isrepeated(const char *);
 void savesym(struct symbol *);

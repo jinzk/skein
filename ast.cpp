@@ -167,7 +167,7 @@ struct ast *newscope(struct ast *v) {
     return (struct ast *)a;
 }
 
-struct ast *newvar(char *s, struct ast *v) {
+struct ast *newvar(char *s, struct ast *v, bool exported) {
     struct symdef *a = (struct symdef *)std::malloc(sizeof(struct symdef));
     if (!a) {
         yyerror("out of space");
@@ -177,6 +177,7 @@ struct ast *newvar(char *s, struct ast *v) {
     set_loc_from(a, v);
     a->name = s;
     a->v = v;
+    a->exported = exported;
     return (struct ast *)a;
 }
 
@@ -243,7 +244,8 @@ struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct 
     return (struct ast *)a;
 }
 
-struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast) {
+struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
+                    bool exported) {
     struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
     if (!a) {
         yyerror("out of space");
@@ -260,6 +262,34 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast) {
     a->sl = sl;
     a->ast = ast;
     a->moved = 0;
+    a->exported = exported;
+    return (struct ast *)a;
+}
+
+struct ast *newpackage(char *name, struct ast *body) {
+    struct package_node *a =
+        (struct package_node *)std::malloc(sizeof(struct package_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'K';
+    set_loc_from(a, body);
+    a->name = name;
+    a->body = body;
+    return (struct ast *)a;
+}
+
+struct ast *newimport(char *path) {
+    struct import_node *a =
+        (struct import_node *)std::malloc(sizeof(struct import_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'J';
+    set_loc(a, 0, 0);
+    a->path = path;
     return (struct ast *)a;
 }
 
@@ -411,6 +441,15 @@ void treefree(struct ast *a) {
         case 'C':
             treefree(((struct ufncall *)a)->callee);
             treefree(((struct ufncall *)a)->args);
+            break;
+        case 'K': {
+            struct package_node *p = (struct package_node *)a;
+            treefree(p->body);
+            std::free(p->name);
+            break;
+        }
+        case 'J':
+            std::free(((struct import_node *)a)->path);
             break;
         case 'X':
             treefree(((struct nscope *)a)->ast);

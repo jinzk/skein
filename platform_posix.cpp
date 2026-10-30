@@ -126,6 +126,10 @@ bool platform_run_command_status(
     return true;
 }
 
+FILE *platform_open_file(const std::string &path, const char *mode) {
+    return std::fopen(path.c_str(), mode);
+}
+
 bool platform_read_file(const std::string &path, std::string &data,
                         std::string &error) {
     data.clear();

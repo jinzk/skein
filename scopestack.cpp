@@ -95,6 +95,7 @@ static void push_scope_impl(bool is_function,
     std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
     s->parent = parent;
     s->is_function = is_function;
+    s->is_global = false;
     s->ret = NULL;
     s->function_scope =
         is_function ? s.get() : (parent ? parent->function_scope : NULL);
@@ -107,6 +108,10 @@ void pushscope() {
     push_scope_impl(false, current);
 }
 
+void pushscope_isolated() {
+    push_scope_impl(false, nullptr);
+}
+
 void pushscope_closure(const std::shared_ptr<scope_t> &parent) {
     push_scope_impl(true, parent ? parent : global_scope);
 }
@@ -116,6 +121,7 @@ void initscope() {
     std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
     s->parent.reset();
     s->is_function = false;
+    s->is_global = true;
     s->ret = NULL;
     s->function_scope = NULL;
     register_scope(s);
@@ -288,6 +294,28 @@ void maybe_collect_cycles() {
     collect_cycles();
     prune_scopes();
     scopes_at_last_collect = all_scopes.size();
+}
+
+void save_global_symbol(const char *name, value_t *v) {
+    if (!global_scope || !name)
+        return;
+    std::string_view key(name);
+    struct symbol *existing = global_scope->syms.find(key);
+    if (existing) {
+        freeval(existing->val);
+        existing->val = v;
+        return;
+    }
+    struct symbol *sym = newsym(name);
+    sym->val = v;
+    global_scope->syms.insert(sym);
+}
+
+value_t *lookup_global_symbol(const char *name) {
+    if (!global_scope || !name)
+        return NULL;
+    struct symbol *sym = global_scope->syms.find(std::string_view(name));
+    return sym ? sym->val : NULL;
 }
 
 struct symbol *lookupsym(const char *sym) {

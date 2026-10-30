@@ -1,9 +1,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "parser.hpp"
 #include "diagnostics.h"
+#include "package.h"
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
@@ -14,20 +17,64 @@ volatile std::sig_atomic_t g_interrupted = 0;
 volatile std::sig_atomic_t g_stdin_eof = 0;
 
 bool g_interactive = true;
+int g_package_loading = 0;
+bool g_keep_going = false;
+bool g_script_stop = false;
+bool g_statement_invalid = false;
 int indent_count = 0;
+
+static void print_usage(const char *program) {
+    std::fprintf(stderr,
+                 "usage: %s [-I dir] [--package-path dir] "
+                 "[-k|--keep-going] [script|-]\n",
+                 program);
+}
 
 int main(int argc, char **argv) {
     platform_init();
     platform_install_interrupt_handler();
 
+    std::string script_path;
+    std::vector<std::string> package_dirs;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-I" || arg == "--package-path") {
+            if (i + 1 >= argc) {
+                print_usage(argv[0]);
+                return 2;
+            }
+            package_dirs.push_back(argv[++i]);
+        } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
+            package_dirs.push_back(arg.substr(2));
+        } else if (arg.rfind("--package-path=", 0) == 0) {
+            package_dirs.push_back(arg.substr(15));
+        } else if (arg == "-k" || arg == "--keep-going") {
+            g_keep_going = true;
+        } else if (arg == "-" || arg[0] != '-') {
+            if (!script_path.empty()) {
+                print_usage(argv[0]);
+                return 2;
+            }
+            script_path = arg;
+        } else {
+            print_usage(argv[0]);
+            return 2;
+        }
+    }
+
+    package_configure(script_path, package_dirs);
+    if (!script_path.empty() && script_path != "-")
+        diag_set_source_name(script_path);
+
     FILE *script = NULL;
-    if (argc > 1) {
+    if (!script_path.empty()) {
         g_interactive = false;
-        if (std::strcmp(argv[1], "-") != 0) {
-            script = std::fopen(argv[1], "rb");
+        if (script_path != "-") {
+            script = std::fopen(script_path.c_str(), "rb");
             if (!script) {
-                std::perror(argv[1]);
-                return 1;
+                std::perror(script_path.c_str());
+                return 2;
             }
             yyin = script;
         }
@@ -60,7 +107,15 @@ int main(int argc, char **argv) {
     donescope();
     if (script)
         std::fclose(script);
-    if (!g_interactive && diag_error_count() > 0 && status == 0)
+
+    if (g_interactive) {
+        status = 0;
+    } else if (g_interrupted) {
+        status = 130;
+    } else if (diag_error_count() > 0) {
         status = 1;
+    } else if (status != 0) {
+        status = 1;
+    }
     return status;
 }

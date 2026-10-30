@@ -197,6 +197,9 @@ EXP ([Ee][-+]?[0-9]+)
 "for" { return FOR; }
 "let" { return LET; }
 "func" { return FUNC; }
+"package" { return PACKAGE; }
+"import" { return IMPORT; }
+"export" { return EXPORT; }
 "return" { return RETURN; }
 "break" { return BREAK; }
 "continue" { return CONTINUE; }
@@ -354,4 +357,48 @@ void reset_scanner_state(std::FILE *in) {
     input_pos = 0;
     std::clearerr(in);
     yyrestart(in);
+}
+
+struct scanner_checkpoint {
+    std::FILE *in;
+    std::string input;
+    size_t position;
+    std::string strings;
+    int string_line;
+    int string_column;
+    int condition;
+    int indent;
+    int line;
+    int stdin_eof;
+};
+
+scanner_checkpoint *scanner_checkpoint_save() {
+    scanner_checkpoint *checkpoint = new scanner_checkpoint;
+    checkpoint->in = yyin;
+    checkpoint->input = input_line;
+    checkpoint->position = input_pos;
+    checkpoint->strings = string_buffer;
+    checkpoint->string_line = string_start_line;
+    checkpoint->string_column = string_start_column;
+    checkpoint->condition = YY_START;
+    checkpoint->indent = indent_count;
+    checkpoint->line = yylineno;
+    checkpoint->stdin_eof = g_stdin_eof;
+    return checkpoint;
+}
+
+void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
+    if (!checkpoint)
+        return;
+    reset_scanner_state(checkpoint->in);
+    input_line = checkpoint->input;
+    input_pos = checkpoint->position;
+    string_buffer = checkpoint->strings;
+    string_start_line = checkpoint->string_line;
+    string_start_column = checkpoint->string_column;
+    indent_count = checkpoint->indent;
+    yylineno = checkpoint->line;
+    g_stdin_eof = checkpoint->stdin_eof;
+    BEGIN(checkpoint->condition);
+    delete checkpoint;
 }

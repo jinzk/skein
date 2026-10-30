@@ -17,6 +17,7 @@ struct symbol *newsym(const char *name) {
     std::memcpy(s->name, name, len + 1);
     s->name_len = len;
     s->val = NULL;
+    s->exported = false;
     return s;
 }
 

@@ -97,6 +97,7 @@ struct funcdef {
     struct symlist *sl;
     struct ast *ast;
     int moved; /* body/params transferred to a runtime function value */
+    int exported;
 };
 
 struct ufncall {
@@ -156,6 +157,22 @@ struct symdef {
     int column;
     char *name;
     struct ast *v;
+    int exported;
+};
+
+struct package_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct ast *body;
+};
+
+struct import_node {
+    int nodetype;
+    int line;
+    int column;
+    char *path;
 };
 
 struct symref {
@@ -187,13 +204,16 @@ struct ast *newnullast();
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);
 struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body);
 struct ast *newsname(char *s);
-struct ast *newvar(char *s, struct ast *v);
+struct ast *newvar(char *s, struct ast *v, bool exported = false);
 
 struct ast *newret(struct ast *v);
 struct ast *newbrk();
 struct ast *newctn();
 
-struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast);
+struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
+                    bool exported = false);
+struct ast *newpackage(char *name, struct ast *body);
+struct ast *newimport(char *path);
 void push_func_location(int line, int column);
 void clear_func_locations();
 std::shared_ptr<function_code> get_function_code(struct funcdef *node);

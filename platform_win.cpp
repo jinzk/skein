@@ -348,6 +348,16 @@ bool platform_run_command_status(
     return true;
 }
 
+FILE *platform_open_file(const std::string &path, const char *mode) {
+    std::wstring wide_path;
+    if (!widen_utf8(path, wide_path))
+        return NULL;
+    std::wstring wide_mode;
+    for (const char *p = mode; *p; ++p)
+        wide_mode.push_back((wchar_t)(unsigned char)*p);
+    return _wfopen(wide_path.c_str(), wide_mode.c_str());
+}
+
 bool platform_read_file(const std::string &path, std::string &data,
                         std::string &error) {
     data.clear();

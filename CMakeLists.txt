@@ -26,6 +26,7 @@ add_executable(${PROJECT_NAME}
   filetype.cpp
   format.cpp
   main.cpp
+  package.cpp
   scopestack.cpp
   symbol.cpp
   valuetype.cpp

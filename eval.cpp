@@ -2,6 +2,7 @@
 #include "diagnostics.h"
 #include "filetype.h"
 #include "format.h"
+#include "package.h"
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
@@ -1970,6 +1971,69 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
+        case 'J': {
+            struct import_node *imp = (struct import_node *)a;
+            std::string error;
+            int errors_before = diag_error_count();
+            struct value_t *ns = package_import(imp->path, error);
+            if (!ns) {
+                if (diag_error_count() == errors_before)
+                    yyerror("import %s: %s", imp->path, error.c_str());
+                else
+                    diag_mark_script_failure();
+                break;
+            }
+            const char *slash = std::strrchr(imp->path, '.');
+            const char *name = slash ? slash + 1 : imp->path;
+            if (isrepeated(name)) {
+                yyerror("import name already exists: %s", name);
+                freeval(ns);
+            } else {
+                struct symbol *sym = newsym(name);
+                sym->val = ns;
+                savesym(sym);
+            }
+            break;
+        }
+
+        case 'K': {
+            struct package_node *pkg = (struct package_node *)a;
+            int errors_before = g_runtime_error_count;
+            std::string error;
+
+            if (package_is_loading())
+                pushscope();
+            else
+                pushscope_isolated();
+
+            struct value_t *body_ret = eval(pkg->body);
+            if (body_ret &&
+                (body_ret->type == T_return || body_ret->type == T_break ||
+                 body_ret->type == T_continue)) {
+                yyerror("invalid control flow in package %s", pkg->name);
+            }
+            value_t *ns = NULL;
+            if (g_runtime_error_count == errors_before)
+                ns = package_build_namespace(current_scope().get(), error);
+            popscope();
+
+            freeval(body_ret);
+
+            if (!ns) {
+                if (g_runtime_error_count == errors_before)
+                    yyerror("package %s: %s", pkg->name,
+                            error.empty() ? "cannot build namespace"
+                                          : error.c_str());
+                break;
+            }
+
+            if (!package_publish(pkg->name, ns, error)) {
+                yyerror("package %s: %s", pkg->name, error.c_str());
+                freeval(ns);
+            }
+            break;
+        }
+
         case 'D': {
             char *name = ((struct symdef *)a)->name;
             if (isrepeated(name)) {
@@ -1979,6 +2043,7 @@ struct value_t *eval(struct ast *a) {
                 if (v) {
                     struct symbol *s = newsym(name);
                     s->val = v;
+                    s->exported = ((struct symdef *)a)->exported;
                     savesym(s);
                 }
             }
@@ -2003,8 +2068,8 @@ struct value_t *eval(struct ast *a) {
                 break;
 
             std::shared_ptr<scope_t> closure = current_scope();
-            /* The global scope is always reachable as the fallback parent. */
-            if (closure && !closure->parent)
+            /* Top-level functions resolve globals through the fallback parent. */
+            if (closure && closure->is_global)
                 closure.reset();
 
             if (!name) {
@@ -2017,6 +2082,7 @@ struct value_t *eval(struct ast *a) {
                 std::shared_ptr<function_code> code = get_function_code(f);
                 struct symbol *sym = newsym(name);
                 sym->val = newfuncval(code, closure);
+                sym->exported = f->exported;
                 f->moved = 1;
                 savesym(sym);
             }

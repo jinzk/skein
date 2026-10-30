@@ -2,9 +2,11 @@
 """Golden/smoke tests for the calc-demo interpreter."""
 
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./calc-demo"
@@ -1163,6 +1165,319 @@ def main():
           stderr="1:1: runtime error: duplicate parameter")
     check("break error location", "{\n  break;\n}\n",
           stderr="2:3: runtime error: break outside loop")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write(
+            "app/aa/aa.calc",
+            'package aa { export let root = "aa"; }\n',
+        )
+        write(
+            "app/aa/bb/bb.calc",
+            'package bb { export let name = "bb"; }\n',
+        )
+        write(
+            "app/aa/bb/cc/cc.calc",
+            "package cc {\n"
+            "  export let value = 42;\n"
+            "  export func hello(name) { return \"hi \" + name; }\n"
+            "  func hidden() { return 99; }\n"
+            "}\n",
+        )
+        app_main = write(
+            "app/main.calc",
+            "import aa.bb.cc;\n"
+            "print(cc.value);\n"
+            "print(cc.hello(\"x\"));\n"
+            "import aa.bb;\n"
+            "print(bb.name);\n"
+            "print(bb.cc.value);\n"
+            "import aa;\n"
+            "print(aa.root);\n"
+            "print(aa.bb.cc.value);\n",
+        )
+        proc = run_file(app_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["42", "hi x", "bb", "42", "aa", "42"], (
+            proc.stdout
+        )
+        assert proc.stderr == "", proc.stderr
+
+        write(
+            "app/aa/state/state.calc",
+            "package state {\n"
+            "  let n = 0;\n"
+            "  export func inc() { n = n + 1; return n; }\n"
+            "  export func get() { return n; }\n"
+            "}\n",
+        )
+        state_main = write(
+            "app/state_main.calc",
+            "import aa.state;\n"
+            "func again() {\n"
+            "  import aa.state;\n"
+            "  return state.inc();\n"
+            "}\n"
+            + "1;\n" * 70
+            + "print(state.inc());\n"
+            "print(again());\n"
+            "print(state.get());\n",
+        )
+        proc = run_file(state_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["1", "2", "2"], proc.stdout
+
+        write(
+            "container/aa/bb/cc/cc.calc",
+            'package cc { export let value = "deep"; }\n',
+        )
+        container_main = write(
+            "container/main.calc",
+            "import aa;\nprint(aa.bb.cc.value);\n",
+        )
+        proc = run_file(container_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "deep\n", repr(proc.stdout)
+
+        # Package lookup paths: source dir > CLI dirs > environment dirs.
+        write(
+            "search/app/aa/bb/cc/cc.calc",
+            'package cc { export let value = "source"; }\n',
+        )
+        search_main = write(
+            "search/app/main.calc",
+            "import aa.bb.cc;\nprint(cc.value);\n",
+        )
+        write(
+            "search/lib1/aa/bb/cc/cc.calc",
+            'package cc { export let value = "cli1"; }\n',
+        )
+        write(
+            "search/lib2/aa/bb/cc/cc.calc",
+            'package cc { export let value = "cli2"; }\n',
+        )
+        write(
+            "search/env/aa/bb/cc/cc.calc",
+            'package cc { export let value = "env"; }\n',
+        )
+        proc = run_file(search_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "source\n", repr(proc.stdout)
+
+        app_without_local = write(
+            "search/app2/main.calc",
+            "import aa.bb.cc;\nprint(cc.value);\n",
+        )
+        lib1 = os.path.join(tmp, "search/lib1")
+        lib2 = os.path.join(tmp, "search/lib2")
+        envlib = os.path.join(tmp, "search/env")
+        proc = subprocess.run(
+            [BIN, "-I", lib1, app_without_local],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "cli1\n", repr(proc.stdout)
+
+        proc = subprocess.run(
+            [BIN, "-I", lib1, "-I", lib2, app_without_local],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "cli1\n", repr(proc.stdout)
+
+        proc = subprocess.run(
+            [BIN, "-I", lib2, "-I", lib1, app_without_local],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "cli2\n", repr(proc.stdout)
+
+        env = os.environ.copy()
+        env["CALC_PACKAGE_PATH"] = envlib
+        proc = subprocess.run(
+            [BIN, app_without_local],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+            env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "env\n", repr(proc.stdout)
+
+        # CLI dirs take priority over environment dirs.
+        proc = subprocess.run(
+            [BIN, "-I", lib1, app_without_local],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+            env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "cli1\n", repr(proc.stdout)
+
+        proc = subprocess.run(
+            [BIN, "-I", lib1],
+            input="import aa.bb.cc;\nprint(cc.value);\n",
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "cli1\n" in proc.stdout, repr(proc.stdout)
+
+        # Packages are isolated from the main package's globals.
+        write(
+            "isolated/aa/bb/cc/cc.calc",
+            "package cc { export let leaked = main_secret; }\n",
+        )
+        isolated_main = write(
+            "isolated/main.calc",
+            "let main_secret = 1;\nimport aa.bb.cc;\n",
+        )
+        proc = run_file(isolated_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "symbol not found main_secret" in proc.stderr, proc.stderr
+
+        # Package names must match their containing folder.
+        write(
+            "wrongname/aa/bb/cc/cc.calc",
+            "package wrong { export let value = 1; }\n",
+        )
+        wrong_main = write(
+            "wrongname/main.calc",
+            "import aa.bb.cc;\n",
+        )
+        proc = run_file(wrong_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "must match folder" in proc.stderr, proc.stderr
+
+        # Explicit main package and exported/private names.
+        main_pkg = write(
+            "mainpkg/main/main.calc",
+            "package main {\n"
+            "  export let x = 5;\n"
+            "  func private() { return 9; }\n"
+            "}\n"
+            "print(main.x);\n",
+        )
+        proc = run_file(main_pkg)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "5\n", repr(proc.stdout)
+
+        # Cyclic imports fail cleanly instead of hanging.
+        write(
+            "cycle/aa/bb/bb.calc",
+            "package bb { import aa.cc; export let x = 1; }\n",
+        )
+        write(
+            "cycle/aa/cc/cc.calc",
+            "package cc { import aa.bb; export let y = 2; }\n",
+        )
+        cycle_main = write(
+            "cycle/main.calc",
+            "import aa.bb;\n",
+        )
+        proc = run_file(cycle_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "cyclic package import" in proc.stderr, proc.stderr
+
+        missing_main = write(
+            "missing/main.calc",
+            "import no.such;\n",
+        )
+        proc = run_file(missing_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
+    with tempfile.TemporaryDirectory() as tmp:
+        failfast = os.path.join(tmp, "failfast.calc")
+        with open(failfast, "w", encoding="utf-8") as f:
+            f.write('print("before");\n1/0;\nprint("after");\n')
+        proc = run_file(failfast)
+        assert proc.returncode == 1, proc.stderr
+        assert "before\n" in proc.stdout, proc.stdout
+        assert "after\n" not in proc.stdout, proc.stdout
+
+        proc = subprocess.run(
+            [BIN, "-k", failfast],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 1, proc.stderr
+        assert "before\n" in proc.stdout, proc.stdout
+        assert "after\n" in proc.stdout, proc.stdout
+
+        check(
+            "assignment failure preserves old value",
+            "let x = 1;\n"
+            "func f() { return 1/0; }\n"
+            "x = f();\n"
+            "x\n",
+            stdout="= 1",
+        )
+
+        lexical_script = os.path.join(tmp, "lexical.calc")
+        with open(lexical_script, "w", encoding="utf-8") as f:
+            f.write('1 @ 2;\nprint("after");\n')
+        proc = run_file(lexical_script)
+        assert proc.returncode == 1, proc.stderr
+        assert "lexical error" in proc.stderr, proc.stderr
+        assert "syntax error" not in proc.stderr, proc.stderr
+        assert "after\n" not in proc.stdout, proc.stdout
+
+        proc = subprocess.run(
+            [BIN, "--bad-option"],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 2, proc.stderr
+
+        proc = subprocess.run(
+            [BIN, os.path.join(tmp, "missing.calc")],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 2, proc.stderr
+
+        if sys.platform != "win32":
+            interrupt_script = os.path.join(tmp, "interrupt.calc")
+            with open(interrupt_script, "w", encoding="utf-8") as f:
+                f.write("while (1) { }\n")
+            proc = subprocess.Popen(
+                [BIN, interrupt_script],
+                text=True,
+                encoding="utf-8",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            time.sleep(0.2)
+            proc.send_signal(signal.SIGINT)
+            stdout, stderr = proc.communicate(timeout=5)
+            assert proc.returncode == 130, (proc.returncode, stdout, stderr)
 
     print(f"all tests passed for {BIN}")
 

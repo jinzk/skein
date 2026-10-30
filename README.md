@@ -64,7 +64,8 @@ chmod +x script.calc
 - 不打印顶层表达式的 `= result` 结果，需要输出时请使用 `print`；
 - 忽略第一行之外的普通注释仍使用 `//`；
 - 使用 `calc-demo -` 可以从 stdin 运行脚本模式；
-- 脚本中出现词法、语法或运行时错误时，退出码为 `1`。
+- 脚本中出现词法、语法或运行时错误时，退出码为 `1`；
+- 默认在第一处错误后停止脚本；使用 `-k` / `--keep-going` 可以继续执行后续顶层语句。
 
 Windows/MinGW 没有原生 shebang，直接使用：
 
@@ -79,6 +80,118 @@ shebang 行同样会被跳过。
 - `Ctrl-C` 取消当前输入（包括未闭合的多行块），或中断正在执行的程序，回到 `> ` 提示符。
 - `Ctrl-D` 退出解释器。
 - 退格键在真实终端和管道输入下均可使用。
+
+## 包与导入
+
+默认包是 `main`。文件可以使用显式包块：
+
+```text
+package cc {
+  export let value = 42;
+
+  export func hello(name) {
+    return "hi " + name;
+  }
+
+  func private_helper() {
+    return 1;
+  }
+}
+```
+
+- `package name {}` 创建独立作用域；
+- `export let` / `export func` 导出标识符；
+- 也可以使用 `export name = expr;` 简写；
+- 没有 `export` 的定义是包私有的；
+- 包名必须与所在文件夹名相同；可以多层嵌套。
+
+### 目录结构
+
+导入路径按文件夹层级解析：
+
+```text
+aa/
+  bb/
+    cc/
+      cc.calc
+```
+
+```text
+import aa.bb.cc;
+print(cc.value);
+```
+
+也支持入口文件名为 `index.calc`：
+
+```text
+aa/bb/cc/index.calc
+```
+
+如果目录中没有 `<name>.calc` 或 `index.calc`，但只有一个 `.calc` 文件，也会把它作为入口。
+
+### import 规则
+
+```text
+import aa.bb.cc;    // 绑定 cc
+import aa.bb;       // 绑定 bb；子包通过 bb.cc 访问
+import aa;          // 绑定 aa；子包通过 aa.bb.cc 访问
+```
+
+- `import aa.bb.cc` 后可以直接使用 `cc`；
+- `import aa.bb` 后使用 `bb.cc`；
+- 父包没有自己的源文件也可以作为子包容器；
+- 同一个包只加载一次，之后复用缓存；
+- 循环导入会报错，不会递归挂起。
+
+包内也可以导入其他包，既可以放在包块内，也可以放在文件顶层：
+
+```text
+import aa.util;
+
+package bb {
+  export func get() {
+    return util.value;
+  }
+}
+```
+
+### 查找路径
+
+查找顺序：
+
+1. 入口脚本所在目录；
+2. 命令行 `-I DIR` / `--package-path DIR`，按出现顺序；
+3. 环境变量 `CALC_PACKAGE_PATH`，按声明顺序。
+
+例如：
+
+```bash
+./calc-demo -I ./lib --package-path ./vendor app/main.calc
+CALC_PACKAGE_PATH=./lib:./vendor ./calc-demo app/main.calc
+```
+
+POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
+
+优先级固定为：
+
+```text
+源文件目录 > 命令行目录 > 环境变量目录
+```
+
+### 作用域与导出值
+
+- 导入包在独立作用域中执行，不能读取主包的全局变量；
+- 主文件中的 `package` 块也是独立作用域，需要的 `import` 应放在块内；
+- 包内函数保留自己的闭包环境；
+- `export let` 的值在包加载时复制到命名空间；之后导出变量本身再变化，不会自动同步到已导入的命名空间；
+- 导出函数仍然可以访问并修改包内部状态。
+
+### 限制
+
+- 每个包使用一个 `<name>.calc` 或 `index.calc` 作为入口；
+- 当前不提供相对导入、通配导入或包别名；
+- 子包会被父包加载时自动加载；
+- `export` 目前只支持 `let` 和命名 `func` 定义。
 
 ## 语言概览
 
@@ -654,6 +767,33 @@ f.close()
 
 调用栈最多显示最近的 8 层。
 
+### 错误恢复
+
+- 运行时错误中止当前语句/函数，不回滚已经发生的副作用；
+- 函数出错时不返回部分结果；
+- `let` 初始化失败不会创建绑定；普通赋值失败会保留旧值；
+- 脚本模式默认在第一条错误后停止；
+- `-k` / `--keep-going` 让脚本继续执行下一条顶层语句，但最终退出码仍为 `1`；
+- REPL 在错误后回到提示符，正常 EOF 退出码为 `0`；
+- 语法错误和词法错误按行恢复；
+- 同一行最多报告一条词法错误，并抑制由此产生的重复语法错误；
+- 包加载失败是原子失败：`import` 不会绑定部分命名空间；
+- `input()` 的 EOF 返回 `null`，不是错误；
+- `command()` 的退出状态不是解释器错误，需要状态时使用 `command_status()`。
+
+### 退出码
+
+| 情况 | 退出码 |
+|---|---:|
+| 正常结束 | `0` |
+| REPL 正常 EOF | `0` |
+| 脚本语言错误（词法/语法/运行时/包） | `1` |
+| 命令行参数错误 | `2` |
+| 脚本文件无法打开 | `2` |
+| 脚本被 Ctrl-C 中断 | `130` |
+
+外部命令的退出状态通过 `command_status()` 返回，不会直接成为解释器退出码。
+
 ## 目录结构
 
 ```text
@@ -664,6 +804,7 @@ diagnostics.* 错误位置、源码片段与调用栈
 eval.*        树遍历求值
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化
+package.*     包查找、加载、缓存与导入
 scopestack.*  词法作用域链与闭包环境
 symbol.*      符号表
 valuetype.*   运行时值类型、深拷贝与释放

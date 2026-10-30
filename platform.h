@@ -1,6 +1,7 @@
 #ifndef CALC_PLATFORM_H
 #define CALC_PLATFORM_H
 
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <utility>
@@ -36,6 +37,9 @@ bool platform_run_command_status(
 /* Read an entire file as bytes.  On failure, `error` describes the problem. */
 bool platform_read_file(const std::string &path, std::string &data,
                         std::string &error);
+
+/* Open a file using the platform's UTF-8 path handling. */
+FILE *platform_open_file(const std::string &path, const char *mode);
 
 /* Write or append `data` to a file.  On failure, `error` is set. */
 bool platform_write_file(const std::string &path, const std::string &data,

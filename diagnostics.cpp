@@ -16,6 +16,8 @@ int g_flow_column = 0;
 static int current_line = 1;
 static int current_column = 1;
 static int error_count = 0;
+static int lexical_error_line = 0;
+static std::string source_name;
 static std::vector<std::string> source_lines;
 
 struct call_frame {
@@ -110,12 +112,18 @@ static void print_call_stack() {
     }
 }
 
+void diag_mark_script_failure() {
+    if (!g_interactive && !g_keep_going && g_package_loading == 0)
+        g_script_stop = true;
+}
+
 void diag_report(int line, int column, const char *category,
                  const char *message) {
     if (g_interrupted)
         return;
 
     ++error_count;
+    diag_mark_script_failure();
 
     if (line <= 0)
         line = g_token_line;
@@ -123,11 +131,19 @@ void diag_report(int line, int column, const char *category,
         column = g_token_column;
 
     std::fflush(stdout);
-    if (column > 0)
+    if (!source_name.empty()) {
+        if (column > 0)
+            std::fprintf(stderr, "%s:%d:%d: %s: %s\n", source_name.c_str(),
+                         line, column, category, message);
+        else
+            std::fprintf(stderr, "%s:%d: %s: %s\n", source_name.c_str(),
+                         line, category, message);
+    } else if (column > 0) {
         std::fprintf(stderr, "%d:%d: %s: %s\n", line, column, category,
                      message);
-    else
+    } else {
         std::fprintf(stderr, "%d: %s: %s\n", line, category, message);
+    }
 
     print_snippet(line, column);
     print_call_stack();
@@ -135,12 +151,23 @@ void diag_report(int line, int column, const char *category,
 }
 
 void diag_report_lexical(int line, int column, const char *fmt, ...) {
+    if (line <= 0)
+        line = g_token_line;
+    if (lexical_error_line == line)
+        return;
+    lexical_error_line = line;
+    g_statement_invalid = true;
+
     char buffer[1024];
     va_list ap;
     va_start(ap, fmt);
     std::vsnprintf(buffer, sizeof(buffer), fmt, ap);
     va_end(ap);
     diag_report(line, column, "lexical error", buffer);
+}
+
+bool diag_lexical_error_on_line(int line) {
+    return line > 0 && lexical_error_line == line;
 }
 
 void diag_push_call(const std::string &name, int line, int column) {
@@ -154,4 +181,50 @@ void diag_pop_call() {
 
 int diag_error_count() {
     return error_count;
+}
+
+void diag_set_source_name(const std::string &name) {
+    source_name = name;
+}
+
+void diag_save_source(diag_source_checkpoint &checkpoint) {
+    checkpoint.current_line = current_line;
+    checkpoint.current_column = current_column;
+    checkpoint.token_line = g_token_line;
+    checkpoint.token_column = g_token_column;
+    checkpoint.error_line = g_error_line;
+    checkpoint.error_column = g_error_column;
+    checkpoint.flow_line = g_flow_line;
+    checkpoint.flow_column = g_flow_column;
+    checkpoint.lexical_line = lexical_error_line;
+    checkpoint.source_name = source_name;
+    checkpoint.lines = source_lines;
+}
+
+void diag_restore_source(const diag_source_checkpoint &checkpoint) {
+    current_line = checkpoint.current_line;
+    current_column = checkpoint.current_column;
+    g_token_line = checkpoint.token_line;
+    g_token_column = checkpoint.token_column;
+    g_error_line = checkpoint.error_line;
+    g_error_column = checkpoint.error_column;
+    g_flow_line = checkpoint.flow_line;
+    g_flow_column = checkpoint.flow_column;
+    lexical_error_line = checkpoint.lexical_line;
+    source_name = checkpoint.source_name;
+    source_lines = checkpoint.lines;
+}
+
+void diag_start_source() {
+    current_line = 1;
+    current_column = 1;
+    g_token_line = 1;
+    g_token_column = 1;
+    g_error_line = 0;
+    g_error_column = 0;
+    g_flow_line = 0;
+    g_flow_column = 0;
+    lexical_error_line = 0;
+    source_name.clear();
+    source_lines.clear();
 }

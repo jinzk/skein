@@ -503,6 +503,53 @@ def main():
         "f(7)\n",
         stdout="= 7",
     )
+    check("len list", "len([1, 2, 3])\n", stdout="= 3")
+    check("len empty list", "len([])\n", stdout="= 0")
+    check("len dict", 'len({"a": 1, "b": 2})\n', stdout="= 2")
+    check("len utf8 string", 'len("你好a")\n', stdout="= 3")
+    check("len bytes", 'len(bytes_from_hex("00ff"))\n', stdout="= 2")
+    check("len invalid type", "len(1)\n",
+          stderr="len expects string, bytes, list, or dict")
+    check(
+        "for in list",
+        "for (let x in [1, 2, 3]) { print(x); }\n",
+        stdout="1\n2\n3\n",
+    )
+    check(
+        "for in dict keys",
+        'let d = {"a": 1, "b": 2};\n'
+        "for (let k in d) { print(k + \"=\" + str(d[k])); }\n",
+        stdout="a=1\nb=2\n",
+    )
+    check(
+        "for in utf8 string",
+        'for (let ch in "你好") { print(ch); }\n',
+        stdout="你\n好\n",
+    )
+    check(
+        "for in bytes",
+        'for (let b in bytes_from_hex("00ff")) { print(b); }\n',
+        stdout="0\n255\n",
+    )
+    check(
+        "for in break continue",
+        "for (let x in [1, 2, 3, 4]) {\n"
+        "  if (x == 2) { continue; }\n"
+        "  if (x == 4) { break; }\n"
+        "  print(x);\n"
+        "}\n",
+        stdout="1\n3\n",
+    )
+    check(
+        "for in snapshot",
+        "let a = [1, 2];\n"
+        "for (let x in a) { a[0] = 9; print(x); }\n",
+        stdout="1\n2\n",
+    )
+    check("for in invalid type", "for (let x in 1) { print(x); }\n",
+          stderr="cannot iterate int")
+    check("for in variable scope", "for (let x in [1]) { }\nx\n",
+          stderr="symbol not found x")
 
     check(
         "break",

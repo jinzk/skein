@@ -11,6 +11,7 @@ enum bifs {
     B_exp,
     B_log,
     B_abs,
+    B_len,
     B_print,
     B_list,
     B_dict,
@@ -127,6 +128,15 @@ struct forloop {
     struct ast *body;
 };
 
+struct forinloop {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct ast *iterable;
+    struct ast *body;
+};
+
 struct val {
     int nodetype;
     int line;
@@ -204,6 +214,7 @@ struct ast *newbuiltin(int functype);
 struct ast *newnullast();
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);
 struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body);
+struct ast *newforin(char *name, struct ast *iterable, struct ast *body);
 struct ast *newsname(char *s);
 struct ast *newvar(char *s, struct ast *v, bool exported = false,
                    bool is_const = false);

@@ -709,6 +709,21 @@ static struct value_t *call_builtin(int functype,
                 yyerror("abs expects a number, got %s", typename_of(arg));
             }
             break;
+        case B_len:
+            if (arg->type == T_string) {
+                ret = newintval((long long)utf8_length(
+                    ((struct string_value_t *)arg)->value));
+            } else if (arg->type == T_bytes) {
+                ret = newintval((long long)((struct bytes_value_t *)arg)->value.size());
+            } else if (arg->type == T_list) {
+                ret = newintval((long long)((struct list_value_t *)arg)->payload->items.size());
+            } else if (arg->type == T_dict) {
+                ret = newintval((long long)((struct dict_value_t *)arg)->payload->items.size());
+            } else {
+                yyerror("len expects string, bytes, list, or dict, got %s",
+                        typename_of(arg));
+            }
+            break;
         case B_int:
             if (arg->type == T_int) {
                 ret = newintval(((struct int_value_t *)arg)->value);
@@ -2521,6 +2536,93 @@ struct value_t *eval(struct ast *a) {
                 freeval(ret);
                 ret = NULL;
             }
+            break;
+        }
+
+        case 'F': {
+            struct forinloop *f = (struct forinloop *)a;
+            int errors_before = g_runtime_error_count;
+            struct value_t *iter = eval(f->iterable);
+            if (!iter || g_runtime_error_count != errors_before) {
+                freeval(iter);
+                break;
+            }
+
+            size_t count = 0;
+            if (iter->type == T_list)
+                count = ((struct list_value_t *)iter)->payload->items.size();
+            else if (iter->type == T_dict)
+                count = ((struct dict_value_t *)iter)->payload->items.size();
+            else if (iter->type == T_string)
+                count = utf8_length(((struct string_value_t *)iter)->value);
+            else if (iter->type == T_bytes)
+                count = ((struct bytes_value_t *)iter)->value.size();
+            else {
+                yyerror("cannot iterate %s", typename_of(iter));
+                freeval(iter);
+                break;
+            }
+
+            pushscope();
+            struct symbol *sym = newsym(f->name);
+            sym->val = NULL;
+            savesym(sym);
+
+            bool leave = false;
+            for (size_t i = 0; i < count && !leave; ++i) {
+                if (g_interrupted)
+                    break;
+
+                struct value_t *item = NULL;
+                if (iter->type == T_list) {
+                    item = dupval(((struct list_value_t *)iter)->payload->items[i]);
+                } else if (iter->type == T_dict) {
+                    item = dupval(((struct dict_value_t *)iter)->payload->items[i].first);
+                } else if (iter->type == T_string) {
+                    std::string ch;
+                    if (!utf8_char_at(((struct string_value_t *)iter)->value, i,
+                                      ch)) {
+                        yyerror("invalid UTF-8 string iteration");
+                        leave = true;
+                        break;
+                    }
+                    item = newstrval(ch.c_str());
+                } else {
+                    item = newintval((unsigned char)
+                        ((struct bytes_value_t *)iter)->value[i]);
+                }
+
+                freeval(sym->val);
+                sym->val = item;
+
+                errors_before = g_runtime_error_count;
+                struct value_t *body = eval(f->body);
+                if (g_runtime_error_count != errors_before) {
+                    freeval(body);
+                    leave = true;
+                    break;
+                }
+                if (body) {
+                    if (body->type == T_return) {
+                        ret = body;
+                        leave = true;
+                        break;
+                    }
+                    if (body->type == T_break) {
+                        freeval(body);
+                        leave = true;
+                        break;
+                    }
+                    if (body->type == T_continue) {
+                        freeval(body);
+                        continue;
+                    }
+                    freeval(body);
+                }
+            }
+
+            popscope();
+            freeval(iter);
             break;
         }
 

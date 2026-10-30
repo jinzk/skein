@@ -51,7 +51,7 @@ static char *join_import_path(const char *left, const char *right) {
 %token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let" CONST "const"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null"
-%token IMPORT "import" PACKAGE "package" EXPORT "export"
+%token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 
 %right '='
@@ -88,6 +88,7 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
     | FOR '(' forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
+    | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, $6, $8); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($2, $4, $7); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }

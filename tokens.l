@@ -204,12 +204,14 @@ EXP ([Ee][-+]?[0-9]+)
 "return" { return RETURN; }
 "break" { return BREAK; }
 "continue" { return CONTINUE; }
+"in" { return IN; }
 "null" { return NULLVAL; }
 
 "sqrt" { yylval.fn = B_sqrt; return BUILTIN; }
 "exp" { yylval.fn = B_exp; return BUILTIN; }
 "log" { yylval.fn = B_log; return BUILTIN; }
 "abs" { yylval.fn = B_abs; return BUILTIN; }
+"len" { yylval.fn = B_len; return BUILTIN; }
 "print" { yylval.fn = B_print; return BUILTIN; }
 "list" { yylval.fn = B_list; return BUILTIN; }
 "dict" { yylval.fn = B_dict; return BUILTIN; }

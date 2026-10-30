@@ -398,8 +398,30 @@ for (;;) {
 
 - 三个部分都可以为空；
 - 初始化部分支持空、表达式或 `let` 声明；
-- 条件和步进部分支持空或表达式；
-- 不支持 `for ... in`。
+- 条件和步进部分支持空或表达式。
+
+`for ... in`：
+
+```text
+for (let x in [1, 2, 3]) {
+  print(x);
+}
+
+for (let key in {"a": 1, "b": 2}) {
+  print(key);
+}
+```
+
+规则：
+
+- 只能使用 `for (let NAME in exp)`；
+- list 遍历元素；
+- dict 遍历键；
+- string 遍历 UTF-8 字符；
+- bytes 遍历 `0..255` 的字节值；
+- 被遍历对象在循环开始时求值一次；
+- 循环变量只存在于循环作用域；
+- 支持 `break` / `continue` / `return`。
 
 ### 5.6 代码块
 
@@ -562,7 +584,7 @@ sqrt exp log abs
 ### 输出和转换
 
 ```text
-print list dict int float str format
+print list dict int float str format len
 ```
 
 ### 进程
@@ -673,7 +695,7 @@ var
 三元表达式
 switch
 do while
-for ... in
+for ... of
 try/catch
 相对导入
 通配导入

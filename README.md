@@ -278,7 +278,25 @@ while (x > 0) {
 for (let i = 0; i < 3; i = i + 1) {
   print(i);
 }
+
+for (let x in [1, 2, 3]) {
+  print(x);
+}
+
+for (let key in {"a": 1, "b": 2}) {
+  print(key);
+}
 ```
+
+`for ... in` 规则：
+
+- list 遍历元素；
+- dict 遍历键；
+- string 遍历 UTF-8 字符；
+- bytes 遍历 `0..255` 的字节值；
+- 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；
+- 循环变量只在循环作用域内有效；
+- 支持 `break` / `continue` / `return`。
 
 `break` / `continue` 可用于 `while` 和 `for`。
 
@@ -358,7 +376,7 @@ fact(5)                 → 120
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -394,6 +412,7 @@ apply(sqrt, 16)
 - `&&`、`||`、`!` 返回整数 `0` / `1`，并短路求值。
 - `==` / `!=` 对所有类型有效；大小比较只支持数值之间或字符串之间。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
+- `len(x)` 支持字符串、bytes、list、dict：字符串按 UTF-8 码点计数，bytes 按字节数，list/dict 按元素数。
 - 字典键按值相等判断，`1` 和 `1.0` 是同一个键；字面量中的重复键以最后一个为准。
 - `list` 和 `dict` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。
 - `bytes` 和字符串目前仍然复制内容；函数值共享闭包环境，文件句柄等原生资源共享底层句柄。

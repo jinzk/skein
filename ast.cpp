@@ -1,10 +1,35 @@
 #include "ast.h"
+#include "diagnostics.h"
 #include "scopestack.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <unordered_map>
+#include <utility>
+#include <vector>
+
+template <typename T>
+static void set_loc(T *node, int line, int column) {
+    node->line = line > 0 ? line : g_token_line;
+    node->column = column > 0 ? column : g_token_column;
+}
+
+template <typename T>
+static void set_loc_from(T *node, const struct ast *anchor) {
+    set_loc(node, anchor ? anchor->line : 0,
+            anchor ? anchor->column : 0);
+}
+
+static std::vector<std::pair<int, int>> func_locations;
+
+void push_func_location(int line, int column) {
+    func_locations.push_back(std::make_pair(line, column));
+}
+
+void clear_func_locations() {
+    func_locations.clear();
+}
 
 struct ast *newast(int nodetype, struct ast *l, struct ast *r) {
     struct ast *a = (struct ast *)std::malloc(sizeof(struct ast));
@@ -13,6 +38,7 @@ struct ast *newast(int nodetype, struct ast *l, struct ast *r) {
         std::exit(0);
     }
     a->nodetype = nodetype;
+    set_loc_from(a, l);
     a->l = l;
     a->r = r;
     return a;
@@ -25,6 +51,7 @@ struct ast *newint(long long i) {
         std::exit(0);
     }
     a->nodetype = 'V';
+    set_loc(a, 0, 0);
     a->val = newintval(i);
     return (struct ast *)a;
 }
@@ -36,6 +63,7 @@ struct ast *newfloat(double d) {
         std::exit(0);
     }
     a->nodetype = 'V';
+    set_loc(a, 0, 0);
     a->val = newfloatval(d);
     return (struct ast *)a;
 }
@@ -47,6 +75,7 @@ struct ast *newstr(char *s) {
         std::exit(0);
     }
     a->nodetype = 'V';
+    set_loc(a, 0, 0);
     a->val = newstrval(s);
     return (struct ast *)a;
 }
@@ -58,6 +87,7 @@ struct ast *newbuiltin(int functype) {
         std::exit(0);
     }
     a->nodetype = 'V';
+    set_loc(a, 0, 0);
     a->val = newbuiltinval(functype);
     return (struct ast *)a;
 }
@@ -69,6 +99,7 @@ struct ast *newnullast() {
         std::exit(0);
     }
     a->nodetype = 'V';
+    set_loc(a, 0, 0);
     a->val = newnull();
     return (struct ast *)a;
 }
@@ -80,6 +111,7 @@ struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
         std::exit(0);
     }
     a->nodetype = '0' + cmptype;
+    set_loc_from(a, l);
     a->l = l;
     a->r = r;
     return a;
@@ -92,6 +124,7 @@ struct ast *newcall(struct ast *callee, struct ast *l) {
         std::exit(0);
     }
     a->nodetype = 'C';
+    set_loc_from(a, callee);
     a->callee = callee;
     a->args = l;
     return (struct ast *)a;
@@ -104,6 +137,7 @@ struct ast *newref(char *s) {
         std::exit(0);
     }
     a->nodetype = 'N';
+    set_loc(a, 0, 0);
     a->name = s;
     return (struct ast *)a;
 }
@@ -115,6 +149,7 @@ struct ast *newasgn(struct ast *target, struct ast *v) {
         std::exit(0);
     }
     a->nodetype = '=';
+    set_loc_from(a, target);
     a->target = target;
     a->v = v;
     return (struct ast *)a;
@@ -127,6 +162,7 @@ struct ast *newscope(struct ast *v) {
         std::exit(0);
     }
     a->nodetype = 'X';
+    set_loc_from(a, v);
     a->ast = v;
     return (struct ast *)a;
 }
@@ -138,6 +174,7 @@ struct ast *newvar(char *s, struct ast *v) {
         std::exit(0);
     }
     a->nodetype = 'D';
+    set_loc_from(a, v);
     a->name = s;
     a->v = v;
     return (struct ast *)a;
@@ -150,6 +187,7 @@ struct ast *newret(struct ast *v) {
         std::exit(0);
     }
     a->nodetype = 'R';
+    set_loc_from(a, v);
     a->v = v;
     return (struct ast *)a;
 }
@@ -161,6 +199,7 @@ struct ast *newbrk() {
         std::exit(0);
     }
     a->nodetype = 'B';
+    set_loc(a, 0, 0);
     return (struct ast *)a;
 }
 
@@ -171,6 +210,7 @@ struct ast *newctn() {
         std::exit(0);
     }
     a->nodetype = 'O';
+    set_loc(a, 0, 0);
     return (struct ast *)a;
 }
 
@@ -181,6 +221,7 @@ struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *
         std::exit(0);
     }
     a->nodetype = nodetype;
+    set_loc_from(a, cond);
     a->cond = cond;
     a->tl = tl;
     a->el = el;
@@ -194,6 +235,7 @@ struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct 
         std::exit(0);
     }
     a->nodetype = 'P';
+    set_loc_from(a, init ? init : (cond ? cond : body));
     a->init = init;
     a->cond = cond;
     a->step = step;
@@ -208,6 +250,12 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast) {
         std::exit(0);
     }
     a->nodetype = 'Z';
+    set_loc_from(a, ast);
+    if (!func_locations.empty()) {
+        set_loc(a, func_locations.back().first,
+                func_locations.back().second);
+        func_locations.pop_back();
+    }
     a->name = s;
     a->sl = sl;
     a->ast = ast;
@@ -239,7 +287,9 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     int nparams = 0;
     for (struct symlist *sl = node->sl; sl; sl = sl->next) ++nparams;
     std::shared_ptr<function_code> code(
-        new function_code{node->ast, node->sl, nparams}, free_function_code);
+        new function_code{node->ast, node->sl, nparams,
+                          node->name ? node->name : ""},
+        free_function_code);
     function_codes[node] = code;
     return code;
 }
@@ -255,6 +305,7 @@ struct ast *newlist(struct ast *v, struct ast *l) {
         std::exit(0);
     }
     p->nodetype = 'l';
+    set_loc_from(p, v);
     p->value = v;
     p->next = l;
     return (struct ast *)p;
@@ -267,6 +318,7 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
         std::exit(0);
     }
     p->nodetype = 'd';
+    set_loc_from(p, k);
     p->value = v;
     p->key = k;
     p->next = l;

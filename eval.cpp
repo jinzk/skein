@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "diagnostics.h"
 #include "filetype.h"
 #include "format.h"
 #include "platform.h"
@@ -19,6 +20,37 @@ int g_runtime_error_count = 0;
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace {
+
+struct eval_location_guard {
+    int old_line;
+    int old_column;
+
+    eval_location_guard(int line, int column)
+        : old_line(g_error_line), old_column(g_error_column) {
+        if (line > 0) {
+            g_error_line = line;
+            g_error_column = column > 0 ? column : old_column;
+        }
+    }
+
+    ~eval_location_guard() {
+        g_error_line = old_line;
+        g_error_column = old_column;
+    }
+};
+
+struct call_stack_guard {
+    call_stack_guard(const std::string &name, int line, int column) {
+        diag_push_call(name, line, column);
+    }
+    ~call_stack_guard() {
+        diag_pop_call();
+    }
+};
+
+} // namespace
 
 static bool is_numeric(const struct value_t *v) {
     return v && (v->type == T_int || v->type == T_float);
@@ -1472,6 +1504,15 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     }
 
     int errors_before = g_runtime_error_count;
+    int frame_line = g_error_line;
+    int frame_column = g_error_column;
+    if (frame_line <= 0 && def->code->ast) {
+        frame_line = def->code->ast->line;
+        frame_column = def->code->ast->column;
+    }
+    std::string frame_name =
+        def->code->name.empty() ? "<anonymous>" : def->code->name;
+    call_stack_guard frame_guard(frame_name, frame_line, frame_column);
     pushscope_closure(def->closure);
     int i = 0;
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
@@ -1486,10 +1527,13 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     topscope()->ret = NULL;
 
     if (body_ret) {
-        if (body_ret->type == T_break)
+        if (body_ret->type == T_break) {
+            diag_set_location(g_flow_line, g_flow_column);
             yyerror("break outside loop in function");
-        else if (body_ret->type == T_continue)
+        } else if (body_ret->type == T_continue) {
+            diag_set_location(g_flow_line, g_flow_column);
             yyerror("continue outside loop in function");
+        }
         freeval(body_ret);
     }
 
@@ -1859,6 +1903,7 @@ static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
     if (g_interrupted) return NULL;
+    eval_location_guard location_guard(a->line, a->column);
     struct value_t *ret = NULL;
 
     switch (a->nodetype) {
@@ -1939,10 +1984,12 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'B':
+            diag_set_flow_location(a->line, a->column);
             ret = newbreak();
             break;
 
         case 'O':
+            diag_set_flow_location(a->line, a->column);
             ret = newcontinue();
             break;
 
@@ -2366,6 +2413,7 @@ struct value_t *eval(struct ast *a) {
                         leave = true;
                     } else {
                         if (v->type == T_break || v->type == T_continue) {
+                            diag_set_location(g_flow_line, g_flow_column);
                             yyerror("break/continue outside loop");
                             leave = true;
                         }
@@ -2428,6 +2476,7 @@ struct value_t *eval(struct ast *a) {
                             leave = true;
                         } else {
                             if (step->type == T_break || step->type == T_continue) {
+                                diag_set_location(g_flow_line, g_flow_column);
                                 yyerror("break/continue outside loop");
                                 leave = true;
                             }

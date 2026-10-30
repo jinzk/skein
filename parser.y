@@ -4,8 +4,10 @@
 #include <cstdlib>
 #include <cstdarg>
 #include <cstring>
+#include <string>
 
 #include "ast.h"
+#include "diagnostics.h"
 #include "repl.h"
 #include "scopestack.h"
 #include "eval.h"
@@ -13,6 +15,9 @@
 extern int yylex();
 extern int yyparse();
 %}
+
+%define parse.error custom
+%define parse.lac full
 
 %union {
     struct ast *a;
@@ -23,16 +28,16 @@ extern int yyparse();
     char *str;
 }
 
-%token <d> FLOAT
-%token <i> INT
-%token <str> NAME
-%token <fn> FUNC
-%token <str> XSTRING
-%token EOL
-%token IF ELSE WHILE FOR DEF LET
-%token RETURN BREAK CONTINUE
-%token NULLVAL
-%token LOGAND LOGOR SHL SHR
+%token <d> FLOAT "float"
+%token <i> INT "integer"
+%token <str> NAME "identifier"
+%token <fn> FUNC "built-in function"
+%token <str> XSTRING "string"
+%token EOL "end of line"
+%token IF "if" ELSE "else" WHILE "while" FOR "for" DEF "def" LET "let"
+%token RETURN "return" BREAK "break" CONTINUE "continue"
+%token NULLVAL "null"
+%token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 
 %right '='
 %left LOGOR
@@ -67,7 +72,9 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
     | FOR '(' forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
-    | DEF NAME '(' symlist ')' '{' list '}' { $$ = newfunc($2, $4, $7); }
+    | DEF { push_func_location(g_token_line, g_token_column); }
+          NAME '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc($3, $5, $8); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
     ;
 
@@ -172,6 +179,7 @@ calclist: exp { $$ = $1; }
 
 docalc: calclist EOL {
         g_runtime_error_count = 0;
+        diag_set_location(0, 0);
         struct value_t *rslt = eval($1);
         if (rslt && !g_interrupted && rslt->type != T_null) {
             switch (rslt->type) {
@@ -179,9 +187,11 @@ docalc: calclist EOL {
                     yyerror("return outside function");
                     break;
                 case T_break:
+                    diag_set_location(g_flow_line, g_flow_column);
                     yyerror("break outside loop");
                     break;
                 case T_continue:
+                    diag_set_location(g_flow_line, g_flow_column);
                     yyerror("continue outside loop");
                     break;
                 default:
@@ -219,20 +229,60 @@ calc: %empty
     ;
 %%
 
+int yyreport_syntax_error(const yypcontext_t *ctx) {
+    enum { MAX_EXPECTED = 64, MAX_SHOWN = 6 };
+    yysymbol_kind_t expected[MAX_EXPECTED];
+
+    yysymbol_kind_t unexpected = yypcontext_token(ctx);
+    std::string message;
+    if (unexpected == YYSYMBOL_YYEMPTY) {
+        message = "invalid syntax";
+    } else {
+        message = "unexpected ";
+        message += yysymbol_name(unexpected);
+    }
+
+    int n = yypcontext_expected_tokens(ctx, expected, MAX_EXPECTED);
+    if (n > 0) {
+        int shown = n < MAX_SHOWN ? n : MAX_SHOWN;
+        message += ", expecting ";
+        for (int i = 0; i < shown; ++i) {
+            if (i > 0)
+                message += (i + 1 == shown && shown == n) ? " or " : ", ";
+            message += yysymbol_name(expected[i]);
+        }
+        if (shown < n)
+            message += ", ...";
+    }
+
+    diag_report(g_token_line, g_token_column, "syntax error",
+                message.c_str());
+    clear_func_locations();
+    return 0;
+}
+
 void yyerror(const char *s, ...) {
     if (g_interrupted)
         return;
 
     ++g_runtime_error_count;
 
+    char buffer[2048];
     va_list ap;
     va_start(ap, s);
-
-    fflush(stdout);
-    fprintf(stderr, "%d: error: ", yylineno);
-    vfprintf(stderr, s, ap);
-    fprintf(stderr, "\n");
-    fflush(stderr);
-
+    std::vsnprintf(buffer, sizeof(buffer), s, ap);
     va_end(ap);
+
+    const char *message = buffer;
+    const char *category = "runtime error";
+    if (std::strncmp(message, "syntax error", 12) == 0) {
+        category = "syntax error";
+        message += 12;
+        while (*message == ',' || *message == ' ')
+            ++message;
+        if (*message == '\0')
+            message = "invalid syntax";
+    }
+
+    diag_report(g_error_line, g_error_column, category, message);
 }

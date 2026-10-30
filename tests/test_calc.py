@@ -922,7 +922,8 @@ def main():
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")
-    check("mystery character", "1 @ 2\n", stderr="mystery character")
+    check("mystery character", "1 @ 2\n",
+          stderr="lexical error: unexpected character '@' (0x40)")
 
     # Unterminated strings must never hang or crash.
     check("unterminated string newline", 'print("unterminated)\n',
@@ -997,6 +998,58 @@ def main():
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == "stdin-script\n", repr(proc.stdout)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        runtime_script = os.path.join(tmp, "runtime.calc")
+        with open(runtime_script, "w", encoding="utf-8") as f:
+            f.write('print("a");\n1/0;\n')
+        proc = run_file(runtime_script)
+        assert proc.returncode == 1, proc.stderr
+        assert "2:1: runtime error: division by zero" in proc.stderr, proc.stderr
+        assert "  1/0;\n  ^" in proc.stderr, proc.stderr
+
+        nested_script = os.path.join(tmp, "nested.calc")
+        with open(nested_script, "w", encoding="utf-8") as f:
+            f.write(
+                "def g() {\n"
+                "  return 10 / 0;\n"
+                "}\n"
+                "def f() {\n"
+                "  return g();\n"
+                "}\n"
+                "f();\n"
+            )
+        proc = run_file(nested_script)
+        assert proc.returncode == 1, proc.stderr
+        assert "2:10: runtime error: division by zero" in proc.stderr, proc.stderr
+        assert "in g() called from line 5" in proc.stderr, proc.stderr
+        assert "in f() called from line 7" in proc.stderr, proc.stderr
+
+        clean_script = os.path.join(tmp, "clean.calc")
+        with open(clean_script, "w", encoding="utf-8") as f:
+            f.write("print(\"ok\");\n")
+        proc = run_file(clean_script)
+        assert proc.returncode == 0, proc.stderr
+
+        syntax_script = os.path.join(tmp, "syntax.calc")
+        with open(syntax_script, "w", encoding="utf-8") as f:
+            f.write("let x = ;\n")
+        proc = run_file(syntax_script)
+        assert proc.returncode == 1, proc.stderr
+        assert "1:9: syntax error: unexpected ';'" in proc.stderr, proc.stderr
+
+    check("syntax error detail", "let x = ;\n",
+          stderr="syntax error: unexpected ';', expecting")
+    check("syntax error snippet", "let x = ;\n",
+          stderr="  let x = ;\n          ^")
+    check("lexical error position", "1 @ 2\n",
+          stderr="1:3: lexical error: unexpected character '@' (0x40)")
+    check("unterminated string position", 'print("unterminated)\n',
+          stderr="1:7: lexical error: unterminated string literal")
+    check("definition error location", "def f(a, a) {\n  return a;\n}\n",
+          stderr="1:1: runtime error: duplicate parameter")
+    check("break error location", "{\n  break;\n}\n",
+          stderr="2:3: runtime error: break outside loop")
 
     print(f"all tests passed for {BIN}")
 

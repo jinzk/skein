@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "parser.hpp"
+#include "diagnostics.h"
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
@@ -59,5 +60,7 @@ int main(int argc, char **argv) {
     donescope();
     if (script)
         std::fclose(script);
+    if (!g_interactive && diag_error_count() > 0 && status == 0)
+        status = 1;
     return status;
 }

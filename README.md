@@ -63,7 +63,8 @@ chmod +x script.calc
 - 不打印 `> ` 提示符；
 - 不打印顶层表达式的 `= result` 结果，需要输出时请使用 `print`；
 - 忽略第一行之外的普通注释仍使用 `//`；
-- 使用 `calc-demo -` 可以从 stdin 运行脚本模式。
+- 使用 `calc-demo -` 可以从 stdin 运行脚本模式；
+- 脚本中出现词法、语法或运行时错误时，退出码为 `1`。
 
 Windows/MinGW 没有原生 shebang，直接使用：
 
@@ -568,12 +569,48 @@ f.close()
 
 文件函数可以访问进程有权限的任意路径，只应在可信脚本中使用。
 
+## 错误信息
+
+错误输出统一包含位置、类别和源码片段：
+
+```text
+3:1: runtime error: division by zero
+  1/0;
+  ^
+```
+
+- 行号和列号从 `1` 开始；
+- 类别分为 `lexical error`、`syntax error`、`runtime error`；
+- 运行时错误指向实际出错的 AST 节点，而不是语句结束位置；
+- 源码行下的 `^` 指向出错列；
+- 词法错误会显示字符和十六进制字节，例如 `unexpected character '@' (0x40)`；
+- 语法错误会列出出错 token 和部分期望 token：
+
+```text
+1:9: syntax error: unexpected ';', expecting float, integer, identifier, ...
+  let x = ;
+          ^
+```
+
+函数调用中的运行时错误会附带调用栈：
+
+```text
+2:10: runtime error: division by zero
+    return 10 / 0;
+           ^
+  in g() called from line 5
+  in f() called from line 7
+```
+
+调用栈最多显示最近的 8 层。
+
 ## 目录结构
 
 ```text
 tokens.l      Flex 词法分析
 parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
+diagnostics.* 错误位置、源码片段与调用栈
 eval.*        树遍历求值
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化

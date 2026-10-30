@@ -57,30 +57,42 @@ enum bifs {
 
 struct ast {
     int nodetype;
+    int line;
+    int column;
     struct ast *l;
     struct ast *r;
 };
 
 struct fnret {
     int nodetype;
+    int line;
+    int column;
     struct ast *v;
 };
 
 struct nbreak {
     int nodetype;
+    int line;
+    int column;
 };
 
 struct ncontinue {
     int nodetype;
+    int line;
+    int column;
 };
 
 struct nscope {
     int nodetype;
+    int line;
+    int column;
     struct ast *ast;
 };
 
 struct funcdef {
     int nodetype;
+    int line;
+    int column;
     char *name;
     struct symlist *sl;
     struct ast *ast;
@@ -89,12 +101,16 @@ struct funcdef {
 
 struct ufncall {
     int nodetype;
+    int line;
+    int column;
     struct ast *callee;
     struct ast *args;
 };
 
 struct flow {
     int nodetype;
+    int line;
+    int column;
     struct ast *cond;
     struct ast *tl;
     struct ast *el;
@@ -102,6 +118,8 @@ struct flow {
 
 struct forloop {
     int nodetype;
+    int line;
+    int column;
     struct ast *init;
     struct ast *cond;
     struct ast *step;
@@ -110,17 +128,23 @@ struct forloop {
 
 struct val {
     int nodetype;
+    int line;
+    int column;
     value_t *val;
 };
 
 struct list_node {
     int nodetype;
+    int line;
+    int column;
     ast *value;
     ast *next;
 };
 
 struct dict_node {
     int nodetype;
+    int line;
+    int column;
     ast *key;
     ast *value;
     ast *next;
@@ -128,17 +152,23 @@ struct dict_node {
 
 struct symdef {
     int nodetype;
+    int line;
+    int column;
     char *name;
     struct ast *v;
 };
 
 struct symref {
     int nodetype;
+    int line;
+    int column;
     char *name;
 };
 
 struct symasgn {
     int nodetype;
+    int line;
+    int column;
     struct ast *target;
     struct ast *v;
 };
@@ -164,6 +194,8 @@ struct ast *newbrk();
 struct ast *newctn();
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast);
+void push_func_location(int line, int column);
+void clear_func_locations();
 std::shared_ptr<function_code> get_function_code(struct funcdef *node);
 void release_function_code(struct funcdef *node);
 

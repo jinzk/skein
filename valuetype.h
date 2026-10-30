@@ -14,6 +14,7 @@ struct function_code {
     struct ast *ast;
     struct symlist *sl;
     int nparams;
+    std::string name;
 };
 
 struct function_def {

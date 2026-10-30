@@ -18,6 +18,7 @@
 #endif
 
 #include <cerrno>
+#include <cctype>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -25,12 +26,19 @@
 #include <string>
 
 #include "ast.h"
+#include "diagnostics.h"
 #include "parser.hpp"
 #include "repl.h"
 
 extern int indent_count;
 
 static std::string string_buffer;
+
+/* Location of the opening quote of the string currently being scanned. */
+static int string_start_line = 1;
+static int string_start_column = 1;
+
+#define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
 // 当 stdin 不是终端（管道、IDE 运行窗口等）时，内核不会处理退格，
 // 需要自己按行读出并删除 \b / 0x7f 前的一个字符。
@@ -60,6 +68,7 @@ static void strip_utf8_bom_once() {
 static input_status read_input_line() {
     input_line.clear();
     input_pos = 0;
+    diag_start_input_line();
 
     for (;;) {
         if (g_interrupted) {
@@ -84,11 +93,13 @@ static input_status read_input_line() {
             if (input_line.empty())
                 return INPUT_EOF;
             strip_utf8_bom_once();
+            diag_record_line(diag_current_line(), input_line);
             return INPUT_PARTIAL;
         }
         if (c == '\n') {
             input_line.push_back('\n');
             strip_utf8_bom_once();
+            diag_record_line(diag_current_line(), input_line);
             return INPUT_LINE;
         }
         if (c == '\b' || c == 0x7f) {
@@ -269,19 +280,23 @@ EXP ([Ee][-+]?[0-9]+)
 [ \t\r] {}
 
 \" {
+    string_start_line = g_token_line;
+    string_start_column = g_token_column;
     string_buffer.clear();
     BEGIN(STRING);
 }
 
 <STRING>{
     \n {
-        yyerror("unterminated string literal");
+        diag_report_lexical(string_start_line, string_start_column,
+                            "unterminated string literal");
         string_buffer.clear();
         BEGIN(INITIAL);
         return EOL;
     }
     <<EOF>> {
-        yyerror("unterminated string literal at end of input");
+        diag_report_lexical(string_start_line, string_start_column,
+                            "unterminated string literal at end of input");
         string_buffer.clear();
         BEGIN(INITIAL);
         yyterminate();
@@ -320,7 +335,13 @@ EXP ([Ee][-+]?[0-9]+)
 }
 
 . {
-    yyerror("mystery character '%c'", *yytext);
+    unsigned char c = (unsigned char)yytext[0];
+    if (std::isprint(c))
+        diag_report_lexical(g_token_line, g_token_column,
+                            "unexpected character '%c' (0x%02x)", c, c);
+    else
+        diag_report_lexical(g_token_line, g_token_column,
+                            "unexpected byte 0x%02x", c);
 }
 
 %%
@@ -328,6 +349,7 @@ EXP ([Ee][-+]?[0-9]+)
 void reset_scanner_state(std::FILE *in) {
     BEGIN(INITIAL);
     string_buffer.clear();
+    clear_func_locations();
     input_line.clear();
     input_pos = 0;
     std::clearerr(in);

@@ -1,0 +1,46 @@
+#ifndef CALC_DIAGNOSTICS_H
+#define CALC_DIAGNOSTICS_H
+
+#include <string>
+
+/* Location of the most recently scanned token. */
+extern int g_token_line;
+extern int g_token_column;
+
+/* Current runtime error location, set while evaluating an AST node. */
+extern int g_error_line;
+extern int g_error_column;
+
+/* Location of the most recent break/continue value. */
+extern int g_flow_line;
+extern int g_flow_column;
+
+void diag_set_flow_location(int line, int column);
+
+/* Called by the scanner before each rule action. */
+void diag_scan_token(const char *text, int length);
+
+/* Remember a physical source line for snippets. */
+void diag_record_line(int line, const std::string &text);
+
+/* Runtime location handling. */
+void diag_set_location(int line, int column);
+int diag_current_line();
+int diag_current_column();
+void diag_start_input_line();
+
+/* Report an error and print the source snippet and call stack. */
+void diag_report(int line, int column, const char *category,
+                 const char *message);
+
+/* Lexical error with printf-style formatting. */
+void diag_report_lexical(int line, int column, const char *fmt, ...);
+
+/* Runtime call stack. */
+void diag_push_call(const std::string &name, int line, int column);
+void diag_pop_call();
+
+/* Total number of reported errors. */
+int diag_error_count();
+
+#endif

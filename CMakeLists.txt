@@ -21,6 +21,7 @@ add_executable(${PROJECT_NAME}
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
   ast.cpp
+  diagnostics.cpp
   eval.cpp
   filetype.cpp
   format.cpp

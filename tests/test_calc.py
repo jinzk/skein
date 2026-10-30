@@ -638,6 +638,78 @@ def main():
         "std.list.len([1, 2])\n",
         stdout="= 2",
     )
+    check(
+        "std list transformations",
+        "import std;\n"
+        "std.list.reverse([1, 2, 3])\n"
+        "std.list.sort([3, 1, 2])\n"
+        "std.list.sort([2.5, 1, 3])\n"
+        'std.list.sort(["b", "a", "c"])\n'
+        "std.list.append([1, 2], 3)\n",
+        stdout_all=[
+            "= [3, 2, 1]",
+            "= [1, 2, 3]",
+            "= [1, 2.5, 3]",
+            "= [a, b, c]",
+            "= [1, 2, 3]",
+        ],
+    )
+    check(
+        "std list functional helpers",
+        "import std;\n"
+        "std.list.map([1, 2, 3], func(x) { return x * 2; })\n"
+        "std.list.filter([1, 2, 3, 4], func(x) { return x % 2 == 0; })\n"
+        "std.list.reduce([1, 2, 3, 4], func(a, b) { return a + b; })\n"
+        "std.list.reduce([1, 2, 3, 4], func(a, b) { return a + b; }, 10)\n",
+        stdout_all=["= [2, 4, 6]", "= [2, 4]", "= 10", "= 20"],
+    )
+    check(
+        "std dict items/delete/merge",
+        "import std;\n"
+        'std.dict.items({"a": 1, "b": 2})\n'
+        'std.dict.delete({"a": 1, "b": 2}, "a")\n'
+        'std.dict.delete({"a": 1}, "missing")\n'
+        'std.dict.merge({"a": 1, "b": 2}, {"b": 9, "c": 3})\n',
+        stdout_all=["= [[a, 1], [b, 2]]", "= {b: 2}", "= {a: 1}",
+                    "= {a: 1, b: 9, c: 3}"],
+    )
+    check(
+        "std string extras",
+        "import std;\n"
+        'std.string.contains("hello", "ell")\n'
+        'std.string.contains("hello", "x")\n'
+        'std.string.repeat("ab", 3)\n'
+        'std.string.repeat("ab", 0) == ""\n'
+        'std.string.trim_start("  x  ")\n'
+        'std.string.trim_end("  x  ")\n',
+        stdout_all=["= 1", "= 0", "= ababab", "= 1", "= x  ", "=   x"],
+    )
+    check(
+        "std list sort type error",
+        'import std;\nstd.list.sort([1, "a"])\n',
+        stderr="expects all numbers or all strings",
+    )
+    check(
+        "std reduce empty error",
+        "import std;\nstd.list.reduce([], func(a, b) { return a + b; })\n",
+        stderr="empty list without initial value",
+    )
+    check(
+        "std map callback error",
+        "import std;\n"
+        "std.list.map([1], func(x) { return 1/0; })\n",
+        stderr="division by zero",
+    )
+    check(
+        "std repeat negative",
+        'import std;\nstd.string.repeat("a", -1)\n',
+        stderr="repeat count must be non-negative",
+    )
+    check(
+        "std dict merge type",
+        "import std;\nstd.dict.merge({\"a\": 1}, 1)\n",
+        stderr="std.dict.merge expects two dicts",
+    )
 
     check(
         "break",

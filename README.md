@@ -187,12 +187,21 @@ std.list.len
 std.list.slice
 std.list.contains
 std.list.index
+std.list.reverse
+std.list.sort
+std.list.append
+std.list.map
+std.list.filter
+std.list.reduce
 
 std.dict.len
 std.dict.get
 std.dict.has
 std.dict.keys
 std.dict.values
+std.dict.items
+std.dict.delete
+std.dict.merge
 
 std.string.len
 std.string.find
@@ -200,10 +209,14 @@ std.string.substr
 std.string.split
 std.string.split_ws
 std.string.trim
+std.string.trim_start
+std.string.trim_end
 std.string.join
 std.string.replace
 std.string.starts_with
 std.string.ends_with
+std.string.contains
+std.string.repeat
 
 std.bytes.len
 std.bytes.get
@@ -226,8 +239,18 @@ std.bytes.from_int
 - `std.list.slice` 的 `start` / `length` 不能为负数；
 - `std.list.index` 找不到时返回 `-1`，`std.list.contains` 返回 `1` / `0`；
 - `std.dict.get` 缺少键时返回 `null` 或提供的默认值；
+- `std.list.reverse` / `std.list.sort` / `std.list.append` 返回新 list，不修改参数；
+- `std.list.sort` 只接受全数字或全字符串 list；
+- `std.list.map` / `std.list.filter` / `std.list.reduce` 接收函数值，回调出错时中止；
+- `std.list.reduce` 回调参数顺序是 `(accumulator, element)`；没有初始值时不能用于空 list；
+- `std.dict.items` 返回 `[[key, value], ...]`；
+- `std.dict.delete` 删除缺失键时返回原 dict 的副本；
+- `std.dict.merge` 中右侧 dict 覆盖同名键；
 - `std.string.join` 只接受字符串元素；
-- `std.string.replace` 替换全部匹配，空查找串会报错。
+- `std.string.replace` 替换全部匹配，空查找串会报错；
+- `std.string.contains` 返回 `1` / `0`；
+- `std.string.repeat` 的次数不能为负数；
+- `std.string.trim_start` / `trim_end` 只按 ASCII 空白裁剪。
 
 ### 查找路径
 

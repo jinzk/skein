@@ -18,6 +18,7 @@ int g_runtime_error_count = 0;
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -557,6 +558,11 @@ static bool read_console_line(const char *prompt, std::string &line,
     }
 }
 
+static struct value_t *invoke_value(
+    struct value_t *callee, std::vector<struct value_t *> &args);
+static struct value_t *call_value_args(
+    struct value_t *callee, std::vector<struct value_t *> args);
+
 static struct value_t *call_builtin(int functype,
                                     const std::vector<struct value_t *> &args) {
     if (functype == B_list || functype == B_dict) {
@@ -730,6 +736,27 @@ static struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_list_append || functype == B_dict_delete ||
+               functype == B_dict_merge || functype == B_string_contains ||
+               functype == B_string_repeat || functype == B_list_map ||
+               functype == B_list_filter) {
+        if (args.size() != 2) {
+            const char *name =
+                functype == B_list_append ? "std.list.append" :
+                functype == B_dict_delete ? "std.dict.delete" :
+                functype == B_dict_merge ? "std.dict.merge" :
+                functype == B_string_contains ? "std.string.contains" :
+                functype == B_string_repeat ? "std.string.repeat" :
+                functype == B_list_map ? "std.list.map" : "std.list.filter";
+            yyerror("%s expects 2 arguments, got %d", name, (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_reduce) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.list.reduce expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
@@ -877,6 +904,146 @@ static struct value_t *call_builtin(int functype,
                 ret = newintval(found);
             break;
         }
+        case B_list_reverse: {
+            if (arg->type != T_list) {
+                yyerror("std.list.reverse expects a list, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct list_value_t *source = (struct list_value_t *)arg;
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(source->payload->items.size());
+            for (size_t i = source->payload->items.size(); i > 0; --i)
+                out->payload->items.push_back(
+                    dupval(source->payload->items[i - 1]));
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_list_sort: {
+            if (arg->type != T_list) {
+                yyerror("std.list.sort expects a list, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct list_value_t *source = (struct list_value_t *)arg;
+            bool numeric = true;
+            bool strings = true;
+            for (value_t *item : source->payload->items) {
+                if (!is_numeric(item))
+                    numeric = false;
+                if (item->type != T_string)
+                    strings = false;
+            }
+            if (!numeric && !strings) {
+                yyerror("std.list.sort expects all numbers or all strings");
+                break;
+            }
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(source->payload->items.size());
+            for (value_t *item : source->payload->items)
+                out->payload->items.push_back(dupval(item));
+            bool sort_numeric = numeric;
+            std::stable_sort(
+                out->payload->items.begin(), out->payload->items.end(),
+                [sort_numeric](value_t *a, value_t *b) {
+                    if (sort_numeric) {
+                        bool unordered = false;
+                        int cmp = compare_numeric(a, b, unordered);
+                        return !unordered && cmp < 0;
+                    }
+                    return std::strcmp(
+                               ((struct string_value_t *)a)->value,
+                               ((struct string_value_t *)b)->value) < 0;
+                });
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_list_append: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.append expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            struct list_value_t *source = (struct list_value_t *)args[0];
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(source->payload->items.size() + 1);
+            for (value_t *item : source->payload->items)
+                out->payload->items.push_back(dupval(item));
+            out->payload->items.push_back(dupval(args[1]));
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_list_map:
+        case B_list_filter:
+        case B_list_reduce: {
+            if (args[0]->type != T_list) {
+                yyerror("%s expects a list, got %s",
+                        functype == B_list_map ? "std.list.map" :
+                        functype == B_list_filter ? "std.list.filter" :
+                        "std.list.reduce",
+                        typename_of(args[0]));
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)args[0];
+            struct value_t *fn = args[1];
+
+            if (functype == B_list_reduce) {
+                struct value_t *acc = NULL;
+                size_t index = 0;
+                if (args.size() == 3) {
+                    acc = dupval(args[2]);
+                } else {
+                    if (list->payload->items.empty()) {
+                        yyerror("std.list.reduce empty list without initial value");
+                        break;
+                    }
+                    acc = dupval(list->payload->items[0]);
+                    index = 1;
+                }
+                for (; index < list->payload->items.size(); ++index) {
+                    std::vector<struct value_t *> call_args;
+                    call_args.push_back(dupval(acc));
+                    call_args.push_back(
+                        dupval(list->payload->items[index]));
+                    struct value_t *next =
+                        call_value_args(fn, std::move(call_args));
+                    if (!next) {
+                        freeval(acc);
+                        acc = NULL;
+                        break;
+                    }
+                    freeval(acc);
+                    acc = next;
+                }
+                ret = acc;
+                break;
+            }
+
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(list->payload->items.size());
+            for (value_t *item : list->payload->items) {
+                std::vector<struct value_t *> call_args;
+                call_args.push_back(dupval(item));
+                struct value_t *result =
+                    call_value_args(fn, std::move(call_args));
+                if (!result) {
+                    freeval((struct value_t *)out);
+                    out = NULL;
+                    break;
+                }
+                if (functype == B_list_map) {
+                    out->payload->items.push_back(result);
+                } else {
+                    bool keep = truthy(result);
+                    freeval(result);
+                    if (keep)
+                        out->payload->items.push_back(dupval(item));
+                }
+            }
+            if (out)
+                ret = (struct value_t *)out;
+            break;
+        }
         case B_dict_get:
         case B_dict_has: {
             if (args[0]->type != T_dict) {
@@ -920,6 +1087,74 @@ static struct value_t *call_builtin(int functype,
             for (auto &entry : dict->payload->items)
                 out->payload->items.push_back(dupval(
                     functype == B_dict_keys ? entry.first : entry.second));
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_dict_items: {
+            if (arg->type != T_dict) {
+                yyerror("std.dict.items expects a dict, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct dict_value_t *dict = (struct dict_value_t *)arg;
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(dict->payload->items.size());
+            for (auto &entry : dict->payload->items) {
+                struct list_value_t *pair = newlistval();
+                pair->payload->items.push_back(dupval(entry.first));
+                pair->payload->items.push_back(dupval(entry.second));
+                out->payload->items.push_back((struct value_t *)pair);
+            }
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_dict_delete: {
+            if (args[0]->type != T_dict) {
+                yyerror("std.dict.delete expects a dict, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            struct dict_value_t *source = (struct dict_value_t *)args[0];
+            struct dict_value_t *out = newdictval();
+            out->payload->items.reserve(source->payload->items.size());
+            for (auto &entry : source->payload->items) {
+                if (value_equals(entry.first, args[1]))
+                    continue;
+                out->payload->items.push_back(std::make_pair(
+                    dupval(entry.first), dupval(entry.second)));
+            }
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_dict_merge: {
+            if (args[0]->type != T_dict || args[1]->type != T_dict) {
+                yyerror("std.dict.merge expects two dicts");
+                break;
+            }
+            struct dict_value_t *left = (struct dict_value_t *)args[0];
+            struct dict_value_t *right = (struct dict_value_t *)args[1];
+            struct dict_value_t *out = newdictval();
+            out->payload->items.reserve(left->payload->items.size() +
+                                        right->payload->items.size());
+            for (auto &entry : left->payload->items) {
+                out->payload->items.push_back(std::make_pair(
+                    dupval(entry.first), dupval(entry.second)));
+            }
+            for (auto &entry : right->payload->items) {
+                bool replaced = false;
+                for (auto &target : out->payload->items) {
+                    if (value_equals(target.first, entry.first)) {
+                        freeval(target.second);
+                        target.second = dupval(entry.second);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced) {
+                    out->payload->items.push_back(std::make_pair(
+                        dupval(entry.first), dupval(entry.second)));
+                }
+            }
             ret = (struct value_t *)out;
             break;
         }
@@ -999,6 +1234,57 @@ static struct value_t *call_builtin(int functype,
                 match = std::memcmp(text + text_len - part_len, part,
                                     part_len) == 0;
             ret = newintval(match ? 1 : 0);
+            break;
+        }
+        case B_string_contains: {
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("std.string.contains expects two strings");
+                break;
+            }
+            const char *text = ((struct string_value_t *)args[0])->value;
+            const char *needle = ((struct string_value_t *)args[1])->value;
+            ret = newintval(std::strstr(text, needle) ? 1 : 0);
+            break;
+        }
+        case B_string_repeat: {
+            if (args[0]->type != T_string || args[1]->type != T_int) {
+                yyerror("std.string.repeat expects a string and an integer");
+                break;
+            }
+            long long count = ((struct int_value_t *)args[1])->value;
+            if (count < 0) {
+                yyerror("std.string.repeat count must be non-negative");
+                break;
+            }
+            const char *text = ((struct string_value_t *)args[0])->value;
+            std::string result;
+            size_t length = std::strlen(text);
+            result.reserve(length * (size_t)count);
+            for (long long i = 0; i < count; ++i)
+                result += text;
+            ret = newstrval(result.c_str());
+            break;
+        }
+        case B_string_trim_start:
+        case B_string_trim_end: {
+            if (arg->type != T_string) {
+                yyerror("%s expects a string",
+                        functype == B_string_trim_start
+                            ? "std.string.trim_start"
+                            : "std.string.trim_end");
+                break;
+            }
+            const char *text = ((struct string_value_t *)arg)->value;
+            const char *begin = text;
+            const char *end = text + std::strlen(text);
+            if (functype == B_string_trim_start) {
+                while (begin < end && std::isspace((unsigned char)*begin))
+                    ++begin;
+            } else {
+                while (end > begin && std::isspace((unsigned char)end[-1]))
+                    --end;
+            }
+            ret = newstrval(std::string(begin, (size_t)(end - begin)).c_str());
             break;
         }
         case B_int:
@@ -1749,22 +2035,9 @@ struct call_depth_guard {
 };
 }
 
-static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
-    if (!callee)
-        return NULL;
-
-    /*
-     * Keep the call-depth guard before argument evaluation so deeply nested
-     * call expressions cannot exhaust the C++ stack.
-     */
-    if (call_depth >= MAX_CALL_DEPTH) {
-        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
-        return NULL;
-    }
-    call_depth_guard depth_guard;
-
-    std::vector<struct value_t *> args;
-    if (!collect_args(args_ast, args)) {
+static struct value_t *invoke_value(
+    struct value_t *callee, std::vector<struct value_t *> &args) {
+    if (!callee) {
         free_args(args);
         return NULL;
     }
@@ -1838,6 +2111,44 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
         return NULL;
     }
     return result ? result : newnull();
+}
+
+static struct value_t *call_value_args(
+    struct value_t *callee, std::vector<struct value_t *> args) {
+    if (!callee) {
+        free_args(args);
+        return NULL;
+    }
+    if (call_depth >= MAX_CALL_DEPTH) {
+        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+        free_args(args);
+        return NULL;
+    }
+    call_depth_guard depth_guard;
+    return invoke_value(callee, args);
+}
+
+static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
+    if (!callee)
+        return NULL;
+
+    /*
+     * Keep the call-depth guard before argument evaluation so deeply nested
+     * call expressions cannot exhaust the C++ stack.
+     */
+    if (call_depth >= MAX_CALL_DEPTH) {
+        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+        return NULL;
+    }
+    call_depth_guard depth_guard;
+
+    std::vector<struct value_t *> args;
+    if (!collect_args(args_ast, args)) {
+        free_args(args);
+        return NULL;
+    }
+
+    return invoke_value(callee, args);
 }
 
 static struct ast *index_base(struct ast *a) {

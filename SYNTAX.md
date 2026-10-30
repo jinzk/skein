@@ -577,11 +577,23 @@ std.bytes
 ```text
 std.list.slice([1, 2, 3], 1, 2)
 std.list.contains([1, 2, 3], 2)
+std.list.reverse([1, 2, 3])
+std.list.sort([3, 1, 2])
+std.list.append([1, 2], 3)
+std.list.map([1, 2], func(x) { return x * 2; })
+std.list.filter([1, 2, 3], func(x) { return x % 2 == 1; })
+std.list.reduce([1, 2, 3], func(a, b) { return a + b; })
 std.dict.get({"a": 1}, "b", 0)
 std.dict.keys({"a": 1, "b": 2})
+std.dict.items({"a": 1, "b": 2})
+std.dict.delete({"a": 1}, "a")
+std.dict.merge({"a": 1}, {"b": 2})
 std.string.join(["a", "b"], ",")
 std.string.replace("a-b", "-", "_")
 std.string.starts_with("hello", "he")
+std.string.contains("hello", "ell")
+std.string.repeat("ab", 2)
+std.string.trim_start("  x")
 std.bytes.hex(bytes_from_hex("00ff"))
 ```
 

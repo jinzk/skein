@@ -270,6 +270,12 @@ value_t *build_std_namespace() {
             {"slice", B_list_slice},
             {"contains", B_list_contains},
             {"index", B_list_index},
+            {"reverse", B_list_reverse},
+            {"sort", B_list_sort},
+            {"append", B_list_append},
+            {"map", B_list_map},
+            {"filter", B_list_filter},
+            {"reduce", B_list_reduce},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("dict"),
@@ -279,6 +285,9 @@ value_t *build_std_namespace() {
             {"has", B_dict_has},
             {"keys", B_dict_keys},
             {"values", B_dict_values},
+            {"items", B_dict_items},
+            {"delete", B_dict_delete},
+            {"merge", B_dict_merge},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("string"),
@@ -293,6 +302,10 @@ value_t *build_std_namespace() {
             {"replace", B_string_replace},
             {"starts_with", B_string_starts_with},
             {"ends_with", B_string_ends_with},
+            {"contains", B_string_contains},
+            {"repeat", B_string_repeat},
+            {"trim_start", B_string_trim_start},
+            {"trim_end", B_string_trim_end},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("bytes"),

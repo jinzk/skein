@@ -2,6 +2,8 @@
 
 一个使用 Flex + Bison + C++17 实现的动态类型脚本语言解释器（REPL）。
 
+完整语法参考见 [SYNTAX.md](SYNTAX.md)。
+
 ## 构建与运行
 
 ```bash

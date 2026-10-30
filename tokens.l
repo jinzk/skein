@@ -204,6 +204,24 @@ EXP ([Ee][-+]?[0-9]+)
 "format" { yylval.fn = B_format; return FUNC; }
 "command" { yylval.fn = B_command; return FUNC; }
 "command_status" { yylval.fn = B_command_status; return FUNC; }
+"read_file" { yylval.fn = B_read_file; return FUNC; }
+"write_file" { yylval.fn = B_write_file; return FUNC; }
+"append_file" { yylval.fn = B_append_file; return FUNC; }
+"file_exists" { yylval.fn = B_file_exists; return FUNC; }
+"file_open" { yylval.fn = B_file_open; return FUNC; }
+"file_read" { yylval.fn = B_file_read; return FUNC; }
+"file_write" { yylval.fn = B_file_write; return FUNC; }
+"file_seek" { yylval.fn = B_file_seek; return FUNC; }
+"file_tell" { yylval.fn = B_file_tell; return FUNC; }
+"file_eof" { yylval.fn = B_file_eof; return FUNC; }
+"file_close" { yylval.fn = B_file_close; return FUNC; }
+"file_flush" { yylval.fn = B_file_flush; return FUNC; }
+"input" { yylval.fn = B_input; return FUNC; }
+"split" { yylval.fn = B_split; return FUNC; }
+"split_ws" { yylval.fn = B_split_ws; return FUNC; }
+"trim" { yylval.fn = B_trim; return FUNC; }
+"find" { yylval.fn = B_find; return FUNC; }
+"substr" { yylval.fn = B_substr; return FUNC; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;

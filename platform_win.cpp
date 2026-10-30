@@ -1,6 +1,7 @@
 #include "platform.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -345,4 +346,225 @@ bool platform_run_command_status(
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
     return true;
+}
+
+bool platform_read_file(const std::string &path, std::string &data,
+                        std::string &error) {
+    data.clear();
+    error.clear();
+
+    std::wstring wide_path;
+    if (!widen_utf8(path, wide_path)) {
+        error = "invalid file path";
+        return false;
+    }
+
+    FILE *file = _wfopen(wide_path.c_str(), L"rb");
+    if (!file) {
+        error = std::strerror(errno);
+        return false;
+    }
+
+    char buffer[4096];
+    size_t received;
+    while ((received = std::fread(buffer, 1, sizeof buffer, file)) > 0)
+        data.append(buffer, received);
+
+    if (std::ferror(file)) {
+        int saved = errno;
+        std::fclose(file);
+        error = std::strerror(saved);
+        return false;
+    }
+    if (std::fclose(file) != 0) {
+        error = std::strerror(errno);
+        return false;
+    }
+    return true;
+}
+
+bool platform_write_file(const std::string &path, const std::string &data,
+                         bool append, std::string &error) {
+    error.clear();
+
+    std::wstring wide_path;
+    if (!widen_utf8(path, wide_path)) {
+        error = "invalid file path";
+        return false;
+    }
+
+    FILE *file = _wfopen(wide_path.c_str(), append ? L"ab" : L"wb");
+    if (!file) {
+        error = std::strerror(errno);
+        return false;
+    }
+
+    size_t written = std::fwrite(data.data(), 1, data.size(), file);
+    if (written != data.size()) {
+        int saved = errno;
+        std::fclose(file);
+        error = std::strerror(saved);
+        return false;
+    }
+    if (std::fclose(file) != 0) {
+        error = std::strerror(errno);
+        return false;
+    }
+    return true;
+}
+
+bool platform_file_exists(const std::string &path) {
+    std::wstring wide_path;
+    if (!widen_utf8(path, wide_path))
+        return false;
+    return GetFileAttributesW(wide_path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+struct platform_file {
+    FILE *stream = nullptr;
+    std::string path;
+
+    ~platform_file() {
+        if (stream)
+            std::fclose(stream);
+    }
+};
+
+platform_file_ptr platform_file_open(const std::string &path,
+                                     const std::string &mode,
+                                     std::string &error) {
+    error.clear();
+    std::wstring wide_path;
+    if (!widen_utf8(path, wide_path)) {
+        error = "invalid file path";
+        return nullptr;
+    }
+    std::wstring wide_mode(mode.begin(), mode.end());
+    FILE *stream = _wfopen(wide_path.c_str(), wide_mode.c_str());
+    if (!stream) {
+        error = std::strerror(errno);
+        return nullptr;
+    }
+    std::shared_ptr<platform_file> file = std::make_shared<platform_file>();
+    file->stream = stream;
+    file->path = path;
+    return file;
+}
+
+bool platform_file_read(const platform_file_ptr &file, size_t limit,
+                        std::string &data, std::string &error) {
+    data.clear();
+    error.clear();
+    if (!file || !file->stream) {
+        error = "file is closed";
+        return false;
+    }
+
+    char buffer[4096];
+    size_t total = 0;
+    while (limit == 0 || total < limit) {
+        size_t want = sizeof buffer;
+        if (limit != 0 && limit - total < want)
+            want = limit - total;
+        size_t received = std::fread(buffer, 1, want, file->stream);
+        if (received > 0) {
+            data.append(buffer, received);
+            total += received;
+        }
+        if (received < want) {
+            if (std::ferror(file->stream)) {
+                error = std::strerror(errno);
+                return false;
+            }
+            break;
+        }
+    }
+    return true;
+}
+
+bool platform_file_write(const platform_file_ptr &file,
+                         const std::string &data, std::string &error) {
+    error.clear();
+    if (!file || !file->stream) {
+        error = "file is closed";
+        return false;
+    }
+    size_t written = 0;
+    while (written < data.size()) {
+        size_t n = std::fwrite(data.data() + written, 1,
+                               data.size() - written, file->stream);
+        if (n == 0) {
+            error = std::strerror(errno);
+            return false;
+        }
+        written += n;
+    }
+    return true;
+}
+
+bool platform_file_seek(const platform_file_ptr &file, long long offset,
+                        int whence, std::string &error) {
+    error.clear();
+    if (!file || !file->stream) {
+        error = "file is closed";
+        return false;
+    }
+    if (whence < 0 || whence > 2) {
+        error = "invalid whence";
+        return false;
+    }
+    if (_fseeki64(file->stream, offset, whence) != 0) {
+        error = std::strerror(errno);
+        return false;
+    }
+    return true;
+}
+
+long long platform_file_tell(const platform_file_ptr &file,
+                             std::string &error) {
+    error.clear();
+    if (!file || !file->stream) {
+        error = "file is closed";
+        return -1;
+    }
+    long long position = _ftelli64(file->stream);
+    if (position < 0) {
+        error = std::strerror(errno);
+        return -1;
+    }
+    return (long long)position;
+}
+
+bool platform_file_eof(const platform_file_ptr &file) {
+    return file && file->stream && std::feof(file->stream) != 0;
+}
+
+bool platform_file_flush(const platform_file_ptr &file, std::string &error) {
+    error.clear();
+    if (!file || !file->stream) {
+        error = "file is closed";
+        return false;
+    }
+    if (std::fflush(file->stream) != 0) {
+        error = std::strerror(errno);
+        return false;
+    }
+    return true;
+}
+
+void platform_file_close(const platform_file_ptr &file, std::string &error) {
+    error.clear();
+    if (!file || !file->stream)
+        return;
+    if (std::fclose(file->stream) != 0)
+        error = std::strerror(errno);
+    file->stream = nullptr;
+}
+
+bool platform_file_is_open(const platform_file_ptr &file) {
+    return file && file->stream != nullptr;
+}
+
+std::string platform_file_path(const platform_file_ptr &file) {
+    return file ? file->path : std::string();
 }

@@ -22,6 +22,7 @@ add_executable(${PROJECT_NAME}
   ${FLEX_MyScanner_OUTPUTS}
   ast.cpp
   eval.cpp
+  filetype.cpp
   format.cpp
   main.cpp
   scopestack.cpp

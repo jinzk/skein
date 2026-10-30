@@ -19,7 +19,25 @@ enum bifs {
     B_str,
     B_format,
     B_command,
-    B_command_status
+    B_command_status,
+    B_read_file,
+    B_write_file,
+    B_append_file,
+    B_file_exists,
+    B_file_open,
+    B_file_read,
+    B_file_write,
+    B_file_seek,
+    B_file_tell,
+    B_file_eof,
+    B_file_close,
+    B_file_flush,
+    B_input,
+    B_split,
+    B_split_ws,
+    B_trim,
+    B_find,
+    B_substr
 };
 
 struct ast {

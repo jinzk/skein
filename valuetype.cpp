@@ -63,6 +63,15 @@ struct value_t *newbuiltinval(int functype) {
     return (struct value_t *)v;
 }
 
+struct value_t *newuserdataval(const struct native_type *meta,
+                               std::shared_ptr<void> data) {
+    struct userdata_value_t *v = new userdata_value_t;
+    v->type = T_userdata;
+    v->meta = meta;
+    v->data = std::move(data);
+    return (struct value_t *)v;
+}
+
 struct value_t *newnull() {
     struct value_t *v = new value_t;
     v->type = T_null;
@@ -126,6 +135,10 @@ struct value_t *dupval(struct value_t *v) {
         }
         case T_builtin:
             return newbuiltinval(((struct builtin_value_t *)v)->functype);
+        case T_userdata: {
+            struct userdata_value_t *src = (struct userdata_value_t *)v;
+            return newuserdataval(src->meta, src->data);
+        }
         case T_null:
             return newnull();
         case T_return:
@@ -176,6 +189,9 @@ void freeval(struct value_t *v) {
         case T_builtin:
             delete (struct builtin_value_t *)v;
             break;
+        case T_userdata:
+            delete (struct userdata_value_t *)v;
+            break;
         case T_null:
             delete v;
             break;
@@ -199,6 +215,10 @@ const char *typename_of(const struct value_t *v) {
         case T_dict: return "dict";
         case T_func: return "function";
         case T_builtin: return "builtin";
+        case T_userdata: {
+            const struct userdata_value_t *u = (const struct userdata_value_t *)v;
+            return u->meta ? u->meta->name : "userdata";
+        }
         case T_null: return "null";
         case T_class: return "class";
         case T_return: return "return";
@@ -264,6 +284,12 @@ std::string value_to_string(const struct value_t *v) {
             return "<function>";
         case T_builtin:
             return "<builtin>";
+        case T_userdata: {
+            const struct userdata_value_t *u = (const struct userdata_value_t *)v;
+            if (u->meta && u->meta->describe)
+                return u->meta->describe(u->data.get());
+            return "<userdata>";
+        }
         case T_null:
             return "null";
         case T_class:

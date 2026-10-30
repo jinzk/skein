@@ -29,6 +29,7 @@ enum val_type {
     T_dict,
     T_func,
     T_builtin,
+    T_userdata,
     T_null,
     T_class,
     T_return,
@@ -75,6 +76,18 @@ struct builtin_value_t {
     int functype;
 };
 
+struct native_type {
+    const char *name;
+    /* Return a human-readable representation of one instance. */
+    std::string (*describe)(const void *data);
+};
+
+struct userdata_value_t {
+    enum val_type type;
+    const struct native_type *meta;
+    std::shared_ptr<void> data;
+};
+
 struct value_t *newreturn();
 struct value_t *newbreak();
 struct value_t *newcontinue();
@@ -82,6 +95,8 @@ struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newstrval(const char *s);
 struct value_t *newbuiltinval(int functype);
+struct value_t *newuserdataval(const struct native_type *meta,
+                               std::shared_ptr<void> data);
 struct value_t *newnull();
 struct value_t *newfuncval(std::shared_ptr<function_code> code,
                            std::shared_ptr<struct scope_t> closure);

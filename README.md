@@ -191,7 +191,7 @@ adder(3)(4)
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -320,6 +320,166 @@ run("echo ok")
 
 Windows 下命令输出需要是 UTF-8 字节流，否则中文内容可能与解释器内部编码不一致。
 
+## 字符串处理
+
+```text
+trim(text)                  → 去掉首尾空白
+split(text, separator)      → list<string>
+split_ws(text)              → list<string>
+find(text, substring)       → 码点下标 / -1
+substr(text, start[, length]) → string
+```
+
+示例：
+
+```text
+trim("  hello\t\n")          → "hello"
+split("a,b,c", ",")          → ["a", "b", "c"]
+split(",a,", ",")            → ["", "a", ""]
+split_ws("  a  b\tc ")       → ["a", "b", "c"]
+find("hello", "ll")          → 2
+find("hello", "x")           → -1
+substr("hello", 1, 3)        → "ell"
+substr("你好世界", 1, 2)      → "好世"
+```
+
+规则：
+
+- `trim` 和 `split_ws` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
+- `split` 使用非重叠匹配，保留首尾空字段；
+- `split` 的分隔符不能为空字符串；
+- `find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
+- `substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
+- `start` 和 `length` 不能为负数。
+
+组合使用：
+
+```text
+let parts = split_ws(input("请输入两个数: "));
+let a = int(parts[0]);
+let b = int(parts[1]);
+print(a + b);
+```
+
+## 控制台输入
+
+`input([prompt])` 从 stdin 读取一行：
+
+```text
+let name = input("Name: ");
+print("hello " + name);
+```
+
+- 返回的字符串不包含末尾换行；
+- 可选的 `prompt` 会原样输出到 stdout，不经过 `format`；
+- 读到 EOF 时返回 `null`；
+- 空行返回空字符串；
+- CRLF 会被处理，末尾 `\r\n` 不会进入结果；
+- 控制台负责行编辑和退格；管道输入中的退格会由 `input` 过滤；
+- 脚本模式下仍然从原始 stdin 读取，不会读脚本文件本身；
+- `input` 是普通一等内置函数，可以保存和传递。
+
+```text
+let read = input;
+read("> ")
+```
+
+示例：
+
+```text
+let name = input("Name: ");
+print(format("hello {}", name));
+```
+
+## 文件读写
+
+```text
+read_file(path)          → 文件全部内容
+write_file(path, text)   → null，覆盖写入
+append_file(path, text)  → null，追加写入
+file_exists(path)        → 1 / 0
+```
+
+示例：
+
+```text
+write_file("out.txt", "hello\n");
+append_file("out.txt", "world\n");
+print(read_file("out.txt"));
+
+file_exists("out.txt")
+```
+
+规则：
+
+- `read_file` 读取整个文件并返回字符串；空文件返回空字符串；
+- `write_file` 创建或截断文件；
+- `append_file` 创建或追加；
+- 文件以二进制模式打开，不会自动转换 CRLF，也不会去掉末尾换行；
+- 读写内容按 UTF-8 文本处理；
+- `read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；
+- 不会自动创建父目录；
+- 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
+- Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
+
+### 文件句柄
+
+需要多次操作同一个文件时，可以使用低层文件句柄：
+
+```text
+file_open(path, mode)       → file handle
+file_read(handle[, n])      → string
+file_write(handle, text)    → null
+file_seek(handle, offset[, whence]) → null
+file_tell(handle)           → int
+file_eof(handle)            → 1 / 0
+file_close(handle)          → null
+file_flush(handle)          → null
+```
+
+`mode` 支持 `r`、`w`、`a`、`r+`、`w+`、`a+`，也接受带 `b`/`t` 的写法；内部统一按二进制模式打开。
+
+示例：
+
+```text
+let h = file_open("data.txt", "w+");
+file_write(h, "hello world");
+file_seek(h, 0);
+file_read(h, 5)
+file_close(h)
+```
+
+- 文件句柄是不可打印底层指针的资源对象，打印显示为 `<file: path>`；
+- 句柄复制会共享同一个底层文件，关闭其中一个会影响所有副本；
+- `file_read(h)` 读取剩余全部内容，`file_read(h, n)` 最多读取 n 字节；`n = 0` 等价于读取全部；
+- `file_seek` 的 `whence`：`0` 文件开头、`1` 当前位置、`2` 文件末尾；
+- 关闭后继续读写会报 `file is closed`；
+- 读取到 NUL 字节会报错；
+- 最终未关闭的句柄会随进程退出关闭。
+
+### 用 dict + 闭包封装文件对象
+
+当前语言没有方法绑定，但可以用 dict + 闭包实现类似接口：
+
+```text
+def open_file(path) {
+  let h = file_open(path, "r");
+
+  def read(n) { return file_read(h, n); }
+  def seek(n) { return file_seek(h, n); }
+  def close() { return file_close(h); }
+
+  return {"read": read, "seek": seek, "close": close};
+}
+
+let f = open_file("data.txt");
+f.read(10)
+f.close()
+```
+
+底层文件资源使用通用的原生 userdata 生命周期管理；上层对象接口可以用语言本身扩展，不需要修改内置实现。
+
+文件函数可以访问进程有权限的任意路径，只应在可信脚本中使用。
 
 ## 目录结构
 
@@ -328,6 +488,7 @@ tokens.l      Flex 词法分析
 parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
 eval.*        树遍历求值
+filetype.*    原生文件资源类型
 format.*      Python 风格格式化
 scopestack.*  词法作用域链与闭包环境
 symbol.*      符号表

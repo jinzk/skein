@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "filetype.h"
 #include "format.h"
 #include "platform.h"
 #include "repl.h"
@@ -163,6 +164,36 @@ static bool utf8_char_at(const char *s, size_t index, std::string &out) {
     return false;
 }
 
+static size_t utf8_length_prefix(const char *s, size_t bytes) {
+    size_t len = std::strlen(s);
+    if (bytes > len)
+        bytes = len;
+    size_t pos = 0;
+    size_t count = 0;
+    while (pos < bytes) {
+        pos += utf8_valid_sequence_length(s + pos, len - pos);
+        ++count;
+    }
+    return count;
+}
+
+static std::string utf8_substr(const char *s, size_t start, size_t count) {
+    size_t len = std::strlen(s);
+    size_t pos = 0;
+    size_t current = 0;
+    while (pos < len && current < start) {
+        pos += utf8_valid_sequence_length(s + pos, len - pos);
+        ++current;
+    }
+    size_t begin = pos;
+    size_t taken = 0;
+    while (pos < len && taken < count) {
+        pos += utf8_valid_sequence_length(s + pos, len - pos);
+        ++taken;
+    }
+    return std::string(s + begin, pos - begin);
+}
+
 static bool truthy(const struct value_t *v) {
     if (!v) return false;
     switch (v->type) {
@@ -176,6 +207,7 @@ static bool truthy(const struct value_t *v) {
         case T_dict: return !((struct dict_value_t *)v)->value.empty();
         case T_func: return true;
         case T_builtin: return true;
+        case T_userdata: return true;
         case T_null: return false;
         default: return false;
     }
@@ -227,6 +259,11 @@ static bool value_equals(struct value_t *a, struct value_t *b) {
         case T_builtin:
             return ((struct builtin_value_t *)a)->functype ==
                    ((struct builtin_value_t *)b)->functype;
+        case T_userdata: {
+            struct userdata_value_t *ua = (struct userdata_value_t *)a;
+            struct userdata_value_t *ub = (struct userdata_value_t *)b;
+            return ua->meta == ub->meta && ua->data == ub->data;
+        }
         case T_null:
             return true;
         default:
@@ -347,6 +384,67 @@ static bool collect_command_env(
     return true;
 }
 
+static bool get_file_resource(struct value_t *value,
+                              std::shared_ptr<file_resource> &file,
+                              const char *who) {
+    if (!is_file_value(value)) {
+        yyerror("%s expects a file, got %s", who, typename_of(value));
+        return false;
+    }
+    file = file_value(value);
+    if (!file) {
+        yyerror("%s expects a file", who);
+        return false;
+    }
+    return true;
+}
+
+static void erase_last_utf8_character(std::string &line) {
+    if (line.empty())
+        return;
+    size_t pos = line.size() - 1;
+    while (pos > 0 && (((unsigned char)line[pos]) & 0xC0) == 0x80)
+        --pos;
+    line.erase(pos);
+}
+
+static bool read_console_line(const char *prompt, std::string &line,
+                              bool &at_eof) {
+    line.clear();
+    at_eof = false;
+
+    if (prompt) {
+        std::fputs(prompt, stdout);
+        std::fflush(stdout);
+    }
+
+    for (;;) {
+        int c = std::fgetc(stdin);
+        if (c == EOF) {
+            if (g_interrupted) {
+                std::clearerr(stdin);
+                return false;
+            }
+            if (std::ferror(stdin)) {
+                std::clearerr(stdin);
+                yyerror("input: read error");
+                return false;
+            }
+            at_eof = true;
+            return true;
+        }
+        if (c == '\n')
+            return true;
+        if (c == '\r')
+            continue;
+        if (c == '\b' || c == 0x7f) {
+            erase_last_utf8_character(line);
+            continue;
+        }
+        line.push_back((char)c);
+    }
+}
+
 static struct value_t *call_builtin(int functype,
                                     const std::vector<struct value_t *> &args) {
     if (functype == B_list || functype == B_dict) {
@@ -399,12 +497,57 @@ static struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_write_file || functype == B_append_file) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_write_file ? "write_file" : "append_file",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_file_open || functype == B_file_write) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_file_open ? "file_open" : "file_write",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_file_read) {
+        if (args.empty() || args.size() > 2) {
+            yyerror("file_read expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_file_seek) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("file_seek expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_input) {
+        if (args.size() > 1) {
+            yyerror("input expects 0 or 1 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_split || functype == B_find) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_split ? "split" : "find",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_substr) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("substr expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
     }
 
-    struct value_t *arg = args[0];
+    struct value_t *arg = args.empty() ? NULL : args[0];
     struct value_t *ret = NULL;
     switch (functype) {
         case B_abs:
@@ -497,6 +640,325 @@ static struct value_t *call_builtin(int functype,
                 else
                     ret = newintval(status);
             }
+            break;
+        }
+        case B_read_file: {
+            if (arg->type != T_string) {
+                yyerror("read_file expects a string path, got %s",
+                        typename_of(arg));
+            } else {
+                std::string data;
+                std::string error;
+                if (!platform_read_file(
+                        ((struct string_value_t *)arg)->value, data, error))
+                    yyerror("read_file: %s", error.c_str());
+                else if (data.find('\0') != std::string::npos)
+                    yyerror("read_file: file contains NUL byte");
+                else
+                    ret = newstrval(data.c_str());
+            }
+            break;
+        }
+        case B_write_file:
+        case B_append_file: {
+            const char *name =
+                functype == B_write_file ? "write_file" : "append_file";
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("%s expects a string path and data, got %s and %s",
+                        name, typename_of(args[0]), typename_of(args[1]));
+            } else {
+                std::string error;
+                if (!platform_write_file(
+                        ((struct string_value_t *)args[0])->value,
+                        ((struct string_value_t *)args[1])->value,
+                        functype == B_append_file, error))
+                    yyerror("%s: %s", name, error.c_str());
+                else
+                    ret = newnull();
+            }
+            break;
+        }
+        case B_file_exists:
+            if (arg->type != T_string) {
+                yyerror("file_exists expects a string path, got %s",
+                        typename_of(arg));
+            } else {
+                ret = newintval(platform_file_exists(
+                                    ((struct string_value_t *)arg)->value)
+                                    ? 1
+                                    : 0);
+            }
+            break;
+        case B_file_open: {
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("file_open expects a string path and mode, got %s and %s",
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            std::string mode_error;
+            std::string mode = normalize_file_mode(
+                ((struct string_value_t *)args[1])->value, mode_error);
+            if (mode.empty()) {
+                yyerror("file_open: %s", mode_error.c_str());
+                break;
+            }
+            std::string error;
+            const char *path = ((struct string_value_t *)args[0])->value;
+            platform_file_ptr file = platform_file_open(path, mode, error);
+            if (!file)
+                yyerror("file_open: %s", error.c_str());
+            else
+                ret = new_file_value(file, path);
+            break;
+        }
+        case B_file_read: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_read"))
+                break;
+            size_t limit = 0;
+            if (args.size() == 2) {
+                if (args[1]->type != T_int ||
+                    ((struct int_value_t *)args[1])->value < 0) {
+                    yyerror("file_read size must be a non-negative integer");
+                    break;
+                }
+                limit = (size_t)((struct int_value_t *)args[1])->value;
+            }
+            std::string data;
+            std::string error;
+            if (!platform_file_read(file->file, limit, data, error)) {
+                yyerror("file_read: %s", error.c_str());
+            } else if (data.find('\0') != std::string::npos) {
+                yyerror("file_read: file contains NUL byte");
+            } else {
+                ret = newstrval(data.c_str());
+            }
+            break;
+        }
+        case B_file_write: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_write"))
+                break;
+            if (args[1]->type != T_string) {
+                yyerror("file_write expects string data, got %s",
+                        typename_of(args[1]));
+                break;
+            }
+            std::string error;
+            if (!platform_file_write(
+                    file->file,
+                    ((struct string_value_t *)args[1])->value, error))
+                yyerror("file_write: %s", error.c_str());
+            else
+                ret = newnull();
+            break;
+        }
+        case B_file_seek: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_seek"))
+                break;
+            if (args[1]->type != T_int) {
+                yyerror("file_seek offset must be an integer");
+                break;
+            }
+            int whence = 0;
+            if (args.size() == 3) {
+                if (args[2]->type != T_int) {
+                    yyerror("file_seek whence must be an integer");
+                    break;
+                }
+                long long value = ((struct int_value_t *)args[2])->value;
+                if (value < 0 || value > 2) {
+                    yyerror("file_seek whence must be 0, 1, or 2");
+                    break;
+                }
+                whence = (int)value;
+            }
+            std::string error;
+            if (!platform_file_seek(
+                    file->file,
+                    ((struct int_value_t *)args[1])->value, whence, error))
+                yyerror("file_seek: %s", error.c_str());
+            else
+                ret = newnull();
+            break;
+        }
+        case B_file_tell: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_tell"))
+                break;
+            std::string error;
+            long long position = platform_file_tell(file->file, error);
+            if (position < 0)
+                yyerror("file_tell: %s", error.c_str());
+            else
+                ret = newintval(position);
+            break;
+        }
+        case B_file_eof: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_eof"))
+                break;
+            if (!platform_file_is_open(file->file)) {
+                yyerror("file_eof: file is closed");
+                break;
+            }
+            ret = newintval(platform_file_eof(file->file) ? 1 : 0);
+            break;
+        }
+        case B_file_close: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_close"))
+                break;
+            std::string error;
+            platform_file_close(file->file, error);
+            if (!error.empty())
+                yyerror("file_close: %s", error.c_str());
+            else
+                ret = newnull();
+            break;
+        }
+        case B_file_flush: {
+            std::shared_ptr<file_resource> file;
+            if (!get_file_resource(arg, file, "file_flush"))
+                break;
+            std::string error;
+            if (!platform_file_flush(file->file, error))
+                yyerror("file_flush: %s", error.c_str());
+            else
+                ret = newnull();
+            break;
+        }
+        case B_input: {
+            const char *prompt = NULL;
+            if (!args.empty()) {
+                if (args[0]->type != T_string) {
+                    yyerror("input prompt must be a string, got %s",
+                            typename_of(args[0]));
+                    break;
+                }
+                prompt = ((struct string_value_t *)args[0])->value;
+            }
+            std::string line;
+            bool at_eof = false;
+            if (!read_console_line(prompt, line, at_eof))
+                break;
+            if (at_eof && line.empty()) {
+                ret = newnull();
+            } else if (line.find('\0') != std::string::npos) {
+                yyerror("input: line contains NUL byte");
+            } else {
+                ret = newstrval(line.c_str());
+            }
+            break;
+        }
+        case B_split: {
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("split expects string text and separator, got %s and %s",
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            const char *text = ((struct string_value_t *)args[0])->value;
+            const char *separator = ((struct string_value_t *)args[1])->value;
+            if (!separator[0]) {
+                yyerror("split separator must not be empty");
+                break;
+            }
+            std::string input = text;
+            std::string sep = separator;
+            struct list_value_t *parts = newlistval();
+            size_t position = 0;
+            for (;;) {
+                size_t found = input.find(sep, position);
+                if (found == std::string::npos) {
+                    parts->value.push_back(
+                        newstrval(input.substr(position).c_str()));
+                    break;
+                }
+                parts->value.push_back(
+                    newstrval(input.substr(position, found - position).c_str()));
+                position = found + sep.size();
+            }
+            ret = (struct value_t *)parts;
+            break;
+        }
+        case B_split_ws: {
+            if (arg->type != T_string) {
+                yyerror("split_ws expects a string, got %s", typename_of(arg));
+                break;
+            }
+            const char *text = ((struct string_value_t *)arg)->value;
+            struct list_value_t *parts = newlistval();
+            const char *p = text;
+            while (*p) {
+                while (*p && std::isspace((unsigned char)*p))
+                    ++p;
+                if (!*p)
+                    break;
+                const char *start = p;
+                while (*p && !std::isspace((unsigned char)*p))
+                    ++p;
+                std::string part(start, (size_t)(p - start));
+                parts->value.push_back(newstrval(part.c_str()));
+            }
+            ret = (struct value_t *)parts;
+            break;
+        }
+        case B_trim: {
+            if (arg->type != T_string) {
+                yyerror("trim expects a string, got %s", typename_of(arg));
+                break;
+            }
+            const char *text = ((struct string_value_t *)arg)->value;
+            const char *begin = text;
+            const char *end = text + std::strlen(text);
+            while (begin < end && std::isspace((unsigned char)*begin))
+                ++begin;
+            while (end > begin && std::isspace((unsigned char)end[-1]))
+                --end;
+            ret = newstrval(std::string(begin, (size_t)(end - begin)).c_str());
+            break;
+        }
+        case B_find: {
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("find expects string text and substring, got %s and %s",
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            const char *text = ((struct string_value_t *)args[0])->value;
+            const char *needle = ((struct string_value_t *)args[1])->value;
+            const char *found = std::strstr(text, needle);
+            if (!found) {
+                ret = newintval(-1);
+            } else {
+                ret = newintval((long long)utf8_length_prefix(
+                    text, (size_t)(found - text)));
+            }
+            break;
+        }
+        case B_substr: {
+            if (arg->type != T_string) {
+                yyerror("substr expects a string, got %s", typename_of(arg));
+                break;
+            }
+            if (args[1]->type != T_int ||
+                ((struct int_value_t *)args[1])->value < 0) {
+                yyerror("substr start must be a non-negative integer");
+                break;
+            }
+            size_t start = (size_t)((struct int_value_t *)args[1])->value;
+            size_t count = std::string::npos;
+            if (args.size() == 3) {
+                if (args[2]->type != T_int ||
+                    ((struct int_value_t *)args[2])->value < 0) {
+                    yyerror("substr length must be a non-negative integer");
+                    break;
+                }
+                count = (size_t)((struct int_value_t *)args[2])->value;
+            }
+            std::string part = utf8_substr(
+                ((struct string_value_t *)arg)->value, start, count);
+            ret = newstrval(part.c_str());
             break;
         }
         case B_sqrt:

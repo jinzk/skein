@@ -238,6 +238,42 @@ def main():
     check("utf8 string index second", '"你好"[1]\n', stdout="= 好")
     check("utf8 string index out of range", '"你好"[2]\n',
           stderr="out of range")
+    check("string trim", 'trim("  hi\\t\\n")\n', stdout="= hi")
+    check("string split", 'split("a,b,c", ",")\n', stdout="= [a, b, c]")
+    check("string split empty fields", 'split(",a,", ",")\n',
+          stdout="= [, a, ]")
+    check("string split no match", 'split("abc", ",")\n', stdout="= [abc]")
+    check("string split empty text", 'split("", ",") == [""]\n',
+          stdout="= 1")
+    check("string split empty separator", 'split("a,b", "")\n',
+          stderr="split separator must not be empty")
+    check("string split whitespace", 'split_ws("  a  b\\tc\\n d ")\n',
+          stdout="= [a, b, c, d]")
+    check("string split whitespace empty", 'split_ws("")\n',
+          stdout="= []")
+    check("string find", 'find("hello", "ll")\n', stdout="= 2")
+    check("string find missing", 'find("hello", "x")\n', stdout="= -1")
+    check("string find empty needle", 'find("hello", "")\n', stdout="= 0")
+    check("string find utf8", 'find("你好世界", "世界")\n', stdout="= 2")
+    check("string substr", 'substr("hello", 1, 3)\n', stdout="= ell")
+    check("string substr to end", 'substr("hello", 2)\n', stdout="= llo")
+    check("string substr past end", 'substr("hello", 10)\n', stdout="= ")
+    check("string substr clamps length", 'substr("hello", 1, 100)\n',
+          stdout="= ello")
+    check("string substr utf8", 'substr("你好世界", 1, 2)\n',
+          stdout="= 好世")
+    check("string substr negative start", 'substr("hello", -1)\n',
+          stderr="substr start must be a non-negative integer")
+    check("string substr negative length", 'substr("hello", 1, -1)\n',
+          stderr="substr length must be a non-negative integer")
+    check("string split type", 'split(1, ",")\n',
+          stderr="split expects string text and separator")
+    check("string split arity", 'split("a")\n',
+          stderr="split expects 2 arguments")
+    check("string find arity", 'find("a")\n',
+          stderr="find expects 2 arguments")
+    check("string substr arity", 'substr("a")\n',
+          stderr="substr expects 2 or 3 arguments")
 
     check("list expression", "[1+2, 3*4]\n", stdout="= [3, 12]")
     check("empty list", "[]\n", stdout="= []")
@@ -477,6 +513,148 @@ def main():
           stderr="command_status expects a string")
     check("command_status arity error", "command_status()\n",
           stderr="expects 1 or 2 arguments")
+    check("input reads a line", "input()\nhello\n", stdout="= hello")
+    check("input with prompt", 'input("Name: ")\nAlice\n',
+          stdout_all=["Name: ", "= Alice"])
+    check("input with print", 'print(input("> "))\nworld\n',
+          stdout_all=["> ", "world"])
+    check("input preserves spaces", "input()\n  hi  \n", stdout="=   hi  ")
+    check("input CRLF", "input()\r\nhello\r\n", stdout="= hello")
+    check("input backspace", "input()\nhello\x7f\x7f\n", stdout="= hel")
+    check("input EOF is null", "input() == null\n", stdout="= 1")
+    check("input EOF print", "print(input())\n", stdout="null")
+    check("input prompt type", "input(1)\n",
+          stderr="input prompt must be a string")
+    check("input arity", 'input("a", "b")\n',
+          stderr="input expects 0 or 1 arguments")
+    check("input as value", 'let f = input;\nf("> ")\nvalue\n',
+          stdout_all=["> ", "= value"])
+    check("read_file type error", "read_file(1)\n",
+          stderr="read_file expects a string path")
+    check("write_file type error", 'write_file("x", 1)\n',
+          stderr="write_file expects a string path and data")
+    check("write_file arity error", 'write_file("x")\n',
+          stderr="write_file expects 2 arguments")
+    check("append_file arity error", 'append_file("x")\n',
+          stderr="append_file expects 2 arguments")
+    check("file_exists type error", "file_exists(1)\n",
+          stderr="file_exists expects a string path")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "io.txt")
+        quoted = path.replace("\\", "\\\\").replace('"', '\\"')
+        check("write and read file",
+              f'write_file("{quoted}", "hello");\nread_file("{quoted}")\n',
+              stdout="= hello")
+        check("append file",
+              f'append_file("{quoted}", " world");\nread_file("{quoted}")\n',
+              stdout="= hello world")
+        check("write file truncates",
+              f'write_file("{quoted}", "reset");\nread_file("{quoted}")\n',
+              stdout="= reset")
+        check("file exists", f'file_exists("{quoted}")\n', stdout="= 1")
+        check("file does not exist",
+              f'file_exists("{quoted}.missing")\n', stdout="= 0")
+        check("read missing file", f'read_file("{quoted}.missing")\n',
+              stderr="read_file:")
+        missing_dir = os.path.join(tmp, "missing", "file.txt")
+        quoted_missing = missing_dir.replace("\\", "\\\\")
+        check("write missing directory",
+              f'write_file("{quoted_missing}", "x")\n',
+              stderr="write_file:")
+
+        empty = os.path.join(tmp, "empty.txt")
+        quoted_empty = empty.replace("\\", "\\\\")
+        check("empty file",
+              f'write_file("{quoted_empty}", "");\nread_file("{quoted_empty}")\n',
+              stdout="= ")
+
+        nul_file = os.path.join(tmp, "nul.bin")
+        with open(nul_file, "wb") as f:
+            f.write(b"a\0b")
+        quoted_nul = nul_file.replace("\\", "\\\\")
+        check("read file with NUL", f'read_file("{quoted_nul}")\n',
+              stderr="contains NUL byte")
+
+        handle_path = os.path.join(tmp, "handle.txt")
+        quoted_handle = handle_path.replace("\\", "\\\\")
+        check(
+            "file handle write/seek/read/tell",
+            f'let h = file_open("{quoted_handle}", "w+");\n'
+            f'file_write(h, "hello world");\n'
+            f'file_seek(h, 0);\n'
+            f'file_read(h, 5);\n'
+            f'file_tell(h);\n'
+            f'file_close(h);\n',
+            stdout_all=["= hello", "= 5"],
+        )
+        check(
+            "file handle read all and eof",
+            f'let h = file_open("{quoted_handle}", "r");\n'
+            f'file_read(h);\n'
+            f'file_eof(h);\n'
+            f'file_close(h);\n',
+            stdout_all=["= hello world", "= 1"],
+        )
+        check(
+            "file handle seek from end",
+            f'let h = file_open("{quoted_handle}", "r");\n'
+            f'file_seek(h, -1, 2);\n'
+            f'file_read(h, 1)\n',
+            stdout="= d",
+        )
+        check(
+            "file handle NUL",
+            f'let h = file_open("{quoted_nul}", "r");\n'
+            f'file_read(h)\n',
+            stderr="contains NUL byte",
+        )
+        check(
+            "file handle close and copy",
+            f'let h = file_open("{quoted_handle}", "r");\n'
+            f'let g = h;\n'
+            f'file_close(h);\n'
+            f'file_read(g, 1)\n',
+            stderr="file is closed",
+        )
+        check(
+            "file handle factory",
+            f'def open_file(path, mode) {{\n'
+            f'  let h = file_open(path, mode);\n'
+            f'  def read(n) {{ return file_read(h, n); }}\n'
+            f'  def write(s) {{ return file_write(h, s); }}\n'
+            f'  def seek(n) {{ return file_seek(h, n); }}\n'
+            f'  def close() {{ return file_close(h); }}\n'
+            f'  return {{"read": read, "write": write, '
+            f'"seek": seek, "close": close}};\n'
+            f'}}\n'
+            f'let f = open_file("{quoted_handle}", "w+");\n'
+            f'f.write("abcdef");\n'
+            f'f.seek(0);\n'
+            f'f.read(3);\n'
+            f'f.close();\n',
+            stdout="= abc",
+        )
+        check("file_open invalid mode", 'file_open("x", "bad")\n',
+              stderr="invalid file mode")
+        check("file_open arity", 'file_open("x")\n',
+              stderr="file_open expects 2 arguments")
+        check("file_read arity", "file_read()\n",
+              stderr="file_read expects 1 or 2 arguments")
+        check("file_write arity", 'file_write("x")\n',
+              stderr="file_write expects 2 arguments")
+        check("file_seek arity", "file_seek(1)\n",
+              stderr="file_seek expects 2 or 3 arguments")
+        check("file_read type", "file_read(1)\n",
+              stderr="file_read expects a file")
+        check("file_read size type",
+              f'let h = file_open("{quoted_handle}", "r");\n'
+              f'file_read(h, "x")\n',
+              stderr="file_read size must be a non-negative integer")
+        check("file_seek whence type",
+              f'let h = file_open("{quoted_handle}", "r");\n'
+              f'file_seek(h, 0, "x")\n',
+              stderr="file_seek whence must be an integer")
 
     proc = run("def bad() { 1/0; }\nbad() + 1\n")
     assert "division by zero" in proc.stderr
@@ -580,6 +758,20 @@ def main():
         proc = run_file(bom_script)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "bom\n", repr(proc.stdout)
+
+        input_script = os.path.join(tmp, "input.calc")
+        with open(input_script, "w", encoding="utf-8") as f:
+            f.write('print(input("? "));\n')
+        proc = subprocess.run(
+            [BIN, input_script],
+            input="hello\n",
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "? hello\n", repr(proc.stdout)
 
         if sys.platform != "win32":
             executable = os.path.abspath(BIN)

@@ -1,6 +1,7 @@
 #ifndef CALC_PLATFORM_H
 #define CALC_PLATFORM_H
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,5 +32,37 @@ bool platform_run_command_status(
     const std::string &command,
     const std::vector<std::pair<std::string, std::string>> &env,
     int &status);
+
+/* Read an entire file as bytes.  On failure, `error` describes the problem. */
+bool platform_read_file(const std::string &path, std::string &data,
+                        std::string &error);
+
+/* Write or append `data` to a file.  On failure, `error` is set. */
+bool platform_write_file(const std::string &path, const std::string &data,
+                         bool append, std::string &error);
+
+/* Return true when `path` exists. */
+bool platform_file_exists(const std::string &path);
+
+/* Opaque streaming file handle. */
+struct platform_file;
+using platform_file_ptr = std::shared_ptr<platform_file>;
+
+platform_file_ptr platform_file_open(const std::string &path,
+                                     const std::string &mode,
+                                     std::string &error);
+bool platform_file_read(const platform_file_ptr &file, size_t limit,
+                        std::string &data, std::string &error);
+bool platform_file_write(const platform_file_ptr &file,
+                         const std::string &data, std::string &error);
+bool platform_file_seek(const platform_file_ptr &file, long long offset,
+                        int whence, std::string &error);
+long long platform_file_tell(const platform_file_ptr &file,
+                             std::string &error);
+bool platform_file_eof(const platform_file_ptr &file);
+bool platform_file_flush(const platform_file_ptr &file, std::string &error);
+void platform_file_close(const platform_file_ptr &file, std::string &error);
+bool platform_file_is_open(const platform_file_ptr &file);
+std::string platform_file_path(const platform_file_ptr &file);
 
 #endif

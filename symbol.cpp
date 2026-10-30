@@ -18,6 +18,7 @@ struct symbol *newsym(const char *name) {
     s->name_len = len;
     s->val = NULL;
     s->exported = false;
+    s->is_const = false;
     return s;
 }
 

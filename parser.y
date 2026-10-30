@@ -48,7 +48,7 @@ static char *join_import_path(const char *left, const char *right) {
 %token <fn> BUILTIN "built-in function"
 %token <str> XSTRING "string"
 %token EOL "end of line"
-%token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let"
+%token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let" CONST "const"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null"
 %token IMPORT "import" PACKAGE "package" EXPORT "export"
@@ -91,12 +91,14 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($2, $4, $7); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
+    | EXPORT CONST NAME '=' exp ';'       { $$ = newvar($3, $5, true, true); }
     | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($3, $5, $8, true); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
     | IMPORT importpath ';'               { $$ = newimport($2); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
+    | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
     ;
 
 importpath: NAME                          { $$ = $1; }

@@ -301,6 +301,19 @@ def main():
     )
     check("underscore identifier", "let my_value = 3;\nmy_value\n",
           stdout="= 3")
+    check("const declaration", "const x = 3;\nx\n", stdout="= 3")
+    check("const reassignment", "const x = 1;\nx = 2;\n",
+          stderr="cannot assign to constant x")
+    check(
+        "const closure reassignment",
+        "const x = 1;\nfunc f() { x = 2; }\nf();\n",
+        stderr="cannot assign to constant x",
+    )
+    check(
+        "const binding is shallow",
+        "const a = [1, 2];\na[0] = 9;\na\n",
+        stdout="= [9, 2]",
+    )
 
     check("string concat", '"a" + "b"\n', stdout="= ab")
     check("string compare", '"a" < "b"\n', stdout="= 1")
@@ -1186,6 +1199,7 @@ def main():
             "app/aa/bb/cc/cc.calc",
             "package cc {\n"
             "  export let value = 42;\n"
+            "  export const fixed = 7;\n"
             "  export func hello(name) { return \"hi \" + name; }\n"
             "  func hidden() { return 99; }\n"
             "}\n",
@@ -1194,6 +1208,7 @@ def main():
             "app/main.calc",
             "import aa.bb.cc;\n"
             "print(cc.value);\n"
+            "print(cc.fixed);\n"
             "print(cc.hello(\"x\"));\n"
             "import aa.bb;\n"
             "print(bb.name);\n"
@@ -1204,7 +1219,7 @@ def main():
         )
         proc = run_file(app_main)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.splitlines() == ["42", "hi x", "bb", "42", "aa", "42"], (
+        assert proc.stdout.splitlines() == ["42", "7", "hi x", "bb", "42", "aa", "42"], (
             proc.stdout
         )
         assert proc.stderr == "", proc.stderr

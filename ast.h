@@ -158,6 +158,7 @@ struct symdef {
     char *name;
     struct ast *v;
     int exported;
+    int is_const;
 };
 
 struct package_node {
@@ -204,7 +205,8 @@ struct ast *newnullast();
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);
 struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body);
 struct ast *newsname(char *s);
-struct ast *newvar(char *s, struct ast *v, bool exported = false);
+struct ast *newvar(char *s, struct ast *v, bool exported = false,
+                   bool is_const = false);
 
 struct ast *newret(struct ast *v);
 struct ast *newbrk();

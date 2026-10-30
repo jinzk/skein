@@ -9,6 +9,7 @@ struct symbol {
     size_t name_len;
     struct value_t *val;
     bool exported;
+    bool is_const;
 };
 
 struct symlist {

@@ -1943,6 +1943,10 @@ static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
         yyerror("symbol not found %s", ref->name);
         return NULL;
     }
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", ref->name);
+        return NULL;
+    }
     struct value_t *v = eval(value_ast);
     if (!v) return NULL;
     freeval(s->val);
@@ -2035,15 +2039,17 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'D': {
-            char *name = ((struct symdef *)a)->name;
+            struct symdef *def = (struct symdef *)a;
+            char *name = def->name;
             if (isrepeated(name)) {
                 yyerror("symbol repeated %s", name);
             } else {
-                struct value_t *v = eval(((struct symdef *)a)->v);
+                struct value_t *v = eval(def->v);
                 if (v) {
                     struct symbol *s = newsym(name);
                     s->val = v;
-                    s->exported = ((struct symdef *)a)->exported;
+                    s->exported = def->exported;
+                    s->is_const = def->is_const;
                     savesym(s);
                 }
             }

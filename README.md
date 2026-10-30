@@ -88,6 +88,7 @@ shebang 行同样会被跳过。
 ```text
 package cc {
   export let value = 42;
+  export const fixed = 7;
 
   export func hello(name) {
     return "hi " + name;
@@ -100,7 +101,7 @@ package cc {
 ```
 
 - `package name {}` 创建独立作用域；
-- `export let` / `export func` 导出标识符；
+- `export let` / `export const` / `export func` 导出标识符；
 - 也可以使用 `export name = expr;` 简写；
 - 没有 `export` 的定义是包私有的；
 - 包名必须与所在文件夹名相同；可以多层嵌套。
@@ -183,7 +184,7 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 - 导入包在独立作用域中执行，不能读取主包的全局变量；
 - 主文件中的 `package` 块也是独立作用域，需要的 `import` 应放在块内；
 - 包内函数保留自己的闭包环境；
-- `export let` 的值在包加载时复制到命名空间；之后导出变量本身再变化，不会自动同步到已导入的命名空间；
+- `export let` / `export const` 的值在包加载时复制到命名空间；之后导出变量本身再变化，不会自动同步到已导入的命名空间；
 - 导出函数仍然可以访问并修改包内部状态。
 
 ### 限制
@@ -191,7 +192,7 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 - 每个包使用一个 `<name>.calc` 或 `index.calc` 作为入口；
 - 当前不提供相对导入、通配导入或包别名；
 - 子包会被父包加载时自动加载；
-- `export` 目前只支持 `let` 和命名 `func` 定义。
+- `export` 目前支持 `let`、`const` 和命名 `func` 定义。
 
 ## 语言概览
 
@@ -216,6 +217,17 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 let x = 10;
 x = x + 1;
 x
+
+const y = 20;
+y = 21;        // 错误：cannot assign to constant y
+```
+
+`const` 只约束绑定，不是深不可变：
+
+```text
+const a = [1, 2];
+a[0] = 9;      // 允许
+a              // [9, 2]
 ```
 
 变量名可以包含下划线：`my_value`。
@@ -772,6 +784,7 @@ f.close()
 - 运行时错误中止当前语句/函数，不回滚已经发生的副作用；
 - 函数出错时不返回部分结果；
 - `let` 初始化失败不会创建绑定；普通赋值失败会保留旧值；
+- 给 `const` 绑定重新赋值会报 `cannot assign to constant`，但修改其容器内容仍然允许；
 - 脚本模式默认在第一条错误后停止；
 - `-k` / `--keep-going` 让脚本继续执行下一条顶层语句，但最终退出码仍为 `1`；
 - REPL 在错误后回到提示符，正常 EOF 退出码为 `0`；

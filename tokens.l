@@ -196,6 +196,7 @@ EXP ([Ee][-+]?[0-9]+)
 "while" { return WHILE; }
 "for" { return FOR; }
 "let" { return LET; }
+"const" { return CONST; }
 "func" { return FUNC; }
 "package" { return PACKAGE; }
 "import" { return IMPORT; }

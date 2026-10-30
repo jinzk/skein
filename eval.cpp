@@ -691,6 +691,12 @@ static struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_range) {
+        if (args.empty() || args.size() > 3) {
+            yyerror("range expects 1 to 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
@@ -724,6 +730,62 @@ static struct value_t *call_builtin(int functype,
                         typename_of(arg));
             }
             break;
+        case B_range: {
+            long long start = 0;
+            long long length = 0;
+            long long step = 1;
+
+            if (args.size() == 1) {
+                if (args[0]->type != T_int) {
+                    yyerror("range length must be an integer");
+                    break;
+                }
+                length = ((struct int_value_t *)args[0])->value;
+            } else {
+                if (args[0]->type != T_int) {
+                    yyerror("range start must be an integer");
+                    break;
+                }
+                start = ((struct int_value_t *)args[0])->value;
+                if (args[1]->type != T_int) {
+                    yyerror("range length must be an integer");
+                    break;
+                }
+                length = ((struct int_value_t *)args[1])->value;
+                if (args.size() == 3) {
+                    if (args[2]->type != T_int) {
+                        yyerror("range step must be an integer");
+                        break;
+                    }
+                    step = ((struct int_value_t *)args[2])->value;
+                }
+            }
+
+            if (length < 0) {
+                yyerror("range length must be non-negative");
+                break;
+            }
+            if (step == 0) {
+                yyerror("range step must not be zero");
+                break;
+            }
+
+            struct list_value_t *list = newlistval();
+            list->payload->items.reserve((size_t)length);
+            for (long long i = 0; i < length; ++i) {
+                __int128 value = (__int128)start + (__int128)i * step;
+                if (value < LLONG_MIN || value > LLONG_MAX) {
+                    yyerror("range value overflow");
+                    freeval((struct value_t *)list);
+                    list = NULL;
+                    break;
+                }
+                list->payload->items.push_back(newintval((long long)value));
+            }
+            if (list)
+                ret = (struct value_t *)list;
+            break;
+        }
         case B_int:
             if (arg->type == T_int) {
                 ret = newintval(((struct int_value_t *)arg)->value);

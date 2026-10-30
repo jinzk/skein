@@ -550,6 +550,31 @@ def main():
           stderr="cannot iterate int")
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
           stderr="symbol not found x")
+    check("range length only", "range(5)\n", stdout="= [0, 1, 2, 3, 4]")
+    check("range start and length", "range(-2, 3)\n", stdout="= [-2, -1, 0]")
+    check("range positive step", "range(5, 3, 2)\n", stdout="= [5, 7, 9]")
+    check("range negative step", "range(5, 3, -2)\n", stdout="= [5, 3, 1]")
+    check("range empty", "range(10, 0)\n", stdout="= []")
+    check("range len", "len(range(0, 7, 2))\n", stdout="= 7")
+    check(
+        "for in range",
+        "for (let x in range(1, 3)) { print(x); }\n",
+        stdout="1\n2\n3\n",
+    )
+    check("range negative length", "range(0, -1)\n",
+          stderr="range length must be non-negative")
+    check("range zero step", "range(0, 3, 0)\n",
+          stderr="range step must not be zero")
+    check("range non-integer start", 'range("a", 2)\n',
+          stderr="range start must be an integer")
+    check("range non-integer length", 'range(0, "a")\n',
+          stderr="range length must be an integer")
+    check("range non-integer step", 'range(0, 2, 1.5)\n',
+          stderr="range step must be an integer")
+    check("range arity", "range()\n",
+          stderr="range expects 1 to 3 arguments")
+    check("range overflow", "range(9223372036854775807, 2)\n",
+          stderr="range value overflow")
 
     check(
         "break",

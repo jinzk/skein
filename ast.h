@@ -12,6 +12,7 @@ enum bifs {
     B_log,
     B_abs,
     B_len,
+    B_range,
     B_print,
     B_list,
     B_dict,

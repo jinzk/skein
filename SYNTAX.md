@@ -419,6 +419,7 @@ for (let key in {"a": 1, "b": 2}) {
 - dict 遍历键；
 - string 遍历 UTF-8 字符；
 - bytes 遍历 `0..255` 的字节值；
+- 可以配合 `range()` 做计数循环；
 - 被遍历对象在循环开始时求值一次；
 - 循环变量只存在于循环作用域；
 - 支持 `break` / `continue` / `return`。
@@ -584,7 +585,7 @@ sqrt exp log abs
 ### 输出和转换
 
 ```text
-print list dict int float str format len
+print list dict int float str format len range
 ```
 
 ### 进程
@@ -629,6 +630,30 @@ let n = int("42");
 let b = read_bytes("data.bin");
 let h = file_open("data.bin", "rb");
 ```
+
+### range
+
+```text
+range(length)                 → [0, 1, ..., length-1]
+range(start, length)          → [start, ..., start+length-1]
+range(start, length, step)    → 长度为 length 的等差数列
+```
+
+示例：
+
+```text
+range(5)             → [0, 1, 2, 3, 4]
+range(-2, 3)         → [-2, -1, 0]
+range(5, 3, -2)      → [5, 3, 1]
+```
+
+规则：
+
+- 第二个参数是**长度**，不是结束值；
+- `length` 必须是非负整数；
+- `step` 不能为 0；
+- 结果始终是 list；
+- 元素计算超出 `int64` 范围时报错。
 
 ## 8. 值语义
 

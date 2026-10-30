@@ -212,6 +212,7 @@ EXP ([Ee][-+]?[0-9]+)
 "log" { yylval.fn = B_log; return BUILTIN; }
 "abs" { yylval.fn = B_abs; return BUILTIN; }
 "len" { yylval.fn = B_len; return BUILTIN; }
+"range" { yylval.fn = B_range; return BUILTIN; }
 "print" { yylval.fn = B_print; return BUILTIN; }
 "list" { yylval.fn = B_list; return BUILTIN; }
 "dict" { yylval.fn = B_dict; return BUILTIN; }

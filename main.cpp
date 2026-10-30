@@ -1,14 +1,16 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
+#include <cstdio>
+#include <cstdlib>
+
 #include "scopestack.h"
 #include "parser.hpp"
 
 int indent_count = 0;
 
 int main() {
-    printf("> ");
+    std::printf("> ");
+    std::fflush(stdout);
     initscope();
-	return yyparse();
+    int status = yyparse();
+    donescope();
+    return status;
 }
-

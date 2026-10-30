@@ -1,4 +1,5 @@
 .cache
 build
 tags
-
+._*
+.DS_Store

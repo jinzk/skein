@@ -2,6 +2,8 @@
 #define _SCOPESTACK_H_
 #include "valuetype.h"
 
+struct symbol;
+
 struct scope_t {
     struct symbol *func;
     value_t *ret;
@@ -17,9 +19,10 @@ struct scope_t *topscope();
 void pushscope(struct symbol *);
 void initscope();
 void popscope();
+void donescope();
 struct symbol *lookupsym(char *);
 bool isrepeated(char *);
 void savesym(struct symbol *);
-void retval(struct value_t *);
+bool retval(struct value_t *);
 
 #endif

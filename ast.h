@@ -43,6 +43,7 @@ struct funcdef {
     char *name;
     struct symlist *sl;
     struct ast *ast;
+    int moved; /* body/params transferred to a runtime function value */
 };
 
 struct fncall {
@@ -62,6 +63,14 @@ struct flow {
     struct ast *cond;
     struct ast *tl;
     struct ast *el;
+};
+
+struct forloop {
+    int nodetype;
+    struct ast *init;
+    struct ast *cond;
+    struct ast *step;
+    struct ast *body;
 };
 
 struct val {
@@ -110,6 +119,7 @@ struct ast *newint(int i);
 struct ast *newfloat(double d);
 struct ast *newstr(char *s);
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);
+struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body);
 struct ast *newsname(char *s);
 struct ast *newvar(char *s, struct ast *v);
 

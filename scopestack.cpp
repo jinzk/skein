@@ -1,8 +1,9 @@
 #include "scopestack.h"
 #include "symbol.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 static struct scopestack *scope_stack = NULL;
 static struct scope_t *global_scope = NULL;
@@ -13,11 +14,19 @@ struct scope_t *topscope() {
 }
 
 void pushscope(struct symbol *func) {
-    struct scope_t * s = (struct scope_t *)malloc(sizeof(struct scope_t));
+    struct scope_t *s = (struct scope_t *)std::malloc(sizeof(struct scope_t));
+    if (!s) {
+        std::fprintf(stderr, "out of space\n");
+        std::exit(1);
+    }
     s->syms = NULL;
     s->ret = NULL;
     s->func = func;
-    struct scopestack *p = (struct scopestack *)malloc(sizeof(struct scopestack));
+    struct scopestack *p = (struct scopestack *)std::malloc(sizeof(struct scopestack));
+    if (!p) {
+        std::fprintf(stderr, "out of space\n");
+        std::exit(1);
+    }
     p->last = scope_stack;
     p->scope = s;
     scope_stack = p;
@@ -31,11 +40,17 @@ void popscope() {
     while (sp) {
         struct symlist *s = sp;
         sp = sp->next;
-        free(s->sym);
-        free(s);
+        struct symbol *sym = s->sym;
+        if (sym) {
+            freeval(sym->val);
+            std::free(sym->name);
+            std::free(sym);
+        }
+        std::free(s);
     }
-    free(p->scope);
-    free(p);
+    /* scope->ret is owned by the caller (function call result), not freed here. */
+    std::free(p->scope);
+    std::free(p);
 }
 
 void initscope() {
@@ -44,22 +59,26 @@ void initscope() {
     global_scope = topscope();
 }
 
+void donescope() {
+    while (scope_stack) popscope();
+    global_scope = NULL;
+}
+
 struct symbol *lookupsym(char *sym) {
     struct scopestack *p = scope_stack;
     while (p) {
         struct symlist *sl = p->scope->syms;
         while (sl) {
-            if(sl->sym->name && !strcmp(sl->sym->name, sym)) {
+            if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
                 return sl->sym;
-            }
             sl = sl->next;
         }
         if (p->scope->func) {
+            if (!global_scope) return NULL;
             sl = global_scope->syms;
             while (sl) {
-                if(sl->sym->name && !strcmp(sl->sym->name, sym)) {
+                if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
                     return sl->sym;
-                }
                 sl = sl->next;
             }
             return NULL;
@@ -74,9 +93,8 @@ bool isrepeated(char *sym) {
     if (p) {
         struct symlist *sl = p->scope->syms;
         while (sl) {
-            if(sl->sym->name && !strcmp(sl->sym->name, sym)) {
+            if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
                 return true;
-            }
             sl = sl->next;
         }
     }
@@ -84,20 +102,25 @@ bool isrepeated(char *sym) {
 }
 
 void savesym(struct symbol *sp) {
-    struct symlist *sl = (struct symlist *)malloc(sizeof(struct symlist));
+    if (!scope_stack) return;
+    struct symlist *sl = (struct symlist *)std::malloc(sizeof(struct symlist));
+    if (!sl) {
+        std::fprintf(stderr, "out of space\n");
+        std::exit(1);
+    }
     sl->sym = sp;
     sl->next = scope_stack->scope->syms;
     scope_stack->scope->syms = sl;
-
 }
 
-void retval(struct value_t *r) {
+bool retval(struct value_t *r) {
     struct scopestack *p = scope_stack;
     while (p) {
         if (p->scope->func) {
             p->scope->ret = r;
-            break;
+            return true;
         }
         p = p->last;
     }
+    return false;
 }

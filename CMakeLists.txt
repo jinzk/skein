@@ -1,34 +1,55 @@
-set(PROJECT_NAME calc-demo)
-project(${PROJECT_NAME})  
-cmake_minimum_required(VERSION 3.10)  
+cmake_minimum_required(VERSION 3.10)
+project(calc-demo LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --std=c11")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fexceptions")
 
-find_package(BISON)
-find_package(FLEX)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
 
-add_definitions(-D_DEBUG -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS)
+find_package(BISON REQUIRED)
+find_package(FLEX REQUIRED)
 
 BISON_TARGET(MyParser parser.y ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp)
 FLEX_TARGET(MyScanner tokens.l ${CMAKE_CURRENT_BINARY_DIR}/tokens.cpp)
 ADD_FLEX_BISON_DEPENDENCY(MyScanner MyParser)
 
-aux_source_directory(. DIR_SRCS)
-add_executable(${PROJECT_NAME} ${BISON_MyParser_OUTPUTS} ${FLEX_MyScanner_OUTPUTS} ${DIR_SRCS})
+add_executable(${PROJECT_NAME}
+  ${BISON_MyParser_OUTPUTS}
+  ${FLEX_MyScanner_OUTPUTS}
+  ast.cpp
+  eval.cpp
+  main.cpp
+  scopestack.cpp
+  symbol.cpp
+  valuetype.cpp
+)
 
-find_package(LLVM)
-if( NOT LLVM_FOUND )
-  message(FATAL_ERROR "LLVM package can't be found. Set CMAKE_PREFIX_PATH variable to LLVM's installation prefix.")
+target_include_directories(${PROJECT_NAME} PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 endif()
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${LLVM_INCLUDE_DIRS} )
-link_directories( ${LLVM_LIBRARY_DIRS} )
+target_link_libraries(${PROJECT_NAME} PRIVATE m)
 
-target_link_libraries(${PROJECT_NAME} ${REQ_LLVM_LIBRARIES})
-
-get_cmake_property(_variableNames VARIABLES)
-#foreach (_variableName ${_variableNames})
-#    message(STATUS "${_variableName}=${${_variableName}}")
-#endforeach()
+include(CTest)
+if(BUILD_TESTING)
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME calc_tests
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_calc.py
+              $<TARGET_FILE:${PROJECT_NAME}>
+    )
+  else()
+    message(WARNING "Python3 not found; calc_tests will not be registered")
+  endif()
+endif()

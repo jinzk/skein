@@ -1,12 +1,10 @@
 %{
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <string.h>
-#include <map>
-#include <vector>
-#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstdarg>
+#include <cstring>
+
 #include "ast.h"
 #include "scopestack.h"
 #include "eval.h"
@@ -16,12 +14,12 @@ extern int yyparse();
 %}
 
 %union {
-	struct ast *a;
-	struct symlist *sl;
-	double d;
-	int i;
-	int fn;
-	char *str;
+    struct ast *a;
+    struct symlist *sl;
+    double d;
+    int i;
+    int fn;
+    char *str;
 }
 
 %token <d> FLOAT
@@ -29,123 +27,174 @@ extern int yyparse();
 %token <str> NAME
 %token <fn> FUNC
 %token <str> XSTRING
-%token EOL INDENT
-%token IF THEN ELSE WHILE DO FOR DEF END LET
+%token EOL
+%token IF ELSE WHILE FOR DEF LET
 %token RETURN BREAK CONTINUE
 
-%right RETURN
 %nonassoc <fn> CMP
-%right '='
+%precedence '='
 %left '+' '-'
 %left '*' '/'
-%nonassoc UMINUS
-%nonassoc NOELSE
-%nonassoc ELSE
+%precedence UMINUS
+%precedence '['
+%precedence NOELSE
+%precedence ELSE
 
-%type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist;
+%type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
+%type <a> forinit forcond forend
 %type <sl> symlist
+
+%destructor { treefree($$); } <a>
+%destructor { free($$); } <str>
+%destructor { symlistfree($$); } <sl>
 
 %start calc
 %%
 
-stmt: IF '(' exp ')' scope {$$=newflow('I', $3, $5, NULL);} %prec NOELSE
-	| IF '(' exp ')' scope ELSE scope {$$=newflow('I', $3, $5, $7);}
-	| WHILE '(' exp ')' scope {$$=newflow('W', $3, $5, NULL);}
-	| DEF NAME '(' symlist ')' '{' list '}' {$$=newfunc($2, $4, $7);}
-	| LET NAME '=' exp ';' {$$=newvar($2, $4);}
-	;
+stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
+    | IF '(' exp ')' scope ELSE scope     { $$ = newflow('I', $3, $5, $7); }
+    | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
+    | FOR '(' forinit ';' forcond ';' forend ')' scope
+                                           { $$ = newfor($3, $5, $7, $9); }
+    | DEF NAME '(' symlist ')' '{' list '}' { $$ = newfunc($2, $4, $7); }
+    | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
+    ;
 
-line: RETURN exp {$$=newret($2);}
-	| RETURN {$$=newret(NULL);}
-	| BREAK {$$=newbrk();}
-	| CONTINUE {$$=newctn();}
-	| exp {$$ = $1;}
-	;
+line: RETURN exp                          { $$ = newret($2); }
+    | RETURN                              { $$ = newret(NULL); }
+    | BREAK                               { $$ = newbrk(); }
+    | CONTINUE                            { $$ = newctn(); }
+    | exp                                 { $$ = $1; }
+    ;
 
-scope: stmt {$$ = $1;}
-	| line ';' {$$ = $1;}
-	| '{' list '}' {$$ = newscope($2);}
-	;
+scope: stmt                               { $$ = $1; }
+     | line ';'                           { $$ = $1; }
+     | '{' list '}'                       { $$ = newscope($2); }
+     ;
 
-list: {$$=NULL;}
-	| scope list {
-		if ($2 == NULL)
-			$$ = $1;
-		else
-			$$ = newast('L', $1, $2);
-	}
-	;
+list: %empty                              { $$ = NULL; }
+    | scope list {
+        if ($2 == NULL)
+            $$ = $1;
+        else
+            $$ = newast('L', $1, $2);
+      }
+    ;
 
-exp: exp '+' exp {$$ = newast('+', $1, $3);}
-	| exp '-' exp {$$ = newast('-', $1, $3);}
-	| exp '*' exp {$$ = newast('*', $1, $3);}
-	| exp '/' exp {$$ = newast('/', $1, $3);}
-	| '(' exp ')' {$$ = $2;}
-	| '-' exp %prec UMINUS {$$ = newast('M', $2, NULL);}
-	| exp CMP exp {$$ = newcmp($2, $1, $3);}
-	| NAME { $$ = newref($1);}
-	| NAME '=' exp { $$ = newasgn($1, $3);}
-	| FUNC '(' explist ')' {$$ = newfunc($1, $3);}
-	| NAME '(' explist ')' {$$ = newcall($1, $3);}
-	| '[' valuelist ']' {$$ = $2;}
-	| '{' pairlist '}' {$$ = $2;}
-	| value
-	;
+exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
+    | exp '-' exp                         { $$ = newast('-', $1, $3); }
+    | exp '*' exp                         { $$ = newast('*', $1, $3); }
+    | exp '/' exp                         { $$ = newast('/', $1, $3); }
+    | '(' exp ')'                         { $$ = $2; }
+    | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
+    | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
+    | NAME                                { $$ = newref($1); }
+    | NAME '=' exp                        { $$ = newasgn($1, $3); }
+    | FUNC '(' explist ')'                { $$ = newfunc($1, $3); }
+    | NAME '(' explist ')'                { $$ = newcall($1, $3); }
+    | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
+    | '[' valuelist ']'                   { $$ = $2; }
+    | '{' pairlist '}'                    { $$ = $2; }
+    | value
+    ;
 
-value: INT {$$ = newint($1);}
-	| FLOAT {$$ = newfloat($1);}
-	| XSTRING {$$ = newstr($1);}
-	;
+value: INT                                { $$ = newint($1); }
+    | FLOAT                               { $$ = newfloat($1); }
+    | XSTRING                             { $$ = newstr($1); free($1); }
+    ;
 
-valuelist: value {$$=newlist($1, NULL);}
-	| value ',' valuelist  {$$ = $$=newlist($1, $3);}
-	;
+valuelist: %empty                         { $$ = newlist(NULL, NULL); }
+    | exp                                 { $$ = newlist($1, NULL); }
+    | exp ',' valuelist                   { $$ = newlist($1, $3); }
+    ;
 
-pairlist: value ':' value {$$=newdict($1, $3, NULL);}
-	| value ':' value ',' pairlist  {$$=newdict($1, $3, $5);}
-	;
+pairlist: exp ':' exp                     { $$ = newdict($1, $3, NULL); }
+    | exp ':' exp ',' pairlist            { $$ = newdict($1, $3, $5); }
+    ;
 
-explist: exp
-	| exp ',' explist {$$ = newast('L', $1, $3);}
-	;
+forinit: %empty                           { $$ = NULL; }
+    | exp                                 { $$ = $1; }
+    | LET NAME '=' exp                    { $$ = newvar($2, $4); }
+    ;
 
-symlist: NAME {$$ = newsymlist(newsym($1), NULL);}
-	| NAME ',' symlist {$$ = newsymlist(newsym($1), $3);}
-	;
+forcond: %empty                           { $$ = NULL; }
+    | exp                                 { $$ = $1; }
+    ;
 
-calclist: exp {$$ = $1;}
-	| list {$$ = $1;}
-	;
+forend: %empty                            { $$ = NULL; }
+    | exp                                 { $$ = $1; }
+    ;
+
+explist: %empty                            { $$ = NULL; }
+    | exp
+    | exp ',' explist                     { $$ = newast('L', $1, $3); }
+    ;
+
+symlist: %empty                           { $$ = NULL; }
+    | NAME {
+        struct symbol *s = newsym($1);
+        free($1);
+        $$ = newsymlist(s, NULL);
+      }
+    | NAME ',' symlist {
+        struct symbol *s = newsym($1);
+        free($1);
+        $$ = newsymlist(s, $3);
+      }
+    ;
+
+calclist: exp { $$ = $1; }
+    | list { $$ = $1; }
+    ;
 
 docalc: calclist EOL {
-		struct value_t *rslt = eval($1);
-		if (rslt) {
-			switch (rslt->type) {
-				case T_int: printf("= %4d\n> ", ((struct int_value_t *)rslt)->value); break;
-				case T_float: printf("= %4.4g\n> ", ((struct float_value_t *)rslt)->value); break;
-				case T_string: printf("= %s\n> ", ((struct string_value_t *)rslt)->value); break;
-				case T_list: {printf("list\n> ");}; break;
-				case T_dict: {printf("dict\n> ");}; break;
-				default:  printf("not define value type %c\n> ", rslt->type); break;
-			}
-		} else {
-			printf("> ");
-		}
-		if ($1) treefree($1);
-	}
-	| error {yyclearin; yyerrok; printf("> ");}
-	;
+        struct value_t *rslt = eval($1);
+        if (rslt) {
+            switch (rslt->type) {
+                case T_return:
+                    yyerror("return outside function");
+                    break;
+                case T_break:
+                    yyerror("break outside loop");
+                    break;
+                case T_continue:
+                    yyerror("continue outside loop");
+                    break;
+                default:
+                    printf("= ");
+                    printvalue(rslt);
+                    printf("\n");
+                    break;
+            }
+            freeval(rslt);
+        }
+        printf("> ");
+        fflush(stdout);
+        if ($1) treefree($1);
+        $$ = NULL;
+    }
+    | error EOL {
+        yyerrok;
+        printf("> ");
+        fflush(stdout);
+        $$ = NULL;
+    }
+    ;
 
-calc: 
-	| calc docalc
-	;
+calc: %empty
+    | calc docalc { (void)$2; }
+    ;
 %%
 
 void yyerror(const char *s, ...) {
-	va_list ap;
-	va_start(ap, s);
+    va_list ap;
+    va_start(ap, s);
 
-	fprintf(stderr, "%d: error: ", yylineno);
-	vfprintf(stderr, s, ap);
-	fprintf(stderr, "\n");
+    fflush(stdout);
+    fprintf(stderr, "%d: error: ", yylineno);
+    vfprintf(stderr, s, ap);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+
+    va_end(ap);
 }

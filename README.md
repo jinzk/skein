@@ -34,6 +34,45 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison 和 Flex。平�
 
 脚本文件建议保存为 UTF-8；输入开头的 UTF-8 BOM 会被忽略。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
 
+## 脚本模式与 shebang
+
+可以直接把脚本文件作为第一个参数运行：
+
+```bash
+./build/calc-demo script.calc
+```
+
+也可以使用 shebang：
+
+```text
+#!/usr/bin/env calc-demo
+print("hello");
+```
+
+```bash
+chmod +x script.calc
+./script.calc
+```
+
+使用 `/usr/bin/env calc-demo` 时，请确保 `calc-demo` 在 `PATH` 中；也可以直接写解释器的绝对路径。
+
+脚本模式会：
+
+- 跳过第一行的 `#!`；
+- 跳过 UTF-8 BOM；
+- 不打印 `> ` 提示符；
+- 不打印顶层表达式的 `= result` 结果，需要输出时请使用 `print`；
+- 忽略第一行之外的普通注释仍使用 `//`；
+- 使用 `calc-demo -` 可以从 stdin 运行脚本模式。
+
+Windows/MinGW 没有原生 shebang，直接使用：
+
+```bat
+build\calc-demo.exe script.calc
+```
+
+shebang 行同样会被跳过。
+
 交互模式：
 
 - `Ctrl-C` 取消当前输入（包括未闭合的多行块），或中断正在执行的程序，回到 `> ` 提示符。

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Golden/smoke tests for the calc-demo interpreter."""
 
+import os
 import subprocess
 import sys
+import tempfile
 
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./calc-demo"
@@ -20,6 +22,16 @@ def run(source, timeout=5):
         )
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(f"interpreter timed out for input {source!r}") from exc
+
+
+def run_file(path, timeout=5):
+    return subprocess.run(
+        [BIN, path],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=timeout,
+    )
 
 
 def check(name, source, *, stdout=None, stdout_all=None, stderr=None, code=0):
@@ -548,6 +560,54 @@ def main():
     check("empty block", "{}\n", code=0)
     check("utf8 bom", "\ufeff1+2\n", stdout="= 3")
     check("crlf input", "1+2\r\n", stdout="= 3")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        script = os.path.join(tmp, "script.calc")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(
+                "#!/usr/bin/env calc-demo\n"
+                'print("script");\n'
+                "1 + 2\n"
+            )
+        proc = run_file(script)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "script\n", repr(proc.stdout)
+        assert proc.stderr == "", proc.stderr
+
+        bom_script = os.path.join(tmp, "bom.calc")
+        with open(bom_script, "w", encoding="utf-8") as f:
+            f.write("\ufeff#!/usr/bin/env calc-demo\nprint(\"bom\");\n")
+        proc = run_file(bom_script)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "bom\n", repr(proc.stdout)
+
+        if sys.platform != "win32":
+            executable = os.path.abspath(BIN)
+            if " " not in executable:
+                shebang_script = os.path.join(tmp, "shebang.calc")
+                with open(shebang_script, "w", encoding="utf-8") as f:
+                    f.write(f"#!{executable}\nprint(\"shebang\");\n")
+                os.chmod(shebang_script, 0o755)
+                proc = subprocess.run(
+                    [shebang_script],
+                    text=True,
+                    encoding="utf-8",
+                    capture_output=True,
+                    timeout=5,
+                )
+                assert proc.returncode == 0, proc.stderr
+                assert proc.stdout == "shebang\n", repr(proc.stdout)
+
+    proc = subprocess.run(
+        [BIN, "-"],
+        input='print("stdin-script");\n',
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=5,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "stdin-script\n", repr(proc.stdout)
 
     print(f"all tests passed for {BIN}")
 

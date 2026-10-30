@@ -63,20 +63,20 @@ static input_status read_input_line() {
 
     for (;;) {
         if (g_interrupted) {
-            std::clearerr(stdin);
+            std::clearerr(yyin);
             return INPUT_INTERRUPTED;
         }
 
         errno = 0;
-        int c = std::getchar();
+        int c = std::fgetc(yyin);
         if (c == EOF) {
             if (g_interrupted) {
-                std::clearerr(stdin);
+                std::clearerr(yyin);
                 return INPUT_INTERRUPTED;
             }
 #ifdef EINTR
-            if (std::ferror(stdin) && errno == EINTR) {
-                std::clearerr(stdin);
+            if (std::ferror(yyin) && errno == EINTR) {
+                std::clearerr(yyin);
                 g_interrupted = 1;
                 return INPUT_INTERRUPTED;
             }
@@ -92,9 +92,10 @@ static input_status read_input_line() {
             return INPUT_LINE;
         }
         if (c == '\b' || c == 0x7f) {
-            if (!input_line.empty())
+            if (g_interactive && !input_line.empty())
                 input_line.pop_back();
-            continue;
+            if (g_interactive)
+                continue;
         }
         input_line.push_back(static_cast<char>(c));
     }
@@ -141,6 +142,8 @@ static void append_unescaped(const char *s, int len) {
 EXP ([Ee][-+]?[0-9]+)
 
 %%
+
+^"#!"[^\n]*\n? { }
 
 "+" |
 "-" |
@@ -272,10 +275,12 @@ EXP ([Ee][-+]?[0-9]+)
 
 \n {
     if (indent_count > 0) {
-        std::printf("> ");
-        for (int i = 0; i < indent_count; ++i)
-            std::printf("..");
-        std::fflush(stdout);
+        if (g_interactive) {
+            std::printf("> ");
+            for (int i = 0; i < indent_count; ++i)
+                std::printf("..");
+            std::fflush(stdout);
+        }
     } else {
         return EOL;
     }

@@ -185,14 +185,16 @@ docalc: calclist EOL {
                     yyerror("continue outside loop");
                     break;
                 default:
-                    printf("= ");
-                    printvalue(rslt);
-                    printf("\n");
+                    if (g_interactive) {
+                        printf("= ");
+                        printvalue(rslt);
+                        printf("\n");
+                    }
                     break;
             }
         }
         freeval(rslt);
-        if (!g_interrupted) {
+        if (g_interactive && !g_interrupted) {
             printf("> ");
             fflush(stdout);
         }
@@ -204,7 +206,7 @@ docalc: calclist EOL {
     }
     | error EOL {
         yyerrok;
-        if (!g_interrupted) {
+        if (g_interactive && !g_interrupted) {
             printf("> ");
             fflush(stdout);
         }

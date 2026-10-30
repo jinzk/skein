@@ -271,7 +271,7 @@ void free_function_code(struct function_code *code) {
 }
 
 /*
- * A single `def` AST node can be executed more than once (a nested function
+ * A single `func` AST node can be executed more than once (a nested function
  * defined inside another function).  All executions share the same code
  * (body + parameter list), but each gets its own closure environment.
  */

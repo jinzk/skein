@@ -63,14 +63,24 @@ struct bytes_value_t {
     std::string value;
 };
 
+struct list_payload {
+    std::vector<value_t *> items;
+    ~list_payload();
+};
+
+struct dict_payload {
+    std::vector<std::pair<value_t *, value_t *>> items;
+    ~dict_payload();
+};
+
 struct list_value_t {
     enum val_type type;
-    std::vector<value_t *> value;
+    std::shared_ptr<list_payload> payload;
 };
 
 struct dict_value_t {
     enum val_type type;
-    std::vector<std::pair<value_t *, value_t *>> value;
+    std::shared_ptr<dict_payload> payload;
 };
 
 struct func_value_t {

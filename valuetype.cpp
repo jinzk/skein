@@ -98,13 +98,27 @@ struct value_t *newfuncval(std::shared_ptr<function_code> code,
 struct list_value_t *newlistval() {
     struct list_value_t *v = new list_value_t;
     v->type = T_list;
+    v->payload = std::make_shared<list_payload>();
     return v;
 }
 
 struct dict_value_t *newdictval() {
     struct dict_value_t *v = new dict_value_t;
     v->type = T_dict;
+    v->payload = std::make_shared<dict_payload>();
     return v;
+}
+
+list_payload::~list_payload() {
+    for (size_t i = 0; i < items.size(); ++i)
+        freeval(items[i]);
+}
+
+dict_payload::~dict_payload() {
+    for (size_t i = 0; i < items.size(); ++i) {
+        freeval(items[i].first);
+        freeval(items[i].second);
+    }
 }
 
 struct value_t *dupval(struct value_t *v) {
@@ -120,19 +134,16 @@ struct value_t *dupval(struct value_t *v) {
             return newbytesval(((struct bytes_value_t *)v)->value);
         case T_list: {
             struct list_value_t *src = (struct list_value_t *)v;
-            struct list_value_t *dst = newlistval();
-            dst->value.reserve(src->value.size());
-            for (size_t i = 0; i < src->value.size(); ++i)
-                dst->value.push_back(dupval(src->value[i]));
+            struct list_value_t *dst = new list_value_t;
+            dst->type = T_list;
+            dst->payload = src->payload;
             return (struct value_t *)dst;
         }
         case T_dict: {
             struct dict_value_t *src = (struct dict_value_t *)v;
-            struct dict_value_t *dst = newdictval();
-            dst->value.reserve(src->value.size());
-            for (size_t i = 0; i < src->value.size(); ++i)
-                dst->value.push_back(std::make_pair(dupval(src->value[i].first),
-                                                    dupval(src->value[i].second)));
+            struct dict_value_t *dst = new dict_value_t;
+            dst->type = T_dict;
+            dst->payload = src->payload;
             return (struct value_t *)dst;
         }
         case T_func: {
@@ -179,22 +190,12 @@ void freeval(struct value_t *v) {
         case T_bytes:
             delete (struct bytes_value_t *)v;
             break;
-        case T_list: {
-            struct list_value_t *l = (struct list_value_t *)v;
-            for (size_t i = 0; i < l->value.size(); ++i)
-                freeval(l->value[i]);
-            delete l;
+        case T_list:
+            delete (struct list_value_t *)v;
             break;
-        }
-        case T_dict: {
-            struct dict_value_t *d = (struct dict_value_t *)v;
-            for (size_t i = 0; i < d->value.size(); ++i) {
-                freeval(d->value[i].first);
-                freeval(d->value[i].second);
-            }
-            delete d;
+        case T_dict:
+            delete (struct dict_value_t *)v;
             break;
-        }
         case T_func:
             delete (struct func_value_t *)v;
             break;
@@ -278,9 +279,9 @@ std::string value_to_string(const struct value_t *v) {
         case T_list: {
             const struct list_value_t *l = (const struct list_value_t *)v;
             std::string out = "[";
-            for (size_t i = 0; i < l->value.size(); ++i) {
+            for (size_t i = 0; i < l->payload->items.size(); ++i) {
                 if (i) out += ", ";
-                out += value_to_string(l->value[i]);
+                out += value_to_string(l->payload->items[i]);
             }
             out += "]";
             return out;
@@ -288,11 +289,11 @@ std::string value_to_string(const struct value_t *v) {
         case T_dict: {
             const struct dict_value_t *d = (const struct dict_value_t *)v;
             std::string out = "{";
-            for (size_t i = 0; i < d->value.size(); ++i) {
+            for (size_t i = 0; i < d->payload->items.size(); ++i) {
                 if (i) out += ", ";
-                out += value_to_string(d->value[i].first);
+                out += value_to_string(d->payload->items[i].first);
                 out += ": ";
-                out += value_to_string(d->value[i].second);
+                out += value_to_string(d->payload->items[i].second);
             }
             out += "}";
             return out;

@@ -311,8 +311,8 @@ static bool truthy(const struct value_t *v) {
             return s && *s;
         }
         case T_bytes: return !((struct bytes_value_t *)v)->value.empty();
-        case T_list: return !((struct list_value_t *)v)->value.empty();
-        case T_dict: return !((struct dict_value_t *)v)->value.empty();
+        case T_list: return !((struct list_value_t *)v)->payload->items.empty();
+        case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
         case T_func: return true;
         case T_builtin: return true;
         case T_userdata: return true;
@@ -339,20 +339,20 @@ static bool value_equals(struct value_t *a, struct value_t *b) {
         case T_list: {
             struct list_value_t *la = (struct list_value_t *)a;
             struct list_value_t *lb = (struct list_value_t *)b;
-            if (la->value.size() != lb->value.size()) return false;
-            for (size_t i = 0; i < la->value.size(); ++i)
-                if (!value_equals(la->value[i], lb->value[i])) return false;
+            if (la->payload->items.size() != lb->payload->items.size()) return false;
+            for (size_t i = 0; i < la->payload->items.size(); ++i)
+                if (!value_equals(la->payload->items[i], lb->payload->items[i])) return false;
             return true;
         }
         case T_dict: {
             struct dict_value_t *da = (struct dict_value_t *)a;
             struct dict_value_t *db = (struct dict_value_t *)b;
-            if (da->value.size() != db->value.size()) return false;
-            for (size_t i = 0; i < da->value.size(); ++i) {
+            if (da->payload->items.size() != db->payload->items.size()) return false;
+            for (size_t i = 0; i < da->payload->items.size(); ++i) {
                 bool found = false;
-                for (size_t j = 0; j < db->value.size(); ++j) {
-                    if (value_equals(da->value[i].first, db->value[j].first)) {
-                        if (!value_equals(da->value[i].second, db->value[j].second))
+                for (size_t j = 0; j < db->payload->items.size(); ++j) {
+                    if (value_equals(da->payload->items[i].first, db->payload->items[j].first)) {
+                        if (!value_equals(da->payload->items[i].second, db->payload->items[j].second))
                             return false;
                         found = true;
                         break;
@@ -473,9 +473,9 @@ static bool collect_command_env(
     }
 
     struct dict_value_t *dict = (struct dict_value_t *)value;
-    for (size_t i = 0; i < dict->value.size(); ++i) {
-        struct value_t *key = dict->value[i].first;
-        struct value_t *val = dict->value[i].second;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        struct value_t *key = dict->payload->items[i].first;
+        struct value_t *val = dict->payload->items[i].second;
         if (key->type != T_string) {
             yyerror("%s env keys must be strings", who);
             return false;
@@ -1019,11 +1019,11 @@ static struct value_t *call_builtin(int functype,
             for (;;) {
                 size_t found = input.find(sep, position);
                 if (found == std::string::npos) {
-                    parts->value.push_back(
+                    parts->payload->items.push_back(
                         newstrval(input.substr(position).c_str()));
                     break;
                 }
-                parts->value.push_back(
+                parts->payload->items.push_back(
                     newstrval(input.substr(position, found - position).c_str()));
                 position = found + sep.size();
             }
@@ -1047,7 +1047,7 @@ static struct value_t *call_builtin(int functype,
                 while (*p && !std::isspace((unsigned char)*p))
                     ++p;
                 std::string part(start, (size_t)(p - start));
-                parts->value.push_back(newstrval(part.c_str()));
+                parts->payload->items.push_back(newstrval(part.c_str()));
             }
             ret = (struct value_t *)parts;
             break;
@@ -1567,6 +1567,52 @@ static bool collect_index_asts(struct ast *a, std::vector<struct ast *> &out) {
     return a->nodetype == 'N';
 }
 
+/*
+ * Detach a shared payload before mutating it.  The new payload owns fresh
+ * wrapper values; nested containers are still shared through their own
+ * copy-on-write payloads.
+ */
+static void ensure_unique_list(struct list_value_t *list) {
+    if (!list->payload) {
+        list->payload = std::make_shared<list_payload>();
+        return;
+    }
+    if (list->payload.use_count() == 1)
+        return;
+
+    std::shared_ptr<list_payload> copy = std::make_shared<list_payload>();
+    copy->items.reserve(list->payload->items.size());
+    for (size_t i = 0; i < list->payload->items.size(); ++i)
+        copy->items.push_back(dupval(list->payload->items[i]));
+    list->payload = std::move(copy);
+}
+
+static void ensure_unique_dict(struct dict_value_t *dict) {
+    if (!dict->payload) {
+        dict->payload = std::make_shared<dict_payload>();
+        return;
+    }
+    if (dict->payload.use_count() == 1)
+        return;
+
+    std::shared_ptr<dict_payload> copy = std::make_shared<dict_payload>();
+    copy->items.reserve(dict->payload->items.size());
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        copy->items.push_back(std::make_pair(
+            dupval(dict->payload->items[i].first),
+            dupval(dict->payload->items[i].second)));
+    }
+    dict->payload = std::move(copy);
+}
+
+static void ensure_unique_container(struct value_t *container) {
+    if (!container) return;
+    if (container->type == T_list)
+        ensure_unique_list((struct list_value_t *)container);
+    else if (container->type == T_dict)
+        ensure_unique_dict((struct dict_value_t *)container);
+}
+
 static struct value_t **index_slot_ptr(struct value_t *container,
                                        struct value_t *idx) {
     if (!container || !idx) return NULL;
@@ -1574,14 +1620,14 @@ static struct value_t **index_slot_ptr(struct value_t *container,
         if (idx->type != T_int) return NULL;
         long long i = ((struct int_value_t *)idx)->value;
         struct list_value_t *lv = (struct list_value_t *)container;
-        if (i < 0 || (unsigned long long)i >= lv->value.size()) return NULL;
-        return &lv->value[(size_t)i];
+        if (i < 0 || (unsigned long long)i >= lv->payload->items.size()) return NULL;
+        return &lv->payload->items[(size_t)i];
     }
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
-        for (size_t i = 0; i < dv->value.size(); ++i)
-            if (value_equals(dv->value[i].first, idx))
-                return &dv->value[i].second;
+        for (size_t i = 0; i < dv->payload->items.size(); ++i)
+            if (value_equals(dv->payload->items[i].first, idx))
+                return &dv->payload->items[i].second;
     }
     return NULL;
 }
@@ -1627,6 +1673,7 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
 
     struct value_t *container = s->val;
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
+        ensure_unique_container(container);
         struct value_t **slot = index_slot_ptr(container, indices[k]);
         if (!slot || !*slot) {
             yyerror("invalid index assignment path");
@@ -1652,32 +1699,34 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
         } else {
             long long i = ((struct int_value_t *)idx)->value;
             struct list_value_t *lv = (struct list_value_t *)container;
-            if (i < 0 || (unsigned long long)i >= lv->value.size()) {
+            if (i < 0 || (unsigned long long)i >= lv->payload->items.size()) {
                 yyerror("list index %lld out of range", i);
             } else {
-                freeval(lv->value[(size_t)i]);
-                lv->value[(size_t)i] = val;
+                ensure_unique_list(lv);
+                freeval(lv->payload->items[(size_t)i]);
+                lv->payload->items[(size_t)i] = val;
                 val = NULL;
-                ret = dupval(lv->value[(size_t)i]);
+                ret = dupval(lv->payload->items[(size_t)i]);
             }
         }
     } else if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
+        ensure_unique_dict(dv);
         bool found = false;
-        for (size_t i = 0; i < dv->value.size(); ++i) {
-            if (value_equals(dv->value[i].first, idx)) {
-                freeval(dv->value[i].second);
-                dv->value[i].second = val;
+        for (size_t i = 0; i < dv->payload->items.size(); ++i) {
+            if (value_equals(dv->payload->items[i].first, idx)) {
+                freeval(dv->payload->items[i].second);
+                dv->payload->items[i].second = val;
                 val = NULL;
                 found = true;
-                ret = dupval(dv->value[i].second);
+                ret = dupval(dv->payload->items[i].second);
                 break;
             }
         }
         if (!found) {
-            dv->value.push_back(std::make_pair(dupval(idx), val));
+            dv->payload->items.push_back(std::make_pair(dupval(idx), val));
             val = NULL;
-            ret = dupval(dv->value.back().second);
+            ret = dupval(dv->payload->items.back().second);
         }
     } else if (container->type == T_bytes) {
         if (idx->type != T_int) {
@@ -1758,11 +1807,11 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
         }
         long long i = ((struct int_value_t *)index)->value;
         struct list_value_t *lv = (struct list_value_t *)container;
-        if (i < 0 || (unsigned long long)i >= lv->value.size()) {
+        if (i < 0 || (unsigned long long)i >= lv->payload->items.size()) {
             yyerror("list index %lld out of range", i);
             return false;
         }
-        *next = lv->value[(size_t)i];
+        *next = lv->payload->items[(size_t)i];
         return true;
     }
 
@@ -1806,9 +1855,9 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
 
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
-        for (size_t i = 0; i < dv->value.size(); ++i) {
-            if (value_equals(dv->value[i].first, index)) {
-                *next = dv->value[i].second;
+        for (size_t i = 0; i < dv->payload->items.size(); ++i) {
+            if (value_equals(dv->payload->items[i].first, index)) {
+                *next = dv->payload->items[i].second;
                 return true;
             }
         }
@@ -1937,31 +1986,38 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'Z': {
-            char *name = ((struct funcdef *)a)->name;
-            struct symlist *sl = ((struct funcdef *)a)->sl;
+            struct funcdef *f = (struct funcdef *)a;
+            char *name = f->name;
+            struct symlist *sl = f->sl;
+            const char *display_name = name ? name : "<anonymous>";
             bool bad = false;
             for (struct symlist *p = sl; p && !bad; p = p->next)
                 for (struct symlist *q = p->next; q; q = q->next)
                     if (!std::strcmp(p->sym->name, q->sym->name)) {
                         yyerror("duplicate parameter %s in function %s",
-                                p->sym->name, name);
+                                p->sym->name, display_name);
                         bad = true;
                         break;
                     }
             if (bad)
                 break;
-            if (isrepeated(name)) {
+
+            std::shared_ptr<scope_t> closure = current_scope();
+            /* The global scope is always reachable as the fallback parent. */
+            if (closure && !closure->parent)
+                closure.reset();
+
+            if (!name) {
+                std::shared_ptr<function_code> code = get_function_code(f);
+                f->moved = 1;
+                ret = newfuncval(code, closure);
+            } else if (isrepeated(name)) {
                 yyerror("symbol repeated %s", name);
             } else {
-                std::shared_ptr<scope_t> closure = current_scope();
-                /* The global scope is always reachable as the fallback parent. */
-                if (closure && !closure->parent)
-                    closure.reset();
+                std::shared_ptr<function_code> code = get_function_code(f);
                 struct symbol *sym = newsym(name);
-                std::shared_ptr<function_code> code =
-                    get_function_code((struct funcdef *)a);
                 sym->val = newfuncval(code, closure);
-                ((struct funcdef *)a)->moved = 1;
+                f->moved = 1;
                 savesym(sym);
             }
             break;
@@ -2021,7 +2077,7 @@ struct value_t *eval(struct ast *a) {
                         freeval((struct value_t *)v);
                         return NULL;
                     }
-                    v->value.push_back(item);
+                    v->payload->items.push_back(item);
                 }
                 p = (struct list_node *)p->next;
             }
@@ -2043,17 +2099,17 @@ struct value_t *eval(struct ast *a) {
                         return NULL;
                     }
                     bool replaced = false;
-                    for (size_t i = 0; i < v->value.size(); ++i) {
-                        if (value_equals(v->value[i].first, key)) {
-                            freeval(v->value[i].second);
-                            v->value[i].second = val;
+                    for (size_t i = 0; i < v->payload->items.size(); ++i) {
+                        if (value_equals(v->payload->items[i].first, key)) {
+                            freeval(v->payload->items[i].second);
+                            v->payload->items[i].second = val;
                             freeval(key);
                             replaced = true;
                             break;
                         }
                     }
                     if (!replaced)
-                        v->value.push_back(std::make_pair(key, val));
+                        v->payload->items.push_back(std::make_pair(key, val));
                 }
                 p = (struct dict_node *)p->next;
             }
@@ -2098,11 +2154,11 @@ struct value_t *eval(struct ast *a) {
                 struct list_value_t *lv = newlistval();
                 struct list_value_t *ll = (struct list_value_t *)l;
                 struct list_value_t *rl = (struct list_value_t *)r;
-                lv->value.reserve(ll->value.size() + rl->value.size());
-                for (size_t i = 0; i < ll->value.size(); ++i)
-                    lv->value.push_back(dupval(ll->value[i]));
-                for (size_t i = 0; i < rl->value.size(); ++i)
-                    lv->value.push_back(dupval(rl->value[i]));
+                lv->payload->items.reserve(ll->payload->items.size() + rl->payload->items.size());
+                for (size_t i = 0; i < ll->payload->items.size(); ++i)
+                    lv->payload->items.push_back(dupval(ll->payload->items[i]));
+                for (size_t i = 0; i < rl->payload->items.size(); ++i)
+                    lv->payload->items.push_back(dupval(rl->payload->items[i]));
                 ret = (struct value_t *)lv;
             } else {
                 yyerror("cannot add %s and %s", typename_of(l), typename_of(r));
@@ -2527,10 +2583,10 @@ struct value_t *eval(struct ast *a) {
                 } else {
                     long long i = ((struct int_value_t *)index)->value;
                     struct list_value_t *lv = (struct list_value_t *)container;
-                    if (i < 0 || (unsigned long long)i >= lv->value.size())
+                    if (i < 0 || (unsigned long long)i >= lv->payload->items.size())
                         yyerror("list index %lld out of range", i);
                     else
-                        ret = dupval(lv->value[(size_t)i]);
+                        ret = dupval(lv->payload->items[(size_t)i]);
                 }
             } else if (container->type == T_string) {
                 if (index->type != T_int) {
@@ -2564,9 +2620,9 @@ struct value_t *eval(struct ast *a) {
             } else if (container->type == T_dict) {
                 struct dict_value_t *dv = (struct dict_value_t *)container;
                 bool found = false;
-                for (size_t i = 0; i < dv->value.size(); ++i) {
-                    if (value_equals(dv->value[i].first, index)) {
-                        ret = dupval(dv->value[i].second);
+                for (size_t i = 0; i < dv->payload->items.size(); ++i) {
+                    if (value_equals(dv->payload->items[i].first, index)) {
+                        ret = dupval(dv->payload->items[i].second);
                         found = true;
                         break;
                     }

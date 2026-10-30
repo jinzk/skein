@@ -196,58 +196,58 @@ EXP ([Ee][-+]?[0-9]+)
 "while" { return WHILE; }
 "for" { return FOR; }
 "let" { return LET; }
-"def" { return DEF; }
+"func" { return FUNC; }
 "return" { return RETURN; }
 "break" { return BREAK; }
 "continue" { return CONTINUE; }
 "null" { return NULLVAL; }
 
-"sqrt" { yylval.fn = B_sqrt; return FUNC; }
-"exp" { yylval.fn = B_exp; return FUNC; }
-"log" { yylval.fn = B_log; return FUNC; }
-"abs" { yylval.fn = B_abs; return FUNC; }
-"print" { yylval.fn = B_print; return FUNC; }
-"list" { yylval.fn = B_list; return FUNC; }
-"dict" { yylval.fn = B_dict; return FUNC; }
-"int" { yylval.fn = B_int; return FUNC; }
-"float" { yylval.fn = B_float; return FUNC; }
-"str" { yylval.fn = B_str; return FUNC; }
-"format" { yylval.fn = B_format; return FUNC; }
-"command" { yylval.fn = B_command; return FUNC; }
-"command_status" { yylval.fn = B_command_status; return FUNC; }
-"read_file" { yylval.fn = B_read_file; return FUNC; }
-"write_file" { yylval.fn = B_write_file; return FUNC; }
-"append_file" { yylval.fn = B_append_file; return FUNC; }
-"file_exists" { yylval.fn = B_file_exists; return FUNC; }
-"file_open" { yylval.fn = B_file_open; return FUNC; }
-"file_read" { yylval.fn = B_file_read; return FUNC; }
-"file_write" { yylval.fn = B_file_write; return FUNC; }
-"file_seek" { yylval.fn = B_file_seek; return FUNC; }
-"file_tell" { yylval.fn = B_file_tell; return FUNC; }
-"file_eof" { yylval.fn = B_file_eof; return FUNC; }
-"file_close" { yylval.fn = B_file_close; return FUNC; }
-"file_flush" { yylval.fn = B_file_flush; return FUNC; }
-"input" { yylval.fn = B_input; return FUNC; }
-"split" { yylval.fn = B_split; return FUNC; }
-"split_ws" { yylval.fn = B_split_ws; return FUNC; }
-"trim" { yylval.fn = B_trim; return FUNC; }
-"find" { yylval.fn = B_find; return FUNC; }
-"substr" { yylval.fn = B_substr; return FUNC; }
-"bytes_from_string" { yylval.fn = B_bytes_from_string; return FUNC; }
-"bytes_to_string" { yylval.fn = B_bytes_to_string; return FUNC; }
-"bytes_len" { yylval.fn = B_bytes_len; return FUNC; }
-"bytes_get" { yylval.fn = B_bytes_get; return FUNC; }
-"bytes_slice" { yylval.fn = B_bytes_slice; return FUNC; }
-"bytes_concat" { yylval.fn = B_bytes_concat; return FUNC; }
-"bytes_hex" { yylval.fn = B_bytes_hex; return FUNC; }
-"bytes_from_hex" { yylval.fn = B_bytes_from_hex; return FUNC; }
-"bytes_to_int" { yylval.fn = B_bytes_to_int; return FUNC; }
-"int_to_bytes" { yylval.fn = B_int_to_bytes; return FUNC; }
-"read_bytes" { yylval.fn = B_read_bytes; return FUNC; }
-"write_bytes" { yylval.fn = B_write_bytes; return FUNC; }
-"append_bytes" { yylval.fn = B_append_bytes; return FUNC; }
-"file_read_bytes" { yylval.fn = B_file_read_bytes; return FUNC; }
-"file_write_bytes" { yylval.fn = B_file_write_bytes; return FUNC; }
+"sqrt" { yylval.fn = B_sqrt; return BUILTIN; }
+"exp" { yylval.fn = B_exp; return BUILTIN; }
+"log" { yylval.fn = B_log; return BUILTIN; }
+"abs" { yylval.fn = B_abs; return BUILTIN; }
+"print" { yylval.fn = B_print; return BUILTIN; }
+"list" { yylval.fn = B_list; return BUILTIN; }
+"dict" { yylval.fn = B_dict; return BUILTIN; }
+"int" { yylval.fn = B_int; return BUILTIN; }
+"float" { yylval.fn = B_float; return BUILTIN; }
+"str" { yylval.fn = B_str; return BUILTIN; }
+"format" { yylval.fn = B_format; return BUILTIN; }
+"command" { yylval.fn = B_command; return BUILTIN; }
+"command_status" { yylval.fn = B_command_status; return BUILTIN; }
+"read_file" { yylval.fn = B_read_file; return BUILTIN; }
+"write_file" { yylval.fn = B_write_file; return BUILTIN; }
+"append_file" { yylval.fn = B_append_file; return BUILTIN; }
+"file_exists" { yylval.fn = B_file_exists; return BUILTIN; }
+"file_open" { yylval.fn = B_file_open; return BUILTIN; }
+"file_read" { yylval.fn = B_file_read; return BUILTIN; }
+"file_write" { yylval.fn = B_file_write; return BUILTIN; }
+"file_seek" { yylval.fn = B_file_seek; return BUILTIN; }
+"file_tell" { yylval.fn = B_file_tell; return BUILTIN; }
+"file_eof" { yylval.fn = B_file_eof; return BUILTIN; }
+"file_close" { yylval.fn = B_file_close; return BUILTIN; }
+"file_flush" { yylval.fn = B_file_flush; return BUILTIN; }
+"input" { yylval.fn = B_input; return BUILTIN; }
+"split" { yylval.fn = B_split; return BUILTIN; }
+"split_ws" { yylval.fn = B_split_ws; return BUILTIN; }
+"trim" { yylval.fn = B_trim; return BUILTIN; }
+"find" { yylval.fn = B_find; return BUILTIN; }
+"substr" { yylval.fn = B_substr; return BUILTIN; }
+"bytes_from_string" { yylval.fn = B_bytes_from_string; return BUILTIN; }
+"bytes_to_string" { yylval.fn = B_bytes_to_string; return BUILTIN; }
+"bytes_len" { yylval.fn = B_bytes_len; return BUILTIN; }
+"bytes_get" { yylval.fn = B_bytes_get; return BUILTIN; }
+"bytes_slice" { yylval.fn = B_bytes_slice; return BUILTIN; }
+"bytes_concat" { yylval.fn = B_bytes_concat; return BUILTIN; }
+"bytes_hex" { yylval.fn = B_bytes_hex; return BUILTIN; }
+"bytes_from_hex" { yylval.fn = B_bytes_from_hex; return BUILTIN; }
+"bytes_to_int" { yylval.fn = B_bytes_to_int; return BUILTIN; }
+"int_to_bytes" { yylval.fn = B_int_to_bytes; return BUILTIN; }
+"read_bytes" { yylval.fn = B_read_bytes; return BUILTIN; }
+"write_bytes" { yylval.fn = B_write_bytes; return BUILTIN; }
+"append_bytes" { yylval.fn = B_append_bytes; return BUILTIN; }
+"file_read_bytes" { yylval.fn = B_file_read_bytes; return BUILTIN; }
+"file_write_bytes" { yylval.fn = B_file_write_bytes; return BUILTIN; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;

@@ -155,21 +155,21 @@ for (let i = 0; i < 3; i = i + 1) {
 
 `break` / `continue` 可用于 `while` 和 `for`。
 
-函数与闭包：
+函数、匿名函数与闭包：
 
 ```text
-def add(a, b) {
+func add(a, b) {
   return a + b;
 }
 
-def fib(n) {
+func fib(n) {
   if (n < 2) { return n; }
   return fib(n - 1) + fib(n - 2);
 }
 
-def make_counter() {
+func make_counter() {
   let n = 0;
-  def inc() {
+  func inc() {
     n = n + 1;
     return n;
   }
@@ -190,6 +190,45 @@ d["handler"](42)
 adder(3)(4)
 ```
 
+匿名函数使用同一个 `func` 关键字，省略函数名：
+
+```text
+let double = func(x) { return x * 2; };
+double(21)
+
+(func(x) { return x + 1; })(41)
+```
+
+匿名函数同样可以捕获定义处的作用域，并作为参数或返回值：
+
+```text
+func make_adder(n) {
+  return func(x) { return x + n; };
+}
+
+let add5 = make_adder(5);
+add5(3)                 → 8
+```
+
+也可以通过变量绑定实现递归：
+
+```text
+let fact = func(n) {
+  if (n <= 1) { return 1; }
+  return n * fact(n - 1);
+};
+
+fact(5)                 → 120
+```
+
+匿名函数规则：
+
+- 没有名字，诊断和调用栈中显示为 `<anonymous>`；
+- 每次求值都会创建新的闭包；
+- 仍然使用显式 `return`；
+- 支持空参数和空函数体；
+- 立即调用时建议给匿名函数加括号，例如 `(func(x) { ... })(1)`。
+
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
 内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
@@ -198,7 +237,7 @@ adder(3)(4)
 let f = sqrt;
 f(9)
 
-def apply(fn, x) { return fn(x); }
+func apply(fn, x) { return fn(x); }
 apply(sqrt, 16)
 ```
 
@@ -229,6 +268,8 @@ apply(sqrt, 16)
 - `==` / `!=` 对所有类型有效；大小比较只支持数值之间或字符串之间。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
 - 字典键按值相等判断，`1` 和 `1.0` 是同一个键；字面量中的重复键以最后一个为准。
+- `list` 和 `dict` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。
+- `bytes` 和字符串目前仍然复制内容；函数值共享闭包环境，文件句柄等原生资源共享底层句柄。
 - 显式转换：`int(x)`、`float(x)`、`str(x)`。`int` / `float` 接受整数、浮点数或字符串，`str` 接受任意值。
 - 浮点数输出使用可往返的最短表示并保留 `.0`：`1.0` 显示为 `1.0`，`1.23456` 显示为 `1.23456`。
 - 没有字符串与数字之间的隐式转换，`1 + "2"` 会报错；需要时请使用 `int()` / `float()` / `str()`。
@@ -550,12 +591,12 @@ file_close(h);
 当前语言没有方法绑定，但可以用 dict + 闭包实现类似接口：
 
 ```text
-def open_file(path) {
+func open_file(path) {
   let h = file_open(path, "r");
 
-  def read(n) { return file_read(h, n); }
-  def seek(n) { return file_seek(h, n); }
-  def close() { return file_close(h); }
+  func read(n) { return file_read(h, n); }
+  func seek(n) { return file_seek(h, n); }
+  func close() { return file_close(h); }
 
   return {"read": read, "seek": seek, "close": close};
 }

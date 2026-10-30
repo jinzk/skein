@@ -127,15 +127,15 @@ def main():
     check("if float truthy", 'if (1.5) { print("yes"); }\n', stdout="yes")
     check("if else", 'if (0) { print("yes"); } else { print("no"); }\n', stdout="no")
 
-    check("zero-arg function", "def f() {\n  return 42;\n}\nf()\n", stdout="= 42")
+    check("zero-arg function", "func f() {\n  return 42;\n}\nf()\n", stdout="= 42")
     check(
         "return inside while",
-        "def f(a) {\n  while (1) { return a; }\n}\nf(7)\n",
+        "func f(a) {\n  while (1) { return a; }\n}\nf(7)\n",
         stdout="= 7",
     )
     check(
         "recursion",
-        "def fib(n) {\n"
+        "func fib(n) {\n"
         "  if (n < 2) { return n; }\n"
         "  return fib(n-1) + fib(n-2);\n"
         "}\n"
@@ -144,19 +144,67 @@ def main():
     )
     check(
         "function value alias",
-        "def f(a) { return a; }\nlet g = f;\nlet h = g;\nh(8)\n",
+        "func f(a) { return a; }\nlet g = f;\nlet h = g;\nh(8)\n",
         stdout="= 8",
     )
     check(
+        "anonymous function",
+        "let double = func(x) { return x * 2; };\ndouble(21)\n",
+        stdout="= 42",
+    )
+    check(
+        "anonymous immediate call",
+        "(func(x) { return x + 1; })(41)\n",
+        stdout="= 42",
+    )
+    check(
+        "anonymous higher order",
+        "func apply(fn, x) { return fn(x); }\n"
+        "apply(func(n) { return n * n; }, 9)\n",
+        stdout="= 81",
+    )
+    check(
+        "anonymous closure",
+        "func make_adder(n) { return func(x) { return x + n; }; }\n"
+        "let add5 = make_adder(5);\n"
+        "add5(3)\n",
+        stdout="= 8",
+    )
+    check(
+        "anonymous recursion",
+        "let fact = func(n) {\n"
+        "  if (n <= 1) { return 1; }\n"
+        "  return n * fact(n - 1);\n"
+        "};\n"
+        "fact(5)\n",
+        stdout="= 120",
+    )
+    check(
+        "anonymous function in list",
+        "let fs = [func(x) { return x + 1; }, func(x) { return x * 2; }];\n"
+        "fs[1](5)\n",
+        stdout="= 10",
+    )
+    check(
+        "anonymous duplicate parameter",
+        "func(a, a) { return a; }\n",
+        stderr="duplicate parameter a in function <anonymous>",
+    )
+    check(
+        "anonymous arity",
+        "func(a) { return a; }(1, 2)\n",
+        stderr="function expects 1 argument(s), got 2",
+    )
+    check(
         "duplicate parameter",
-        "def f(a,a) { return a; }\n",
+        "func f(a,a) { return a; }\n",
         stderr="duplicate parameter",
     )
     check(
         "closure counter",
-        "def make_counter() {\n"
+        "func make_counter() {\n"
         "  let n = 0;\n"
-        "  def inc() { n = n + 1; return n; }\n"
+        "  func inc() { n = n + 1; return n; }\n"
         "  return inc;\n"
         "}\n"
         "let c1 = make_counter();\n"
@@ -168,10 +216,10 @@ def main():
     )
     check(
         "closure shared environment",
-        "def make_pair() {\n"
+        "func make_pair() {\n"
         "  let n = 0;\n"
-        "  def inc() { n = n + 1; return n; }\n"
-        "  def get() { return n; }\n"
+        "  func inc() { n = n + 1; return n; }\n"
+        "  func get() { return n; }\n"
         "  let d = dict();\n"
         "  d[\"inc\"] = inc;\n"
         "  d[\"get\"] = get;\n"
@@ -185,8 +233,8 @@ def main():
     )
     check(
         "closure factory",
-        "def adder(x) {\n"
-        "  def add(y) { return x + y; }\n"
+        "func adder(x) {\n"
+        "  func add(y) { return x + y; }\n"
         "  return add;\n"
         "}\n"
         "let a = adder(10);\n"
@@ -196,8 +244,8 @@ def main():
     )
     check(
         "closure recursion",
-        "def make_fact() {\n"
-        "  def fact(n) {\n"
+        "func make_fact() {\n"
+        "  func fact(n) {\n"
         "    if (n < 2) { return 1; }\n"
         "    return n * fact(n-1);\n"
         "  }\n"
@@ -212,7 +260,7 @@ def main():
         "let c = 0;\n"
         "{\n"
         "  let x = 5;\n"
-        "  def f() { return x; }\n"
+        "  func f() { return x; }\n"
         "  c = f;\n"
         "}\n"
         "c()\n",
@@ -220,7 +268,7 @@ def main():
     )
     check(
         "function value in list",
-        "def adder(x) { def add(y) { return x + y; } return add; }\n"
+        "func adder(x) { func add(y) { return x + y; } return add; }\n"
         "let fs = [adder(1), adder(2)];\n"
         "fs[0](10)\n"
         "fs[1](10)\n",
@@ -291,9 +339,51 @@ def main():
         stdout="{x: [1, 2]}",
     )
     check(
+        "list alias copy on write",
+        "let a = [1, 2];\nlet b = a;\nb[0] = 9;\na\nb\n",
+        stdout_all=["= [1, 2]", "= [9, 2]"],
+    )
+    check(
+        "dict alias copy on write",
+        'let d = {"x": 1};\nlet e = d;\ne["x"] = 9;\nd\ne\n',
+        stdout_all=["{x: 1}", "{x: 9}"],
+    )
+    check(
+        "dict alias insert copy on write",
+        'let d = {"a": 1};\nlet e = d;\ne["b"] = 2;\nd\ne\n',
+        stdout_all=["{a: 1}", "{a: 1, b: 2}"],
+    )
+    check(
+        "nested list alias copy on write",
+        "let a = [[1], [2]];\nlet b = a;\nb[0][0] = 9;\na\nb\n",
+        stdout_all=["= [[1], [2]]", "= [[9], [2]]"],
+    )
+    check(
+        "function argument copy on write",
+        "func mutate(x) { x[0] = 9; return x; }\n"
+        "let a = [1, 2];\n"
+        "mutate(a)\n"
+        "a\n",
+        stdout_all=["= [9, 2]", "= [1, 2]"],
+    )
+    check(
+        "closure capture copy on write",
+        "func make() {\n"
+        "  let a = [1];\n"
+        "  func get() { return a; }\n"
+        "  return [a, get];\n"
+        "}\n"
+        "let pair = make();\n"
+        "let x = pair[0];\n"
+        "x[0] = 9;\n"
+        "pair[0]\n"
+        "pair[1]()\n",
+        stdout_all=["= [1]", "= [1]"],
+    )
+    check(
         "index side effect falls back to copy",
         "let a = [10,20,30];\n"
-        "def f() { a[0] = 99; return 0; }\n"
+        "func f() { a[0] = 99; return 0; }\n"
         "a[f()]\n",
         stdout="= 10",
     )
@@ -369,7 +459,7 @@ def main():
     )
     check(
         "return inside for",
-        "def f(a) {\n"
+        "func f(a) {\n"
         "  for (let i = 0; i < 10; i = i + 1) { return a; }\n"
         "}\n"
         "f(7)\n",
@@ -407,31 +497,31 @@ def main():
     check(
         "large symbol table closure",
         many_globals
-        + "def make() { let n = 5; def get() { return n + v39; } return get; }\n"
+        + "func make() { let n = 5; func get() { return n + v39; } return get; }\n"
         + "let g = make();\ng()\n",
         stdout="= 44",
     )
     check(
         "large symbol table shadowing",
-        many_globals + "let x = 1;\ndef f() { let x = 2; return x; }\nf()\nx\n",
+        many_globals + "let x = 1;\nfunc f() { let x = 2; return x; }\nf()\nx\n",
         stdout_all=["= 2", "= 1"],
     )
 
     check("call non-function", "let x = 1;\nx(2)\n", stderr="cannot call int")
     check("recursion depth limit",
-          "def f(n) { return f(n + 1); }\nf(0)\n",
+          "func f(n) { return f(n + 1); }\nf(0)\n",
           stderr="maximum recursion depth")
     check("function without return yields null",
-          "def noret() { }\nprint(noret())\n", stdout="null")
-    check("null arithmetic", "def noret() { }\nnoret() + 1\n",
+          "func noret() { }\nprint(noret())\n", stdout="null")
+    check("null arithmetic", "func noret() { }\nnoret() + 1\n",
           stderr="cannot add null and int")
     check("null truthiness",
-          "def noret() { }\nif (noret()) { print(1); } else { print(2); }\n",
+          "func noret() { }\nif (noret()) { print(1); } else { print(2); }\n",
           stdout="2")
     check("null as argument",
-          "def noret() { }\ndef add(a,b) { return a+b; }\nadd(noret(), 2)\n",
+          "func noret() { }\nfunc add(a,b) { return a+b; }\nadd(noret(), 2)\n",
           stderr="cannot add null and int")
-    check("null equality", "def noret() { }\nnoret() == noret()\n",
+    check("null equality", "func noret() { }\nnoret() == noret()\n",
           stdout="= 1")
     check("null literal", "print(null)\n", stdout="null")
     check("null literal equality", "null == null\n", stdout="= 1")
@@ -443,19 +533,19 @@ def main():
     check("null is not callable", "null()\n", stderr="cannot call null")
     check("str null", "str(null)\n", stdout="= null")
     check("format null", 'format("{}", null)\n', stdout="= null")
-    check("explicit empty return", "def f() { return; }\nprint(f())\n",
+    check("explicit empty return", "func f() { return; }\nprint(f())\n",
           stdout="null")
     check("print returns null", "let x = print(1);\nprint(x)\n",
           stdout_all=["1", "null"])
     check("arity error after argument evaluation",
-          "def one(a) { return a; }\none(print(1), 2)\n",
+          "func one(a) { return a; }\none(print(1), 2)\n",
           stdout="1", stderr="expects 1 argument")
     check("non-callable evaluates arguments", "1(print(7))\n",
           stdout="7", stderr="cannot call int")
 
     check("builtin as value", "let f = sqrt;\nf(9)\n", stdout="= 3.0")
     check("builtin as callback",
-          "def apply(f, x) { return f(x); }\napply(sqrt, 16)\n",
+          "func apply(f, x) { return f(x); }\napply(sqrt, 16)\n",
           stdout="= 4.0")
     check("builtin in list", "let fs = [sqrt, abs];\nfs[0](25)\n",
           stdout="= 5.0")
@@ -816,12 +906,12 @@ def main():
         )
         check(
             "file handle factory",
-            f'def open_file(path, mode) {{\n'
+            f'func open_file(path, mode) {{\n'
             f'  let h = file_open(path, mode);\n'
-            f'  def read(n) {{ return file_read(h, n); }}\n'
-            f'  def write(s) {{ return file_write(h, s); }}\n'
-            f'  def seek(n) {{ return file_seek(h, n); }}\n'
-            f'  def close() {{ return file_close(h); }}\n'
+            f'  func read(n) {{ return file_read(h, n); }}\n'
+            f'  func write(s) {{ return file_write(h, s); }}\n'
+            f'  func seek(n) {{ return file_seek(h, n); }}\n'
+            f'  func close() {{ return file_close(h); }}\n'
             f'  return {{"read": read, "write": write, '
             f'"seek": seek, "close": close}};\n'
             f'}}\n'
@@ -853,12 +943,12 @@ def main():
               f'file_seek(h, 0, "x")\n',
               stderr="file_seek whence must be an integer")
 
-    proc = run("def bad() { 1/0; }\nbad() + 1\n")
+    proc = run("func bad() { 1/0; }\nbad() + 1\n")
     assert "division by zero" in proc.stderr
     assert "cannot add null" not in proc.stderr
 
     proc = run(
-        "def f(n) { if (n == 0) { return 1/0; } return f(n - 1); }\n"
+        "func f(n) { if (n == 0) { return 1/0; } return f(n - 1); }\n"
         "f(3)\n"
     )
     assert "division by zero" in proc.stderr
@@ -1011,10 +1101,10 @@ def main():
         nested_script = os.path.join(tmp, "nested.calc")
         with open(nested_script, "w", encoding="utf-8") as f:
             f.write(
-                "def g() {\n"
+                "func g() {\n"
                 "  return 10 / 0;\n"
                 "}\n"
-                "def f() {\n"
+                "func f() {\n"
                 "  return g();\n"
                 "}\n"
                 "f();\n"
@@ -1046,7 +1136,7 @@ def main():
           stderr="1:3: lexical error: unexpected character '@' (0x40)")
     check("unterminated string position", 'print("unterminated)\n',
           stderr="1:7: lexical error: unterminated string literal")
-    check("definition error location", "def f(a, a) {\n  return a;\n}\n",
+    check("definition error location", "func f(a, a) {\n  return a;\n}\n",
           stderr="1:1: runtime error: duplicate parameter")
     check("break error location", "{\n  break;\n}\n",
           stderr="2:3: runtime error: break outside loop")

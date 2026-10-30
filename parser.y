@@ -31,10 +31,10 @@ extern int yyparse();
 %token <d> FLOAT "float"
 %token <i> INT "integer"
 %token <str> NAME "identifier"
-%token <fn> FUNC "built-in function"
+%token <fn> BUILTIN "built-in function"
 %token <str> XSTRING "string"
 %token EOL "end of line"
-%token IF "if" ELSE "else" WHILE "while" FOR "for" DEF "def" LET "let"
+%token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
@@ -72,9 +72,8 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
     | FOR '(' forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
-    | DEF { push_func_location(g_token_line, g_token_column); }
-          NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($3, $5, $8); }
+    | funcstart NAME '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc($2, $4, $7); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
     ;
 
@@ -123,13 +122,18 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '.' NAME                        { $$ = newast('G', $1, newstr($3)); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' pairlist '}'                    { $$ = $2; }
+    | funcstart '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc(NULL, $3, $6); }
     | value
+    ;
+
+funcstart: FUNC { push_func_location(g_token_line, g_token_column); }
     ;
 
 value: INT                                { $$ = newint($1); }
     | FLOAT                               { $$ = newfloat($1); }
     | XSTRING                             { $$ = newstr($1); free($1); }
-    | FUNC                                { $$ = newbuiltin($1); }
+    | BUILTIN                             { $$ = newbuiltin($1); }
     | NULLVAL                             { $$ = newnullast(); }
     ;
 

@@ -1,126 +1,157 @@
 #include "scopestack.h"
 #include "symbol.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <vector>
 
-static struct scopestack *scope_stack = NULL;
-static struct scope_t *global_scope = NULL;
+static std::shared_ptr<scope_t> current;
+static std::shared_ptr<scope_t> global_scope;
+static std::vector<std::shared_ptr<scope_t>> restore_stack;
+static std::vector<std::weak_ptr<scope_t>> all_scopes;
 
-struct scope_t *topscope() {
-    if (!scope_stack) return NULL;
-    return scope_stack->scope;
-}
-
-void pushscope(struct symbol *func) {
-    struct scope_t *s = (struct scope_t *)std::malloc(sizeof(struct scope_t));
-    if (!s) {
-        std::fprintf(stderr, "out of space\n");
-        std::exit(1);
-    }
+static void clear_scope(scope_t *s) {
+    if (!s) return;
+    struct symlist *list = s->syms;
     s->syms = NULL;
-    s->ret = NULL;
-    s->func = func;
-    struct scopestack *p = (struct scopestack *)std::malloc(sizeof(struct scopestack));
-    if (!p) {
-        std::fprintf(stderr, "out of space\n");
-        std::exit(1);
-    }
-    p->last = scope_stack;
-    p->scope = s;
-    scope_stack = p;
-}
-
-void popscope() {
-    if (!scope_stack) return;
-    struct scopestack *p = scope_stack;
-    scope_stack = p->last;
-    struct symlist *sp = p->scope->syms;
-    while (sp) {
-        struct symlist *s = sp;
-        sp = sp->next;
-        struct symbol *sym = s->sym;
+    while (list) {
+        struct symlist *next = list->next;
+        struct symbol *sym = list->sym;
         if (sym) {
             freeval(sym->val);
             std::free(sym->name);
             std::free(sym);
         }
-        std::free(s);
+        std::free(list);
+        list = next;
     }
-    /* scope->ret is owned by the caller (function call result), not freed here. */
-    std::free(p->scope);
-    std::free(p);
+}
+
+scope_t::~scope_t() {
+    clear_scope(this);
+    if (ret) {
+        freeval(ret);
+        ret = NULL;
+    }
+}
+
+static void register_scope(const std::shared_ptr<scope_t> &s) {
+    if (all_scopes.size() > 4096) {
+        all_scopes.erase(
+            std::remove_if(all_scopes.begin(), all_scopes.end(),
+                           [](const std::weak_ptr<scope_t> &w) {
+                               return w.expired();
+                           }),
+            all_scopes.end());
+    }
+    all_scopes.push_back(s);
+}
+
+struct scope_t *topscope() {
+    return current.get();
+}
+
+std::shared_ptr<scope_t> current_scope() {
+    return current;
+}
+
+static void push_scope_impl(bool is_function,
+                            const std::shared_ptr<scope_t> &parent) {
+    std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
+    s->parent = parent;
+    s->is_function = is_function;
+    s->ret = NULL;
+    s->syms = NULL;
+    register_scope(s);
+    restore_stack.push_back(current);
+    current = s;
+}
+
+void pushscope() {
+    push_scope_impl(false, current);
+}
+
+void pushscope_closure(const std::shared_ptr<scope_t> &parent) {
+    push_scope_impl(true, parent ? parent : global_scope);
 }
 
 void initscope() {
-    if (scope_stack) return;
-    pushscope(NULL);
-    global_scope = topscope();
+    if (current) return;
+    std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
+    s->parent.reset();
+    s->is_function = false;
+    s->ret = NULL;
+    s->syms = NULL;
+    register_scope(s);
+    global_scope = s;
+    current = s;
+    restore_stack.clear();
+}
+
+void popscope() {
+    if (!current || restore_stack.empty()) return;
+    current = restore_stack.back();
+    restore_stack.pop_back();
 }
 
 void donescope() {
-    while (scope_stack) popscope();
-    global_scope = NULL;
+    restore_stack.clear();
+
+    /*
+     * Closures can create reference cycles between a scope and the function
+     * values stored in it.  Clearing all symbol tables first breaks those
+     * cycles, so the remaining shared_ptr references can be released.
+     */
+    for (auto &w : all_scopes) {
+        if (std::shared_ptr<scope_t> s = w.lock())
+            clear_scope(s.get());
+    }
+
+    current.reset();
+    global_scope.reset();
+    all_scopes.clear();
 }
 
 struct symbol *lookupsym(char *sym) {
-    struct scopestack *p = scope_stack;
-    while (p) {
-        struct symlist *sl = p->scope->syms;
-        while (sl) {
+    for (std::shared_ptr<scope_t> s = current; s; s = s->parent) {
+        for (struct symlist *sl = s->syms; sl; sl = sl->next) {
             if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
                 return sl->sym;
-            sl = sl->next;
         }
-        if (p->scope->func) {
-            if (!global_scope) return NULL;
-            sl = global_scope->syms;
-            while (sl) {
-                if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
-                    return sl->sym;
-                sl = sl->next;
-            }
-            return NULL;
-        }
-        p = p->last;
     }
     return NULL;
 }
 
 bool isrepeated(char *sym) {
-    struct scopestack *p = scope_stack;
-    if (p) {
-        struct symlist *sl = p->scope->syms;
-        while (sl) {
-            if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
-                return true;
-            sl = sl->next;
-        }
+    if (!current) return false;
+    for (struct symlist *sl = current->syms; sl; sl = sl->next) {
+        if (sl->sym->name && !std::strcmp(sl->sym->name, sym))
+            return true;
     }
     return false;
 }
 
 void savesym(struct symbol *sp) {
-    if (!scope_stack) return;
+    if (!current) return;
     struct symlist *sl = (struct symlist *)std::malloc(sizeof(struct symlist));
     if (!sl) {
         std::fprintf(stderr, "out of space\n");
         std::exit(1);
     }
     sl->sym = sp;
-    sl->next = scope_stack->scope->syms;
-    scope_stack->scope->syms = sl;
+    sl->next = current->syms;
+    current->syms = sl;
 }
 
 bool retval(struct value_t *r) {
-    struct scopestack *p = scope_stack;
-    while (p) {
-        if (p->scope->func) {
-            p->scope->ret = r;
+    for (std::shared_ptr<scope_t> s = current; s; s = s->parent) {
+        if (s->is_function) {
+            s->ret = r;
             return true;
         }
-        p = p->last;
     }
     return false;
 }

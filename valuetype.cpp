@@ -56,11 +56,13 @@ struct value_t *newstrval(const char *s) {
     return (struct value_t *)v;
 }
 
-struct value_t *newfuncval(struct ast *ast, struct symlist *sl) {
+struct value_t *newfuncval(std::shared_ptr<function_code> code,
+                           std::shared_ptr<struct scope_t> closure) {
     struct func_value_t *v = new func_value_t;
     v->type = T_func;
-    v->def = std::shared_ptr<function_def>(new function_def{ast, sl},
-                                          free_function_def);
+    v->def = std::make_shared<function_def>();
+    v->def->code = code;
+    v->def->closure = closure;
     return (struct value_t *)v;
 }
 

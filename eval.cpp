@@ -157,6 +157,19 @@ static struct value_t *callbuildin(struct fncall *f) {
         free_args(args);
         return NULL;
     }
+
+    if (f->functype == B_list || f->functype == B_dict) {
+        if (!args.empty()) {
+            yyerror("built-in function expects 0 arguments, got %d",
+                    (int)args.size());
+            free_args(args);
+            return NULL;
+        }
+        return (f->functype == B_list)
+                   ? (struct value_t *)newlistval()
+                   : (struct value_t *)newdictval();
+    }
+
     if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         free_args(args);
@@ -206,61 +219,210 @@ static struct value_t *callbuildin(struct fncall *f) {
     return ret;
 }
 
-static struct value_t *calluser(struct ufncall *f) {
-    struct symbol *fn = lookupsym(f->name);
-    if (!fn || !fn->val) {
-        yyerror("function not found %s", f->name);
-        return NULL;
-    }
-    if (fn->val->type != T_func) {
-        yyerror("%s is not a function", f->name);
+static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
+    if (!callee || callee->type != T_func) {
+        yyerror("cannot call %s", typename_of(callee));
         return NULL;
     }
 
-    struct func_value_t *fv = (struct func_value_t *)fn->val;
+    struct func_value_t *fv = (struct func_value_t *)callee;
     /*
      * Keep the function definition alive for the whole call.  The body can
      * reassign/free the variable that holds this function value.
      */
     std::shared_ptr<function_def> def = fv->def;
     std::vector<struct value_t *> args;
-    if (!collect_args(f->args, args)) {
+    if (!collect_args(args_ast, args)) {
         free_args(args);
         return NULL;
     }
 
     int nparams = 0;
-    for (struct symlist *sl = def->sl; sl; sl = sl->next) ++nparams;
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next) ++nparams;
     if ((int)args.size() != nparams) {
-        yyerror("function %s expects %d argument(s), got %d",
-                f->name, nparams, (int)args.size());
+        yyerror("function expects %d argument(s), got %d",
+                nparams, (int)args.size());
         free_args(args);
         return NULL;
     }
 
-    pushscope(fn);
+    pushscope_closure(def->closure);
     int i = 0;
-    for (struct symlist *sl = def->sl; sl; sl = sl->next, ++i) {
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
         sym->val = args[i];
         savesym(sym);
     }
     args.clear(); /* ownership transferred to the function scope */
 
-    struct value_t *body_ret = eval(def->ast);
+    struct value_t *body_ret = eval(def->code->ast);
     struct value_t *result = topscope()->ret;
     topscope()->ret = NULL;
 
     if (body_ret) {
         if (body_ret->type == T_break)
-            yyerror("break outside loop in function %s", f->name);
+            yyerror("break outside loop in function");
         else if (body_ret->type == T_continue)
-            yyerror("continue outside loop in function %s", f->name);
+            yyerror("continue outside loop in function");
         freeval(body_ret);
     }
 
     popscope();
     return result;
+}
+
+static struct ast *index_base(struct ast *a) {
+    while (a && a->nodetype == 'G') a = a->l;
+    return a;
+}
+
+/*
+ * Collect the index expressions of an lvalue chain such as a[i][j].  The base
+ * must be a variable; assigning through function calls or literals is not
+ * allowed.
+ */
+static bool collect_index_asts(struct ast *a, std::vector<struct ast *> &out) {
+    if (!a) return false;
+    if (a->nodetype == 'G') {
+        if (!collect_index_asts(a->l, out)) return false;
+        out.push_back(a->r);
+        return true;
+    }
+    return a->nodetype == 'N';
+}
+
+static struct value_t **index_slot_ptr(struct value_t *container,
+                                       struct value_t *idx) {
+    if (!container || !idx) return NULL;
+    if (container->type == T_list) {
+        if (idx->type != T_int) return NULL;
+        int i = ((struct int_value_t *)idx)->value;
+        struct list_value_t *lv = (struct list_value_t *)container;
+        if (i < 0 || (size_t)i >= lv->value.size()) return NULL;
+        return &lv->value[i];
+    }
+    if (container->type == T_dict) {
+        struct dict_value_t *dv = (struct dict_value_t *)container;
+        for (size_t i = 0; i < dv->value.size(); ++i)
+            if (value_equals(dv->value[i].first, idx))
+                return &dv->value[i].second;
+    }
+    return NULL;
+}
+
+static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
+    std::vector<struct ast *> index_asts;
+    if (!collect_index_asts(target, index_asts)) {
+        yyerror("cannot assign through this expression");
+        return NULL;
+    }
+    struct ast *base = index_base(target);
+    if (!base || base->nodetype != 'N') {
+        yyerror("cannot assign through this expression");
+        return NULL;
+    }
+
+    /*
+     * Evaluate the right-hand side and every index expression before walking
+     * the container.  This prevents user code from invalidating pointers into
+     * a list/dict vector while we are assigning.
+     */
+    struct value_t *val = eval(value_ast);
+    if (!val) return NULL;
+
+    std::vector<struct value_t *> indices;
+    for (size_t i = 0; i < index_asts.size(); ++i) {
+        struct value_t *idx = eval(index_asts[i]);
+        if (!idx) {
+            freeval(val);
+            free_args(indices);
+            return NULL;
+        }
+        indices.push_back(idx);
+    }
+
+    struct symbol *s = lookupsym(((struct symref *)base)->name);
+    if (!s || !s->val) {
+        yyerror("symbol not found %s", ((struct symref *)base)->name);
+        freeval(val);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *container = s->val;
+    for (size_t k = 0; k + 1 < indices.size(); ++k) {
+        struct value_t **slot = index_slot_ptr(container, indices[k]);
+        if (!slot || !*slot) {
+            yyerror("invalid index assignment path");
+            freeval(val);
+            free_args(indices);
+            return NULL;
+        }
+        struct value_t *elem = *slot;
+        if (elem->type != T_list && elem->type != T_dict) {
+            yyerror("cannot index-assign into %s", typename_of(elem));
+            freeval(val);
+            free_args(indices);
+            return NULL;
+        }
+        container = elem;
+    }
+
+    struct value_t *idx = indices.back();
+    struct value_t *ret = NULL;
+    if (container->type == T_list) {
+        if (idx->type != T_int) {
+            yyerror("list index must be an integer, got %s", typename_of(idx));
+        } else {
+            int i = ((struct int_value_t *)idx)->value;
+            struct list_value_t *lv = (struct list_value_t *)container;
+            if (i < 0 || (size_t)i >= lv->value.size()) {
+                yyerror("list index %d out of range", i);
+            } else {
+                freeval(lv->value[i]);
+                lv->value[i] = val;
+                val = NULL;
+                ret = dupval(lv->value[i]);
+            }
+        }
+    } else if (container->type == T_dict) {
+        struct dict_value_t *dv = (struct dict_value_t *)container;
+        bool found = false;
+        for (size_t i = 0; i < dv->value.size(); ++i) {
+            if (value_equals(dv->value[i].first, idx)) {
+                freeval(dv->value[i].second);
+                dv->value[i].second = val;
+                val = NULL;
+                found = true;
+                ret = dupval(dv->value[i].second);
+                break;
+            }
+        }
+        if (!found) {
+            dv->value.push_back(std::make_pair(dupval(idx), val));
+            val = NULL;
+            ret = dupval(dv->value.back().second);
+        }
+    } else {
+        yyerror("cannot index-assign into %s", typename_of(container));
+    }
+
+    free_args(indices);
+    freeval(val);
+    return ret;
+}
+
+static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
+    struct symbol *s = lookupsym(ref->name);
+    if (!s) {
+        yyerror("symbol not found %s", ref->name);
+        return NULL;
+    }
+    struct value_t *v = eval(value_ast);
+    if (!v) return NULL;
+    freeval(s->val);
+    s->val = v;
+    return dupval(v);
 }
 
 struct value_t *eval(struct ast *a) {
@@ -314,8 +476,14 @@ struct value_t *eval(struct ast *a) {
             if (isrepeated(name)) {
                 yyerror("symbol repeated %s", name);
             } else {
+                std::shared_ptr<scope_t> closure = current_scope();
+                /* The global scope is always reachable as the fallback parent. */
+                if (closure && !closure->parent)
+                    closure.reset();
                 struct symbol *sym = newsym(name);
-                sym->val = newfuncval(((struct funcdef *)a)->ast, sl);
+                std::shared_ptr<function_code> code =
+                    get_function_code((struct funcdef *)a);
+                sym->val = newfuncval(code, closure);
                 ((struct funcdef *)a)->moved = 1;
                 savesym(sym);
             }
@@ -345,7 +513,7 @@ struct value_t *eval(struct ast *a) {
             break;
 
         case 'X': {
-            pushscope(NULL);
+            pushscope();
             ret = eval(((struct nscope *)a)->ast);
             popscope();
             break;
@@ -353,17 +521,12 @@ struct value_t *eval(struct ast *a) {
 
         case '=': {
             struct symasgn *asgn = (struct symasgn *)a;
-            struct symbol *s = lookupsym(asgn->name);
-            if (!s) {
-                yyerror("symbol not found %s", asgn->name);
-            } else {
-                struct value_t *v = eval(asgn->v);
-                if (v) {
-                    freeval(s->val);
-                    s->val = v;
-                    ret = dupval(s->val);
-                }
-            }
+            if (asgn->target->nodetype == 'N')
+                ret = assign_name((struct symref *)asgn->target, asgn->v);
+            else if (asgn->target->nodetype == 'G')
+                ret = assign_index(asgn->target, asgn->v);
+            else
+                yyerror("cannot assign to this expression");
             break;
         }
 
@@ -518,6 +681,150 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
+        case '%': {
+            struct value_t *l = eval(a->l);
+            struct value_t *r = eval(a->r);
+            if (!l || !r) {
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            if (!is_numeric(l) || !is_numeric(r)) {
+                yyerror("cannot take %s modulo %s", typename_of(l), typename_of(r));
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            if (as_double(r) == 0.0) {
+                yyerror("modulo by zero");
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            if (l->type == T_int && r->type == T_int) {
+                long long x = ((struct int_value_t *)l)->value;
+                long long y = ((struct int_value_t *)r)->value;
+                ret = newintval((int)(x % y));
+            } else {
+                ret = newfloatval(std::fmod(as_double(l), as_double(r)));
+            }
+            freeval(l);
+            freeval(r);
+            break;
+        }
+
+        case 'A': {
+            struct value_t *l = eval(a->l);
+            if (!l) break;
+            bool left = truthy(l);
+            freeval(l);
+            if (!left) {
+                ret = newintval(0);
+                break;
+            }
+            struct value_t *r = eval(a->r);
+            if (!r) break;
+            ret = newintval(truthy(r) ? 1 : 0);
+            freeval(r);
+            break;
+        }
+
+        case 'Q': {
+            struct value_t *l = eval(a->l);
+            if (!l) break;
+            bool left = truthy(l);
+            freeval(l);
+            if (left) {
+                ret = newintval(1);
+                break;
+            }
+            struct value_t *r = eval(a->r);
+            if (!r) break;
+            ret = newintval(truthy(r) ? 1 : 0);
+            freeval(r);
+            break;
+        }
+
+        case '!': {
+            struct value_t *v = eval(a->l);
+            if (!v) break;
+            ret = newintval(truthy(v) ? 0 : 1);
+            freeval(v);
+            break;
+        }
+
+        case '~': {
+            struct value_t *v = eval(a->l);
+            if (!v) break;
+            if (v->type != T_int) {
+                yyerror("bitwise not expects an int, got %s", typename_of(v));
+            } else {
+                ret = newintval(~((struct int_value_t *)v)->value);
+            }
+            freeval(v);
+            break;
+        }
+
+        case '&':
+        case '|':
+        case '^': {
+            struct value_t *l = eval(a->l);
+            struct value_t *r = eval(a->r);
+            if (!l || !r) {
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            if (l->type != T_int || r->type != T_int) {
+                yyerror("bitwise operator expects ints, got %s and %s",
+                        typename_of(l), typename_of(r));
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            int x = ((struct int_value_t *)l)->value;
+            int y = ((struct int_value_t *)r)->value;
+            if (a->nodetype == '&')
+                ret = newintval(x & y);
+            else if (a->nodetype == '|')
+                ret = newintval(x | y);
+            else
+                ret = newintval(x ^ y);
+            freeval(l);
+            freeval(r);
+            break;
+        }
+
+        case 's':
+        case 'r': {
+            struct value_t *l = eval(a->l);
+            struct value_t *r = eval(a->r);
+            if (!l || !r) {
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            if (l->type != T_int || r->type != T_int) {
+                yyerror("shift operator expects ints, got %s and %s",
+                        typename_of(l), typename_of(r));
+                freeval(l);
+                freeval(r);
+                break;
+            }
+            int x = ((struct int_value_t *)l)->value;
+            int y = ((struct int_value_t *)r)->value;
+            if (y < 0 || y >= 32) {
+                yyerror("shift count %d out of range", y);
+            } else if (a->nodetype == 's') {
+                ret = newintval((int)((unsigned)x << y));
+            } else {
+                ret = newintval(x >> y);
+            }
+            freeval(l);
+            freeval(r);
+            break;
+        }
+
         case '1':
         case '2':
         case '3':
@@ -580,7 +887,7 @@ struct value_t *eval(struct ast *a) {
 
         case 'P': {
             struct forloop *f = (struct forloop *)a;
-            pushscope(NULL);
+            pushscope();
             bool leave = false;
 
             if (f->init) {
@@ -712,9 +1019,15 @@ struct value_t *eval(struct ast *a) {
             ret = callbuildin((struct fncall *)a);
             break;
 
-        case 'C':
-            ret = calluser((struct ufncall *)a);
+        case 'C': {
+            struct ufncall *call = (struct ufncall *)a;
+            struct value_t *callee = eval(call->callee);
+            if (callee) {
+                ret = callvalue(callee, call->args);
+                freeval(callee);
+            }
             break;
+        }
 
         default:
             std::fprintf(stderr, "internal error: bad node %c\n", a->nodetype);

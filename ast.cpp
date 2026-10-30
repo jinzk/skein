@@ -3,6 +3,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <unordered_map>
 
 struct ast *newast(int nodetype, struct ast *l, struct ast *r) {
     struct ast *a = (struct ast *)std::malloc(sizeof(struct ast));
@@ -73,15 +75,15 @@ struct ast *newfunc(int functype, struct ast *l) {
     return (struct ast *)a;
 }
 
-struct ast *newcall(char *s, struct ast *l) {
+struct ast *newcall(struct ast *callee, struct ast *l) {
     struct ufncall *a = (struct ufncall *)std::malloc(sizeof(struct ufncall));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
     }
     a->nodetype = 'C';
+    a->callee = callee;
     a->args = l;
-    a->name = s;
     return (struct ast *)a;
 }
 
@@ -96,14 +98,14 @@ struct ast *newref(char *s) {
     return (struct ast *)a;
 }
 
-struct ast *newasgn(char *s, struct ast *v) {
+struct ast *newasgn(struct ast *target, struct ast *v) {
     struct symasgn *a = (struct symasgn *)std::malloc(sizeof(struct symasgn));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
     }
     a->nodetype = '=';
-    a->name = s;
+    a->target = target;
     a->v = v;
     return (struct ast *)a;
 }
@@ -203,11 +205,35 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast) {
     return (struct ast *)a;
 }
 
-void free_function_def(struct function_def *d) {
-    if (!d) return;
-    if (d->ast) treefree(d->ast);
-    if (d->sl) symlistfree(d->sl);
-    delete d;
+void free_function_code(struct function_code *code) {
+    if (!code) return;
+    if (code->ast) treefree(code->ast);
+    if (code->sl) symlistfree(code->sl);
+    delete code;
+}
+
+/*
+ * A single `def` AST node can be executed more than once (a nested function
+ * defined inside another function).  All executions share the same code
+ * (body + parameter list), but each gets its own closure environment.
+ */
+static std::unordered_map<struct funcdef *, std::shared_ptr<function_code>>
+    function_codes;
+
+std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
+    std::unordered_map<struct funcdef *, std::shared_ptr<function_code>>::iterator
+        it = function_codes.find(node);
+    if (it != function_codes.end())
+        return it->second;
+
+    std::shared_ptr<function_code> code(
+        new function_code{node->ast, node->sl}, free_function_code);
+    function_codes[node] = code;
+    return code;
+}
+
+void release_function_code(struct funcdef *node) {
+    function_codes.erase(node);
 }
 
 struct ast *newlist(struct ast *v, struct ast *l) {
@@ -242,6 +268,14 @@ void treefree(struct ast *a) {
         case '-':
         case '*':
         case '/':
+        case '%':
+        case '&':
+        case '|':
+        case '^':
+        case 'A':
+        case 'Q':
+        case 's':
+        case 'r':
         case 'G':
         case '1':
         case '2':
@@ -254,6 +288,8 @@ void treefree(struct ast *a) {
             treefree(a->l);
             break;
         case 'M':
+        case '!':
+        case '~':
             treefree(a->l);
             break;
         case 'V':
@@ -266,8 +302,8 @@ void treefree(struct ast *a) {
         case 'O':
             break;
         case '=':
+            treefree(((struct symasgn *)a)->target);
             treefree(((struct symasgn *)a)->v);
-            std::free(((struct symasgn *)a)->name);
             break;
         case 'D':
             treefree(((struct symdef *)a)->v);
@@ -283,7 +319,9 @@ void treefree(struct ast *a) {
              * example, a duplicate definition error) release them here.
              */
             struct funcdef *f = (struct funcdef *)a;
-            if (!f->moved) {
+            if (f->moved) {
+                release_function_code(f);
+            } else {
                 treefree(f->ast);
                 if (f->sl) symlistfree(f->sl);
             }
@@ -307,8 +345,8 @@ void treefree(struct ast *a) {
             break;
         }
         case 'C':
+            treefree(((struct ufncall *)a)->callee);
             treefree(((struct ufncall *)a)->args);
-            std::free(((struct ufncall *)a)->name);
             break;
         case 'F':
             treefree(((struct fncall *)a)->args);

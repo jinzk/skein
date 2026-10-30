@@ -1,22 +1,25 @@
 #ifndef _SCOPESTACK_H_
 #define _SCOPESTACK_H_
+
+#include <memory>
+
 #include "valuetype.h"
 
 struct symbol;
 
 struct scope_t {
-    struct symbol *func;
+    std::shared_ptr<scope_t> parent;
+    bool is_function;
     value_t *ret;
     struct symlist *syms;
-};
 
-struct scopestack {
-    struct scope_t *scope;
-    struct scopestack *last;
+    ~scope_t();
 };
 
 struct scope_t *topscope();
-void pushscope(struct symbol *);
+std::shared_ptr<scope_t> current_scope();
+void pushscope();
+void pushscope_closure(const std::shared_ptr<struct scope_t> &);
 void initscope();
 void popscope();
 void donescope();

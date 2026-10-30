@@ -11,7 +11,9 @@ enum bifs {
     B_exp,
     B_log,
     B_abs,
-    B_print
+    B_print,
+    B_list,
+    B_dict
 };
 
 struct ast {
@@ -54,8 +56,8 @@ struct fncall {
 
 struct ufncall {
     int nodetype;
+    struct ast *callee;
     struct ast *args;
-    char *name;
 };
 
 struct flow {
@@ -104,16 +106,16 @@ struct symref {
 
 struct symasgn {
     int nodetype;
-    char *name;
+    struct ast *target;
     struct ast *v;
 };
 
 struct ast *newast(int nodetype, struct ast *l, struct ast *r);
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r);
 struct ast *newfunc(int functype, struct ast *l);
-struct ast *newcall(char *s, struct ast *l);
+struct ast *newcall(struct ast *callee, struct ast *l);
 struct ast *newref(char *s);
-struct ast *newasgn(char *s, struct ast *v);
+struct ast *newasgn(struct ast *target, struct ast *v);
 struct ast *newscope(struct ast *v);
 struct ast *newint(int i);
 struct ast *newfloat(double d);
@@ -128,6 +130,8 @@ struct ast *newbrk();
 struct ast *newctn();
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast);
+std::shared_ptr<function_code> get_function_code(struct funcdef *node);
+void release_function_code(struct funcdef *node);
 
 
 struct ast *newlist(struct ast *v, struct ast *l);

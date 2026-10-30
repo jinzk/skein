@@ -21,7 +21,7 @@ def run(source, timeout=5):
         raise AssertionError(f"interpreter timed out for input {source!r}") from exc
 
 
-def check(name, source, *, stdout=None, stderr=None, code=0):
+def check(name, source, *, stdout=None, stdout_all=None, stderr=None, code=0):
     proc = run(source)
     combined = proc.stdout + proc.stderr
     assert "Segmentation fault" not in combined, f"{name}: crashed"
@@ -34,6 +34,12 @@ def check(name, source, *, stdout=None, stderr=None, code=0):
             f"{name}: expected stdout to contain {stdout!r}\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
+    if stdout_all is not None:
+        for expected in stdout_all:
+            assert expected in proc.stdout, (
+                f"{name}: expected stdout to contain {expected!r}\n"
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
     if stderr is not None:
         assert stderr in proc.stderr, (
             f"{name}: expected stderr to contain {stderr!r}\n"
@@ -50,6 +56,23 @@ def main():
           stdout="= 2.147e+09")
     check("INT_MIN division overflow", "(-2147483647 - 1) / -1\n",
           stdout="= 2.147e+09")
+
+    check("modulo", "7 % 4\n", stdout="= 3")
+    check("float modulo", "7.5 % 2\n", stdout="= 1.5")
+    check("modulo by zero", "1 % 0\n", stderr="modulo by zero")
+    check("logical and", "1 && 2\n", stdout="= 1")
+    check("logical and short-circuit", "0 && (1/0)\n", stdout="= 0")
+    check("logical or", "0 || 2\n", stdout="= 1")
+    check("logical or short-circuit", "1 || (1/0)\n", stdout="= 1")
+    check("logical not", "!0\n", stdout="= 1")
+    check("logical not string", '!""\n', stdout="= 1")
+    check("bitwise and", "1 & 3\n", stdout="= 1")
+    check("bitwise or", "1 | 2\n", stdout="= 3")
+    check("bitwise xor", "5 ^ 3\n", stdout="= 6")
+    check("bitwise not", "~0\n", stdout="= -1")
+    check("shift left", "1 << 4\n", stdout="= 16")
+    check("shift right", "16 >> 2\n", stdout="= 4")
+    check("bitwise vs equality precedence", "1 & 3 == 1\n", stdout="= 0")
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")
@@ -85,6 +108,82 @@ def main():
         "def f(a,a) { return a; }\n",
         stderr="duplicate parameter",
     )
+    check(
+        "closure counter",
+        "def make_counter() {\n"
+        "  let n = 0;\n"
+        "  def inc() { n = n + 1; return n; }\n"
+        "  return inc;\n"
+        "}\n"
+        "let c1 = make_counter();\n"
+        "let c2 = make_counter();\n"
+        "c1()\n"
+        "c1()\n"
+        "c2()\n",
+        stdout_all=["= 1", "= 2"],
+    )
+    check(
+        "closure shared environment",
+        "def make_pair() {\n"
+        "  let n = 0;\n"
+        "  def inc() { n = n + 1; return n; }\n"
+        "  def get() { return n; }\n"
+        "  let d = dict();\n"
+        "  d[\"inc\"] = inc;\n"
+        "  d[\"get\"] = get;\n"
+        "  return d;\n"
+        "}\n"
+        "let p = make_pair();\n"
+        "p[\"inc\"]()\n"
+        "p[\"inc\"]()\n"
+        "p[\"get\"]()\n",
+        stdout_all=["= 1", "= 2"],
+    )
+    check(
+        "closure factory",
+        "def adder(x) {\n"
+        "  def add(y) { return x + y; }\n"
+        "  return add;\n"
+        "}\n"
+        "let a = adder(10);\n"
+        "a(5)\n"
+        "adder(3)(4)\n",
+        stdout_all=["= 15", "= 7"],
+    )
+    check(
+        "closure recursion",
+        "def make_fact() {\n"
+        "  def fact(n) {\n"
+        "    if (n < 2) { return 1; }\n"
+        "    return n * fact(n-1);\n"
+        "  }\n"
+        "  return fact;\n"
+        "}\n"
+        "let f = make_fact();\n"
+        "f(5)\n",
+        stdout="= 120",
+    )
+    check(
+        "closure from block",
+        "let c = 0;\n"
+        "{\n"
+        "  let x = 5;\n"
+        "  def f() { return x; }\n"
+        "  c = f;\n"
+        "}\n"
+        "c()\n",
+        stdout="= 5",
+    )
+    check(
+        "function value in list",
+        "def adder(x) { def add(y) { return x + y; } return add; }\n"
+        "let fs = [adder(1), adder(2)];\n"
+        "fs[0](10)\n"
+        "fs[1](10)\n",
+        stdout_all=["= 11", "= 12"],
+    )
+    check("underscore identifier", "let my_value = 3;\nmy_value\n",
+          stdout="= 3")
 
     check("string concat", '"a" + "b"\n', stdout="= ab")
     check("string compare", '"a" < "b"\n', stdout="= 1")
@@ -100,6 +199,28 @@ def main():
     check("dict equality", "{1:2} == {1:2}\n", stdout="= 1")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
+    check("empty dict builtin", "dict()\n", stdout="= {}")
+    check("empty list builtin", "list()\n", stdout="= []")
+
+    check("list index assignment", "let a = [1,2,3];\na[0] = 9;\na\n",
+          stdout="= [9, 2, 3]")
+    check("dict insert by assignment", "let d = {1:2};\nd[2] = 5;\nd\n",
+          stdout="= {1: 2, 2: 5}")
+    check(
+        "nested index assignment",
+        "let a = [[1,2],[3,4]];\na[0][1] = 99;\na\n",
+        stdout="= [[1, 99], [3, 4]]",
+    )
+    check(
+        "nested dict assignment",
+        'let d = {"a": dict()};\nd["a"]["b"] = 42;\nd\n',
+        stdout="{a: {b: 42}}",
+    )
+    check("index assignment out of range", "let a = [1];\na[3] = 9;\n",
+          stderr="out of range")
+    check("index assignment to string", 'let s = "abc";\ns[0] = "z";\n',
+          stderr="cannot index-assign into string")
+    check("assignment to literal", "1 = 2\n", stderr="cannot assign to this expression")
 
     check(
         "for loop",
@@ -157,11 +278,11 @@ def main():
         stdout="= 2",
     )
 
-    check("call non-function", "let x = 1;\nx(2)\n", stderr="not a function")
+    check("call non-function", "let x = 1;\nx(2)\n", stderr="cannot call int")
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")
-    check("mystery character", "1 % 2\n", stderr="mystery character")
+    check("mystery character", "1 @ 2\n", stderr="mystery character")
 
     # Unterminated strings must never hang or crash.
     check("unterminated string newline", 'print("unterminated)\n',

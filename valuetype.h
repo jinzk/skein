@@ -7,10 +7,16 @@
 
 struct ast;
 struct symlist;
+struct scope_t;
 
-struct function_def {
+struct function_code {
     struct ast *ast;
     struct symlist *sl;
+};
+
+struct function_def {
+    std::shared_ptr<function_code> code;
+    std::shared_ptr<scope_t> closure;
 };
 
 enum val_type {
@@ -60,7 +66,7 @@ struct func_value_t {
     std::shared_ptr<function_def> def;
 };
 
-void free_function_def(struct function_def *d);
+
 
 struct value_t *newreturn();
 struct value_t *newbreak();
@@ -68,7 +74,9 @@ struct value_t *newcontinue();
 struct value_t *newintval(int i);
 struct value_t *newfloatval(double f);
 struct value_t *newstrval(const char *s);
-struct value_t *newfuncval(struct ast *ast, struct symlist *sl);
+struct value_t *newfuncval(std::shared_ptr<function_code> code,
+                           std::shared_ptr<struct scope_t> closure);
+void free_function_code(struct function_code *code);
 struct value_t *dupval(struct value_t *v);
 
 struct list_value_t *newlistval();

@@ -44,10 +44,21 @@ EXP ([Ee][-+]?[0-9]+)
 "-" |
 "*" |
 "/" |
+"%" |
 "=" |
 "," |
 ":" |
-";" { return yytext[0]; }
+";" |
+"&" |
+"|" |
+"^" |
+"~" |
+"!" { return yytext[0]; }
+
+"&&" { return LOGAND; }
+"||" { return LOGOR; }
+"<<" { return SHL; }
+">>" { return SHR; }
 
 "{" { indent_count++; return '{'; }
 "}" { if (indent_count > 0) indent_count--; return '}'; }
@@ -79,8 +90,10 @@ EXP ([Ee][-+]?[0-9]+)
 "log" { yylval.fn = B_log; return FUNC; }
 "abs" { yylval.fn = B_abs; return FUNC; }
 "print" { yylval.fn = B_print; return FUNC; }
+"list" { yylval.fn = B_list; return FUNC; }
+"dict" { yylval.fn = B_dict; return FUNC; }
 
-[a-zA-Z][a-zA-Z0-9]* {
+[a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;
     yylval.str = (char *)std::malloc(len);
     if (!yylval.str) {

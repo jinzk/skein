@@ -30,13 +30,21 @@ extern int yyparse();
 %token EOL
 %token IF ELSE WHILE FOR DEF LET
 %token RETURN BREAK CONTINUE
+%token LOGAND LOGOR SHL SHR
 
+%right '='
+%left LOGOR
+%left LOGAND
+%left '|'
+%left '^'
+%left '&'
 %nonassoc <fn> CMP
-%precedence '='
+%left SHL SHR
 %left '+' '-'
-%left '*' '/'
-%precedence UMINUS
+%left '*' '/' '%'
+%precedence UMINUS NOT BITNOT
 %precedence '['
+%precedence '('
 %precedence NOELSE
 %precedence ELSE
 
@@ -85,13 +93,23 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '-' exp                         { $$ = newast('-', $1, $3); }
     | exp '*' exp                         { $$ = newast('*', $1, $3); }
     | exp '/' exp                         { $$ = newast('/', $1, $3); }
+    | exp '%' exp                         { $$ = newast('%', $1, $3); }
+    | exp LOGAND exp                      { $$ = newast('A', $1, $3); }
+    | exp LOGOR exp                       { $$ = newast('Q', $1, $3); }
+    | exp '&' exp                         { $$ = newast('&', $1, $3); }
+    | exp '|' exp                         { $$ = newast('|', $1, $3); }
+    | exp '^' exp                         { $$ = newast('^', $1, $3); }
+    | exp SHL exp                         { $$ = newast('s', $1, $3); }
+    | exp SHR exp                         { $$ = newast('r', $1, $3); }
     | '(' exp ')'                         { $$ = $2; }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
+    | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
+    | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
     | NAME                                { $$ = newref($1); }
-    | NAME '=' exp                        { $$ = newasgn($1, $3); }
+    | exp '=' exp                         { $$ = newasgn($1, $3); }
     | FUNC '(' explist ')'                { $$ = newfunc($1, $3); }
-    | NAME '(' explist ')'                { $$ = newcall($1, $3); }
+    | exp '(' explist ')'      { $$ = newcall($1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' pairlist '}'                    { $$ = $2; }

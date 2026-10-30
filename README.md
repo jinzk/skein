@@ -152,7 +152,7 @@ adder(3)(4)
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -226,6 +226,58 @@ print("x = {:.2f}", 1.5)
 | `{{` / `}}` | 字面量 `{` / `}` |
 
 自动编号 `{}` 和显式编号 `{0}` 不能混用；参数不足会报错，多余参数会被忽略。注意 `print("x", 1)` 按格式模式处理，输出 `x` 并忽略多余的 `1`。
+
+## 外部命令
+
+`command(cmd[, env])` 执行一个 shell 命令，并返回其标准输出字符串：
+
+```text
+command("echo hi")                    → "hi"
+command("echo $FOO", {"FOO": "bar"})  → "bar"
+print(command("ls"))
+```
+
+- POSIX 使用 `/bin/sh -c`；
+- Windows/MinGW 使用 `cmd.exe /C`；
+- 可选的 `env` 是 dict，键和值必须是字符串；
+- `env` 在父进程环境基础上覆盖，只对当前命令生效；
+- 标准错误继承到当前进程，不会被捕获；
+- 返回值末尾的 `\r` / `\n` 会被去掉；
+- 命令无法启动时报告 `command failed to start`；
+- 非零退出码不会自动报错，当前返回值只有标准输出，没有退出码。
+
+如果只需要退出码，使用 `command_status(cmd[, env])`：
+
+```text
+command_status("exit 0")                     → 0
+command_status("exit 3")                     → 3
+command_status("exit $CODE", {"CODE": "3"})  → 3
+```
+
+`command_status` 会直接继承标准输入/输出/错误，因此命令输出会正常显示；它返回退出码整数。命令处理器无法启动时报告 `command_status failed to start`。
+
+环境变量名不能为空，也不能包含 `=`。在 Windows cmd 中引用变量使用 `%FOO%`，POSIX shell 使用 `$FOO`。
+
+示例：
+
+```text
+let files = command("ls");
+print(files);
+
+let name = command("echo world");
+format("hello {}", name)
+```
+
+`command` 是普通内置函数，因此也可以保存和传递：
+
+```text
+let run = command;
+run("echo ok")
+```
+
+**安全提示**：`command()` 会执行任意 shell 命令，只应对可信输入使用。
+
+Windows 下命令输出需要是 UTF-8 字节流，否则中文内容可能与解释器内部编码不一致。
 
 
 ## 目录结构

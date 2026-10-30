@@ -17,7 +17,9 @@ enum bifs {
     B_int,
     B_float,
     B_str,
-    B_format
+    B_format,
+    B_command,
+    B_command_status
 };
 
 struct ast {

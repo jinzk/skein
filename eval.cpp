@@ -1,5 +1,6 @@
 #include "eval.h"
 #include "format.h"
+#include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
 #include "symbol.h"
@@ -15,6 +16,7 @@ int g_runtime_error_count = 0;
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 static bool is_numeric(const struct value_t *v) {
@@ -309,6 +311,42 @@ static bool collect_args(struct ast *a, std::vector<struct value_t *> &out) {
     return true;
 }
 
+static bool collect_command_env(
+    const std::vector<struct value_t *> &args, size_t index,
+    const char *who,
+    std::vector<std::pair<std::string, std::string>> &env) {
+    if (index >= args.size())
+        return true;
+
+    struct value_t *value = args[index];
+    if (value->type != T_dict) {
+        yyerror("%s env must be a dict, got %s", who, typename_of(value));
+        return false;
+    }
+
+    struct dict_value_t *dict = (struct dict_value_t *)value;
+    for (size_t i = 0; i < dict->value.size(); ++i) {
+        struct value_t *key = dict->value[i].first;
+        struct value_t *val = dict->value[i].second;
+        if (key->type != T_string) {
+            yyerror("%s env keys must be strings", who);
+            return false;
+        }
+        if (val->type != T_string) {
+            yyerror("%s env values must be strings", who);
+            return false;
+        }
+        const char *name = ((struct string_value_t *)key)->value;
+        if (!name[0] || std::strchr(name, '=') != NULL) {
+            yyerror("invalid environment variable name");
+            return false;
+        }
+        env.emplace_back(name,
+                         ((struct string_value_t *)val)->value);
+    }
+    return true;
+}
+
 static struct value_t *call_builtin(int functype,
                                     const std::vector<struct value_t *> &args) {
     if (functype == B_list || functype == B_dict) {
@@ -354,7 +392,14 @@ static struct value_t *call_builtin(int functype,
         return ret;
     }
 
-    if (args.size() != 1) {
+    if (functype == B_command || functype == B_command_status) {
+        if (args.empty() || args.size() > 2) {
+            yyerror("%s expects 1 or 2 arguments, got %d",
+                    functype == B_command ? "command" : "command_status",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
     }
@@ -419,6 +464,41 @@ static struct value_t *call_builtin(int functype,
         case B_str:
             ret = newstrval(value_to_string(arg).c_str());
             break;
+        case B_command: {
+            if (arg->type != T_string) {
+                yyerror("command expects a string, got %s", typename_of(arg));
+            } else {
+                std::vector<std::pair<std::string, std::string>> env;
+                if (!collect_command_env(args, 1, "command", env))
+                    break;
+                std::string output;
+                int status = 0;
+                if (!platform_run_command(
+                        ((struct string_value_t *)arg)->value, env, output,
+                        status))
+                    yyerror("command failed to start");
+                else
+                    ret = newstrval(output.c_str());
+            }
+            break;
+        }
+        case B_command_status: {
+            if (arg->type != T_string) {
+                yyerror("command_status expects a string, got %s",
+                        typename_of(arg));
+            } else {
+                std::vector<std::pair<std::string, std::string>> env;
+                if (!collect_command_env(args, 1, "command_status", env))
+                    break;
+                int status = 0;
+                if (!platform_run_command_status(
+                        ((struct string_value_t *)arg)->value, env, status))
+                    yyerror("command_status failed to start");
+                else
+                    ret = newintval(status);
+            }
+            break;
+        }
         case B_sqrt:
         case B_exp:
         case B_log:

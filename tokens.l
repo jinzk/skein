@@ -199,6 +199,8 @@ EXP ([Ee][-+]?[0-9]+)
 "float" { yylval.fn = B_float; return FUNC; }
 "str" { yylval.fn = B_str; return FUNC; }
 "format" { yylval.fn = B_format; return FUNC; }
+"command" { yylval.fn = B_command; return FUNC; }
+"command_status" { yylval.fn = B_command_status; return FUNC; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;

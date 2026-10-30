@@ -56,6 +56,19 @@ struct value_t *newstrval(const char *s) {
     return (struct value_t *)v;
 }
 
+struct value_t *newbuiltinval(int functype) {
+    struct builtin_value_t *v = new builtin_value_t;
+    v->type = T_builtin;
+    v->functype = functype;
+    return (struct value_t *)v;
+}
+
+struct value_t *newnull() {
+    struct value_t *v = new value_t;
+    v->type = T_null;
+    return v;
+}
+
 struct value_t *newfuncval(std::shared_ptr<function_code> code,
                            std::shared_ptr<struct scope_t> closure) {
     struct func_value_t *v = new func_value_t;
@@ -111,6 +124,10 @@ struct value_t *dupval(struct value_t *v) {
             dst->def = src->def;
             return (struct value_t *)dst;
         }
+        case T_builtin:
+            return newbuiltinval(((struct builtin_value_t *)v)->functype);
+        case T_null:
+            return newnull();
         case T_return:
             return newreturn();
         case T_break:
@@ -156,6 +173,12 @@ void freeval(struct value_t *v) {
         case T_func:
             delete (struct func_value_t *)v;
             break;
+        case T_builtin:
+            delete (struct builtin_value_t *)v;
+            break;
+        case T_null:
+            delete v;
+            break;
         case T_return:
         case T_break:
         case T_continue:
@@ -175,6 +198,8 @@ const char *typename_of(const struct value_t *v) {
         case T_list: return "list";
         case T_dict: return "dict";
         case T_func: return "function";
+        case T_builtin: return "builtin";
+        case T_null: return "null";
         case T_class: return "class";
         case T_return: return "return";
         case T_break: return "break";
@@ -237,6 +262,10 @@ std::string value_to_string(const struct value_t *v) {
         }
         case T_func:
             return "<function>";
+        case T_builtin:
+            return "<builtin>";
+        case T_null:
+            return "null";
         case T_class:
             return "<class>";
         case T_return:

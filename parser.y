@@ -31,6 +31,7 @@ extern int yyparse();
 %token EOL
 %token IF ELSE WHILE FOR DEF LET
 %token RETURN BREAK CONTINUE
+%token NULLVAL
 %token LOGAND LOGOR SHL SHR
 
 %right '='
@@ -45,6 +46,7 @@ extern int yyparse();
 %left '*' '/' '%'
 %precedence UMINUS NOT BITNOT
 %precedence '['
+%precedence '.'
 %precedence '('
 %precedence NOELSE
 %precedence ELSE
@@ -109,9 +111,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
     | NAME                                { $$ = newref($1); }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
-    | FUNC '(' explist ')'                { $$ = newfunc($1, $3); }
     | exp '(' explist ')'      { $$ = newcall($1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
+    | exp '.' NAME                        { $$ = newast('G', $1, newstr($3)); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' pairlist '}'                    { $$ = $2; }
     | value
@@ -120,6 +122,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
 value: INT                                { $$ = newint($1); }
     | FLOAT                               { $$ = newfloat($1); }
     | XSTRING                             { $$ = newstr($1); free($1); }
+    | FUNC                                { $$ = newbuiltin($1); }
+    | NULLVAL                             { $$ = newnullast(); }
     ;
 
 valuelist: %empty                         { $$ = newlist(NULL, NULL); }
@@ -167,8 +171,9 @@ calclist: exp { $$ = $1; }
     ;
 
 docalc: calclist EOL {
+        g_runtime_error_count = 0;
         struct value_t *rslt = eval($1);
-        if (rslt && !g_interrupted) {
+        if (rslt && !g_interrupted && rslt->type != T_null) {
             switch (rslt->type) {
                 case T_return:
                     yyerror("return outside function");
@@ -215,6 +220,8 @@ calc: %empty
 void yyerror(const char *s, ...) {
     if (g_interrupted)
         return;
+
+    ++g_runtime_error_count;
 
     va_list ap;
     va_start(ap, s);

@@ -224,8 +224,41 @@ def main():
     check("list expression", "[1+2, 3*4]\n", stdout="= [3, 12]")
     check("empty list", "[]\n", stdout="= []")
     check("list index", "[1,2][1]\n", stdout="= 2")
+    check("nested list read", "let a = [[1,2],[3,4]];\na[0][1]\n",
+          stdout="= 2")
+    check(
+        "list read value semantics",
+        "let a = [[1]];\nlet b = a[0];\nb[0] = 9;\na\nb\n",
+        stdout_all=["= [[1]]", "= [9]"],
+    )
+    check(
+        "dict read value semantics",
+        'let d = {"x": [1,2]};\nlet e = d["x"];\ne[0] = 9;\nd\n',
+        stdout="{x: [1, 2]}",
+    )
+    check(
+        "index side effect falls back to copy",
+        "let a = [10,20,30];\n"
+        "def f() { a[0] = 99; return 0; }\n"
+        "a[f()]\n",
+        stdout="= 10",
+    )
     check("list equality", "[1,2] == [1,2]\n", stdout="= 1")
     check("dict index", '{1:2, 3:4}[3]\n', stdout="= 4")
+    check("dict field read", 'let p = {"x": 1, "y": 2};\np.x + p.y\n',
+          stdout="= 3")
+    check("dict field assignment", 'let p = {"x": 1};\np.x = 5;\np\n',
+          stdout="{x: 5}")
+    check(
+        "nested dict field assignment",
+        'let p = {"a": {"b": 2}};\np.a.b = 3;\np\n',
+        stdout="{a: {b: 3}}",
+    )
+    check("dict field callable", 'let d = {"f": sqrt};\nd.f(9)\n',
+          stdout="= 3.0")
+    check("dict field missing", 'let p = {"x": 1};\np.y\n',
+          stderr="key not found")
+    check("float literals unaffected by dot", ".5 + 1\n", stdout="= 1.5")
     check("dict equality", "{1:2} == {1:2}\n", stdout="= 1")
     check("dict literal duplicate key last wins", '{1: "a", 1: "b"}\n',
           stdout="{1: b}")
@@ -334,6 +367,67 @@ def main():
     check("recursion depth limit",
           "def f(n) { return f(n + 1); }\nf(0)\n",
           stderr="maximum recursion depth")
+    check("function without return yields null",
+          "def noret() { }\nprint(noret())\n", stdout="null")
+    check("null arithmetic", "def noret() { }\nnoret() + 1\n",
+          stderr="cannot add null and int")
+    check("null truthiness",
+          "def noret() { }\nif (noret()) { print(1); } else { print(2); }\n",
+          stdout="2")
+    check("null as argument",
+          "def noret() { }\ndef add(a,b) { return a+b; }\nadd(noret(), 2)\n",
+          stderr="cannot add null and int")
+    check("null equality", "def noret() { }\nnoret() == noret()\n",
+          stdout="= 1")
+    check("null literal", "print(null)\n", stdout="null")
+    check("null literal equality", "null == null\n", stdout="= 1")
+    check("null literal inequality", "null == 0\n", stdout="= 0")
+    check("null literal falsy",
+          "if (null) { print(1); } else { print(2); }\n", stdout="2")
+    check("null literal arithmetic", "null + 1\n",
+          stderr="cannot add null and int")
+    check("null is not callable", "null()\n", stderr="cannot call null")
+    check("str null", "str(null)\n", stdout="= null")
+    check("format null", 'format("{}", null)\n', stdout="= null")
+    check("explicit empty return", "def f() { return; }\nprint(f())\n",
+          stdout="null")
+    check("print returns null", "let x = print(1);\nprint(x)\n",
+          stdout_all=["1", "null"])
+    check("arity error after argument evaluation",
+          "def one(a) { return a; }\none(print(1), 2)\n",
+          stdout="1", stderr="expects 1 argument")
+    check("non-callable evaluates arguments", "1(print(7))\n",
+          stdout="7", stderr="cannot call int")
+
+    check("builtin as value", "let f = sqrt;\nf(9)\n", stdout="= 3.0")
+    check("builtin as callback",
+          "def apply(f, x) { return f(x); }\napply(sqrt, 16)\n",
+          stdout="= 4.0")
+    check("builtin in list", "let fs = [sqrt, abs];\nfs[0](25)\n",
+          stdout="= 5.0")
+    check("builtin equality", "sqrt == sqrt\nsqrt == abs\n",
+          stdout_all=["= 1", "= 0"])
+    check("print as value", 'let p = print;\np("ok")\n', stdout="ok")
+    check("format as value", 'let f = format;\nf("{} + {}", 1, 2)\n',
+          stdout="= 1 + 2")
+    check("builtin string form", "str(sqrt)\n", stdout="= <builtin>")
+
+    proc = run("def bad() { 1/0; }\nbad() + 1\n")
+    assert "division by zero" in proc.stderr
+    assert "cannot add null" not in proc.stderr
+
+    proc = run(
+        "def f(n) { if (n == 0) { return 1/0; } return f(n - 1); }\n"
+        "f(3)\n"
+    )
+    assert "division by zero" in proc.stderr
+    assert "maximum recursion depth" not in proc.stderr
+
+    proc = run('1/0; print("after");\n')
+    assert "division by zero" in proc.stderr
+    assert "after" not in proc.stdout
+
+
     check("int conversion from float", "int(2.9)\n", stdout="= 2")
     check("int conversion truncates toward zero", "int(-2.9)\n", stdout="= -2")
     check("int conversion from string", 'int("  -42  ")\n', stdout="= -42")

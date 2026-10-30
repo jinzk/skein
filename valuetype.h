@@ -13,6 +13,7 @@ struct scope_t;
 struct function_code {
     struct ast *ast;
     struct symlist *sl;
+    int nparams;
 };
 
 struct function_def {
@@ -27,6 +28,8 @@ enum val_type {
     T_list,
     T_dict,
     T_func,
+    T_builtin,
+    T_null,
     T_class,
     T_return,
     T_break,
@@ -67,7 +70,10 @@ struct func_value_t {
     std::shared_ptr<function_def> def;
 };
 
-
+struct builtin_value_t {
+    enum val_type type;
+    int functype;
+};
 
 struct value_t *newreturn();
 struct value_t *newbreak();
@@ -75,6 +81,8 @@ struct value_t *newcontinue();
 struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newstrval(const char *s);
+struct value_t *newbuiltinval(int functype);
+struct value_t *newnull();
 struct value_t *newfuncval(std::shared_ptr<function_code> code,
                            std::shared_ptr<struct scope_t> closure);
 void free_function_code(struct function_code *code);

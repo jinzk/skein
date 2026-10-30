@@ -52,12 +52,6 @@ struct funcdef {
     int moved; /* body/params transferred to a runtime function value */
 };
 
-struct fncall {
-    int nodetype;
-    struct ast *args;
-    enum bifs functype;
-};
-
 struct ufncall {
     int nodetype;
     struct ast *callee;
@@ -116,7 +110,6 @@ struct symasgn {
 
 struct ast *newast(int nodetype, struct ast *l, struct ast *r);
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r);
-struct ast *newfunc(int functype, struct ast *l);
 struct ast *newcall(struct ast *callee, struct ast *l);
 struct ast *newref(char *s);
 struct ast *newasgn(struct ast *target, struct ast *v);
@@ -124,6 +117,8 @@ struct ast *newscope(struct ast *v);
 struct ast *newint(long long i);
 struct ast *newfloat(double d);
 struct ast *newstr(char *s);
+struct ast *newbuiltin(int functype);
+struct ast *newnullast();
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);
 struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body);
 struct ast *newsname(char *s);

@@ -51,6 +51,28 @@ struct ast *newstr(char *s) {
     return (struct ast *)a;
 }
 
+struct ast *newbuiltin(int functype) {
+    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'V';
+    a->val = newbuiltinval(functype);
+    return (struct ast *)a;
+}
+
+struct ast *newnullast() {
+    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'V';
+    a->val = newnull();
+    return (struct ast *)a;
+}
+
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
     struct ast *a = (struct ast *)std::malloc(sizeof(struct ast));
     if (!a) {
@@ -61,18 +83,6 @@ struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
     a->l = l;
     a->r = r;
     return a;
-}
-
-struct ast *newfunc(int functype, struct ast *l) {
-    struct fncall *a = (struct fncall *)std::malloc(sizeof(struct fncall));
-    if (!a) {
-        yyerror("out of space");
-        std::exit(0);
-    }
-    a->nodetype = 'F';
-    a->args = l;
-    a->functype = (enum bifs)functype;
-    return (struct ast *)a;
 }
 
 struct ast *newcall(struct ast *callee, struct ast *l) {
@@ -226,8 +236,10 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     if (it != function_codes.end())
         return it->second;
 
+    int nparams = 0;
+    for (struct symlist *sl = node->sl; sl; sl = sl->next) ++nparams;
     std::shared_ptr<function_code> code(
-        new function_code{node->ast, node->sl}, free_function_code);
+        new function_code{node->ast, node->sl, nparams}, free_function_code);
     function_codes[node] = code;
     return code;
 }
@@ -347,9 +359,6 @@ void treefree(struct ast *a) {
         case 'C':
             treefree(((struct ufncall *)a)->callee);
             treefree(((struct ufncall *)a)->args);
-            break;
-        case 'F':
-            treefree(((struct fncall *)a)->args);
             break;
         case 'X':
             treefree(((struct nscope *)a)->ast);

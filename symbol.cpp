@@ -4,26 +4,18 @@
 #include <cstdlib>
 #include <cstring>
 
-static char *dupstr(const char *s) {
-    if (!s) s = "";
-    size_t len = std::strlen(s) + 1;
-    char *p = (char *)std::malloc(len);
-    if (!p) {
-        std::fprintf(stderr, "out of space\n");
-        std::exit(1);
-    }
-    std::memcpy(p, s, len);
-    return p;
-}
-
 struct symbol *newsym(const char *name) {
-    struct symbol *s = (struct symbol *)std::malloc(sizeof(struct symbol));
+    if (!name) name = "";
+    size_t len = std::strlen(name);
+    struct symbol *s =
+        (struct symbol *)std::malloc(sizeof(struct symbol) + len + 1);
     if (!s) {
         yyerror("out of space");
         std::exit(0);
     }
-    s->name = dupstr(name);
-    s->name_len = std::strlen(s->name);
+    s->name = (char *)(s + 1);
+    std::memcpy(s->name, name, len + 1);
+    s->name_len = len;
     s->val = NULL;
     return s;
 }
@@ -43,7 +35,6 @@ void symlistfree(struct symlist *sl) {
     while (sl) {
         struct symlist *next = sl->next;
         if (sl->sym) {
-            std::free(sl->sym->name);
             std::free(sl->sym);
         }
         std::free(sl);

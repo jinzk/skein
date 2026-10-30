@@ -5,6 +5,8 @@
 #include "symbol.h"
 #include "valuetype.h"
 
+int g_runtime_error_count = 0;
+
 #include <climits>
 #include <cmath>
 #include <cctype>
@@ -171,6 +173,8 @@ static bool truthy(const struct value_t *v) {
         case T_list: return !((struct list_value_t *)v)->value.empty();
         case T_dict: return !((struct dict_value_t *)v)->value.empty();
         case T_func: return true;
+        case T_builtin: return true;
+        case T_null: return false;
         default: return false;
     }
 }
@@ -218,6 +222,11 @@ static bool value_equals(struct value_t *a, struct value_t *b) {
             struct func_value_t *fb = (struct func_value_t *)b;
             return fa->def == fb->def;
         }
+        case T_builtin:
+            return ((struct builtin_value_t *)a)->functype ==
+                   ((struct builtin_value_t *)b)->functype;
+        case T_null:
+            return true;
         default:
             return false;
     }
@@ -283,6 +292,8 @@ static void free_args(std::vector<struct value_t *> &args) {
  */
 static bool collect_args(struct ast *a, std::vector<struct value_t *> &out) {
     if (!a) return true;
+    if (out.capacity() == 0)
+        out.reserve(8);
     if (a->nodetype == 'L') {
         if (!collect_args(a->l, out)) return false;
         return collect_args(a->r, out);
@@ -298,37 +309,33 @@ static bool collect_args(struct ast *a, std::vector<struct value_t *> &out) {
     return true;
 }
 
-static struct value_t *callbuildin(struct fncall *f) {
-    std::vector<struct value_t *> args;
-    if (!collect_args(f->args, args)) {
-        free_args(args);
-        return NULL;
-    }
-
-    if (f->functype == B_list || f->functype == B_dict) {
+static struct value_t *call_builtin(int functype,
+                                    const std::vector<struct value_t *> &args) {
+    if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {
             yyerror("built-in function expects 0 arguments, got %d",
                     (int)args.size());
-            free_args(args);
             return NULL;
         }
-        return (f->functype == B_list)
+        return (functype == B_list)
                    ? (struct value_t *)newlistval()
                    : (struct value_t *)newdictval();
     }
 
-    if (f->functype == B_format || f->functype == B_print) {
+    if (functype == B_format || functype == B_print) {
         struct value_t *ret = NULL;
-        if (f->functype == B_format && args.empty()) {
+        if (functype == B_format && args.empty()) {
             yyerror("format expects at least 1 argument");
-        } else if (f->functype == B_print && args.empty()) {
+        } else if (functype == B_print && args.empty()) {
             std::printf("\n");
-        } else if (f->functype == B_print && args.size() == 1) {
+            ret = newnull();
+        } else if (functype == B_print && args.size() == 1) {
             printvalue(args[0]);
             std::printf("\n");
+            ret = newnull();
         } else if (args[0]->type != T_string) {
             yyerror("%s first argument must be a string, got %s",
-                    f->functype == B_format ? "format" : "print",
+                    functype == B_format ? "format" : "print",
                     typename_of(args[0]));
         } else {
             std::vector<struct value_t *> fmt_args(args.begin() + 1, args.end());
@@ -337,25 +344,24 @@ static struct value_t *callbuildin(struct fncall *f) {
             if (!format_values(((struct string_value_t *)args[0])->value,
                                fmt_args, out, error)) {
                 yyerror("%s", error.c_str());
-            } else if (f->functype == B_format) {
+            } else if (functype == B_format) {
                 ret = newstrval(out.c_str());
             } else {
                 std::printf("%s\n", out.c_str());
+                ret = newnull();
             }
         }
-        free_args(args);
         return ret;
     }
 
     if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
-        free_args(args);
         return NULL;
     }
 
     struct value_t *arg = args[0];
     struct value_t *ret = NULL;
-    switch (f->functype) {
+    switch (functype) {
         case B_abs:
             if (arg->type == T_int) {
                 long long n = ((struct int_value_t *)arg)->value;
@@ -420,18 +426,17 @@ static struct value_t *callbuildin(struct fncall *f) {
                 yyerror("math function expects a number, got %s", typename_of(arg));
                 break;
             }
-            if (f->functype == B_sqrt)
+            if (functype == B_sqrt)
                 ret = newfloatval(std::sqrt(as_double(arg)));
-            else if (f->functype == B_exp)
+            else if (functype == B_exp)
                 ret = newfloatval(std::exp(as_double(arg)));
             else
                 ret = newfloatval(std::log(as_double(arg)));
             break;
         default:
-            yyerror("unknown built-in function %d", f->functype);
+            yyerror("unknown built-in function %d", functype);
             break;
     }
-    free_args(args);
     return ret;
 }
 
@@ -446,16 +451,37 @@ struct call_depth_guard {
 }
 
 static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
-    if (!callee || callee->type != T_func) {
-        yyerror("cannot call %s", typename_of(callee));
+    if (!callee)
         return NULL;
-    }
 
+    /*
+     * Keep the call-depth guard before argument evaluation so deeply nested
+     * call expressions cannot exhaust the C++ stack.
+     */
     if (call_depth >= MAX_CALL_DEPTH) {
         yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
         return NULL;
     }
     call_depth_guard depth_guard;
+
+    std::vector<struct value_t *> args;
+    if (!collect_args(args_ast, args)) {
+        free_args(args);
+        return NULL;
+    }
+
+    if (callee->type == T_builtin) {
+        struct value_t *ret = call_builtin(
+            ((struct builtin_value_t *)callee)->functype, args);
+        free_args(args);
+        return ret;
+    }
+
+    if (callee->type != T_func) {
+        yyerror("cannot call %s", typename_of(callee));
+        free_args(args);
+        return NULL;
+    }
 
     struct func_value_t *fv = (struct func_value_t *)callee;
     /*
@@ -463,14 +489,7 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
      * reassign/free the variable that holds this function value.
      */
     std::shared_ptr<function_def> def = fv->def;
-    std::vector<struct value_t *> args;
-    if (!collect_args(args_ast, args)) {
-        free_args(args);
-        return NULL;
-    }
-
-    int nparams = 0;
-    for (struct symlist *sl = def->code->sl; sl; sl = sl->next) ++nparams;
+    int nparams = def->code->nparams;
     if ((int)args.size() != nparams) {
         yyerror("function expects %d argument(s), got %d",
                 nparams, (int)args.size());
@@ -478,6 +497,7 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
         return NULL;
     }
 
+    int errors_before = g_runtime_error_count;
     pushscope_closure(def->closure);
     int i = 0;
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
@@ -500,7 +520,13 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     }
 
     popscope();
-    return result;
+
+    bool errored = g_runtime_error_count != errors_before;
+    if (g_interrupted || errored) {
+        freeval(result);
+        return NULL;
+    }
+    return result ? result : newnull();
 }
 
 static struct ast *index_base(struct ast *a) {
@@ -644,6 +670,170 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     return ret;
 }
 
+static bool is_read_only(const struct ast *a) {
+    if (!a) return true;
+    switch (a->nodetype) {
+        case 'V':
+        case 'N':
+            return true;
+        case '+':
+        case '-':
+        case '*':
+        case '/':
+        case '%':
+        case '&':
+        case '|':
+        case '^':
+        case 'A':
+        case 'Q':
+        case 's':
+        case 'r':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case 'M':
+        case '!':
+        case '~':
+        case 'G':
+            return is_read_only(a->l) && is_read_only(a->r);
+        default:
+            return false;
+    }
+}
+
+/*
+ * Read one indexing step without copying the container.  For lists and
+ * dictionaries `next` points into the container and stays borrowed; for
+ * strings a new one-character string is returned and must be freed.
+ */
+static bool index_read_step(struct value_t *container, struct value_t *index,
+                            struct value_t **next, bool *next_owned) {
+    *next = NULL;
+    *next_owned = false;
+
+    if (container->type == T_list) {
+        if (index->type != T_int) {
+            yyerror("list index must be an integer, got %s",
+                    typename_of(index));
+            return false;
+        }
+        long long i = ((struct int_value_t *)index)->value;
+        struct list_value_t *lv = (struct list_value_t *)container;
+        if (i < 0 || (unsigned long long)i >= lv->value.size()) {
+            yyerror("list index %lld out of range", i);
+            return false;
+        }
+        *next = lv->value[(size_t)i];
+        return true;
+    }
+
+    if (container->type == T_string) {
+        if (index->type != T_int) {
+            yyerror("string index must be an integer, got %s",
+                    typename_of(index));
+            return false;
+        }
+        long long i = ((struct int_value_t *)index)->value;
+        const char *s = ((struct string_value_t *)container)->value;
+        size_t len = utf8_length(s);
+        if (i < 0 || (unsigned long long)i >= len) {
+            yyerror("string index %lld out of range", i);
+            return false;
+        }
+        std::string ch;
+        if (!utf8_char_at(s, (size_t)i, ch))
+            return false;
+        *next = newstrval(ch.c_str());
+        *next_owned = true;
+        return true;
+    }
+
+    if (container->type == T_dict) {
+        struct dict_value_t *dv = (struct dict_value_t *)container;
+        for (size_t i = 0; i < dv->value.size(); ++i) {
+            if (value_equals(dv->value[i].first, index)) {
+                *next = dv->value[i].second;
+                return true;
+            }
+        }
+        yyerror("key not found");
+        return false;
+    }
+
+    yyerror("cannot index %s", typename_of(container));
+    return false;
+}
+
+/*
+ * Fast read path for expressions rooted at a variable, e.g. a[i] or a[i][j].
+ * It borrows the variable's container instead of duplicating the whole value.
+ * Only used when every index expression is side-effect free, so evaluating
+ * the indices cannot invalidate the borrowed container.
+ */
+static bool read_index_chain(struct ast *a, struct value_t *&out) {
+    std::vector<struct ast *> index_asts;
+    if (!collect_index_asts(a, index_asts))
+        return false;
+    for (struct ast *idx : index_asts) {
+        if (!is_read_only(idx))
+            return false;
+    }
+
+    struct ast *base = index_base(a);
+    struct symbol *sym = lookupsym(((struct symref *)base)->name);
+    if (!sym || !sym->val) {
+        yyerror("symbol not found %s", ((struct symref *)base)->name);
+        out = NULL;
+        return true;
+    }
+
+    struct value_t *container = sym->val;
+    bool container_owned = false;
+
+    for (size_t k = 0; k < index_asts.size(); ++k) {
+        struct value_t *idx = eval(index_asts[k]);
+        if (!idx) {
+            if (container_owned) freeval(container);
+            out = NULL;
+            return true;
+        }
+
+        struct value_t *next = NULL;
+        bool next_owned = false;
+        bool ok = index_read_step(container, idx, &next, &next_owned);
+        freeval(idx);
+        if (!ok) {
+            if (container_owned) freeval(container);
+            out = NULL;
+            return true;
+        }
+
+        if (k + 1 == index_asts.size()) {
+            out = next_owned ? next : dupval(next);
+            if (container_owned) freeval(container);
+            return true;
+        }
+
+        /*
+         * A borrowed child of an owned string cannot occur in the current
+         * type system, but duplicate defensively if it ever does.
+         */
+        if (container_owned && !next_owned) {
+            next = dupval(next);
+            next_owned = true;
+        }
+        if (container_owned) freeval(container);
+        container = next;
+        container_owned = next_owned;
+    }
+
+    out = NULL;
+    return true;
+}
+
 static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     struct symbol *s = lookupsym(ref->name);
     if (!s) {
@@ -728,6 +918,8 @@ struct value_t *eval(struct ast *a) {
             struct value_t *v = eval(value_ast);
             if (value_ast && !v)
                 break;
+            if (!v)
+                v = newnull();
             if (!retval(v)) {
                 yyerror("return outside function");
                 freeval(v);
@@ -1087,7 +1279,12 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'I': {
+            int errors_before = g_runtime_error_count;
             struct value_t *cond = eval(((struct flow *)a)->cond);
+            if (g_runtime_error_count != errors_before) {
+                freeval(cond);
+                break;
+            }
             if (!cond) break;
             bool b = truthy(cond);
             freeval(cond);
@@ -1107,13 +1304,24 @@ struct value_t *eval(struct ast *a) {
             if (!body) break;
             for (;;) {
                 if (g_interrupted) break;
+                int errors_before = g_runtime_error_count;
                 struct value_t *cond = eval(cond_ast);
+                if (g_runtime_error_count != errors_before) {
+                    freeval(cond);
+                    break;
+                }
                 if (!cond) break;
                 bool b = truthy(cond);
                 freeval(cond);
                 if (!b) break;
 
+                errors_before = g_runtime_error_count;
                 ret = eval(body);
+                if (g_runtime_error_count != errors_before) {
+                    freeval(ret);
+                    ret = NULL;
+                    break;
+                }
                 if (ret && ret->type == T_return)
                     break;
                 if (ret && ret->type == T_break) {
@@ -1138,14 +1346,20 @@ struct value_t *eval(struct ast *a) {
             bool leave = false;
 
             if (f->init) {
+                int errors_before = g_runtime_error_count;
                 struct value_t *v = eval(f->init);
-                if (v) {
+                if (g_runtime_error_count != errors_before) {
+                    freeval(v);
+                    leave = true;
+                } else if (v) {
                     if (v->type == T_return) {
                         ret = v;
                         leave = true;
                     } else {
-                        if (v->type == T_break || v->type == T_continue)
+                        if (v->type == T_break || v->type == T_continue) {
                             yyerror("break/continue outside loop");
+                            leave = true;
+                        }
                         freeval(v);
                     }
                 }
@@ -1153,9 +1367,16 @@ struct value_t *eval(struct ast *a) {
 
             for (; !leave;) {
                 if (g_interrupted) break;
+
                 bool cond_true = true;
                 if (f->cond) {
+                    int errors_before = g_runtime_error_count;
                     struct value_t *cond = eval(f->cond);
+                    if (g_runtime_error_count != errors_before) {
+                        freeval(cond);
+                        leave = true;
+                        break;
+                    }
                     if (!cond) break;
                     cond_true = truthy(cond);
                     freeval(cond);
@@ -1163,7 +1384,13 @@ struct value_t *eval(struct ast *a) {
                 if (!cond_true) break;
 
                 bool do_break = false;
+                int errors_before = g_runtime_error_count;
                 struct value_t *body = eval(f->body);
+                if (g_runtime_error_count != errors_before) {
+                    freeval(body);
+                    leave = true;
+                    break;
+                }
                 if (body) {
                     if (body->type == T_return) {
                         ret = body;
@@ -1179,14 +1406,22 @@ struct value_t *eval(struct ast *a) {
                 if (leave || do_break) break;
 
                 if (f->step) {
+                    errors_before = g_runtime_error_count;
                     struct value_t *step = eval(f->step);
+                    if (g_runtime_error_count != errors_before) {
+                        freeval(step);
+                        leave = true;
+                        break;
+                    }
                     if (step) {
                         if (step->type == T_return) {
                             ret = step;
                             leave = true;
                         } else {
-                            if (step->type == T_break || step->type == T_continue)
+                            if (step->type == T_break || step->type == T_continue) {
                                 yyerror("break/continue outside loop");
+                                leave = true;
+                            }
                             freeval(step);
                         }
                     }
@@ -1198,7 +1433,13 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'L': {
+            int errors_before = g_runtime_error_count;
             ret = eval(a->l);
+            if (g_runtime_error_count != errors_before) {
+                freeval(ret);
+                ret = NULL;
+                break;
+            }
             if (ret && (ret->type == T_return ||
                         ret->type == T_break ||
                         ret->type == T_continue))
@@ -1209,6 +1450,11 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'G': {
+            struct value_t *fast = NULL;
+            if (read_index_chain(a, fast)) {
+                ret = fast;
+                break;
+            }
             struct value_t *container = eval(a->l);
             struct value_t *index = eval(a->r);
             if (!container || !index) {
@@ -1263,10 +1509,6 @@ struct value_t *eval(struct ast *a) {
             freeval(index);
             break;
         }
-
-        case 'F':
-            ret = callbuildin((struct fncall *)a);
-            break;
 
         case 'C': {
             struct ufncall *call = (struct ufncall *)a;

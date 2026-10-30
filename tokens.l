@@ -152,6 +152,7 @@ EXP ([Ee][-+]?[0-9]+)
 "return" { return RETURN; }
 "break" { return BREAK; }
 "continue" { return CONTINUE; }
+"null" { return NULLVAL; }
 
 "sqrt" { yylval.fn = B_sqrt; return FUNC; }
 "exp" { yylval.fn = B_exp; return FUNC; }
@@ -189,6 +190,8 @@ EXP ([Ee][-+]?[0-9]+)
 
 ([0-9]+"."[0-9]*|"."[0-9]+)({EXP})? { yylval.d = std::strtod(yytext, NULL); return FLOAT; }
 [0-9]+{EXP} { yylval.d = std::strtod(yytext, NULL); return FLOAT; }
+
+"." { return '.'; }
 
 "//".*
 [ \t\r] {}

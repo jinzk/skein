@@ -52,7 +52,6 @@ static void clear_scope(scope_t *s) {
     for (struct symbol *sym : s->syms.small) {
         if (sym) {
             freeval(sym->val);
-            std::free(sym->name);
             std::free(sym);
         }
     }

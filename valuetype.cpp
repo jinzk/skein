@@ -35,7 +35,7 @@ struct value_t *newcontinue() {
     return v;
 }
 
-struct value_t *newintval(int i) {
+struct value_t *newintval(long long i) {
     struct int_value_t *v = new int_value_t;
     v->type = T_int;
     v->value = i;

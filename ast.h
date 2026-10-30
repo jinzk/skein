@@ -16,7 +16,8 @@ enum bifs {
     B_dict,
     B_int,
     B_float,
-    B_str
+    B_str,
+    B_format
 };
 
 struct ast {
@@ -120,7 +121,7 @@ struct ast *newcall(struct ast *callee, struct ast *l);
 struct ast *newref(char *s);
 struct ast *newasgn(struct ast *target, struct ast *v);
 struct ast *newscope(struct ast *v);
-struct ast *newint(int i);
+struct ast *newint(long long i);
 struct ast *newfloat(double d);
 struct ast *newstr(char *s);
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);

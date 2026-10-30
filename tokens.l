@@ -163,6 +163,7 @@ EXP ([Ee][-+]?[0-9]+)
 "int" { yylval.fn = B_int; return FUNC; }
 "float" { yylval.fn = B_float; return FUNC; }
 "str" { yylval.fn = B_str; return FUNC; }
+"format" { yylval.fn = B_format; return FUNC; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;
@@ -177,12 +178,12 @@ EXP ([Ee][-+]?[0-9]+)
 
 [0-9]+ {
     errno = 0;
-    long v = std::strtol(yytext, NULL, 10);
-    if (errno == ERANGE || v > INT_MAX || v < INT_MIN) {
+    long long v = std::strtoll(yytext, NULL, 10);
+    if (errno == ERANGE) {
         yylval.d = std::strtod(yytext, NULL);
         return FLOAT;
     }
-    yylval.i = (int)v;
+    yylval.i = v;
     return INT;
 }
 

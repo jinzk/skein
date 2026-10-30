@@ -18,7 +18,7 @@ struct ast *newast(int nodetype, struct ast *l, struct ast *r) {
     return a;
 }
 
-struct ast *newint(int i) {
+struct ast *newint(long long i) {
     struct val *a = (struct val *)std::malloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");

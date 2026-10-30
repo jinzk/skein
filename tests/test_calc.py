@@ -58,12 +58,17 @@ def main():
     check("integer division", "10/4\n", stdout="= 2")
     check("float division", "10/4.0\n", stdout="= 2.5")
     check("integer division truncates toward zero", "-7 / 4\n", stdout="= -1")
-    check("integer overflow", "2147483647 + 1\n",
+    check("int64 addition", "2147483647 + 1\n", stdout="= 2147483648")
+    check("int64 maximum", "9223372036854775807\n",
+          stdout="= 9223372036854775807")
+    check("integer overflow", "9223372036854775807 + 1\n",
           stderr="integer overflow")
-    check("out-of-range integer literal becomes float", "2147483648\n",
-          stdout="= 2147483648.0")
-    check("INT_MIN division overflow", "(-2147483647 - 1) / -1\n",
-          stderr="integer overflow")
+    check("out-of-range integer literal becomes float",
+          "9223372036854775808\n", stdout="= 9.223372036854776e+18")
+    check("INT64_MIN division overflow",
+          "(-9223372036854775807 - 1) / -1\n", stderr="integer overflow")
+    check("int64 exact mixed comparison",
+          "9007199254740993 == 9007199254740992.0\n", stdout="= 0")
 
     check("modulo", "7 % 4\n", stdout="= 3")
     check("float modulo", "7.5 % 2\n", stdout="= 1.5")
@@ -82,11 +87,15 @@ def main():
     check("bitwise not", "~0\n", stdout="= -1")
     check("shift left", "1 << 4\n", stdout="= 16")
     check("shift right", "16 >> 2\n", stdout="= 4")
+    check("int64 shift", "1 << 62\n", stdout="= 4611686018427387904")
+    check("shift count out of range", "1 << 64\n",
+          stderr="shift count 64 out of range")
     check("bitwise vs equality precedence", "1 & 3 == 1\n", stdout="= 0")
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")
-    check("abs overflow", "abs(-2147483647 - 1)\n", stderr="integer overflow")
+    check("abs overflow", "abs(-9223372036854775807 - 1)\n",
+          stderr="integer overflow")
 
     check("nan equality is false", "sqrt(-1) == 1\n", stdout="= 0")
     check("nan inequality is true", "sqrt(-1) != 1\n", stdout="= 1")
@@ -316,8 +325,47 @@ def main():
     check("str conversion of list", "str([1, 2])\n", stdout="= [1, 2]")
     check("int conversion rejects float string", 'int("4.2")\n',
           stderr="int() cannot convert")
-    check("int conversion out of range", "int(2147483648.0)\n",
+    check("int conversion out of range", "int(9223372036854775808.0)\n",
           stderr="int() value out of range")
+    check("int conversion from int64 string",
+          'int("9223372036854775807")\n', stdout="= 9223372036854775807")
+
+    check("format basic", 'format("x = {}", 3)\n', stdout="= x = 3")
+    check("format multiple", 'format("{} + {} = {}", 1, 2, 3)\n',
+          stdout="= 1 + 2 = 3")
+    check("format positional", 'format("{1} {0}", "a", "b")\n',
+          stdout="= b a")
+    check("format escaped braces", 'format("{{}} = {}", 1)\n',
+          stdout="= {} = 1")
+    check("format float precision", 'format("{:.2f}", 1.5)\n',
+          stdout="= 1.50")
+    check("format integer type", 'format("{:d}", 42)\n', stdout="= 42")
+    check("format hex", 'format("{:x} {:X}", 255, 255)\n', stdout="= ff FF")
+    check("format width", 'format("[{:>6}]", "hi")\n', stdout="= [    hi]")
+    check("format center", 'format("[{:*^8}]", "hi")\n', stdout="= [***hi***]")
+    check("format zero padding", 'format("{:08}", -42)\n', stdout="= -0000042")
+    check("format utf8 width", 'format("[{:4}]", "你")\n', stdout="= [你   ]")
+    check("format utf8 precision", 'format("{:.2s}", "你好ab")\n',
+          stdout="= 你好")
+    check("format extra args ignored", 'format("{}", 1, 2)\n', stdout="= 1")
+    check("format too few args", 'format("{} {}", 1)\n',
+          stderr="out of range")
+    check("format mixed numbering", 'format("{} {0}", 1)\n',
+          stderr="cannot mix")
+    check("format unmatched brace", 'format("{")\n', stderr="unmatched")
+    check("format unknown type", 'format("{:q}", 1)\n',
+          stderr="unknown format type")
+    check("format type mismatch", 'format("{:d}", "x")\n',
+          stderr="requires an integer")
+    check("format precision requires type", 'format("{:.2}", 1.5)\n',
+          stderr="precision requires")
+    check("print formatting", 'print("x = {}", 3)\n', stdout="x = 3")
+    check("print raw single argument", 'print("{{}}")\n', stdout="{{}}")
+    check("print multi-arg formatting", 'print("{} + {} = {}", 1, 2, 3)\n',
+          stdout="1 + 2 = 3")
+    check("print extra args ignored", 'print("x", 1)\n', stdout="x")
+    check("print non-string format", 'print(1, 2)\n',
+          stderr="first argument must be a string")
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")

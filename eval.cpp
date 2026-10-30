@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "format.h"
 #include "repl.h"
 #include "scopestack.h"
 #include "symbol.h"
@@ -18,12 +19,12 @@ static bool is_numeric(const struct value_t *v) {
     return v && (v->type == T_int || v->type == T_float);
 }
 
-static struct value_t *new_int_checked(long long n) {
-    if (n < INT_MIN || n > INT_MAX) {
+static struct value_t *new_int_checked(__int128 n) {
+    if (n < LLONG_MIN || n > LLONG_MAX) {
         yyerror("integer overflow");
         return NULL;
     }
-    return newintval((int)n);
+    return newintval((long long)n);
 }
 
 static double as_double(const struct value_t *v) {
@@ -38,15 +39,14 @@ static const char *skip_space(const char *p) {
     return p;
 }
 
-static bool parse_int_string(const char *s, int &out) {
+static bool parse_int_string(const char *s, long long &out) {
     if (!s) return false;
     errno = 0;
     char *end = NULL;
     long long v = std::strtoll(s, &end, 10);
     if (end == s || errno == ERANGE) return false;
     if (*skip_space(end) != '\0') return false;
-    if (v < INT_MIN || v > INT_MAX) return false;
-    out = (int)v;
+    out = v;
     return true;
 }
 
@@ -60,6 +60,61 @@ static bool parse_float_string(const char *s, double &out) {
     if (*skip_space(end) != '\0') return false;
     out = v;
     return true;
+}
+
+/*
+ * Compare an int64 with a double exactly, returning the sign of (i - d).
+ * `unordered` is set for NaN, where all comparisons are false.
+ */
+static int compare_int_double(long long i, double d, bool &unordered) {
+    unordered = false;
+    if (std::isnan(d)) {
+        unordered = true;
+        return 0;
+    }
+    if (std::isinf(d))
+        return d > 0 ? -1 : 1;
+
+    /* 2^63, the first double that is outside the int64 range. */
+    const double two63 = 9223372036854775808.0;
+    if (d >= two63) return -1;
+    if (d < -two63) return 1;
+
+    double truncated = std::trunc(d);
+    long long ti = (long long)truncated;
+    if (i < ti) return -1;
+    if (i > ti) return 1;
+    if (d > truncated) return -1;
+    if (d < truncated) return 1;
+    return 0;
+}
+
+static int compare_numeric(const struct value_t *a, const struct value_t *b,
+                           bool &unordered) {
+    unordered = false;
+    if (a->type == T_int && b->type == T_int) {
+        long long x = ((const struct int_value_t *)a)->value;
+        long long y = ((const struct int_value_t *)b)->value;
+        return x < y ? -1 : (x > y ? 1 : 0);
+    }
+    if (a->type == T_float && b->type == T_float) {
+        double x = ((const struct float_value_t *)a)->value;
+        double y = ((const struct float_value_t *)b)->value;
+        if (std::isnan(x) || std::isnan(y)) {
+            unordered = true;
+            return 0;
+        }
+        return x < y ? -1 : (x > y ? 1 : 0);
+    }
+    if (a->type == T_int) {
+        return compare_int_double(((const struct int_value_t *)a)->value,
+                                  ((const struct float_value_t *)b)->value,
+                                  unordered);
+    }
+    int cmp = compare_int_double(((const struct int_value_t *)b)->value,
+                                 ((const struct float_value_t *)a)->value,
+                                 unordered);
+    return unordered ? 0 : -cmp;
 }
 
 static size_t utf8_sequence_length(unsigned char c) {
@@ -122,8 +177,11 @@ static bool truthy(const struct value_t *v) {
 
 static bool value_equals(struct value_t *a, struct value_t *b) {
     if (!a || !b) return a == b;
-    if (is_numeric(a) && is_numeric(b))
-        return as_double(a) == as_double(b);
+    if (is_numeric(a) && is_numeric(b)) {
+        bool unordered = false;
+        int cmp = compare_numeric(a, b, unordered);
+        return !unordered && cmp == 0;
+    }
     if (a->type != b->type) return false;
     switch (a->type) {
         case T_string:
@@ -179,15 +237,20 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
     }
 
     if (is_numeric(l) && is_numeric(r)) {
-        /* Compare directly so NaN follows IEEE 754 (all ordering is false). */
-        double a = as_double(l), b = as_double(r);
+        bool unordered = false;
+        int cmp = compare_numeric(l, r, unordered);
+        if (unordered) {
+            /* IEEE 754: NaN is unequal to everything and unordered. */
+            if (op == 3) return newintval(1);
+            return newintval(0);
+        }
         switch (op) {
-            case 1: return newintval(a > b ? 1 : 0);
-            case 2: return newintval(a < b ? 1 : 0);
-            case 3: return newintval(a != b ? 1 : 0);
-            case 4: return newintval(a == b ? 1 : 0);
-            case 5: return newintval(a >= b ? 1 : 0);
-            case 6: return newintval(a <= b ? 1 : 0);
+            case 1: return newintval(cmp > 0 ? 1 : 0);
+            case 2: return newintval(cmp < 0 ? 1 : 0);
+            case 3: return newintval(cmp != 0 ? 1 : 0);
+            case 4: return newintval(cmp == 0 ? 1 : 0);
+            case 5: return newintval(cmp >= 0 ? 1 : 0);
+            case 6: return newintval(cmp <= 0 ? 1 : 0);
             default: return NULL;
         }
     }
@@ -254,6 +317,36 @@ static struct value_t *callbuildin(struct fncall *f) {
                    : (struct value_t *)newdictval();
     }
 
+    if (f->functype == B_format || f->functype == B_print) {
+        struct value_t *ret = NULL;
+        if (f->functype == B_format && args.empty()) {
+            yyerror("format expects at least 1 argument");
+        } else if (f->functype == B_print && args.empty()) {
+            std::printf("\n");
+        } else if (f->functype == B_print && args.size() == 1) {
+            printvalue(args[0]);
+            std::printf("\n");
+        } else if (args[0]->type != T_string) {
+            yyerror("%s first argument must be a string, got %s",
+                    f->functype == B_format ? "format" : "print",
+                    typename_of(args[0]));
+        } else {
+            std::vector<struct value_t *> fmt_args(args.begin() + 1, args.end());
+            std::string out;
+            std::string error;
+            if (!format_values(((struct string_value_t *)args[0])->value,
+                               fmt_args, out, error)) {
+                yyerror("%s", error.c_str());
+            } else if (f->functype == B_format) {
+                ret = newstrval(out.c_str());
+            } else {
+                std::printf("%s\n", out.c_str());
+            }
+        }
+        free_args(args);
+        return ret;
+    }
+
     if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         free_args(args);
@@ -263,15 +356,10 @@ static struct value_t *callbuildin(struct fncall *f) {
     struct value_t *arg = args[0];
     struct value_t *ret = NULL;
     switch (f->functype) {
-        case B_print:
-            printvalue(arg);
-            std::printf("\n");
-            break;
         case B_abs:
             if (arg->type == T_int) {
                 long long n = ((struct int_value_t *)arg)->value;
-                if (n < 0) n = -n;
-                ret = new_int_checked(n);
+                ret = new_int_checked(n < 0 ? -(__int128)n : (__int128)n);
             } else if (arg->type == T_float) {
                 ret = newfloatval(std::fabs(((struct float_value_t *)arg)->value));
             } else {
@@ -283,17 +371,18 @@ static struct value_t *callbuildin(struct fncall *f) {
                 ret = newintval(((struct int_value_t *)arg)->value);
             } else if (arg->type == T_float) {
                 double d = ((struct float_value_t *)arg)->value;
+                const double two63 = 9223372036854775808.0;
                 if (!std::isfinite(d)) {
                     yyerror("int() value out of range");
                 } else {
                     d = std::trunc(d);
-                    if (d < (double)INT_MIN || d > (double)INT_MAX)
+                    if (d < -two63 || d >= two63)
                         yyerror("int() value out of range");
                     else
-                        ret = newintval((int)d);
+                        ret = newintval((long long)d);
                 }
             } else if (arg->type == T_string) {
-                int value = 0;
+                long long value = 0;
                 if (parse_int_string(((struct string_value_t *)arg)->value, value))
                     ret = newintval(value);
                 else
@@ -439,10 +528,10 @@ static struct value_t **index_slot_ptr(struct value_t *container,
     if (!container || !idx) return NULL;
     if (container->type == T_list) {
         if (idx->type != T_int) return NULL;
-        int i = ((struct int_value_t *)idx)->value;
+        long long i = ((struct int_value_t *)idx)->value;
         struct list_value_t *lv = (struct list_value_t *)container;
-        if (i < 0 || (size_t)i >= lv->value.size()) return NULL;
-        return &lv->value[i];
+        if (i < 0 || (unsigned long long)i >= lv->value.size()) return NULL;
+        return &lv->value[(size_t)i];
     }
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
@@ -517,15 +606,15 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
         if (idx->type != T_int) {
             yyerror("list index must be an integer, got %s", typename_of(idx));
         } else {
-            int i = ((struct int_value_t *)idx)->value;
+            long long i = ((struct int_value_t *)idx)->value;
             struct list_value_t *lv = (struct list_value_t *)container;
-            if (i < 0 || (size_t)i >= lv->value.size()) {
-                yyerror("list index %d out of range", i);
+            if (i < 0 || (unsigned long long)i >= lv->value.size()) {
+                yyerror("list index %lld out of range", i);
             } else {
-                freeval(lv->value[i]);
-                lv->value[i] = val;
+                freeval(lv->value[(size_t)i]);
+                lv->value[(size_t)i] = val;
                 val = NULL;
-                ret = dupval(lv->value[i]);
+                ret = dupval(lv->value[(size_t)i]);
             }
         }
     } else if (container->type == T_dict) {
@@ -729,7 +818,7 @@ struct value_t *eval(struct ast *a) {
             if (!v) break;
             if (v->type == T_int) {
                 long long n = ((struct int_value_t *)v)->value;
-                ret = new_int_checked(-n);
+                ret = new_int_checked(-(__int128)n);
             } else if (v->type == T_float) {
                 ret = newfloatval(-((struct float_value_t *)v)->value);
             } else {
@@ -750,7 +839,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked(x + y);
+                ret = new_int_checked((__int128)x + y);
             } else if (is_numeric(l) && is_numeric(r)) {
                 ret = newfloatval(as_double(l) + as_double(r));
             } else if (l->type == T_string && r->type == T_string) {
@@ -794,7 +883,9 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked(a->nodetype == '-' ? x - y : x * y);
+                ret = new_int_checked(a->nodetype == '-'
+                                          ? (__int128)x - y
+                                          : (__int128)x * y);
             } else {
                 double x = as_double(l), y = as_double(r);
                 ret = newfloatval(a->nodetype == '-' ? x - y : x * y);
@@ -827,7 +918,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked(x / y);
+                ret = new_int_checked((__int128)x / y);
             } else {
                 ret = newfloatval(as_double(l) / as_double(r));
             }
@@ -859,7 +950,7 @@ struct value_t *eval(struct ast *a) {
             if (l->type == T_int && r->type == T_int) {
                 long long x = ((struct int_value_t *)l)->value;
                 long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked(x % y);
+                ret = new_int_checked((__int128)x % y);
             } else {
                 ret = newfloatval(std::fmod(as_double(l), as_double(r)));
             }
@@ -937,8 +1028,8 @@ struct value_t *eval(struct ast *a) {
                 freeval(r);
                 break;
             }
-            int x = ((struct int_value_t *)l)->value;
-            int y = ((struct int_value_t *)r)->value;
+            long long x = ((struct int_value_t *)l)->value;
+            long long y = ((struct int_value_t *)r)->value;
             if (a->nodetype == '&')
                 ret = newintval(x & y);
             else if (a->nodetype == '|')
@@ -966,12 +1057,12 @@ struct value_t *eval(struct ast *a) {
                 freeval(r);
                 break;
             }
-            int x = ((struct int_value_t *)l)->value;
-            int y = ((struct int_value_t *)r)->value;
-            if (y < 0 || y >= 32) {
-                yyerror("shift count %d out of range", y);
+            long long x = ((struct int_value_t *)l)->value;
+            long long y = ((struct int_value_t *)r)->value;
+            if (y < 0 || y >= 64) {
+                yyerror("shift count %lld out of range", y);
             } else if (a->nodetype == 's') {
-                ret = newintval((int)((unsigned)x << y));
+                ret = newintval((long long)((unsigned long long)x << y));
             } else {
                 ret = newintval(x >> y);
             }
@@ -1130,23 +1221,23 @@ struct value_t *eval(struct ast *a) {
                     yyerror("list index must be an integer, got %s",
                             typename_of(index));
                 } else {
-                    int i = ((struct int_value_t *)index)->value;
+                    long long i = ((struct int_value_t *)index)->value;
                     struct list_value_t *lv = (struct list_value_t *)container;
-                    if (i < 0 || (size_t)i >= lv->value.size())
-                        yyerror("list index %d out of range", i);
+                    if (i < 0 || (unsigned long long)i >= lv->value.size())
+                        yyerror("list index %lld out of range", i);
                     else
-                        ret = dupval(lv->value[i]);
+                        ret = dupval(lv->value[(size_t)i]);
                 }
             } else if (container->type == T_string) {
                 if (index->type != T_int) {
                     yyerror("string index must be an integer, got %s",
                             typename_of(index));
                 } else {
-                    int i = ((struct int_value_t *)index)->value;
+                    long long i = ((struct int_value_t *)index)->value;
                     const char *s = ((struct string_value_t *)container)->value;
                     size_t len = utf8_length(s);
-                    if (i < 0 || (size_t)i >= len) {
-                        yyerror("string index %d out of range", i);
+                    if (i < 0 || (unsigned long long)i >= len) {
+                        yyerror("string index %lld out of range", i);
                     } else {
                         std::string ch;
                         if (utf8_char_at(s, (size_t)i, ch))

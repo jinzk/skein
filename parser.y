@@ -18,7 +18,7 @@ extern int yyparse();
     struct ast *a;
     struct symlist *sl;
     double d;
-    int i;
+    long long i;
     int fn;
     char *str;
 }

@@ -39,7 +39,7 @@ struct value_t {
 
 struct int_value_t {
     enum val_type type;
-    int value;
+    long long value;
 };
 
 struct float_value_t {
@@ -72,7 +72,7 @@ struct func_value_t {
 struct value_t *newreturn();
 struct value_t *newbreak();
 struct value_t *newcontinue();
-struct value_t *newintval(int i);
+struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newstrval(const char *s);
 struct value_t *newfuncval(std::shared_ptr<function_code> code,

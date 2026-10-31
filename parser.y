@@ -170,6 +170,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token STRUCT "struct" IMPL "impl" TRAIT "trait"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
+%token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
@@ -193,6 +194,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %precedence '['
 %precedence '.'
 %precedence '('
+%precedence ON
 %precedence NOELSE
 %precedence ELSE
 
@@ -373,6 +375,11 @@ line: RETURN exp                          { $$ = newret($2); }
     | RETURN                              { $$ = newret(NULL); }
     | BREAK                               { $$ = newbrk(); }
     | CONTINUE                            { $$ = newctn(); }
+    | FAIL exp                            { $$ = newfail($2); }
+    | FAIL                                { $$ = newfail(NULL); }
+    | RECOVER exp                         { $$ = newrecover($2); }
+    | RECOVER                             { $$ = newrecover(NULL); }
+    | PASS exp                            { $$ = newpass($2); }
     | exp                                 { $$ = $1; }
     ;
 
@@ -414,6 +421,12 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp DEC                             { $$ = newincdec($1, -1, false); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
     | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
+    | exp ON ERROR '(' NAME ')' '{' empty_body %prec ON {
+        $$ = newonerror($1, $5, NULL);
+      }
+    | exp ON ERROR '(' NAME ')' '{' list '}' %prec ON {
+        $$ = newonerror($1, $5, $8);
+      }
     | NAME                                { $$ = newref($1); }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
     | exp '(' explist ')'      { $$ = newcall($1, $3); }
@@ -551,6 +564,8 @@ docalc: calclist EOL {
                 maybe_collect_cycles();
 
             rslt = eval($1);
+            if (eval_control_pending())
+                eval_finish_statement_control();
             if (rslt && !g_interrupted && rslt->type != T_null) {
                 switch (rslt->type) {
                     case T_return:

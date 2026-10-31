@@ -259,6 +259,60 @@ struct ast *newctn() {
     return (struct ast *)a;
 }
 
+struct ast *newfail(struct ast *v) {
+    struct control_stmt *a =
+        (struct control_stmt *)std::malloc(sizeof(struct control_stmt));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'u';
+    set_loc_from(a, v);
+    a->value = v;
+    return (struct ast *)a;
+}
+
+struct ast *newrecover(struct ast *v) {
+    struct control_stmt *a =
+        (struct control_stmt *)std::malloc(sizeof(struct control_stmt));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'v';
+    set_loc_from(a, v);
+    a->value = v;
+    return (struct ast *)a;
+}
+
+struct ast *newpass(struct ast *v) {
+    struct control_stmt *a =
+        (struct control_stmt *)std::malloc(sizeof(struct control_stmt));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'p';
+    set_loc_from(a, v);
+    a->value = v;
+    return (struct ast *)a;
+}
+
+struct ast *newonerror(struct ast *call, char *name, struct ast *body) {
+    struct on_error_node *a =
+        (struct on_error_node *)std::malloc(sizeof(struct on_error_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'o';
+    set_loc_from(a, call);
+    a->call = call;
+    a->name = name;
+    a->body = body;
+    return (struct ast *)a;
+}
+
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *el) {
     struct flow *a = (struct flow *)std::malloc(sizeof(struct flow));
     if (!a) {
@@ -647,6 +701,18 @@ void treefree(struct ast *a) {
         case 'B':
         case 'O':
             break;
+        case 'u':
+        case 'v':
+        case 'p':
+            treefree(((struct control_stmt *)a)->value);
+            break;
+        case 'o': {
+            struct on_error_node *o = (struct on_error_node *)a;
+            treefree(o->call);
+            treefree(o->body);
+            std::free(o->name);
+            break;
+        }
         case '=':
             treefree(((struct symasgn *)a)->target);
             treefree(((struct symasgn *)a)->v);

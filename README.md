@@ -504,6 +504,35 @@ switch (x) {
 - case 值必须是值，不能写 `case x > 1 && x < 5` 这种条件；条件判断用 `if/else`；
 - `case int` 不是类型模式，而是内置函数值，会作为不支持的 case 值报错。
 
+错误处理：
+
+```text
+func parse_positive(text) {
+  let n = int(text);
+
+  if (n <= 0) {
+    fail "must be positive: " + str(n);
+  }
+
+  return n;
+}
+
+let n = parse_positive("0") on error(e) {
+  print("bad input: " + str(e));
+  recover 0;
+};
+```
+
+- `fail expr;` 抛出错误值，`fail;` 抛出 `null`；
+- `call() on error(e) { ... }` 捕获该调用产生的显式 `fail`；
+- `e` 只在 handler 作用域内有效；
+- `recover expr;` 结束 handler 并返回恢复值；
+- `pass e;` 把错误继续传给外层；
+- handler 必须以 `recover`、`pass` 或 `fail` 结束；
+- handler 内不能直接用 `return` / `break` / `continue` 结束；
+- 第一版只捕获显式 `fail`，普通运行时错误仍然直接报错；
+- 未捕获的 `fail` 在脚本顶层报错并停止脚本。
+
 函数、匿名函数与闭包：
 
 ```text

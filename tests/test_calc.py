@@ -1082,6 +1082,66 @@ def main():
         stdout="= 2",
     )
 
+    check("fail caught with recover",
+          'func f() { fail "boom"; }\n'
+          "f() on error(e) { print(e); recover 0; }\n",
+          stdout_all=["boom", "= 0"])
+    check("on error handler not called on success",
+          "func f() { return 1; }\n"
+          'f() on error(e) { print("bad"); recover 0; }\n',
+          stdout="= 1")
+    check("pass propagates to outer handler",
+          'func inner() { fail "x"; }\n'
+          "func outer() { return inner() on error(e) { pass e; }; }\n"
+          'outer() on error(e) { print("caught " + e); recover 7; }\n',
+          stdout_all=["caught x", "= 7"])
+    check("fail stops loop body",
+          "func f() {\n"
+          "  for (let i in [1, 2, 3]) {\n"
+          '    if (i == 2) { fail "loop"; }\n'
+          "    print(i);\n"
+          "  }\n"
+          "  return 0;\n"
+          "}\n"
+          'f() on error(e) { print("E " + e); recover 9; }\n',
+          stdout_all=["1", "E loop", "= 9"])
+    check("recover value is expression result",
+          'func f() { fail "x"; }\n'
+          "(f() on error(e) { recover 2; }) + 3\n",
+          stdout="= 5")
+    check("handler accesses outer scope",
+          'let n = 3;\nfunc f() { fail "x"; }\n'
+          "f() on error(e) { recover n + 1; }\n",
+          stdout="= 4")
+    check("recover outside handler",
+          "recover 1;\n", stderr="recover outside error handler")
+    check("pass outside handler",
+          "pass 1;\n", stderr="pass outside error handler")
+    check("handler without terminal statement",
+          'func f() { fail "x"; }\n'
+          "let x = f() on error(e) { print(e); };\n",
+          stderr="error handler must end with recover, pass, or fail")
+    check("handler return rejected",
+          'func f() { fail "x"; }\n'
+          "func g() { let x = f() on error(e) { return 1; }; return 2; }\n"
+          "g()\n",
+          stderr="error handler cannot return, break, or continue")
+    check("method fail caught",
+          "struct P {\n"
+          "  x: int;\n"
+          '  func check(self) { if (self.x < 0) { fail "negative"; } '
+          "return self.x; }\n"
+          "}\n"
+          'P { x: -1 }.check() on error(e) { print(e); recover 0; }\n',
+          stdout_all=["negative", "= 0"])
+    check("recover does not cross function boundary",
+          'func bad() { recover 1; }\n'
+          'func f() { fail "x"; }\n'
+          "f() on error(e) { bad(); recover 0; };\n",
+          stderr="recover outside error handler")
+    check("uncaught fail at top level",
+          'fail "boom";\n', stderr="uncaught fail: boom")
+
     many_globals = "".join(f"let v{i} = {i};\n" for i in range(40))
     check("large symbol table lookup", many_globals + "v0 + v39\n",
           stdout="= 39")
@@ -2488,6 +2548,15 @@ def main():
         assert proc.returncode == 1, proc.stderr
         assert "before\n" in proc.stdout, proc.stdout
         assert "after\n" in proc.stdout, proc.stdout
+
+        uncaught = os.path.join(tmp, "uncaught.calc")
+        with open(uncaught, "w", encoding="utf-8") as f:
+            f.write('print("before");\nfail "boom";\nprint("after");\n')
+        proc = run_file(uncaught)
+        assert proc.returncode == 1, proc.stderr
+        assert "before\n" in proc.stdout, proc.stdout
+        assert "after\n" not in proc.stdout, proc.stdout
+        assert "uncaught fail: boom" in proc.stderr, proc.stderr
 
         check(
             "assignment failure preserves old value",

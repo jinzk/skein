@@ -109,6 +109,22 @@ struct ncontinue {
     int column;
 };
 
+struct control_stmt {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *value;
+};
+
+struct on_error_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *call;
+    char *name;
+    struct ast *body;
+};
+
 struct nscope {
     int nodetype;
     int line;
@@ -349,6 +365,10 @@ struct ast *newvar(char *s, struct ast *v, bool exported = false,
 struct ast *newret(struct ast *v);
 struct ast *newbrk();
 struct ast *newctn();
+struct ast *newfail(struct ast *v);
+struct ast *newrecover(struct ast *v);
+struct ast *newpass(struct ast *v);
+struct ast *newonerror(struct ast *call, char *name, struct ast *body);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported = false);

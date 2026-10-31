@@ -20,6 +20,7 @@ if else while do for
 switch case default
 struct impl trait
 return break continue
+fail on error recover pass
 null true false
 package import export as
 ```
@@ -682,7 +683,72 @@ continue;
 - `continue` 只能用于循环；
 - 都需要分号。
 
-### 5.9 命名函数
+### 5.9 错误处理
+
+抛出错误：
+
+```text
+func parse_positive(text) {
+  let n = int(text);
+
+  if (n <= 0) {
+    fail "must be positive: " + str(n);
+  }
+
+  return n;
+}
+```
+
+捕获错误：
+
+```text
+let n = parse_positive("0") on error(e) {
+  print("bad input: " + str(e));
+  recover 0;
+};
+```
+
+规则：
+
+- `fail expr;` 抛出错误值；
+- `fail;` 抛出 `null`；
+- `call() on error(e) { ... }` 捕获该调用表达式产生的显式 `fail`；
+- `e` 是传给 `fail` 的原始值，只在 handler 作用域内有效；
+- handler 必须以 `recover`、`pass` 或 `fail` 结束；
+- `recover expr;` 结束 handler，并把 `expr` 作为整个 `on error` 表达式的值；
+- `recover;` 等价于 `recover null;`；
+- `pass e;` 继续向外层传播错误；
+- handler 内不能直接用 `return`、`break` 或 `continue` 结束 handler；
+- 第一版只捕获显式 `fail`，`1/0`、越界、类型错误等运行时错误仍然直接报错；
+- `recover` / `pass` 只能出现在 handler 内；
+- 未捕获的 `fail` 在脚本顶层报错并停止脚本。
+
+示例：
+
+```text
+func load() {
+  let n = parse_positive("-1") on error(e) {
+    print("load failed: " + str(e));
+    pass e;
+  };
+
+  return n;
+}
+
+load() on error(e) {
+  print("top: " + str(e));
+  recover 0;
+};
+```
+
+错误值不要求是字符串，可以是任意值：
+
+```text
+fail 42;
+fail {"code": 7, "message": "bad"};
+```
+
+### 5.10 命名函数
 
 ```text
 func add(a, b) {
@@ -734,7 +800,7 @@ function add argument 1 (a) expects int, got string
 let add = func(a, b) { return a + b; };
 ```
 
-### 5.10 结构体、impl 与 trait
+### 5.11 结构体、impl 与 trait
 
 结构体：
 
@@ -841,7 +907,7 @@ render(Point { x: 1, y: 2 });
 - 类型名按源模块注册，模块通常对应一个源文件；不同模块可以定义同名结构体或 trait；
 - 类型名不会自动跨模块可见；跨模块返回的结构体值仍可以通过字段和方法使用。
 
-### 5.11 导出声明
+### 5.12 导出声明
 
 只能在包中有实际意义：
 

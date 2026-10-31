@@ -282,6 +282,11 @@ EXP ([Ee][-+]?[0-9]+)
 "return" { YYRET(RETURN); }
 "break" { YYRET(BREAK); }
 "continue" { YYRET(CONTINUE); }
+"fail" { YYRET(FAIL); }
+"on" { YYRET(ON); }
+"error" { YYRET(ERROR); }
+"recover" { YYRET(RECOVER); }
+"pass" { YYRET(PASS); }
 "in" { YYRET(IN); }
 "as" { YYRET(AS); }
 "null" { YYRET(NULLVAL); }

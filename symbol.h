@@ -30,6 +30,7 @@ struct symbol {
     char *name;
     size_t name_len;
     struct value_t *val;
+    struct type_constraint type;
     bool exported;
     bool is_const;
 };

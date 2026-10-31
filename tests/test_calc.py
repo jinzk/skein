@@ -1214,6 +1214,54 @@ def main():
           "func f(x: nope) { return x; }\n",
           stderr="unknown type name nope")
 
+    check("typed variable declaration",
+          'let x: string = "hi";\nx\nx = "bye";\nx\n',
+          stdout_all=["= hi", "= bye", "= bye"])
+    check("typed variable initializer mismatch",
+          'let x: int = "bad";\n',
+          stderr="variable x expects int, got string")
+    check("typed variable reassignment mismatch",
+          'let x: int = 1;\nx = "bad";\n',
+          stderr="variable x expects int, got string")
+    check("typed variable number accepts int and float",
+          "let x: number = 1;\nx\nx = 2.5;\nx\n",
+          stdout_all=["= 1", "= 2.5", "= 2.5"])
+    check("typed variable function",
+          "let f: function = func(x) { return x + 1; };\nf(2)\n",
+          stdout="= 3")
+    check("typed variable builtin",
+          "let f: builtin = sqrt;\nf(16)\n", stdout="= 4.0")
+    check("typed variable callable",
+          "let f: callable = sqrt;\nf(9)\n", stdout="= 3.0")
+    check("typed variable requires initializer for function",
+          "let f: function;\n",
+          stderr="variable f of type function requires an initializer")
+    check("typed const declaration",
+          "const x: int = 1;\nx\n", stdout_all=["= 1"])
+    check("typed const reassignment",
+          "const x: int = 1;\nx = 2;\n",
+          stderr="cannot assign to constant x")
+    check("typed for initializer",
+          "for (let i: int = 0; i < 2; i++) { print(i); }\n",
+          stdout_all=["0", "1"])
+    check("typed parameter reassignment",
+          'func f(x: int) { x = "bad"; }\nf(1)\n',
+          stderr="variable x expects int, got string")
+    check("typed variable defaults",
+          "let s: string;\n"
+          "let i: int;\n"
+          "let f: float;\n"
+          "let b: bool;\n"
+          "let l: list;\n"
+          "let d: dict;\n"
+          "let by: bytes;\n"
+          "let a: any;\n"
+          's == "" && i == 0 && f == 0.0 && !b && len(l) == 0 && '
+          "len(d) == 0 && bytes_len(by) == 0 && a == null\n",
+          stdout="= true")
+    check("typed variable is shallow",
+          'let a: list = [0];\na[0] = "x";\na\n', stdout='= [x]')
+
     check("explicit empty return", "func f() { return; }\nprint(f())\n",
           stdout="null")
     check("print returns null", "let x = print(1);\nprint(x)\n",

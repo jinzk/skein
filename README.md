@@ -348,6 +348,36 @@ a[0] = 9;      // 允许
 a              // [9, 2]
 ```
 
+变量可以带类型标注：
+
+```text
+let name: string = "alice";
+let count: int;
+
+count = 3;          // 允许
+count = "three";    // 错误：variable count expects int, got string
+```
+
+- 类型在运行时的初始化和重新赋值时检查，不做隐式转换；
+- 支持 `any int float number bool string bytes list dict function builtin callable null userdata`；
+- 带类型标注的 `let` 可以省略初始值，使用默认值：
+
+```text
+int / number  → 0
+float         → 0.0
+bool          → false
+string        → ""
+bytes         → 空 bytes
+list          → []
+dict          → {}
+any / null    → null
+```
+
+- `function`、`builtin`、`callable`、`userdata` 必须提供初始值；
+- `const` 也可以带类型，例如 `const x: int = 1;`；
+- 类型标注只约束变量绑定，不约束容器内部元素，例如 `let a: list = [0]; a[0] = "x";` 仍允许；
+- `for` 的初始化部分也支持类型标注：`for (let i: int = 0; i < 3; i++)`。
+
 自增和自减：
 
 ```text

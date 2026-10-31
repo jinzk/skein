@@ -208,7 +208,8 @@ struct ast *newscope(struct ast *v) {
     return (struct ast *)a;
 }
 
-struct ast *newvar(char *s, struct ast *v, bool exported, bool is_const) {
+struct ast *newvar(char *s, struct ast *v, bool exported, bool is_const,
+                   struct type_constraint *type) {
     struct symdef *a = (struct symdef *)std::malloc(sizeof(struct symdef));
     if (!a) {
         yyerror("out of space");
@@ -218,6 +219,7 @@ struct ast *newvar(char *s, struct ast *v, bool exported, bool is_const) {
     set_loc_from(a, v);
     a->name = s;
     a->v = v;
+    a->type = type;
     a->exported = exported;
     a->is_const = is_const;
     return (struct ast *)a;
@@ -503,6 +505,7 @@ void treefree(struct ast *a) {
             break;
         case 'D':
             treefree(((struct symdef *)a)->v);
+            free_type_constraint(((struct symdef *)a)->type);
             std::free(((struct symdef *)a)->name);
             break;
         case 'R':

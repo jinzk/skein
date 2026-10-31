@@ -2148,6 +2148,8 @@ static struct value_t *invoke_value(
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
         sym->val = args[i];
+        if (sl->type)
+            sym->type.kind = sl->type->kind;
         savesym(sym);
     }
     args.clear(); /* ownership transferred to the function scope */
@@ -2743,6 +2745,38 @@ static bool read_index_chain(struct ast *a, struct value_t *&out) {
     return true;
 }
 
+static struct value_t *default_value_for_type(
+    const struct type_constraint *type) {
+    enum type_constraint_kind kind = type ? type->kind : TYPE_ANY;
+    switch (kind) {
+        case TYPE_INT:
+        case TYPE_NUMBER:
+            return newintval(0);
+        case TYPE_FLOAT:
+            return newfloatval(0.0);
+        case TYPE_BOOL:
+            return newboolval(false);
+        case TYPE_STRING:
+            return newstrval("");
+        case TYPE_BYTES:
+            return newbytesval(std::string());
+        case TYPE_LIST:
+            return (struct value_t *)newlistval();
+        case TYPE_DICT:
+            return (struct value_t *)newdictval();
+        case TYPE_NULL:
+        case TYPE_ANY:
+            return newnull();
+        case TYPE_FUNCTION:
+        case TYPE_BUILTIN:
+        case TYPE_CALLABLE:
+        case TYPE_USERDATA:
+        case TYPE_INVALID:
+        default:
+            return NULL;
+    }
+}
+
 static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     struct symbol *s = lookupsym(ref->name);
     if (!s) {
@@ -2755,6 +2789,12 @@ static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     }
     struct value_t *v = eval(value_ast);
     if (!v) return NULL;
+    if (!type_constraint_matches(&s->type, v)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(v));
+        freeval(v);
+        return NULL;
+    }
     freeval(s->val);
     s->val = v;
     return dupval(v);
@@ -2773,6 +2813,12 @@ static struct value_t *increment_name(struct symref *ref, int delta,
     }
     struct value_t *newv = apply_increment(s->val, delta);
     if (!newv) return NULL;
+    if (!type_constraint_matches(&s->type, newv)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(newv));
+        freeval(newv);
+        return NULL;
+    }
     struct value_t *ret = prefix ? dupval(newv) : dupval(s->val);
     freeval(s->val);
     s->val = newv;
@@ -2869,15 +2915,32 @@ struct value_t *eval(struct ast *a) {
             char *name = def->name;
             if (isrepeated(name)) {
                 yyerror("symbol repeated %s", name);
+            } else if (def->type && def->type->kind == TYPE_INVALID) {
+                /* The parser already reported the unknown type name. */
+                break;
             } else {
-                struct value_t *v = eval(def->v);
-                if (v) {
-                    struct symbol *s = newsym(name);
-                    s->val = v;
-                    s->exported = def->exported;
-                    s->is_const = def->is_const;
-                    savesym(s);
+                struct value_t *v = def->v
+                    ? eval(def->v)
+                    : default_value_for_type(def->type);
+                if (!v) {
+                    if (!def->v)
+                        yyerror("variable %s of type %s requires an initializer",
+                                name, type_constraint_name(def->type));
+                    break;
                 }
+                if (!type_constraint_matches(def->type, v)) {
+                    yyerror("variable %s expects %s, got %s", name,
+                            type_constraint_name(def->type), typename_of(v));
+                    freeval(v);
+                    break;
+                }
+                struct symbol *s = newsym(name);
+                s->val = v;
+                if (def->type)
+                    s->type.kind = def->type->kind;
+                s->exported = def->exported;
+                s->is_const = def->is_const;
+                savesym(s);
             }
             break;
         }

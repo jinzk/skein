@@ -436,15 +436,66 @@ b[1]--;
 
 ```text
 let x = 1;
+let name: string = "alice";
+let count: int;
 const y = 2;
+const limit: int = 10;
 ```
 
-- 必须提供初始值；
+- 无类型标注时必须提供初始值；
+- 带类型标注时可以省略初始值，使用该类型的默认值；
+- 初始化和重新赋值都会进行运行时类型检查，不做隐式转换；
 - 同一作用域不能重复声明同名变量；
 - 嵌套作用域允许遮蔽外层变量；
 - `const` 绑定不可重新赋值；
 - `let` / `const` 都是块级作用域；
-- 初始化失败不会创建绑定。
+- 初始化失败或类型不匹配时不会创建绑定。
+
+支持的类型：
+
+```text
+any int float number bool string bytes
+list dict function builtin callable null userdata
+```
+
+默认值：
+
+| 类型 | 默认值 |
+|---|---|
+| `int` / `number` | `0` |
+| `float` | `0.0` |
+| `bool` | `false` |
+| `string` | `""` |
+| `bytes` | 空 bytes |
+| `list` | `[]` |
+| `dict` | `{}` |
+| `any` / `null` | `null` |
+
+`function`、`builtin`、`callable`、`userdata` 没有默认值，必须提供初始值。
+
+```text
+let x: int = 1;
+x = 2;              // 允许
+x = "two";          // 错误：variable x expects int, got string
+
+let s: string;
+s == ""             // true
+```
+
+类型标注只约束绑定，不约束容器内部元素：
+
+```text
+let a: list = [0];
+a[0] = "x";         // 允许
+```
+
+`for` 初始化部分也支持类型标注：
+
+```text
+for (let i: int = 0; i < 3; i++) {
+  print(i);
+}
+```
 
 ### 5.3 条件语句
 

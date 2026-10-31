@@ -228,7 +228,14 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($2, $4, $7); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
+    | EXPORT LET NAME ':' type '=' exp ';' {
+        $$ = newvar($3, $7, true, false, $5);
+      }
+    | EXPORT LET NAME ':' type ';'        { $$ = newvar($3, NULL, true, false, $5); }
     | EXPORT CONST NAME '=' exp ';'       { $$ = newvar($3, $5, true, true); }
+    | EXPORT CONST NAME ':' type '=' exp ';' {
+        $$ = newvar($3, $7, true, true, $5);
+      }
     | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
     | EXPORT funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($3, $5, NULL, true); }
@@ -239,7 +246,10 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | IMPORT importref ';'                { $$ = newimport($2, NULL); }
     | IMPORT importref AS NAME ';'        { $$ = newimport($2, $4); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
+    | LET NAME ':' type '=' exp ';'       { $$ = newvar($2, $6, false, false, $4); }
+    | LET NAME ':' type ';'               { $$ = newvar($2, NULL, false, false, $4); }
     | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
+    | CONST NAME ':' type '=' exp ';'     { $$ = newvar($2, $6, false, true, $4); }
     ;
 
 importref: importpath                     { $$ = $1; }
@@ -352,6 +362,7 @@ pairlist: exp ':' exp                     { $$ = newdict($1, $3, NULL); }
 forinit: %empty                           { $$ = NULL; }
     | exp                                 { $$ = $1; }
     | LET NAME '=' exp                    { $$ = newvar($2, $4); }
+    | LET NAME ':' type '=' exp           { $$ = newvar($2, $6, false, false, $4); }
     ;
 
 forcond: %empty                           { $$ = NULL; }

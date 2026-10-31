@@ -211,6 +211,7 @@ struct symdef {
     int column;
     char *name;
     struct ast *v;
+    struct type_constraint *type;
     int exported;
     int is_const;
 };
@@ -278,7 +279,7 @@ struct ast *newcase(struct ast *values, struct ast *body, struct ast *next);
 struct ast *append_case(struct ast *head, struct ast *node);
 struct ast *newsname(char *s);
 struct ast *newvar(char *s, struct ast *v, bool exported = false,
-                   bool is_const = false);
+                   bool is_const = false, struct type_constraint *type = NULL);
 
 struct ast *newret(struct ast *v);
 struct ast *newbrk();

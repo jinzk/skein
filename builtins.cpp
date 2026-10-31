@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "eval_helpers.h"
 #include "net.h"
+#include "task.h"
 #ifdef CALC_ENABLE_FFI
 #include "ffi_module.h"
 #endif
@@ -312,6 +313,8 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_ffi_open && functype <= B_ffi_buffer_free)
         return call_ffi_builtin(functype, args);
 #endif
+    if (functype >= B_task_sleep && functype <= B_task_done)
+        return call_task_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

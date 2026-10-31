@@ -1,15 +1,14 @@
 #include "net.h"
 
 #include "ast.h"
+#include "event_loop.h"
 #include "repl.h"
 #include "valuetype.h"
 
 #include <uv.h>
 
-#include <cstdint>
 #include <cstring>
 #include <deque>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -24,97 +23,8 @@
 
 namespace {
 
-struct net_runtime {
-    uv_loop_t loop;
-    uv_timer_t ticker;
-    bool initialized = false;
-};
-
-net_runtime &get_runtime() {
-    static net_runtime runtime;
-    return runtime;
-}
-
 void on_tcp_close(uv_handle_t *handle) {
     delete (uv_tcp_t *)handle;
-}
-
-void on_timer_close(uv_handle_t *) {}
-
-bool ensure_runtime() {
-    net_runtime &runtime = get_runtime();
-    if (runtime.initialized)
-        return true;
-    if (uv_loop_init(&runtime.loop) != 0)
-        return false;
-    if (uv_timer_init(&runtime.loop, &runtime.ticker) != 0) {
-        uv_loop_close(&runtime.loop);
-        return false;
-    }
-    if (uv_timer_start(&runtime.ticker, [](uv_timer_t *) {}, 10, 10) != 0) {
-        uv_close((uv_handle_t *)&runtime.ticker, on_timer_close);
-        uv_run(&runtime.loop, UV_RUN_DEFAULT);
-        uv_loop_close(&runtime.loop);
-        return false;
-    }
-    runtime.initialized = true;
-    return true;
-}
-
-enum net_wait_result {
-    NET_WAIT_OK,
-    NET_WAIT_TIMEOUT,
-    NET_WAIT_INTERRUPTED
-};
-
-struct net_timeout {
-    bool enabled = false;
-    uint64_t deadline_ms = 0;
-};
-
-uint64_t net_now_ms() {
-    return (uint64_t)(uv_hrtime() / 1000000ULL);
-}
-
-net_timeout make_timeout(long long timeout_ms) {
-    net_timeout timeout;
-    if (timeout_ms > 0) {
-        uint64_t now = net_now_ms();
-        uint64_t delay = (uint64_t)timeout_ms;
-        timeout.enabled = true;
-        timeout.deadline_ms =
-            now > UINT64_MAX - delay ? UINT64_MAX : now + delay;
-    }
-    return timeout;
-}
-
-bool timeout_expired(const net_timeout &timeout) {
-    return timeout.enabled && net_now_ms() >= timeout.deadline_ms;
-}
-
-net_wait_result net_wait(bool &done,
-                         const std::function<void()> &cancel,
-                         const net_timeout &timeout) {
-    net_runtime &runtime = get_runtime();
-    bool interrupted = false;
-    bool timed_out = false;
-    bool canceled = false;
-    while (!done) {
-        if (!interrupted && g_interrupted)
-            interrupted = true;
-        if (!timed_out && timeout_expired(timeout))
-            timed_out = true;
-        if ((interrupted || timed_out) && !canceled) {
-            canceled = true;
-            cancel();
-        }
-        uv_run(&runtime.loop, UV_RUN_ONCE);
-    }
-    if (interrupted)
-        return NET_WAIT_INTERRUPTED;
-    if (timed_out)
-        return NET_WAIT_TIMEOUT;
-    return NET_WAIT_OK;
 }
 
 struct resolve_state {
@@ -122,7 +32,7 @@ struct resolve_state {
     int status = 0;
     struct addrinfo *addresses = NULL;
     uv_getaddrinfo_t request = {};
-    net_wait_result wait_result = NET_WAIT_OK;
+    event_wait_result wait_result = EVENT_WAIT_OK;
 };
 
 void on_resolve(uv_getaddrinfo_t *request, int status,
@@ -135,22 +45,22 @@ void on_resolve(uv_getaddrinfo_t *request, int status,
 
 bool getaddrinfo_async(const char *node, const char *service,
                        const struct addrinfo *hints,
-                       const net_timeout &timeout, resolve_state &state) {
-    if (!ensure_runtime()) {
+                       const event_timeout &timeout, resolve_state &state) {
+    if (!event_loop_init()) {
         state.status = UV_ENOMEM;
         return false;
     }
     state.request.data = &state;
-    int rc = uv_getaddrinfo(&get_runtime().loop, &state.request, on_resolve,
+    int rc = uv_getaddrinfo(event_loop_handle(), &state.request, on_resolve,
                             node, service, hints);
     if (rc < 0) {
         state.status = rc;
         return false;
     }
-    state.wait_result = net_wait(state.done, [&state] {
+    state.wait_result = event_wait(state.done, [&state] {
         uv_cancel((uv_req_t *)&state.request);
     }, timeout);
-    if (state.wait_result != NET_WAIT_OK) {
+    if (state.wait_result != EVENT_WAIT_OK) {
         if (state.addresses)
             uv_freeaddrinfo(state.addresses);
         state.addresses = NULL;
@@ -205,11 +115,11 @@ struct net_socket {
 };
 
 std::shared_ptr<net_socket> new_socket() {
-    if (!ensure_runtime())
+    if (!event_loop_init())
         return NULL;
     std::shared_ptr<net_socket> socket = std::make_shared<net_socket>();
     socket->handle = new uv_tcp_t;
-    int rc = uv_tcp_init(&get_runtime().loop, socket->handle);
+    int rc = uv_tcp_init(event_loop_handle(), socket->handle);
     if (rc < 0) {
         delete socket->handle;
         socket->handle = NULL;
@@ -503,7 +413,7 @@ value_t *net_tcp_connect(const std::vector<value_t *> &args) {
     hints.ai_family = family;
     hints.ai_socktype = SOCK_STREAM;
 
-    net_timeout timeout = make_timeout(timeout_ms);
+    event_timeout timeout = make_event_timeout(timeout_ms);
     std::string service = service_string(port);
     const char *host = ((struct string_value_t *)args[0])->value;
     resolve_state resolved;
@@ -511,7 +421,7 @@ value_t *net_tcp_connect(const std::vector<value_t *> &args) {
                            resolved)) {
         if (g_interrupted)
             return NULL;
-        if (resolved.wait_result == NET_WAIT_TIMEOUT) {
+        if (resolved.wait_result == EVENT_WAIT_TIMEOUT) {
             report_timeout("tcp_connect", timeout_ms);
             return NULL;
         }
@@ -520,15 +430,15 @@ value_t *net_tcp_connect(const std::vector<value_t *> &args) {
     }
 
     int last_status = 0;
-    net_wait_result wait_result = NET_WAIT_OK;
+    event_wait_result wait_result = EVENT_WAIT_OK;
     for (struct addrinfo *address = resolved.addresses; address;
          address = address->ai_next) {
         if (g_interrupted) {
-            wait_result = NET_WAIT_INTERRUPTED;
+            wait_result = EVENT_WAIT_INTERRUPTED;
             break;
         }
-        if (timeout_expired(timeout)) {
-            wait_result = NET_WAIT_TIMEOUT;
+        if (event_timeout_expired(timeout)) {
+            wait_result = EVENT_WAIT_TIMEOUT;
             break;
         }
 
@@ -548,10 +458,10 @@ value_t *net_tcp_connect(const std::vector<value_t *> &args) {
             continue;
         }
 
-        wait_result = net_wait(state.done, [&socket] {
+        wait_result = event_wait(state.done, [&socket] {
             socket->close();
         }, timeout);
-        if (wait_result != NET_WAIT_OK) {
+        if (wait_result != EVENT_WAIT_OK) {
             socket->close();
             break;
         }
@@ -564,9 +474,9 @@ value_t *net_tcp_connect(const std::vector<value_t *> &args) {
     }
 
     uv_freeaddrinfo(resolved.addresses);
-    if (wait_result == NET_WAIT_INTERRUPTED || g_interrupted)
+    if (wait_result == EVENT_WAIT_INTERRUPTED || g_interrupted)
         return NULL;
-    if (wait_result == NET_WAIT_TIMEOUT || timeout_expired(timeout)) {
+    if (wait_result == EVENT_WAIT_TIMEOUT || event_timeout_expired(timeout)) {
         report_timeout("tcp_connect", timeout_ms);
         return NULL;
     }
@@ -601,7 +511,7 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    net_timeout timeout = make_timeout(timeout_ms);
+    event_timeout timeout = make_event_timeout(timeout_ms);
     std::string service = service_string(port);
     const char *host = ((struct string_value_t *)args[0])->value;
     resolve_state resolved;
@@ -609,7 +519,7 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
                            &hints, timeout, resolved)) {
         if (g_interrupted)
             return NULL;
-        if (resolved.wait_result == NET_WAIT_TIMEOUT) {
+        if (resolved.wait_result == EVENT_WAIT_TIMEOUT) {
             report_timeout("tcp_listen", timeout_ms);
             return NULL;
         }
@@ -622,7 +532,7 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
          address = address->ai_next) {
         if (g_interrupted)
             break;
-        if (timeout_expired(timeout))
+        if (event_timeout_expired(timeout))
             break;
 
         std::shared_ptr<net_socket> socket = new_socket();
@@ -649,7 +559,7 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
     uv_freeaddrinfo(resolved.addresses);
     if (g_interrupted)
         return NULL;
-    if (timeout_expired(timeout)) {
+    if (event_timeout_expired(timeout)) {
         report_timeout("tcp_listen", timeout_ms);
         return NULL;
     }
@@ -684,20 +594,20 @@ value_t *net_accept(const std::vector<value_t *> &args) {
         return new_socket_value(std::move(client));
     }
 
-    net_timeout timeout = make_timeout(timeout_ms);
+    event_timeout timeout = make_event_timeout(timeout_ms);
     accept_state state;
     listener->pending_accept = &state;
-    net_wait_result wait_result = net_wait(state.done,
+    event_wait_result wait_result = event_wait(state.done,
         [&listener, &state] {
             listener->pending_accept = NULL;
             state.done = true;
         }, timeout);
     listener->pending_accept = NULL;
 
-    if (wait_result != NET_WAIT_OK) {
+    if (wait_result != EVENT_WAIT_OK) {
         if (state.client)
             listener->pending_clients.push_front(std::move(state.client));
-        if (wait_result == NET_WAIT_TIMEOUT)
+        if (wait_result == EVENT_WAIT_TIMEOUT)
             report_timeout("accept", timeout_ms);
         return NULL;
     }
@@ -760,15 +670,15 @@ value_t *net_send(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    net_timeout timeout = make_timeout(timeout_ms);
-    net_wait_result wait_result = net_wait(state.done, [&socket] {
+    event_timeout timeout = make_event_timeout(timeout_ms);
+    event_wait_result wait_result = event_wait(state.done, [&socket] {
         socket->close();
     }, timeout);
-    if (wait_result == NET_WAIT_TIMEOUT) {
+    if (wait_result == EVENT_WAIT_TIMEOUT) {
         report_timeout("send", timeout_ms);
         return NULL;
     }
-    if (wait_result != NET_WAIT_OK)
+    if (wait_result != EVENT_WAIT_OK)
         return NULL;
     if (state.status < 0) {
         yyerror("send: %s", uv_strerror(state.status));
@@ -827,18 +737,18 @@ value_t *net_recv(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    net_timeout timeout = make_timeout(timeout_ms);
-    net_wait_result wait_result = net_wait(socket->read_done, [&socket] {
+    event_timeout timeout = make_event_timeout(timeout_ms);
+    event_wait_result wait_result = event_wait(socket->read_done, [&socket] {
         uv_read_stop((uv_stream_t *)socket->handle);
         socket->reading = false;
         socket->read_done = true;
     }, timeout);
     socket->reading = false;
-    if (wait_result == NET_WAIT_TIMEOUT) {
+    if (wait_result == EVENT_WAIT_TIMEOUT) {
         report_timeout("recv", timeout_ms);
         return NULL;
     }
-    if (wait_result != NET_WAIT_OK)
+    if (wait_result != EVENT_WAIT_OK)
         return NULL;
     if (socket->read_status < 0) {
         yyerror("recv: %s", uv_strerror(socket->read_status));
@@ -892,15 +802,15 @@ value_t *net_socket_shutdown(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    net_timeout timeout = make_timeout(timeout_ms);
-    net_wait_result wait_result = net_wait(state.done, [&socket] {
+    event_timeout timeout = make_event_timeout(timeout_ms);
+    event_wait_result wait_result = event_wait(state.done, [&socket] {
         socket->close();
     }, timeout);
-    if (wait_result == NET_WAIT_TIMEOUT) {
+    if (wait_result == EVENT_WAIT_TIMEOUT) {
         report_timeout("shutdown", timeout_ms);
         return NULL;
     }
-    if (wait_result != NET_WAIT_OK)
+    if (wait_result != EVENT_WAIT_OK)
         return NULL;
     if (state.status < 0) {
         yyerror("shutdown: %s", uv_strerror(state.status));
@@ -962,14 +872,14 @@ value_t *net_resolve(const std::vector<value_t *> &args) {
     hints.ai_family = family;
     hints.ai_socktype = SOCK_STREAM;
 
-    net_timeout timeout = make_timeout(timeout_ms);
+    event_timeout timeout = make_event_timeout(timeout_ms);
     resolve_state resolved;
     if (!getaddrinfo_async(
             ((struct string_value_t *)args[0])->value, NULL,
             &hints, timeout, resolved)) {
         if (g_interrupted)
             return NULL;
-        if (resolved.wait_result == NET_WAIT_TIMEOUT) {
+        if (resolved.wait_result == EVENT_WAIT_TIMEOUT) {
             report_timeout("resolve", timeout_ms);
             return NULL;
         }
@@ -1011,12 +921,10 @@ value_t *net_resolve(const std::vector<value_t *> &args) {
 } // namespace
 
 void net_shutdown() {
-    net_runtime &runtime = get_runtime();
-    if (!runtime.initialized)
+    uv_loop_t *loop = event_loop_handle();
+    if (!loop)
         return;
-
-    uv_timer_stop(&runtime.ticker);
-    uv_walk(&runtime.loop, [](uv_handle_t *handle, void *) {
+    uv_walk(loop, [](uv_handle_t *handle, void *) {
         if (handle->type != UV_TCP)
             return;
         net_socket *socket = (net_socket *)handle->data;
@@ -1027,12 +935,6 @@ void net_shutdown() {
         if (!uv_is_closing(handle))
             uv_close(handle, on_tcp_close);
     }, NULL);
-    if (!uv_is_closing((uv_handle_t *)&runtime.ticker))
-        uv_close((uv_handle_t *)&runtime.ticker, on_timer_close);
-
-    uv_run(&runtime.loop, UV_RUN_DEFAULT);
-    uv_loop_close(&runtime.loop);
-    runtime.initialized = false;
 }
 
 struct value_t *call_net_builtin(

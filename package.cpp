@@ -482,6 +482,16 @@ value_t *build_std_namespace() {
             {"buffer_free", B_ffi_buffer_free},
         })));
 #endif
+    root->payload->items.push_back(std::make_pair(
+        newstrval("task"),
+        builtin_module({
+            {"sleep", B_task_sleep},
+            {"yield", B_task_yield},
+            {"wait", B_task_wait},
+            {"wait_all", B_task_wait_all},
+            {"cancel", B_task_cancel},
+            {"done", B_task_done},
+        })));
     return (value_t *)root;
 }
 

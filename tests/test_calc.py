@@ -1017,6 +1017,66 @@ def main():
         stdout_all=["= list", "= int", "= true"],
     )
     check(
+        "std task sleep",
+        "import std;\n"
+        "let a = std.task.sleep(50);\n"
+        "std.task.done(a)\n"
+        "std.task.wait(a)\n"
+        "std.task.done(a)\n",
+        stdout_all=["= false", "= true"],
+    )
+    check(
+        "std task wait_all",
+        "import std;\n"
+        "let a = std.task.sleep(100);\n"
+        "let b = std.task.sleep(100);\n"
+        "std.task.wait_all([a, b])\n"
+        "std.task.done(a) && std.task.done(b)\n",
+        stdout="= true",
+    )
+    check(
+        "std task timeout and cancel",
+        "import std;\n"
+        "let a = std.task.sleep(200);\n"
+        "std.task.wait(a, 50);\n"
+        "std.task.cancel(a)\n"
+        "std.task.done(a)\n",
+        stdout="= true",
+        stderr="timed out",
+    )
+    check(
+        "std task cancelled wait",
+        "import std;\n"
+        "let a = std.task.sleep(200);\n"
+        "std.task.cancel(a);\n"
+        "std.task.wait(a);\n",
+        stderr="task was cancelled",
+    )
+    check(
+        "std task yield",
+        "import std;\n"
+        "let y = std.task.yield();\n"
+        "std.task.done(y)\n"
+        "std.task.wait(y)\n"
+        "std.task.done(y)\n",
+        stdout_all=["= false", "= true"],
+    )
+    check(
+        "std task pending shutdown",
+        "import std;\nlet pending = std.task.sleep(10000);\n",
+    )
+    check(
+        "std task advances during net wait",
+        "import std;\n"
+        'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+        "let t = std.task.sleep(10);\n"
+        "std.net.accept(listener, 50);\n"
+        "std.task.done(t)\n"
+        "std.net.close(listener);\n",
+        stdout="= true",
+        stderr="timed out",
+    )
+    check(
         "std net resolve",
         'import std;\nlen(std.net.resolve("localhost")) > 0\n',
         stdout="= true",

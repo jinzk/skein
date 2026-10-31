@@ -1210,6 +1210,7 @@ std.fs
 std.process
 std.type
 std.net
+std.task
 std.ffi（可选）
 ```
 
@@ -1255,6 +1256,7 @@ std.bytes.hex(bytes_from_hex("00ff"))
 - `std.process`：命令执行、`status` / `command_status`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
 - `std.net`：同步 TCP 客户端/服务端和 DNS 解析，底层使用 libuv；
+- `std.task`：原生 task、等待、批量等待、取消和完成状态；
 - `std.ffi`：可选的 libffi C ABI 调用。
 
 TCP 示例：
@@ -1291,7 +1293,37 @@ peer_addr(socket)
 {address: "127.0.0.1", port: 8080, family: "ipv4"}
 ```
 
-`std.net` 的公开 API 仍是同步的；libuv 事件循环只在每次调用内部运行，不会暴露给脚本。
+`std.net` 的公开 API 仍是同步的；libuv 事件循环只在内部运行，不会作为对象暴露给脚本。
+
+Task 示例：
+
+```text
+import std;
+
+let a = std.task.sleep(100);
+let b = std.task.yield();
+
+std.task.done(a)
+std.task.wait(a)
+std.task.wait_all([a, b])
+```
+
+Task 函数：
+
+```text
+sleep(ms)                  → task
+yield()                    → task
+wait(task[, timeout_ms])   → result
+wait_all(tasks[, timeout_ms]) → list
+cancel(task)               → bool
+done(task)                 → bool
+```
+
+`yield` 是普通函数，不是关键字。`wait` 超时不会自动取消 task；需要显式调用 `cancel`。
+
+task 是协作式调度的：只有运行事件循环时才会推进，例如 `wait`、`wait_all` 或同步网络调用期间。
+
+目前 task 只覆盖原生定时器和后续异步 I/O；还不能用 `spawn` 异步执行脚本函数，因为脚本函数尚未支持挂起和恢复。
 
 FFI 示例：
 
@@ -1343,7 +1375,9 @@ std.ffi.buffer_free
 - 不支持结构体、回调、可变参数；
 - 网络和 FFI 错误当前是运行时错误，不能通过 `on error` 捕获；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
-- `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用；
+- `std.net` 暂不支持 TLS、HTTP 或异步网络 API；libuv 事件循环目前只驱动同步网络调用和 task；
+- `std.task` 目前没有 `spawn`，脚本函数还不能挂起和恢复；
+- `std.task.wait` / `wait_all` 超时不会自动取消 task，需要显式 `cancel`；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。

@@ -24,7 +24,7 @@ sudo apt install libuv1-dev
 cmake -S . -B build -G Ninja -DCALC_ENABLE_FFI=OFF
 ```
 
-`std.net` 对外仍是同步 API，libuv 只在内部驱动 socket 和 DNS 操作，不向脚本暴露事件循环。
+`std.net` 对外仍是同步 API；libuv 只在内部驱动 socket、DNS 和 `std.task`，不向脚本暴露事件循环对象。
 
 运行测试：
 
@@ -269,6 +269,36 @@ std.net.peer_addr(socket)
 
 `tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。
 
+Task：
+
+```text
+import std;
+
+let a = std.task.sleep(100);
+let b = std.task.yield();
+
+std.task.done(a)
+std.task.wait(a)
+std.task.wait_all([a, b])
+```
+
+Task API：
+
+```text
+std.task.sleep(ms)            → task
+std.task.yield()              → task
+std.task.wait(task[, timeout_ms]) → result
+std.task.wait_all(tasks[, timeout_ms]) → list
+std.task.cancel(task)         → true / false
+std.task.done(task)           → true / false
+```
+
+- `sleep` / `yield` 是目前内置的原生 task；
+- `yield` 是函数，不是关键字；
+- `wait` 超时不会自动取消 task，需要显式 `cancel`；
+- 退出解释器时会取消剩余 task；
+- 目前还没有 `spawn(func, ...)`，因为脚本函数还不能挂起；后续异步网络操作会复用同一套 task 和事件循环。
+
 FFI：
 
 ```text
@@ -319,6 +349,7 @@ std.fs
 std.process
 std.type
 std.net
+std.task
 std.ffi（可选）
 ```
 
@@ -423,6 +454,13 @@ std.net.resolve
 std.net.local_addr
 std.net.peer_addr
 
+std.task.sleep
+std.task.yield
+std.task.wait
+std.task.wait_all
+std.task.cancel
+std.task.done
+
 std.ffi.open
 std.ffi.close
 std.ffi.call
@@ -472,6 +510,10 @@ std.bytes.from_int
 - `std.net` 提供同步 TCP 客户端/服务端和 DNS 解析，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
+- `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
+- task 是协作式调度的，只有在 `wait` / `wait_all` 或同步网络等待运行事件循环时才推进；
+- `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
+- `std.task` 暂无 `spawn`，脚本函数目前不能挂起和恢复；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
 - `std.ffi` 的 `u64` / `usize` 返回值必须在脚本 `int` 范围内，否则报错；
@@ -480,7 +522,7 @@ std.bytes.from_int
 - `std.ffi` 是可选模块，缺少 libffi 时不可用；
 - 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
-- `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用；
+- `std.net` 暂不支持 TLS、HTTP 或异步网络 API；libuv 事件循环目前只驱动同步网络调用和 task；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
@@ -1523,13 +1565,17 @@ ast.*         AST 定义、函数代码共享与释放
 diagnostics.* 错误位置、源码片段与调用栈
 eval.*        树遍历求值
 eval_helpers.h 求值器与内置函数共享的辅助函数
+event_loop.*  libuv 事件循环与等待
 builtins.*    内置函数实现
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化
+net.*         std.net TCP / DNS
+ffi.*         可选的 std.ffi
 package.*     包查找、加载、缓存与导入
 repl.*        REPL 输入、历史、命令和上次结果
 scopestack.*  词法作用域链与闭包环境
 symbol.*      符号表
+task.*        std.task 原生 task
 valuetype.*   运行时值类型、深拷贝与释放
 platform.*    POSIX / Windows 平台适配
 tests/        自动化回归测试

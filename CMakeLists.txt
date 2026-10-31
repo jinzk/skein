@@ -46,6 +46,7 @@ add_executable(${PROJECT_NAME}
   builtins.cpp
   diagnostics.cpp
   eval.cpp
+  event_loop.cpp
   filetype.cpp
   format.cpp
   main.cpp
@@ -56,6 +57,7 @@ add_executable(${PROJECT_NAME}
   structeval.cpp
   structtype.cpp
   symbol.cpp
+  task.cpp
   valuetype.cpp
 )
 

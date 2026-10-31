@@ -6,12 +6,14 @@
 
 #include "parser.hpp"
 #include "diagnostics.h"
+#include "event_loop.h"
 #include "net.h"
 #include "package.h"
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
 #include "structtype.h"
+#include "task.h"
 
 extern FILE *yyin;
 
@@ -113,9 +115,11 @@ int main(int argc, char **argv) {
 
     if (g_show_prompt)
         repl_history_save();
+    task_shutdown();
+    net_shutdown();
     donescope();
     structtype_shutdown();
-    net_shutdown();
+    event_loop_shutdown();
     if (script)
         std::fclose(script);
 

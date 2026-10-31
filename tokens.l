@@ -268,6 +268,7 @@ EXP ([Ee][-+]?[0-9]+)
 "break" { YYRET(BREAK); }
 "continue" { YYRET(CONTINUE); }
 "in" { YYRET(IN); }
+"as" { YYRET(AS); }
 "null" { YYRET(NULLVAL); }
 
 "sqrt" { yylval.fn = B_sqrt; YYRET(BUILTIN); }

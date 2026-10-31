@@ -209,6 +209,7 @@ struct import_node {
     int line;
     int column;
     char *path;
+    char *alias;
 };
 
 struct symref {
@@ -251,7 +252,7 @@ struct ast *newctn();
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported = false);
 struct ast *newpackage(char *name, struct ast *body);
-struct ast *newimport(char *path);
+struct ast *newimport(char *path, char *alias);
 void push_func_location(int line, int column);
 void clear_func_locations();
 std::shared_ptr<function_code> get_function_code(struct funcdef *node);

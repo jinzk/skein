@@ -138,10 +138,14 @@ aa/bb/cc/index.calc
 import aa.bb.cc;    // 绑定 cc
 import aa.bb;       // 绑定 bb；子包通过 bb.cc 访问
 import aa;          // 绑定 aa；子包通过 aa.bb.cc 访问
+import aa.bb.cc as c;  // 绑定到别名 c
+import std as s;       // 标准库也可使用别名
 ```
 
 - `import aa.bb.cc` 后可以直接使用 `cc`；
 - `import aa.bb` 后使用 `bb.cc`；
+- `import aa.bb.cc as c` 后使用 `c`，不再绑定 `cc`；
+- 别名必须是普通标识符，`as` 是保留字；
 - 父包没有自己的源文件也可以作为子包容器；
 - 同一个包只加载一次，之后复用缓存；
 - 循环导入会报错，不会递归挂起。

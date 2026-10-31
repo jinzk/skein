@@ -655,6 +655,17 @@ def main():
           stderr="range expects 1 to 3 arguments")
     check("range overflow", "range(9223372036854775807, 2)\n",
           stderr="range value overflow")
+    check("std import alias", "import std as s;\ns.list.len([1, 2, 3])\n",
+          stdout="= 3")
+    check(
+        "std import multiple aliases",
+        "import std as s1;\n"
+        "import std as s2;\n"
+        "s1.list.len([1]) + s2.list.len([1, 2])\n",
+        stdout="= 3",
+    )
+    check("import alias conflict", "let s = 1;\nimport std as s;\n",
+          stderr="import name already exists: s")
     check(
         "std list helpers",
         "import std;\n"
@@ -1512,13 +1523,30 @@ def main():
             "print(bb.cc.value);\n"
             "import aa;\n"
             "print(aa.root);\n"
-            "print(aa.bb.cc.value);\n",
+            "print(aa.bb.cc.value);\n"
+            "import aa.bb.cc as c;\n"
+            "print(c.value);\n"
+            "import aa.bb as b;\n"
+            "print(b.cc.value);\n"
+            "import aa as a;\n"
+            "print(a.root);\n"
+            "print(a.bb.cc.value);\n",
         )
         proc = run_file(app_main)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.splitlines() == ["42", "7", "hi x", "bb", "42", "aa", "42"], (
-            proc.stdout
-        )
+        assert proc.stdout.splitlines() == [
+            "42",
+            "7",
+            "hi x",
+            "bb",
+            "42",
+            "aa",
+            "42",
+            "42",
+            "42",
+            "aa",
+            "42",
+        ], proc.stdout
         assert proc.stderr == "", proc.stderr
 
         write(

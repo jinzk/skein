@@ -19,7 +19,7 @@ let const func
 if else while for
 return break continue
 null
-package import export
+package import export as
 ```
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
@@ -544,11 +544,15 @@ package cc {
 import aa.bb.cc;
 import aa.bb;
 import aa;
+import aa.bb.cc as c;
+import std as s;
 ```
 
 - `import aa.bb.cc;` 绑定最后一个包名 `cc`；
 - `import aa.bb;` 绑定 `bb`，子包通过 `bb.cc` 访问；
 - `import aa;` 绑定 `aa`，子包通过 `aa.bb.cc` 访问；
+- `import aa.bb.cc as c;` 使用别名 `c` 绑定，后续通过 `c.value` 访问；
+- 别名必须是普通标识符；`as` 是保留字；
 - import 语句需要分号；
 - 包名绑定到当前作用域。
 

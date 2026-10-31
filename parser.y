@@ -116,7 +116,7 @@ static const char *builtin_field_name(int functype) {
 %token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let" CONST "const"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null"
-%token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in"
+%token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
@@ -169,7 +169,8 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                                            { $$ = newfunc($3, $5, $8, true); }
     | PACKAGE NAME '{' EMPTY_BLOCK_CLOSE  { $$ = newpackage($2, NULL); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
-    | IMPORT importpath ';'               { $$ = newimport($2); }
+    | IMPORT importpath ';'               { $$ = newimport($2, NULL); }
+    | IMPORT importpath AS NAME ';'       { $$ = newimport($2, $4); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
     | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
     ;

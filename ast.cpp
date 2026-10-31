@@ -296,7 +296,7 @@ struct ast *newpackage(char *name, struct ast *body) {
     return (struct ast *)a;
 }
 
-struct ast *newimport(char *path) {
+struct ast *newimport(char *path, char *alias) {
     struct import_node *a =
         (struct import_node *)std::malloc(sizeof(struct import_node));
     if (!a) {
@@ -306,6 +306,7 @@ struct ast *newimport(char *path) {
     a->nodetype = 'J';
     set_loc(a, 0, 0);
     a->path = path;
+    a->alias = alias;
     return (struct ast *)a;
 }
 
@@ -471,9 +472,12 @@ void treefree(struct ast *a) {
             std::free(p->name);
             break;
         }
-        case 'J':
-            std::free(((struct import_node *)a)->path);
+        case 'J': {
+            struct import_node *imp = (struct import_node *)a;
+            std::free(imp->path);
+            std::free(imp->alias);
             break;
+        }
         case 'X':
             treefree(((struct nscope *)a)->ast);
             break;

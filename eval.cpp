@@ -2591,7 +2591,9 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
             const char *slash = std::strrchr(imp->path, '.');
-            const char *name = slash ? slash + 1 : imp->path;
+            const char *name = imp->alias
+                                   ? imp->alias
+                                   : (slash ? slash + 1 : imp->path);
             if (isrepeated(name)) {
                 yyerror("import name already exists: %s", name);
                 freeval(ns);

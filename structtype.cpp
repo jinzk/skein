@@ -1,5 +1,4 @@
 #include "structtype.h"
-#include "diagnostics.h"
 
 #include <cstring>
 #include <unordered_map>
@@ -9,6 +8,13 @@ namespace {
 
 std::unordered_map<std::string, std::unique_ptr<struct_def>> struct_types;
 std::unordered_map<std::string, std::unique_ptr<trait_def>> trait_types;
+
+std::string type_key(const char *module, const char *name) {
+    std::string key = module ? module : "";
+    key.push_back('\x1f');
+    key += name ? name : "";
+    return key;
+}
 
 } // namespace
 
@@ -22,31 +28,33 @@ void structtype_shutdown() {
     trait_types.clear();
 }
 
-struct_def *structtype_find_struct(const char *name) {
+struct_def *structtype_find_struct(const char *module, const char *name) {
     if (!name) return NULL;
-    auto it = struct_types.find(name);
+    auto it = struct_types.find(type_key(module, name));
     return it == struct_types.end() ? NULL : it->second.get();
 }
 
-trait_def *structtype_find_trait(const char *name) {
+trait_def *structtype_find_trait(const char *module, const char *name) {
     if (!name) return NULL;
-    auto it = trait_types.find(name);
+    auto it = trait_types.find(type_key(module, name));
     return it == trait_types.end() ? NULL : it->second.get();
 }
 
-bool structtype_type_exists(const char *name) {
+bool structtype_type_exists(const char *module, const char *name) {
     if (!name) return false;
-    return struct_types.count(name) != 0 || trait_types.count(name) != 0;
+    std::string key = type_key(module, name);
+    return struct_types.count(key) != 0 || trait_types.count(key) != 0;
 }
 
-bool structtype_create_struct(const char *name, std::vector<field_def> fields,
+bool structtype_create_struct(const char *module, const char *name,
+                              std::vector<field_def> fields,
                               struct_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
         error = "invalid struct name";
         return false;
     }
-    if (structtype_type_exists(name)) {
+    if (structtype_type_exists(module, name)) {
         error = std::string("type repeated ") + name;
         return false;
     }
@@ -65,21 +73,22 @@ bool structtype_create_struct(const char *name, std::vector<field_def> fields,
 
     std::unique_ptr<struct_def> def(new struct_def);
     def->name = name;
-    def->module = diag_current_source_name();
+    def->module = module ? module : "";
     def->fields = std::move(fields);
     out = def.get();
-    struct_types.emplace(out->name, std::move(def));
+    struct_types.emplace(type_key(module, name), std::move(def));
     return true;
 }
 
-bool structtype_create_trait(const char *name, std::vector<method_sig> methods,
+bool structtype_create_trait(const char *module, const char *name,
+                             std::vector<method_sig> methods,
                              trait_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
         error = "invalid trait name";
         return false;
     }
-    if (structtype_type_exists(name)) {
+    if (structtype_type_exists(module, name)) {
         error = std::string("type repeated ") + name;
         return false;
     }
@@ -98,10 +107,10 @@ bool structtype_create_trait(const char *name, std::vector<method_sig> methods,
 
     std::unique_ptr<trait_def> def(new trait_def);
     def->name = name;
-    def->module = diag_current_source_name();
+    def->module = module ? module : "";
     def->methods = std::move(methods);
     out = def.get();
-    trait_types.emplace(out->name, std::move(def));
+    trait_types.emplace(type_key(module, name), std::move(def));
     return true;
 }
 
@@ -180,18 +189,19 @@ void ensure_unique_struct(struct struct_value_t *value) {
     value->payload = std::move(copy);
 }
 
-bool named_type_matches(const char *name, const struct value_t *value) {
-    if (!name || !value || value->type != T_struct)
+bool named_type_matches(const char *module, const char *name,
+                        const struct value_t *value) {
+    if (!module || !name || !value || value->type != T_struct)
         return false;
 
     const struct struct_value_t *sv = (const struct struct_value_t *)value;
     if (!sv->def)
         return false;
 
-    if (sv->def->name == name)
+    if (sv->def->module == module && sv->def->name == name)
         return true;
 
-    trait_def *trait = structtype_find_trait(name);
+    trait_def *trait = structtype_find_trait(module, name);
     if (!trait)
         return false;
     return structtype_has_trait(sv->def, trait);

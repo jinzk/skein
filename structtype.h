@@ -47,13 +47,15 @@ struct struct_value_t {
 
 void structtype_shutdown();
 
-struct_def *structtype_find_struct(const char *name);
-trait_def *structtype_find_trait(const char *name);
-bool structtype_type_exists(const char *name);
+struct_def *structtype_find_struct(const char *module, const char *name);
+trait_def *structtype_find_trait(const char *module, const char *name);
+bool structtype_type_exists(const char *module, const char *name);
 
-bool structtype_create_struct(const char *name, std::vector<field_def> fields,
+bool structtype_create_struct(const char *module, const char *name,
+                              std::vector<field_def> fields,
                               struct_def *&out, std::string &error);
-bool structtype_create_trait(const char *name, std::vector<method_sig> methods,
+bool structtype_create_trait(const char *module, const char *name,
+                             std::vector<method_sig> methods,
                              trait_def *&out, std::string &error);
 bool structtype_add_method(struct_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,
@@ -69,6 +71,7 @@ struct value_t *newstructval(struct_def *def,
 void ensure_unique_struct(struct struct_value_t *value);
 
 /* Runtime implementation of a TYPE_NAMED type constraint. */
-bool named_type_matches(const char *name, const struct value_t *value);
+bool named_type_matches(const char *module, const char *name,
+                        const struct value_t *value);
 
 #endif

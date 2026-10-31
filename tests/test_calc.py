@@ -2428,6 +2428,48 @@ def main():
         assert "package not found" in proc.stderr, proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write(
+            "app/aa/aa.calc",
+            "package aa {\n"
+            "  struct P { x: int; }\n"
+            "  impl P { func get(self) { return self.x; } }\n"
+            "  export func make() { return P { x: 7 }; }\n"
+            "}\n",
+        )
+        main = write(
+            "app/main.calc",
+            "import aa;\n"
+            "struct P { y: string; }\n"
+            "let pkg = aa.make();\n"
+            'let local: P = P { y: "ok" };\n'
+            "print(pkg.get());\n"
+            "print(local.y);\n"
+            "func local_get(p: P) { return p.y; }\n"
+            "print(local_get(local));\n",
+        )
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["7", "ok", "ok"], proc.stdout
+        assert proc.stderr == "", proc.stderr
+
+        main2 = write(
+            "app/main2.calc",
+            "import aa;\n"
+            "let p = aa.make();\n"
+            "let q: P = p;\n",
+        )
+        proc = run_file(main2)
+        assert proc.returncode == 1, proc.stdout
+        assert "unknown type name P" in proc.stderr, proc.stderr
+
+    with tempfile.TemporaryDirectory() as tmp:
         failfast = os.path.join(tmp, "failfast.calc")
         with open(failfast, "w", encoding="utf-8") as f:
             f.write('print("before");\n1/0;\nprint("after");\n')

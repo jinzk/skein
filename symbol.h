@@ -27,6 +27,7 @@ struct type_constraint {
     enum type_constraint_kind kind;
     /* Interned; non-NULL only for TYPE_NAMED. */
     const char *name;
+    const char *module;
 };
 
 struct symbol {
@@ -52,7 +53,8 @@ struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
 void symlistfree(struct symlist *sl);
 
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);
-struct type_constraint *new_named_type_constraint(const char *name);
+struct type_constraint *new_named_type_constraint(const char *name,
+                                                  const char *module);
 void free_type_constraint(struct type_constraint *type);
 bool type_constraint_matches(const struct type_constraint *type,
                              const struct value_t *value);

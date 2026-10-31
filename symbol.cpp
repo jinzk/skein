@@ -23,6 +23,7 @@ struct symbol *newsym(const char *name) {
     s->val = NULL;
     s->type.kind = TYPE_ANY;
     s->type.name = NULL;
+    s->type.module = NULL;
     s->exported = false;
     s->is_const = false;
     s->is_self = false;
@@ -71,12 +72,15 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
     }
     type->kind = kind;
     type->name = NULL;
+    type->module = NULL;
     return type;
 }
 
-struct type_constraint *new_named_type_constraint(const char *name) {
+struct type_constraint *new_named_type_constraint(const char *name,
+                                                  const char *module) {
     struct type_constraint *type = new_type_constraint(TYPE_NAMED);
     type->name = intern_type_name(name);
+    type->module = intern_type_name(module);
     return type;
 }
 
@@ -119,7 +123,7 @@ bool type_constraint_matches(const struct type_constraint *type,
         case TYPE_USERDATA:
             return value->type == T_userdata;
         case TYPE_NAMED:
-            return named_type_matches(type->name, value);
+            return named_type_matches(type->module, type->name, value);
         case TYPE_INVALID:
         default:
             return false;
@@ -132,8 +136,15 @@ bool type_constraint_equal(const struct type_constraint *a,
         return !a && !b;
     if (a->kind != b->kind)
         return false;
-    if (a->kind == TYPE_NAMED)
-        return a->name && b->name && std::strcmp(a->name, b->name) == 0;
+    if (a->kind == TYPE_NAMED) {
+        if (!a->name || !b->name)
+            return a->name == b->name;
+        if (std::strcmp(a->name, b->name) != 0)
+            return false;
+        if (!a->module || !b->module)
+            return a->module == b->module;
+        return std::strcmp(a->module, b->module) == 0;
+    }
     return true;
 }
 

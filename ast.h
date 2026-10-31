@@ -231,6 +231,7 @@ struct struct_node {
     int line;
     int column;
     char *name;
+    char *module;
     struct struct_member *members;
 };
 
@@ -240,6 +241,7 @@ struct impl_node {
     int column;
     char *type_name;
     char *trait_name;
+    char *module;
     struct struct_member *methods;
 };
 
@@ -257,6 +259,7 @@ struct trait_node {
     int line;
     int column;
     char *name;
+    char *module;
     struct trait_method *methods;
 };
 
@@ -274,6 +277,7 @@ struct struct_lit_node {
     int line;
     int column;
     char *name;
+    char *module;
     struct struct_init *fields;
 };
 
@@ -359,16 +363,19 @@ void release_function_code(struct funcdef *node);
 struct ast *newlist(struct ast *v, struct ast *l);
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l);
 
-struct ast *newstructdecl(char *name, struct struct_member *members);
+struct ast *newstructdecl(char *name, char *module,
+                          struct struct_member *members);
 struct ast *newstructfield(char *name, struct type_constraint *type);
 struct ast *newstructmethod(char *name, struct ast *func);
 struct ast *append_struct_member(struct ast *head, struct ast *member);
-struct ast *newimpl(char *type_name, char *trait_name,
+struct ast *newimpl(char *type_name, char *trait_name, char *module,
                     struct struct_member *methods);
-struct ast *newtraitdecl(char *name, struct trait_method *methods);
+struct ast *newtraitdecl(char *name, char *module,
+                         struct trait_method *methods);
 struct ast *newtraitmethod(char *name, struct symlist *params);
 struct ast *append_trait_method(struct ast *head, struct ast *method);
-struct ast *newstructlit(char *name, struct struct_init *fields);
+struct ast *newstructlit(char *name, char *module,
+                         struct struct_init *fields);
 struct ast *newstructinit(char *name, struct ast *value);
 struct ast *append_struct_init(struct ast *head, struct ast *init);
 

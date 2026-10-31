@@ -126,7 +126,8 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
     if (std::strcmp(name, "callable") == 0) return new_type_constraint(TYPE_CALLABLE);
     if (std::strcmp(name, "null") == 0) return new_type_constraint(TYPE_NULL);
     if (std::strcmp(name, "userdata") == 0) return new_type_constraint(TYPE_USERDATA);
-    return new_named_type_constraint(name);
+    return new_named_type_constraint(name,
+                                     diag_current_source_name().c_str());
 }
 
 static struct type_constraint *type_constraint_from_builtin(int functype) {
@@ -262,9 +263,15 @@ empty_body: EMPTY_DICT_CLOSE
     | EMPTY_BLOCK_CLOSE
     ;
 
-struct_decl: STRUCT NAME '{' empty_body  { $$ = newstructdecl($2, NULL); }
+struct_decl: STRUCT NAME '{' empty_body  {
+        $$ = newstructdecl($2,
+                           copy_text(diag_current_source_name().c_str()),
+                           NULL);
+      }
     | STRUCT NAME '{' struct_members '}' {
-        $$ = newstructdecl($2, (struct struct_member *)$4);
+        $$ = newstructdecl($2,
+                           copy_text(diag_current_source_name().c_str()),
+                           (struct struct_member *)$4);
       }
     ;
 
@@ -282,24 +289,43 @@ method_member: funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newstructmethod($2, newfunc(NULL, $4, $7)); }
     ;
 
-impl_decl: IMPL NAME '{' empty_body      { $$ = newimpl($2, NULL, NULL); }
+impl_decl: IMPL NAME '{' empty_body      {
+        $$ = newimpl($2, NULL,
+                     copy_text(diag_current_source_name().c_str()), NULL);
+      }
     | IMPL NAME '{' impl_methods '}'     {
-        $$ = newimpl($2, NULL, (struct struct_member *)$4);
+        $$ = newimpl($2, NULL,
+                     copy_text(diag_current_source_name().c_str()),
+                     (struct struct_member *)$4);
       }
-    | IMPL NAME FOR NAME '{' empty_body  { $$ = newimpl($4, $2, NULL); }
+    | IMPL NAME FOR NAME '{' empty_body  {
+        $$ = newimpl($4, $2,
+                     copy_text(diag_current_source_name().c_str()), NULL);
+      }
     | IMPL NAME FOR NAME '{' impl_methods '}' {
-        $$ = newimpl($4, $2, (struct struct_member *)$6);
+        $$ = newimpl($4, $2,
+                     copy_text(diag_current_source_name().c_str()),
+                     (struct struct_member *)$6);
       }
-    | IMPL NAME FOR NAME ';'             { $$ = newimpl($4, $2, NULL); }
+    | IMPL NAME FOR NAME ';'             {
+        $$ = newimpl($4, $2,
+                     copy_text(diag_current_source_name().c_str()), NULL);
+      }
     ;
 
 impl_methods: method_member              { $$ = $1; }
     | impl_methods method_member         { $$ = append_struct_member($1, $2); }
     ;
 
-trait_decl: TRAIT NAME '{' empty_body    { $$ = newtraitdecl($2, NULL); }
+trait_decl: TRAIT NAME '{' empty_body    {
+        $$ = newtraitdecl($2,
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL);
+      }
     | TRAIT NAME '{' trait_methods '}'   {
-        $$ = newtraitdecl($2, (struct trait_method *)$4);
+        $$ = newtraitdecl($2,
+                          copy_text(diag_current_source_name().c_str()),
+                          (struct trait_method *)$4);
       }
     ;
 
@@ -396,9 +422,15 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' EMPTY_DICT_CLOSE                { $$ = newdict(NULL, NULL, NULL); }
     | '{' pairlist '}'                    { $$ = $2; }
-    | NAME '{' empty_body                 { $$ = newstructlit($1, NULL); }
+    | NAME '{' empty_body                 {
+        $$ = newstructlit($1,
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL);
+      }
     | NAME '{' struct_fields '}'          {
-        $$ = newstructlit($1, (struct struct_init *)$3);
+        $$ = newstructlit($1,
+                          copy_text(diag_current_source_name().c_str()),
+                          (struct struct_init *)$3);
       }
     | funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $3, NULL); }

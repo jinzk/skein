@@ -456,7 +456,8 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
     return (struct ast *)p;
 }
 
-struct ast *newstructdecl(char *name, struct struct_member *members) {
+struct ast *newstructdecl(char *name, char *module,
+                          struct struct_member *members) {
     struct struct_node *a =
         (struct struct_node *)std::malloc(sizeof(struct struct_node));
     if (!a) {
@@ -466,6 +467,7 @@ struct ast *newstructdecl(char *name, struct struct_member *members) {
     a->nodetype = 'Y';
     set_loc(a, 0, 0);
     a->name = name;
+    a->module = module;
     a->members = members;
     return (struct ast *)a;
 }
@@ -510,7 +512,7 @@ struct ast *append_struct_member(struct ast *head, struct ast *member) {
     return head;
 }
 
-struct ast *newimpl(char *type_name, char *trait_name,
+struct ast *newimpl(char *type_name, char *trait_name, char *module,
                     struct struct_member *methods) {
     struct impl_node *a =
         (struct impl_node *)std::malloc(sizeof(struct impl_node));
@@ -522,11 +524,13 @@ struct ast *newimpl(char *type_name, char *trait_name,
     set_loc(a, 0, 0);
     a->type_name = type_name;
     a->trait_name = trait_name;
+    a->module = module;
     a->methods = methods;
     return (struct ast *)a;
 }
 
-struct ast *newtraitdecl(char *name, struct trait_method *methods) {
+struct ast *newtraitdecl(char *name, char *module,
+                         struct trait_method *methods) {
     struct trait_node *a =
         (struct trait_node *)std::malloc(sizeof(struct trait_node));
     if (!a) {
@@ -536,6 +540,7 @@ struct ast *newtraitdecl(char *name, struct trait_method *methods) {
     a->nodetype = 't';
     set_loc(a, 0, 0);
     a->name = name;
+    a->module = module;
     a->methods = methods;
     return (struct ast *)a;
 }
@@ -563,7 +568,8 @@ struct ast *append_trait_method(struct ast *head, struct ast *method) {
     return head;
 }
 
-struct ast *newstructlit(char *name, struct struct_init *fields) {
+struct ast *newstructlit(char *name, char *module,
+                         struct struct_init *fields) {
     struct struct_lit_node *a =
         (struct struct_lit_node *)std::malloc(sizeof(struct struct_lit_node));
     if (!a) {
@@ -573,6 +579,7 @@ struct ast *newstructlit(char *name, struct struct_init *fields) {
     a->nodetype = 'y';
     set_loc(a, 0, 0);
     a->name = name;
+    a->module = module;
     a->fields = fields;
     return (struct ast *)a;
 }
@@ -747,6 +754,7 @@ void treefree(struct ast *a) {
             struct struct_node *s = (struct struct_node *)a;
             treefree((struct ast *)s->members);
             std::free(s->name);
+            std::free(s->module);
             break;
         }
         case 'H': {
@@ -754,12 +762,14 @@ void treefree(struct ast *a) {
             treefree((struct ast *)i->methods);
             std::free(i->type_name);
             std::free(i->trait_name);
+            std::free(i->module);
             break;
         }
         case 't': {
             struct trait_node *t = (struct trait_node *)a;
             treefree((struct ast *)t->methods);
             std::free(t->name);
+            std::free(t->module);
             break;
         }
         case 'f': {
@@ -787,6 +797,7 @@ void treefree(struct ast *a) {
             struct struct_lit_node *s = (struct struct_lit_node *)a;
             treefree((struct ast *)s->fields);
             std::free(s->name);
+            std::free(s->module);
             break;
         }
         case 'i': {

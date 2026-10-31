@@ -678,8 +678,9 @@ render(p)
 - trait 方法名不能与类型已有方法冲突；
 - trait 实现和类型必须在同一模块中；
 - 一个类型对同一个 trait 只能实现一次；
-- 结构体和 trait 名称共享类型命名空间，不能重名；
-- 当前类型注册是全局的，不同包不能定义同名结构体或 trait。
+- 结构体和 trait 名称共享类型命名空间，不能在同一模块中重名；
+- 类型名按源模块注册，模块通常对应一个源文件；不同模块可以定义同名结构体或 trait；
+- 类型名不会自动跨模块可见，跨模块值仍可通过方法表正常调用。
 
 内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 

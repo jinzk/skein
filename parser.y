@@ -656,6 +656,11 @@ docalc: calclist EOL {
             rslt = eval($1);
             if (eval_control_pending())
                 eval_finish_statement_control();
+            if (g_interactive && rslt && rslt->type != T_null &&
+                rslt->type != T_return && rslt->type != T_break &&
+                rslt->type != T_continue) {
+                repl_set_last_result(rslt);
+            }
             if (rslt && !g_interrupted && rslt->type != T_null) {
                 switch (rslt->type) {
                     case T_return:
@@ -681,11 +686,6 @@ docalc: calclist EOL {
             freeval(rslt);
         }
 
-        if (g_interactive && !g_interrupted) {
-            printf("> ");
-            fflush(stdout);
-        }
-
         if ($1) treefree($1);
         $1 = NULL;
         $$ = NULL;
@@ -697,10 +697,6 @@ docalc: calclist EOL {
         g_statement_invalid = false;
         if (!g_interactive && g_script_stop)
             YYABORT;
-        if (g_interactive && !g_interrupted) {
-            printf("> ");
-            fflush(stdout);
-        }
         $$ = NULL;
     }
     ;

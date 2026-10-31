@@ -18,6 +18,7 @@ volatile std::sig_atomic_t g_interrupted = 0;
 volatile std::sig_atomic_t g_stdin_eof = 0;
 
 bool g_interactive = true;
+bool g_show_prompt = false;
 int g_package_loading = 0;
 bool g_keep_going = false;
 bool g_script_stop = false;
@@ -26,7 +27,7 @@ int indent_count = 0;
 
 static void print_usage(const char *program) {
     std::fprintf(stderr,
-                 "usage: %s [-I dir] [--package-path dir] "
+                 "usage: %s [-i] [-I dir] [--package-path dir] "
                  "[-k|--keep-going] [script|-]\n",
                  program);
 }
@@ -37,6 +38,7 @@ int main(int argc, char **argv) {
 
     std::string script_path;
     std::vector<std::string> package_dirs;
+    bool force_interactive = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -50,6 +52,8 @@ int main(int argc, char **argv) {
             package_dirs.push_back(arg.substr(2));
         } else if (arg.rfind("--package-path=", 0) == 0) {
             package_dirs.push_back(arg.substr(15));
+        } else if (arg == "-i") {
+            force_interactive = true;
         } else if (arg == "-k" || arg == "--keep-going") {
             g_keep_going = true;
         } else if (arg == "-" || arg[0] != '-') {
@@ -72,6 +76,10 @@ int main(int argc, char **argv) {
     FILE *script = NULL;
     if (!script_path.empty()) {
         g_interactive = false;
+    } else {
+        g_show_prompt = force_interactive || platform_stdin_is_tty();
+    }
+    if (!script_path.empty()) {
         if (script_path != "-") {
             script = std::fopen(script_path.c_str(), "rb");
             if (!script) {
@@ -83,10 +91,8 @@ int main(int argc, char **argv) {
     }
 
     initscope();
-    if (g_interactive) {
-        std::printf("> ");
-        std::fflush(stdout);
-    }
+    if (g_show_prompt)
+        repl_history_load();
 
     int status = 0;
     for (;;) {
@@ -102,10 +108,10 @@ int main(int argc, char **argv) {
         g_interrupted = 0;
         indent_count = 0;
         reset_scanner_state(yyin ? yyin : stdin);
-        std::printf("\n> ");
-        std::fflush(stdout);
     }
 
+    if (g_show_prompt)
+        repl_history_save();
     donescope();
     structtype_shutdown();
     if (script)

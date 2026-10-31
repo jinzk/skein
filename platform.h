@@ -10,6 +10,9 @@
 /* One-time process/platform initialization: console encoding and I/O mode. */
 void platform_init();
 
+/* True when stdin is an interactive terminal. */
+bool platform_stdin_is_tty();
+
 /* Install the Ctrl-C handler used by the REPL. */
 void platform_install_interrupt_handler();
 

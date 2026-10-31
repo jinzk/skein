@@ -88,6 +88,26 @@ static input_status read_input_line() {
     input_pos = 0;
     diag_start_input_line();
 
+    if (g_show_prompt && (yyin == NULL || yyin == stdin)) {
+        repl_line_status st = repl_read_line(input_line, indent_count > 0);
+        if (st == REPL_EOF) {
+            input_line.clear();
+            input_pos = 0;
+            g_stdin_eof = 1;
+            return INPUT_EOF;
+        }
+        if (st == REPL_INTERRUPTED) {
+            input_line.clear();
+            input_pos = 0;
+            std::clearerr(yyin);
+            return INPUT_INTERRUPTED;
+        }
+        input_line.push_back('\n');
+        strip_utf8_bom_once();
+        diag_record_line(diag_current_line(), input_line);
+        return INPUT_LINE;
+    }
+
     for (;;) {
         if (g_interrupted) {
             std::clearerr(yyin);
@@ -437,16 +457,8 @@ EXP ([Ee][-+]?[0-9]+)
 }
 
 \n {
-    if (indent_count > 0) {
-        if (g_interactive) {
-            std::printf("> ");
-            for (int i = 0; i < indent_count; ++i)
-                std::printf("..");
-            std::fflush(stdout);
-        }
-    } else {
+    if (indent_count == 0)
         YYRET(EOL);
-    }
 }
 
 . {

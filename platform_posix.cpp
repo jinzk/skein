@@ -60,6 +60,10 @@ static void on_sigint(int) {
 void platform_init() {
 }
 
+bool platform_stdin_is_tty() {
+    return isatty(fileno(stdin)) != 0;
+}
+
 void platform_install_interrupt_handler() {
     struct sigaction sa = {};
     sa.sa_handler = on_sigint;

@@ -117,7 +117,12 @@ def check_interactive_continuation():
         os.write(master, b"d\n")
         assert "= {}" in read_available(), "multi-line empty dict failed"
 
-        os.write(master, b"\x04")
+        os.write(master, b"1 + 2\n")
+        assert "= 3" in read_available(), "REPL result failed"
+        os.write(master, b"ans + 1\n")
+        assert "= 4" in read_available(), "REPL ans failed"
+
+        os.write(master, b":quit\n")
         proc.wait(timeout=2)
     finally:
         if proc.poll() is None:
@@ -128,6 +133,11 @@ def check_interactive_continuation():
 
 def main():
     check("addition", "1+2\n", stdout="= 3")
+    check("pipe mode has no REPL prompt", "1+2\n", stdout="= 3")
+    assert "> " not in run("1+2\n").stdout
+    check("ans and underscore reference last result",
+          "1 + 2\nans * 4\n_\n_ + 1\n",
+          stdout_all=["= 3", "= 12", "= 12", "= 13"])
     check("float", "1.5*2\n", stdout="= 3.0")
     check("float keeps type in output", "1.0\n", stdout="= 1.0")
     check("float shortest round-trip", "1.23456\n", stdout="= 1.23456")

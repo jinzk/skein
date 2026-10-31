@@ -27,6 +27,7 @@ add_executable(${PROJECT_NAME}
   format.cpp
   main.cpp
   package.cpp
+  repl.cpp
   scopestack.cpp
   structeval.cpp
   structtype.cpp

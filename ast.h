@@ -100,7 +100,21 @@ enum bifs {
     B_write_bytes,
     B_append_bytes,
     B_file_read_bytes,
-    B_file_write_bytes
+    B_file_write_bytes,
+    B_net_tcp_connect,
+    B_net_tcp_listen,
+    B_net_accept,
+    B_net_send,
+    B_net_recv,
+    B_net_close,
+    B_net_resolve,
+    B_ffi_open,
+    B_ffi_close,
+    B_ffi_call,
+    B_ffi_buffer,
+    B_ffi_buffer_len,
+    B_ffi_buffer_bytes,
+    B_ffi_buffer_free
 };
 
 struct ast {

@@ -1209,6 +1209,8 @@ std.io
 std.fs
 std.process
 std.type
+std.net
+std.ffi（可选）
 ```
 
 常用示例：
@@ -1221,6 +1223,7 @@ std.io.print("hello")
 std.fs.read_file("data.txt")
 std.process.command_status("true")
 std.type.name(1)
+std.net.resolve("localhost")
 
 std.list.slice([1, 2, 3], 1, 2)
 std.list.contains([1, 2, 3], 2)
@@ -1250,7 +1253,70 @@ std.bytes.hex(bytes_from_hex("00ff"))
 - `std.io`：`print`、`format`、`input`；
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`status` / `command_status`；
-- `std.type`：`kind_of`、`name`、`module`、`source`。
+- `std.type`：`kind_of`、`name`、`module`、`source`；
+- `std.net`：同步 TCP 客户端/服务端和 DNS 解析；
+- `std.ffi`：可选的 libffi C ABI 调用。
+
+TCP 示例：
+
+```text
+import std;
+
+let s = std.net.tcp_connect("127.0.0.1", 8080);
+std.net.send(s, "hello");
+let data = std.net.recv(s, 4096);
+print(bytes_to_string(data));
+std.net.close(s);
+```
+
+FFI 示例：
+
+```text
+import std;
+
+let lib = std.ffi.open("libm.so.6");
+std.ffi.call(lib, "cos", "f64", ["f64"], [0.0])
+std.ffi.close(lib)
+```
+
+FFI 支持的类型：
+
+```text
+void i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
+cstring bytes buffer usize isize
+```
+
+`bytes` 作为输入参数时，FFI 会复制脚本 bytes 的内容并传 `const void *`。
+`buffer` 是 FFI 管理的原生内存，可作为 C 的输出缓冲区。
+
+```text
+let buf = std.ffi.buffer(1024);
+let n = std.ffi.call(lib, "shim_read", "i64",
+                     ["buffer", "usize"], [buf, 1024]);
+let data = std.ffi.buffer_bytes(buf, n);
+std.ffi.buffer_free(buf);
+```
+
+`buffer` 相关函数：
+
+```text
+std.ffi.buffer
+std.ffi.buffer_len
+std.ffi.buffer_bytes
+std.ffi.buffer_free
+```
+
+`bytes` / `buffer` 不能直接作为 `std.ffi.call` 的返回类型；二进制输出请使用 `buffer` 或 C shim 返回字符串/句柄。
+
+`bytes` 传递的是调用期间的临时副本，C 侧不能保存该指针。
+`buffer` 的容量和写入边界由调用方保证，C 侧越界写入会破坏内存。
+
+限制：
+
+- 只支持 C ABI；
+- 不支持结构体、回调、可变参数；
+- 网络和 FFI 错误当前是运行时错误，不能通过 `on error` 捕获；
+- `std.net` 暂不支持 TLS、HTTP、异步。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。
 

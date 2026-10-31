@@ -455,6 +455,30 @@ value_t *build_std_namespace() {
             {"module", B_type_module},
             {"source", B_type_source},
         })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("net"),
+        builtin_module({
+            {"tcp_connect", B_net_tcp_connect},
+            {"tcp_listen", B_net_tcp_listen},
+            {"accept", B_net_accept},
+            {"send", B_net_send},
+            {"recv", B_net_recv},
+            {"close", B_net_close},
+            {"resolve", B_net_resolve},
+        })));
+#ifdef CALC_ENABLE_FFI
+    root->payload->items.push_back(std::make_pair(
+        newstrval("ffi"),
+        builtin_module({
+            {"open", B_ffi_open},
+            {"close", B_ffi_close},
+            {"call", B_ffi_call},
+            {"buffer", B_ffi_buffer},
+            {"buffer_len", B_ffi_buffer_len},
+            {"buffer_bytes", B_ffi_buffer_bytes},
+            {"buffer_free", B_ffi_buffer_free},
+        })));
+#endif
     return (value_t *)root;
 }
 

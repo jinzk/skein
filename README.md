@@ -12,6 +12,14 @@ cmake --build build
 ./build/calc-demo
 ```
 
+`std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
+
+```bash
+cmake -S . -B build -G Ninja -DCALC_ENABLE_FFI=OFF
+```
+
+`std.net` 在 POSIX 使用系统 socket，在 Windows 使用 Winsock。
+
 运行测试：
 
 ```bash
@@ -209,6 +217,56 @@ std.math.sqrt(9)
 std.fs.read_file("data.txt")
 std.process.command_status("true")
 std.type.name(1)
+std.net.resolve("localhost")
+```
+
+TCP：
+
+```text
+import std;
+
+let s = std.net.tcp_connect("127.0.0.1", 8080);
+std.net.send(s, "hello");
+let data = std.net.recv(s, 4096);
+print(bytes_to_string(data));
+std.net.close(s);
+```
+
+FFI：
+
+```text
+import std;
+
+let lib = std.ffi.open("libm.so.6");
+std.ffi.call(lib, "cos", "f64", ["f64"], [0.0])
+std.ffi.close(lib)
+```
+
+二进制输入和输出：
+
+```text
+import std;
+
+let lib = std.ffi.open("libc.so.6");
+let data = bytes_from_string("hello");
+
+let buf = std.ffi.buffer(8);
+std.ffi.call(lib, "memcpy", "void",
+             ["buffer", "bytes", "usize"],
+             [buf, data, 5]);
+
+print(bytes_to_string(std.ffi.buffer_bytes(buf, 5)));
+std.ffi.buffer_free(buf);
+std.ffi.close(lib);
+```
+
+FFI 字节参数：
+
+```text
+bytes        const void *（脚本 bytes 的临时副本）
+buffer       ffi_buffer 的原生内存
+usize        size_t
+isize        ssize_t / intptr_t 宽度
 ```
 
 模块：
@@ -223,6 +281,8 @@ std.io
 std.fs
 std.process
 std.type
+std.net
+std.ffi（可选）
 ```
 
 当前提供的函数：
@@ -315,6 +375,22 @@ std.type.name
 std.type.module
 std.type.source
 
+std.net.tcp_connect
+std.net.tcp_listen
+std.net.accept
+std.net.send
+std.net.recv
+std.net.close
+std.net.resolve
+
+std.ffi.open
+std.ffi.close
+std.ffi.call
+std.ffi.buffer
+std.ffi.buffer_len
+std.ffi.buffer_bytes
+std.ffi.buffer_free
+
 std.bytes.len
 std.bytes.get
 std.bytes.slice
@@ -353,6 +429,14 @@ std.bytes.from_int
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
+- `std.net` 提供同步 TCP 客户端/服务端和 DNS 解析，数据使用 `bytes`；
+- `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
+- `bytes` 传给 C 的是调用期间的临时副本，C 侧不能保存指针；
+- `buffer` 的容量和写入边界由调用方保证，C 侧越界写入会破坏内存；
+- `std.ffi` 是可选模块，缺少 libffi 时不可用；
+- 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
+- FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
+- `std.net` 暂不支持 TLS、HTTP、异步或事件循环；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
 ### 查找路径

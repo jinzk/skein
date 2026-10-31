@@ -1011,6 +1011,76 @@ def main():
         stdout_all=["= list", "= int", "= true"],
     )
     check(
+        "std net resolve",
+        'import std;\nlen(std.net.resolve("localhost")) > 0\n',
+        stdout="= true",
+    )
+    try:
+        import socket
+        import threading
+
+        server = socket.socket()
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        server.settimeout(5)
+        port = server.getsockname()[1]
+        received = []
+
+        def echo_server():
+            try:
+                client, _ = server.accept()
+                data = client.recv(100)
+                received.append(data)
+                client.sendall(b"echo:" + data)
+                client.close()
+            finally:
+                server.close()
+
+        thread = threading.Thread(target=echo_server)
+        thread.start()
+        net_proc = run(
+            "import std;\n"
+            f'let s = std.net.tcp_connect("127.0.0.1", {port});\n'
+            'std.net.send(s, "hello");\n'
+            "let data = std.net.recv(s, 100);\n"
+            "print(bytes_to_string(data));\n"
+            "std.net.close(s);\n"
+        )
+        thread.join(timeout=5)
+        assert net_proc.returncode == 0, net_proc.stderr
+        assert "echo:hello" in net_proc.stdout, net_proc.stdout
+        assert received == [b"hello"], received
+    except OSError:
+        pass
+
+    if sys.platform.startswith("linux"):
+        import ctypes.util
+        libm = ctypes.util.find_library("m")
+        libc = ctypes.util.find_library("c")
+        ffi_probe = run("import std;\nkind_of(std.ffi)\n")
+        if libm and libc and "= dict" in ffi_probe.stdout:
+            check(
+                "std ffi basic calls",
+                f'import std;\n'
+                f'let m = std.ffi.open("{libm}");\n'
+                f'std.ffi.call(m, "cos", "f64", ["f64"], [0.0])\n'
+                f'let c = std.ffi.open("{libc}");\n'
+                f'std.ffi.call(c, "strlen", "i64", ["cstring"], ["hello"])\n'
+                f'let x = bytes_from_string("hello");\n'
+                f'let y = bytes_from_string("hello");\n'
+                f'std.ffi.call(c, "memcmp", "i32", '
+                f'["bytes", "bytes", "usize"], [x, y, 5])\n'
+                f'let buf = std.ffi.buffer(8);\n'
+                f'std.ffi.call(c, "memcpy", "void", '
+                f'["buffer", "bytes", "usize"], [buf, x, 5]);\n'
+                f'bytes_to_string(std.ffi.buffer_bytes(buf, 5))\n'
+                f'std.ffi.buffer_len(buf)\n'
+                f'std.ffi.buffer_free(buf);\n'
+                f'std.ffi.close(m);\nstd.ffi.close(c);\n',
+                stdout_all=["= 1.0", "= 5", "= 0", "= hello", "= 8"],
+            )
+    check(
         "std string format",
         'import std;\nstd.string.format("{}", 3)\n',
         stdout="= 3",

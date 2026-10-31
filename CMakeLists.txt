@@ -27,6 +27,7 @@ add_executable(${PROJECT_NAME}
   filetype.cpp
   format.cpp
   main.cpp
+  net.cpp
   package.cpp
   repl.cpp
   scopestack.cpp
@@ -57,12 +58,31 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+option(CALC_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
+if(CALC_ENABLE_FFI)
+  find_package(PkgConfig QUIET)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(LIBFFI QUIET IMPORTED_TARGET libffi)
+  endif()
+  if(LIBFFI_FOUND)
+    target_sources(${PROJECT_NAME} PRIVATE ffi.cpp)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_FFI=1)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBFFI)
+  else()
+    message(STATUS "libffi not found; std.ffi is disabled")
+  endif()
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 endif()
 
 if(UNIX)
   target_link_libraries(${PROJECT_NAME} PRIVATE m)
+endif()
+
+if(WIN32)
+  target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
 endif()
 
 include(CTest)

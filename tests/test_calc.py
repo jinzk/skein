@@ -159,6 +159,53 @@ def main():
     check("modulo sign follows dividend", "-7 % 4\n", stdout="= -3")
     check("modulo negative divisor", "7 % -4\n", stdout="= 3")
     check("modulo by zero", "1 % 0\n", stderr="modulo by zero")
+
+    check("postfix increment returns old value",
+          "let x = 1;\nlet a = x++;\na\nx\n", stdout_all=["= 1", "= 2"])
+    check("prefix increment returns new value",
+          "let x = 1;\nlet a = ++x;\na\nx\n", stdout_all=["= 2", "= 2"])
+    check("postfix decrement returns old value",
+          "let x = 2;\nlet a = x--;\na\nx\n", stdout_all=["= 2", "= 1"])
+    check("prefix decrement returns new value",
+          "let x = 2;\nlet a = --x;\na\nx\n", stdout_all=["= 1", "= 1"])
+    check("increment in for loop",
+          "let n = 0;\nfor (let i = 0; i < 3; i++) { n = n + i; }\nn\n",
+          stdout="= 3")
+    check("increment float", "let x = 1.5;\nx++\nx\n++x\nx\n",
+          stdout_all=["= 1.5", "= 2.5", "= 3.5", "= 3.5"])
+    check("increment list element",
+          "let a = [1, 2];\na[0]++;\n++a[1];\na\n",
+          stdout_all=["= 1", "= 3", "= [2, 3]"])
+    check("increment nested index",
+          "let a = [[1]];\na[0][0]++;\na\n",
+          stdout_all=["= 1", "= [[2]]"])
+    check("increment dict field",
+          'let d = {"x": 5};\nd.x++;\n++d["x"];\nd\n',
+          stdout_all=["= 5", "= 7", "= {x: 7}"])
+    check("increment bytes element",
+          'let b = bytes_from_hex("00ff");\nb[0]++;\nb[1]--;\nb\n',
+          stdout_all=["= 0", "= 255", "= <bytes: 2>"])
+    check("increment evaluates index once",
+          "let i = 0;\nlet a = [10];\na[i++]++;\ni\na\n",
+          stdout_all=["= 10", "= 1", "= [11]"])
+    check("increment const binding",
+          "const x = 1;\nx++;\n",
+          stderr="cannot assign to constant x")
+    check("increment const container element",
+          "const a = [1];\na[0]++;\na\n", stdout="= [2]")
+    check("increment string", 'let s = "a";\ns++;\n',
+          stderr="cannot increment string")
+    check("decrement bool", "let b = true;\nb--;\n",
+          stderr="cannot decrement bool")
+    check("increment literal", "1++\n",
+          stderr="cannot increment this expression")
+    check("increment missing dict key",
+          'let d = {};\nd["x"]++;\n', stderr="key not found")
+    check("increment integer overflow",
+          "let x = 9223372036854775807;\nx++;\n",
+          stderr="integer overflow")
+    check("increment precedence with unary minus",
+          "let x = 5;\n-x++\nx\n", stdout_all=["= -5", "= 6"])
     check("logical and", "1 && 2\n", stdout="= true")
     check("logical and short-circuit", "0 && (1/0)\n", stdout="= false")
     check("logical or", "0 || 2\n", stdout="= true")

@@ -181,6 +181,21 @@ struct ast *newasgn(struct ast *target, struct ast *v) {
     return (struct ast *)a;
 }
 
+struct ast *newincdec(struct ast *target, int delta, bool prefix) {
+    struct incdec_node *a =
+        (struct incdec_node *)std::malloc(sizeof(struct incdec_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'U';
+    set_loc_from(a, target);
+    a->target = target;
+    a->delta = delta;
+    a->prefix = prefix;
+    return (struct ast *)a;
+}
+
 struct ast *newscope(struct ast *v) {
     struct nscope *a = (struct nscope *)std::malloc(sizeof(struct nscope));
     if (!a) {
@@ -482,6 +497,9 @@ void treefree(struct ast *a) {
         case '=':
             treefree(((struct symasgn *)a)->target);
             treefree(((struct symasgn *)a)->v);
+            break;
+        case 'U':
+            treefree(((struct incdec_node *)a)->target);
             break;
         case 'D':
             treefree(((struct symdef *)a)->v);

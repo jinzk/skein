@@ -247,11 +247,21 @@ struct symasgn {
     struct ast *v;
 };
 
+struct incdec_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *target;
+    int delta;
+    int prefix;
+};
+
 struct ast *newast(int nodetype, struct ast *l, struct ast *r);
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r);
 struct ast *newcall(struct ast *callee, struct ast *l);
 struct ast *newref(char *s);
 struct ast *newasgn(struct ast *target, struct ast *v);
+struct ast *newincdec(struct ast *target, int delta, bool prefix);
 struct ast *newscope(struct ast *v);
 struct ast *newint(long long i);
 struct ast *newfloat(double d);

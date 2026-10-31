@@ -2309,6 +2309,20 @@ static struct value_t **index_slot_ptr(struct value_t *container,
     return NULL;
 }
 
+static struct value_t *apply_increment(struct value_t *v, int delta) {
+    if (v && v->type == T_int) {
+        long long n = ((struct int_value_t *)v)->value;
+        return new_int_checked((__int128)n + delta);
+    }
+    if (v && v->type == T_float) {
+        double d = ((struct float_value_t *)v)->value;
+        return newfloatval(d + (double)delta);
+    }
+    yyerror("cannot %s %s", delta > 0 ? "increment" : "decrement",
+            typename_of(v));
+    return NULL;
+}
+
 static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     std::vector<struct ast *> index_asts;
     if (!collect_index_asts(target, index_asts)) {
@@ -2429,6 +2443,122 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
 
     free_args(indices);
     freeval(val);
+    return ret;
+}
+
+static struct value_t *increment_index(struct ast *target, int delta,
+                                       bool prefix) {
+    std::vector<struct ast *> index_asts;
+    if (!collect_index_asts(target, index_asts)) {
+        yyerror("cannot assign through this expression");
+        return NULL;
+    }
+    struct ast *base = index_base(target);
+    if (!base || base->nodetype != 'N') {
+        yyerror("cannot assign through this expression");
+        return NULL;
+    }
+
+    std::vector<struct value_t *> indices;
+    for (size_t i = 0; i < index_asts.size(); ++i) {
+        struct value_t *idx = eval(index_asts[i]);
+        if (!idx) {
+            free_args(indices);
+            return NULL;
+        }
+        indices.push_back(idx);
+    }
+
+    struct symbol *s = lookupsym(((struct symref *)base)->name);
+    if (!s || !s->val) {
+        yyerror("symbol not found %s", ((struct symref *)base)->name);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *container = s->val;
+    for (size_t k = 0; k + 1 < indices.size(); ++k) {
+        ensure_unique_container(container);
+        struct value_t **slot = index_slot_ptr(container, indices[k]);
+        if (!slot || !*slot) {
+            yyerror("invalid index assignment path");
+            free_args(indices);
+            return NULL;
+        }
+        struct value_t *elem = *slot;
+        if (elem->type != T_list && elem->type != T_dict) {
+            yyerror("cannot index-assign into %s", typename_of(elem));
+            free_args(indices);
+            return NULL;
+        }
+        container = elem;
+    }
+
+    struct value_t *idx = indices.back();
+    struct value_t *ret = NULL;
+
+    if (container->type == T_list) {
+        if (idx->type != T_int) {
+            yyerror("list index must be an integer, got %s", typename_of(idx));
+        } else {
+            long long i = ((struct int_value_t *)idx)->value;
+            struct list_value_t *lv = (struct list_value_t *)container;
+            if (i < 0 || (unsigned long long)i >= lv->payload->items.size()) {
+                yyerror("list index %lld out of range", i);
+            } else {
+                ensure_unique_list(lv);
+                struct value_t **slot = &lv->payload->items[(size_t)i];
+                struct value_t *newv = apply_increment(*slot, delta);
+                if (newv) {
+                    ret = prefix ? dupval(newv) : dupval(*slot);
+                    freeval(*slot);
+                    *slot = newv;
+                }
+            }
+        }
+    } else if (container->type == T_dict) {
+        struct dict_value_t *dv = (struct dict_value_t *)container;
+        ensure_unique_dict(dv);
+        bool found = false;
+        for (size_t i = 0; i < dv->payload->items.size(); ++i) {
+            if (!value_equals(dv->payload->items[i].first, idx))
+                continue;
+            found = true;
+            struct value_t *old = dv->payload->items[i].second;
+            struct value_t *newv = apply_increment(old, delta);
+            if (newv) {
+                ret = prefix ? dupval(newv) : dupval(old);
+                freeval(old);
+                dv->payload->items[i].second = newv;
+            }
+            break;
+        }
+        if (!found)
+            yyerror("key not found");
+    } else if (container->type == T_bytes) {
+        if (idx->type != T_int) {
+            yyerror("bytes index must be an integer, got %s", typename_of(idx));
+        } else {
+            long long i = ((struct int_value_t *)idx)->value;
+            std::string &data = ((struct bytes_value_t *)container)->value;
+            if (i < 0 || (unsigned long long)i >= data.size()) {
+                yyerror("bytes index %lld out of range", i);
+            } else {
+                long long old = (unsigned char)data[(size_t)i];
+                long long updated = old + delta;
+                if (updated < 0 || updated > 255) {
+                    yyerror("bytes value %lld out of range", updated);
+                } else {
+                    ret = newintval(prefix ? updated : old);
+                    data[(size_t)i] = (char)(unsigned char)updated;
+                }
+            }
+        }
+    } else {
+        yyerror("cannot index-assign into %s", typename_of(container));
+    }
+
+    free_args(indices);
     return ret;
 }
 
@@ -2630,6 +2760,25 @@ static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     return dupval(v);
 }
 
+static struct value_t *increment_name(struct symref *ref, int delta,
+                                      bool prefix) {
+    struct symbol *s = lookupsym(ref->name);
+    if (!s) {
+        yyerror("symbol not found %s", ref->name);
+        return NULL;
+    }
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", ref->name);
+        return NULL;
+    }
+    struct value_t *newv = apply_increment(s->val, delta);
+    if (!newv) return NULL;
+    struct value_t *ret = prefix ? dupval(newv) : dupval(s->val);
+    freeval(s->val);
+    s->val = newv;
+    return ret;
+}
+
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
     if (g_interrupted) return NULL;
@@ -2813,6 +2962,19 @@ struct value_t *eval(struct ast *a) {
                 ret = assign_index(asgn->target, asgn->v);
             else
                 yyerror("cannot assign to this expression");
+            break;
+        }
+
+        case 'U': {
+            struct incdec_node *u = (struct incdec_node *)a;
+            if (u->target->nodetype == 'N')
+                ret = increment_name((struct symref *)u->target, u->delta,
+                                     u->prefix);
+            else if (u->target->nodetype == 'G')
+                ret = increment_index(u->target, u->delta, u->prefix);
+            else
+                yyerror("cannot %s this expression",
+                        u->delta > 0 ? "increment" : "decrement");
             break;
         }
 

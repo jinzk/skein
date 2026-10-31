@@ -172,6 +172,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
+%token INC "++" DEC "--"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
 
@@ -187,6 +188,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %left '+' '-'
 %left '*' '/' '%'
 %precedence UMINUS NOT BITNOT
+%right INC DEC
 %precedence '['
 %precedence '.'
 %precedence '('
@@ -305,6 +307,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }
+    | INC exp                             { $$ = newincdec($2, 1, true); }
+    | DEC exp                             { $$ = newincdec($2, -1, true); }
+    | exp INC                             { $$ = newincdec($1, 1, false); }
+    | exp DEC                             { $$ = newincdec($1, -1, false); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
     | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
     | NAME                                { $$ = newref($1); }

@@ -118,7 +118,8 @@ bool type_constraint_matches(const struct type_constraint *type,
         case TYPE_BUILTIN:
             return value->type == T_builtin;
         case TYPE_CALLABLE:
-            return value->type == T_func || value->type == T_builtin;
+            return value->type == T_func || value->type == T_builtin ||
+                   value->type == T_method;
         case TYPE_NULL:
             return value->type == T_null;
         case TYPE_USERDATA:

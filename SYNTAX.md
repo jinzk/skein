@@ -21,7 +21,7 @@ switch case default
 struct impl trait
 return break continue
 fail on error recover pass
-is
+is label
 null true false
 package import export as
 ```
@@ -337,6 +337,29 @@ d.key = 4
 a = b = 1
 ```
 
+复合赋值：
+
+```text
+x += 1
+x -= 1
+x *= 2
+x /= 2
+x %= 2
+x &= mask
+x |= mask
+x ^= mask
+x <<= 1
+x >>= 1
+```
+
+规则：
+
+- 目标和普通赋值一样必须是可赋值位置；
+- `a[i] += 1` 的下标表达式只求值一次；
+- 字符串和 list 支持 `+=`；
+- 复合赋值也遵守变量和字段的类型约束；
+- `const` 变量不能复合赋值。
+
 不能给字面量或表达式结果赋值。
 
 `const` 绑定不能重新赋值：
@@ -467,7 +490,7 @@ p is Drawable     // true
 从低到高：
 
 ```text
-=
+= += -= *= /= %= &= |= ^= <<= >>=
 ? :
 ||
 &&
@@ -747,12 +770,37 @@ return;
 return value;
 break;
 continue;
+
+break outer;
+continue outer;
 ```
 
 - `return` 只能用于函数；
 - `break` 可用于循环或 switch；
 - `continue` 只能用于循环；
 - 都需要分号。
+
+带标签的控制流：
+
+```text
+label outer: for (let i in [1, 2, 3]) {
+  for (let j in [1, 2, 3]) {
+    if (i == 2 && j == 2) {
+      break outer;
+    }
+    print(str(i) + "," + str(j));
+  }
+}
+```
+
+规则：
+
+- 标签写法为 `label NAME: loop_or_switch`；
+- `label` 只能直接放在 `for`、`for ... in`、`while`、`do while` 或 `switch` 前；
+- `break NAME;` 跳出指定标签；
+- `continue NAME;` 继续指定标签对应的循环；
+- 无标签的 `break` / `continue` 仍然作用于最近的循环或 switch；
+- 标签找不到时按普通越界 `break` / `continue` 报错。
 
 ### 5.9 错误处理
 
@@ -952,7 +1000,8 @@ p.length()
 - 方法第一个参数必须是显式 `self`；
 - `self` 的类型隐式为当前结构体；
 - 方法通过实例调用：`p.length()`，调用时不传 `self`；
-- 暂不支持方法值提取，例如 `let f = p.length`；
+- 方法值可以提取：`let f = p.length; f()`；
+- 方法值绑定提取时的结构体快照，之后修改原结构体不会影响它；
 - 第一版方法是只读的，不允许 `self.x = ...`；
 - 结构体使用 copy-on-write 值语义；
 - 所有成员都是公开的，`_` 前缀没有特殊含义；
@@ -969,6 +1018,27 @@ func show(p: Point) {
   print(p.x);
 }
 ```
+
+跨模块类型：
+
+```text
+// package aa
+export struct P { x: int; }
+export trait D { func d(self); }
+
+// main
+import aa;
+let p: aa::P = aa.make();
+p is aa::D
+
+import aa as lib;
+let q: lib::P = lib.make();
+```
+
+- 类型默认只在声明模块内可见；
+- `export struct` / `export trait` 后才能通过模块路径引用；
+- 限定类型名使用 `::`；
+- 未导出的类型不能通过 `aa::Hidden` 引用，但它的值仍能正常传递和调用方法。
 
 trait 定义接口：
 
@@ -1026,6 +1096,8 @@ render(Point { x: 1, y: 2 });
 export let value = 1;
 export const fixed = 2;
 export func hello() { return "hi"; }
+export struct Point { x: int; }
+export trait Drawable { func draw(self); }
 
 export x = 3;
 ```
@@ -1036,10 +1108,13 @@ export x = 3;
 export let NAME = expr;
 export const NAME = expr;
 export func NAME(params) { ... }
+export struct NAME { ... }
+export trait NAME { ... }
 export NAME = expr;
 ```
 
 `export NAME = expr` 等价于导出可变的 `let` 绑定。
+导出类型后，其他模块可以用 `包名::类型名` 作为类型标注或 `is` 的右操作数。
 
 ## 6. 包和导入
 
@@ -1317,13 +1392,16 @@ def
 var
 解构声明
 多变量声明
-复合赋值
 for ... of
 try/catch
 通配导入
+默认参数 / 命名参数
+静态方法 / 关联函数
+可变 self
 私有成员
 struct 继承
 trait 继承 / 默认方法
+泛型 / Option / 联合类型
 ```
 
 动态链接库加载目前是设计方向，尚未作为语言语法实现。

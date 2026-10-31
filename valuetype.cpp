@@ -25,16 +25,18 @@ struct value_t *newreturn() {
     return v;
 }
 
-struct value_t *newbreak() {
-    struct value_t *v = new value_t;
+struct value_t *newbreak(const char *label) {
+    struct control_value_t *v = new control_value_t;
     v->type = T_break;
-    return v;
+    v->label = label ? dupstr(label) : NULL;
+    return (struct value_t *)v;
 }
 
-struct value_t *newcontinue() {
-    struct value_t *v = new value_t;
+struct value_t *newcontinue(const char *label) {
+    struct control_value_t *v = new control_value_t;
     v->type = T_continue;
-    return v;
+    v->label = label ? dupstr(label) : NULL;
+    return (struct value_t *)v;
 }
 
 struct value_t *newintval(long long i) {
@@ -178,14 +180,23 @@ struct value_t *dupval(struct value_t *v) {
             dst->payload = src->payload;
             return (struct value_t *)dst;
         }
+        case T_method: {
+            struct method_value_t *src = (struct method_value_t *)v;
+            struct method_value_t *dst = new method_value_t;
+            dst->type = T_method;
+            dst->def = src->def;
+            dst->receiver = src->receiver;
+            dst->method = src->method;
+            return (struct value_t *)dst;
+        }
         case T_null:
             return newnull();
         case T_return:
             return newreturn();
         case T_break:
-            return newbreak();
+            return newbreak(((struct control_value_t *)v)->label);
         case T_continue:
-            return newcontinue();
+            return newcontinue(((struct control_value_t *)v)->label);
         default:
             return NULL;
     }
@@ -230,14 +241,22 @@ void freeval(struct value_t *v) {
         case T_struct:
             delete (struct struct_value_t *)v;
             break;
+        case T_method:
+            delete (struct method_value_t *)v;
+            break;
         case T_null:
             delete v;
             break;
         case T_return:
-        case T_break:
-        case T_continue:
             delete v;
             break;
+        case T_break:
+        case T_continue: {
+            struct control_value_t *c = (struct control_value_t *)v;
+            std::free(c->label);
+            delete c;
+            break;
+        }
         default:
             break;
     }
@@ -263,6 +282,7 @@ const char *typename_of(const struct value_t *v) {
             const struct struct_value_t *s = (const struct struct_value_t *)v;
             return s->def ? s->def->name.c_str() : "struct";
         }
+        case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
         case T_return: return "return";
@@ -358,6 +378,8 @@ std::string value_to_string(const struct value_t *v) {
             out += " }";
             return out;
         }
+        case T_method:
+            return "<method>";
         case T_null:
             return "null";
         case T_class:

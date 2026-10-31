@@ -105,12 +105,22 @@ struct nbreak {
     int nodetype;
     int line;
     int column;
+    char *label;
 };
 
 struct ncontinue {
     int nodetype;
     int line;
     int column;
+    char *label;
+};
+
+struct label_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct ast *stmt;
 };
 
 struct control_stmt {
@@ -268,6 +278,7 @@ struct struct_node {
     char *name;
     char *module;
     struct struct_member *members;
+    int exported;
 };
 
 struct impl_node {
@@ -296,6 +307,7 @@ struct trait_node {
     char *name;
     char *module;
     struct trait_method *methods;
+    int exported;
 };
 
 struct struct_init {
@@ -348,6 +360,15 @@ struct symasgn {
     struct ast *v;
 };
 
+struct compound_asgn {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *target;
+    int op;
+    struct ast *v;
+};
+
 struct incdec_node {
     int nodetype;
     int line;
@@ -362,6 +383,7 @@ struct ast *newcmp(int cmptype, struct ast *l, struct ast *r);
 struct ast *newcall(struct ast *callee, struct ast *l);
 struct ast *newref(char *s);
 struct ast *newasgn(struct ast *target, struct ast *v);
+struct ast *newcompound(struct ast *target, int op, struct ast *v);
 struct ast *newincdec(struct ast *target, int delta, bool prefix);
 struct ast *newscope(struct ast *v);
 struct ast *newint(long long i);
@@ -382,8 +404,9 @@ struct ast *newvar(char *s, struct ast *v, bool exported = false,
                    bool is_const = false, struct type_constraint *type = NULL);
 
 struct ast *newret(struct ast *v);
-struct ast *newbrk();
-struct ast *newctn();
+struct ast *newbrk(char *label = NULL, int line = 0, int column = 0);
+struct ast *newctn(char *label = NULL, int line = 0, int column = 0);
+struct ast *newlabel(char *name, struct ast *stmt);
 struct ast *newfail(struct ast *v);
 struct ast *newrecover(struct ast *v);
 struct ast *newpass(struct ast *v);
@@ -405,14 +428,16 @@ struct ast *newlist(struct ast *v, struct ast *l);
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l);
 
 struct ast *newstructdecl(char *name, char *module,
-                          struct struct_member *members);
+                          struct struct_member *members,
+                          bool exported = false);
 struct ast *newstructfield(char *name, struct type_constraint *type);
 struct ast *newstructmethod(char *name, struct ast *func);
 struct ast *append_struct_member(struct ast *head, struct ast *member);
 struct ast *newimpl(char *type_name, char *trait_name, char *module,
                     struct struct_member *methods);
 struct ast *newtraitdecl(char *name, char *module,
-                         struct trait_method *methods);
+                         struct trait_method *methods,
+                         bool exported = false);
 struct ast *newtraitmethod(char *name, struct symlist *params);
 struct ast *append_trait_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *module,

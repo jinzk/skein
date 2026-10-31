@@ -206,6 +206,36 @@ def main():
           stderr="integer overflow")
     check("increment precedence with unary minus",
           "let x = 5;\n-x++\nx\n", stdout_all=["= -5", "= 6"])
+    check("compound assignment operators",
+          "let x = 10;\n"
+          "x += 5;\nx\n"
+          "x -= 3;\nx\n"
+          "x *= 2;\nx\n"
+          "x /= 4;\nx\n"
+          "x %= 4;\nx\n"
+          "x &= 3;\nx\n"
+          "x |= 4;\nx\n"
+          "x ^= 1;\nx\n"
+          "x <<= 2;\nx\n"
+          "x >>= 1;\nx\n",
+          stdout_all=["= 15", "= 12", "= 24", "= 6", "= 2", "= 2",
+                      "= 6", "= 7", "= 28", "= 14"])
+    check("compound string and list",
+          'let s = "a";\ns += "b";\ns\n'
+          "let a = [1];\na += [2, 3];\na\n",
+          stdout_all=["= ab", "= [1, 2, 3]"])
+    check("compound index and field",
+          "let a = [10];\nlet i = 0;\na[i++] += 5;\ni\na\n"
+          "let p = {\"x\": 1};\np.x += 2;\np\n"
+          "struct P { x: int; }\nlet q = P { x: 1 };\nq.x += 4;\nq\n",
+          stdout_all=["= 15", "= 1", "= [15]", "= 3", "= {x: 3}",
+                      "= 5", "= P { x: 5 }"])
+    check("compound typed variable type error",
+          "let x: int = 1;\nx += \"bad\";\n",
+          stderr="cannot add int and string")
+    check("compound const error",
+          "const x = 1;\nx += 1;\n",
+          stderr="cannot assign to constant x")
     check("logical and", "1 && 2\n", stdout="= true")
     check("logical and short-circuit", "0 && (1/0)\n", stdout="= false")
     check("logical or", "0 || 2\n", stdout="= true")
@@ -1072,6 +1102,42 @@ def main():
         stdout="1\n3\n",
     )
     check(
+        "labeled break outer loop",
+        "label outer: for (let i in [1, 2, 3]) {\n"
+        "  for (let j in [1, 2, 3]) {\n"
+        "    if (i == 2 && j == 2) { break outer; }\n"
+        "    print(str(i) + \",\" + str(j));\n"
+        "  }\n"
+        "}\n"
+        'print("done");\n',
+        stdout_all=["1,1", "1,2", "1,3", "2,1", "done"],
+    )
+    check(
+        "labeled continue outer loop",
+        "label outer: for (let i in [1, 2]) {\n"
+        "  for (let j in [1, 2]) {\n"
+        "    if (j == 1) { continue outer; }\n"
+        "    print(\"bad\");\n"
+        "  }\n"
+        "}\n"
+        'print("done");\n',
+        stdout="done\n",
+    )
+    check(
+        "labeled break switch",
+        "label sw: switch (1) {\n"
+        "  case 1 => { break sw; }\n"
+        '  default => print("bad");\n'
+        "}\n"
+        'print("after");\n',
+        stdout="after\n",
+    )
+    check(
+        "label on non-loop rejected",
+        "label bad: if (1) { print(1); }\n",
+        stderr="label must be attached to a loop or switch",
+    )
+    check(
         "block scope",
         "let x = 1;\n{ let x = 2; }\nx\n",
         stdout="= 1",
@@ -1477,10 +1543,24 @@ def main():
           stdout_all=["= true", "= false"])
     check("empty struct",
           "struct Empty {}\nlet e = Empty {};\ne\n", stdout="= Empty {}")
-    check("method value not supported",
+    check("bound method value",
+          "struct Point {\n"
+          "  x: int;\n"
+          "  func get(self) { return self.x; }\n"
+          "  func add(self, n: int) { return self.x + n; }\n"
+          "}\n"
+          "let p = Point { x: 3 };\n"
+          "let f = p.get;\n"
+          "let g = p.add;\n"
+          "f()\ng(4)\n",
+          stdout_all=["= 3", "= 7"])
+    check("bound method snapshot",
           "struct Point { x: int; func get(self) { return self.x; } }\n"
-          "let p = Point { x: 1 };\nlet f = p.get;\n",
-          stderr="method get must be called")
+          "let p = Point { x: 1 };\n"
+          "let f = p.get;\n"
+          "p.x = 5;\n"
+          "f()\np.get()\n",
+          stdout_all=["= 5", "= 1", "= 5"])
 
     check("trait implementation",
           "trait Drawable { func draw(self); }\n"
@@ -2608,9 +2688,13 @@ def main():
         write(
             "app/aa/aa.calc",
             "package aa {\n"
-            "  struct P { x: int; }\n"
+            "  export struct P { x: int; }\n"
+            "  struct Hidden { h: int; }\n"
+            "  export trait D { func d(self); }\n"
+            "  impl D for P { func d(self) { return self.x; } }\n"
             "  impl P { func get(self) { return self.x; } }\n"
             "  export func make() { return P { x: 7 }; }\n"
+            "  export func hidden() { return Hidden { h: 9 }; }\n"
             "}\n",
         )
         main = write(
@@ -2619,6 +2703,7 @@ def main():
             "struct P { y: string; }\n"
             "let pkg = aa.make();\n"
             'let local: P = P { y: "ok" };\n'
+            "let imported: aa::P = pkg;\n"
             "print(pkg.get());\n"
             "print(local.y);\n"
             "func local_get(p: P) { return p.y; }\n"
@@ -2628,13 +2713,15 @@ def main():
             "print(type_module(pkg) == type_module(local));\n"
             "print(type_module(pkg));\n"
             "print(type_module(local));\n"
-            "print(type_source(pkg) != \"\");\n",
+            "print(type_source(pkg) != \"\");\n"
+            "print(imported.x);\n"
+            "print(pkg is aa::D);\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == [
             "7", "ok", "ok", "false", "true", "false",
-            "aa", "main", "true",
+            "aa", "main", "true", "7", "true",
         ], proc.stdout
         assert proc.stderr == "", proc.stderr
 
@@ -2647,6 +2734,15 @@ def main():
         proc = run_file(main2)
         assert proc.returncode == 1, proc.stdout
         assert "unknown type name P" in proc.stderr, proc.stderr
+
+        main3 = write(
+            "app/main3.calc",
+            "import aa;\n"
+            'let h: aa::Hidden = aa.hidden();\n',
+        )
+        proc = run_file(main3)
+        assert proc.returncode == 1, proc.stdout
+        assert "unknown type name aa::Hidden" in proc.stderr, proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
         failfast = os.path.join(tmp, "failfast.calc")

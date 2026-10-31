@@ -214,6 +214,17 @@ struct cycle_collector {
                             mark_scope(fv->def->closure.get());
                         break;
                     }
+                    case T_method: {
+                        struct method_value_t *method =
+                            (struct method_value_t *)v;
+                        if (method->method && method->method->closure)
+                            mark_scope(method->method->closure.get());
+                        if (method->receiver)
+                            for (size_t i = 0;
+                                 i < method->receiver->fields.size(); ++i)
+                                mark_value(method->receiver->fields[i]);
+                        break;
+                    }
                     case T_list: {
                         struct list_value_t *lv = (struct list_value_t *)v;
                         if (lv->payload &&

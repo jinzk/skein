@@ -11,6 +11,8 @@
 #include "symbol.h"
 #include "valuetype.h"
 
+#include <cstring>
+
 int g_runtime_error_count = 0;
 
 enum eval_control_kind {
@@ -22,6 +24,29 @@ enum eval_control_kind {
 static enum eval_control_kind g_eval_control = EVAL_CONTROL_NONE;
 static struct value_t *g_eval_control_value = NULL;
 static int g_handler_depth = 0;
+static const char *g_pending_label = NULL;
+
+static const char *take_pending_label() {
+    const char *label = g_pending_label;
+    g_pending_label = NULL;
+    return label;
+}
+
+static bool label_directly_applies(const struct ast *node) {
+    if (!node) return false;
+    return node->nodetype == 'P' || node->nodetype == 'F' ||
+           node->nodetype == 'W' || node->nodetype == 'E' ||
+           node->nodetype == 'S';
+}
+
+static bool control_matches_label(struct value_t *value, const char *label) {
+    if (!value || (value->type != T_break && value->type != T_continue))
+        return false;
+    struct control_value_t *control = (struct control_value_t *)value;
+    if (!control->label)
+        return true;
+    return label && std::strcmp(control->label, label) == 0;
+}
 
 #include <climits>
 #include <cmath>
@@ -370,6 +395,7 @@ static bool truthy(const struct value_t *v) {
         case T_list: return !((struct list_value_t *)v)->payload->items.empty();
         case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
         case T_struct: return true;
+        case T_method: return true;
         case T_func: return true;
         case T_builtin: return true;
         case T_userdata: return true;
@@ -433,6 +459,7 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_builtin: return "builtin";
         case T_userdata: return "userdata";
         case T_struct: return "struct";
+        case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
         case T_return: return "return";
@@ -511,6 +538,11 @@ static bool value_equals(struct value_t *a, struct value_t *b) {
                                   sb->payload->fields[i]))
                     return false;
             return true;
+        }
+        case T_method: {
+            struct method_value_t *ma = (struct method_value_t *)a;
+            struct method_value_t *mb = (struct method_value_t *)b;
+            return ma->method == mb->method && ma->receiver == mb->receiver;
         }
         case T_null:
             return true;
@@ -2228,6 +2260,20 @@ static struct value_t *invoke_value(
         return ret;
     }
 
+    if (callee->type == T_method) {
+        struct method_value_t *method = (struct method_value_t *)callee;
+        std::vector<struct value_t *> all_args;
+        all_args.reserve(args.size() + 1);
+        all_args.push_back(newstructval(method->def, method->receiver));
+        for (size_t i = 0; i < args.size(); ++i)
+            all_args.push_back(args[i]);
+        args.clear();
+        struct func_value_t function;
+        function.type = T_func;
+        function.def = method->method;
+        return invoke_value((struct value_t *)&function, all_args);
+    }
+
     if (callee->type != T_func) {
         yyerror("cannot call %s", typename_of(callee));
         free_args(args);
@@ -2746,6 +2792,108 @@ static struct value_t *increment_member_value(struct value_t *container,
     return ret;
 }
 
+static struct value_t *apply_binary_value(int op, struct value_t *l,
+                                          struct value_t *r) {
+    if (op == '+') {
+        if (l->type == T_int && r->type == T_int) {
+            long long x = ((struct int_value_t *)l)->value;
+            long long y = ((struct int_value_t *)r)->value;
+            return new_int_checked((__int128)x + y);
+        }
+        if (is_numeric(l) && is_numeric(r))
+            return newfloatval(as_double(l) + as_double(r));
+        if (l->type == T_string && r->type == T_string) {
+            std::string s = ((struct string_value_t *)l)->value;
+            s += ((struct string_value_t *)r)->value;
+            return newstrval(s.c_str());
+        }
+        if (l->type == T_list && r->type == T_list) {
+            struct list_value_t *lv = newlistval();
+            struct list_value_t *ll = (struct list_value_t *)l;
+            struct list_value_t *rl = (struct list_value_t *)r;
+            lv->payload->items.reserve(ll->payload->items.size() +
+                                       rl->payload->items.size());
+            for (size_t i = 0; i < ll->payload->items.size(); ++i)
+                lv->payload->items.push_back(dupval(ll->payload->items[i]));
+            for (size_t i = 0; i < rl->payload->items.size(); ++i)
+                lv->payload->items.push_back(dupval(rl->payload->items[i]));
+            return (struct value_t *)lv;
+        }
+        yyerror("cannot add %s and %s", typename_of(l), typename_of(r));
+        return NULL;
+    }
+
+    if (op == '-' || op == '*') {
+        if (!is_numeric(l) || !is_numeric(r)) {
+            yyerror("cannot use %c on %s and %s", op, typename_of(l),
+                    typename_of(r));
+            return NULL;
+        }
+        if (l->type == T_int && r->type == T_int) {
+            long long x = ((struct int_value_t *)l)->value;
+            long long y = ((struct int_value_t *)r)->value;
+            return new_int_checked(op == '-' ? (__int128)x - y
+                                             : (__int128)x * y);
+        }
+        double x = as_double(l), y = as_double(r);
+        return newfloatval(op == '-' ? x - y : x * y);
+    }
+
+    if (op == '/' || op == '%') {
+        if (!is_numeric(l) || !is_numeric(r)) {
+            yyerror(op == '/' ? "cannot divide %s by %s"
+                              : "cannot take %s modulo %s",
+                    typename_of(l), typename_of(r));
+            return NULL;
+        }
+        if (as_double(r) == 0.0) {
+            yyerror(op == '/' ? "division by zero" : "modulo by zero");
+            return NULL;
+        }
+        if (l->type == T_int && r->type == T_int) {
+            long long x = ((struct int_value_t *)l)->value;
+            long long y = ((struct int_value_t *)r)->value;
+            return new_int_checked(op == '/' ? (__int128)x / y
+                                             : (__int128)x % y);
+        }
+        return newfloatval(op == '/' ? as_double(l) / as_double(r)
+                                     : std::fmod(as_double(l), as_double(r)));
+    }
+
+    if (op == '&' || op == '|' || op == '^') {
+        if (l->type != T_int || r->type != T_int) {
+            yyerror("bitwise operator expects ints, got %s and %s",
+                    typename_of(l), typename_of(r));
+            return NULL;
+        }
+        long long x = ((struct int_value_t *)l)->value;
+        long long y = ((struct int_value_t *)r)->value;
+        if (op == '&') return newintval(x & y);
+        if (op == '|') return newintval(x | y);
+        return newintval(x ^ y);
+    }
+
+    if (op == 's' || op == 'r') {
+        if (l->type != T_int || r->type != T_int) {
+            yyerror("shift operator expects ints, got %s and %s",
+                    typename_of(l), typename_of(r));
+            return NULL;
+        }
+        long long x = ((struct int_value_t *)l)->value;
+        long long y = ((struct int_value_t *)r)->value;
+        if (y < 0 || y >= 64) {
+            yyerror("shift count %lld out of range", y);
+            return NULL;
+        }
+        if (op == 's')
+            return newintval((long long)((unsigned long long)x << y));
+        return newintval(x >> y);
+    }
+
+    yyerror("unsupported compound assignment operator");
+    return NULL;
+}
+
 static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     std::vector<struct ast *> index_asts;
     if (!collect_index_asts(target, index_asts)) {
@@ -2847,6 +2995,106 @@ static struct value_t *increment_index(struct ast *target, int delta,
 
     struct value_t *ret = increment_member_value(
         container, indices.back(), delta, prefix);
+    free_args(indices);
+    return ret;
+}
+
+static struct value_t *read_member_value(struct value_t *container,
+                                         struct value_t *index);
+
+static struct value_t *compound_name(struct symref *ref, int op,
+                                     struct ast *value_ast) {
+    struct symbol *s = lookupsym(ref->name);
+    if (!s) {
+        yyerror("symbol not found %s", ref->name);
+        return NULL;
+    }
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", ref->name);
+        return NULL;
+    }
+    struct value_t *rhs = eval(value_ast);
+    if (!rhs) return NULL;
+    struct value_t *old = dupval(s->val);
+    struct value_t *value = apply_binary_value(op, old, rhs);
+    freeval(old);
+    freeval(rhs);
+    if (!value) return NULL;
+    if (!type_constraint_matches(&s->type, value)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(value));
+        freeval(value);
+        return NULL;
+    }
+    freeval(s->val);
+    s->val = value;
+    return dupval(value);
+}
+
+static struct value_t *compound_index(struct ast *target, int op,
+                                      struct ast *value_ast) {
+    std::vector<struct ast *> index_asts;
+    if (!collect_index_asts(target, index_asts)) {
+        yyerror("cannot assign through this expression");
+        return NULL;
+    }
+    struct ast *base = index_base(target);
+    if (!base || base->nodetype != 'N') {
+        yyerror("cannot assign through this expression");
+        return NULL;
+    }
+
+    struct value_t *rhs = eval(value_ast);
+    if (!rhs) return NULL;
+
+    std::vector<struct value_t *> indices;
+    for (size_t i = 0; i < index_asts.size(); ++i) {
+        struct value_t *idx = eval(index_asts[i]);
+        if (!idx) {
+            freeval(rhs);
+            free_args(indices);
+            return NULL;
+        }
+        indices.push_back(idx);
+    }
+
+    struct symbol *s = lookupsym(((struct symref *)base)->name);
+    if (!s || !s->val) {
+        yyerror("symbol not found %s", ((struct symref *)base)->name);
+        freeval(rhs);
+        free_args(indices);
+        return NULL;
+    }
+    if (s->is_self) {
+        yyerror("cannot modify self in a read-only method");
+        freeval(rhs);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *container = NULL;
+    if (!resolve_write_container(s, indices, container)) {
+        freeval(rhs);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *idx = indices.back();
+    struct value_t *old = read_member_value(container, idx);
+    if (!old) {
+        freeval(rhs);
+        free_args(indices);
+        return NULL;
+    }
+    struct value_t *value = apply_binary_value(op, old, rhs);
+    freeval(old);
+    freeval(rhs);
+    if (!value) {
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *ret = write_member_value(container, idx, value);
     free_args(indices);
     return ret;
 }
@@ -3194,10 +3442,10 @@ static struct value_t *read_member_value(struct value_t *container,
         if (field >= 0 && sv->payload &&
             (size_t)field < sv->payload->fields.size())
             return dupval(sv->payload->fields[(size_t)field]);
-        if (sv->def->methods.count(name) != 0)
-            yyerror("method %s must be called", name);
-        else
-            yyerror("field %s not found in %s", name, sv->def->name.c_str());
+        auto method = sv->def->methods.find(name);
+        if (method != sv->def->methods.end())
+            return newmethodval(sv->def, sv->payload, method->second);
+        yyerror("field %s not found in %s", name, sv->def->name.c_str());
         return NULL;
     }
 
@@ -3271,6 +3519,16 @@ struct value_t *eval(struct ast *a) {
                 struct symbol *sym = newsym(name);
                 sym->val = ns;
                 savesym(sym);
+                const char *path = imp->path;
+                if (path && *path && path[0] != '.' && path[0] != '@') {
+                    const char *alias = imp->alias;
+                    if (!alias) {
+                        const char *dot = std::strrchr(path, '.');
+                        alias = dot ? dot + 1 : path;
+                    }
+                    structtype_register_alias(
+                        diag_current_source_name().c_str(), alias, path);
+                }
             }
             break;
         }
@@ -3442,13 +3700,25 @@ struct value_t *eval(struct ast *a) {
 
         case 'B':
             diag_set_flow_location(a->line, a->column);
-            ret = newbreak();
+            ret = newbreak(((struct nbreak *)a)->label);
             break;
 
         case 'O':
             diag_set_flow_location(a->line, a->column);
-            ret = newcontinue();
+            ret = newcontinue(((struct ncontinue *)a)->label);
             break;
+
+        case 'g': {
+            struct label_node *node = (struct label_node *)a;
+            if (!label_directly_applies(node->stmt)) {
+                yyerror("label must be attached to a loop or switch");
+                break;
+            }
+            g_pending_label = node->name;
+            ret = eval(node->stmt);
+            g_pending_label = NULL;
+            break;
+        }
 
         case 'u': {
             struct control_stmt *stmt = (struct control_stmt *)a;
@@ -3562,6 +3832,18 @@ struct value_t *eval(struct ast *a) {
                 ret = assign_name((struct symref *)asgn->target, asgn->v);
             else if (asgn->target->nodetype == 'G')
                 ret = assign_index(asgn->target, asgn->v);
+            else
+                yyerror("cannot assign to this expression");
+            break;
+        }
+
+        case 'a': {
+            struct compound_asgn *asgn = (struct compound_asgn *)a;
+            if (asgn->target->nodetype == 'N')
+                ret = compound_name((struct symref *)asgn->target, asgn->op,
+                                    asgn->v);
+            else if (asgn->target->nodetype == 'G')
+                ret = compound_index(asgn->target, asgn->op, asgn->v);
             else
                 yyerror("cannot assign to this expression");
             break;
@@ -3908,6 +4190,7 @@ struct value_t *eval(struct ast *a) {
 
         case 'S': {
             struct switch_node *sw = (struct switch_node *)a;
+            const char *switch_label = take_pending_label();
             int errors_before = g_runtime_error_count;
             struct value_t *subject = eval(sw->expr);
             if (!subject || g_runtime_error_count != errors_before) {
@@ -3928,7 +4211,10 @@ struct value_t *eval(struct ast *a) {
                     freeval(body_ret);
                 } else if (body_ret) {
                     if (body_ret->type == T_break) {
-                        freeval(body_ret);
+                        if (control_matches_label(body_ret, switch_label))
+                            freeval(body_ret);
+                        else
+                            ret = body_ret;
                     } else if (body_ret->type == T_continue ||
                                body_ret->type == T_return) {
                         ret = body_ret;
@@ -4041,6 +4327,7 @@ struct value_t *eval(struct ast *a) {
 
         case 'E': {
             struct flow *f = (struct flow *)a;
+            const char *loop_label = take_pending_label();
             if (!f->cond || !f->tl) break;
 
             for (;;) {
@@ -4064,10 +4351,20 @@ struct value_t *eval(struct ast *a) {
                         break;
                     }
                     if (body->type == T_break) {
-                        freeval(body);
-                        do_break = true;
+                        if (control_matches_label(body, loop_label)) {
+                            freeval(body);
+                            do_break = true;
+                        } else {
+                            ret = body;
+                            break;
+                        }
                     } else if (body->type == T_continue) {
-                        freeval(body);
+                        if (control_matches_label(body, loop_label)) {
+                            freeval(body);
+                        } else {
+                            ret = body;
+                            break;
+                        }
                     } else {
                         freeval(body);
                     }
@@ -4089,6 +4386,7 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'W': {
+            const char *loop_label = take_pending_label();
             struct ast *cond_ast = ((struct flow *)a)->cond;
             struct ast *body = ((struct flow *)a)->tl;
             if (!body) break;
@@ -4120,14 +4418,20 @@ struct value_t *eval(struct ast *a) {
                 if (ret && ret->type == T_return)
                     break;
                 if (ret && ret->type == T_break) {
-                    freeval(ret);
-                    ret = NULL;
+                    if (control_matches_label(ret, loop_label)) {
+                        freeval(ret);
+                        ret = NULL;
+                        break;
+                    }
                     break;
                 }
                 if (ret && ret->type == T_continue) {
-                    freeval(ret);
-                    ret = NULL;
-                    continue;
+                    if (control_matches_label(ret, loop_label)) {
+                        freeval(ret);
+                        ret = NULL;
+                        continue;
+                    }
+                    break;
                 }
                 freeval(ret);
                 ret = NULL;
@@ -4137,6 +4441,7 @@ struct value_t *eval(struct ast *a) {
 
         case 'F': {
             struct forinloop *f = (struct forinloop *)a;
+            const char *loop_label = take_pending_label();
             int errors_before = g_runtime_error_count;
             struct value_t *iter = eval(f->iterable);
             if (!iter || g_runtime_error_count != errors_before) {
@@ -4239,13 +4544,23 @@ struct value_t *eval(struct ast *a) {
                         break;
                     }
                     if (body->type == T_break) {
-                        freeval(body);
+                        if (control_matches_label(body, loop_label)) {
+                            freeval(body);
+                            leave = true;
+                            break;
+                        }
+                        ret = body;
                         leave = true;
                         break;
                     }
                     if (body->type == T_continue) {
-                        freeval(body);
-                        continue;
+                        if (control_matches_label(body, loop_label)) {
+                            freeval(body);
+                            continue;
+                        }
+                        ret = body;
+                        leave = true;
+                        break;
                     }
                     freeval(body);
                 }
@@ -4258,6 +4573,7 @@ struct value_t *eval(struct ast *a) {
 
         case 'P': {
             struct forloop *f = (struct forloop *)a;
+            const char *loop_label = take_pending_label();
             pushscope();
             bool leave = false;
 
@@ -4321,10 +4637,21 @@ struct value_t *eval(struct ast *a) {
                         ret = body;
                         leave = true;
                     } else if (body->type == T_break) {
-                        freeval(body);
-                        do_break = true;
+                        if (control_matches_label(body, loop_label)) {
+                            freeval(body);
+                            do_break = true;
+                        } else {
+                            ret = body;
+                            leave = true;
+                        }
+                    } else if (body->type == T_continue) {
+                        if (control_matches_label(body, loop_label)) {
+                            freeval(body);
+                        } else {
+                            ret = body;
+                            leave = true;
+                        }
                     } else {
-                        /* normal value and T_continue both run the step */
                         freeval(body);
                     }
                 }

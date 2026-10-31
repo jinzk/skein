@@ -36,6 +36,7 @@ enum val_type {
     T_builtin,
     T_userdata,
     T_struct,
+    T_method,
     T_null,
     T_class,
     T_return,
@@ -45,6 +46,11 @@ enum val_type {
 
 struct value_t {
     enum val_type type;
+};
+
+struct control_value_t {
+    enum val_type type;
+    char *label;
 };
 
 struct int_value_t {
@@ -115,8 +121,8 @@ struct userdata_value_t {
 };
 
 struct value_t *newreturn();
-struct value_t *newbreak();
-struct value_t *newcontinue();
+struct value_t *newbreak(const char *label = NULL);
+struct value_t *newcontinue(const char *label = NULL);
 struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newboolval(bool b);

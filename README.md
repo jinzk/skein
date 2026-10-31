@@ -395,6 +395,26 @@ i--            // 2，i 变为 1
 - `const` 变量不能自增/自减，但 `const` 容器中的元素可以；
 - 整数溢出、bytes 超出 `0..255`、dict 键不存在都会报错。
 
+复合赋值：
+
+```text
+x += 1;
+x -= 1;
+x *= 2;
+x /= 2;
+x %= 2;
+x &= mask;
+x |= mask;
+x ^= mask;
+x <<= 1;
+x >>= 1;
+```
+
+- 支持变量、下标和字段；
+- `a[i] += 1` 的下标只求值一次；
+- 字符串和 list 支持 `+=`；
+- 类型约束和 `const` 规则与普通赋值一致。
+
 变量名可以包含下划线：`my_value`。
 
 列表和字典：
@@ -478,6 +498,22 @@ for (let key in {"a": 1, "b": 2}) {
 `do ... while` 至少执行一次循环体；`while` 可以写在 `}` 的下一行，结尾分号可省略。
 
 `break` / `continue` 可用于循环；`break` 也可用于 `switch`。
+
+带标签的 `break` / `continue`：
+
+```text
+label outer: for (let i in [1, 2, 3]) {
+  for (let j in [1, 2, 3]) {
+    if (i == 2 && j == 2) { break outer; }
+    print(str(i) + "," + str(j));
+  }
+}
+```
+
+- 标签写成 `label NAME: loop_or_switch`；
+- `break NAME;` 跳出指定循环或 switch；
+- `continue NAME;` 继续指定循环的下一轮；
+- 标签只能直接放在循环或 switch 前。
 
 `switch` 值匹配：
 
@@ -700,7 +736,8 @@ let q = p.moved(1, 2);
 - 方法第一个参数必须是显式 `self`；
 - 方法可以在 `struct` 内声明，也可以在同模块的 `impl Type` 中补充；
 - 方法只能通过实例调用：`p.length()`；
-- 暂不支持把方法本身作为值提取，例如 `let f = p.length`；
+- 方法本身可以作为值提取，例如 `let f = p.length; f()`；
+- 方法值绑定提取时的结构体快照，之后修改原结构体不会影响已绑定的方法；
 - 第一版方法是只读的：方法内不能写 `self.x = ...`，需要修改时返回新结构体；
 - 结构体是值语义，赋值和作为参数传递时使用 copy-on-write；
 - 结构体类型可以用在变量和参数类型标注中：`let p: Point = Point { x: 1, y: 2 }`、`func f(p: Point)`；结构体类型没有默认值，变量必须初始化；
@@ -750,7 +787,24 @@ render(p)
 - 一个类型对同一个 trait 只能实现一次；
 - 结构体和 trait 名称共享类型命名空间，不能在同一模块中重名；
 - 类型名按源模块注册，模块通常对应一个源文件；不同模块可以定义同名结构体或 trait；
-- 类型名不会自动跨模块可见，跨模块值仍可通过方法表正常调用。
+- 类型默认不跨模块可见；`export struct` / `export trait` 后可以按模块路径使用；
+- 导入之后用 `aa::Point`、`lib::Drawable` 这样的限定名引用：
+
+```text
+// package aa
+export struct P { x: int; }
+export trait D { func d(self); }
+
+// main
+import aa;
+let p: aa::P = aa.make();
+p is aa::D
+
+import aa as lib;
+let q: lib::P = lib.make();
+```
+
+- 未导出的类型不能通过模块路径引用，但它的值仍可作为普通值传递和方法调用。
 
 运行时类型检查：
 

@@ -15,6 +15,9 @@
 extern int yylex();
 extern int yyparse();
 
+static int flow_keyword_line = 0;
+static int flow_keyword_column = 0;
+
 static char *join_import_path(const char *left, const char *right) {
     size_t left_len = std::strlen(left);
     size_t right_len = std::strlen(right);
@@ -175,7 +178,11 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
-%token IS "is"
+%token IS "is" LABEL "label"
+%token COLONCOLON "::"
+%token PLUS_ASSIGN "+=" MINUS_ASSIGN "-=" MUL_ASSIGN "*=" DIV_ASSIGN "/="
+%token MOD_ASSIGN "%=" AND_ASSIGN "&=" OR_ASSIGN "|=" XOR_ASSIGN "^="
+%token SHL_ASSIGN "<<=" SHR_ASSIGN ">>="
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
@@ -184,7 +191,8 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
 
-%right '='
+%right '=' PLUS_ASSIGN MINUS_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
+%right AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 %right '?'
 %left LOGOR
 %left LOGAND
@@ -250,10 +258,31 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
         $$ = newvar($3, $7, true, true, $5);
       }
     | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
+    | EXPORT STRUCT NAME '{' empty_body  {
+        $$ = newstructdecl($3,
+                           copy_text(diag_current_source_name().c_str()),
+                           NULL, true);
+      }
+    | EXPORT STRUCT NAME '{' struct_members '}' {
+        $$ = newstructdecl($3,
+                           copy_text(diag_current_source_name().c_str()),
+                           (struct struct_member *)$5, true);
+      }
+    | EXPORT TRAIT NAME '{' empty_body   {
+        $$ = newtraitdecl($3,
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL, true);
+      }
+    | EXPORT TRAIT NAME '{' trait_methods '}' {
+        $$ = newtraitdecl($3,
+                          copy_text(diag_current_source_name().c_str()),
+                          (struct trait_method *)$5, true);
+      }
     | EXPORT funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($3, $5, NULL, true); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($3, $5, $8, true); }
+    | LABEL NAME ':' stmt                { $$ = newlabel($2, $4); }
     | struct_decl
     | impl_decl
     | trait_decl
@@ -380,14 +409,36 @@ fieldname: NAME                           { $$ = $1; }
 
 line: RETURN exp                          { $$ = newret($2); }
     | RETURN                              { $$ = newret(NULL); }
-    | BREAK                               { $$ = newbrk(); }
-    | CONTINUE                            { $$ = newctn(); }
+    | breakstart                          {
+        $$ = newbrk(NULL, flow_keyword_line, flow_keyword_column);
+      }
+    | breakstart NAME                     {
+        $$ = newbrk($2, flow_keyword_line, flow_keyword_column);
+      }
+    | continuestart                       {
+        $$ = newctn(NULL, flow_keyword_line, flow_keyword_column);
+      }
+    | continuestart NAME                  {
+        $$ = newctn($2, flow_keyword_line, flow_keyword_column);
+      }
     | FAIL exp                            { $$ = newfail($2); }
     | FAIL                                { $$ = newfail(NULL); }
     | RECOVER exp                         { $$ = newrecover($2); }
     | RECOVER                             { $$ = newrecover(NULL); }
     | PASS exp                            { $$ = newpass($2); }
     | exp                                 { $$ = $1; }
+    ;
+
+breakstart: BREAK {
+        flow_keyword_line = g_token_line;
+        flow_keyword_column = g_token_column;
+      }
+    ;
+
+continuestart: CONTINUE {
+        flow_keyword_line = g_token_line;
+        flow_keyword_column = g_token_column;
+      }
     ;
 
 scope: stmt                               { $$ = $1; }
@@ -437,6 +488,16 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
       }
     | NAME                                { $$ = newref($1); }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
+    | exp PLUS_ASSIGN exp                 { $$ = newcompound($1, '+', $3); }
+    | exp MINUS_ASSIGN exp                { $$ = newcompound($1, '-', $3); }
+    | exp MUL_ASSIGN exp                  { $$ = newcompound($1, '*', $3); }
+    | exp DIV_ASSIGN exp                  { $$ = newcompound($1, '/', $3); }
+    | exp MOD_ASSIGN exp                  { $$ = newcompound($1, '%', $3); }
+    | exp AND_ASSIGN exp                  { $$ = newcompound($1, '&', $3); }
+    | exp OR_ASSIGN exp                   { $$ = newcompound($1, '|', $3); }
+    | exp XOR_ASSIGN exp                  { $$ = newcompound($1, '^', $3); }
+    | exp SHL_ASSIGN exp                  { $$ = newcompound($1, 's', $3); }
+    | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = newcall($1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
     | exp '.' fieldname                   { $$ = newast('G', $1, newstr($3)); free($3); }
@@ -562,6 +623,13 @@ type: type_name                           { $$ = $1; }
 type_name: NAME                           {
         $$ = type_constraint_from_name($1);
         free($1);
+      }
+    | NAME COLONCOLON NAME                {
+        std::string qualified = std::string($1) + "::" + $3;
+        $$ = new_named_type_constraint(
+            qualified.c_str(), diag_current_source_name().c_str());
+        free($1);
+        free($3);
       }
     | BUILTIN                             { $$ = type_constraint_from_builtin($1); }
     | FUNC                                { $$ = new_type_constraint(TYPE_FUNCTION); }

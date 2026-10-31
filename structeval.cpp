@@ -152,7 +152,7 @@ void eval_struct_decl(struct struct_node *s) {
     struct_def *def = NULL;
     if (!structtype_create_struct(
             s->module, diag_current_module_name().c_str(), s->name,
-            std::move(fields), def, error)) {
+            s->exported != 0, std::move(fields), def, error)) {
         yyerror("%s", error.c_str());
         return;
     }
@@ -294,7 +294,7 @@ void eval_trait_decl(struct trait_node *t) {
     trait_def *def = NULL;
     if (!structtype_create_trait(
             t->module, diag_current_module_name().c_str(), t->name,
-            std::move(methods), def, error))
+            t->exported != 0, std::move(methods), def, error))
         yyerror("%s", error.c_str());
 }
 

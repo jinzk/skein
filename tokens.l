@@ -206,6 +206,17 @@ EXP ([Ee][-+]?[0-9]+)
 "++" { YYRET(INC); }
 "--" { YYRET(DEC); }
 
+"+=" { YYRET(PLUS_ASSIGN); }
+"-=" { YYRET(MINUS_ASSIGN); }
+"*=" { YYRET(MUL_ASSIGN); }
+"/=" { YYRET(DIV_ASSIGN); }
+"%=" { YYRET(MOD_ASSIGN); }
+"&=" { YYRET(AND_ASSIGN); }
+"|=" { YYRET(OR_ASSIGN); }
+"^=" { YYRET(XOR_ASSIGN); }
+"<<=" { YYRET(SHL_ASSIGN); }
+">>=" { YYRET(SHR_ASSIGN); }
+
 "+" |
 "-" |
 "*" |
@@ -226,6 +237,8 @@ EXP ([Ee][-+]?[0-9]+)
 "..." { YYRET(ELLIPSIS); }
 
 "=>" { YYRET(ARROW); }
+
+"::" { YYRET(COLONCOLON); }
 
 "&&" { YYRET(LOGAND); }
 "||" { YYRET(LOGOR); }
@@ -286,6 +299,7 @@ EXP ([Ee][-+]?[0-9]+)
 "continue" { YYRET(CONTINUE); }
 "fail" { YYRET(FAIL); }
 "is" { YYRET(IS); }
+"label" { YYRET(LABEL); }
 "on" { YYRET(ON); }
 "error" { YYRET(ERROR); }
 "recover" { YYRET(RECOVER); }

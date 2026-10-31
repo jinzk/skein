@@ -181,6 +181,21 @@ struct ast *newasgn(struct ast *target, struct ast *v) {
     return (struct ast *)a;
 }
 
+struct ast *newcompound(struct ast *target, int op, struct ast *v) {
+    struct compound_asgn *a =
+        (struct compound_asgn *)std::malloc(sizeof(struct compound_asgn));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'a';
+    set_loc_from(a, target);
+    a->target = target;
+    a->op = op;
+    a->v = v;
+    return (struct ast *)a;
+}
+
 struct ast *newincdec(struct ast *target, int delta, bool prefix) {
     struct incdec_node *a =
         (struct incdec_node *)std::malloc(sizeof(struct incdec_node));
@@ -237,25 +252,41 @@ struct ast *newret(struct ast *v) {
     return (struct ast *)a;
 }
 
-struct ast *newbrk() {
+struct ast *newbrk(char *label, int line, int column) {
     struct nbreak *a = (struct nbreak *)std::malloc(sizeof(struct nbreak));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
     }
     a->nodetype = 'B';
-    set_loc(a, 0, 0);
+    set_loc(a, line, column);
+    a->label = label;
     return (struct ast *)a;
 }
 
-struct ast *newctn() {
+struct ast *newctn(char *label, int line, int column) {
     struct ncontinue *a = (struct ncontinue *)std::malloc(sizeof(struct ncontinue));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
     }
     a->nodetype = 'O';
-    set_loc(a, 0, 0);
+    set_loc(a, line, column);
+    a->label = label;
+    return (struct ast *)a;
+}
+
+struct ast *newlabel(char *name, struct ast *stmt) {
+    struct label_node *a =
+        (struct label_node *)std::malloc(sizeof(struct label_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'g';
+    set_loc_from(a, stmt);
+    a->name = name;
+    a->stmt = stmt;
     return (struct ast *)a;
 }
 
@@ -543,7 +574,7 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
 }
 
 struct ast *newstructdecl(char *name, char *module,
-                          struct struct_member *members) {
+                          struct struct_member *members, bool exported) {
     struct struct_node *a =
         (struct struct_node *)std::malloc(sizeof(struct struct_node));
     if (!a) {
@@ -555,6 +586,7 @@ struct ast *newstructdecl(char *name, char *module,
     a->name = name;
     a->module = module;
     a->members = members;
+    a->exported = exported;
     return (struct ast *)a;
 }
 
@@ -616,7 +648,7 @@ struct ast *newimpl(char *type_name, char *trait_name, char *module,
 }
 
 struct ast *newtraitdecl(char *name, char *module,
-                         struct trait_method *methods) {
+                         struct trait_method *methods, bool exported) {
     struct trait_node *a =
         (struct trait_node *)std::malloc(sizeof(struct trait_node));
     if (!a) {
@@ -628,6 +660,7 @@ struct ast *newtraitdecl(char *name, char *module,
     a->name = name;
     a->module = module;
     a->methods = methods;
+    a->exported = exported;
     return (struct ast *)a;
 }
 
@@ -731,8 +764,17 @@ void treefree(struct ast *a) {
             std::free(((struct symref *)a)->name);
             break;
         case 'B':
-        case 'O':
+            std::free(((struct nbreak *)a)->label);
             break;
+        case 'O':
+            std::free(((struct ncontinue *)a)->label);
+            break;
+        case 'g': {
+            struct label_node *n = (struct label_node *)a;
+            treefree(n->stmt);
+            std::free(n->name);
+            break;
+        }
         case 'u':
         case 'v':
         case 'p':
@@ -761,6 +803,12 @@ void treefree(struct ast *a) {
         case 'U':
             treefree(((struct incdec_node *)a)->target);
             break;
+        case 'a': {
+            struct compound_asgn *asgn = (struct compound_asgn *)a;
+            treefree(asgn->target);
+            treefree(asgn->v);
+            break;
+        }
         case 'D':
             treefree(((struct symdef *)a)->v);
             free_type_constraint(((struct symdef *)a)->type);

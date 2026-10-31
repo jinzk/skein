@@ -24,6 +24,7 @@ struct trait_def {
     std::string name;
     std::string module;
     std::string module_name;
+    bool exported;
     std::vector<method_sig> methods;
 };
 
@@ -31,6 +32,7 @@ struct struct_def {
     std::string name;
     std::string module;
     std::string module_name;
+    bool exported;
     std::vector<field_def> fields;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
     std::vector<const trait_def *> traits;
@@ -47,6 +49,13 @@ struct struct_value_t {
     std::shared_ptr<struct_payload> payload;
 };
 
+struct method_value_t {
+    enum val_type type;
+    struct_def *def;
+    std::shared_ptr<struct_payload> receiver;
+    std::shared_ptr<function_def> method;
+};
+
 void structtype_shutdown();
 
 struct_def *structtype_find_struct(const char *module, const char *name);
@@ -54,10 +63,12 @@ trait_def *structtype_find_trait(const char *module, const char *name);
 bool structtype_type_exists(const char *module, const char *name);
 
 bool structtype_create_struct(const char *module, const char *module_name,
-                              const char *name, std::vector<field_def> fields,
+                              const char *name, bool exported,
+                              std::vector<field_def> fields,
                               struct_def *&out, std::string &error);
 bool structtype_create_trait(const char *module, const char *module_name,
-                             const char *name, std::vector<method_sig> methods,
+                             const char *name, bool exported,
+                             std::vector<method_sig> methods,
                              trait_def *&out, std::string &error);
 bool structtype_add_method(struct_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,
@@ -68,8 +79,15 @@ bool structtype_add_trait(struct_def *def, trait_def *trait,
 bool structtype_has_trait(const struct_def *def, const trait_def *trait);
 int structtype_field_index(const struct_def *def, const std::string &name);
 
+/* importer is the source identity; target is the package/module name. */
+void structtype_register_alias(const char *importer, const char *alias,
+                               const char *target);
+
 struct value_t *newstructval(struct_def *def,
                              std::shared_ptr<struct_payload> payload);
+struct value_t *newmethodval(struct_def *def,
+                             std::shared_ptr<struct_payload> receiver,
+                             std::shared_ptr<function_def> method);
 void ensure_unique_struct(struct struct_value_t *value);
 
 /* Runtime implementation of a TYPE_NAMED type constraint. */

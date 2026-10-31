@@ -44,6 +44,10 @@ enum bifs {
     B_float,
     B_bool,
     B_str,
+    B_kind_of,
+    B_type_name,
+    B_type_module,
+    B_type_source,
     B_format,
     B_command,
     B_command_status,
@@ -123,6 +127,14 @@ struct on_error_node {
     struct ast *call;
     char *name;
     struct ast *body;
+};
+
+struct is_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *value;
+    struct type_constraint *type;
 };
 
 struct nscope {
@@ -369,6 +381,7 @@ struct ast *newfail(struct ast *v);
 struct ast *newrecover(struct ast *v);
 struct ast *newpass(struct ast *v);
 struct ast *newonerror(struct ast *call, char *name, struct ast *body);
+struct ast *newis(struct ast *value, struct type_constraint *type);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported = false);

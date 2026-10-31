@@ -21,6 +21,7 @@ switch case default
 struct impl trait
 return break continue
 fail on error recover pass
+is
 null true false
 package import export as
 ```
@@ -391,7 +392,77 @@ let b = bytes_from_hex("00ff");
 b[1]--;
 ```
 
-### 4.11 运算优先级
+### 4.11 运行时类型
+
+```text
+kind_of(x)
+type_name(x)
+type_module(x)
+type_source(x)
+x is Type
+```
+
+- `kind_of(x)` 返回粗略运行时类别；
+- `type_name(x)` 返回具体类型名；
+- `type_module(x)` 返回逻辑模块/包名：主模块为 `main`，包内类型为包名；
+- `type_source(x)` 返回调试用源文件路径；普通值返回空字符串；
+- `is` 用类型名判断运行时值是否匹配。
+
+`kind_of` 返回值：
+
+```text
+int float bool string bytes list dict
+function builtin userdata struct null
+```
+
+示例：
+
+```text
+for (let value in values) {
+  switch (kind_of(value)) {
+    case "int" => print("int");
+    case "string" => print("string");
+    case "struct" => print("struct: " + type_name(value));
+    default => print(kind_of(value));
+  }
+}
+```
+
+结构体：
+
+```text
+struct Point { x: int; }
+
+let p = Point { x: 1 };
+
+kind_of(p)        // "struct"
+type_name(p)      // "Point"
+type_module(p)    // "main" 或包名，例如 "aa.bb"
+type_source(p)    // 调试用源文件路径
+
+p is Point        // true
+p is int          // false
+```
+
+trait：
+
+```text
+trait Drawable {
+  func draw(self);
+}
+
+impl Drawable for Point {
+  func draw(self) {
+    print("point");
+  }
+}
+
+p is Drawable     // true
+```
+
+`is` 只接受类型名或 trait 名，不接受任意表达式作为右操作数。类型名按模块解析，因此同名结构体不会混淆。
+
+### 4.12 运算优先级
 
 从低到高：
 
@@ -403,7 +474,7 @@ b[1]--;
 |
 ^
 &
-比较运算
+比较运算 / is
 << >>
 + -
 * / %
@@ -1076,6 +1147,7 @@ sqrt exp log abs
 
 ```text
 print list dict int float bool str format len range
+kind_of type_name type_module type_source
 ```
 
 ### 进程

@@ -711,7 +711,34 @@ render(p)
 - 类型名按源模块注册，模块通常对应一个源文件；不同模块可以定义同名结构体或 trait；
 - 类型名不会自动跨模块可见，跨模块值仍可通过方法表正常调用。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+运行时类型检查：
+
+```text
+kind_of(x)        // "int" / "list" / "struct" / ...
+type_name(x)      // "int" / "Point" / ...
+type_module(x)    // 逻辑模块：主模块为 "main"，包类型为包名
+type_source(x)    // 调试用源文件路径
+
+x is int
+x is Point
+x is Drawable
+```
+
+`any` 只是类型约束，不会丢失运行时类型。遍历异构列表时可以这样分派：
+
+```text
+for (let value in values) {
+  if (kind_of(value) == "struct") {
+    print(type_name(value));
+  } else if (value is int) {
+    print("int");
+  }
+}
+```
+
+`is` 只接受类型名或 trait 名作为右操作数；结构体类型名按模块解析。
+
+内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;

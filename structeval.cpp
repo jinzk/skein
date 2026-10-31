@@ -1,6 +1,7 @@
 #include "structeval.h"
 
 #include "ast.h"
+#include "diagnostics.h"
 #include "eval.h"
 #include "structtype.h"
 #include "valuetype.h"
@@ -145,8 +146,9 @@ void eval_struct_decl(struct struct_node *s) {
 
     std::string error;
     struct_def *def = NULL;
-    if (!structtype_create_struct(s->module, s->name, std::move(fields), def,
-                                  error)) {
+    if (!structtype_create_struct(
+            s->module, diag_current_module_name().c_str(), s->name,
+            std::move(fields), def, error)) {
         yyerror("%s", error.c_str());
         return;
     }
@@ -282,8 +284,9 @@ void eval_trait_decl(struct trait_node *t) {
 
     std::string error;
     trait_def *def = NULL;
-    if (!structtype_create_trait(t->module, t->name, std::move(methods), def,
-                                 error))
+    if (!structtype_create_trait(
+            t->module, diag_current_module_name().c_str(), t->name,
+            std::move(methods), def, error))
         yyerror("%s", error.c_str());
 }
 

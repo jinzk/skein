@@ -46,8 +46,8 @@ bool structtype_type_exists(const char *module, const char *name) {
     return struct_types.count(key) != 0 || trait_types.count(key) != 0;
 }
 
-bool structtype_create_struct(const char *module, const char *name,
-                              std::vector<field_def> fields,
+bool structtype_create_struct(const char *module, const char *module_name,
+                              const char *name, std::vector<field_def> fields,
                               struct_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
@@ -74,14 +74,15 @@ bool structtype_create_struct(const char *module, const char *name,
     std::unique_ptr<struct_def> def(new struct_def);
     def->name = name;
     def->module = module ? module : "";
+    def->module_name = module_name ? module_name : def->module;
     def->fields = std::move(fields);
     out = def.get();
     struct_types.emplace(type_key(module, name), std::move(def));
     return true;
 }
 
-bool structtype_create_trait(const char *module, const char *name,
-                             std::vector<method_sig> methods,
+bool structtype_create_trait(const char *module, const char *module_name,
+                             const char *name, std::vector<method_sig> methods,
                              trait_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
@@ -108,6 +109,7 @@ bool structtype_create_trait(const char *module, const char *name,
     std::unique_ptr<trait_def> def(new trait_def);
     def->name = name;
     def->module = module ? module : "";
+    def->module_name = module_name ? module_name : def->module;
     def->methods = std::move(methods);
     out = def.get();
     trait_types.emplace(type_key(module, name), std::move(def));

@@ -283,6 +283,7 @@ EXP ([Ee][-+]?[0-9]+)
 "break" { YYRET(BREAK); }
 "continue" { YYRET(CONTINUE); }
 "fail" { YYRET(FAIL); }
+"is" { YYRET(IS); }
 "on" { YYRET(ON); }
 "error" { YYRET(ERROR); }
 "recover" { YYRET(RECOVER); }
@@ -306,6 +307,10 @@ EXP ([Ee][-+]?[0-9]+)
 "float" { yylval.fn = B_float; YYRET(BUILTIN); }
 "bool" { yylval.fn = B_bool; YYRET(BUILTIN); }
 "str" { yylval.fn = B_str; YYRET(BUILTIN); }
+"kind_of" { yylval.fn = B_kind_of; YYRET(BUILTIN); }
+"type_name" { yylval.fn = B_type_name; YYRET(BUILTIN); }
+"type_module" { yylval.fn = B_type_module; YYRET(BUILTIN); }
+"type_source" { yylval.fn = B_type_source; YYRET(BUILTIN); }
 "format" { yylval.fn = B_format; YYRET(BUILTIN); }
 "command" { yylval.fn = B_command; YYRET(BUILTIN); }
 "command_status" { yylval.fn = B_command_status; YYRET(BUILTIN); }

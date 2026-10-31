@@ -277,7 +277,8 @@ bool is_loading(const std::string &key) {
 }
 
 bool load_package_file(const resolved_package &resolved,
-                       const std::string &expected_name, value_t *&result,
+                       const std::string &expected_name,
+                       const std::string &module_name, value_t *&result,
                        std::string &error);
 bool load_child_packages(const std::string &dotted,
                          const fs::path &directory, value_t *namespace_value,
@@ -299,7 +300,7 @@ value_t *import_resolved(const std::string &dotted,
 
     value_t *namespace_value = NULL;
     bool ok = load_package_file(resolved, split_dotted(dotted).back(),
-                                namespace_value, error);
+                                dotted, namespace_value, error);
     if (ok) {
         ok = load_child_packages(dotted, resolved.directory,
                                  namespace_value, error);
@@ -573,7 +574,8 @@ void restore_parser_globals(int saved_char, const YYSTYPE &saved_lval,
 }
 
 bool load_package_file(const resolved_package &resolved,
-                       const std::string &expected_name, value_t *&result,
+                       const std::string &expected_name,
+                       const std::string &module_name, value_t *&result,
                        std::string &error) {
     if (!resolved.has_source) {
         result = (value_t *)newdictval();
@@ -608,6 +610,7 @@ bool load_package_file(const resolved_package &resolved,
     reset_scanner_state(file);
     diag_start_source();
     diag_set_source_name(resolved.file.string());
+    diag_set_module_name(module_name);
     pushscope_isolated();
 
     package_load_context context;

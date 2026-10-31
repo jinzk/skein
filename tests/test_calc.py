@@ -1498,6 +1498,54 @@ def main():
           "switch (Point { x: 1 }) { default => print(\"bad\"); }\n",
           stderr="switch does not support Point")
 
+    check("runtime kind_of",
+          "kind_of(1)\n"
+          "kind_of(1.5)\n"
+          "kind_of(true)\n"
+          'kind_of("x")\n'
+          "kind_of([1])\n"
+          "kind_of({})\n"
+          "kind_of(func() { return 1; })\n"
+          "kind_of(sqrt)\n"
+          "kind_of(null)\n",
+          stdout_all=["= int", "= float", "= bool", "= string", "= list",
+                      "= dict", "= function", "= builtin", "= null"])
+    check("runtime type_name",
+          "struct Point { x: int; }\n"
+          'type_name(1)\ntype_name("x")\ntype_name(Point { x: 1 })\n'
+          "type_name(null)\n",
+          stdout_all=["= int", "= string", "= Point", "= null"])
+    check("runtime type_module for primitive",
+          'type_module(1) == ""\n', stdout="= true")
+    check("is primitive types",
+          "1 is int\n1 is number\n1 is string\n"
+          "true is bool\n[1] is list\n{} is dict\n"
+          'null is null\n1 is any\n',
+          stdout_all=["= true", "= true", "= false", "= true",
+                      "= true", "= true", "= true", "= true"])
+    check("is struct and trait",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "struct Other { x: int; }\n"
+          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "let p = Point { x: 1 };\n"
+          "let o = Other { x: 1 };\n"
+          "p is Point\np is Other\np is Drawable\no is Drawable\n",
+          stdout_all=["= true", "= false", "= true", "= false"])
+    check("is in heterogeneous loop",
+          "struct Point { x: int; }\n"
+          'let values = [1, "x", [2], Point { x: 3 }, null];\n'
+          "for (let value in values) {\n"
+          '  if (kind_of(value) == "struct") {\n'
+          '    print("struct " + type_name(value));\n'
+          "  } else {\n"
+          "    print(kind_of(value));\n"
+          "  }\n"
+          "}\n",
+          stdout_all=["int", "string", "list", "struct Point", "null"])
+    check("is unknown type",
+          "1 is Missing\n", stderr="unknown type name Missing")
+
     check("explicit empty return", "func f() { return; }\nprint(f())\n",
           stdout="null")
     check("print returns null", "let x = print(1);\nprint(x)\n",
@@ -2512,11 +2560,20 @@ def main():
             "print(pkg.get());\n"
             "print(local.y);\n"
             "func local_get(p: P) { return p.y; }\n"
-            "print(local_get(local));\n",
+            "print(local_get(local));\n"
+            "print(pkg is P);\n"
+            "print(local is P);\n"
+            "print(type_module(pkg) == type_module(local));\n"
+            "print(type_module(pkg));\n"
+            "print(type_module(local));\n"
+            "print(type_source(pkg) != \"\");\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.splitlines() == ["7", "ok", "ok"], proc.stdout
+        assert proc.stdout.splitlines() == [
+            "7", "ok", "ok", "false", "true", "false",
+            "aa", "main", "true",
+        ], proc.stdout
         assert proc.stderr == "", proc.stderr
 
         main2 = write(

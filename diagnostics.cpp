@@ -18,6 +18,7 @@ static int current_column = 1;
 static int error_count = 0;
 static int lexical_error_line = 0;
 static std::string source_name;
+static std::string module_name;
 static std::vector<std::string> source_lines;
 
 struct call_frame {
@@ -191,6 +192,14 @@ const std::string &diag_current_source_name() {
     return source_name;
 }
 
+void diag_set_module_name(const std::string &name) {
+    module_name = name;
+}
+
+const std::string &diag_current_module_name() {
+    return module_name;
+}
+
 void diag_save_source(diag_source_checkpoint &checkpoint) {
     checkpoint.current_line = current_line;
     checkpoint.current_column = current_column;
@@ -202,6 +211,7 @@ void diag_save_source(diag_source_checkpoint &checkpoint) {
     checkpoint.flow_column = g_flow_column;
     checkpoint.lexical_line = lexical_error_line;
     checkpoint.source_name = source_name;
+    checkpoint.module_name = module_name;
     checkpoint.lines = source_lines;
 }
 
@@ -216,6 +226,7 @@ void diag_restore_source(const diag_source_checkpoint &checkpoint) {
     g_flow_column = checkpoint.flow_column;
     lexical_error_line = checkpoint.lexical_line;
     source_name = checkpoint.source_name;
+    module_name = checkpoint.module_name;
     source_lines = checkpoint.lines;
 }
 

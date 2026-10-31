@@ -313,6 +313,19 @@ struct ast *newonerror(struct ast *call, char *name, struct ast *body) {
     return (struct ast *)a;
 }
 
+struct ast *newis(struct ast *value, struct type_constraint *type) {
+    struct is_node *a = (struct is_node *)std::malloc(sizeof(struct is_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'k';
+    set_loc_from(a, value);
+    a->value = value;
+    a->type = type;
+    return (struct ast *)a;
+}
+
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *el) {
     struct flow *a = (struct flow *)std::malloc(sizeof(struct flow));
     if (!a) {
@@ -711,6 +724,12 @@ void treefree(struct ast *a) {
             treefree(o->call);
             treefree(o->body);
             std::free(o->name);
+            break;
+        }
+        case 'k': {
+            struct is_node *n = (struct is_node *)a;
+            treefree(n->value);
+            free_type_constraint(n->type);
             break;
         }
         case '=':

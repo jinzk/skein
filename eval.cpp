@@ -419,6 +419,29 @@ static bool case_values_have_condition(struct ast *values) {
     return false;
 }
 
+static const char *kind_of_value(const struct value_t *v) {
+    if (!v) return "null";
+    switch (v->type) {
+        case T_int: return "int";
+        case T_float: return "float";
+        case T_bool: return "bool";
+        case T_string: return "string";
+        case T_bytes: return "bytes";
+        case T_list: return "list";
+        case T_dict: return "dict";
+        case T_func: return "function";
+        case T_builtin: return "builtin";
+        case T_userdata: return "userdata";
+        case T_struct: return "struct";
+        case T_null: return "null";
+        case T_class: return "class";
+        case T_return: return "return";
+        case T_break: return "break";
+        case T_continue: return "continue";
+        default: return "unknown";
+    }
+}
+
 static bool value_equals(struct value_t *a, struct value_t *b) {
     if (!a || !b) return a == b;
     if (is_numeric(a) && is_numeric(b)) {
@@ -877,6 +900,29 @@ static struct value_t *call_builtin(int functype,
     struct value_t *arg = args.empty() ? NULL : args[0];
     struct value_t *ret = NULL;
     switch (functype) {
+        case B_kind_of:
+            ret = newstrval(kind_of_value(arg));
+            break;
+        case B_type_name:
+            ret = newstrval(typename_of(arg));
+            break;
+        case B_type_module:
+            if (arg && arg->type == T_struct) {
+                struct struct_value_t *sv = (struct struct_value_t *)arg;
+                ret = newstrval(
+                    sv->def ? sv->def->module_name.c_str() : "");
+            } else {
+                ret = newstrval("");
+            }
+            break;
+        case B_type_source:
+            if (arg && arg->type == T_struct) {
+                struct struct_value_t *sv = (struct struct_value_t *)arg;
+                ret = newstrval(sv->def ? sv->def->module.c_str() : "");
+            } else {
+                ret = newstrval("");
+            }
+            break;
         case B_abs:
             if (arg->type == T_int) {
                 long long n = ((struct int_value_t *)arg)->value;
@@ -3190,6 +3236,12 @@ struct value_t *eval(struct ast *a) {
             else
                 pushscope_isolated();
 
+            std::string saved_module_name = diag_current_module_name();
+            std::string package_module_name =
+                (saved_module_name.empty() || saved_module_name == "main")
+                    ? pkg->name
+                    : saved_module_name;
+            diag_set_module_name(package_module_name);
             struct value_t *body_ret = eval(pkg->body);
             if (body_ret &&
                 (body_ret->type == T_return || body_ret->type == T_break ||
@@ -3200,6 +3252,7 @@ struct value_t *eval(struct ast *a) {
             if (g_runtime_error_count == errors_before)
                 ns = package_build_namespace(current_scope().get(), error);
             popscope();
+            diag_set_module_name(saved_module_name);
 
             freeval(body_ret);
 
@@ -4272,6 +4325,21 @@ struct value_t *eval(struct ast *a) {
                 break;
             freeval(ret);
             ret = eval(a->r);
+            break;
+        }
+
+        case 'k': {
+            struct is_node *node = (struct is_node *)a;
+            struct value_t *value = eval(node->value);
+            if (!value)
+                break;
+            if (!validate_type_constraint(node->type)) {
+                freeval(value);
+                break;
+            }
+            bool matched = type_constraint_matches(node->type, value);
+            freeval(value);
+            ret = newboolval(matched);
             break;
         }
 

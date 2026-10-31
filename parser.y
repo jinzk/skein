@@ -69,6 +69,10 @@ static const char *builtin_field_name(int functype) {
         case B_float: return "float";
         case B_bool: return "bool";
         case B_str: return "str";
+        case B_kind_of: return "kind_of";
+        case B_type_name: return "type_name";
+        case B_type_module: return "type_module";
+        case B_type_source: return "type_source";
         case B_format: return "format";
         case B_command: return "command";
         case B_command_status: return "command_status";
@@ -171,6 +175,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
+%token IS "is"
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
@@ -186,6 +191,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %left '^'
 %left '&'
 %nonassoc <fn> CMP
+%precedence IS
 %left SHL SHR
 %left '+' '-'
 %left '*' '/' '%'
@@ -420,6 +426,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp INC                             { $$ = newincdec($1, 1, false); }
     | exp DEC                             { $$ = newincdec($1, -1, false); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
+    | exp IS type %prec IS                { $$ = newis($1, $3); }
     | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
     | exp ON ERROR '(' NAME ')' '{' empty_body %prec ON {
         $$ = newonerror($1, $5, NULL);

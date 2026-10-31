@@ -23,12 +23,14 @@ struct method_sig {
 struct trait_def {
     std::string name;
     std::string module;
+    std::string module_name;
     std::vector<method_sig> methods;
 };
 
 struct struct_def {
     std::string name;
     std::string module;
+    std::string module_name;
     std::vector<field_def> fields;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
     std::vector<const trait_def *> traits;
@@ -51,11 +53,11 @@ struct_def *structtype_find_struct(const char *module, const char *name);
 trait_def *structtype_find_trait(const char *module, const char *name);
 bool structtype_type_exists(const char *module, const char *name);
 
-bool structtype_create_struct(const char *module, const char *name,
-                              std::vector<field_def> fields,
+bool structtype_create_struct(const char *module, const char *module_name,
+                              const char *name, std::vector<field_def> fields,
                               struct_def *&out, std::string &error);
-bool structtype_create_trait(const char *module, const char *name,
-                             std::vector<method_sig> methods,
+bool structtype_create_trait(const char *module, const char *module_name,
+                             const char *name, std::vector<method_sig> methods,
                              trait_def *&out, std::string &error);
 bool structtype_add_method(struct_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,

@@ -35,6 +35,8 @@ void diag_report(int line, int column, const char *category,
                  const char *message);
 void diag_set_source_name(const std::string &name);
 const std::string &diag_current_source_name();
+void diag_set_module_name(const std::string &name);
+const std::string &diag_current_module_name();
 bool diag_lexical_error_on_line(int line);
 void diag_mark_script_failure();
 
@@ -60,6 +62,7 @@ struct diag_source_checkpoint {
     int flow_column;
     int lexical_line;
     std::string source_name;
+    std::string module_name;
     std::vector<std::string> lines;
 };
 

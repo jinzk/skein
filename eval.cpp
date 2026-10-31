@@ -395,7 +395,7 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
         !(l->type == T_string && r->type == T_string)) {
         if (op == 3 || op == 4) {
             bool eq = value_equals(l, r);
-            return newintval((op == 4) ? (eq ? 1 : 0) : (eq ? 0 : 1));
+            return newboolval((op == 4) ? eq : !eq);
         }
         yyerror("cannot compare %s and %s", typename_of(l), typename_of(r));
         return NULL;
@@ -406,16 +406,16 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
         int cmp = compare_numeric(l, r, unordered);
         if (unordered) {
             /* IEEE 754: NaN is unequal to everything and unordered. */
-            if (op == 3) return newintval(1);
-            return newintval(0);
+            if (op == 3) return newboolval(true);
+            return newboolval(false);
         }
         switch (op) {
-            case 1: return newintval(cmp > 0 ? 1 : 0);
-            case 2: return newintval(cmp < 0 ? 1 : 0);
-            case 3: return newintval(cmp != 0 ? 1 : 0);
-            case 4: return newintval(cmp == 0 ? 1 : 0);
-            case 5: return newintval(cmp >= 0 ? 1 : 0);
-            case 6: return newintval(cmp <= 0 ? 1 : 0);
+            case 1: return newboolval(cmp > 0);
+            case 2: return newboolval(cmp < 0);
+            case 3: return newboolval(cmp != 0);
+            case 4: return newboolval(cmp == 0);
+            case 5: return newboolval(cmp >= 0);
+            case 6: return newboolval(cmp <= 0);
             default: return NULL;
         }
     }
@@ -425,12 +425,12 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
     cmp = (cmp < 0) ? -1 : (cmp > 0 ? 1 : 0);
 
     switch (op) {
-        case 1: return newintval(cmp > 0 ? 1 : 0);
-        case 2: return newintval(cmp < 0 ? 1 : 0);
-        case 3: return newintval(cmp != 0 ? 1 : 0);
-        case 4: return newintval(cmp == 0 ? 1 : 0);
-        case 5: return newintval(cmp >= 0 ? 1 : 0);
-        case 6: return newintval(cmp <= 0 ? 1 : 0);
+        case 1: return newboolval(cmp > 0);
+        case 2: return newboolval(cmp < 0);
+        case 3: return newboolval(cmp != 0);
+        case 4: return newboolval(cmp == 0);
+        case 5: return newboolval(cmp >= 0);
+        case 6: return newboolval(cmp <= 0);
         default: return NULL;
     }
 }

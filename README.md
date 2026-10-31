@@ -457,7 +457,7 @@ apply(sqrt, 16)
 - 支持 `any`、`int`、`float`、`number`、`bool`、`string`、`bytes`、`list`、`dict`、`function`、`builtin`、`callable`、`null`、`userdata`；
 - 调用时做运行时检查，不做隐式转换；
 - 类型错误不会进入函数体；
-- 逻辑运算返回 `bool`；比较运算当前仍返回 `int 0/1`，需要布尔值时用 `bool(...)` 转换。
+- 逻辑运算和比较运算都返回 `bool`。
 
 函数是一等值，可以保存到变量、列表或字典中，并通过任意表达式调用：
 
@@ -548,7 +548,7 @@ apply(sqrt, 16)
 - `str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
 - `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `format("{}", null)` 输出。
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
-- `==` / `!=` 对所有类型有效；大小比较只支持数值之间或字符串之间。
+- `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
 - `len(x)` 支持字符串、bytes、list、dict：字符串按 UTF-8 码点计数，bytes 按字节数，list/dict 按元素数。
 - `range(length)` / `range(start, length[, step])` 生成整数序列，第二参数是长度而不是结束值；`step` 不能为 0。

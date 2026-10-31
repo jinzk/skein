@@ -152,7 +152,7 @@ def main():
     check("INT64_MIN division overflow",
           "(-9223372036854775807 - 1) / -1\n", stderr="integer overflow")
     check("int64 exact mixed comparison",
-          "9007199254740993 == 9007199254740992.0\n", stdout="= 0")
+          "9007199254740993 == 9007199254740992.0\n", stdout="= false")
 
     check("modulo", "7 % 4\n", stdout="= 3")
     check("float modulo", "7.5 % 2\n", stdout="= 1.5")
@@ -173,6 +173,8 @@ def main():
     check("logical result format", 'format("{}", true && false)\n',
           stdout="= false")
     check("bitwise and", "1 & 3\n", stdout="= 1")
+    check("bitwise rejects bool", "1 & (1 == 1)\n",
+          stderr="bitwise operator expects ints")
     check("bitwise or", "1 | 2\n", stdout="= 3")
     check("bitwise xor", "5 ^ 3\n", stdout="= 6")
     check("bitwise not", "~0\n", stdout="= -1")
@@ -181,7 +183,11 @@ def main():
     check("int64 shift", "1 << 62\n", stdout="= 4611686018427387904")
     check("shift count out of range", "1 << 64\n",
           stderr="shift count 64 out of range")
-    check("bitwise vs equality precedence", "1 & 3 == 1\n", stdout="= 0")
+    check("arithmetic vs equality precedence", "1 + 2 == 3\n",
+          stdout="= true")
+    check("equality result is bool",
+          "func f(x: bool) { return x; }\nf(1 < 2)\n",
+          stdout="= true")
     check("bool true literal", "true\n", stdout="= true")
     check("bool false literal", "false\n", stdout="= false")
     check("bool print", "print(true)\nprint(false)\n",
@@ -194,9 +200,9 @@ def main():
           stdout="no")
     check("bool equality",
           "true == true\ntrue == false\ntrue != false\n",
-          stdout_all=["= 1", "= 0", "= 1"])
+          stdout_all=["= true", "= false", "= true"])
     check("bool is distinct from int",
-          "true == 1\ntrue != 1\n", stdout_all=["= 0", "= 1"])
+          "true == 1\ntrue != 1\n", stdout_all=["= false", "= true"])
     check("bool conversions",
           "str(true)\nint(true)\nint(false)\nfloat(true)\n",
           stdout_all=["= true", "= 1", "= 0", "= 1.0"])
@@ -215,11 +221,11 @@ def main():
     check("abs overflow", "abs(-9223372036854775807 - 1)\n",
           stderr="integer overflow")
 
-    check("nan equality is false", "sqrt(-1) == 1\n", stdout="= 0")
-    check("nan inequality is true", "sqrt(-1) != 1\n", stdout="= 1")
+    check("nan equality is false", "sqrt(-1) == 1\n", stdout="= false")
+    check("nan inequality is true", "sqrt(-1) != 1\n", stdout="= true")
     check("nan is not equal to itself", "sqrt(-1) == sqrt(-1)\n",
-          stdout="= 0")
-    check("nan ordering is false", "sqrt(-1) >= 1\n", stdout="= 0")
+          stdout="= false")
+    check("nan ordering is false", "sqrt(-1) >= 1\n", stdout="= false")
 
     check("divide by zero int", "1/0\n", stderr="division by zero")
     check("divide by zero float", "1.0/0\n", stderr="division by zero")
@@ -414,8 +420,8 @@ def main():
     )
 
     check("string concat", '"a" + "b"\n', stdout="= ab")
-    check("string compare", '"a" < "b"\n', stdout="= 1")
-    check("string equality", '"a" == "a"\n', stdout="= 1")
+    check("string compare", '"a" < "b"\n', stdout="= true")
+    check("string equality", '"a" == "a"\n', stdout="= true")
     check("string escape", 'print("a\\nb")\n', stdout="a\nb")
     check("string index", '"hello"[1]\n', stdout="= e")
     check("utf8 string index first", '"你好"[0]\n', stdout="= 你")
@@ -428,7 +434,7 @@ def main():
           stdout="= [, a, ]")
     check("string split no match", 'split("abc", ",")\n', stdout="= [abc]")
     check("string split empty text", 'split("", ",") == [""]\n',
-          stdout="= 1")
+          stdout="= true")
     check("string split empty separator", 'split("a,b", "")\n',
           stderr="split separator must not be empty")
     check("string split whitespace", 'split_ws("  a  b\\tc\\n d ")\n',
@@ -523,7 +529,7 @@ def main():
         "a[f()]\n",
         stdout="= 10",
     )
-    check("list equality", "[1,2] == [1,2]\n", stdout="= 1")
+    check("list equality", "[1,2] == [1,2]\n", stdout="= true")
     check("dict index", '{1:2, 3:4}[3]\n', stdout="= 4")
     check("dict field read", 'let p = {"x": 1, "y": 2};\np.x + p.y\n',
           stdout="= 3")
@@ -539,11 +545,11 @@ def main():
     check("dict field missing", 'let p = {"x": 1};\np.y\n',
           stderr="key not found")
     check("float literals unaffected by dot", ".5 + 1\n", stdout="= 1.5")
-    check("dict equality", "{1:2} == {1:2}\n", stdout="= 1")
+    check("dict equality", "{1:2} == {1:2}\n", stdout="= true")
     check("dict literal duplicate key last wins", '{1: "a", 1: "b"}\n',
           stdout="{1: b}")
     check("dict literal numeric duplicate key",
-          '{1: "a", 1.0: "b"} == {1: "b"}\n', stdout="= 1")
+          '{1: "a", 1.0: "b"} == {1: "b"}\n', stdout="= true")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
     check("empty dict literal", "{}\n", stdout="= {}")
@@ -807,7 +813,7 @@ def main():
         'std.string.repeat("ab", 0) == ""\n'
         'std.string.trim_start("  x  ")\n'
         'std.string.trim_end("  x  ")\n',
-        stdout_all=["= 1", "= 0", "= ababab", "= 1", "= x  ", "=   x"],
+        stdout_all=["= 1", "= 0", "= ababab", "= true", "= x  ", "=   x"],
     )
     check(
         "std list sort type error",
@@ -892,10 +898,10 @@ def main():
           "func noret() { }\nfunc add(a,b) { return a+b; }\nadd(noret(), 2)\n",
           stderr="cannot add null and int")
     check("null equality", "func noret() { }\nnoret() == noret()\n",
-          stdout="= 1")
+          stdout="= true")
     check("null literal", "print(null)\n", stdout="null")
-    check("null literal equality", "null == null\n", stdout="= 1")
-    check("null literal inequality", "null == 0\n", stdout="= 0")
+    check("null literal equality", "null == null\n", stdout="= true")
+    check("null literal inequality", "null == 0\n", stdout="= false")
     check("null literal falsy",
           "if (null) { print(1); } else { print(2); }\n", stdout="2")
     check("null literal arithmetic", "null + 1\n",
@@ -924,9 +930,9 @@ def main():
     check("typed bool rejects int",
           "func h(x: bool) { return x; }\nh(1)\n",
           stderr="expects bool, got int")
-    check("typed bool rejects comparison int",
+    check("typed bool accepts comparison",
           "func h(x: bool) { return x; }\nh(1 == 1)\n",
-          stderr="expects bool, got int")
+          stdout="= true")
     check("typed list",
           "func f(x: list) { return len(x); }\nf([1,2])\n",
           stdout="= 2")
@@ -1008,7 +1014,7 @@ def main():
     check("builtin in list", "let fs = [sqrt, abs];\nfs[0](25)\n",
           stdout="= 5.0")
     check("builtin equality", "sqrt == sqrt\nsqrt == abs\n",
-          stdout_all=["= 1", "= 0"])
+          stdout_all=["= true", "= false"])
     check("print as value", 'let p = print;\np("ok")\n', stdout="ok")
     check("format as value", 'let f = format;\nf("{} + {}", 1, 2)\n',
           stdout="= 1 + 2")
@@ -1069,7 +1075,7 @@ def main():
     check("input preserves spaces", "input()\n  hi  \n", stdout="=   hi  ")
     check("input CRLF", "input()\r\nhello\r\n", stdout="= hello")
     check("input backspace", "input()\nhello\x7f\x7f\n", stdout="= hel")
-    check("input EOF is null", "input() == null\n", stdout="= 1")
+    check("input EOF is null", "input() == null\n", stdout="= true")
     check("input EOF print", "print(input())\n", stdout="null")
     check("input prompt type", "input(1)\n",
           stderr="input prompt must be a string")
@@ -1224,7 +1230,7 @@ def main():
           stderr="bytes value 256 out of range")
     check("bytes equality",
           'bytes_from_string("ab") == bytes_from_hex("6162")\n',
-          stdout="= 1")
+          stdout="= true")
     check("bytes arity", "bytes_len()\n",
           stderr="built-in function expects 1 argument")
     check("bytes_slice arity", "bytes_slice(bytes_from_string(\"a\"))\n",

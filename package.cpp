@@ -373,6 +373,7 @@ value_t *build_std_namespace() {
             {"repeat", B_string_repeat},
             {"trim_start", B_string_trim_start},
             {"trim_end", B_string_trim_end},
+            {"format", B_format},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("bytes"),
@@ -385,6 +386,74 @@ value_t *build_std_namespace() {
             {"from_hex", B_bytes_from_hex},
             {"to_int", B_bytes_to_int},
             {"from_int", B_int_to_bytes},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("math"),
+        builtin_module({
+            {"sqrt", B_sqrt},
+            {"exp", B_exp},
+            {"log", B_log},
+            {"abs", B_abs},
+            {"sin", B_sin},
+            {"cos", B_cos},
+            {"tan", B_tan},
+            {"asin", B_asin},
+            {"acos", B_acos},
+            {"atan", B_atan},
+            {"atan2", B_atan2},
+            {"pow", B_pow},
+            {"floor", B_floor},
+            {"ceil", B_ceil},
+            {"round", B_round},
+            {"trunc", B_trunc},
+            {"log2", B_log2},
+            {"log10", B_log10},
+            {"hypot", B_hypot},
+            {"min", B_min},
+            {"max", B_max},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("io"),
+        builtin_module({
+            {"print", B_print},
+            {"format", B_format},
+            {"input", B_input},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("fs"),
+        builtin_module({
+            {"read_file", B_read_file},
+            {"write_file", B_write_file},
+            {"append_file", B_append_file},
+            {"exists", B_file_exists},
+            {"open", B_file_open},
+            {"read", B_file_read},
+            {"write", B_file_write},
+            {"seek", B_file_seek},
+            {"tell", B_file_tell},
+            {"eof", B_file_eof},
+            {"close", B_file_close},
+            {"flush", B_file_flush},
+            {"read_bytes", B_read_bytes},
+            {"write_bytes", B_write_bytes},
+            {"append_bytes", B_append_bytes},
+            {"file_read_bytes", B_file_read_bytes},
+            {"file_write_bytes", B_file_write_bytes},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("process"),
+        builtin_module({
+            {"command", B_command},
+            {"status", B_command_status},
+            {"command_status", B_command_status},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("type"),
+        builtin_module({
+            {"kind_of", B_kind_of},
+            {"name", B_type_name},
+            {"module", B_type_module},
+            {"source", B_type_source},
         })));
     return (value_t *)root;
 }

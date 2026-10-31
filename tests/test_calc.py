@@ -987,6 +987,35 @@ def main():
     check("import alias conflict", "let s = 1;\nimport std as s;\n",
           stderr="import name already exists: s")
     check(
+        "std math helpers",
+        "import std;\n"
+        "std.math.sqrt(9)\nstd.math.sin(0)\nstd.math.min(3, 1, 2)\n",
+        stdout_all=["= 3.0", "= 0.0", "= 1"],
+    )
+    check(
+        "std io helpers",
+        "import std;\n"
+        'std.io.format("{} + {} = {}", 1, 2, 3)\n',
+        stdout="= 1 + 2 = 3",
+    )
+    check(
+        "std process helpers",
+        'import std;\nstd.process.status("exit 0")\n',
+        stdout="= 0",
+    )
+    check(
+        "std type helpers",
+        "import std;\n"
+        "std.type.kind_of([])\nstd.type.name(1)\n"
+        "std.type.module(1) == \"\"\n",
+        stdout_all=["= list", "= int", "= true"],
+    )
+    check(
+        "std string format",
+        'import std;\nstd.string.format("{}", 3)\n',
+        stdout="= 3",
+    )
+    check(
         "std list helpers",
         "import std;\n"
         "std.list.len([1, 2, 3])\n"

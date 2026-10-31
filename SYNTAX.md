@@ -1204,11 +1204,24 @@ std.list
 std.dict
 std.string
 std.bytes
+std.math
+std.io
+std.fs
+std.process
+std.type
 ```
 
 常用示例：
 
 ```text
+std.math.sqrt(9)
+std.math.sin(0)
+std.math.min(3, 1, 2)
+std.io.print("hello")
+std.fs.read_file("data.txt")
+std.process.command_status("true")
+std.type.name(1)
+
 std.list.slice([1, 2, 3], 1, 2)
 std.list.contains([1, 2, 3], 2)
 std.list.reverse([1, 2, 3])
@@ -1231,7 +1244,15 @@ std.string.trim_start("  x")
 std.bytes.hex(bytes_from_hex("00ff"))
 ```
 
-原有全局函数仍可使用。
+新增模块说明：
+
+- `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
+- `std.io`：`print`、`format`、`input`；
+- `std.fs`：文件读写和文件句柄操作；
+- `std.process`：命令执行、`status` / `command_status`；
+- `std.type`：`kind_of`、`name`、`module`、`source`。
+
+原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。
 
 ### 6.5 查找路径
 

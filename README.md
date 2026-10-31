@@ -205,6 +205,10 @@ std.list.slice([1, 2, 3, 4], 1, 2)
 std.dict.get({"a": 1}, "a")
 std.string.join(["a", "b"], ",")
 std.bytes.hex(bytes_from_hex("00ff"))
+std.math.sqrt(9)
+std.fs.read_file("data.txt")
+std.process.command_status("true")
+std.type.name(1)
 ```
 
 模块：
@@ -214,6 +218,11 @@ std.list
 std.dict
 std.string
 std.bytes
+std.math
+std.io
+std.fs
+std.process
+std.type
 ```
 
 当前提供的函数：
@@ -253,6 +262,58 @@ std.string.starts_with
 std.string.ends_with
 std.string.contains
 std.string.repeat
+std.string.format
+
+std.math.sqrt
+std.math.exp
+std.math.log
+std.math.abs
+std.math.sin
+std.math.cos
+std.math.tan
+std.math.asin
+std.math.acos
+std.math.atan
+std.math.atan2
+std.math.pow
+std.math.floor
+std.math.ceil
+std.math.round
+std.math.trunc
+std.math.log2
+std.math.log10
+std.math.hypot
+std.math.min
+std.math.max
+
+std.io.print
+std.io.format
+std.io.input
+
+std.fs.read_file
+std.fs.write_file
+std.fs.append_file
+std.fs.exists
+std.fs.open
+std.fs.read
+std.fs.write
+std.fs.seek
+std.fs.tell
+std.fs.eof
+std.fs.close
+std.fs.flush
+std.fs.read_bytes
+std.fs.write_bytes
+std.fs.append_bytes
+
+std.process.command
+std.process.status
+std.process.command_status
+
+std.type.kind_of
+std.type.name
+std.type.module
+std.type.source
 
 std.bytes.len
 std.bytes.get
@@ -286,7 +347,13 @@ std.bytes.from_int
 - `std.string.replace` 替换全部匹配，空查找串会报错；
 - `std.string.contains` 返回 `1` / `0`；
 - `std.string.repeat` 的次数不能为负数；
-- `std.string.trim_start` / `trim_end` 只按 ASCII 空白裁剪。
+- `std.string.trim_start` / `trim_end` 只按 ASCII 空白裁剪；
+- `std.math` 与全局数学函数使用同一套实现；
+- `std.io` 提供 `print`、`format`、`input`；
+- `std.fs` 提供文件读写和文件句柄操作；
+- `std.process` 提供命令执行和状态查询；
+- `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
+- 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
 ### 查找路径
 

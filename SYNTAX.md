@@ -16,7 +16,7 @@
 
 ```text
 let const func
-if else while for
+if else while do for
 return break continue
 null true false
 package import export as
@@ -398,15 +398,21 @@ if (a) {
 }
 ```
 
-条件必须放在圆括号中。`if` / `while` / `for` 的主体可以是代码块，也可以是单条语句；单条表达式语句需要分号。
+条件必须放在圆括号中。`if` / `while` / `for` / `do` 的主体可以是代码块，也可以是单条语句；单条表达式语句需要分号。
 
-### 5.4 while
+### 5.4 while / do while
 
 ```text
 while (condition) {
   ...
 }
+
+do {
+  ...
+} while (condition);
 ```
+
+`do ... while` 至少执行一次循环体。`while` 可以写在 `}` 的下一行；结尾分号可以省略，也可以保留（会当作空语句）。
 
 ### 5.5 for
 
@@ -434,15 +440,24 @@ for (let x in [1, 2, 3]) {
 for (let key in {"a": 1, "b": 2}) {
   print(key);
 }
+
+for (let key, value in {"a": 1, "b": 2}) {
+  print(key + "=" + str(value));
+}
+
+for (let index, value in [10, 20]) {
+  print(str(index) + ":" + str(value));
+}
 ```
 
 规则：
 
-- 只能使用 `for (let NAME in exp)`；
-- list 遍历元素；
-- dict 遍历键；
-- string 遍历 UTF-8 字符；
-- bytes 遍历 `0..255` 的字节值；
+- 单变量形式：`for (let NAME in exp)`；
+- 双变量形式：`for (let NAME1, NAME2 in exp)`；
+- list 单变量遍历元素，双变量得到 `index, value`；
+- dict 单变量遍历 key，双变量得到 `key, value`；
+- string 单变量遍历 UTF-8 字符，双变量得到 `index, char`；
+- bytes 单变量遍历 `0..255` 的字节值，双变量得到 `index, byte`；
 - 可以配合 `range()` 做计数循环；
 - 被遍历对象在循环开始时求值一次；
 - 循环变量只存在于循环作用域；
@@ -827,7 +842,6 @@ var
 复合赋值
 三元表达式
 switch
-do while
 for ... of
 try/catch
 通配导入

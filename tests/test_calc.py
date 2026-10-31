@@ -670,6 +670,64 @@ def main():
           stderr="cannot iterate int")
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
           stderr="symbol not found x")
+    check(
+        "for in dict key value",
+        'for (let k, v in {"a": 1, "b": 2}) { '
+        'print(k + "=" + str(v)); }\n',
+        stdout="a=1\nb=2\n",
+    )
+    check(
+        "for in list index value",
+        "for (let i, v in [10, 20]) { "
+        'print(str(i) + ":" + str(v)); }\n',
+        stdout="0:10\n1:20\n",
+    )
+    check(
+        "for in string index value",
+        'for (let i, ch in "ab") { print(str(i) + ch); }\n',
+        stdout="0a\n1b\n",
+    )
+    check(
+        "for in bytes index value",
+        'for (let i, b in bytes_from_hex("00ff")) { '
+        'print(str(i) + ":" + str(b)); }\n',
+        stdout="0:0\n1:255\n",
+    )
+    check("for in duplicate loop variables",
+          "for (let x, x in [1]) { }\n",
+          stderr="loop variable repeated: x")
+    check("for in two variables scope",
+          'for (let k, v in {"a": 1}) { }\nk\n',
+          stderr="symbol not found k")
+
+    check("do while executes once",
+          "let i = 0;\ndo { i = i + 1; } while (0);\ni\n",
+          stdout="= 1")
+    check("do while condition",
+          "let i = 0;\ndo { i = i + 1; } while (i < 3);\ni\n",
+          stdout="= 3")
+    check("do while single statement",
+          "let i = 0;\ndo i = i + 1; while (i < 2);\ni\n",
+          stdout="= 2")
+    check("do while while on next line",
+          "let i = 0;\ndo {\n  i = i + 1;\n}\nwhile (i < 2);\ni\n",
+          stdout="= 2")
+    check(
+        "do while break continue",
+        "let i = 0;\n"
+        "do {\n"
+        "  i = i + 1;\n"
+        "  if (i == 2) { continue; }\n"
+        "  if (i == 4) { break; }\n"
+        "  print(i);\n"
+        "} while (i < 10);\n",
+        stdout="1\n3\n",
+    )
+    check("do while return",
+          "func f(a) {\n  do { return a; } while (1);\n}\nf(7)\n",
+          stdout="= 7")
+    check("do while empty body", "do {} while (0);\n", code=0)
+    check("do while no trailing semicolon", "do {} while (0)\n", code=0)
     check("range length only", "range(5)\n", stdout="= [0, 1, 2, 3, 4]")
     check("range start and length", "range(-2, 3)\n", stdout="= [-2, -1, 0]")
     check("range positive step", "range(5, 3, 2)\n", stdout="= [5, 7, 9]")

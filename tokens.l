@@ -175,7 +175,7 @@ static void append_unescaped(const char *s, int len) {
 static bool brace_starts_block() {
     if (last_token == NAME && prev_token == PACKAGE)
         return true;
-    if (last_token == ')' || last_token == ELSE)
+    if (last_token == ')' || last_token == ELSE || last_token == DO)
         return true;
     return false;
 }
@@ -258,6 +258,7 @@ EXP ([Ee][-+]?[0-9]+)
 "if" { YYRET(IF); }
 "else" { YYRET(ELSE); }
 "while" { YYRET(WHILE); }
+"do" { YYRET(DO); }
 "for" { YYRET(FOR); }
 "let" { YYRET(LET); }
 "const" { YYRET(CONST); }

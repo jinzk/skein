@@ -3118,6 +3118,51 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
+        case 'E': {
+            struct flow *f = (struct flow *)a;
+            if (!f->cond || !f->tl) break;
+
+            for (;;) {
+                if (g_interrupted) break;
+
+                int errors_before = g_runtime_error_count;
+                struct value_t *body = eval(f->tl);
+                if (g_runtime_error_count != errors_before) {
+                    freeval(body);
+                    break;
+                }
+
+                bool do_break = false;
+                if (body) {
+                    if (body->type == T_return) {
+                        ret = body;
+                        break;
+                    }
+                    if (body->type == T_break) {
+                        freeval(body);
+                        do_break = true;
+                    } else if (body->type == T_continue) {
+                        freeval(body);
+                    } else {
+                        freeval(body);
+                    }
+                }
+                if (do_break) break;
+
+                errors_before = g_runtime_error_count;
+                struct value_t *cond = eval(f->cond);
+                if (g_runtime_error_count != errors_before) {
+                    freeval(cond);
+                    break;
+                }
+                if (!cond) break;
+                bool b = truthy(cond);
+                freeval(cond);
+                if (!b) break;
+            }
+            break;
+        }
+
         case 'W': {
             struct ast *cond_ast = ((struct flow *)a)->cond;
             struct ast *body = ((struct flow *)a)->tl;
@@ -3184,10 +3229,23 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
+            if (f->value_name &&
+                std::strcmp(f->name, f->value_name) == 0) {
+                yyerror("loop variable repeated: %s", f->name);
+                freeval(iter);
+                break;
+            }
+
             pushscope();
             struct symbol *sym = newsym(f->name);
             sym->val = NULL;
             savesym(sym);
+            struct symbol *value_sym = NULL;
+            if (f->value_name) {
+                value_sym = newsym(f->value_name);
+                value_sym->val = NULL;
+                savesym(value_sym);
+            }
 
             bool leave = false;
             for (size_t i = 0; i < count && !leave; ++i) {
@@ -3195,10 +3253,21 @@ struct value_t *eval(struct ast *a) {
                     break;
 
                 struct value_t *item = NULL;
+                struct value_t *second = NULL;
                 if (iter->type == T_list) {
-                    item = dupval(((struct list_value_t *)iter)->payload->items[i]);
+                    struct value_t *value =
+                        ((struct list_value_t *)iter)->payload->items[i];
+                    if (f->value_name) {
+                        item = newintval((long long)i);
+                        second = dupval(value);
+                    } else {
+                        item = dupval(value);
+                    }
                 } else if (iter->type == T_dict) {
-                    item = dupval(((struct dict_value_t *)iter)->payload->items[i].first);
+                    struct dict_value_t *dict = (struct dict_value_t *)iter;
+                    item = dupval(dict->payload->items[i].first);
+                    if (f->value_name)
+                        second = dupval(dict->payload->items[i].second);
                 } else if (iter->type == T_string) {
                     std::string ch;
                     if (!utf8_char_at(((struct string_value_t *)iter)->value, i,
@@ -3207,14 +3276,29 @@ struct value_t *eval(struct ast *a) {
                         leave = true;
                         break;
                     }
-                    item = newstrval(ch.c_str());
+                    if (f->value_name) {
+                        item = newintval((long long)i);
+                        second = newstrval(ch.c_str());
+                    } else {
+                        item = newstrval(ch.c_str());
+                    }
                 } else {
-                    item = newintval((unsigned char)
-                        ((struct bytes_value_t *)iter)->value[i]);
+                    int byte = (unsigned char)
+                        ((struct bytes_value_t *)iter)->value[i];
+                    if (f->value_name) {
+                        item = newintval((long long)i);
+                        second = newintval(byte);
+                    } else {
+                        item = newintval(byte);
+                    }
                 }
 
                 freeval(sym->val);
                 sym->val = item;
+                if (value_sym) {
+                    freeval(value_sym->val);
+                    value_sym->val = second;
+                }
 
                 errors_before = g_runtime_error_count;
                 struct value_t *body = eval(f->body);

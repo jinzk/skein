@@ -384,12 +384,24 @@ while (x > 0) {
   x = x - 1;
 }
 
+do {
+  x = x - 1;
+} while (x > 0);
+
 for (let i = 0; i < 3; i = i + 1) {
   print(i);
 }
 
 for (let x in [1, 2, 3]) {
   print(x);
+}
+
+for (let index, value in [10, 20]) {
+  print(str(index) + ":" + str(value));
+}
+
+for (let key, value in {"a": 1, "b": 2}) {
+  print(key + "=" + str(value));
 }
 
 for (let i in range(0, 3)) {
@@ -403,15 +415,16 @@ for (let key in {"a": 1, "b": 2}) {
 
 `for ... in` 规则：
 
-- list 遍历元素；
-- dict 遍历键；
-- string 遍历 UTF-8 字符；
-- bytes 遍历 `0..255` 的字节值；
+- 单变量：list 遍历元素，dict 遍历键；
+- 双变量：list 得到 `index, value`，dict 得到 `key, value`；
+- string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
 - 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；
 - 循环变量只在循环作用域内有效；
 - 支持 `break` / `continue` / `return`。
 
-`break` / `continue` 可用于 `while` 和 `for`。
+`do ... while` 至少执行一次循环体；`while` 可以写在 `}` 的下一行，结尾分号可省略。
+
+`break` / `continue` 可用于 `while`、`do while` 和 `for`。
 
 函数、匿名函数与闭包：
 

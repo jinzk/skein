@@ -271,7 +271,8 @@ struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct 
     return (struct ast *)a;
 }
 
-struct ast *newforin(char *name, struct ast *iterable, struct ast *body) {
+struct ast *newforin(char *name, char *value_name, struct ast *iterable,
+                     struct ast *body) {
     struct forinloop *a =
         (struct forinloop *)std::malloc(sizeof(struct forinloop));
     if (!a) {
@@ -281,6 +282,7 @@ struct ast *newforin(char *name, struct ast *iterable, struct ast *body) {
     a->nodetype = 'F';
     set_loc_from(a, iterable ? iterable : body);
     a->name = name;
+    a->value_name = value_name;
     a->iterable = iterable;
     a->body = body;
     return (struct ast *)a;
@@ -467,7 +469,8 @@ void treefree(struct ast *a) {
             break;
         }
         case 'I':
-        case 'W': {
+        case 'W':
+        case 'E': {
             struct flow *f = (struct flow *)a;
             treefree(f->cond);
             treefree(f->tl);
@@ -487,6 +490,7 @@ void treefree(struct ast *a) {
             treefree(f->iterable);
             treefree(f->body);
             std::free(f->name);
+            std::free(f->value_name);
             break;
         }
         case 'C':

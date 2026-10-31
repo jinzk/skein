@@ -166,7 +166,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <fn> BUILTIN "built-in function"
 %token <str> XSTRING "string"
 %token EOL "end of line"
-%token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let" CONST "const"
+%token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
@@ -208,9 +208,12 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | IF '(' exp ')' scope ELSE scope     { $$ = newflow('I', $3, $5, $7); }
     | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
+    | DO scope eols WHILE '(' exp ')'     { $$ = newflow('E', $6, $2, NULL); }
     | FOR '(' forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
-    | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, $6, $8); }
+    | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
+    | FOR '(' LET NAME ',' NAME IN exp ')' scope
+                                           { $$ = newforin($4, $6, $8, $10); }
     | funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($2, $4, NULL); }
     | funcstart NAME '(' symlist ')' '{' list '}'
@@ -343,6 +346,10 @@ forcond: %empty                           { $$ = NULL; }
 
 forend: %empty                            { $$ = NULL; }
     | exp                                 { $$ = $1; }
+    ;
+
+eols: %empty
+    | EOL eols
     ;
 
 explist: %empty                            { $$ = NULL; }

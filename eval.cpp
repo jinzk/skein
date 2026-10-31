@@ -2977,12 +2977,12 @@ struct value_t *eval(struct ast *a) {
             bool left = truthy(l);
             freeval(l);
             if (!left) {
-                ret = newintval(0);
+                ret = newboolval(false);
                 break;
             }
             struct value_t *r = eval(a->r);
             if (!r) break;
-            ret = newintval(truthy(r) ? 1 : 0);
+            ret = newboolval(truthy(r));
             freeval(r);
             break;
         }
@@ -2993,12 +2993,12 @@ struct value_t *eval(struct ast *a) {
             bool left = truthy(l);
             freeval(l);
             if (left) {
-                ret = newintval(1);
+                ret = newboolval(true);
                 break;
             }
             struct value_t *r = eval(a->r);
             if (!r) break;
-            ret = newintval(truthy(r) ? 1 : 0);
+            ret = newboolval(truthy(r));
             freeval(r);
             break;
         }
@@ -3006,7 +3006,7 @@ struct value_t *eval(struct ast *a) {
         case '!': {
             struct value_t *v = eval(a->l);
             if (!v) break;
-            ret = newintval(truthy(v) ? 0 : 1);
+            ret = newboolval(!truthy(v));
             freeval(v);
             break;
         }

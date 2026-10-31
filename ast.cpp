@@ -470,7 +470,8 @@ void treefree(struct ast *a) {
         }
         case 'I':
         case 'W':
-        case 'E': {
+        case 'E':
+        case 'T': {
             struct flow *f = (struct flow *)a;
             treefree(f->cond);
             treefree(f->tl);

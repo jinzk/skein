@@ -215,6 +215,26 @@ def main():
     check("bool arithmetic error", "true + 1\n",
           stderr="cannot add bool and int")
 
+    check("ternary true", "1 ? 2 : 3\n", stdout="= 2")
+    check("ternary false", "0 ? 2 : 3\n", stdout="= 3")
+    check("ternary string", 'true ? "yes" : "no"\n', stdout="= yes")
+    check("ternary short-circuit then", "1 ? 5 : 1/0\n", stdout="= 5")
+    check("ternary short-circuit else", "0 ? 1/0 : 5\n", stdout="= 5")
+    check("ternary right associative", "0 ? 1 : 0 ? 2 : 3\n",
+          stdout="= 3")
+    check("ternary nested then", "1 ? 0 ? 2 : 3 : 4\n",
+          stdout="= 3")
+    check("ternary comparison condition", '1 < 2 ? "a" : "b"\n',
+          stdout="= a")
+    check("ternary assignment",
+          "let x = 0;\nlet y = x ? 10 : 20;\ny\n", stdout="= 20")
+    check("ternary list element", "[0 ? 1 : 2, 3]\n", stdout="= [2, 3]")
+    check("ternary dict value", '{"a": 0 ? 1 : 2}\n', stdout="{a: 2}")
+    check("ternary dict key", '{1 ? "a" : "b": 2}\n', stdout="{a: 2}")
+    check("ternary bool result",
+          "func f(x: bool) { return x; }\nf(1 < 2 ? true : false)\n",
+          stdout="= true")
+
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")

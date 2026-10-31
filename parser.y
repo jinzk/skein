@@ -175,6 +175,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token EMPTY_BLOCK_CLOSE "empty block"
 
 %right '='
+%right '?'
 %left LOGOR
 %left LOGAND
 %left '|'
@@ -299,6 +300,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
+    | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
     | NAME                                { $$ = newref($1); }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
     | exp '(' explist ')'      { $$ = newcall($1, $3); }

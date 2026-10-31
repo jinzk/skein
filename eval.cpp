@@ -3098,6 +3098,21 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
+        case 'T': {
+            struct flow *f = (struct flow *)a;
+            int errors_before = g_runtime_error_count;
+            struct value_t *cond = eval(f->cond);
+            if (g_runtime_error_count != errors_before) {
+                freeval(cond);
+                break;
+            }
+            if (!cond) break;
+            bool b = truthy(cond);
+            freeval(cond);
+            ret = eval(b ? f->tl : f->el);
+            break;
+        }
+
         case 'I': {
             int errors_before = g_runtime_error_count;
             struct value_t *cond = eval(((struct flow *)a)->cond);

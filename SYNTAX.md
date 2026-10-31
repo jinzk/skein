@@ -1255,7 +1255,7 @@ std.bytes.hex(bytes_from_hex("00ff"))
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`status` / `command_status`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
-- `std.net`：同步 TCP 客户端/服务端和 DNS 解析，底层使用 libuv；
+- `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
 - `std.task`：原生 task、等待、批量等待、取消和完成状态；
 - `std.ffi`：可选的 libffi C ABI 调用。
 
@@ -1293,7 +1293,31 @@ peer_addr(socket)
 {address: "127.0.0.1", port: 8080, family: "ipv4"}
 ```
 
-`std.net` 的公开 API 仍是同步的；libuv 事件循环只在内部运行，不会作为对象暴露给脚本。
+`std.net` 同时提供同步接口和 task 形式的异步接口；libuv 事件循环只在内部运行，不会作为对象暴露给脚本。
+
+异步网络：
+
+```text
+tcp_connect_async(host, port[, timeout_ms[, family]]) → task
+tcp_listen_async(host, port[, timeout_ms[, family]])  → task
+accept_async(listener[, timeout_ms])                  → task
+send_async(socket, data[, timeout_ms])                → task
+recv_async(socket, size[, timeout_ms])                → task
+resolve_async(host[, timeout_ms[, family]])           → task
+shutdown_async(socket[, timeout_ms])                  → task
+```
+
+```text
+import std;
+
+let t = std.net.tcp_connect_async("127.0.0.1", 8080, 1000);
+let socket = std.task.wait(t);
+```
+
+- 操作自身的 `timeout_ms` 和 `std.task.wait` 的超时是两回事；
+- `std.task.cancel` 会取消底层网络操作；
+- 多个 task 可以用 `std.task.wait_all` 并发等待；
+- `std.net.close` 仍然同步。
 
 Task 示例：
 
@@ -1323,7 +1347,7 @@ done(task)                 → bool
 
 task 是协作式调度的：只有运行事件循环时才会推进，例如 `wait`、`wait_all` 或同步网络调用期间。
 
-目前 task 只覆盖原生定时器和后续异步 I/O；还不能用 `spawn` 异步执行脚本函数，因为脚本函数尚未支持挂起和恢复。
+目前 task 覆盖原生定时器和 `std.net.*_async` 异步 I/O；还不能用 `spawn` 异步执行脚本函数，因为脚本函数尚未支持挂起和恢复。
 
 FFI 示例：
 
@@ -1375,7 +1399,8 @@ std.ffi.buffer_free
 - 不支持结构体、回调、可变参数；
 - 网络和 FFI 错误当前是运行时错误，不能通过 `on error` 捕获；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
-- `std.net` 暂不支持 TLS、HTTP 或异步网络 API；libuv 事件循环目前只驱动同步网络调用和 task；
+- `std.net` 暂不支持 TLS、HTTP；异步网络目前使用 `std.net.*_async` 返回 task，不需要 `async/await` 语法；
+- `std.net.*_async` 的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 目前没有 `spawn`，脚本函数还不能挂起和恢复；
 - `std.task.wait` / `wait_all` 超时不会自动取消 task，需要显式 `cancel`；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回。

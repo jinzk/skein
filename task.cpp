@@ -13,8 +13,6 @@
 #include <utility>
 #include <vector>
 
-namespace {
-
 enum task_status {
     TASK_PENDING,
     TASK_DONE,
@@ -37,13 +35,17 @@ struct task {
     value_t *result = NULL;
     std::string error;
     uv_timer_t *timer = NULL;
+    std::function<void()> cancel_operation;
 
     task() {
         task_registry().push_back(this);
     }
 
     ~task() {
-        close_timer();
+        if (status == TASK_PENDING)
+            cancel();
+        else
+            close_timer();
         std::vector<task *> &tasks = task_registry();
         tasks.erase(std::remove(tasks.begin(), tasks.end(), this),
                     tasks.end());
@@ -75,6 +77,7 @@ struct task {
         status = TASK_DONE;
         result = value;
         close_timer();
+        cancel_operation = nullptr;
     }
 
     void fail(const std::string &message) {
@@ -83,6 +86,7 @@ struct task {
         status = TASK_FAILED;
         error = message;
         close_timer();
+        cancel_operation = nullptr;
     }
 
     bool cancel() {
@@ -91,6 +95,10 @@ struct task {
         status = TASK_CANCELLED;
         error = "task was cancelled";
         close_timer();
+        std::function<void()> cancel = std::move(cancel_operation);
+        cancel_operation = nullptr;
+        if (cancel)
+            cancel();
         return true;
     }
 };
@@ -117,7 +125,7 @@ const struct native_type task_type = {
     "task", task_describe
 };
 
-value_t *new_task_value(std::shared_ptr<task> value) {
+value_t *make_task_value(std::shared_ptr<task> value) {
     return newuserdataval(&task_type, value);
 }
 
@@ -212,7 +220,7 @@ value_t *task_sleep(const std::vector<value_t *> &args) {
         yyerror("task.sleep: cannot create timer");
         return NULL;
     }
-    return new_task_value(value);
+    return make_task_value(value);
 }
 
 value_t *task_yield(const std::vector<value_t *> &args) {
@@ -225,7 +233,7 @@ value_t *task_yield(const std::vector<value_t *> &args) {
         yyerror("task.yield: cannot create timer");
         return NULL;
     }
-    return new_task_value(value);
+    return make_task_value(value);
 }
 
 value_t *task_wait(const std::vector<value_t *> &args) {
@@ -358,7 +366,32 @@ value_t *task_done(const std::vector<value_t *> &args) {
     return newboolval(value->done());
 }
 
-} // namespace
+task_ptr task_create() {
+    return std::make_shared<task>();
+}
+
+value_t *new_task_value(task_ptr value) {
+    return make_task_value(std::move(value));
+}
+
+void task_set_cancel(const task_ptr &value,
+                     std::function<void()> cancel) {
+    if (value && value->status == TASK_PENDING)
+        value->cancel_operation = std::move(cancel);
+}
+
+void task_complete(const task_ptr &value, value_t *result) {
+    if (!value) {
+        freeval(result);
+        return;
+    }
+    value->complete(result);
+}
+
+void task_fail(const task_ptr &value, const std::string &error) {
+    if (value)
+        value->fail(error);
+}
 
 void task_shutdown() {
     std::vector<task *> &tasks = task_registry();

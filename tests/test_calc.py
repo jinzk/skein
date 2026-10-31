@@ -1086,6 +1086,31 @@ def main():
         'import std;\nlen(std.net.resolve("localhost", 1000, "ipv4")) > 0\n',
         stdout="= true",
     )
+    check(
+        "std net resolve async",
+        "import std;\n"
+        'let t = std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        "len(std.task.wait(t)) > 0\n",
+        stdout="= true",
+    )
+    check(
+        "std net concurrent resolve async",
+        "import std;\n"
+        'let a = std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        'let b = std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        "let values = std.task.wait_all([a, b]);\n"
+        "len(values) == 2 && len(values[0]) > 0 && len(values[1]) > 0\n",
+        stdout="= true",
+    )
+    check(
+        "std net async resolve cancel",
+        "import std;\n"
+        'let t = std.net.resolve_async("localhost", 5000);\n'
+        "std.task.cancel(t)\n"
+        "std.task.wait(t);\n",
+        stdout="= true",
+        stderr="task was cancelled",
+    )
     try:
         import socket
         import threading
@@ -1122,6 +1147,43 @@ def main():
         assert net_proc.returncode == 0, net_proc.stderr
         assert "echo:hello" in net_proc.stdout, net_proc.stdout
         assert received == [b"hello"], received
+
+        async_server = socket.socket()
+        async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        async_server.bind(("127.0.0.1", 0))
+        async_server.listen(1)
+        async_server.settimeout(5)
+        async_port = async_server.getsockname()[1]
+        async_received = []
+
+        def async_echo_server():
+            try:
+                client, _ = async_server.accept()
+                data = client.recv(100)
+                async_received.append(data)
+                client.sendall(b"async:" + data)
+                client.close()
+            finally:
+                async_server.close()
+
+        async_thread = threading.Thread(target=async_echo_server)
+        async_thread.start()
+        async_proc = run(
+            "import std;\n"
+            f'let t = std.net.tcp_connect_async('
+            f'"127.0.0.1", {async_port}, 1000, "ipv4");\n'
+            "let s = std.task.wait(t);\n"
+            'let st = std.net.send_async(s, "hello", 1000);\n'
+            "std.task.wait(st)\n"
+            "let rt = std.net.recv_async(s, 100, 1000);\n"
+            "let data = std.task.wait(rt);\n"
+            "print(bytes_to_string(data));\n"
+            "std.net.close(s);\n"
+        )
+        async_thread.join(timeout=5)
+        assert async_proc.returncode == 0, async_proc.stderr
+        assert "async:hello" in async_proc.stdout, async_proc.stdout
+        assert async_received == [b"hello"], async_received
 
         probe = socket.socket()
         probe.bind(("127.0.0.1", 0))
@@ -1174,6 +1236,65 @@ def main():
                 server_proc.kill()
                 server_proc.wait()
 
+        async_probe = socket.socket()
+        async_probe.bind(("127.0.0.1", 0))
+        async_listen_port = async_probe.getsockname()[1]
+        async_probe.close()
+        async_server_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        client = None
+        try:
+            async_server_proc.stdin.write(
+                "import std;\n"
+                f'let lt = std.net.tcp_listen_async('
+                f'"127.0.0.1", {async_listen_port}, 1000, "ipv4");\n'
+                "let listener = std.task.wait(lt);\n"
+                "let at = std.net.accept_async(listener, 1000);\n"
+                "let client = std.task.wait(at);\n"
+                "let rt = std.net.recv_async(client, 100, 1000);\n"
+                "let data = std.task.wait(rt);\n"
+                "let st = std.net.send_async(client, bytes_concat("
+                'bytes_from_string("async:"), data), 1000);\n'
+                "std.task.wait(st)\n"
+                "let ht = std.net.shutdown_async(client, 1000);\n"
+                "std.task.wait(ht)\n"
+                "std.net.close(client);\n"
+                "std.net.close(listener);\n"
+            )
+            async_server_proc.stdin.close()
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    client = socket.create_connection(
+                        ("127.0.0.1", async_listen_port), timeout=0.2
+                    )
+                    break
+                except OSError:
+                    if async_server_proc.poll() is not None:
+                        break
+                    time.sleep(0.02)
+            assert client is not None, "calc async listener did not accept"
+            client.sendall(b"hello")
+            assert client.recv(100) == b"async:hello"
+            assert client.recv(100) == b""
+            client.close()
+            client = None
+            async_server_proc.wait(timeout=5)
+            err = async_server_proc.stderr.read()
+            assert async_server_proc.returncode == 0, err
+        finally:
+            if client is not None:
+                client.close()
+            if async_server_proc.poll() is None:
+                async_server_proc.kill()
+                async_server_proc.wait()
+
         check(
             "std net accept timeout",
             "import std;\n"
@@ -1183,6 +1304,41 @@ def main():
             "std.net.close(s);\n",
             stdout="= ipv4",
             stderr="timed out",
+        )
+        check(
+            "std net async accept timeout",
+            "import std;\n"
+            'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            "let a = std.net.accept_async(listener, 50);\n"
+            "std.task.wait(a);\n"
+            "std.net.close(listener);\n",
+            stderr="accept_async: timed out",
+        )
+        check(
+            "std net async cancel",
+            "import std;\n"
+            'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            "let a = std.net.accept_async(listener, 1000);\n"
+            "std.task.cancel(a)\n"
+            "std.task.wait(a);\n"
+            "std.net.close(listener);\n",
+            stdout="= true",
+            stderr="task was cancelled",
+        )
+        check(
+            "std net async close pending",
+            "import std;\n"
+            'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            "let a = std.net.accept_async(listener, 1000);\n"
+            "std.net.close(listener);\n"
+            "std.task.wait(a);\n",
+            stderr="accept_async: listener closed",
+        )
+        check(
+            "std net async pending shutdown",
+            "import std;\n"
+            'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            "let pending = std.net.accept_async(listener, 10000);\n",
         )
         check(
             "std net ipv4 family",
@@ -1211,13 +1367,16 @@ def main():
         bad_port = socket.socket()
         bad_port.bind(("127.0.0.1", 0))
         bad_port_number = bad_port.getsockname()[1]
-        bad_port.close()
-        check(
-            "std net connect failure",
-            "import std;\n"
-            f'std.net.tcp_connect("127.0.0.1", {bad_port_number}, 100);\n',
-            stderr="tcp_connect:",
-        )
+        try:
+            check(
+                "std net connect failure",
+                "import std;\n"
+                f'std.net.tcp_connect('
+                f'"127.0.0.1", {bad_port_number}, 100);\n',
+                stderr="tcp_connect:",
+            )
+        finally:
+            bad_port.close()
 
         silent = socket.socket()
         silent.bind(("127.0.0.1", 0))

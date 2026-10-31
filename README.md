@@ -24,7 +24,7 @@ sudo apt install libuv1-dev
 cmake -S . -B build -G Ninja -DCALC_ENABLE_FFI=OFF
 ```
 
-`std.net` 对外仍是同步 API；libuv 只在内部驱动 socket、DNS 和 `std.task`，不向脚本暴露事件循环对象。
+`std.net` 提供同步 API 和 task 形式的异步 API；libuv 只在内部驱动 socket、DNS 和 `std.task`，不向脚本暴露事件循环对象。
 
 运行测试：
 
@@ -269,6 +269,31 @@ std.net.peer_addr(socket)
 
 `tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。
 
+异步网络：
+
+```text
+let t = std.net.tcp_connect_async("127.0.0.1", 8080, 1000);
+let socket = std.task.wait(t);
+```
+
+异步函数：
+
+```text
+tcp_connect_async(host, port[, timeout_ms[, family]]) → task
+tcp_listen_async(host, port[, timeout_ms[, family]])  → task
+accept_async(listener[, timeout_ms])                  → task
+send_async(socket, data[, timeout_ms])                → task
+recv_async(socket, size[, timeout_ms])                → task
+resolve_async(host[, timeout_ms[, family]])           → task
+shutdown_async(socket[, timeout_ms])                  → task
+```
+
+- task 完成值分别是 socket、listener、发送字节数、bytes、地址 list 或 null；
+- `timeout_ms` 是异步操作自身的超时，不是 `std.task.wait` 的超时；
+- `std.task.cancel(task)` 会取消底层网络操作；
+- 可以同时启动多个 task，再用 `std.task.wait_all` 等待；
+- `std.net.close` 仍是同步操作。
+
 Task：
 
 ```text
@@ -297,7 +322,7 @@ std.task.done(task)           → true / false
 - `yield` 是函数，不是关键字；
 - `wait` 超时不会自动取消 task，需要显式 `cancel`；
 - 退出解释器时会取消剩余 task；
-- 目前还没有 `spawn(func, ...)`，因为脚本函数还不能挂起；后续异步网络操作会复用同一套 task 和事件循环。
+- 目前还没有 `spawn(func, ...)`，因为脚本函数还不能挂起；`std.net.*_async` 已经复用同一套 task 和事件循环。
 
 FFI：
 
@@ -453,6 +478,13 @@ std.net.shutdown
 std.net.resolve
 std.net.local_addr
 std.net.peer_addr
+std.net.tcp_connect_async
+std.net.tcp_listen_async
+std.net.accept_async
+std.net.send_async
+std.net.recv_async
+std.net.resolve_async
+std.net.shutdown_async
 
 std.task.sleep
 std.task.yield
@@ -507,9 +539,11 @@ std.bytes.from_int
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
-- `std.net` 提供同步 TCP 客户端/服务端和 DNS 解析，数据使用 `bytes`，底层由 libuv 驱动；
+- `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
+- `std.net.*_async` 返回 task，底层复用同一事件循环；
+- 异步网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
 - task 是协作式调度的，只有在 `wait` / `wait_all` 或同步网络等待运行事件循环时才推进；
 - `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
@@ -522,7 +556,7 @@ std.bytes.from_int
 - `std.ffi` 是可选模块，缺少 libffi 时不可用；
 - 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
-- `std.net` 暂不支持 TLS、HTTP 或异步网络 API；libuv 事件循环目前只驱动同步网络调用和 task；
+- `std.net` 暂不支持 TLS、HTTP；异步网络目前使用 task，不需要 `async/await` 语法；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 

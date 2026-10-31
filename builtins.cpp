@@ -307,7 +307,7 @@ static const char *math_builtin_name(int functype) {
 
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
-    if (functype >= B_net_tcp_connect && functype <= B_net_peer_addr)
+    if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)
         return call_net_builtin(functype, args);
 #ifdef CALC_ENABLE_FFI
     if (functype >= B_ffi_open && functype <= B_ffi_buffer_free)

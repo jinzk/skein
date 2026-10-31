@@ -3,12 +3,15 @@
 #include "ast.h"
 #include "event_loop.h"
 #include "repl.h"
+#include "task.h"
 #include "valuetype.h"
 
 #include <uv.h>
 
+#include <algorithm>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -75,7 +78,158 @@ bool getaddrinfo_async(const char *node, const char *service,
     return true;
 }
 
+void on_async_timer_close(uv_handle_t *handle) {
+    delete (uv_timer_t *)handle;
+}
+
+struct async_state {
+    std::weak_ptr<task> task_ref;
+    std::function<void()> cancel_operation;
+    uv_timer_t *timer = NULL;
+    std::string timeout_error;
+    bool finished = false;
+    bool callback_after_cancel = true;
+
+    virtual ~async_state() {
+        close_timer();
+    }
+
+    void close_timer() {
+        if (!timer)
+            return;
+        uv_timer_t *handle = timer;
+        timer = NULL;
+        handle->data = NULL;
+        uv_timer_stop(handle);
+        if (event_loop_initialized())
+            uv_close((uv_handle_t *)handle, on_async_timer_close);
+        else
+            delete handle;
+    }
+};
+
+void async_complete(async_state *state, value_t *value) {
+    if (!state) {
+        freeval(value);
+        return;
+    }
+    if (state->finished) {
+        freeval(value);
+        delete state;
+        return;
+    }
+    state->finished = true;
+    state->close_timer();
+    task_ptr task = state->task_ref.lock();
+    if (task)
+        task_complete(task, value);
+    else
+        freeval(value);
+    delete state;
+}
+
+void async_fail(async_state *state, const std::string &error) {
+    if (!state)
+        return;
+    if (state->finished) {
+        delete state;
+        return;
+    }
+    state->finished = true;
+    state->close_timer();
+    task_ptr task = state->task_ref.lock();
+    if (task)
+        task_fail(task, error);
+    delete state;
+}
+
+void async_cancel(async_state *state) {
+    if (!state || state->finished)
+        return;
+    state->finished = true;
+    state->close_timer();
+    std::function<void()> cancel = std::move(state->cancel_operation);
+    state->cancel_operation = nullptr;
+    if (cancel)
+        cancel();
+    if (!state->callback_after_cancel)
+        delete state;
+}
+
+void async_timeout(async_state *state) {
+    if (!state || state->finished)
+        return;
+    state->finished = true;
+    state->close_timer();
+    task_ptr task = state->task_ref.lock();
+    if (task)
+        task_fail(task, state->timeout_error);
+    std::function<void()> cancel = std::move(state->cancel_operation);
+    state->cancel_operation = nullptr;
+    if (cancel)
+        cancel();
+    if (!state->callback_after_cancel)
+        delete state;
+}
+
+void on_async_timeout(uv_timer_t *timer) {
+    async_state *state = (async_state *)timer->data;
+    timer->data = NULL;
+    if (!state) {
+        uv_close((uv_handle_t *)timer, on_async_timer_close);
+        return;
+    }
+    state->timer = NULL;
+    uv_timer_stop(timer);
+    uv_close((uv_handle_t *)timer, on_async_timer_close);
+    async_timeout(state);
+}
+
+bool start_async_timeout(async_state *state, long long timeout_ms) {
+    if (timeout_ms <= 0)
+        return true;
+    state->timer = new uv_timer_t;
+    int rc = uv_timer_init(event_loop_handle(), state->timer);
+    if (rc < 0) {
+        delete state->timer;
+        state->timer = NULL;
+        return false;
+    }
+    state->timer->data = state;
+    rc = uv_timer_start(state->timer, on_async_timeout,
+                        (uint64_t)timeout_ms, 0);
+    if (rc < 0) {
+        state->close_timer();
+        return false;
+    }
+    return true;
+}
+
+bool prepare_async(async_state *state, task_ptr &task, long long timeout_ms,
+                   const std::string &timeout_error) {
+    if (!event_loop_init())
+        return false;
+    task = task_create();
+    state->task_ref = task;
+    state->timeout_error = timeout_error;
+    if (!start_async_timeout(state, timeout_ms)) {
+        task_fail(task, "cannot create timeout timer");
+        return false;
+    }
+    task_set_cancel(task, [state] {
+        async_cancel(state);
+    });
+    return true;
+}
+
+std::string async_timeout_error(const char *operation, long long timeout_ms) {
+    return std::string(operation) + ": timed out after " +
+           std::to_string(timeout_ms) + " ms";
+}
+
 struct net_socket;
+struct accept_async_op;
+struct recv_async_op;
 
 struct accept_state {
     bool done = false;
@@ -88,6 +242,8 @@ struct net_socket {
     bool listening = false;
     accept_state *pending_accept = NULL;
     std::deque<std::shared_ptr<net_socket>> pending_clients;
+    std::deque<accept_async_op *> pending_async_accepts;
+    recv_async_op *pending_async_read = NULL;
 
     bool reading = false;
     bool read_done = false;
@@ -113,6 +269,46 @@ struct net_socket {
             uv_close((uv_handle_t *)old, on_tcp_close);
     }
 };
+
+struct accept_async_op : async_state {
+    std::shared_ptr<net_socket> listener;
+};
+
+struct recv_async_op : async_state {
+    std::shared_ptr<net_socket> socket;
+};
+
+void remove_accept_async(accept_async_op *op) {
+    if (!op || !op->listener)
+        return;
+    std::deque<accept_async_op *> &queue =
+        op->listener->pending_async_accepts;
+    queue.erase(std::remove(queue.begin(), queue.end(), op), queue.end());
+}
+
+void cancel_accept_async(accept_async_op *op) {
+    remove_accept_async(op);
+}
+
+void fail_async_accept(net_socket *listener, const std::string &error) {
+    if (!listener || listener->pending_async_accepts.empty())
+        return;
+    accept_async_op *op = listener->pending_async_accepts.front();
+    listener->pending_async_accepts.pop_front();
+    async_fail(op, error);
+}
+
+void cancel_recv_async(recv_async_op *op) {
+    if (!op || !op->socket)
+        return;
+    net_socket *socket = op->socket.get();
+    if (socket->pending_async_read == op)
+        socket->pending_async_read = NULL;
+    if (socket->handle)
+        uv_read_stop((uv_stream_t *)socket->handle);
+    socket->reading = false;
+    socket->read_done = true;
+}
 
 std::shared_ptr<net_socket> new_socket() {
     if (!event_loop_init())
@@ -225,6 +421,37 @@ void report_timeout(const char *operation, long long timeout_ms) {
     yyerror("%s: timed out after %lld ms", operation, timeout_ms);
 }
 
+value_t *address_list_from_addrinfo(struct addrinfo *addresses) {
+    struct list_value_t *list = newlistval();
+    for (struct addrinfo *address = addresses; address;
+         address = address->ai_next) {
+        char host[64];
+        int rc = -1;
+        if (address->ai_family == AF_INET) {
+            rc = uv_ip4_name((const struct sockaddr_in *)address->ai_addr,
+                             host, sizeof host);
+        } else if (address->ai_family == AF_INET6) {
+            rc = uv_ip6_name((const struct sockaddr_in6 *)address->ai_addr,
+                             host, sizeof host);
+        }
+        if (rc != 0)
+            continue;
+
+        bool duplicate = false;
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            if (std::strcmp(
+                    ((struct string_value_t *)list->payload->items[i])->value,
+                    host) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate)
+            list->payload->items.push_back(newstrval(host));
+    }
+    return (value_t *)list;
+}
+
 value_t *address_value(const struct sockaddr *address) {
     char host[64];
     const char *family = NULL;
@@ -304,6 +531,10 @@ void on_connection(uv_stream_t *server, int status) {
             !listener->pending_accept->done) {
             listener->pending_accept->status = status;
             listener->pending_accept->done = true;
+        } else {
+            fail_async_accept(
+                listener, std::string("accept_async: ") +
+                              uv_strerror(status));
         }
         return;
     }
@@ -314,6 +545,8 @@ void on_connection(uv_stream_t *server, int status) {
             !listener->pending_accept->done) {
             listener->pending_accept->status = UV_ENOMEM;
             listener->pending_accept->done = true;
+        } else {
+            fail_async_accept(listener, "accept_async: out of memory");
         }
         return;
     }
@@ -325,6 +558,9 @@ void on_connection(uv_stream_t *server, int status) {
             !listener->pending_accept->done) {
             listener->pending_accept->status = rc;
             listener->pending_accept->done = true;
+        } else {
+            fail_async_accept(listener, std::string("accept_async: ") +
+                                            uv_strerror(rc));
         }
         return;
     }
@@ -333,6 +569,10 @@ void on_connection(uv_stream_t *server, int status) {
         listener->pending_accept->client = client;
         listener->pending_accept->status = 0;
         listener->pending_accept->done = true;
+    } else if (!listener->pending_async_accepts.empty()) {
+        accept_async_op *op = listener->pending_async_accepts.front();
+        listener->pending_async_accepts.pop_front();
+        async_complete(op, new_socket_value(client));
     } else if (listener->pending_clients.size() < 16) {
         listener->pending_clients.push_back(std::move(client));
     } else {
@@ -385,7 +625,20 @@ void on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *) {
 
     socket->reading = false;
     uv_read_stop(stream);
-    socket->read_done = true;
+
+    recv_async_op *op = socket->pending_async_read;
+    if (!op) {
+        socket->read_done = true;
+        return;
+    }
+
+    socket->pending_async_read = NULL;
+    if (socket->read_status < 0) {
+        async_fail(op, std::string("recv_async: ") +
+                           uv_strerror(socket->read_status));
+    } else {
+        async_complete(op, newbytesval(std::move(socket->read_result)));
+    }
 }
 
 value_t *net_tcp_connect(const std::vector<value_t *> &args) {
@@ -720,6 +973,10 @@ value_t *net_recv(const std::vector<value_t *> &args) {
         yyerror("recv: %s", uv_strerror(socket->read_error));
         return NULL;
     }
+    if (socket->reading || socket->pending_async_read) {
+        yyerror("recv: another read is already pending");
+        return NULL;
+    }
     if (g_interrupted)
         return NULL;
 
@@ -767,6 +1024,20 @@ value_t *net_close(const std::vector<value_t *> &args) {
         return NULL;
     socket->pending_accept = NULL;
     socket->pending_clients.clear();
+    std::deque<accept_async_op *> accepts =
+        std::move(socket->pending_async_accepts);
+    socket->pending_async_accepts.clear();
+    for (size_t i = 0; i < accepts.size(); ++i) {
+        async_fail(accepts[i], "accept_async: listener closed");
+    }
+    recv_async_op *read_op = socket->pending_async_read;
+    socket->pending_async_read = NULL;
+    if (read_op) {
+        if (socket->handle)
+            uv_read_stop((uv_stream_t *)socket->handle);
+        socket->reading = false;
+        async_fail(read_op, "recv_async: socket closed");
+    }
     socket->listening = false;
     socket->reading = false;
     socket->read_buffer.clear();
@@ -850,6 +1121,602 @@ value_t *net_address(const std::vector<value_t *> &args, bool peer) {
     return result;
 }
 
+value_t *completed_task(value_t *value) {
+    task_ptr task = task_create();
+    task_complete(task, value);
+    return new_task_value(std::move(task));
+}
+
+value_t *failed_task(const std::string &error) {
+    task_ptr task = task_create();
+    task_fail(task, error);
+    return new_task_value(std::move(task));
+}
+
+struct resolve_async_op : async_state {
+    uv_getaddrinfo_t request = {};
+};
+
+void on_resolve_async(uv_getaddrinfo_t *request, int status,
+                      struct addrinfo *addresses) {
+    resolve_async_op *op = (resolve_async_op *)request->data;
+    if (op->finished) {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+        delete op;
+        return;
+    }
+    if (status < 0) {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+        async_fail(op, std::string("resolve_async: ") +
+                          uv_strerror(status));
+        return;
+    }
+    value_t *list = address_list_from_addrinfo(addresses);
+    if (addresses)
+        uv_freeaddrinfo(addresses);
+    async_complete(op, list);
+}
+
+value_t *net_resolve_async(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 3) {
+        yyerror("std.net.resolve_async expects 1 to 3 arguments");
+        return NULL;
+    }
+    if (args[0]->type != T_string) {
+        yyerror("resolve_async host must be a string");
+        return NULL;
+    }
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 1, timeout_ms))
+        return NULL;
+    int family = AF_UNSPEC;
+    if (!get_optional_family(args, 2, family))
+        return NULL;
+    if (g_interrupted)
+        return NULL;
+
+    struct addrinfo hints = {};
+    hints.ai_family = family;
+    hints.ai_socktype = SOCK_STREAM;
+
+    resolve_async_op *op = new resolve_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("resolve_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("resolve_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->callback_after_cancel = true;
+    op->cancel_operation = [op] {
+        uv_cancel((uv_req_t *)&op->request);
+    };
+    op->request.data = op;
+
+    int rc = uv_getaddrinfo(event_loop_handle(), &op->request,
+                            on_resolve_async,
+                            ((struct string_value_t *)args[0])->value,
+                            NULL, &hints);
+    if (rc < 0)
+        async_fail(op, std::string("resolve_async: ") + uv_strerror(rc));
+    return new_task_value(std::move(task));
+}
+
+enum connect_async_phase {
+    CONNECT_ASYNC_RESOLVE,
+    CONNECT_ASYNC_CONNECT
+};
+
+struct connect_async_op : async_state {
+    uv_getaddrinfo_t resolve_request = {};
+    uv_connect_t connect_request = {};
+    std::shared_ptr<net_socket> socket;
+    struct addrinfo *addresses = NULL;
+    struct addrinfo *current = NULL;
+    int phase = CONNECT_ASYNC_RESOLVE;
+    int last_status = 0;
+
+    ~connect_async_op() override {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+    }
+};
+
+void start_next_connect(connect_async_op *op);
+
+void on_connect_async(uv_connect_t *request, int status) {
+    connect_async_op *op = (connect_async_op *)request->data;
+    if (op->finished) {
+        delete op;
+        return;
+    }
+    if (status == 0) {
+        async_complete(op, new_socket_value(std::move(op->socket)));
+        return;
+    }
+    op->last_status = status;
+    if (op->socket) {
+        op->socket->close();
+        op->socket.reset();
+    }
+    op->current = op->current ? op->current->ai_next : NULL;
+    start_next_connect(op);
+}
+
+void start_next_connect(connect_async_op *op) {
+    while (!op->finished && op->current) {
+        op->socket = new_socket();
+        if (!op->socket) {
+            op->last_status = UV_ENOMEM;
+            op->current = op->current->ai_next;
+            continue;
+        }
+
+        op->connect_request.data = op;
+        int rc = uv_tcp_connect(&op->connect_request, op->socket->handle,
+                                op->current->ai_addr, on_connect_async);
+        if (rc == 0) {
+            op->phase = CONNECT_ASYNC_CONNECT;
+            return;
+        }
+        op->last_status = rc;
+        op->socket->close();
+        op->socket.reset();
+        op->current = op->current->ai_next;
+    }
+    if (op->finished)
+        return;
+    async_fail(op, std::string("tcp_connect_async: ") +
+                      uv_strerror(op->last_status ?
+                                  op->last_status : UV_EINVAL));
+}
+
+void on_connect_async_resolve(uv_getaddrinfo_t *request, int status,
+                              struct addrinfo *addresses) {
+    connect_async_op *op = (connect_async_op *)request->data;
+    if (op->finished) {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+        delete op;
+        return;
+    }
+    if (status < 0) {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+        async_fail(op, std::string("tcp_connect_async: ") +
+                          uv_strerror(status));
+        return;
+    }
+    op->addresses = addresses;
+    op->current = addresses;
+    start_next_connect(op);
+}
+
+value_t *net_tcp_connect_async(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 4) {
+        yyerror("std.net.tcp_connect_async expects 2 to 4 arguments");
+        return NULL;
+    }
+    if (args[0]->type != T_string) {
+        yyerror("tcp_connect_async host must be a string");
+        return NULL;
+    }
+    int port = 0;
+    if (!get_port(args[1], port))
+        return NULL;
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 2, timeout_ms))
+        return NULL;
+    int family = AF_UNSPEC;
+    if (!get_optional_family(args, 3, family))
+        return NULL;
+    if (g_interrupted)
+        return NULL;
+
+    struct addrinfo hints = {};
+    hints.ai_family = family;
+    hints.ai_socktype = SOCK_STREAM;
+
+    connect_async_op *op = new connect_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("tcp_connect_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("tcp_connect_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->phase = CONNECT_ASYNC_RESOLVE;
+    op->callback_after_cancel = true;
+    op->cancel_operation = [op] {
+        if (op->phase == CONNECT_ASYNC_RESOLVE) {
+            uv_cancel((uv_req_t *)&op->resolve_request);
+        } else if (op->socket) {
+            op->socket->close();
+        }
+    };
+    op->resolve_request.data = op;
+
+    std::string service = service_string(port);
+    int rc = uv_getaddrinfo(
+        event_loop_handle(), &op->resolve_request,
+        on_connect_async_resolve,
+        ((struct string_value_t *)args[0])->value,
+        service.c_str(), &hints);
+    if (rc < 0)
+        async_fail(op, std::string("tcp_connect_async: ") +
+                          uv_strerror(rc));
+    return new_task_value(std::move(task));
+}
+
+struct listen_async_op : async_state {
+    uv_getaddrinfo_t request = {};
+    struct addrinfo *addresses = NULL;
+
+    ~listen_async_op() override {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+    }
+};
+
+void on_listen_async_resolve(uv_getaddrinfo_t *request, int status,
+                             struct addrinfo *addresses) {
+    listen_async_op *op = (listen_async_op *)request->data;
+    if (op->finished) {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+        delete op;
+        return;
+    }
+    if (status < 0) {
+        if (addresses)
+            uv_freeaddrinfo(addresses);
+        async_fail(op, std::string("tcp_listen_async: ") +
+                          uv_strerror(status));
+        return;
+    }
+    op->addresses = addresses;
+
+    int last_status = 0;
+    for (struct addrinfo *address = addresses; address;
+         address = address->ai_next) {
+        std::shared_ptr<net_socket> socket = new_socket();
+        if (!socket) {
+            last_status = UV_ENOMEM;
+            continue;
+        }
+        int rc = uv_tcp_bind(socket->handle, address->ai_addr, 0);
+        if (rc == 0)
+            rc = uv_listen((uv_stream_t *)socket->handle, 16,
+                           on_connection);
+        if (rc < 0) {
+            last_status = rc;
+            socket->close();
+            continue;
+        }
+        socket->listening = true;
+        async_complete(op, new_socket_value(std::move(socket)));
+        return;
+    }
+
+    async_fail(op, std::string("tcp_listen_async: ") +
+                      uv_strerror(last_status ? last_status : UV_EINVAL));
+}
+
+value_t *net_tcp_listen_async(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 4) {
+        yyerror("std.net.tcp_listen_async expects 2 to 4 arguments");
+        return NULL;
+    }
+    if (args[0]->type != T_string) {
+        yyerror("tcp_listen_async host must be a string");
+        return NULL;
+    }
+    int port = 0;
+    if (!get_port(args[1], port))
+        return NULL;
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 2, timeout_ms))
+        return NULL;
+    int family = AF_UNSPEC;
+    if (!get_optional_family(args, 3, family))
+        return NULL;
+    if (g_interrupted)
+        return NULL;
+
+    struct addrinfo hints = {};
+    hints.ai_family = family;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    listen_async_op *op = new listen_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("tcp_listen_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("tcp_listen_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->callback_after_cancel = true;
+    op->cancel_operation = [op] {
+        uv_cancel((uv_req_t *)&op->request);
+    };
+    op->request.data = op;
+
+    std::string service = service_string(port);
+    const char *host = ((struct string_value_t *)args[0])->value;
+    int rc = uv_getaddrinfo(event_loop_handle(), &op->request,
+                            on_listen_async_resolve,
+                            host[0] ? host : NULL, service.c_str(), &hints);
+    if (rc < 0)
+        async_fail(op, std::string("tcp_listen_async: ") +
+                          uv_strerror(rc));
+    return new_task_value(std::move(task));
+}
+
+value_t *net_accept_async(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2) {
+        yyerror("std.net.accept_async expects 1 or 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<net_socket> listener;
+    if (!get_socket(args[0], listener))
+        return NULL;
+    if (!listener->listening) {
+        yyerror("accept_async expects a listening tcp socket");
+        return NULL;
+    }
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 1, timeout_ms))
+        return NULL;
+    if (g_interrupted)
+        return NULL;
+
+    if (!listener->pending_clients.empty()) {
+        std::shared_ptr<net_socket> client =
+            std::move(listener->pending_clients.front());
+        listener->pending_clients.pop_front();
+        return completed_task(new_socket_value(std::move(client)));
+    }
+
+    accept_async_op *op = new accept_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("accept_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("accept_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->listener = listener;
+    op->callback_after_cancel = false;
+    op->cancel_operation = [op] {
+        cancel_accept_async(op);
+    };
+    listener->pending_async_accepts.push_back(op);
+    return new_task_value(std::move(task));
+}
+
+struct send_async_op : async_state {
+    uv_write_t request = {};
+    std::string data;
+    std::shared_ptr<net_socket> socket;
+};
+
+void on_send_async(uv_write_t *request, int status) {
+    send_async_op *op = (send_async_op *)request->data;
+    if (op->finished) {
+        delete op;
+        return;
+    }
+    if (status < 0) {
+        async_fail(op, std::string("send_async: ") + uv_strerror(status));
+        return;
+    }
+    async_complete(op, newintval((long long)op->data.size()));
+}
+
+value_t *net_send_async(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3) {
+        yyerror("std.net.send_async expects 2 or 3 arguments");
+        return NULL;
+    }
+    std::shared_ptr<net_socket> socket;
+    if (!get_socket(args[0], socket))
+        return NULL;
+    if (socket->listening) {
+        yyerror("send_async expects a connected tcp socket");
+        return NULL;
+    }
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 2, timeout_ms))
+        return NULL;
+
+    std::string data;
+    if (args[1]->type == T_string) {
+        data = ((struct string_value_t *)args[1])->value;
+    } else if (args[1]->type == T_bytes) {
+        data = ((struct bytes_value_t *)args[1])->value;
+    } else {
+        yyerror("send_async data must be string or bytes");
+        return NULL;
+    }
+    if (data.empty())
+        return completed_task(newintval(0));
+    if (g_interrupted)
+        return NULL;
+    if (data.size() >
+        (size_t)std::numeric_limits<unsigned int>::max()) {
+        yyerror("send_async data is too large");
+        return NULL;
+    }
+
+    send_async_op *op = new send_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("send_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("send_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->socket = socket;
+    op->data = std::move(data);
+    op->callback_after_cancel = true;
+    op->cancel_operation = [op] {
+        if (op->socket)
+            op->socket->close();
+    };
+    op->request.data = op;
+
+    uv_buf_t buffer = uv_buf_init(
+        &op->data[0], (unsigned int)op->data.size());
+    int rc = uv_write(&op->request, (uv_stream_t *)socket->handle,
+                      &buffer, 1, on_send_async);
+    if (rc < 0)
+        async_fail(op, std::string("send_async: ") + uv_strerror(rc));
+    return new_task_value(std::move(task));
+}
+
+value_t *net_recv_async(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3) {
+        yyerror("std.net.recv_async expects 2 or 3 arguments");
+        return NULL;
+    }
+    std::shared_ptr<net_socket> socket;
+    if (!get_socket(args[0], socket))
+        return NULL;
+    if (socket->listening) {
+        yyerror("recv_async expects a connected tcp socket");
+        return NULL;
+    }
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 2, timeout_ms))
+        return NULL;
+    if (args[1]->type != T_int ||
+        ((struct int_value_t *)args[1])->value < 0) {
+        yyerror("recv_async size must be a non-negative integer");
+        return NULL;
+    }
+    long long requested = ((struct int_value_t *)args[1])->value;
+    if (requested == 0)
+        return completed_task(newbytesval(std::string()));
+    if (requested > std::numeric_limits<int>::max()) {
+        yyerror("recv_async size is too large");
+        return NULL;
+    }
+    if (socket->read_eof)
+        return completed_task(newbytesval(std::string()));
+    if (socket->read_failed) {
+        return failed_task(std::string("recv_async: ") +
+                           uv_strerror(socket->read_error));
+    }
+    if (socket->reading || socket->pending_async_read) {
+        yyerror("recv_async: another read is already pending");
+        return NULL;
+    }
+    if (g_interrupted)
+        return NULL;
+
+    recv_async_op *op = new recv_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("recv_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("recv_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->socket = socket;
+    op->callback_after_cancel = false;
+    op->cancel_operation = [op] {
+        cancel_recv_async(op);
+    };
+
+    socket->read_done = false;
+    socket->read_status = 0;
+    socket->read_requested = (size_t)requested;
+    socket->read_buffer.clear();
+    socket->read_result.clear();
+    socket->reading = true;
+    socket->pending_async_read = op;
+
+    int rc = uv_read_start((uv_stream_t *)socket->handle,
+                           on_alloc, on_read);
+    if (rc < 0) {
+        socket->pending_async_read = NULL;
+        socket->reading = false;
+        async_fail(op, std::string("recv_async: ") + uv_strerror(rc));
+    }
+    return new_task_value(std::move(task));
+}
+
+struct shutdown_async_op : async_state {
+    uv_shutdown_t request = {};
+    std::shared_ptr<net_socket> socket;
+};
+
+void on_shutdown_async(uv_shutdown_t *request, int status) {
+    shutdown_async_op *op = (shutdown_async_op *)request->data;
+    if (op->finished) {
+        delete op;
+        return;
+    }
+    if (status < 0) {
+        async_fail(op, std::string("shutdown_async: ") +
+                          uv_strerror(status));
+        return;
+    }
+    async_complete(op, newnull());
+}
+
+value_t *net_shutdown_async(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2) {
+        yyerror("std.net.shutdown_async expects 1 or 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<net_socket> socket;
+    if (!get_socket(args[0], socket))
+        return NULL;
+    if (socket->listening) {
+        yyerror("shutdown_async expects a connected tcp socket");
+        return NULL;
+    }
+    long long timeout_ms = 0;
+    if (!get_optional_timeout(args, 1, timeout_ms))
+        return NULL;
+    if (g_interrupted)
+        return NULL;
+
+    shutdown_async_op *op = new shutdown_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("shutdown_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        yyerror("shutdown_async: cannot initialize event loop");
+        return NULL;
+    }
+    op->socket = socket;
+    op->callback_after_cancel = true;
+    op->cancel_operation = [op] {
+        if (op->socket)
+            op->socket->close();
+    };
+    op->request.data = op;
+
+    int rc = uv_shutdown(&op->request, (uv_stream_t *)socket->handle,
+                         on_shutdown_async);
+    if (rc < 0)
+        async_fail(op, std::string("shutdown_async: ") +
+                          uv_strerror(rc));
+    return new_task_value(std::move(task));
+}
+
 value_t *net_resolve(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 3) {
         yyerror("std.net.resolve expects 1 to 3 arguments");
@@ -887,35 +1754,9 @@ value_t *net_resolve(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    struct list_value_t *list = newlistval();
-    for (struct addrinfo *address = resolved.addresses; address;
-         address = address->ai_next) {
-        char host[64];
-        int rc = -1;
-        if (address->ai_family == AF_INET) {
-            rc = uv_ip4_name((const struct sockaddr_in *)address->ai_addr,
-                             host, sizeof host);
-        } else if (address->ai_family == AF_INET6) {
-            rc = uv_ip6_name((const struct sockaddr_in6 *)address->ai_addr,
-                             host, sizeof host);
-        }
-        if (rc != 0)
-            continue;
-
-        bool duplicate = false;
-        for (size_t i = 0; i < list->payload->items.size(); ++i) {
-            if (std::strcmp(
-                    ((struct string_value_t *)list->payload->items[i])->value,
-                    host) == 0) {
-                duplicate = true;
-                break;
-            }
-        }
-        if (!duplicate)
-            list->payload->items.push_back(newstrval(host));
-    }
+    value_t *list = address_list_from_addrinfo(resolved.addresses);
     uv_freeaddrinfo(resolved.addresses);
-    return (struct value_t *)list;
+    return list;
 }
 
 } // namespace
@@ -960,6 +1801,20 @@ struct value_t *call_net_builtin(
             return net_address(args, false);
         case B_net_peer_addr:
             return net_address(args, true);
+        case B_net_tcp_connect_async:
+            return net_tcp_connect_async(args);
+        case B_net_tcp_listen_async:
+            return net_tcp_listen_async(args);
+        case B_net_accept_async:
+            return net_accept_async(args);
+        case B_net_send_async:
+            return net_send_async(args);
+        case B_net_recv_async:
+            return net_recv_async(args);
+        case B_net_resolve_async:
+            return net_resolve_async(args);
+        case B_net_shutdown_async:
+            return net_shutdown_async(args);
         default:
             yyerror("unknown network function");
             return NULL;

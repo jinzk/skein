@@ -468,6 +468,13 @@ value_t *build_std_namespace() {
             {"shutdown", B_net_shutdown},
             {"local_addr", B_net_local_addr},
             {"peer_addr", B_net_peer_addr},
+            {"tcp_connect_async", B_net_tcp_connect_async},
+            {"tcp_listen_async", B_net_tcp_listen_async},
+            {"accept_async", B_net_accept_async},
+            {"send_async", B_net_send_async},
+            {"recv_async", B_net_recv_async},
+            {"resolve_async", B_net_resolve_async},
+            {"shutdown_async", B_net_shutdown_async},
         })));
 #ifdef CALC_ENABLE_FFI
     root->payload->items.push_back(std::make_pair(

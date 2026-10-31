@@ -18,7 +18,7 @@
 let const func
 if else while for
 return break continue
-null
+null true false
 package import export as
 ```
 
@@ -164,6 +164,7 @@ let double = func(x) { return x * 2; };
 ```text
 int
 float
+bool
 string
 bytes
 list
@@ -174,12 +175,19 @@ userdata
 null
 ```
 
+布尔字面量：
+
+```text
+true
+false
+```
+
 真值规则：
 
-- 假：`null`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典；
-- 真：其他值，包括函数、内置函数和 userdata（例如文件句柄）。
+- 假：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典；
+- 真：其他值，包括 `true`、函数、内置函数和 userdata（例如文件句柄）。
 
-没有布尔字面量，使用 `1` / `0`。
+`bool(x)` 按真值规则转换为 `true` / `false`。`str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
 
 ## 4. 表达式
 
@@ -227,8 +235,9 @@ a || b
 !a
 ```
 
-- `&&` / `||` 短路求值；
-- 返回整数 `0` / `1`；
+- `&&` / `||` / `!` 短路求值；
+- 当前仍返回整数 `0` / `1`，以保持兼容；
+- 需要布尔值时使用 `bool(...)`，例如 `bool(a && b)`；
 - 真值规则见上一节。
 
 ### 4.4 位运算
@@ -473,16 +482,44 @@ func add(a, b) {
   return a + b;
 }
 
+func typed_add(a: int, b: int) {
+  return a + b;
+}
+
 func hello() {
   print("hello");
 }
 ```
 
 - 参数用逗号分隔；
+- 参数可以带可选的类型约束：`name: type`；
 - 支持空参数；
 - 不支持默认参数和可变参数；
 - 函数体使用 `{ list }`；
 - 函数调用深度上限为 1000。
+
+参数类型约束在调用时进行运行时检查，不做隐式转换。支持：
+
+```text
+any int float number bool string bytes
+list dict function builtin callable null userdata
+```
+
+示例：
+
+```text
+func apply(fn: callable, x: int) {
+  return fn(x);
+}
+
+apply(sqrt, 16)
+```
+
+类型不匹配会报告运行时错误，例如：
+
+```text
+function add argument 1 (a) expects int, got string
+```
 
 匿名函数：
 
@@ -658,7 +695,7 @@ sqrt exp log abs
 ### 输出和转换
 
 ```text
-print list dict int float str format len range
+print list dict int float bool str format len range
 ```
 
 ### 进程
@@ -786,7 +823,6 @@ calc-demo -k script.calc
 ```text
 def
 var
-类型标注
 解构声明
 多变量声明
 复合赋值

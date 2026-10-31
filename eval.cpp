@@ -308,6 +308,7 @@ static bool truthy(const struct value_t *v) {
     switch (v->type) {
         case T_int: return ((struct int_value_t *)v)->value != 0;
         case T_float: return ((struct float_value_t *)v)->value != 0.0;
+        case T_bool: return ((struct bool_value_t *)v)->value;
         case T_string: {
             const char *s = ((struct string_value_t *)v)->value;
             return s && *s;
@@ -332,6 +333,9 @@ static bool value_equals(struct value_t *a, struct value_t *b) {
     }
     if (a->type != b->type) return false;
     switch (a->type) {
+        case T_bool:
+            return ((struct bool_value_t *)a)->value ==
+                   ((struct bool_value_t *)b)->value;
         case T_string:
             return std::strcmp(((struct string_value_t *)a)->value,
                                ((struct string_value_t *)b)->value) == 0;
@@ -1302,6 +1306,8 @@ static struct value_t *call_builtin(int functype,
                     else
                         ret = newintval((long long)d);
                 }
+            } else if (arg->type == T_bool) {
+                ret = newintval(((struct bool_value_t *)arg)->value ? 1 : 0);
             } else if (arg->type == T_string) {
                 long long value = 0;
                 if (parse_int_string(((struct string_value_t *)arg)->value, value))
@@ -1310,7 +1316,7 @@ static struct value_t *call_builtin(int functype,
                     yyerror("int() cannot convert string \"%s\"",
                             ((struct string_value_t *)arg)->value);
             } else {
-                yyerror("int() expects int, float, or string, got %s",
+                yyerror("int() expects int, float, bool, or string, got %s",
                         typename_of(arg));
             }
             break;
@@ -1319,6 +1325,8 @@ static struct value_t *call_builtin(int functype,
                 ret = newfloatval((double)((struct int_value_t *)arg)->value);
             } else if (arg->type == T_float) {
                 ret = newfloatval(((struct float_value_t *)arg)->value);
+            } else if (arg->type == T_bool) {
+                ret = newfloatval(((struct bool_value_t *)arg)->value ? 1.0 : 0.0);
             } else if (arg->type == T_string) {
                 double value = 0.0;
                 if (parse_float_string(((struct string_value_t *)arg)->value, value))
@@ -1327,9 +1335,12 @@ static struct value_t *call_builtin(int functype,
                     yyerror("float() cannot convert string \"%s\"",
                             ((struct string_value_t *)arg)->value);
             } else {
-                yyerror("float() expects int, float, or string, got %s",
+                yyerror("float() expects int, float, bool, or string, got %s",
                         typename_of(arg));
             }
+            break;
+        case B_bool:
+            ret = newboolval(truthy(arg));
             break;
         case B_str:
             ret = newstrval(value_to_string(arg).c_str());
@@ -2069,6 +2080,20 @@ static struct value_t *invoke_value(
         return NULL;
     }
 
+    std::string frame_name =
+        def->code->name.empty() ? "<anonymous>" : def->code->name;
+
+    int i = 0;
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
+        if (!type_constraint_matches(sl->type, args[i])) {
+            yyerror("function %s argument %d (%s) expects %s, got %s",
+                    frame_name.c_str(), i + 1, sl->sym->name,
+                    type_constraint_name(sl->type), typename_of(args[i]));
+            free_args(args);
+            return NULL;
+        }
+    }
+
     int errors_before = g_runtime_error_count;
     int frame_line = g_error_line;
     int frame_column = g_error_column;
@@ -2076,11 +2101,9 @@ static struct value_t *invoke_value(
         frame_line = def->code->ast->line;
         frame_column = def->code->ast->column;
     }
-    std::string frame_name =
-        def->code->name.empty() ? "<anonymous>" : def->code->name;
     call_stack_guard frame_guard(frame_name, frame_line, frame_column);
     pushscope_closure(def->closure);
-    int i = 0;
+    i = 0;
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
         sym->val = args[i];

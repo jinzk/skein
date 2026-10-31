@@ -271,6 +271,8 @@ EXP ([Ee][-+]?[0-9]+)
 "in" { YYRET(IN); }
 "as" { YYRET(AS); }
 "null" { YYRET(NULLVAL); }
+"true" { YYRET(TRUE); }
+"false" { YYRET(FALSE); }
 
 "sqrt" { yylval.fn = B_sqrt; YYRET(BUILTIN); }
 "exp" { yylval.fn = B_exp; YYRET(BUILTIN); }
@@ -283,6 +285,7 @@ EXP ([Ee][-+]?[0-9]+)
 "dict" { yylval.fn = B_dict; YYRET(BUILTIN); }
 "int" { yylval.fn = B_int; YYRET(BUILTIN); }
 "float" { yylval.fn = B_float; YYRET(BUILTIN); }
+"bool" { yylval.fn = B_bool; YYRET(BUILTIN); }
 "str" { yylval.fn = B_str; YYRET(BUILTIN); }
 "format" { yylval.fn = B_format; YYRET(BUILTIN); }
 "command" { yylval.fn = B_command; YYRET(BUILTIN); }

@@ -420,6 +420,10 @@ func add(a, b) {
   return a + b;
 }
 
+func typed_add(a: int, b: int) {
+  return a + b;
+}
+
 func fib(n) {
   if (n < 2) { return n; }
   return fib(n - 1) + fib(n - 2);
@@ -438,6 +442,22 @@ let c = make_counter();
 c()
 c()
 ```
+
+参数可以带可选的类型约束：
+
+```text
+func apply(fn: callable, x: int) {
+  return fn(x);
+}
+
+apply(sqrt, 16)
+```
+
+- 语法为 `参数名: 类型`，不写类型表示 `any`；
+- 支持 `any`、`int`、`float`、`number`、`bool`、`string`、`bytes`、`list`、`dict`、`function`、`builtin`、`callable`、`null`、`userdata`；
+- 调用时做运行时检查，不做隐式转换；
+- 类型错误不会进入函数体；
+- 当前比较和逻辑运算仍返回 `int`，需要 `bool` 时用 `bool(...)` 转换。
 
 函数是一等值，可以保存到变量、列表或字典中，并通过任意表达式调用：
 
@@ -489,7 +509,7 @@ fact(5)                 → 120
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -523,9 +543,11 @@ apply(sqrt, 16)
 - `int` 与 `float` 混合运算提升为 `float`，例如 `1 + 2.5` 得到 `3.5`；`1 == 1.0` 为真。超过 2^53 的整数与 float 比较仍按数学值精确判断，但转成 `float`（混合运算或 `float()`）时会丢失精度。
 - 整数除法向零截断，取模结果符号随被除数：`-7 / 4 == -1`，`-7 % 4 == -3`，`7 % -4 == 3`。
 - 位运算按 64 位进行，移位次数必须在 `0..63` 之间。
-- 真值规则：`null`、`0`、`0.0`、空字符串、空列表、空字典为假；其余值（包括函数和内置函数）为真。
+- `bool` 类型有 `true` / `false` 两个字面量；`bool(x)` 按真值规则转换。
+- 真值规则：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典为假；其余值（包括 `true`、函数和内置函数）为真。
+- `str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
 - `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `format("{}", null)` 输出。
-- `&&`、`||`、`!` 返回整数 `0` / `1`，并短路求值。
+- `&&`、`||`、`!` 当前仍返回整数 `0` / `1`，并短路求值；需要布尔值时使用 `bool(...)`。
 - `==` / `!=` 对所有类型有效；大小比较只支持数值之间或字符串之间。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
 - `len(x)` 支持字符串、bytes、list、dict：字符串按 UTF-8 码点计数，bytes 按字节数，list/dict 按元素数。
@@ -533,7 +555,7 @@ apply(sqrt, 16)
 - 字典键按值相等判断，`1` 和 `1.0` 是同一个键；字面量中的重复键以最后一个为准。
 - `list` 和 `dict` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。
 - `bytes` 和字符串目前仍然复制内容；函数值共享闭包环境，文件句柄等原生资源共享底层句柄。
-- 显式转换：`int(x)`、`float(x)`、`str(x)`。`int` / `float` 接受整数、浮点数或字符串，`str` 接受任意值。
+- 显式转换：`int(x)`、`float(x)`、`bool(x)`、`str(x)`。`int` / `float` 接受整数、浮点数、布尔值或字符串；`bool` 按真值规则转换；`str` 接受任意值。
 - 浮点数输出使用可往返的最短表示并保留 `.0`：`1.0` 显示为 `1.0`，`1.23456` 显示为 `1.23456`。
 - 没有字符串与数字之间的隐式转换，`1 + "2"` 会报错；需要时请使用 `int()` / `float()` / `str()`。
 

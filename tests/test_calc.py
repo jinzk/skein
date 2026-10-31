@@ -175,6 +175,33 @@ def main():
     check("shift count out of range", "1 << 64\n",
           stderr="shift count 64 out of range")
     check("bitwise vs equality precedence", "1 & 3 == 1\n", stdout="= 0")
+    check("bool true literal", "true\n", stdout="= true")
+    check("bool false literal", "false\n", stdout="= false")
+    check("bool print", "print(true)\nprint(false)\n",
+          stdout_all=["true", "false"])
+    check("bool truthiness",
+          'if (true) { print("yes"); } else { print("no"); }\n',
+          stdout="yes")
+    check("bool false truthiness",
+          'if (false) { print("yes"); } else { print("no"); }\n',
+          stdout="no")
+    check("bool equality",
+          "true == true\ntrue == false\ntrue != false\n",
+          stdout_all=["= 1", "= 0", "= 1"])
+    check("bool is distinct from int",
+          "true == 1\ntrue != 1\n", stdout_all=["= 0", "= 1"])
+    check("bool conversions",
+          "str(true)\nint(true)\nint(false)\nfloat(true)\n",
+          stdout_all=["= true", "= 1", "= 0", "= 1.0"])
+    check("bool conversion builtin",
+          'bool(0)\nbool(1)\nbool("")\nbool("x")\nbool(null)\nbool([])\n',
+          stdout_all=["= false", "= true", "= false", "= true",
+                      "= false", "= false"])
+    check("bool as value", "let f = bool;\nf(1)\n", stdout="= true")
+    check("bool format", 'format("{}", true)\n', stdout="= true")
+    check("bool arithmetic error", "true + 1\n",
+          stderr="cannot add bool and int")
+
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")
@@ -869,6 +896,94 @@ def main():
     check("null is not callable", "null()\n", stderr="cannot call null")
     check("str null", "str(null)\n", stdout="= null")
     check("format null", 'format("{}", null)\n', stdout="= null")
+
+    check("typed parameter ok",
+          "func f(x: int) { return x + 1; }\nf(2)\n", stdout="= 3")
+    check("typed parameter error",
+          'func f(x: int) { return x; }\nf("x")\n',
+          stderr="argument 1 (x) expects int, got string")
+    check("untyped parameter",
+          'func f(x) { return x; }\nf("x")\n', stdout="= x")
+    check("multiple typed parameters",
+          "func g(a, b: number, c: string) { return b; }\n"
+          'g(1, 2.5, "x")\n',
+          stdout="= 2.5")
+    check("typed number rejects string",
+          'func g(b: number) { return b; }\ng("x")\n',
+          stderr="expects number, got string")
+    check("typed bool",
+          "func h(x: bool) { return x; }\nh(true)\nh(false)\n",
+          stdout_all=["= true", "= false"])
+    check("typed bool rejects int",
+          "func h(x: bool) { return x; }\nh(1)\n",
+          stderr="expects bool, got int")
+    check("typed bool rejects comparison int",
+          "func h(x: bool) { return x; }\nh(1 == 1)\n",
+          stderr="expects bool, got int")
+    check("typed list",
+          "func f(x: list) { return len(x); }\nf([1,2])\n",
+          stdout="= 2")
+    check("typed dict",
+          "func f(x: dict) { return len(x); }\nf({1:2})\n",
+          stdout="= 1")
+    check("typed string",
+          'func f(x: string) { return x; }\nf("a")\n', stdout="= a")
+    check("typed bytes",
+          'func f(x: bytes) { return bytes_len(x); }\n'
+          'f(bytes_from_hex("00ff"))\n',
+          stdout="= 2")
+    check("typed callable",
+          "func apply(fn: callable, x: int) { return fn(x); }\n"
+          "apply(sqrt, 9)\n",
+          stdout="= 3.0")
+    check("typed function",
+          "func apply(fn: function, x: int) { return fn(x); }\n"
+          "let f = func(y) { return y * 2; };\n"
+          "apply(f, 3)\n",
+          stdout="= 6")
+    check("typed builtin",
+          "func apply(fn: builtin, x: int) { return fn(x); }\n"
+          "apply(sqrt, 16)\n",
+          stdout="= 4.0")
+    check("typed callable rejects int",
+          "func apply(fn: callable) { return fn; }\napply(1)\n",
+          stderr="expects callable, got int")
+    check("typed function rejects builtin",
+          "func apply(fn: function) { return fn; }\napply(sqrt)\n",
+          stderr="expects function, got builtin")
+    check("typed builtin rejects function",
+          "func apply(fn: builtin) { return fn; }\n"
+          "let f = func() { return 1; };\napply(f)\n",
+          stderr="expects builtin, got function")
+    check("typed any",
+          "func f(x: any) { return x; }\nf(true)\n", stdout="= true")
+    check("typed null",
+          "func f(x: null) { return x; }\nprint(f(null))\n",
+          stdout="null")
+    check("typed null rejects int",
+          "func f(x: null) { return x; }\nf(1)\n",
+          stderr="expects null, got int")
+    check("typed number accepts int and float",
+          "func f(x: number) { return x; }\nf(1)\nf(1.5)\n",
+          stdout_all=["= 1", "= 1.5"])
+    check("typed anonymous function",
+          "let f = func(x: int) { return x; };\nf(3)\n", stdout="= 3")
+    check("typed closure",
+          "func make() { func get(x: int) { return x + 1; } return get; }\n"
+          "let f = make();\nf(4)\n",
+          stdout="= 5")
+    check("typed parameter trailing comma",
+          "func f(x: int,) { return x; }\nf(1)\n", stdout="= 1")
+    check("typed parameter error prevents body",
+          "let hits = 0;\n"
+          "func f(x: int) { hits = hits + 1; }\n"
+          'f("bad");\nhits\n',
+          stdout="= 0",
+          stderr="expects int, got string")
+    check("unknown type name",
+          "func f(x: nope) { return x; }\n",
+          stderr="unknown type name nope")
+
     check("explicit empty return", "func f() { return; }\nprint(f())\n",
           stdout="null")
     check("print returns null", "let x = print(1);\nprint(x)\n",

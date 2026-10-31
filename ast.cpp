@@ -82,6 +82,18 @@ struct ast *newfloat(double d) {
     return (struct ast *)a;
 }
 
+struct ast *newbool(bool b) {
+    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'V';
+    set_loc(a, 0, 0);
+    a->val = newboolval(b);
+    return (struct ast *)a;
+}
+
 struct ast *newstr(char *s) {
     struct val *a = (struct val *)std::malloc(sizeof(struct val));
     if (!a) {

@@ -25,6 +25,7 @@ struct function_def {
 enum val_type {
     T_int = 1,
     T_float,
+    T_bool,
     T_string,
     T_bytes,
     T_list,
@@ -51,6 +52,11 @@ struct int_value_t {
 struct float_value_t {
     enum val_type type;
     double value;
+};
+
+struct bool_value_t {
+    enum val_type type;
+    bool value;
 };
 
 struct string_value_t {
@@ -110,6 +116,7 @@ struct value_t *newbreak();
 struct value_t *newcontinue();
 struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
+struct value_t *newboolval(bool b);
 struct value_t *newstrval(const char *s);
 struct value_t *newbytesval(std::string data);
 struct value_t *newbuiltinval(int functype);

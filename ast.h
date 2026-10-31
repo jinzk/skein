@@ -42,6 +42,7 @@ enum bifs {
     B_dict,
     B_int,
     B_float,
+    B_bool,
     B_str,
     B_format,
     B_command,
@@ -236,6 +237,7 @@ struct ast *newasgn(struct ast *target, struct ast *v);
 struct ast *newscope(struct ast *v);
 struct ast *newint(long long i);
 struct ast *newfloat(double d);
+struct ast *newbool(bool b);
 struct ast *newstr(char *s);
 struct ast *newbuiltin(int functype);
 struct ast *newnullast();

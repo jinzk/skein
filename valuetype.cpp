@@ -50,6 +50,13 @@ struct value_t *newfloatval(double f) {
     return (struct value_t *)v;
 }
 
+struct value_t *newboolval(bool b) {
+    struct bool_value_t *v = new bool_value_t;
+    v->type = T_bool;
+    v->value = b;
+    return (struct value_t *)v;
+}
+
 struct value_t *newstrval(const char *s) {
     struct string_value_t *v = new string_value_t;
     v->type = T_string;
@@ -129,6 +136,8 @@ struct value_t *dupval(struct value_t *v) {
             return newintval(((struct int_value_t *)v)->value);
         case T_float:
             return newfloatval(((struct float_value_t *)v)->value);
+        case T_bool:
+            return newboolval(((struct bool_value_t *)v)->value);
         case T_string:
             return newstrval(((struct string_value_t *)v)->value);
         case T_bytes:
@@ -182,6 +191,9 @@ void freeval(struct value_t *v) {
         case T_float:
             delete (struct float_value_t *)v;
             break;
+        case T_bool:
+            delete (struct bool_value_t *)v;
+            break;
         case T_string: {
             struct string_value_t *s = (struct string_value_t *)v;
             std::free(s->value);
@@ -224,6 +236,7 @@ const char *typename_of(const struct value_t *v) {
     switch (v->type) {
         case T_int: return "int";
         case T_float: return "float";
+        case T_bool: return "bool";
         case T_string: return "string";
         case T_bytes: return "bytes";
         case T_list: return "list";
@@ -269,6 +282,8 @@ std::string value_to_string(const struct value_t *v) {
             return std::to_string(((const struct int_value_t *)v)->value);
         case T_float:
             return format_double(((const struct float_value_t *)v)->value);
+        case T_bool:
+            return ((const struct bool_value_t *)v)->value ? "true" : "false";
         case T_string: {
             const char *s = ((const struct string_value_t *)v)->value;
             return s ? s : "";

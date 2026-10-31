@@ -67,6 +67,7 @@ static const char *builtin_field_name(int functype) {
         case B_dict: return "dict";
         case B_int: return "int";
         case B_float: return "float";
+        case B_bool: return "bool";
         case B_str: return "str";
         case B_format: return "format";
         case B_command: return "command";
@@ -107,6 +108,43 @@ static const char *builtin_field_name(int functype) {
         default: return NULL;
     }
 }
+
+static struct type_constraint *type_constraint_from_name(const char *name) {
+    if (!name)
+        return new_type_constraint(TYPE_INVALID);
+    if (std::strcmp(name, "any") == 0) return new_type_constraint(TYPE_ANY);
+    if (std::strcmp(name, "int") == 0) return new_type_constraint(TYPE_INT);
+    if (std::strcmp(name, "float") == 0) return new_type_constraint(TYPE_FLOAT);
+    if (std::strcmp(name, "number") == 0) return new_type_constraint(TYPE_NUMBER);
+    if (std::strcmp(name, "bool") == 0) return new_type_constraint(TYPE_BOOL);
+    if (std::strcmp(name, "string") == 0) return new_type_constraint(TYPE_STRING);
+    if (std::strcmp(name, "bytes") == 0) return new_type_constraint(TYPE_BYTES);
+    if (std::strcmp(name, "list") == 0) return new_type_constraint(TYPE_LIST);
+    if (std::strcmp(name, "dict") == 0) return new_type_constraint(TYPE_DICT);
+    if (std::strcmp(name, "function") == 0) return new_type_constraint(TYPE_FUNCTION);
+    if (std::strcmp(name, "builtin") == 0) return new_type_constraint(TYPE_BUILTIN);
+    if (std::strcmp(name, "callable") == 0) return new_type_constraint(TYPE_CALLABLE);
+    if (std::strcmp(name, "null") == 0) return new_type_constraint(TYPE_NULL);
+    if (std::strcmp(name, "userdata") == 0) return new_type_constraint(TYPE_USERDATA);
+    yyerror("unknown type name %s", name);
+    return new_type_constraint(TYPE_INVALID);
+}
+
+static struct type_constraint *type_constraint_from_builtin(int functype) {
+    switch (functype) {
+        case B_int: return new_type_constraint(TYPE_INT);
+        case B_float: return new_type_constraint(TYPE_FLOAT);
+        case B_bool: return new_type_constraint(TYPE_BOOL);
+        case B_str: return new_type_constraint(TYPE_STRING);
+        case B_list: return new_type_constraint(TYPE_LIST);
+        case B_dict: return new_type_constraint(TYPE_DICT);
+        default: {
+            const char *name = builtin_field_name(functype);
+            yyerror("unknown type name %s", name ? name : "builtin");
+            return new_type_constraint(TYPE_INVALID);
+        }
+    }
+}
 %}
 
 %define parse.error custom
@@ -115,6 +153,7 @@ static const char *builtin_field_name(int functype) {
 %union {
     struct ast *a;
     struct symlist *sl;
+    struct type_constraint *type;
     double d;
     long long i;
     int fn;
@@ -129,7 +168,7 @@ static const char *builtin_field_name(int functype) {
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" FOR "for" FUNC "func" LET "let" CONST "const"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
-%token NULLVAL "null"
+%token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 %token EMPTY_DICT_CLOSE "empty dictionary"
@@ -154,12 +193,14 @@ static const char *builtin_field_name(int functype) {
 
 %type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
-%type <sl> symlist
+%type <sl> param symlist
+%type <type> type type_name
 %type <str> importref importpath fieldname
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
 %destructor { symlistfree($$); } <sl>
+%destructor { free_type_constraint($$); } <type>
 
 %start calc
 %%
@@ -275,6 +316,8 @@ funcstart: FUNC { push_func_location(g_token_line, g_token_column); }
 
 value: INT                                { $$ = newint($1); }
     | FLOAT                               { $$ = newfloat($1); }
+    | TRUE                                { $$ = newbool(true); }
+    | FALSE                               { $$ = newbool(false); }
     | XSTRING                             { $$ = newstr($1); free($1); }
     | BUILTIN                             { $$ = newbuiltin($1); }
     | NULLVAL                             { $$ = newnullast(); }
@@ -307,17 +350,36 @@ explist: %empty                            { $$ = NULL; }
     | exp ',' explist                     { $$ = newast('L', $1, $3); }
     ;
 
+param: NAME {
+        struct symbol *s = newsym($1);
+        free($1);
+        $$ = newsymlist(s, NULL, NULL);
+      }
+    | NAME ':' type {
+        struct symbol *s = newsym($1);
+        free($1);
+        $$ = newsymlist(s, $3, NULL);
+      }
+    ;
+
 symlist: %empty                           { $$ = NULL; }
-    | NAME {
-        struct symbol *s = newsym($1);
-        free($1);
-        $$ = newsymlist(s, NULL);
+    | param                               { $$ = $1; }
+    | param ',' symlist                   {
+        $1->next = $3;
+        $$ = $1;
       }
-    | NAME ',' symlist {
-        struct symbol *s = newsym($1);
+    ;
+
+type: type_name                           { $$ = $1; }
+    ;
+
+type_name: NAME                           {
+        $$ = type_constraint_from_name($1);
         free($1);
-        $$ = newsymlist(s, $3);
       }
+    | BUILTIN                             { $$ = type_constraint_from_builtin($1); }
+    | FUNC                                { $$ = new_type_constraint(TYPE_FUNCTION); }
+    | NULLVAL                             { $$ = new_type_constraint(TYPE_NULL); }
     ;
 
 calclist: exp { $$ = $1; }

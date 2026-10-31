@@ -3930,132 +3930,25 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
-        case '+': {
-            struct value_t *l = eval(a->l);
-            struct value_t *r = eval(a->r);
-            if (!l || !r) {
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (l->type == T_int && r->type == T_int) {
-                long long x = ((struct int_value_t *)l)->value;
-                long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked((__int128)x + y);
-            } else if (is_numeric(l) && is_numeric(r)) {
-                ret = newfloatval(as_double(l) + as_double(r));
-            } else if (l->type == T_string && r->type == T_string) {
-                std::string s = ((struct string_value_t *)l)->value;
-                s += ((struct string_value_t *)r)->value;
-                ret = newstrval(s.c_str());
-            } else if (l->type == T_list && r->type == T_list) {
-                struct list_value_t *lv = newlistval();
-                struct list_value_t *ll = (struct list_value_t *)l;
-                struct list_value_t *rl = (struct list_value_t *)r;
-                lv->payload->items.reserve(ll->payload->items.size() + rl->payload->items.size());
-                for (size_t i = 0; i < ll->payload->items.size(); ++i)
-                    lv->payload->items.push_back(dupval(ll->payload->items[i]));
-                for (size_t i = 0; i < rl->payload->items.size(); ++i)
-                    lv->payload->items.push_back(dupval(rl->payload->items[i]));
-                ret = (struct value_t *)lv;
-            } else {
-                yyerror("cannot add %s and %s", typename_of(l), typename_of(r));
-            }
-            freeval(l);
-            freeval(r);
-            break;
-        }
-
+        case '+':
         case '-':
-        case '*': {
+        case '*':
+        case '/':
+        case '%':
+        case '&':
+        case '|':
+        case '^':
+        case 's':
+        case 'r': {
             struct value_t *l = eval(a->l);
+            if (!l)
+                break;
             struct value_t *r = eval(a->r);
-            if (!l || !r) {
+            if (!r) {
                 freeval(l);
-                freeval(r);
                 break;
             }
-            if (!is_numeric(l) || !is_numeric(r)) {
-                yyerror("cannot use %c on %s and %s", a->nodetype,
-                        typename_of(l), typename_of(r));
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (l->type == T_int && r->type == T_int) {
-                long long x = ((struct int_value_t *)l)->value;
-                long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked(a->nodetype == '-'
-                                          ? (__int128)x - y
-                                          : (__int128)x * y);
-            } else {
-                double x = as_double(l), y = as_double(r);
-                ret = newfloatval(a->nodetype == '-' ? x - y : x * y);
-            }
-            freeval(l);
-            freeval(r);
-            break;
-        }
-
-        case '/': {
-            struct value_t *l = eval(a->l);
-            struct value_t *r = eval(a->r);
-            if (!l || !r) {
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (!is_numeric(l) || !is_numeric(r)) {
-                yyerror("cannot divide %s by %s", typename_of(l), typename_of(r));
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (as_double(r) == 0.0) {
-                yyerror("division by zero");
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (l->type == T_int && r->type == T_int) {
-                long long x = ((struct int_value_t *)l)->value;
-                long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked((__int128)x / y);
-            } else {
-                ret = newfloatval(as_double(l) / as_double(r));
-            }
-            freeval(l);
-            freeval(r);
-            break;
-        }
-
-        case '%': {
-            struct value_t *l = eval(a->l);
-            struct value_t *r = eval(a->r);
-            if (!l || !r) {
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (!is_numeric(l) || !is_numeric(r)) {
-                yyerror("cannot take %s modulo %s", typename_of(l), typename_of(r));
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (as_double(r) == 0.0) {
-                yyerror("modulo by zero");
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (l->type == T_int && r->type == T_int) {
-                long long x = ((struct int_value_t *)l)->value;
-                long long y = ((struct int_value_t *)r)->value;
-                ret = new_int_checked((__int128)x % y);
-            } else {
-                ret = newfloatval(std::fmod(as_double(l), as_double(r)));
-            }
+            ret = apply_binary_value(a->nodetype, l, r);
             freeval(l);
             freeval(r);
             break;
@@ -4110,66 +4003,6 @@ struct value_t *eval(struct ast *a) {
                 ret = newintval(~((struct int_value_t *)v)->value);
             }
             freeval(v);
-            break;
-        }
-
-        case '&':
-        case '|':
-        case '^': {
-            struct value_t *l = eval(a->l);
-            struct value_t *r = eval(a->r);
-            if (!l || !r) {
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (l->type != T_int || r->type != T_int) {
-                yyerror("bitwise operator expects ints, got %s and %s",
-                        typename_of(l), typename_of(r));
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            long long x = ((struct int_value_t *)l)->value;
-            long long y = ((struct int_value_t *)r)->value;
-            if (a->nodetype == '&')
-                ret = newintval(x & y);
-            else if (a->nodetype == '|')
-                ret = newintval(x | y);
-            else
-                ret = newintval(x ^ y);
-            freeval(l);
-            freeval(r);
-            break;
-        }
-
-        case 's':
-        case 'r': {
-            struct value_t *l = eval(a->l);
-            struct value_t *r = eval(a->r);
-            if (!l || !r) {
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            if (l->type != T_int || r->type != T_int) {
-                yyerror("shift operator expects ints, got %s and %s",
-                        typename_of(l), typename_of(r));
-                freeval(l);
-                freeval(r);
-                break;
-            }
-            long long x = ((struct int_value_t *)l)->value;
-            long long y = ((struct int_value_t *)r)->value;
-            if (y < 0 || y >= 64) {
-                yyerror("shift count %lld out of range", y);
-            } else if (a->nodetype == 's') {
-                ret = newintval((long long)((unsigned long long)x << y));
-            } else {
-                ret = newintval(x >> y);
-            }
-            freeval(l);
-            freeval(r);
             break;
         }
 

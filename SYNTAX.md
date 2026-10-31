@@ -173,6 +173,8 @@ string
 bytes
 list
 dict
+struct
+method
 function
 builtin
 userdata
@@ -189,7 +191,7 @@ false
 真值规则：
 
 - 假：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典；
-- 真：其他值，包括 `true`、函数、内置函数和 userdata（例如文件句柄）。
+- 真：其他值，包括 `true`、struct、方法值、函数、内置函数和 userdata（例如文件句柄）。
 
 `bool(x)` 按真值规则转换为 `true` / `false`。`str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
 

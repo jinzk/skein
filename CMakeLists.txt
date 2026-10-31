@@ -111,12 +111,18 @@ include(CTest)
 if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
-    add_test(
-      NAME calc_tests
-      COMMAND ${Python3_EXECUTABLE}
-              ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_calc.py
-              $<TARGET_FILE:${PROJECT_NAME}>
+    if(CALC_ENABLE_FFI AND LIBFFI_FOUND)
+      add_library(calc_ffi_shim SHARED tests/ffi_shim.cpp)
+    endif()
+    set(CALC_TEST_COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_calc.py
+      $<TARGET_FILE:${PROJECT_NAME}>
     )
+    if(TARGET calc_ffi_shim)
+      list(APPEND CALC_TEST_COMMAND $<TARGET_FILE:calc_ffi_shim>)
+    endif()
+    add_test(NAME calc_tests COMMAND ${CALC_TEST_COMMAND})
   else()
     message(WARNING "Python3 not found; calc_tests will not be registered")
   endif()

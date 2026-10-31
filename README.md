@@ -238,6 +238,37 @@ print(bytes_to_string(data));
 std.net.close(s);
 ```
 
+网络函数支持可选超时和地址族：
+
+```text
+tcp_connect(host, port[, timeout_ms[, family]])
+tcp_listen(host, port[, timeout_ms[, family]])
+accept(listener[, timeout_ms])
+send(socket, data[, timeout_ms])
+recv(socket, size[, timeout_ms])
+resolve(host[, timeout_ms[, family]])
+shutdown(socket[, timeout_ms])
+```
+
+`timeout_ms` 为 `0` 或省略时不设置超时；正数表示一次调用的总超时时间，检查精度约 10ms。
+`family` 支持 `"any"`、`"ipv4"`、`"ipv6"`。
+`"any"` 会使用解析结果中的第一个可绑定地址；需要同时监听 IPv4/IPv6 时应分别创建 listener。
+
+地址查询：
+
+```text
+std.net.local_addr(socket)
+std.net.peer_addr(socket)
+```
+
+返回：
+
+```text
+{address: "127.0.0.1", port: 8080, family: "ipv4"}
+```
+
+`tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。
+
 FFI：
 
 ```text
@@ -387,7 +418,10 @@ std.net.accept
 std.net.send
 std.net.recv
 std.net.close
+std.net.shutdown
 std.net.resolve
+std.net.local_addr
+std.net.peer_addr
 
 std.ffi.open
 std.ffi.close
@@ -436,13 +470,18 @@ std.bytes.from_int
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
 - `std.net` 提供同步 TCP 客户端/服务端和 DNS 解析，数据使用 `bytes`，底层由 libuv 驱动；
+- `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
+- `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
+- Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
+- `std.ffi` 的 `u64` / `usize` 返回值必须在脚本 `int` 范围内，否则报错；
 - `bytes` 传给 C 的是调用期间的临时副本，C 侧不能保存指针；
 - `buffer` 的容量和写入边界由调用方保证，C 侧越界写入会破坏内存；
 - `std.ffi` 是可选模块，缺少 libffi 时不可用；
 - 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
 - `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用；
+- DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
 ### 查找路径

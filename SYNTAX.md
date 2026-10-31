@@ -1269,6 +1269,28 @@ print(bytes_to_string(data));
 std.net.close(s);
 ```
 
+网络函数签名：
+
+```text
+tcp_connect(host, port[, timeout_ms[, family]])
+tcp_listen(host, port[, timeout_ms[, family]])
+accept(listener[, timeout_ms])
+send(socket, data[, timeout_ms])
+recv(socket, size[, timeout_ms])
+resolve(host[, timeout_ms[, family]])
+shutdown(socket[, timeout_ms])
+local_addr(socket)
+peer_addr(socket)
+```
+
+`timeout_ms = 0` 或省略表示不设置超时；正数表示一次调用的总超时时间，检查精度约 10ms。`family` 支持 `"any"`、`"ipv4"`、`"ipv6"`；`"any"` 使用解析结果中的第一个可绑定地址。
+
+地址查询返回：
+
+```text
+{address: "127.0.0.1", port: 8080, family: "ipv4"}
+```
+
 `std.net` 的公开 API 仍是同步的；libuv 事件循环只在每次调用内部运行，不会暴露给脚本。
 
 FFI 示例：
@@ -1313,12 +1335,16 @@ std.ffi.buffer_free
 `bytes` 传递的是调用期间的临时副本，C 侧不能保存该指针。
 `buffer` 的容量和写入边界由调用方保证，C 侧越界写入会破坏内存。
 
+`u64` / `usize` 返回值必须在脚本有符号 64 位整数范围内，否则 `std.ffi.call` 报错。
+
 限制：
 
 - 只支持 C ABI；
 - 不支持结构体、回调、可变参数；
 - 网络和 FFI 错误当前是运行时错误，不能通过 `on error` 捕获；
-- `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用。
+- Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
+- `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用；
+- DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。
 

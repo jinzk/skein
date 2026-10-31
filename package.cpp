@@ -465,6 +465,9 @@ value_t *build_std_namespace() {
             {"recv", B_net_recv},
             {"close", B_net_close},
             {"resolve", B_net_resolve},
+            {"shutdown", B_net_shutdown},
+            {"local_addr", B_net_local_addr},
+            {"peer_addr", B_net_peer_addr},
         })));
 #ifdef CALC_ENABLE_FFI
     root->payload->items.push_back(std::make_pair(

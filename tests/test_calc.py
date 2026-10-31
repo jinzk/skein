@@ -10,6 +10,12 @@ import time
 
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./calc-demo"
+FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 else None
+
+
+def calc_string(value):
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def run(source, timeout=5):
@@ -1015,6 +1021,11 @@ def main():
         'import std;\nlen(std.net.resolve("localhost")) > 0\n',
         stdout="= true",
     )
+    check(
+        "std net resolve ipv4",
+        'import std;\nlen(std.net.resolve("localhost", 1000, "ipv4")) > 0\n',
+        stdout="= true",
+    )
     try:
         import socket
         import threading
@@ -1041,9 +1052,9 @@ def main():
         thread.start()
         net_proc = run(
             "import std;\n"
-            f'let s = std.net.tcp_connect("127.0.0.1", {port});\n'
-            'std.net.send(s, "hello");\n'
-            "let data = std.net.recv(s, 100);\n"
+            f'let s = std.net.tcp_connect("127.0.0.1", {port}, 1000, "ipv4");\n'
+            'std.net.send(s, "hello", 1000);\n'
+            "let data = std.net.recv(s, 100, 1000);\n"
             "print(bytes_to_string(data));\n"
             "std.net.close(s);\n"
         )
@@ -1102,15 +1113,114 @@ def main():
             if server_proc.poll() is None:
                 server_proc.kill()
                 server_proc.wait()
+
+        check(
+            "std net accept timeout",
+            "import std;\n"
+            'let s = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            "std.net.local_addr(s)[\"family\"]\n"
+            "std.net.accept(s, 100);\n"
+            "std.net.close(s);\n",
+            stdout="= ipv4",
+            stderr="timed out",
+        )
+        check(
+            "std net ipv4 family",
+            "import std;\n"
+            'let s = std.net.tcp_listen("localhost", 0, 100, "ipv4");\n'
+            'std.net.local_addr(s)["family"]\n'
+            "std.net.close(s);\n",
+            stdout="= ipv4",
+        )
+        check(
+            "std net listener misuse",
+            "import std;\n"
+            'let s = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            'std.net.send(s, "x");\n'
+            "std.net.close(s);\n",
+            stderr="send expects a connected tcp socket",
+        )
+        check(
+            "std net double close",
+            "import std;\n"
+            'let s = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+            "std.net.close(s);\n"
+            "std.net.close(s);\n",
+            stderr="tcp socket is closed",
+        )
+        bad_port = socket.socket()
+        bad_port.bind(("127.0.0.1", 0))
+        bad_port_number = bad_port.getsockname()[1]
+        bad_port.close()
+        check(
+            "std net connect failure",
+            "import std;\n"
+            f'std.net.tcp_connect("127.0.0.1", {bad_port_number}, 100);\n',
+            stderr="tcp_connect:",
+        )
+
+        silent = socket.socket()
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(1)
+        silent_port = silent.getsockname()[1]
+
+        def silent_server():
+            try:
+                client, _ = silent.accept()
+                time.sleep(0.5)
+                client.close()
+            finally:
+                silent.close()
+
+        silent_thread = threading.Thread(target=silent_server)
+        silent_thread.start()
+        check(
+            "std net recv timeout",
+            "import std;\n"
+            f'let s = std.net.tcp_connect("127.0.0.1", {silent_port}, 100);\n'
+            "std.net.recv(s, 10, 100);\n"
+            "std.net.close(s);\n",
+            stderr="timed out",
+        )
+        silent_thread.join(timeout=5)
+
+        close_server = socket.socket()
+        close_server.bind(("127.0.0.1", 0))
+        close_server.listen(1)
+        close_port = close_server.getsockname()[1]
+
+        def close_server_thread():
+            try:
+                client, _ = close_server.accept()
+                while client.recv(100):
+                    pass
+                client.close()
+            finally:
+                close_server.close()
+
+        close_thread = threading.Thread(target=close_server_thread)
+        close_thread.start()
+        check(
+            "std net address and shutdown",
+            "import std;\n"
+            f'let s = std.net.tcp_connect("127.0.0.1", {close_port}, 100);\n'
+            'std.net.local_addr(s)["family"]\n'
+            'std.net.peer_addr(s)["family"]\n'
+            "std.net.shutdown(s, 100);\n"
+            "std.net.close(s);\n",
+            stdout_all=["= ipv4", "= ipv4"],
+        )
+        close_thread.join(timeout=5)
     except OSError:
         pass
 
-    if sys.platform.startswith("linux"):
+    ffi_probe = run("import std;\nkind_of(std.ffi)\n")
+    has_ffi = "= dict" in ffi_probe.stdout
+    if sys.platform.startswith("linux") and has_ffi:
         import ctypes.util
         libm = ctypes.util.find_library("m")
         libc = ctypes.util.find_library("c")
-        ffi_probe = run("import std;\nkind_of(std.ffi)\n")
-        if libm and libc and "= dict" in ffi_probe.stdout:
+        if libm and libc:
             check(
                 "std ffi basic calls",
                 f'import std;\n'
@@ -1131,6 +1241,108 @@ def main():
                 f'std.ffi.close(m);\nstd.ffi.close(c);\n',
                 stdout_all=["= 1.0", "= 5", "= 0", "= hello", "= 8"],
             )
+
+    if has_ffi and FFI_SHIM:
+        shim = calc_string(FFI_SHIM)
+        check(
+            "std ffi scalar types",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_i8", "i8", ["i8"], [-5])\n'
+            'std.ffi.call(lib, "shim_u8", "u8", ["u8"], [250])\n'
+            'std.ffi.call(lib, "shim_i16", "i16", ["i16"], [-30000])\n'
+            'std.ffi.call(lib, "shim_u16", "u16", ["u16"], [60000])\n'
+            'std.ffi.call(lib, "shim_i32", "i32", ["i32"], [-100000])\n'
+            'std.ffi.call(lib, "shim_u32", "u32", ["u32"], [4000000000])\n'
+            'std.ffi.call(lib, "shim_i64", "i64", ["i64"], [-9000000000])\n'
+            'std.ffi.call(lib, "shim_u64", "u64", ["u64"], [9000000000])\n'
+            'std.ffi.call(lib, "shim_f32", "f32", ["f32"], [1.5])\n'
+            'std.ffi.call(lib, "shim_f64", "f64", ["f64"], [2.5])\n'
+            'std.ffi.call(lib, "shim_cstring", "cstring", '
+            '["cstring"], ["hello"])\n'
+            'std.ffi.call(lib, "shim_usize", "usize", ["usize"], [123])\n'
+            'std.ffi.call(lib, "shim_isize", "isize", ["isize"], [-123])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=[
+                "= -5", "= 250", "= -30000", "= 60000",
+                "= -100000", "= 4000000000", "= -9000000000",
+                "= 9000000000", "= 1.5", "= 2.5", "= hello",
+                "= 123", "= -123",
+            ],
+        )
+        check(
+            "std ffi u64 overflow",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_u64_max", "u64", [], [])\n'
+            "std.ffi.close(lib);\n",
+            stderr="u64 return value exceeds int64 range",
+        )
+        if sys.maxsize > 2**31 - 1:
+            check(
+                "std ffi usize overflow",
+                "import std;\n"
+                f"let lib = std.ffi.open({shim});\n"
+                'std.ffi.call(lib, "shim_usize_max", "usize", [], [])\n'
+                "std.ffi.close(lib);\n",
+                stderr="usize return value exceeds int64 range",
+            )
+        check(
+            "std ffi library error",
+            'import std;\nstd.ffi.open("/definitely/not/a/library.so")\n',
+            stderr="cannot load",
+        )
+        check(
+            "std ffi symbol error",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_missing_symbol", "void", [], [])\n'
+            "std.ffi.close(lib);\n",
+            stderr="symbol not found",
+        )
+        check(
+            "std ffi direct bytes return",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_cstring", "bytes", '
+            '["cstring"], ["hello"])\n'
+            "std.ffi.close(lib);\n",
+            stderr="cannot be returned directly",
+        )
+        check(
+            "std ffi buffer output",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let buf = std.ffi.buffer(8);\n"
+            'std.ffi.call(lib, "shim_buffer_write", "i32", '
+            '["buffer", "usize"], [buf, 8])\n'
+            "bytes_to_string(std.ffi.buffer_bytes(buf, 5))\n"
+            "std.ffi.buffer_len(buf)\n"
+            "std.ffi.buffer_free(buf);\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 5", "= hello", "= 8"],
+        )
+        check(
+            "std ffi buffer bounds",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let buf = std.ffi.buffer(4);\n"
+            "std.ffi.buffer_bytes(buf, 5)\n"
+            "std.ffi.buffer_free(buf);\n"
+            "std.ffi.buffer_len(buf)\n"
+            "std.ffi.close(lib);\n",
+            stderr="length out of range",
+        )
+        check(
+            "std ffi freed buffer",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let buf = std.ffi.buffer(4);\n"
+            "std.ffi.buffer_free(buf);\n"
+            "std.ffi.buffer_len(buf)\n"
+            "std.ffi.close(lib);\n",
+            stderr="ffi buffer is freed",
+        )
     check(
         "std string format",
         'import std;\nstd.string.format("{}", 3)\n',

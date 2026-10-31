@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -181,6 +182,29 @@ ffi_type *ffi_type_for(ffi_kind kind) {
     }
 }
 
+std::string ffi_native_error() {
+#ifdef _WIN32
+    DWORD code = GetLastError();
+    char *message = NULL;
+    DWORD length = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, code, 0, (LPSTR)&message, 0, NULL);
+    std::string result = length && message
+        ? std::string(message, length)
+        : "error " + std::to_string(code);
+    if (message)
+        LocalFree(message);
+    while (!result.empty() &&
+           (result.back() == '\r' || result.back() == '\n'))
+        result.pop_back();
+    return result;
+#else
+    const char *message = dlerror();
+    return message ? message : "unknown dynamic loader error";
+#endif
+}
+
 value_t *ffi_open(const std::vector<value_t *> &args) {
     if (args.size() != 1) {
         yyerror("std.ffi.open expects 1 argument");
@@ -193,12 +217,15 @@ value_t *ffi_open(const std::vector<value_t *> &args) {
     const char *path = ((struct string_value_t *)args[0])->value;
     void *handle = NULL;
 #ifdef _WIN32
+    SetLastError(0);
     handle = (void *)LoadLibraryA(path);
 #else
+    dlerror();
     handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
 #endif
     if (!handle) {
-        yyerror("ffi.open: cannot load %s", path);
+        yyerror("ffi.open: cannot load %s: %s", path,
+                ffi_native_error().c_str());
         return NULL;
     }
     return new_library_value(handle);
@@ -479,12 +506,15 @@ value_t *ffi_call(const std::vector<value_t *> &args) {
     const char *symbol_name = ((struct string_value_t *)args[1])->value;
     void *symbol = NULL;
 #ifdef _WIN32
+    SetLastError(0);
     symbol = (void *)GetProcAddress((HMODULE)library->handle, symbol_name);
 #else
+    dlerror();
     symbol = dlsym(library->handle, symbol_name);
 #endif
     if (!symbol) {
-        yyerror("ffi.call: symbol not found: %s", symbol_name);
+        yyerror("ffi.call: symbol not found: %s: %s", symbol_name,
+                ffi_native_error().c_str());
         return NULL;
     }
 
@@ -518,6 +548,27 @@ value_t *ffi_call(const std::vector<value_t *> &args) {
 
     ffi_arg result = 0;
     ffi_call(&cif, FFI_FN(symbol), &result, arg_values.data());
+
+    unsigned long long max_signed =
+        (unsigned long long)std::numeric_limits<long long>::max();
+    if (return_kind == FFI_U64) {
+        unsigned long long value = (unsigned long long)result;
+        if (value > max_signed) {
+            yyerror("ffi.call: u64 return value exceeds int64 range");
+            return NULL;
+        }
+        return newintval((long long)value);
+    }
+    if (return_kind == FFI_USIZE) {
+        unsigned long long value =
+            (unsigned long long)(std::uintptr_t)result;
+        if (value > max_signed) {
+            yyerror("ffi.call: usize return value exceeds int64 range");
+            return NULL;
+        }
+        return newintval((long long)value);
+    }
+
     long long signed_result = (long long)result;
     if (return_kind == FFI_I8)
         signed_result = (std::int8_t)result;
@@ -531,8 +582,6 @@ value_t *ffi_call(const std::vector<value_t *> &args) {
         signed_result = (std::int32_t)result;
     else if (return_kind == FFI_U32)
         signed_result = (std::uint32_t)result;
-    else if (return_kind == FFI_USIZE)
-        signed_result = (long long)(std::uintptr_t)result;
     else if (return_kind == FFI_ISIZE)
         signed_result = (long long)(std::intptr_t)result;
     return newintval(signed_result);

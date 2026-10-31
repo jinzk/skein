@@ -62,6 +62,70 @@ def check(name, source, *, stdout=None, stdout_all=None, stderr=None, code=0):
         )
 
 
+def check_interactive_continuation():
+    """Verify REPL continuation prompts for multi-line empty braces."""
+    if sys.platform == "win32":
+        return
+    try:
+        import pty
+        import select
+    except ImportError:
+        return
+
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(
+        [BIN],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+    )
+    os.close(slave)
+
+    try:
+        def read_available(timeout=1.0):
+            data = b""
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.05)
+                if ready:
+                    try:
+                        chunk = os.read(master, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    data += chunk
+                    deadline = time.time() + 0.15
+                elif data:
+                    break
+            return data.decode("utf-8", "replace")
+
+        assert ">" in read_available()
+
+        os.write(master, b"if (1) {\n")
+        assert ".." in read_available(), "missing empty-block continuation prompt"
+        os.write(master, b"}\n")
+        read_available()
+
+        os.write(master, b"let d = {\n")
+        assert ".." in read_available(), "missing empty-dict continuation prompt"
+        os.write(master, b"// comment\n")
+        assert ".." in read_available(), "missing comment continuation prompt"
+        os.write(master, b"};\n")
+        read_available()
+        os.write(master, b"d\n")
+        assert "= {}" in read_available(), "multi-line empty dict failed"
+
+        os.write(master, b"\x04")
+        proc.wait(timeout=2)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=2)
+        os.close(master)
+
+
 def main():
     check("addition", "1+2\n", stdout="= 3")
     check("float", "1.5*2\n", stdout="= 3.0")
@@ -454,6 +518,18 @@ def main():
     check("empty list literal assignment", "let l = [];\nl\n", stdout="= []")
     check("empty dict builtin", "dict()\n", stdout="= {}")
     check("empty list builtin", "list()\n", stdout="= []")
+    check("multi-line empty dict", "let d = {\n};\nd\n", stdout="= {}")
+    check("comment-only empty dict", "let d = { // comment\n};\nd\n",
+          stdout="= {}")
+    check("multi-line comment-only empty dict",
+          "let d = {\n  // comment\n\n};\nd\n", stdout="= {}")
+    check("empty dict as first dict key", "let d = {{}: 1};\nd\n",
+          stdout="= {{}: 1}")
+    check("empty dict inside block statement", "{ {}; }\n", code=0)
+    check("multi-line empty if block", "if (1) {\n}\n", code=0)
+    check("comment-only empty if block", "if (1) { // comment\n}\n", code=0)
+    check("multi-line empty func body", "func f() {\n}\nf()\n", code=0)
+    check("multi-line empty package body", "package p {\n}\n", code=0)
 
     check("list index assignment", "let a = [1,2,3];\na[0] = 9;\na\n",
           stdout="= [9, 2, 3]")
@@ -1714,6 +1790,8 @@ def main():
             proc.send_signal(signal.SIGINT)
             stdout, stderr = proc.communicate(timeout=5)
             assert proc.returncode == 130, (proc.returncode, stdout, stderr)
+
+    check_interactive_continuation()
 
     print(f"all tests passed for {BIN}")
 

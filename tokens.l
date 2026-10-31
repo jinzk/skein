@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "ast.h"
 #include "diagnostics.h"
@@ -41,7 +42,19 @@ static int string_start_column = 1;
 static int last_token = 0;
 static int prev_token = 0;
 
-#define YYRET(tok) do { int yyret_tok = (tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+struct brace_frame {
+    bool is_dict;
+    bool empty;
+};
+
+/*
+ * Tracks the lexical kind of every currently open brace.  The kind is only
+ * consulted when the brace turns out to be empty; non-empty braces use the
+ * normal '{' ... '}' path and let the parser decide from their contents.
+ */
+static std::vector<brace_frame> brace_stack;
+
+#define YYRET(tok) do { int yyret_tok = (tok); note_token(yyret_tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
@@ -153,41 +166,32 @@ static void append_unescaped(const char *s, int len) {
         }
     }
 }
-static bool empty_brace_expression_context() {
-    switch (last_token) {
-        case '=': case '(': case '[': case ',': case ':':
-        case '+': case '-': case '*': case '/': case '%':
-        case '&': case '|': case '^': case '~': case '!':
-        case LOGAND: case LOGOR: case SHL: case SHR:
-        case CMP: case RETURN: case IN:
-            return true;
-        default:
-            return false;
-    }
+/*
+ * Decide whether an opening brace introduces a block body.  Only syntactic
+ * positions that always require a body are treated as blocks; everything else
+ * is treated as a dict when the brace is empty.  For non-empty braces this
+ * choice is irrelevant because the closing brace stays a normal '}'.
+ */
+static bool brace_starts_block() {
+    if (last_token == NAME && prev_token == PACKAGE)
+        return true;
+    if (last_token == ')' || last_token == ELSE)
+        return true;
+    return false;
 }
 
-static int empty_brace_token() {
-    /* package NAME {} is a declaration body */
-    if (last_token == NAME && prev_token == PACKAGE)
-        return EMPTY_BLOCK;
-
-    /* control/function headers end with ')' and are followed by a body */
-    if (last_token == ')' || last_token == ELSE)
-        return EMPTY_BLOCK;
-
-    /* expression positions: value, argument, index, dict value, etc. */
-    if (empty_brace_expression_context())
-        return EMPTY_DICT;
-
-    /* inside a block, a bare {} at a statement boundary is an empty block */
-    if (indent_count > 0 &&
-        (last_token == 0 || last_token == EOL || last_token == ';' ||
-         last_token == '{' || last_token == '}' ||
-         last_token == EMPTY_BLOCK))
-        return EMPTY_BLOCK;
-
-    /* top level (and other ambiguous positions) default to an empty dict */
-    return EMPTY_DICT;
+/*
+ * Any real token between braces makes the innermost brace non-empty.
+ * Comments, whitespace and newlines never reach this function.
+ */
+static void note_token(int tok) {
+    if (brace_stack.empty())
+        return;
+    if (tok == '{' || tok == '}' ||
+        tok == EMPTY_DICT_CLOSE || tok == EMPTY_BLOCK_CLOSE ||
+        tok == EOL)
+        return;
+    brace_stack.back().empty = false;
 }
 
 %}
@@ -218,10 +222,25 @@ EXP ([Ee][-+]?[0-9]+)
 "<<" { YYRET(SHL); }
 ">>" { YYRET(SHR); }
 
-"{"[ \t]*"}" { YYRET(empty_brace_token()); }
+"{" {
+    if (!brace_stack.empty())
+        brace_stack.back().empty = false;
+    brace_stack.push_back(brace_frame{!brace_starts_block(), true});
+    indent_count++;
+    YYRET('{');
+}
 
-"{" { indent_count++; YYRET('{'); }
-"}" { if (indent_count > 0) indent_count--; YYRET('}'); }
+"}" {
+    if (indent_count > 0) indent_count--;
+    int tok = '}';
+    if (!brace_stack.empty()) {
+        brace_frame frame = brace_stack.back();
+        brace_stack.pop_back();
+        if (frame.empty)
+            tok = frame.is_dict ? EMPTY_DICT_CLOSE : EMPTY_BLOCK_CLOSE;
+    }
+    YYRET(tok);
+}
 "[" { indent_count++; YYRET('['); }
 "]" { if (indent_count > 0) indent_count--; YYRET(']'); }
 "(" { indent_count++; YYRET('('); }
@@ -405,6 +424,7 @@ void reset_scanner_state(std::FILE *in) {
     input_pos = 0;
     last_token = 0;
     prev_token = 0;
+    brace_stack.clear();
     std::clearerr(in);
     yyrestart(in);
 }
@@ -422,6 +442,7 @@ struct scanner_checkpoint {
     int stdin_eof;
     int last_token;
     int prev_token;
+    std::vector<brace_frame> braces;
 };
 
 scanner_checkpoint *scanner_checkpoint_save() {
@@ -438,6 +459,7 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->stdin_eof = g_stdin_eof;
     checkpoint->last_token = last_token;
     checkpoint->prev_token = prev_token;
+    checkpoint->braces = brace_stack;
     return checkpoint;
 }
 
@@ -455,6 +477,7 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     g_stdin_eof = checkpoint->stdin_eof;
     last_token = checkpoint->last_token;
     prev_token = checkpoint->prev_token;
+    brace_stack = checkpoint->braces;
     BEGIN(checkpoint->condition);
     delete checkpoint;
 }

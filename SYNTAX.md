@@ -444,20 +444,16 @@ for (let key in {"a": 1, "b": 2}) {
 for (let key, value in {"a": 1, "b": 2}) {
   print(key + "=" + str(value));
 }
-
-for (let index, value in [10, 20]) {
-  print(str(index) + ":" + str(value));
-}
 ```
 
 规则：
 
 - 单变量形式：`for (let NAME in exp)`；
-- 双变量形式：`for (let NAME1, NAME2 in exp)`；
-- list 单变量遍历元素，双变量得到 `index, value`；
+- 双变量形式：`for (let NAME1, NAME2 in exp)`，只支持 dict；
+- list 单变量遍历元素；需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - dict 单变量遍历 key，双变量得到 `key, value`；
-- string 单变量遍历 UTF-8 字符，双变量得到 `index, char`；
-- bytes 单变量遍历 `0..255` 的字节值，双变量得到 `index, byte`；
+- string 单变量遍历 UTF-8 字符；
+- bytes 单变量遍历 `0..255` 的字节值；
 - 可以配合 `range()` 做计数循环；
 - 被遍历对象在循环开始时求值一次；
 - 循环变量只存在于循环作用域；

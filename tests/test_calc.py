@@ -677,24 +677,22 @@ def main():
         stdout="a=1\nb=2\n",
     )
     check(
-        "for in list index value",
-        "for (let i, v in [10, 20]) { "
-        'print(str(i) + ":" + str(v)); }\n',
-        stdout="0:10\n1:20\n",
+        "for in two variables requires dict list",
+        "for (let i, v in [10, 20]) { print(v); }\n",
+        stderr="two-variable for-in requires dict, got list",
     )
     check(
-        "for in string index value",
-        'for (let i, ch in "ab") { print(str(i) + ch); }\n',
-        stdout="0a\n1b\n",
+        "for in two variables requires dict string",
+        'for (let i, ch in "ab") { print(ch); }\n',
+        stderr="two-variable for-in requires dict, got string",
     )
     check(
-        "for in bytes index value",
-        'for (let i, b in bytes_from_hex("00ff")) { '
-        'print(str(i) + ":" + str(b)); }\n',
-        stdout="0:0\n1:255\n",
+        "for in two variables requires dict bytes",
+        'for (let i, b in bytes_from_hex("00ff")) { print(b); }\n',
+        stderr="two-variable for-in requires dict, got bytes",
     )
     check("for in duplicate loop variables",
-          "for (let x, x in [1]) { }\n",
+          'for (let x, x in {"a": 1}) { }\n',
           stderr="loop variable repeated: x")
     check("for in two variables scope",
           'for (let k, v in {"a": 1}) { }\nk\n',

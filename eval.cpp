@@ -3229,6 +3229,13 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
+            if (f->value_name && iter->type != T_dict) {
+                yyerror("two-variable for-in requires dict, got %s",
+                        typename_of(iter));
+                freeval(iter);
+                break;
+            }
+
             if (f->value_name &&
                 std::strcmp(f->name, f->value_name) == 0) {
                 yyerror("loop variable repeated: %s", f->name);
@@ -3255,14 +3262,8 @@ struct value_t *eval(struct ast *a) {
                 struct value_t *item = NULL;
                 struct value_t *second = NULL;
                 if (iter->type == T_list) {
-                    struct value_t *value =
-                        ((struct list_value_t *)iter)->payload->items[i];
-                    if (f->value_name) {
-                        item = newintval((long long)i);
-                        second = dupval(value);
-                    } else {
-                        item = dupval(value);
-                    }
+                    item = dupval(
+                        ((struct list_value_t *)iter)->payload->items[i]);
                 } else if (iter->type == T_dict) {
                     struct dict_value_t *dict = (struct dict_value_t *)iter;
                     item = dupval(dict->payload->items[i].first);
@@ -3276,21 +3277,10 @@ struct value_t *eval(struct ast *a) {
                         leave = true;
                         break;
                     }
-                    if (f->value_name) {
-                        item = newintval((long long)i);
-                        second = newstrval(ch.c_str());
-                    } else {
-                        item = newstrval(ch.c_str());
-                    }
+                    item = newstrval(ch.c_str());
                 } else {
-                    int byte = (unsigned char)
-                        ((struct bytes_value_t *)iter)->value[i];
-                    if (f->value_name) {
-                        item = newintval((long long)i);
-                        second = newintval(byte);
-                    } else {
-                        item = newintval(byte);
-                    }
+                    item = newintval((unsigned char)
+                        ((struct bytes_value_t *)iter)->value[i]);
                 }
 
                 freeval(sym->val);

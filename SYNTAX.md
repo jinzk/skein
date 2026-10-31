@@ -1254,7 +1254,7 @@ std.bytes.hex(bytes_from_hex("00ff"))
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`status` / `command_status`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
-- `std.net`：同步 TCP 客户端/服务端和 DNS 解析；
+- `std.net`：同步 TCP 客户端/服务端和 DNS 解析，底层使用 libuv；
 - `std.ffi`：可选的 libffi C ABI 调用。
 
 TCP 示例：
@@ -1268,6 +1268,8 @@ let data = std.net.recv(s, 4096);
 print(bytes_to_string(data));
 std.net.close(s);
 ```
+
+`std.net` 的公开 API 仍是同步的；libuv 事件循环只在每次调用内部运行，不会暴露给脚本。
 
 FFI 示例：
 
@@ -1316,7 +1318,7 @@ std.ffi.buffer_free
 - 只支持 C ABI；
 - 不支持结构体、回调、可变参数；
 - 网络和 FFI 错误当前是运行时错误，不能通过 `on error` 捕获；
-- `std.net` 暂不支持 TLS、HTTP、异步。
+- `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。
 

@@ -6,6 +6,7 @@
 
 #include "parser.hpp"
 #include "diagnostics.h"
+#include "net.h"
 #include "package.h"
 #include "platform.h"
 #include "repl.h"
@@ -114,6 +115,7 @@ int main(int argc, char **argv) {
         repl_history_save();
     donescope();
     structtype_shutdown();
+    net_shutdown();
     if (script)
         std::fclose(script);
 

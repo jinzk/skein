@@ -1051,6 +1051,57 @@ def main():
         assert net_proc.returncode == 0, net_proc.stderr
         assert "echo:hello" in net_proc.stdout, net_proc.stdout
         assert received == [b"hello"], received
+
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        listen_port = probe.getsockname()[1]
+        probe.close()
+        server_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        client = None
+        try:
+            server_proc.stdin.write(
+                "import std;\n"
+                f'let listener = std.net.tcp_listen("127.0.0.1", {listen_port});\n'
+                "let client = std.net.accept(listener);\n"
+                "let data = std.net.recv(client, 100);\n"
+                'std.net.send(client, bytes_concat('
+                'bytes_from_string("echo:"), data));\n'
+                "std.net.close(client);\n"
+                "std.net.close(listener);\n"
+            )
+            server_proc.stdin.close()
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    client = socket.create_connection(
+                        ("127.0.0.1", listen_port), timeout=0.2
+                    )
+                    break
+                except OSError:
+                    if server_proc.poll() is not None:
+                        break
+                    time.sleep(0.02)
+            assert client is not None, "calc tcp_listen did not accept"
+            client.sendall(b"hello")
+            assert client.recv(100) == b"echo:hello"
+            client.close()
+            client = None
+            server_proc.wait(timeout=5)
+            err = server_proc.stderr.read()
+            assert server_proc.returncode == 0, err
+        finally:
+            if client is not None:
+                client.close()
+            if server_proc.poll() is None:
+                server_proc.kill()
+                server_proc.wait()
     except OSError:
         pass
 

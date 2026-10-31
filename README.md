@@ -12,13 +12,19 @@ cmake --build build
 ./build/calc-demo
 ```
 
+`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件。例如 Debian/Ubuntu：
+
+```bash
+sudo apt install libuv1-dev
+```
+
 `std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
 
 ```bash
 cmake -S . -B build -G Ninja -DCALC_ENABLE_FFI=OFF
 ```
 
-`std.net` 在 POSIX 使用系统 socket，在 Windows 使用 Winsock。
+`std.net` 对外仍是同步 API，libuv 只在内部驱动 socket 和 DNS 操作，不向脚本暴露事件循环。
 
 运行测试：
 
@@ -34,7 +40,7 @@ cmake --build build
 build\calc-demo.exe
 ```
 
-Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison 和 Flex。平台相关代码集中在 `platform_win.cpp`：
+Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex 和 libuv。平台相关代码集中在 `platform_win.cpp`：
 
 - 设置控制台输入输出代码页为 UTF-8；
 - 管道输入使用二进制模式，避免 CRLF / `0x1A` 转换；
@@ -429,14 +435,14 @@ std.bytes.from_int
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
-- `std.net` 提供同步 TCP 客户端/服务端和 DNS 解析，数据使用 `bytes`；
+- `std.net` 提供同步 TCP 客户端/服务端和 DNS 解析，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
 - `bytes` 传给 C 的是调用期间的临时副本，C 侧不能保存指针；
 - `buffer` 的容量和写入边界由调用方保证，C 侧越界写入会破坏内存；
 - `std.ffi` 是可选模块，缺少 libffi 时不可用；
 - 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
-- `std.net` 暂不支持 TLS、HTTP、异步或事件循环；
+- `std.net` 暂不支持 TLS、HTTP 或异步 API；libuv 事件循环只在内部驱动同步调用；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
 ### 查找路径

@@ -17,6 +17,28 @@ BISON_TARGET(MyParser parser.y ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp)
 FLEX_TARGET(MyScanner tokens.l ${CMAKE_CURRENT_BINARY_DIR}/tokens.cpp)
 ADD_FLEX_BISON_DEPENDENCY(MyScanner MyParser)
 
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(LIBUV QUIET IMPORTED_TARGET libuv)
+endif()
+if(TARGET PkgConfig::LIBUV)
+  set(CALC_LIBUV_TARGET PkgConfig::LIBUV)
+else()
+  find_path(LIBUV_INCLUDE_DIR uv.h)
+  find_library(LIBUV_LIBRARY NAMES uv libuv)
+  if(LIBUV_INCLUDE_DIR AND LIBUV_LIBRARY)
+    add_library(calc_libuv UNKNOWN IMPORTED)
+    set_target_properties(calc_libuv PROPERTIES
+      IMPORTED_LOCATION "${LIBUV_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${LIBUV_INCLUDE_DIR}"
+    )
+    set(CALC_LIBUV_TARGET calc_libuv)
+  endif()
+endif()
+if(NOT CALC_LIBUV_TARGET)
+  message(FATAL_ERROR "libuv not found; install libuv development files")
+endif()
+
 add_executable(${PROJECT_NAME}
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
@@ -57,10 +79,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
 )
+target_link_libraries(${PROJECT_NAME} PRIVATE ${CALC_LIBUV_TARGET})
 
 option(CALC_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
 if(CALC_ENABLE_FFI)
-  find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
     pkg_check_modules(LIBFFI QUIET IMPORTED_TARGET libffi)
   endif()

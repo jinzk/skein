@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "event_loop.h"
+#include "fiber.h"
 #include "repl.h"
 #include "valuetype.h"
 
@@ -129,7 +130,7 @@ value_t *make_task_value(std::shared_ptr<task> value) {
     return newuserdataval(&task_type, value);
 }
 
-bool get_task(value_t *value, std::shared_ptr<task> &result) {
+bool get_task_value(value_t *value, std::shared_ptr<task> &result) {
     if (!value || value->type != T_userdata) {
         yyerror("expected a task, got %s", typename_of(value));
         return false;
@@ -242,7 +243,7 @@ value_t *task_wait(const std::vector<value_t *> &args) {
         return NULL;
     }
     std::shared_ptr<task> value;
-    if (!get_task(args[0], value))
+    if (!get_task_value(args[0], value))
         return NULL;
     long long timeout_ms = 0;
     if (!get_optional_timeout(args, 1, timeout_ms))
@@ -262,6 +263,7 @@ value_t *task_wait(const std::vector<value_t *> &args) {
                 return NULL;
             }
             uv_run(event_loop_handle(), UV_RUN_ONCE);
+            fiber_pump();
         }
     }
 
@@ -294,7 +296,7 @@ value_t *task_wait_all(const std::vector<value_t *> &args) {
     tasks.reserve(values->payload->items.size());
     for (size_t i = 0; i < values->payload->items.size(); ++i) {
         std::shared_ptr<task> value;
-        if (!get_task(values->payload->items[i], value))
+        if (!get_task_value(values->payload->items[i], value))
             return NULL;
         tasks.push_back(std::move(value));
     }
@@ -322,6 +324,7 @@ value_t *task_wait_all(const std::vector<value_t *> &args) {
                 return NULL;
             }
             uv_run(event_loop_handle(), UV_RUN_ONCE);
+            fiber_pump();
         }
     }
 
@@ -350,7 +353,7 @@ value_t *task_cancel(const std::vector<value_t *> &args) {
         return NULL;
     }
     std::shared_ptr<task> value;
-    if (!get_task(args[0], value))
+    if (!get_task_value(args[0], value))
         return NULL;
     return newboolval(value->cancel());
 }
@@ -361,7 +364,7 @@ value_t *task_done(const std::vector<value_t *> &args) {
         return NULL;
     }
     std::shared_ptr<task> value;
-    if (!get_task(args[0], value))
+    if (!get_task_value(args[0], value))
         return NULL;
     return newboolval(value->done());
 }
@@ -391,6 +394,29 @@ void task_complete(const task_ptr &value, value_t *result) {
 void task_fail(const task_ptr &value, const std::string &error) {
     if (value)
         value->fail(error);
+}
+
+task_state_code task_get_state(const task_ptr &value) {
+    if (!value)
+        return TASK_STATE_FAILED;
+    switch (value->status) {
+        case TASK_PENDING: return TASK_STATE_PENDING;
+        case TASK_DONE: return TASK_STATE_DONE;
+        case TASK_FAILED: return TASK_STATE_FAILED;
+        case TASK_CANCELLED: return TASK_STATE_CANCELLED;
+        default: return TASK_STATE_FAILED;
+    }
+}
+
+value_t *task_copy_result(const task_ptr &value) {
+    if (!value || value->status != TASK_DONE)
+        return NULL;
+    return value->result ? dupval(value->result) : newnull();
+}
+
+const std::string &task_error_message(const task_ptr &value) {
+    static const std::string empty;
+    return value ? value->error : empty;
 }
 
 void task_shutdown() {

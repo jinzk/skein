@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "diagnostics.h"
+#include "eval_context.h"
 #include "parser.hpp"
 #include "platform.h"
 #include "repl.h"
@@ -709,7 +710,7 @@ bool load_package_file(const resolved_package &resolved,
     diag_save_source(diag_cp);
 
     bool saved_interactive = g_interactive;
-    int saved_runtime_errors = g_runtime_error_count;
+    int saved_runtime_errors = active_eval_context().runtime_error_count;
     bool saved_invalid = g_statement_invalid;
     int errors_before = diag_error_count();
     std::string saved_import_base = import_base;
@@ -744,7 +745,7 @@ bool load_package_file(const resolved_package &resolved,
     import_base = saved_import_base;
     g_interactive = saved_interactive;
     --g_package_loading;
-    g_runtime_error_count = saved_runtime_errors;
+    active_eval_context().runtime_error_count = saved_runtime_errors;
     g_statement_invalid = saved_invalid;
 
     if (status != 0 || diag_error_count() != errors_before || !result) {

@@ -11,10 +11,16 @@
 #include <unordered_set>
 #include <vector>
 
-static std::shared_ptr<scope_t> current;
-static std::shared_ptr<scope_t> global_scope;
-static std::vector<std::shared_ptr<scope_t>> restore_stack;
-static std::vector<std::weak_ptr<scope_t>> all_scopes;
+static scope_context fallback_context;
+static scope_context *active_context = NULL;
+
+scope_context &active_scope_context() {
+    return active_context ? *active_context : fallback_context;
+}
+
+void set_active_scope_context(scope_context *context) {
+    active_context = context;
+}
 
 struct symbol *symbol_table::find(std::string_view name) const {
     if (indexed) {
@@ -68,31 +74,33 @@ scope_t::~scope_t() {
     }
 }
 
-static void prune_scopes() {
-    all_scopes.erase(
-        std::remove_if(all_scopes.begin(), all_scopes.end(),
+static void prune_scopes(scope_context &context) {
+    context.all_scopes.erase(
+        std::remove_if(context.all_scopes.begin(), context.all_scopes.end(),
                        [](const std::weak_ptr<scope_t> &w) {
                            return w.expired();
                        }),
-        all_scopes.end());
+        context.all_scopes.end());
 }
 
-static void register_scope(const std::shared_ptr<scope_t> &s) {
-    if (all_scopes.size() > 4096)
-        prune_scopes();
-    all_scopes.push_back(s);
+static void register_scope(scope_context &context,
+                           const std::shared_ptr<scope_t> &s) {
+    if (context.all_scopes.size() > 4096)
+        prune_scopes(context);
+    context.all_scopes.push_back(s);
 }
 
 struct scope_t *topscope() {
-    return current.get();
+    return active_scope_context().current.get();
 }
 
 std::shared_ptr<scope_t> current_scope() {
-    return current;
+    return active_scope_context().current;
 }
 
 static void push_scope_impl(bool is_function,
                             const std::shared_ptr<scope_t> &parent) {
+    scope_context &context = active_scope_context();
     std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
     s->parent = parent;
     s->is_function = is_function;
@@ -100,13 +108,13 @@ static void push_scope_impl(bool is_function,
     s->ret = NULL;
     s->function_scope =
         is_function ? s.get() : (parent ? parent->function_scope : NULL);
-    register_scope(s);
-    restore_stack.push_back(current);
-    current = s;
+    register_scope(context, s);
+    context.restore_stack.push_back(context.current);
+    context.current = s;
 }
 
 void pushscope() {
-    push_scope_impl(false, current);
+    push_scope_impl(false, active_scope_context().current);
 }
 
 void pushscope_isolated() {
@@ -114,45 +122,66 @@ void pushscope_isolated() {
 }
 
 void pushscope_closure(const std::shared_ptr<scope_t> &parent) {
-    push_scope_impl(true, parent ? parent : global_scope);
+    scope_context &context = active_scope_context();
+    push_scope_impl(true, parent ? parent : context.global_scope);
 }
 
 void initscope() {
-    if (current) return;
+    initscope(active_scope_context());
+}
+
+void initscope(scope_context &context) {
+    if (context.current) return;
     std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
     s->parent.reset();
     s->is_function = false;
     s->is_global = true;
     s->ret = NULL;
     s->function_scope = NULL;
-    register_scope(s);
-    global_scope = s;
-    current = s;
-    restore_stack.clear();
+    register_scope(context, s);
+    context.global_scope = s;
+    context.current = s;
+    context.restore_stack.clear();
 }
 
 void popscope() {
-    if (!current || restore_stack.empty()) return;
-    current = restore_stack.back();
-    restore_stack.pop_back();
+    scope_context &context = active_scope_context();
+    if (!context.current || context.restore_stack.empty()) return;
+    context.current = context.restore_stack.back();
+    context.restore_stack.pop_back();
 }
 
 void donescope() {
-    restore_stack.clear();
+    donescope(active_scope_context());
+}
+
+void adopt_scopes(scope_context &from, scope_context &to) {
+    for (auto &scope : from.all_scopes)
+        to.all_scopes.push_back(scope);
+    from.all_scopes.clear();
+    from.restore_stack.clear();
+    from.current.reset();
+    from.global_scope.reset();
+}
+
+void donescope(scope_context &context) {
+    context.restore_stack.clear();
 
     /*
      * Closures can create reference cycles between a scope and the function
      * values stored in it.  Clearing all symbol tables first breaks those
      * cycles, so the remaining shared_ptr references can be released.
      */
-    for (auto &w : all_scopes) {
+    for (auto &w : context.all_scopes) {
         if (std::shared_ptr<scope_t> s = w.lock())
             clear_scope(s.get());
     }
 
-    current.reset();
-    global_scope.reset();
-    all_scopes.clear();
+    context.current.reset();
+    context.global_scope.reset();
+    context.all_scopes.clear();
+    context.statements_since_collect = 0;
+    context.scopes_at_last_collect = 0;
 }
 
 namespace {
@@ -262,20 +291,20 @@ struct cycle_collector {
     }
 };
 
-void collect_cycles() {
-    prune_scopes();
+void collect_cycles(scope_context &context) {
+    prune_scopes(context);
 
     std::vector<std::shared_ptr<scope_t>> scopes;
-    scopes.reserve(all_scopes.size());
-    for (auto &w : all_scopes) {
+    scopes.reserve(context.all_scopes.size());
+    for (auto &w : context.all_scopes) {
         if (std::shared_ptr<scope_t> s = w.lock())
             scopes.push_back(std::move(s));
     }
 
     cycle_collector collector;
-    collector.mark_scope(global_scope.get());
-    collector.mark_scope(current.get());
-    for (auto &s : restore_stack)
+    collector.mark_scope(context.global_scope.get());
+    collector.mark_scope(context.current.get());
+    for (auto &s : context.restore_stack)
         collector.mark_scope(s.get());
     collector.drain();
 
@@ -290,38 +319,38 @@ void collect_cycles() {
     }
 
     scopes.clear();
-    prune_scopes();
+    prune_scopes(context);
 }
 
 } // namespace
 
 void maybe_collect_cycles() {
-    static int statements_since_collect = 0;
-    static size_t scopes_at_last_collect = 0;
+    scope_context &context = active_scope_context();
     static constexpr int COLLECT_INTERVAL = 64;
     static constexpr size_t SCOPE_GROWTH_THRESHOLD = 1024;
 
-    ++statements_since_collect;
-    prune_scopes();
+    ++context.statements_since_collect;
+    prune_scopes(context);
 
-    bool due = statements_since_collect >= COLLECT_INTERVAL;
-    if (!due && all_scopes.size() >
-                    scopes_at_last_collect + SCOPE_GROWTH_THRESHOLD)
+    bool due = context.statements_since_collect >= COLLECT_INTERVAL;
+    if (!due && context.all_scopes.size() >
+                    context.scopes_at_last_collect + SCOPE_GROWTH_THRESHOLD)
         due = true;
     if (!due)
         return;
 
-    statements_since_collect = 0;
-    collect_cycles();
-    prune_scopes();
-    scopes_at_last_collect = all_scopes.size();
+    context.statements_since_collect = 0;
+    collect_cycles(context);
+    prune_scopes(context);
+    context.scopes_at_last_collect = context.all_scopes.size();
 }
 
 void save_global_symbol(const char *name, value_t *v) {
-    if (!global_scope || !name)
+    scope_context &context = active_scope_context();
+    if (!context.global_scope || !name)
         return;
     std::string_view key(name);
-    struct symbol *existing = global_scope->syms.find(key);
+    struct symbol *existing = context.global_scope->syms.find(key);
     if (existing) {
         freeval(existing->val);
         existing->val = v;
@@ -329,20 +358,23 @@ void save_global_symbol(const char *name, value_t *v) {
     }
     struct symbol *sym = newsym(name);
     sym->val = v;
-    global_scope->syms.insert(sym);
+    context.global_scope->syms.insert(sym);
 }
 
 value_t *lookup_global_symbol(const char *name) {
-    if (!global_scope || !name)
+    scope_context &context = active_scope_context();
+    if (!context.global_scope || !name)
         return NULL;
-    struct symbol *sym = global_scope->syms.find(std::string_view(name));
+    struct symbol *sym =
+        context.global_scope->syms.find(std::string_view(name));
     return sym ? sym->val : NULL;
 }
 
 struct symbol *lookupsym(const char *sym) {
     if (!sym) return NULL;
+    scope_context &context = active_scope_context();
     std::string_view key(sym);
-    for (scope_t *s = current.get(); s; s = s->parent.get()) {
+    for (scope_t *s = context.current.get(); s; s = s->parent.get()) {
         if (struct symbol *found = s->syms.find(key))
             return found;
     }
@@ -350,18 +382,21 @@ struct symbol *lookupsym(const char *sym) {
 }
 
 bool isrepeated(const char *sym) {
-    if (!current || !sym) return false;
-    return current->syms.find(std::string_view(sym)) != NULL;
+    scope_context &context = active_scope_context();
+    if (!context.current || !sym) return false;
+    return context.current->syms.find(std::string_view(sym)) != NULL;
 }
 
 void savesym(struct symbol *sp) {
-    if (!current) return;
-    current->syms.insert(sp);
+    scope_context &context = active_scope_context();
+    if (!context.current) return;
+    context.current->syms.insert(sp);
 }
 
 bool retval(struct value_t *r) {
-    if (current && current->function_scope) {
-        current->function_scope->ret = r;
+    scope_context &context = active_scope_context();
+    if (context.current && context.current->function_scope) {
+        context.current->function_scope->ret = r;
         return true;
     }
     return false;

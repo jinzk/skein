@@ -455,7 +455,7 @@ struct ast *append_case(struct ast *head, struct ast *node) {
 }
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported) {
+                    bool exported, bool is_async) {
     struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
     if (!a) {
         yyerror("out of space");
@@ -473,7 +473,13 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->ast = ast;
     a->moved = 0;
     a->exported = exported;
+    a->is_async = is_async;
     return (struct ast *)a;
+}
+
+struct ast *newawait(struct ast *value) {
+    struct ast *a = newast('b', value, NULL);
+    return a;
 }
 
 struct ast *newpackage(char *name, struct ast *body) {
@@ -536,7 +542,8 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     }
     std::shared_ptr<function_code> code(
         new function_code{node->ast, node->sl, nparams,
-                          node->name ? node->name : "", false, variadic},
+                          node->name ? node->name : "", false, variadic,
+                          node->is_async != 0},
         free_function_code);
     function_codes[node] = code;
     return code;
@@ -755,6 +762,7 @@ void treefree(struct ast *a) {
         case 'M':
         case '!':
         case '~':
+        case 'b':
             treefree(a->l);
             break;
         case 'V':

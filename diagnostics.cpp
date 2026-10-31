@@ -21,13 +21,7 @@ static std::string source_name;
 static std::string module_name;
 static std::vector<std::string> source_lines;
 
-struct call_frame {
-    std::string name;
-    int line;
-    int column;
-};
-
-static std::vector<call_frame> call_stack;
+static std::vector<diag_call_frame> call_stack;
 static const size_t MAX_REPORTED_FRAMES = 8;
 
 void diag_scan_token(const char *text, int length) {
@@ -104,7 +98,7 @@ static void print_call_stack() {
         std::fprintf(stderr, "  ... %zu more call(s)\n", first);
     }
     for (size_t i = shown; i > first; --i) {
-        const call_frame &frame = call_stack[i - 1];
+        const diag_call_frame &frame = call_stack[i - 1];
         if (frame.line > 0)
             std::fprintf(stderr, "  in %s() called from line %d\n",
                          frame.name.c_str(), frame.line);
@@ -172,7 +166,7 @@ bool diag_lexical_error_on_line(int line) {
 }
 
 void diag_push_call(const std::string &name, int line, int column) {
-    call_stack.push_back(call_frame{name, line, column});
+    call_stack.push_back(diag_call_frame{name, line, column});
 }
 
 void diag_pop_call() {
@@ -228,6 +222,40 @@ void diag_restore_source(const diag_source_checkpoint &checkpoint) {
     source_name = checkpoint.source_name;
     module_name = checkpoint.module_name;
     source_lines = checkpoint.lines;
+}
+
+void diag_capture(diag_state &state) {
+    state.current_line = current_line;
+    state.current_column = current_column;
+    state.token_line = g_token_line;
+    state.token_column = g_token_column;
+    state.error_line = g_error_line;
+    state.error_column = g_error_column;
+    state.flow_line = g_flow_line;
+    state.flow_column = g_flow_column;
+    state.error_count = error_count;
+    state.lexical_line = lexical_error_line;
+    state.source_name = source_name;
+    state.module_name = module_name;
+    state.lines = source_lines;
+    state.call_stack = call_stack;
+}
+
+void diag_restore(const diag_state &state) {
+    current_line = state.current_line;
+    current_column = state.current_column;
+    g_token_line = state.token_line;
+    g_token_column = state.token_column;
+    g_error_line = state.error_line;
+    g_error_column = state.error_column;
+    g_flow_line = state.flow_line;
+    g_flow_column = state.flow_column;
+    error_count = state.error_count;
+    lexical_error_line = state.lexical_line;
+    source_name = state.source_name;
+    module_name = state.module_name;
+    source_lines = state.lines;
+    call_stack = state.call_stack;
 }
 
 void diag_start_source() {

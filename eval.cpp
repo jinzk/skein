@@ -1,7 +1,9 @@
 #include "eval.h"
 #include "builtins.h"
 #include "diagnostics.h"
+#include "eval_context.h"
 #include "eval_helpers.h"
+#include "fiber.h"
 #include "filetype.h"
 #include "format.h"
 #include "package.h"
@@ -15,22 +17,14 @@
 
 #include <cstring>
 
-int g_runtime_error_count = 0;
-
-enum eval_control_kind {
-    EVAL_CONTROL_NONE,
-    EVAL_CONTROL_FAIL,
-    EVAL_CONTROL_RECOVER
-};
-
-static enum eval_control_kind g_eval_control = EVAL_CONTROL_NONE;
-static struct value_t *g_eval_control_value = NULL;
-static int g_handler_depth = 0;
-static const char *g_pending_label = NULL;
+static eval_context &eval_ctx() {
+    return active_eval_context();
+}
 
 static const char *take_pending_label() {
-    const char *label = g_pending_label;
-    g_pending_label = NULL;
+    eval_context &context = eval_ctx();
+    const char *label = context.pending_label;
+    context.pending_label = NULL;
     return label;
 }
 
@@ -113,38 +107,38 @@ double as_double(const struct value_t *v) {
 }
 
 static void clear_eval_control() {
-    freeval(g_eval_control_value);
-    g_eval_control_value = NULL;
-    g_eval_control = EVAL_CONTROL_NONE;
+    freeval(eval_ctx().control_value);
+    eval_ctx().control_value = NULL;
+    eval_ctx().control = EVAL_CONTROL_NONE;
 }
 
 static void set_eval_control(enum eval_control_kind kind,
                              struct value_t *value) {
     clear_eval_control();
-    g_eval_control = kind;
-    g_eval_control_value = value;
+    eval_ctx().control = kind;
+    eval_ctx().control_value = value;
 }
 
 static struct value_t *take_eval_control(enum eval_control_kind kind) {
-    if (g_eval_control != kind)
+    if (eval_ctx().control != kind)
         return NULL;
-    struct value_t *value = g_eval_control_value;
-    g_eval_control_value = NULL;
-    g_eval_control = EVAL_CONTROL_NONE;
+    struct value_t *value = eval_ctx().control_value;
+    eval_ctx().control_value = NULL;
+    eval_ctx().control = EVAL_CONTROL_NONE;
     return value;
 }
 
 bool eval_control_pending() {
-    return g_eval_control != EVAL_CONTROL_NONE;
+    return eval_ctx().control != EVAL_CONTROL_NONE;
 }
 
 void eval_finish_statement_control() {
-    if (g_eval_control == EVAL_CONTROL_NONE)
+    if (eval_ctx().control == EVAL_CONTROL_NONE)
         return;
-    if (g_eval_control == EVAL_CONTROL_FAIL) {
-        if (g_eval_control_value)
+    if (eval_ctx().control == EVAL_CONTROL_FAIL) {
+        if (eval_ctx().control_value)
             yyerror("uncaught fail: %s",
-                    value_to_string(g_eval_control_value).c_str());
+                    value_to_string(eval_ctx().control_value).c_str());
         else
             yyerror("uncaught fail");
     } else {
@@ -498,6 +492,95 @@ struct call_depth_guard {
 };
 }
 
+static struct value_t *invoke_function_body(
+    const std::shared_ptr<function_def> &def,
+    std::vector<struct value_t *> &args) {
+    int nparams = def->code->nparams;
+    std::string frame_name =
+        def->code->name.empty() ? "<anonymous>" : def->code->name;
+
+    struct symlist *rest = NULL;
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next) {
+        if (sl->variadic) {
+            rest = sl;
+            break;
+        }
+    }
+
+    int errors_before = eval_ctx().runtime_error_count;
+    int frame_line = g_error_line;
+    int frame_column = g_error_column;
+    if (frame_line <= 0 && def->code->ast) {
+        frame_line = def->code->ast->line;
+        frame_column = def->code->ast->column;
+    }
+    call_stack_guard frame_guard(frame_name, frame_line, frame_column);
+    bool saved_allow_await = eval_ctx().allow_await;
+    eval_ctx().allow_await = def->code->is_async;
+    pushscope_closure(def->closure);
+    int i = 0;
+    for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
+         sl = sl->next, ++i) {
+        struct symbol *sym = newsym(sl->sym->name);
+        sym->val = args[i];
+        if (sl->type) {
+            sym->type.kind = sl->type->kind;
+            sym->type.name = sl->type->name;
+        }
+        if (i == 0 && def->code->is_method) {
+            sym->is_self = true;
+            sym->is_const = true;
+        }
+        savesym(sym);
+    }
+    if (rest) {
+        struct list_value_t *list = newlistval();
+        for (size_t k = (size_t)nparams; k < args.size(); ++k) {
+            list->payload->items.push_back(args[k]);
+            args[k] = NULL;
+        }
+        struct symbol *sym = newsym(rest->sym->name);
+        sym->val = (struct value_t *)list;
+        sym->type.kind = TYPE_LIST;
+        sym->type.name = NULL;
+        savesym(sym);
+    }
+    args.clear(); /* ownership transferred to the function scope */
+
+    int saved_handler_depth = eval_ctx().handler_depth;
+    eval_ctx().handler_depth = 0;
+    struct value_t *body_ret = eval(def->code->ast);
+    eval_ctx().handler_depth = saved_handler_depth;
+    struct value_t *result = topscope()->ret;
+    topscope()->ret = NULL;
+
+    if (body_ret) {
+        if (body_ret->type == T_break) {
+            diag_set_location(g_flow_line, g_flow_column);
+            yyerror("break outside loop in function");
+        } else if (body_ret->type == T_continue) {
+            diag_set_location(g_flow_line, g_flow_column);
+            yyerror("continue outside loop in function");
+        }
+        freeval(body_ret);
+    }
+
+    popscope();
+    eval_ctx().allow_await = saved_allow_await;
+
+    if (eval_ctx().control != EVAL_CONTROL_NONE) {
+        freeval(result);
+        return NULL;
+    }
+
+    bool errored = eval_ctx().runtime_error_count != errors_before;
+    if (g_interrupted || errored) {
+        freeval(result);
+        return NULL;
+    }
+    return result ? result : newnull();
+}
+
 static struct value_t *invoke_value(
     struct value_t *callee, std::vector<struct value_t *> &args) {
     if (!callee) {
@@ -582,75 +665,19 @@ static struct value_t *invoke_value(
         }
     }
 
-    int errors_before = g_runtime_error_count;
-    int frame_line = g_error_line;
-    int frame_column = g_error_column;
-    if (frame_line <= 0 && def->code->ast) {
-        frame_line = def->code->ast->line;
-        frame_column = def->code->ast->column;
-    }
-    call_stack_guard frame_guard(frame_name, frame_line, frame_column);
-    pushscope_closure(def->closure);
-    i = 0;
-    for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
-         sl = sl->next, ++i) {
-        struct symbol *sym = newsym(sl->sym->name);
-        sym->val = args[i];
-        if (sl->type) {
-            sym->type.kind = sl->type->kind;
-            sym->type.name = sl->type->name;
+    if (def->code->is_async) {
+        task_ptr task = fiber_start_async(
+            [def, owned = std::move(args)]() mutable {
+                return invoke_function_body(def, owned);
+            });
+        if (!task) {
+            free_args(args);
+            return NULL;
         }
-        if (i == 0 && def->code->is_method) {
-            sym->is_self = true;
-            sym->is_const = true;
-        }
-        savesym(sym);
-    }
-    if (rest) {
-        struct list_value_t *list = newlistval();
-        for (size_t k = (size_t)nparams; k < args.size(); ++k) {
-            list->payload->items.push_back(args[k]);
-            args[k] = NULL;
-        }
-        struct symbol *sym = newsym(rest->sym->name);
-        sym->val = (struct value_t *)list;
-        sym->type.kind = TYPE_LIST;
-        sym->type.name = NULL;
-        savesym(sym);
-    }
-    args.clear(); /* ownership transferred to the function scope */
-
-    int saved_handler_depth = g_handler_depth;
-    g_handler_depth = 0;
-    struct value_t *body_ret = eval(def->code->ast);
-    g_handler_depth = saved_handler_depth;
-    struct value_t *result = topscope()->ret;
-    topscope()->ret = NULL;
-
-    if (body_ret) {
-        if (body_ret->type == T_break) {
-            diag_set_location(g_flow_line, g_flow_column);
-            yyerror("break outside loop in function");
-        } else if (body_ret->type == T_continue) {
-            diag_set_location(g_flow_line, g_flow_column);
-            yyerror("continue outside loop in function");
-        }
-        freeval(body_ret);
+        return new_task_value(std::move(task));
     }
 
-    popscope();
-
-    if (g_eval_control != EVAL_CONTROL_NONE) {
-        freeval(result);
-        return NULL;
-    }
-
-    bool errored = g_runtime_error_count != errors_before;
-    if (g_interrupted || errored) {
-        freeval(result);
-        return NULL;
-    }
-    return result ? result : newnull();
+    return invoke_function_body(def, args);
 }
 
 struct value_t *call_value_args(
@@ -1378,6 +1405,7 @@ static bool is_read_only(const struct ast *a) {
         case 'M':
         case '!':
         case '~':
+        case 'b':
         case 'G':
             return is_read_only(a->l) && is_read_only(a->r);
         default:
@@ -1787,7 +1815,7 @@ struct value_t *eval(struct ast *a) {
 
         case 'K': {
             struct package_node *pkg = (struct package_node *)a;
-            int errors_before = g_runtime_error_count;
+            int errors_before = eval_ctx().runtime_error_count;
             std::string error;
 
             if (package_is_loading())
@@ -1808,7 +1836,7 @@ struct value_t *eval(struct ast *a) {
                 yyerror("invalid control flow in package %s", pkg->name);
             }
             value_t *ns = NULL;
-            if (g_runtime_error_count == errors_before)
+            if (eval_ctx().runtime_error_count == errors_before)
                 ns = package_build_namespace(current_scope().get(), error);
             popscope();
             diag_set_module_name(saved_module_name);
@@ -1816,7 +1844,7 @@ struct value_t *eval(struct ast *a) {
             freeval(body_ret);
 
             if (!ns) {
-                if (g_runtime_error_count == errors_before)
+                if (eval_ctx().runtime_error_count == errors_before)
                     yyerror("package %s: %s", pkg->name,
                             error.empty() ? "cannot build namespace"
                                           : error.c_str());
@@ -1966,9 +1994,9 @@ struct value_t *eval(struct ast *a) {
                 yyerror("label must be attached to a loop or switch");
                 break;
             }
-            g_pending_label = node->name;
+            eval_ctx().pending_label = node->name;
             ret = eval(node->stmt);
-            g_pending_label = NULL;
+            eval_ctx().pending_label = NULL;
             break;
         }
 
@@ -1978,7 +2006,7 @@ struct value_t *eval(struct ast *a) {
                 stmt->value ? eval(stmt->value) : newnull();
             if (!value)
                 break;
-            if (g_eval_control != EVAL_CONTROL_NONE) {
+            if (eval_ctx().control != EVAL_CONTROL_NONE) {
                 freeval(value);
                 break;
             }
@@ -1987,7 +2015,7 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'v': {
-            if (g_handler_depth <= 0) {
+            if (eval_ctx().handler_depth <= 0) {
                 yyerror("recover outside error handler");
                 break;
             }
@@ -1996,7 +2024,7 @@ struct value_t *eval(struct ast *a) {
                 stmt->value ? eval(stmt->value) : newnull();
             if (!value)
                 break;
-            if (g_eval_control != EVAL_CONTROL_NONE) {
+            if (eval_ctx().control != EVAL_CONTROL_NONE) {
                 freeval(value);
                 break;
             }
@@ -2005,7 +2033,7 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'p': {
-            if (g_handler_depth <= 0) {
+            if (eval_ctx().handler_depth <= 0) {
                 yyerror("pass outside error handler");
                 break;
             }
@@ -2013,7 +2041,7 @@ struct value_t *eval(struct ast *a) {
             struct value_t *value = eval(stmt->value);
             if (!value)
                 break;
-            if (g_eval_control != EVAL_CONTROL_NONE) {
+            if (eval_ctx().control != EVAL_CONTROL_NONE) {
                 freeval(value);
                 break;
             }
@@ -2028,7 +2056,7 @@ struct value_t *eval(struct ast *a) {
                 ret = value;
                 break;
             }
-            if (g_eval_control != EVAL_CONTROL_FAIL)
+            if (eval_ctx().control != EVAL_CONTROL_FAIL)
                 break;
 
             struct value_t *error_value =
@@ -2039,19 +2067,19 @@ struct value_t *eval(struct ast *a) {
             error_sym->is_const = true;
             savesym(error_sym);
 
-            int handler_errors = g_runtime_error_count;
-            int saved_handler_depth = g_handler_depth;
-            g_handler_depth = saved_handler_depth + 1;
+            int handler_errors = eval_ctx().runtime_error_count;
+            int saved_handler_depth = eval_ctx().handler_depth;
+            eval_ctx().handler_depth = saved_handler_depth + 1;
             struct value_t *body = eval(handler->body);
-            g_handler_depth = saved_handler_depth;
+            eval_ctx().handler_depth = saved_handler_depth;
             popscope();
 
-            if (g_eval_control == EVAL_CONTROL_RECOVER) {
+            if (eval_ctx().control == EVAL_CONTROL_RECOVER) {
                 ret = take_eval_control(EVAL_CONTROL_RECOVER);
                 freeval(body);
                 break;
             }
-            if (g_eval_control == EVAL_CONTROL_FAIL) {
+            if (eval_ctx().control == EVAL_CONTROL_FAIL) {
                 freeval(body);
                 break;
             }
@@ -2062,7 +2090,7 @@ struct value_t *eval(struct ast *a) {
                         "use recover, pass, or fail");
                 break;
             }
-            if (g_runtime_error_count != handler_errors) {
+            if (eval_ctx().runtime_error_count != handler_errors) {
                 freeval(body);
                 break;
             }
@@ -2164,6 +2192,21 @@ struct value_t *eval(struct ast *a) {
                 p = (struct dict_node *)p->next;
             }
             ret = (struct value_t *)v;
+            break;
+        }
+
+        case 'b': {
+            if (!eval_ctx().allow_await) {
+                yyerror("await outside async function");
+                break;
+            }
+            struct value_t *v = eval(a->l);
+            if (!v)
+                break;
+            task_ptr task;
+            if (get_task_value(v, task))
+                ret = fiber_await_task(task);
+            freeval(v);
             break;
         }
 
@@ -2276,9 +2319,9 @@ struct value_t *eval(struct ast *a) {
         case 'S': {
             struct switch_node *sw = (struct switch_node *)a;
             const char *switch_label = take_pending_label();
-            int errors_before = g_runtime_error_count;
+            int errors_before = eval_ctx().runtime_error_count;
             struct value_t *subject = eval(sw->expr);
-            if (!subject || g_runtime_error_count != errors_before) {
+            if (!subject || eval_ctx().runtime_error_count != errors_before) {
                 freeval(subject);
                 break;
             }
@@ -2290,9 +2333,9 @@ struct value_t *eval(struct ast *a) {
 
             auto run_body = [&](struct ast *body) {
                 pushscope();
-                int body_errors = g_runtime_error_count;
+                int body_errors = eval_ctx().runtime_error_count;
                 struct value_t *body_ret = eval(body);
-                if (g_runtime_error_count != body_errors) {
+                if (eval_ctx().runtime_error_count != body_errors) {
                     freeval(body_ret);
                 } else if (body_ret) {
                     if (body_ret->type == T_break) {
@@ -2327,9 +2370,9 @@ struct value_t *eval(struct ast *a) {
                     break;
                 }
 
-                errors_before = g_runtime_error_count;
+                errors_before = eval_ctx().runtime_error_count;
                 struct value_t *values = eval(c->values);
-                if (!values || g_runtime_error_count != errors_before) {
+                if (!values || eval_ctx().runtime_error_count != errors_before) {
                     freeval(values);
                     stop = true;
                     break;
@@ -2377,9 +2420,9 @@ struct value_t *eval(struct ast *a) {
 
         case 'T': {
             struct flow *f = (struct flow *)a;
-            int errors_before = g_runtime_error_count;
+            int errors_before = eval_ctx().runtime_error_count;
             struct value_t *cond = eval(f->cond);
-            if (g_runtime_error_count != errors_before) {
+            if (eval_ctx().runtime_error_count != errors_before) {
                 freeval(cond);
                 break;
             }
@@ -2391,9 +2434,9 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'I': {
-            int errors_before = g_runtime_error_count;
+            int errors_before = eval_ctx().runtime_error_count;
             struct value_t *cond = eval(((struct flow *)a)->cond);
-            if (g_runtime_error_count != errors_before) {
+            if (eval_ctx().runtime_error_count != errors_before) {
                 freeval(cond);
                 break;
             }
@@ -2418,13 +2461,13 @@ struct value_t *eval(struct ast *a) {
             for (;;) {
                 if (g_interrupted) break;
 
-                int errors_before = g_runtime_error_count;
+                int errors_before = eval_ctx().runtime_error_count;
                 struct value_t *body = eval(f->tl);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(body);
                     break;
                 }
-                if (g_eval_control != EVAL_CONTROL_NONE) {
+                if (eval_ctx().control != EVAL_CONTROL_NONE) {
                     freeval(body);
                     break;
                 }
@@ -2456,9 +2499,9 @@ struct value_t *eval(struct ast *a) {
                 }
                 if (do_break) break;
 
-                errors_before = g_runtime_error_count;
+                errors_before = eval_ctx().runtime_error_count;
                 struct value_t *cond = eval(f->cond);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(cond);
                     break;
                 }
@@ -2477,9 +2520,9 @@ struct value_t *eval(struct ast *a) {
             if (!body) break;
             for (;;) {
                 if (g_interrupted) break;
-                int errors_before = g_runtime_error_count;
+                int errors_before = eval_ctx().runtime_error_count;
                 struct value_t *cond = eval(cond_ast);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(cond);
                     break;
                 }
@@ -2488,14 +2531,14 @@ struct value_t *eval(struct ast *a) {
                 freeval(cond);
                 if (!b) break;
 
-                errors_before = g_runtime_error_count;
+                errors_before = eval_ctx().runtime_error_count;
                 ret = eval(body);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(ret);
                     ret = NULL;
                     break;
                 }
-                if (g_eval_control != EVAL_CONTROL_NONE) {
+                if (eval_ctx().control != EVAL_CONTROL_NONE) {
                     freeval(ret);
                     ret = NULL;
                     break;
@@ -2527,9 +2570,9 @@ struct value_t *eval(struct ast *a) {
         case 'F': {
             struct forinloop *f = (struct forinloop *)a;
             const char *loop_label = take_pending_label();
-            int errors_before = g_runtime_error_count;
+            int errors_before = eval_ctx().runtime_error_count;
             struct value_t *iter = eval(f->iterable);
-            if (!iter || g_runtime_error_count != errors_before) {
+            if (!iter || eval_ctx().runtime_error_count != errors_before) {
                 freeval(iter);
                 break;
             }
@@ -2610,14 +2653,14 @@ struct value_t *eval(struct ast *a) {
                     value_sym->val = second;
                 }
 
-                errors_before = g_runtime_error_count;
+                errors_before = eval_ctx().runtime_error_count;
                 struct value_t *body = eval(f->body);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(body);
                     leave = true;
                     break;
                 }
-                if (g_eval_control != EVAL_CONTROL_NONE) {
+                if (eval_ctx().control != EVAL_CONTROL_NONE) {
                     freeval(body);
                     leave = true;
                     break;
@@ -2663,12 +2706,12 @@ struct value_t *eval(struct ast *a) {
             bool leave = false;
 
             if (f->init) {
-                int errors_before = g_runtime_error_count;
+                int errors_before = eval_ctx().runtime_error_count;
                 struct value_t *v = eval(f->init);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(v);
                     leave = true;
-                } else if (g_eval_control != EVAL_CONTROL_NONE) {
+                } else if (eval_ctx().control != EVAL_CONTROL_NONE) {
                     freeval(v);
                     leave = true;
                 } else if (v) {
@@ -2691,9 +2734,9 @@ struct value_t *eval(struct ast *a) {
 
                 bool cond_true = true;
                 if (f->cond) {
-                    int errors_before = g_runtime_error_count;
+                    int errors_before = eval_ctx().runtime_error_count;
                     struct value_t *cond = eval(f->cond);
-                    if (g_runtime_error_count != errors_before) {
+                    if (eval_ctx().runtime_error_count != errors_before) {
                         freeval(cond);
                         leave = true;
                         break;
@@ -2705,14 +2748,14 @@ struct value_t *eval(struct ast *a) {
                 if (!cond_true) break;
 
                 bool do_break = false;
-                int errors_before = g_runtime_error_count;
+                int errors_before = eval_ctx().runtime_error_count;
                 struct value_t *body = eval(f->body);
-                if (g_runtime_error_count != errors_before) {
+                if (eval_ctx().runtime_error_count != errors_before) {
                     freeval(body);
                     leave = true;
                     break;
                 }
-                if (g_eval_control != EVAL_CONTROL_NONE) {
+                if (eval_ctx().control != EVAL_CONTROL_NONE) {
                     freeval(body);
                     leave = true;
                     break;
@@ -2743,14 +2786,14 @@ struct value_t *eval(struct ast *a) {
                 if (leave || do_break) break;
 
                 if (f->step) {
-                    errors_before = g_runtime_error_count;
+                    errors_before = eval_ctx().runtime_error_count;
                     struct value_t *step = eval(f->step);
-                    if (g_runtime_error_count != errors_before) {
+                    if (eval_ctx().runtime_error_count != errors_before) {
                         freeval(step);
                         leave = true;
                         break;
                     }
-                    if (g_eval_control != EVAL_CONTROL_NONE) {
+                    if (eval_ctx().control != EVAL_CONTROL_NONE) {
                         freeval(step);
                         leave = true;
                         break;
@@ -2776,14 +2819,14 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'L': {
-            int errors_before = g_runtime_error_count;
+            int errors_before = eval_ctx().runtime_error_count;
             ret = eval(a->l);
-            if (g_runtime_error_count != errors_before) {
+            if (eval_ctx().runtime_error_count != errors_before) {
                 freeval(ret);
                 ret = NULL;
                 break;
             }
-            if (g_eval_control != EVAL_CONTROL_NONE)
+            if (eval_ctx().control != EVAL_CONTROL_NONE)
                 break;
             if (ret && (ret->type == T_return ||
                         ret->type == T_break ||

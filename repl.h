@@ -11,8 +11,6 @@ extern volatile std::sig_atomic_t g_interrupted;
 /* Set when stdin really reaches EOF (not when Ctrl-C aborts a read). */
 extern volatile std::sig_atomic_t g_stdin_eof;
 
-/* Number of runtime errors reported by yyerror since the last statement. */
-extern int g_runtime_error_count;
 
 /* True for the interactive stdin REPL; false when running a script file. */
 extern bool g_interactive;

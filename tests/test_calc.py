@@ -1077,6 +1077,59 @@ def main():
         stderr="timed out",
     )
     check(
+        "async await basic",
+        "import std;\n"
+        "async func answer() { return 42; }\n"
+        "let t = answer();\n"
+        "await t\n",
+        stdout="= 42",
+    )
+    check(
+        "async await concurrent",
+        "import std;\n"
+        "async func work(n) {\n"
+        '  print("start " + str(n));\n'
+        "  await std.task.sleep(50);\n"
+        '  print("end " + str(n));\n'
+        "  return n;\n"
+        "}\n"
+        "let a = work(1);\n"
+        "let b = work(2);\n"
+        "let ra = await a;\n"
+        "let rb = await b;\n"
+        "print(ra + rb);\n",
+        stdout_all=["start 1", "start 2", "end 1", "end 2", "3"],
+    )
+    check(
+        "async await net",
+        "import std;\n"
+        "async func resolve_one() {\n"
+        '  return await std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        "}\n"
+        "len(await resolve_one()) > 0\n",
+        stdout="= true",
+    )
+    check(
+        "await outside async",
+        "import std;\n"
+        "func bad() { await std.task.sleep(1); }\n"
+        "bad();\n",
+        stderr="await outside async function",
+    )
+    check(
+        "async cancellation",
+        "import std;\n"
+        "async func wait_forever() {\n"
+        "  await std.task.sleep(1000);\n"
+        "  return 1;\n"
+        "}\n"
+        "let t = wait_forever();\n"
+        "std.task.cancel(t)\n"
+        "std.task.wait(t);\n",
+        stdout="= true",
+        stderr="task was cancelled",
+    )
+    check(
         "std net resolve",
         'import std;\nlen(std.net.resolve("localhost")) > 0\n',
         stdout="= true",
@@ -1364,19 +1417,12 @@ def main():
             "std.net.close(s);\n",
             stderr="tcp socket is closed",
         )
-        bad_port = socket.socket()
-        bad_port.bind(("127.0.0.1", 0))
-        bad_port_number = bad_port.getsockname()[1]
-        try:
-            check(
-                "std net connect failure",
-                "import std;\n"
-                f'std.net.tcp_connect('
-                f'"127.0.0.1", {bad_port_number}, 100);\n',
-                stderr="tcp_connect:",
-            )
-        finally:
-            bad_port.close()
+        check(
+            "std net connect failure",
+            "import std;\n"
+            'std.net.tcp_connect("127.0.0.1", 1, 100);\n',
+            stderr="tcp_connect:",
+        )
 
         silent = socket.socket()
         silent.bind(("127.0.0.1", 0))

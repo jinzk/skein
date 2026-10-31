@@ -39,14 +39,29 @@ struct scope_t {
     ~scope_t();
 };
 
+struct scope_context {
+    std::shared_ptr<scope_t> current;
+    std::shared_ptr<scope_t> global_scope;
+    std::vector<std::shared_ptr<scope_t>> restore_stack;
+    std::vector<std::weak_ptr<scope_t>> all_scopes;
+    int statements_since_collect = 0;
+    size_t scopes_at_last_collect = 0;
+};
+
+scope_context &active_scope_context();
+void set_active_scope_context(scope_context *context);
+
 struct scope_t *topscope();
 std::shared_ptr<scope_t> current_scope();
 void pushscope();
 void pushscope_isolated();
 void pushscope_closure(const std::shared_ptr<struct scope_t> &);
 void initscope();
+void initscope(scope_context &context);
 void popscope();
 void donescope();
+void donescope(scope_context &context);
+void adopt_scopes(scope_context &from, scope_context &to);
 void maybe_collect_cycles();
 void save_global_symbol(const char *name, value_t *v);
 value_t *lookup_global_symbol(const char *name);

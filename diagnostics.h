@@ -70,4 +70,30 @@ void diag_save_source(diag_source_checkpoint &checkpoint);
 void diag_restore_source(const diag_source_checkpoint &checkpoint);
 void diag_start_source();
 
+struct diag_call_frame {
+    std::string name;
+    int line;
+    int column;
+};
+
+struct diag_state {
+    int current_line = 1;
+    int current_column = 1;
+    int token_line = 1;
+    int token_column = 1;
+    int error_line = 0;
+    int error_column = 0;
+    int flow_line = 0;
+    int flow_column = 0;
+    int error_count = 0;
+    int lexical_line = 0;
+    std::string source_name;
+    std::string module_name;
+    std::vector<std::string> lines;
+    std::vector<diag_call_frame> call_stack;
+};
+
+void diag_capture(diag_state &state);
+void diag_restore(const diag_state &state);
+
 #endif

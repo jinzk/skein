@@ -8,6 +8,7 @@
 
 #include "ast.h"
 #include "diagnostics.h"
+#include "eval_context.h"
 #include "repl.h"
 #include "scopestack.h"
 #include "eval.h"
@@ -191,6 +192,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <str> XSTRING "string"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
+%token ASYNC "async" AWAIT "await"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
@@ -265,6 +267,12 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                                            { $$ = newfunc($2, $4, NULL); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($2, $4, $7); }
+    | ASYNC funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newfunc($3, $5, NULL,
+                                                          false, true); }
+    | ASYNC funcstart NAME '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc($3, $5, $8,
+                                                          false, true); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
     | EXPORT LET NAME ':' type '=' exp ';' {
         $$ = newvar($3, $7, true, false, $5);
@@ -299,6 +307,13 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                                            { $$ = newfunc($3, $5, NULL, true); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($3, $5, $8, true); }
+    | EXPORT ASYNC funcstart NAME '(' symlist ')' '{'
+      EMPTY_BLOCK_CLOSE
+                                           { $$ = newfunc($4, $6, NULL,
+                                                          true, true); }
+    | EXPORT ASYNC funcstart NAME '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc($4, $6, $9,
+                                                          true, true); }
     | LABEL NAME ':' stmt                { $$ = newlabel($2, $4); }
     | struct_decl
     | impl_decl
@@ -487,6 +502,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHL exp                         { $$ = newast('s', $1, $3); }
     | exp SHR exp                         { $$ = newast('r', $1, $3); }
     | '(' exp ')'                         { $$ = $2; }
+    | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }
@@ -535,6 +551,12 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                            { $$ = newfunc(NULL, $3, NULL); }
     | funcstart '(' symlist ')' '{' list '}'
                                            { $$ = newfunc(NULL, $3, $6); }
+    | ASYNC funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newfunc(NULL, $4, NULL,
+                                                          false, true); }
+    | ASYNC funcstart '(' symlist ')' '{' list '}'
+                                           { $$ = newfunc(NULL, $4, $7,
+                                                          false, true); }
     | value
     ;
 
@@ -658,7 +680,7 @@ calclist: exp { $$ = $1; }
     ;
 
 docalc: calclist EOL {
-        g_runtime_error_count = 0;
+        active_eval_context().runtime_error_count = 0;
         diag_set_location(0, 0);
 
         bool invalid = g_statement_invalid;
@@ -769,7 +791,7 @@ void yyerror(const char *s, ...) {
     if (g_interrupted)
         return;
 
-    ++g_runtime_error_count;
+    ++active_eval_context().runtime_error_count;
 
     char buffer[2048];
     va_list ap;

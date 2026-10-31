@@ -15,7 +15,7 @@
 ### 1.2 关键字
 
 ```text
-let const func
+let const func async await
 if else while do for
 switch case default
 struct impl trait
@@ -1345,9 +1345,38 @@ done(task)                 → bool
 
 `yield` 是普通函数，不是关键字。`wait` 超时不会自动取消 task；需要显式调用 `cancel`。
 
-task 是协作式调度的：只有运行事件循环时才会推进，例如 `wait`、`wait_all` 或同步网络调用期间。
+task 是协作式调度的：只有运行事件循环时才会推进，例如 `wait`、`wait_all`、`await` 或同步网络调用期间。
 
-目前 task 覆盖原生定时器和 `std.net.*_async` 异步 I/O；还不能用 `spawn` 异步执行脚本函数，因为脚本函数尚未支持挂起和恢复。
+目前 task 覆盖原生定时器、async 函数和 `std.net.*_async` 异步 I/O。
+
+### async / await
+
+```text
+import std;
+
+async func fetch(port) {
+  let socket = await std.net.tcp_connect_async("127.0.0.1", port, 1000);
+  let data = await std.net.recv_async(socket, 4096, 1000);
+  std.net.close(socket);
+  return data;
+}
+
+let a = fetch(8080);
+let b = fetch(8081);
+
+let da = await a;
+let db = await b;
+```
+
+规则：
+
+- `async` 修饰函数，调用后返回 task；
+- async 函数调用后立即开始运行，遇到第一个 `await` 时挂起；
+- `await` 可用于 async 函数或顶层；
+- 普通函数中使用 `await` 会报错；
+- 多个 async 函数可以先启动再分别 await，从而并发执行；
+- `yield` 不用于 async；主动让出使用 `await std.task.yield()`；
+- POSIX 使用有栈协程实现；Windows 目前是同步降级实现。
 
 FFI 示例：
 
@@ -1399,10 +1428,11 @@ std.ffi.buffer_free
 - 不支持结构体、回调、可变参数；
 - 网络和 FFI 错误当前是运行时错误，不能通过 `on error` 捕获；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
-- `std.net` 暂不支持 TLS、HTTP；异步网络目前使用 `std.net.*_async` 返回 task，不需要 `async/await` 语法；
+- `std.net` 暂不支持 TLS、HTTP；
 - `std.net.*_async` 的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
-- `std.task` 目前没有 `spawn`，脚本函数还不能挂起和恢复；
+- async 函数可以挂起和恢复；普通函数仍不能通过通用 `spawn` 启动；
 - `std.task.wait` / `wait_all` 超时不会自动取消 task，需要显式 `cancel`；
+- async/await 使用有栈协程；POSIX 使用 `ucontext`，Windows 目前是同步降级实现；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。

@@ -1,5 +1,6 @@
 #include "event_loop.h"
 
+#include "fiber.h"
 #include "repl.h"
 
 namespace {
@@ -81,6 +82,7 @@ event_wait_result event_wait(bool &done,
             cancel();
         }
         uv_run(&state.loop, UV_RUN_ONCE);
+        fiber_pump();
     }
     if (interrupted)
         return EVENT_WAIT_INTERRUPTED;

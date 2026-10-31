@@ -17,6 +17,7 @@ struct function_code {
     std::string name;
     bool is_method;
     bool variadic;
+    bool is_async;
 };
 
 struct function_def {

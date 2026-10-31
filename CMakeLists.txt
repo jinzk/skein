@@ -46,7 +46,9 @@ add_executable(${PROJECT_NAME}
   builtins.cpp
   diagnostics.cpp
   eval.cpp
+  eval_context.cpp
   event_loop.cpp
+  fiber.cpp
   filetype.cpp
   format.cpp
   main.cpp

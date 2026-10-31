@@ -6,7 +6,9 @@
 
 #include "parser.hpp"
 #include "diagnostics.h"
+#include "eval_context.h"
 #include "event_loop.h"
+#include "fiber.h"
 #include "net.h"
 #include "package.h"
 #include "platform.h"
@@ -93,6 +95,9 @@ int main(int argc, char **argv) {
         }
     }
 
+    eval_context context;
+    context.allow_await = true;
+    set_active_eval_context(&context);
     initscope();
     if (g_show_prompt)
         repl_history_load();
@@ -116,10 +121,12 @@ int main(int argc, char **argv) {
     if (g_show_prompt)
         repl_history_save();
     task_shutdown();
+    fiber_shutdown();
     net_shutdown();
     donescope();
     structtype_shutdown();
     event_loop_shutdown();
+    set_active_eval_context(NULL);
     if (script)
         std::fclose(script);
 

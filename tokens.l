@@ -311,6 +311,8 @@ EXP ([Ee][-+]?[0-9]+)
 "let" { YYRET(LET); }
 "const" { YYRET(CONST); }
 "func" { YYRET(FUNC); }
+"async" { YYRET(ASYNC); }
+"await" { YYRET(AWAIT); }
 "package" { YYRET(PACKAGE); }
 "import" { YYRET(IMPORT); }
 "export" { YYRET(EXPORT); }

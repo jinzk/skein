@@ -217,6 +217,7 @@ struct funcdef {
     struct ast *ast;
     int moved; /* body/params transferred to a runtime function value */
     int exported;
+    int is_async;
 };
 
 struct ufncall {
@@ -462,7 +463,8 @@ struct ast *newis(struct ast *value, struct type_constraint *type);
 struct ast *newspread(struct ast *value);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported = false);
+                    bool exported = false, bool is_async = false);
+struct ast *newawait(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
 struct ast *newimport(char *path, char *alias);
 void push_func_location(int line, int column);

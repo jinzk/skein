@@ -322,7 +322,36 @@ std.task.done(task)           → true / false
 - `yield` 是函数，不是关键字；
 - `wait` 超时不会自动取消 task，需要显式 `cancel`；
 - 退出解释器时会取消剩余 task；
-- 目前还没有 `spawn(func, ...)`，因为脚本函数还不能挂起；`std.net.*_async` 已经复用同一套 task 和事件循环。
+- `std.net.*_async` 已经复用同一套 task 和事件循环。
+
+async / await：
+
+```text
+import std;
+
+async func fetch(port) {
+  let socket = await std.net.tcp_connect_async("127.0.0.1", port, 1000);
+  let data = await std.net.recv_async(socket, 4096, 1000);
+  std.net.close(socket);
+  return data;
+}
+
+let a = fetch(8080);
+let b = fetch(8081);
+
+let da = await a;
+let db = await b;
+```
+
+规则：
+
+- `async` 修饰函数，调用后返回 task；
+- async 函数调用后立即开始运行，遇到第一个 `await` 时挂起；
+- `await` 只能用于 async 函数或顶层；
+- 普通函数不能使用 `await`；
+- 多个 async 函数可以先启动，再分别 await，从而并发执行；
+- `yield` 不用于 async；主动让出使用 `await std.task.yield()`；
+- 目前 async/await 的协程栈实现在 POSIX 上可用，Windows 仍为同步降级实现。
 
 FFI：
 
@@ -545,9 +574,9 @@ std.bytes.from_int
 - `std.net.*_async` 返回 task，底层复用同一事件循环；
 - 异步网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
-- task 是协作式调度的，只有在 `wait` / `wait_all` 或同步网络等待运行事件循环时才推进；
+- task 是协作式调度的，只有在 `wait` / `wait_all`、`await` 或同步网络等待运行事件循环时才推进；
 - `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
-- `std.task` 暂无 `spawn`，脚本函数目前不能挂起和恢复；
+- async 函数可以挂起和恢复；普通函数仍不能通过 `spawn` 作为独立 task 启动；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
 - `std.ffi` 的 `u64` / `usize` 返回值必须在脚本 `int` 范围内，否则报错；
@@ -556,7 +585,8 @@ std.bytes.from_int
 - `std.ffi` 是可选模块，缺少 libffi 时不可用；
 - 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
-- `std.net` 暂不支持 TLS、HTTP；异步网络目前使用 task，不需要 `async/await` 语法；
+- `std.net` 暂不支持 TLS、HTTP；
+- async/await 使用有栈协程；POSIX 使用 `ucontext`，Windows 目前是同步降级实现；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
@@ -1598,8 +1628,10 @@ parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
 diagnostics.* 错误位置、源码片段与调用栈
 eval.*        树遍历求值
+eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
+fiber.*       有栈协程与 async/await 调度
 builtins.*    内置函数实现
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化

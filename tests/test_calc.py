@@ -1262,6 +1262,182 @@ def main():
     check("typed variable is shallow",
           'let a: list = [0];\na[0] = "x";\na\n', stdout='= [x]')
 
+    check("struct construction and fields",
+          "struct Point { x: int; y: int; }\n"
+          "let p = Point { x: 3, y: 4 };\n"
+          "p.x + p.y\n"
+          "p.x = 10;\n"
+          "p.x\n"
+          "p\n",
+          stdout_all=["= 7", "= 10", "= Point { x: 10, y: 4 }"])
+    check("struct method in struct",
+          "struct Point {\n"
+          "  x: int;\n"
+          "  y: int;\n"
+          "  func length(self) {\n"
+          "    return sqrt(self.x * self.x + self.y * self.y);\n"
+          "  }\n"
+          "}\n"
+          "Point { x: 3, y: 4 }.length()\n",
+          stdout="= 5.0")
+    check("struct method in impl",
+          "struct Point { x: int; y: int; }\n"
+          "impl Point {\n"
+          "  func moved(self, dx: int, dy: int) {\n"
+          "    return Point { x: self.x + dx, y: self.y + dy };\n"
+          "  }\n"
+          "}\n"
+          "let p = Point { x: 3, y: 4 };\n"
+          "p.moved(1, 2)\n",
+          stdout="= Point { x: 4, y: 6 }")
+    check("struct method read-only self",
+          "struct Counter {\n"
+          "  n: int;\n"
+          "  func bump(self) { self.n = self.n + 1; }\n"
+          "}\n"
+          "let c = Counter { n: 1 };\nc.bump();\n",
+          stderr="cannot modify self in a read-only method")
+    check("struct self reassignment",
+          "struct A { func f(self) { self = null; } }\n"
+          "A {}.f();\n",
+          stderr="cannot assign to constant self")
+    check("struct missing field",
+          "struct Point { x: int; y: int; }\nPoint { x: 1 }\n",
+          stderr="field y of Point is required")
+    check("struct unknown field",
+          "struct Point { x: int; }\nPoint { x: 1, z: 2 }\n",
+          stderr="unknown field z in Point")
+    check("struct repeated field",
+          "struct Point { x: int; }\nPoint { x: 1, x: 2 }\n",
+          stderr="field x repeated in Point")
+    check("struct field initializer type",
+          'struct Point { x: int; }\nPoint { x: "bad" }\n',
+          stderr="field x of Point expects int, got string")
+    check("struct field assignment type",
+          'struct Point { x: int; }\nlet p = Point { x: 1 };\np.x = "bad";\n',
+          stderr="field x of Point expects int, got string")
+    check("typed struct variable",
+          "struct Point { x: int; }\n"
+          "let p: Point = Point { x: 7 };\n"
+          "func get_x(p: Point) { return p.x; }\n"
+          "get_x(p)\n",
+          stdout="= 7")
+    check("typed struct variable mismatch",
+          "struct Point { x: int; }\nlet p: Point = 1;\n",
+          stderr="variable p expects Point, got int")
+    check("struct copy-on-write",
+          "struct Point { x: int; }\n"
+          "let p = Point { x: 1 };\n"
+          "let q = p;\n"
+          "q.x = 9;\n"
+          "p.x\nq.x\n",
+          stdout_all=["= 1", "= 9"])
+    check("nested struct field",
+          "struct Inner { n: int; }\n"
+          "struct Outer { inner: Inner; }\n"
+          "let o = Outer { inner: Inner { n: 1 } };\n"
+          "o.inner.n = 5;\no.inner.n\n",
+          stdout="= 5")
+    check("struct in list",
+          "struct Point { x: int; }\n"
+          "let a = [Point { x: 1 }, Point { x: 2 }];\n"
+          "a[1].x++;\na[1].x\n",
+          stdout="= 3")
+    check("struct function field",
+          "struct Handler { callback: callable; }\n"
+          "let h = Handler { callback: func(x) { return x + 1; } };\n"
+          "h.callback(41)\n",
+          stdout="= 42")
+    check("struct equality",
+          "struct Point { x: int; }\n"
+          "Point { x: 1 } == Point { x: 1 }\n"
+          "Point { x: 1 } == Point { x: 2 }\n",
+          stdout_all=["= true", "= false"])
+    check("empty struct",
+          "struct Empty {}\nlet e = Empty {};\ne\n", stdout="= Empty {}")
+    check("method value not supported",
+          "struct Point { x: int; func get(self) { return self.x; } }\n"
+          "let p = Point { x: 1 };\nlet f = p.get;\n",
+          stderr="method get must be called")
+
+    check("trait implementation",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point {\n"
+          "  func draw(self) { print(\"point\"); }\n"
+          "}\n"
+          "let p = Point { x: 1 };\n"
+          "p.draw()\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(p)\n",
+          stdout_all=["point", "point"])
+    check("trait adapter with existing method",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func draw(self) { print(\"existing\"); } }\n"
+          "impl Drawable for Point;\n"
+          "let p = Point { x: 1 };\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(p)\n",
+          stdout="existing")
+    check("trait nominal only",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func draw(self) { print(\"point\"); } }\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(Point { x: 1 });\n",
+          stderr="expects Drawable, got Point")
+    check("trait typed variable",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "let d: Drawable = Point { x: 1 };\nd.draw()\n",
+          stdout="= 1")
+    check("trait adapter signature mismatch",
+          "trait Drawable { func draw(self, x: int); }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func draw(self, x: string) { return x; } }\n"
+          "impl Drawable for Point;\n",
+          stderr="method draw does not match the trait signature")
+    check("trait missing method",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point { }\n",
+          stderr="does not implement method draw required by trait Drawable")
+    check("trait extra method",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point {\n"
+          "  func other(self) { return 1; }\n"
+          "}\n",
+          stderr="method other is not declared by trait Drawable")
+    check("duplicate trait implementation",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "impl Drawable for Point { func draw(self) { return 2; } }\n",
+          stderr="method repeated draw")
+    check("duplicate method",
+          "struct Point { x: int; }\n"
+          "impl Point { func get(self) { return 1; } }\n"
+          "impl Point { func get(self) { return 2; } }\n",
+          stderr="method repeated get")
+    check("field and method name conflict",
+          "struct Point { x: int; func x(self) { return 1; } }\n",
+          stderr="field and method have the same name x")
+    check("method first parameter self",
+          "struct Point { x: int; }\n"
+          "impl Point { func get(this) { return 1; } }\n",
+          stderr="method first parameter must be self")
+    check("unknown struct type",
+          "let p = Missing { x: 1 };\n", stderr="unknown struct type Missing")
+    check("unknown field type",
+          "struct Point { x: Missing; }\n", stderr="unknown type name Missing")
+    check("struct switch unsupported",
+          "struct Point { x: int; }\n"
+          "switch (Point { x: 1 }) { default => print(\"bad\"); }\n",
+          stderr="switch does not support Point")
+
     check("explicit empty return", "func f() { return; }\nprint(f())\n",
           stdout="null")
     check("print returns null", "let x = print(1);\nprint(x)\n",

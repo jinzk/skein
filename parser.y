@@ -126,8 +126,7 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
     if (std::strcmp(name, "callable") == 0) return new_type_constraint(TYPE_CALLABLE);
     if (std::strcmp(name, "null") == 0) return new_type_constraint(TYPE_NULL);
     if (std::strcmp(name, "userdata") == 0) return new_type_constraint(TYPE_USERDATA);
-    yyerror("unknown type name %s", name);
-    return new_type_constraint(TYPE_INVALID);
+    return new_named_type_constraint(name);
 }
 
 static struct type_constraint *type_constraint_from_builtin(int functype) {
@@ -167,6 +166,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <str> XSTRING "string"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
+%token STRUCT "struct" IMPL "impl" TRAIT "trait"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null" TRUE "true" FALSE "false"
@@ -198,6 +198,9 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
+%type <a> struct_decl impl_decl trait_decl struct_members struct_member
+%type <a> impl_methods trait_methods trait_method method_member
+%type <a> struct_fields struct_field
 %type <sl> param symlist
 %type <type> type type_name
 %type <str> importref importpath fieldname
@@ -241,6 +244,9 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                                            { $$ = newfunc($3, $5, NULL, true); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($3, $5, $8, true); }
+    | struct_decl
+    | impl_decl
+    | trait_decl
     | PACKAGE NAME '{' EMPTY_BLOCK_CLOSE  { $$ = newpackage($2, NULL); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
     | IMPORT importref ';'                { $$ = newimport($2, NULL); }
@@ -250,6 +256,65 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | LET NAME ':' type ';'               { $$ = newvar($2, NULL, false, false, $4); }
     | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
     | CONST NAME ':' type '=' exp ';'     { $$ = newvar($2, $6, false, true, $4); }
+    ;
+
+empty_body: EMPTY_DICT_CLOSE
+    | EMPTY_BLOCK_CLOSE
+    ;
+
+struct_decl: STRUCT NAME '{' empty_body  { $$ = newstructdecl($2, NULL); }
+    | STRUCT NAME '{' struct_members '}' {
+        $$ = newstructdecl($2, (struct struct_member *)$4);
+      }
+    ;
+
+struct_members: struct_member            { $$ = $1; }
+    | struct_members struct_member       { $$ = append_struct_member($1, $2); }
+    ;
+
+struct_member: NAME ':' type ';'         { $$ = newstructfield($1, $3); }
+    | method_member                       { $$ = $1; }
+    ;
+
+method_member: funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, NULL)); }
+    | funcstart NAME '(' symlist ')' '{' list '}'
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, $7)); }
+    ;
+
+impl_decl: IMPL NAME '{' empty_body      { $$ = newimpl($2, NULL, NULL); }
+    | IMPL NAME '{' impl_methods '}'     {
+        $$ = newimpl($2, NULL, (struct struct_member *)$4);
+      }
+    | IMPL NAME FOR NAME '{' empty_body  { $$ = newimpl($4, $2, NULL); }
+    | IMPL NAME FOR NAME '{' impl_methods '}' {
+        $$ = newimpl($4, $2, (struct struct_member *)$6);
+      }
+    | IMPL NAME FOR NAME ';'             { $$ = newimpl($4, $2, NULL); }
+    ;
+
+impl_methods: method_member              { $$ = $1; }
+    | impl_methods method_member         { $$ = append_struct_member($1, $2); }
+    ;
+
+trait_decl: TRAIT NAME '{' empty_body    { $$ = newtraitdecl($2, NULL); }
+    | TRAIT NAME '{' trait_methods '}'   {
+        $$ = newtraitdecl($2, (struct trait_method *)$4);
+      }
+    ;
+
+trait_methods: trait_method              { $$ = $1; }
+    | trait_methods trait_method         { $$ = append_trait_method($1, $2); }
+    ;
+
+trait_method: FUNC NAME '(' symlist ')' ';' { $$ = newtraitmethod($2, $4); }
+    ;
+
+struct_fields: struct_field              { $$ = $1; }
+    | struct_field ',' struct_fields     { $$ = append_struct_init($1, $3); }
+    ;
+
+struct_field: NAME ':' exp               { $$ = newstructinit($1, $3); }
     ;
 
 importref: importpath                     { $$ = $1; }
@@ -331,6 +396,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' EMPTY_DICT_CLOSE                { $$ = newdict(NULL, NULL, NULL); }
     | '{' pairlist '}'                    { $$ = $2; }
+    | NAME '{' empty_body                 { $$ = newstructlit($1, NULL); }
+    | NAME '{' struct_fields '}'          {
+        $$ = newstructlit($1, (struct struct_init *)$3);
+      }
     | funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $3, NULL); }
     | funcstart '(' symlist ')' '{' list '}'

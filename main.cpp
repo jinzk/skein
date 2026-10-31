@@ -10,6 +10,7 @@
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
+#include "structtype.h"
 
 extern FILE *yyin;
 
@@ -105,6 +106,7 @@ int main(int argc, char **argv) {
     }
 
     donescope();
+    structtype_shutdown();
     if (script)
         std::fclose(script);
 

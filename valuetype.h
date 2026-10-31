@@ -15,6 +15,7 @@ struct function_code {
     struct symlist *sl;
     int nparams;
     std::string name;
+    bool is_method;
 };
 
 struct function_def {
@@ -33,6 +34,7 @@ enum val_type {
     T_func,
     T_builtin,
     T_userdata,
+    T_struct,
     T_null,
     T_class,
     T_return,

@@ -6,6 +6,7 @@
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
+#include "structtype.h"
 #include "symbol.h"
 #include "valuetype.h"
 
@@ -71,6 +72,36 @@ static double as_double(const struct value_t *v) {
     if (v->type == T_int) return (double)((struct int_value_t *)v)->value;
     if (v->type == T_float) return ((struct float_value_t *)v)->value;
     return 0.0;
+}
+
+static bool validate_type_constraint(const struct type_constraint *type) {
+    if (!type) return true;
+    if (type->kind == TYPE_NAMED) {
+        if (!type->name || !structtype_type_exists(type->name)) {
+            yyerror("unknown type name %s",
+                    type->name ? type->name : "invalid");
+            return false;
+        }
+        return true;
+    }
+    if (type->kind == TYPE_INVALID) {
+        yyerror("invalid type");
+        return false;
+    }
+    return true;
+}
+
+static struct type_constraint any_type_constraint() {
+    struct type_constraint type;
+    type.kind = TYPE_ANY;
+    type.name = NULL;
+    return type;
+}
+
+static struct type_constraint copy_type_constraint(
+    const struct type_constraint *type) {
+    if (!type) return any_type_constraint();
+    return *type;
 }
 
 static const char *skip_space(const char *p) {
@@ -316,6 +347,7 @@ static bool truthy(const struct value_t *v) {
         case T_bytes: return !((struct bytes_value_t *)v)->value.empty();
         case T_list: return !((struct list_value_t *)v)->payload->items.empty();
         case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
+        case T_struct: return true;
         case T_func: return true;
         case T_builtin: return true;
         case T_userdata: return true;
@@ -421,6 +453,19 @@ static bool value_equals(struct value_t *a, struct value_t *b) {
             struct userdata_value_t *ua = (struct userdata_value_t *)a;
             struct userdata_value_t *ub = (struct userdata_value_t *)b;
             return ua->meta == ub->meta && ua->data == ub->data;
+        }
+        case T_struct: {
+            struct struct_value_t *sa = (struct struct_value_t *)a;
+            struct struct_value_t *sb = (struct struct_value_t *)b;
+            if (sa->def != sb->def) return false;
+            if (!sa->payload || !sb->payload) return sa->payload == sb->payload;
+            if (sa->payload->fields.size() != sb->payload->fields.size())
+                return false;
+            for (size_t i = 0; i < sa->payload->fields.size(); ++i)
+                if (!value_equals(sa->payload->fields[i],
+                                  sb->payload->fields[i]))
+                    return false;
+            return true;
         }
         case T_null:
             return true;
@@ -2148,8 +2193,14 @@ static struct value_t *invoke_value(
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
         sym->val = args[i];
-        if (sl->type)
+        if (sl->type) {
             sym->type.kind = sl->type->kind;
+            sym->type.name = sl->type->name;
+        }
+        if (i == 0 && def->code->is_method) {
+            sym->is_self = true;
+            sym->is_const = true;
+        }
         savesym(sym);
     }
     args.clear(); /* ownership transferred to the function scope */
@@ -2290,6 +2341,8 @@ static void ensure_unique_container(struct value_t *container) {
         ensure_unique_list((struct list_value_t *)container);
     else if (container->type == T_dict)
         ensure_unique_dict((struct dict_value_t *)container);
+    else if (container->type == T_struct)
+        ensure_unique_struct((struct struct_value_t *)container);
 }
 
 static struct value_t **index_slot_ptr(struct value_t *container,
@@ -2307,6 +2360,16 @@ static struct value_t **index_slot_ptr(struct value_t *container,
         for (size_t i = 0; i < dv->payload->items.size(); ++i)
             if (value_equals(dv->payload->items[i].first, idx))
                 return &dv->payload->items[i].second;
+    }
+    if (container->type == T_struct) {
+        if (idx->type != T_string) return NULL;
+        struct struct_value_t *sv = (struct struct_value_t *)container;
+        if (!sv->def || !sv->payload) return NULL;
+        int field = structtype_field_index(
+            sv->def, ((struct string_value_t *)idx)->value);
+        if (field < 0 || (size_t)field >= sv->payload->fields.size())
+            return NULL;
+        return &sv->payload->fields[(size_t)field];
     }
     return NULL;
 }
@@ -2363,6 +2426,12 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
         free_args(indices);
         return NULL;
     }
+    if (s->is_self) {
+        yyerror("cannot modify self in a read-only method");
+        freeval(val);
+        free_args(indices);
+        return NULL;
+    }
 
     struct value_t *container = s->val;
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
@@ -2375,7 +2444,8 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
             return NULL;
         }
         struct value_t *elem = *slot;
-        if (elem->type != T_list && elem->type != T_dict) {
+        if (elem->type != T_list && elem->type != T_dict &&
+            elem->type != T_struct) {
             yyerror("cannot index-assign into %s", typename_of(elem));
             freeval(val);
             free_args(indices);
@@ -2420,6 +2490,38 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
             dv->payload->items.push_back(std::make_pair(dupval(idx), val));
             val = NULL;
             ret = dupval(dv->payload->items.back().second);
+        }
+    } else if (container->type == T_struct) {
+        if (idx->type != T_string) {
+            yyerror("struct field name must be a string, got %s",
+                    typename_of(idx));
+        } else {
+            struct struct_value_t *sv = (struct struct_value_t *)container;
+            const char *name = ((struct string_value_t *)idx)->value;
+            int field = sv->def ? structtype_field_index(sv->def, name) : -1;
+            if (field < 0 || !sv->def ||
+                (size_t)field >= sv->def->fields.size()) {
+                yyerror("field %s not found in %s", name,
+                        sv->def ? sv->def->name.c_str() : "struct");
+            } else if (!type_constraint_matches(
+                           &sv->def->fields[(size_t)field].type, val)) {
+                yyerror("field %s of %s expects %s, got %s", name,
+                        sv->def->name.c_str(),
+                        type_constraint_name(
+                            &sv->def->fields[(size_t)field].type),
+                        typename_of(val));
+            } else {
+                ensure_unique_struct(sv);
+                if (!sv->payload ||
+                    (size_t)field >= sv->payload->fields.size()) {
+                    yyerror("invalid struct field assignment");
+                } else {
+                    freeval(sv->payload->fields[(size_t)field]);
+                    sv->payload->fields[(size_t)field] = val;
+                    val = NULL;
+                    ret = dupval(sv->payload->fields[(size_t)field]);
+                }
+            }
         }
     } else if (container->type == T_bytes) {
         if (idx->type != T_int) {
@@ -2477,6 +2579,11 @@ static struct value_t *increment_index(struct ast *target, int delta,
         free_args(indices);
         return NULL;
     }
+    if (s->is_self) {
+        yyerror("cannot modify self in a read-only method");
+        free_args(indices);
+        return NULL;
+    }
 
     struct value_t *container = s->val;
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
@@ -2488,7 +2595,8 @@ static struct value_t *increment_index(struct ast *target, int delta,
             return NULL;
         }
         struct value_t *elem = *slot;
-        if (elem->type != T_list && elem->type != T_dict) {
+        if (elem->type != T_list && elem->type != T_dict &&
+            elem->type != T_struct) {
             yyerror("cannot index-assign into %s", typename_of(elem));
             free_args(indices);
             return NULL;
@@ -2537,6 +2645,44 @@ static struct value_t *increment_index(struct ast *target, int delta,
         }
         if (!found)
             yyerror("key not found");
+    } else if (container->type == T_struct) {
+        if (idx->type != T_string) {
+            yyerror("struct field name must be a string, got %s",
+                    typename_of(idx));
+        } else {
+            struct struct_value_t *sv = (struct struct_value_t *)container;
+            const char *name = ((struct string_value_t *)idx)->value;
+            int field = sv->def ? structtype_field_index(sv->def, name) : -1;
+            if (field < 0 || !sv->def ||
+                (size_t)field >= sv->def->fields.size()) {
+                yyerror("field %s not found in %s", name,
+                        sv->def ? sv->def->name.c_str() : "struct");
+            } else {
+                ensure_unique_struct(sv);
+                if (!sv->payload ||
+                    (size_t)field >= sv->payload->fields.size()) {
+                    yyerror("invalid struct field assignment");
+                } else {
+                    struct value_t *old =
+                        sv->payload->fields[(size_t)field];
+                    struct value_t *newv = apply_increment(old, delta);
+                    if (newv &&
+                        !type_constraint_matches(
+                            &sv->def->fields[(size_t)field].type, newv)) {
+                        yyerror("field %s of %s expects %s, got %s", name,
+                                sv->def->name.c_str(),
+                                type_constraint_name(
+                                    &sv->def->fields[(size_t)field].type),
+                                typename_of(newv));
+                        freeval(newv);
+                    } else if (newv) {
+                        ret = prefix ? dupval(newv) : dupval(old);
+                        freeval(old);
+                        sv->payload->fields[(size_t)field] = newv;
+                    }
+                }
+            }
+        }
     } else if (container->type == T_bytes) {
         if (idx->type != T_int) {
             yyerror("bytes index must be an integer, got %s", typename_of(idx));
@@ -2705,6 +2851,10 @@ static bool read_index_chain(struct ast *a, struct value_t *&out) {
     bool container_owned = false;
 
     for (size_t k = 0; k < index_asts.size(); ++k) {
+        if (container->type == T_struct) {
+            if (container_owned) freeval(container);
+            return false;
+        }
         struct value_t *idx = eval(index_asts[k]);
         if (!idx) {
             if (container_owned) freeval(container);
@@ -2825,6 +2975,429 @@ static struct value_t *increment_name(struct symref *ref, int delta,
     return ret;
 }
 
+static bool method_self_ok(struct symlist *sl, const char *owner,
+                           std::string &error) {
+    if (!sl || !sl->sym) {
+        error = "method requires self";
+        return false;
+    }
+    if (std::strcmp(sl->sym->name, "self") != 0) {
+        error = "method first parameter must be self";
+        return false;
+    }
+    if (sl->type && sl->type->kind != TYPE_ANY) {
+        if (sl->type->kind != TYPE_NAMED || !owner ||
+            !sl->type->name || std::strcmp(sl->type->name, owner) != 0) {
+            error = "method self has an invalid type";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool evaluate_method(struct struct_member *member, struct_def *owner,
+                            std::shared_ptr<function_def> &out,
+                            std::string &error) {
+    out.reset();
+    struct value_t *value = eval(member->func);
+    if (!value)
+        return false;
+    if (value->type != T_func) {
+        error = "invalid method function";
+        freeval(value);
+        return false;
+    }
+    struct func_value_t *fv = (struct func_value_t *)value;
+    out = fv->def;
+    freeval(value);
+    if (!out || !out->code) {
+        error = "invalid method function";
+        out.reset();
+        return false;
+    }
+    if (!method_self_ok(out->code->sl, owner ? owner->name.c_str() : NULL,
+                        error)) {
+        out.reset();
+        return false;
+    }
+    out->code->is_method = true;
+    out->code->name = member->name;
+    return true;
+}
+
+static const struct method_sig *find_trait_method(const trait_def *trait,
+                                                  const char *name) {
+    if (!trait || !name) return NULL;
+    for (size_t i = 0; i < trait->methods.size(); ++i)
+        if (trait->methods[i].name == name)
+            return &trait->methods[i];
+    return NULL;
+}
+
+static bool method_signature_matches(const method_sig *sig,
+                                     const struct function_code *code,
+                                     std::string &error) {
+    if (!sig || !code) {
+        error = "invalid method signature";
+        return false;
+    }
+    if ((int)sig->params.size() != code->nparams) {
+        error = "method " + sig->name + " has the wrong number of parameters";
+        return false;
+    }
+    int i = 0;
+    for (struct symlist *sl = code->sl; sl; sl = sl->next, ++i) {
+        struct type_constraint actual =
+            sl->type ? *sl->type : any_type_constraint();
+        struct type_constraint expected = sig->params[(size_t)i];
+        /* The receiver type is the implementing type; do not compare it. */
+        if (i == 0)
+            continue;
+        if (!type_constraint_equal(&actual, &expected)) {
+            error = "method " + sig->name +
+                    " does not match the trait signature";
+            return false;
+        }
+    }
+    return true;
+}
+
+static struct value_t *eval_struct_decl(struct struct_node *s) {
+    std::vector<field_def> fields;
+    for (struct struct_member *m = s->members; m; m = m->next) {
+        if (m->nodetype != 'f')
+            continue;
+        if (!validate_type_constraint(m->type))
+            return NULL;
+        field_def field;
+        field.name = m->name;
+        field.type = copy_type_constraint(m->type);
+        fields.push_back(field);
+    }
+
+    std::string error;
+    struct_def *def = NULL;
+    if (!structtype_create_struct(s->name, std::move(fields), def, error)) {
+        yyerror("%s", error.c_str());
+        return NULL;
+    }
+
+    for (struct struct_member *m = s->members; m; m = m->next) {
+        if (m->nodetype != 'm')
+            continue;
+        std::shared_ptr<function_def> code;
+        error.clear();
+        if (!evaluate_method(m, def, code, error)) {
+            if (!error.empty())
+                yyerror("%s", error.c_str());
+            continue;
+        }
+        if (!structtype_add_method(def, m->name, code, error))
+            yyerror("%s", error.c_str());
+    }
+    return NULL;
+}
+
+static bool eval_impl_decl(struct impl_node *impl) {
+    struct_def *owner = structtype_find_struct(impl->type_name);
+    if (!owner) {
+        yyerror("unknown type %s", impl->type_name);
+        return false;
+    }
+    if (owner->module != diag_current_source_name()) {
+        yyerror("impl for type %s must be in the same module",
+                impl->type_name);
+        return false;
+    }
+
+    trait_def *trait = NULL;
+    if (impl->trait_name) {
+        trait = structtype_find_trait(impl->trait_name);
+        if (!trait) {
+            yyerror("unknown trait %s", impl->trait_name);
+            return false;
+        }
+        if (trait->module != diag_current_source_name()) {
+            yyerror("trait %s must be in the same module",
+                    impl->trait_name);
+            return false;
+        }
+    }
+
+    bool ok = true;
+    for (struct struct_member *m = impl->methods; m; m = m->next) {
+        if (m->nodetype != 'm')
+            continue;
+        if (trait) {
+            const struct method_sig *sig = find_trait_method(trait, m->name);
+            if (!sig) {
+                yyerror("method %s is not declared by trait %s", m->name,
+                        trait->name.c_str());
+                ok = false;
+                continue;
+            }
+            std::shared_ptr<function_def> code;
+            std::string error;
+            if (!evaluate_method(m, owner, code, error)) {
+                if (!error.empty())
+                    yyerror("%s", error.c_str());
+                ok = false;
+                continue;
+            }
+            if (!method_signature_matches(sig, code->code.get(), error)) {
+                yyerror("%s", error.c_str());
+                ok = false;
+                continue;
+            }
+            if (!structtype_add_method(owner, m->name, code, error)) {
+                yyerror("%s", error.c_str());
+                ok = false;
+            }
+        } else {
+            std::shared_ptr<function_def> code;
+            std::string error;
+            if (!evaluate_method(m, owner, code, error)) {
+                if (!error.empty())
+                    yyerror("%s", error.c_str());
+                ok = false;
+                continue;
+            }
+            if (!structtype_add_method(owner, m->name, code, error)) {
+                yyerror("%s", error.c_str());
+                ok = false;
+            }
+        }
+    }
+
+    if (!trait)
+        return ok;
+
+    for (size_t i = 0; i < trait->methods.size(); ++i) {
+        auto method = owner->methods.find(trait->methods[i].name);
+        if (method == owner->methods.end()) {
+            yyerror("type %s does not implement method %s required by trait %s",
+                    owner->name.c_str(), trait->methods[i].name.c_str(),
+                    trait->name.c_str());
+            ok = false;
+            continue;
+        }
+        std::string error;
+        if (method->second && method->second->code &&
+            !method_signature_matches(&trait->methods[i],
+                                      method->second->code.get(), error)) {
+            yyerror("%s", error.c_str());
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        std::string error;
+        if (!structtype_add_trait(owner, trait, error)) {
+            yyerror("%s", error.c_str());
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+static struct value_t *eval_trait_decl(struct trait_node *t) {
+    std::vector<method_sig> methods;
+    for (struct trait_method *m = t->methods; m; m = m->next) {
+        if (!m->params || std::strcmp(m->params->sym->name, "self") != 0) {
+            yyerror("trait method %s must start with self", m->name);
+            return NULL;
+        }
+        if (m->params->type &&
+            m->params->type->kind != TYPE_ANY) {
+            yyerror("trait method %s self must be untyped", m->name);
+            return NULL;
+        }
+        method_sig sig;
+        sig.name = m->name;
+        for (struct symlist *p = m->params; p; p = p->next) {
+            if (!validate_type_constraint(p->type))
+                return NULL;
+            sig.params.push_back(copy_type_constraint(p->type));
+        }
+        methods.push_back(sig);
+    }
+
+    std::string error;
+    trait_def *def = NULL;
+    if (!structtype_create_trait(t->name, std::move(methods), def, error)) {
+        yyerror("%s", error.c_str());
+        return NULL;
+    }
+    return NULL;
+}
+
+static struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
+    struct_def *def = structtype_find_struct(lit->name);
+    if (!def) {
+        yyerror("unknown struct type %s", lit->name);
+        return NULL;
+    }
+
+    std::shared_ptr<struct_payload> payload = std::make_shared<struct_payload>();
+    payload->fields.resize(def->fields.size(), NULL);
+    std::vector<bool> seen(def->fields.size(), false);
+    bool ok = true;
+
+    for (struct struct_init *init = lit->fields; init; init = init->next) {
+        int index = structtype_field_index(def, init->name);
+        if (index < 0) {
+            yyerror("unknown field %s in %s", init->name, def->name.c_str());
+            ok = false;
+            continue;
+        }
+        if (seen[(size_t)index]) {
+            yyerror("field %s repeated in %s", init->name, def->name.c_str());
+            ok = false;
+            continue;
+        }
+        struct value_t *value = eval(init->value);
+        if (!value) {
+            ok = false;
+            continue;
+        }
+        if (!type_constraint_matches(&def->fields[(size_t)index].type, value)) {
+            yyerror("field %s of %s expects %s, got %s", init->name,
+                    def->name.c_str(),
+                    type_constraint_name(&def->fields[(size_t)index].type),
+                    typename_of(value));
+            freeval(value);
+            ok = false;
+            continue;
+        }
+        payload->fields[(size_t)index] = value;
+        seen[(size_t)index] = true;
+    }
+
+    for (size_t i = 0; i < seen.size(); ++i) {
+        if (!seen[i]) {
+            yyerror("field %s of %s is required", def->fields[i].name.c_str(),
+                    def->name.c_str());
+            ok = false;
+        }
+    }
+
+    if (!ok)
+        return NULL;
+    return newstructval(def, payload);
+}
+
+static struct value_t *read_member_value(struct value_t *container,
+                                         struct value_t *index) {
+    if (!container || !index)
+        return NULL;
+
+    if (container->type == T_list) {
+        if (index->type != T_int) {
+            yyerror("list index must be an integer, got %s", typename_of(index));
+            return NULL;
+        }
+        long long i = ((struct int_value_t *)index)->value;
+        struct list_value_t *lv = (struct list_value_t *)container;
+        if (i < 0 || (unsigned long long)i >= lv->payload->items.size()) {
+            yyerror("list index %lld out of range", i);
+            return NULL;
+        }
+        return dupval(lv->payload->items[(size_t)i]);
+    }
+
+    if (container->type == T_string) {
+        if (index->type != T_int) {
+            yyerror("string index must be an integer, got %s",
+                    typename_of(index));
+            return NULL;
+        }
+        long long i = ((struct int_value_t *)index)->value;
+        const char *s = ((struct string_value_t *)container)->value;
+        size_t len = utf8_length(s);
+        if (i < 0 || (unsigned long long)i >= len) {
+            yyerror("string index %lld out of range", i);
+            return NULL;
+        }
+        std::string ch;
+        if (!utf8_char_at(s, (size_t)i, ch))
+            return NULL;
+        return newstrval(ch.c_str());
+    }
+
+    if (container->type == T_bytes) {
+        if (index->type != T_int) {
+            yyerror("bytes index must be an integer, got %s",
+                    typename_of(index));
+            return NULL;
+        }
+        long long i = ((struct int_value_t *)index)->value;
+        std::string &data = ((struct bytes_value_t *)container)->value;
+        if (i < 0 || (unsigned long long)i >= data.size()) {
+            yyerror("bytes index %lld out of range", i);
+            return NULL;
+        }
+        return newintval((unsigned char)data[(size_t)i]);
+    }
+
+    if (container->type == T_dict) {
+        struct dict_value_t *dv = (struct dict_value_t *)container;
+        for (size_t i = 0; i < dv->payload->items.size(); ++i)
+            if (value_equals(dv->payload->items[i].first, index))
+                return dupval(dv->payload->items[i].second);
+        yyerror("key not found");
+        return NULL;
+    }
+
+    if (container->type == T_struct) {
+        if (index->type != T_string) {
+            yyerror("struct field name must be a string, got %s",
+                    typename_of(index));
+            return NULL;
+        }
+        struct struct_value_t *sv = (struct struct_value_t *)container;
+        if (!sv->def) {
+            yyerror("invalid struct value");
+            return NULL;
+        }
+        const char *name = ((struct string_value_t *)index)->value;
+        int field = structtype_field_index(sv->def, name);
+        if (field >= 0 && sv->payload &&
+            (size_t)field < sv->payload->fields.size())
+            return dupval(sv->payload->fields[(size_t)field]);
+        if (sv->def->methods.count(name) != 0)
+            yyerror("method %s must be called", name);
+        else
+            yyerror("field %s not found in %s", name, sv->def->name.c_str());
+        return NULL;
+    }
+
+    yyerror("cannot index %s", typename_of(container));
+    return NULL;
+}
+
+static struct value_t *call_method_value(struct value_t *receiver,
+                                         std::shared_ptr<function_def> def,
+                                         struct ast *args_ast) {
+    if (call_depth >= MAX_CALL_DEPTH) {
+        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+        return NULL;
+    }
+    call_depth_guard depth_guard;
+
+    std::vector<struct value_t *> args;
+    args.reserve(8);
+    args.push_back(dupval(receiver));
+    if (!collect_args(args_ast, args)) {
+        free_args(args);
+        return NULL;
+    }
+
+    struct func_value_t callee;
+    callee.type = T_func;
+    callee.def = std::move(def);
+    return invoke_value((struct value_t *)&callee, args);
+}
+
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
     if (g_interrupted) return NULL;
@@ -2915,8 +3488,7 @@ struct value_t *eval(struct ast *a) {
             char *name = def->name;
             if (isrepeated(name)) {
                 yyerror("symbol repeated %s", name);
-            } else if (def->type && def->type->kind == TYPE_INVALID) {
-                /* The parser already reported the unknown type name. */
+            } else if (!validate_type_constraint(def->type)) {
                 break;
             } else {
                 struct value_t *v = def->v
@@ -2936,14 +3508,32 @@ struct value_t *eval(struct ast *a) {
                 }
                 struct symbol *s = newsym(name);
                 s->val = v;
-                if (def->type)
+                if (def->type) {
                     s->type.kind = def->type->kind;
+                    s->type.name = def->type->name;
+                }
                 s->exported = def->exported;
                 s->is_const = def->is_const;
                 savesym(s);
             }
             break;
         }
+
+        case 'Y':
+            eval_struct_decl((struct struct_node *)a);
+            break;
+
+        case 'H':
+            eval_impl_decl((struct impl_node *)a);
+            break;
+
+        case 't':
+            eval_trait_decl((struct trait_node *)a);
+            break;
+
+        case 'y':
+            ret = eval_struct_lit((struct struct_lit_node *)a);
+            break;
 
         case 'Z': {
             struct funcdef *f = (struct funcdef *)a;
@@ -2959,6 +3549,9 @@ struct value_t *eval(struct ast *a) {
                         bad = true;
                         break;
                     }
+            for (struct symlist *p = sl; p && !bad; p = p->next)
+                if (!validate_type_constraint(p->type))
+                    bad = true;
             if (bad)
                 break;
 
@@ -3824,62 +4417,7 @@ struct value_t *eval(struct ast *a) {
                 freeval(index);
                 break;
             }
-            if (container->type == T_list) {
-                if (index->type != T_int) {
-                    yyerror("list index must be an integer, got %s",
-                            typename_of(index));
-                } else {
-                    long long i = ((struct int_value_t *)index)->value;
-                    struct list_value_t *lv = (struct list_value_t *)container;
-                    if (i < 0 || (unsigned long long)i >= lv->payload->items.size())
-                        yyerror("list index %lld out of range", i);
-                    else
-                        ret = dupval(lv->payload->items[(size_t)i]);
-                }
-            } else if (container->type == T_string) {
-                if (index->type != T_int) {
-                    yyerror("string index must be an integer, got %s",
-                            typename_of(index));
-                } else {
-                    long long i = ((struct int_value_t *)index)->value;
-                    const char *s = ((struct string_value_t *)container)->value;
-                    size_t len = utf8_length(s);
-                    if (i < 0 || (unsigned long long)i >= len) {
-                        yyerror("string index %lld out of range", i);
-                    } else {
-                        std::string ch;
-                        if (utf8_char_at(s, (size_t)i, ch))
-                            ret = newstrval(ch.c_str());
-                    }
-                }
-            } else if (container->type == T_bytes) {
-                if (index->type != T_int) {
-                    yyerror("bytes index must be an integer, got %s",
-                            typename_of(index));
-                } else {
-                    long long i = ((struct int_value_t *)index)->value;
-                    std::string &data =
-                        ((struct bytes_value_t *)container)->value;
-                    if (i < 0 || (unsigned long long)i >= data.size())
-                        yyerror("bytes index %lld out of range", i);
-                    else
-                        ret = newintval((unsigned char)data[(size_t)i]);
-                }
-            } else if (container->type == T_dict) {
-                struct dict_value_t *dv = (struct dict_value_t *)container;
-                bool found = false;
-                for (size_t i = 0; i < dv->payload->items.size(); ++i) {
-                    if (value_equals(dv->payload->items[i].first, index)) {
-                        ret = dupval(dv->payload->items[i].second);
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
-                    yyerror("key not found");
-            } else {
-                yyerror("cannot index %s", typename_of(container));
-            }
+            ret = read_member_value(container, index);
             freeval(container);
             freeval(index);
             break;
@@ -3887,6 +4425,69 @@ struct value_t *eval(struct ast *a) {
 
         case 'C': {
             struct ufncall *call = (struct ufncall *)a;
+            if (call->callee && call->callee->nodetype == 'G') {
+                struct value_t *receiver = eval(call->callee->l);
+                struct value_t *key = eval(call->callee->r);
+                if (!receiver || !key) {
+                    freeval(receiver);
+                    freeval(key);
+                    break;
+                }
+                if (receiver->type == T_struct) {
+                    if (key->type != T_string) {
+                        yyerror("struct method name must be a string, got %s",
+                                typename_of(key));
+                    } else {
+                        struct struct_value_t *sv =
+                            (struct struct_value_t *)receiver;
+                        const char *name =
+                            ((struct string_value_t *)key)->value;
+                        int field =
+                            sv->def ? structtype_field_index(sv->def, name)
+                                    : -1;
+                        if (field >= 0 && sv->payload &&
+                            (size_t)field < sv->payload->fields.size()) {
+                            struct value_t *member =
+                                dupval(sv->payload->fields[(size_t)field]);
+                            freeval(receiver);
+                            freeval(key);
+                            if (member) {
+                                ret = callvalue(member, call->args);
+                                freeval(member);
+                            }
+                            break;
+                        }
+                        bool called = false;
+                        if (sv->def) {
+                            auto method = sv->def->methods.find(name);
+                            if (method != sv->def->methods.end()) {
+                                ret = call_method_value(receiver,
+                                                        method->second,
+                                                        call->args);
+                                called = true;
+                            }
+                        }
+                        if (!called) {
+                            yyerror("method %s not found in %s", name,
+                                    sv->def ? sv->def->name.c_str()
+                                            : "struct");
+                        }
+                    }
+                    freeval(receiver);
+                    freeval(key);
+                    break;
+                }
+
+                struct value_t *member = read_member_value(receiver, key);
+                freeval(receiver);
+                freeval(key);
+                if (member) {
+                    ret = callvalue(member, call->args);
+                    freeval(member);
+                }
+                break;
+            }
+
             struct value_t *callee = eval(call->callee);
             if (callee) {
                 ret = callvalue(callee, call->args);

@@ -1,4 +1,5 @@
 #include "scopestack.h"
+#include "structtype.h"
 #include "symbol.h"
 
 #include <algorithm>
@@ -231,6 +232,15 @@ struct cycle_collector {
                                 mark_value(entry.second);
                             }
                         }
+                        break;
+                    }
+                    case T_struct: {
+                        struct struct_value_t *sv =
+                            (struct struct_value_t *)v;
+                        if (sv->payload)
+                            for (size_t i = 0;
+                                 i < sv->payload->fields.size(); ++i)
+                                mark_value(sv->payload->fields[i]);
                         break;
                     }
                     default:

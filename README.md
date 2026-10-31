@@ -600,6 +600,87 @@ fact(5)                 → 120
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
+结构体、`impl` 与 `trait`：
+
+```text
+struct Point {
+  x: int;
+  y: int;
+}
+
+impl Point {
+  func length(self) {
+    return sqrt(self.x * self.x + self.y * self.y);
+  }
+
+  func moved(self, dx: int, dy: int) {
+    return Point { x: self.x + dx, y: self.y + dy };
+  }
+}
+
+let p = Point { x: 3, y: 4 };
+p.x
+p.length()
+let q = p.moved(1, 2);
+```
+
+- `struct` 声明字段；所有字段都必须初始化，未知字段或重复字段会报错；
+- 构造使用 `Point { x: 3, y: 4 }`，字段顺序不限；
+- 字段可以读写：`p.x`、`p.x = 5`；
+- 方法第一个参数必须是显式 `self`；
+- 方法可以在 `struct` 内声明，也可以在同模块的 `impl Type` 中补充；
+- 方法只能通过实例调用：`p.length()`；
+- 暂不支持把方法本身作为值提取，例如 `let f = p.length`；
+- 第一版方法是只读的：方法内不能写 `self.x = ...`，需要修改时返回新结构体；
+- 结构体是值语义，赋值和作为参数传递时使用 copy-on-write；
+- 结构体类型可以用在变量和参数类型标注中：`let p: Point = Point { x: 1, y: 2 }`、`func f(p: Point)`；结构体类型没有默认值，变量必须初始化；
+- 字段类型必须是已声明的类型；暂不支持递归/自引用结构体；
+- 所有字段和方法都是公开的；暂不实现 `_` 私有语法；
+- 字段可以保存函数值，作为普通回调使用，不会自动绑定 `self`：
+
+```text
+struct Handler {
+  callback: callable;
+}
+
+let h = Handler {
+  callback: func(x) { return x + 1; }
+};
+
+h.callback(41)      // 42
+```
+
+- 不支持继承、动态添加方法、静态方法、泛型或运算符重载。
+
+`trait` 定义接口，`impl Trait for Type` 显式实现：
+
+```text
+trait Drawable {
+  func draw(self);
+}
+
+impl Drawable for Point {
+  func draw(self) {
+    print("point");
+  }
+}
+
+func render(x: Drawable) {
+  x.draw();
+}
+
+render(p)
+```
+
+- `trait` 只包含方法签名，不包含字段、默认方法或 trait 继承；
+- 接口是名义式的：只有显式写了 `impl Drawable for Point`，`Point` 才能传给 `Drawable`；
+- 如果方法已经存在于 `impl Point` 中，可以只写 `impl Drawable for Point;` 做接口适配；
+- trait 方法名不能与类型已有方法冲突；
+- trait 实现和类型必须在同一模块中；
+- 一个类型对同一个 trait 只能实现一次；
+- 结构体和 trait 名称共享类型命名空间，不能重名；
+- 当前类型注册是全局的，不同包不能定义同名结构体或 trait。
+
 内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text

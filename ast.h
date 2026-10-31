@@ -216,6 +216,67 @@ struct symdef {
     int is_const;
 };
 
+struct struct_member {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct type_constraint *type;
+    struct ast *func;
+    struct struct_member *next;
+};
+
+struct struct_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct struct_member *members;
+};
+
+struct impl_node {
+    int nodetype;
+    int line;
+    int column;
+    char *type_name;
+    char *trait_name;
+    struct struct_member *methods;
+};
+
+struct trait_method {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct symlist *params;
+    struct trait_method *next;
+};
+
+struct trait_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct trait_method *methods;
+};
+
+struct struct_init {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct ast *value;
+    struct struct_init *next;
+};
+
+struct struct_lit_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct struct_init *fields;
+};
+
 struct package_node {
     int nodetype;
     int line;
@@ -297,6 +358,19 @@ void release_function_code(struct funcdef *node);
 
 struct ast *newlist(struct ast *v, struct ast *l);
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l);
+
+struct ast *newstructdecl(char *name, struct struct_member *members);
+struct ast *newstructfield(char *name, struct type_constraint *type);
+struct ast *newstructmethod(char *name, struct ast *func);
+struct ast *append_struct_member(struct ast *head, struct ast *member);
+struct ast *newimpl(char *type_name, char *trait_name,
+                    struct struct_member *methods);
+struct ast *newtraitdecl(char *name, struct trait_method *methods);
+struct ast *newtraitmethod(char *name, struct symlist *params);
+struct ast *append_trait_method(struct ast *head, struct ast *method);
+struct ast *newstructlit(char *name, struct struct_init *fields);
+struct ast *newstructinit(char *name, struct ast *value);
+struct ast *append_struct_init(struct ast *head, struct ast *init);
 
 
 void treefree(struct ast *);

@@ -34,6 +34,7 @@ void diag_start_input_line();
 void diag_report(int line, int column, const char *category,
                  const char *message);
 void diag_set_source_name(const std::string &name);
+const std::string &diag_current_source_name();
 bool diag_lexical_error_on_line(int line);
 void diag_mark_script_failure();
 

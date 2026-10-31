@@ -1,4 +1,5 @@
 #include "valuetype.h"
+#include "structtype.h"
 
 #include <cmath>
 #include <cstdio>
@@ -169,6 +170,14 @@ struct value_t *dupval(struct value_t *v) {
             struct userdata_value_t *src = (struct userdata_value_t *)v;
             return newuserdataval(src->meta, src->data);
         }
+        case T_struct: {
+            struct struct_value_t *src = (struct struct_value_t *)v;
+            struct struct_value_t *dst = new struct_value_t;
+            dst->type = T_struct;
+            dst->def = src->def;
+            dst->payload = src->payload;
+            return (struct value_t *)dst;
+        }
         case T_null:
             return newnull();
         case T_return:
@@ -218,6 +227,9 @@ void freeval(struct value_t *v) {
         case T_userdata:
             delete (struct userdata_value_t *)v;
             break;
+        case T_struct:
+            delete (struct struct_value_t *)v;
+            break;
         case T_null:
             delete v;
             break;
@@ -246,6 +258,10 @@ const char *typename_of(const struct value_t *v) {
         case T_userdata: {
             const struct userdata_value_t *u = (const struct userdata_value_t *)v;
             return u->meta ? u->meta->name : "userdata";
+        }
+        case T_struct: {
+            const struct struct_value_t *s = (const struct struct_value_t *)v;
+            return s->def ? s->def->name.c_str() : "struct";
         }
         case T_null: return "null";
         case T_class: return "class";
@@ -323,6 +339,24 @@ std::string value_to_string(const struct value_t *v) {
             if (u->meta && u->meta->describe)
                 return u->meta->describe(u->data.get());
             return "<userdata>";
+        }
+        case T_struct: {
+            const struct struct_value_t *s = (const struct struct_value_t *)v;
+            if (!s->def || !s->payload)
+                return "<struct>";
+            if (s->def->fields.empty())
+                return s->def->name + " {}";
+            std::string out = s->def->name + " { ";
+            for (size_t i = 0; i < s->def->fields.size(); ++i) {
+                if (i) out += ", ";
+                out += s->def->fields[i].name;
+                out += ": ";
+                out += (i < s->payload->fields.size())
+                           ? value_to_string(s->payload->fields[i])
+                           : "null";
+            }
+            out += " }";
+            return out;
         }
         case T_null:
             return "null";

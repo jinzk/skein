@@ -19,11 +19,14 @@ enum type_constraint_kind {
     TYPE_CALLABLE,
     TYPE_NULL,
     TYPE_USERDATA,
+    TYPE_NAMED,
     TYPE_INVALID
 };
 
 struct type_constraint {
     enum type_constraint_kind kind;
+    /* Interned; non-NULL only for TYPE_NAMED. */
+    const char *name;
 };
 
 struct symbol {
@@ -33,6 +36,8 @@ struct symbol {
     struct type_constraint type;
     bool exported;
     bool is_const;
+    /* True for the implicit receiver binding of a read-only method. */
+    bool is_self;
 };
 
 struct symlist {
@@ -47,9 +52,12 @@ struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
 void symlistfree(struct symlist *sl);
 
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);
+struct type_constraint *new_named_type_constraint(const char *name);
 void free_type_constraint(struct type_constraint *type);
 bool type_constraint_matches(const struct type_constraint *type,
                              const struct value_t *value);
+bool type_constraint_equal(const struct type_constraint *a,
+                           const struct type_constraint *b);
 const char *type_constraint_name(const struct type_constraint *type);
 
 #endif

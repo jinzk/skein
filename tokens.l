@@ -267,6 +267,9 @@ EXP ([Ee][-+]?[0-9]+)
 "while" { YYRET(WHILE); }
 "do" { YYRET(DO); }
 "for" { YYRET(FOR); }
+"struct" { YYRET(STRUCT); }
+"impl" { YYRET(IMPL); }
+"trait" { YYRET(TRAIT); }
 "switch" { YYRET(SWITCH); }
 "case" { YYRET(CASE); }
 "default" { YYRET(DEFAULT); }

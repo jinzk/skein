@@ -187,6 +187,10 @@ void diag_set_source_name(const std::string &name) {
     source_name = name;
 }
 
+const std::string &diag_current_source_name() {
+    return source_name;
+}
+
 void diag_save_source(diag_source_checkpoint &checkpoint) {
     checkpoint.current_line = current_line;
     checkpoint.current_column = current_column;

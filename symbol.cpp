@@ -1,8 +1,12 @@
 #include "symbol.h"
 
+#include "structtype.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <unordered_set>
 
 struct symbol *newsym(const char *name) {
     if (!name) name = "";
@@ -18,9 +22,19 @@ struct symbol *newsym(const char *name) {
     s->name_len = len;
     s->val = NULL;
     s->type.kind = TYPE_ANY;
+    s->type.name = NULL;
     s->exported = false;
     s->is_const = false;
+    s->is_self = false;
     return s;
+}
+
+static const char *intern_type_name(const char *name) {
+    static std::unordered_set<std::string> names;
+    if (!name) name = "";
+    std::unordered_set<std::string>::iterator it = names.find(name);
+    if (it == names.end()) it = names.insert(name).first;
+    return it->c_str();
 }
 
 struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
@@ -56,6 +70,13 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
         std::exit(0);
     }
     type->kind = kind;
+    type->name = NULL;
+    return type;
+}
+
+struct type_constraint *new_named_type_constraint(const char *name) {
+    struct type_constraint *type = new_type_constraint(TYPE_NAMED);
+    type->name = intern_type_name(name);
     return type;
 }
 
@@ -97,10 +118,23 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_null;
         case TYPE_USERDATA:
             return value->type == T_userdata;
+        case TYPE_NAMED:
+            return named_type_matches(type->name, value);
         case TYPE_INVALID:
         default:
             return false;
     }
+}
+
+bool type_constraint_equal(const struct type_constraint *a,
+                           const struct type_constraint *b) {
+    if (!a || !b)
+        return !a && !b;
+    if (a->kind != b->kind)
+        return false;
+    if (a->kind == TYPE_NAMED)
+        return a->name && b->name && std::strcmp(a->name, b->name) == 0;
+    return true;
 }
 
 const char *type_constraint_name(const struct type_constraint *type) {
@@ -121,6 +155,7 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_CALLABLE: return "callable";
         case TYPE_NULL: return "null";
         case TYPE_USERDATA: return "userdata";
+        case TYPE_NAMED: return type->name ? type->name : "invalid";
         case TYPE_INVALID:
         default: return "invalid";
     }

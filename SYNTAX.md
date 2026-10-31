@@ -18,6 +18,7 @@
 let const func
 if else while do for
 switch case default
+struct impl trait
 return break continue
 null true false
 package import export as
@@ -473,6 +474,8 @@ list dict function builtin callable null userdata
 
 `function`、`builtin`、`callable`、`userdata` 没有默认值，必须提供初始值。
 
+已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
+
 ```text
 let x: int = 1;
 x = 2;              // 允许
@@ -731,7 +734,112 @@ function add argument 1 (a) expects int, got string
 let add = func(a, b) { return a + b; };
 ```
 
-### 5.10 导出声明
+### 5.10 结构体、impl 与 trait
+
+结构体：
+
+```text
+struct Point {
+  x: int;
+  y: int;
+
+  func length(self) {
+    return sqrt(self.x * self.x + self.y * self.y);
+  }
+}
+
+impl Point {
+  func moved(self, dx: int, dy: int) {
+    return Point { x: self.x + dx, y: self.y + dy };
+  }
+}
+```
+
+构造和访问：
+
+```text
+let p = Point { x: 3, y: 4 };
+
+p.x
+p.x = 5;
+p.length()
+```
+
+规则：
+
+- 字段必须全部初始化；
+- 未知字段、重复字段、字段类型不匹配都会报错；
+- 字段顺序不影响构造；
+- `struct` 内可以声明字段和方法；
+- `impl Type` 用于在结构体外部补充该类型的固有方法；
+- 方法第一个参数必须是显式 `self`；
+- `self` 的类型隐式为当前结构体；
+- 方法通过实例调用：`p.length()`，调用时不传 `self`；
+- 暂不支持方法值提取，例如 `let f = p.length`；
+- 第一版方法是只读的，不允许 `self.x = ...`；
+- 结构体使用 copy-on-write 值语义；
+- 所有成员都是公开的，`_` 前缀没有特殊含义；
+- 字段类型必须是已声明的类型；暂不支持递归/自引用结构体；
+- 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
+- 不支持继承、静态方法、泛型、动态添加方法或运算符重载。
+
+结构体类型可用于类型标注：
+
+```text
+let p: Point = Point { x: 1, y: 2 };
+
+func show(p: Point) {
+  print(p.x);
+}
+```
+
+trait 定义接口：
+
+```text
+trait Drawable {
+  func draw(self);
+}
+```
+
+实现接口：
+
+```text
+impl Drawable for Point {
+  func draw(self) {
+    print("point");
+  }
+}
+```
+
+如果方法已在 `impl Point` 中定义，可以只做接口适配：
+
+```text
+impl Drawable for Point;
+```
+
+接口使用：
+
+```text
+func render(x: Drawable) {
+  x.draw();
+}
+
+render(Point { x: 1, y: 2 });
+```
+
+规则：
+
+- trait 只包含方法签名；
+- 接口是名义式的，必须显式 `impl Trait for Type`；
+- 实现块只能定义 trait 中声明的方法；
+- 实现方法的参数数量和除 `self` 外的参数类型必须与 trait 一致；
+- 一个类型对同一个 trait 只能实现一次；
+- trait 方法名不能与类型已有方法冲突；
+- trait 和类型必须在同一模块；
+- 不支持 trait 继承、默认方法、泛型、静态方法；
+- 结构体和 trait 名称共享类型命名空间；当前类型注册是全局的，不同包不能定义同名结构体或 trait。
+
+### 5.11 导出声明
 
 只能在包中有实际意义：
 
@@ -1033,6 +1141,9 @@ var
 for ... of
 try/catch
 通配导入
+私有成员
+struct 继承
+trait 继承 / 默认方法
 ```
 
 动态链接库加载目前是设计方向，尚未作为语言语法实现。

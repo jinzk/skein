@@ -419,7 +419,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     for (struct symlist *sl = node->sl; sl; sl = sl->next) ++nparams;
     std::shared_ptr<function_code> code(
         new function_code{node->ast, node->sl, nparams,
-                          node->name ? node->name : ""},
+                          node->name ? node->name : "", false},
         free_function_code);
     function_codes[node] = code;
     return code;
@@ -454,6 +454,150 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
     p->key = k;
     p->next = l;
     return (struct ast *)p;
+}
+
+struct ast *newstructdecl(char *name, struct struct_member *members) {
+    struct struct_node *a =
+        (struct struct_node *)std::malloc(sizeof(struct struct_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'Y';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->members = members;
+    return (struct ast *)a;
+}
+
+struct ast *newstructfield(char *name, struct type_constraint *type) {
+    struct struct_member *a =
+        (struct struct_member *)std::malloc(sizeof(struct struct_member));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'f';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->type = type;
+    a->func = NULL;
+    a->next = NULL;
+    return (struct ast *)a;
+}
+
+struct ast *newstructmethod(char *name, struct ast *func) {
+    struct struct_member *a =
+        (struct struct_member *)std::malloc(sizeof(struct struct_member));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'm';
+    set_loc_from(a, func);
+    a->name = name;
+    a->type = NULL;
+    a->func = func;
+    a->next = NULL;
+    return (struct ast *)a;
+}
+
+struct ast *append_struct_member(struct ast *head, struct ast *member) {
+    if (!head) return member;
+    struct struct_member *current = (struct struct_member *)head;
+    while (current->next) current = current->next;
+    current->next = (struct struct_member *)member;
+    return head;
+}
+
+struct ast *newimpl(char *type_name, char *trait_name,
+                    struct struct_member *methods) {
+    struct impl_node *a =
+        (struct impl_node *)std::malloc(sizeof(struct impl_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'H';
+    set_loc(a, 0, 0);
+    a->type_name = type_name;
+    a->trait_name = trait_name;
+    a->methods = methods;
+    return (struct ast *)a;
+}
+
+struct ast *newtraitdecl(char *name, struct trait_method *methods) {
+    struct trait_node *a =
+        (struct trait_node *)std::malloc(sizeof(struct trait_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 't';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->methods = methods;
+    return (struct ast *)a;
+}
+
+struct ast *newtraitmethod(char *name, struct symlist *params) {
+    struct trait_method *a =
+        (struct trait_method *)std::malloc(sizeof(struct trait_method));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'q';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->params = params;
+    a->next = NULL;
+    return (struct ast *)a;
+}
+
+struct ast *append_trait_method(struct ast *head, struct ast *method) {
+    if (!head) return method;
+    struct trait_method *current = (struct trait_method *)head;
+    while (current->next) current = current->next;
+    current->next = (struct trait_method *)method;
+    return head;
+}
+
+struct ast *newstructlit(char *name, struct struct_init *fields) {
+    struct struct_lit_node *a =
+        (struct struct_lit_node *)std::malloc(sizeof(struct struct_lit_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'y';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->fields = fields;
+    return (struct ast *)a;
+}
+
+struct ast *newstructinit(char *name, struct ast *value) {
+    struct struct_init *a =
+        (struct struct_init *)std::malloc(sizeof(struct struct_init));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'i';
+    set_loc_from(a, value);
+    a->name = name;
+    a->value = value;
+    a->next = NULL;
+    return (struct ast *)a;
+}
+
+struct ast *append_struct_init(struct ast *head, struct ast *init) {
+    if (!head) return init;
+    struct struct_init *current = (struct struct_init *)head;
+    while (current->next) current = current->next;
+    current->next = (struct struct_init *)init;
+    return head;
 }
 
 void treefree(struct ast *a) {
@@ -597,6 +741,59 @@ void treefree(struct ast *a) {
             treefree(p->key);
             treefree(p->value);
             treefree(p->next);
+            break;
+        }
+        case 'Y': {
+            struct struct_node *s = (struct struct_node *)a;
+            treefree((struct ast *)s->members);
+            std::free(s->name);
+            break;
+        }
+        case 'H': {
+            struct impl_node *i = (struct impl_node *)a;
+            treefree((struct ast *)i->methods);
+            std::free(i->type_name);
+            std::free(i->trait_name);
+            break;
+        }
+        case 't': {
+            struct trait_node *t = (struct trait_node *)a;
+            treefree((struct ast *)t->methods);
+            std::free(t->name);
+            break;
+        }
+        case 'f': {
+            struct struct_member *m = (struct struct_member *)a;
+            treefree((struct ast *)m->next);
+            free_type_constraint(m->type);
+            std::free(m->name);
+            break;
+        }
+        case 'm': {
+            struct struct_member *m = (struct struct_member *)a;
+            treefree((struct ast *)m->next);
+            treefree(m->func);
+            std::free(m->name);
+            break;
+        }
+        case 'q': {
+            struct trait_method *m = (struct trait_method *)a;
+            treefree((struct ast *)m->next);
+            symlistfree(m->params);
+            std::free(m->name);
+            break;
+        }
+        case 'y': {
+            struct struct_lit_node *s = (struct struct_lit_node *)a;
+            treefree((struct ast *)s->fields);
+            std::free(s->name);
+            break;
+        }
+        case 'i': {
+            struct struct_init *i = (struct struct_init *)a;
+            treefree((struct ast *)i->next);
+            treefree(i->value);
+            std::free(i->name);
             break;
         }
         default:

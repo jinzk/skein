@@ -44,6 +44,8 @@ struct resolved_package {
 
 std::string main_source_path;
 std::vector<std::string> search_roots;
+std::string import_base;
+fs::path project_root;
 std::vector<package_load_context> load_stack;
 std::vector<std::string> loading_paths;
 
@@ -95,6 +97,68 @@ std::string canonical_file(const fs::path &file) {
     return ec ? file.lexically_normal().string() : canonical.string();
 }
 
+fs::path find_project_root(const fs::path &start) {
+    std::error_code ec;
+    fs::path directory = start;
+    if (directory.is_relative())
+        directory = fs::absolute(directory, ec);
+    if (!ec) {
+        fs::path canonical = fs::weakly_canonical(directory, ec);
+        if (!ec)
+            directory = canonical;
+    }
+    if (ec)
+        return start;
+
+    for (;;) {
+        std::error_code exists_ec;
+        if (fs::exists(directory / ".calcroot", exists_ec) && !exists_ec)
+            return directory;
+        fs::path parent = directory.parent_path();
+        if (parent.empty() || parent == directory)
+            break;
+        directory = parent;
+    }
+    return start;
+}
+
+bool validate_package_parts(const std::string &dotted,
+                            std::vector<std::string> &parts,
+                            std::string &error) {
+    parts = split_dotted(dotted);
+    for (const std::string &part : parts) {
+        if (!is_identifier(part)) {
+            error = "invalid package path";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool package_file_exists(const fs::path &dir, const std::string &name,
+                         fs::path &file);
+bool directory_has_package(const fs::path &directory, int depth = 0);
+
+bool try_resolve_package_dir(const fs::path &directory,
+                             const std::string &last,
+                             resolved_package &resolved) {
+    std::error_code ec;
+    if (!fs::is_directory(directory, ec))
+        return false;
+
+    fs::path file;
+    bool has_source = package_file_exists(directory, last, file);
+    if (!has_source && !directory_has_package(directory))
+        return false;
+
+    resolved.directory = directory;
+    resolved.file = file;
+    resolved.has_source = has_source;
+    resolved.key = has_source ? canonical_file(file)
+                              : canonical_file(directory);
+    return true;
+}
+
 std::string package_cache_key(const std::string &canonical_path) {
     return std::string("\x01pkg:") + canonical_path;
 }
@@ -138,7 +202,7 @@ bool package_file_exists(const fs::path &dir, const std::string &name,
     return false;
 }
 
-bool directory_has_package(const fs::path &directory, int depth = 0) {
+bool directory_has_package(const fs::path &directory, int depth) {
     if (depth > 64)
         return false;
     std::error_code ec;
@@ -167,34 +231,17 @@ bool directory_has_package(const fs::path &directory, int depth = 0) {
 
 bool resolve_package(const std::string &dotted, resolved_package &resolved,
                      std::string &error) {
-    std::vector<std::string> parts = split_dotted(dotted);
-    for (const std::string &part : parts) {
-        if (!is_identifier(part)) {
-            error = "invalid package path";
-            return false;
-        }
-    }
+    std::vector<std::string> parts;
+    if (!validate_package_parts(dotted, parts, error))
+        return false;
 
     const std::string &last = parts.back();
     for (const std::string &root : search_roots) {
         fs::path directory(root);
         for (const std::string &part : parts)
             directory /= part;
-
-        std::error_code ec;
-        if (!fs::is_directory(directory, ec))
-            continue;
-
-        fs::path file;
-        bool has_source = package_file_exists(directory, last, file);
-        if (!has_source && !directory_has_package(directory))
-            continue;
-        resolved.directory = directory;
-        resolved.file = file;
-        resolved.has_source = has_source;
-        resolved.key = has_source ? canonical_file(file)
-                                  : canonical_file(directory);
-        return true;
+        if (try_resolve_package_dir(directory, last, resolved))
+            return true;
     }
 
     error = "package not found";
@@ -202,6 +249,25 @@ bool resolve_package(const std::string &dotted, resolved_package &resolved,
         error += "\n  searched: ";
         error += root;
     }
+    return false;
+}
+
+bool resolve_package_at(const fs::path &base, const std::string &dotted,
+                        resolved_package &resolved, std::string &error) {
+    std::vector<std::string> parts;
+    if (!validate_package_parts(dotted, parts, error))
+        return false;
+
+    fs::path directory = base;
+    for (const std::string &part : parts)
+        directory /= part;
+
+    if (try_resolve_package_dir(directory, parts.back(), resolved))
+        return true;
+
+    error = "package not found";
+    error += "\n  searched: ";
+    error += directory.string();
     return false;
 }
 
@@ -322,13 +388,60 @@ value_t *build_std_namespace() {
     return (value_t *)root;
 }
 
-value_t *package_import_impl(const char *dotted_path, std::string &error) {
-    if (!dotted_path || !*dotted_path) {
+enum import_kind {
+    IMPORT_ABSOLUTE,
+    IMPORT_RELATIVE,
+    IMPORT_PROJECT
+};
+
+struct import_spec {
+    import_kind kind;
+    int up_levels;
+    std::string dotted;
+};
+
+bool parse_import_spec(const char *raw, import_spec &spec, std::string &error) {
+    std::string path = raw ? raw : "";
+    if (path.empty()) {
         error = "empty package path";
-        return NULL;
+        return false;
     }
 
-    if (std::strcmp(dotted_path, "std") == 0) {
+    size_t pos = 0;
+    spec.kind = IMPORT_ABSOLUTE;
+    spec.up_levels = 0;
+
+    if (path[pos] == '@') {
+        spec.kind = IMPORT_PROJECT;
+        ++pos;
+    } else if (path[pos] == '.') {
+        spec.kind = IMPORT_RELATIVE;
+        size_t start = pos;
+        while (pos < path.size() && path[pos] == '.')
+            ++pos;
+        spec.up_levels = (int)(pos - start - 1);
+    }
+
+    if (pos >= path.size()) {
+        error = "empty package path";
+        return false;
+    }
+    spec.dotted = path.substr(pos);
+
+    std::vector<std::string> parts;
+    if (!validate_package_parts(spec.dotted, parts, error))
+        return false;
+    return true;
+}
+
+value_t *package_import_impl(const char *dotted_path, const char *base_dir,
+                             std::string &error) {
+    import_spec spec;
+    if (!parse_import_spec(dotted_path, spec, error))
+        return NULL;
+
+    /* Only a bare `std` refers to the built-in standard library. */
+    if (spec.kind == IMPORT_ABSOLUTE && spec.dotted == "std") {
         std::string hidden = package_cache_key("builtin:std");
         if (value_t *cached = lookup_global_symbol(hidden.c_str()))
             return dupval(cached);
@@ -338,9 +451,40 @@ value_t *package_import_impl(const char *dotted_path, std::string &error) {
     }
 
     resolved_package resolved;
-    if (!resolve_package(dotted_path, resolved, error))
-        return NULL;
-    return import_resolved(dotted_path, resolved, error);
+    if (spec.kind == IMPORT_ABSOLUTE) {
+        if (!resolve_package(spec.dotted, resolved, error))
+            return NULL;
+    } else {
+        fs::path base;
+        if (spec.kind == IMPORT_PROJECT) {
+            base = project_root;
+        } else {
+            std::string lexical_base =
+                (base_dir && *base_dir) ? base_dir : import_base;
+            if (lexical_base.empty()) {
+                error = "no base directory for relative import";
+                return NULL;
+            }
+            base = fs::path(lexical_base);
+            for (int i = 0; i < spec.up_levels; ++i) {
+                fs::path parent = base.parent_path();
+                if (parent.empty() || parent == base) {
+                    error = "relative import escapes filesystem root";
+                    return NULL;
+                }
+                base = parent;
+            }
+        }
+
+        if (base.empty()) {
+            error = "no project root for import";
+            return NULL;
+        }
+        if (!resolve_package_at(base, spec.dotted, resolved, error))
+            return NULL;
+    }
+
+    return import_resolved(spec.dotted, resolved, error);
 }
 
 bool namespace_has_key(value_t *namespace_value, const std::string &key) {
@@ -453,7 +597,9 @@ bool load_package_file(const resolved_package &resolved,
     int saved_runtime_errors = g_runtime_error_count;
     bool saved_invalid = g_statement_invalid;
     int errors_before = diag_error_count();
+    std::string saved_import_base = import_base;
 
+    import_base = normalize_dir(resolved.directory.string());
     g_interactive = false;
     g_statement_invalid = false;
     ++g_package_loading;
@@ -479,6 +625,7 @@ bool load_package_file(const resolved_package &resolved,
     scanner_checkpoint_restore(scan_cp);
     diag_restore_source(diag_cp);
     restore_parser_globals(saved_char, saved_lval, saved_errs);
+    import_base = saved_import_base;
     g_interactive = saved_interactive;
     --g_package_loading;
     g_runtime_error_count = saved_runtime_errors;
@@ -500,26 +647,36 @@ void package_configure(const std::string &source_path,
                        const std::vector<std::string> &cli_dirs) {
     search_roots.clear();
     main_source_path.clear();
+    import_base.clear();
+    project_root.clear();
 
     fs::path source(source_path);
     std::error_code ec;
+    std::string main_directory;
+
     if (!source_path.empty() && source_path != "-") {
         if (source.is_relative())
             source = fs::absolute(source, ec);
         if (!ec) {
             main_source_path = source.lexically_normal().string();
             fs::path directory = source.parent_path();
-            if (!directory.empty())
-                search_roots.push_back(normalize_dir(directory.string()));
+            if (!directory.empty()) {
+                main_directory = normalize_dir(directory.string());
+                search_roots.push_back(main_directory);
+            }
         }
     }
 
     if (search_roots.empty()) {
         std::error_code cwd_error;
         fs::path cwd = fs::current_path(cwd_error);
-        search_roots.push_back(
-            normalize_dir(cwd_error ? "." : cwd.string()));
+        main_directory =
+            normalize_dir(cwd_error ? "." : cwd.string());
+        search_roots.push_back(main_directory);
     }
+
+    import_base = main_directory;
+    project_root = find_project_root(fs::path(import_base));
 
     for (const std::string &dir : cli_dirs) {
         if (!dir.empty())
@@ -553,8 +710,13 @@ bool package_is_loading() {
     return !load_stack.empty();
 }
 
-value_t *package_import(const char *dotted_path, std::string &error) {
-    return package_import_impl(dotted_path, error);
+const std::string &package_current_import_base() {
+    return import_base;
+}
+
+value_t *package_import(const char *dotted_path, const char *base_dir,
+                        std::string &error) {
+    return package_import_impl(dotted_path, base_dir, error);
 }
 
 value_t *package_build_namespace(scope_t *scope, std::string &error) {

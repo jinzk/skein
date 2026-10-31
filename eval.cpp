@@ -2128,6 +2128,15 @@ static struct value_t *call_value_args(
     return invoke_value(callee, args);
 }
 
+static const char *import_binding_name(const char *path) {
+    while (path && (*path == '.' || *path == '@'))
+        ++path;
+    if (!path || !*path)
+        return "";
+    const char *dot = std::strrchr(path, '.');
+    return dot ? dot + 1 : path;
+}
+
 static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     if (!callee)
         return NULL;
@@ -2582,7 +2591,7 @@ struct value_t *eval(struct ast *a) {
             struct import_node *imp = (struct import_node *)a;
             std::string error;
             int errors_before = diag_error_count();
-            struct value_t *ns = package_import(imp->path, error);
+            struct value_t *ns = package_import(imp->path, imp->base, error);
             if (!ns) {
                 if (diag_error_count() == errors_before)
                     yyerror("import %s: %s", imp->path, error.c_str());
@@ -2590,10 +2599,9 @@ struct value_t *eval(struct ast *a) {
                     diag_mark_script_failure();
                 break;
             }
-            const char *slash = std::strrchr(imp->path, '.');
             const char *name = imp->alias
                                    ? imp->alias
-                                   : (slash ? slash + 1 : imp->path);
+                                   : import_binding_name(imp->path);
             if (isrepeated(name)) {
                 yyerror("import name already exists: %s", name);
                 freeval(ns);

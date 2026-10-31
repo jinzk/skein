@@ -1,13 +1,27 @@
 #include "ast.h"
 #include "diagnostics.h"
+#include "package.h"
 #include "scopestack.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+static char *copy_string(const char *text) {
+    if (!text) text = "";
+    size_t len = std::strlen(text) + 1;
+    char *copy = (char *)std::malloc(len);
+    if (!copy) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    std::memcpy(copy, text, len);
+    return copy;
+}
 
 template <typename T>
 static void set_loc(T *node, int line, int column) {
@@ -307,6 +321,7 @@ struct ast *newimport(char *path, char *alias) {
     set_loc(a, 0, 0);
     a->path = path;
     a->alias = alias;
+    a->base = copy_string(package_current_import_base().c_str());
     return (struct ast *)a;
 }
 
@@ -476,6 +491,7 @@ void treefree(struct ast *a) {
             struct import_node *imp = (struct import_node *)a;
             std::free(imp->path);
             std::free(imp->alias);
+            std::free(imp->base);
             break;
         }
         case 'X':

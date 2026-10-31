@@ -210,6 +210,7 @@ struct import_node {
     int column;
     char *path;
     char *alias;
+    char *base;
 };
 
 struct symref {

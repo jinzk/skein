@@ -29,6 +29,20 @@ static char *join_import_path(const char *left, const char *right) {
     return path;
 }
 
+static char *join_import_prefix(const char *prefix, char *path) {
+    size_t prefix_len = std::strlen(prefix);
+    size_t path_len = std::strlen(path);
+    char *result = (char *)std::malloc(prefix_len + path_len + 1);
+    if (!result) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    std::memcpy(result, prefix, prefix_len);
+    std::memcpy(result + prefix_len, path, path_len + 1);
+    std::free(path);
+    return result;
+}
+
 static char *copy_text(const char *text) {
     size_t len = std::strlen(text) + 1;
     char *copy = (char *)std::malloc(len);
@@ -141,7 +155,7 @@ static const char *builtin_field_name(int functype) {
 %type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
 %type <sl> symlist
-%type <str> importpath fieldname
+%type <str> importref importpath fieldname
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
@@ -169,10 +183,16 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                                            { $$ = newfunc($3, $5, $8, true); }
     | PACKAGE NAME '{' EMPTY_BLOCK_CLOSE  { $$ = newpackage($2, NULL); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
-    | IMPORT importpath ';'               { $$ = newimport($2, NULL); }
-    | IMPORT importpath AS NAME ';'       { $$ = newimport($2, $4); }
+    | IMPORT importref ';'                { $$ = newimport($2, NULL); }
+    | IMPORT importref AS NAME ';'        { $$ = newimport($2, $4); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
     | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
+    ;
+
+importref: importpath                     { $$ = $1; }
+    | '.' importpath                      { $$ = join_import_prefix(".", $2); }
+    | '.' '.' importpath                  { $$ = join_import_prefix("..", $3); }
+    | '@' importpath                      { $$ = join_import_prefix("@", $2); }
     ;
 
 importpath: NAME                          { $$ = $1; }

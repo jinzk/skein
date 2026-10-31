@@ -546,12 +546,21 @@ import aa.bb;
 import aa;
 import aa.bb.cc as c;
 import std as s;
+
+import .sibling;        // 当前包目录
+import ..common;        // 上一级目录
+import @top.pkg;        // 项目根目录
 ```
 
 - `import aa.bb.cc;` 绑定最后一个包名 `cc`；
 - `import aa.bb;` 绑定 `bb`，子包通过 `bb.cc` 访问；
 - `import aa;` 绑定 `aa`，子包通过 `aa.bb.cc` 访问；
 - `import aa.bb.cc as c;` 使用别名 `c` 绑定，后续通过 `c.value` 访问；
+- `.name` 相对于导入语句所在文件的包目录；
+- `..name` 相对于该包目录的上一级；
+- `@name` 只从项目根目录解析，不回退到 `-I` 或环境变量；
+- 项目根由从主脚本目录向上查找的 `.calcroot` 标记文件确定；没有标记时使用主脚本目录（stdin 模式使用当前目录）；
+- 裸 `std` 才是内置标准库；`.std`、`..std`、`@std` 都按文件系统包路径解析；
 - 别名必须是普通标识符；`as` 是保留字；
 - import 语句需要分号；
 - 包名绑定到当前作用域。
@@ -786,9 +795,7 @@ switch
 do while
 for ... of
 try/catch
-相对导入
 通配导入
-包别名
 ```
 
 动态链接库加载目前是设计方向，尚未作为语言语法实现。

@@ -1348,8 +1348,8 @@ def main():
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")
-    check("mystery character", "1 @ 2\n",
-          stderr="lexical error: unexpected character '@' (0x40)")
+    check("mystery character", "1 $ 2\n",
+          stderr="lexical error: unexpected character '$' (0x24)")
 
     # Unterminated strings must never hang or crash.
     check("unterminated string newline", 'print("unterminated)\n',
@@ -1478,8 +1478,8 @@ def main():
           stderr="syntax error: unexpected ';', expecting")
     check("syntax error snippet", "let x = ;\n",
           stderr="  let x = ;\n          ^")
-    check("lexical error position", "1 @ 2\n",
-          stderr="1:3: lexical error: unexpected character '@' (0x40)")
+    check("lexical error position", "1 $ 2\n",
+          stderr="1:3: lexical error: unexpected character '$' (0x24)")
     check("unterminated string position", 'print("unterminated)\n',
           stderr="1:7: lexical error: unterminated string literal")
     check("definition error location", "func f(a, a) {\n  return a;\n}\n",
@@ -1747,6 +1747,117 @@ def main():
         assert proc.returncode == 1, proc.stderr
         assert "package not found" in proc.stderr, proc.stderr
 
+    # Relative imports (. and ..) and project-root imports (@).
+    with tempfile.TemporaryDirectory() as tmp:
+        root = os.path.join(tmp, "proj")
+        os.makedirs(root, exist_ok=True)
+
+        def write(rel, text):
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        with open(os.path.join(root, ".calcroot"), "w", encoding="utf-8"):
+            pass
+
+        write("top/pkg/pkg.calc",
+              'package pkg { export let value = "root"; }\n')
+        write("lib/top/pkg/pkg.calc",
+              'package pkg { export let value = "global"; }\n')
+        write("src/common/common.calc",
+              'package common { export let value = "common"; }\n')
+        write("src/app/local/local.calc",
+              'package local { export let value = "local"; }\n')
+        write("src/app/sibling/sibling.calc",
+              'package sibling { export let value = "sibling"; }\n')
+        write("src/app/user/helper/helper.calc",
+              'package helper { export let value = "helper"; }\n')
+        write(
+            "src/app/user/user.calc",
+            "package user {\n"
+            "  export func run() {\n"
+            "    import .helper;\n"
+            "    import ..sibling;\n"
+            "    import @top.pkg;\n"
+            '    return helper.value + ":" + sibling.value + ":" + pkg.value;\n'
+            "  }\n"
+            "}\n",
+        )
+        relative_main = write(
+            "src/app/main.calc",
+            "import @top.pkg;\n"
+            "print(pkg.value);\n"
+            "import .local;\n"
+            "print(local.value);\n"
+            "import ..common;\n"
+            "print(common.value);\n"
+            "import .local as l;\n"
+            "print(l.value);\n"
+            "import ..common as c;\n"
+            "print(c.value);\n"
+            "import @top.pkg as p;\n"
+            "print(p.value);\n"
+            "import user;\n"
+            "print(user.run());\n"
+            "func later() {\n"
+            "  import .local;\n"
+            "  return local.value;\n"
+            "}\n"
+            "print(later());\n",
+        )
+        proc = subprocess.run(
+            [BIN, "-I", os.path.join(root, "lib"), relative_main],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == [
+            "root",
+            "local",
+            "common",
+            "local",
+            "common",
+            "root",
+            "helper:sibling:root",
+            "local",
+        ], proc.stdout
+
+        # Without a .calcroot marker, @ falls back to the main script dir.
+        nomarker = os.path.join(tmp, "nomarker")
+        os.makedirs(os.path.join(nomarker, "local"), exist_ok=True)
+        with open(os.path.join(nomarker, "local", "local.calc"),
+                  "w", encoding="utf-8") as f:
+            f.write('package local { export let value = "local"; }\n')
+        fallback_main = os.path.join(nomarker, "main.calc")
+        with open(fallback_main, "w", encoding="utf-8") as f:
+            f.write("import @local;\nprint(local.value);\n")
+        proc = run_file(fallback_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "local\n", repr(proc.stdout)
+
+        # @ never falls back to -I directories.
+        os.makedirs(os.path.join(nomarker, "lib", "top", "pkg"),
+                    exist_ok=True)
+        with open(os.path.join(nomarker, "lib", "top", "pkg", "pkg.calc"),
+                  "w", encoding="utf-8") as f:
+            f.write('package pkg { export let value = "global"; }\n')
+        nofallback_main = os.path.join(nomarker, "nofallback.calc")
+        with open(nofallback_main, "w", encoding="utf-8") as f:
+            f.write("import @top.pkg;\n")
+        proc = subprocess.run(
+            [BIN, "-I", os.path.join(nomarker, "lib"), nofallback_main],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 1, proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
     with tempfile.TemporaryDirectory() as tmp:
         failfast = os.path.join(tmp, "failfast.calc")
         with open(failfast, "w", encoding="utf-8") as f:
@@ -1778,7 +1889,7 @@ def main():
 
         lexical_script = os.path.join(tmp, "lexical.calc")
         with open(lexical_script, "w", encoding="utf-8") as f:
-            f.write('1 @ 2;\nprint("after");\n')
+            f.write('1 $ 2;\nprint("after");\n')
         proc = run_file(lexical_script)
         assert proc.returncode == 1, proc.stderr
         assert "lexical error" in proc.stderr, proc.stderr

@@ -140,11 +140,19 @@ import aa.bb;       // 绑定 bb；子包通过 bb.cc 访问
 import aa;          // 绑定 aa；子包通过 aa.bb.cc 访问
 import aa.bb.cc as c;  // 绑定到别名 c
 import std as s;       // 标准库也可使用别名
+
+import .sibling;    // 当前包目录
+import ..common;    // 上一级目录
+import @top.pkg;    // 项目根目录
 ```
 
 - `import aa.bb.cc` 后可以直接使用 `cc`；
 - `import aa.bb` 后使用 `bb.cc`；
 - `import aa.bb.cc as c` 后使用 `c`，不再绑定 `cc`；
+- `.name` 相对当前包目录，`..name` 相对上一级目录；
+- `@name` 只从项目根目录解析，不回退到 `-I` / 环境变量；
+- 项目根通过从主脚本目录向上查找 `.calcroot` 文件确定；没有标记时使用主脚本目录；
+- 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
 - 别名必须是普通标识符，`as` 是保留字；
 - 父包没有自己的源文件也可以作为子包容器；
 - 同一个包只加载一次，之后复用缓存；
@@ -290,7 +298,8 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 ### 限制
 
 - 每个包使用一个 `<name>.calc` 或 `index.calc` 作为入口；
-- 当前不提供相对导入、通配导入或包别名；
+- 相对导入支持 `.` / `..`，项目根导入支持 `@`；包别名通过 `as` 支持；
+- 当前不提供通配导入；
 - 子包会被父包加载时自动加载；
 - `export` 目前支持 `let`、`const` 和命名 `func` 定义。
 
@@ -887,7 +896,7 @@ f.close()
 - 类别分为 `lexical error`、`syntax error`、`runtime error`；
 - 运行时错误指向实际出错的 AST 节点，而不是语句结束位置；
 - 源码行下的 `^` 指向出错列；
-- 词法错误会显示字符和十六进制字节，例如 `unexpected character '@' (0x40)`；
+- 词法错误会显示字符和十六进制字节，例如 `unexpected character '$' (0x24)`；
 - 语法错误会列出出错 token 和部分期望 token：
 
 ```text

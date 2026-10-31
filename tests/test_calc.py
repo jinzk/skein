@@ -421,6 +421,29 @@ def main():
     check("abs negative", "abs(-3)\n", stdout="= 3")
     check("abs overflow", "abs(-9223372036854775807 - 1)\n",
           stderr="integer overflow")
+    check("trig functions",
+          "sin(0)\ncos(0)\ntan(0)\n"
+          "asin(1)\nacos(1)\natan(1)\natan2(1, 1)\n",
+          stdout_all=["= 0.0", "= 1.0", "= 0.0", "= 1.5707963267948966",
+                      "= 0.0", "= 0.7853981633974483",
+                      "= 0.7853981633974483"])
+    check("math power and logs",
+          "pow(2, 10)\nlog2(8)\nlog10(100)\nhypot(3, 4)\n",
+          stdout_all=["= 1024.0", "= 3.0", "= 2.0", "= 5.0"])
+    check("math rounding",
+          "floor(1.9)\nceil(1.1)\nround(-1.5)\ntrunc(-1.9)\n",
+          stdout_all=["= 1", "= 2", "= -2", "= -1"])
+    check("math min max",
+          "min(3, 1, 2)\nmax(2.5, 1)\nmin(1)\nmax(1, 2.0)\n",
+          stdout_all=["= 1", "= 2.5", "= 1", "= 2.0"])
+    check("math type error",
+          'sin("x")\n', stderr="sin expects a number, got string")
+    check("math arity error",
+          "atan2(1)\n", stderr="atan2 expects 2 arguments, got 1")
+    check("math variadic arity",
+          "min()\n", stderr="min expects at least 1 argument")
+    check("math rounding overflow",
+          "floor(1e100)\n", stderr="floor result out of integer range")
 
     check("nan equality is false", "sqrt(-1) == 1\n", stdout="= false")
     check("nan inequality is true", "sqrt(-1) != 1\n", stdout="= true")

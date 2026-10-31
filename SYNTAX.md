@@ -1257,8 +1257,18 @@ POSIX 使用 `:`，Windows 使用 `;`。
 ### 数学
 
 ```text
-sqrt exp log abs
+sqrt exp log abs sin cos tan asin acos atan atan2
+pow floor ceil round trunc log2 log10 hypot min max
 ```
+
+规则：
+
+- `sqrt`、`exp`、`log`、三角函数、`pow`、`log2`、`log10`、`hypot` 返回 `float`；
+- `floor`、`ceil`、`round`、`trunc` 返回 `int`，超出整数范围会报错；
+- `round` 按远离零的方向处理半值，例如 `round(-1.5) == -2`；
+- `min` / `max` 至少需要一个数值参数；全为 `int` 时返回 `int`，否则返回 `float`；
+- `atan2(y, x)` 返回 `atan(y / x)` 的角度；
+- 所有数学函数的参数必须是数值，不做隐式转换。
 
 ### 输出和转换
 

@@ -857,7 +857,7 @@ for (let value in values) {
 
 `is` 只接受类型名或 trait 名作为右操作数；结构体类型名按模块解析。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -1326,9 +1326,12 @@ parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
 diagnostics.* 错误位置、源码片段与调用栈
 eval.*        树遍历求值
+eval_helpers.h 求值器与内置函数共享的辅助函数
+builtins.*    内置函数实现
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化
 package.*     包查找、加载、缓存与导入
+repl.*        REPL 输入、历史、命令和上次结果
 scopestack.*  词法作用域链与闭包环境
 symbol.*      符号表
 valuetype.*   运行时值类型、深拷贝与释放

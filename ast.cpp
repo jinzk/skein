@@ -326,6 +326,19 @@ struct ast *newis(struct ast *value, struct type_constraint *type) {
     return (struct ast *)a;
 }
 
+struct ast *newspread(struct ast *value) {
+    struct spread_node *a =
+        (struct spread_node *)std::malloc(sizeof(struct spread_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'x';
+    set_loc_from(a, value);
+    a->value = value;
+    return (struct ast *)a;
+}
+
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *el) {
     struct flow *a = (struct flow *)std::malloc(sizeof(struct flow));
     if (!a) {
@@ -483,10 +496,16 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
         return it->second;
 
     int nparams = 0;
-    for (struct symlist *sl = node->sl; sl; sl = sl->next) ++nparams;
+    bool variadic = false;
+    for (struct symlist *sl = node->sl; sl; sl = sl->next) {
+        if (sl->variadic)
+            variadic = true;
+        else
+            ++nparams;
+    }
     std::shared_ptr<function_code> code(
         new function_code{node->ast, node->sl, nparams,
-                          node->name ? node->name : "", false},
+                          node->name ? node->name : "", false, variadic},
         free_function_code);
     function_codes[node] = code;
     return code;
@@ -732,6 +751,9 @@ void treefree(struct ast *a) {
             free_type_constraint(n->type);
             break;
         }
+        case 'x':
+            treefree(((struct spread_node *)a)->value);
+            break;
         case '=':
             treefree(((struct symasgn *)a)->target);
             treefree(((struct symasgn *)a)->v);

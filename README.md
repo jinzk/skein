@@ -629,6 +629,47 @@ fact(5)                 → 120
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
 
+可变参数：
+
+```text
+func sum(...nums: number) {
+  let total = 0;
+  for (let n in nums) {
+    total = total + n;
+  }
+  return total;
+}
+
+sum()           // 0
+sum(1, 2, 3)    // 6
+```
+
+规则：
+
+- `...rest` 只能是最后一个参数；
+- 最多一个；
+- `rest` 在函数内是 `list`，没有额外参数时是 `[]`；
+- 类型标注表示每个额外参数的类型，例如 `...nums: number`；
+- 固定参数不足会报错；
+- 方法也可以使用，`self` 仍然是第一个固定参数；
+- trait 方法暂不支持可变参数。
+
+调用点可以用 `...` 展开列表：
+
+```text
+func sum(...nums: number) {
+  let total = 0;
+  for (let n in nums) { total = total + n; }
+  return total;
+}
+
+let xs = [1, 2, 3];
+sum(...xs)       // 6
+sum(0, ...xs)    // 6
+```
+
+展开项必须是 `list`，可以和普通参数混用。
+
 结构体、`impl` 与 `trait`：
 
 ```text

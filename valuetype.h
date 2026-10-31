@@ -16,6 +16,7 @@ struct function_code {
     int nparams;
     std::string name;
     bool is_method;
+    bool variadic;
 };
 
 struct function_def {

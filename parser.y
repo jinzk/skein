@@ -180,6 +180,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 %token INC "++" DEC "--"
+%token ELLIPSIS "..."
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
 
@@ -204,7 +205,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %precedence NOELSE
 %precedence ELSE
 
-%type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
+%type <a> exp value stmt list scope explist arg calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> struct_decl impl_decl trait_decl struct_members struct_member
@@ -517,8 +518,12 @@ case_values: exp                          { $$ = newlist($1, NULL); }
     ;
 
 explist: %empty                            { $$ = NULL; }
-    | exp
-    | exp ',' explist                     { $$ = newast('L', $1, $3); }
+    | arg
+    | arg ',' explist                     { $$ = newast('L', $1, $3); }
+    ;
+
+arg: exp                                   { $$ = $1; }
+    | ELLIPSIS exp                         { $$ = newspread($2); }
     ;
 
 param: NAME {
@@ -530,6 +535,16 @@ param: NAME {
         struct symbol *s = newsym($1);
         free($1);
         $$ = newsymlist(s, $3, NULL);
+      }
+    | ELLIPSIS NAME {
+        struct symbol *s = newsym($2);
+        free($2);
+        $$ = newsymlist(s, NULL, NULL, true);
+      }
+    | ELLIPSIS NAME ':' type {
+        struct symbol *s = newsym($2);
+        free($2);
+        $$ = newsymlist(s, $4, NULL, true);
       }
     ;
 

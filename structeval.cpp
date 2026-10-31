@@ -50,7 +50,7 @@ static bool method_self_ok(struct symlist *sl, const char *owner,
         error = "method requires self";
         return false;
     }
-    if (std::strcmp(sl->sym->name, "self") != 0) {
+    if (std::strcmp(sl->sym->name, "self") != 0 || sl->variadic) {
         error = "method first parameter must be self";
         return false;
     }
@@ -108,6 +108,10 @@ static bool method_signature_matches(const method_sig *sig,
                                      std::string &error) {
     if (!sig || !code) {
         error = "invalid method signature";
+        return false;
+    }
+    if (code->variadic) {
+        error = "trait methods cannot be variadic";
         return false;
     }
     if ((int)sig->params.size() != code->nparams) {
@@ -275,6 +279,10 @@ void eval_trait_decl(struct trait_node *t) {
         method_sig sig;
         sig.name = m->name;
         for (struct symlist *p = m->params; p; p = p->next) {
+            if (p->variadic) {
+                yyerror("trait methods cannot be variadic");
+                return;
+            }
             if (!validate_type_constraint(p->type))
                 return;
             sig.params.push_back(copy_type_constraint(p->type));

@@ -223,6 +223,8 @@ EXP ([Ee][-+]?[0-9]+)
 "@" |
 "?" { YYRET(yytext[0]); }
 
+"..." { YYRET(ELLIPSIS); }
+
 "=>" { YYRET(ARROW); }
 
 "&&" { YYRET(LOGAND); }

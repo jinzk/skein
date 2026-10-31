@@ -45,11 +45,12 @@ struct symlist {
     struct symbol *sym;
     struct type_constraint *type;
     struct symlist *next;
+    bool variadic;
 };
 
 struct symbol *newsym(const char *name);
 struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
-                           struct symlist *next);
+                           struct symlist *next, bool variadic = false);
 void symlistfree(struct symlist *sl);
 
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);

@@ -137,6 +137,13 @@ struct is_node {
     struct type_constraint *type;
 };
 
+struct spread_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *value;
+};
+
 struct nscope {
     int nodetype;
     int line;
@@ -382,6 +389,7 @@ struct ast *newrecover(struct ast *v);
 struct ast *newpass(struct ast *v);
 struct ast *newonerror(struct ast *call, char *name, struct ast *body);
 struct ast *newis(struct ast *value, struct type_constraint *type);
+struct ast *newspread(struct ast *value);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported = false);

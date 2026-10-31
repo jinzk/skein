@@ -1142,6 +1142,68 @@ def main():
     check("uncaught fail at top level",
           'fail "boom";\n', stderr="uncaught fail: boom")
 
+    check("variadic function",
+          "func sum(...nums: number) {\n"
+          "  let total = 0;\n"
+          "  for (let n in nums) { total = total + n; }\n"
+          "  return total;\n"
+          "}\n"
+          "sum()\nsum(1, 2, 3)\n",
+          stdout_all=["= 0", "= 6"])
+    check("variadic with fixed parameters",
+          "func f(a: int, ...rest: string) {\n"
+          "  return a + len(rest);\n"
+          "}\n"
+          "f(1)\nf(1, \"a\", \"b\")\n",
+          stdout_all=["= 1", "= 3"])
+    check("variadic rest is list",
+          "func f(...xs) {\n"
+          "  if (len(xs) == 0) { return null; }\n"
+          "  return xs[1];\n"
+          "}\n"
+          "f()\nf(10, 20)\n",
+          stdout_all=["= 20"])
+    check("variadic arity",
+          "func f(a: int, ...rest) { return a; }\nf()\n",
+          stderr="function f expects at least 1 argument(s), got 0")
+    check("variadic element type",
+          'func f(...rest: number) { return len(rest); }\nf(1, "x")\n',
+          stderr="function f rest argument 2 expects number, got string")
+    check("variadic must be last",
+          "func f(...xs, y) { return y; }\n",
+          stderr="variadic parameter must be last")
+    check("variadic method",
+          "func sum(...nums: number) {\n"
+          "  let total = 0;\n"
+          "  for (let n in nums) { total = total + n; }\n"
+          "  return total;\n"
+          "}\n"
+          "struct P { x: int; }\n"
+          "impl P {\n"
+          "  func add(self, ...nums: int) { return sum(...nums); }\n"
+          "}\n"
+          "P { x: 1 }.add(1, 2, 3)\n",
+          stdout="= 6")
+    check("variadic anonymous function",
+          "func make() { return func(...args: int) { return len(args); }; }\n"
+          "make()(1, 2, 3)\n",
+          stdout="= 3")
+    check("call spread",
+          "func sum(...nums: number) {\n"
+          "  let total = 0;\n"
+          "  for (let n in nums) { total = total + n; }\n"
+          "  return total;\n"
+          "}\n"
+          "let xs = [1, 2, 3];\n"
+          "sum(...xs)\nsum(0, ...xs)\n",
+          stdout_all=["= 6", "= 6"])
+    check("call spread requires list",
+          "func f(...xs) { return len(xs); }\nf(...1)\n",
+          stderr="spread expects a list, got int")
+    check("trait variadic rejected",
+          "trait T { func f(self, ...args); }\n",
+          stderr="trait methods cannot be variadic")
+
     many_globals = "".join(f"let v{i} = {i};\n" for i in range(40))
     check("large symbol table lookup", many_globals + "v0 + v39\n",
           stdout="= 39")

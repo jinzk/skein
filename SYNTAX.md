@@ -838,7 +838,8 @@ func hello() {
 - 参数用逗号分隔；
 - 参数可以带可选的类型约束：`name: type`；
 - 支持空参数；
-- 不支持默认参数和可变参数；
+- 不支持默认参数；
+- 支持最后一个参数为可变参数；
 - 函数体使用 `{ list }`；
 - 函数调用深度上限为 1000。
 
@@ -864,6 +865,45 @@ apply(sqrt, 16)
 ```text
 function add argument 1 (a) expects int, got string
 ```
+
+可变参数：
+
+```text
+func sum(...nums: number) {
+  let total = 0;
+  for (let n in nums) {
+    total = total + n;
+  }
+  return total;
+}
+
+sum()           // 0
+sum(1, 2, 3)    // 6
+```
+
+规则：
+
+- `...rest` 只能是最后一个参数；
+- 最多一个可变参数；
+- `rest` 在函数内是 `list`；
+- 没有额外参数时是 `[]`；
+- 类型标注作用于每个额外参数；
+- 固定参数不足会报错；
+- 方法中 `self` 仍是第一个固定参数，例如 `func log(self, ...items)`；
+- trait 方法暂不支持可变参数。
+
+调用点展开：
+
+```text
+let xs = [1, 2, 3];
+
+sum(...xs)       // 6
+sum(0, ...xs)    // 6
+```
+
+- `...expr` 只能出现在调用参数列表；
+- `expr` 必须是 `list`；
+- 展开项可以和普通参数混用。
 
 匿名函数：
 

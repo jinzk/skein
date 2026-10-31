@@ -585,6 +585,20 @@ static bool collect_args(struct ast *a, std::vector<struct value_t *> &out) {
         if (!collect_args(a->l, out)) return false;
         return collect_args(a->r, out);
     }
+    if (a->nodetype == 'x') {
+        struct value_t *v = eval(((struct spread_node *)a)->value);
+        if (!v) return false;
+        if (v->type != T_list) {
+            yyerror("spread expects a list, got %s", typename_of(v));
+            freeval(v);
+            return false;
+        }
+        struct list_value_t *list = (struct list_value_t *)v;
+        for (size_t i = 0; i < list->payload->items.size(); ++i)
+            out.push_back(dupval(list->payload->items[i]));
+        freeval(v);
+        return true;
+    }
     struct value_t *v = eval(a);
     if (!v) return false;
     if (v->type == T_return || v->type == T_break || v->type == T_continue) {
@@ -2227,24 +2241,46 @@ static struct value_t *invoke_value(
      */
     std::shared_ptr<function_def> def = fv->def;
     int nparams = def->code->nparams;
-    if ((int)args.size() != nparams) {
-        yyerror("function expects %d argument(s), got %d",
-                nparams, (int)args.size());
+    bool variadic = def->code->variadic;
+    std::string frame_name =
+        def->code->name.empty() ? "<anonymous>" : def->code->name;
+    if ((int)args.size() < nparams ||
+        (!variadic && (int)args.size() != nparams)) {
+        if (variadic)
+            yyerror("function %s expects at least %d argument(s), got %d",
+                    frame_name.c_str(), nparams, (int)args.size());
+        else
+            yyerror("function expects %d argument(s), got %d",
+                    nparams, (int)args.size());
         free_args(args);
         return NULL;
     }
 
-    std::string frame_name =
-        def->code->name.empty() ? "<anonymous>" : def->code->name;
-
+    struct symlist *rest = NULL;
     int i = 0;
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
+        if (sl->variadic) {
+            rest = sl;
+            break;
+        }
         if (!type_constraint_matches(sl->type, args[i])) {
             yyerror("function %s argument %d (%s) expects %s, got %s",
                     frame_name.c_str(), i + 1, sl->sym->name,
                     type_constraint_name(sl->type), typename_of(args[i]));
             free_args(args);
             return NULL;
+        }
+    }
+    if (rest) {
+        for (size_t k = (size_t)nparams; k < args.size(); ++k) {
+            if (!type_constraint_matches(rest->type, args[k])) {
+                yyerror("function %s rest argument %d expects %s, got %s",
+                        frame_name.c_str(), (int)(k - (size_t)nparams + 1),
+                        type_constraint_name(rest->type),
+                        typename_of(args[k]));
+                free_args(args);
+                return NULL;
+            }
         }
     }
 
@@ -2258,7 +2294,8 @@ static struct value_t *invoke_value(
     call_stack_guard frame_guard(frame_name, frame_line, frame_column);
     pushscope_closure(def->closure);
     i = 0;
-    for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++i) {
+    for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
+         sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
         sym->val = args[i];
         if (sl->type) {
@@ -2269,6 +2306,18 @@ static struct value_t *invoke_value(
             sym->is_self = true;
             sym->is_const = true;
         }
+        savesym(sym);
+    }
+    if (rest) {
+        struct list_value_t *list = newlistval();
+        for (size_t k = (size_t)nparams; k < args.size(); ++k) {
+            list->payload->items.push_back(args[k]);
+            args[k] = NULL;
+        }
+        struct symbol *sym = newsym(rest->sym->name);
+        sym->val = (struct value_t *)list;
+        sym->type.kind = TYPE_LIST;
+        sym->type.name = NULL;
         savesym(sym);
     }
     args.clear(); /* ownership transferred to the function scope */
@@ -3337,9 +3386,14 @@ struct value_t *eval(struct ast *a) {
                         bad = true;
                         break;
                     }
-            for (struct symlist *p = sl; p && !bad; p = p->next)
+            for (struct symlist *p = sl; p && !bad; p = p->next) {
                 if (!validate_type_constraint(p->type))
                     bad = true;
+                if (p->variadic && p->next) {
+                    yyerror("variadic parameter must be last");
+                    bad = true;
+                }
+            }
             if (bad)
                 break;
 

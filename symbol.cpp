@@ -39,7 +39,7 @@ static const char *intern_type_name(const char *name) {
 }
 
 struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
-                           struct symlist *next) {
+                           struct symlist *next, bool variadic) {
     struct symlist *sl = (struct symlist *)std::malloc(sizeof(struct symlist));
     if (!sl) {
         yyerror("out of space");
@@ -48,6 +48,7 @@ struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
     sl->sym = sym;
     sl->type = type;
     sl->next = next;
+    sl->variadic = variadic;
     return sl;
 }
 

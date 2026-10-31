@@ -448,6 +448,10 @@ def main():
           '{1: "a", 1.0: "b"} == {1: "b"}\n', stdout="= 1")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
+    check("empty dict literal", "{}\n", stdout="= {}")
+    check("empty list literal", "[]\n", stdout="= []")
+    check("empty dict literal assignment", "let d = {};\nd\n", stdout="= {}")
+    check("empty list literal assignment", "let l = [];\nl\n", stdout="= []")
     check("empty dict builtin", "dict()\n", stdout="= {}")
     check("empty list builtin", "list()\n", stdout="= []")
 
@@ -1268,7 +1272,17 @@ def main():
     assert "Segmentation fault" not in proc.stderr
 
     check("empty input", "", code=0)
-    check("empty block", "{}\n", code=0)
+    check("empty block statement", "{ ; }\n", code=0)
+    check("empty if block", "if (1) {}\n", code=0)
+    check("empty if else blocks", "if (0) {} else {}\n", code=0)
+    check("empty while body", "while (0) {}\n", code=0)
+    check("empty for body", "for (let i = 0; i < 1; i = i + 1) {}\n", code=0)
+    check("empty func body", "func f() {}\nf()\n", code=0)
+    check("empty package body", "package pkg {}\n", code=0)
+    check("empty dict in expression", "len({})\n", stdout="= 0")
+    check("empty dict as value", 'let d = {"a": {}};\nd["a"]\n',
+          stdout="= {}")
+    check("empty block inside block", "if (1) { {} }\n", code=0)
     check("utf8 bom", "\ufeff1+2\n", stdout="= 3")
     check("crlf input", "1+2\r\n", stdout="= 3")
 

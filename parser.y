@@ -118,6 +118,8 @@ static const char *builtin_field_name(int functype) {
 %token NULLVAL "null"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in"
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
+%token EMPTY_DICT "empty dictionary"
+%token EMPTY_BLOCK "empty block"
 
 %right '='
 %left LOGOR
@@ -154,13 +156,18 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | FOR '(' forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
     | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, $6, $8); }
+    | funcstart NAME '(' symlist ')' EMPTY_BLOCK
+                                           { $$ = newfunc($2, $4, NULL); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($2, $4, $7); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
     | EXPORT CONST NAME '=' exp ';'       { $$ = newvar($3, $5, true, true); }
     | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
+    | EXPORT funcstart NAME '(' symlist ')' EMPTY_BLOCK
+                                           { $$ = newfunc($3, $5, NULL, true); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($3, $5, $8, true); }
+    | PACKAGE NAME EMPTY_BLOCK            { $$ = newpackage($2, NULL); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
     | IMPORT importpath ';'               { $$ = newimport($2); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
@@ -196,6 +203,8 @@ line: RETURN exp                          { $$ = newret($2); }
 
 scope: stmt                               { $$ = $1; }
      | line ';'                           { $$ = $1; }
+     | ';'                                { $$ = newscope(NULL); }
+     | EMPTY_BLOCK                        { $$ = newscope(NULL); }
      | '{' list '}'                       { $$ = newscope($2); }
      ;
 
@@ -231,7 +240,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
     | exp '.' fieldname                   { $$ = newast('G', $1, newstr($3)); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
+    | EMPTY_DICT                          { $$ = newdict(NULL, NULL, NULL); }
     | '{' pairlist '}'                    { $$ = $2; }
+    | funcstart '(' symlist ')' EMPTY_BLOCK
+                                           { $$ = newfunc(NULL, $3, NULL); }
     | funcstart '(' symlist ')' '{' list '}'
                                            { $$ = newfunc(NULL, $3, $6); }
     | value

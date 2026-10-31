@@ -38,6 +38,11 @@ static std::string string_buffer;
 static int string_start_line = 1;
 static int string_start_column = 1;
 
+static int last_token = 0;
+static int prev_token = 0;
+
+#define YYRET(tok) do { int yyret_tok = (tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
 // 当 stdin 不是终端（管道、IDE 运行窗口等）时，内核不会处理退格，
@@ -148,6 +153,43 @@ static void append_unescaped(const char *s, int len) {
         }
     }
 }
+static bool empty_brace_expression_context() {
+    switch (last_token) {
+        case '=': case '(': case '[': case ',': case ':':
+        case '+': case '-': case '*': case '/': case '%':
+        case '&': case '|': case '^': case '~': case '!':
+        case LOGAND: case LOGOR: case SHL: case SHR:
+        case CMP: case RETURN: case IN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static int empty_brace_token() {
+    /* package NAME {} is a declaration body */
+    if (last_token == NAME && prev_token == PACKAGE)
+        return EMPTY_BLOCK;
+
+    /* control/function headers end with ')' and are followed by a body */
+    if (last_token == ')' || last_token == ELSE)
+        return EMPTY_BLOCK;
+
+    /* expression positions: value, argument, index, dict value, etc. */
+    if (empty_brace_expression_context())
+        return EMPTY_DICT;
+
+    /* inside a block, a bare {} at a statement boundary is an empty block */
+    if (indent_count > 0 &&
+        (last_token == 0 || last_token == EOL || last_token == ';' ||
+         last_token == '{' || last_token == '}' ||
+         last_token == EMPTY_BLOCK))
+        return EMPTY_BLOCK;
+
+    /* top level (and other ambiguous positions) default to an empty dict */
+    return EMPTY_DICT;
+}
+
 %}
 
 EXP ([Ee][-+]?[0-9]+)
@@ -169,92 +211,94 @@ EXP ([Ee][-+]?[0-9]+)
 "|" |
 "^" |
 "~" |
-"!" { return yytext[0]; }
+"!" { YYRET(yytext[0]); }
 
-"&&" { return LOGAND; }
-"||" { return LOGOR; }
-"<<" { return SHL; }
-">>" { return SHR; }
+"&&" { YYRET(LOGAND); }
+"||" { YYRET(LOGOR); }
+"<<" { YYRET(SHL); }
+">>" { YYRET(SHR); }
 
-"{" { indent_count++; return '{'; }
-"}" { if (indent_count > 0) indent_count--; return '}'; }
-"[" { indent_count++; return '['; }
-"]" { if (indent_count > 0) indent_count--; return ']'; }
-"(" { indent_count++; return '('; }
-")" { if (indent_count > 0) indent_count--; return ')'; }
+"{"[ \t]*"}" { YYRET(empty_brace_token()); }
 
-">" { yylval.fn = 1; return CMP; }
-"<" { yylval.fn = 2; return CMP; }
+"{" { indent_count++; YYRET('{'); }
+"}" { if (indent_count > 0) indent_count--; YYRET('}'); }
+"[" { indent_count++; YYRET('['); }
+"]" { if (indent_count > 0) indent_count--; YYRET(']'); }
+"(" { indent_count++; YYRET('('); }
+")" { if (indent_count > 0) indent_count--; YYRET(')'); }
+
+">" { yylval.fn = 1; YYRET(CMP); }
+"<" { yylval.fn = 2; YYRET(CMP); }
 "<>" |
-"!=" { yylval.fn = 3; return CMP; }
-"==" { yylval.fn = 4; return CMP; }
-">=" { yylval.fn = 5; return CMP; }
-"<=" { yylval.fn = 6; return CMP; }
+"!=" { yylval.fn = 3; YYRET(CMP); }
+"==" { yylval.fn = 4; YYRET(CMP); }
+">=" { yylval.fn = 5; YYRET(CMP); }
+"<=" { yylval.fn = 6; YYRET(CMP); }
 
-"if" { return IF; }
-"else" { return ELSE; }
-"while" { return WHILE; }
-"for" { return FOR; }
-"let" { return LET; }
-"const" { return CONST; }
-"func" { return FUNC; }
-"package" { return PACKAGE; }
-"import" { return IMPORT; }
-"export" { return EXPORT; }
-"return" { return RETURN; }
-"break" { return BREAK; }
-"continue" { return CONTINUE; }
-"in" { return IN; }
-"null" { return NULLVAL; }
+"if" { YYRET(IF); }
+"else" { YYRET(ELSE); }
+"while" { YYRET(WHILE); }
+"for" { YYRET(FOR); }
+"let" { YYRET(LET); }
+"const" { YYRET(CONST); }
+"func" { YYRET(FUNC); }
+"package" { YYRET(PACKAGE); }
+"import" { YYRET(IMPORT); }
+"export" { YYRET(EXPORT); }
+"return" { YYRET(RETURN); }
+"break" { YYRET(BREAK); }
+"continue" { YYRET(CONTINUE); }
+"in" { YYRET(IN); }
+"null" { YYRET(NULLVAL); }
 
-"sqrt" { yylval.fn = B_sqrt; return BUILTIN; }
-"exp" { yylval.fn = B_exp; return BUILTIN; }
-"log" { yylval.fn = B_log; return BUILTIN; }
-"abs" { yylval.fn = B_abs; return BUILTIN; }
-"len" { yylval.fn = B_len; return BUILTIN; }
-"range" { yylval.fn = B_range; return BUILTIN; }
-"print" { yylval.fn = B_print; return BUILTIN; }
-"list" { yylval.fn = B_list; return BUILTIN; }
-"dict" { yylval.fn = B_dict; return BUILTIN; }
-"int" { yylval.fn = B_int; return BUILTIN; }
-"float" { yylval.fn = B_float; return BUILTIN; }
-"str" { yylval.fn = B_str; return BUILTIN; }
-"format" { yylval.fn = B_format; return BUILTIN; }
-"command" { yylval.fn = B_command; return BUILTIN; }
-"command_status" { yylval.fn = B_command_status; return BUILTIN; }
-"read_file" { yylval.fn = B_read_file; return BUILTIN; }
-"write_file" { yylval.fn = B_write_file; return BUILTIN; }
-"append_file" { yylval.fn = B_append_file; return BUILTIN; }
-"file_exists" { yylval.fn = B_file_exists; return BUILTIN; }
-"file_open" { yylval.fn = B_file_open; return BUILTIN; }
-"file_read" { yylval.fn = B_file_read; return BUILTIN; }
-"file_write" { yylval.fn = B_file_write; return BUILTIN; }
-"file_seek" { yylval.fn = B_file_seek; return BUILTIN; }
-"file_tell" { yylval.fn = B_file_tell; return BUILTIN; }
-"file_eof" { yylval.fn = B_file_eof; return BUILTIN; }
-"file_close" { yylval.fn = B_file_close; return BUILTIN; }
-"file_flush" { yylval.fn = B_file_flush; return BUILTIN; }
-"input" { yylval.fn = B_input; return BUILTIN; }
-"split" { yylval.fn = B_split; return BUILTIN; }
-"split_ws" { yylval.fn = B_split_ws; return BUILTIN; }
-"trim" { yylval.fn = B_trim; return BUILTIN; }
-"find" { yylval.fn = B_find; return BUILTIN; }
-"substr" { yylval.fn = B_substr; return BUILTIN; }
-"bytes_from_string" { yylval.fn = B_bytes_from_string; return BUILTIN; }
-"bytes_to_string" { yylval.fn = B_bytes_to_string; return BUILTIN; }
-"bytes_len" { yylval.fn = B_bytes_len; return BUILTIN; }
-"bytes_get" { yylval.fn = B_bytes_get; return BUILTIN; }
-"bytes_slice" { yylval.fn = B_bytes_slice; return BUILTIN; }
-"bytes_concat" { yylval.fn = B_bytes_concat; return BUILTIN; }
-"bytes_hex" { yylval.fn = B_bytes_hex; return BUILTIN; }
-"bytes_from_hex" { yylval.fn = B_bytes_from_hex; return BUILTIN; }
-"bytes_to_int" { yylval.fn = B_bytes_to_int; return BUILTIN; }
-"int_to_bytes" { yylval.fn = B_int_to_bytes; return BUILTIN; }
-"read_bytes" { yylval.fn = B_read_bytes; return BUILTIN; }
-"write_bytes" { yylval.fn = B_write_bytes; return BUILTIN; }
-"append_bytes" { yylval.fn = B_append_bytes; return BUILTIN; }
-"file_read_bytes" { yylval.fn = B_file_read_bytes; return BUILTIN; }
-"file_write_bytes" { yylval.fn = B_file_write_bytes; return BUILTIN; }
+"sqrt" { yylval.fn = B_sqrt; YYRET(BUILTIN); }
+"exp" { yylval.fn = B_exp; YYRET(BUILTIN); }
+"log" { yylval.fn = B_log; YYRET(BUILTIN); }
+"abs" { yylval.fn = B_abs; YYRET(BUILTIN); }
+"len" { yylval.fn = B_len; YYRET(BUILTIN); }
+"range" { yylval.fn = B_range; YYRET(BUILTIN); }
+"print" { yylval.fn = B_print; YYRET(BUILTIN); }
+"list" { yylval.fn = B_list; YYRET(BUILTIN); }
+"dict" { yylval.fn = B_dict; YYRET(BUILTIN); }
+"int" { yylval.fn = B_int; YYRET(BUILTIN); }
+"float" { yylval.fn = B_float; YYRET(BUILTIN); }
+"str" { yylval.fn = B_str; YYRET(BUILTIN); }
+"format" { yylval.fn = B_format; YYRET(BUILTIN); }
+"command" { yylval.fn = B_command; YYRET(BUILTIN); }
+"command_status" { yylval.fn = B_command_status; YYRET(BUILTIN); }
+"read_file" { yylval.fn = B_read_file; YYRET(BUILTIN); }
+"write_file" { yylval.fn = B_write_file; YYRET(BUILTIN); }
+"append_file" { yylval.fn = B_append_file; YYRET(BUILTIN); }
+"file_exists" { yylval.fn = B_file_exists; YYRET(BUILTIN); }
+"file_open" { yylval.fn = B_file_open; YYRET(BUILTIN); }
+"file_read" { yylval.fn = B_file_read; YYRET(BUILTIN); }
+"file_write" { yylval.fn = B_file_write; YYRET(BUILTIN); }
+"file_seek" { yylval.fn = B_file_seek; YYRET(BUILTIN); }
+"file_tell" { yylval.fn = B_file_tell; YYRET(BUILTIN); }
+"file_eof" { yylval.fn = B_file_eof; YYRET(BUILTIN); }
+"file_close" { yylval.fn = B_file_close; YYRET(BUILTIN); }
+"file_flush" { yylval.fn = B_file_flush; YYRET(BUILTIN); }
+"input" { yylval.fn = B_input; YYRET(BUILTIN); }
+"split" { yylval.fn = B_split; YYRET(BUILTIN); }
+"split_ws" { yylval.fn = B_split_ws; YYRET(BUILTIN); }
+"trim" { yylval.fn = B_trim; YYRET(BUILTIN); }
+"find" { yylval.fn = B_find; YYRET(BUILTIN); }
+"substr" { yylval.fn = B_substr; YYRET(BUILTIN); }
+"bytes_from_string" { yylval.fn = B_bytes_from_string; YYRET(BUILTIN); }
+"bytes_to_string" { yylval.fn = B_bytes_to_string; YYRET(BUILTIN); }
+"bytes_len" { yylval.fn = B_bytes_len; YYRET(BUILTIN); }
+"bytes_get" { yylval.fn = B_bytes_get; YYRET(BUILTIN); }
+"bytes_slice" { yylval.fn = B_bytes_slice; YYRET(BUILTIN); }
+"bytes_concat" { yylval.fn = B_bytes_concat; YYRET(BUILTIN); }
+"bytes_hex" { yylval.fn = B_bytes_hex; YYRET(BUILTIN); }
+"bytes_from_hex" { yylval.fn = B_bytes_from_hex; YYRET(BUILTIN); }
+"bytes_to_int" { yylval.fn = B_bytes_to_int; YYRET(BUILTIN); }
+"int_to_bytes" { yylval.fn = B_int_to_bytes; YYRET(BUILTIN); }
+"read_bytes" { yylval.fn = B_read_bytes; YYRET(BUILTIN); }
+"write_bytes" { yylval.fn = B_write_bytes; YYRET(BUILTIN); }
+"append_bytes" { yylval.fn = B_append_bytes; YYRET(BUILTIN); }
+"file_read_bytes" { yylval.fn = B_file_read_bytes; YYRET(BUILTIN); }
+"file_write_bytes" { yylval.fn = B_file_write_bytes; YYRET(BUILTIN); }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     int len = (int)std::strlen(yytext) + 1;
@@ -264,7 +308,7 @@ EXP ([Ee][-+]?[0-9]+)
         return 0;
     }
     std::memcpy(yylval.str, yytext, len);
-    return NAME;
+    YYRET(NAME);
 }
 
 [0-9]+ {
@@ -272,16 +316,16 @@ EXP ([Ee][-+]?[0-9]+)
     long long v = std::strtoll(yytext, NULL, 10);
     if (errno == ERANGE) {
         yylval.d = std::strtod(yytext, NULL);
-        return FLOAT;
+        YYRET(FLOAT);
     }
     yylval.i = v;
-    return INT;
+    YYRET(INT);
 }
 
-([0-9]+"."[0-9]*|"."[0-9]+)({EXP})? { yylval.d = std::strtod(yytext, NULL); return FLOAT; }
-[0-9]+{EXP} { yylval.d = std::strtod(yytext, NULL); return FLOAT; }
+([0-9]+"."[0-9]*|"."[0-9]+)({EXP})? { yylval.d = std::strtod(yytext, NULL); YYRET(FLOAT); }
+[0-9]+{EXP} { yylval.d = std::strtod(yytext, NULL); YYRET(FLOAT); }
 
-"." { return '.'; }
+"." { YYRET('.'); }
 
 "//".*
 [ \t\r] {}
@@ -299,7 +343,7 @@ EXP ([Ee][-+]?[0-9]+)
                             "unterminated string literal");
         string_buffer.clear();
         BEGIN(INITIAL);
-        return EOL;
+        YYRET(EOL);
     }
     <<EOF>> {
         diag_report_lexical(string_start_line, string_start_column,
@@ -321,7 +365,7 @@ EXP ([Ee][-+]?[0-9]+)
         }
         std::memcpy(yylval.str, string_buffer.c_str(), len);
         yylval.str[len] = '\0';
-        return XSTRING;
+        YYRET(XSTRING);
     }
     . {
         append_unescaped(yytext, (int)yyleng);
@@ -337,7 +381,7 @@ EXP ([Ee][-+]?[0-9]+)
             std::fflush(stdout);
         }
     } else {
-        return EOL;
+        YYRET(EOL);
     }
 }
 
@@ -359,6 +403,8 @@ void reset_scanner_state(std::FILE *in) {
     clear_func_locations();
     input_line.clear();
     input_pos = 0;
+    last_token = 0;
+    prev_token = 0;
     std::clearerr(in);
     yyrestart(in);
 }
@@ -374,6 +420,8 @@ struct scanner_checkpoint {
     int indent;
     int line;
     int stdin_eof;
+    int last_token;
+    int prev_token;
 };
 
 scanner_checkpoint *scanner_checkpoint_save() {
@@ -388,6 +436,8 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->indent = indent_count;
     checkpoint->line = yylineno;
     checkpoint->stdin_eof = g_stdin_eof;
+    checkpoint->last_token = last_token;
+    checkpoint->prev_token = prev_token;
     return checkpoint;
 }
 
@@ -403,6 +453,8 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     indent_count = checkpoint->indent;
     yylineno = checkpoint->line;
     g_stdin_eof = checkpoint->stdin_eof;
+    last_token = checkpoint->last_token;
+    prev_token = checkpoint->prev_token;
     BEGIN(checkpoint->condition);
     delete checkpoint;
 }

@@ -430,7 +430,32 @@ for (let key in {"a": 1, "b": 2}) {
 
 `do ... while` 至少执行一次循环体；`while` 可以写在 `}` 的下一行，结尾分号可省略。
 
-`break` / `continue` 可用于 `while`、`do while` 和 `for`。
+`break` / `continue` 可用于循环；`break` 也可用于 `switch`。
+
+`switch` 值匹配：
+
+```text
+switch (x) {
+  case 1 => print("one");
+
+  case 2, 3 => {
+    print("two or three");
+  }
+
+  default => print("other");
+}
+```
+
+- 选择值只求值一次；
+- 无 fallthrough，第一个匹配的 case 执行后退出 switch；
+- case 体可以是单条语句或代码块，并有独立作用域；
+- `case` 支持多值，如 `case 1, 2, 3`；
+- `default` 可选且必须最后；
+- `break` 退出 switch，`continue` 作用于外层循环，`return` 退出函数；
+- 支持 `int`、`bool`、`string`、`bytes`、`null`；
+- 不支持 `float`、`list`、`dict`、`function`、`builtin`、`userdata`；
+- case 值必须是值，不能写 `case x > 1 && x < 5` 这种条件；条件判断用 `if/else`；
+- `case int` 不是类型模式，而是内置函数值，会作为不支持的 case 值报错。
 
 函数、匿名函数与闭包：
 

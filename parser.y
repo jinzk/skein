@@ -167,6 +167,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <str> XSTRING "string"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
+%token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
@@ -194,6 +195,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 
 %type <a> exp value stmt list scope explist calclist docalc line valuelist pairlist
 %type <a> forinit forcond forend
+%type <a> switch_body switch_cases switch_case case_values
 %type <sl> param symlist
 %type <type> type type_name
 %type <str> importref importpath fieldname
@@ -210,6 +212,10 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | IF '(' exp ')' scope ELSE scope     { $$ = newflow('I', $3, $5, $7); }
     | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
     | DO scope eols WHILE '(' exp ')'     { $$ = newflow('E', $6, $2, NULL); }
+    | SWITCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newswitch($3, NULL); }
+    | SWITCH '(' exp ')' '{' switch_body '}'
+                                           { $$ = newswitch($3, $6); }
     | FOR '(' forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
     | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
@@ -352,6 +358,24 @@ forend: %empty                            { $$ = NULL; }
 
 eols: %empty
     | EOL eols
+    ;
+
+switch_body: switch_cases                 { $$ = $1; }
+    | DEFAULT ARROW scope                 { $$ = newcase(NULL, $3, NULL); }
+    | switch_cases DEFAULT ARROW scope    {
+        $$ = append_case($1, newcase(NULL, $4, NULL));
+      }
+    ;
+
+switch_cases: switch_case                 { $$ = $1; }
+    | switch_cases switch_case            { $$ = append_case($1, $2); }
+    ;
+
+switch_case: CASE case_values ARROW scope { $$ = newcase($2, $4, NULL); }
+    ;
+
+case_values: exp                          { $$ = newlist($1, NULL); }
+    | exp ',' case_values                 { $$ = newlist($1, $3); }
     ;
 
 explist: %empty                            { $$ = NULL; }

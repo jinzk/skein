@@ -164,6 +164,23 @@ struct forinloop {
     struct ast *body;
 };
 
+struct switch_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *expr;
+    struct ast *cases;
+};
+
+struct case_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *values;
+    struct ast *body;
+    struct ast *next;
+};
+
 struct val {
     int nodetype;
     int line;
@@ -246,6 +263,9 @@ struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *
 struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body);
 struct ast *newforin(char *name, char *value_name, struct ast *iterable,
                      struct ast *body);
+struct ast *newswitch(struct ast *expr, struct ast *cases);
+struct ast *newcase(struct ast *values, struct ast *body, struct ast *next);
+struct ast *append_case(struct ast *head, struct ast *node);
 struct ast *newsname(char *s);
 struct ast *newvar(char *s, struct ast *v, bool exported = false,
                    bool is_const = false);

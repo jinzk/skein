@@ -235,6 +235,100 @@ def main():
           "func f(x: bool) { return x; }\nf(1 < 2 ? true : false)\n",
           stdout="= true")
 
+    check("switch int",
+          'switch (2) { case 1 => print("one"); '
+          'case 2, 3 => print("two or three"); '
+          'default => print("other"); }\n',
+          stdout="two or three")
+    check("switch default",
+          'switch (9) { case 1 => print("one"); '
+          'default => print("other"); }\n',
+          stdout="other")
+    check("switch no match no default",
+          'switch (9) { case 1 => print("one"); }\n', code=0)
+    check("switch empty body", "switch (1) {}\n", code=0)
+    check("switch empty body spaced", "switch (1) { }\n", code=0)
+    check("switch single statement",
+          "let x = 0;\nswitch (1) { case 1 => x = 10; }\nx\n",
+          stdout="= 10")
+    check("switch block",
+          "switch (1) { case 1 => { print(1); print(2); } }\n",
+          stdout_all=["1", "2"])
+    check("switch case scope",
+          "switch (1) { case 1 => let y = 2; }\ny\n",
+          stderr="symbol not found y")
+    check("switch string",
+          'switch ("a") { case "b" => print("bad"); '
+          'case "a" => print("ok"); }\n', stdout="ok")
+    check("switch bool",
+          'switch (true) { case false => print("bad"); '
+          'case true => print("ok"); }\n', stdout="ok")
+    check("switch null",
+          'switch (null) { case null => print("null"); }\n',
+          stdout="null")
+    check("switch bytes",
+          'switch (bytes_from_hex("00ff")) { '
+          'case bytes_from_hex("00ff") => print("bytes"); }\n',
+          stdout="bytes")
+    check("switch no fallthrough",
+          'switch (1) { case 1 => print("one"); '
+          'case 2 => print("two"); }\n', stdout="one")
+    check("switch logical selector",
+          'switch (1 < 2) { case true => print("ok"); }\n', stdout="ok")
+    check("switch break exits switch",
+          "let hits = 0;\n"
+          "while (true) {\n"
+          "  switch (1) { case 1 => break; }\n"
+          "  hits = hits + 1;\n"
+          "  if (hits == 2) { break; }\n"
+          "}\n"
+          "hits\n",
+          stdout="= 2")
+    check("switch continue outer loop",
+          'let out = "";\n'
+          "for (let i in [0, 1, 2]) {\n"
+          "  switch (i) { case 1 => continue; }\n"
+          "  out = out + str(i);\n"
+          "}\n"
+          "out\n",
+          stdout="= 02")
+    check("switch return",
+          "func f(x) {\n"
+          "  switch (x) { case 1 => return 10; default => return 20; }\n"
+          "}\n"
+          "f(1)\nf(2)\n",
+          stdout_all=["= 10", "= 20"])
+    check("switch nested",
+          'switch (1) { case 1 => switch (1) { case 1 => print("nested"); } }\n',
+          stdout="nested")
+    check("switch default only",
+          'switch (1) { default => print("only"); }\n', stdout="only")
+    check("switch empty case block",
+          "switch (1) { case 1 => {} }\n", code=0)
+    check("switch empty statement case",
+          "switch (1) { case 1 => ; }\n", code=0)
+    check("switch float selector",
+          'switch (1.0) { case 1 => print("bad"); }\n',
+          stderr="switch does not support float")
+    check("switch float case",
+          'switch (1) { case 1.0 => print("bad"); }\n',
+          stderr="switch does not support float case value")
+    check("switch list case",
+          'switch (1) { case [1] => print("bad"); }\n',
+          stderr="switch does not support list case value")
+    check("switch builtin case",
+          'switch (1) { case sqrt => print("bad"); }\n',
+          stderr="switch does not support builtin case value")
+    check("switch type name is not pattern",
+          'switch (1) { case int => print("bad"); }\n',
+          stderr="switch does not support builtin case value")
+    check("switch case condition rejected",
+          'switch (true) { case 1 < 2 => print("bad"); }\n',
+          stderr="logical or comparison expressions are not allowed in case values")
+    check("switch list selector",
+          'switch ([1]) { default => print("bad"); }\n',
+          stderr="switch does not support list")
+
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")

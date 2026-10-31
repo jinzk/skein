@@ -288,6 +288,44 @@ struct ast *newforin(char *name, char *value_name, struct ast *iterable,
     return (struct ast *)a;
 }
 
+struct ast *newswitch(struct ast *expr, struct ast *cases) {
+    struct switch_node *a =
+        (struct switch_node *)std::malloc(sizeof(struct switch_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'S';
+    set_loc_from(a, expr);
+    a->expr = expr;
+    a->cases = cases;
+    return (struct ast *)a;
+}
+
+struct ast *newcase(struct ast *values, struct ast *body, struct ast *next) {
+    struct case_node *a =
+        (struct case_node *)std::malloc(sizeof(struct case_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'c';
+    set_loc_from(a, body ? body : values);
+    a->values = values;
+    a->body = body;
+    a->next = next;
+    return (struct ast *)a;
+}
+
+struct ast *append_case(struct ast *head, struct ast *node) {
+    if (!head) return node;
+    struct ast *current = head;
+    while (((struct case_node *)current)->next)
+        current = ((struct case_node *)current)->next;
+    ((struct case_node *)current)->next = node;
+    return head;
+}
+
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported) {
     struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
@@ -492,6 +530,19 @@ void treefree(struct ast *a) {
             treefree(f->body);
             std::free(f->name);
             std::free(f->value_name);
+            break;
+        }
+        case 'S': {
+            struct switch_node *s = (struct switch_node *)a;
+            treefree(s->expr);
+            treefree(s->cases);
+            break;
+        }
+        case 'c': {
+            struct case_node *c = (struct case_node *)a;
+            treefree(c->values);
+            treefree(c->body);
+            treefree(c->next);
             break;
         }
         case 'C':

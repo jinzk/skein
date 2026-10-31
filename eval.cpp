@@ -324,6 +324,47 @@ static bool truthy(const struct value_t *v) {
     }
 }
 
+static bool switch_value_supported(const struct value_t *v) {
+    if (!v) return false;
+    switch (v->type) {
+        case T_int:
+        case T_bool:
+        case T_string:
+        case T_bytes:
+        case T_null:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool case_value_is_condition(struct ast *a) {
+    if (!a) return false;
+    switch (a->nodetype) {
+        case 'A':
+        case 'Q':
+        case '!':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool case_values_have_condition(struct ast *values) {
+    for (struct list_node *p = (struct list_node *)values; p;
+         p = (struct list_node *)p->next) {
+        if (case_value_is_condition(p->value))
+            return true;
+    }
+    return false;
+}
+
 static bool value_equals(struct value_t *a, struct value_t *b) {
     if (!a || !b) return a == b;
     if (is_numeric(a) && is_numeric(b)) {
@@ -3095,6 +3136,104 @@ struct value_t *eval(struct ast *a) {
                 ret = do_compare(a->nodetype - '0', l, r);
             freeval(l);
             freeval(r);
+            break;
+        }
+
+        case 'S': {
+            struct switch_node *sw = (struct switch_node *)a;
+            int errors_before = g_runtime_error_count;
+            struct value_t *subject = eval(sw->expr);
+            if (!subject || g_runtime_error_count != errors_before) {
+                freeval(subject);
+                break;
+            }
+            if (!switch_value_supported(subject)) {
+                yyerror("switch does not support %s", typename_of(subject));
+                freeval(subject);
+                break;
+            }
+
+            auto run_body = [&](struct ast *body) {
+                pushscope();
+                int body_errors = g_runtime_error_count;
+                struct value_t *body_ret = eval(body);
+                if (g_runtime_error_count != body_errors) {
+                    freeval(body_ret);
+                } else if (body_ret) {
+                    if (body_ret->type == T_break) {
+                        freeval(body_ret);
+                    } else if (body_ret->type == T_continue ||
+                               body_ret->type == T_return) {
+                        ret = body_ret;
+                    } else {
+                        freeval(body_ret);
+                    }
+                }
+                popscope();
+            };
+
+            struct case_node *default_case = NULL;
+            bool matched = false;
+            bool stop = false;
+
+            for (struct case_node *c = (struct case_node *)sw->cases;
+                 c && !stop; c = (struct case_node *)c->next) {
+                if (!c->values) {
+                    default_case = c;
+                    continue;
+                }
+                if (case_values_have_condition(c->values)) {
+                    yyerror("logical or comparison expressions are not allowed "
+                            "in case values");
+                    stop = true;
+                    break;
+                }
+
+                errors_before = g_runtime_error_count;
+                struct value_t *values = eval(c->values);
+                if (!values || g_runtime_error_count != errors_before) {
+                    freeval(values);
+                    stop = true;
+                    break;
+                }
+                if (values->type != T_list) {
+                    yyerror("switch case values must be a list");
+                    freeval(values);
+                    stop = true;
+                    break;
+                }
+
+                struct list_value_t *list = (struct list_value_t *)values;
+                for (size_t i = 0; i < list->payload->items.size(); ++i) {
+                    if (!switch_value_supported(list->payload->items[i])) {
+                        yyerror("switch does not support %s case value",
+                                typename_of(list->payload->items[i]));
+                        stop = true;
+                        break;
+                    }
+                }
+                if (!stop) {
+                    for (size_t i = 0; i < list->payload->items.size(); ++i) {
+                        if (value_equals(subject, list->payload->items[i])) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+                freeval(values);
+
+                if (stop) break;
+                if (matched) {
+                    run_body(c->body);
+                    stop = true;
+                    break;
+                }
+            }
+
+            if (!stop && !matched && default_case)
+                run_body(default_case->body);
+
+            freeval(subject);
             break;
         }
 

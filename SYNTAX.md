@@ -17,6 +17,7 @@
 ```text
 let const func
 if else while do for
+switch case default
 return break continue
 null true false
 package import export as
@@ -487,7 +488,79 @@ for (let key, value in {"a": 1, "b": 2}) {
 - 循环变量只存在于循环作用域；
 - 支持 `break` / `continue` / `return`。
 
-### 5.6 代码块
+### 5.6 switch
+
+```text
+switch (value) {
+  case 1 => print("one");
+
+  case 2, 3 => {
+    print("two or three");
+  }
+
+  default => print("other");
+}
+```
+
+规则：
+
+- `switch` 的选择值只求值一次；
+- 按 case 顺序匹配，匹配成功后不再尝试后续 case；
+- 没有 fallthrough，不需要用 `break` 阻止贯穿；
+- `case` 值用逗号分隔，例如 `case 1, 2, 3`；
+- case 体可以是单条语句或代码块，并且有独立作用域；
+- `default` 可选，只能出现一次，且必须放在最后；
+- `break` 退出当前 switch；
+- `continue` 作用于外层循环；
+- `return` 退出函数。
+
+支持的 switch 值类型：
+
+```text
+int
+bool
+string
+bytes
+null
+```
+
+不支持：
+
+```text
+float
+list
+dict
+function
+builtin
+userdata
+```
+
+浮点相等容易产生 `0.1 + 0.2 != 0.3`、`NaN` 等问题，因此 switch 不支持 float；浮点判断请使用 `if/else`。
+
+case 值按值比较，使用 `==` 语义；case 值本身不能是逻辑或比较表达式：
+
+```text
+switch (x) {
+  case x > 1 && x < 5 => ...   // 错误：case 值不能是条件表达式
+}
+```
+
+需要条件判断时使用 `if / else if`。当前不支持 `case int` 这种类型模式；`int` 只是内置函数值，会作为不支持的 case 值报错。
+
+示例：
+
+```text
+switch (bytes_from_hex("00ff")) {
+  case bytes_from_hex("00ff") => print("bytes match");
+}
+
+switch (null) {
+  case null => print("null");
+  default => print("other");
+}
+```
+
+### 5.7 代码块
 
 ```text
 {
@@ -500,7 +573,7 @@ for (let key, value in {"a": 1, "b": 2}) {
 
 空代码块可以写在控制流/函数体位置（如 `if (x) {}`、`func f() {}`），也可以显式写成 `{ ; }`。块内单独出现的 `{}` 按空字典表达式处理；表达式位置的 `{}` 也是空字典。
 
-### 5.7 return / break / continue
+### 5.8 return / break / continue
 
 ```text
 return;
@@ -510,10 +583,11 @@ continue;
 ```
 
 - `return` 只能用于函数；
-- `break` / `continue` 只能用于循环；
+- `break` 可用于循环或 switch；
+- `continue` 只能用于循环；
 - 都需要分号。
 
-### 5.8 命名函数
+### 5.9 命名函数
 
 ```text
 func add(a, b) {
@@ -565,7 +639,7 @@ function add argument 1 (a) expects int, got string
 let add = func(a, b) { return a + b; };
 ```
 
-### 5.9 导出声明
+### 5.10 导出声明
 
 只能在包中有实际意义：
 
@@ -864,7 +938,6 @@ var
 解构声明
 多变量声明
 复合赋值
-switch
 for ... of
 try/catch
 通配导入

@@ -1,6 +1,7 @@
 #ifndef _VALUETYPE_H_
 #define _VALUETYPE_H_
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -112,10 +113,22 @@ struct builtin_value_t {
     int functype;
 };
 
+struct stream_ops {
+    bool (*read)(void *data, std::size_t max_bytes, long long timeout_ms,
+                 std::string &out, bool &eof, std::string &error);
+    bool (*write)(void *data, const std::string &bytes, long long timeout_ms,
+                  std::size_t &written, std::string &error);
+    bool (*flush)(void *data, std::string &error);
+    bool (*close)(void *data, bool &was_open, std::string &error);
+    bool (*eof)(void *data, bool &eof, std::string &error);
+    bool (*seekable)(void *data);
+};
+
 struct native_type {
     const char *name;
     /* Return a human-readable representation of one instance. */
     std::string (*describe)(const void *data);
+    const struct stream_ops *stream = nullptr;
 };
 
 struct userdata_value_t {

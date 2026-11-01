@@ -1263,6 +1263,9 @@ std.math.sqrt(9)
 std.math.sin(0)
 std.math.min(3, 1, 2)
 std.io.print("hello")
+std.io.read(stream, 4096)
+std.io.write_all(stream, data)
+std.io.read_all(stream, 16 * 1024 * 1024)
 std.fs.read_file("data.txt")
 std.process.command_status("true")
 std.type.name(1)
@@ -1290,10 +1293,54 @@ std.string.trim_start("  x")
 std.bytes.hex(bytes_from_hex("00ff"))
 ```
 
+流式读写：
+
+```text
+import std;
+
+let f = std.fs.open("data.bin", "rb");
+defer std.io.close(f);
+
+std.io.readable(f)
+std.io.writable(f)
+std.io.seekable(f)
+
+let chunk = std.io.read(f, 4096);       // bytes；EOF 为 null
+let rest = std.io.read_all(f, 16 * 1024 * 1024);
+std.io.eof(f)
+```
+
+流函数：
+
+```text
+std.io.read(stream, max_bytes[, timeout_ms])
+std.io.write(stream, data[, timeout_ms])
+std.io.write_all(stream, data[, timeout_ms])
+std.io.flush(stream)
+std.io.close(stream)
+std.io.eof(stream)
+std.io.readable(stream)
+std.io.writable(stream)
+std.io.seekable(stream)
+std.io.read_exact(stream, n[, timeout_ms])
+std.io.read_all(stream[, limit])
+std.io.read_line(stream[, limit])
+std.io.copy(dst, src[, limit])
+```
+
+规则：
+
+- EOF 返回 `null`；
+- `read_all` 默认上限 16 MiB；
+- `close` 幂等，返回是否实际关闭；
+- 文件和 socket 共用 `std.io`；
+- 文件仍使用 `std.fs.seek` / `std.fs.tell`；
+- `std.io` 是同步接口，socket 异步仍使用 `std.net.*_async`。
+
 新增模块说明：
 
 - `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
-- `std.io`：`print`、`format`、`input`；
+- `std.io`：`print`、`format`、`input`，以及文件和 socket 通用的流式读写；
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`status` / `command_status`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；

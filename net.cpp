@@ -332,8 +332,28 @@ std::string net_describe(const void *data) {
     return "<tcp_socket>";
 }
 
+bool net_stream_read(void *data, std::size_t max_bytes,
+                     long long timeout_ms, std::string &out, bool &eof,
+                     std::string &error);
+bool net_stream_write(void *data, const std::string &bytes,
+                      long long timeout_ms, std::size_t &written,
+                      std::string &error);
+bool net_stream_flush(void *data, std::string &error);
+bool net_stream_close(void *data, bool &was_open, std::string &error);
+bool net_stream_eof(void *data, bool &eof, std::string &error);
+bool net_stream_seekable(void *data);
+
+const struct stream_ops net_stream_ops = {
+    net_stream_read,
+    net_stream_write,
+    net_stream_flush,
+    net_stream_close,
+    net_stream_eof,
+    net_stream_seekable,
+};
+
 const struct native_type net_socket_type = {
-    "tcp_socket", net_describe
+    "tcp_socket", net_describe, &net_stream_ops
 };
 
 value_t *new_socket_value(std::shared_ptr<net_socket> socket) {
@@ -875,6 +895,57 @@ value_t *net_accept(const std::vector<value_t *> &args) {
     return new_socket_value(std::move(state.client));
 }
 
+bool net_send_data(net_socket *socket, std::string data,
+                   long long timeout_ms, std::size_t &written,
+                   std::string &error) {
+    written = 0;
+    if (!socket || !socket->handle) {
+        error = "tcp socket is closed";
+        return false;
+    }
+    if (socket->listening) {
+        error = "send expects a connected tcp socket";
+        return false;
+    }
+    if (data.empty())
+        return true;
+    if (g_interrupted)
+        return false;
+    if (data.size() > (size_t)std::numeric_limits<unsigned int>::max()) {
+        error = "send data is too large";
+        return false;
+    }
+
+    write_state state;
+    state.data = std::move(data);
+    state.request.data = &state;
+    uv_buf_t buffer = uv_buf_init(
+        &state.data[0], (unsigned int)state.data.size());
+    int rc = uv_write(&state.request, (uv_stream_t *)socket->handle,
+                      &buffer, 1, on_write);
+    if (rc < 0) {
+        error = std::string("send: ") + uv_strerror(rc);
+        return false;
+    }
+
+    event_timeout timeout = make_event_timeout(timeout_ms);
+    event_wait_result wait_result = event_wait(state.done, [socket] {
+        socket->close();
+    }, timeout);
+    if (wait_result == EVENT_WAIT_TIMEOUT) {
+        error = "send: timed out after " + std::to_string(timeout_ms) + " ms";
+        return false;
+    }
+    if (wait_result != EVENT_WAIT_OK)
+        return false;
+    if (state.status < 0) {
+        error = std::string("send: ") + uv_strerror(state.status);
+        return false;
+    }
+    written = state.data.size();
+    return true;
+}
+
 value_t *net_send(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
         yyerror("std.net.send expects 2 or 3 arguments");
@@ -901,43 +972,86 @@ value_t *net_send(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    if (data.empty())
-        return newintval(0);
-    if (g_interrupted)
-        return NULL;
-    if (data.size() >
-        (size_t)std::numeric_limits<unsigned int>::max()) {
-        yyerror("send data is too large");
+    std::size_t written = 0;
+    std::string error;
+    if (!net_send_data(socket.get(), std::move(data), timeout_ms, written,
+                       error)) {
+        if (g_interrupted)
+            return NULL;
+        yyerror("%s", error.empty() ? "send failed" : error.c_str());
         return NULL;
     }
+    return newintval((long long)written);
+}
 
-    write_state state;
-    state.data = std::move(data);
-    state.request.data = &state;
-    uv_buf_t buffer = uv_buf_init(
-        &state.data[0], (unsigned int)state.data.size());
-    int rc = uv_write(&state.request, (uv_stream_t *)socket->handle,
-                      &buffer, 1, on_write);
+bool net_recv_data(net_socket *socket, std::size_t requested,
+                   long long timeout_ms, std::string &out, bool &eof,
+                   std::string &error) {
+    out.clear();
+    eof = false;
+    if (!socket || !socket->handle) {
+        error = "tcp socket is closed";
+        return false;
+    }
+    if (socket->listening) {
+        error = "recv expects a connected tcp socket";
+        return false;
+    }
+    if (requested == 0)
+        return true;
+    if (requested > (std::size_t)std::numeric_limits<int>::max()) {
+        error = "recv size is too large";
+        return false;
+    }
+    if (socket->read_eof) {
+        eof = true;
+        return true;
+    }
+    if (socket->read_failed) {
+        error = std::string("recv: ") + uv_strerror(socket->read_error);
+        return false;
+    }
+    if (socket->reading || socket->pending_async_read) {
+        error = "recv: another read is already pending";
+        return false;
+    }
+    if (g_interrupted)
+        return false;
+
+    socket->read_done = false;
+    socket->read_status = 0;
+    socket->read_requested = requested;
+    socket->read_buffer.clear();
+    socket->read_result.clear();
+    socket->reading = true;
+
+    int rc = uv_read_start((uv_stream_t *)socket->handle, on_alloc, on_read);
     if (rc < 0) {
-        yyerror("send: %s", uv_strerror(rc));
-        return NULL;
+        socket->reading = false;
+        error = std::string("recv: ") + uv_strerror(rc);
+        return false;
     }
 
     event_timeout timeout = make_event_timeout(timeout_ms);
-    event_wait_result wait_result = event_wait(state.done, [&socket] {
-        socket->close();
+    event_wait_result wait_result = event_wait(socket->read_done, [socket] {
+        uv_read_stop((uv_stream_t *)socket->handle);
+        socket->reading = false;
+        socket->read_done = true;
     }, timeout);
+    socket->reading = false;
     if (wait_result == EVENT_WAIT_TIMEOUT) {
-        report_timeout("send", timeout_ms);
-        return NULL;
+        error = "recv: timed out after " + std::to_string(timeout_ms) + " ms";
+        return false;
     }
     if (wait_result != EVENT_WAIT_OK)
-        return NULL;
-    if (state.status < 0) {
-        yyerror("send: %s", uv_strerror(state.status));
-        return NULL;
+        return false;
+    if (socket->read_status < 0) {
+        error = std::string("recv: ") + uv_strerror(socket->read_status);
+        return false;
     }
-    return newintval((long long)state.data.size());
+    out = std::move(socket->read_result);
+    eof = socket->read_eof && out.empty();
+    return true;
 }
 
 value_t *net_recv(const std::vector<value_t *> &args) {
@@ -963,65 +1077,45 @@ value_t *net_recv(const std::vector<value_t *> &args) {
     long long requested = ((struct int_value_t *)args[1])->value;
     if (requested == 0)
         return newbytesval(std::string());
-    if (requested > std::numeric_limits<int>::max()) {
-        yyerror("recv size is too large");
+    std::string out;
+    bool eof = false;
+    std::string error;
+    if (!net_recv_data(socket.get(), (std::size_t)requested, timeout_ms, out,
+                       eof, error)) {
+        if (g_interrupted)
+            return NULL;
+        yyerror("%s", error.empty() ? "recv failed" : error.c_str());
         return NULL;
     }
-    if (socket->read_eof)
-        return newbytesval(std::string());
-    if (socket->read_failed) {
-        yyerror("recv: %s", uv_strerror(socket->read_error));
-        return NULL;
-    }
-    if (socket->reading || socket->pending_async_read) {
-        yyerror("recv: another read is already pending");
-        return NULL;
-    }
-    if (g_interrupted)
-        return NULL;
-
-    socket->read_done = false;
-    socket->read_status = 0;
-    socket->read_requested = (size_t)requested;
-    socket->read_buffer.clear();
-    socket->read_result.clear();
-    socket->reading = true;
-
-    int rc = uv_read_start((uv_stream_t *)socket->handle, on_alloc, on_read);
-    if (rc < 0) {
-        socket->reading = false;
-        yyerror("recv: %s", uv_strerror(rc));
-        return NULL;
-    }
-
-    event_timeout timeout = make_event_timeout(timeout_ms);
-    event_wait_result wait_result = event_wait(socket->read_done, [&socket] {
-        uv_read_stop((uv_stream_t *)socket->handle);
-        socket->reading = false;
-        socket->read_done = true;
-    }, timeout);
-    socket->reading = false;
-    if (wait_result == EVENT_WAIT_TIMEOUT) {
-        report_timeout("recv", timeout_ms);
-        return NULL;
-    }
-    if (wait_result != EVENT_WAIT_OK)
-        return NULL;
-    if (socket->read_status < 0) {
-        yyerror("recv: %s", uv_strerror(socket->read_status));
-        return NULL;
-    }
-    return newbytesval(std::move(socket->read_result));
+    return newbytesval(std::move(out));
 }
 
-value_t *net_close(const std::vector<value_t *> &args) {
-    if (args.size() != 1) {
-        yyerror("std.net.close expects 1 argument");
-        return NULL;
+bool net_stream_read(void *data, std::size_t max_bytes,
+                     long long timeout_ms, std::string &out, bool &eof,
+                     std::string &error) {
+    return net_recv_data(static_cast<net_socket *>(data), max_bytes,
+                         timeout_ms, out, eof, error);
+}
+
+bool net_stream_write(void *data, const std::string &bytes,
+                      long long timeout_ms, std::size_t &written,
+                      std::string &error) {
+    return net_send_data(static_cast<net_socket *>(data), bytes, timeout_ms,
+                         written, error);
+}
+
+bool net_stream_flush(void *data, std::string &error) {
+    net_socket *socket = static_cast<net_socket *>(data);
+    if (!socket || !socket->handle) {
+        error = "tcp socket is closed";
+        return false;
     }
-    std::shared_ptr<net_socket> socket;
-    if (!get_socket(args[0], socket))
-        return NULL;
+    return true;
+}
+
+void close_net_socket(net_socket *socket) {
+    if (!socket)
+        return;
     socket->pending_accept = NULL;
     socket->pending_clients.clear();
     std::deque<accept_async_op *> accepts =
@@ -1043,6 +1137,40 @@ value_t *net_close(const std::vector<value_t *> &args) {
     socket->read_buffer.clear();
     socket->read_result.clear();
     socket->close();
+}
+
+bool net_stream_close(void *data, bool &was_open, std::string &error) {
+    (void)error;
+    net_socket *socket = static_cast<net_socket *>(data);
+    was_open = socket && socket->handle != NULL;
+    close_net_socket(socket);
+    return true;
+}
+
+bool net_stream_eof(void *data, bool &eof, std::string &error) {
+    net_socket *socket = static_cast<net_socket *>(data);
+    if (!socket || !socket->handle) {
+        error = "tcp socket is closed";
+        return false;
+    }
+    eof = socket->read_eof;
+    return true;
+}
+
+bool net_stream_seekable(void *data) {
+    (void)data;
+    return false;
+}
+
+value_t *net_close(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.net.close expects 1 argument");
+        return NULL;
+    }
+    std::shared_ptr<net_socket> socket;
+    if (!get_socket(args[0], socket))
+        return NULL;
+    close_net_socket(socket.get());
     return newnull();
 }
 

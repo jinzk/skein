@@ -1815,6 +1815,39 @@ def main():
         assert "echo:hello" in net_proc.stdout, net_proc.stdout
         assert received == [b"hello"], received
 
+        stream_server = socket.socket()
+        stream_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        stream_server.bind(("127.0.0.1", 0))
+        stream_server.listen(1)
+        stream_server.settimeout(5)
+        stream_port = stream_server.getsockname()[1]
+        stream_received = []
+
+        def stream_server_fn():
+            try:
+                client, _ = stream_server.accept()
+                data = client.recv(100)
+                stream_received.append(data)
+                client.sendall(b"stream:" + data)
+                client.close()
+            finally:
+                stream_server.close()
+
+        stream_thread = threading.Thread(target=stream_server_fn)
+        stream_thread.start()
+        stream_proc = run(
+            "import std;\n"
+            f'let s = std.net.tcp_connect("127.0.0.1", {stream_port}, '
+            '1000, "ipv4");\n'
+            'std.io.write_all(s, "hello", 1000);\n'
+            "print(bytes_to_string(std.io.read(s, 100, 1000)));\n"
+            "std.io.close(s);\n"
+        )
+        stream_thread.join(timeout=5)
+        assert stream_proc.returncode == 0, stream_proc.stderr
+        assert "stream:hello" in stream_proc.stdout, stream_proc.stdout
+        assert stream_received == [b"hello"], stream_received
+
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         async_server.bind(("127.0.0.1", 0))
@@ -3282,6 +3315,64 @@ def main():
             f'let h = file_open("{quoted_nul}", "rb");\n'
             f'bytes_hex(file_read_bytes(h))\n',
             stdout="= 610062",
+        )
+        stream_path = os.path.join(tmp, "stream.bin")
+        quoted_stream = stream_path.replace("\\", "\\\\")
+        stream_copy = os.path.join(tmp, "stream-copy.bin")
+        quoted_stream_copy = stream_copy.replace("\\", "\\\\")
+        check(
+            "io file stream",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream}", "w+b");\n'
+            f'std.io.readable(f)\n'
+            f'std.io.writable(f)\n'
+            f'std.io.seekable(f)\n'
+            f'std.io.write_all(f, "hello\\nworld\\n")\n'
+            f'std.io.flush(f)\n'
+            f'std.fs.seek(f, 0, 0)\n'
+            f'bytes_to_string(std.io.read(f, 5))\n'
+            f'std.fs.seek(f, 6, 0)\n'
+            f'bytes_to_string(std.io.read_line(f))\n'
+            f'std.fs.seek(f, 0, 0)\n'
+            f'len(std.io.read_all(f, 100))\n'
+            f'std.io.eof(f)\n'
+            f'std.fs.seek(f, 0, 0)\n'
+            f'bytes_to_string(std.io.read_exact(f, 5))\n'
+            f'std.io.close(f)\n'
+            f'std.io.close(f)\n',
+            stdout_all=[
+                "= true", "= true", "= true", "= 12",
+                "= hello", "= world", "= 12", "= true",
+                "= hello", "= true", "= false",
+            ],
+        )
+        check(
+            "io file eof read",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream}", "rb");\n'
+            f'len(std.io.read(f, 100))\n'
+            f'std.io.eof(f)\n'
+            f'std.io.read(f, 100) == null\n'
+            f'std.io.close(f)\n',
+            stdout_all=["= 12", "= true", "= true", "= true"],
+        )
+        check(
+            "io copy",
+            f'import std;\n'
+            f'let src = std.fs.open("{quoted_stream}", "rb");\n'
+            f'let dst = std.fs.open("{quoted_stream_copy}", "w+b");\n'
+            f'std.io.copy(dst, src)\n'
+            f'std.io.close(dst)\n'
+            f'std.io.close(src)\n'
+            f'let check = std.fs.open("{quoted_stream_copy}", "rb");\n'
+            f'bytes_to_string(std.io.read_all(check, 100)) == "hello\\nworld\\n"\n'
+            f'std.io.close(check)\n',
+            stdout_all=["= 12", "= true", "= true", "= true", "= true"],
+        )
+        check(
+            "io stream type",
+            "import std;\nstd.io.read(42, 10)\n",
+            stderr="std.io.read expects a stream",
         )
         check("file_read_bytes arity", "file_read_bytes()\n",
               stderr="file_read_bytes expects 1 or 2 arguments")

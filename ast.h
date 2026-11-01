@@ -148,7 +148,20 @@ enum bifs {
     B_result_capture,
     B_error_new,
     B_error_kind,
-    B_error_message
+    B_error_message,
+    B_io_read,
+    B_io_write,
+    B_io_write_all,
+    B_io_flush,
+    B_io_close,
+    B_io_eof,
+    B_io_readable,
+    B_io_writable,
+    B_io_seekable,
+    B_io_read_exact,
+    B_io_read_all,
+    B_io_read_line,
+    B_io_copy
 };
 
 struct ast {

@@ -755,6 +755,20 @@ std.io.print
 std.io.format
 std.io.input
 
+std.io.read
+std.io.write
+std.io.write_all
+std.io.flush
+std.io.close
+std.io.eof
+std.io.readable
+std.io.writable
+std.io.seekable
+std.io.read_exact
+std.io.read_all
+std.io.read_line
+std.io.copy
+
 std.fs.read_file
 std.fs.write_file
 std.fs.append_file
@@ -868,7 +882,7 @@ std.bytes.from_int
 - `std.string.repeat` 的次数不能为负数；
 - `std.string.trim_start` / `trim_end` 只按 ASCII 空白裁剪；
 - `std.math` 与全局数学函数使用同一套实现；
-- `std.io` 提供 `print`、`format`、`input`；
+- `std.io` 提供 `print`、`format`、`input`，以及文件和 socket 通用的流式读写；
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
@@ -900,6 +914,51 @@ std.bytes.from_int
 - 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
+
+### 流式读写
+
+文件句柄和 TCP socket 共用 `std.io` 流接口：
+
+```text
+import std;
+
+let f = std.fs.open("data.bin", "rb");
+defer std.io.close(f);
+
+std.io.readable(f)        // true
+std.io.writable(f)        // false
+std.io.seekable(f)        // true
+
+let first = std.io.read(f, 4096);     // bytes，EOF 时是 null
+let rest = std.io.read_all(f, 16 * 1024 * 1024);
+std.io.eof(f)
+```
+
+```text
+std.io.read(stream, max_bytes[, timeout_ms])  → bytes / null
+std.io.write(stream, data[, timeout_ms])      → int
+std.io.write_all(stream, data[, timeout_ms])  → int
+std.io.flush(stream)
+std.io.close(stream)                          → bool
+std.io.eof(stream)                            → bool
+std.io.readable(stream)                       → bool
+std.io.writable(stream)                       → bool
+std.io.seekable(stream)                       → bool
+std.io.read_exact(stream, n[, timeout_ms])    → bytes
+std.io.read_all(stream[, limit])              → bytes
+std.io.read_line(stream[, limit])             → bytes
+std.io.copy(dst, src[, limit])                → int
+```
+
+规则：
+
+- `read` 最多读取 `max_bytes`；
+- EOF 返回 `null`，不是空 `bytes`；
+- `write` 返回实际写入字节数，`write_all` 循环写满；
+- `close` 幂等，返回是否实际关闭；
+- `read_all` 默认上限 16 MiB；
+- 文件和 socket 共用 `std.io`，文件仍可用 `std.fs.seek` / `std.fs.tell`；
+- `std.io` 目前是同步接口；socket 异步仍使用 `std.net.*_async`。
 
 ### 查找路径
 
@@ -1948,6 +2007,7 @@ eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
 http1_parser.* llhttp 封装与增量 HTTP/1.x 解析
+io.*          std.io 通用流式读写与辅助函数
 fiber.*       Boost.Context 有栈协程、async/await 与生成器
 generator.*   生成器迭代函数
 result.*      result 值与错误捕获

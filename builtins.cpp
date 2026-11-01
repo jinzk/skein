@@ -4,6 +4,7 @@
 #include "eval_helpers.h"
 #include "error.h"
 #include "generator.h"
+#include "io.h"
 #include "net.h"
 #include "result.h"
 #include "task.h"
@@ -326,6 +327,8 @@ struct value_t *call_builtin(int functype,
         return call_result_builtin(functype, args);
     if (functype >= B_error_new && functype <= B_error_message)
         return call_error_builtin(functype, args);
+    if (functype >= B_io_read && functype <= B_io_copy)
+        return call_io_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

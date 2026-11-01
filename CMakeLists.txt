@@ -73,6 +73,7 @@ add_executable(${PROJECT_NAME}
   format.cpp
   generator.cpp
   http1_parser.cpp
+  io.cpp
   main.cpp
   net.cpp
   package.cpp

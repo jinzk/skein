@@ -14,9 +14,85 @@ static std::string describe_file(const void *data) {
     return text;
 }
 
+static bool file_stream_read(void *data, std::size_t max_bytes,
+                             long long timeout_ms, std::string &out,
+                             bool &eof, std::string &error) {
+    (void)timeout_ms;
+    file_resource *resource = static_cast<file_resource *>(data);
+    if (!resource || !platform_file_is_open(resource->file)) {
+        error = "file is closed";
+        return false;
+    }
+    if (!platform_file_read(resource->file, max_bytes, out, error))
+        return false;
+    eof = out.empty() && platform_file_eof(resource->file);
+    return true;
+}
+
+static bool file_stream_write(void *data, const std::string &bytes,
+                              long long timeout_ms, std::size_t &written,
+                              std::string &error) {
+    (void)timeout_ms;
+    file_resource *resource = static_cast<file_resource *>(data);
+    if (!resource || !platform_file_is_open(resource->file)) {
+        error = "file is closed";
+        return false;
+    }
+    if (!platform_file_write(resource->file, bytes, error))
+        return false;
+    written = bytes.size();
+    return true;
+}
+
+static bool file_stream_flush(void *data, std::string &error) {
+    file_resource *resource = static_cast<file_resource *>(data);
+    if (!resource || !platform_file_is_open(resource->file)) {
+        error = "file is closed";
+        return false;
+    }
+    return platform_file_flush(resource->file, error);
+}
+
+static bool file_stream_close(void *data, bool &was_open,
+                              std::string &error) {
+    file_resource *resource = static_cast<file_resource *>(data);
+    if (!resource || !platform_file_is_open(resource->file)) {
+        was_open = false;
+        return true;
+    }
+    was_open = true;
+    platform_file_close(resource->file, error);
+    return error.empty();
+}
+
+static bool file_stream_eof(void *data, bool &eof, std::string &error) {
+    file_resource *resource = static_cast<file_resource *>(data);
+    if (!resource || !platform_file_is_open(resource->file)) {
+        error = "file is closed";
+        return false;
+    }
+    eof = platform_file_eof(resource->file);
+    return true;
+}
+
+static bool file_stream_seekable(void *data) {
+    (void)data;
+    return true;
+}
+
+static const struct stream_ops file_stream_ops = {
+    file_stream_read,
+    file_stream_write,
+    file_stream_flush,
+    file_stream_close,
+    file_stream_eof,
+    file_stream_seekable,
+};
+
 const struct native_type file_native_type = {
     "file",
     describe_file,
+    &file_stream_ops,
 };
 
 bool is_file_value(const struct value_t *value) {

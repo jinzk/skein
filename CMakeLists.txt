@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(calc-demo LANGUAGES CXX)
+project(calc-demo LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,6 +44,20 @@ if(NOT Boost_FOUND)
   find_package(Boost REQUIRED COMPONENTS context)
 endif()
 
+add_library(calc_llhttp STATIC
+  third_party/llhttp/src/llhttp.c
+  third_party/llhttp/src/api.c
+  third_party/llhttp/src/http.c
+)
+target_include_directories(calc_llhttp PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llhttp/include
+)
+set_target_properties(calc_llhttp PROPERTIES
+  C_STANDARD 99
+  C_STANDARD_REQUIRED ON
+  POSITION_INDEPENDENT_CODE ON
+)
+
 add_executable(${PROJECT_NAME}
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
@@ -58,6 +72,7 @@ add_executable(${PROJECT_NAME}
   filetype.cpp
   format.cpp
   generator.cpp
+  http1_parser.cpp
   main.cpp
   net.cpp
   package.cpp
@@ -94,6 +109,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
   ${CALC_LIBUV_TARGET}
   Boost::context
+  calc_llhttp
 )
 
 option(CALC_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
@@ -124,6 +140,19 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(http1_parser_test
+    tests/test_http1_parser.cpp
+    http1_parser.cpp
+  )
+  target_link_libraries(http1_parser_test PRIVATE calc_llhttp)
+  target_include_directories(http1_parser_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(http1_parser_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME http1_parser_test COMMAND http1_parser_test)
+
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     if(CALC_ENABLE_FFI AND LIBFFI_FOUND)

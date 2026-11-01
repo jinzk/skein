@@ -18,6 +18,8 @@ cmake --build build
 sudo apt install libuv1-dev libboost-context-dev
 ```
 
+HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），不需要额外的系统包。
+
 `std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
 
 ```bash
@@ -1945,6 +1947,7 @@ eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
+http1_parser.* llhttp 封装与增量 HTTP/1.x 解析
 fiber.*       Boost.Context 有栈协程、async/await 与生成器
 generator.*   生成器迭代函数
 result.*      result 值与错误捕获

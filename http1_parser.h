@@ -2,6 +2,7 @@
 #define CALC_HTTP1_PARSER_H
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,6 +53,14 @@ public:
 
     /* Signal EOF. This can complete a close-delimited response. */
     bool finish();
+
+    /* When a body sink is installed, body bytes are delivered to the sink
+       instead of being appended to message.body. Returning false pauses
+       parsing; call resume() and feed the input again from paused_offset(). */
+    void set_body_sink(std::function<bool(const char *, std::size_t)> sink);
+    bool paused() const;
+    std::size_t paused_offset() const;
+    bool resume();
 
     const std::vector<message> &messages() const;
     std::vector<message> take_messages();

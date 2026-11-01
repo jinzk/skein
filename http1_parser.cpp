@@ -38,6 +38,10 @@ struct parser_state {
     bool header_field_done = false;
     std::size_t header_bytes = 0;
     std::size_t header_count = 0;
+    std::size_t body_bytes = 0;
+    std::function<bool(const char *, std::size_t)> body_sink;
+    bool paused = false;
+    std::size_t paused_offset = 0;
 
     std::size_t total_bytes = 0;
     std::size_t base_offset = 0;
@@ -116,6 +120,7 @@ int on_message_begin(llhttp_t *parser) {
     state->header_field_done = false;
     state->header_bytes = 0;
     state->header_count = 0;
+    state->body_bytes = 0;
     return 0;
 }
 
@@ -193,10 +198,15 @@ int on_headers_complete(llhttp_t *parser) {
 
 int on_body(llhttp_t *parser, const char *at, size_t length) {
     parser_state *state = parser_state::from(parser);
-    if (state->current.body.size() > state->options.max_body_bytes ||
-        length > state->options.max_body_bytes -
-                     state->current.body.size()) {
+    if (state->body_bytes > state->options.max_body_bytes ||
+        length > state->options.max_body_bytes - state->body_bytes) {
         return state->fail("body exceeds limit");
+    }
+    state->body_bytes += length;
+    if (state->body_sink) {
+        if (!state->body_sink(at, length))
+            return HPE_PAUSED;
+        return 0;
     }
     state->current.body.append(at, length);
     return 0;
@@ -224,6 +234,7 @@ int on_reset(llhttp_t *parser) {
     state->header_field_done = false;
     state->header_bytes = 0;
     state->header_count = 0;
+    state->body_bytes = 0;
     return 0;
 }
 
@@ -271,7 +282,17 @@ bool parser::execute(const char *data, std::size_t length) {
         state.total_bytes += length;
         return true;
     }
+    if (error == HPE_PAUSED) {
+        const char *position = llhttp_get_error_pos(&state.handle);
+        state.paused = true;
+        state.paused_offset = 0;
+        if (position && position >= data && position <= data + length)
+            state.paused_offset = (std::size_t)(position - data);
+        return false;
+    }
     if (error == HPE_OK) {
+        state.paused = false;
+        state.paused_offset = 0;
         state.total_bytes += length;
         return true;
     }
@@ -306,8 +327,16 @@ bool parser::finish() {
 
     state.base_offset = state.total_bytes;
     llhttp_errno_t error = llhttp_finish(&state.handle);
-    if (error == HPE_OK)
+    if (error == HPE_OK) {
+        state.paused = false;
+        state.paused_offset = 0;
         return true;
+    }
+    if (error == HPE_PAUSED) {
+        state.paused = true;
+        state.paused_offset = 0;
+        return false;
+    }
     if (state.failed)
         return false;
 
@@ -320,6 +349,29 @@ bool parser::finish() {
         state.error += reason;
     }
     return false;
+}
+
+void parser::set_body_sink(
+    std::function<bool(const char *, std::size_t)> sink) {
+    impl_->state.body_sink = std::move(sink);
+}
+
+bool parser::paused() const {
+    return impl_->state.paused;
+}
+
+std::size_t parser::paused_offset() const {
+    return impl_->state.paused_offset;
+}
+
+bool parser::resume() {
+    parser_state &state = impl_->state;
+    if (!state.paused)
+        return false;
+    llhttp_resume(&state.handle);
+    state.paused = false;
+    state.paused_offset = 0;
+    return true;
 }
 
 const std::vector<message> &parser::messages() const {
@@ -361,6 +413,9 @@ void parser::reset(bool request) {
     state.header_value.clear();
     state.header_bytes = 0;
     state.header_count = 0;
+    state.body_bytes = 0;
+    state.paused = false;
+    state.paused_offset = 0;
     state.total_bytes = 0;
     state.base_offset = 0;
     state.error_code = 0;

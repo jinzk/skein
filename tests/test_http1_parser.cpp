@@ -226,6 +226,60 @@ void test_body_limit() {
     CHECK(parser.error().find("body") != std::string::npos);
 }
 
+void test_streaming_body_pause() {
+    http1::parser parser(true);
+    std::string body;
+    int calls = 0;
+    parser.set_body_sink([&](const char *at, std::size_t length) {
+        body.append(at, length);
+        ++calls;
+        return calls != 1;
+    });
+
+    const std::string input =
+        "POST /pause HTTP/1.1\r\n"
+        "Content-Length: 10\r\n"
+        "\r\n"
+        "0123456789";
+    CHECK(!parser.execute(input));
+    CHECK(parser.paused());
+    CHECK(parser.error().empty());
+    std::size_t offset = parser.paused_offset();
+    CHECK(offset > 0);
+    CHECK(offset <= input.size());
+    CHECK(parser.resume());
+    CHECK(parser.execute(input.data() + offset, input.size() - offset));
+    CHECK(body == "0123456789");
+    CHECK(parser.messages().size() == 1);
+    CHECK(parser.messages()[0].body.empty());
+}
+
+void test_streaming_chunked_body() {
+    http1::parser parser(true);
+    std::string body;
+    int calls = 0;
+    parser.set_body_sink([&](const char *at, std::size_t length) {
+        body.append(at, length);
+        ++calls;
+        return calls != 1;
+    });
+
+    const std::string input =
+        "POST /chunk HTTP/1.1\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+        "5\r\nhello\r\n"
+        "6\r\n world\r\n"
+        "0\r\n\r\n";
+    CHECK(!parser.execute(input));
+    CHECK(parser.paused());
+    std::size_t offset = parser.paused_offset();
+    CHECK(parser.resume());
+    CHECK(parser.execute(input.data() + offset, input.size() - offset));
+    CHECK(body == "hello world");
+    CHECK(parser.messages().size() == 1);
+}
+
 void test_take_messages() {
     http1::parser parser(true);
     CHECK(parser.execute("GET /a HTTP/1.1\r\n\r\n"));
@@ -265,6 +319,8 @@ int main() {
     test_header_limit();
     test_header_count_limit();
     test_body_limit();
+    test_streaming_body_pause();
+    test_streaming_chunked_body();
     test_take_messages();
     test_reset();
 

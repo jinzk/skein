@@ -12,10 +12,10 @@ cmake --build build
 ./build/calc-demo
 ```
 
-`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件。例如 Debian/Ubuntu：
+`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context。例如 Debian/Ubuntu：
 
 ```bash
-sudo apt install libuv1-dev
+sudo apt install libuv1-dev libboost-context-dev
 ```
 
 `std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
@@ -40,7 +40,7 @@ cmake --build build
 build\calc-demo.exe
 ```
 
-Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex 和 libuv。平台相关代码集中在 `platform_win.cpp`：
+Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv 和 Boost.Context。平台相关代码集中在 `platform_win.cpp`：
 
 - 设置控制台输入输出代码页为 UTF-8；
 - 管道输入使用二进制模式，避免 CRLF / `0x1A` 转换；
@@ -319,7 +319,7 @@ std.task.done(task)           → true / false
 ```
 
 - `sleep` / `yield` 是目前内置的原生 task；
-- `yield` 是函数，不是关键字；
+- `std.task.yield` 是函数字段；单独的 `yield` 关键字用于生成器；
 - `wait` 超时不会自动取消 task，需要显式 `cancel`；
 - 退出解释器时会取消剩余 task；
 - `std.net.*_async` 已经复用同一套 task 和事件循环。
@@ -351,7 +351,48 @@ let db = await b;
 - 普通函数不能使用 `await`；
 - 多个 async 函数可以先启动，再分别 await，从而并发执行；
 - `yield` 不用于 async；主动让出使用 `await std.task.yield()`；
-- 目前 async/await 的协程栈实现在 POSIX 上可用，Windows 仍为同步降级实现。
+- 协程栈由 Boost.Context 提供，支持 Boost.Context 覆盖的平台。
+
+生成器：
+
+```text
+import std;
+
+func numbers() {
+  yield 1;
+  yield 2;
+  yield 3;
+}
+
+let g = numbers();
+
+std.generator.next(g)
+std.generator.next(g)
+std.generator.next(g)
+std.generator.next(g)
+std.generator.done(g)
+```
+
+返回：
+
+```text
+{done: false, value: 1}
+{done: false, value: 2}
+{done: false, value: 3}
+{done: true, value: null}
+true
+```
+
+规则：
+
+- 函数体中出现 `yield` 时，该函数自动成为生成器；
+- 生成器调用后不会立即执行函数体，第一次 `next` 才开始；
+- `yield expr` 把值交给调用方并挂起；
+- `return` 的返回值作为生成器结束时 `{done: true, value: ...}` 的 value；
+- 目前 `yield` 不接收 `next` 回传值；
+- 目前还不能直接 `for ... in generator`，需要循环调用 `std.generator.next`；
+- async 生成器暂不支持；
+- 生成器依赖 Boost.Context 提供的协程栈。
 
 FFI：
 
@@ -404,6 +445,7 @@ std.process
 std.type
 std.net
 std.task
+std.generator
 std.ffi（可选）
 ```
 
@@ -522,6 +564,9 @@ std.task.wait_all
 std.task.cancel
 std.task.done
 
+std.generator.next
+std.generator.done
+
 std.ffi.open
 std.ffi.close
 std.ffi.call
@@ -577,6 +622,8 @@ std.bytes.from_int
 - task 是协作式调度的，只有在 `wait` / `wait_all`、`await` 或同步网络等待运行事件循环时才推进；
 - `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
 - async 函数可以挂起和恢复；普通函数仍不能通过 `spawn` 作为独立 task 启动；
+- `yield` 用于生成器；生成器通过 `std.generator.next` 拉取值；
+- 目前不支持 async 生成器，也不支持直接 `for ... in generator`；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
 - `std.ffi` 的 `u64` / `usize` 返回值必须在脚本 `int` 范围内，否则报错；
@@ -586,7 +633,7 @@ std.bytes.from_int
 - 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
 - `std.net` 暂不支持 TLS、HTTP；
-- async/await 使用有栈协程；POSIX 使用 `ucontext`，Windows 目前是同步降级实现；
+- async/await 和生成器使用 Boost.Context 提供的有栈协程；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
@@ -1631,7 +1678,8 @@ eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
-fiber.*       有栈协程与 async/await 调度
+fiber.*       Boost.Context 有栈协程、async/await 与生成器
+generator.*   生成器迭代函数
 builtins.*    内置函数实现
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化

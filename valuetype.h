@@ -18,6 +18,7 @@ struct function_code {
     bool is_method;
     bool variadic;
     bool is_async;
+    bool is_generator;
 };
 
 struct function_def {

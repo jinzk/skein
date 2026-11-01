@@ -130,7 +130,9 @@ enum bifs {
     B_task_wait,
     B_task_wait_all,
     B_task_cancel,
-    B_task_done
+    B_task_done,
+    B_generator_next,
+    B_generator_done
 };
 
 struct ast {
@@ -218,6 +220,7 @@ struct funcdef {
     int moved; /* body/params transferred to a runtime function value */
     int exported;
     int is_async;
+    int is_generator;
 };
 
 struct ufncall {
@@ -463,8 +466,10 @@ struct ast *newis(struct ast *value, struct type_constraint *type);
 struct ast *newspread(struct ast *value);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported = false, bool is_async = false);
+                    bool exported = false, bool is_async = false,
+                    bool is_generator = false);
 struct ast *newawait(struct ast *value);
+struct ast *newyield(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
 struct ast *newimport(char *path, char *alias);
 void push_func_location(int line, int column);

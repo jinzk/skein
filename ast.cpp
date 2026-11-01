@@ -455,7 +455,7 @@ struct ast *append_case(struct ast *head, struct ast *node) {
 }
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported, bool is_async) {
+                    bool exported, bool is_async, bool is_generator) {
     struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
     if (!a) {
         yyerror("out of space");
@@ -472,13 +472,23 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->sl = sl;
     a->ast = ast;
     a->moved = 0;
+    if (is_async && is_generator) {
+        yyerror("async generators are not supported");
+        is_generator = false;
+    }
     a->exported = exported;
     a->is_async = is_async;
+    a->is_generator = is_generator;
     return (struct ast *)a;
 }
 
 struct ast *newawait(struct ast *value) {
     struct ast *a = newast('b', value, NULL);
+    return a;
+}
+
+struct ast *newyield(struct ast *value) {
+    struct ast *a = newast('w', value, NULL);
     return a;
 }
 
@@ -543,7 +553,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     std::shared_ptr<function_code> code(
         new function_code{node->ast, node->sl, nparams,
                           node->name ? node->name : "", false, variadic,
-                          node->is_async != 0},
+                          node->is_async != 0, node->is_generator != 0},
         free_function_code);
     function_codes[node] = code;
     return code;
@@ -763,6 +773,7 @@ void treefree(struct ast *a) {
         case '!':
         case '~':
         case 'b':
+        case 'w':
             treefree(a->l);
             break;
         case 'V':

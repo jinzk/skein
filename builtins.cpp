@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "eval_helpers.h"
+#include "generator.h"
 #include "net.h"
 #include "task.h"
 #ifdef CALC_ENABLE_FFI
@@ -315,6 +316,8 @@ struct value_t *call_builtin(int functype,
 #endif
     if (functype >= B_task_sleep && functype <= B_task_done)
         return call_task_builtin(functype, args);
+    if (functype >= B_generator_next && functype <= B_generator_done)
+        return call_generator_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

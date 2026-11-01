@@ -1130,6 +1130,79 @@ def main():
         stderr="task was cancelled",
     )
     check(
+        "generator next",
+        "import std;\n"
+        "func numbers() {\n"
+        "  yield 1;\n"
+        "  yield 2;\n"
+        "  yield 3;\n"
+        "}\n"
+        "let g = numbers();\n"
+        "std.generator.next(g)\n"
+        "std.generator.next(g)\n"
+        "std.generator.next(g)\n"
+        "std.generator.next(g)\n"
+        "std.generator.done(g)\n",
+        stdout_all=[
+            "= {done: false, value: 1}",
+            "= {done: false, value: 2}",
+            "= {done: false, value: 3}",
+            "= {done: true, value: null}",
+            "= true",
+        ],
+    )
+    check(
+        "generator return value",
+        "import std;\n"
+        "func value() {\n"
+        "  yield 1;\n"
+        "  return 9;\n"
+        "}\n"
+        "let g = value();\n"
+        "std.generator.next(g)\n"
+        "std.generator.next(g)\n",
+        stdout_all=[
+            "= {done: false, value: 1}",
+            "= {done: true, value: 9}",
+        ],
+    )
+    check(
+        "yield outside generator",
+        "yield 1;\n",
+        stderr="yield outside generator",
+    )
+    check(
+        "generator error",
+        "import std;\n"
+        "func broken() {\n"
+        "  yield 1;\n"
+        "  let x = 1 / 0;\n"
+        "}\n"
+        "let g = broken();\n"
+        "std.generator.next(g)\n"
+        "std.generator.next(g);\n",
+        stderr="generator failed",
+    )
+    check(
+        "generator closure value",
+        "import std;\n"
+        "func make() {\n"
+        "  let x = 5;\n"
+        "  yield func() { return x; };\n"
+        "}\n"
+        "let g = make();\n"
+        "let r = std.generator.next(g);\n"
+        "let f = r[\"value\"];\n"
+        "f()\n",
+        stdout="= 5",
+    )
+    check(
+        "generator unstarted cleanup",
+        "import std;\n"
+        "func pending() { yield 1; }\n"
+        "let g = pending();\n",
+    )
+    check(
         "std net resolve",
         'import std;\nlen(std.net.resolve("localhost")) > 0\n',
         stdout="= true",

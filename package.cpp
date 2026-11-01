@@ -500,6 +500,12 @@ value_t *build_std_namespace() {
             {"cancel", B_task_cancel},
             {"done", B_task_done},
         })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("generator"),
+        builtin_module({
+            {"next", B_generator_next},
+            {"done", B_generator_done},
+        })));
     return (value_t *)root;
 }
 

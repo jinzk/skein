@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "ast.h"
 #include "diagnostics.h"
@@ -18,6 +19,24 @@ extern int yyparse();
 
 static int flow_keyword_line = 0;
 static int flow_keyword_column = 0;
+static std::vector<int> func_yield_counts;
+
+static void start_function() {
+    func_yield_counts.push_back(0);
+}
+
+static void note_yield() {
+    if (!func_yield_counts.empty())
+        ++func_yield_counts.back();
+}
+
+static bool finish_function() {
+    bool generator =
+        !func_yield_counts.empty() && func_yield_counts.back() > 0;
+    if (!func_yield_counts.empty())
+        func_yield_counts.pop_back();
+    return generator;
+}
 
 static char *join_import_path(const char *left, const char *right) {
     size_t left_len = std::strlen(left);
@@ -192,7 +211,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <str> XSTRING "string"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
-%token ASYNC "async" AWAIT "await"
+%token ASYNC "async" AWAIT "await" YIELD "yield"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
@@ -264,15 +283,17 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | FOR '(' LET NAME ',' NAME IN exp ')' scope
                                            { $$ = newforin($4, $6, $8, $10); }
     | funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc($2, $4, NULL); }
+                                           { $$ = newfunc($2, $4, NULL, false, false, finish_function()); }
     | funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($2, $4, $7); }
+                                           { $$ = newfunc($2, $4, $7, false, false, finish_function()); }
     | ASYNC funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($3, $5, NULL,
-                                                          false, true); }
+                                                          false, true,
+                                                          finish_function()); }
     | ASYNC funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($3, $5, $8,
-                                                          false, true); }
+                                                          false, true,
+                                                          finish_function()); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
     | EXPORT LET NAME ':' type '=' exp ';' {
         $$ = newvar($3, $7, true, false, $5);
@@ -304,16 +325,18 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                           (struct trait_method *)$5, true);
       }
     | EXPORT funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc($3, $5, NULL, true); }
+                                           { $$ = newfunc($3, $5, NULL, true, false, finish_function()); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($3, $5, $8, true); }
+                                           { $$ = newfunc($3, $5, $8, true, false, finish_function()); }
     | EXPORT ASYNC funcstart NAME '(' symlist ')' '{'
       EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($4, $6, NULL,
-                                                          true, true); }
+                                                          true, true,
+                                                          finish_function()); }
     | EXPORT ASYNC funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newfunc($4, $6, $9,
-                                                          true, true); }
+                                                          true, true,
+                                                          finish_function()); }
     | LABEL NAME ':' stmt                { $$ = newlabel($2, $4); }
     | struct_decl
     | impl_decl
@@ -354,9 +377,9 @@ struct_member: NAME ':' type ';'         { $$ = newstructfield($1, $3); }
     ;
 
 method_member: funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newstructmethod($2, newfunc(NULL, $4, NULL)); }
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, NULL, false, false, finish_function())); }
     | funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newstructmethod($2, newfunc(NULL, $4, $7)); }
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, $7, false, false, finish_function())); }
     ;
 
 impl_decl: IMPL NAME '{' empty_body      {
@@ -428,6 +451,7 @@ importpath: NAME                          { $$ = $1; }
     ;
 
 fieldname: NAME                           { $$ = $1; }
+    | YIELD                                { $$ = copy_text("yield"); }
     | BUILTIN {
         const char *name = builtin_field_name($1);
         if (name) {
@@ -503,6 +527,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHR exp                         { $$ = newast('r', $1, $3); }
     | '(' exp ')'                         { $$ = $2; }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
+    | YIELD exp %prec UMINUS              { note_yield(); $$ = newyield($2); }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }
@@ -548,19 +573,24 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           (struct struct_init *)$3);
       }
     | funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc(NULL, $3, NULL); }
+                                           { $$ = newfunc(NULL, $3, NULL, false, false, finish_function()); }
     | funcstart '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc(NULL, $3, $6); }
+                                           { $$ = newfunc(NULL, $3, $6, false, false, finish_function()); }
     | ASYNC funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $4, NULL,
-                                                          false, true); }
+                                                          false, true,
+                                                          finish_function()); }
     | ASYNC funcstart '(' symlist ')' '{' list '}'
                                            { $$ = newfunc(NULL, $4, $7,
-                                                          false, true); }
+                                                          false, true,
+                                                          finish_function()); }
     | value
     ;
 
-funcstart: FUNC { push_func_location(g_token_line, g_token_column); }
+funcstart: FUNC {
+        push_func_location(g_token_line, g_token_column);
+        start_function();
+    }
     ;
 
 value: INT                                { $$ = newint($1); }
@@ -680,6 +710,7 @@ calclist: exp { $$ = $1; }
     ;
 
 docalc: calclist EOL {
+        func_yield_counts.clear();
         active_eval_context().runtime_error_count = 0;
         diag_set_location(0, 0);
 

@@ -13,6 +13,11 @@
 
 static scope_context fallback_context;
 static scope_context *active_context = NULL;
+static bool tearing_down = false;
+
+bool scope_teardown_active() {
+    return tearing_down;
+}
 
 scope_context &active_scope_context() {
     return active_context ? *active_context : fallback_context;
@@ -156,6 +161,8 @@ void donescope() {
 }
 
 void adopt_scopes(scope_context &from, scope_context &to) {
+    if (tearing_down)
+        return;
     for (auto &scope : from.all_scopes)
         to.all_scopes.push_back(scope);
     from.all_scopes.clear();
@@ -165,6 +172,8 @@ void adopt_scopes(scope_context &from, scope_context &to) {
 }
 
 void donescope(scope_context &context) {
+    bool previous_tearing_down = tearing_down;
+    tearing_down = true;
     context.restore_stack.clear();
 
     /*
@@ -182,6 +191,7 @@ void donescope(scope_context &context) {
     context.all_scopes.clear();
     context.statements_since_collect = 0;
     context.scopes_at_last_collect = 0;
+    tearing_down = previous_tearing_down;
 }
 
 namespace {

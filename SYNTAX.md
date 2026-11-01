@@ -15,7 +15,7 @@
 ### 1.2 关键字
 
 ```text
-let const func async await
+let const func async await yield
 if else while do for
 switch case default
 struct impl trait
@@ -1211,6 +1211,7 @@ std.process
 std.type
 std.net
 std.task
+std.generator
 std.ffi（可选）
 ```
 
@@ -1257,6 +1258,7 @@ std.bytes.hex(bytes_from_hex("00ff"))
 - `std.type`：`kind_of`、`name`、`module`、`source`；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
 - `std.task`：原生 task、等待、批量等待、取消和完成状态；
+- `std.generator`：生成器的 `next` / `done`；
 - `std.ffi`：可选的 libffi C ABI 调用。
 
 TCP 示例：
@@ -1343,7 +1345,7 @@ cancel(task)               → bool
 done(task)                 → bool
 ```
 
-`yield` 是普通函数，不是关键字。`wait` 超时不会自动取消 task；需要显式调用 `cancel`。
+`std.task.yield` 是函数字段；单独的 `yield` 关键字用于生成器。`wait` 超时不会自动取消 task；需要显式调用 `cancel`。
 
 task 是协作式调度的：只有运行事件循环时才会推进，例如 `wait`、`wait_all`、`await` 或同步网络调用期间。
 
@@ -1376,7 +1378,38 @@ let db = await b;
 - 普通函数中使用 `await` 会报错；
 - 多个 async 函数可以先启动再分别 await，从而并发执行；
 - `yield` 不用于 async；主动让出使用 `await std.task.yield()`；
-- POSIX 使用有栈协程实现；Windows 目前是同步降级实现。
+- 使用 Boost.Context 提供有栈协程。
+
+生成器：
+
+```text
+import std;
+
+func numbers() {
+  yield 1;
+  yield 2;
+  yield 3;
+}
+
+let g = numbers();
+
+std.generator.next(g)
+std.generator.next(g)
+std.generator.next(g)
+std.generator.next(g)
+std.generator.done(g)
+```
+
+规则：
+
+- 函数体中出现 `yield` 时，该函数自动成为生成器；
+- 第一次 `std.generator.next` 才开始执行函数体；
+- `std.generator.next` 返回 `{done: bool, value: ...}`；
+- `return` 的返回值作为结束时 `{done: true, value: ...}` 的 value；
+- 当前 `yield` 不接收 `next` 回传值；
+- async 生成器暂不支持；
+- 暂不支持直接 `for ... in generator`；
+- 生成器依赖 Boost.Context 提供的有栈协程。
 
 FFI 示例：
 
@@ -1432,7 +1465,9 @@ std.ffi.buffer_free
 - `std.net.*_async` 的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - async 函数可以挂起和恢复；普通函数仍不能通过通用 `spawn` 启动；
 - `std.task.wait` / `wait_all` 超时不会自动取消 task，需要显式 `cancel`；
-- async/await 使用有栈协程；POSIX 使用 `ucontext`，Windows 目前是同步降级实现；
+- async/await 和生成器使用 Boost.Context 提供的有栈协程；
+- 生成器依赖 Boost.Context 提供的有栈协程；
+- 暂不支持 async 生成器、`yield` 回传值和直接 `for ... in generator`；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。

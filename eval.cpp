@@ -665,6 +665,23 @@ static struct value_t *invoke_value(
         }
     }
 
+    if (def->code->is_generator) {
+        std::shared_ptr<std::vector<value_t *>> owned(
+            new std::vector<value_t *>(std::move(args)),
+            [](std::vector<value_t *> *values) {
+                free_args(*values);
+                delete values;
+            });
+        generator_ptr generator = generator_create(
+            [def, owned]() {
+                return invoke_function_body(def, *owned);
+            });
+        if (!generator) {
+            return NULL;
+        }
+        return new_generator_value(std::move(generator));
+    }
+
     if (def->code->is_async) {
         task_ptr task = fiber_start_async(
             [def, owned = std::move(args)]() mutable {
@@ -2207,6 +2224,14 @@ struct value_t *eval(struct ast *a) {
             if (get_task_value(v, task))
                 ret = fiber_await_task(task);
             freeval(v);
+            break;
+        }
+
+        case 'w': {
+            struct value_t *v = a->l ? eval(a->l) : newnull();
+            if (!v)
+                break;
+            ret = fiber_yield_value(v);
             break;
         }
 

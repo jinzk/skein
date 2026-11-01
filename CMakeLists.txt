@@ -39,6 +39,11 @@ if(NOT CALC_LIBUV_TARGET)
   message(FATAL_ERROR "libuv not found; install libuv development files")
 endif()
 
+find_package(Boost CONFIG QUIET COMPONENTS context)
+if(NOT Boost_FOUND)
+  find_package(Boost REQUIRED COMPONENTS context)
+endif()
+
 add_executable(${PROJECT_NAME}
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
@@ -51,6 +56,7 @@ add_executable(${PROJECT_NAME}
   fiber.cpp
   filetype.cpp
   format.cpp
+  generator.cpp
   main.cpp
   net.cpp
   package.cpp
@@ -83,7 +89,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE ${CALC_LIBUV_TARGET})
+target_link_libraries(${PROJECT_NAME} PRIVATE
+  ${CALC_LIBUV_TARGET}
+  Boost::context
+)
 
 option(CALC_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
 if(CALC_ENABLE_FFI)

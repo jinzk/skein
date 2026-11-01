@@ -2,8 +2,10 @@
 
 #include "ast.h"
 #include "eval_helpers.h"
+#include "error.h"
 #include "generator.h"
 #include "net.h"
+#include "result.h"
 #include "task.h"
 #ifdef CALC_ENABLE_FFI
 #include "ffi_module.h"
@@ -175,6 +177,8 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_func: return "function";
         case T_builtin: return "builtin";
         case T_userdata: return "userdata";
+        case T_result: return "result";
+        case T_error: return "error";
         case T_struct: return "struct";
         case T_method: return "method";
         case T_null: return "null";
@@ -314,10 +318,14 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_ffi_open && functype <= B_ffi_buffer_free)
         return call_ffi_builtin(functype, args);
 #endif
-    if (functype >= B_task_sleep && functype <= B_task_done)
+    if (functype >= B_task_sleep && functype <= B_task_try_wait_all)
         return call_task_builtin(functype, args);
-    if (functype >= B_generator_next && functype <= B_generator_done)
+    if (functype >= B_generator_next && functype <= B_generator_close)
         return call_generator_builtin(functype, args);
+    if (functype >= B_result_ok && functype <= B_result_capture)
+        return call_result_builtin(functype, args);
+    if (functype >= B_error_new && functype <= B_error_message)
+        return call_error_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

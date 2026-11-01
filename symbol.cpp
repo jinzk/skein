@@ -124,6 +124,10 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_null;
         case TYPE_USERDATA:
             return value->type == T_userdata;
+        case TYPE_RESULT:
+            return value->type == T_result;
+        case TYPE_ERROR:
+            return value->type == T_error;
         case TYPE_NAMED:
             return named_type_matches(type->module, type->name, value);
         case TYPE_INVALID:
@@ -168,6 +172,8 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_CALLABLE: return "callable";
         case TYPE_NULL: return "null";
         case TYPE_USERDATA: return "userdata";
+        case TYPE_RESULT: return "result";
+        case TYPE_ERROR: return "error";
         case TYPE_NAMED: return type->name ? type->name : "invalid";
         case TYPE_INVALID:
         default: return "invalid";

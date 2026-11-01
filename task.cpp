@@ -1,6 +1,8 @@
 #include "task.h"
 
 #include "ast.h"
+#include "eval.h"
+#include "eval_context.h"
 #include "event_loop.h"
 #include "fiber.h"
 #include "repl.h"
@@ -35,8 +37,11 @@ struct task {
     task_status status = TASK_PENDING;
     value_t *result = NULL;
     std::string error;
+    value_t *error_value = NULL;
     uv_timer_t *timer = NULL;
     std::function<void()> cancel_operation;
+    std::vector<std::function<void()>> waiters;
+    std::vector<std::shared_ptr<task>> dependencies;
 
     task() {
         task_registry().push_back(this);
@@ -51,6 +56,7 @@ struct task {
         tasks.erase(std::remove(tasks.begin(), tasks.end(), this),
                     tasks.end());
         freeval(result);
+        freeval(error_value);
     }
 
     bool done() const {
@@ -70,6 +76,15 @@ struct task {
             delete handle;
     }
 
+    void notify_waiters() {
+        std::vector<std::function<void()>> pending = std::move(waiters);
+        waiters.clear();
+        for (size_t i = 0; i < pending.size(); ++i) {
+            if (pending[i])
+                pending[i]();
+        }
+    }
+
     void complete(value_t *value) {
         if (status != TASK_PENDING) {
             freeval(value);
@@ -79,15 +94,26 @@ struct task {
         result = value;
         close_timer();
         cancel_operation = nullptr;
+        notify_waiters();
+    }
+
+    void fail_error(value_t *value) {
+        if (status != TASK_PENDING) {
+            freeval(value);
+            return;
+        }
+        status = TASK_FAILED;
+        error_value = normalize_error(value, "task");
+        error = error_message_of(error_value);
+        close_timer();
+        cancel_operation = nullptr;
+        notify_waiters();
     }
 
     void fail(const std::string &message) {
         if (status != TASK_PENDING)
             return;
-        status = TASK_FAILED;
-        error = message;
-        close_timer();
-        cancel_operation = nullptr;
+        fail_error(newerrorval("runtime", message));
     }
 
     bool cancel() {
@@ -95,11 +121,13 @@ struct task {
             return false;
         status = TASK_CANCELLED;
         error = "task was cancelled";
+        error_value = newerrorval("cancelled", error);
         close_timer();
         std::function<void()> cancel = std::move(cancel_operation);
         cancel_operation = nullptr;
         if (cancel)
             cancel();
+        notify_waiters();
         return true;
     }
 };
@@ -268,11 +296,11 @@ value_t *task_wait(const std::vector<value_t *> &args) {
     }
 
     if (value->status == TASK_CANCELLED) {
-        yyerror("task was cancelled");
+        eval_raise(newerrorval("cancelled", "task was cancelled"));
         return NULL;
     }
     if (value->status == TASK_FAILED) {
-        yyerror("task failed: %s", value->error.c_str());
+        eval_raise(task_error_value(value));
         return NULL;
     }
     return value->result ? dupval(value->result) : newnull();
@@ -333,12 +361,12 @@ value_t *task_wait_all(const std::vector<value_t *> &args) {
     for (size_t i = 0; i < tasks.size(); ++i) {
         if (tasks[i]->status == TASK_CANCELLED) {
             freeval((value_t *)result);
-            yyerror("task was cancelled");
+            eval_raise(newerrorval("cancelled", "task was cancelled"));
             return NULL;
         }
         if (tasks[i]->status == TASK_FAILED) {
             freeval((value_t *)result);
-            yyerror("task failed: %s", tasks[i]->error.c_str());
+            eval_raise(task_error_value(tasks[i]));
             return NULL;
         }
         result->payload->items.push_back(
@@ -396,6 +424,13 @@ void task_fail(const task_ptr &value, const std::string &error) {
         value->fail(error);
 }
 
+void task_fail_error(const task_ptr &value, value_t *error) {
+    if (value)
+        value->fail_error(error);
+    else
+        freeval(error);
+}
+
 task_state_code task_get_state(const task_ptr &value) {
     if (!value)
         return TASK_STATE_FAILED;
@@ -417,6 +452,106 @@ value_t *task_copy_result(const task_ptr &value) {
 const std::string &task_error_message(const task_ptr &value) {
     static const std::string empty;
     return value ? value->error : empty;
+}
+
+value_t *task_error_value(const task_ptr &value) {
+    if (!value)
+        return newerrorval("task", "task failed");
+    if (value->error_value)
+        return dupval(value->error_value);
+    if (value->status == TASK_CANCELLED)
+        return newerrorval("cancelled", "task was cancelled");
+    return newerrorval("runtime",
+                       value->error.empty() ? "task failed" : value->error);
+}
+
+static void task_add_waiter(const task_ptr &task,
+                            std::function<void()> waiter) {
+    if (!task)
+        return;
+    if (task->status != TASK_PENDING) {
+        waiter();
+        return;
+    }
+    task->waiters.push_back(std::move(waiter));
+}
+
+static value_t *task_as_result(const task_ptr &task) {
+    switch (task_get_state(task)) {
+        case TASK_STATE_DONE:
+            return newresultok(task_copy_result(task));
+        case TASK_STATE_FAILED:
+            return newresulterr(task_error_value(task));
+        case TASK_STATE_CANCELLED:
+            return newresulterr(
+                newerrorval("cancelled", "task was cancelled"));
+        case TASK_STATE_PENDING:
+        default:
+            return newresulterr(newerrorval("pending", "task is pending"));
+    }
+}
+
+static value_t *task_catch(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.task.catch expects 1 argument");
+        return NULL;
+    }
+    task_ptr source;
+    if (!get_task_value(args[0], source))
+        return NULL;
+
+    task_ptr result = task_create();
+    result->dependencies.push_back(source);
+
+    if (source->status != TASK_PENDING) {
+        task_complete(result, task_as_result(source));
+        return new_task_value(std::move(result));
+    }
+
+    std::weak_ptr<task> weak_result = result;
+    std::weak_ptr<task> weak_source = source;
+    task_add_waiter(source, [weak_result, weak_source] {
+        task_ptr result = weak_result.lock();
+        task_ptr source = weak_source.lock();
+        if (result && source)
+            task_complete(result, task_as_result(source));
+    });
+    return new_task_value(std::move(result));
+}
+
+static value_t *task_capture_call(
+    value_t *(*call)(const std::vector<value_t *> &),
+    const std::vector<value_t *> &args) {
+    eval_capture_snapshot snapshot;
+    eval_capture_begin(snapshot);
+    value_t *result = call(args);
+    eval_capture_result captured = eval_capture_end(snapshot);
+
+    if (g_interrupted) {
+        freeval(result);
+        freeval(captured.error);
+        return NULL;
+    }
+    if (captured.failed) {
+        freeval(result);
+        return newresulterr(captured.error);
+    }
+    if (active_eval_context().control == EVAL_CONTROL_CLOSE) {
+        freeval(result);
+        freeval(captured.error);
+        return NULL;
+    }
+    if (!result)
+        return newresulterr_message("runtime", "runtime error");
+    return newresultok(result);
+}
+
+static value_t *task_try_wait(const std::vector<value_t *> &args) {
+    return task_capture_call(task_wait, args);
+}
+
+static value_t *task_try_wait_all(const std::vector<value_t *> &args) {
+    return task_capture_call(task_wait_all, args);
 }
 
 void task_shutdown() {
@@ -442,6 +577,12 @@ struct value_t *call_task_builtin(
             return task_cancel(args);
         case B_task_done:
             return task_done(args);
+        case B_task_catch:
+            return task_catch(args);
+        case B_task_try_wait:
+            return task_try_wait(args);
+        case B_task_try_wait_all:
+            return task_try_wait_all(args);
         default:
             yyerror("unknown task function");
             return NULL;

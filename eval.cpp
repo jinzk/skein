@@ -135,16 +135,165 @@ bool eval_control_pending() {
 void eval_finish_statement_control() {
     if (eval_ctx().control == EVAL_CONTROL_NONE)
         return;
+    if (eval_ctx().control == EVAL_CONTROL_CLOSE) {
+        clear_eval_control();
+        return;
+    }
     if (eval_ctx().control == EVAL_CONTROL_FAIL) {
         if (eval_ctx().control_value)
             yyerror("uncaught fail: %s",
-                    value_to_string(eval_ctx().control_value).c_str());
+                    error_message_of(eval_ctx().control_value).c_str());
         else
             yyerror("uncaught fail");
     } else {
         yyerror("recover outside error handler");
     }
     clear_eval_control();
+}
+
+void eval_capture_begin(struct eval_capture_snapshot &snapshot) {
+    eval_context &context = eval_ctx();
+    snapshot.capture_errors = context.capture_errors;
+    snapshot.has_captured_error = context.has_captured_error;
+    snapshot.captured_error = context.captured_error;
+    snapshot.runtime_error_count = context.runtime_error_count;
+    context.capture_errors = true;
+    context.has_captured_error = false;
+    context.captured_error.clear();
+}
+
+struct eval_capture_result eval_capture_end(
+    const struct eval_capture_snapshot &snapshot) {
+    eval_context &context = eval_ctx();
+    bool has_error = context.has_captured_error;
+    std::string message = context.captured_error;
+
+    context.capture_errors = snapshot.capture_errors;
+    context.has_captured_error = snapshot.has_captured_error;
+    context.captured_error = snapshot.captured_error;
+    context.runtime_error_count = snapshot.runtime_error_count;
+
+    struct eval_capture_result result;
+    if (context.control == EVAL_CONTROL_FAIL) {
+        result.failed = true;
+        result.error = normalize_error(take_eval_control(EVAL_CONTROL_FAIL),
+                                       "fail");
+    } else if (has_error) {
+        result.failed = true;
+        result.error = newerrorval(
+            "runtime", message.empty() ? "runtime error" : message);
+    }
+    return result;
+}
+
+void eval_raise(struct value_t *error) {
+    set_eval_control(EVAL_CONTROL_FAIL, normalize_error(error, "fail"));
+}
+
+void eval_request_close() {
+    clear_eval_control();
+    eval_ctx().control = EVAL_CONTROL_CLOSE;
+}
+
+static void push_defer_scope() {
+    eval_ctx().defer_stack.emplace_back();
+}
+
+static void run_current_defers() {
+    eval_context &context = eval_ctx();
+    if (context.defer_stack.empty())
+        return;
+    std::vector<ast *> defers = std::move(context.defer_stack.back());
+    context.defer_stack.pop_back();
+
+    /* Run cleanup with a clean control state so an in-flight error does not
+       get mistaken for an error raised by a defer. */
+    eval_control_kind saved_control = context.control;
+    value_t *saved_value = context.control_value;
+    context.control = EVAL_CONTROL_NONE;
+    context.control_value = NULL;
+
+    /* While another error is unwinding, defer failures are secondary
+       diagnostics and must not be swallowed by an outer capture. */
+    bool saved_capture = context.capture_errors;
+    if (saved_control != EVAL_CONTROL_NONE)
+        context.capture_errors = false;
+
+    eval_control_kind pending_control = EVAL_CONTROL_NONE;
+    value_t *pending_value = NULL;
+
+    for (size_t i = defers.size(); i > 0; --i) {
+        struct value_t *result = eval(defers[i - 1]);
+        freeval(result);
+        if (context.control == EVAL_CONTROL_NONE)
+            continue;
+
+        if (pending_control != EVAL_CONTROL_NONE ||
+            (saved_control != EVAL_CONTROL_NONE &&
+             saved_control != EVAL_CONTROL_CLOSE)) {
+            /* A second error while one is already unwinding. Keep the first
+               error and report this one as a secondary diagnostic. */
+            if (context.control == EVAL_CONTROL_FAIL)
+                yyerror("error in defer: %s",
+                        error_message_of(context.control_value).c_str());
+            else
+                yyerror("error in defer: recover outside error handler");
+            clear_eval_control();
+            continue;
+        }
+
+        pending_control = context.control;
+        pending_value = context.control_value;
+        context.control = EVAL_CONTROL_NONE;
+        context.control_value = NULL;
+        context.capture_errors = false;
+    }
+
+    if (saved_control == EVAL_CONTROL_CLOSE &&
+        pending_control == EVAL_CONTROL_FAIL) {
+        /* A failing defer during close replaces the internal close signal,
+           so the caller can observe it through fail / on error. */
+        freeval(saved_value);
+        context.control = pending_control;
+        context.control_value = pending_value;
+    } else if (saved_control != EVAL_CONTROL_NONE) {
+        freeval(pending_value);
+        context.control = saved_control;
+        context.control_value = saved_value;
+    } else if (pending_control != EVAL_CONTROL_NONE) {
+        context.control = pending_control;
+        context.control_value = pending_value;
+    }
+    context.capture_errors = saved_capture;
+}
+
+void eval_pushscope() {
+    pushscope();
+    push_defer_scope();
+}
+
+void eval_push_isolated_scope() {
+    pushscope_isolated();
+    push_defer_scope();
+}
+
+void eval_push_closure_scope(
+    const std::shared_ptr<struct scope_t> &parent) {
+    pushscope_closure(parent);
+    push_defer_scope();
+}
+
+void eval_popscope() {
+    run_current_defers();
+    popscope();
+}
+
+void eval_begin_root_defers() {
+    push_defer_scope();
+}
+
+void eval_run_root_defers() {
+    run_current_defers();
 }
 
 static int compare_int_double(long long i, double d, bool &unordered) {
@@ -258,6 +407,8 @@ bool truthy(const struct value_t *v) {
         case T_func: return true;
         case T_builtin: return true;
         case T_userdata: return true;
+        case T_result: return ((struct result_value_t *)v)->ok;
+        case T_error: return true;
         case T_null: return false;
         default: return false;
     }
@@ -311,6 +462,13 @@ bool value_equals(struct value_t *a, struct value_t *b) {
         int cmp = compare_numeric(a, b, unordered);
         return !unordered && cmp == 0;
     }
+    if (a->type == T_error && b->type == T_string) {
+        struct string_value_t *sb = (struct string_value_t *)b;
+        return ((struct error_value_t *)a)->message ==
+               (sb->value ? sb->value : "");
+    }
+    if (a->type == T_string && b->type == T_error)
+        return value_equals(b, a);
     if (a->type != b->type) return false;
     switch (a->type) {
         case T_bool:
@@ -360,6 +518,18 @@ bool value_equals(struct value_t *a, struct value_t *b) {
             struct userdata_value_t *ua = (struct userdata_value_t *)a;
             struct userdata_value_t *ub = (struct userdata_value_t *)b;
             return ua->meta == ub->meta && ua->data == ub->data;
+        }
+        case T_error: {
+            struct error_value_t *ea = (struct error_value_t *)a;
+            struct error_value_t *eb = (struct error_value_t *)b;
+            return ea->kind == eb->kind && ea->message == eb->message;
+        }
+        case T_result: {
+            struct result_value_t *ra = (struct result_value_t *)a;
+            struct result_value_t *rb = (struct result_value_t *)b;
+            if (ra->ok != rb->ok) return false;
+            if (!ra->ok) return value_equals(ra->error, rb->error);
+            return value_equals(ra->value, rb->value);
         }
         case T_struct: {
             struct struct_value_t *sa = (struct struct_value_t *)a;
@@ -517,7 +687,7 @@ static struct value_t *invoke_function_body(
     call_stack_guard frame_guard(frame_name, frame_line, frame_column);
     bool saved_allow_await = eval_ctx().allow_await;
     eval_ctx().allow_await = def->code->is_async;
-    pushscope_closure(def->closure);
+    eval_push_closure_scope(def->closure);
     int i = 0;
     for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
          sl = sl->next, ++i) {
@@ -565,7 +735,7 @@ static struct value_t *invoke_function_body(
         freeval(body_ret);
     }
 
-    popscope();
+    eval_popscope();
     eval_ctx().allow_await = saved_allow_await;
 
     if (eval_ctx().control != EVAL_CONTROL_NONE) {
@@ -1836,9 +2006,9 @@ struct value_t *eval(struct ast *a) {
             std::string error;
 
             if (package_is_loading())
-                pushscope();
+                eval_pushscope();
             else
-                pushscope_isolated();
+                eval_push_isolated_scope();
 
             std::string saved_module_name = diag_current_module_name();
             std::string package_module_name =
@@ -1855,7 +2025,7 @@ struct value_t *eval(struct ast *a) {
             value_t *ns = NULL;
             if (eval_ctx().runtime_error_count == errors_before)
                 ns = package_build_namespace(current_scope().get(), error);
-            popscope();
+            eval_popscope();
             diag_set_module_name(saved_module_name);
 
             freeval(body_ret);
@@ -2027,7 +2197,8 @@ struct value_t *eval(struct ast *a) {
                 freeval(value);
                 break;
             }
-            set_eval_control(EVAL_CONTROL_FAIL, value);
+            set_eval_control(EVAL_CONTROL_FAIL,
+                             normalize_error(value, "fail"));
             break;
         }
 
@@ -2062,23 +2233,53 @@ struct value_t *eval(struct ast *a) {
                 freeval(value);
                 break;
             }
-            set_eval_control(EVAL_CONTROL_FAIL, value);
+            set_eval_control(EVAL_CONTROL_FAIL,
+                             normalize_error(value, "fail"));
             break;
         }
 
         case 'o': {
             struct on_error_node *handler = (struct on_error_node *)a;
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
             struct value_t *value = eval(handler->call);
+            struct eval_capture_result captured = eval_capture_end(snapshot);
+            if (g_interrupted) {
+                freeval(value);
+                freeval(captured.error);
+                break;
+            }
+            struct value_t *error_value = captured.error;
+            if (captured.failed) {
+                freeval(value);
+                value = NULL;
+            } else if (value && value->type == T_result) {
+                struct result_value_t *result =
+                    (struct result_value_t *)value;
+                if (result->ok) {
+                    ret = dupval(result->value);
+                    freeval(value);
+                    freeval(error_value);
+                    break;
+                }
+                freeval(error_value);
+                error_value = dupval(result->error);
+                freeval(value);
+                value = NULL;
+            }
             if (value) {
+                freeval(error_value);
                 ret = value;
                 break;
             }
-            if (eval_ctx().control != EVAL_CONTROL_FAIL)
-                break;
 
-            struct value_t *error_value =
-                take_eval_control(EVAL_CONTROL_FAIL);
-            pushscope();
+            if (!error_value) {
+                if (eval_ctx().control != EVAL_CONTROL_FAIL)
+                    break;
+                error_value = take_eval_control(EVAL_CONTROL_FAIL);
+            }
+            error_value = normalize_error(error_value, "fail");
+            eval_pushscope();
             struct symbol *error_sym = newsym(handler->name);
             error_sym->val = error_value;
             error_sym->is_const = true;
@@ -2089,7 +2290,7 @@ struct value_t *eval(struct ast *a) {
             eval_ctx().handler_depth = saved_handler_depth + 1;
             struct value_t *body = eval(handler->body);
             eval_ctx().handler_depth = saved_handler_depth;
-            popscope();
+            eval_popscope();
 
             if (eval_ctx().control == EVAL_CONTROL_RECOVER) {
                 ret = take_eval_control(EVAL_CONTROL_RECOVER);
@@ -2117,9 +2318,9 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'X': {
-            pushscope();
+            eval_pushscope();
             ret = eval(((struct nscope *)a)->ast);
-            popscope();
+            eval_popscope();
             break;
         }
 
@@ -2232,6 +2433,17 @@ struct value_t *eval(struct ast *a) {
             if (!v)
                 break;
             ret = fiber_yield_value(v);
+            break;
+        }
+
+        case 'n': {
+            eval_context &context = eval_ctx();
+            if (context.defer_stack.size() <= 1) {
+                yyerror("defer is only allowed inside a function or block");
+                break;
+            }
+            context.defer_stack.back().push_back(a->l);
+            ret = newnull();
             break;
         }
 
@@ -2357,7 +2569,7 @@ struct value_t *eval(struct ast *a) {
             }
 
             auto run_body = [&](struct ast *body) {
-                pushscope();
+                eval_pushscope();
                 int body_errors = eval_ctx().runtime_error_count;
                 struct value_t *body_ret = eval(body);
                 if (eval_ctx().runtime_error_count != body_errors) {
@@ -2375,7 +2587,7 @@ struct value_t *eval(struct ast *a) {
                         freeval(body_ret);
                     }
                 }
-                popscope();
+                eval_popscope();
             };
 
             struct case_node *default_case = NULL;
@@ -2602,6 +2814,89 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
+            if (fiber_is_generator(iter)) {
+                if (f->value_name) {
+                    yyerror("two-variable for-in requires dict, got generator");
+                    freeval(iter);
+                    break;
+                }
+                generator_ptr generator;
+                if (!get_generator_value(iter, generator)) {
+                    freeval(iter);
+                    break;
+                }
+
+                eval_pushscope();
+                struct symbol *sym = newsym(f->name);
+                sym->val = NULL;
+                savesym(sym);
+
+                bool leave = false;
+                while (!leave) {
+                    if (g_interrupted)
+                        break;
+
+                    struct value_t *item = NULL;
+                    bool done = false;
+                    if (!generator_next_value(generator, NULL, item, done)) {
+                        freeval(item);
+                        leave = true;
+                        break;
+                    }
+                    if (done) {
+                        freeval(item);
+                        break;
+                    }
+                    if (sym->val)
+                        freeval(sym->val);
+                    sym->val = item;
+
+                    errors_before = eval_ctx().runtime_error_count;
+                    struct value_t *body = eval(f->body);
+                    if (eval_ctx().runtime_error_count != errors_before) {
+                        freeval(body);
+                        leave = true;
+                        break;
+                    }
+                    if (eval_ctx().control != EVAL_CONTROL_NONE) {
+                        freeval(body);
+                        leave = true;
+                        break;
+                    }
+                    if (body) {
+                        if (body->type == T_return) {
+                            ret = body;
+                            leave = true;
+                            break;
+                        }
+                        if (body->type == T_break) {
+                            if (control_matches_label(body, loop_label)) {
+                                freeval(body);
+                                leave = true;
+                                break;
+                            }
+                            ret = body;
+                            leave = true;
+                            break;
+                        }
+                        if (body->type == T_continue) {
+                            if (control_matches_label(body, loop_label)) {
+                                freeval(body);
+                                continue;
+                            }
+                            ret = body;
+                            leave = true;
+                            break;
+                        }
+                        freeval(body);
+                    }
+                }
+
+                eval_popscope();
+                freeval(iter);
+                break;
+            }
+
             size_t count = 0;
             if (iter->type == T_list)
                 count = ((struct list_value_t *)iter)->payload->items.size();
@@ -2631,7 +2926,7 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
-            pushscope();
+            eval_pushscope();
             struct symbol *sym = newsym(f->name);
             sym->val = NULL;
             savesym(sym);
@@ -2719,7 +3014,7 @@ struct value_t *eval(struct ast *a) {
                 }
             }
 
-            popscope();
+            eval_popscope();
             freeval(iter);
             break;
         }
@@ -2727,7 +3022,7 @@ struct value_t *eval(struct ast *a) {
         case 'P': {
             struct forloop *f = (struct forloop *)a;
             const char *loop_label = take_pending_label();
-            pushscope();
+            eval_pushscope();
             bool leave = false;
 
             if (f->init) {
@@ -2839,7 +3134,7 @@ struct value_t *eval(struct ast *a) {
                 }
             }
 
-            popscope();
+            eval_popscope();
             break;
         }
 

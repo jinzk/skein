@@ -19,6 +19,8 @@ enum type_constraint_kind {
     TYPE_CALLABLE,
     TYPE_NULL,
     TYPE_USERDATA,
+    TYPE_RESULT,
+    TYPE_ERROR,
     TYPE_NAMED,
     TYPE_INVALID
 };

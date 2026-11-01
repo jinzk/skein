@@ -6,6 +6,7 @@
 
 #include "parser.hpp"
 #include "diagnostics.h"
+#include "eval.h"
 #include "eval_context.h"
 #include "event_loop.h"
 #include "fiber.h"
@@ -98,6 +99,7 @@ int main(int argc, char **argv) {
     eval_context context;
     context.allow_await = true;
     set_active_eval_context(&context);
+    eval_begin_root_defers();
     initscope();
     if (g_show_prompt)
         repl_history_load();
@@ -120,6 +122,8 @@ int main(int argc, char **argv) {
 
     if (g_show_prompt)
         repl_history_save();
+    eval_run_root_defers();
+    fiber_disable_generator_warnings();
     task_shutdown();
     fiber_shutdown();
     net_shutdown();

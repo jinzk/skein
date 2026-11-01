@@ -316,6 +316,9 @@ std.task.wait(task[, timeout_ms]) → result
 std.task.wait_all(tasks[, timeout_ms]) → list
 std.task.cancel(task)         → true / false
 std.task.done(task)           → true / false
+std.task.catch(task)          → result task
+std.task.try_wait(task[, timeout_ms]) → result
+std.task.try_wait_all(tasks[, timeout_ms]) → result
 ```
 
 - `sleep` / `yield` 是目前内置的原生 task；
@@ -350,6 +353,8 @@ let db = await b;
 - `await` 只能用于 async 函数或顶层；
 - 普通函数不能使用 `await`；
 - 多个 async 函数可以先启动，再分别 await，从而并发执行；
+- async 函数内部错误会变成 task 失败；
+- `await` 未捕获的 task 失败会报错，`await std.task.catch(task)` 可以恢复；
 - `yield` 不用于 async；主动让出使用 `await std.task.yield()`；
 - 协程栈由 Boost.Context 提供，支持 Boost.Context 覆盖的平台。
 
@@ -388,11 +393,243 @@ true
 - 函数体中出现 `yield` 时，该函数自动成为生成器；
 - 生成器调用后不会立即执行函数体，第一次 `next` 才开始；
 - `yield expr` 把值交给调用方并挂起；
+- `yield` 表达式恢复时会返回 `next(value)` 发送的值；
 - `return` 的返回值作为生成器结束时 `{done: true, value: ...}` 的 value；
-- 目前 `yield` 不接收 `next` 回传值；
-- 目前还不能直接 `for ... in generator`，需要循环调用 `std.generator.next`；
+- 可以直接迭代生成器：
+  ```text
+  for (let x in numbers()) {
+    print(x);
+  }
+  ```
+- `std.generator.next(g[, value])` 支持向生成器发送值；第一次 `next` 的发送值会被忽略；
+- `std.generator.close(g)` 关闭生成器并执行 `defer`；
+- 挂起生成器被直接丢弃且仍有待执行 `defer` 时，会打印 warning，但不会执行清理；
+- 提前 `break` 出 `for (let x in g())` 时，临时生成器会被丢弃并触发 warning；需要清理时先绑定变量并 `defer std.generator.close(g)`；
+- 未开始的生成器调用 `close` 不会执行函数体；
+- 已结束的生成器调用 `close` 返回 `false`；
+- `close` 期间 `defer` 抛出的 `fail` 会传给调用方，可被 `on error` / `std.result.capture` 捕获；
+- 正在运行的生成器不能关闭自己；
+- 不提供 `std.generator.throw`；生成器内部错误使用 `fail`，调用方使用 `on error` / `std.result.capture`；
 - async 生成器暂不支持；
 - 生成器依赖 Boost.Context 提供的协程栈。
+
+向生成器发送值：
+
+```text
+func echo() {
+  let x = yield 1;
+  yield x + 1;
+}
+
+let g = echo();
+std.generator.next(g)       // {done: false, value: 1}
+std.generator.next(g, 10)   // {done: false, value: 11}
+```
+
+关闭生成器：
+
+```text
+func worker() {
+  defer print("cleanup");
+  yield 1;
+  print("not reached after close");
+}
+
+let g = worker();
+std.generator.next(g)
+std.generator.close(g)      // cleanup，返回 true
+std.generator.done(g)       // true
+std.generator.next(g)       // {done: true, value: null}
+```
+
+错误传播：
+
+```text
+func broken() {
+  fail std.error.new("io", "generator boom");
+  yield 1;
+}
+
+let g = broken();
+let v = std.generator.next(g) on error(e) {
+  print(std.error.kind(e));    // io
+  print(str(e));               // generator boom
+  recover 0;
+};
+```
+
+没有 `std.generator.throw`。需要从外部注入错误时，用 `next(g, error)` 发送一个 `error` 值，生成器内部再显式 `fail` 它：
+
+```text
+func worker() {
+  let signal = yield 1;
+  if (signal is error) {
+    fail signal;
+  }
+  yield 2;
+}
+
+let g = worker();
+std.generator.next(g)
+
+let v = std.generator.next(g, std.error.new("cancel", "stop")) on error(e) {
+  print(std.error.kind(e));    // cancel
+  print(str(e));               // stop
+  recover 0;
+};
+```
+
+生成器内部错误使用 `fail`，调用方用 `on error` 或 `std.result.capture` 恢复。
+
+错误值：
+
+`fail`、运行时错误、`result`、task 失败和 generator 失败共用同一个 `error` 值：
+
+```text
+error(kind, message)
+```
+
+```text
+import std;
+
+let e = std.error.new("io", "connection refused");
+e is error
+std.error.kind(e)
+std.error.message(e)
+str(e)
+```
+
+`fail` 和 `std.result.err` 会自动把普通值包装成 `error`：
+
+```text
+fail "boom";              // error(kind="fail", message="boom")
+std.result.err("boom");   // error(kind="error", message="boom")
+1 / 0;                    // error(kind="runtime", message="division by zero")
+```
+
+同步错误捕获：
+
+```text
+import std;
+
+let r = std.result.capture(func() {
+  return std.net.tcp_connect("127.0.0.1", 1, 100);
+});
+
+std.result.is_err(r)
+std.result.error(r)
+```
+
+`on error` 同时捕获显式 `fail`、运行时错误和 `result.err`：
+
+```text
+let v = (1 / 0) on error(e) {
+  print(std.error.kind(e));   // runtime
+  print(str(e));              // division by zero
+  recover 42;
+};
+```
+
+`on error` 也是 `result` 的统一消费语法：
+
+```text
+func parse(s) {
+  if (s == "") { return std.result.err("empty"); }
+  return std.result.ok(42);
+}
+
+let n = parse(input) on error(e) {
+  print(str(e));
+  recover 0;
+};
+```
+
+规则：
+
+| `expr` 的结果 | `on error` 的行为 |
+|---|---|
+| `ok(v)` | 表达式值是 `v` |
+| `err(e)` | 执行 handler |
+| `fail` / 运行时错误 | 执行 handler |
+| 普通值 | 原样返回 |
+
+- `ok` 只解包一层；
+- `on error` 不会自动解包嵌套在普通表达式里的 result；
+- 如果只想拿到 result 本身，不要对它使用 `on error`。
+
+`std.result.unwrap` 在 `err` 时通过 `fail` 抛出，因此可以被 `on error` 捕获：
+
+```text
+let v = std.result.unwrap(std.result.err("boom")) on error(e) {
+  recover str(e);
+};
+```
+
+异步错误恢复：
+
+```text
+let t = std.net.tcp_connect_async("127.0.0.1", 1, 1000);
+let r = await std.task.catch(t);
+
+if (std.result.is_err(r)) {
+  print(std.result.error(r));
+}
+```
+
+Result API：
+
+```text
+std.result.ok(value)          → result
+std.result.err(message)       → result
+std.result.is_ok(result)      → bool
+std.result.is_err(result)     → bool
+std.result.unwrap(result)     → value / fail(error)
+std.result.unwrap_or(result, default)
+std.result.value(result)      → value / null
+std.result.error(result)      → error / null
+std.result.capture(fn)        → result
+
+std.error.new(kind, message)  → error
+std.error.new(message)        → error(kind="error")
+std.error.kind(error)         → string
+std.error.message(error)      → string
+```
+
+规则：
+
+- `result` 和 `error` 是独立值类型，不是 dict；
+- `ok(result)` 为真，`err(result)` 为假；
+- `std.result.error(result)` 返回 `error` 值，`str(error)` 返回消息；
+- `fail` 和 `std.result.err` 会把普通值包装成 `error`；
+- `capture` 捕获同步 `fail` 和运行时错误，并转换成 result；
+- `capture` 不打印被捕获的错误；
+- `std.result.unwrap` 在 `err` 时通过 `fail` 抛出；
+- `std.task.catch(task)` 返回一个总是以 result 完成的 task；
+- async 函数内部使用 `await std.task.catch(task)` 恢复失败；
+- `std.task.try_wait` / `try_wait_all` 是同步 result 等待；
+- `on error` 捕获显式 `fail`、运行时错误和 `result.err`，并对 `result.ok` 解包。
+
+defer：
+
+```text
+func work() {
+  let h = file_open("x");
+  defer file_close(h);
+
+  ...
+}
+```
+
+规则：
+
+- `defer expr;` 在离开当前函数或代码块时执行；
+- 多个 defer 按 LIFO 执行；
+- 支持 return / break / continue / 运行时错误；
+- 没有其他错误时，defer 内的错误会继续向外传播；
+- 已有错误正在展开时，原错误优先，defer 错误以 `error in defer: ...` 作为附加诊断报告；
+- 顶层 `defer` 不允许，必须放在函数或代码块中；
+- 生成器正常结束时会执行 defer；
+- 生成器被直接丢弃时不会执行脚本级 defer；如果仍有待执行 defer，析构/GC 时会打印 warning。
 
 FFI：
 
@@ -446,6 +683,8 @@ std.type
 std.net
 std.task
 std.generator
+std.result
+std.error
 std.ffi（可选）
 ```
 
@@ -563,9 +802,27 @@ std.task.wait
 std.task.wait_all
 std.task.cancel
 std.task.done
+std.task.catch
+std.task.try_wait
+std.task.try_wait_all
 
 std.generator.next
 std.generator.done
+std.generator.close
+
+std.result.ok
+std.result.err
+std.result.is_ok
+std.result.is_err
+std.result.unwrap
+std.result.unwrap_or
+std.result.value
+std.result.error
+std.result.capture
+
+std.error.new
+std.error.kind
+std.error.message
 
 std.ffi.open
 std.ffi.close
@@ -622,18 +879,23 @@ std.bytes.from_int
 - task 是协作式调度的，只有在 `wait` / `wait_all`、`await` 或同步网络等待运行事件循环时才推进；
 - `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
 - async 函数可以挂起和恢复；普通函数仍不能通过 `spawn` 作为独立 task 启动；
-- `yield` 用于生成器；生成器通过 `std.generator.next` 拉取值；
-- 目前不支持 async 生成器，也不支持直接 `for ... in generator`；
+- `yield` 用于生成器；生成器通过 `std.generator.next` 拉取值，`std.generator.close` 关闭并清理；
+- `std.result` 提供独立 result 值和错误捕获；
+- `std.error` 提供独立 error 值和 `kind` / `message` 访问；
+- `defer` 是块级清理语句，按 LIFO 执行；
+- 目前不支持 async 生成器；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
 - `std.ffi` 的 `u64` / `usize` 返回值必须在脚本 `int` 范围内，否则报错；
 - `bytes` 传给 C 的是调用期间的临时副本，C 侧不能保存指针；
 - `buffer` 的容量和写入边界由调用方保证，C 侧越界写入会破坏内存；
 - `std.ffi` 是可选模块，缺少 libffi 时不可用；
-- 网络 I/O 和 FFI 错误目前是运行时错误，不能通过 `on error` 捕获；
+- 网络 I/O 和 FFI 错误是运行时错误，可以通过 `on error` 或 `std.result.capture` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
 - `std.net` 暂不支持 TLS、HTTP；
 - async/await 和生成器使用 Boost.Context 提供的有栈协程；
+- `std.result.capture` 捕获同步 `fail` 和运行时错误；async 使用 `std.task.catch`；
+- 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
@@ -732,7 +994,7 @@ count = "three";    // 错误：variable count expects int, got string
 ```
 
 - 类型在运行时的初始化和重新赋值时检查，不做隐式转换；
-- 支持 `any int float number bool string bytes list dict function builtin callable null userdata`；
+- 支持 `any int float number bool string bytes list dict function builtin callable null userdata result error`；
 - 带类型标注的 `let` 可以省略初始值，使用默认值：
 
 ```text
@@ -932,14 +1194,17 @@ let n = parse_positive("0") on error(e) {
 };
 ```
 
-- `fail expr;` 抛出错误值，`fail;` 抛出 `null`；
-- `call() on error(e) { ... }` 捕获该调用产生的显式 `fail`；
-- `e` 只在 handler 作用域内有效；
+- `fail expr;` 抛出错误，`fail;` 抛出空错误；
+- 普通值会被包装成 `error(kind="fail", message=...)`；
+- `call() on error(e) { ... }` 捕获 `fail`、运行时错误和 `result.err`；
+- `result.ok(v) on error(...)` 直接得到 `v`，不执行 handler；
+- `e` 是 `error` 值，只在 handler 作用域内有效；
+- `str(e)` 或 `std.error.message(e)` 取得消息；
+- `std.error.kind(e)` 取得错误类别；
 - `recover expr;` 结束 handler 并返回恢复值；
 - `pass e;` 把错误继续传给外层；
 - handler 必须以 `recover`、`pass` 或 `fail` 结束；
 - handler 内不能直接用 `return` / `break` / `continue` 结束；
-- 第一版只捕获显式 `fail`，普通运行时错误仍然直接报错；
 - 未捕获的 `fail` 在脚本顶层报错并停止脚本。
 
 函数、匿名函数与闭包：
@@ -1640,8 +1905,10 @@ f.close()
 ### 错误恢复
 
 - 运行时错误中止当前语句/函数，不回滚已经发生的副作用；
-- 显式 `fail` 可以被 `on error` 捕获；未捕获的 `fail` 在脚本顶层报错并停止；
-- `on error` 只捕获显式 `fail`，不捕获除零、越界、类型错误等运行时错误；
+- 显式 `fail`、运行时错误和 `result.err` 可以被 `on error` 捕获；未捕获的 `fail` 在脚本顶层报错并停止；
+- `on error` 对 `result.ok(v)` 解包为 `v`；
+- 除零、越界、网络和 FFI 错误会转换成 `error`，并可由 `on error` 或 `std.result.capture` 捕获；
+- 语法错误、内部不变量错误和控制流误用不会转换成 `result`；
 - 函数出错时不返回部分结果；
 - `let` 初始化失败不会创建绑定；普通赋值失败会保留旧值；
 - 给 `const` 绑定重新赋值会报 `cannot assign to constant`，但修改其容器内容仍然允许；
@@ -1680,6 +1947,8 @@ eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
 fiber.*       Boost.Context 有栈协程、async/await 与生成器
 generator.*   生成器迭代函数
+result.*      result 值与错误捕获
+error.*       error 值与 kind / message
 builtins.*    内置函数实现
 filetype.*    原生文件资源类型
 format.*      Python 风格格式化

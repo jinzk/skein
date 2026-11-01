@@ -90,6 +90,59 @@ struct value_t *newuserdataval(const struct native_type *meta,
     return (struct value_t *)v;
 }
 
+struct value_t *newerrorval(const std::string &kind,
+                            const std::string &message) {
+    struct error_value_t *v = new error_value_t;
+    v->type = T_error;
+    v->kind = kind;
+    v->message = message;
+    return (struct value_t *)v;
+}
+
+struct value_t *newresultok(struct value_t *value) {
+    struct result_value_t *v = new result_value_t;
+    v->type = T_result;
+    v->ok = true;
+    v->value = value;
+    v->error = NULL;
+    return (struct value_t *)v;
+}
+
+struct value_t *newresulterr(struct value_t *error) {
+    struct result_value_t *v = new result_value_t;
+    v->type = T_result;
+    v->ok = false;
+    v->value = NULL;
+    v->error = error;
+    return (struct value_t *)v;
+}
+
+struct value_t *newresulterr_message(const std::string &kind,
+                                     const std::string &message) {
+    return newresulterr(newerrorval(kind, message));
+}
+
+struct value_t *normalize_error(struct value_t *value,
+                                const char *default_kind) {
+    if (value && value->type == T_error)
+        return value;
+    std::string message = value ? value_to_string(value) : "null";
+    freeval(value);
+    return newerrorval(default_kind ? default_kind : "error", message);
+}
+
+const char *error_kind_of(const struct value_t *value) {
+    if (!value || value->type != T_error)
+        return "";
+    return ((const struct error_value_t *)value)->kind.c_str();
+}
+
+std::string error_message_of(const struct value_t *value) {
+    if (!value || value->type != T_error)
+        return value ? value_to_string(value) : "";
+    return ((const struct error_value_t *)value)->message;
+}
+
 struct value_t *newnull() {
     struct value_t *v = new value_t;
     v->type = T_null;
@@ -172,6 +225,16 @@ struct value_t *dupval(struct value_t *v) {
             struct userdata_value_t *src = (struct userdata_value_t *)v;
             return newuserdataval(src->meta, src->data);
         }
+        case T_error: {
+            struct error_value_t *src = (struct error_value_t *)v;
+            return newerrorval(src->kind, src->message);
+        }
+        case T_result: {
+            struct result_value_t *src = (struct result_value_t *)v;
+            if (!src->ok)
+                return newresulterr(dupval(src->error));
+            return newresultok(dupval(src->value));
+        }
         case T_struct: {
             struct struct_value_t *src = (struct struct_value_t *)v;
             struct struct_value_t *dst = new struct_value_t;
@@ -238,6 +301,16 @@ void freeval(struct value_t *v) {
         case T_userdata:
             delete (struct userdata_value_t *)v;
             break;
+        case T_error:
+            delete (struct error_value_t *)v;
+            break;
+        case T_result: {
+            struct result_value_t *r = (struct result_value_t *)v;
+            freeval(r->value);
+            freeval(r->error);
+            delete r;
+            break;
+        }
         case T_struct:
             delete (struct struct_value_t *)v;
             break;
@@ -278,6 +351,8 @@ const char *typename_of(const struct value_t *v) {
             const struct userdata_value_t *u = (const struct userdata_value_t *)v;
             return u->meta ? u->meta->name : "userdata";
         }
+        case T_result: return "result";
+        case T_error: return "error";
         case T_struct: {
             const struct struct_value_t *s = (const struct struct_value_t *)v;
             return s->def ? s->def->name.c_str() : "struct";
@@ -359,6 +434,15 @@ std::string value_to_string(const struct value_t *v) {
             if (u->meta && u->meta->describe)
                 return u->meta->describe(u->data.get());
             return "<userdata>";
+        }
+        case T_error:
+            return ((const struct error_value_t *)v)->message;
+        case T_result: {
+            const struct result_value_t *r =
+                (const struct result_value_t *)v;
+            if (r->ok)
+                return "ok(" + value_to_string(r->value) + ")";
+            return "err(" + value_to_string(r->error) + ")";
         }
         case T_struct: {
             const struct struct_value_t *s = (const struct struct_value_t *)v;

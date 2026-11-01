@@ -50,6 +50,7 @@ add_executable(${PROJECT_NAME}
   ast.cpp
   builtins.cpp
   diagnostics.cpp
+  error.cpp
   eval.cpp
   eval_context.cpp
   event_loop.cpp
@@ -61,6 +62,7 @@ add_executable(${PROJECT_NAME}
   net.cpp
   package.cpp
   repl.cpp
+  result.cpp
   scopestack.cpp
   structeval.cpp
   structtype.cpp

@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "diagnostics.h"
+#include "eval.h"
 #include "eval_context.h"
 #include "event_loop.h"
 #include "repl.h"
@@ -47,8 +48,11 @@ struct fiber {
     fiber_kind kind = FIBER_TASK;
     value_t *yielded_value = NULL;
     value_t *final_value = NULL;
+    value_t *error_value = NULL;
+    value_t *resume_value = NULL;
     bool failed = false;
     bool canceled = false;
+    bool closing = false;
     bool queued = false;
 
     fiber(std::function<value_t *()> fn, fiber_kind fiber_type)
@@ -66,6 +70,10 @@ struct fiber {
     ~fiber() {
         context = boost::context::fiber();
         caller = boost::context::fiber();
+        freeval(resume_value);
+        resume_value = NULL;
+        freeval(error_value);
+        error_value = NULL;
     }
 
     void fiber_main();
@@ -74,6 +82,7 @@ struct fiber {
 fiber *current_fiber = NULL;
 eval_context *root_context = NULL;
 bool shutting_down = false;
+bool generator_warnings_enabled = true;
 std::deque<fiber *> ready_fibers;
 std::vector<fiber *> all_fibers;
 
@@ -123,6 +132,22 @@ void suspend_current() {
     value->state = FIBER_RUNNING;
 }
 
+value_t *take_fiber_error(fiber *value, const char *fallback) {
+    value_t *error = NULL;
+    if (value->eval.control == EVAL_CONTROL_FAIL) {
+        error = value->eval.control_value;
+        value->eval.control_value = NULL;
+        value->eval.control = EVAL_CONTROL_NONE;
+    }
+    if (!error) {
+        if (value->eval.has_captured_error)
+            error = newerrorval("runtime", value->eval.captured_error);
+        else
+            error = newerrorval("runtime", fallback);
+    }
+    return normalize_error(error, "runtime");
+}
+
 value_t *await_result(const task_ptr &task) {
     if (!task) {
         yyerror("await expects a task");
@@ -132,11 +157,10 @@ value_t *await_result(const task_ptr &task) {
         case TASK_STATE_DONE:
             return task_copy_result(task);
         case TASK_STATE_FAILED:
-            yyerror("task failed: %s",
-                    task_error_message(task).c_str());
+            eval_raise(task_error_value(task));
             return NULL;
         case TASK_STATE_CANCELLED:
-            yyerror("task was cancelled");
+            eval_raise(newerrorval("cancelled", "task was cancelled"));
             return NULL;
         case TASK_STATE_PENDING:
         default:
@@ -151,10 +175,20 @@ void fiber::fiber_main() {
     body = nullptr;
 
     if (kind == FIBER_GENERATOR) {
-        if (canceled) {
+        bool closed = eval.control == EVAL_CONTROL_CLOSE ||
+                      (closing && eval.control == EVAL_CONTROL_NONE);
+        if (closed) {
+            freeval(result);
+            if (eval.control != EVAL_CONTROL_NONE) {
+                eval.control = EVAL_CONTROL_NONE;
+                freeval(eval.control_value);
+                eval.control_value = NULL;
+            }
+        } else if (canceled) {
             freeval(result);
         } else if (!result) {
             failed = true;
+            error_value = take_fiber_error(this, "generator failed");
         } else {
             final_value = result;
         }
@@ -162,7 +196,8 @@ void fiber::fiber_main() {
         if (canceled) {
             freeval(result);
         } else if (!result) {
-            task_fail(task, "async function failed");
+            task_fail_error(task,
+                            take_fiber_error(this, "async function failed"));
         } else {
             task_complete(task, result);
         }
@@ -184,6 +219,9 @@ task_ptr fiber_start_async(std::function<value_t *()> body) {
     diag_capture(value->diagnostics);
     value->eval.scopes.global_scope =
         active_eval_context().scopes.global_scope;
+    value->eval.capture_errors = true;
+    /* Match the script root context so defer's scope check is uniform. */
+    value->eval.defer_stack.emplace_back();
 
     task_set_cancel(task, [value] {
         if (value->state == FIBER_DONE)
@@ -205,10 +243,27 @@ task_ptr fiber_start_async(std::function<value_t *()> body) {
 
 struct generator {
     fiber *value = NULL;
+    bool started = false;
     bool done = false;
 
     ~generator() {
         if (value) {
+            if (generator_warnings_enabled && !shutting_down &&
+                started && !done && value->state == FIBER_YIELDED) {
+                bool has_defers = false;
+                for (size_t i = 0; i < value->eval.defer_stack.size(); ++i) {
+                    if (!value->eval.defer_stack[i].empty()) {
+                        has_defers = true;
+                        break;
+                    }
+                }
+                if (has_defers) {
+                    diag_warning(
+                        "suspended generator dropped without close; "
+                        "deferred cleanup skipped "
+                        "(use std.generator.close or defer close)");
+                }
+            }
             if (root_context)
                 adopt_scopes(value->eval.scopes, root_context->scopes);
             delete value;
@@ -237,6 +292,8 @@ generator_ptr generator_create(std::function<value_t *()> body) {
     fiber *value = new fiber(std::move(body), FIBER_GENERATOR);
     value->eval.scopes.global_scope =
         active_eval_context().scopes.global_scope;
+    value->eval.capture_errors = true;
+    value->eval.defer_stack.emplace_back();
     diag_capture(value->diagnostics);
     generator_ptr result = std::make_shared<generator>();
     result->value = value;
@@ -266,16 +323,25 @@ bool get_generator_value(value_t *value, generator_ptr &generator) {
 }
 
 bool generator_next_value(const generator_ptr &generator,
+                          value_t *send_value,
                           value_t *&value, bool &done) {
     value = NULL;
     done = false;
     if (!generator || generator->done || !generator->value) {
+        freeval(send_value);
         done = true;
         value = newnull();
         return true;
     }
 
+    if (!generator->started) {
+        freeval(send_value);
+        send_value = NULL;
+        generator->started = true;
+    }
+
     fiber *current = generator->value;
+    current->resume_value = send_value;
     fiber *previous = current_fiber;
     switch_into(current, previous);
 
@@ -292,11 +358,21 @@ bool generator_next_value(const generator_ptr &generator,
     bool failed = current->failed;
     value = current->final_value;
     current->final_value = NULL;
+    if (current->resume_value) {
+        freeval(current->resume_value);
+        current->resume_value = NULL;
+    }
+    value_t *error_value = current->error_value;
+    current->error_value = NULL;
     delete current;
     generator->value = NULL;
     if (failed) {
         freeval(value);
-        yyerror("generator failed");
+        if (error_value) {
+            eval_raise(error_value);
+        } else {
+            yyerror("generator failed");
+        }
         return false;
     }
     if (!value)
@@ -304,8 +380,69 @@ bool generator_next_value(const generator_ptr &generator,
     return true;
 }
 
+bool generator_close(const generator_ptr &generator) {
+    if (!generator || generator->done || !generator->value)
+        return false;
+
+    fiber *current = generator->value;
+    if (current == current_fiber) {
+        yyerror("cannot close a running generator");
+        return false;
+    }
+
+    if (!generator->started) {
+        /* The body never ran, so there are no defers to execute. */
+        delete current;
+        generator->value = NULL;
+        generator->done = true;
+        return true;
+    }
+
+    current->closing = true;
+    freeval(current->resume_value);
+    current->resume_value = NULL;
+
+    fiber *previous = current_fiber;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        if (current->state != FIBER_YIELDED)
+            break;
+        current->closing = true;
+        switch_into(current, previous);
+    }
+
+    if (current->state != FIBER_DONE) {
+        yyerror("generator did not close");
+        return false;
+    }
+
+    bool failed = current->failed;
+    value_t *close_error = current->error_value;
+    current->error_value = NULL;
+    freeval(current->yielded_value);
+    current->yielded_value = NULL;
+    freeval(current->final_value);
+    current->final_value = NULL;
+    delete current;
+    generator->value = NULL;
+    generator->done = true;
+
+    if (failed) {
+        if (!close_error)
+            close_error = newerrorval("runtime", "generator close failed");
+        eval_raise(close_error);
+    } else {
+        freeval(close_error);
+    }
+    return true;
+}
+
 bool generator_done(const generator_ptr &generator) {
     return !generator || generator->done;
+}
+
+bool fiber_is_generator(value_t *value) {
+    return value && value->type == T_userdata &&
+           ((userdata_value_t *)value)->meta == &generator_type;
 }
 
 value_t *fiber_yield_value(value_t *value) {
@@ -315,11 +452,24 @@ value_t *fiber_yield_value(value_t *value) {
         freeval(value);
         return NULL;
     }
+    if (current->closing) {
+        freeval(value);
+        eval_request_close();
+        return NULL;
+    }
     current->yielded_value = value;
     current->state = FIBER_YIELDED;
     current->caller = std::move(current->caller).resume();
     current->state = FIBER_RUNNING;
-    return newnull();
+
+    value_t *sent = current->resume_value;
+    current->resume_value = NULL;
+    if (current->closing) {
+        freeval(sent);
+        eval_request_close();
+        return NULL;
+    }
+    return sent ? sent : newnull();
 }
 
 value_t *fiber_await_task(const task_ptr &task) {
@@ -392,8 +542,13 @@ void fiber_pump() {
     }
 }
 
+void fiber_disable_generator_warnings() {
+    generator_warnings_enabled = false;
+}
+
 void fiber_shutdown() {
     shutting_down = true;
+    generator_warnings_enabled = false;
     for (size_t i = 0; i < all_fibers.size(); ++i) {
         fiber *value = all_fibers[i];
         if (value->state == FIBER_DONE)

@@ -3,10 +3,17 @@
 
 #include "scopestack.h"
 
+#include <string>
+#include <vector>
+
+struct ast;
+
 enum eval_control_kind {
     EVAL_CONTROL_NONE,
     EVAL_CONTROL_FAIL,
-    EVAL_CONTROL_RECOVER
+    EVAL_CONTROL_RECOVER,
+    /* Internal, non-catchable unwind used by generator.close. */
+    EVAL_CONTROL_CLOSE
 };
 
 struct eval_context {
@@ -17,6 +24,10 @@ struct eval_context {
     const char *pending_label = NULL;
     int runtime_error_count = 0;
     bool allow_await = false;
+    bool capture_errors = false;
+    bool has_captured_error = false;
+    std::string captured_error;
+    std::vector<std::vector<struct ast *>> defer_stack;
 
     eval_context() = default;
     eval_context(const eval_context &) = delete;

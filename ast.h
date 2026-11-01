@@ -131,8 +131,24 @@ enum bifs {
     B_task_wait_all,
     B_task_cancel,
     B_task_done,
+    B_task_catch,
+    B_task_try_wait,
+    B_task_try_wait_all,
     B_generator_next,
-    B_generator_done
+    B_generator_done,
+    B_generator_close,
+    B_result_ok,
+    B_result_err,
+    B_result_is_ok,
+    B_result_is_err,
+    B_result_unwrap,
+    B_result_unwrap_or,
+    B_result_value,
+    B_result_error,
+    B_result_capture,
+    B_error_new,
+    B_error_kind,
+    B_error_message
 };
 
 struct ast {
@@ -470,6 +486,7 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool is_generator = false);
 struct ast *newawait(struct ast *value);
 struct ast *newyield(struct ast *value);
+struct ast *newdefer(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
 struct ast *newimport(char *path, char *alias);
 void push_func_location(int line, int column);

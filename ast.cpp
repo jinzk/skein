@@ -492,6 +492,11 @@ struct ast *newyield(struct ast *value) {
     return a;
 }
 
+struct ast *newdefer(struct ast *value) {
+    struct ast *a = newast('n', value, NULL);
+    return a;
+}
+
 struct ast *newpackage(char *name, struct ast *body) {
     struct package_node *a =
         (struct package_node *)std::malloc(sizeof(struct package_node));
@@ -774,6 +779,7 @@ void treefree(struct ast *a) {
         case '~':
         case 'b':
         case 'w':
+        case 'n':
             treefree(a->l);
             break;
         case 'V':

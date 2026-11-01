@@ -37,6 +37,8 @@ enum val_type {
     T_func,
     T_builtin,
     T_userdata,
+    T_result,
+    T_error,
     T_struct,
     T_method,
     T_null,
@@ -122,6 +124,19 @@ struct userdata_value_t {
     std::shared_ptr<void> data;
 };
 
+struct error_value_t {
+    enum val_type type;
+    std::string kind;
+    std::string message;
+};
+
+struct result_value_t {
+    enum val_type type;
+    bool ok;
+    struct value_t *value;
+    struct value_t *error;
+};
+
 struct value_t *newreturn();
 struct value_t *newbreak(const char *label = NULL);
 struct value_t *newcontinue(const char *label = NULL);
@@ -131,6 +146,17 @@ struct value_t *newboolval(bool b);
 struct value_t *newstrval(const char *s);
 struct value_t *newbytesval(std::string data);
 struct value_t *newbuiltinval(int functype);
+struct value_t *newerrorval(const std::string &kind,
+                            const std::string &message);
+struct value_t *newresultok(struct value_t *value);
+struct value_t *newresulterr(struct value_t *error);
+struct value_t *newresulterr_message(const std::string &kind,
+                                     const std::string &message);
+/* Convert any value into an error value, taking ownership of `value`. */
+struct value_t *normalize_error(struct value_t *value,
+                                const char *default_kind);
+const char *error_kind_of(const struct value_t *value);
+std::string error_message_of(const struct value_t *value);
 struct value_t *newuserdataval(const struct native_type *meta,
                                std::shared_ptr<void> data);
 struct value_t *newnull();

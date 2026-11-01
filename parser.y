@@ -170,6 +170,7 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
     if (std::strcmp(name, "callable") == 0) return new_type_constraint(TYPE_CALLABLE);
     if (std::strcmp(name, "null") == 0) return new_type_constraint(TYPE_NULL);
     if (std::strcmp(name, "userdata") == 0) return new_type_constraint(TYPE_USERDATA);
+    if (std::strcmp(name, "result") == 0) return new_type_constraint(TYPE_RESULT);
     return new_named_type_constraint(name,
                                      diag_current_source_name().c_str());
 }
@@ -211,7 +212,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <str> XSTRING "string"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
-%token ASYNC "async" AWAIT "await" YIELD "yield"
+%token ASYNC "async" AWAIT "await" YIELD "yield" DEFER "defer"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
@@ -282,6 +283,7 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
     | FOR '(' LET NAME ',' NAME IN exp ')' scope
                                            { $$ = newforin($4, $6, $8, $10); }
+    | DEFER exp ';'                       { $$ = newdefer($2); }
     | funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($2, $4, NULL, false, false, finish_function()); }
     | funcstart NAME '(' symlist ')' '{' list '}'
@@ -452,6 +454,7 @@ importpath: NAME                          { $$ = $1; }
 
 fieldname: NAME                           { $$ = $1; }
     | YIELD                                { $$ = copy_text("yield"); }
+    | ERROR                                { $$ = copy_text("error"); }
     | BUILTIN {
         const char *name = builtin_field_name($1);
         if (name) {
@@ -527,7 +530,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHR exp                         { $$ = newast('r', $1, $3); }
     | '(' exp ')'                         { $$ = $2; }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
-    | YIELD exp %prec UMINUS              { note_yield(); $$ = newyield($2); }
+    | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }
@@ -702,6 +705,7 @@ type_name: NAME                           {
       }
     | BUILTIN                             { $$ = type_constraint_from_builtin($1); }
     | FUNC                                { $$ = new_type_constraint(TYPE_FUNCTION); }
+    | ERROR                               { $$ = new_type_constraint(TYPE_ERROR); }
     | NULLVAL                             { $$ = new_type_constraint(TYPE_NULL); }
     ;
 
@@ -822,8 +826,6 @@ void yyerror(const char *s, ...) {
     if (g_interrupted)
         return;
 
-    ++active_eval_context().runtime_error_count;
-
     char buffer[2048];
     va_list ap;
     va_start(ap, s);
@@ -839,6 +841,17 @@ void yyerror(const char *s, ...) {
             ++message;
         if (*message == '\0')
             message = "invalid syntax";
+    }
+
+    eval_context &context = active_eval_context();
+    ++context.runtime_error_count;
+    if (context.capture_errors &&
+        std::strcmp(category, "runtime error") == 0) {
+        if (!context.has_captured_error) {
+            context.has_captured_error = true;
+            context.captured_error = message;
+        }
+        return;
     }
 
     diag_report(g_error_line, g_error_column, category, message);

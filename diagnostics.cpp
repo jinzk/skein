@@ -145,6 +145,19 @@ void diag_report(int line, int column, const char *category,
     std::fflush(stderr);
 }
 
+void diag_warning(const char *message) {
+    if (g_interrupted)
+        return;
+
+    std::fflush(stdout);
+    if (!source_name.empty())
+        std::fprintf(stderr, "%s: warning: %s\n", source_name.c_str(),
+                     message);
+    else
+        std::fprintf(stderr, "warning: %s\n", message);
+    std::fflush(stderr);
+}
+
 void diag_report_lexical(int line, int column, const char *fmt, ...) {
     if (line <= 0)
         line = g_token_line;

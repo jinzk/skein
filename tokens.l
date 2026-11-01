@@ -314,6 +314,7 @@ EXP ([Ee][-+]?[0-9]+)
 "async" { YYRET(ASYNC); }
 "await" { YYRET(AWAIT); }
 "yield" { YYRET(YIELD); }
+"defer" { YYRET(DEFER); }
 "package" { YYRET(PACKAGE); }
 "import" { YYRET(IMPORT); }
 "export" { YYRET(EXPORT); }

@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "diagnostics.h"
+#include "eval.h"
 #include "eval_context.h"
 #include "parser.hpp"
 #include "platform.h"
@@ -499,12 +500,36 @@ value_t *build_std_namespace() {
             {"wait_all", B_task_wait_all},
             {"cancel", B_task_cancel},
             {"done", B_task_done},
+            {"catch", B_task_catch},
+            {"try_wait", B_task_try_wait},
+            {"try_wait_all", B_task_try_wait_all},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("generator"),
         builtin_module({
             {"next", B_generator_next},
             {"done", B_generator_done},
+            {"close", B_generator_close},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("result"),
+        builtin_module({
+            {"ok", B_result_ok},
+            {"err", B_result_err},
+            {"is_ok", B_result_is_ok},
+            {"is_err", B_result_is_err},
+            {"unwrap", B_result_unwrap},
+            {"unwrap_or", B_result_unwrap_or},
+            {"value", B_result_value},
+            {"error", B_result_error},
+            {"capture", B_result_capture},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("error"),
+        builtin_module({
+            {"new", B_error_new},
+            {"kind", B_error_kind},
+            {"message", B_error_message},
         })));
     return (value_t *)root;
 }
@@ -731,7 +756,7 @@ bool load_package_file(const resolved_package &resolved,
     diag_start_source();
     diag_set_source_name(resolved.file.string());
     diag_set_module_name(module_name);
-    pushscope_isolated();
+    eval_push_isolated_scope();
 
     package_load_context context;
     context.expected_name = expected_name;
@@ -742,7 +767,7 @@ bool load_package_file(const resolved_package &resolved,
     result = load_stack.back().result;
     load_stack.pop_back();
 
-    popscope();
+    eval_popscope();
     std::fclose(file);
 
     scanner_checkpoint_restore(scan_cp);

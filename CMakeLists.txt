@@ -62,6 +62,7 @@ add_executable(${PROJECT_NAME}
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
   ast.cpp
+  async_support.cpp
   builtins.cpp
   diagnostics.cpp
   error.cpp

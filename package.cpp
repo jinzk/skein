@@ -429,10 +429,15 @@ value_t *build_std_namespace() {
             {"readable", B_io_readable},
             {"writable", B_io_writable},
             {"seekable", B_io_seekable},
+            {"seek", B_io_seek},
+            {"tell", B_io_tell},
             {"read_exact", B_io_read_exact},
             {"read_all", B_io_read_all},
             {"read_line", B_io_read_line},
             {"copy", B_io_copy},
+            {"buffered", B_io_buffered},
+            {"read_async", B_io_read_async},
+            {"write_async", B_io_write_async},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("fs"),

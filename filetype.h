@@ -10,6 +10,8 @@
 struct file_resource {
     platform_file_ptr file;
     std::string path;
+    bool eof = false;
+    bool async_pending = false;
 };
 
 extern const struct native_type file_native_type;

@@ -1,6 +1,7 @@
 #include "net.h"
 
 #include "ast.h"
+#include "async_support.h"
 #include "event_loop.h"
 #include "repl.h"
 #include "task.h"
@@ -78,154 +79,14 @@ bool getaddrinfo_async(const char *node, const char *service,
     return true;
 }
 
-void on_async_timer_close(uv_handle_t *handle) {
-    delete (uv_timer_t *)handle;
-}
-
-struct async_state {
-    std::weak_ptr<task> task_ref;
-    std::function<void()> cancel_operation;
-    uv_timer_t *timer = NULL;
-    std::string timeout_error;
-    bool finished = false;
-    bool callback_after_cancel = true;
-
-    virtual ~async_state() {
-        close_timer();
-    }
-
-    void close_timer() {
-        if (!timer)
-            return;
-        uv_timer_t *handle = timer;
-        timer = NULL;
-        handle->data = NULL;
-        uv_timer_stop(handle);
-        if (event_loop_initialized())
-            uv_close((uv_handle_t *)handle, on_async_timer_close);
-        else
-            delete handle;
-    }
-};
-
-void async_complete(async_state *state, value_t *value) {
-    if (!state) {
-        freeval(value);
-        return;
-    }
-    if (state->finished) {
-        freeval(value);
-        delete state;
-        return;
-    }
-    state->finished = true;
-    state->close_timer();
-    task_ptr task = state->task_ref.lock();
-    if (task)
-        task_complete(task, value);
-    else
-        freeval(value);
-    delete state;
-}
-
-void async_fail(async_state *state, const std::string &error) {
-    if (!state)
-        return;
-    if (state->finished) {
-        delete state;
-        return;
-    }
-    state->finished = true;
-    state->close_timer();
-    task_ptr task = state->task_ref.lock();
-    if (task)
-        task_fail(task, error);
-    delete state;
-}
-
-void async_cancel(async_state *state) {
-    if (!state || state->finished)
-        return;
-    state->finished = true;
-    state->close_timer();
-    std::function<void()> cancel = std::move(state->cancel_operation);
-    state->cancel_operation = nullptr;
-    if (cancel)
-        cancel();
-    if (!state->callback_after_cancel)
-        delete state;
-}
-
-void async_timeout(async_state *state) {
-    if (!state || state->finished)
-        return;
-    state->finished = true;
-    state->close_timer();
-    task_ptr task = state->task_ref.lock();
-    if (task)
-        task_fail(task, state->timeout_error);
-    std::function<void()> cancel = std::move(state->cancel_operation);
-    state->cancel_operation = nullptr;
-    if (cancel)
-        cancel();
-    if (!state->callback_after_cancel)
-        delete state;
-}
-
-void on_async_timeout(uv_timer_t *timer) {
-    async_state *state = (async_state *)timer->data;
-    timer->data = NULL;
-    if (!state) {
-        uv_close((uv_handle_t *)timer, on_async_timer_close);
-        return;
-    }
-    state->timer = NULL;
-    uv_timer_stop(timer);
-    uv_close((uv_handle_t *)timer, on_async_timer_close);
-    async_timeout(state);
-}
-
-bool start_async_timeout(async_state *state, long long timeout_ms) {
-    if (timeout_ms <= 0)
-        return true;
-    state->timer = new uv_timer_t;
-    int rc = uv_timer_init(event_loop_handle(), state->timer);
-    if (rc < 0) {
-        delete state->timer;
-        state->timer = NULL;
-        return false;
-    }
-    state->timer->data = state;
-    rc = uv_timer_start(state->timer, on_async_timeout,
-                        (uint64_t)timeout_ms, 0);
-    if (rc < 0) {
-        state->close_timer();
-        return false;
-    }
-    return true;
-}
-
-bool prepare_async(async_state *state, task_ptr &task, long long timeout_ms,
-                   const std::string &timeout_error) {
-    if (!event_loop_init())
-        return false;
-    task = task_create();
-    state->task_ref = task;
-    state->timeout_error = timeout_error;
-    if (!start_async_timeout(state, timeout_ms)) {
-        task_fail(task, "cannot create timeout timer");
-        return false;
-    }
-    task_set_cancel(task, [state] {
-        async_cancel(state);
-    });
-    return true;
-}
-
-std::string async_timeout_error(const char *operation, long long timeout_ms) {
-    return std::string(operation) + ": timed out after " +
-           std::to_string(timeout_ms) + " ms";
-}
+using async_state = calc_async::state;
+using calc_async::async_complete;
+using calc_async::async_fail;
+using calc_async::async_cancel;
+using calc_async::async_timeout;
+using calc_async::start_async_timeout;
+using calc_async::prepare_async;
+using calc_async::async_timeout_error;
 
 struct net_socket;
 struct accept_async_op;
@@ -237,7 +98,7 @@ struct accept_state {
     std::shared_ptr<net_socket> client;
 };
 
-struct net_socket {
+struct net_socket : std::enable_shared_from_this<net_socket> {
     uv_tcp_t *handle = NULL;
     bool listening = false;
     accept_state *pending_accept = NULL;
@@ -276,6 +137,7 @@ struct accept_async_op : async_state {
 
 struct recv_async_op : async_state {
     std::shared_ptr<net_socket> socket;
+    bool stream_mode = false;
 };
 
 void remove_accept_async(accept_async_op *op) {
@@ -342,6 +204,14 @@ bool net_stream_flush(void *data, std::string &error);
 bool net_stream_close(void *data, bool &was_open, std::string &error);
 bool net_stream_eof(void *data, bool &eof, std::string &error);
 bool net_stream_seekable(void *data);
+value_t *net_stream_read_async(void *data,
+                               const std::shared_ptr<void> &owner,
+                               std::size_t max_bytes, long long timeout_ms,
+                               std::string &error);
+value_t *net_stream_write_async(void *data,
+                                const std::shared_ptr<void> &owner,
+                                const std::string &bytes,
+                                long long timeout_ms, std::string &error);
 
 const struct stream_ops net_stream_ops = {
     net_stream_read,
@@ -350,6 +220,10 @@ const struct stream_ops net_stream_ops = {
     net_stream_close,
     net_stream_eof,
     net_stream_seekable,
+    NULL,
+    NULL,
+    net_stream_read_async,
+    net_stream_write_async,
 };
 
 const struct native_type net_socket_type = {
@@ -656,6 +530,9 @@ void on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *) {
     if (socket->read_status < 0) {
         async_fail(op, std::string("recv_async: ") +
                            uv_strerror(socket->read_status));
+    } else if (op->stream_mode && socket->read_eof &&
+               socket->read_result.empty()) {
+        async_complete(op, newnull());
     } else {
         async_complete(op, newbytesval(std::move(socket->read_result)));
     }
@@ -1648,6 +1525,54 @@ void on_send_async(uv_write_t *request, int status) {
     async_complete(op, newintval((long long)op->data.size()));
 }
 
+value_t *net_send_async_task(std::shared_ptr<net_socket> socket,
+                              std::string data, long long timeout_ms,
+                              std::string &error) {
+    if (!socket || !socket->handle) {
+        error = "tcp socket is closed";
+        return NULL;
+    }
+    if (socket->listening) {
+        error = "send_async expects a connected tcp socket";
+        return NULL;
+    }
+    if (data.empty())
+        return completed_task(newintval(0));
+    if (g_interrupted)
+        return NULL;
+    if (data.size() >
+        (size_t)std::numeric_limits<unsigned int>::max()) {
+        error = "send_async data is too large";
+        return NULL;
+    }
+
+    send_async_op *op = new send_async_op;
+    task_ptr task;
+    std::string timeout_error =
+        async_timeout_error("send_async", timeout_ms);
+    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
+        delete op;
+        error = "send_async: cannot initialize event loop";
+        return NULL;
+    }
+    op->socket = socket;
+    op->data = std::move(data);
+    op->callback_after_cancel = true;
+    op->cancel_operation = [op] {
+        if (op->socket)
+            op->socket->close();
+    };
+    op->request.data = op;
+
+    uv_buf_t buffer = uv_buf_init(
+        &op->data[0], (unsigned int)op->data.size());
+    int rc = uv_write(&op->request, (uv_stream_t *)socket->handle,
+                      &buffer, 1, on_send_async);
+    if (rc < 0)
+        async_fail(op, std::string("send_async: ") + uv_strerror(rc));
+    return new_task_value(std::move(task));
+}
+
 value_t *net_send_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
         yyerror("std.net.send_async expects 2 or 3 arguments");
@@ -1673,40 +1598,79 @@ value_t *net_send_async(const std::vector<value_t *> &args) {
         yyerror("send_async data must be string or bytes");
         return NULL;
     }
-    if (data.empty())
-        return completed_task(newintval(0));
-    if (g_interrupted)
-        return NULL;
-    if (data.size() >
-        (size_t)std::numeric_limits<unsigned int>::max()) {
-        yyerror("send_async data is too large");
+
+    std::string error;
+    value_t *task = net_send_async_task(socket, std::move(data),
+                                        timeout_ms, error);
+    if (!task && !error.empty())
+        yyerror("%s", error.c_str());
+    return task;
+}
+
+value_t *net_recv_async_task(std::shared_ptr<net_socket> socket,
+                             std::size_t requested, long long timeout_ms,
+                             bool stream_mode, std::string &error) {
+    if (!socket || !socket->handle) {
+        error = "tcp socket is closed";
         return NULL;
     }
+    if (socket->listening) {
+        error = "recv_async expects a connected tcp socket";
+        return NULL;
+    }
+    if (requested == 0)
+        return completed_task(newbytesval(std::string()));
+    if (requested > (std::size_t)std::numeric_limits<int>::max()) {
+        error = "recv_async size is too large";
+        return NULL;
+    }
+    if (socket->read_eof) {
+        if (stream_mode)
+            return completed_task(newnull());
+        return completed_task(newbytesval(std::string()));
+    }
+    if (socket->read_failed) {
+        return failed_task(std::string("recv_async: ") +
+                           uv_strerror(socket->read_error));
+    }
+    if (socket->reading || socket->pending_async_read) {
+        error = "recv_async: another read is already pending";
+        return NULL;
+    }
+    if (g_interrupted)
+        return NULL;
 
-    send_async_op *op = new send_async_op;
+    recv_async_op *op = new recv_async_op;
     task_ptr task;
     std::string timeout_error =
-        async_timeout_error("send_async", timeout_ms);
+        async_timeout_error("recv_async", timeout_ms);
     if (!prepare_async(op, task, timeout_ms, timeout_error)) {
         delete op;
-        yyerror("send_async: cannot initialize event loop");
+        error = "recv_async: cannot initialize event loop";
         return NULL;
     }
     op->socket = socket;
-    op->data = std::move(data);
-    op->callback_after_cancel = true;
+    op->stream_mode = stream_mode;
+    op->callback_after_cancel = false;
     op->cancel_operation = [op] {
-        if (op->socket)
-            op->socket->close();
+        cancel_recv_async(op);
     };
-    op->request.data = op;
 
-    uv_buf_t buffer = uv_buf_init(
-        &op->data[0], (unsigned int)op->data.size());
-    int rc = uv_write(&op->request, (uv_stream_t *)socket->handle,
-                      &buffer, 1, on_send_async);
-    if (rc < 0)
-        async_fail(op, std::string("send_async: ") + uv_strerror(rc));
+    socket->read_done = false;
+    socket->read_status = 0;
+    socket->read_requested = requested;
+    socket->read_buffer.clear();
+    socket->read_result.clear();
+    socket->reading = true;
+    socket->pending_async_read = op;
+
+    int rc = uv_read_start((uv_stream_t *)socket->handle,
+                           on_alloc, on_read);
+    if (rc < 0) {
+        socket->pending_async_read = NULL;
+        socket->reading = false;
+        async_fail(op, std::string("recv_async: ") + uv_strerror(rc));
+    }
     return new_task_value(std::move(task));
 }
 
@@ -1731,56 +1695,34 @@ value_t *net_recv_async(const std::vector<value_t *> &args) {
         return NULL;
     }
     long long requested = ((struct int_value_t *)args[1])->value;
-    if (requested == 0)
-        return completed_task(newbytesval(std::string()));
-    if (requested > std::numeric_limits<int>::max()) {
-        yyerror("recv_async size is too large");
-        return NULL;
-    }
-    if (socket->read_eof)
-        return completed_task(newbytesval(std::string()));
-    if (socket->read_failed) {
-        return failed_task(std::string("recv_async: ") +
-                           uv_strerror(socket->read_error));
-    }
-    if (socket->reading || socket->pending_async_read) {
-        yyerror("recv_async: another read is already pending");
-        return NULL;
-    }
-    if (g_interrupted)
-        return NULL;
 
-    recv_async_op *op = new recv_async_op;
-    task_ptr task;
-    std::string timeout_error =
-        async_timeout_error("recv_async", timeout_ms);
-    if (!prepare_async(op, task, timeout_ms, timeout_error)) {
-        delete op;
-        yyerror("recv_async: cannot initialize event loop");
-        return NULL;
-    }
-    op->socket = socket;
-    op->callback_after_cancel = false;
-    op->cancel_operation = [op] {
-        cancel_recv_async(op);
-    };
+    std::string error;
+    value_t *task = net_recv_async_task(socket, (std::size_t)requested,
+                                        timeout_ms, false, error);
+    if (!task && !error.empty())
+        yyerror("%s", error.c_str());
+    return task;
+}
 
-    socket->read_done = false;
-    socket->read_status = 0;
-    socket->read_requested = (size_t)requested;
-    socket->read_buffer.clear();
-    socket->read_result.clear();
-    socket->reading = true;
-    socket->pending_async_read = op;
+value_t *net_stream_read_async(void *data,
+                               const std::shared_ptr<void> &owner,
+                               std::size_t max_bytes, long long timeout_ms,
+                               std::string &error) {
+    (void)data;
+    std::shared_ptr<net_socket> socket =
+        std::static_pointer_cast<net_socket>(owner);
+    return net_recv_async_task(std::move(socket), max_bytes, timeout_ms,
+                               true, error);
+}
 
-    int rc = uv_read_start((uv_stream_t *)socket->handle,
-                           on_alloc, on_read);
-    if (rc < 0) {
-        socket->pending_async_read = NULL;
-        socket->reading = false;
-        async_fail(op, std::string("recv_async: ") + uv_strerror(rc));
-    }
-    return new_task_value(std::move(task));
+value_t *net_stream_write_async(void *data,
+                                const std::shared_ptr<void> &owner,
+                                const std::string &bytes,
+                                long long timeout_ms, std::string &error) {
+    (void)data;
+    std::shared_ptr<net_socket> socket =
+        std::static_pointer_cast<net_socket>(owner);
+    return net_send_async_task(std::move(socket), bytes, timeout_ms, error);
 }
 
 struct shutdown_async_op : async_state {

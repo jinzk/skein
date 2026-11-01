@@ -71,5 +71,6 @@ bool platform_file_flush(const platform_file_ptr &file, std::string &error);
 void platform_file_close(const platform_file_ptr &file, std::string &error);
 bool platform_file_is_open(const platform_file_ptr &file);
 std::string platform_file_path(const platform_file_ptr &file);
+int platform_file_fd(const platform_file_ptr &file);
 
 #endif

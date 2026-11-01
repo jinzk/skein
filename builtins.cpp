@@ -327,7 +327,7 @@ struct value_t *call_builtin(int functype,
         return call_result_builtin(functype, args);
     if (functype >= B_error_new && functype <= B_error_message)
         return call_error_builtin(functype, args);
-    if (functype >= B_io_read && functype <= B_io_copy)
+    if (functype >= B_io_read && functype <= B_io_write_async)
         return call_io_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {

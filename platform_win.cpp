@@ -459,6 +459,7 @@ platform_file_ptr platform_file_open(const std::string &path,
         error = std::strerror(errno);
         return nullptr;
     }
+    std::setvbuf(stream, nullptr, _IONBF, 0);
     std::shared_ptr<platform_file> file = std::make_shared<platform_file>();
     file->stream = stream;
     file->path = path;
@@ -577,6 +578,12 @@ void platform_file_close(const platform_file_ptr &file, std::string &error) {
 
 bool platform_file_is_open(const platform_file_ptr &file) {
     return file && file->stream != nullptr;
+}
+
+int platform_file_fd(const platform_file_ptr &file) {
+    if (!file || !file->stream)
+        return -1;
+    return _fileno(file->stream);
 }
 
 std::string platform_file_path(const platform_file_ptr &file) {

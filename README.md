@@ -764,10 +764,15 @@ std.io.eof
 std.io.readable
 std.io.writable
 std.io.seekable
+std.io.seek
+std.io.tell
 std.io.read_exact
 std.io.read_all
 std.io.read_line
 std.io.copy
+std.io.buffered
+std.io.read_async
+std.io.write_async
 
 std.fs.read_file
 std.fs.write_file
@@ -932,6 +937,48 @@ std.io.seekable(f)        // true
 let first = std.io.read(f, 4096);     // bytes，EOF 时是 null
 let rest = std.io.read_all(f, 16 * 1024 * 1024);
 std.io.eof(f)
+
+std.io.seek(f, 0, 0)
+std.io.tell(f)
+
+let buffered = std.io.buffered(f, 8192);
+bytes_to_string(std.io.read(buffered, 4096))
+std.io.close(buffered)
+```
+
+socket 异步流：
+
+```text
+let s = std.net.tcp_connect("127.0.0.1", 8080);
+
+await std.io.write_async(s, "hello", 1000);
+
+let data = await std.io.read_async(s, 4096, 1000);
+if (data == null) {
+  print("closed");
+} else {
+  print(bytes_to_string(data));
+}
+
+std.io.close(s);
+```
+
+文件异步流：
+
+```text
+let f = std.fs.open("data.bin", "rb");
+
+let first = await std.io.read_async(f, 4096);
+let rest = await std.io.read_async(f, 4096);
+
+std.io.close(f);
+```
+
+```text
+let f = std.fs.open("out.bin", "w+b");
+
+let n = await std.io.write_async(f, bytes_from_string("hello"));
+std.io.close(f);
 ```
 
 ```text
@@ -944,10 +991,15 @@ std.io.eof(stream)                            → bool
 std.io.readable(stream)                       → bool
 std.io.writable(stream)                       → bool
 std.io.seekable(stream)                       → bool
+std.io.seek(stream, offset[, whence])         → int
+std.io.tell(stream)                           → int
 std.io.read_exact(stream, n[, timeout_ms])    → bytes
 std.io.read_all(stream[, limit])              → bytes
 std.io.read_line(stream[, limit])             → bytes
 std.io.copy(dst, src[, limit])                → int
+std.io.buffered(stream[, size])               → stream
+std.io.read_async(stream, max[, timeout_ms])  → task
+std.io.write_async(stream, data[, timeout_ms]) → task
 ```
 
 规则：
@@ -957,8 +1009,14 @@ std.io.copy(dst, src[, limit])                → int
 - `write` 返回实际写入字节数，`write_all` 循环写满；
 - `close` 幂等，返回是否实际关闭；
 - `read_all` 默认上限 16 MiB；
-- 文件和 socket 共用 `std.io`，文件仍可用 `std.fs.seek` / `std.fs.tell`；
-- `std.io` 目前是同步接口；socket 异步仍使用 `std.net.*_async`。
+- `seek` / `tell` 只适用于可 seek 的流；
+- `buffered` 包装读缓冲和写缓冲，`close` 会先 flush；
+- `read_async` / `write_async` 返回 task，socket 和文件都支持；
+- 文件异步 I/O 使用 libuv 线程池，不阻塞事件循环；
+- 同一文件同时只允许一个异步操作；异步未完成时同步 read/write/seek/tell/close 会报错；
+- `write_async` 返回实际写入字节数，可能部分写入；
+- buffered 流会代理底层流的异步读写；
+- 文件和 socket 共用 `std.io`，文件仍可用 `std.fs.seek` / `std.fs.tell`。
 
 ### 查找路径
 

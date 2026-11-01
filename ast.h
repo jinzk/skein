@@ -158,10 +158,15 @@ enum bifs {
     B_io_readable,
     B_io_writable,
     B_io_seekable,
+    B_io_seek,
+    B_io_tell,
     B_io_read_exact,
     B_io_read_all,
     B_io_read_line,
-    B_io_copy
+    B_io_copy,
+    B_io_buffered,
+    B_io_read_async,
+    B_io_write_async
 };
 
 struct ast {

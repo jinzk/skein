@@ -1848,6 +1848,54 @@ def main():
         assert "stream:hello" in stream_proc.stdout, stream_proc.stdout
         assert stream_received == [b"hello"], stream_received
 
+        async_stream_server = socket.socket()
+        async_stream_server.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        async_stream_server.bind(("127.0.0.1", 0))
+        async_stream_server.listen(1)
+        async_stream_server.settimeout(5)
+        async_stream_port = async_stream_server.getsockname()[1]
+        async_stream_received = []
+
+        def async_stream_server_fn():
+            try:
+                client, _ = async_stream_server.accept()
+                data = client.recv(100)
+                async_stream_received.append(data)
+                client.sendall(b"async-stream:" + data)
+                client.close()
+            finally:
+                async_stream_server.close()
+
+        async_stream_thread = threading.Thread(target=async_stream_server_fn)
+        async_stream_thread.start()
+        async_stream_proc = run(
+            "import std;\n"
+            f'let s = std.net.tcp_connect("127.0.0.1", '
+            f'{async_stream_port}, 1000, "ipv4");\n'
+            'await std.io.write_async(s, "hello", 1000)\n'
+            "let data = await std.io.read_async(s, 100, 1000);\n"
+            "print(bytes_to_string(data));\n"
+            "std.io.close(s);\n"
+        )
+        async_stream_thread.join(timeout=5)
+        assert async_stream_proc.returncode == 0, async_stream_proc.stderr
+        assert "async-stream:hello" in async_stream_proc.stdout, (
+            async_stream_proc.stdout)
+        assert async_stream_received == [b"hello"], async_stream_received
+        test_file = os.path.abspath(__file__).replace("\\", "\\\\")
+        test_file = test_file.replace('"', '\\"')
+        check(
+            "io buffered async",
+            'import std;\n'
+            f'let f = std.fs.open("{test_file}", "rb");\n'
+            'let b = std.io.buffered(f, 4);\n'
+            'len(await std.io.read_async(b, 2)) == 2\n'
+            'len(await std.io.read_async(b, 100)) > 0\n'
+            'std.io.close(b)\n',
+            stdout_all=["= true", "= true", "= true"],
+        )
+
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         async_server.bind(("127.0.0.1", 0))
@@ -3368,6 +3416,89 @@ def main():
             f'bytes_to_string(std.io.read_all(check, 100)) == "hello\\nworld\\n"\n'
             f'std.io.close(check)\n',
             stdout_all=["= 12", "= true", "= true", "= true", "= true"],
+        )
+        check(
+            "io buffered read",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream}", "rb");\n'
+            f'let r = std.io.buffered(f, 4);\n'
+            f'bytes_hex(std.io.read(r, 2))\n'
+            f'bytes_hex(std.io.read(r, 2))\n'
+            f'bytes_hex(std.io.read(r, 2))\n'
+            f'bytes_hex(std.io.read(r, 2))\n'
+            f'bytes_hex(std.io.read(r, 2))\n'
+            f'bytes_hex(std.io.read(r, 2))\n'
+            f'std.io.read(r, 2) == null\n'
+            f'std.io.eof(r)\n'
+            f'std.io.close(r)\n',
+            stdout_all=[
+                "= 6865", "= 6c6c", "= 6f0a", "= 776f", "= 726c",
+                "= 640a", "= true", "= true", "= true",
+            ],
+        )
+        check(
+            "io buffered write close flush",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream_copy}", "w+b");\n'
+            f'let w = std.io.buffered(f, 4);\n'
+            f'std.io.write_all(w, "buffered data")\n'
+            f'std.io.close(w)\n'
+            f'let check = std.fs.open("{quoted_stream_copy}", "rb");\n'
+            f'bytes_to_string(std.io.read_all(check, 100))\n'
+            f'std.io.close(check)\n',
+            stdout_all=["= 13", "= true", "= buffered data", "= true"],
+        )
+        check(
+            "io seek tell",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream}", "rb");\n'
+            f'std.io.tell(f)\n'
+            f'std.io.seek(f, 6, 0)\n'
+            f'std.io.tell(f)\n'
+            f'bytes_to_string(std.io.read_exact(f, 1))\n'
+            f'std.io.seek(f, 0, 0)\n'
+            f'std.io.tell(f)\n'
+            f'std.io.close(f)\n',
+            stdout_all=["= 0", "= 6", "= 6", "= w", "= 0", "= 0", "= true"],
+        )
+        check(
+            "io buffered seek tell",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream}", "rb");\n'
+            f'let b = std.io.buffered(f, 4);\n'
+            f'std.io.tell(b)\n'
+            f'bytes_to_string(std.io.read(b, 2))\n'
+            f'std.io.tell(b)\n'
+            f'std.io.seek(b, 6, 0)\n'
+            f'std.io.tell(b)\n'
+            f'bytes_to_string(std.io.read_exact(b, 1))\n'
+            f'std.io.close(b)\n',
+            stdout_all=["= 0", "= he", "= 2", "= 6", "= 6", "= w", "= true"],
+        )
+        check(
+            "io file async",
+            f'import std;\n'
+            f'let w = std.fs.open("{quoted_stream_copy}", "w+b");\n'
+            f'await std.io.write_async(w, "file async data")\n'
+            f'std.io.close(w)\n'
+            f'let r = std.fs.open("{quoted_stream_copy}", "rb");\n'
+            f'bytes_to_string(await std.io.read_async(r, 4))\n'
+            f'len(await std.io.read_async(r, 100))\n'
+            f'await std.io.read_async(r, 100) == null\n'
+            f'std.io.eof(r)\n'
+            f'std.io.close(r)\n',
+            stdout_all=[
+                "= 15", "= true", "= file", "= 11", "= true",
+                "= true", "= true",
+            ],
+        )
+        check(
+            "io file async pending",
+            f'import std;\n'
+            f'let f = std.fs.open("{quoted_stream}", "rb");\n'
+            f'let t = std.io.read_async(f, 4);\n'
+            f'std.io.read(f, 1)\n',
+            stderr="pending async operation",
         )
         check(
             "io stream type",

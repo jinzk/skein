@@ -1310,6 +1310,25 @@ let rest = std.io.read_all(f, 16 * 1024 * 1024);
 std.io.eof(f)
 ```
 
+socket 异步流：
+
+```text
+let s = std.net.tcp_connect("127.0.0.1", 8080);
+
+await std.io.write_async(s, "hello", 1000);
+let data = await std.io.read_async(s, 4096, 1000);
+std.io.close(s);
+```
+
+文件异步流：
+
+```text
+let f = std.fs.open("data.bin", "rb");
+let first = await std.io.read_async(f, 4096);
+let rest = await std.io.read_async(f, 4096);
+std.io.close(f)
+```
+
 流函数：
 
 ```text
@@ -1322,10 +1341,15 @@ std.io.eof(stream)
 std.io.readable(stream)
 std.io.writable(stream)
 std.io.seekable(stream)
+std.io.seek(stream, offset[, whence])
+std.io.tell(stream)
 std.io.read_exact(stream, n[, timeout_ms])
 std.io.read_all(stream[, limit])
 std.io.read_line(stream[, limit])
 std.io.copy(dst, src[, limit])
+std.io.buffered(stream[, size])
+std.io.read_async(stream, max[, timeout_ms])
+std.io.write_async(stream, data[, timeout_ms])
 ```
 
 规则：
@@ -1333,9 +1357,15 @@ std.io.copy(dst, src[, limit])
 - EOF 返回 `null`；
 - `read_all` 默认上限 16 MiB；
 - `close` 幂等，返回是否实际关闭；
+- `seek` / `tell` 只适用于可 seek 的流；
+- `buffered` 同时提供读缓冲和写缓冲，`close` 会先 flush；
+- `read_async` / `write_async` 返回 task，socket 和文件都支持；
+- 文件异步 I/O 使用 libuv 线程池；
+- 同一文件同时只允许一个异步操作；异步未完成时同步操作会报错；
+- `write_async` 可能部分写入，返回实际写入字节数；
+- buffered 流会代理底层流的异步读写；
 - 文件和 socket 共用 `std.io`；
-- 文件仍使用 `std.fs.seek` / `std.fs.tell`；
-- `std.io` 是同步接口，socket 异步仍使用 `std.net.*_async`。
+- 文件仍使用 `std.fs.seek` / `std.fs.tell`。
 
 新增模块说明：
 

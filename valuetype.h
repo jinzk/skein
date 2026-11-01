@@ -122,6 +122,18 @@ struct stream_ops {
     bool (*close)(void *data, bool &was_open, std::string &error);
     bool (*eof)(void *data, bool &eof, std::string &error);
     bool (*seekable)(void *data);
+    bool (*seek)(void *data, long long offset, int whence,
+                 long long &position, std::string &error);
+    bool (*tell)(void *data, long long &position, std::string &error);
+    struct value_t *(*read_async)(void *data,
+                                  const std::shared_ptr<void> &owner,
+                                  std::size_t max_bytes, long long timeout_ms,
+                                  std::string &error);
+    struct value_t *(*write_async)(void *data,
+                                   const std::shared_ptr<void> &owner,
+                                   const std::string &bytes,
+                                   long long timeout_ms,
+                                   std::string &error);
 };
 
 struct native_type {

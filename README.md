@@ -520,6 +520,22 @@ let served = std.http.serve(s, func(req) {
 - HTTP/1.1 流式响应自动使用 `Transfer-Encoding: chunked`；
 - HTTP/2 流式响应通过 data provider 发送。
 
+服务端请求 body 流式回调：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+
+s["on_request_body"] = func(chunk) {
+  print(bytes_to_string(chunk));
+};
+```
+
+- `on_request_body` 在请求 body 到达时逐块调用；
+- 设置后 handler 的 `req["body"]` 为空，需要完整 body 时应在回调中自行累积；
+- HTTP/2 多个 stream 的请求 body 可能交错回调；
+- 未设置时仍整体读取请求 body；
+- `max_body_bytes` 同时限制流式请求 body。
+
 请求 dict：
 
 ```text
@@ -644,6 +660,42 @@ std.http2.close(s);
 - `request_many` / `request_many_async` 在单连接上并发提交多个 stream；
 - 收到 GOAWAY 或共享连接失败时，async 幂等请求会换新连接重试一次；
 - 使用 `body_stream` / `on_body` 的请求不自动重试。
+
+HTTP/2 SETTINGS 与 flow control：
+
+客户端：
+
+```text
+let a = std.http2.get(url, {
+  "settings": {"initial_window_size": 1048576}
+});
+```
+
+服务端：
+
+```text
+let s = std.http2.listen("127.0.0.1", 8080);
+
+s["settings"] = {
+  "max_concurrent_streams": 100,
+  "initial_window_size": 262144
+};
+```
+
+支持的设置项：
+
+```text
+max_concurrent_streams   // > 0
+initial_window_size      // 1 .. 2147483647
+max_frame_size           // 16384 .. 16777215
+max_header_list_size     // > 0
+enable_push              // 仅客户端，bool
+```
+
+- 未设置时使用 nghttp2 默认值；
+- `settings` 参与连接池 key，不同 settings 不会错误复用同一连接；
+- 批量请求在提交前会等待服务端 SETTINGS，避免超过服务端并发 stream 限制；
+- `initial_window_size` 可以用于调大单 stream 流控窗口。
 
 TLS：
 

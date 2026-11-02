@@ -2993,6 +2993,160 @@ def main():
                     http2_ms_proc.terminate()
                     http2_ms_proc.wait(timeout=5)
 
+            http2_set_probe = socket.socket()
+            http2_set_probe.bind(("127.0.0.1", 0))
+            http2_set_port = http2_set_probe.getsockname()[1]
+            http2_set_probe.close()
+            http2_set_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_set_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_set_port});\n"
+                    's["settings"] = {"initial_window_size": 16384, '
+                    '"max_concurrent_streams": 1};\n'
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  return {"status": 200, "body": "len=" + '
+                    'str(bytes_len(req["body"]))};\n'
+                    "}, 2);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_set_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_set_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 settings server did not listen"
+                http2_set_client = run(
+                    "import std;\n"
+                    "func big() {\n"
+                    '  let chunk = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";\n'
+                    "  for (let i = 0; i < 1000; i = i + 1) {\n"
+                    "    yield chunk;\n"
+                    "  }\n"
+                    "}\n"
+                    "let rs = std.http2.request_many([\n"
+                    f'  {{"url": '
+                    f'"http://127.0.0.1:{http2_set_port}/a", '
+                    '"method": "POST", "body_stream": big()},\n'
+                    f'  {{"url": '
+                    f'"http://127.0.0.1:{http2_set_port}/b", '
+                    '"method": "POST", "body_stream": big()}\n'
+                    '], {"settings": {"initial_window_size": 16384}});\n'
+                    'print(bytes_to_string(rs[0]["body"]));\n'
+                    'print(bytes_to_string(rs[1]["body"]));\n',
+                    timeout=30,
+                )
+                assert http2_set_client.returncode == 0, (
+                    http2_set_client.stderr)
+                assert http2_set_client.stdout.splitlines() == [
+                    "len=100000", "len=100000"], http2_set_client.stdout
+                http2_set_proc.wait(timeout=10)
+                set_output = http2_set_proc.stdout.read()
+                assert "served 2" in set_output, set_output
+            finally:
+                if http2_set_proc.poll() is None:
+                    http2_set_proc.terminate()
+                    http2_set_proc.wait(timeout=5)
+
+            bad_settings = run(
+                "import std;\n"
+                'std.http2.get("http://127.0.0.1:1/", '
+                '{"settings": {"max_frame_size": 100}});\n'
+            )
+            assert "max_frame_size must be between" in bad_settings.stderr, (
+                bad_settings.stderr)
+            bad_server_settings = run(
+                "import std;\n"
+                'let s = std.http2.listen("127.0.0.1", 0);\n'
+                's["settings"] = {"enable_push": true};\n'
+                "std.http2.serve(s, func(req) { "
+                'return {"status": 200, "body": "x"}; }, 1);\n'
+            )
+            assert "enable_push is only valid for clients" in (
+                bad_server_settings.stderr), bad_server_settings.stderr
+
+            rb2_probe = socket.socket()
+            rb2_probe.bind(("127.0.0.1", 0))
+            rb2_port = rb2_probe.getsockname()[1]
+            rb2_probe.close()
+            rb2_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                rb2_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", {rb2_port});\n'
+                    's["on_request_body"] = func(chunk) {\n'
+                    '  print("rb=" + bytes_to_string(chunk));\n'
+                    "};\n"
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  return {"status": 200, "body": "handler_body=" + '
+                    'bytes_to_string(req["body"])};\n'
+                    "}, 1);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                rb2_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", rb2_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 request body server did not listen"
+                rb2_client = run(
+                    "import std;\n"
+                    "func parts() {\n"
+                    '  yield "hello";\n'
+                    '  yield " ";\n'
+                    '  yield "world";\n'
+                    "}\n"
+                    f'let a = std.http2.post('
+                    f'"http://127.0.0.1:{rb2_port}/a", '
+                    '{"body_stream": parts()});\n'
+                    'print(bytes_to_string(a["body"]));\n',
+                    timeout=15,
+                )
+                assert rb2_client.returncode == 0, rb2_client.stderr
+                assert "handler_body=" in rb2_client.stdout, rb2_client.stdout
+                rb2_proc.wait(timeout=10)
+                rb2_output = rb2_proc.stdout.read()
+                rb2_chunks = "".join(
+                    line[3:] for line in rb2_output.splitlines()
+                    if line.startswith("rb="))
+                assert rb2_chunks == "hello world", rb2_output
+                assert "served 1" in rb2_output, rb2_output
+            finally:
+                if rb2_proc.poll() is None:
+                    rb2_proc.terminate()
+                    rb2_proc.wait(timeout=5)
+
             http2_conc_probe = socket.socket()
             http2_conc_probe.bind(("127.0.0.1", 0))
             http2_conc_port = http2_conc_probe.getsockname()[1]
@@ -4149,6 +4303,72 @@ def main():
             if http1_mc_proc.poll() is None:
                 http1_mc_proc.terminate()
                 http1_mc_proc.wait(timeout=5)
+
+        rb1_probe = socket.socket()
+        rb1_probe.bind(("127.0.0.1", 0))
+        rb1_port = rb1_probe.getsockname()[1]
+        rb1_probe.close()
+        rb1_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            rb1_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http.listen("127.0.0.1", {rb1_port});\n'
+                's["on_request_body"] = func(chunk) {\n'
+                '  print("rb=" + bytes_to_string(chunk));\n'
+                "};\n"
+                "let n = std.http.serve(s, func(req) {\n"
+                '  return {"status": 200, "body": "handler_body=" + '
+                'bytes_to_string(req["body"])};\n'
+                "}, 1);\n"
+                'print("served " + str(n));\n'
+                "std.http.close(s);\n"
+            )
+            rb1_proc.stdin.close()
+            deadline = time.time() + 5
+            ready = False
+            while time.time() < deadline:
+                try:
+                    probe = socket.create_connection(
+                        ("127.0.0.1", rb1_port), timeout=0.2)
+                    probe.close()
+                    ready = True
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert ready, "http1 request body server did not listen"
+            rb1_client = run(
+                "import std;\n"
+                "func parts() {\n"
+                '  yield "hello";\n'
+                '  yield " ";\n'
+                '  yield "world";\n'
+                "}\n"
+                f'let a = std.http.post('
+                f'"http://127.0.0.1:{rb1_port}/a", '
+                '{"body_stream": parts()});\n'
+                'print(bytes_to_string(a["body"]));\n',
+                timeout=15,
+            )
+            assert rb1_client.returncode == 0, rb1_client.stderr
+            assert "handler_body=" in rb1_client.stdout, rb1_client.stdout
+            rb1_proc.wait(timeout=10)
+            rb1_output = rb1_proc.stdout.read()
+            rb1_chunks = "".join(
+                line[3:] for line in rb1_output.splitlines()
+                if line.startswith("rb="))
+            assert rb1_chunks == "hello world", rb1_output
+            assert "served 1" in rb1_output, rb1_output
+        finally:
+            if rb1_proc.poll() is None:
+                rb1_proc.terminate()
+                rb1_proc.wait(timeout=5)
 
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

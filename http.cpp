@@ -1655,6 +1655,7 @@ struct http_server_state {
     long long idle_timeout_ms = 0;
     long long served = 0;
     bool stopping = false;
+    value_t *on_request_body = NULL;
 };
 
 void handle_http_server_connection(value_t *stream, value_t *handler,
@@ -1678,7 +1679,8 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             eval_capture_snapshot snapshot;
             eval_capture_begin(snapshot);
             ok = read_message_async(stream, true, read_timeout, message,
-                                    NULL, 16 * 1024 * 1024, &clean_eof);
+                                    state->on_request_body,
+                                    16 * 1024 * 1024, &clean_eof);
             eval_capture_result captured = eval_capture_end(snapshot);
             if (!ok) {
                 std::string text;
@@ -1860,10 +1862,19 @@ value_t *http_serve(const std::vector<value_t *> &args) {
         key_file = ((string_value_t *)key_value)->value;
     }
 
+    value_t *on_request_body = dict_get(args[0], "on_request_body");
+    if (on_request_body && on_request_body->type == T_null)
+        on_request_body = NULL;
+    if (on_request_body && !callable_value(on_request_body)) {
+        yyerror("std.http.serve on_request_body must be a function");
+        return NULL;
+    }
+
     http_server_state state;
     state.max_requests = max_requests;
     state.max_per_connection = max_per_connection;
     state.idle_timeout_ms = idle_timeout_ms;
+    state.on_request_body = on_request_body;
 
     value_t *handler = args[1];
     task_ptr server_task = fiber_start_async(

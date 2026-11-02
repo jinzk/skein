@@ -194,7 +194,10 @@ enum bifs {
     B_http2_serve,
     B_tls_client,
     B_tls_server,
-    B_tls_alpn
+    B_tls_alpn,
+    B_json_parse,
+    B_json_try_parse,
+    B_json_stringify
 };
 
 struct ast {

@@ -7,6 +7,7 @@
 #include "http.h"
 #include "http2.h"
 #include "io.h"
+#include "json.h"
 #include "net.h"
 #include "result.h"
 #include "task.h"
@@ -334,6 +335,8 @@ struct value_t *call_builtin(int functype,
         return call_error_builtin(functype, args);
     if (functype >= B_io_read && functype <= B_io_write_async)
         return call_io_builtin(functype, args);
+    if (functype >= B_json_parse && functype <= B_json_stringify)
+        return call_json_builtin(functype, args);
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
 #ifdef CALC_ENABLE_HTTP2

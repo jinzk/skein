@@ -76,6 +76,7 @@ add_executable(${PROJECT_NAME}
   http.cpp
   http1_parser.cpp
   io.cpp
+  json.cpp
   main.cpp
   net.cpp
   package.cpp

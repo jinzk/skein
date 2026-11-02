@@ -1241,6 +1241,7 @@ import std;
 ```text
 std.list
 std.dict
+std.json
 std.string
 std.bytes
 std.math
@@ -1286,6 +1287,8 @@ std.dict.keys({"a": 1, "b": 2})
 std.dict.items({"a": 1, "b": 2})
 std.dict.delete({"a": 1}, "a")
 std.dict.merge({"a": 1}, {"b": 2})
+std.json.parse("{\"a\": 1}")
+std.json.stringify({"a": 1, "b": [2, 3]})
 std.string.join(["a", "b"], ",")
 std.string.replace("a-b", "-", "_")
 std.string.starts_with("hello", "he")
@@ -1294,6 +1297,47 @@ std.string.repeat("ab", 2)
 std.string.trim_start("  x")
 std.bytes.hex(bytes_from_hex("00ff"))
 ```
+
+JSON：
+
+```text
+import std;
+
+let value = std.json.parse("{\"name\": \"alice\", \"tags\": [1, 2]}");
+std.json.stringify(value)       // {"name":"alice","tags":[1,2]}
+
+let r = std.json.try_parse("{bad}");
+std.result.is_err(r)            // true
+```
+
+函数：
+
+```text
+std.json.parse(text)        → value
+std.json.try_parse(text)    → result
+std.json.stringify(value)   → string
+```
+
+`text` 可以是 `string` 或 `bytes`，HTTP body 可以直接传入。
+
+```text
+let data = std.json.parse(req["body"]);
+std.http.respond(req, 200, {"Content-Type": "application/json"},
+                 std.json.stringify({"ok": true}));
+```
+
+规则：
+
+- JSON object 映射为 `dict`，key 一律是 `string`；array 映射为 `list`；
+- number：在 int64 范围内的整数映射为 `int`，否则映射为 `float`；
+- `true` / `false` / `null` 映射为 `bool` / `null`；
+- `parse` 遇到非法 JSON 会报运行时错误，`try_parse` 返回 `result`；
+- 重复 key 以最后一个为准；
+- `stringify` 只接受 JSON 子集；object key 必须是 `string`，否则报错；
+- `stringify` 拒绝 `bytes`、`function`、`struct`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
+- 字符串按 UTF-8 校验并转义控制字符；JSON 的 `\u0000` 不支持；
+- 嵌套深度上限为 512；
+- 默认输出紧凑 JSON，并保持 dict 的插入序。
 
 流式读写：
 
@@ -1375,6 +1419,7 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.io`：`print`、`format`、`input`，以及文件和 socket 通用的流式读写；
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`status` / `command_status`；
+- `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
 - `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/async；
@@ -1756,6 +1801,7 @@ std.http2.close(s);
 - 支持 `on_body` 回调流式接收响应 body；
 - 服务端响应 dict 支持 `body_stream` 流式发送；
 - async 服务端 handler 可在多个 stream 之间并发执行；
+- 每个客户端连接在独立 fiber 中处理，多个连接可以并发服务；
 - `options` 支持 `headers`、`body`、`body_stream`、`on_body`、`timeout_ms`、`max_body_bytes`、`tls`；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
@@ -1763,9 +1809,10 @@ std.http2.close(s);
 - 同步和 async 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
 - async 的 `get_async` / `post_async` / `request_async` 可以共享同一连接并并发执行；
-- 使用 `on_body` / `body_stream` 的 async 请求仍使用独立连接；
+- async 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
 - `request_many` / `request_many_async` 在单连接上并发提交多个 stream；
-- 收到 GOAWAY 或复用连接失败时，幂等方法会换新连接重试一次。
+- 收到 GOAWAY 或共享连接失败时，async 幂等请求会换新连接重试一次；
+- 使用 `body_stream` / `on_body` 的请求不自动重试。
 
 ### TLS
 

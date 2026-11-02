@@ -359,6 +359,13 @@ value_t *build_std_namespace() {
             {"merge", B_dict_merge},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("json"),
+        builtin_module({
+            {"parse", B_json_parse},
+            {"try_parse", B_json_try_parse},
+            {"stringify", B_json_stringify},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("string"),
         builtin_module({
             {"len", B_len},

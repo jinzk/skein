@@ -227,6 +227,8 @@ import std;
 
 std.list.slice([1, 2, 3, 4], 1, 2)
 std.dict.get({"a": 1}, "a")
+std.json.parse("{\"a\": 1}")
+std.json.stringify({"a": 1})
 std.string.join(["a", "b"], ",")
 std.bytes.hex(bytes_from_hex("00ff"))
 std.math.sqrt(9)
@@ -628,15 +630,17 @@ std.http2.close(s);
 - 客户端 `options` 支持 `headers`、`body`、`body_stream`、`on_body`、`timeout_ms`、`max_body_bytes`、`tls`；
 - 服务端 handler 接收 request dict，返回 response dict；
 - 每个请求在独立 fiber 中执行，async handler 可以跨 stream 并发；
+- 每个客户端连接也在独立 fiber 中处理，多个连接可以并发服务；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
 - 同步和 async 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
 - async 的 `get_async` / `post_async` / `request_async` 可以共享同一连接并并发执行；
-- 使用 `on_body` / `body_stream` 的 async 请求仍使用独立连接；
+- async 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
 - `request_many` / `request_many_async` 在单连接上并发提交多个 stream；
-- 收到 GOAWAY 或复用连接失败时，幂等方法会换新连接重试一次。
+- 收到 GOAWAY 或共享连接失败时，async 幂等请求会换新连接重试一次；
+- 使用 `body_stream` / `on_body` 的请求不自动重试。
 
 TLS：
 
@@ -1047,6 +1051,7 @@ isize        ssize_t / intptr_t 宽度
 ```text
 std.list
 std.dict
+std.json
 std.string
 std.bytes
 std.math
@@ -1086,6 +1091,10 @@ std.dict.values
 std.dict.items
 std.dict.delete
 std.dict.merge
+
+std.json.parse
+std.json.try_parse
+std.json.stringify
 
 std.string.len
 std.string.find
@@ -1287,6 +1296,11 @@ std.bytes.from_int
 - `std.dict.items` 返回 `[[key, value], ...]`；
 - `std.dict.delete` 删除缺失键时返回原 dict 的副本；
 - `std.dict.merge` 中右侧 dict 覆盖同名键；
+- `std.json.parse` 把 JSON object 映射为 `dict`，key 一律是 `string`；参数可以是 `string` 或 `bytes`；
+- `std.json.try_parse` 返回 `result`，非法 JSON 不会直接抛错；
+- `std.json.stringify` 只接受 JSON 子集，dict key 必须是 `string`；
+- JSON 整数在 int64 范围内映射为 `int`，否则映射为 `float`；重复 key 以最后一个为准；
+- `std.json.stringify` 拒绝 `bytes`、`function`、`struct`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
 - `std.string.join` 只接受字符串元素；
 - `std.string.replace` 替换全部匹配，空查找串会报错；
 - `std.string.contains` 返回 `1` / `0`；

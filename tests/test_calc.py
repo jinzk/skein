@@ -2982,6 +2982,77 @@ def main():
                     http2_conc_proc.terminate()
                     http2_conc_proc.wait(timeout=5)
 
+            http2_mc_probe = socket.socket()
+            http2_mc_probe.bind(("127.0.0.1", 0))
+            http2_mc_port = http2_mc_probe.getsockname()[1]
+            http2_mc_probe.close()
+            http2_mc_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_mc_proc.stdin.write(
+                    "import std;\n"
+                    "async func handler(req) {\n"
+                    "  await std.task.sleep(300);\n"
+                    '  return {"status": 200, "body": "ok " + '
+                    'req["path"]};\n'
+                    "}\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_mc_port});\n"
+                    "let n = std.http2.serve(s, handler, 2);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_mc_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_mc_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 multi-conn server did not listen"
+                client_source = (
+                    "import std;\n"
+                    f'let a = std.http2.get('
+                    f'"http://127.0.0.1:{http2_mc_port}/a");\n'
+                    'print(bytes_to_string(a["body"]));\n'
+                )
+                started = time.time()
+                mc1 = subprocess.Popen(
+                    [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                time.sleep(0.02)
+                mc2 = subprocess.Popen(
+                    [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                out1, err1 = mc1.communicate(client_source, timeout=15)
+                out2, err2 = mc2.communicate(client_source, timeout=15)
+                elapsed = time.time() - started
+                assert mc1.returncode == 0, err1
+                assert mc2.returncode == 0, err2
+                assert "ok /a" in out1, out1
+                assert "ok /a" in out2, out2
+                assert elapsed < 0.55, (
+                    f"http2 connections were not served concurrently: "
+                    f"{elapsed:.3f}s")
+                http2_mc_proc.wait(timeout=10)
+                mc_output = http2_mc_proc.stdout.read()
+                assert "served 2" in mc_output, mc_output
+            finally:
+                if http2_mc_proc.poll() is None:
+                    http2_mc_proc.terminate()
+                    http2_mc_proc.wait(timeout=5)
+
             http2_shared_probe = socket.socket()
             http2_shared_probe.bind(("127.0.0.1", 0))
             http2_shared_port = http2_shared_probe.getsockname()[1]
@@ -3152,6 +3223,150 @@ def main():
                 if http2_shared_go_proc.poll() is None:
                     http2_shared_go_proc.terminate()
                     http2_shared_go_proc.wait(timeout=5)
+
+            http2_retry_probe = socket.socket()
+            http2_retry_probe.bind(("127.0.0.1", 0))
+            http2_retry_port = http2_retry_probe.getsockname()[1]
+            http2_retry_probe.close()
+            http2_retry_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_retry_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_retry_port});\n"
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  return {"status": 200, "body": "cid=" + '
+                    'str(req["connection_id"]) + " " + req["path"]};\n'
+                    "}, 2, 1);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_retry_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_retry_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 retry server did not listen"
+                http2_retry_client = run(
+                    "import std;\n"
+                    f'let t1 = std.http2.get_async('
+                    f'"http://127.0.0.1:{http2_retry_port}/a");\n'
+                    f'let t2 = std.http2.get_async('
+                    f'"http://127.0.0.1:{http2_retry_port}/b");\n'
+                    "let a = await t1;\n"
+                    "let b = await t2;\n"
+                    'print(bytes_to_string(a["body"]));\n'
+                    'print(bytes_to_string(b["body"]));\n',
+                    timeout=15,
+                )
+                assert http2_retry_client.returncode == 0, (
+                    http2_retry_client.stderr)
+                retry_lines = http2_retry_client.stdout.splitlines()
+                assert len(retry_lines) == 2, http2_retry_client.stdout
+                retry_cids = [line.split()[0] for line in retry_lines]
+                assert retry_cids[0] != retry_cids[1], (
+                    "http2 client did not retry the refused stream: "
+                    + http2_retry_client.stdout)
+                assert " /a" in retry_lines[0], http2_retry_client.stdout
+                assert " /b" in retry_lines[1], http2_retry_client.stdout
+                http2_retry_proc.wait(timeout=10)
+                retry_output = http2_retry_proc.stdout.read()
+                assert "served 2" in retry_output, retry_output
+            finally:
+                if http2_retry_proc.poll() is None:
+                    http2_retry_proc.terminate()
+                    http2_retry_proc.wait(timeout=5)
+
+            http2_ss_probe = socket.socket()
+            http2_ss_probe.bind(("127.0.0.1", 0))
+            http2_ss_port = http2_ss_probe.getsockname()[1]
+            http2_ss_probe.close()
+            http2_ss_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_ss_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_ss_port});\n"
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  return {"status": 200, "body": "cid=" + '
+                    'str(req["connection_id"]) + " echo:" + '
+                    'bytes_to_string(req["body"])};\n'
+                    "}, 2);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_ss_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_ss_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 shared stream server did not listen"
+                http2_ss_client = run(
+                    "import std;\n"
+                    "func p1() { yield \"hello\"; }\n"
+                    "func p2() { yield \"world\"; }\n"
+                    f'let t1 = std.http2.post_async('
+                    f'"http://127.0.0.1:{http2_ss_port}/a", '
+                    '{"body_stream": p1(), "on_body": func(c) {\n'
+                    '  print("s1=" + bytes_to_string(c));\n'
+                    "}});\n"
+                    f'let t2 = std.http2.post_async('
+                    f'"http://127.0.0.1:{http2_ss_port}/b", '
+                    '{"body_stream": p2(), "on_body": func(c) {\n'
+                    '  print("s2=" + bytes_to_string(c));\n'
+                    "}});\n"
+                    "let r1 = await t1;\n"
+                    "let r2 = await t2;\n"
+                    'print("r1=" + bytes_to_string(r1["body"]));\n'
+                    'print("r2=" + bytes_to_string(r2["body"]));\n',
+                    timeout=15,
+                )
+                assert http2_ss_client.returncode == 0, (
+                    http2_ss_client.stderr)
+                ss_lines = http2_ss_client.stdout.splitlines()
+                s1 = "".join(line[3:] for line in ss_lines
+                             if line.startswith("s1="))
+                s2 = "".join(line[3:] for line in ss_lines
+                             if line.startswith("s2="))
+                assert s1 == "cid=1 echo:hello", http2_ss_client.stdout
+                assert s2 == "cid=1 echo:world", http2_ss_client.stdout
+                assert "r1=" in ss_lines, http2_ss_client.stdout
+                assert "r2=" in ss_lines, http2_ss_client.stdout
+                http2_ss_proc.wait(timeout=10)
+                ss_output = http2_ss_proc.stdout.read()
+                assert "served 2" in ss_output, ss_output
+            finally:
+                if http2_ss_proc.poll() is None:
+                    http2_ss_proc.terminate()
+                    http2_ss_proc.wait(timeout=5)
 
         import shutil
         tls_probe = run('import std;\nstd.dict.has(std, "tls")\n')
@@ -4319,6 +4534,94 @@ def main():
         "std dict merge type",
         "import std;\nstd.dict.merge({\"a\": 1}, 1)\n",
         stderr="std.dict.merge expects two dicts",
+    )
+    check(
+        "std json parse",
+        r'''import std;
+let v = std.json.parse("{\"a\": 1, \"b\": [true, null, \"x\"], \"c\": 1.5}");
+print(v.a);
+print(v.b[0]);
+print(v.b[1]);
+print(v.b[2]);
+print(v.c);
+''',
+        stdout_all=["1", "true", "null", "x", "1.5"],
+    )
+    check(
+        "std json stringify",
+        r'''import std;
+std.json.stringify({"a": 1, "b": [true, null, "x"], "c": 1.5})
+std.json.stringify({"s": "a\"b\n\\c"})
+std.json.stringify(1.0)
+''',
+        stdout_all=[r'= {"a":1,"b":[true,null,"x"],"c":1.5}',
+                    r'= {"s":"a\"b\n\\c"}', "= 1.0"],
+    )
+    check(
+        "std json numbers",
+        r'''import std;
+std.type.kind_of(std.json.parse("1"))
+std.type.kind_of(std.json.parse("1.0"))
+std.type.kind_of(std.json.parse("9223372036854775808"))
+std.json.parse("-9223372036854775808")
+''',
+        stdout_all=["= int", "= float", "= float",
+                    "= -9223372036854775808"],
+    )
+    check(
+        "std json duplicate keys and unicode",
+        r'''import std;
+std.json.parse("{\"a\":1,\"a\":2}").a
+std.json.parse("\"\\u4f60\\u597d\"")
+''',
+        stdout_all=["= 2", "= 你好"],
+    )
+    check(
+        "std json roundtrip",
+        r'''import std;
+let text = "{\"a\": [1, 2], \"b\": {\"c\": true}, \"s\": \"\\u4f60\"}";
+std.json.stringify(std.json.parse(text))
+''',
+        stdout=r'= {"a":[1,2],"b":{"c":true},"s":"你"}',
+    )
+    check(
+        "std json try_parse",
+        'import std;\n'
+        'let r = std.json.try_parse("{bad}");\n'
+        'std.result.is_err(r)\n'
+        'std.result.is_ok(std.json.try_parse("{\\"a\\":1}"))\n',
+        stdout_all=["= true", "= true"],
+    )
+    check(
+        "std json parse error",
+        'import std;\nstd.json.parse("{\\"a\\":1")\n',
+        stderr="JSON parse error",
+    )
+    check(
+        "std json parse bytes",
+        'import std;\n'
+        'std.json.parse(bytes_from_string("{\\"a\\": 7}")).a\n',
+        stdout="= 7",
+    )
+    check(
+        "std json parse type",
+        "import std;\nstd.json.parse(1)\n",
+        stderr="std.json.parse expects a string or bytes",
+    )
+    check(
+        "std json parse invalid utf8",
+        'import std;\nstd.json.parse(bytes_from_hex("ff"))\n',
+        stderr="not valid UTF-8",
+    )
+    check(
+        "std json stringify key error",
+        "import std;\nstd.json.stringify({1: 2})\n",
+        stderr="JSON object keys must be strings",
+    )
+    check(
+        "std json stringify unsupported",
+        'import std;\nstd.json.stringify({"a": bytes_from_hex("00")})\n',
+        stderr="cannot encode bytes as JSON",
     )
 
     check(

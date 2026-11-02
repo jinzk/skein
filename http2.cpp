@@ -313,7 +313,9 @@ struct h2_connection {
         std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
     };
     std::map<int32_t, multi_response> multi_streams;
-    std::vector<std::unique_ptr<out_body>> multi_request_bodies;
+    std::vector<std::shared_ptr<out_body>> multi_request_bodies;
+    std::map<int32_t, std::shared_ptr<generator_state>>
+        multi_generators;
 
     /* client pool state */
     std::string key;
@@ -991,6 +993,7 @@ int server_on_stream_close(nghttp2_session *, int32_t stream_id,
     connection->requests.erase(stream_id);
     connection->response_bodies.erase(stream_id);
     connection->response_streams.erase(stream_id);
+    connection->multi_generators.erase(stream_id);
     return 0;
 }
 
@@ -1683,6 +1686,8 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
     std::vector<url_parts> urls;
     std::vector<value_t *> headers;
     std::vector<std::string> bodies;
+    std::vector<value_t *> on_bodies;
+    std::vector<generator_ptr> body_generators;
     std::string key;
     for (size_t i = 0; i < request_list->payload->items.size(); ++i) {
         value_t *item = request_list->payload->items[i];
@@ -1731,10 +1736,32 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
                         "std.http2.request_many"))
             return NULL;
 
+        value_t *item_on_body = dict_get(item, "on_body");
+        if (item_on_body && item_on_body->type == T_null)
+            item_on_body = NULL;
+        if (item_on_body && !callable_value(item_on_body)) {
+            yyerror("std.http2.request_many on_body must be a function");
+            return NULL;
+        }
+        generator_ptr item_generator;
+        value_t *item_stream = dict_get(item, "body_stream");
+        if (item_stream && item_stream->type != T_null) {
+            if (!fiber_is_generator(item_stream) ||
+                !get_generator_value(item_stream, item_generator))
+                return NULL;
+            if (!body.empty()) {
+                yyerror("std.http2.request_many: body and body_stream "
+                        "cannot both be set");
+                return NULL;
+            }
+        }
+
         methods.push_back(method);
         urls.push_back(url);
         headers.push_back(item_headers);
         bodies.push_back(body);
+        on_bodies.push_back(item_on_body);
+        body_generators.push_back(item_generator);
     }
 
     h2_connection *connection = h2_pool_acquire(key);
@@ -1778,17 +1805,22 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
         std::vector<nghttp2_nv> nva;
         build_nv(request_headers, nva);
 
-        connection->multi_request_bodies.push_back(
-            std::unique_ptr<out_body>(new out_body()));
-        out_body *body_slot =
-            connection->multi_request_bodies.back().get();
-        body_slot->data = bodies[i];
-        body_slot->offset = 0;
-
+        std::shared_ptr<out_body> body_owner;
+        std::shared_ptr<generator_state> generator_owner;
         nghttp2_data_provider provider;
         nghttp2_data_provider *provider_ptr = NULL;
-        if (!bodies[i].empty()) {
-            provider.source.ptr = body_slot;
+        if (body_generators[i]) {
+            generator_owner = std::make_shared<generator_state>();
+            generator_owner->generator = body_generators[i];
+            provider.source.ptr = generator_owner.get();
+            provider.read_callback = generator_state_read_callback;
+            provider_ptr = &provider;
+        } else if (!bodies[i].empty()) {
+            body_owner = std::make_shared<out_body>();
+            body_owner->data = bodies[i];
+            body_owner->offset = 0;
+            connection->multi_request_bodies.push_back(body_owner);
+            provider.source.ptr = body_owner.get();
             provider.read_callback = body_read_callback;
             provider_ptr = &provider;
         }
@@ -1800,7 +1832,12 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
             failed = true;
             break;
         }
-        connection->multi_streams[stream_id];
+        h2_connection::multi_response &stream_state =
+            connection->multi_streams[stream_id];
+        stream_state.on_body = on_bodies[i];
+        stream_state.max_body_bytes = max_body_bytes;
+        if (generator_owner)
+            connection->multi_generators[stream_id] = generator_owner;
         stream_order.push_back(stream_id);
     }
 
@@ -1870,6 +1907,7 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
     bool goaway = connection->goaway;
     connection->multi_mode = false;
     connection->multi_request_bodies.clear();
+    connection->multi_generators.clear();
 
     if (failed || !connection->failure.empty()) {
         connection->multi_streams.clear();

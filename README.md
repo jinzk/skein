@@ -598,7 +598,8 @@ let responses2 = await std.http2.request_many_async([
 - 所有请求必须属于同一个 origin（scheme + host + port + TLS 配置）；
 - 请求在同一个 HTTP/2 连接上同时提交为多个 stream；
 - 返回的列表顺序与输入顺序一致；
-- 每个请求项支持 `url`、`method`、`headers`、`body`。
+- 每个请求项支持 `url`、`method`、`headers`、`body`、`body_stream`、`on_body`；
+- 每个请求项可以独立流式发送请求 body 和流式接收响应 body。
 
 服务端：
 

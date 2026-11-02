@@ -2914,6 +2914,85 @@ def main():
                     http2_many_proc.terminate()
                     http2_many_proc.wait(timeout=5)
 
+            http2_ms_probe = socket.socket()
+            http2_ms_probe.bind(("127.0.0.1", 0))
+            http2_ms_port = http2_ms_probe.getsockname()[1]
+            http2_ms_probe.close()
+            http2_ms_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_ms_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_ms_port});\n"
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  return {"status": 200, "body": "cid=" + '
+                    'str(req["connection_id"]) + " echo:" + '
+                    'bytes_to_string(req["body"])};\n'
+                    "}, 2);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_ms_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_ms_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 many stream server did not listen"
+                http2_ms_client = run(
+                    "import std;\n"
+                    "func p1() { yield \"one\"; }\n"
+                    "func p2() { yield \"two\"; }\n"
+                    "let rs = std.http2.request_many([\n"
+                    f'  {{"url": '
+                    f'"http://127.0.0.1:{http2_ms_port}/a", '
+                    '"method": "POST", "body_stream": p1(), '
+                    '"on_body": func(c) {\n'
+                    '    print("s1=" + bytes_to_string(c));\n'
+                    "  }},\n"
+                    f'  {{"url": '
+                    f'"http://127.0.0.1:{http2_ms_port}/b", '
+                    '"method": "POST", "body_stream": p2(), '
+                    '"on_body": func(c) {\n'
+                    '    print("s2=" + bytes_to_string(c));\n'
+                    "  }}\n"
+                    "]);\n"
+                    'print("r1=" + bytes_to_string(rs[0]["body"]));\n'
+                    'print("r2=" + bytes_to_string(rs[1]["body"]));\n',
+                    timeout=15,
+                )
+                assert http2_ms_client.returncode == 0, (
+                    http2_ms_client.stderr)
+                ms_lines = http2_ms_client.stdout.splitlines()
+                ms1 = "".join(line[3:] for line in ms_lines
+                              if line.startswith("s1="))
+                ms2 = "".join(line[3:] for line in ms_lines
+                              if line.startswith("s2="))
+                assert ms1 == "cid=1 echo:one", http2_ms_client.stdout
+                assert ms2 == "cid=1 echo:two", http2_ms_client.stdout
+                assert "r1=" in ms_lines, http2_ms_client.stdout
+                assert "r2=" in ms_lines, http2_ms_client.stdout
+                http2_ms_proc.wait(timeout=10)
+                ms_output = http2_ms_proc.stdout.read()
+                assert "served 2" in ms_output, ms_output
+            finally:
+                if http2_ms_proc.poll() is None:
+                    http2_ms_proc.terminate()
+                    http2_ms_proc.wait(timeout=5)
+
             http2_conc_probe = socket.socket()
             http2_conc_probe.bind(("127.0.0.1", 0))
             http2_conc_port = http2_conc_probe.getsockname()[1]

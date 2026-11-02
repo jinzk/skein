@@ -4764,6 +4764,196 @@ def main():
             redirect_server.server_close()
             redirect_thread.join(timeout=5)
 
+        class CookieHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                pass
+
+            def _send(self, code, body=b"", cookies=None):
+                self.send_response(code)
+                for cookie in (cookies or []):
+                    self.send_header("Set-Cookie", cookie)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/set":
+                    self._send(200, b"set", [
+                        "a=1; Path=/",
+                        "b=2; Path=/admin",
+                        "c=3; HttpOnly; Path=/",
+                        "s=4; Secure; Path=/",
+                        "d=5; Domain=127.0.0.1; Path=/",
+                    ])
+                elif self.path == "/check":
+                    self._send(
+                        200, self.headers.get("Cookie", "").encode())
+                elif self.path == "/admin/check":
+                    self._send(
+                        200, self.headers.get("Cookie", "").encode())
+                elif self.path == "/delete":
+                    self._send(200, b"deleted",
+                               ["a=; Max-Age=0; Path=/"])
+                else:
+                    self._send(404)
+
+        cookie_server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), CookieHandler)
+        cookie_port = cookie_server.server_address[1]
+        cookie_thread = threading.Thread(
+            target=cookie_server.serve_forever)
+        cookie_thread.start()
+        try:
+            cookie_client = run(
+                "import std;\n"
+                "let jar = {};\n"
+                f'let r = std.http.get('
+                f'"http://127.0.0.1:{cookie_port}/set", '
+                '{"cookie_jar": jar});\n'
+                "let cs = std.http.cookies(r);\n"
+                'print("count=" + str(len(cs)));\n'
+                'print("check1=" + bytes_to_string(std.http.get('
+                f'"http://127.0.0.1:{cookie_port}/check", '
+                '{"cookie_jar": jar})["body"]));\n'
+                'print("admin=" + bytes_to_string(std.http.get('
+                f'"http://127.0.0.1:{cookie_port}/admin/check", '
+                '{"cookie_jar": jar})["body"]));\n'
+                f'let deleted = std.http.get('
+                f'"http://127.0.0.1:{cookie_port}/delete", '
+                '{"cookie_jar": jar});\n'
+                'print("check2=" + bytes_to_string(std.http.get('
+                f'"http://127.0.0.1:{cookie_port}/check", '
+                '{"cookie_jar": jar})["body"]));\n'
+                "let jar2 = {};\n"
+                f'let ar = await std.http.get_async('
+                f'"http://127.0.0.1:{cookie_port}/set", '
+                '{"cookie_jar": jar2});\n'
+                'print("acount=" + str(len(std.http.cookies(ar))));\n'
+                f'let ac = await std.http.get_async('
+                f'"http://127.0.0.1:{cookie_port}/check", '
+                '{"cookie_jar": jar2});\n'
+                'print("acheck=" + bytes_to_string(ac["body"]));\n',
+                timeout=15,
+            )
+            assert cookie_client.returncode == 0, cookie_client.stderr
+            assert cookie_client.stdout.splitlines() == [
+                "count=5",
+                "check1=a=1; c=3; d=5",
+                "admin=b=2; a=1; c=3; d=5",
+                "check2=c=3; d=5",
+                "acount=5",
+                "acheck=a=1; c=3; d=5",
+            ], cookie_client.stdout
+        finally:
+            cookie_server.shutdown()
+            cookie_server.server_close()
+            cookie_thread.join(timeout=5)
+
+        comp_probe = run(
+            "import std;\n"
+            'std.http.get("http://127.0.0.1:1/", '
+            '{"decompress": true});\n'
+        )
+        compression_enabled = (
+            "compression support is disabled" not in comp_probe.stderr)
+        if compression_enabled:
+            import gzip
+            import zlib
+
+            class CompressionHandler(http.server.BaseHTTPRequestHandler):
+                protocol_version = "HTTP/1.1"
+
+                def log_message(self, *args):
+                    pass
+
+                def _send(self, body, encoding=None):
+                    self.send_response(200)
+                    if encoding:
+                        self.send_header("Content-Encoding", encoding)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+                def do_GET(self):
+                    if self.path == "/gzip":
+                        self._send(gzip.compress(b"hello gzip"), "gzip")
+                    elif self.path == "/deflate":
+                        self._send(zlib.compress(b"hello deflate"), "deflate")
+                    elif self.path == "/rawdeflate":
+                        compressor = zlib.compressobj(wbits=-15)
+                        self._send(
+                            compressor.compress(b"hello raw") +
+                            compressor.flush(), "deflate")
+                    elif self.path == "/br":
+                        self._send(b"\x8b\x03\x80hello br\x03", "br")
+                    elif self.path == "/plain":
+                        self._send(b"hello plain")
+                    elif self.path == "/ae":
+                        self._send(self.headers.get(
+                            "Accept-Encoding", "").encode())
+                    else:
+                        self._send(b"missing")
+
+            compression_server = http.server.ThreadingHTTPServer(
+                ("127.0.0.1", 0), CompressionHandler)
+            compression_port = compression_server.server_address[1]
+            compression_thread = threading.Thread(
+                target=compression_server.serve_forever)
+            compression_thread.start()
+            try:
+                compression_client = run(
+                    "import std;\n"
+                    f'let a = std.http.get('
+                    f'"http://127.0.0.1:{compression_port}/gzip", '
+                    '{"decompress": true});\n'
+                    'print(bytes_to_string(a["body"]) + " " + '
+                    'str(a["decompressed"]));\n'
+                    f'let b = std.http.get('
+                    f'"http://127.0.0.1:{compression_port}/deflate", '
+                    '{"decompress": true});\n'
+                    'print(bytes_to_string(b["body"]));\n'
+                    f'let c = std.http.get('
+                    f'"http://127.0.0.1:{compression_port}/rawdeflate", '
+                    '{"decompress": true});\n'
+                    'print(bytes_to_string(c["body"]));\n'
+                    f'let d = std.http.get('
+                    f'"http://127.0.0.1:{compression_port}/br", '
+                    '{"decompress": true});\n'
+                    'print(bytes_to_string(d["body"]));\n'
+                    f'let e = await std.http.get_async('
+                    f'"http://127.0.0.1:{compression_port}/gzip", '
+                    '{"decompress": true});\n'
+                    'print(bytes_to_string(e["body"]));\n'
+                    f'let f = std.http.get('
+                    f'"http://127.0.0.1:{compression_port}/ae", '
+                    '{"decompress": true});\n'
+                    'print("ae=" + bytes_to_string(f["body"]));\n',
+                    timeout=15,
+                )
+                assert compression_client.returncode == 0, (
+                    compression_client.stderr)
+                lines = compression_client.stdout.splitlines()
+                assert lines[0] == "hello gzip true", lines
+                assert lines[1] == "hello deflate", lines
+                assert lines[2] == "hello raw", lines
+                assert lines[3] == "hello br", lines
+                assert lines[4] == "hello gzip", lines
+                assert lines[5].startswith("ae="), lines
+                assert "gzip" in lines[5] and "deflate" in lines[5], lines
+                bad_compression = run(
+                    "import std;\n"
+                    f'std.http.get("http://127.0.0.1:{compression_port}/gzip", '
+                    '{"decompress": true, "on_body": func(c) {}});\n'
+                )
+                assert "decompress cannot be combined with on_body" in (
+                    bad_compression.stderr), bad_compression.stderr
+            finally:
+                compression_server.shutdown()
+                compression_server.server_close()
+                compression_thread.join(timeout=5)
+
         rb1_probe = socket.socket()
         rb1_probe.bind(("127.0.0.1", 0))
         rb1_port = rb1_probe.getsockname()[1]

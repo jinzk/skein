@@ -64,6 +64,7 @@ add_executable(${PROJECT_NAME}
   ast.cpp
   async_support.cpp
   builtins.cpp
+  compression.cpp
   diagnostics.cpp
   error.cpp
   eval.cpp
@@ -129,6 +130,26 @@ if(CALC_ENABLE_TLS)
     )
   else()
     message(STATUS "OpenSSL not found; std.tls is disabled")
+  endif()
+endif()
+
+option(CALC_ENABLE_COMPRESSION "Enable gzip/deflate/brotli response decompression" ON)
+if(CALC_ENABLE_COMPRESSION)
+  find_package(ZLIB QUIET)
+  if(ZLIB_FOUND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_ZLIB=1)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
+  else()
+    message(STATUS "zlib not found; gzip/deflate decompression is disabled")
+  endif()
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+  endif()
+  if(BROTLIDEC_FOUND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_BROTLI=1)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::BROTLIDEC)
+  else()
+    message(STATUS "brotli decoder not found; br decompression is disabled")
   endif()
 endif()
 

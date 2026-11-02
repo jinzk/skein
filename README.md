@@ -683,6 +683,61 @@ let r = std.http.get(url, {
 - `body_stream` 无法重放：`301/302/303` 会丢弃 body，`307/308` 会报错；
 - 同步和 async 客户端都支持。
 
+Cookie：
+
+```text
+let jar = {};
+
+let r = std.http.get(url, {"cookie_jar": jar});
+let cookies = std.http.cookies(r);
+
+let next = std.http.get(url + "/next", {"cookie_jar": jar});
+```
+
+- `cookie_jar` 是普通 dict，可跨请求复用；
+- 自动读取响应中的 `Set-Cookie`；
+- 自动发送匹配 domain / path / secure / expires 的 `Cookie`；
+- `Max-Age=0` 会删除对应 cookie；
+- 用户显式提供 `Cookie` header 时不会覆盖；
+- `std.http.cookies(response)` 返回解析后的 cookie 列表。
+
+cookie dict：
+
+```text
+name
+value
+domain
+path
+secure
+http_only
+max_age
+expires
+same_site
+host_only
+```
+
+- HTTP/1.1 客户端支持自动 cookie jar；
+- HTTP/2 响应也提供 `set_cookie`，可用 `std.http.cookies` 解析；
+- HTTP/2 自动 cookie jar 尚未接入。
+
+压缩：
+
+```text
+let r = std.http.get(url, {"decompress": true});
+print(bytes_to_string(r["body"]));
+```
+
+- `decompress` 默认 `false`；
+- 开启后自动添加 `Accept-Encoding: gzip, deflate, br`（取决于构建支持）；
+- 自动解码 `Content-Encoding`；
+- 支持 `gzip`、`deflate`、`br`；
+- 解码后响应带 `"decompressed": true`；
+- 删除响应 header 中的 `Content-Encoding`，并更新 `Content-Length`；
+- 不能与 `on_body` 同时使用；
+- 同步和 async 客户端都支持；
+- 构建选项 `-DCALC_ENABLE_COMPRESSION=OFF` 可关闭；
+- HTTP/2 自动解压尚未接入。
+
 
 HTTP/2：
 
@@ -1392,6 +1447,7 @@ std.http.respond
 std.http.respond_async
 std.http.serve
 std.http.upgrade
+std.http.cookies
 std.http.close
 
 std.http2.request

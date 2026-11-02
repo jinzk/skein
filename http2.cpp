@@ -1156,6 +1156,18 @@ value_t *headers_dict(const std::vector<header_pair> &headers) {
     return result;
 }
 
+value_t *set_cookie_list(const std::vector<header_pair> &headers) {
+    value_t *list = (value_t *)newlistval();
+    list_value_t *items = (list_value_t *)list;
+    for (size_t i = 0; i < headers.size(); ++i) {
+        if (headers[i].name != "set-cookie")
+            continue;
+        items->payload->items.push_back(
+            newstrval(headers[i].value.c_str()));
+    }
+    return list;
+}
+
 value_t *make_response(const h2_connection &connection) {
     value_t *response = (value_t *)newdictval();
     dict_set(response, "status", newintval(connection.status));
@@ -1166,6 +1178,8 @@ value_t *make_response(const h2_connection &connection) {
     dict_set(response, "http_major", newintval(2));
     dict_set(response, "http_minor", newintval(0));
     dict_set(response, "protocol", newstrval("h2"));
+    dict_set(response, "set_cookie",
+             set_cookie_list(connection.response_headers));
     return response;
 }
 
@@ -1753,6 +1767,7 @@ value_t *make_multi_response(h2_connection::multi_response &state) {
     dict_set(response, "http_major", newintval(2));
     dict_set(response, "http_minor", newintval(0));
     dict_set(response, "protocol", newstrval("h2"));
+    dict_set(response, "set_cookie", set_cookie_list(state.headers));
     return response;
 }
 

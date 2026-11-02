@@ -1,6 +1,7 @@
 #include "http.h"
 
 #include "ast.h"
+#include "compression.h"
 #include "eval.h"
 #include "fiber.h"
 #include "http1_parser.h"
@@ -16,7 +17,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <chrono>
 #include <cstring>
 #include <memory>
@@ -521,6 +524,8 @@ value_t *headers_dict(const http1::message &message) {
     return headers;
 }
 
+value_t *set_cookie_list(const std::vector<http1::header> &headers);
+
 value_t *make_response(const http1::message &message) {
     value_t *response = (value_t *)newdictval();
     dict_set(response, "status", newintval(message.status_code));
@@ -530,6 +535,7 @@ value_t *make_response(const http1::message &message) {
     dict_set(response, "body", newbytesval(message.body));
     dict_set(response, "http_major", newintval(message.http_major));
     dict_set(response, "http_minor", newintval(message.http_minor));
+    dict_set(response, "set_cookie", set_cookie_list(message.headers));
     return response;
 }
 
@@ -824,6 +830,375 @@ value_t *redirect_options(value_t *base, value_t *headers,
     return output;
 }
 
+std::string trim_ascii_ws(const std::string &value) {
+    size_t start = 0;
+    while (start < value.size() &&
+           std::isspace((unsigned char)value[start]))
+        ++start;
+    size_t end = value.size();
+    while (end > start &&
+           std::isspace((unsigned char)value[end - 1]))
+        --end;
+    return value.substr(start, end - start);
+}
+
+std::string normalize_cookie_domain(std::string domain) {
+    domain = lower_ascii(trim_ascii_ws(domain));
+    while (!domain.empty() && domain[0] == '.')
+        domain.erase(domain.begin());
+    return domain;
+}
+
+std::string default_cookie_path(const std::string &request_path) {
+    if (request_path.empty() || request_path[0] != '/')
+        return "/";
+    size_t slash = request_path.rfind('/');
+    if (slash == std::string::npos || slash == 0)
+        return "/";
+    return request_path.substr(0, slash);
+}
+
+bool cookie_domain_matches(const std::string &host,
+                           const std::string &domain, bool host_only) {
+    if (domain.empty())
+        return false;
+    if (host == domain)
+        return true;
+    if (host_only)
+        return false;
+    if (host.size() <= domain.size())
+        return false;
+    size_t offset = host.size() - domain.size();
+    return host.compare(offset, domain.size(), domain) == 0 &&
+           host[offset - 1] == '.';
+}
+
+bool cookie_path_matches(const std::string &request_path,
+                         const std::string &cookie_path) {
+    if (request_path == cookie_path)
+        return true;
+    if (request_path.size() < cookie_path.size())
+        return false;
+    if (request_path.compare(0, cookie_path.size(), cookie_path) != 0)
+        return false;
+    if (!cookie_path.empty() && cookie_path.back() == '/')
+        return true;
+    return request_path.size() > cookie_path.size() &&
+           request_path[cookie_path.size()] == '/';
+}
+
+long long days_from_civil(int year, int month, int day) {
+    year -= month <= 2;
+    int era = (year >= 0 ? year : year - 399) / 400;
+    unsigned yoe = (unsigned)(year - era * 400);
+    unsigned doy =
+        (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return (long long)era * 146097 + (long long)doe - 719468;
+}
+
+bool parse_cookie_date(const std::string &text, long long &expires) {
+    size_t comma = text.find(',');
+    if (comma == std::string::npos)
+        return false;
+    std::string rest = text.substr(comma + 1);
+    int day = 0, year = 0, hour = 0, minute = 0, second = 0;
+    char month_text[4] = {0};
+    if (std::sscanf(rest.c_str(), " %d %3s %d %d:%d:%d", &day,
+                    month_text, &year, &hour, &minute, &second) != 6)
+        return false;
+    std::string month = lower_ascii(month_text);
+    static const char *months[] = {"jan", "feb", "mar", "apr",
+                                   "may", "jun", "jul", "aug",
+                                   "sep", "oct", "nov", "dec"};
+    int month_number = 0;
+    for (int i = 0; i < 12; ++i) {
+        if (month == months[i]) {
+            month_number = i + 1;
+            break;
+        }
+    }
+    if (month_number == 0 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 ||
+        second < 0 || second > 60)
+        return false;
+    long long days = days_from_civil(year, month_number, day);
+    expires = days * 86400 + hour * 3600 + minute * 60 + second;
+    return true;
+}
+
+value_t *parse_set_cookie(const std::string &raw,
+                          const std::string &request_host,
+                          const std::string &request_path, bool &ok) {
+    ok = false;
+    size_t semicolon = raw.find(';');
+    std::string first = trim_ascii_ws(
+        raw.substr(0, semicolon == std::string::npos ? raw.size()
+                                                     : semicolon));
+    size_t equals = first.find('=');
+    if (equals == std::string::npos || equals == 0)
+        return NULL;
+    std::string name = trim_ascii_ws(first.substr(0, equals));
+    std::string value = trim_ascii_ws(first.substr(equals + 1));
+    if (name.empty())
+        return NULL;
+
+    std::string domain;
+    bool host_only = true;
+    std::string path = default_cookie_path(request_path);
+    bool secure = false;
+    bool http_only = false;
+    long long max_age = -1;
+    long long expires = 0;
+    std::string same_site;
+
+    size_t position =
+        semicolon == std::string::npos ? raw.size() : semicolon + 1;
+    while (position < raw.size()) {
+        size_t next = raw.find(';', position);
+        std::string attribute = trim_ascii_ws(
+            raw.substr(position, next == std::string::npos
+                                     ? std::string::npos
+                                     : next - position));
+        position = next == std::string::npos ? raw.size() : next + 1;
+        if (attribute.empty())
+            continue;
+        size_t attribute_equals = attribute.find('=');
+        std::string attribute_name = lower_ascii(trim_ascii_ws(
+            attribute.substr(0, attribute_equals)));
+        std::string attribute_value =
+            attribute_equals == std::string::npos
+                ? std::string()
+                : trim_ascii_ws(attribute.substr(attribute_equals + 1));
+        if (attribute_name == "domain") {
+            domain = normalize_cookie_domain(attribute_value);
+            host_only = false;
+        } else if (attribute_name == "path") {
+            if (!attribute_value.empty() && attribute_value[0] == '/')
+                path = attribute_value;
+        } else if (attribute_name == "secure") {
+            secure = true;
+        } else if (attribute_name == "httponly") {
+            http_only = true;
+        } else if (attribute_name == "max-age") {
+            char *end = NULL;
+            long long parsed =
+                std::strtoll(attribute_value.c_str(), &end, 10);
+            if (end && *end == '\0')
+                max_age = parsed;
+        } else if (attribute_name == "expires") {
+            long long parsed = 0;
+            if (parse_cookie_date(attribute_value, parsed))
+                expires = parsed;
+        } else if (attribute_name == "samesite") {
+            same_site = attribute_value;
+        }
+    }
+
+    std::string host = lower_ascii(request_host);
+    if (host_only) {
+        domain = host;
+    } else if (domain.empty()) {
+        return NULL;
+    } else if (!host.empty() &&
+               !cookie_domain_matches(host, domain, false)) {
+        return NULL;
+    }
+
+    value_t *cookie = (value_t *)newdictval();
+    dict_set(cookie, "name", newstrval(name.c_str()));
+    dict_set(cookie, "value", newstrval(value.c_str()));
+    dict_set(cookie, "domain", newstrval(domain.c_str()));
+    dict_set(cookie, "path", newstrval(path.c_str()));
+    dict_set(cookie, "secure", newboolval(secure));
+    dict_set(cookie, "http_only", newboolval(http_only));
+    dict_set(cookie, "max_age", newintval(max_age));
+    dict_set(cookie, "expires", newintval(expires));
+    dict_set(cookie, "same_site", newstrval(same_site.c_str()));
+    dict_set(cookie, "host_only", newboolval(host_only));
+    ok = true;
+    return cookie;
+}
+
+void dict_delete(value_t *dict, const std::string &key) {
+    if (!dict || dict->type != T_dict)
+        return;
+    dict_value_t *object = (dict_value_t *)dict;
+    for (size_t i = 0; i < object->payload->items.size(); ++i) {
+        value_t *item_key = object->payload->items[i].first;
+        if (item_key->type == T_string &&
+            key == ((string_value_t *)item_key)->value) {
+            freeval(object->payload->items[i].first);
+            freeval(object->payload->items[i].second);
+            object->payload->items.erase(
+                object->payload->items.begin() + (std::ptrdiff_t)i);
+            return;
+        }
+    }
+}
+
+std::string cookie_header(value_t *jar, const std::string &host,
+                          const std::string &path, bool secure) {
+    if (!jar || jar->type != T_dict)
+        return std::string();
+    struct cookie_entry {
+        std::string text;
+        std::size_t path_length;
+    };
+    std::vector<cookie_entry> entries;
+    long long now = (long long)std::time(NULL);
+    dict_value_t *dict = (dict_value_t *)jar;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *cookie = dict->payload->items[i].second;
+        if (!cookie || cookie->type != T_dict)
+            continue;
+        value_t *name = dict_get(cookie, "name");
+        value_t *value = dict_get(cookie, "value");
+        value_t *domain = dict_get(cookie, "domain");
+        value_t *cookie_path = dict_get(cookie, "path");
+        value_t *secure_value = dict_get(cookie, "secure");
+        value_t *expires_value = dict_get(cookie, "expires");
+        value_t *host_only_value = dict_get(cookie, "host_only");
+        if (!name || name->type != T_string || !value ||
+            value->type != T_string || !domain ||
+            domain->type != T_string || !cookie_path ||
+            cookie_path->type != T_string)
+            continue;
+        bool secure_cookie = secure_value && secure_value->type == T_bool &&
+                             ((bool_value_t *)secure_value)->value;
+        if (secure_cookie && !secure)
+            continue;
+        long long expires =
+            expires_value && expires_value->type == T_int
+                ? ((int_value_t *)expires_value)->value
+                : 0;
+        if (expires > 0 && expires <= now)
+            continue;
+        bool host_only = host_only_value &&
+                         host_only_value->type == T_bool &&
+                         ((bool_value_t *)host_only_value)->value;
+        if (!cookie_domain_matches(lower_ascii(host),
+                                   ((string_value_t *)domain)->value,
+                                   host_only))
+            continue;
+        std::string cookie_path_text =
+            ((string_value_t *)cookie_path)->value;
+        if (!cookie_path_matches(path, cookie_path_text))
+            continue;
+        cookie_entry entry;
+        entry.text = ((string_value_t *)name)->value;
+        entry.text += "=";
+        entry.text += ((string_value_t *)value)->value;
+        entry.path_length = cookie_path_text.size();
+        entries.push_back(entry);
+    }
+    std::stable_sort(
+        entries.begin(), entries.end(),
+        [](const cookie_entry &left, const cookie_entry &right) {
+            return left.path_length > right.path_length;
+        });
+    std::string header;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (!header.empty())
+            header += "; ";
+        header += entries[i].text;
+    }
+    return header;
+}
+
+void update_cookie_jar(value_t *jar, value_t *response,
+                       const std::string &host, const std::string &path,
+                       bool secure) {
+    (void)secure;
+    if (!jar || jar->type != T_dict)
+        return;
+    value_t *list = dict_get(response, "set_cookie");
+    if (!list || list->type != T_list)
+        return;
+    list_value_t *items = (list_value_t *)list;
+    long long now = (long long)std::time(NULL);
+    for (size_t i = 0; i < items->payload->items.size(); ++i) {
+        value_t *raw = items->payload->items[i];
+        if (!raw || raw->type != T_string)
+            continue;
+        bool ok = false;
+        value_t *cookie = parse_set_cookie(
+            ((string_value_t *)raw)->value, host, path, ok);
+        if (!ok) {
+            freeval(cookie);
+            continue;
+        }
+        value_t *max_age_value = dict_get(cookie, "max_age");
+        long long max_age =
+            max_age_value && max_age_value->type == T_int
+                ? ((int_value_t *)max_age_value)->value
+                : -1;
+        value_t *expires_value = dict_get(cookie, "expires");
+        long long expires =
+            expires_value && expires_value->type == T_int
+                ? ((int_value_t *)expires_value)->value
+                : 0;
+        if (max_age >= 0) {
+            if (max_age == 0)
+                expires = 1;
+            else
+                expires = now + max_age;
+        }
+        value_t *domain_value = dict_get(cookie, "domain");
+        value_t *path_value = dict_get(cookie, "path");
+        value_t *name_value = dict_get(cookie, "name");
+        std::string domain = ((string_value_t *)domain_value)->value;
+        std::string cookie_path = ((string_value_t *)path_value)->value;
+        std::string name = ((string_value_t *)name_value)->value;
+        std::string key = domain + "\t" + cookie_path + "\t" + name;
+        if (expires > 0 && expires <= now) {
+            dict_delete(jar, key);
+            freeval(cookie);
+            continue;
+        }
+        dict_set(cookie, "expires", newintval(expires));
+        dict_set(jar, key, cookie);
+    }
+}
+
+bool apply_response_decompression(value_t *response) {
+    value_t *headers = dict_get(response, "headers");
+    std::string encoding = header_value(headers, "Content-Encoding");
+    if (encoding.empty() || lower_ascii(encoding) == "identity")
+        return true;
+    value_t *body = dict_get(response, "body");
+    if (!body || body->type != T_bytes)
+        return true;
+    std::string output;
+    std::string error;
+    if (!decompress_content_encoding(
+            encoding, ((bytes_value_t *)body)->value, output, error)) {
+        yyerror("std.http: %s", error.c_str());
+        return false;
+    }
+    dict_set(response, "body", newbytesval(output));
+    dict_set(response, "decompressed", newboolval(true));
+    if (headers && headers->type == T_dict) {
+        dict_delete(headers, "Content-Encoding");
+        dict_delete(headers, "Content-Length");
+        dict_set(headers, "Content-Length",
+                 newstrval(std::to_string(output.size()).c_str()));
+    }
+    return true;
+}
+
+value_t *set_cookie_list(const std::vector<http1::header> &headers) {
+    value_t *list = (value_t *)newlistval();
+    list_value_t *items = (list_value_t *)list;
+    for (size_t i = 0; i < headers.size(); ++i) {
+        if (lower_ascii(headers[i].name) != "set-cookie")
+            continue;
+        items->payload->items.push_back(
+            newstrval(headers[i].value.c_str()));
+    }
+    return list;
+}
+
 value_t *do_request_once(const std::string &method,
                          const std::string &url_text, value_t *options,
                          value_t *body_override) {
@@ -839,6 +1214,43 @@ value_t *do_request_once(const std::string &method,
         yyerror("std.http: headers must be a dict");
         return NULL;
     }
+    value_t *cookie_jar = dict_get(options, "cookie_jar");
+    if (cookie_jar && cookie_jar->type != T_dict) {
+        yyerror("std.http: cookie_jar must be a dict");
+        return NULL;
+    }
+    bool decompress = option_bool(options, "decompress", false);
+    value_t *decompress_value = dict_get(options, "decompress");
+    if (decompress_value && decompress_value->type != T_bool) {
+        yyerror("std.http: decompress must be a bool");
+        return NULL;
+    }
+    value_t *request_headers = headers;
+    value_t *owned_headers = NULL;
+    if (cookie_jar && !header_exists(headers, "Cookie")) {
+        std::string cookie = cookie_header(cookie_jar, url.host, url.path,
+                                           url.tls);
+        if (!cookie.empty()) {
+            owned_headers = copy_headers(headers);
+            dict_set(owned_headers, "Cookie",
+                     newstrval(cookie.c_str()));
+            request_headers = owned_headers;
+        }
+    }
+    if (decompress && !header_exists(request_headers, "Accept-Encoding")) {
+        std::string encodings = compression_accept_encoding();
+        if (encodings.empty()) {
+            yyerror("std.http: compression support is disabled");
+            return NULL;
+        }
+        if (!owned_headers) {
+            owned_headers = copy_headers(request_headers);
+            request_headers = owned_headers;
+        }
+        dict_set(owned_headers, "Accept-Encoding",
+                 newstrval(encodings.c_str()));
+    }
+    std::shared_ptr<value_t> headers_holder(owned_headers, freeval);
 
     std::string body;
     value_t *body_value_option =
@@ -881,6 +1293,10 @@ value_t *do_request_once(const std::string &method,
         yyerror("std.http: on_body must be a function");
         return NULL;
     }
+    if (decompress && on_body) {
+        yyerror("std.http: decompress cannot be combined with on_body");
+        return NULL;
+    }
     std::size_t max_body_bytes = 16 * 1024 * 1024;
     value_t *max_body_value = dict_get(options, "max_body_bytes");
     if (max_body_value) {
@@ -918,8 +1334,8 @@ value_t *do_request_once(const std::string &method,
     }
 
     std::string key = connection_key(url, tls_verify, tls_ca_file);
-    std::string request =
-        build_request(method, url, headers, body, true, chunked, upgrade);
+    std::string request = build_request(method, url, request_headers, body,
+                                        true, chunked, upgrade);
     if (request.empty())
         return NULL;
 
@@ -971,6 +1387,8 @@ value_t *do_request_once(const std::string &method,
             return NULL;
         }
         value_t *response = make_response(message);
+        update_cookie_jar(cookie_jar, response, url.host, url.path,
+                          url.tls);
         bool upgraded = message.status_code == 101;
         dict_set(response, "upgraded", newboolval(upgraded));
         if (upgraded) {
@@ -1062,7 +1480,14 @@ value_t *do_request_once(const std::string &method,
             pool_release(connection);
         else
             pool_discard(connection);
-        return make_response(message);
+        value_t *response = make_response(message);
+        update_cookie_jar(cookie_jar, response, url.host, url.path,
+                          url.tls);
+        if (decompress && !apply_response_decompression(response)) {
+            freeval(response);
+            return NULL;
+        }
+        return response;
     }
     return NULL;
 }
@@ -1311,6 +1736,42 @@ value_t *do_request_async_once(const std::string &method,
         yyerror("std.http: headers must be a dict");
         return NULL;
     }
+    value_t *cookie_jar = dict_get(options, "cookie_jar");
+    if (cookie_jar && cookie_jar->type != T_dict) {
+        yyerror("std.http: cookie_jar must be a dict");
+        return NULL;
+    }
+    bool decompress = option_bool(options, "decompress", false);
+    value_t *decompress_value = dict_get(options, "decompress");
+    if (decompress_value && decompress_value->type != T_bool) {
+        yyerror("std.http: decompress must be a bool");
+        return NULL;
+    }
+    value_t *request_headers = headers;
+    value_t *owned_headers = NULL;
+    if (cookie_jar && !header_exists(headers, "Cookie")) {
+        std::string cookie = cookie_header(cookie_jar, url.host, url.path,
+                                           url.tls);
+        if (!cookie.empty()) {
+            owned_headers = copy_headers(headers);
+            dict_set(owned_headers, "Cookie",
+                     newstrval(cookie.c_str()));
+            request_headers = owned_headers;
+        }
+    }
+    if (decompress && !header_exists(request_headers, "Accept-Encoding")) {
+        std::string encodings = compression_accept_encoding();
+        if (encodings.empty()) {
+            yyerror("std.http: compression support is disabled");
+            return NULL;
+        }
+        if (!owned_headers) {
+            owned_headers = copy_headers(request_headers);
+            request_headers = owned_headers;
+        }
+        dict_set(owned_headers, "Accept-Encoding",
+                 newstrval(encodings.c_str()));
+    }
 
     std::string body;
     value_t *body_option =
@@ -1353,6 +1814,10 @@ value_t *do_request_async_once(const std::string &method,
         yyerror("std.http: on_body must be a function");
         return NULL;
     }
+    if (decompress && on_body) {
+        yyerror("std.http: decompress cannot be combined with on_body");
+        return NULL;
+    }
     std::size_t max_body_bytes = 16 * 1024 * 1024;
     value_t *max_body_value = dict_get(options, "max_body_bytes");
     if (max_body_value) {
@@ -1375,12 +1840,15 @@ value_t *do_request_async_once(const std::string &method,
         upgrade = ((bool_value_t *)upgrade_value)->value;
     }
 
-    std::string request =
-        build_request(method, url, headers, body, true, chunked, upgrade);
+    std::string request = build_request(method, url, request_headers, body,
+                                        true, chunked, upgrade);
+    freeval(owned_headers);
     if (request.empty())
         return NULL;
 
     std::string host = url.host;
+    std::string request_path = url.path;
+    value_t *jar_owned = cookie_jar ? dupval(cookie_jar) : NULL;
     int port = url.port;
     bool use_tls = url.tls;
     std::string key = connection_key(url, tls_verify, tls_ca_file);
@@ -1391,11 +1859,15 @@ value_t *do_request_async_once(const std::string &method,
     task_ptr task = fiber_start_async(
         [host, port, request, timeout_ms, use_tls, tls_verify,
          tls_ca_file, key, retryable, on_body_owned, max_body_bytes,
-         body_generator, chunked, upgrade]() {
+         body_generator, chunked, upgrade, jar_owned, request_path,
+         decompress]() {
         std::shared_ptr<value_t> on_body_holder;
         if (on_body_owned)
             on_body_holder =
                 std::shared_ptr<value_t>(on_body_owned, freeval);
+        std::shared_ptr<value_t> jar_holder;
+        if (jar_owned)
+            jar_holder = std::shared_ptr<value_t>(jar_owned, freeval);
         if (upgrade) {
             value_t *client = async_connect(host, port, timeout_ms);
             if (!client)
@@ -1437,6 +1909,8 @@ value_t *do_request_async_once(const std::string &method,
                 return (value_t *)NULL;
             }
             value_t *response = make_response(message);
+            update_cookie_jar(jar_owned, response, host, request_path,
+                              use_tls);
             bool upgraded = message.status_code == 101;
             dict_set(response, "upgraded", newboolval(upgraded));
             if (upgraded) {
@@ -1519,12 +1993,20 @@ value_t *do_request_async_once(const std::string &method,
                 pool_release(connection);
             else
                 pool_discard(connection);
-            return make_response(message);
+            value_t *response = make_response(message);
+            update_cookie_jar(jar_owned, response, host, request_path,
+                              use_tls);
+            if (decompress && !apply_response_decompression(response)) {
+                freeval(response);
+                return (value_t *)NULL;
+            }
+            return response;
         }
         return (value_t *)NULL;
     });
     if (!task) {
         freeval(on_body_owned);
+        freeval(jar_owned);
         return NULL;
     }
     return new_task_value(std::move(task));
@@ -2529,6 +3011,33 @@ value_t *http_upgrade(const std::vector<value_t *> &args) {
     return dupval(socket);
 }
 
+value_t *http_cookies(const std::vector<value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_dict) {
+        yyerror("std.http.cookies expects an HTTP response");
+        return NULL;
+    }
+    value_t *list = dict_get(args[0], "set_cookie");
+    value_t *output = (value_t *)newlistval();
+    if (!list || list->type != T_list)
+        return output;
+    list_value_t *source = (list_value_t *)list;
+    list_value_t *target = (list_value_t *)output;
+    for (size_t i = 0; i < source->payload->items.size(); ++i) {
+        value_t *raw = source->payload->items[i];
+        if (!raw || raw->type != T_string)
+            continue;
+        bool ok = false;
+        value_t *cookie = parse_set_cookie(
+            ((string_value_t *)raw)->value, std::string(), std::string(),
+            ok);
+        if (ok)
+            target->payload->items.push_back(cookie);
+        else
+            freeval(cookie);
+    }
+    return output;
+}
+
 value_t *http_close(const std::vector<value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_dict) {
         yyerror("std.http.close expects a server or request handle");
@@ -2584,6 +3093,8 @@ struct value_t *call_http_builtin(
             return http_serve(args);
         case B_http_upgrade:
             return http_upgrade(args);
+        case B_http_cookies:
+            return http_cookies(args);
         case B_http_close:
             return http_close(args);
         default:

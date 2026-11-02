@@ -573,6 +573,7 @@ value_t *build_std_namespace() {
             {"respond_async", B_http_respond_async},
             {"serve", B_http_serve},
             {"upgrade", B_http_upgrade},
+            {"cookies", B_http_cookies},
             {"close", B_http_close},
         })));
 #ifdef CALC_ENABLE_HTTP2

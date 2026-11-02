@@ -40,17 +40,19 @@ std::string trim_copy(const std::string &text) {
 }
 
 std::string history_path() {
-    const char *explicit_path = std::getenv("SKEIN_HISTORY");
-    if (explicit_path && *explicit_path)
+    std::string explicit_path;
+    if (platform_get_env("SKEIN_HISTORY", explicit_path) &&
+        !explicit_path.empty())
         return explicit_path;
 #ifdef _WIN32
-    const char *home = std::getenv("USERPROFILE");
+    const char *home_name = "USERPROFILE";
 #else
-    const char *home = std::getenv("HOME");
+    const char *home_name = "HOME";
 #endif
-    if (!home || !*home)
+    std::string home;
+    if (!platform_get_env(home_name, home) || home.empty())
         return std::string();
-    return std::string(home) + "/.skein_history";
+    return home + "/.skein_history";
 }
 
 void history_add(const std::string &line) {

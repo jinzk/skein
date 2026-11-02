@@ -60,6 +60,20 @@ static void on_sigint(int) {
 void platform_init() {
 }
 
+std::vector<std::string> platform_command_line_args(int argc, char **argv) {
+    if (argc <= 0 || !argv)
+        return {};
+    return std::vector<std::string>(argv, argv + argc);
+}
+
+bool platform_get_env(const std::string &name, std::string &value) {
+    const char *env = std::getenv(name.c_str());
+    if (!env)
+        return false;
+    value = env;
+    return true;
+}
+
 bool platform_stdin_is_tty() {
     return isatty(fileno(stdin)) != 0;
 }

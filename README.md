@@ -53,6 +53,8 @@ build\skein.exe
 Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv 和 Boost.Context。平台相关代码集中在 `platform_win.cpp`：
 
 - 设置控制台输入输出代码页为 UTF-8；
+- 命令行参数通过 `GetCommandLineW` / `CommandLineToArgvW` 转换为 UTF-8，脚本路径和 `-I` / `--package-path` 支持中文路径；
+- `SKEIN_PACKAGE_PATH`、`SKEIN_HISTORY`、`USERPROFILE` 等环境变量按 UTF-16 读取后转换为 UTF-8；
 - 管道输入使用二进制模式，避免 CRLF / `0x1A` 转换；
 - 使用 `SetConsoleCtrlHandler` 实现 Ctrl-C。
 

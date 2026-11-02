@@ -933,14 +933,14 @@ void package_configure(const std::string &source_path,
             search_roots.push_back(normalize_dir(dir));
     }
 
-    const char *env = std::getenv("SKEIN_PACKAGE_PATH");
-    if (env && *env) {
+    std::string env;
+    if (platform_get_env("SKEIN_PACKAGE_PATH", env) && !env.empty()) {
 #ifdef _WIN32
         const char separator = ';';
 #else
         const char separator = ':';
 #endif
-        std::string value(env);
+        std::string value = env;
         size_t start = 0;
         for (;;) {
             size_t end = value.find(separator, start);

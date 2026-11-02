@@ -44,18 +44,22 @@ int main(int argc, char **argv) {
     platform_init();
     platform_install_interrupt_handler();
 
+    std::vector<std::string> args = platform_command_line_args(argc, argv);
+    const char *program =
+        args.empty() || args[0].empty() ? "skein" : args[0].c_str();
+
     std::string script_path;
     std::vector<std::string> package_dirs;
     bool force_interactive = false;
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    for (size_t i = 1; i < args.size(); ++i) {
+        const std::string &arg = args[i];
         if (arg == "-I" || arg == "--package-path") {
-            if (i + 1 >= argc) {
-                print_usage(argv[0]);
+            if (i + 1 >= args.size()) {
+                print_usage(program);
                 return 2;
             }
-            package_dirs.push_back(argv[++i]);
+            package_dirs.push_back(args[++i]);
         } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
             package_dirs.push_back(arg.substr(2));
         } else if (arg.rfind("--package-path=", 0) == 0) {
@@ -64,14 +68,14 @@ int main(int argc, char **argv) {
             force_interactive = true;
         } else if (arg == "-k" || arg == "--keep-going") {
             g_keep_going = true;
-        } else if (arg == "-" || arg[0] != '-') {
+        } else if (arg == "-" || (!arg.empty() && arg[0] != '-')) {
             if (!script_path.empty()) {
-                print_usage(argv[0]);
+                print_usage(program);
                 return 2;
             }
             script_path = arg;
         } else {
-            print_usage(argv[0]);
+            print_usage(program);
             return 2;
         }
     }

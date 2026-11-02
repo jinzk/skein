@@ -17,6 +17,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <shellapi.h>
 #include <fcntl.h>
 #include <io.h>
 
@@ -89,6 +90,21 @@ bool widen_utf8(const std::string &text, std::wstring &wide) {
     return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
                                text.data(), (int)text.size(),
                                wide.data(), count) == count;
+}
+
+bool narrow_utf8(const std::wstring &wide, std::string &text) {
+    text.clear();
+    if (wide.empty())
+        return true;
+    int count = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
+                                    (int)wide.size(), nullptr, 0,
+                                    nullptr, nullptr);
+    if (count <= 0)
+        return false;
+    text.resize((size_t)count);
+    return WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(),
+                               text.data(), count, nullptr,
+                               nullptr) == count;
 }
 
 std::wstring command_processor() {
@@ -299,6 +315,54 @@ bool spawn_shell(const std::string &command,
 }
 
 }  // namespace
+
+std::vector<std::string> platform_command_line_args(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+
+    int wide_argc = 0;
+    LPWSTR *wide_argv = CommandLineToArgvW(GetCommandLineW(), &wide_argc);
+    if (!wide_argv)
+        return {};
+
+    std::vector<std::string> args;
+    args.reserve((size_t)wide_argc);
+    for (int i = 0; i < wide_argc; ++i) {
+        std::string arg;
+        if (!narrow_utf8(wide_argv[i], arg))
+            arg.clear();
+        args.push_back(std::move(arg));
+    }
+    LocalFree(wide_argv);
+    return args;
+}
+
+bool platform_get_env(const std::string &name, std::string &value) {
+    value.clear();
+
+    std::wstring wide_name;
+    if (!widen_utf8(name, wide_name))
+        return false;
+
+    DWORD needed = GetEnvironmentVariableW(wide_name.c_str(), nullptr, 0);
+    if (needed == 0) {
+        if (GetLastError() == ERROR_ENVVAR_NOT_FOUND)
+            return false;
+        return true;
+    }
+
+    std::wstring wide_value((size_t)needed, L'\0');
+    DWORD written = GetEnvironmentVariableW(
+        wide_name.c_str(), wide_value.data(), needed);
+    if (written == 0) {
+        if (GetLastError() == ERROR_ENVVAR_NOT_FOUND)
+            return false;
+        return true;
+    }
+
+    wide_value.resize((size_t)written);
+    return narrow_utf8(wide_value, value);
+}
 
 bool platform_run_command(
     const std::string &command,

@@ -10,6 +10,14 @@
 /* One-time process/platform initialization: console encoding and I/O mode. */
 void platform_init();
 
+/* Return process arguments as UTF-8 strings.  On Windows this uses the wide
+ * command line instead of the narrow argv, which is encoded in the active
+ * ANSI code page. */
+std::vector<std::string> platform_command_line_args(int argc, char **argv);
+
+/* Read an environment variable as UTF-8.  Returns false when it is unset. */
+bool platform_get_env(const std::string &name, std::string &value);
+
 /* True when stdin is an interactive terminal. */
 bool platform_stdin_is_tty();
 

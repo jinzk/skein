@@ -686,8 +686,147 @@ bool write_chunked_body(value_t *stream, const generator_ptr &generator,
     return write_stream_data(stream, "0\r\n\r\n", timeout_ms, async);
 }
 
-value_t *do_request(const std::string &method, const std::string &url_text,
-                    value_t *options, value_t *body_override) {
+bool is_redirect_status(int status) {
+    return status == 301 || status == 302 || status == 303 ||
+           status == 307 || status == 308;
+}
+
+value_t *copy_headers(value_t *headers) {
+    value_t *output = (value_t *)newdictval();
+    if (!headers || headers->type != T_dict)
+        return output;
+    dict_value_t *dict = (dict_value_t *)headers;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *key = dict->payload->items[i].first;
+        value_t *value = dict->payload->items[i].second;
+        if (key->type == T_string && value->type == T_string)
+            dict_set(output, ((string_value_t *)key)->value, dupval(value));
+    }
+    return output;
+}
+
+value_t *redirect_headers(value_t *headers, bool cross_origin) {
+    value_t *output = (value_t *)newdictval();
+    if (!headers || headers->type != T_dict)
+        return output;
+    dict_value_t *dict = (dict_value_t *)headers;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *key = dict->payload->items[i].first;
+        value_t *value = dict->payload->items[i].second;
+        if (key->type != T_string || value->type != T_string)
+            continue;
+        std::string name = lower_ascii(((string_value_t *)key)->value);
+        if (name == "host" || name == "content-length" ||
+            name == "transfer-encoding" || name == "connection" ||
+            name == "upgrade" ||
+            (cross_origin && (name == "authorization" || name == "cookie")))
+            continue;
+        dict_set(output, name, dupval(value));
+    }
+    return output;
+}
+
+bool same_http_origin(const std::string &left, const std::string &right) {
+    url_parts a, b;
+    std::string error;
+    if (!parse_url(left, a, error) || !parse_url(right, b, error))
+        return false;
+    return a.tls == b.tls && a.host == b.host && a.port == b.port;
+}
+
+std::string resolve_redirect_url(const std::string &base,
+                                 const std::string &location) {
+    std::string target = location;
+    size_t fragment = target.find('#');
+    if (fragment != std::string::npos)
+        target = target.substr(0, fragment);
+    if (target.empty())
+        return base;
+    if (target.rfind("http://", 0) == 0 ||
+        target.rfind("https://", 0) == 0)
+        return target;
+
+    url_parts parts;
+    std::string error;
+    if (!parse_url(base, parts, error))
+        return target;
+    std::string scheme = parts.tls ? "https" : "http";
+    std::string authority = parts.host;
+    bool default_port = (parts.tls && parts.port == 443) ||
+                        (!parts.tls && parts.port == 80);
+    if (!default_port)
+        authority += ":" + std::to_string(parts.port);
+    if (target.rfind("//", 0) == 0)
+        return scheme + ":" + target;
+    if (target[0] == '/')
+        return scheme + "://" + authority + target;
+    if (target[0] == '?')
+        return scheme + "://" + authority + parts.path + target;
+
+    std::string directory = parts.path;
+    size_t slash = directory.rfind('/');
+    directory = slash == std::string::npos
+                    ? "/"
+                    : directory.substr(0, slash + 1);
+    std::string path = directory + target;
+    std::vector<std::string> segments;
+    size_t i = 0;
+    while (i <= path.size()) {
+        size_t next = path.find('/', i);
+        std::string segment =
+            path.substr(i, next == std::string::npos ? std::string::npos
+                                                     : next - i);
+        if (segment == "..") {
+            if (!segments.empty())
+                segments.pop_back();
+        } else if (!segment.empty() && segment != ".") {
+            segments.push_back(segment);
+        }
+        if (next == std::string::npos)
+            break;
+        i = next + 1;
+    }
+    std::string normalized = "/";
+    for (size_t j = 0; j < segments.size(); ++j) {
+        if (j > 0)
+            normalized += "/";
+        normalized += segments[j];
+    }
+    if (!segments.empty() && !path.empty() && path.back() == '/')
+        normalized += "/";
+    return scheme + "://" + authority + normalized;
+}
+
+value_t *redirect_options(value_t *base, value_t *headers,
+                          bool keep_body_stream) {
+    value_t *output = (value_t *)newdictval();
+    if (base && base->type == T_dict) {
+        dict_value_t *dict = (dict_value_t *)base;
+        for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+            value_t *key = dict->payload->items[i].first;
+            value_t *value = dict->payload->items[i].second;
+            if (key->type != T_string)
+                continue;
+            std::string name = ((string_value_t *)key)->value;
+            if (name == "headers" || name == "body" ||
+                name == "body_stream" || name == "follow_redirects" ||
+                name == "max_redirects")
+                continue;
+            dict_set(output, name, dupval(value));
+        }
+    }
+    dict_set(output, "headers", dupval(headers));
+    if (keep_body_stream) {
+        value_t *stream = dict_get(base, "body_stream");
+        if (stream)
+            dict_set(output, "body_stream", dupval(stream));
+    }
+    return output;
+}
+
+value_t *do_request_once(const std::string &method,
+                         const std::string &url_text, value_t *options,
+                         value_t *body_override) {
     url_parts url;
     std::string error;
     if (!parse_url(url_text, url, error)) {
@@ -1050,9 +1189,103 @@ bool read_message_async(value_t *socket, bool request,
     return true;
 }
 
-value_t *do_request_async(const std::string &method,
-                          const std::string &url_text, value_t *options,
-                          value_t *body_override) {
+value_t *do_request(const std::string &method, const std::string &url_text,
+                    value_t *options, value_t *body_override) {
+    value_t *follow_value = dict_get(options, "follow_redirects");
+    if (follow_value && follow_value->type != T_bool) {
+        yyerror("std.http: follow_redirects must be a bool");
+        return NULL;
+    }
+    bool follow = follow_value &&
+                  ((bool_value_t *)follow_value)->value;
+    long long max_redirects = 5;
+    value_t *max_value = dict_get(options, "max_redirects");
+    if (max_value) {
+        if (max_value->type != T_int ||
+            ((int_value_t *)max_value)->value < 0) {
+            yyerror("std.http: max_redirects must be a non-negative integer");
+            return NULL;
+        }
+        max_redirects = ((int_value_t *)max_value)->value;
+    }
+    if (!follow)
+        return do_request_once(method, url_text, options, body_override);
+
+    value_t *headers = copy_headers(dict_get(options, "headers"));
+    value_t *body = body_override ? dupval(body_override) : NULL;
+    if (!body) {
+        value_t *option_body = dict_get(options, "body");
+        if (option_body && option_body->type != T_null)
+            body = dupval(option_body);
+    }
+    value_t *stream_value = dict_get(options, "body_stream");
+    bool keep_stream = stream_value && stream_value->type != T_null;
+    std::string method_cur = method;
+    std::string url_cur = url_text;
+    int redirects = 0;
+
+    for (;;) {
+        value_t *hop = redirect_options(options, headers, keep_stream);
+        value_t *response = do_request_once(method_cur, url_cur, hop, body);
+        freeval(hop);
+        if (!response) {
+            freeval(headers);
+            freeval(body);
+            return NULL;
+        }
+
+        value_t *status_value = dict_get(response, "status");
+        int status = status_value && status_value->type == T_int
+                         ? (int)((int_value_t *)status_value)->value
+                         : 0;
+        std::string location;
+        if (is_redirect_status(status))
+            location = header_value(dict_get(response, "headers"),
+                                    "Location");
+        if (!is_redirect_status(status) || location.empty()) {
+            freeval(headers);
+            freeval(body);
+            return response;
+        }
+        if (redirects >= max_redirects) {
+            freeval(response);
+            freeval(headers);
+            freeval(body);
+            yyerror("std.http: too many redirects");
+            return NULL;
+        }
+
+        bool drop_body = status == 303 ||
+                         ((status == 301 || status == 302) &&
+                          method_cur == "POST");
+        if (drop_body) {
+            method_cur = "GET";
+            freeval(body);
+            body = NULL;
+            keep_stream = false;
+        } else if (keep_stream) {
+            freeval(response);
+            freeval(headers);
+            freeval(body);
+            yyerror("std.http: body_stream cannot be replayed across "
+                    "redirects");
+            return NULL;
+        }
+
+        std::string next_url = resolve_redirect_url(url_cur, location);
+        bool cross_origin = !same_http_origin(url_cur, next_url);
+        value_t *next_headers = redirect_headers(headers, cross_origin);
+        freeval(headers);
+        headers = next_headers;
+        freeval(response);
+        url_cur = next_url;
+        ++redirects;
+    }
+}
+
+value_t *do_request_async_once(const std::string &method,
+                               const std::string &url_text,
+                               value_t *options, value_t *body_override) {
     url_parts url;
     std::string error;
     if (!parse_url(url_text, url, error)) {
@@ -1292,6 +1525,117 @@ value_t *do_request_async(const std::string &method,
     });
     if (!task) {
         freeval(on_body_owned);
+        return NULL;
+    }
+    return new_task_value(std::move(task));
+}
+
+value_t *do_request_async(const std::string &method,
+                          const std::string &url_text, value_t *options,
+                          value_t *body_override) {
+    value_t *follow_value = dict_get(options, "follow_redirects");
+    if (follow_value && follow_value->type != T_bool) {
+        yyerror("std.http: follow_redirects must be a bool");
+        return NULL;
+    }
+    bool follow = follow_value &&
+                  ((bool_value_t *)follow_value)->value;
+    long long max_redirects = 5;
+    value_t *max_value = dict_get(options, "max_redirects");
+    if (max_value) {
+        if (max_value->type != T_int ||
+            ((int_value_t *)max_value)->value < 0) {
+            yyerror("std.http: max_redirects must be a non-negative integer");
+            return NULL;
+        }
+        max_redirects = ((int_value_t *)max_value)->value;
+    }
+    if (!follow)
+        return do_request_async_once(method, url_text, options,
+                                     body_override);
+
+    std::string method_initial = method;
+    std::string url_initial = url_text;
+    value_t *owned_options = options ? dupval(options) : NULL;
+    value_t *owned_body = body_override ? dupval(body_override) : NULL;
+    task_ptr task = fiber_start_async(
+        [method_initial, url_initial, owned_options, owned_body,
+         max_redirects]() {
+        auto releaser = [](value_t *value) { freeval(value); };
+        typedef std::unique_ptr<value_t, decltype(releaser)> value_holder;
+        value_holder options_holder(owned_options, releaser);
+        value_holder body_holder(owned_body, releaser);
+        value_t *headers =
+            copy_headers(dict_get(owned_options, "headers"));
+        value_holder headers_holder(headers, releaser);
+
+        value_t *body = owned_body;
+        if (!body) {
+            value_t *option_body = dict_get(owned_options, "body");
+            if (option_body && option_body->type != T_null)
+                body = option_body;
+        }
+        value_t *stream_value = dict_get(owned_options, "body_stream");
+        bool keep_stream = stream_value && stream_value->type != T_null;
+        std::string method_cur = method_initial;
+        std::string url_cur = url_initial;
+        int redirects = 0;
+
+        for (;;) {
+            value_t *hop = redirect_options(
+                owned_options, headers_holder.get(), keep_stream);
+            value_t *task_value = do_request_async_once(
+                method_cur, url_cur, hop, body);
+            freeval(hop);
+            value_t *response = await_task_value(task_value);
+            if (!response)
+                return (value_t *)NULL;
+
+            value_t *status_value = dict_get(response, "status");
+            int status = status_value && status_value->type == T_int
+                             ? (int)((int_value_t *)status_value)->value
+                             : 0;
+            std::string location;
+            if (is_redirect_status(status))
+                location = header_value(dict_get(response, "headers"),
+                                        "Location");
+            if (!is_redirect_status(status) || location.empty())
+                return response;
+            if (redirects >= max_redirects) {
+                freeval(response);
+                yyerror("std.http: too many redirects");
+                return (value_t *)NULL;
+            }
+
+            bool drop_body = status == 303 ||
+                             ((status == 301 || status == 302) &&
+                              method_cur == "POST");
+            if (drop_body) {
+                method_cur = "GET";
+                body = NULL;
+                body_holder.reset();
+                keep_stream = false;
+            } else if (keep_stream) {
+                freeval(response);
+                yyerror("std.http: body_stream cannot be replayed across "
+                        "redirects");
+                return (value_t *)NULL;
+            }
+
+            std::string next_url =
+                resolve_redirect_url(url_cur, location);
+            bool cross_origin = !same_http_origin(url_cur, next_url);
+            value_t *next_headers =
+                redirect_headers(headers_holder.get(), cross_origin);
+            headers_holder.reset(next_headers);
+            freeval(response);
+            url_cur = next_url;
+            ++redirects;
+        }
+    });
+    if (!task) {
+        freeval(owned_options);
+        freeval(owned_body);
         return NULL;
     }
     return new_task_value(std::move(task));

@@ -4673,6 +4673,97 @@ def main():
                 ws_server_proc.terminate()
                 ws_server_proc.wait(timeout=5)
 
+        import http.server
+
+        class RedirectHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                pass
+
+            def _send(self, code, body=b"", headers=None):
+                self.send_response(code)
+                for key, value in (headers or {}).items():
+                    self.send_header(key, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/a":
+                    self._send(302, headers={"Location": "/b"})
+                elif self.path == "/b":
+                    self._send(200, b"b")
+                elif self.path == "/get":
+                    self._send(200, b"method=GET")
+                elif self.path == "/dir/page":
+                    self._send(302, headers={"Location": "next"})
+                elif self.path == "/dir/next":
+                    self._send(200, b"next")
+                elif self.path == "/loop":
+                    self._send(302, headers={"Location": "/loop"})
+                else:
+                    self._send(404)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length)
+                if self.path == "/post303":
+                    self._send(303, headers={"Location": "/get"})
+                elif self.path == "/post307":
+                    self._send(307, headers={"Location": "/echo"})
+                elif self.path == "/echo":
+                    self._send(200, b"method=POST body=" + body)
+                else:
+                    self._send(404)
+
+        redirect_server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), RedirectHandler)
+        redirect_port = redirect_server.server_address[1]
+        redirect_thread = threading.Thread(
+            target=redirect_server.serve_forever)
+        redirect_thread.start()
+        try:
+            redirect_client = run(
+                "import std;\n"
+                f'let a = std.http.get('
+                f'"http://127.0.0.1:{redirect_port}/a", '
+                '{"follow_redirects": true});\n'
+                'print(bytes_to_string(a["body"]));\n'
+                f'let b = std.http.post('
+                f'"http://127.0.0.1:{redirect_port}/post303", "data", '
+                '{"follow_redirects": true});\n'
+                'print(bytes_to_string(b["body"]));\n'
+                f'let c = std.http.post('
+                f'"http://127.0.0.1:{redirect_port}/post307", "payload", '
+                '{"follow_redirects": true});\n'
+                'print(bytes_to_string(c["body"]));\n'
+                f'let d = await std.http.get_async('
+                f'"http://127.0.0.1:{redirect_port}/a", '
+                '{"follow_redirects": true});\n'
+                'print(bytes_to_string(d["body"]));\n'
+                f'let e = std.http.get('
+                f'"http://127.0.0.1:{redirect_port}/dir/page", '
+                '{"follow_redirects": true});\n'
+                'print(bytes_to_string(e["body"]));\n',
+                timeout=15,
+            )
+            assert redirect_client.returncode == 0, redirect_client.stderr
+            assert redirect_client.stdout.splitlines() == [
+                "b", "method=GET", "method=POST body=payload", "b",
+                "next"], redirect_client.stdout
+            redirect_loop = run(
+                "import std;\n"
+                f'std.http.get("http://127.0.0.1:{redirect_port}/loop", '
+                '{"follow_redirects": true, "max_redirects": 2});\n'
+            )
+            assert "too many redirects" in redirect_loop.stderr, (
+                redirect_loop.stderr)
+        finally:
+            redirect_server.shutdown()
+            redirect_server.server_close()
+            redirect_thread.join(timeout=5)
+
         rb1_probe = socket.socket()
         rb1_probe.bind(("127.0.0.1", 0))
         rb1_port = rb1_probe.getsockname()[1]

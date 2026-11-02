@@ -663,6 +663,27 @@ status, status_text, headers, body, http_major, http_minor
 - 同名 header 在 dict 中只保留最后一个；
 - `std.http` 客户端和服务端都提供同步和 async 接口。
 
+重定向：
+
+```text
+let r = std.http.get(url, {
+  "follow_redirects": true,
+  "max_redirects": 5
+});
+```
+
+- `follow_redirects` 默认 `false`；
+- `max_redirects` 默认 5，`0` 表示不跟随；
+- 支持 `301` / `302` / `303` / `307` / `308`；
+- `303` 和 `301/302` 的 POST 会改为 GET 并丢弃 body；
+- `307` / `308` 保留方法和 body；
+- `Location` 支持绝对 URL、`//host/path`、`/path`、`?query` 和相对路径；
+- 跨 origin 重定向会删除 `Authorization` / `Cookie`；
+- 重定向时删除 `Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Upgrade`；
+- `body_stream` 无法重放：`301/302/303` 会丢弃 body，`307/308` 会报错；
+- 同步和 async 客户端都支持。
+
+
 HTTP/2：
 
 ```text

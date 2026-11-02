@@ -9,6 +9,7 @@
 #include "repl.h"
 #include "scopestack.h"
 #include "symbol.h"
+#include "unicode_ident.h"
 #include "valuetype.h"
 
 #include <algorithm>
@@ -52,17 +53,7 @@ std::vector<package_load_context> load_stack;
 std::vector<std::string> loading_paths;
 
 bool is_identifier(const std::string &name) {
-    if (name.empty())
-        return false;
-    unsigned char first = (unsigned char)name[0];
-    if (!(std::isalpha(first) || first == '_'))
-        return false;
-    for (size_t i = 1; i < name.size(); ++i) {
-        unsigned char c = (unsigned char)name[i];
-        if (!(std::isalnum(c) || c == '_'))
-            return false;
-    }
-    return true;
+    return unicode_ident::is_identifier(name);
 }
 
 bool is_reserved_main_package(const std::string &dotted) {
@@ -85,23 +76,32 @@ std::vector<std::string> split_dotted(const std::string &path) {
     return parts;
 }
 
+fs::path path_from_utf8(const std::string &text) {
+    return fs::u8path(text);
+}
+
+std::string path_to_utf8(const fs::path &path) {
+    return path.u8string();
+}
+
 std::string normalize_dir(const std::string &dir) {
     std::error_code ec;
-    fs::path path(dir);
+    fs::path path = path_from_utf8(dir);
     if (path.is_relative())
         path = fs::absolute(path, ec);
     if (ec)
         return dir;
     fs::path canonical = fs::weakly_canonical(path, ec);
     if (!ec)
-        return canonical.string();
-    return path.lexically_normal().string();
+        return path_to_utf8(canonical);
+    return path_to_utf8(path.lexically_normal());
 }
 
 std::string canonical_file(const fs::path &file) {
     std::error_code ec;
     fs::path canonical = fs::weakly_canonical(file, ec);
-    return ec ? file.lexically_normal().string() : canonical.string();
+    return ec ? path_to_utf8(file.lexically_normal())
+              : path_to_utf8(canonical);
 }
 
 fs::path find_project_root(const fs::path &start) {
@@ -173,7 +173,7 @@ std::string package_cache_key(const std::string &canonical_path) {
 bool package_file_exists(const fs::path &dir, const std::string &name,
                          fs::path &file) {
     std::error_code ec;
-    fs::path direct = dir / (name + ".skein");
+    fs::path direct = dir / path_from_utf8(name + ".skein");
     if (fs::is_regular_file(direct, ec))
         return file = direct, true;
     ec.clear();
@@ -224,7 +224,7 @@ bool directory_has_package(const fs::path &directory, int depth) {
             ec.clear();
             continue;
         }
-        std::string child = it->path().filename().string();
+        std::string child = path_to_utf8(it->path().filename());
         if (!is_identifier(child))
             continue;
         fs::path child_file;
@@ -244,9 +244,9 @@ bool resolve_package(const std::string &dotted, resolved_package &resolved,
 
     const std::string &last = parts.back();
     for (const std::string &root : search_roots) {
-        fs::path directory(root);
+        fs::path directory = path_from_utf8(root);
         for (const std::string &part : parts)
-            directory /= part;
+            directory /= path_from_utf8(part);
         if (try_resolve_package_dir(directory, last, resolved))
             return true;
     }
@@ -267,14 +267,14 @@ bool resolve_package_at(const fs::path &base, const std::string &dotted,
 
     fs::path directory = base;
     for (const std::string &part : parts)
-        directory /= part;
+        directory /= path_from_utf8(part);
 
     if (try_resolve_package_dir(directory, parts.back(), resolved))
         return true;
 
     error = "package not found";
     error += "\n  searched: ";
-    error += directory.string();
+    error += path_to_utf8(directory);
     return false;
 }
 
@@ -710,7 +710,7 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                 error = "no base directory for relative import";
                 return NULL;
             }
-            base = fs::path(lexical_base);
+            base = path_from_utf8(lexical_base);
             for (int i = 0; i < spec.up_levels; ++i) {
                 fs::path parent = base.parent_path();
                 if (parent.empty() || parent == base) {
@@ -770,7 +770,7 @@ bool load_child_packages(const std::string &dotted, const fs::path &directory,
             ec.clear();
             continue;
         }
-        std::string child = it->path().filename().string();
+        std::string child = path_to_utf8(it->path().filename());
         if (!is_identifier(child))
             continue;
         fs::path child_file;
@@ -828,9 +828,10 @@ bool load_package_file(const resolved_package &resolved,
         return true;
     }
 
-    FILE *file = platform_open_file(resolved.file.string(), "rb");
+    FILE *file = platform_open_file(path_to_utf8(resolved.file), "rb");
     if (!file) {
-        error = "cannot open package file: " + resolved.file.string();
+        error = "cannot open package file: " +
+                path_to_utf8(resolved.file);
         return false;
     }
 
@@ -847,7 +848,7 @@ bool load_package_file(const resolved_package &resolved,
     int errors_before = diag_error_count();
     std::string saved_import_base = import_base;
 
-    import_base = normalize_dir(resolved.directory.string());
+    import_base = normalize_dir(path_to_utf8(resolved.directory));
     g_interactive = false;
     g_statement_invalid = false;
     ++g_package_loading;
@@ -855,7 +856,7 @@ bool load_package_file(const resolved_package &resolved,
     yyin = file;
     reset_scanner_state(file);
     diag_start_source();
-    diag_set_source_name(resolved.file.string());
+    diag_set_source_name(path_to_utf8(resolved.file));
     diag_set_module_name(module_name);
     eval_push_isolated_scope();
 
@@ -899,7 +900,7 @@ void package_configure(const std::string &source_path,
     import_base.clear();
     project_root.clear();
 
-    fs::path source(source_path);
+    fs::path source = path_from_utf8(source_path);
     std::error_code ec;
     std::string main_directory;
 
@@ -907,10 +908,10 @@ void package_configure(const std::string &source_path,
         if (source.is_relative())
             source = fs::absolute(source, ec);
         if (!ec) {
-            main_source_path = source.lexically_normal().string();
+            main_source_path = path_to_utf8(source.lexically_normal());
             fs::path directory = source.parent_path();
             if (!directory.empty()) {
-                main_directory = normalize_dir(directory.string());
+                main_directory = normalize_dir(path_to_utf8(directory));
                 search_roots.push_back(main_directory);
             }
         }
@@ -920,12 +921,12 @@ void package_configure(const std::string &source_path,
         std::error_code cwd_error;
         fs::path cwd = fs::current_path(cwd_error);
         main_directory =
-            normalize_dir(cwd_error ? "." : cwd.string());
+            normalize_dir(cwd_error ? "." : path_to_utf8(cwd));
         search_roots.push_back(main_directory);
     }
 
     import_base = main_directory;
-    project_root = find_project_root(fs::path(import_base));
+    project_root = find_project_root(path_from_utf8(import_base));
 
     for (const std::string &dir : cli_dirs) {
         if (!dir.empty())

@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
     }
     if (!script_path.empty()) {
         if (script_path != "-") {
-            script = std::fopen(script_path.c_str(), "rb");
+            script = platform_open_file(script_path, "rb");
             if (!script) {
                 std::perror(script_path.c_str());
                 return 2;

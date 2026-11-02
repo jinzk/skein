@@ -1,5 +1,6 @@
 #include "diagnostics.h"
 #include "repl.h"
+#include "unicode_ident.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -27,12 +28,58 @@ static const size_t MAX_REPORTED_FRAMES = 8;
 void diag_scan_token(const char *text, int length) {
     g_token_line = current_line;
     g_token_column = current_column;
-    for (int i = 0; i < length; ++i) {
-        if (text[i] == '\n') {
+    int i = 0;
+    while (i < length) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == '\n') {
             ++current_line;
             current_column = 1;
-        } else {
+            ++i;
+        } else if (c < 0x80) {
             ++current_column;
+            ++i;
+        } else {
+            unicode_ident::decode_result decoded =
+                unicode_ident::decode(text + i, (size_t)(length - i));
+            if (!decoded.valid) {
+                ++current_column;
+                ++i;
+            } else {
+                current_column +=
+                    (int)unicode_ident::display_width(decoded.codepoint);
+                i += (int)decoded.length;
+            }
+        }
+    }
+}
+
+void diag_scan_rewind(const char *text, int length) {
+    int i = 0;
+    while (i < length) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == '\n') {
+            if (current_line > 1)
+                --current_line;
+            current_column = 1;
+            ++i;
+        } else if (c < 0x80) {
+            if (current_column > 1)
+                --current_column;
+            ++i;
+        } else {
+            unicode_ident::decode_result decoded =
+                unicode_ident::decode(text + i, (size_t)(length - i));
+            if (!decoded.valid) {
+                if (current_column > 1)
+                    --current_column;
+                ++i;
+            } else {
+                size_t width = unicode_ident::display_width(decoded.codepoint);
+                current_column -= (int)width;
+                if (current_column < 1)
+                    current_column = 1;
+                i += (int)decoded.length;
+            }
         }
     }
 }
@@ -81,9 +128,40 @@ static void print_snippet(int line, int column) {
     if (column <= 0)
         return;
     std::fputs("  ", stderr);
-    for (int i = 1; i < column; ++i) {
-        char c = (size_t)(i - 1) < text.size() ? text[(size_t)(i - 1)] : ' ';
-        std::fputc(c == '\t' ? '\t' : ' ', stderr);
+    size_t pos = 0;
+    int col = 1;
+    while (pos < text.size() && col < column) {
+        unsigned char c = (unsigned char)text[pos];
+        if (c == '\n')
+            break;
+        if (c == '\t') {
+            std::fputc('\t', stderr);
+            ++col;
+            ++pos;
+        } else if (c < 0x80) {
+            std::fputc(' ', stderr);
+            ++col;
+            ++pos;
+        } else {
+            unicode_ident::decode_result decoded =
+                unicode_ident::decode(text.data() + pos, text.size() - pos);
+            if (!decoded.valid) {
+                std::fputc(' ', stderr);
+                ++col;
+                ++pos;
+            } else {
+                size_t width =
+                    unicode_ident::display_width(decoded.codepoint);
+                for (size_t i = 0; i < width; ++i)
+                    std::fputc(' ', stderr);
+                col += (int)width;
+                pos += decoded.length;
+            }
+        }
+    }
+    while (col < column) {
+        std::fputc(' ', stderr);
+        ++col;
     }
     std::fputs("^\n", stderr);
 }

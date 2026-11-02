@@ -21,6 +21,10 @@ void diag_set_flow_location(int line, int column);
 /* Called by the scanner before each rule action. */
 void diag_scan_token(const char *text, int length);
 
+/* Undo column advancement for text that the scanner returns to the input
+ * with yyless(). */
+void diag_scan_rewind(const char *text, int length);
+
 /* Remember a physical source line for snippets. */
 void diag_record_line(int line, const std::string &text);
 

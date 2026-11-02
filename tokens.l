@@ -30,6 +30,7 @@
 #include "diagnostics.h"
 #include "parser.hpp"
 #include "repl.h"
+#include "unicode_ident.h"
 
 extern int indent_count;
 
@@ -186,6 +187,19 @@ static void append_unescaped(const char *s, int len) {
         }
     }
 }
+
+/* Copy a token of explicit byte length into yylval.str. */
+static int make_name_token(const char *text, int len) {
+    char *name = (char *)std::malloc((size_t)len + 1);
+    if (!name) {
+        yyerror("out of space");
+        return 0;
+    }
+    std::memcpy(name, text, (size_t)len);
+    name[len] = '\0';
+    yylval.str = name;
+    return NAME;
+}
 /*
  * Decide whether an opening brace introduces a block body.  Only syntactic
  * positions that always require a body are treated as blocks; everything else
@@ -218,6 +232,15 @@ static void note_token(int tok) {
 %}
 
 EXP ([Ee][-+]?[0-9]+)
+
+ASCII_NAME [A-Za-z_][A-Za-z0-9_]*
+
+UTF8_2 [\xC2-\xDF][\x80-\xBF]
+UTF8_3 [\xE0-\xEF][\x80-\xBF]{2}
+UTF8_4 [\xF0-\xF4][\x80-\xBF]{3}
+UTF8_SEQ ({UTF8_2}|{UTF8_3}|{UTF8_4})
+
+UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 
 %%
 
@@ -405,15 +428,46 @@ EXP ([Ee][-+]?[0-9]+)
 "file_read_bytes" { yylval.fn = B_file_read_bytes; YYRET(BUILTIN); }
 "file_write_bytes" { yylval.fn = B_file_write_bytes; YYRET(BUILTIN); }
 
-[a-zA-Z_][a-zA-Z0-9_]* {
-    int len = (int)std::strlen(yytext) + 1;
-    yylval.str = (char *)std::malloc(len);
-    if (!yylval.str) {
-        yyerror("out of space");
+{ASCII_NAME} {
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
         return 0;
+    YYRET(tok);
+}
+
+{UNICODE_NAME} {
+    unicode_ident::scan_result scanned =
+        unicode_ident::scan_identifier(yytext, (size_t)yyleng);
+
+    if (scanned.valid) {
+        int tok = make_name_token(yytext, yyleng);
+        if (tok == 0)
+            return 0;
+        YYRET(tok);
     }
-    std::memcpy(yylval.str, yytext, len);
-    YYRET(NAME);
+
+    if (scanned.valid_bytes > 0) {
+        int keep = (int)scanned.valid_bytes;
+        diag_scan_rewind(yytext + keep, yyleng - keep);
+        yyless(keep);
+        int tok = make_name_token(yytext, keep);
+        if (tok == 0)
+            return 0;
+        YYRET(tok);
+    }
+
+    if (scanned.bad_codepoint != 0)
+        diag_report_lexical(g_token_line, g_token_column,
+                            "identifier cannot start with U+%04X",
+                            (unsigned int)scanned.bad_codepoint);
+    else
+        diag_report_lexical(g_token_line, g_token_column,
+                            "invalid UTF-8 byte 0x%02x in identifier",
+                            (unsigned char)yytext[scanned.bad_offset]);
+
+    int bad = (int)scanned.bad_length;
+    diag_scan_rewind(yytext + bad, yyleng - bad);
+    yyless(bad);
 }
 
 [0-9]+ {
@@ -484,12 +538,17 @@ EXP ([Ee][-+]?[0-9]+)
 
 . {
     unsigned char c = (unsigned char)yytext[0];
-    if (std::isprint(c))
+    if (c < 0x80) {
+        if (std::isprint(c))
+            diag_report_lexical(g_token_line, g_token_column,
+                                "unexpected character '%c' (0x%02x)", c, c);
+        else
+            diag_report_lexical(g_token_line, g_token_column,
+                                "unexpected byte 0x%02x", c);
+    } else {
         diag_report_lexical(g_token_line, g_token_column,
-                            "unexpected character '%c' (0x%02x)", c, c);
-    else
-        diag_report_lexical(g_token_line, g_token_column,
-                            "unexpected byte 0x%02x", c);
+                            "invalid UTF-8 byte 0x%02x", c);
+    }
 }
 
 %%

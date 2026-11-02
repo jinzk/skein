@@ -89,6 +89,7 @@ add_executable(${PROJECT_NAME}
   structtype.cpp
   symbol.cpp
   task.cpp
+  unicode_ident.cpp
   valuetype.cpp
   websocket.cpp
 )

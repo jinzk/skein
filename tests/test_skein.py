@@ -694,6 +694,68 @@ def main():
     )
     check("underscore identifier", "let my_value = 3;\nmy_value\n",
           stdout="= 3")
+    check("unicode identifier", "let 变量 = 3;\n变量\n", stdout="= 3")
+    check("unicode accented identifier", "let café = 5;\ncafé\n",
+          stdout="= 5")
+    check("unicode greek identifier", "let λ = 2;\nλ\n", stdout="= 2")
+    check("unicode mixed identifier", "let foo变量 = 4;\nfoo变量\n",
+          stdout="= 4")
+    check(
+        "unicode function name and parameters",
+        "func 加法(甲, 乙) { return 甲 + 乙; }\n加法(1, 2)\n",
+        stdout="= 3",
+    )
+    check(
+        "unicode typed parameter",
+        'func 问候(名字: string) { return "你好 " + 名字; }\n问候("世界")\n',
+        stdout="= 你好 世界",
+    )
+    check(
+        "unicode variadic parameter",
+        "func 求和(...数字) { return len(数字); }\n求和(1, 2, 3)\n",
+        stdout="= 3",
+    )
+    check(
+        "unicode struct field",
+        "struct 点 { x: int; }\nlet p = 点 { x: 1 };\np.x\n",
+        stdout="= 1",
+    )
+    check(
+        "unicode label",
+        "label 开始: while (0) { break 开始; }\n1\n",
+        stdout="= 1",
+    )
+    check("unicode keyword-like identifier", "let if变量 = 7;\nif变量\n",
+          stdout="= 7")
+    check("unicode fullwidth identifier", "let ｉｆ = 8;\nｉｆ\n",
+          stdout="= 8")
+    check(
+        "unicode emoji identifier rejected",
+        "let 😀 = 1;\n",
+        stderr="identifier cannot start with U+1F600",
+    )
+    check(
+        "unicode punctuation identifier rejected",
+        "let 。x = 1;\n",
+        stderr="identifier cannot start with U+3002",
+    )
+    check(
+        "combining mark identifier rejected",
+        "let \u0301x = 1;\n",
+        stderr="identifier cannot start with U+0301",
+    )
+    check(
+        "combining mark identifier continuation",
+        "let e\u0301 = 1;\ne\u0301\n",
+        stdout="= 1",
+    )
+    check(
+        "duplicate unicode parameter",
+        "func f(变量, 变量) { }\n",
+        stderr="duplicate parameter 变量",
+    )
+    check("unicode error column", "let 变量 = ;\n",
+          stderr="1:12: syntax error")
     check("const declaration", "const x = 3;\nx\n", stdout="= 3")
     check("const reassignment", "const x = 1;\nx = 2;\n",
           stderr="cannot assign to constant x")
@@ -7580,6 +7642,17 @@ std.json.stringify(std.json.parse(text))
         assert proc.returncode == 1, proc.stderr
         assert "1:9: syntax error: unexpected ';'" in proc.stderr, proc.stderr
 
+        invalid_utf8_script = os.path.join(tmp, "invalid_utf8.skein")
+        with open(invalid_utf8_script, "wb") as f:
+            f.write(b"let a\x80b = 1;\n")
+        proc = subprocess.run(
+            [BIN, invalid_utf8_script],
+            capture_output=True,
+            timeout=5,
+        )
+        assert proc.returncode == 1, proc.stderr
+        assert b"invalid UTF-8 byte 0x80" in proc.stderr, proc.stderr
+
     check("syntax error detail", "let x = ;\n",
           stderr="syntax error: unexpected ';', expecting")
     check("syntax error snippet", "let x = ;\n",
@@ -7907,6 +7980,30 @@ std.json.stringify(std.json.parse(text))
         proc = run_file(missing_main)
         assert proc.returncode == 1, proc.stderr
         assert "package not found" in proc.stderr, proc.stderr
+
+        # Unicode package names and directories.
+        write(
+            "unicode/包/包.skein",
+            "package 包 {\n"
+            "  export let 值 = 42;\n"
+            "}\n",
+        )
+        write(
+            "unicode/包/子包/子包.skein",
+            "package 子包 {\n"
+            "  export let 名称 = \"子\";\n"
+            "}\n",
+        )
+        unicode_main = write(
+            "unicode/main.skein",
+            "import 包;\n"
+            "import 包.子包;\n"
+            "print(包.值);\n"
+            "print(包.子包.名称);\n",
+        )
+        proc = run_file(unicode_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["42", "子"], proc.stdout
 
     # Relative imports (. and ..) and project-root imports (@).
     with tempfile.TemporaryDirectory() as tmp:

@@ -60,6 +60,8 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv �
 
 脚本文件建议保存为 UTF-8；输入开头的 UTF-8 BOM 会被忽略。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
 
+源码必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，也不做 NFC/NFKC 归一化。函数形参、变长参数名、结构体字段、类型名、label 和包名使用相同规则。
+
 ## 脚本模式与 shebang
 
 可以直接把脚本文件作为第一个参数运行：
@@ -2723,10 +2725,12 @@ f["close"]()
 ```
 
 - 行号和列号从 `1` 开始；
+- 列号按终端显示宽度计算，中文、日文、韩文等宽字符占两列；
 - 类别分为 `lexical error`、`syntax error`、`runtime error`；
 - 运行时错误指向实际出错的 AST 节点，而不是语句结束位置；
 - 源码行下的 `^` 指向出错列；
-- 词法错误会显示字符和十六进制字节，例如 `unexpected character '$' (0x24)`；
+- 源码必须是合法 UTF-8，非法 UTF-8 字节会报 `invalid UTF-8 byte 0x..`；
+- 词法错误会显示字符和十六进制字节，例如 `unexpected character '$' (0x24)`；非法 Unicode 字符使用 `U+....` 表示；
 - 语法错误会列出出错 token 和部分期望 token：
 
 ```text
@@ -2786,6 +2790,7 @@ tokens.l      Flex 词法分析
 parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
 diagnostics.* 错误位置、源码片段与调用栈
+unicode_ident.* UTF-8 解码、Unicode 标识符判定与显示宽度
 eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数

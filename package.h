@@ -26,9 +26,10 @@ value_t *package_import(const char *dotted_path, const char *base_dir,
 /* Build a dictionary from exported symbols in `scope`. */
 value_t *package_build_namespace(scope_t *scope, std::string &error);
 
-/* Publish the namespace produced by a package block.  The entry script may
- * use `main` in any directory; imported packages must match their folder
- * name and may not be named `main`. */
+/* Publish the namespace produced by a package block.  A file entry script's
+ * package must be `main`; imported packages must match their folder name and
+ * may not be named `main`.  stdin/REPL have no package identity and may use
+ * any temporary package name. */
 bool package_publish(const char *name, value_t *namespace_value,
                      std::string &error);
 

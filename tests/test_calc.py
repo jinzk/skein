@@ -6680,23 +6680,23 @@ std.json.stringify(std.json.parse(text))
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "7\n", repr(proc.stdout)
 
-        # Entry packages that are not main still follow the folder rule.
+        # A file entry may only use package main.
         entry_named = write(
             "entrypkg/entry/entry.calc",
             "package entry { export let x = 3; }\n"
             "print(entry.x);\n",
         )
         proc = run_file(entry_named)
+        assert proc.returncode == 1, proc.stderr
+        assert "entry package must be \"main\"" in proc.stderr, proc.stderr
+
+        # stdin/REPL have no file package identity, so scratch names still work.
+        proc = run(
+            "package scratch { export let x = 3; }\n"
+            "print(scratch.x);\n"
+        )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "3\n", repr(proc.stdout)
-
-        wrong_entry = write(
-            "entrypkg/wrong/wrong.calc",
-            "package other { export let x = 3; }\n",
-        )
-        proc = run_file(wrong_entry)
-        assert proc.returncode == 1, proc.stderr
-        assert "must match folder" in proc.stderr, proc.stderr
 
         # main is reserved for the entry package and cannot be imported.
         reserved_import = write("reservedimport/main.calc", "import main;\n")

@@ -133,7 +133,7 @@ shebang 行同样会被跳过。
 
 ## 包与导入
 
-入口脚本默认是包 `main`，也可以显式声明与所在目录同名的包。包文件使用显式包块：
+入口脚本的包固定是 `main`，可以显式写 `package main {}`，也可以省略。包文件使用显式包块：
 
 ```text
 package cc {
@@ -154,10 +154,11 @@ package cc {
 - `export let` / `export const` / `export func` 导出标识符；
 - 也可以使用 `export name = expr;` 简写；
 - 没有 `export` 的定义是包私有的；
-- 入口脚本默认包名是 `main`；`package main {}` 可以位于任意目录；
-- 入口脚本也可以显式声明与所在文件夹同名的普通包；
+- 入口脚本的包固定是 `main`；`package main {}` 可以位于任意目录，也可以省略；
+- 入口脚本声明其他包名会报错；普通包文件不能直接作为入口运行；
 - 被 `import` 的包名必须与所在文件夹名相同，且不能是 `main`；可以多层嵌套；
-- `main` 不能被 `import`。
+- `main` 不能被 `import`；
+- stdin / REPL 没有文件包身份，`package name {}` 仍可创建临时命名空间。
 
 ### 目录结构
 

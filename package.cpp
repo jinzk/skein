@@ -995,15 +995,10 @@ bool package_publish(const char *name, value_t *namespace_value,
         return true;
     }
 
-    if (!main_source_path.empty()) {
-        fs::path source(main_source_path);
-        std::string folder = source.parent_path().filename().string();
-        bool is_main = std::strcmp(name, "main") == 0;
-        if (!is_main && !folder.empty() && folder != name) {
-            error = "package name \"" + std::string(name) +
-                    "\" must match folder \"" + folder + "\"";
-            return false;
-        }
+    if (!main_source_path.empty() && std::strcmp(name, "main") != 0) {
+        error = "entry package must be \"main\"; got \"" +
+                std::string(name) + "\"";
+        return false;
     }
 
     if (isrepeated(name)) {

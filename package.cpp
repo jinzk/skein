@@ -543,6 +543,17 @@ value_t *build_std_namespace() {
             {"capture", B_result_capture},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("http"),
+        builtin_module({
+            {"request", B_http_request},
+            {"get", B_http_get},
+            {"post", B_http_post},
+            {"listen", B_http_listen},
+            {"accept", B_http_accept},
+            {"respond", B_http_respond},
+            {"close", B_http_close},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("error"),
         builtin_module({
             {"new", B_error_new},

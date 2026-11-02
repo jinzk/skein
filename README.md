@@ -329,6 +329,79 @@ std.task.try_wait_all(tasks[, timeout_ms]) → result
 - 退出解释器时会取消剩余 task；
 - `std.net.*_async` 已经复用同一套 task 和事件循环。
 
+HTTP/1.1 客户端：
+
+```text
+import std;
+
+let r = std.http.get("http://127.0.0.1:8080/api");
+
+r["status"]                         // 200
+r["headers"]["content-type"]        // text/plain
+bytes_to_string(r["body"])
+```
+
+带 headers 和 timeout：
+
+```text
+let r = std.http.get("http://127.0.0.1:8080/api", {
+  "headers": {"Accept": "application/json"},
+  "timeout_ms": 1000
+});
+```
+
+POST：
+
+```text
+let r = std.http.post("http://127.0.0.1:8080/items", "hello", {
+  "headers": {"Content-Type": "text/plain"},
+  "timeout_ms": 1000
+});
+```
+
+自定义方法：
+
+```text
+let r = std.http.request("DELETE", "http://127.0.0.1:8080/items/1", {
+  "timeout_ms": 1000
+});
+```
+
+HTTP/1.1 服务端：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+
+let req = std.http.accept(s, 5000);
+
+std.http.respond(req, 200, {
+  "Content-Type": "text/plain"
+}, "hello " + req["path"]);
+
+std.http.close(s);
+```
+
+请求 dict：
+
+```text
+method, path, headers, body, http_major, http_minor, socket
+```
+
+响应 dict：
+
+```text
+status, status_text, headers, body, http_major, http_minor
+```
+
+限制：
+
+- 只支持 `http://`，不支持 TLS；
+- 只支持 HTTP/1.1；
+- 一次连接只处理一个请求，响应后关闭连接；
+- 请求和响应 body 整体读取，不能超过解析器的 16 MiB 默认上限；
+- 同名 header 在 dict 中只保留最后一个；
+- `std.http` 当前是同步接口。
+
 async / await：
 
 ```text
@@ -395,6 +468,7 @@ true
 - 函数体中出现 `yield` 时，该函数自动成为生成器；
 - 生成器调用后不会立即执行函数体，第一次 `next` 才开始；
 - `yield expr` 把值交给调用方并挂起；
+- `yield;` 等价于 `yield null;`；
 - `yield` 表达式恢复时会返回 `next(value)` 发送的值；
 - `return` 的返回值作为生成器结束时 `{done: true, value: ...}` 的 value；
 - 可以直接迭代生成器：
@@ -683,6 +757,7 @@ std.fs
 std.process
 std.type
 std.net
+std.http
 std.task
 std.generator
 std.result
@@ -817,6 +892,14 @@ std.net.recv_async
 std.net.resolve_async
 std.net.shutdown_async
 
+std.http.request
+std.http.get
+std.http.post
+std.http.listen
+std.http.accept
+std.http.respond
+std.http.close
+
 std.task.sleep
 std.task.yield
 std.task.wait
@@ -895,6 +978,7 @@ std.bytes.from_int
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
 - `std.net.*_async` 返回 task，底层复用同一事件循环；
+- `std.http` 提供基于 llhttp 的 HTTP/1.1 同步客户端和服务端；
 - 异步网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
 - task 是协作式调度的，只有在 `wait` / `wait_all`、`await` 或同步网络等待运行事件循环时才推进；
@@ -2064,6 +2148,7 @@ eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
+http.*        std.http 客户端与服务端
 http1_parser.* llhttp 封装与增量 HTTP/1.x 解析
 io.*          std.io 通用流式读写与辅助函数
 fiber.*       Boost.Context 有栈协程、async/await 与生成器

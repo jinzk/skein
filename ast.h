@@ -166,7 +166,14 @@ enum bifs {
     B_io_copy,
     B_io_buffered,
     B_io_read_async,
-    B_io_write_async
+    B_io_write_async,
+    B_http_request,
+    B_http_get,
+    B_http_post,
+    B_http_listen,
+    B_http_accept,
+    B_http_respond,
+    B_http_close
 };
 
 struct ast {

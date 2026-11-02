@@ -4,6 +4,7 @@
 #include "eval_helpers.h"
 #include "error.h"
 #include "generator.h"
+#include "http.h"
 #include "io.h"
 #include "net.h"
 #include "result.h"
@@ -329,6 +330,8 @@ struct value_t *call_builtin(int functype,
         return call_error_builtin(functype, args);
     if (functype >= B_io_read && functype <= B_io_write_async)
         return call_io_builtin(functype, args);
+    if (functype >= B_http_request && functype <= B_http_close)
+        return call_http_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

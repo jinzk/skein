@@ -531,6 +531,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | '(' exp ')'                         { $$ = $2; }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
+    | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }

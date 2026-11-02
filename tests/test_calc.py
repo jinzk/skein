@@ -1477,6 +1477,30 @@ def main():
         ],
     )
     check(
+        "generator yield null shorthand",
+        "import std;\n"
+        "func echo() {\n"
+        "  let x = yield;\n"
+        "  yield x;\n"
+        "}\n"
+        "let g = echo();\n"
+        "std.generator.next(g)\n"
+        "std.generator.next(g, 5)\n"
+        "func bare() {\n"
+        "  yield;\n"
+        "  yield 1;\n"
+        "}\n"
+        "let b = bare();\n"
+        "std.generator.next(b)\n"
+        "std.generator.next(b)\n",
+        stdout_all=[
+            "= {done: false, value: null}",
+            "= {done: false, value: 5}",
+            "= {done: false, value: null}",
+            "= {done: false, value: 1}",
+        ],
+    )
+    check(
         "generator for-in",
         "import std;\n"
         "func count(n) {\n"
@@ -1895,6 +1919,100 @@ def main():
             'std.io.close(b)\n',
             stdout_all=["= true", "= true", "= true"],
         )
+
+        http_test_server = socket.socket()
+        http_test_server.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        http_test_server.bind(("127.0.0.1", 0))
+        http_test_server.listen(1)
+        http_test_server.settimeout(5)
+        http_test_port = http_test_server.getsockname()[1]
+
+        def http_test_server_fn():
+            try:
+                client, _ = http_test_server.accept()
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                client.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Length: 5\r\n"
+                    b"X-Test: yes\r\n"
+                    b"\r\n"
+                    b"hello")
+                client.close()
+            finally:
+                http_test_server.close()
+
+        http_test_thread = threading.Thread(target=http_test_server_fn)
+        http_test_thread.start()
+        http_client_proc = run(
+            "import std;\n"
+            f'let r = std.http.get("http://127.0.0.1:{http_test_port}/");\n'
+            'print(r["status"]);\n'
+            'print(r["headers"]["x-test"]);\n'
+            'print(bytes_to_string(r["body"]));\n'
+        )
+        http_test_thread.join(timeout=5)
+        assert http_client_proc.returncode == 0, http_client_proc.stderr
+        assert "200" in http_client_proc.stdout, http_client_proc.stdout
+        assert "yes" in http_client_proc.stdout, http_client_proc.stdout
+        assert "hello" in http_client_proc.stdout, http_client_proc.stdout
+
+        http_probe = socket.socket()
+        http_probe.bind(("127.0.0.1", 0))
+        http_port = http_probe.getsockname()[1]
+        http_probe.close()
+        http_server_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        http_client = None
+        try:
+            http_server_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http.listen("127.0.0.1", {http_port});\n'
+                "let req = std.http.accept(s, 5000);\n"
+                'std.http.respond(req, 200, {"X-Test": "yes"}, '
+                '"hello " + req["path"]);\n'
+                "std.http.close(s);\n"
+            )
+            http_server_proc.stdin.close()
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    http_client = socket.create_connection(
+                        ("127.0.0.1", http_port), timeout=0.2)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert http_client is not None, "http server did not listen"
+            http_client.sendall(
+                b"GET /world HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Connection: close\r\n"
+                b"\r\n")
+            response = b""
+            while True:
+                chunk = http_client.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            text = response.decode("utf-8", errors="replace")
+            assert "200 OK" in text, text
+            assert "hello /world" in text, text
+            assert "x-test" in text.lower(), text
+        finally:
+            if http_client:
+                http_client.close()
+            http_server_proc.wait(timeout=5)
 
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

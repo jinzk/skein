@@ -1249,6 +1249,7 @@ std.fs
 std.process
 std.type
 std.net
+std.http
 std.task
 std.generator
 std.result
@@ -1375,6 +1376,7 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.process`：命令执行、`status` / `command_status`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
+- `std.http`：基于 llhttp 的 HTTP/1.1 同步客户端和服务端；
 - `std.task`：原生 task、等待、批量等待、取消和完成状态；
 - `std.generator`：生成器的 `next` / `done` / `close`；
 - `std.result`：result 值、错误检查和错误捕获；
@@ -1474,6 +1476,85 @@ task 是协作式调度的：只有运行事件循环时才会推进，例如 `w
 
 目前 task 覆盖原生定时器、async 函数和 `std.net.*_async` 异步 I/O。
 
+### HTTP/1.1
+
+客户端：
+
+```text
+import std;
+
+let r = std.http.get("http://127.0.0.1:8080/api");
+
+r["status"]
+r["headers"]["content-type"]
+bytes_to_string(r["body"])
+```
+
+带 headers / timeout：
+
+```text
+let r = std.http.get("http://127.0.0.1:8080/api", {
+  "headers": {"Accept": "application/json"},
+  "timeout_ms": 1000
+});
+```
+
+POST 和自定义方法：
+
+```text
+let r = std.http.post("http://127.0.0.1:8080/items", "hello", {
+  "headers": {"Content-Type": "text/plain"}
+});
+
+let d = std.http.request("DELETE", "http://127.0.0.1:8080/items/1");
+```
+
+服务端：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+let req = std.http.accept(s, 5000);
+
+std.http.respond(req, 200, {
+  "Content-Type": "text/plain"
+}, "hello " + req["path"]);
+
+std.http.close(s);
+```
+
+函数：
+
+```text
+std.http.request(method, url[, options])
+std.http.get(url[, options])
+std.http.post(url, body[, options])
+std.http.listen(host, port[, timeout_ms])
+std.http.accept(server[, timeout_ms])
+std.http.respond(request, status[, headers[, body]])
+std.http.close(server_or_request)
+```
+
+请求 dict：
+
+```text
+method, path, headers, body, http_major, http_minor, socket
+```
+
+响应 dict：
+
+```text
+status, status_text, headers, body, http_major, http_minor
+```
+
+限制：
+
+- 只支持 `http://`；
+- 只支持 HTTP/1.1；
+- 一次连接只处理一个请求，响应后关闭；
+- body 整体读取，默认上限 16 MiB；
+- 同名 header 只保留最后一个；
+- 当前为同步接口。
+
 ### async / await
 
 ```text
@@ -1530,6 +1611,7 @@ std.generator.done(g)
 - 函数体中出现 `yield` 时，该函数自动成为生成器；
 - 第一次 `std.generator.next` 才开始执行函数体；
 - `std.generator.next(g[, value])` 返回 `{done: bool, value: ...}`，第一次 `next` 的发送值会被忽略；
+- `yield;` 等价于 `yield null;`；
 - `yield` 恢复时返回 `next(value)` 发送的值；
 - `return` 的返回值作为结束时 `{done: true, value: ...}` 的 value；
 - 可以直接 `for (let x in generator)`；

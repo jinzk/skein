@@ -201,8 +201,8 @@ def main():
     check("increment nested index",
           "let a = [[1]];\na[0][0]++;\na\n",
           stdout_all=["= 1", "= [[2]]"])
-    check("increment dict field",
-          'let d = {"x": 5};\nd.x++;\n++d["x"];\nd\n',
+    check("increment dict element",
+          'let d = {"x": 5};\nd["x"]++;\n++d["x"];\nd\n',
           stdout_all=["= 5", "= 7", "= {x: 7}"])
     check("increment bytes element",
           'let b = bytes_from_hex("00ff");\nb[0]++;\nb[1]--;\nb\n',
@@ -248,7 +248,7 @@ def main():
           stdout_all=["= ab", "= [1, 2, 3]"])
     check("compound index and field",
           "let a = [10];\nlet i = 0;\na[i++] += 5;\ni\na\n"
-          "let p = {\"x\": 1};\np.x += 2;\np\n"
+          "let p = {\"x\": 1};\np[\"x\"] += 2;\np\n"
           "struct P { x: int; }\nlet q = P { x: 1 };\nq.x += 4;\nq\n",
           stdout_all=["= 15", "= 1", "= [15]", "= 3", "= {x: 3}",
                       "= 5", "= P { x: 5 }"])
@@ -767,19 +767,25 @@ def main():
     )
     check("list equality", "[1,2] == [1,2]\n", stdout="= true")
     check("dict index", '{1:2, 3:4}[3]\n', stdout="= 4")
-    check("dict field read", 'let p = {"x": 1, "y": 2};\np.x + p.y\n',
+    check("dict key read", 'let p = {"x": 1, "y": 2};\np["x"] + p["y"]\n',
           stdout="= 3")
-    check("dict field assignment", 'let p = {"x": 1};\np.x = 5;\np\n',
+    check("dict key assignment", 'let p = {"x": 1};\np["x"] = 5;\np\n',
           stdout="{x: 5}")
     check(
-        "nested dict field assignment",
-        'let p = {"a": {"b": 2}};\np.a.b = 3;\np\n',
+        "nested dict key assignment",
+        'let p = {"a": {"b": 2}};\np["a"]["b"] = 3;\np\n',
         stdout="{a: {b: 3}}",
     )
-    check("dict field callable", 'let d = {"f": sqrt};\nd.f(9)\n',
+    check("dict key callable", 'let d = {"f": sqrt};\nd["f"](9)\n',
           stdout="= 3.0")
-    check("dict field missing", 'let p = {"x": 1};\np.y\n',
+    check("dict key missing", 'let p = {"x": 1};\np["y"]\n',
           stderr="key not found")
+    check("dict dot access rejected", 'let p = {"x": 1};\np.x\n',
+          stderr='cannot access dict key with \'.\'')
+    check("dict dot assignment rejected", 'let p = {"x": 1};\np.x = 2;\n',
+          stderr='cannot access dict key with \'.\'')
+    check("dict dot increment rejected", 'let p = {"x": 1};\np.x++;\n',
+          stderr='cannot access dict key with \'.\'')
     check("float literals unaffected by dot", ".5 + 1\n", stdout="= 1.5")
     check("dict equality", "{1:2} == {1:2}\n", stdout="= true")
     check("dict literal duplicate key last wins", '{1: "a", 1: "b"}\n',
@@ -4616,11 +4622,11 @@ def main():
         "std json parse",
         r'''import std;
 let v = std.json.parse("{\"a\": 1, \"b\": [true, null, \"x\"], \"c\": 1.5}");
-print(v.a);
-print(v.b[0]);
-print(v.b[1]);
-print(v.b[2]);
-print(v.c);
+print(v["a"]);
+print(v["b"][0]);
+print(v["b"][1]);
+print(v["b"][2]);
+print(v["c"]);
 ''',
         stdout_all=["1", "true", "null", "x", "1.5"],
     )
@@ -4648,7 +4654,7 @@ std.json.parse("-9223372036854775808")
     check(
         "std json duplicate keys and unicode",
         r'''import std;
-std.json.parse("{\"a\":1,\"a\":2}").a
+std.json.parse("{\"a\":1,\"a\":2}")["a"]
 std.json.parse("\"\\u4f60\\u597d\"")
 ''',
         stdout_all=["= 2", "= 你好"],
@@ -4677,7 +4683,7 @@ std.json.stringify(std.json.parse(text))
     check(
         "std json parse bytes",
         'import std;\n'
-        'std.json.parse(bytes_from_string("{\\"a\\": 7}")).a\n',
+        'std.json.parse(bytes_from_string("{\\"a\\": 7}"))["a"]\n',
         stdout="= 7",
     )
     check(
@@ -5824,10 +5830,10 @@ std.json.stringify(std.json.parse(text))
             f'"seek": seek, "close": close}};\n'
             f'}}\n'
             f'let f = open_file("{quoted_handle}", "w+");\n'
-            f'f.write("abcdef");\n'
-            f'f.seek(0);\n'
-            f'f.read(3);\n'
-            f'f.close();\n',
+            f'f["write"]("abcdef");\n'
+            f'f["seek"](0);\n'
+            f'f["read"](3);\n'
+            f'f["close"]();\n',
             stdout="= abc",
         )
         check("file_open invalid mode", 'file_open("x", "bad")\n',

@@ -90,6 +90,8 @@ struct list_payload {
 
 struct dict_payload {
     std::vector<std::pair<value_t *, value_t *>> items;
+    /* True for std/package namespaces, which keep dot access for exports. */
+    bool is_namespace = false;
     ~dict_payload();
 };
 

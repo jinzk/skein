@@ -915,20 +915,22 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
 }
 
 static struct ast *index_base(struct ast *a) {
-    while (a && a->nodetype == 'G') a = a->l;
+    while (a && (a->nodetype == 'G' || a->nodetype == 'j')) a = a->l;
     return a;
 }
 
 /*
  * Collect the index expressions of an lvalue chain such as a[i][j].  The base
  * must be a variable; assigning through function calls or literals is not
- * allowed.
+ * allowed.  `fields` records whether each step used dot access.
  */
-static bool collect_index_asts(struct ast *a, std::vector<struct ast *> &out) {
+static bool collect_index_asts(struct ast *a, std::vector<struct ast *> &out,
+                               std::vector<bool> &fields) {
     if (!a) return false;
-    if (a->nodetype == 'G') {
-        if (!collect_index_asts(a->l, out)) return false;
+    if (a->nodetype == 'G' || a->nodetype == 'j') {
+        if (!collect_index_asts(a->l, out, fields)) return false;
         out.push_back(a->r);
+        fields.push_back(a->nodetype == 'j');
         return true;
     }
     return a->nodetype == 'N';
@@ -963,6 +965,7 @@ static void ensure_unique_dict(struct dict_value_t *dict) {
         return;
 
     std::shared_ptr<dict_payload> copy = std::make_shared<dict_payload>();
+    copy->is_namespace = dict->payload->is_namespace;
     copy->items.reserve(dict->payload->items.size());
     for (size_t i = 0; i < dict->payload->items.size(); ++i) {
         copy->items.push_back(std::make_pair(
@@ -1032,10 +1035,15 @@ static struct value_t *apply_increment(struct value_t *v, int delta) {
  */
 static bool resolve_write_container(
     struct symbol *s, const std::vector<struct value_t *> &indices,
-    struct value_t *&container) {
+    const std::vector<bool> &fields, struct value_t *&container) {
     container = s ? s->val : NULL;
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
         ensure_unique_container(container);
+        if (fields[k] && container->type == T_dict &&
+            !((struct dict_value_t *)container)->payload->is_namespace) {
+            yyerror("cannot access dict key with '.', use [\"...\"]");
+            return false;
+        }
         struct value_t **slot = index_slot_ptr(container, indices[k]);
         if (!slot || !*slot) {
             yyerror("invalid index assignment path");
@@ -1055,11 +1063,14 @@ static bool resolve_write_container(
 /* Assigns through an index/field slot.  Ownership of `val` is consumed. */
 static struct value_t *write_member_value(struct value_t *container,
                                           struct value_t *idx,
-                                          struct value_t *val) {
+                                          struct value_t *val,
+                                          bool field_access) {
     struct value_t *ret = NULL;
 
     if (container->type == T_list) {
-        if (idx->type != T_int) {
+        if (field_access) {
+            yyerror("cannot access a list field with '.'");
+        } else if (idx->type != T_int) {
             yyerror("list index must be an integer, got %s", typename_of(idx));
         } else {
             long long i = ((struct int_value_t *)idx)->value;
@@ -1076,22 +1087,26 @@ static struct value_t *write_member_value(struct value_t *container,
         }
     } else if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
-        ensure_unique_dict(dv);
-        bool found = false;
-        for (size_t i = 0; i < dv->payload->items.size(); ++i) {
-            if (value_equals(dv->payload->items[i].first, idx)) {
-                freeval(dv->payload->items[i].second);
-                dv->payload->items[i].second = val;
-                val = NULL;
-                found = true;
-                ret = dupval(dv->payload->items[i].second);
-                break;
+        if (field_access && !dv->payload->is_namespace) {
+            yyerror("cannot access dict key with '.', use [\"...\"]");
+        } else {
+            ensure_unique_dict(dv);
+            bool found = false;
+            for (size_t i = 0; i < dv->payload->items.size(); ++i) {
+                if (value_equals(dv->payload->items[i].first, idx)) {
+                    freeval(dv->payload->items[i].second);
+                    dv->payload->items[i].second = val;
+                    val = NULL;
+                    found = true;
+                    ret = dupval(dv->payload->items[i].second);
+                    break;
+                }
             }
-        }
-        if (!found) {
-            dv->payload->items.push_back(std::make_pair(dupval(idx), val));
-            val = NULL;
-            ret = dupval(dv->payload->items.back().second);
+            if (!found) {
+                dv->payload->items.push_back(std::make_pair(dupval(idx), val));
+                val = NULL;
+                ret = dupval(dv->payload->items.back().second);
+            }
         }
     } else if (container->type == T_struct) {
         if (idx->type != T_string) {
@@ -1153,11 +1168,13 @@ static struct value_t *write_member_value(struct value_t *container,
 
 static struct value_t *increment_member_value(struct value_t *container,
                                               struct value_t *idx, int delta,
-                                              bool prefix) {
+                                              bool prefix, bool field_access) {
     struct value_t *ret = NULL;
 
     if (container->type == T_list) {
-        if (idx->type != T_int) {
+        if (field_access) {
+            yyerror("cannot access a list field with '.'");
+        } else if (idx->type != T_int) {
             yyerror("list index must be an integer, got %s", typename_of(idx));
         } else {
             long long i = ((struct int_value_t *)idx)->value;
@@ -1177,23 +1194,27 @@ static struct value_t *increment_member_value(struct value_t *container,
         }
     } else if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
-        ensure_unique_dict(dv);
-        bool found = false;
-        for (size_t i = 0; i < dv->payload->items.size(); ++i) {
-            if (!value_equals(dv->payload->items[i].first, idx))
-                continue;
-            found = true;
-            struct value_t *old = dv->payload->items[i].second;
-            struct value_t *newv = apply_increment(old, delta);
-            if (newv) {
-                ret = prefix ? dupval(newv) : dupval(old);
-                freeval(old);
-                dv->payload->items[i].second = newv;
+        if (field_access && !dv->payload->is_namespace) {
+            yyerror("cannot access dict key with '.', use [\"...\"]");
+        } else {
+            ensure_unique_dict(dv);
+            bool found = false;
+            for (size_t i = 0; i < dv->payload->items.size(); ++i) {
+                if (!value_equals(dv->payload->items[i].first, idx))
+                    continue;
+                found = true;
+                struct value_t *old = dv->payload->items[i].second;
+                struct value_t *newv = apply_increment(old, delta);
+                if (newv) {
+                    ret = prefix ? dupval(newv) : dupval(old);
+                    freeval(old);
+                    dv->payload->items[i].second = newv;
+                }
+                break;
             }
-            break;
+            if (!found)
+                yyerror("key not found");
         }
-        if (!found)
-            yyerror("key not found");
     } else if (container->type == T_struct) {
         if (idx->type != T_string) {
             yyerror("struct field name must be a string, got %s",
@@ -1362,7 +1383,8 @@ static struct value_t *apply_binary_value(int op, struct value_t *l,
 
 static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     std::vector<struct ast *> index_asts;
-    if (!collect_index_asts(target, index_asts)) {
+    std::vector<bool> fields;
+    if (!collect_index_asts(target, index_asts, fields)) {
         yyerror("cannot assign through this expression");
         return NULL;
     }
@@ -1406,14 +1428,14 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     }
 
     struct value_t *container = NULL;
-    if (!resolve_write_container(s, indices, container)) {
+    if (!resolve_write_container(s, indices, fields, container)) {
         freeval(val);
         free_args(indices);
         return NULL;
     }
 
     struct value_t *ret =
-        write_member_value(container, indices.back(), val);
+        write_member_value(container, indices.back(), val, fields.back());
     free_args(indices);
     return ret;
 }
@@ -1421,7 +1443,8 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
 static struct value_t *increment_index(struct ast *target, int delta,
                                        bool prefix) {
     std::vector<struct ast *> index_asts;
-    if (!collect_index_asts(target, index_asts)) {
+    std::vector<bool> fields;
+    if (!collect_index_asts(target, index_asts, fields)) {
         yyerror("cannot assign through this expression");
         return NULL;
     }
@@ -1454,19 +1477,20 @@ static struct value_t *increment_index(struct ast *target, int delta,
     }
 
     struct value_t *container = NULL;
-    if (!resolve_write_container(s, indices, container)) {
+    if (!resolve_write_container(s, indices, fields, container)) {
         free_args(indices);
         return NULL;
     }
 
     struct value_t *ret = increment_member_value(
-        container, indices.back(), delta, prefix);
+        container, indices.back(), delta, prefix, fields.back());
     free_args(indices);
     return ret;
 }
 
 static struct value_t *read_member_value(struct value_t *container,
-                                         struct value_t *index);
+                                         struct value_t *index,
+                                         bool field_access = false);
 
 static struct value_t *compound_name(struct symref *ref, int op,
                                      struct ast *value_ast) {
@@ -1500,7 +1524,8 @@ static struct value_t *compound_name(struct symref *ref, int op,
 static struct value_t *compound_index(struct ast *target, int op,
                                       struct ast *value_ast) {
     std::vector<struct ast *> index_asts;
-    if (!collect_index_asts(target, index_asts)) {
+    std::vector<bool> fields;
+    if (!collect_index_asts(target, index_asts, fields)) {
         yyerror("cannot assign through this expression");
         return NULL;
     }
@@ -1539,14 +1564,14 @@ static struct value_t *compound_index(struct ast *target, int op,
     }
 
     struct value_t *container = NULL;
-    if (!resolve_write_container(s, indices, container)) {
+    if (!resolve_write_container(s, indices, fields, container)) {
         freeval(rhs);
         free_args(indices);
         return NULL;
     }
 
     struct value_t *idx = indices.back();
-    struct value_t *old = read_member_value(container, idx);
+    struct value_t *old = read_member_value(container, idx, fields.back());
     if (!old) {
         freeval(rhs);
         free_args(indices);
@@ -1560,7 +1585,8 @@ static struct value_t *compound_index(struct ast *target, int op,
         return NULL;
     }
 
-    struct value_t *ret = write_member_value(container, idx, value);
+    struct value_t *ret = write_member_value(container, idx, value,
+                                             fields.back());
     free_args(indices);
     return ret;
 }
@@ -1594,6 +1620,7 @@ static bool is_read_only(const struct ast *a) {
         case '~':
         case 'b':
         case 'G':
+        case 'j':
             return is_read_only(a->l) && is_read_only(a->r);
         default:
             return false;
@@ -1688,8 +1715,13 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
  */
 static bool read_index_chain(struct ast *a, struct value_t *&out) {
     std::vector<struct ast *> index_asts;
-    if (!collect_index_asts(a, index_asts))
+    std::vector<bool> fields;
+    if (!collect_index_asts(a, index_asts, fields))
         return false;
+    /* Dot access has its own validation; use the slow path for it. */
+    for (bool field : fields)
+        if (field)
+            return false;
     for (struct ast *idx : index_asts) {
         if (!is_read_only(idx))
             return false;
@@ -1832,7 +1864,8 @@ static struct value_t *increment_name(struct symref *ref, int delta,
 }
 
 static struct value_t *read_member_value(struct value_t *container,
-                                         struct value_t *index) {
+                                         struct value_t *index,
+                                         bool field_access) {
     if (!container || !index)
         return NULL;
 
@@ -1886,6 +1919,10 @@ static struct value_t *read_member_value(struct value_t *container,
 
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
+        if (field_access && !dv->payload->is_namespace) {
+            yyerror("cannot access dict key with '.', use [\"...\"]");
+            return NULL;
+        }
         for (size_t i = 0; i < dv->payload->items.size(); ++i)
             if (value_equals(dv->payload->items[i].first, index))
                 return dupval(dv->payload->items[i].second);
@@ -2328,7 +2365,8 @@ struct value_t *eval(struct ast *a) {
             struct symasgn *asgn = (struct symasgn *)a;
             if (asgn->target->nodetype == 'N')
                 ret = assign_name((struct symref *)asgn->target, asgn->v);
-            else if (asgn->target->nodetype == 'G')
+            else if (asgn->target->nodetype == 'G' ||
+                     asgn->target->nodetype == 'j')
                 ret = assign_index(asgn->target, asgn->v);
             else
                 yyerror("cannot assign to this expression");
@@ -2340,7 +2378,8 @@ struct value_t *eval(struct ast *a) {
             if (asgn->target->nodetype == 'N')
                 ret = compound_name((struct symref *)asgn->target, asgn->op,
                                     asgn->v);
-            else if (asgn->target->nodetype == 'G')
+            else if (asgn->target->nodetype == 'G' ||
+                     asgn->target->nodetype == 'j')
                 ret = compound_index(asgn->target, asgn->op, asgn->v);
             else
                 yyerror("cannot assign to this expression");
@@ -2352,7 +2391,8 @@ struct value_t *eval(struct ast *a) {
             if (u->target->nodetype == 'N')
                 ret = increment_name((struct symref *)u->target, u->delta,
                                      u->prefix);
-            else if (u->target->nodetype == 'G')
+            else if (u->target->nodetype == 'G' ||
+                     u->target->nodetype == 'j')
                 ret = increment_index(u->target, u->delta, u->prefix);
             else
                 yyerror("cannot %s this expression",
@@ -3192,9 +3232,26 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
+        case 'j': {
+            struct value_t *container = eval(a->l);
+            if (!container)
+                break;
+            struct value_t *index = eval(a->r);
+            if (!index) {
+                freeval(container);
+                break;
+            }
+            ret = read_member_value(container, index, true);
+            freeval(container);
+            freeval(index);
+            break;
+        }
+
         case 'C': {
             struct ufncall *call = (struct ufncall *)a;
-            if (call->callee && call->callee->nodetype == 'G') {
+            if (call->callee && (call->callee->nodetype == 'G' ||
+                                 call->callee->nodetype == 'j')) {
+                bool field_access = call->callee->nodetype == 'j';
                 struct value_t *receiver = eval(call->callee->l);
                 if (!receiver)
                     break;
@@ -3248,7 +3305,8 @@ struct value_t *eval(struct ast *a) {
                     break;
                 }
 
-                struct value_t *member = read_member_value(receiver, key);
+                struct value_t *member =
+                    read_member_value(receiver, key, field_access);
                 freeval(receiver);
                 freeval(key);
                 if (member) {

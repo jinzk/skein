@@ -764,6 +764,7 @@ void treefree(struct ast *a) {
         case 's':
         case 'r':
         case 'G':
+        case 'j':
         case '1':
         case '2':
         case '3':

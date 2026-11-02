@@ -322,6 +322,7 @@ value_t *import_resolved(const std::string &dotted,
 value_t *builtin_module(
     std::initializer_list<std::pair<const char *, int>> functions) {
     struct dict_value_t *module = newdictval();
+    module->payload->is_namespace = true;
     module->payload->items.reserve(functions.size());
     for (const auto &entry : functions) {
         module->payload->items.push_back(std::make_pair(
@@ -332,6 +333,7 @@ value_t *builtin_module(
 
 value_t *build_std_namespace() {
     struct dict_value_t *root = newdictval();
+    root->payload->is_namespace = true;
     root->payload->items.push_back(std::make_pair(
         newstrval("list"),
         builtin_module({
@@ -793,7 +795,9 @@ bool load_package_file(const resolved_package &resolved,
                        const std::string &module_name, value_t *&result,
                        std::string &error) {
     if (!resolved.has_source) {
-        result = (value_t *)newdictval();
+        struct dict_value_t *namespace_value = newdictval();
+        namespace_value->payload->is_namespace = true;
+        result = (value_t *)namespace_value;
         return true;
     }
 
@@ -944,6 +948,7 @@ value_t *package_build_namespace(scope_t *scope, std::string &error) {
     }
 
     struct dict_value_t *dict = newdictval();
+    dict->payload->is_namespace = true;
     for (struct symbol *sym : scope->syms.small) {
         if (!sym || !sym->exported || !sym->val)
             continue;

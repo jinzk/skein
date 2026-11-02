@@ -65,6 +65,7 @@ add_executable(${PROJECT_NAME}
   async_support.cpp
   builtins.cpp
   compression.cpp
+  cookie.cpp
   diagnostics.cpp
   error.cpp
   eval.cpp

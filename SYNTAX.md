@@ -1893,7 +1893,7 @@ host_only
 
 - HTTP/1.1 客户端支持自动 cookie jar；
 - HTTP/2 响应也提供 `set_cookie`，可用 `std.http.cookies` 解析；
-- HTTP/2 自动 cookie jar 尚未接入。
+- HTTP/2 单请求和 `request_many` 都支持自动 cookie jar。
 
 压缩：
 
@@ -1911,8 +1911,36 @@ print(bytes_to_string(r["body"]));
 - 不能与 `on_body` 同时使用；
 - 同步和 async 客户端都支持；
 - 构建选项 `-DCALC_ENABLE_COMPRESSION=OFF` 可关闭；
-- HTTP/2 自动解压尚未接入。
+- HTTP/2 单请求和 `request_many` 都支持自动解压。
 
+
+资源限制：
+
+客户端：
+
+```text
+let r = std.http.get(url, {
+  "max_header_bytes": 65536,
+  "max_headers": 100,
+  "max_body_bytes": 1048576
+});
+```
+
+服务端：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+
+s["max_header_bytes"] = 65536;
+s["max_headers"] = 100;
+s["max_body_bytes"] = 1048576;
+s["max_connections"] = 100;
+```
+
+- 超过限制时请求失败或连接关闭；
+- `max_connections = 0` 表示不限制；
+- `std.http.accept` / `accept_async` 也使用 server dict 中的限制；
+- HTTP/2 使用 `max_body_bytes` / `max_connections`，header 限制通过 `settings.max_header_list_size`。
 
 ### HTTP/2
 
@@ -1964,7 +1992,8 @@ let responses2 = await std.http2.request_many_async([
 - 同一连接上同时提交多个 stream；
 - 返回列表顺序与输入一致；
 - 请求项支持 `url`、`method`、`headers`、`body`、`body_stream`、`on_body`；
-- 每个请求项可以独立流式发送请求 body 和流式接收响应 body。
+- 每个请求项可以独立流式发送请求 body 和流式接收响应 body；
+- `options` 中的 `cookie_jar` / `decompress` 会分别应用到每个请求项的 URL / path。
 
 服务端：
 

@@ -2897,7 +2897,7 @@ def main():
                     'str(req["connection_id"]) + " " + req["method"] + '
                     '" " + req["path"] + " " + '
                     'bytes_to_string(req["body"])};\n'
-                    "}, 6);\n"
+                    f"}}, {h2_cookie_requests});\n"
                     'print("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
@@ -3133,6 +3133,285 @@ def main():
             )
             assert "enable_push is only valid for clients" in (
                 bad_server_settings.stderr), bad_server_settings.stderr
+
+            h2_comp_probe = run(
+                "import std;\n"
+                'std.http2.get("http://127.0.0.1:1/", '
+                '{"decompress": true});\n'
+            )
+            h2_compression_enabled = (
+                "compression support is disabled" not in h2_comp_probe.stderr)
+            h2_cookie_requests = 6 if h2_compression_enabled else 4
+            http2_cookie_probe = socket.socket()
+            http2_cookie_probe.bind(("127.0.0.1", 0))
+            http2_cookie_port = http2_cookie_probe.getsockname()[1]
+            http2_cookie_probe.close()
+            http2_cookie_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_cookie_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_cookie_port});\n"
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  if (req["path"] == "/set") {\n'
+                    '    return {"status": 200, "headers": '
+                    '{"Set-Cookie": "a=1; Path=/"}, "body": "set"};\n'
+                    "  }\n"
+                    '  if (req["path"] == "/check") {\n'
+                    '    let c = std.dict.get(req["headers"], "cookie");\n'
+                    '    let cs = "";\n'
+                    "    if (c != null) { cs = c; }\n"
+                    '    return {"status": 200, "body": "cookie=" + cs};\n'
+                    "  }\n"
+                    '  return {"status": 200, "headers": '
+                    '{"Content-Encoding": "gzip"}, "body": '
+                    'bytes_from_hex("1f8b08000000000002ffcb48cdc9c957c830'
+                    '0200d243ada208000000")};\n'
+                    "}, 6);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_cookie_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_cookie_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 cookie server did not listen"
+                h2_cookie_source = (
+                    "import std;\n"
+                    "let jar = {};\n"
+                    f'let a = std.http2.get('
+                    f'"http://127.0.0.1:{http2_cookie_port}/set", '
+                    '{"cookie_jar": jar});\n'
+                    f'let b = std.http2.get('
+                    f'"http://127.0.0.1:{http2_cookie_port}/check", '
+                    '{"cookie_jar": jar});\n'
+                    'print(bytes_to_string(b["body"]));\n'
+                    "let jar2 = {};\n"
+                    f'let c = await std.http2.get_async('
+                    f'"http://127.0.0.1:{http2_cookie_port}/set", '
+                    '{"cookie_jar": jar2});\n'
+                    f'let d = await std.http2.get_async('
+                    f'"http://127.0.0.1:{http2_cookie_port}/check", '
+                    '{"cookie_jar": jar2});\n'
+                    'print(bytes_to_string(d["body"]));\n'
+                )
+                if h2_compression_enabled:
+                    h2_cookie_source += (
+                        f'let g = std.http2.get('
+                        f'"http://127.0.0.1:{http2_cookie_port}/gzip", '
+                        '{"decompress": true});\n'
+                        'print(bytes_to_string(g["body"]));\n'
+                        f'let h = await std.http2.get_async('
+                        f'"http://127.0.0.1:{http2_cookie_port}/gzip", '
+                        '{"decompress": true});\n'
+                        'print(bytes_to_string(h["body"]));\n'
+                    )
+                http2_cookie_client = run(h2_cookie_source, timeout=15)
+                assert http2_cookie_client.returncode == 0, (
+                    http2_cookie_client.stderr)
+                cookie_lines = http2_cookie_client.stdout.splitlines()
+                assert cookie_lines[:2] == ["cookie=a=1", "cookie=a=1"], (
+                    http2_cookie_client.stdout)
+                if h2_compression_enabled:
+                    assert cookie_lines == [
+                        "cookie=a=1", "cookie=a=1", "hello h2",
+                        "hello h2"], http2_cookie_client.stdout
+                else:
+                    assert len(cookie_lines) == 2, (
+                        http2_cookie_client.stdout)
+                http2_cookie_proc.wait(timeout=10)
+                cookie_output = http2_cookie_proc.stdout.read()
+                assert f"served {h2_cookie_requests}" in cookie_output, (
+                    cookie_output)
+            finally:
+                if http2_cookie_proc.poll() is None:
+                    http2_cookie_proc.terminate()
+                    http2_cookie_proc.wait(timeout=5)
+
+            h2_many_requests = 5 if h2_compression_enabled else 3
+            http2_many2_probe = socket.socket()
+            http2_many2_probe.bind(("127.0.0.1", 0))
+            http2_many2_port = http2_many2_probe.getsockname()[1]
+            http2_many2_probe.close()
+            http2_many2_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_many2_proc.stdin.write(
+                    "import std;\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_many2_port});\n"
+                    "let n = std.http2.serve(s, func(req) {\n"
+                    '  if (req["path"] == "/set") {\n'
+                    '    return {"status": 200, "headers": '
+                    '{"Set-Cookie": "a=1; Path=/"}, "body": "set"};\n'
+                    "  }\n"
+                    '  if (req["path"] == "/check") {\n'
+                    '    let c = std.dict.get(req["headers"], "cookie");\n'
+                    '    let cs = "";\n'
+                    "    if (c != null) { cs = c; }\n"
+                    '    return {"status": 200, "body": "cookie=" + cs};\n'
+                    "  }\n"
+                    '  return {"status": 200, "headers": '
+                    '{"Content-Encoding": "gzip"}, "body": '
+                    'bytes_from_hex("1f8b08000000000002ffcb48cdc9c957c830'
+                    '0200d243ada208000000")};\n'
+                    f"}}, {h2_many_requests});\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_many2_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_many2_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 many cookie server did not listen"
+                h2_many_source = (
+                    "import std;\n"
+                    "let jar = {};\n"
+                    f'let a = std.http2.get('
+                    f'"http://127.0.0.1:{http2_many2_port}/set", '
+                    '{"cookie_jar": jar});\n'
+                    f'let rs = std.http2.request_many([\n'
+                    f'  {{"url": '
+                    f'"http://127.0.0.1:{http2_many2_port}/check"}},\n'
+                    f'  {{"url": '
+                    f'"http://127.0.0.1:{http2_many2_port}/check"}}\n'
+                    '], {"cookie_jar": jar});\n'
+                    'print(bytes_to_string(rs[0]["body"]));\n'
+                    'print(bytes_to_string(rs[1]["body"]));\n'
+                )
+                if h2_compression_enabled:
+                    h2_many_source += (
+                        f'let gs = std.http2.request_many([\n'
+                        f'  {{"url": '
+                        f'"http://127.0.0.1:{http2_many2_port}/gzip"}},\n'
+                        f'  {{"url": '
+                        f'"http://127.0.0.1:{http2_many2_port}/gzip"}}\n'
+                        '], {"decompress": true});\n'
+                        'print(bytes_to_string(gs[0]["body"]));\n'
+                        'print(bytes_to_string(gs[1]["body"]));\n'
+                    )
+                http2_many2_client = run(h2_many_source, timeout=15)
+                assert http2_many2_client.returncode == 0, (
+                    http2_many2_client.stderr)
+                many2_lines = http2_many2_client.stdout.splitlines()
+                assert many2_lines[:2] == ["cookie=a=1", "cookie=a=1"], (
+                    http2_many2_client.stdout)
+                if h2_compression_enabled:
+                    assert many2_lines == [
+                        "cookie=a=1", "cookie=a=1", "hello h2",
+                        "hello h2"], http2_many2_client.stdout
+                http2_many2_proc.wait(timeout=10)
+                many2_output = http2_many2_proc.stdout.read()
+                assert f"served {h2_many_requests}" in many2_output, (
+                    many2_output)
+            finally:
+                if http2_many2_proc.poll() is None:
+                    http2_many2_proc.terminate()
+                    http2_many2_proc.wait(timeout=5)
+
+            h2_maxconn_probe = socket.socket()
+            h2_maxconn_probe.bind(("127.0.0.1", 0))
+            h2_maxconn_port = h2_maxconn_probe.getsockname()[1]
+            h2_maxconn_probe.close()
+            h2_maxconn_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                h2_maxconn_proc.stdin.write(
+                    "import std;\n"
+                    "async func handler(req) {\n"
+                    "  await std.task.sleep(300);\n"
+                    '  return {"status": 200, "body": "ok"};\n'
+                    "}\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{h2_maxconn_port});\n"
+                    's["max_connections"] = 1;\n'
+                    "let n = std.http2.serve(s, handler, 2);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                h2_maxconn_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", h2_maxconn_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 max_connections server did not listen"
+                client_source = (
+                    "import std;\n"
+                    f'let a = std.http2.get('
+                    f'"http://127.0.0.1:{h2_maxconn_port}/a");\n'
+                    'print(bytes_to_string(a["body"]));\n'
+                )
+                started = time.time()
+                h2mc1 = subprocess.Popen(
+                    [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                time.sleep(0.03)
+                h2mc2 = subprocess.Popen(
+                    [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                h2mc1.stdin.write(client_source)
+                h2mc1.stdin.close()
+                h2mc2.stdin.write(client_source)
+                h2mc2.stdin.close()
+                h2out1, h2err1 = h2mc1.communicate(timeout=15)
+                h2out2, h2err2 = h2mc2.communicate(timeout=15)
+                elapsed = time.time() - started
+                assert h2mc1.returncode == 0, h2err1
+                assert h2mc2.returncode == 0, h2err2
+                assert "ok" in h2out1, h2out1
+                assert "ok" in h2out2, h2out2
+                assert elapsed >= 0.50, (
+                    f"http2 max_connections was not enforced: "
+                    f"{elapsed:.3f}s")
+                h2_maxconn_proc.wait(timeout=10)
+                h2_output = h2_maxconn_proc.stdout.read()
+                assert "served 2" in h2_output, h2_output
+            finally:
+                if h2_maxconn_proc.poll() is None:
+                    h2_maxconn_proc.terminate()
+                    h2_maxconn_proc.wait(timeout=5)
 
             rb2_probe = socket.socket()
             rb2_probe.bind(("127.0.0.1", 0))
@@ -4953,6 +5232,162 @@ def main():
                 compression_server.shutdown()
                 compression_server.server_close()
                 compression_thread.join(timeout=5)
+
+        limit_header_server = socket.socket()
+        limit_header_server.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        limit_header_server.bind(("127.0.0.1", 0))
+        limit_header_server.listen(1)
+        limit_header_server.settimeout(5)
+        limit_header_port = limit_header_server.getsockname()[1]
+
+        def limit_header_server_fn():
+            try:
+                client, _ = limit_header_server.accept()
+                client.recv(4096)
+                client.sendall(
+                    b"HTTP/1.1 200 OK\r\nX-Big: " + b"a" * 2000 +
+                    b"\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                client.close()
+            finally:
+                limit_header_server.close()
+
+        limit_header_thread = threading.Thread(target=limit_header_server_fn)
+        limit_header_thread.start()
+        limit_header_client = run(
+            "import std;\n"
+            f'let a = std.http.get("http://127.0.0.1:{limit_header_port}/", '
+            '{"max_header_bytes": 512});\n'
+        )
+        limit_header_thread.join(timeout=5)
+        assert "header bytes exceed limit" in limit_header_client.stderr, (
+            limit_header_client.stderr)
+
+        limit_body_probe = socket.socket()
+        limit_body_probe.bind(("127.0.0.1", 0))
+        limit_body_port = limit_body_probe.getsockname()[1]
+        limit_body_probe.close()
+        limit_body_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            limit_body_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http.listen("127.0.0.1", {limit_body_port});\n'
+                's["max_body_bytes"] = 10;\n'
+                "let req = std.http.accept(s, 5000);\n"
+                'std.http.respond(req, 200, {}, "ok");\n'
+                "std.http.close(s);\n"
+            )
+            limit_body_proc.stdin.close()
+            deadline = time.time() + 5
+            limit_body_client = None
+            while time.time() < deadline:
+                try:
+                    limit_body_client = socket.create_connection(
+                        ("127.0.0.1", limit_body_port), timeout=0.2)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert limit_body_client is not None, (
+                "http body limit server did not listen")
+            limit_body_client.sendall(
+                b"POST / HTTP/1.1\r\nHost: x\r\n"
+                b"Content-Length: 100\r\n\r\n" + b"a" * 100)
+            response = b""
+            while True:
+                chunk = limit_body_client.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            assert response == b"", response
+            limit_body_proc.wait(timeout=10)
+            limit_body_err = limit_body_proc.stderr.read()
+            assert "body exceeds limit" in limit_body_err, limit_body_err
+        finally:
+            if limit_body_client:
+                limit_body_client.close()
+            if limit_body_proc.poll() is None:
+                limit_body_proc.terminate()
+                limit_body_proc.wait(timeout=5)
+
+        maxconn_probe = socket.socket()
+        maxconn_probe.bind(("127.0.0.1", 0))
+        maxconn_port = maxconn_probe.getsockname()[1]
+        maxconn_probe.close()
+        maxconn_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            maxconn_proc.stdin.write(
+                "import std;\n"
+                "async func handler(req) {\n"
+                "  await std.task.sleep(300);\n"
+                '  return {"status": 200, "body": "ok"};\n'
+                "}\n"
+                f'let s = std.http.listen("127.0.0.1", {maxconn_port});\n'
+                's["max_connections"] = 1;\n'
+                "let n = std.http.serve(s, handler, 2);\n"
+                'print("served " + str(n));\n'
+                "std.http.close(s);\n"
+            )
+            maxconn_proc.stdin.close()
+            deadline = time.time() + 5
+            ready = False
+            while time.time() < deadline:
+                try:
+                    probe = socket.create_connection(
+                        ("127.0.0.1", maxconn_port), timeout=0.2)
+                    probe.close()
+                    ready = True
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert ready, "http max_connections server did not listen"
+            client_source = (
+                "import std;\n"
+                f'let a = std.http.get('
+                f'"http://127.0.0.1:{maxconn_port}/a");\n'
+                'print(bytes_to_string(a["body"]));\n'
+            )
+            started = time.time()
+            mc1 = subprocess.Popen(
+                [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            time.sleep(0.03)
+            mc2 = subprocess.Popen(
+                [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            mc1.stdin.write(client_source)
+            mc1.stdin.close()
+            mc2.stdin.write(client_source)
+            mc2.stdin.close()
+            out1, err1 = mc1.communicate(timeout=15)
+            out2, err2 = mc2.communicate(timeout=15)
+            elapsed = time.time() - started
+            assert mc1.returncode == 0, err1
+            assert mc2.returncode == 0, err2
+            assert "ok" in out1, out1
+            assert "ok" in out2, out2
+            assert elapsed >= 0.50, (
+                f"http max_connections was not enforced: {elapsed:.3f}s")
+            maxconn_proc.wait(timeout=10)
+            maxconn_output = maxconn_proc.stdout.read()
+            assert "served 2" in maxconn_output, maxconn_output
+        finally:
+            if maxconn_proc.poll() is None:
+                maxconn_proc.terminate()
+                maxconn_proc.wait(timeout=5)
 
         rb1_probe = socket.socket()
         rb1_probe.bind(("127.0.0.1", 0))

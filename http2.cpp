@@ -1,6 +1,8 @@
 #include "http2.h"
 
 #include "ast.h"
+#include "compression.h"
+#include "cookie.h"
 #include "eval.h"
 #include "fiber.h"
 #include "io.h"
@@ -95,6 +97,94 @@ value_t *dict_get(value_t *dict, const char *key) {
             return object->payload->items[i].second;
     }
     return NULL;
+}
+
+std::string lower_ascii(std::string value);
+
+bool dict_has_header(value_t *headers, const char *name) {
+    if (!headers || headers->type != T_dict)
+        return false;
+    std::string target = lower_ascii(name);
+    dict_value_t *dict = (dict_value_t *)headers;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *key = dict->payload->items[i].first;
+        if (key->type == T_string &&
+            lower_ascii(((string_value_t *)key)->value) == target)
+            return true;
+    }
+    return false;
+}
+
+std::string dict_header_value(value_t *headers, const char *name) {
+    if (!headers || headers->type != T_dict)
+        return std::string();
+    std::string target = lower_ascii(name);
+    dict_value_t *dict = (dict_value_t *)headers;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *key = dict->payload->items[i].first;
+        value_t *value = dict->payload->items[i].second;
+        if (key->type == T_string && value->type == T_string &&
+            lower_ascii(((string_value_t *)key)->value) == target)
+            return ((string_value_t *)value)->value;
+    }
+    return std::string();
+}
+
+value_t *copy_header_dict(value_t *headers) {
+    value_t *output = (value_t *)newdictval();
+    if (!headers || headers->type != T_dict)
+        return output;
+    dict_value_t *dict = (dict_value_t *)headers;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *key = dict->payload->items[i].first;
+        value_t *value = dict->payload->items[i].second;
+        if (key->type == T_string && value->type == T_string)
+            dict_set(output, ((string_value_t *)key)->value, dupval(value));
+    }
+    return output;
+}
+
+void dict_delete(value_t *dict, const char *key) {
+    if (!dict || dict->type != T_dict)
+        return;
+    dict_value_t *object = (dict_value_t *)dict;
+    for (size_t i = 0; i < object->payload->items.size(); ++i) {
+        value_t *item_key = object->payload->items[i].first;
+        if (item_key->type == T_string &&
+            std::strcmp(((string_value_t *)item_key)->value, key) == 0) {
+            freeval(object->payload->items[i].first);
+            freeval(object->payload->items[i].second);
+            object->payload->items.erase(
+                object->payload->items.begin() + (std::ptrdiff_t)i);
+            return;
+        }
+    }
+}
+
+bool apply_http2_decompression(value_t *response) {
+    value_t *headers = dict_get(response, "headers");
+    std::string encoding = dict_header_value(headers, "Content-Encoding");
+    if (encoding.empty() || lower_ascii(encoding) == "identity")
+        return true;
+    value_t *body = dict_get(response, "body");
+    if (!body || body->type != T_bytes)
+        return true;
+    std::string output;
+    std::string error;
+    if (!decompress_content_encoding(
+            encoding, ((bytes_value_t *)body)->value, output, error)) {
+        yyerror("std.http2: %s", error.c_str());
+        return false;
+    }
+    dict_set(response, "body", newbytesval(output));
+    dict_set(response, "decompressed", newboolval(true));
+    if (headers && headers->type == T_dict) {
+        dict_delete(headers, "Content-Encoding");
+        dict_delete(headers, "Content-Length");
+        dict_set(headers, "Content-Length",
+                 newstrval(std::to_string(output.size()).c_str()));
+    }
+    return true;
 }
 
 bool build_h2_settings(value_t *settings, bool server,
@@ -1601,6 +1691,18 @@ value_t *exchange(const std::string &method, const std::string &url_text,
     }
 
     value_t *headers = dict_get(options, "headers");
+    value_t *cookie_jar = dict_get(options, "cookie_jar");
+    if (cookie_jar && cookie_jar->type != T_dict) {
+        yyerror("std.http2: cookie_jar must be a dict");
+        return NULL;
+    }
+    bool decompress = option_bool(options, "decompress", false);
+    value_t *decompress_value = dict_get(options, "decompress");
+    if (decompress_value && decompress_value->type != T_bool) {
+        yyerror("std.http2: decompress must be a bool");
+        return NULL;
+    }
+
     std::string body;
     value_t *body_option =
         body_override ? body_override : dict_get(options, "body");
@@ -1654,6 +1756,10 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         yyerror("std.http2: on_body must be a function");
         return NULL;
     }
+    if (decompress && on_body) {
+        yyerror("std.http2: decompress cannot be combined with on_body");
+        return NULL;
+    }
 
     std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
     value_t *max_body = dict_get(options, "max_body_bytes");
@@ -1671,29 +1777,69 @@ value_t *exchange(const std::string &method, const std::string &url_text,
     if (!build_h2_settings(dict_get(options, "settings"), false, settings))
         return NULL;
 
+    value_t *request_headers = headers;
+    value_t *owned_headers = NULL;
+    if (cookie_jar && !dict_has_header(headers, "Cookie")) {
+        std::string cookie = cookie_header_value(cookie_jar, url.host,
+                                                 url.path, url.tls);
+        if (!cookie.empty()) {
+            owned_headers = copy_header_dict(headers);
+            dict_set(owned_headers, "Cookie",
+                     newstrval(cookie.c_str()));
+            request_headers = owned_headers;
+        }
+    }
+    if (decompress &&
+        !dict_has_header(request_headers, "Accept-Encoding")) {
+        std::string encodings = compression_accept_encoding();
+        if (encodings.empty()) {
+            yyerror("std.http2: compression support is disabled");
+            return NULL;
+        }
+        if (!owned_headers) {
+            owned_headers = copy_header_dict(request_headers);
+            request_headers = owned_headers;
+        }
+        dict_set(owned_headers, "Accept-Encoding",
+                 newstrval(encodings.c_str()));
+    }
+    std::shared_ptr<value_t> headers_holder(owned_headers, freeval);
+
     std::string key = h2_connection_key(url, tls_verify, tls_ca_file);
     key += h2_settings_tag(settings);
     bool idempotent = method == "GET" || method == "HEAD" ||
                       method == "OPTIONS" || method == "TRACE";
     bool retryable = idempotent && !on_body && !body_generator;
 
+    auto finish = [&](value_t *response) -> value_t * {
+        if (!response)
+            return NULL;
+        cookie_jar_update(cookie_jar, response, url.host, url.path,
+                          url.tls);
+        if (decompress && !apply_http2_decompression(response)) {
+            freeval(response);
+            return NULL;
+        }
+        return response;
+    };
+
     if (async) {
         if (!idempotent || on_body || body_generator)
-            return exchange_shared(method, url, headers, body,
-                                   max_body_bytes, on_body, body_generator,
-                                   tls_verify, tls_ca_file, timeout_ms,
-                                   settings, NULL);
+            return finish(exchange_shared(
+                method, url, request_headers, body, max_body_bytes, on_body,
+                body_generator, tls_verify, tls_ca_file, timeout_ms,
+                settings, NULL));
         bool reused = false;
         eval_capture_snapshot snapshot;
         eval_capture_begin(snapshot);
-        value_t *response =
-            exchange_shared(method, url, headers, body, max_body_bytes,
-                            on_body, body_generator, tls_verify,
-                            tls_ca_file, timeout_ms, settings, &reused);
+        value_t *response = exchange_shared(
+            method, url, request_headers, body, max_body_bytes, on_body,
+            body_generator, tls_verify, tls_ca_file, timeout_ms, settings,
+            &reused);
         eval_capture_result captured = eval_capture_end(snapshot);
         if (response) {
             freeval(captured.error);
-            return response;
+            return finish(response);
         }
         if (!reused) {
             if (captured.failed)
@@ -1703,9 +1849,10 @@ value_t *exchange(const std::string &method, const std::string &url_text,
             return NULL;
         }
         freeval(captured.error);
-        return exchange_shared(method, url, headers, body, max_body_bytes,
-                               on_body, body_generator, tls_verify,
-                               tls_ca_file, timeout_ms, settings, NULL);
+        return finish(exchange_shared(
+            method, url, request_headers, body, max_body_bytes, on_body,
+            body_generator, tls_verify, tls_ca_file, timeout_ms, settings,
+            NULL));
     }
 
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -1732,7 +1879,7 @@ value_t *exchange(const std::string &method, const std::string &url_text,
             eval_capture_begin(snapshot);
 
         value_t *response =
-            exchange_once(connection, method, url, headers, body,
+            exchange_once(connection, method, url, request_headers, body,
                           max_body_bytes, on_body, body_generator);
 
         eval_capture_result captured;
@@ -1752,7 +1899,7 @@ value_t *exchange(const std::string &method, const std::string &url_text,
             h2_pool_discard(connection);
         else
             h2_pool_release(connection);
-        return response;
+        return finish(response);
     }
     return NULL;
 }
@@ -1815,6 +1962,18 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
             (std::size_t)((int_value_t *)max_body)->value;
     }
 
+    value_t *cookie_jar = dict_get(options, "cookie_jar");
+    if (cookie_jar && cookie_jar->type != T_dict) {
+        yyerror("std.http2: cookie_jar must be a dict");
+        return NULL;
+    }
+    bool decompress = option_bool(options, "decompress", false);
+    value_t *decompress_value = dict_get(options, "decompress");
+    if (decompress_value && decompress_value->type != T_bool) {
+        yyerror("std.http2: decompress must be a bool");
+        return NULL;
+    }
+
     std::vector<nghttp2_settings_entry> settings;
     if (!build_h2_settings(dict_get(options, "settings"), false, settings))
         return NULL;
@@ -1825,6 +1984,7 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
     std::vector<std::string> bodies;
     std::vector<value_t *> on_bodies;
     std::vector<generator_ptr> body_generators;
+    std::vector<std::shared_ptr<value_t>> owned_header_holders;
     std::string key;
     for (size_t i = 0; i < request_list->payload->items.size(); ++i) {
         value_t *item = request_list->payload->items[i];
@@ -1893,9 +2053,45 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
             }
         }
 
+        if (decompress && item_on_body) {
+            yyerror("std.http2.request_many: decompress cannot be combined "
+                    "with on_body");
+            return NULL;
+        }
+        value_t *effective_headers = item_headers;
+        bool owned_headers = false;
+        if (cookie_jar && !dict_has_header(effective_headers, "Cookie")) {
+            std::string cookie = cookie_header_value(
+                cookie_jar, url.host, url.path, url.tls);
+            if (!cookie.empty()) {
+                effective_headers = copy_header_dict(effective_headers);
+                dict_set(effective_headers, "Cookie",
+                         newstrval(cookie.c_str()));
+                owned_headers = true;
+            }
+        }
+        if (decompress &&
+            !dict_has_header(effective_headers, "Accept-Encoding")) {
+            std::string encodings = compression_accept_encoding();
+            if (encodings.empty()) {
+                yyerror("std.http2: compression support is disabled");
+                return NULL;
+            }
+            if (!owned_headers) {
+                effective_headers = copy_header_dict(effective_headers);
+                owned_headers = true;
+            }
+            dict_set(effective_headers, "Accept-Encoding",
+                     newstrval(encodings.c_str()));
+        }
+        if (owned_headers) {
+            owned_header_holders.push_back(
+                std::shared_ptr<value_t>(effective_headers, freeval));
+        }
+
         methods.push_back(method);
         urls.push_back(url);
-        headers.push_back(item_headers);
+        headers.push_back(effective_headers);
         bodies.push_back(body);
         on_bodies.push_back(item_on_body);
         body_generators.push_back(item_generator);
@@ -2102,6 +2298,17 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
         h2_pool_discard(connection);
     else
         h2_pool_release(connection);
+
+    list_value_t *final_list = (list_value_t *)results;
+    for (size_t i = 0; i < final_list->payload->items.size(); ++i) {
+        value_t *item = final_list->payload->items[i];
+        cookie_jar_update(cookie_jar, item, urls[i].host, urls[i].path,
+                          urls[i].tls);
+        if (decompress && !apply_http2_decompression(item)) {
+            freeval(results);
+            return NULL;
+        }
+    }
     return results;
 }
 
@@ -2503,9 +2710,11 @@ struct h2_server_state {
     long long max_requests = 0;
     long long max_per_connection = 100;
     long long idle_timeout_ms = 0;
+    long long max_connections = 0;
     long long served = 0;
     bool stopping = false;
     value_t *on_request_body = NULL;
+    std::size_t max_body_bytes = 16 * 1024 * 1024;
     std::vector<nghttp2_settings_entry> settings;
 };
 
@@ -2516,7 +2725,7 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
         connection.stream = stream;
         connection.async = true;
         connection.timeout_ms = 0;
-        connection.max_body_bytes = DEFAULT_MAX_BODY_BYTES;
+        connection.max_body_bytes = state->max_body_bytes;
         connection.on_request_body = state->on_request_body;
 
         nghttp2_session_callbacks *callbacks = NULL;
@@ -2806,12 +3015,37 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
     std::vector<nghttp2_settings_entry> settings;
     if (!build_h2_settings(dict_get(args[0], "settings"), true, settings))
         return NULL;
+    long long max_connections = 0;
+    value_t *max_connections_value = dict_get(args[0], "max_connections");
+    if (max_connections_value) {
+        if (max_connections_value->type != T_int ||
+            ((int_value_t *)max_connections_value)->value < 0) {
+            yyerror("std.http2.serve max_connections must be a "
+                    "non-negative integer");
+            return NULL;
+        }
+        max_connections = ((int_value_t *)max_connections_value)->value;
+    }
+    std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
+    value_t *max_body_value = dict_get(args[0], "max_body_bytes");
+    if (max_body_value) {
+        if (max_body_value->type != T_int ||
+            ((int_value_t *)max_body_value)->value <= 0) {
+            yyerror("std.http2.serve max_body_bytes must be a positive "
+                    "integer");
+            return NULL;
+        }
+        max_body_bytes =
+            (std::size_t)((int_value_t *)max_body_value)->value;
+    }
 
     h2_server_state state;
     state.max_requests = max_requests;
     state.max_per_connection = max_per_connection;
     state.idle_timeout_ms = idle_timeout_ms;
+    state.max_connections = max_connections;
     state.on_request_body = on_request_body;
+    state.max_body_bytes = max_body_bytes;
     state.settings = settings;
 
     value_t *handler = args[1];
@@ -2833,6 +3067,15 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
                                       + (std::ptrdiff_t)i);
                 else
                     ++i;
+            }
+            if (state.max_connections > 0 &&
+                (long long)connections.size() >=
+                    state.max_connections) {
+                value_t *sleep_task = call_task_builtin(
+                    B_task_sleep, {newintval(20)});
+                value_t *slept = await_task_value(sleep_task);
+                freeval(slept);
+                continue;
             }
 
             std::vector<value_t *> accept_args;

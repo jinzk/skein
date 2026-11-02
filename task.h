@@ -31,6 +31,7 @@ const std::string &task_error_message(const task_ptr &task);
 /* Return a copy of the structured error, or synthesize one from the message. */
 struct value_t *task_error_value(const task_ptr &task);
 bool get_task_value(struct value_t *value, task_ptr &task);
+bool is_task_value(struct value_t *value);
 
 struct value_t *call_task_builtin(
     int functype, const std::vector<struct value_t *> &args);

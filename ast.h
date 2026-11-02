@@ -187,6 +187,8 @@ enum bifs {
     B_http2_request_async,
     B_http2_get_async,
     B_http2_post_async,
+    B_http2_request_many,
+    B_http2_request_many_async,
     B_http2_listen,
     B_http2_listen_tls,
     B_http2_serve,

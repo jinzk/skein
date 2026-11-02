@@ -570,6 +570,8 @@ value_t *build_std_namespace() {
             {"request_async", B_http2_request_async},
             {"get_async", B_http2_get_async},
             {"post_async", B_http2_post_async},
+            {"request_many", B_http2_request_many},
+            {"request_many_async", B_http2_request_many_async},
             {"listen", B_http2_listen},
             {"listen_tls", B_http2_listen_tls},
             {"serve", B_http2_serve},

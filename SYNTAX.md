@@ -1592,10 +1592,10 @@ std.http.close(s);
 ```text
 std.http.request(method, url[, options])
 std.http.get(url[, options])
-std.http.post(url, body[, options])
+std.http.post(url[, body][, options])
 std.http.request_async(method, url[, options])
 std.http.get_async(url[, options])
-std.http.post_async(url, body[, options])
+std.http.post_async(url[, body][, options])
 std.http.listen(host, port[, timeout_ms])
 std.http.listen_tls(host, port, cert_file, key_file[, timeout_ms])
 std.http.accept(server[, timeout_ms])
@@ -1605,6 +1605,48 @@ std.http.respond_async(request, status[, headers[, body]])
 std.http.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]])
 std.http.close(server_or_request)
 ```
+
+流式 body：
+
+```text
+func parts() {
+  yield "hello";
+  yield "world";
+}
+
+let sent = std.http.post(url, {"body_stream": parts()});
+
+let received = std.http.get(url, {
+  "on_body": func(chunk) {
+    print(bytes_to_string(chunk));
+  }
+});
+```
+
+- `body_stream` 必须是生成器，逐块产生 string/bytes；
+- 使用 `body_stream` 时请求使用 `Transfer-Encoding: chunked`；
+- `body` 与 `body_stream` 不能同时设置；
+- `on_body` 逐块接收响应 body，响应 dict 的 `body` 为空；
+- 使用流式 body 时不会自动重试；
+- `max_body_bytes` 默认 16 MiB，对 `on_body` 同样生效。
+
+服务端流式响应：
+
+```text
+func parts() {
+  yield "hello";
+  yield "world";
+}
+
+let served = std.http.serve(s, func(req) {
+  return {"status": 200, "body_stream": parts()};
+});
+```
+
+- `std.http.serve` 响应 dict 支持 `body_stream`；
+- `std.http.respond` 的 body 参数也可以是生成器；
+- HTTP/1.1 使用 `Transfer-Encoding: chunked`；
+- HTTP/2 使用 data provider。
 
 请求 dict：
 
@@ -1618,6 +1660,8 @@ method, path, headers, body, http_major, http_minor, socket
 status, status_text, headers, body, http_major, http_minor
 ```
 
+响应 dict 还可以使用 `body_stream` 代替 `body`。
+
 限制：
 
 - 支持 `http://` 和 `https://`；
@@ -1627,7 +1671,8 @@ status, status_text, headers, body, http_major, http_minor
 - 复用连接失败时，幂等方法（GET/HEAD/OPTIONS/TRACE）会用新连接重试一次；
 - `std.http.serve` 支持服务端 keep-alive；
 - `std.http.accept` / `respond` 仍是一次连接一个请求；
-- body 整体读取，默认上限 16 MiB；
+- 默认整体读取 body；可用 `body_stream` / `on_body` 流式处理；
+- `max_body_bytes` 默认 16 MiB；
 - 同名 header 只保留最后一个；
 - 客户端和服务端都支持同步和 async。
 
@@ -1640,6 +1685,8 @@ std.http2.post(url[, body[, options]])  → response
 std.http2.request_async(method, url[, options]) → task
 std.http2.get_async(url[, options])             → task
 std.http2.post_async(url[, body[, options]])    → task
+std.http2.request_many(requests[, options])     → list
+std.http2.request_many_async(requests[, options]) → task
 std.http2.listen(host, port[, timeout_ms])      → server
 std.http2.listen_tls(host, port, cert_file, key_file[, timeout_ms]) → server
 std.http2.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]]) → int
@@ -1660,6 +1707,25 @@ print(bytes_to_string(a["body"]));
 let b = std.http2.post("https://example.com/echo", "payload");
 let c = await std.http2.get_async("https://example.com/async");
 ```
+
+批量并发请求：
+
+```text
+let responses = std.http2.request_many([
+  {"url": "https://example.com/a"},
+  {"url": "https://example.com/b", "method": "POST", "body": "payload"}
+]);
+
+let responses2 = await std.http2.request_many_async([
+  {"url": "https://example.com/c"},
+  {"url": "https://example.com/d", "method": "DELETE"}
+]);
+```
+
+- 所有请求必须属于同一个 origin；
+- 同一连接上同时提交多个 stream；
+- 返回列表顺序与输入一致；
+- 请求项支持 `url`、`method`、`headers`、`body`。
 
 服务端：
 
@@ -1683,12 +1749,23 @@ std.http2.close(s);
 - `https://` 通过 TLS ALPN 协商 `h2`，未协商成功会报错；
 - 支持同步和 async 客户端；
 - 支持 h2c / TLS 服务端；
-- body 整体读取，默认上限 16 MiB；
-- `options` 支持 `headers`、`body`、`timeout_ms`、`max_body_bytes`、`tls`；
+- 默认整体读取 body；可用 `body_stream` / `on_body` 流式处理；
+- `max_body_bytes` 默认 16 MiB；
+- request dict 额外包含 `connection_id`；
+- 支持 `body_stream` 生成器流式发送请求 body；
+- 支持 `on_body` 回调流式接收响应 body；
+- 服务端响应 dict 支持 `body_stream` 流式发送；
+- async 服务端 handler 可在多个 stream 之间并发执行；
+- `options` 支持 `headers`、`body`、`body_stream`、`on_body`、`timeout_ms`、`max_body_bytes`、`tls`；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
-- 当前每个客户端请求使用独立连接，尚未实现多路复用和连接池。
+- 同步和 async 客户端共用 HTTP/2 连接池；
+- 同步请求按顺序复用连接；
+- async 的 `get_async` / `post_async` / `request_async` 可以共享同一连接并并发执行；
+- 使用 `on_body` / `body_stream` 的 async 请求仍使用独立连接；
+- `request_many` / `request_many_async` 在单连接上并发提交多个 stream；
+- 收到 GOAWAY 或复用连接失败时，幂等方法会换新连接重试一次。
 
 ### TLS
 

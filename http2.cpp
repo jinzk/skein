@@ -5,6 +5,7 @@
 #include "fiber.h"
 #include "io.h"
 #include "net.h"
+#include "repl.h"
 #include "task.h"
 #ifdef CALC_ENABLE_TLS
 #include "tls.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -101,6 +103,11 @@ std::string lower_ascii(std::string value) {
         value[i] = (char)std::tolower(c);
     }
     return value;
+}
+
+bool callable_value(value_t *value) {
+    return value && (value->type == T_func || value->type == T_builtin ||
+                     value->type == T_method);
 }
 
 bool option_bool(value_t *options, const char *key, bool fallback) {
@@ -265,6 +272,12 @@ struct out_body {
     size_t offset = 0;
 };
 
+struct generator_state {
+    generator_ptr generator;
+    std::string chunk;
+    size_t offset = 0;
+};
+
 struct h2_connection {
     value_t *stream = NULL;
     nghttp2_session *session = NULL;
@@ -278,8 +291,44 @@ struct h2_connection {
     std::vector<header_pair> response_headers;
     std::string response_body;
     std::string failure;
+    bool goaway = false;
     std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
+    std::size_t received_body_bytes = 0;
+    value_t *on_body = NULL;
     out_body request_body;
+    generator_ptr request_generator;
+    std::string generator_chunk;
+    std::size_t generator_offset = 0;
+
+    /* client multiplexed request state */
+    bool multi_mode = false;
+    struct multi_response {
+        bool done = false;
+        int status = 0;
+        std::vector<header_pair> headers;
+        std::string body;
+        std::string failure;
+    };
+    std::map<int32_t, multi_response> multi_streams;
+    std::vector<std::unique_ptr<out_body>> multi_request_bodies;
+
+    /* client pool state */
+    std::string key;
+    bool in_use = false;
+    std::chrono::steady_clock::time_point last_used;
+
+    /* shared async connection state */
+    bool shared = false;
+    bool reader_running = false;
+    bool closed = false;
+    bool stream_closed = false;
+    int active_streams = 0;
+    task_ptr reader_task;
+    bool session_busy = false;
+    int users = 0;
+    std::vector<task_ptr> session_waiters;
+    std::map<int32_t, task_ptr> shared_tasks;
+    std::map<int32_t, std::shared_ptr<out_body>> shared_body_owners;
 
     /* server request state */
     struct server_request {
@@ -295,7 +344,146 @@ struct h2_connection {
     std::map<int32_t, server_request> requests;
     std::vector<int32_t> ready;
     std::map<int32_t, out_body> response_bodies;
+    std::map<int32_t, generator_state> response_streams;
 };
+
+void h2_release_connection(h2_connection *connection) {
+    if (!connection)
+        return;
+    if (connection->session) {
+        nghttp2_session_del(connection->session);
+        connection->session = NULL;
+    }
+    if (connection->stream) {
+        if (!connection->stream_closed)
+            close_socket(connection->stream);
+        freeval(connection->stream);
+        connection->stream = NULL;
+    }
+}
+
+struct h2_connection_deleter {
+    void operator()(h2_connection *connection) const {
+        h2_release_connection(connection);
+        delete connection;
+    }
+};
+
+typedef std::unique_ptr<h2_connection, h2_connection_deleter>
+    h2_connection_ptr;
+
+std::vector<h2_connection_ptr> &h2_pool() {
+    static std::vector<h2_connection_ptr> pool;
+    return pool;
+}
+
+std::map<std::string, task_ptr> &h2_connecting() {
+    static std::map<std::string, task_ptr> connecting;
+    return connecting;
+}
+
+void h2_pool_discard(h2_connection *connection) {
+    if (!connection)
+        return;
+    if (connection->shared &&
+        (connection->reader_running || connection->users > 0)) {
+        connection->closed = true;
+        if (connection->stream && !connection->stream_closed) {
+            close_socket(connection->stream);
+            connection->stream_closed = true;
+        }
+        return;
+    }
+    std::vector<h2_connection_ptr> &pool = h2_pool();
+    for (size_t i = 0; i < pool.size(); ++i) {
+        if (pool[i].get() != connection)
+            continue;
+        pool.erase(pool.begin() + (std::ptrdiff_t)i);
+        return;
+    }
+}
+
+void h2_pool_expire() {
+    std::chrono::steady_clock::time_point now =
+        std::chrono::steady_clock::now();
+    std::vector<h2_connection_ptr> &pool = h2_pool();
+    for (size_t i = 0; i < pool.size();) {
+        if (pool[i]->shared) {
+            bool idle = pool[i]->active_streams == 0 &&
+                        !pool[i]->reader_running && pool[i]->users == 0;
+            bool stale = pool[i]->closed || pool[i]->goaway ||
+                         now - pool[i]->last_used >
+                             std::chrono::seconds(30);
+            if (idle && stale) {
+                pool.erase(pool.begin() + (std::ptrdiff_t)i);
+                continue;
+            }
+            ++i;
+            continue;
+        }
+        if (!pool[i]->in_use && !pool[i]->goaway &&
+            now - pool[i]->last_used > std::chrono::seconds(30)) {
+            pool.erase(pool.begin() + (std::ptrdiff_t)i);
+            continue;
+        }
+        ++i;
+    }
+}
+
+h2_connection *h2_pool_acquire(const std::string &key) {
+    h2_pool_expire();
+    std::vector<h2_connection_ptr> &pool = h2_pool();
+    for (size_t i = 0; i < pool.size(); ++i) {
+        if (!pool[i]->shared && !pool[i]->in_use && !pool[i]->goaway &&
+            pool[i]->key == key) {
+            pool[i]->in_use = true;
+            return pool[i].get();
+        }
+    }
+    return NULL;
+}
+
+h2_connection *h2_pool_acquire_shared(const std::string &key) {
+    h2_pool_expire();
+    std::vector<h2_connection_ptr> &pool = h2_pool();
+    for (size_t i = 0; i < pool.size(); ++i) {
+        if (pool[i]->shared && pool[i]->key == key &&
+            !pool[i]->closed && !pool[i]->goaway &&
+            pool[i]->active_streams < 100)
+            return pool[i].get();
+    }
+    return NULL;
+}
+
+h2_connection *h2_pool_add(const std::string &key,
+                           h2_connection *connection) {
+    connection->key = key;
+    connection->in_use = true;
+    connection->last_used = std::chrono::steady_clock::now();
+    h2_pool().push_back(h2_connection_ptr(connection));
+    return connection;
+}
+
+h2_connection *h2_pool_add_shared(const std::string &key,
+                                  h2_connection *connection) {
+    connection->key = key;
+    connection->shared = true;
+    connection->in_use = false;
+    connection->last_used = std::chrono::steady_clock::now();
+    h2_pool().push_back(h2_connection_ptr(connection));
+    return connection;
+}
+
+void h2_pool_release(h2_connection *connection) {
+    if (!connection)
+        return;
+    connection->in_use = false;
+    connection->last_used = std::chrono::steady_clock::now();
+}
+
+void h2_pool_shutdown() {
+    h2_pool().clear();
+}
 
 value_t *await_task_value(value_t *task_value) {
     if (!task_value)
@@ -345,6 +533,123 @@ value_t *h2_read(h2_connection *connection) {
     return await_task_value(call_io(B_io_read_async, args));
 }
 
+bool h2_session_lock(h2_connection *connection);
+void h2_session_unlock(h2_connection *connection);
+
+bool h2_session_lock(h2_connection *connection) {
+    if (!connection->session_busy) {
+        connection->session_busy = true;
+        if (connection->closed) {
+            h2_session_unlock(connection);
+            return false;
+        }
+        return true;
+    }
+    task_ptr waiter = task_create();
+    connection->session_waiters.push_back(waiter);
+    value_t *result = fiber_await_task(waiter);
+    if (!result) {
+        if (task_get_state(waiter) == TASK_STATE_DONE)
+            h2_session_unlock(connection);
+        return false;
+    }
+    freeval(result);
+    if (connection->closed) {
+        h2_session_unlock(connection);
+        return false;
+    }
+    return true;
+}
+
+void h2_session_unlock(h2_connection *connection) {
+    while (!connection->session_waiters.empty()) {
+        task_ptr waiter = connection->session_waiters.front();
+        connection->session_waiters.erase(
+            connection->session_waiters.begin());
+        if (task_get_state(waiter) == TASK_STATE_PENDING) {
+            task_complete(waiter, newboolval(true));
+            return;
+        }
+    }
+    connection->session_busy = false;
+}
+
+void h2_fail_shared_streams(h2_connection *connection,
+                            const std::string &message) {
+    for (std::map<int32_t, task_ptr>::iterator it =
+             connection->shared_tasks.begin();
+         it != connection->shared_tasks.end(); ++it) {
+        if (task_get_state(it->second) == TASK_STATE_PENDING)
+            task_fail(it->second, message);
+    }
+    connection->shared_tasks.clear();
+    connection->multi_streams.clear();
+    connection->shared_body_owners.clear();
+    connection->active_streams = 0;
+}
+
+void h2_shared_reader(h2_connection *connection) {
+    for (;;) {
+        if (!h2_session_lock(connection))
+            break;
+        bool stop = connection->closed ||
+                    connection->active_streams == 0;
+        if (stop)
+            connection->reader_running = false;
+        h2_session_unlock(connection);
+        if (stop)
+            break;
+        value_t *chunk = h2_read(connection);
+        if (!chunk) {
+            h2_fail_shared_streams(connection,
+                                   "HTTP/2 connection read failed");
+            connection->closed = true;
+            break;
+        }
+        if (chunk->type == T_null) {
+            freeval(chunk);
+            h2_fail_shared_streams(connection,
+                                   "HTTP/2 connection closed");
+            connection->closed = true;
+            break;
+        }
+        if (chunk->type != T_bytes) {
+            freeval(chunk);
+            h2_fail_shared_streams(connection,
+                                   "HTTP/2 read returned non-bytes");
+            connection->closed = true;
+            break;
+        }
+        std::string data = ((bytes_value_t *)chunk)->value;
+        freeval(chunk);
+
+        if (!h2_session_lock(connection))
+            break;
+        ssize_t consumed = nghttp2_session_mem_recv(
+            connection->session, (const uint8_t *)data.data(),
+            data.size());
+        int rv = consumed >= 0 ? nghttp2_session_send(connection->session)
+                               : -1;
+        h2_session_unlock(connection);
+        if (consumed < 0) {
+            h2_fail_shared_streams(connection,
+                                   "HTTP/2 receive failed");
+            connection->closed = true;
+            break;
+        }
+        if (rv != 0) {
+            h2_fail_shared_streams(connection, "HTTP/2 send failed");
+            connection->closed = true;
+            break;
+        }
+    }
+    if (connection->closed)
+        h2_fail_shared_streams(connection, "HTTP/2 connection closed");
+    connection->reader_running = false;
+    connection->reader_task.reset();
+    h2_pool_expire();
+}
+
 ssize_t send_callback(nghttp2_session *, const uint8_t *data, size_t length,
                       int, void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
@@ -368,14 +673,133 @@ ssize_t body_read_callback(nghttp2_session *, int32_t, uint8_t *buf,
     return (ssize_t)take;
 }
 
+ssize_t generator_read_callback(nghttp2_session *, int32_t, uint8_t *buf,
+                                size_t length, uint32_t *data_flags,
+                                nghttp2_data_source *, void *user_data) {
+    h2_connection *connection = (h2_connection *)user_data;
+    if (!connection->request_generator) {
+        *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+        return 0;
+    }
+    for (;;) {
+        if (connection->generator_offset <
+            connection->generator_chunk.size()) {
+            size_t remaining = connection->generator_chunk.size() -
+                               connection->generator_offset;
+            size_t take = std::min(remaining, length);
+            memcpy(buf, connection->generator_chunk.data() +
+                            connection->generator_offset, take);
+            connection->generator_offset += take;
+            return (ssize_t)take;
+        }
+        value_t *value = NULL;
+        bool done = false;
+        if (!generator_next_value(connection->request_generator, NULL, value,
+                                  done))
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        if (done) {
+            freeval(value);
+            *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+            return 0;
+        }
+        connection->generator_chunk.clear();
+        connection->generator_offset = 0;
+        if (value) {
+            if (value->type == T_string)
+                connection->generator_chunk =
+                    ((string_value_t *)value)->value;
+            else if (value->type == T_bytes)
+                connection->generator_chunk =
+                    ((bytes_value_t *)value)->value;
+            else {
+                freeval(value);
+                yyerror("std.http2: body_stream must yield string or bytes");
+                return NGHTTP2_ERR_CALLBACK_FAILURE;
+            }
+            freeval(value);
+        }
+    }
+}
+
+ssize_t server_generator_read_callback(nghttp2_session *, int32_t,
+                                       uint8_t *buf, size_t length,
+                                       uint32_t *data_flags,
+                                       nghttp2_data_source *source, void *) {
+    generator_state *state = (generator_state *)source->ptr;
+    if (!state || !state->generator) {
+        *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+        return 0;
+    }
+    for (;;) {
+        if (state->offset < state->chunk.size()) {
+            size_t remaining = state->chunk.size() - state->offset;
+            size_t take = std::min(remaining, length);
+            memcpy(buf, state->chunk.data() + state->offset, take);
+            state->offset += take;
+            return (ssize_t)take;
+        }
+        value_t *value = NULL;
+        bool done = false;
+        if (!generator_next_value(state->generator, NULL, value, done))
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        if (done) {
+            freeval(value);
+            *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+            return 0;
+        }
+        state->chunk.clear();
+        state->offset = 0;
+        if (value) {
+            if (value->type == T_string)
+                state->chunk = ((string_value_t *)value)->value;
+            else if (value->type == T_bytes)
+                state->chunk = ((bytes_value_t *)value)->value;
+            else {
+                freeval(value);
+                yyerror("std.http2.serve: body_stream must yield string "
+                        "or bytes");
+                return NGHTTP2_ERR_CALLBACK_FAILURE;
+            }
+            freeval(value);
+        }
+    }
+}
+
+value_t *make_multi_response(h2_connection::multi_response &state);
+
 int client_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
                    const uint8_t *data, size_t len, void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
+    if (connection->multi_mode) {
+        std::map<int32_t, h2_connection::multi_response>::iterator it =
+            connection->multi_streams.find(stream_id);
+        if (it == connection->multi_streams.end())
+            return 0;
+        if (it->second.body.size() + len > connection->max_body_bytes) {
+            it->second.failure = "response body exceeds limit";
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        }
+        it->second.body.append((const char *)data, len);
+        return 0;
+    }
     if (stream_id != connection->stream_id)
         return 0;
-    if (connection->response_body.size() + len > connection->max_body_bytes) {
+    if (connection->received_body_bytes + len >
+        connection->max_body_bytes) {
         connection->failure = "response body exceeds limit";
         return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+    connection->received_body_bytes += len;
+    if (connection->on_body) {
+        value_t *chunk = newbytesval(std::string((const char *)data, len));
+        value_t *result = call_value_args(
+            connection->on_body, std::vector<value_t *>{chunk});
+        if (!result) {
+            connection->failure = "on_body callback failed";
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        }
+        freeval(result);
+        return 0;
     }
     connection->response_body.append((const char *)data, len);
     return 0;
@@ -384,6 +808,36 @@ int client_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
 int client_on_stream_close(nghttp2_session *, int32_t stream_id,
                            uint32_t error_code, void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
+    if (connection->multi_mode) {
+        std::map<int32_t, h2_connection::multi_response>::iterator it =
+            connection->multi_streams.find(stream_id);
+        if (it == connection->multi_streams.end())
+            return 0;
+        it->second.done = true;
+        if (error_code != NGHTTP2_NO_ERROR && it->second.failure.empty())
+            it->second.failure = "HTTP/2 stream closed with error " +
+                                 std::to_string(error_code);
+        if (connection->shared) {
+            std::map<int32_t, task_ptr>::iterator task_it =
+                connection->shared_tasks.find(stream_id);
+            if (task_it != connection->shared_tasks.end()) {
+                task_ptr pending = task_it->second;
+                connection->shared_tasks.erase(task_it);
+                if (task_get_state(pending) == TASK_STATE_PENDING) {
+                    if (!it->second.failure.empty())
+                        task_fail(pending, it->second.failure);
+                    else
+                        task_complete(pending,
+                                      make_multi_response(it->second));
+                }
+            }
+            connection->shared_body_owners.erase(stream_id);
+            if (connection->active_streams > 0)
+                --connection->active_streams;
+            connection->last_used = std::chrono::steady_clock::now();
+        }
+        return 0;
+    }
     if (stream_id != connection->stream_id)
         return 0;
     connection->done = true;
@@ -393,16 +847,42 @@ int client_on_stream_close(nghttp2_session *, int32_t stream_id,
     return 0;
 }
 
+int client_on_frame_recv(nghttp2_session *, const nghttp2_frame *frame,
+                         void *user_data) {
+    h2_connection *connection = (h2_connection *)user_data;
+    if (frame->hd.type == NGHTTP2_GOAWAY)
+        connection->goaway = true;
+    return 0;
+}
+
 int client_on_header2(nghttp2_session *, const nghttp2_frame *frame,
                       const uint8_t *name, size_t namelen,
                       const uint8_t *value, size_t valuelen, uint8_t,
                       void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
-    if (frame->hd.type != NGHTTP2_HEADERS ||
-        frame->hd.stream_id != connection->stream_id)
+    if (frame->hd.type != NGHTTP2_HEADERS)
         return 0;
     std::string key((const char *)name, namelen);
     std::string text((const char *)value, valuelen);
+    if (connection->multi_mode) {
+        std::map<int32_t, h2_connection::multi_response>::iterator it =
+            connection->multi_streams.find(frame->hd.stream_id);
+        if (it == connection->multi_streams.end())
+            return 0;
+        if (key == ":status") {
+            it->second.status = std::atoi(text.c_str());
+            return 0;
+        }
+        if (!key.empty() && key[0] == ':')
+            return 0;
+        header_pair pair;
+        pair.name = lower_ascii(key);
+        pair.value = text;
+        it->second.headers.push_back(pair);
+        return 0;
+    }
+    if (frame->hd.stream_id != connection->stream_id)
+        return 0;
     if (key == ":status") {
         connection->status = std::atoi(text.c_str());
         return 0;
@@ -490,6 +970,7 @@ int server_on_stream_close(nghttp2_session *, int32_t stream_id,
     h2_connection *connection = (h2_connection *)user_data;
     connection->requests.erase(stream_id);
     connection->response_bodies.erase(stream_id);
+    connection->response_streams.erase(stream_id);
     return 0;
 }
 
@@ -502,6 +983,8 @@ void setup_callbacks(nghttp2_session_callbacks *callbacks, bool client) {
             callbacks, client_on_data);
         nghttp2_session_callbacks_set_on_stream_close_callback(
             callbacks, client_on_stream_close);
+        nghttp2_session_callbacks_set_on_frame_recv_callback(
+            callbacks, client_on_frame_recv);
     } else {
         nghttp2_session_callbacks_set_on_begin_headers_callback(
             callbacks, server_on_begin_headers);
@@ -584,6 +1067,356 @@ bool collect_request_headers(value_t *headers,
     return true;
 }
 
+std::string h2_connection_key(const url_parts &url, bool verify,
+                              const std::string &ca_file) {
+    std::string key = url.tls ? "h2s://" : "h2://";
+    key += url.host;
+    key += ":";
+    key += std::to_string(url.port);
+    if (url.tls) {
+        key += verify ? "|verify" : "|noverify";
+        if (!ca_file.empty()) {
+            key += "|";
+            key += ca_file;
+        }
+    }
+    return key;
+}
+
+bool open_client_connection(h2_connection *connection,
+                            const url_parts &url, bool async,
+                            bool tls_verify,
+                            const std::string &tls_ca_file,
+                            long long timeout_ms) {
+    connection->async = async;
+    connection->timeout_ms = timeout_ms;
+    connection->goaway = false;
+
+    int connect_type =
+        async ? B_net_tcp_connect_async : B_net_tcp_connect;
+    std::vector<value_t *> connect_args;
+    connect_args.push_back(newstrval(url.host.c_str()));
+    connect_args.push_back(newintval(url.port));
+    connect_args.push_back(newintval(timeout_ms));
+    value_t *client = call_net(connect_type, connect_args);
+    if (!client)
+        return false;
+    if (async) {
+        client = await_task_value(client);
+        if (!client)
+            return false;
+    }
+
+    value_t *stream = client;
+    if (url.tls) {
+#ifdef CALC_ENABLE_TLS
+        value_t *tls_options = (value_t *)newdictval();
+        dict_set(tls_options, "verify", newboolval(tls_verify));
+        if (!tls_ca_file.empty())
+            dict_set(tls_options, "ca_file", newstrval(tls_ca_file.c_str()));
+        value_t *alpn = (value_t *)newlistval();
+        ((list_value_t *)alpn)->payload->items.push_back(newstrval("h2"));
+        dict_set(tls_options, "alpn", alpn);
+        std::vector<value_t *> tls_args;
+        tls_args.push_back(dupval(client));
+        tls_args.push_back(newstrval(url.host.c_str()));
+        tls_args.push_back(tls_options);
+        stream = call_tls(B_tls_client, tls_args);
+        if (!stream) {
+            close_socket(client);
+            freeval(client);
+            return false;
+        }
+        freeval(client);
+
+        std::vector<value_t *> alpn_args;
+        alpn_args.push_back(dupval(stream));
+        value_t *selected = call_tls(B_tls_alpn, alpn_args);
+        if (!selected) {
+            close_socket(stream);
+            freeval(stream);
+            return false;
+        }
+        std::string protocol;
+        if (selected->type == T_string)
+            protocol = ((string_value_t *)selected)->value;
+        freeval(selected);
+        if (protocol != "h2") {
+            yyerror("std.http2: server did not negotiate h2 (got '%s')",
+                    protocol.c_str());
+            close_socket(stream);
+            freeval(stream);
+            return false;
+        }
+#else
+        yyerror("std.http2: https is not supported (TLS disabled)");
+        close_socket(client);
+        freeval(client);
+        return false;
+#endif
+    }
+
+    nghttp2_session_callbacks *callbacks = NULL;
+    if (nghttp2_session_callbacks_new(&callbacks) != 0) {
+        yyerror("std.http2: cannot create nghttp2 callbacks");
+        close_socket(stream);
+        freeval(stream);
+        return false;
+    }
+    setup_callbacks(callbacks, true);
+    int rv = nghttp2_session_client_new(&connection->session, callbacks,
+                                        connection);
+    nghttp2_session_callbacks_del(callbacks);
+    if (rv != 0) {
+        yyerror("std.http2: cannot create nghttp2 session");
+        close_socket(stream);
+        freeval(stream);
+        return false;
+    }
+    nghttp2_submit_settings(connection->session, NGHTTP2_FLAG_NONE, NULL, 0);
+    connection->stream = stream;
+    return true;
+}
+
+value_t *exchange_once(h2_connection *connection,
+                       const std::string &method, const url_parts &url,
+                       value_t *headers, const std::string &body,
+                       std::size_t max_body_bytes, value_t *on_body,
+                       const generator_ptr &body_generator) {
+    connection->stream_id = -1;
+    connection->done = false;
+    connection->status = 0;
+    connection->failure.clear();
+    connection->response_headers.clear();
+    connection->response_body.clear();
+    connection->max_body_bytes = max_body_bytes;
+    connection->received_body_bytes = 0;
+    connection->on_body = on_body;
+    connection->request_generator = body_generator;
+    connection->generator_chunk.clear();
+    connection->generator_offset = 0;
+    connection->request_body.data = body;
+    connection->request_body.offset = 0;
+
+    std::vector<header_pair> request_headers;
+    header_pair method_header = {":method", method};
+    header_pair scheme_header = {":scheme", url.tls ? "https" : "http"};
+    header_pair authority_header = {":authority", url.authority};
+    header_pair path_header = {":path", url.path};
+    request_headers.push_back(method_header);
+    request_headers.push_back(scheme_header);
+    request_headers.push_back(authority_header);
+    request_headers.push_back(path_header);
+    if (!collect_request_headers(headers, request_headers))
+        return NULL;
+
+    std::vector<nghttp2_nv> nva;
+    build_nv(request_headers, nva);
+
+    nghttp2_data_provider provider;
+    nghttp2_data_provider *provider_ptr = NULL;
+    if (body_generator) {
+        provider.source.ptr = NULL;
+        provider.read_callback = generator_read_callback;
+        provider_ptr = &provider;
+    } else if (!body.empty()) {
+        provider.source.ptr = &connection->request_body;
+        provider.read_callback = body_read_callback;
+        provider_ptr = &provider;
+    }
+
+    connection->stream_id = nghttp2_submit_request(
+        connection->session, NULL, nva.data(), nva.size(), provider_ptr,
+        NULL);
+    if (connection->stream_id < 0) {
+        yyerror("std.http2: cannot submit request");
+        return NULL;
+    }
+
+    int rv = 0;
+    while (!connection->done) {
+        rv = nghttp2_session_send(connection->session);
+        if (rv != 0) {
+            connection->failure = "nghttp2 send failed";
+            break;
+        }
+        if (connection->goaway && !connection->done) {
+            connection->failure = "server sent GOAWAY";
+            break;
+        }
+        value_t *chunk = h2_read(connection);
+        if (!chunk)
+            return NULL;
+        if (chunk->type == T_null) {
+            freeval(chunk);
+            connection->failure = "connection closed before response";
+            break;
+        }
+        if (chunk->type != T_bytes) {
+            freeval(chunk);
+            connection->failure = "read returned non-bytes";
+            break;
+        }
+        const std::string &data = ((bytes_value_t *)chunk)->value;
+        ssize_t consumed = nghttp2_session_mem_recv(
+            connection->session, (const uint8_t *)data.data(), data.size());
+        freeval(chunk);
+        if (consumed < 0) {
+            connection->failure = "nghttp2 receive failed";
+            break;
+        }
+    }
+
+    if (nghttp2_session_send(connection->session) != 0 &&
+        connection->failure.empty())
+        connection->failure = "nghttp2 send failed";
+
+    connection->on_body = NULL;
+    connection->request_generator.reset();
+    if (!connection->failure.empty()) {
+        yyerror("std.http2: %s", connection->failure.c_str());
+        return NULL;
+    }
+    return make_response(*connection);
+}
+
+struct shared_user_guard {
+    h2_connection *connection;
+    explicit shared_user_guard(h2_connection *value)
+        : connection(value) {
+        if (connection)
+            ++connection->users;
+    }
+    ~shared_user_guard() {
+        if (connection && --connection->users == 0)
+            h2_pool_expire();
+    }
+};
+
+value_t *exchange_shared(const std::string &method, const url_parts &url,
+                         value_t *headers, const std::string &body,
+                         std::size_t max_body_bytes, bool tls_verify,
+                         const std::string &tls_ca_file,
+                         long long timeout_ms) {
+    std::vector<header_pair> request_headers;
+    header_pair method_header = {":method", method};
+    header_pair scheme_header = {":scheme", url.tls ? "https" : "http"};
+    header_pair authority_header = {":authority", url.authority};
+    header_pair path_header = {":path", url.path};
+    request_headers.push_back(method_header);
+    request_headers.push_back(scheme_header);
+    request_headers.push_back(authority_header);
+    request_headers.push_back(path_header);
+    if (!collect_request_headers(headers, request_headers))
+        return NULL;
+
+    std::string key = h2_connection_key(url, tls_verify, tls_ca_file);
+    h2_connection *connection = h2_pool_acquire_shared(key);
+    if (!connection) {
+        std::map<std::string, task_ptr>::iterator gate_it =
+            h2_connecting().find(key);
+        if (gate_it != h2_connecting().end()) {
+            value_t *gate_result = fiber_await_task(gate_it->second);
+            freeval(gate_result);
+            connection = h2_pool_acquire_shared(key);
+        }
+    }
+    if (!connection) {
+        task_ptr gate = task_create();
+        h2_connecting()[key] = gate;
+        connection = new h2_connection();
+        bool opened = open_client_connection(connection, url, true,
+                                             tls_verify, tls_ca_file,
+                                             timeout_ms);
+        if (opened) {
+            connection->shared = true;
+            h2_pool_add_shared(key, connection);
+        }
+        h2_connecting().erase(key);
+        task_complete(gate, newboolval(opened));
+        if (!opened) {
+            h2_release_connection(connection);
+            delete connection;
+            return NULL;
+        }
+    }
+
+    shared_user_guard user_guard(connection);
+    connection->async = true;
+    connection->multi_mode = true;
+    connection->max_body_bytes = max_body_bytes;
+    connection->timeout_ms = 0;
+    connection->last_used = std::chrono::steady_clock::now();
+
+    std::vector<nghttp2_nv> nva;
+    build_nv(request_headers, nva);
+
+    std::shared_ptr<out_body> body_owner;
+    nghttp2_data_provider provider;
+    nghttp2_data_provider *provider_ptr = NULL;
+    if (!body.empty()) {
+        body_owner = std::make_shared<out_body>();
+        body_owner->data = body;
+        provider.source.ptr = body_owner.get();
+        provider.read_callback = body_read_callback;
+        provider_ptr = &provider;
+    }
+
+    if (!h2_session_lock(connection))
+        return NULL;
+
+    int32_t stream_id = nghttp2_submit_request(
+        connection->session, NULL, nva.data(), nva.size(), provider_ptr,
+        NULL);
+    if (stream_id < 0) {
+        h2_session_unlock(connection);
+        yyerror("std.http2: cannot submit request");
+        return NULL;
+    }
+
+    task_ptr stream_task = task_create();
+    connection->multi_streams[stream_id];
+    connection->shared_tasks[stream_id] = stream_task;
+    if (body_owner)
+        connection->shared_body_owners[stream_id] = body_owner;
+    ++connection->active_streams;
+
+    if (!connection->reader_running && !connection->closed) {
+        connection->reader_running = true;
+        connection->reader_task = fiber_start_async([connection]() {
+            h2_shared_reader(connection);
+            return (value_t *)NULL;
+        });
+        if (!connection->reader_task) {
+            connection->reader_running = false;
+            task_fail(stream_task, "cannot start HTTP/2 reader");
+        }
+    }
+
+    int rv = nghttp2_session_send(connection->session);
+    h2_session_unlock(connection);
+
+    if (rv != 0) {
+        connection->shared_tasks.erase(stream_id);
+        connection->multi_streams.erase(stream_id);
+        connection->shared_body_owners.erase(stream_id);
+        if (connection->active_streams > 0)
+            --connection->active_streams;
+        h2_pool_discard(connection);
+        yyerror("std.http2: nghttp2 send failed");
+        return NULL;
+    }
+
+    value_t *response = fiber_await_task(stream_task);
+
+    connection->shared_tasks.erase(stream_id);
+    connection->multi_streams.erase(stream_id);
+    connection->shared_body_owners.erase(stream_id);
+    if (connection->closed || connection->goaway)
+        h2_pool_discard(connection);
+    return response;
+}
+
 value_t *exchange(const std::string &method, const std::string &url_text,
                   value_t *options, value_t *body_override, bool async) {
     url_parts url;
@@ -599,6 +1432,21 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         body_override ? body_override : dict_get(options, "body");
     if (!body_value(body_option, body, "std.http2"))
         return NULL;
+
+    value_t *body_stream_value = dict_get(options, "body_stream");
+    generator_ptr body_generator;
+    if (body_stream_value && body_stream_value->type != T_null) {
+        if (!fiber_is_generator(body_stream_value)) {
+            yyerror("std.http2: body_stream must be a generator");
+            return NULL;
+        }
+        if (!get_generator_value(body_stream_value, body_generator))
+            return NULL;
+        if (!body.empty()) {
+            yyerror("std.http2: body and body_stream cannot both be set");
+            return NULL;
+        }
+    }
 
     long long timeout_ms = 0;
     value_t *timeout_value = dict_get(options, "timeout_ms");
@@ -625,192 +1473,354 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         }
     }
 
-    int connect_type =
-        async ? B_net_tcp_connect_async : B_net_tcp_connect;
-    std::vector<value_t *> connect_args;
-    connect_args.push_back(newstrval(url.host.c_str()));
-    connect_args.push_back(newintval(url.port));
-    connect_args.push_back(newintval(timeout_ms));
-    value_t *client = call_net(connect_type, connect_args);
-    if (!client)
+    value_t *on_body = dict_get(options, "on_body");
+    if (on_body && on_body->type == T_null)
+        on_body = NULL;
+    if (on_body && !callable_value(on_body)) {
+        yyerror("std.http2: on_body must be a function");
         return NULL;
-    if (async) {
-        client = await_task_value(client);
-        if (!client)
-            return NULL;
     }
 
-    value_t *stream = client;
-    if (url.tls) {
-#ifdef CALC_ENABLE_TLS
-        value_t *tls_options = (value_t *)newdictval();
-        dict_set(tls_options, "verify", newboolval(tls_verify));
-        if (!tls_ca_file.empty())
-            dict_set(tls_options, "ca_file", newstrval(tls_ca_file.c_str()));
-        value_t *alpn = (value_t *)newlistval();
-        ((list_value_t *)alpn)->payload->items.push_back(newstrval("h2"));
-        dict_set(tls_options, "alpn", alpn);
-        std::vector<value_t *> tls_args;
-        tls_args.push_back(dupval(client));
-        tls_args.push_back(newstrval(url.host.c_str()));
-        tls_args.push_back(tls_options);
-        stream = call_tls(B_tls_client, tls_args);
-        if (!stream) {
-            close_socket(client);
-            freeval(client);
-            return NULL;
-        }
-        freeval(client);
-
-        std::vector<value_t *> alpn_args;
-        alpn_args.push_back(dupval(stream));
-        value_t *selected = call_tls(B_tls_alpn, alpn_args);
-        if (!selected) {
-            close_socket(stream);
-            freeval(stream);
-            return NULL;
-        }
-        std::string protocol;
-        if (selected->type == T_string)
-            protocol = ((string_value_t *)selected)->value;
-        freeval(selected);
-        if (protocol != "h2") {
-            yyerror("std.http2: server did not negotiate h2 (got '%s')",
-                    protocol.c_str());
-            close_socket(stream);
-            freeval(stream);
-            return NULL;
-        }
-#else
-        yyerror("std.http2: https is not supported (TLS disabled)");
-        close_socket(client);
-        freeval(client);
-        return NULL;
-#endif
-    }
-
-    h2_connection connection;
-    connection.stream = stream;
-    connection.async = async;
-    connection.timeout_ms = timeout_ms;
+    std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
     value_t *max_body = dict_get(options, "max_body_bytes");
     if (max_body) {
         if (max_body->type != T_int ||
             ((int_value_t *)max_body)->value <= 0) {
             yyerror("std.http2: max_body_bytes must be a positive integer");
-            close_socket(stream);
-            freeval(stream);
             return NULL;
         }
-        connection.max_body_bytes = (std::size_t)((int_value_t *)max_body)->value;
+        max_body_bytes =
+            (std::size_t)((int_value_t *)max_body)->value;
     }
 
-    nghttp2_session_callbacks *callbacks = NULL;
-    if (nghttp2_session_callbacks_new(&callbacks) != 0) {
-        yyerror("std.http2: cannot create nghttp2 callbacks");
-        close_socket(stream);
-        freeval(stream);
+    std::string key = h2_connection_key(url, tls_verify, tls_ca_file);
+    bool idempotent = method == "GET" || method == "HEAD" ||
+                      method == "OPTIONS" || method == "TRACE";
+    bool retryable = idempotent && !on_body && !body_generator;
+
+    if (async && !on_body && !body_generator)
+        return exchange_shared(method, url, headers, body, max_body_bytes,
+                               tls_verify, tls_ca_file, timeout_ms);
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        h2_connection *connection =
+            attempt == 0 ? h2_pool_acquire(key) : NULL;
+        bool reused = connection != NULL;
+        if (!connection) {
+            connection = new h2_connection();
+            if (!open_client_connection(connection, url, async, tls_verify,
+                                        tls_ca_file, timeout_ms)) {
+                h2_release_connection(connection);
+                delete connection;
+                return NULL;
+            }
+            h2_pool_add(key, connection);
+        } else {
+            connection->async = async;
+            connection->timeout_ms = timeout_ms;
+        }
+
+        bool capture_errors = attempt == 0 && reused;
+        eval_capture_snapshot snapshot;
+        if (capture_errors)
+            eval_capture_begin(snapshot);
+
+        value_t *response =
+            exchange_once(connection, method, url, headers, body,
+                          max_body_bytes, on_body, body_generator);
+
+        eval_capture_result captured;
+        if (capture_errors)
+            captured = eval_capture_end(snapshot);
+
+        if (!response) {
+            freeval(captured.error);
+            h2_pool_discard(connection);
+            if (capture_errors && retryable && !g_interrupted)
+                continue;
+            return NULL;
+        }
+
+        freeval(captured.error);
+        if (connection->goaway)
+            h2_pool_discard(connection);
+        else
+            h2_pool_release(connection);
+        return response;
+    }
+    return NULL;
+}
+
+value_t *make_multi_response(h2_connection::multi_response &state) {
+    value_t *response = (value_t *)newdictval();
+    dict_set(response, "status", newintval(state.status));
+    dict_set(response, "status_text",
+             newstrval(reason_phrase(state.status)));
+    dict_set(response, "headers", headers_dict(state.headers));
+    dict_set(response, "body", newbytesval(state.body));
+    dict_set(response, "http_major", newintval(2));
+    dict_set(response, "http_minor", newintval(0));
+    dict_set(response, "protocol", newstrval("h2"));
+    return response;
+}
+
+value_t *exchange_many(value_t *requests, value_t *options, bool async) {
+    if (!requests || requests->type != T_list) {
+        yyerror("std.http2.request_many expects a list of requests");
         return NULL;
     }
-    setup_callbacks(callbacks, true);
-    int rv = nghttp2_session_client_new(&connection.session, callbacks,
-                                        &connection);
-    nghttp2_session_callbacks_del(callbacks);
-    if (rv != 0) {
-        yyerror("std.http2: cannot create nghttp2 session");
-        close_socket(stream);
-        freeval(stream);
-        return NULL;
-    }
-    nghttp2_submit_settings(connection.session, NGHTTP2_FLAG_NONE, NULL, 0);
+    list_value_t *request_list = (list_value_t *)requests;
+    if (request_list->payload->items.empty())
+        return (value_t *)newlistval();
 
-    std::vector<header_pair> request_headers;
-    header_pair method_header = {":method", method};
-    header_pair scheme_header = {":scheme", url.tls ? "https" : "http"};
-    header_pair authority_header = {":authority", url.authority};
-    header_pair path_header = {":path", url.path};
-    request_headers.push_back(method_header);
-    request_headers.push_back(scheme_header);
-    request_headers.push_back(authority_header);
-    request_headers.push_back(path_header);
-    if (!collect_request_headers(headers, request_headers)) {
-        nghttp2_session_del(connection.session);
-        close_socket(stream);
-        freeval(stream);
-        return NULL;
+    long long timeout_ms = 0;
+    value_t *timeout_value = dict_get(options, "timeout_ms");
+    if (timeout_value) {
+        if (timeout_value->type != T_int ||
+            ((int_value_t *)timeout_value)->value < 0) {
+            yyerror("std.http2: timeout_ms must be a non-negative integer");
+            return NULL;
+        }
+        timeout_ms = ((int_value_t *)timeout_value)->value;
     }
 
-    std::vector<nghttp2_nv> nva;
-    build_nv(request_headers, nva);
-
-    connection.request_body.data = body;
-    nghttp2_data_provider provider;
-    nghttp2_data_provider *provider_ptr = NULL;
-    if (!body.empty()) {
-        provider.source.ptr = &connection.request_body;
-        provider.read_callback = body_read_callback;
-        provider_ptr = &provider;
+    bool tls_verify = true;
+    std::string tls_ca_file;
+    value_t *tls_options = dict_get(options, "tls");
+    if (tls_options) {
+        if (tls_options->type != T_dict) {
+            yyerror("std.http2: tls options must be a dict");
+            return NULL;
+        }
+        tls_verify = option_bool(tls_options, "verify", true);
+        tls_ca_file = option_string(tls_options, "ca_file");
     }
 
-    connection.stream_id = nghttp2_submit_request(
-        connection.session, NULL, nva.data(), nva.size(), provider_ptr,
-        NULL);
-    if (connection.stream_id < 0) {
-        yyerror("std.http2: cannot submit request");
-        nghttp2_session_del(connection.session);
-        close_socket(stream);
-        freeval(stream);
-        return NULL;
+    std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
+    value_t *max_body = dict_get(options, "max_body_bytes");
+    if (max_body) {
+        if (max_body->type != T_int ||
+            ((int_value_t *)max_body)->value <= 0) {
+            yyerror("std.http2: max_body_bytes must be a positive integer");
+            return NULL;
+        }
+        max_body_bytes =
+            (std::size_t)((int_value_t *)max_body)->value;
     }
 
+    std::vector<std::string> methods;
+    std::vector<url_parts> urls;
+    std::vector<value_t *> headers;
+    std::vector<std::string> bodies;
+    std::string key;
+    for (size_t i = 0; i < request_list->payload->items.size(); ++i) {
+        value_t *item = request_list->payload->items[i];
+        if (!item || item->type != T_dict) {
+            yyerror("std.http2.request_many items must be dicts");
+            return NULL;
+        }
+        value_t *url_value = dict_get(item, "url");
+        if (!url_value || url_value->type != T_string) {
+            yyerror("std.http2.request_many item is missing a URL");
+            return NULL;
+        }
+        url_parts url;
+        std::string error;
+        if (!parse_url(((string_value_t *)url_value)->value, url, error)) {
+            yyerror("std.http2: %s", error.c_str());
+            return NULL;
+        }
+        std::string item_key =
+            h2_connection_key(url, tls_verify, tls_ca_file);
+        if (i == 0)
+            key = item_key;
+        else if (item_key != key) {
+            yyerror("std.http2.request_many requires all requests to "
+                    "share one origin");
+            return NULL;
+        }
+
+        std::string method = "GET";
+        value_t *method_value = dict_get(item, "method");
+        if (method_value) {
+            if (method_value->type != T_string) {
+                yyerror("std.http2.request_many method must be a string");
+                return NULL;
+            }
+            method = ((string_value_t *)method_value)->value;
+        }
+        value_t *item_headers = dict_get(item, "headers");
+        if (item_headers && item_headers->type != T_dict &&
+            item_headers->type != T_null) {
+            yyerror("std.http2.request_many headers must be a dict");
+            return NULL;
+        }
+        std::string body;
+        if (!body_value(dict_get(item, "body"), body,
+                        "std.http2.request_many"))
+            return NULL;
+
+        methods.push_back(method);
+        urls.push_back(url);
+        headers.push_back(item_headers);
+        bodies.push_back(body);
+    }
+
+    h2_connection *connection = h2_pool_acquire(key);
+    if (!connection) {
+        connection = new h2_connection();
+        if (!open_client_connection(connection, urls[0], async, tls_verify,
+                                    tls_ca_file, timeout_ms)) {
+            h2_release_connection(connection);
+            delete connection;
+            return NULL;
+        }
+        h2_pool_add(key, connection);
+    } else {
+        connection->async = async;
+        connection->timeout_ms = timeout_ms;
+    }
+
+    connection->multi_mode = true;
+    connection->multi_streams.clear();
+    connection->multi_request_bodies.clear();
+    connection->max_body_bytes = max_body_bytes;
+    connection->goaway = false;
+
+    std::vector<int32_t> stream_order;
     bool failed = false;
-    while (!connection.done) {
-        rv = nghttp2_session_send(connection.session);
-        if (rv != 0) {
-            connection.failure = "nghttp2 send failed";
+    for (size_t i = 0; i < methods.size(); ++i) {
+        std::vector<header_pair> request_headers;
+        header_pair method_header = {":method", methods[i]};
+        header_pair scheme_header = {":scheme",
+                                     urls[i].tls ? "https" : "http"};
+        header_pair authority_header = {":authority", urls[i].authority};
+        header_pair path_header = {":path", urls[i].path};
+        request_headers.push_back(method_header);
+        request_headers.push_back(scheme_header);
+        request_headers.push_back(authority_header);
+        request_headers.push_back(path_header);
+        if (!collect_request_headers(headers[i], request_headers)) {
             failed = true;
             break;
         }
-        value_t *chunk = h2_read(&connection);
+        std::vector<nghttp2_nv> nva;
+        build_nv(request_headers, nva);
+
+        connection->multi_request_bodies.push_back(
+            std::unique_ptr<out_body>(new out_body()));
+        out_body *body_slot =
+            connection->multi_request_bodies.back().get();
+        body_slot->data = bodies[i];
+        body_slot->offset = 0;
+
+        nghttp2_data_provider provider;
+        nghttp2_data_provider *provider_ptr = NULL;
+        if (!bodies[i].empty()) {
+            provider.source.ptr = body_slot;
+            provider.read_callback = body_read_callback;
+            provider_ptr = &provider;
+        }
+        int32_t stream_id = nghttp2_submit_request(
+            connection->session, NULL, nva.data(), nva.size(),
+            provider_ptr, NULL);
+        if (stream_id < 0) {
+            yyerror("std.http2.request_many: cannot submit request");
+            failed = true;
+            break;
+        }
+        connection->multi_streams[stream_id];
+        stream_order.push_back(stream_id);
+    }
+
+    while (!failed) {
+        int rv = nghttp2_session_send(connection->session);
+        if (rv != 0) {
+            connection->failure = "nghttp2 send failed";
+            failed = true;
+            break;
+        }
+        bool all_done = true;
+        for (size_t i = 0; i < stream_order.size(); ++i) {
+            if (!connection->multi_streams[stream_order[i]].done) {
+                all_done = false;
+                break;
+            }
+        }
+        if (all_done)
+            break;
+        if (connection->goaway) {
+            connection->failure = "server sent GOAWAY";
+            failed = true;
+            break;
+        }
+        value_t *chunk = h2_read(connection);
         if (!chunk) {
             failed = true;
             break;
         }
         if (chunk->type == T_null) {
             freeval(chunk);
-            connection.failure = "connection closed before response";
+            connection->failure = "connection closed before response";
             failed = true;
             break;
         }
         if (chunk->type != T_bytes) {
             freeval(chunk);
-            connection.failure = "read returned non-bytes";
+            connection->failure = "read returned non-bytes";
             failed = true;
             break;
         }
         const std::string &data = ((bytes_value_t *)chunk)->value;
         ssize_t consumed = nghttp2_session_mem_recv(
-            connection.session, (const uint8_t *)data.data(), data.size());
+            connection->session, (const uint8_t *)data.data(), data.size());
         freeval(chunk);
         if (consumed < 0) {
-            connection.failure = "nghttp2 receive failed";
+            connection->failure = "nghttp2 receive failed";
             failed = true;
             break;
         }
     }
+    if (!failed)
+        nghttp2_session_send(connection->session);
 
-    rv = nghttp2_session_send(connection.session);
-    nghttp2_session_del(connection.session);
-    close_socket(stream);
-    freeval(stream);
+    if (!failed) {
+        for (size_t i = 0; i < stream_order.size(); ++i) {
+            h2_connection::multi_response &state =
+                connection->multi_streams[stream_order[i]];
+            if (!state.failure.empty()) {
+                connection->failure = state.failure;
+                failed = true;
+                break;
+            }
+        }
+    }
 
-    if (failed || !connection.failure.empty()) {
-        yyerror("std.http2: %s", connection.failure.empty()
+    bool goaway = connection->goaway;
+    connection->multi_mode = false;
+    connection->multi_request_bodies.clear();
+
+    if (failed || !connection->failure.empty()) {
+        connection->multi_streams.clear();
+        h2_pool_discard(connection);
+        yyerror("std.http2: %s", connection->failure.empty()
                                      ? "request failed"
-                                     : connection.failure.c_str());
+                                     : connection->failure.c_str());
         return NULL;
     }
-    return make_response(connection);
+
+    value_t *results = (value_t *)newlistval();
+    list_value_t *result_list = (list_value_t *)results;
+    for (size_t i = 0; i < stream_order.size(); ++i) {
+        result_list->payload->items.push_back(
+            make_multi_response(connection->multi_streams[stream_order[i]]));
+    }
+    connection->multi_streams.clear();
+    if (goaway)
+        h2_pool_discard(connection);
+    else
+        h2_pool_release(connection);
+    return results;
 }
 
 value_t *http2_request(const std::vector<value_t *> &args) {
@@ -847,8 +1857,17 @@ value_t *http2_post(const std::vector<value_t *> &args) {
         yyerror("std.http2.post expects URL, optional body, and options");
         return NULL;
     }
-    value_t *body = args.size() >= 2 ? args[1] : NULL;
-    value_t *options = args.size() == 3 ? args[2] : NULL;
+    value_t *body = NULL;
+    value_t *options = NULL;
+    if (args.size() == 2) {
+        if (args[1]->type == T_dict)
+            options = args[1];
+        else
+            body = args[1];
+    } else if (args.size() == 3) {
+        body = args[1];
+        options = args[2];
+    }
     if (options && options->type != T_dict) {
         yyerror("std.http2: options must be a dict");
         return NULL;
@@ -915,8 +1934,17 @@ value_t *http2_post_async(const std::vector<value_t *> &args) {
         return NULL;
     }
     std::string url = ((string_value_t *)args[0])->value;
-    value_t *body = args.size() >= 2 ? args[1] : NULL;
-    value_t *options = args.size() == 3 ? args[2] : NULL;
+    value_t *body = NULL;
+    value_t *options = NULL;
+    if (args.size() == 2) {
+        if (args[1]->type == T_dict)
+            options = args[1];
+        else
+            body = args[1];
+    } else if (args.size() == 3) {
+        body = args[1];
+        options = args[2];
+    }
     if (options && options->type != T_dict) {
         yyerror("std.http2: options must be a dict");
         return NULL;
@@ -932,6 +1960,48 @@ value_t *http2_post_async(const std::vector<value_t *> &args) {
     });
     if (!task) {
         freeval(owned_body);
+        freeval(owned_options);
+        return NULL;
+    }
+    return new_task_value(std::move(task));
+}
+
+value_t *http2_request_many(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2 || args[0]->type != T_list) {
+        yyerror("std.http2.request_many expects a request list and optional "
+                "options");
+        return NULL;
+    }
+    value_t *options = args.size() == 2 ? args[1] : NULL;
+    if (options && options->type != T_dict) {
+        yyerror("std.http2: options must be a dict");
+        return NULL;
+    }
+    return exchange_many(args[0], options, false);
+}
+
+value_t *http2_request_many_async(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2 || args[0]->type != T_list) {
+        yyerror("std.http2.request_many_async expects a request list and "
+                "optional options");
+        return NULL;
+    }
+    value_t *options = args.size() == 2 ? args[1] : NULL;
+    if (options && options->type != T_dict) {
+        yyerror("std.http2: options must be a dict");
+        return NULL;
+    }
+    value_t *owned_requests = dupval(args[0]);
+    value_t *owned_options = options ? dupval(options) : NULL;
+    task_ptr task = fiber_start_async([owned_requests, owned_options]() {
+        std::unique_ptr<value_t, void (*)(value_t *)> requests_holder(
+            owned_requests, freeval);
+        std::unique_ptr<value_t, void (*)(value_t *)> options_holder(
+            owned_options, freeval);
+        return exchange_many(owned_requests, owned_options, true);
+    });
+    if (!task) {
+        freeval(owned_requests);
         freeval(owned_options);
         return NULL;
     }
@@ -1015,7 +2085,7 @@ value_t *http2_listen_tls(const std::vector<value_t *> &args) {
 }
 
 value_t *make_request(const h2_connection::server_request &request,
-                      value_t *stream) {
+                      value_t *stream, long long connection_id) {
     value_t *object = (value_t *)newdictval();
     dict_set(object, "method", newstrval(request.method.c_str()));
     dict_set(object, "path", newstrval(request.path.c_str()));
@@ -1026,6 +2096,7 @@ value_t *make_request(const h2_connection::server_request &request,
     dict_set(object, "http_major", newintval(2));
     dict_set(object, "http_minor", newintval(0));
     dict_set(object, "socket", dupval(stream));
+    dict_set(object, "connection_id", newintval(connection_id));
     return object;
 }
 
@@ -1068,8 +2139,24 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
         return false;
     }
     std::string body;
-    if (!body_value(dict_get(response, "body"), body, "std.http2.serve"))
+    generator_ptr body_generator;
+    value_t *body_stream_value = dict_get(response, "body_stream");
+    if (body_stream_value && body_stream_value->type != T_null) {
+        if (!fiber_is_generator(body_stream_value) ||
+            !get_generator_value(body_stream_value, body_generator))
+            return false;
+        if (!body_value(dict_get(response, "body"), body,
+                        "std.http2.serve"))
+            return false;
+        if (!body.empty()) {
+            yyerror("std.http2.serve: body and body_stream cannot both be "
+                    "set");
+            return false;
+        }
+    } else if (!body_value(dict_get(response, "body"), body,
+                           "std.http2.serve")) {
         return false;
+    }
 
     std::vector<header_pair> response_headers;
     header_pair status_header = {":status", std::to_string(status)};
@@ -1102,12 +2189,20 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
     std::vector<nghttp2_nv> nva;
     build_nv(response_headers, nva);
 
-    out_body &body_slot = connection.response_bodies[stream_id];
-    body_slot.data = body;
-    body_slot.offset = 0;
     nghttp2_data_provider provider;
     nghttp2_data_provider *provider_ptr = NULL;
-    if (!body.empty()) {
+    if (body_generator) {
+        generator_state &state = connection.response_streams[stream_id];
+        state.generator = body_generator;
+        state.chunk.clear();
+        state.offset = 0;
+        provider.source.ptr = &state;
+        provider.read_callback = server_generator_read_callback;
+        provider_ptr = &provider;
+    } else if (!body.empty()) {
+        out_body &body_slot = connection.response_bodies[stream_id];
+        body_slot.data = body;
+        body_slot.offset = 0;
         provider.source.ptr = &body_slot;
         provider.read_callback = body_read_callback;
         provider_ptr = &provider;
@@ -1169,6 +2264,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
     }
 
     long long served = 0;
+    long long next_connection_id = 1;
     while (max_requests == 0 || served < max_requests) {
         std::vector<value_t *> accept_args;
         accept_args.push_back(dupval(socket));
@@ -1176,6 +2272,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
         value_t *client = call_net(B_net_accept, accept_args);
         if (!client)
             break;
+        long long connection_id = next_connection_id++;
         value_t *stream = client;
         if (!cert_file.empty()) {
 #ifdef CALC_ENABLE_TLS
@@ -1206,7 +2303,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
 
         h2_connection connection;
         connection.stream = stream;
-        connection.async = false;
+        connection.async = true;
         connection.timeout_ms = 0;
         connection.max_body_bytes = DEFAULT_MAX_BODY_BYTES;
 
@@ -1230,11 +2327,15 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
 
         bool connection_open = true;
         long long connection_requests = 0;
+        std::map<int32_t, task_ptr> handler_tasks;
         while (connection_open &&
                (max_requests == 0 || served < max_requests)) {
             rv = nghttp2_session_send(connection.session);
-            if (rv != 0)
+            if (rv != 0) {
+                connection.failure = "nghttp2 send failed";
+                connection_open = false;
                 break;
+            }
 
             while (!connection.ready.empty()) {
                 int32_t stream_id = connection.ready.front();
@@ -1244,17 +2345,50 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
                 if (it == connection.requests.end() || it->second.responded)
                     continue;
 
-                value_t *request = make_request(it->second, stream);
-                value_t *response =
-                    call_value_args(args[1],
-                                    std::vector<value_t *>{request});
-                if (!response) {
+                value_t *request =
+                    make_request(it->second, stream, connection_id);
+                value_t *handler = args[1];
+                task_ptr handler_task = fiber_start_async(
+                    [handler, request]() {
+                    value_t *result =
+                        call_value_args(handler,
+                                        std::vector<value_t *>{request});
+                    if (result && is_task_value(result))
+                        result = await_task_value(result);
+                    return result;
+                });
+                if (!handler_task) {
+                    freeval(request);
+                    connection.failure = "cannot start handler";
                     connection_open = false;
                     break;
                 }
+                handler_tasks[stream_id] = handler_task;
+            }
+            if (!connection_open)
+                break;
+
+            for (std::map<int32_t, task_ptr>::iterator it =
+                     handler_tasks.begin();
+                 it != handler_tasks.end();) {
+                task_state_code state = task_get_state(it->second);
+                if (state == TASK_STATE_PENDING) {
+                    ++it;
+                    continue;
+                }
+                int32_t stream_id = it->first;
+                if (state != TASK_STATE_DONE) {
+                    connection.failure = task_error_message(it->second);
+                    if (connection.failure.empty())
+                        connection.failure = "handler failed";
+                    connection_open = false;
+                    break;
+                }
+                value_t *response = task_copy_result(it->second);
                 bool ok = submit_server_response(connection, stream_id,
                                                  response);
                 freeval(response);
+                it = handler_tasks.erase(it);
                 if (!ok) {
                     connection_open = false;
                     break;
@@ -1273,17 +2407,20 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
             if (rv != 0)
                 break;
 
+            long long read_timeout = idle_timeout_ms;
+            if (!handler_tasks.empty())
+                read_timeout =
+                    idle_timeout_ms == 0
+                        ? 20
+                        : std::min<long long>(idle_timeout_ms, 20);
+            connection.timeout_ms = read_timeout;
+
             bool timed_out = false;
-            bool clean_eof = false;
             value_t *chunk = NULL;
             {
-                std::vector<value_t *> read_args;
-                read_args.push_back(dupval(stream));
-                read_args.push_back(newintval(8192));
-                read_args.push_back(newintval(idle_timeout_ms));
                 eval_capture_snapshot snapshot;
                 eval_capture_begin(snapshot);
-                chunk = call_io(B_io_read, read_args);
+                chunk = h2_read(&connection);
                 eval_capture_result captured = eval_capture_end(snapshot);
                 if (captured.failed) {
                     std::string message;
@@ -1295,23 +2432,35 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
                         timed_out = true;
                     else if (!message.empty())
                         yyerror("std.http2.serve: %s", message.c_str());
-                    if (timed_out)
-                        break;
-                    break;
-                }
-                if (chunk && chunk->type == T_null) {
-                    clean_eof = true;
-                    freeval(chunk);
-                    chunk = NULL;
                 }
             }
-            if (timed_out || clean_eof)
-                break;
+            if (timed_out) {
+                if (handler_tasks.empty())
+                    break;
+                continue;
+            }
             if (!chunk)
                 break;
+            if (chunk->type == T_null) {
+                freeval(chunk);
+                break;
+            }
             if (!feed_chunk(connection, chunk))
                 break;
         }
+
+        for (std::map<int32_t, task_ptr>::iterator it =
+                 handler_tasks.begin();
+             it != handler_tasks.end(); ++it) {
+            if (task_get_state(it->second) == TASK_STATE_PENDING) {
+                std::vector<value_t *> cancel_args;
+                cancel_args.push_back(new_task_value(it->second));
+                value_t *cancelled =
+                    call_task_builtin(B_task_cancel, cancel_args);
+                freeval(cancelled);
+            }
+        }
+        handler_tasks.clear();
 
         nghttp2_submit_goaway(
             connection.session, NGHTTP2_FLAG_NONE,
@@ -1342,6 +2491,10 @@ value_t *call_http2_builtin(int functype,
             return http2_get_async(args);
         case B_http2_post_async:
             return http2_post_async(args);
+        case B_http2_request_many:
+            return http2_request_many(args);
+        case B_http2_request_many_async:
+            return http2_request_many_async(args);
         case B_http2_listen:
             return http2_listen(args);
         case B_http2_listen_tls:
@@ -1354,4 +2507,6 @@ value_t *call_http2_builtin(int functype,
     }
 }
 
-void http2_shutdown() {}
+void http2_shutdown() {
+    h2_pool_shutdown();
+}

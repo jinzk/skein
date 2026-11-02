@@ -158,6 +158,11 @@ value_t *make_task_value(std::shared_ptr<task> value) {
     return newuserdataval(&task_type, value);
 }
 
+bool is_task_value(value_t *value) {
+    return value && value->type == T_userdata &&
+           ((userdata_value_t *)value)->meta == &task_type;
+}
+
 bool get_task_value(value_t *value, std::shared_ptr<task> &result) {
     if (!value || value->type != T_userdata) {
         yyerror("expected a task, got %s", typename_of(value));

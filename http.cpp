@@ -191,6 +191,11 @@ void dict_set(value_t *dict, const std::string &key, value_t *value) {
         std::make_pair(newstrval(key.c_str()), value));
 }
 
+bool callable_value(value_t *value) {
+    return value && (value->type == T_func || value->type == T_builtin ||
+                     value->type == T_method);
+}
+
 std::string lower_ascii(std::string value) {
     for (size_t i = 0; i < value.size(); ++i) {
         unsigned char c = (unsigned char)value[i];
@@ -409,12 +414,29 @@ bool parse_url(const std::string &url, url_parts &parts, std::string &error) {
 
 bool read_message(value_t *socket, bool request, long long timeout_ms,
                   http1::message &message, bool *clean_eof = NULL,
-                  bool *timed_out = NULL) {
+                  bool *timed_out = NULL, value_t *on_body = NULL,
+                  std::size_t max_body_bytes = 16 * 1024 * 1024) {
     if (clean_eof)
         *clean_eof = false;
     if (timed_out)
         *timed_out = false;
-    http1::parser parser(request);
+    http1::parser_options parser_options;
+    parser_options.max_body_bytes = max_body_bytes;
+    http1::parser parser(request, parser_options);
+    bool sink_failed = false;
+    if (on_body) {
+        parser.set_body_sink([&](const char *data, std::size_t length) {
+            value_t *chunk = newbytesval(std::string(data, length));
+            value_t *result =
+                call_value_args(on_body, std::vector<value_t *>{chunk});
+            if (!result) {
+                sink_failed = true;
+                return false;
+            }
+            freeval(result);
+            return true;
+        });
+    }
     for (;;) {
         if (!parser.messages().empty()) {
             message = parser.messages()[0];
@@ -450,6 +472,8 @@ bool read_message(value_t *socket, bool request, long long timeout_ms,
         if (chunk->type == T_null) {
             freeval(chunk);
             if (!parser.finish()) {
+                if (sink_failed)
+                    return false;
                 if (!parser.error().empty())
                     yyerror("http: incomplete message: %s",
                             parser.error().c_str());
@@ -468,6 +492,8 @@ bool read_message(value_t *socket, bool request, long long timeout_ms,
         std::string data = ((bytes_value_t *)chunk)->value;
         freeval(chunk);
         if (!parser.execute(data)) {
+            if (sink_failed)
+                return false;
             yyerror("http: parse error: %s", parser.error().c_str());
             return false;
         }
@@ -521,13 +547,17 @@ value_t *make_request(value_t *client, const http1::message &message) {
 
 std::string build_response(int status, value_t *headers,
                            const std::string &body, bool keep_alive,
-                           std::string &error) {
+                           std::string &error, bool chunked = false) {
     std::string response = "HTTP/1.1 ";
     response += std::to_string(status);
     response += " ";
     response += reason_phrase(status);
     response += "\r\n";
-    if (!body.empty() && !header_exists(headers, "Content-Length")) {
+    if (chunked) {
+        if (!header_exists(headers, "Content-Length") &&
+            !header_exists(headers, "Transfer-Encoding"))
+            response += "Transfer-Encoding: chunked\r\n";
+    } else if (!body.empty() && !header_exists(headers, "Content-Length")) {
         response += "Content-Length: ";
         response += std::to_string(body.size());
         response += "\r\n";
@@ -538,13 +568,14 @@ std::string build_response(int status, value_t *headers,
     if (!append_headers(response, headers, error))
         return std::string();
     response += "\r\n";
-    response += body;
+    if (!chunked)
+        response += body;
     return response;
 }
 
 std::string build_request(const std::string &method, const url_parts &url,
                           value_t *headers, const std::string &body,
-                          bool keep_alive) {
+                          bool keep_alive, bool chunked = false) {
     std::string request;
     request += method;
     request += " ";
@@ -563,7 +594,11 @@ std::string build_request(const std::string &method, const url_parts &url,
     if (!header_exists(headers, "Connection"))
         request += keep_alive ? "Connection: keep-alive\r\n"
                               : "Connection: close\r\n";
-    if (!body.empty() && !header_exists(headers, "Content-Length")) {
+    if (chunked) {
+        if (!header_exists(headers, "Content-Length") &&
+            !header_exists(headers, "Transfer-Encoding"))
+            request += "Transfer-Encoding: chunked\r\n";
+    } else if (!body.empty() && !header_exists(headers, "Content-Length")) {
         request += "Content-Length: ";
         request += std::to_string(body.size());
         request += "\r\n";
@@ -575,8 +610,74 @@ std::string build_request(const std::string &method, const url_parts &url,
         return std::string();
     }
     request += "\r\n";
-    request += body;
+    if (!chunked)
+        request += body;
     return request;
+}
+
+bool async_write(value_t *socket, const std::string &data,
+                 long long timeout_ms);
+
+std::string hex_size(std::size_t size) {
+    char buffer[2 * sizeof(std::size_t) + 1];
+    static const char digits[] = "0123456789abcdef";
+    std::size_t pos = sizeof(buffer) - 1;
+    buffer[pos] = '\0';
+    if (size == 0)
+        buffer[--pos] = '0';
+    while (size) {
+        buffer[--pos] = digits[size & 0xf];
+        size >>= 4;
+    }
+    return std::string(buffer + pos);
+}
+
+bool write_stream_data(value_t *stream, const std::string &data,
+                       long long timeout_ms, bool async) {
+    if (async)
+        return async_write(stream, data, timeout_ms);
+    std::vector<value_t *> args;
+    args.push_back(dupval(stream));
+    args.push_back(newbytesval(data));
+    args.push_back(newintval(timeout_ms));
+    value_t *written = call_io(B_io_write_all, args);
+    if (!written)
+        return false;
+    freeval(written);
+    return true;
+}
+
+bool write_chunked_body(value_t *stream, const generator_ptr &generator,
+                        long long timeout_ms, bool async) {
+    for (;;) {
+        value_t *value = NULL;
+        bool done = false;
+        if (!generator_next_value(generator, NULL, value, done))
+            return false;
+        if (done) {
+            freeval(value);
+            break;
+        }
+        std::string chunk;
+        if (value) {
+            if (value->type == T_string)
+                chunk = ((string_value_t *)value)->value;
+            else if (value->type == T_bytes)
+                chunk = ((bytes_value_t *)value)->value;
+            else {
+                freeval(value);
+                yyerror("std.http: body_stream must yield string or bytes");
+                return false;
+            }
+            freeval(value);
+        }
+        if (chunk.empty())
+            continue;
+        std::string frame = hex_size(chunk.size()) + "\r\n" + chunk + "\r\n";
+        if (!write_stream_data(stream, frame, timeout_ms, async))
+            return false;
+    }
+    return write_stream_data(stream, "0\r\n\r\n", timeout_ms, async);
 }
 
 value_t *do_request(const std::string &method, const std::string &url_text,
@@ -600,6 +701,23 @@ value_t *do_request(const std::string &method, const std::string &url_text,
     if (!body_value(body_value_option, body, "std.http"))
         return NULL;
 
+    value_t *body_stream_value = dict_get(options, "body_stream");
+    generator_ptr body_generator;
+    bool chunked = false;
+    if (body_stream_value && body_stream_value->type != T_null) {
+        if (!fiber_is_generator(body_stream_value)) {
+            yyerror("std.http: body_stream must be a generator");
+            return NULL;
+        }
+        if (!get_generator_value(body_stream_value, body_generator))
+            return NULL;
+        if (!body.empty()) {
+            yyerror("std.http: body and body_stream cannot both be set");
+            return NULL;
+        }
+        chunked = true;
+    }
+
     long long timeout_ms = 0;
     value_t *timeout_value = dict_get(options, "timeout_ms");
     if (timeout_value) {
@@ -609,6 +727,25 @@ value_t *do_request(const std::string &method, const std::string &url_text,
             return NULL;
         }
         timeout_ms = ((int_value_t *)timeout_value)->value;
+    }
+
+    value_t *on_body = dict_get(options, "on_body");
+    if (on_body && on_body->type == T_null)
+        on_body = NULL;
+    if (on_body && !callable_value(on_body)) {
+        yyerror("std.http: on_body must be a function");
+        return NULL;
+    }
+    std::size_t max_body_bytes = 16 * 1024 * 1024;
+    value_t *max_body_value = dict_get(options, "max_body_bytes");
+    if (max_body_value) {
+        if (max_body_value->type != T_int ||
+            ((int_value_t *)max_body_value)->value <= 0) {
+            yyerror("std.http: max_body_bytes must be a positive integer");
+            return NULL;
+        }
+        max_body_bytes =
+            (std::size_t)((int_value_t *)max_body_value)->value;
     }
 
     bool tls_verify = true;
@@ -627,12 +764,13 @@ value_t *do_request(const std::string &method, const std::string &url_text,
 
     std::string key = connection_key(url, tls_verify, tls_ca_file);
     std::string request =
-        build_request(method, url, headers, body, true);
+        build_request(method, url, headers, body, true, chunked);
     if (request.empty())
         return NULL;
 
     bool idempotent = method == "GET" || method == "HEAD" ||
                       method == "OPTIONS" || method == "TRACE";
+    bool retryable = idempotent && !on_body && !chunked;
     for (int attempt = 0; attempt < 2; ++attempt) {
         pooled_connection *connection =
             attempt == 0 ? pool_acquire(key) : NULL;
@@ -685,9 +823,12 @@ value_t *do_request(const std::string &method, const std::string &url_text,
         bool ok = written != NULL;
         if (written)
             freeval(written);
+        if (ok && chunked)
+            ok = write_chunked_body(stream, body_generator, timeout_ms, false);
         http1::message message;
         if (ok)
-            ok = read_message(stream, false, timeout_ms, message);
+            ok = read_message(stream, false, timeout_ms, message, NULL, NULL,
+                              on_body, max_body_bytes);
 
         eval_capture_result captured;
         if (capture_errors)
@@ -696,7 +837,7 @@ value_t *do_request(const std::string &method, const std::string &url_text,
         if (!ok) {
             freeval(captured.error);
             pool_discard(connection);
-            if (capture_errors && idempotent && !g_interrupted)
+            if (capture_errors && retryable && !g_interrupted)
                 continue;
             return NULL;
         }
@@ -753,8 +894,26 @@ bool async_write(value_t *socket, const std::string &data,
 }
 
 bool read_message_async(value_t *socket, bool request,
-                        long long timeout_ms, http1::message &message) {
-    http1::parser parser(request);
+                        long long timeout_ms, http1::message &message,
+                        value_t *on_body = NULL,
+                        std::size_t max_body_bytes = 16 * 1024 * 1024) {
+    http1::parser_options parser_options;
+    parser_options.max_body_bytes = max_body_bytes;
+    http1::parser parser(request, parser_options);
+    bool sink_failed = false;
+    if (on_body) {
+        parser.set_body_sink([&](const char *data, std::size_t length) {
+            value_t *chunk = newbytesval(std::string(data, length));
+            value_t *result =
+                call_value_args(on_body, std::vector<value_t *>{chunk});
+            if (!result) {
+                sink_failed = true;
+                return false;
+            }
+            freeval(result);
+            return true;
+        });
+    }
     for (;;) {
         if (!parser.messages().empty()) {
             message = parser.messages()[0];
@@ -773,6 +932,8 @@ bool read_message_async(value_t *socket, bool request,
         if (chunk->type == T_null) {
             freeval(chunk);
             if (!parser.finish()) {
+                if (sink_failed)
+                    return false;
                 if (!parser.error().empty())
                     yyerror("http: incomplete message: %s",
                             parser.error().c_str());
@@ -791,6 +952,8 @@ bool read_message_async(value_t *socket, bool request,
         std::string data = ((bytes_value_t *)chunk)->value;
         freeval(chunk);
         if (!parser.execute(data)) {
+            if (sink_failed)
+                return false;
             yyerror("http: parse error: %s", parser.error().c_str());
             return false;
         }
@@ -839,6 +1002,23 @@ value_t *do_request_async(const std::string &method,
     if (!body_value(body_option, body, "std.http"))
         return NULL;
 
+    value_t *body_stream_value = dict_get(options, "body_stream");
+    generator_ptr body_generator;
+    bool chunked = false;
+    if (body_stream_value && body_stream_value->type != T_null) {
+        if (!fiber_is_generator(body_stream_value)) {
+            yyerror("std.http: body_stream must be a generator");
+            return NULL;
+        }
+        if (!get_generator_value(body_stream_value, body_generator))
+            return NULL;
+        if (!body.empty()) {
+            yyerror("std.http: body and body_stream cannot both be set");
+            return NULL;
+        }
+        chunked = true;
+    }
+
     long long timeout_ms = 0;
     value_t *timeout_value = dict_get(options, "timeout_ms");
     if (timeout_value) {
@@ -850,8 +1030,27 @@ value_t *do_request_async(const std::string &method,
         timeout_ms = ((int_value_t *)timeout_value)->value;
     }
 
+    value_t *on_body = dict_get(options, "on_body");
+    if (on_body && on_body->type == T_null)
+        on_body = NULL;
+    if (on_body && !callable_value(on_body)) {
+        yyerror("std.http: on_body must be a function");
+        return NULL;
+    }
+    std::size_t max_body_bytes = 16 * 1024 * 1024;
+    value_t *max_body_value = dict_get(options, "max_body_bytes");
+    if (max_body_value) {
+        if (max_body_value->type != T_int ||
+            ((int_value_t *)max_body_value)->value <= 0) {
+            yyerror("std.http: max_body_bytes must be a positive integer");
+            return NULL;
+        }
+        max_body_bytes =
+            (std::size_t)((int_value_t *)max_body_value)->value;
+    }
+
     std::string request =
-        build_request(method, url, headers, body, true);
+        build_request(method, url, headers, body, true, chunked);
     if (request.empty())
         return NULL;
 
@@ -861,9 +1060,16 @@ value_t *do_request_async(const std::string &method,
     std::string key = connection_key(url, tls_verify, tls_ca_file);
     bool idempotent = method == "GET" || method == "HEAD" ||
                       method == "OPTIONS" || method == "TRACE";
+    bool retryable = idempotent && !on_body && !chunked;
+    value_t *on_body_owned = on_body ? dupval(on_body) : NULL;
     task_ptr task = fiber_start_async(
         [host, port, request, timeout_ms, use_tls, tls_verify,
-         tls_ca_file, key, idempotent]() {
+         tls_ca_file, key, retryable, on_body_owned, max_body_bytes,
+         body_generator, chunked]() {
+        std::shared_ptr<value_t> on_body_holder;
+        if (on_body_owned)
+            on_body_holder =
+                std::shared_ptr<value_t>(on_body_owned, freeval);
         for (int attempt = 0; attempt < 2; ++attempt) {
             pooled_connection *connection =
                 attempt == 0 ? pool_acquire(key) : NULL;
@@ -910,9 +1116,13 @@ value_t *do_request_async(const std::string &method,
 
             value_t *stream = connection->stream;
             bool ok = async_write(stream, request, timeout_ms);
+            if (ok && chunked)
+                ok = write_chunked_body(stream, body_generator, timeout_ms,
+                                        true);
             http1::message message;
             if (ok)
-                ok = read_message_async(stream, false, timeout_ms, message);
+                ok = read_message_async(stream, false, timeout_ms, message,
+                                        on_body_owned, max_body_bytes);
 
             eval_capture_result captured;
             if (capture_errors)
@@ -921,7 +1131,7 @@ value_t *do_request_async(const std::string &method,
             if (!ok) {
                 freeval(captured.error);
                 pool_discard(connection);
-                if (capture_errors && idempotent && !g_interrupted)
+                if (capture_errors && retryable && !g_interrupted)
                     continue;
                 return (value_t *)NULL;
             }
@@ -935,8 +1145,10 @@ value_t *do_request_async(const std::string &method,
         }
         return (value_t *)NULL;
     });
-    if (!task)
+    if (!task) {
+        freeval(on_body_owned);
         return NULL;
+    }
     return new_task_value(std::move(task));
 }
 
@@ -979,13 +1191,23 @@ value_t *http_post_async(const std::vector<value_t *> &args) {
                 "options dict");
         return NULL;
     }
-    value_t *options = args.size() == 3 ? args[2] : NULL;
+    value_t *body = NULL;
+    value_t *options = NULL;
+    if (args.size() == 2) {
+        if (args[1]->type == T_dict)
+            options = args[1];
+        else
+            body = args[1];
+    } else {
+        body = args[1];
+        options = args[2];
+    }
     if (options && options->type != T_dict) {
         yyerror("std.http.post_async options must be a dict");
         return NULL;
     }
     return do_request_async("POST", ((string_value_t *)args[0])->value,
-                            options, args[1]);
+                            options, body);
 }
 
 value_t *http_request(const std::vector<value_t *> &args) {
@@ -1025,13 +1247,23 @@ value_t *http_post(const std::vector<value_t *> &args) {
         yyerror("std.http.post expects a URL, body, and optional options dict");
         return NULL;
     }
-    value_t *options = args.size() == 3 ? args[2] : NULL;
+    value_t *body = NULL;
+    value_t *options = NULL;
+    if (args.size() == 2) {
+        if (args[1]->type == T_dict)
+            options = args[1];
+        else
+            body = args[1];
+    } else {
+        body = args[1];
+        options = args[2];
+    }
     if (options && options->type != T_dict) {
         yyerror("std.http.post options must be a dict");
         return NULL;
     }
     return do_request("POST", ((string_value_t *)args[0])->value, options,
-                      args[1]);
+                      body);
 }
 
 value_t *http_listen(const std::vector<value_t *> &args) {
@@ -1307,12 +1539,21 @@ value_t *http_respond(const std::vector<value_t *> &args) {
         return NULL;
     }
     std::string body;
-    if (args.size() == 4 && !body_value(args[3], body, "std.http.respond"))
-        return NULL;
+    generator_ptr body_generator;
+    bool chunked = false;
+    if (args.size() == 4) {
+        if (fiber_is_generator(args[3])) {
+            if (!get_generator_value(args[3], body_generator))
+                return NULL;
+            chunked = true;
+        } else if (!body_value(args[3], body, "std.http.respond")) {
+            return NULL;
+        }
+    }
 
     std::string error;
     std::string response =
-        build_response((int)status, headers, body, false, error);
+        build_response((int)status, headers, body, false, error, chunked);
     if (response.empty()) {
         yyerror("std.http.respond: %s", error.c_str());
         return NULL;
@@ -1328,6 +1569,11 @@ value_t *http_respond(const std::vector<value_t *> &args) {
         return NULL;
     }
     freeval(written);
+    if (chunked &&
+        !write_chunked_body(socket, body_generator, 0, false)) {
+        close_socket(socket);
+        return NULL;
+    }
     close_socket(socket);
     return newboolval(true);
 }
@@ -1356,21 +1602,32 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
         return NULL;
     }
     std::string body;
-    if (args.size() == 4 &&
-        !body_value(args[3], body, "std.http.respond_async"))
-        return NULL;
+    generator_ptr body_generator;
+    bool chunked = false;
+    if (args.size() == 4) {
+        if (fiber_is_generator(args[3])) {
+            if (!get_generator_value(args[3], body_generator))
+                return NULL;
+            chunked = true;
+        } else if (!body_value(args[3], body, "std.http.respond_async")) {
+            return NULL;
+        }
+    }
 
     std::string error;
     std::string response =
-        build_response((int)status, headers, body, false, error);
+        build_response((int)status, headers, body, false, error, chunked);
     if (response.empty()) {
         yyerror("std.http.respond_async: %s", error.c_str());
         return NULL;
     }
 
     value_t *client = dupval(socket);
-    task_ptr task = fiber_start_async([client, response]() {
+    task_ptr task = fiber_start_async(
+        [client, response, body_generator, chunked]() {
         bool ok = async_write(client, response, 0);
+        if (ok && chunked)
+            ok = write_chunked_body(client, body_generator, 0, true);
         close_socket(client);
         freeval(client);
         if (!ok)
@@ -1511,8 +1768,34 @@ value_t *http_serve(const std::vector<value_t *> &args) {
                 break;
             }
             std::string body;
-            if (!body_value(dict_get(response, "body"), body,
-                            "std.http.serve")) {
+            generator_ptr body_generator;
+            bool chunked = false;
+            value_t *body_stream_value =
+                dict_get(response, "body_stream");
+            if (body_stream_value && body_stream_value->type != T_null) {
+                if (!fiber_is_generator(body_stream_value) ||
+                    !get_generator_value(body_stream_value,
+                                         body_generator)) {
+                    freeval(response);
+                    connection_open = false;
+                    break;
+                }
+                if (!body_value(dict_get(response, "body"), body,
+                                "std.http.serve")) {
+                    freeval(response);
+                    connection_open = false;
+                    break;
+                }
+                if (!body.empty()) {
+                    yyerror("std.http.serve: body and body_stream cannot "
+                            "both be set");
+                    freeval(response);
+                    connection_open = false;
+                    break;
+                }
+                chunked = true;
+            } else if (!body_value(dict_get(response, "body"), body,
+                                   "std.http.serve")) {
                 freeval(response);
                 connection_open = false;
                 break;
@@ -1527,7 +1810,7 @@ value_t *http_serve(const std::vector<value_t *> &args) {
                 keep_alive = false;
             std::string error;
             std::string response_text = build_response(
-                (int)status, headers, body, keep_alive, error);
+                (int)status, headers, body, keep_alive, error, chunked);
             if (response_text.empty()) {
                 yyerror("std.http.serve: %s", error.c_str());
                 freeval(response);
@@ -1546,6 +1829,11 @@ value_t *http_serve(const std::vector<value_t *> &args) {
                 break;
             }
             freeval(written);
+            if (chunked &&
+                !write_chunked_body(stream, body_generator, 0, false)) {
+                connection_open = false;
+                break;
+            }
             ++served;
             ++connection_requests;
             if (!keep_alive)

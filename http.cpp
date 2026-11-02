@@ -896,7 +896,10 @@ bool async_write(value_t *socket, const std::string &data,
 bool read_message_async(value_t *socket, bool request,
                         long long timeout_ms, http1::message &message,
                         value_t *on_body = NULL,
-                        std::size_t max_body_bytes = 16 * 1024 * 1024) {
+                        std::size_t max_body_bytes = 16 * 1024 * 1024,
+                        bool *clean_eof = NULL) {
+    if (clean_eof)
+        *clean_eof = false;
     http1::parser_options parser_options;
     parser_options.max_body_bytes = max_body_bytes;
     http1::parser parser(request, parser_options);
@@ -960,6 +963,10 @@ bool read_message_async(value_t *socket, bool request,
     }
 
     if (parser.messages().empty()) {
+        if (clean_eof && parser.error().empty()) {
+            *clean_eof = true;
+            return true;
+        }
         yyerror("http: incomplete message");
         return false;
     }
@@ -1642,6 +1649,172 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
     return new_task_value(std::move(task));
 }
 
+struct http_server_state {
+    long long max_requests = 0;
+    long long max_per_connection = 100;
+    long long idle_timeout_ms = 0;
+    long long served = 0;
+    bool stopping = false;
+};
+
+void handle_http_server_connection(value_t *stream, value_t *handler,
+                                   http_server_state *state) {
+    bool connection_open = true;
+    long long connection_requests = 0;
+    std::chrono::steady_clock::time_point last_activity =
+        std::chrono::steady_clock::now();
+    while (connection_open && !state->stopping &&
+           (state->max_requests == 0 ||
+            state->served < state->max_requests)) {
+        http1::message message;
+        bool clean_eof = false;
+        bool timed_out = false;
+        bool ok = false;
+        long long read_timeout = 100;
+        if (state->idle_timeout_ms != 0)
+            read_timeout = std::min<long long>(
+                read_timeout, state->idle_timeout_ms);
+        {
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
+            ok = read_message_async(stream, true, read_timeout, message,
+                                    NULL, 16 * 1024 * 1024, &clean_eof);
+            eval_capture_result captured = eval_capture_end(snapshot);
+            if (!ok) {
+                std::string text;
+                if (captured.error && captured.error->type == T_error)
+                    text = ((error_value_t *)captured.error)->message;
+                freeval(captured.error);
+                if (text.find("timed out") != std::string::npos)
+                    timed_out = true;
+                else if (!text.empty())
+                    yyerror("std.http.serve: %s", text.c_str());
+            }
+        }
+        if (timed_out) {
+            if (state->stopping)
+                break;
+            if (state->idle_timeout_ms != 0 &&
+                std::chrono::steady_clock::now() - last_activity >=
+                    std::chrono::milliseconds(state->idle_timeout_ms))
+                break;
+            continue;
+        }
+        if (clean_eof || !ok)
+            break;
+        last_activity = std::chrono::steady_clock::now();
+        ++state->served;
+        ++connection_requests;
+        if (state->max_requests != 0 &&
+            state->served >= state->max_requests)
+            state->stopping = true;
+
+        value_t *request = make_request(stream, message);
+        value_t *response =
+            call_value_args(handler, std::vector<value_t *>{request});
+        if (response && is_task_value(response))
+            response = await_task_value(response);
+        if (!response) {
+            connection_open = false;
+            break;
+        }
+        if (response->type != T_dict) {
+            yyerror("std.http.serve handler must return a response dict");
+            freeval(response);
+            connection_open = false;
+            break;
+        }
+
+        value_t *status_value = dict_get(response, "status");
+        if (!status_value || status_value->type != T_int) {
+            yyerror("std.http.serve response status must be an integer");
+            freeval(response);
+            connection_open = false;
+            break;
+        }
+        long long status = ((int_value_t *)status_value)->value;
+        if (status < 100 || status > 999) {
+            yyerror("std.http.serve response status is invalid");
+            freeval(response);
+            connection_open = false;
+            break;
+        }
+        value_t *headers = dict_get(response, "headers");
+        if (headers && headers->type != T_dict &&
+            headers->type != T_null) {
+            yyerror("std.http.serve response headers must be a dict");
+            freeval(response);
+            connection_open = false;
+            break;
+        }
+        std::string body;
+        generator_ptr body_generator;
+        bool chunked = false;
+        value_t *body_stream_value = dict_get(response, "body_stream");
+        if (body_stream_value && body_stream_value->type != T_null) {
+            if (!fiber_is_generator(body_stream_value) ||
+                !get_generator_value(body_stream_value, body_generator)) {
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            if (!body_value(dict_get(response, "body"), body,
+                            "std.http.serve")) {
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            if (!body.empty()) {
+                yyerror("std.http.serve: body and body_stream cannot both "
+                        "be set");
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            chunked = true;
+        } else if (!body_value(dict_get(response, "body"), body,
+                               "std.http.serve")) {
+            freeval(response);
+            connection_open = false;
+            break;
+        }
+
+        bool keep_alive =
+            message.keep_alive && !headers_request_close(headers);
+        if (state->max_requests != 0 &&
+            state->served >= state->max_requests)
+            keep_alive = false;
+        if (state->max_per_connection != 0 &&
+            connection_requests >= state->max_per_connection)
+            keep_alive = false;
+
+        std::string error;
+        std::string response_text = build_response(
+            (int)status, headers, body, keep_alive, error, chunked);
+        if (response_text.empty()) {
+            yyerror("std.http.serve: %s", error.c_str());
+            freeval(response);
+            connection_open = false;
+            break;
+        }
+        freeval(response);
+
+        if (!write_stream_data(stream, response_text, 0, true)) {
+            connection_open = false;
+            break;
+        }
+        if (chunked &&
+            !write_chunked_body(stream, body_generator, 0, true)) {
+            connection_open = false;
+            break;
+        }
+        if (!keep_alive)
+            connection_open = false;
+    }
+    close_socket(stream);
+    freeval(stream);
+}
+
 value_t *http_serve(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 5 || args[0]->type != T_dict ||
         (args[1]->type != T_func && args[1]->type != T_builtin &&
@@ -1687,163 +1860,116 @@ value_t *http_serve(const std::vector<value_t *> &args) {
         key_file = ((string_value_t *)key_value)->value;
     }
 
-    long long served = 0;
-    while (max_requests == 0 || served < max_requests) {
-        std::vector<value_t *> accept_args;
-        accept_args.push_back(dupval(socket));
-        accept_args.push_back(newintval(0));
-        value_t *client = call_net(B_net_accept, accept_args);
-        if (!client)
-            break;
+    http_server_state state;
+    state.max_requests = max_requests;
+    state.max_per_connection = max_per_connection;
+    state.idle_timeout_ms = idle_timeout_ms;
 
-        value_t *stream = client;
-        if (!cert_file.empty()) {
+    value_t *handler = args[1];
+    task_ptr server_task = fiber_start_async(
+        [socket, handler, &state, cert_file, key_file]() {
+        std::vector<task_ptr> connections;
+        for (;;) {
+            if (state.stopping)
+                break;
+            if (state.max_requests != 0 &&
+                state.served >= state.max_requests) {
+                state.stopping = true;
+                break;
+            }
+            for (size_t i = 0; i < connections.size();) {
+                if (task_get_state(connections[i]) != TASK_STATE_PENDING)
+                    connections.erase(connections.begin()
+                                      + (std::ptrdiff_t)i);
+                else
+                    ++i;
+            }
+
+            std::vector<value_t *> accept_args;
+            accept_args.push_back(dupval(socket));
+            accept_args.push_back(newintval(50));
+            value_t *accept_task =
+                call_net(B_net_accept_async, accept_args);
+            if (!accept_task)
+                break;
+
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
+            value_t *client = await_task_value(accept_task);
+            eval_capture_result captured = eval_capture_end(snapshot);
+            if (!client) {
+                bool timed_out = false;
+                if (captured.failed && captured.error &&
+                    captured.error->type == T_error) {
+                    std::string message =
+                        ((error_value_t *)captured.error)->message;
+                    timed_out =
+                        message.find("timed out") != std::string::npos;
+                }
+                if (timed_out) {
+                    freeval(captured.error);
+                    continue;
+                }
+                if (captured.failed && captured.error)
+                    eval_raise(captured.error);
+                else
+                    freeval(captured.error);
+                break;
+            }
+            freeval(captured.error);
+
+            value_t *stream = client;
+            if (!cert_file.empty()) {
 #ifdef CALC_ENABLE_TLS
-            std::vector<value_t *> tls_args;
-            tls_args.push_back(dupval(client));
-            tls_args.push_back(newstrval(cert_file.c_str()));
-            tls_args.push_back(newstrval(key_file.c_str()));
-            stream = call_tls(B_tls_server, tls_args);
-            if (!stream) {
+                std::vector<value_t *> tls_args;
+                tls_args.push_back(dupval(client));
+                tls_args.push_back(newstrval(cert_file.c_str()));
+                tls_args.push_back(newstrval(key_file.c_str()));
+                stream = call_tls(B_tls_server, tls_args);
+                if (!stream) {
+                    close_socket(client);
+                    freeval(client);
+                    continue;
+                }
+                freeval(client);
+#else
+                yyerror("std.http.serve: TLS is disabled");
                 close_socket(client);
                 freeval(client);
-                break;
-            }
-            freeval(client);
-#else
-            yyerror("std.http.serve: TLS is disabled");
-            close_socket(client);
-            freeval(client);
-            break;
+                continue;
 #endif
+            }
+
+            task_ptr connection_task = fiber_start_async(
+                [stream, handler, &state]() {
+                handle_http_server_connection(stream, handler, &state);
+                return (value_t *)NULL;
+            });
+            if (!connection_task) {
+                close_socket(stream);
+                freeval(stream);
+                break;
+            }
+            connections.push_back(connection_task);
         }
 
-        bool connection_open = true;
-        long long connection_requests = 0;
-        while (connection_open &&
-               (max_requests == 0 || served < max_requests)) {
-            http1::message message;
-            bool clean_eof = false;
-            bool timed_out = false;
-            if (!read_message(stream, true, idle_timeout_ms, message,
-                              &clean_eof, &timed_out))
-                break;
-            if (clean_eof || timed_out)
-                break;
-
-            value_t *request = make_request(stream, message);
-            value_t *response =
-                call_value_args(args[1], std::vector<value_t *>{request});
-            if (!response) {
-                connection_open = false;
-                break;
-            }
-            if (response->type != T_dict) {
-                yyerror("std.http.serve handler must return a response dict");
-                freeval(response);
-                connection_open = false;
-                break;
-            }
-
-            value_t *status_value = dict_get(response, "status");
-            if (!status_value || status_value->type != T_int) {
-                yyerror("std.http.serve response status must be an integer");
-                freeval(response);
-                connection_open = false;
-                break;
-            }
-            long long status = ((int_value_t *)status_value)->value;
-            if (status < 100 || status > 999) {
-                yyerror("std.http.serve response status is invalid");
-                freeval(response);
-                connection_open = false;
-                break;
-            }
-            value_t *headers = dict_get(response, "headers");
-            if (headers && headers->type != T_dict &&
-                headers->type != T_null) {
-                yyerror("std.http.serve response headers must be a dict");
-                freeval(response);
-                connection_open = false;
-                break;
-            }
-            std::string body;
-            generator_ptr body_generator;
-            bool chunked = false;
-            value_t *body_stream_value =
-                dict_get(response, "body_stream");
-            if (body_stream_value && body_stream_value->type != T_null) {
-                if (!fiber_is_generator(body_stream_value) ||
-                    !get_generator_value(body_stream_value,
-                                         body_generator)) {
-                    freeval(response);
-                    connection_open = false;
-                    break;
-                }
-                if (!body_value(dict_get(response, "body"), body,
-                                "std.http.serve")) {
-                    freeval(response);
-                    connection_open = false;
-                    break;
-                }
-                if (!body.empty()) {
-                    yyerror("std.http.serve: body and body_stream cannot "
-                            "both be set");
-                    freeval(response);
-                    connection_open = false;
-                    break;
-                }
-                chunked = true;
-            } else if (!body_value(dict_get(response, "body"), body,
-                                   "std.http.serve")) {
-                freeval(response);
-                connection_open = false;
-                break;
-            }
-
-            bool keep_alive =
-                message.keep_alive && !headers_request_close(headers);
-            if (max_requests != 0 && served + 1 >= max_requests)
-                keep_alive = false;
-            if (max_per_connection != 0 &&
-                connection_requests + 1 >= max_per_connection)
-                keep_alive = false;
-            std::string error;
-            std::string response_text = build_response(
-                (int)status, headers, body, keep_alive, error, chunked);
-            if (response_text.empty()) {
-                yyerror("std.http.serve: %s", error.c_str());
-                freeval(response);
-                connection_open = false;
-                break;
-            }
-            freeval(response);
-
-            std::vector<value_t *> write_args;
-            write_args.push_back(dupval(stream));
-            write_args.push_back(newbytesval(response_text));
-            write_args.push_back(newintval(0));
-            value_t *written = call_io(B_io_write_all, write_args);
-            if (!written) {
-                connection_open = false;
-                break;
-            }
-            freeval(written);
-            if (chunked &&
-                !write_chunked_body(stream, body_generator, 0, false)) {
-                connection_open = false;
-                break;
-            }
-            ++served;
-            ++connection_requests;
-            if (!keep_alive)
-                connection_open = false;
+        state.stopping = true;
+        for (size_t i = 0; i < connections.size(); ++i) {
+            if (task_get_state(connections[i]) != TASK_STATE_PENDING)
+                continue;
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
+            value_t *result = fiber_await_task(connections[i]);
+            eval_capture_result captured = eval_capture_end(snapshot);
+            freeval(result);
+            freeval(captured.error);
         }
-
-        close_socket(stream);
-        freeval(stream);
-    }
-    return newintval(served);
+        connections.clear();
+        return newintval(state.served);
+    });
+    if (!server_task)
+        return NULL;
+    return await_task_value(new_task_value(std::move(server_task)));
 }
 
 value_t *http_close(const std::vector<value_t *> &args) {

@@ -3035,8 +3035,12 @@ def main():
                 mc2 = subprocess.Popen(
                     [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8")
-                out1, err1 = mc1.communicate(client_source, timeout=15)
-                out2, err2 = mc2.communicate(client_source, timeout=15)
+                mc1.stdin.write(client_source)
+                mc1.stdin.close()
+                mc2.stdin.write(client_source)
+                mc2.stdin.close()
+                out1, err1 = mc1.communicate(timeout=15)
+                out2, err2 = mc2.communicate(timeout=15)
                 elapsed = time.time() - started
                 assert mc1.returncode == 0, err1
                 assert mc2.returncode == 0, err2
@@ -3987,6 +3991,79 @@ def main():
             if serve_idle_proc.poll() is None:
                 serve_idle_proc.terminate()
                 serve_idle_proc.wait(timeout=5)
+
+        http1_mc_probe = socket.socket()
+        http1_mc_probe.bind(("127.0.0.1", 0))
+        http1_mc_port = http1_mc_probe.getsockname()[1]
+        http1_mc_probe.close()
+        http1_mc_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            http1_mc_proc.stdin.write(
+                "import std;\n"
+                "async func handler(req) {\n"
+                "  await std.task.sleep(300);\n"
+                '  return {"status": 200, "body": "ok " + req["path"]};\n'
+                "}\n"
+                f'let s = std.http.listen("127.0.0.1", {http1_mc_port});\n'
+                "let n = std.http.serve(s, handler, 2);\n"
+                'print("served " + str(n));\n'
+                "std.http.close(s);\n"
+            )
+            http1_mc_proc.stdin.close()
+            deadline = time.time() + 5
+            ready = False
+            while time.time() < deadline:
+                try:
+                    probe = socket.create_connection(
+                        ("127.0.0.1", http1_mc_port), timeout=0.2)
+                    probe.close()
+                    ready = True
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert ready, "http1 multi-conn server did not listen"
+            client_source = (
+                "import std;\n"
+                f'let a = std.http.get('
+                f'"http://127.0.0.1:{http1_mc_port}/a");\n'
+                'print(bytes_to_string(a["body"]));\n'
+            )
+            started = time.time()
+            mc1 = subprocess.Popen(
+                [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            time.sleep(0.02)
+            mc2 = subprocess.Popen(
+                [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            mc1.stdin.write(client_source)
+            mc1.stdin.close()
+            mc2.stdin.write(client_source)
+            mc2.stdin.close()
+            out1, err1 = mc1.communicate(timeout=15)
+            out2, err2 = mc2.communicate(timeout=15)
+            elapsed = time.time() - started
+            assert mc1.returncode == 0, err1
+            assert mc2.returncode == 0, err2
+            assert "ok /a" in out1, out1
+            assert "ok /a" in out2, out2
+            assert elapsed < 0.55, (
+                f"http1 connections were not served concurrently: "
+                f"{elapsed:.3f}s")
+            http1_mc_proc.wait(timeout=10)
+            mc_output = http1_mc_proc.stdout.read()
+            assert "served 2" in mc_output, mc_output
+        finally:
+            if http1_mc_proc.poll() is None:
+                http1_mc_proc.terminate()
+                http1_mc_proc.wait(timeout=5)
 
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -460,7 +460,9 @@ std.http.close(s);
 
 - handler 接收 request dict；
 - 必须返回 response dict；
+- handler 可以是 `async func`，等待期间其他连接可以继续处理；
 - 同一个连接可以处理多个请求；
+- 每个客户端连接在独立 fiber 中处理，多个连接可以并发服务；
 - 请求允许 keep-alive 时继续复用；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
@@ -645,7 +647,8 @@ std.http2.close(s);
 TLS：
 
 ```text
-std.tls.client(stream, server_name[, options]) → tls_streamstd.tls.server(stream, cert_file, key_file[, options]) → tls_stream
+std.tls.client(stream, server_name[, options]) → tls_stream
+std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
 std.tls.alpn(tls_stream)                       → string
 ```
 

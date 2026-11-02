@@ -1625,6 +1625,8 @@ std.http.close(s);
 
 - handler 接收 request dict；
 - 返回 response dict；
+- handler 可以是 `async func`，等待期间其他连接可以继续处理；
+- 每个客户端连接在独立 fiber 中处理，多个连接可以并发服务；
 - 同一个连接可以处理多个请求；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；

@@ -1,7 +1,10 @@
 #include "tls.h"
 
 #include "ast.h"
+#include "fiber.h"
+#include "io.h"
 #include "repl.h"
+#include "task.h"
 #include "valuetype.h"
 
 #include <openssl/err.h>
@@ -10,6 +13,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -75,15 +79,19 @@ struct tls_stream {
     SSL *ssl = NULL;
     BIO *rbio = NULL;
     BIO *wbio = NULL;
+    std::vector<std::string> *server_alpn = NULL;
+    std::string selected_alpn;
 
     bool closed = false;
     bool eof = false;
+    bool async_pending = false;
 
     ~tls_stream() {
         if (ssl)
             SSL_free(ssl);
         if (ctx)
             SSL_CTX_free(ctx);
+        delete server_alpn;
         freeval(source);
     }
 };
@@ -93,8 +101,46 @@ std::string describe_tls(const void *data) {
     return "<tls_stream>";
 }
 
-bool flush_write_bio(tls_stream *stream, long long timeout_ms,
-                     std::string &error) {
+int select_alpn(SSL *, const unsigned char **out, unsigned char *outlen,
+                const unsigned char *in, unsigned int inlen, void *arg) {
+    std::vector<std::string> *preferences =
+        static_cast<std::vector<std::string> *>(arg);
+    if (!preferences)
+        return SSL_TLSEXT_ERR_NOACK;
+    for (size_t p = 0; p < preferences->size(); ++p) {
+        const std::string &wanted = (*preferences)[p];
+        unsigned int offset = 0;
+        while (offset < inlen) {
+            unsigned int length = in[offset++];
+            if (offset + length > inlen)
+                break;
+            if (length == wanted.size() &&
+                std::memcmp(in + offset, wanted.data(), length) == 0) {
+                *out = in + offset;
+                *outlen = (unsigned char)length;
+                return SSL_TLSEXT_ERR_OK;
+            }
+            offset += length;
+        }
+    }
+    return SSL_TLSEXT_ERR_NOACK;
+}
+
+void capture_alpn(tls_stream *stream) {
+    const unsigned char *protocol = NULL;
+    unsigned int length = 0;
+    SSL_get0_alpn_selected(stream->ssl, &protocol, &length);
+    if (protocol && length > 0)
+        stream->selected_alpn.assign((const char *)protocol, length);
+}
+
+using tls_read_fn = std::function<bool(long long, std::string &, bool &,
+                                       std::string &)>;
+using tls_write_fn = std::function<bool(const std::string &, long long,
+                                        std::size_t &, std::string &)>;
+
+bool flush_write_bio(tls_stream *stream, const tls_write_fn &write,
+                     long long timeout_ms, std::string &error) {
     if (!stream->wbio)
         return true;
     char buffer[16384];
@@ -102,13 +148,12 @@ bool flush_write_bio(tls_stream *stream, long long timeout_ms,
         int n = BIO_read(stream->wbio, buffer, sizeof(buffer));
         if (n <= 0)
             break;
-        size_t written = 0;
-        while (written < (size_t)n) {
+        std::size_t written = 0;
+        while (written < (std::size_t)n) {
             std::size_t count = 0;
-            if (!stream->source_ops->write(
-                    stream->source_data,
-                    std::string(buffer + written, (size_t)n - written),
-                    timeout_ms, count, error))
+            if (!write(std::string(buffer + written,
+                                   (std::size_t)n - written),
+                       timeout_ms, count, error))
                 return false;
             if (count == 0) {
                 error = "tls: underlying write returned 0 bytes";
@@ -120,12 +165,12 @@ bool flush_write_bio(tls_stream *stream, long long timeout_ms,
     return true;
 }
 
-bool pump_read(tls_stream *stream, long long timeout_ms, bool &source_eof,
+bool pump_read(tls_stream *stream, const tls_read_fn &read,
+               long long timeout_ms, bool &source_eof,
                std::string &error) {
     std::string data;
     source_eof = false;
-    if (!stream->source_ops->read(stream->source_data, 16384, timeout_ms,
-                                  data, source_eof, error))
+    if (!read(timeout_ms, data, source_eof, error))
         return false;
     if (!data.empty()) {
         int written = BIO_write(stream->rbio, data.data(), (int)data.size());
@@ -137,22 +182,23 @@ bool pump_read(tls_stream *stream, long long timeout_ms, bool &source_eof,
     return true;
 }
 
-bool tls_handshake(tls_stream *stream, long long timeout_ms,
-                   std::string &error) {
+bool tls_handshake_impl(tls_stream *stream, const tls_read_fn &read,
+                        const tls_write_fn &write, long long timeout_ms,
+                        std::string &error) {
     for (;;) {
         ERR_clear_error();
         int rc = SSL_do_handshake(stream->ssl);
         if (rc == 1) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             return true;
         }
         int ssl_error = SSL_get_error(stream->ssl, rc);
         if (ssl_error == SSL_ERROR_WANT_READ) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             bool source_eof = false;
-            if (!pump_read(stream, timeout_ms, source_eof, error))
+            if (!pump_read(stream, read, timeout_ms, source_eof, error))
                 return false;
             if (source_eof) {
                 error = "tls: handshake ended unexpectedly";
@@ -161,7 +207,7 @@ bool tls_handshake(tls_stream *stream, long long timeout_ms,
             continue;
         }
         if (ssl_error == SSL_ERROR_WANT_WRITE) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             continue;
         }
@@ -170,9 +216,10 @@ bool tls_handshake(tls_stream *stream, long long timeout_ms,
     }
 }
 
-bool tls_read(void *data, std::size_t max_bytes, long long timeout_ms,
-              std::string &out, bool &eof, std::string &error) {
-    tls_stream *stream = static_cast<tls_stream *>(data);
+bool tls_read_impl(tls_stream *stream, const tls_read_fn &read,
+                   const tls_write_fn &write, std::size_t max_bytes,
+                   long long timeout_ms, std::string &out, bool &eof,
+                   std::string &error) {
     out.clear();
     eof = false;
     if (!stream || stream->closed) {
@@ -195,10 +242,10 @@ bool tls_read(void *data, std::size_t max_bytes, long long timeout_ms,
         }
         int ssl_error = SSL_get_error(stream->ssl, n);
         if (ssl_error == SSL_ERROR_WANT_READ) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             bool source_eof = false;
-            if (!pump_read(stream, timeout_ms, source_eof, error))
+            if (!pump_read(stream, read, timeout_ms, source_eof, error))
                 return false;
             if (source_eof) {
                 stream->eof = true;
@@ -208,7 +255,7 @@ bool tls_read(void *data, std::size_t max_bytes, long long timeout_ms,
             continue;
         }
         if (ssl_error == SSL_ERROR_WANT_WRITE) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             continue;
         }
@@ -227,15 +274,15 @@ bool tls_read(void *data, std::size_t max_bytes, long long timeout_ms,
     }
 }
 
-bool tls_write(void *data, const std::string &bytes, long long timeout_ms,
-               std::size_t &written, std::string &error) {
-    tls_stream *stream = static_cast<tls_stream *>(data);
+bool tls_write_impl(tls_stream *stream, const tls_read_fn &read,
+                    const tls_write_fn &write, const std::string &bytes,
+                    long long timeout_ms, std::size_t &written,
+                    std::string &error) {
     written = 0;
     if (!stream || stream->closed) {
         error = "stream is closed";
         return false;
     }
-
     while (written < bytes.size()) {
         int request = (int)std::min<std::size_t>(bytes.size() - written,
                                                  16384);
@@ -243,21 +290,21 @@ bool tls_write(void *data, const std::string &bytes, long long timeout_ms,
         int n = SSL_write(stream->ssl, bytes.data() + written, request);
         if (n > 0) {
             written += (std::size_t)n;
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             continue;
         }
         int ssl_error = SSL_get_error(stream->ssl, n);
         if (ssl_error == SSL_ERROR_WANT_WRITE) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             continue;
         }
         if (ssl_error == SSL_ERROR_WANT_READ) {
-            if (!flush_write_bio(stream, timeout_ms, error))
+            if (!flush_write_bio(stream, write, timeout_ms, error))
                 return false;
             bool source_eof = false;
-            if (!pump_read(stream, timeout_ms, source_eof, error))
+            if (!pump_read(stream, read, timeout_ms, source_eof, error))
                 return false;
             if (source_eof) {
                 error = "tls: write failed: unexpected EOF";
@@ -271,13 +318,223 @@ bool tls_write(void *data, const std::string &bytes, long long timeout_ms,
     return true;
 }
 
+tls_read_fn sync_reader(tls_stream *stream) {
+    return [stream](long long timeout, std::string &out, bool &eof,
+                    std::string &error) {
+        return stream->source_ops->read(stream->source_data, 16384, timeout,
+                                        out, eof, error);
+    };
+}
+
+tls_write_fn sync_writer(tls_stream *stream) {
+    return [stream](const std::string &data, long long timeout,
+                    std::size_t &written, std::string &error) {
+        return stream->source_ops->write(stream->source_data, data, timeout,
+                                         written, error);
+    };
+}
+
+value_t *await_task_value(value_t *task_value) {
+    if (!task_value)
+        return NULL;
+    task_ptr task;
+    if (!get_task_value(task_value, task)) {
+        freeval(task_value);
+        return NULL;
+    }
+    freeval(task_value);
+    return fiber_await_task(task);
+}
+
+value_t *call_io(int functype, std::vector<value_t *> args) {
+    value_t *result = call_io_builtin(functype, args);
+    for (size_t i = 0; i < args.size(); ++i)
+        freeval(args[i]);
+    return result;
+}
+
+tls_read_fn async_reader(value_t *source) {
+    return [source](long long timeout, std::string &out, bool &eof,
+                    std::string &error) {
+        std::vector<value_t *> args;
+        args.push_back(dupval(source));
+        args.push_back(newintval(16384));
+        args.push_back(newintval(timeout));
+        value_t *task_value = call_io(B_io_read_async, args);
+        if (!task_value) {
+            if (error.empty())
+                error = "tls: underlying async read failed";
+            return false;
+        }
+        value_t *result = await_task_value(task_value);
+        if (!result) {
+            if (error.empty())
+                error = "tls: underlying async read failed";
+            return false;
+        }
+        if (result->type == T_null) {
+            freeval(result);
+            out.clear();
+            eof = true;
+            return true;
+        }
+        if (result->type != T_bytes) {
+            freeval(result);
+            error = "tls: underlying async read returned non-bytes";
+            return false;
+        }
+        out = ((bytes_value_t *)result)->value;
+        freeval(result);
+        return true;
+    };
+}
+
+tls_write_fn async_writer(value_t *source) {
+    return [source](const std::string &data, long long timeout,
+                    std::size_t &written, std::string &error) {
+        written = 0;
+        while (written < data.size()) {
+            std::vector<value_t *> args;
+            args.push_back(dupval(source));
+            args.push_back(newbytesval(data.substr(written)));
+            args.push_back(newintval(timeout));
+            value_t *task_value = call_io(B_io_write_async, args);
+            if (!task_value) {
+                if (error.empty())
+                    error = "tls: underlying async write failed";
+                return false;
+            }
+            value_t *result = await_task_value(task_value);
+            if (!result) {
+                if (error.empty())
+                    error = "tls: underlying async write failed";
+                return false;
+            }
+            if (result->type != T_int) {
+                freeval(result);
+                error = "tls: underlying async write returned non-int";
+                return false;
+            }
+            long long count = ((int_value_t *)result)->value;
+            freeval(result);
+            if (count <= 0) {
+                error = "tls: underlying async write returned 0 bytes";
+                return false;
+            }
+            written += (std::size_t)count;
+        }
+        return true;
+    };
+}
+
+bool tls_read(void *data, std::size_t max_bytes, long long timeout_ms,
+              std::string &out, bool &eof, std::string &error) {
+    tls_stream *stream = static_cast<tls_stream *>(data);
+    if (stream && stream->async_pending) {
+        error = "stream has a pending async operation";
+        return false;
+    }
+    return tls_read_impl(stream, sync_reader(stream), sync_writer(stream),
+                         max_bytes, timeout_ms, out, eof, error);
+}
+
+bool tls_write(void *data, const std::string &bytes, long long timeout_ms,
+               std::size_t &written, std::string &error) {
+    tls_stream *stream = static_cast<tls_stream *>(data);
+    if (stream && stream->async_pending) {
+        error = "stream has a pending async operation";
+        return false;
+    }
+    return tls_write_impl(stream, sync_reader(stream), sync_writer(stream),
+                          bytes, timeout_ms, written, error);
+}
+
+value_t *tls_read_async(void *data, const std::shared_ptr<void> &owner,
+                        std::size_t max_bytes, long long timeout_ms,
+                        std::string &error) {
+    tls_stream *stream = static_cast<tls_stream *>(data);
+    if (!stream || stream->closed) {
+        error = "stream is closed";
+        return NULL;
+    }
+    if (stream->async_pending) {
+        error = "stream has a pending async operation";
+        return NULL;
+    }
+    stream->async_pending = true;
+    task_ptr task = fiber_start_async([owner, max_bytes, timeout_ms]() {
+        tls_stream *stream = static_cast<tls_stream *>(owner.get());
+        std::string out;
+        bool eof = false;
+        std::string read_error;
+        bool ok = tls_read_impl(stream, async_reader(stream->source),
+                                async_writer(stream->source), max_bytes,
+                                timeout_ms, out, eof, read_error);
+        stream->async_pending = false;
+        if (!ok) {
+            yyerror("%s", read_error.empty() ? "tls: async read failed"
+                                             : read_error.c_str());
+            return (value_t *)NULL;
+        }
+        if (eof)
+            return newnull();
+        return newbytesval(std::move(out));
+    });
+    if (!task) {
+        stream->async_pending = false;
+        error = "tls: cannot start async read";
+        return NULL;
+    }
+    return new_task_value(std::move(task));
+}
+
+value_t *tls_write_async(void *data, const std::shared_ptr<void> &owner,
+                         const std::string &bytes, long long timeout_ms,
+                         std::string &error) {
+    tls_stream *stream = static_cast<tls_stream *>(data);
+    if (!stream || stream->closed) {
+        error = "stream is closed";
+        return NULL;
+    }
+    if (stream->async_pending) {
+        error = "stream has a pending async operation";
+        return NULL;
+    }
+    stream->async_pending = true;
+    task_ptr task = fiber_start_async([owner, bytes, timeout_ms]() {
+        tls_stream *stream = static_cast<tls_stream *>(owner.get());
+        std::size_t written = 0;
+        std::string write_error;
+        bool ok = tls_write_impl(stream, async_reader(stream->source),
+                                 async_writer(stream->source), bytes,
+                                 timeout_ms, written, write_error);
+        stream->async_pending = false;
+        if (!ok) {
+            yyerror("%s", write_error.empty() ? "tls: async write failed"
+                                              : write_error.c_str());
+            return (value_t *)NULL;
+        }
+        return newintval((long long)written);
+    });
+    if (!task) {
+        stream->async_pending = false;
+        error = "tls: cannot start async write";
+        return NULL;
+    }
+    return new_task_value(std::move(task));
+}
+
 bool tls_flush(void *data, std::string &error) {
     tls_stream *stream = static_cast<tls_stream *>(data);
     if (!stream || stream->closed) {
         error = "stream is closed";
         return false;
     }
-    if (!flush_write_bio(stream, 0, error))
+    if (stream->async_pending) {
+        error = "stream has a pending async operation";
+        return false;
+    }
+    if (!flush_write_bio(stream, sync_writer(stream), 0, error))
         return false;
     if (stream->source_ops->flush &&
         !stream->source_ops->flush(stream->source_data, error))
@@ -291,11 +548,15 @@ bool tls_close(void *data, bool &was_open, std::string &error) {
         was_open = false;
         return true;
     }
+    if (stream->async_pending) {
+        error = "stream has a pending async operation";
+        return false;
+    }
     was_open = true;
     ERR_clear_error();
     SSL_shutdown(stream->ssl);
     std::string flush_error;
-    flush_write_bio(stream, 0, flush_error);
+    flush_write_bio(stream, sync_writer(stream), 0, flush_error);
     if (stream->source_ops->close) {
         bool source_was_open = false;
         if (!stream->source_ops->close(stream->source_data, source_was_open,
@@ -332,8 +593,8 @@ const stream_ops tls_stream_ops = {
     tls_seekable,
     NULL,
     NULL,
-    NULL,
-    NULL,
+    tls_read_async,
+    tls_write_async,
 };
 
 const native_type tls_native_type = {
@@ -492,10 +753,12 @@ value_t *tls_client(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    if (!tls_handshake(stream.get(), 0, error)) {
+    if (!tls_handshake_impl(stream.get(), sync_reader(stream.get()),
+                            sync_writer(stream.get()), 0, error)) {
         yyerror("%s", error.c_str());
         return NULL;
     }
+    capture_alpn(stream.get());
     return make_tls_value(std::move(stream));
 }
 
@@ -542,6 +805,30 @@ value_t *tls_server(const std::vector<value_t *> &args) {
         return NULL;
     }
 
+    value_t *alpn_value = dict_get(options, "alpn");
+    if (alpn_value && alpn_value->type != T_null) {
+        if (alpn_value->type != T_list) {
+            yyerror("std.tls.server: alpn must be a list of strings");
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+        std::vector<std::string> *preferences =
+            new std::vector<std::string>();
+        list_value_t *list = (list_value_t *)alpn_value;
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            value_t *item = list->payload->items[i];
+            if (item->type != T_string || item->type == T_null) {
+                delete preferences;
+                yyerror("std.tls.server: alpn entries must be strings");
+                SSL_CTX_free(ctx);
+                return NULL;
+            }
+            preferences->push_back(((string_value_t *)item)->value);
+        }
+        stream->server_alpn = preferences;
+        SSL_CTX_set_alpn_select_cb(ctx, select_alpn, preferences);
+    }
+
     SSL *ssl = SSL_new(ctx);
     if (!ssl) {
         std::string error;
@@ -559,11 +846,33 @@ value_t *tls_server(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    if (!tls_handshake(stream.get(), 0, error)) {
+    if (!tls_handshake_impl(stream.get(), sync_reader(stream.get()),
+                            sync_writer(stream.get()), 0, error)) {
         yyerror("%s", error.c_str());
         return NULL;
     }
+    capture_alpn(stream.get());
     return make_tls_value(std::move(stream));
+}
+
+value_t *tls_alpn(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.tls.alpn expects 1 argument");
+        return NULL;
+    }
+    value_t *value = args[0];
+    if (!value || value->type != T_userdata ||
+        ((userdata_value_t *)value)->meta != &tls_native_type) {
+        yyerror("std.tls.alpn expects a TLS stream");
+        return NULL;
+    }
+    tls_stream *stream = static_cast<tls_stream *>(
+        ((userdata_value_t *)value)->data.get());
+    if (!stream) {
+        yyerror("std.tls.alpn expects a TLS stream");
+        return NULL;
+    }
+    return newstrval(stream->selected_alpn.c_str());
 }
 
 } // namespace
@@ -575,6 +884,8 @@ struct value_t *call_tls_builtin(
         return tls_client(args);
     case B_tls_server:
         return tls_server(args);
+    case B_tls_alpn:
+        return tls_alpn(args);
     default:
         yyerror("unknown tls function");
         return NULL;

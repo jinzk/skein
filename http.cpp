@@ -73,6 +73,20 @@ value_t *dict_get(value_t *dict, const char *key) {
     return NULL;
 }
 
+bool option_bool(value_t *options, const char *key, bool fallback) {
+    value_t *value = dict_get(options, key);
+    if (!value || value->type != T_bool)
+        return fallback;
+    return ((bool_value_t *)value)->value;
+}
+
+std::string option_string(value_t *options, const char *key) {
+    value_t *value = dict_get(options, key);
+    if (!value || value->type != T_string)
+        return std::string();
+    return ((string_value_t *)value)->value;
+}
+
 void dict_set(value_t *dict, const std::string &key, value_t *value) {
     if (!dict || dict->type != T_dict) {
         freeval(value);
@@ -611,9 +625,18 @@ value_t *do_request_async(const std::string &method,
         yyerror("std.http: %s", error.c_str());
         return NULL;
     }
+    bool tls_verify = true;
+    std::string tls_ca_file;
     if (url.tls) {
-        yyerror("std.http: https async is not supported yet");
-        return NULL;
+        value_t *tls_options = dict_get(options, "tls");
+        if (tls_options && tls_options->type != T_dict) {
+            yyerror("std.http: tls options must be a dict");
+            return NULL;
+        }
+        if (tls_options) {
+            tls_verify = option_bool(tls_options, "verify", true);
+            tls_ca_file = option_string(tls_options, "ca_file");
+        }
     }
 
     value_t *headers = dict_get(options, "headers");
@@ -645,21 +668,51 @@ value_t *do_request_async(const std::string &method,
 
     std::string host = url.host;
     int port = url.port;
-    task_ptr task = fiber_start_async([host, port, request, timeout_ms]() {
+    bool use_tls = url.tls;
+    task_ptr task = fiber_start_async(
+        [host, port, request, timeout_ms, use_tls, tls_verify,
+         tls_ca_file]() {
         value_t *client = async_connect(host, port, timeout_ms);
         if (!client)
             return (value_t *)NULL;
 
-        if (!async_write(client, request, timeout_ms)) {
+        value_t *stream = client;
+        if (use_tls) {
+#ifdef CALC_ENABLE_TLS
+            value_t *tls_options = (value_t *)newdictval();
+            dict_set(tls_options, "verify", newboolval(tls_verify));
+            if (!tls_ca_file.empty())
+                dict_set(tls_options, "ca_file",
+                         newstrval(tls_ca_file.c_str()));
+            std::vector<value_t *> tls_args;
+            tls_args.push_back(dupval(client));
+            tls_args.push_back(newstrval(host.c_str()));
+            tls_args.push_back(tls_options);
+            stream = call_tls(B_tls_client, tls_args);
+            if (!stream) {
+                close_socket(client);
+                freeval(client);
+                return (value_t *)NULL;
+            }
+            freeval(client);
+#else
+            yyerror("std.http: https is not supported (TLS disabled)");
             close_socket(client);
             freeval(client);
+            return (value_t *)NULL;
+#endif
+        }
+
+        if (!async_write(stream, request, timeout_ms)) {
+            close_socket(stream);
+            freeval(stream);
             return (value_t *)NULL;
         }
 
         http1::message message;
-        bool ok = read_message_async(client, false, timeout_ms, message);
-        close_socket(client);
-        freeval(client);
+        bool ok = read_message_async(stream, false, timeout_ms, message);
+        close_socket(stream);
+        freeval(stream);
         if (!ok)
             return (value_t *)NULL;
         return make_response(message);
@@ -929,10 +982,18 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
         yyerror("std.http.accept_async expects a std.http server");
         return NULL;
     }
-    if (dict_get(args[0], "cert") || dict_get(args[0], "key")) {
-        yyerror("std.http.accept_async: TLS server async accept is not "
-                "supported");
-        return NULL;
+    std::string cert_file;
+    std::string key_file;
+    value_t *cert_value = dict_get(args[0], "cert");
+    value_t *key_value = dict_get(args[0], "key");
+    if (cert_value || key_value) {
+        if (!cert_value || !key_value ||
+            cert_value->type != T_string || key_value->type != T_string) {
+            yyerror("std.http.accept_async: invalid TLS server certificate");
+            return NULL;
+        }
+        cert_file = ((string_value_t *)cert_value)->value;
+        key_file = ((string_value_t *)key_value)->value;
     }
     long long timeout_ms = 0;
     if (args.size() == 2) {
@@ -946,7 +1007,8 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
     }
 
     value_t *listener = dupval(socket);
-    task_ptr task = fiber_start_async([listener, timeout_ms]() {
+    task_ptr task = fiber_start_async([listener, timeout_ms, cert_file,
+                                       key_file]() {
         std::vector<value_t *> accept_args;
         accept_args.push_back(dupval(listener));
         accept_args.push_back(newintval(timeout_ms));
@@ -957,15 +1019,39 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
             return (value_t *)NULL;
         }
 
-        http1::message message;
-        if (!read_message_async(client, true, timeout_ms, message)) {
+        value_t *stream = client;
+        if (!cert_file.empty()) {
+#ifdef CALC_ENABLE_TLS
+            std::vector<value_t *> tls_args;
+            tls_args.push_back(dupval(client));
+            tls_args.push_back(newstrval(cert_file.c_str()));
+            tls_args.push_back(newstrval(key_file.c_str()));
+            stream = call_tls(B_tls_server, tls_args);
+            if (!stream) {
+                close_socket(client);
+                freeval(client);
+                freeval(listener);
+                return (value_t *)NULL;
+            }
+            freeval(client);
+#else
+            yyerror("std.http.accept_async: TLS is disabled");
             close_socket(client);
             freeval(client);
             freeval(listener);
             return (value_t *)NULL;
+#endif
         }
 
-        value_t *request = make_request(client, message);
+        http1::message message;
+        if (!read_message_async(stream, true, timeout_ms, message)) {
+            close_socket(stream);
+            freeval(stream);
+            freeval(listener);
+            return (value_t *)NULL;
+        }
+
+        value_t *request = make_request(stream, message);
         freeval(listener);
         return request;
     });

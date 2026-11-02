@@ -181,7 +181,8 @@ enum bifs {
     B_http_respond_async,
     B_http_close,
     B_tls_client,
-    B_tls_server
+    B_tls_server,
+    B_tls_alpn
 };
 
 struct ast {

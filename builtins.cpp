@@ -336,7 +336,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
 #ifdef CALC_ENABLE_TLS
-    if (functype >= B_tls_client && functype <= B_tls_server)
+    if (functype >= B_tls_client && functype <= B_tls_alpn)
         return call_tls_builtin(functype, args);
 #endif
 

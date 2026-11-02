@@ -1593,8 +1593,7 @@ status, status_text, headers, body, http_major, http_minor
 限制：
 
 - 支持 `http://` 和 `https://`；
-- `https://` 当前仅支持同步客户端和同步服务端；
-- async `https://` 尚未支持；
+- `https://` 支持同步和 async 客户端/服务端；
 - 只支持 HTTP/1.1；
 - 一次连接只处理一个请求，响应后关闭；
 - body 整体读取，默认上限 16 MiB；
@@ -1606,6 +1605,7 @@ status, status_text, headers, body, http_major, http_minor
 ```text
 std.tls.client(stream, server_name[, options]) → tls_stream
 std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
+std.tls.alpn(tls_stream)                       → string
 ```
 
 客户端：
@@ -1640,15 +1640,22 @@ std.net.close(listener);
 ```text
 verify    // 客户端默认 true
 ca_file   // 客户端 CA 文件
-alpn      // 客户端 ALPN 列表
+alpn      // 客户端/服务端 ALPN 列表
+```
+
+`std.tls.alpn(tls)` 返回协商出的 ALPN：
+
+```text
+std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
 ```
 
 规则：
 
 - 默认校验证书和主机名；
 - TLS 流实现 `std.io` 接口；
-- `std.tls` 当前是同步接口；
-- 服务端 ALPN 尚未实现；
+- TLS 流支持 `std.io.read_async` / `write_async`；
+- TLS 握手在包装时同步完成；
+- 服务端 ALPN 会按服务端列表选择第一个客户端也支持的协议；
 
 ### async / await
 

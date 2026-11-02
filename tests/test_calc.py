@@ -2135,6 +2135,7 @@ def main():
                     import ssl
                     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                     context.load_cert_chain(tls_cert, tls_key)
+                    context.set_alpn_protocols(["http/1.1"])
                     try:
                         client, _ = tls_server.accept()
                         tls_client = context.wrap_socket(
@@ -2152,7 +2153,9 @@ def main():
                     f'let s = std.net.tcp_connect("127.0.0.1", {tls_port}, '
                     '1000);\n'
                     'let t = std.tls.client(s, "localhost", '
-                    f'{{"ca_file": "{tls_cert}"}});\n'
+                    f'{{"ca_file": "{tls_cert}", '
+                    '"alpn": ["h2", "http/1.1"]});\n'
+                    "print(std.tls.alpn(t));\n"
                     'std.io.write_all(t, "hello");\n'
                     "print(bytes_to_string(std.io.read(t, 100)));\n"
                     "std.io.close(t);\n"
@@ -2161,6 +2164,8 @@ def main():
                 assert tls_client_proc.returncode == 0, (
                     tls_client_proc.stderr)
                 assert "tls:hello" in tls_client_proc.stdout, (
+                    tls_client_proc.stdout)
+                assert "http/1.1" in tls_client_proc.stdout, (
                     tls_client_proc.stdout)
 
                 tls_server_probe = socket.socket()
@@ -2183,7 +2188,9 @@ def main():
                         f"{tls_server_port}, 1000);\n"
                         "let c = std.net.accept(l, 5000);\n"
                         f'let t = std.tls.server(c, "{tls_cert}", '
-                        f'"{tls_key}");\n'
+                        f'"{tls_key}", '
+                        '{"alpn": ["h2", "http/1.1"]});\n'
+                        "print(std.tls.alpn(t));\n"
                         "let data = std.io.read(t, 100);\n"
                         'std.io.write_all(t, "server:" + '
                         "bytes_to_string(data));\n"
@@ -2205,8 +2212,10 @@ def main():
                     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                     context.check_hostname = False
                     context.verify_mode = ssl.CERT_NONE
+                    context.set_alpn_protocols(["http/1.1"])
                     tls_wrapped = context.wrap_socket(
                         tls_calc_client, server_hostname="localhost")
+                    assert tls_wrapped.selected_alpn_protocol() == "http/1.1"
                     tls_wrapped.sendall(b"hello")
                     tls_response = tls_wrapped.recv(100)
                     assert tls_response == b"server:hello", tls_response
@@ -2215,6 +2224,48 @@ def main():
                     if tls_calc_client:
                         tls_calc_client.close()
                     tls_calc_server.wait(timeout=10)
+                    tls_calc_output = tls_calc_server.stdout.read()
+                    assert "http/1.1" in tls_calc_output, tls_calc_output
+
+                tls_async_server = socket.socket()
+                tls_async_server.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                tls_async_server.bind(("127.0.0.1", 0))
+                tls_async_server.listen(1)
+                tls_async_server.settimeout(5)
+                tls_async_port = tls_async_server.getsockname()[1]
+
+                def tls_async_echo_server():
+                    import ssl
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain(tls_cert, tls_key)
+                    try:
+                        client, _ = tls_async_server.accept()
+                        tls_client = context.wrap_socket(
+                            client, server_side=True)
+                        data = tls_client.recv(100)
+                        tls_client.sendall(b"async-tls:" + data)
+                        tls_client.close()
+                    finally:
+                        tls_async_server.close()
+
+                tls_async_thread = threading.Thread(
+                    target=tls_async_echo_server)
+                tls_async_thread.start()
+                tls_async_proc = run(
+                    "import std;\n"
+                    f'let s = std.net.tcp_connect("127.0.0.1", '
+                    f'{tls_async_port}, 1000);\n'
+                    'let t = std.tls.client(s, "localhost", '
+                    f'{{"ca_file": "{tls_cert}"}});\n'
+                    'await std.io.write_async(t, "hello");\n'
+                    "print(bytes_to_string(await std.io.read_async(t, 100)));\n"
+                    "std.io.close(t);\n"
+                )
+                tls_async_thread.join(timeout=5)
+                assert tls_async_proc.returncode == 0, tls_async_proc.stderr
+                assert "async-tls:hello" in tls_async_proc.stdout, (
+                    tls_async_proc.stdout)
 
                 https_server = socket.socket()
                 https_server.setsockopt(
@@ -2322,6 +2373,119 @@ def main():
                     if https_calc_client:
                         https_calc_client.close()
                     https_calc_server.wait(timeout=10)
+
+                async_https_server = socket.socket()
+                async_https_server.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                async_https_server.bind(("127.0.0.1", 0))
+                async_https_server.listen(1)
+                async_https_server.settimeout(5)
+                async_https_port = async_https_server.getsockname()[1]
+
+                def async_https_echo_server():
+                    import ssl
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain(tls_cert, tls_key)
+                    try:
+                        client, _ = async_https_server.accept()
+                        tls_client = context.wrap_socket(
+                            client, server_side=True)
+                        data = b""
+                        while b"\r\n\r\n" not in data:
+                            chunk = tls_client.recv(4096)
+                            if not chunk:
+                                break
+                            data += chunk
+                        tls_client.sendall(
+                            b"HTTP/1.1 201 Created\r\n"
+                            b"Content-Length: 5\r\n"
+                            b"\r\n"
+                            b"async")
+                        tls_client.close()
+                    finally:
+                        async_https_server.close()
+
+                async_https_thread = threading.Thread(
+                    target=async_https_echo_server)
+                async_https_thread.start()
+                async_https_proc = run(
+                    "import std;\n"
+                    f'let r = await std.http.get_async('
+                    f'"https://localhost:{async_https_port}/", '
+                    f'{{"tls": {{"ca_file": "{tls_cert}"}}}});\n'
+                    'print(r["status"]);\n'
+                    'print(bytes_to_string(r["body"]));\n'
+                )
+                async_https_thread.join(timeout=5)
+                assert async_https_proc.returncode == 0, (
+                    async_https_proc.stderr)
+                assert "201" in async_https_proc.stdout, (
+                    async_https_proc.stdout)
+                assert "async" in async_https_proc.stdout, (
+                    async_https_proc.stdout)
+
+                async_https_probe = socket.socket()
+                async_https_probe.bind(("127.0.0.1", 0))
+                async_https_server_port = async_https_probe.getsockname()[1]
+                async_https_probe.close()
+                async_https_calc = subprocess.Popen(
+                    [BIN],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                async_https_client = None
+                try:
+                    async_https_calc.stdin.write(
+                        "import std;\n"
+                        f'let s = std.http.listen_tls("127.0.0.1", '
+                        f'{async_https_server_port}, "{tls_cert}", '
+                        f'"{tls_key}");\n'
+                        "let req = await std.http.accept_async(s, 10000);\n"
+                        'await std.http.respond_async(req, 200, '
+                        '{"X-Async": "yes"}, "async secure " + '
+                        'req["path"]);\n'
+                        "std.http.close(s);\n"
+                    )
+                    async_https_calc.stdin.close()
+                    deadline = time.time() + 5
+                    while time.time() < deadline:
+                        try:
+                            async_https_client = socket.create_connection(
+                                ("127.0.0.1", async_https_server_port),
+                                timeout=0.2)
+                            break
+                        except OSError:
+                            time.sleep(0.05)
+                    assert async_https_client is not None, (
+                        "async https server did not listen")
+                    import ssl
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    wrapped = context.wrap_socket(
+                        async_https_client, server_hostname="localhost")
+                    wrapped.sendall(
+                        b"GET /async HTTPS HTTP/1.1\r\n"
+                        b"Host: localhost\r\n"
+                        b"Connection: close\r\n"
+                        b"\r\n")
+                    response = b""
+                    while True:
+                        chunk = wrapped.recv(4096)
+                        if not chunk:
+                            break
+                        response += chunk
+                    text = response.decode("utf-8", errors="replace")
+                    assert "200 OK" in text, text
+                    assert "async secure /async HTTPS" in text, text
+                    wrapped.close()
+                finally:
+                    if async_https_client:
+                        async_https_client.close()
+                    async_https_calc.wait(timeout=10)
 
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

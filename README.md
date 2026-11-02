@@ -453,8 +453,7 @@ status, status_text, headers, body, http_major, http_minor
 限制：
 
 - 支持 `http://` 和 `https://`；
-- `https://` 目前只支持同步客户端和同步服务端；
-- async `https://` 尚未支持；
+- `https://` 支持同步和 async 客户端/服务端；
 - 只支持 HTTP/1.1；
 - 一次连接只处理一个请求，响应后关闭连接；
 - 请求和响应 body 整体读取，不能超过解析器的 16 MiB 默认上限；
@@ -466,6 +465,7 @@ TLS：
 ```text
 std.tls.client(stream, server_name[, options]) → tls_stream
 std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
+std.tls.alpn(tls_stream)                       → string
 ```
 
 客户端：
@@ -490,7 +490,9 @@ std.io.close(tls);
 let listener = std.net.tcp_listen("127.0.0.1", 8443);
 let client = std.net.accept(listener, 5000);
 
-let tls = std.tls.server(client, "cert.pem", "key.pem");
+let tls = std.tls.server(client, "cert.pem", "key.pem", {
+  "alpn": ["h2", "http/1.1"]
+});
 
 let data = std.io.read(tls, 4096);
 std.io.write_all(tls, data);
@@ -503,7 +505,13 @@ std.net.close(listener);
 ```text
 verify    // bool，客户端默认 true
 ca_file   // 客户端 CA 文件
-alpn      // 客户端 ALPN 协议列表
+alpn      // 客户端/服务端 ALPN 协议列表
+```
+
+`std.tls.alpn(stream)` 返回握手后协商出的协议：
+
+```text
+std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
 ```
 
 规则：
@@ -511,8 +519,9 @@ alpn      // 客户端 ALPN 协议列表
 - 默认校验证书和主机名；
 - 测试环境可显式 `"verify": false`；
 - TLS 流实现 `std.io` 接口；
-- `std.tls` 当前是同步接口；
-- 服务端 ALPN 选择尚未实现；
+- TLS 流支持 `std.io.read_async` / `write_async`；
+- TLS 握手在 `std.tls.client/server` 包装时同步完成；
+- 服务端 ALPN 会按服务端列表选择第一个客户端也支持的协议；
 
 async / await：
 
@@ -1021,6 +1030,7 @@ std.http.close
 
 std.tls.client
 std.tls.server
+std.tls.alpn
 
 std.task.sleep
 std.task.yield

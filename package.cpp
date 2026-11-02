@@ -565,6 +565,7 @@ value_t *build_std_namespace() {
         builtin_module({
             {"client", B_tls_client},
             {"server", B_tls_server},
+            {"alpn", B_tls_alpn},
         })));
 #endif
     root->payload->items.push_back(std::make_pair(

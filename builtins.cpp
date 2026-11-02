@@ -6,6 +6,7 @@
 #include "generator.h"
 #include "http.h"
 #include "http2.h"
+#include "websocket.h"
 #include "io.h"
 #include "json.h"
 #include "net.h"
@@ -347,6 +348,8 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_tls_client && functype <= B_tls_alpn)
         return call_tls_builtin(functype, args);
 #endif
+    if (functype >= B_ws_connect && functype <= B_ws_close)
+        return call_websocket_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

@@ -88,6 +88,7 @@ add_executable(${PROJECT_NAME}
   symbol.cpp
   task.cpp
   valuetype.cpp
+  websocket.cpp
 )
 
 if(WIN32)

@@ -446,6 +446,98 @@ await sent;
 std.http.close(s);
 ```
 
+协议升级（Upgrade）：
+
+客户端：
+
+```text
+let r = std.http.get(url, {
+  "upgrade": true,
+  "headers": {"Upgrade": "websocket"}
+});
+
+if (r["upgraded"]) {
+  std.io.write_all(r["socket"], "hello");
+  bytes_to_string(std.io.read(r["socket"], 4096));
+  std.io.close(r["socket"]);
+}
+```
+
+服务端：
+
+```text
+let req = std.http.accept(s, 5000);
+let stream = std.http.upgrade(req, {"X-Test": "yes"});
+
+std.io.write_all(stream, "hello");
+bytes_to_string(std.io.read(stream, 4096));
+std.io.close(stream);
+```
+
+- `upgrade: true` 时客户端使用独立连接，不进入 keep-alive 连接池；
+- 服务端返回 `101` 时，响应 dict 包含 `"upgraded": true` 和 `"socket"`；
+- `std.http.upgrade(request[, headers])` 发送 `101 Switching Protocols` 并返回原始 stream；
+- 升级后的读写使用 `std.io`；
+- 当前只支持 HTTP/1.1 Upgrade；HTTP/2 extended CONNECT 尚未实现。
+
+WebSocket：
+
+```text
+std.websocket.connect(url[, options])          → ws
+std.websocket.connect_async(url[, options])    → task
+std.websocket.accept(request)                  → ws
+std.websocket.send(ws, data[, timeout_ms])     → bool
+std.websocket.send_async(ws, data[, timeout_ms]) → task
+std.websocket.receive(ws[, timeout_ms])        → message
+std.websocket.receive_async(ws[, timeout_ms])  → task
+std.websocket.ping(ws[, data])                 → bool
+std.websocket.close(ws[, code[, reason]])      → bool
+```
+
+客户端：
+
+```text
+let ws = std.websocket.connect("ws://127.0.0.1:8080/");
+
+std.websocket.send(ws, "hello");
+
+let msg = std.websocket.receive(ws);
+print(msg["type"] + ": " + msg["data"]);
+
+std.websocket.close(ws);
+```
+
+服务端：
+
+```text
+let req = std.http.accept(s, 5000);
+let ws = std.websocket.accept(req);
+
+let msg = std.websocket.receive(ws);
+std.websocket.send(ws, "echo:" + msg["data"]);
+std.websocket.close(ws);
+```
+
+消息 dict：
+
+```text
+text   → {"type": "text", "data": string}
+binary → {"type": "binary", "data": bytes}
+pong   → {"type": "pong", "data": bytes}
+close  → {"type": "close", "code": int, "reason": string}
+```
+
+规则：
+
+- 支持 `ws://` 和 `wss://`；
+- 客户端发出的帧自动 masking，服务端发出的帧不 masking；
+- 自动回复 ping；
+- 支持分片消息重组；
+- 单条消息默认上限 16 MiB；
+- `send` 对 string 使用 text 帧，对 bytes 使用 binary 帧；
+- `close` 发送 close 帧并关闭底层 stream；
+- 目前只支持 HTTP/1.1 WebSocket 握手，不支持 HTTP/2 extended CONNECT。
+
 keep-alive 服务端：
 
 ```text
@@ -566,6 +658,7 @@ status, status_text, headers, body, http_major, http_minor
 - `std.http.serve` 支持服务端 keep-alive；
 - `std.http.accept` / `respond` 仍是一次连接一个请求；
 - 默认整体读取请求和响应 body；可用 `body_stream` / `on_body` 流式处理；
+- 客户端 `options` 还支持 `upgrade`，用于发起 HTTP/1.1 协议升级；
 - `max_body_bytes` 默认 16 MiB；
 - 同名 header 在 dict 中只保留最后一个；
 - `std.http` 客户端和服务端都提供同步和 async 接口。
@@ -1277,6 +1370,7 @@ std.http.accept_async
 std.http.respond
 std.http.respond_async
 std.http.serve
+std.http.upgrade
 std.http.close
 
 std.http2.request
@@ -1295,6 +1389,16 @@ std.http2.close
 std.tls.client
 std.tls.server
 std.tls.alpn
+
+std.websocket.connect
+std.websocket.connect_async
+std.websocket.accept
+std.websocket.send
+std.websocket.send_async
+std.websocket.receive
+std.websocket.receive_async
+std.websocket.ping
+std.websocket.close
 
 std.task.sleep
 std.task.yield

@@ -281,6 +281,7 @@ bool body_value(value_t *value, std::string &out, const char *who) {
 
 const char *reason_phrase(int status) {
     switch (status) {
+        case 101: return "Switching Protocols";
         case 200: return "OK";
         case 201: return "Created";
         case 202: return "Accepted";
@@ -575,7 +576,8 @@ std::string build_response(int status, value_t *headers,
 
 std::string build_request(const std::string &method, const url_parts &url,
                           value_t *headers, const std::string &body,
-                          bool keep_alive, bool chunked = false) {
+                          bool keep_alive, bool chunked = false,
+                          bool upgrade = false) {
     std::string request;
     request += method;
     request += " ";
@@ -591,9 +593,13 @@ std::string build_request(const std::string &method, const url_parts &url,
         }
         request += "\r\n";
     }
-    if (!header_exists(headers, "Connection"))
-        request += keep_alive ? "Connection: keep-alive\r\n"
-                              : "Connection: close\r\n";
+    if (!header_exists(headers, "Connection")) {
+        if (upgrade)
+            request += "Connection: Upgrade\r\n";
+        else
+            request += keep_alive ? "Connection: keep-alive\r\n"
+                                  : "Connection: close\r\n";
+    }
     if (chunked) {
         if (!header_exists(headers, "Content-Length") &&
             !header_exists(headers, "Transfer-Encoding"))
@@ -748,6 +754,16 @@ value_t *do_request(const std::string &method, const std::string &url_text,
             (std::size_t)((int_value_t *)max_body_value)->value;
     }
 
+    bool upgrade = false;
+    value_t *upgrade_value = dict_get(options, "upgrade");
+    if (upgrade_value) {
+        if (upgrade_value->type != T_bool) {
+            yyerror("std.http: upgrade must be a bool");
+            return NULL;
+        }
+        upgrade = ((bool_value_t *)upgrade_value)->value;
+    }
+
     bool tls_verify = true;
     std::string tls_ca_file;
     value_t *tls_options = dict_get(options, "tls");
@@ -764,9 +780,69 @@ value_t *do_request(const std::string &method, const std::string &url_text,
 
     std::string key = connection_key(url, tls_verify, tls_ca_file);
     std::string request =
-        build_request(method, url, headers, body, true, chunked);
+        build_request(method, url, headers, body, true, chunked, upgrade);
     if (request.empty())
         return NULL;
+
+    if (upgrade) {
+        std::vector<value_t *> connect_args;
+        connect_args.push_back(newstrval(url.host.c_str()));
+        connect_args.push_back(newintval(url.port));
+        connect_args.push_back(newintval(timeout_ms));
+        value_t *client = call_net(B_net_tcp_connect, connect_args);
+        if (!client)
+            return NULL;
+        value_t *stream = client;
+        if (url.tls) {
+#ifdef CALC_ENABLE_TLS
+            std::vector<value_t *> tls_args;
+            tls_args.push_back(dupval(client));
+            tls_args.push_back(newstrval(url.host.c_str()));
+            tls_args.push_back(tls_options ? dupval(tls_options)
+                                           : newnull());
+            stream = call_tls(B_tls_client, tls_args);
+            if (!stream) {
+                close_socket(client);
+                freeval(client);
+                return NULL;
+            }
+            freeval(client);
+#else
+            yyerror("std.http: https is not supported (TLS disabled)");
+            close_socket(client);
+            freeval(client);
+            return NULL;
+#endif
+        }
+
+        std::vector<value_t *> write_args;
+        write_args.push_back(dupval(stream));
+        write_args.push_back(newbytesval(request));
+        write_args.push_back(newintval(timeout_ms));
+        value_t *written = call_io(B_io_write_all, write_args);
+        bool ok = written != NULL;
+        if (written)
+            freeval(written);
+        http1::message message;
+        if (ok)
+            ok = read_message(stream, false, timeout_ms, message);
+        if (!ok) {
+            close_socket(stream);
+            freeval(stream);
+            return NULL;
+        }
+        value_t *response = make_response(message);
+        bool upgraded = message.status_code == 101;
+        dict_set(response, "upgraded", newboolval(upgraded));
+        if (upgraded) {
+            dict_set(response, "socket", dupval(stream));
+            freeval(stream);
+            return response;
+        }
+        close_socket(stream);
+        freeval(stream);
+        return response;
+    }
 
     bool idempotent = method == "GET" || method == "HEAD" ||
                       method == "OPTIONS" || method == "TRACE";
@@ -1056,8 +1132,18 @@ value_t *do_request_async(const std::string &method,
             (std::size_t)((int_value_t *)max_body_value)->value;
     }
 
+    bool upgrade = false;
+    value_t *upgrade_value = dict_get(options, "upgrade");
+    if (upgrade_value) {
+        if (upgrade_value->type != T_bool) {
+            yyerror("std.http: upgrade must be a bool");
+            return NULL;
+        }
+        upgrade = ((bool_value_t *)upgrade_value)->value;
+    }
+
     std::string request =
-        build_request(method, url, headers, body, true, chunked);
+        build_request(method, url, headers, body, true, chunked, upgrade);
     if (request.empty())
         return NULL;
 
@@ -1072,11 +1158,63 @@ value_t *do_request_async(const std::string &method,
     task_ptr task = fiber_start_async(
         [host, port, request, timeout_ms, use_tls, tls_verify,
          tls_ca_file, key, retryable, on_body_owned, max_body_bytes,
-         body_generator, chunked]() {
+         body_generator, chunked, upgrade]() {
         std::shared_ptr<value_t> on_body_holder;
         if (on_body_owned)
             on_body_holder =
                 std::shared_ptr<value_t>(on_body_owned, freeval);
+        if (upgrade) {
+            value_t *client = async_connect(host, port, timeout_ms);
+            if (!client)
+                return (value_t *)NULL;
+            value_t *stream = client;
+            if (use_tls) {
+#ifdef CALC_ENABLE_TLS
+                value_t *tls_options = (value_t *)newdictval();
+                dict_set(tls_options, "verify", newboolval(tls_verify));
+                if (!tls_ca_file.empty())
+                    dict_set(tls_options, "ca_file",
+                             newstrval(tls_ca_file.c_str()));
+                std::vector<value_t *> tls_args;
+                tls_args.push_back(dupval(client));
+                tls_args.push_back(newstrval(host.c_str()));
+                tls_args.push_back(tls_options);
+                stream = call_tls(B_tls_client, tls_args);
+                if (!stream) {
+                    close_socket(client);
+                    freeval(client);
+                    return (value_t *)NULL;
+                }
+                freeval(client);
+#else
+                yyerror("std.http: https is not supported (TLS disabled)");
+                close_socket(client);
+                freeval(client);
+                return (value_t *)NULL;
+#endif
+            }
+            bool ok = async_write(stream, request, timeout_ms);
+            http1::message message;
+            if (ok)
+                ok = read_message_async(stream, false, timeout_ms, message,
+                                        on_body_owned, max_body_bytes);
+            if (!ok) {
+                close_socket(stream);
+                freeval(stream);
+                return (value_t *)NULL;
+            }
+            value_t *response = make_response(message);
+            bool upgraded = message.status_code == 101;
+            dict_set(response, "upgraded", newboolval(upgraded));
+            if (upgraded) {
+                dict_set(response, "socket", dupval(stream));
+                freeval(stream);
+                return response;
+            }
+            close_socket(stream);
+            freeval(stream);
+            return response;
+        }
         for (int attempt = 0; attempt < 2; ++attempt) {
             pooled_connection *connection =
                 attempt == 0 ? pool_acquire(key) : NULL;
@@ -1983,6 +2121,70 @@ value_t *http_serve(const std::vector<value_t *> &args) {
     return await_task_value(new_task_value(std::move(server_task)));
 }
 
+value_t *http_upgrade(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2 || args[0]->type != T_dict) {
+        yyerror("std.http.upgrade expects a request and optional headers");
+        return NULL;
+    }
+    value_t *socket = dict_get(args[0], "socket");
+    if (!socket) {
+        yyerror("std.http.upgrade expects an HTTP request handle");
+        return NULL;
+    }
+    value_t *headers = args.size() == 2 ? args[1] : NULL;
+    if (headers && headers->type != T_dict && headers->type != T_null) {
+        yyerror("std.http.upgrade headers must be a dict or null");
+        return NULL;
+    }
+
+    std::string upgrade = header_value(headers, "Upgrade");
+    if (upgrade.empty())
+        upgrade = header_value(dict_get(args[0], "headers"), "Upgrade");
+    if (upgrade.empty()) {
+        yyerror("std.http.upgrade requires an Upgrade header");
+        return NULL;
+    }
+
+    std::string response = "HTTP/1.1 101 Switching Protocols\r\n";
+    response += "Connection: Upgrade\r\n";
+    response += "Upgrade: ";
+    response += upgrade;
+    response += "\r\n";
+    if (headers && headers->type == T_dict) {
+        dict_value_t *dict = (dict_value_t *)headers;
+        for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+            value_t *key = dict->payload->items[i].first;
+            value_t *value = dict->payload->items[i].second;
+            if (key->type != T_string || value->type != T_string) {
+                yyerror("std.http.upgrade header names and values must be "
+                        "strings");
+                return NULL;
+            }
+            std::string name = ((string_value_t *)key)->value;
+            std::string lower = lower_ascii(name);
+            if (lower == "connection" || lower == "upgrade" ||
+                lower == "content-length" ||
+                lower == "transfer-encoding")
+                continue;
+            response += name;
+            response += ": ";
+            response += ((string_value_t *)value)->value;
+            response += "\r\n";
+        }
+    }
+    response += "\r\n";
+
+    std::vector<value_t *> write_args;
+    write_args.push_back(dupval(socket));
+    write_args.push_back(newbytesval(response));
+    write_args.push_back(newintval(0));
+    value_t *written = call_io(B_io_write_all, write_args);
+    if (!written)
+        return NULL;
+    freeval(written);
+    return dupval(socket);
+}
+
 value_t *http_close(const std::vector<value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_dict) {
         yyerror("std.http.close expects a server or request handle");
@@ -2036,6 +2238,8 @@ struct value_t *call_http_builtin(
             return http_respond_async(args);
         case B_http_serve:
             return http_serve(args);
+        case B_http_upgrade:
+            return http_upgrade(args);
         case B_http_close:
             return http_close(args);
         default:

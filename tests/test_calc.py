@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Golden/smoke tests for the calc-demo interpreter."""
 
+import base64
+import hashlib
 import os
 import signal
 import subprocess
@@ -72,6 +74,57 @@ def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
             f"{name}: expected stderr not to contain {not_stderr!r}\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
+
+
+def ws_recv_exact(sock, count):
+    data = b""
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+        if not chunk:
+            raise AssertionError("websocket: unexpected EOF")
+        data += chunk
+    return data
+
+
+def ws_read_frame(sock):
+    first, second = ws_recv_exact(sock, 2)
+    opcode = first & 0x0f
+    masked = bool(second & 0x80)
+    length = second & 0x7f
+    if length == 126:
+        length = int.from_bytes(ws_recv_exact(sock, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(ws_recv_exact(sock, 8), "big")
+    mask = ws_recv_exact(sock, 4) if masked else b""
+    payload = ws_recv_exact(sock, length) if length else b""
+    if masked:
+        payload = bytes(
+            byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    return opcode, payload
+
+
+def ws_write_frame(sock, opcode, payload, masked):
+    header = bytes([0x80 | opcode])
+    length = len(payload)
+    mask_bit = 0x80 if masked else 0
+    if length <= 125:
+        header += bytes([mask_bit | length])
+    elif length <= 65535:
+        header += bytes([mask_bit | 126]) + length.to_bytes(2, "big")
+    else:
+        header += bytes([mask_bit | 127]) + length.to_bytes(8, "big")
+    if masked:
+        mask = b"\x11\x22\x33\x44"
+        header += mask
+        payload = bytes(
+            byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    sock.sendall(header + payload)
+
+
+def ws_accept_key(key):
+    guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    digest = hashlib.sha1((key + guid).encode()).digest()
+    return base64.b64encode(digest).decode()
 
 
 def check_interactive_continuation():
@@ -4372,6 +4425,253 @@ def main():
             if http1_mc_proc.poll() is None:
                 http1_mc_proc.terminate()
                 http1_mc_proc.wait(timeout=5)
+
+        upgrade_probe = socket.socket()
+        upgrade_probe.bind(("127.0.0.1", 0))
+        upgrade_port = upgrade_probe.getsockname()[1]
+        upgrade_probe.close()
+        upgrade_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        upgrade_client = None
+        try:
+            upgrade_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http.listen("127.0.0.1", {upgrade_port});\n'
+                "let req = std.http.accept(s, 5000);\n"
+                "let stream = std.http.upgrade(req);\n"
+                "let data = std.io.read(stream, 100);\n"
+                'std.io.write_all(stream, "echo:" + '
+                "bytes_to_string(data));\n"
+                "std.io.close(stream);\n"
+                "std.http.close(s);\n"
+            )
+            upgrade_proc.stdin.close()
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    upgrade_client = socket.create_connection(
+                        ("127.0.0.1", upgrade_port), timeout=0.2)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert upgrade_client is not None, (
+                "http upgrade server did not listen")
+            upgrade_client.sendall(
+                b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                b"Connection: Upgrade\r\nUpgrade: test\r\n\r\n")
+            response = b""
+            while b"\r\n\r\n" not in response:
+                chunk = upgrade_client.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            assert b"101 Switching Protocols" in response, response
+            assert b"Connection: Upgrade" in response, response
+            assert b"Upgrade: test" in response, response
+            upgrade_client.sendall(b"hello")
+            assert upgrade_client.recv(100) == b"echo:hello"
+            upgrade_proc.wait(timeout=10)
+        finally:
+            if upgrade_client:
+                upgrade_client.close()
+            if upgrade_proc.poll() is None:
+                upgrade_proc.terminate()
+                upgrade_proc.wait(timeout=5)
+
+        upgrade_server_sock = socket.socket()
+        upgrade_server_sock.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        upgrade_server_sock.bind(("127.0.0.1", 0))
+        upgrade_server_sock.listen(2)
+        upgrade_server_sock.settimeout(5)
+        upgrade_server_port = upgrade_server_sock.getsockname()[1]
+
+        def upgrade_echo_server():
+            try:
+                for _ in range(2):
+                    client, _ = upgrade_server_sock.accept()
+                    request = b""
+                    while b"\r\n\r\n" not in request:
+                        chunk = client.recv(4096)
+                        if not chunk:
+                            return
+                        request += chunk
+                    client.sendall(
+                        b"HTTP/1.1 101 Switching Protocols\r\n"
+                        b"Connection: Upgrade\r\n"
+                        b"Upgrade: test\r\n\r\n")
+                    data = client.recv(100)
+                    client.sendall(b"echo:" + data)
+                    client.close()
+            finally:
+                upgrade_server_sock.close()
+
+        upgrade_thread = threading.Thread(target=upgrade_echo_server)
+        upgrade_thread.start()
+        upgrade_client_proc = run(
+            "import std;\n"
+            f'let a = std.http.get('
+            f'"http://127.0.0.1:{upgrade_server_port}/", '
+            '{"upgrade": true, "headers": {"Upgrade": "test"}});\n'
+            'print(str(a["status"]) + " " + str(a["upgraded"]));\n'
+            'std.io.write_all(a["socket"], "one");\n'
+            'print(bytes_to_string(std.io.read(a["socket"], 100)));\n'
+            'std.io.close(a["socket"]);\n'
+            f'let b = await std.http.get_async('
+            f'"http://127.0.0.1:{upgrade_server_port}/", '
+            '{"upgrade": true, "headers": {"Upgrade": "test"}});\n'
+            'print(str(b["status"]) + " " + str(b["upgraded"]));\n'
+            'std.io.write_all(b["socket"], "two");\n'
+            'print(bytes_to_string(std.io.read(b["socket"], 100)));\n'
+            'std.io.close(b["socket"]);\n',
+            timeout=15,
+        )
+        upgrade_thread.join(timeout=5)
+        assert upgrade_client_proc.returncode == 0, (
+            upgrade_client_proc.stderr)
+        assert "101 true" in upgrade_client_proc.stdout, (
+            upgrade_client_proc.stdout)
+        assert "echo:one" in upgrade_client_proc.stdout, (
+            upgrade_client_proc.stdout)
+        assert "echo:two" in upgrade_client_proc.stdout, (
+            upgrade_client_proc.stdout)
+
+        ws_client_server = socket.socket()
+        ws_client_server.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        ws_client_server.bind(("127.0.0.1", 0))
+        ws_client_server.listen(1)
+        ws_client_server.settimeout(5)
+        ws_client_port = ws_client_server.getsockname()[1]
+        ws_client_error = []
+
+        def ws_client_server_fn():
+            try:
+                client, _ = ws_client_server.accept()
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        return
+                    request += chunk
+                key = ""
+                for line in request.split(b"\r\n")[1:]:
+                    if line.lower().startswith(b"sec-websocket-key:"):
+                        key = line.split(b":", 1)[1].strip().decode()
+                if not key:
+                    ws_client_error.append("missing websocket key")
+                    return
+                client.sendall(
+                    b"HTTP/1.1 101 Switching Protocols\r\n"
+                    b"Connection: Upgrade\r\n"
+                    b"Upgrade: websocket\r\n"
+                    b"Sec-WebSocket-Accept: " +
+                    ws_accept_key(key).encode() + b"\r\n\r\n")
+                opcode, payload = ws_read_frame(client)
+                if opcode != 1 or payload != b"hello":
+                    ws_client_error.append(
+                        f"bad client frame: {opcode} {payload!r}")
+                    return
+                ws_write_frame(client, 1, b"echo:hello", False)
+                opcode, _ = ws_read_frame(client)
+                if opcode != 8:
+                    ws_client_error.append(
+                        f"expected close, got {opcode}")
+                client.close()
+            finally:
+                ws_client_server.close()
+
+        ws_client_thread = threading.Thread(target=ws_client_server_fn)
+        ws_client_thread.start()
+        ws_client_proc = run(
+            "import std;\n"
+            f'let ws = std.websocket.connect('
+            f'"ws://127.0.0.1:{ws_client_port}/");\n'
+            'std.websocket.send(ws, "hello");\n'
+            "let m = std.websocket.receive(ws);\n"
+            'print(m["data"]);\n'
+            "std.websocket.close(ws);\n",
+            timeout=15,
+        )
+        ws_client_thread.join(timeout=5)
+        assert not ws_client_error, ws_client_error
+        assert ws_client_proc.returncode == 0, ws_client_proc.stderr
+        assert "echo:hello" in ws_client_proc.stdout, (
+            ws_client_proc.stdout)
+
+        ws_server_probe = socket.socket()
+        ws_server_probe.bind(("127.0.0.1", 0))
+        ws_server_port = ws_server_probe.getsockname()[1]
+        ws_server_probe.close()
+        ws_server_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        ws_server_client = None
+        try:
+            ws_server_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http.listen("127.0.0.1", '
+                f"{ws_server_port});\n"
+                "let req = std.http.accept(s, 5000);\n"
+                "let ws = std.websocket.accept(req);\n"
+                "let m = std.websocket.receive(ws);\n"
+                'print("got:" + m["data"]);\n'
+                'std.websocket.send(ws, "echo:" + m["data"]);\n'
+                "std.websocket.close(ws);\n"
+                "std.http.close(s);\n"
+            )
+            ws_server_proc.stdin.close()
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    ws_server_client = socket.create_connection(
+                        ("127.0.0.1", ws_server_port), timeout=0.2)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert ws_server_client is not None, (
+                "websocket server did not listen")
+            key = base64.b64encode(b"0123456789abcdef").decode()
+            ws_server_client.sendall(
+                b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                b"Connection: Upgrade\r\nUpgrade: websocket\r\n"
+                b"Sec-WebSocket-Version: 13\r\n"
+                b"Sec-WebSocket-Key: " + key.encode() + b"\r\n\r\n")
+            response = b""
+            while b"\r\n\r\n" not in response:
+                chunk = ws_server_client.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            assert b"101 Switching Protocols" in response, response
+            assert ("Sec-WebSocket-Accept: " + ws_accept_key(key)).encode() \
+                in response, response
+            ws_write_frame(ws_server_client, 1, b"hello", True)
+            opcode, payload = ws_read_frame(ws_server_client)
+            assert opcode == 1 and payload == b"echo:hello", (
+                opcode, payload)
+            opcode, _ = ws_read_frame(ws_server_client)
+            assert opcode == 8, opcode
+            ws_server_proc.wait(timeout=10)
+            ws_server_output = ws_server_proc.stdout.read()
+            assert "got:hello" in ws_server_output, ws_server_output
+        finally:
+            if ws_server_client:
+                ws_server_client.close()
+            if ws_server_proc.poll() is None:
+                ws_server_proc.terminate()
+                ws_server_proc.wait(timeout=5)
 
         rb1_probe = socket.socket()
         rb1_probe.bind(("127.0.0.1", 0))

@@ -572,6 +572,7 @@ value_t *build_std_namespace() {
             {"respond", B_http_respond},
             {"respond_async", B_http_respond_async},
             {"serve", B_http_serve},
+            {"upgrade", B_http_upgrade},
             {"close", B_http_close},
         })));
 #ifdef CALC_ENABLE_HTTP2
@@ -601,6 +602,19 @@ value_t *build_std_namespace() {
             {"alpn", B_tls_alpn},
         })));
 #endif
+    root->payload->items.push_back(std::make_pair(
+        newstrval("websocket"),
+        builtin_module({
+            {"connect", B_ws_connect},
+            {"connect_async", B_ws_connect_async},
+            {"accept", B_ws_accept},
+            {"send", B_ws_send},
+            {"send_async", B_ws_send_async},
+            {"receive", B_ws_receive},
+            {"receive_async", B_ws_receive_async},
+            {"ping", B_ws_ping},
+            {"close", B_ws_close},
+        })));
     root->payload->items.push_back(std::make_pair(
         newstrval("error"),
         builtin_module({

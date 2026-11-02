@@ -3534,6 +3534,75 @@ def main():
                     http2_retry_proc.terminate()
                     http2_retry_proc.wait(timeout=5)
 
+            http2_drain_probe = socket.socket()
+            http2_drain_probe.bind(("127.0.0.1", 0))
+            http2_drain_port = http2_drain_probe.getsockname()[1]
+            http2_drain_probe.close()
+            http2_drain_proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                http2_drain_proc.stdin.write(
+                    "import std;\n"
+                    "async func handler(req) {\n"
+                    "  await std.task.sleep(100);\n"
+                    '  return {"status": 200, "body": "cid=" + '
+                    'str(req["connection_id"]) + " " + req["path"]};\n'
+                    "}\n"
+                    f'let s = std.http2.listen("127.0.0.1", '
+                    f"{http2_drain_port});\n"
+                    "let n = std.http2.serve(s, handler, 2);\n"
+                    'print("served " + str(n));\n'
+                    "std.http2.close(s);\n"
+                )
+                http2_drain_proc.stdin.close()
+                deadline = time.time() + 5
+                ready = False
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", http2_drain_port), timeout=0.2)
+                        probe.close()
+                        ready = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                assert ready, "http2 drain server did not listen"
+                http2_drain_client = run(
+                    "import std;\n"
+                    f'let t1 = std.http2.get_async('
+                    f'"http://127.0.0.1:{http2_drain_port}/a");\n'
+                    f'let t2 = std.http2.get_async('
+                    f'"http://127.0.0.1:{http2_drain_port}/b");\n'
+                    "let a = await t1;\n"
+                    "let b = await t2;\n"
+                    'print(bytes_to_string(a["body"]));\n'
+                    'print(bytes_to_string(b["body"]));\n',
+                    timeout=15,
+                )
+                assert http2_drain_client.returncode == 0, (
+                    http2_drain_client.stderr)
+                drain_lines = http2_drain_client.stdout.splitlines()
+                assert len(drain_lines) == 2, http2_drain_client.stdout
+                drain_cids = [line.split()[0] for line in drain_lines]
+                assert len(set(drain_cids)) == 1, (
+                    "http2 max_requests drain did not finish in-flight "
+                    "streams: " + http2_drain_client.stdout)
+                assert " /a" in drain_lines[0], http2_drain_client.stdout
+                assert " /b" in drain_lines[1], http2_drain_client.stdout
+                http2_drain_proc.wait(timeout=10)
+                drain_output = http2_drain_proc.stdout.read()
+                assert "served 2" in drain_output, drain_output
+            finally:
+                if http2_drain_proc.poll() is None:
+                    http2_drain_proc.terminate()
+                    http2_drain_proc.wait(timeout=5)
+
             http2_ss_probe = socket.socket()
             http2_ss_probe.bind(("127.0.0.1", 0))
             http2_ss_port = http2_ss_probe.getsockname()[1]

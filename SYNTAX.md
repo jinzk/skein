@@ -1823,6 +1823,8 @@ std.http2.close(s);
 - 服务端响应 dict 支持 `body_stream` 流式发送；
 - async 服务端 handler 可在多个 stream 之间并发执行；
 - 每个客户端连接在独立 fiber 中处理，多个连接可以并发服务；
+- 达到 `max_requests` 后进入 graceful drain：停止接受新连接和新 stream，已启动的 handler 会继续完成并发送响应；
+- 达到 `max_per_connection` 后关闭当前连接，未处理的 stream 由客户端按幂等规则重试；
 - `options` 支持 `headers`、`body`、`body_stream`、`on_body`、`timeout_ms`、`max_body_bytes`、`tls`；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；

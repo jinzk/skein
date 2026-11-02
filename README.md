@@ -655,6 +655,8 @@ std.http2.close(s);
 - 服务端 handler 接收 request dict，返回 response dict；
 - 每个请求在独立 fiber 中执行，async handler 可以跨 stream 并发；
 - 每个客户端连接也在独立 fiber 中处理，多个连接可以并发服务；
+- 达到 `max_requests` 后进入 graceful drain：停止接受新连接和新 stream，已启动的 handler 会继续完成并发送响应；
+- 达到 `max_per_connection` 后关闭当前连接，未处理的 stream 由客户端按幂等规则重试；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；

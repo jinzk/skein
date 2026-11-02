@@ -2525,13 +2525,20 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             state->settings.size());
 
         bool connection_open = true;
+        bool draining = false;
+        bool goaway_sent = false;
+        int32_t last_served_stream_id = 0;
         long long connection_requests = 0;
         std::map<int32_t, task_ptr> handler_tasks;
         std::chrono::steady_clock::time_point last_activity =
             std::chrono::steady_clock::now();
-        while (connection_open && !state->stopping &&
-               (state->max_requests == 0 ||
-                state->served < state->max_requests)) {
+        while (connection_open) {
+            if (!draining &&
+                (state->stopping ||
+                 (state->max_requests != 0 &&
+                  state->served >= state->max_requests)))
+                draining = true;
+
             rv = nghttp2_session_send(connection.session);
             if (rv != 0) {
                 connection.failure = "nghttp2 send failed";
@@ -2539,7 +2546,20 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 break;
             }
 
-            while (!connection.ready.empty()) {
+            while (!draining && !connection.ready.empty()) {
+                if (state->max_requests != 0 &&
+                    state->served + (long long)handler_tasks.size() >=
+                        state->max_requests) {
+                    draining = true;
+                    break;
+                }
+                if (state->max_per_connection != 0 &&
+                    connection_requests +
+                            (long long)handler_tasks.size() >=
+                        state->max_per_connection) {
+                    draining = true;
+                    break;
+                }
                 int32_t stream_id = connection.ready.front();
                 connection.ready.erase(connection.ready.begin());
                 std::map<int32_t, h2_connection::server_request>::iterator it =
@@ -2569,6 +2589,19 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             if (!connection_open)
                 break;
 
+            if (draining && !goaway_sent) {
+                int32_t last_stream_id = last_served_stream_id;
+                for (std::map<int32_t, task_ptr>::iterator it =
+                         handler_tasks.begin();
+                     it != handler_tasks.end(); ++it)
+                    if (it->first > last_stream_id)
+                        last_stream_id = it->first;
+                nghttp2_submit_goaway(connection.session,
+                                      NGHTTP2_FLAG_NONE, last_stream_id,
+                                      NGHTTP2_NO_ERROR, NULL, 0);
+                goaway_sent = true;
+            }
+
             for (std::map<int32_t, task_ptr>::iterator it =
                      handler_tasks.begin();
                  it != handler_tasks.end();) {
@@ -2597,14 +2630,17 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 }
                 ++state->served;
                 ++connection_requests;
-                if ((state->max_requests != 0 &&
-                     state->served >= state->max_requests) ||
-                    (state->max_per_connection != 0 &&
-                     connection_requests >= state->max_per_connection)) {
+                if (stream_id > last_served_stream_id)
+                    last_served_stream_id = stream_id;
+                if (state->max_requests != 0 &&
+                    state->served >= state->max_requests) {
+                    state->stopping = true;
+                    draining = true;
+                }
+                if (state->max_per_connection != 0 &&
+                    connection_requests >=
+                        state->max_per_connection) {
                     connection_open = false;
-                    if (state->max_requests != 0 &&
-                        state->served >= state->max_requests)
-                        state->stopping = true;
                     break;
                 }
             }
@@ -2615,8 +2651,11 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             if (rv != 0)
                 break;
 
+            if (draining && handler_tasks.empty())
+                break;
+
             long long read_timeout = 100;
-            if (!handler_tasks.empty())
+            if (!handler_tasks.empty() || draining)
                 read_timeout = 20;
             if (state->idle_timeout_ms != 0)
                 read_timeout = std::min<long long>(
@@ -2644,6 +2683,8 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             }
             if (timed_out) {
                 if (state->stopping)
+                    draining = true;
+                if (draining && handler_tasks.empty())
                     break;
                 if (handler_tasks.empty() &&
                     state->idle_timeout_ms != 0 &&
@@ -2677,10 +2718,16 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
         }
         handler_tasks.clear();
 
-        nghttp2_submit_goaway(
-            connection.session, NGHTTP2_FLAG_NONE,
-            nghttp2_session_get_last_proc_stream_id(connection.session),
-            NGHTTP2_NO_ERROR, NULL, 0);
+        if (!goaway_sent) {
+            int32_t last_stream_id = last_served_stream_id;
+            if (last_stream_id == 0)
+                last_stream_id =
+                    nghttp2_session_get_last_proc_stream_id(
+                        connection.session);
+            nghttp2_submit_goaway(connection.session, NGHTTP2_FLAG_NONE,
+                                  last_stream_id, NGHTTP2_NO_ERROR, NULL,
+                                  0);
+        }
         nghttp2_session_send(connection.session);
         nghttp2_session_del(connection.session);
         close_socket(stream);

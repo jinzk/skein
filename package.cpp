@@ -574,6 +574,7 @@ value_t *build_std_namespace() {
             {"serve", B_http_serve},
             {"upgrade", B_http_upgrade},
             {"cookies", B_http_cookies},
+            {"read_body", B_http_read_body},
             {"close", B_http_close},
         })));
 #ifdef SKEIN_ENABLE_HTTP2

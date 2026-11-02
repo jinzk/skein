@@ -65,6 +65,11 @@ public:
     const std::vector<message> &messages() const;
     std::vector<message> take_messages();
 
+    /* True once the current message's headers have been parsed. */
+    bool headers_complete() const;
+    /* The message currently being parsed (headers and any body so far). */
+    const message &current_message() const;
+
     int error_code() const;
     const std::string &error() const;
     std::size_t error_offset() const;

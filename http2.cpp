@@ -5,6 +5,7 @@
 #include "cookie.h"
 #include "eval.h"
 #include "fiber.h"
+#include "http.h"
 #include "io.h"
 #include "net.h"
 #include "repl.h"
@@ -21,6 +22,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -527,12 +529,19 @@ struct h2_connection {
         std::string authority;
         std::vector<header_pair> headers;
         std::string body;
+        std::deque<std::string> body_chunks;
+        task_ptr body_waiter;
+        bool body_failed = false;
+        std::string body_error;
         std::size_t received_bytes = 0;
         bool complete = false;
         bool responded = false;
+        bool ready_enqueued = false;
+        bool discard_body = false;
     };
-    std::map<int32_t, server_request> requests;
+    std::map<int32_t, std::shared_ptr<server_request>> requests;
     std::vector<int32_t> ready;
+    bool stream_request_body = false;
     value_t *on_request_body = NULL;
     std::map<int32_t, out_body> response_bodies;
     std::map<int32_t, generator_state> response_streams;
@@ -1105,13 +1114,34 @@ int client_on_header2(nghttp2_session *, const nghttp2_frame *frame,
     return 0;
 }
 
+std::shared_ptr<h2_connection::server_request> server_request_at(
+    h2_connection *connection, int32_t stream_id) {
+    std::map<int32_t, std::shared_ptr<h2_connection::server_request>>::
+        iterator it = connection->requests.find(stream_id);
+    if (it == connection->requests.end())
+        return std::shared_ptr<h2_connection::server_request>();
+    return it->second;
+}
+
+void wake_server_body(
+    const std::shared_ptr<h2_connection::server_request> &request) {
+    if (!request)
+        return;
+    task_ptr waiter = std::move(request->body_waiter);
+    request->body_waiter.reset();
+    if (waiter && task_get_state(waiter) == TASK_STATE_PENDING)
+        task_complete(waiter, NULL);
+}
+
 int server_on_begin_headers(nghttp2_session *, const nghttp2_frame *frame,
                             void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
     if (frame->hd.type != NGHTTP2_HEADERS ||
         frame->headers.cat != NGHTTP2_HCAT_REQUEST)
         return 0;
-    connection->requests[frame->hd.stream_id];
+    if (!server_request_at(connection, frame->hd.stream_id))
+        connection->requests[frame->hd.stream_id] =
+            std::make_shared<h2_connection::server_request>();
     return 0;
 }
 
@@ -1122,25 +1152,29 @@ int server_on_header(nghttp2_session *, const nghttp2_frame *frame,
     h2_connection *connection = (h2_connection *)user_data;
     if (frame->hd.type != NGHTTP2_HEADERS)
         return 0;
-    h2_connection::server_request &request =
-        connection->requests[frame->hd.stream_id];
+    std::shared_ptr<h2_connection::server_request> request =
+        server_request_at(connection, frame->hd.stream_id);
+    if (!request) {
+        request = std::make_shared<h2_connection::server_request>();
+        connection->requests[frame->hd.stream_id] = request;
+    }
     std::string key((const char *)name, namelen);
     std::string text((const char *)value, valuelen);
     if (key == ":method")
-        request.method = text;
+        request->method = text;
     else if (key == ":path")
-        request.path = text;
+        request->path = text;
     else if (key == ":scheme")
-        request.scheme = text;
+        request->scheme = text;
     else if (key == ":authority")
-        request.authority = text;
+        request->authority = text;
     else if (!key.empty() && key[0] == ':')
         ; /* ignore unknown pseudo headers */
     else {
         header_pair pair;
         pair.name = lower_ascii(key);
         pair.value = text;
-        request.headers.push_back(pair);
+        request->headers.push_back(pair);
     }
     return 0;
 }
@@ -1148,12 +1182,17 @@ int server_on_header(nghttp2_session *, const nghttp2_frame *frame,
 int server_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
                    const uint8_t *data, size_t len, void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
-    h2_connection::server_request &request = connection->requests[stream_id];
-    if (request.received_bytes + len > connection->max_body_bytes) {
+    std::shared_ptr<h2_connection::server_request> request =
+        server_request_at(connection, stream_id);
+    if (!request)
+        return 0;
+    if (request->discard_body)
+        return 0;
+    if (request->received_bytes + len > connection->max_body_bytes) {
         connection->failure = "request body exceeds limit";
         return NGHTTP2_ERR_CALLBACK_FAILURE;
     }
-    request.received_bytes += len;
+    request->received_bytes += len;
     if (connection->on_request_body) {
         value_t *chunk =
             newbytesval(std::string((const char *)data, len));
@@ -1166,7 +1205,15 @@ int server_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
         freeval(result);
         return 0;
     }
-    request.body.append((const char *)data, len);
+    if (connection->stream_request_body) {
+        if (len != 0) {
+            request->body_chunks.push_back(
+                std::string((const char *)data, len));
+            wake_server_body(request);
+        }
+        return 0;
+    }
+    request->body.append((const char *)data, len);
     return 0;
 }
 
@@ -1176,20 +1223,48 @@ int server_on_frame_recv(nghttp2_session *, const nghttp2_frame *frame,
     if (frame->hd.type != NGHTTP2_HEADERS &&
         frame->hd.type != NGHTTP2_DATA)
         return 0;
+    int32_t stream_id = frame->hd.stream_id;
+    std::shared_ptr<h2_connection::server_request> request =
+        server_request_at(connection, stream_id);
+    if (!request)
+        return 0;
+
+    bool initial_headers =
+        frame->hd.type == NGHTTP2_HEADERS &&
+        frame->headers.cat == NGHTTP2_HCAT_REQUEST;
+    if (initial_headers && connection->stream_request_body &&
+        !request->ready_enqueued && !request->responded) {
+        request->ready_enqueued = true;
+        connection->ready.push_back(stream_id);
+    }
+
     if (!(frame->hd.flags & NGHTTP2_FLAG_END_STREAM))
         return 0;
-    int32_t stream_id = frame->hd.stream_id;
-    h2_connection::server_request &request = connection->requests[stream_id];
-    if (request.complete || request.responded)
+    if (request->complete || request->responded)
         return 0;
-    request.complete = true;
-    connection->ready.push_back(stream_id);
+    request->complete = true;
+    wake_server_body(request);
+    if (!connection->stream_request_body) {
+        request->ready_enqueued = true;
+        connection->ready.push_back(stream_id);
+    }
     return 0;
 }
 
 int server_on_stream_close(nghttp2_session *, int32_t stream_id,
-                           uint32_t, void *user_data) {
+                           uint32_t error_code, void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
+    std::shared_ptr<h2_connection::server_request> request =
+        server_request_at(connection, stream_id);
+    if (request && !request->complete) {
+        request->body_failed = true;
+        request->body_error =
+            error_code == NGHTTP2_NO_ERROR
+                ? "request body stream closed"
+                : "request body stream closed with error " +
+                      std::to_string(error_code);
+        wake_server_body(request);
+    }
     connection->requests.erase(stream_id);
     connection->response_bodies.erase(stream_id);
     connection->response_streams.erase(stream_id);
@@ -2573,19 +2648,60 @@ value_t *http2_listen_tls(const std::vector<value_t *> &args) {
 #endif
 }
 
-value_t *make_request(const h2_connection::server_request &request,
-                      value_t *stream, long long connection_id) {
+struct h2_pull_body : request_body {
+    std::shared_ptr<h2_connection::server_request> request;
+
+    explicit h2_pull_body(
+        std::shared_ptr<h2_connection::server_request> request_)
+        : request(std::move(request_)) {}
+
+    bool next(value_t *&value, bool &done) override {
+        done = false;
+        while (request->body_chunks.empty()) {
+            if (request->body_failed) {
+                yyerror("std.http2.serve: %s",
+                        request->body_error.c_str());
+                return false;
+            }
+            if (request->complete) {
+                done = true;
+                value = newnull();
+                return true;
+            }
+            task_ptr waiter = task_create();
+            request->body_waiter = waiter;
+            value_t *woken = fiber_await_task(waiter);
+            if (request->body_waiter == waiter)
+                request->body_waiter.reset();
+            if (!woken)
+                return false;
+            freeval(woken);
+        }
+        value = newbytesval(std::move(request->body_chunks.front()));
+        request->body_chunks.pop_front();
+        return true;
+    }
+};
+
+value_t *make_request(
+    const std::shared_ptr<h2_connection::server_request> &request,
+    value_t *stream, long long connection_id, bool stream_request_body) {
     value_t *object = (value_t *)newdictval();
-    dict_set(object, "method", newstrval(request.method.c_str()));
-    dict_set(object, "path", newstrval(request.path.c_str()));
-    dict_set(object, "scheme", newstrval(request.scheme.c_str()));
-    dict_set(object, "authority", newstrval(request.authority.c_str()));
-    dict_set(object, "headers", headers_dict(request.headers));
-    dict_set(object, "body", newbytesval(request.body));
+    dict_set(object, "method", newstrval(request->method.c_str()));
+    dict_set(object, "path", newstrval(request->path.c_str()));
+    dict_set(object, "scheme", newstrval(request->scheme.c_str()));
+    dict_set(object, "authority", newstrval(request->authority.c_str()));
+    dict_set(object, "headers", headers_dict(request->headers));
+    dict_set(object, "body", newbytesval(request->body));
     dict_set(object, "http_major", newintval(2));
     dict_set(object, "http_minor", newintval(0));
     dict_set(object, "socket", dupval(stream));
     dict_set(object, "connection_id", newintval(connection_id));
+    if (stream_request_body) {
+        dict_set(object, "body_reader",
+                 new_request_body_value(
+                     std::make_shared<h2_pull_body>(request)));
+    }
     return object;
 }
 
@@ -2702,7 +2818,15 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
         yyerror("std.http2.serve: cannot submit response");
         return false;
     }
-    connection.requests[stream_id].responded = true;
+    std::shared_ptr<h2_connection::server_request> request =
+        server_request_at(&connection, stream_id);
+    if (request) {
+        request->responded = true;
+        if (!request->complete) {
+            request->discard_body = true;
+            request->body_chunks.clear();
+        }
+    }
     return true;
 }
 
@@ -2713,6 +2837,7 @@ struct h2_server_state {
     long long max_connections = 0;
     long long served = 0;
     bool stopping = false;
+    bool stream_request_body = false;
     value_t *on_request_body = NULL;
     std::size_t max_body_bytes = 16 * 1024 * 1024;
     std::vector<nghttp2_settings_entry> settings;
@@ -2727,6 +2852,7 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
         connection.timeout_ms = 0;
         connection.max_body_bytes = state->max_body_bytes;
         connection.on_request_body = state->on_request_body;
+        connection.stream_request_body = state->stream_request_body;
 
         nghttp2_session_callbacks *callbacks = NULL;
         if (nghttp2_session_callbacks_new(&callbacks) != 0) {
@@ -2786,13 +2912,22 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 }
                 int32_t stream_id = connection.ready.front();
                 connection.ready.erase(connection.ready.begin());
-                std::map<int32_t, h2_connection::server_request>::iterator it =
-                    connection.requests.find(stream_id);
-                if (it == connection.requests.end() || it->second.responded)
+                std::map<int32_t,
+                         std::shared_ptr<h2_connection::server_request>>::
+                    iterator it = connection.requests.find(stream_id);
+                if (it == connection.requests.end() || !it->second ||
+                    it->second->responded)
                     continue;
 
-                value_t *request =
-                    make_request(it->second, stream, connection_id);
+                value_t *request = make_request(
+                    it->second, stream, connection_id,
+                    state->stream_request_body);
+                if (!request) {
+                    connection.failure =
+                        "cannot create request handle";
+                    connection_open = false;
+                    break;
+                }
                 task_ptr handler_task = fiber_start_async(
                     [handler, request]() {
                     value_t *result =
@@ -2929,6 +3064,16 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             last_activity = std::chrono::steady_clock::now();
         }
 
+        for (std::map<int32_t, std::shared_ptr<h2_connection::server_request>>::
+                 iterator it = connection.requests.begin();
+             it != connection.requests.end(); ++it) {
+            if (it->second && !it->second->complete) {
+                it->second->body_failed = true;
+                it->second->body_error = "connection closed";
+                wake_server_body(it->second);
+            }
+        }
+
         for (std::map<int32_t, task_ptr>::iterator it =
                  handler_tasks.begin();
              it != handler_tasks.end(); ++it) {
@@ -3011,6 +3156,22 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
         yyerror("std.http2.serve on_request_body must be a function");
         return NULL;
     }
+    bool stream_request_body = false;
+    value_t *stream_body_value =
+        dict_get(args[0], "stream_request_body");
+    if (stream_body_value && stream_body_value->type != T_null) {
+        if (stream_body_value->type != T_bool) {
+            yyerror("std.http2.serve stream_request_body must be a bool");
+            return NULL;
+        }
+        stream_request_body =
+            ((bool_value_t *)stream_body_value)->value;
+    }
+    if (stream_request_body && on_request_body) {
+        yyerror("std.http2.serve cannot combine stream_request_body with "
+                "on_request_body");
+        return NULL;
+    }
 
     std::vector<nghttp2_settings_entry> settings;
     if (!build_h2_settings(dict_get(args[0], "settings"), true, settings))
@@ -3044,6 +3205,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
     state.max_per_connection = max_per_connection;
     state.idle_timeout_ms = idle_timeout_ms;
     state.max_connections = max_connections;
+    state.stream_request_body = stream_request_body;
     state.on_request_body = on_request_body;
     state.max_body_bytes = max_body_bytes;
     state.settings = settings;

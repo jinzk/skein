@@ -23,6 +23,7 @@
 #include <ctime>
 #include <chrono>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <limits>
 #include <string>
@@ -30,6 +31,8 @@
 #include <vector>
 
 namespace {
+
+value_t *await_task_value(value_t *task_value);
 
 void free_args(std::vector<value_t *> &args) {
     for (size_t i = 0; i < args.size(); ++i)
@@ -568,6 +571,175 @@ value_t *make_request(value_t *client, const http1::message &message) {
     dict_set(request, "http_minor", newintval(message.http_minor));
     dict_set(request, "keep_alive", newboolval(message.keep_alive));
     dict_set(request, "socket", dupval(client));
+    return request;
+}
+
+struct http1_pull_body : request_body {
+    value_t *stream = NULL;
+    http1::parser parser;
+    std::deque<std::string> chunks;
+    bool complete = false;
+    bool failed = false;
+    std::string error;
+    long long timeout_ms = 0;
+
+    http1_pull_body(value_t *socket, long long timeout,
+                    const http1::parser_options &options)
+        : stream(dupval(socket)), parser(true, options),
+          timeout_ms(timeout) {
+        parser.set_body_sink([this](const char *data, std::size_t length) {
+            chunks.push_back(std::string(data, length));
+            return true;
+        });
+    }
+
+    ~http1_pull_body() {
+        freeval(stream);
+        stream = NULL;
+    }
+
+    bool next(value_t *&value, bool &done) override;
+};
+
+void fail_pull_body(http1_pull_body *body, const std::string &message) {
+    body->failed = true;
+    body->error = message;
+    yyerror("std.http.serve: %s", message.c_str());
+}
+
+bool read_pull_body_chunk(http1_pull_body *body) {
+    std::vector<value_t *> args;
+    args.push_back(dupval(body->stream));
+    args.push_back(newintval(8192));
+    args.push_back(newintval(body->timeout_ms));
+    value_t *chunk =
+        await_task_value(call_io(B_io_read_async, args));
+    if (!chunk)
+        return false;
+
+    if (chunk->type == T_null) {
+        freeval(chunk);
+        if (!body->parser.finish()) {
+            std::string message = body->parser.error().empty()
+                                      ? "incomplete request body"
+                                      : body->parser.error();
+            fail_pull_body(body, message);
+            return false;
+        }
+        if (body->parser.messages().empty()) {
+            fail_pull_body(body, "incomplete request body");
+            return false;
+        }
+        body->complete = true;
+        return true;
+    }
+    if (chunk->type != T_bytes) {
+        freeval(chunk);
+        fail_pull_body(body, "read returned non-bytes");
+        return false;
+    }
+
+    std::string data = ((bytes_value_t *)chunk)->value;
+    freeval(chunk);
+    if (!body->parser.execute(data)) {
+        std::string message = body->parser.error().empty()
+                                  ? "request parse error"
+                                  : body->parser.error();
+        fail_pull_body(body, message);
+        return false;
+    }
+    if (!body->parser.messages().empty())
+        body->complete = true;
+    return true;
+}
+
+bool http1_pull_body::next(value_t *&value, bool &done) {
+    done = false;
+    while (chunks.empty()) {
+        if (failed) {
+            yyerror("std.http.serve: %s", error.c_str());
+            return false;
+        }
+        if (complete) {
+            done = true;
+            value = newnull();
+            return true;
+        }
+        if (!read_pull_body_chunk(this))
+            return false;
+    }
+    value = newbytesval(std::move(chunks.front()));
+    chunks.pop_front();
+    return true;
+}
+
+bool read_request_headers_async(
+    value_t *socket, long long timeout_ms, http1::message &message,
+    std::shared_ptr<http1_pull_body> &body, bool *clean_eof,
+    const http1::parser_options &options) {
+    if (clean_eof)
+        *clean_eof = false;
+    body = std::make_shared<http1_pull_body>(socket, timeout_ms, options);
+    for (;;) {
+        if (!body->parser.messages().empty()) {
+            message = body->parser.messages()[0];
+            body->complete = true;
+            return true;
+        }
+        if (body->parser.headers_complete()) {
+            message = body->parser.current_message();
+            return true;
+        }
+
+        std::vector<value_t *> args;
+        args.push_back(dupval(socket));
+        args.push_back(newintval(8192));
+        args.push_back(newintval(timeout_ms));
+        value_t *chunk =
+            await_task_value(call_io(B_io_read_async, args));
+        if (!chunk)
+            return false;
+
+        if (chunk->type == T_null) {
+            freeval(chunk);
+            if (!body->parser.finish()) {
+                yyerror("http: incomplete message: %s",
+                        body->parser.error().c_str());
+                return false;
+            }
+            if (body->parser.messages().empty()) {
+                if (clean_eof && body->parser.error().empty()) {
+                    *clean_eof = true;
+                    return false;
+                }
+                yyerror("http: incomplete message");
+                return false;
+            }
+            message = body->parser.messages()[0];
+            body->complete = true;
+            return true;
+        }
+        if (chunk->type != T_bytes) {
+            freeval(chunk);
+            yyerror("http: read returned non-bytes");
+            return false;
+        }
+
+        std::string data = ((bytes_value_t *)chunk)->value;
+        freeval(chunk);
+        if (!body->parser.execute(data)) {
+            yyerror("http: parse error: %s",
+                    body->parser.error().c_str());
+            return false;
+        }
+    }
+}
+
+value_t *make_pull_request(
+    value_t *stream, const http1::message &message,
+    const std::shared_ptr<http1_pull_body> &body) {
+    value_t *request = make_request(stream, message);
+    dict_set(request, "body_reader", new_request_body_value(body));
     return request;
 }
 
@@ -2359,6 +2531,26 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
     return new_task_value(std::move(task));
 }
 
+void drain_http1_pull_body(const std::shared_ptr<http1_pull_body> &body) {
+    if (!body || body->complete || body->failed)
+        return;
+    eval_capture_snapshot snapshot;
+    eval_capture_begin(snapshot);
+    for (;;) {
+        value_t *chunk = NULL;
+        bool done = false;
+        if (!body->next(chunk, done)) {
+            freeval(chunk);
+            break;
+        }
+        freeval(chunk);
+        if (done || body->complete || body->failed)
+            break;
+    }
+    eval_capture_result captured = eval_capture_end(snapshot);
+    freeval(captured.error);
+}
+
 struct http_server_state {
     long long max_requests = 0;
     long long max_per_connection = 100;
@@ -2366,6 +2558,7 @@ struct http_server_state {
     long long max_connections = 0;
     long long served = 0;
     bool stopping = false;
+    bool stream_request_body = false;
     value_t *on_request_body = NULL;
     std::size_t max_header_bytes = 64 * 1024;
     std::size_t max_headers = 100;
@@ -2382,6 +2575,7 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
            (state->max_requests == 0 ||
             state->served < state->max_requests)) {
         http1::message message;
+        std::shared_ptr<http1_pull_body> pull_body;
         bool clean_eof = false;
         bool timed_out = false;
         bool ok = false;
@@ -2392,10 +2586,21 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
         {
             eval_capture_snapshot snapshot;
             eval_capture_begin(snapshot);
-            ok = read_message_async(
-                stream, true, read_timeout, message, state->on_request_body,
-                state->max_body_bytes, &clean_eof, state->max_header_bytes,
-                state->max_headers);
+            if (state->stream_request_body) {
+                http1::parser_options options;
+                options.max_body_bytes = state->max_body_bytes;
+                options.max_header_bytes = state->max_header_bytes;
+                options.max_headers = state->max_headers;
+                ok = read_request_headers_async(
+                    stream, read_timeout, message, pull_body, &clean_eof,
+                    options);
+            } else {
+                ok = read_message_async(
+                    stream, true, read_timeout, message,
+                    state->on_request_body, state->max_body_bytes,
+                    &clean_eof, state->max_header_bytes,
+                    state->max_headers);
+            }
             eval_capture_result captured = eval_capture_end(snapshot);
             if (!ok) {
                 std::string text;
@@ -2426,7 +2631,13 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             state->served >= state->max_requests)
             state->stopping = true;
 
-        value_t *request = make_request(stream, message);
+        value_t *request = state->stream_request_body
+                               ? make_pull_request(stream, message, pull_body)
+                               : make_request(stream, message);
+        if (!request) {
+            connection_open = false;
+            break;
+        }
         value_t *response =
             call_value_args(handler, std::vector<value_t *>{request});
         if (response && is_task_value(response))
@@ -2498,6 +2709,9 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
 
         bool keep_alive =
             message.keep_alive && !headers_request_close(headers);
+        if (state->stream_request_body &&
+            (!pull_body || !pull_body->complete))
+            keep_alive = false;
         if (state->max_requests != 0 &&
             state->served >= state->max_requests)
             keep_alive = false;
@@ -2525,6 +2739,8 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             connection_open = false;
             break;
         }
+        if (state->stream_request_body && !keep_alive && pull_body)
+            drain_http1_pull_body(pull_body);
         if (!keep_alive)
             connection_open = false;
     }
@@ -2584,6 +2800,22 @@ value_t *http_serve(const std::vector<value_t *> &args) {
         yyerror("std.http.serve on_request_body must be a function");
         return NULL;
     }
+    bool stream_request_body = false;
+    value_t *stream_body_value =
+        dict_get(args[0], "stream_request_body");
+    if (stream_body_value && stream_body_value->type != T_null) {
+        if (stream_body_value->type != T_bool) {
+            yyerror("std.http.serve stream_request_body must be a bool");
+            return NULL;
+        }
+        stream_request_body =
+            ((bool_value_t *)stream_body_value)->value;
+    }
+    if (stream_request_body && on_request_body) {
+        yyerror("std.http.serve cannot combine stream_request_body with "
+                "on_request_body");
+        return NULL;
+    }
 
     long long max_connections = 0;
     value_t *max_connections_value = dict_get(args[0], "max_connections");
@@ -2610,6 +2842,7 @@ value_t *http_serve(const std::vector<value_t *> &args) {
     state.max_per_connection = max_per_connection;
     state.idle_timeout_ms = idle_timeout_ms;
     state.max_connections = max_connections;
+    state.stream_request_body = stream_request_body;
     state.on_request_body = on_request_body;
     state.max_header_bytes = max_header_bytes;
     state.max_headers = max_headers;
@@ -2842,6 +3075,65 @@ value_t *http_close(const std::vector<value_t *> &args) {
 
 } // namespace
 
+namespace {
+
+std::string request_body_describe(const void *) {
+    return "<request body>";
+}
+
+const native_type request_body_type = {
+    "request body", request_body_describe
+};
+
+} // namespace
+
+value_t *new_request_body_value(std::shared_ptr<request_body> body) {
+    return newuserdataval(&request_body_type, std::move(body));
+}
+
+bool get_request_body_value(value_t *value,
+                            std::shared_ptr<request_body> &body) {
+    if (!value || value->type != T_userdata ||
+        ((userdata_value_t *)value)->meta != &request_body_type) {
+        yyerror("expected a request body reader, got %s",
+                typename_of(value));
+        return false;
+    }
+    body = std::static_pointer_cast<request_body>(
+        ((userdata_value_t *)value)->data);
+    if (!body) {
+        yyerror("invalid request body reader");
+        return false;
+    }
+    return true;
+}
+
+value_t *http_read_body(const std::vector<value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_dict) {
+        yyerror("std.http.read_body expects a request dict");
+        return NULL;
+    }
+    value_t *reader_value = dict_get(args[0], "body_reader");
+    if (!reader_value) {
+        yyerror("std.http.read_body expects a streaming request body");
+        return NULL;
+    }
+    std::shared_ptr<request_body> body;
+    if (!get_request_body_value(reader_value, body))
+        return NULL;
+    value_t *value = NULL;
+    bool done = false;
+    if (!body->next(value, done)) {
+        freeval(value);
+        return NULL;
+    }
+    if (done) {
+        freeval(value);
+        return newnull();
+    }
+    return value ? value : newnull();
+}
+
 void http_shutdown() {
     pool_shutdown();
 }
@@ -2879,6 +3171,8 @@ struct value_t *call_http_builtin(
             return http_upgrade(args);
         case B_http_cookies:
             return http_cookies(args);
+        case B_http_read_body:
+            return http_read_body(args);
         case B_http_close:
             return http_close(args);
         default:

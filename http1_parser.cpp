@@ -36,6 +36,7 @@ struct parser_state {
     std::string header_field;
     std::string header_value;
     bool header_field_done = false;
+    bool headers_complete = false;
     std::size_t header_bytes = 0;
     std::size_t header_count = 0;
     std::size_t body_bytes = 0;
@@ -118,6 +119,7 @@ int on_message_begin(llhttp_t *parser) {
     state->header_field.clear();
     state->header_value.clear();
     state->header_field_done = false;
+    state->headers_complete = false;
     state->header_bytes = 0;
     state->header_count = 0;
     state->body_bytes = 0;
@@ -193,6 +195,7 @@ int on_headers_complete(llhttp_t *parser) {
     state->current.keep_alive = llhttp_should_keep_alive(parser) != 0;
     state->current.upgrade = llhttp_get_upgrade(parser) != 0;
     state->current.chunked = (parser->flags & F_CHUNKED) != 0;
+    state->headers_complete = true;
     return 0;
 }
 
@@ -217,6 +220,7 @@ int on_message_complete(llhttp_t *parser) {
     state->messages.push_back(std::move(state->current));
     state->current = message{};
     state->current.is_request = state->request;
+    state->headers_complete = false;
     return 0;
 }
 
@@ -232,6 +236,7 @@ int on_reset(llhttp_t *parser) {
     state->header_field.clear();
     state->header_value.clear();
     state->header_field_done = false;
+    state->headers_complete = false;
     state->header_bytes = 0;
     state->header_count = 0;
     state->body_bytes = 0;
@@ -250,6 +255,7 @@ void finalize_upgrade_message(parser_state *state) {
     state->messages.push_back(std::move(state->current));
     state->current = message{};
     state->current.is_request = state->request;
+    state->headers_complete = false;
 }
 
 } // namespace
@@ -384,6 +390,14 @@ std::vector<message> parser::take_messages() {
     return messages;
 }
 
+bool parser::headers_complete() const {
+    return impl_->state.headers_complete;
+}
+
+const message &parser::current_message() const {
+    return impl_->state.current;
+}
+
 int parser::error_code() const {
     return impl_->state.error_code;
 }
@@ -414,6 +428,7 @@ void parser::reset(bool request) {
     state.header_bytes = 0;
     state.header_count = 0;
     state.body_bytes = 0;
+    state.headers_complete = false;
     state.paused = false;
     state.paused_offset = 0;
     state.total_bytes = 0;

@@ -182,6 +182,7 @@ enum bifs {
     B_http_serve,
     B_http_upgrade,
     B_http_cookies,
+    B_http_read_body,
     B_http_close,
     B_http2_request,
     B_http2_get,

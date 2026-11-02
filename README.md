@@ -634,11 +634,40 @@ s["on_request_body"] = func(chunk) {
 - 未设置时仍整体读取请求 body；
 - `max_body_bytes` 同时限制流式请求 body。
 
+handler 拉取请求 body：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+s["stream_request_body"] = true;
+
+let served = std.http.serve(s, func(req) {
+  let body = "";
+  let chunk = std.http.read_body(req);
+  while (chunk != null) {
+    body = body + bytes_to_string(chunk);
+    chunk = std.http.read_body(req);
+  }
+  return {"status": 200, "body": "read " + body};
+});
+```
+
+- `stream_request_body` 为 `true` 时，handler 在请求 headers 到达后立即执行；
+- 此时 `req["body"]` 为空，使用 `std.http.read_body(req)` 逐块拉取；
+- `std.http.read_body` 返回 `bytes`，请求 body 结束时返回 `null`；
+- 不能与 `on_request_body` 同时设置；
+- HTTP/1.1 下如果 handler 未读完 body 就返回响应，连接会在响应后关闭；
+- HTTP/2 下未读取的 body 会被丢弃，其他 stream 不受影响；
+- `max_body_bytes` 同时限制拉取式请求 body；
+- `std.http2.serve` 使用相同的 `stream_request_body` 和 `std.http.read_body`。
+
 请求 dict：
 
 ```text
 method, path, headers, body, http_major, http_minor, socket
 ```
+
+启用 `stream_request_body` 后请求 dict 还包含 `body_reader`，供
+`std.http.read_body` 使用。
 
 响应 dict：
 
@@ -1477,6 +1506,7 @@ std.http.respond_async
 std.http.serve
 std.http.upgrade
 std.http.cookies
+std.http.read_body
 std.http.close
 
 std.http2.request

@@ -5455,6 +5455,150 @@ def main():
                 rb1_proc.terminate()
                 rb1_proc.wait(timeout=5)
 
+        pull1_probe = socket.socket()
+        pull1_probe.bind(("127.0.0.1", 0))
+        pull1_port = pull1_probe.getsockname()[1]
+        pull1_probe.close()
+        pull1_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            pull1_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http.listen("127.0.0.1", {pull1_port});\n'
+                's["stream_request_body"] = true;\n'
+                "let n = std.http.serve(s, func(req) {\n"
+                '  let out = "";\n'
+                '  let chunk = std.http.read_body(req);\n'
+                "  while (chunk != null) {\n"
+                "    out = out + bytes_to_string(chunk);\n"
+                "    chunk = std.http.read_body(req);\n"
+                "  }\n"
+                '  return {"status": 200, "body": "pull=" + out + '
+                '    "|body=" + bytes_to_string(req["body"])};\n'
+                "}, 2);\n"
+                'print("served " + str(n));\n'
+                "std.http.close(s);\n"
+            )
+            pull1_proc.stdin.close()
+            deadline = time.time() + 5
+            ready = False
+            while time.time() < deadline:
+                try:
+                    probe = socket.create_connection(
+                        ("127.0.0.1", pull1_port), timeout=0.2)
+                    probe.close()
+                    ready = True
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert ready, "http1 pull body server did not listen"
+            pull1_client = run(
+                "import std;\n"
+                "func parts() {\n"
+                '  yield "hello";\n'
+                '  yield " ";\n'
+                '  yield "world";\n'
+                "}\n"
+                f'let a = std.http.post('
+                f'"http://127.0.0.1:{pull1_port}/a", '
+                '{"body_stream": parts()});\n'
+                'print(bytes_to_string(a["body"]));\n'
+                f'let b = std.http.get('
+                f'"http://127.0.0.1:{pull1_port}/b");\n'
+                'print(bytes_to_string(b["body"]));\n',
+                timeout=15,
+            )
+            assert pull1_client.returncode == 0, pull1_client.stderr
+            assert "pull=hello world|body=" in pull1_client.stdout, (
+                pull1_client.stdout)
+            assert "pull=|body=" in pull1_client.stdout, (
+                pull1_client.stdout)
+            pull1_proc.wait(timeout=10)
+            pull1_output = pull1_proc.stdout.read()
+            assert "served 2" in pull1_output, pull1_output
+        finally:
+            if pull1_proc.poll() is None:
+                pull1_proc.terminate()
+                pull1_proc.wait(timeout=5)
+
+        pull2_probe = socket.socket()
+        pull2_probe.bind(("127.0.0.1", 0))
+        pull2_port = pull2_probe.getsockname()[1]
+        pull2_probe.close()
+        pull2_proc = subprocess.Popen(
+            [BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            pull2_proc.stdin.write(
+                "import std;\n"
+                f'let s = std.http2.listen("127.0.0.1", {pull2_port});\n'
+                's["stream_request_body"] = true;\n'
+                "let n = std.http2.serve(s, func(req) {\n"
+                '  let out = "";\n'
+                '  let chunk = std.http.read_body(req);\n'
+                "  while (chunk != null) {\n"
+                "    out = out + bytes_to_string(chunk);\n"
+                "    chunk = std.http.read_body(req);\n"
+                "  }\n"
+                '  return {"status": 200, "body": "pull=" + out + '
+                '    "|body=" + bytes_to_string(req["body"])};\n'
+                "}, 2);\n"
+                'print("served " + str(n));\n'
+                "std.http2.close(s);\n"
+            )
+            pull2_proc.stdin.close()
+            deadline = time.time() + 5
+            ready = False
+            while time.time() < deadline:
+                try:
+                    probe = socket.create_connection(
+                        ("127.0.0.1", pull2_port), timeout=0.2)
+                    probe.close()
+                    ready = True
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            assert ready, "http2 pull body server did not listen"
+            pull2_client = run(
+                "import std;\n"
+                "func parts() {\n"
+                '  yield "hello";\n'
+                '  yield " ";\n'
+                '  yield "world";\n'
+                "}\n"
+                f'let a = std.http2.post('
+                f'"http://127.0.0.1:{pull2_port}/a", '
+                '{"body_stream": parts()});\n'
+                'print(bytes_to_string(a["body"]));\n'
+                f'let b = std.http2.get('
+                f'"http://127.0.0.1:{pull2_port}/b");\n'
+                'print(bytes_to_string(b["body"]));\n',
+                timeout=15,
+            )
+            assert pull2_client.returncode == 0, pull2_client.stderr
+            assert "pull=hello world|body=" in pull2_client.stdout, (
+                pull2_client.stdout)
+            assert "pull=|body=" in pull2_client.stdout, (
+                pull2_client.stdout)
+            pull2_proc.wait(timeout=10)
+            pull2_output = pull2_proc.stdout.read()
+            assert "served 2" in pull2_output, pull2_output
+        finally:
+            if pull2_proc.poll() is None:
+                pull2_proc.terminate()
+                pull2_proc.wait(timeout=5)
+
         async_server = socket.socket()
         async_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         async_server.bind(("127.0.0.1", 0))

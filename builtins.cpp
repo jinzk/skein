@@ -9,6 +9,9 @@
 #include "net.h"
 #include "result.h"
 #include "task.h"
+#ifdef CALC_ENABLE_TLS
+#include "tls.h"
+#endif
 #ifdef CALC_ENABLE_FFI
 #include "ffi_module.h"
 #endif
@@ -332,6 +335,10 @@ struct value_t *call_builtin(int functype,
         return call_io_builtin(functype, args);
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
+#ifdef CALC_ENABLE_TLS
+    if (functype >= B_tls_client && functype <= B_tls_server)
+        return call_tls_builtin(functype, args);
+#endif
 
     if (functype == B_list || functype == B_dict) {
         if (!args.empty()) {

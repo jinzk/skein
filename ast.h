@@ -170,10 +170,18 @@ enum bifs {
     B_http_request,
     B_http_get,
     B_http_post,
+    B_http_request_async,
+    B_http_get_async,
+    B_http_post_async,
     B_http_listen,
+    B_http_listen_tls,
     B_http_accept,
+    B_http_accept_async,
     B_http_respond,
-    B_http_close
+    B_http_respond_async,
+    B_http_close,
+    B_tls_client,
+    B_tls_server
 };
 
 struct ast {

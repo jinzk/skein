@@ -115,6 +115,21 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   calc_llhttp
 )
 
+option(CALC_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
+if(CALC_ENABLE_TLS)
+  find_package(OpenSSL QUIET)
+  if(OpenSSL_FOUND)
+    target_sources(${PROJECT_NAME} PRIVATE tls.cpp)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_TLS=1)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+      OpenSSL::SSL
+      OpenSSL::Crypto
+    )
+  else()
+    message(STATUS "OpenSSL not found; std.tls is disabled")
+  endif()
+endif()
+
 option(CALC_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
 if(CALC_ENABLE_FFI)
   if(PKG_CONFIG_FOUND)

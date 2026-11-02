@@ -1250,6 +1250,7 @@ std.process
 std.type
 std.net
 std.http
+std.tls（可选）
 std.task
 std.generator
 std.result
@@ -1376,7 +1377,8 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.process`：命令执行、`status` / `command_status`；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
-- `std.http`：基于 llhttp 的 HTTP/1.1 同步客户端和服务端；
+- `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/async；
+- `std.tls`：基于 OpenSSL 的同步 TLS 流包装（可选）；
 - `std.task`：原生 task、等待、批量等待、取消和完成状态；
 - `std.generator`：生成器的 `next` / `done` / `close`；
 - `std.result`：result 值、错误检查和错误捕获；
@@ -1509,7 +1511,33 @@ let r = std.http.post("http://127.0.0.1:8080/items", "hello", {
 let d = std.http.request("DELETE", "http://127.0.0.1:8080/items/1");
 ```
 
-服务端：
+异步客户端：
+
+```text
+let r = await std.http.get_async("http://127.0.0.1:8080/api");
+let p = await std.http.post_async("http://127.0.0.1:8080/items", "hello");
+let d = await std.http.request_async(
+    "DELETE", "http://127.0.0.1:8080/items/1");
+```
+
+HTTPS 同步客户端：
+
+```text
+let r = std.http.get("https://example.com/", {
+  "tls": {"ca_file": "/etc/ssl/certs/ca-certificates.crt"}
+});
+```
+
+HTTPS 同步服务端：
+
+```text
+let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem");
+let req = std.http.accept(s, 5000);
+std.http.respond(req, 200, {"Content-Type": "text/plain"}, "secure");
+std.http.close(s);
+```
+
+HTTP/1.1 服务端：
 
 ```text
 let s = std.http.listen("127.0.0.1", 8080);
@@ -1522,15 +1550,31 @@ std.http.respond(req, 200, {
 std.http.close(s);
 ```
 
+异步服务端：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+let req = await std.http.accept_async(s, 5000);
+await std.http.respond_async(req, 200, {"Content-Type": "text/plain"},
+                             "hello " + req["path"]);
+std.http.close(s);
+```
+
 函数：
 
 ```text
 std.http.request(method, url[, options])
 std.http.get(url[, options])
 std.http.post(url, body[, options])
+std.http.request_async(method, url[, options])
+std.http.get_async(url[, options])
+std.http.post_async(url, body[, options])
 std.http.listen(host, port[, timeout_ms])
+std.http.listen_tls(host, port, cert_file, key_file[, timeout_ms])
 std.http.accept(server[, timeout_ms])
+std.http.accept_async(server[, timeout_ms])
 std.http.respond(request, status[, headers[, body]])
+std.http.respond_async(request, status[, headers[, body]])
 std.http.close(server_or_request)
 ```
 
@@ -1548,12 +1592,63 @@ status, status_text, headers, body, http_major, http_minor
 
 限制：
 
-- 只支持 `http://`；
+- 支持 `http://` 和 `https://`；
+- `https://` 当前仅支持同步客户端和同步服务端；
+- async `https://` 尚未支持；
 - 只支持 HTTP/1.1；
 - 一次连接只处理一个请求，响应后关闭；
 - body 整体读取，默认上限 16 MiB；
 - 同名 header 只保留最后一个；
-- 当前为同步接口。
+- 客户端和服务端都支持同步和 async。
+
+### TLS
+
+```text
+std.tls.client(stream, server_name[, options]) → tls_stream
+std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
+```
+
+客户端：
+
+```text
+let socket = std.net.tcp_connect("127.0.0.1", 8443, 1000);
+let tls = std.tls.client(socket, "example.com", {
+  "verify": true,
+  "ca_file": "/etc/ssl/certs/ca-certificates.crt",
+  "alpn": ["h2", "http/1.1"]
+});
+
+std.io.write_all(tls, "hello");
+bytes_to_string(std.io.read(tls, 4096));
+std.io.close(tls);
+```
+
+服务端：
+
+```text
+let listener = std.net.tcp_listen("127.0.0.1", 8443);
+let client = std.net.accept(listener, 5000);
+let tls = std.tls.server(client, "cert.pem", "key.pem");
+let data = std.io.read(tls, 4096);
+std.io.write_all(tls, data);
+std.io.close(tls);
+std.net.close(listener);
+```
+
+选项：
+
+```text
+verify    // 客户端默认 true
+ca_file   // 客户端 CA 文件
+alpn      // 客户端 ALPN 列表
+```
+
+规则：
+
+- 默认校验证书和主机名；
+- TLS 流实现 `std.io` 接口；
+- `std.tls` 当前是同步接口；
+- 服务端 ALPN 尚未实现；
 
 ### async / await
 

@@ -20,6 +20,14 @@ sudo apt install libuv1-dev libboost-context-dev
 
 HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），不需要额外的系统包。
 
+TLS 是可选模块；启用时需要 OpenSSL 开发文件：
+
+```bash
+sudo apt install libssl-dev
+```
+
+没有 OpenSSL 时使用 `-DCALC_ENABLE_TLS=OFF`，`std.tls` 和 `https://` 不可用。
+
 `std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
 
 ```bash
@@ -367,6 +375,40 @@ let r = std.http.request("DELETE", "http://127.0.0.1:8080/items/1", {
 });
 ```
 
+异步客户端：
+
+```text
+let t = std.http.get_async("http://127.0.0.1:8080/api");
+let r = await t;
+
+let t2 = std.http.post_async("http://127.0.0.1:8080/items", "hello");
+let r2 = await t2;
+
+let t3 = std.http.request_async("DELETE", "http://127.0.0.1:8080/items/1");
+await t3;
+```
+
+异步客户端返回 task，可以 `await`、`std.task.catch`、`std.task.wait` 或 `cancel`。
+
+HTTPS 同步客户端：
+
+```text
+let r = std.http.get("https://example.com/", {
+  "tls": {
+    "ca_file": "/etc/ssl/certs/ca-certificates.crt"
+  }
+});
+```
+
+HTTPS 同步服务端：
+
+```text
+let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem");
+let req = std.http.accept(s, 5000);
+std.http.respond(req, 200, {"Content-Type": "text/plain"}, "secure");
+std.http.close(s);
+```
+
 HTTP/1.1 服务端：
 
 ```text
@@ -377,6 +419,21 @@ let req = std.http.accept(s, 5000);
 std.http.respond(req, 200, {
   "Content-Type": "text/plain"
 }, "hello " + req["path"]);
+
+std.http.close(s);
+```
+
+异步服务端：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+
+let req = await std.http.accept_async(s, 5000);
+
+let sent = std.http.respond_async(req, 200, {
+  "Content-Type": "text/plain"
+}, "hello " + req["path"]);
+await sent;
 
 std.http.close(s);
 ```
@@ -395,12 +452,67 @@ status, status_text, headers, body, http_major, http_minor
 
 限制：
 
-- 只支持 `http://`，不支持 TLS；
+- 支持 `http://` 和 `https://`；
+- `https://` 目前只支持同步客户端和同步服务端；
+- async `https://` 尚未支持；
 - 只支持 HTTP/1.1；
 - 一次连接只处理一个请求，响应后关闭连接；
 - 请求和响应 body 整体读取，不能超过解析器的 16 MiB 默认上限；
 - 同名 header 在 dict 中只保留最后一个；
-- `std.http` 当前是同步接口。
+- `std.http` 客户端和服务端都提供同步和 async 接口。
+
+TLS：
+
+```text
+std.tls.client(stream, server_name[, options]) → tls_stream
+std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
+```
+
+客户端：
+
+```text
+let socket = std.net.tcp_connect("127.0.0.1", 8443, 1000);
+
+let tls = std.tls.client(socket, "example.com", {
+  "verify": true,
+  "ca_file": "/etc/ssl/certs/ca-certificates.crt",
+  "alpn": ["h2", "http/1.1"]
+});
+
+std.io.write_all(tls, "hello");
+bytes_to_string(std.io.read(tls, 4096));
+std.io.close(tls);
+```
+
+服务端：
+
+```text
+let listener = std.net.tcp_listen("127.0.0.1", 8443);
+let client = std.net.accept(listener, 5000);
+
+let tls = std.tls.server(client, "cert.pem", "key.pem");
+
+let data = std.io.read(tls, 4096);
+std.io.write_all(tls, data);
+std.io.close(tls);
+std.net.close(listener);
+```
+
+选项：
+
+```text
+verify    // bool，客户端默认 true
+ca_file   // 客户端 CA 文件
+alpn      // 客户端 ALPN 协议列表
+```
+
+规则：
+
+- 默认校验证书和主机名；
+- 测试环境可显式 `"verify": false`；
+- TLS 流实现 `std.io` 接口；
+- `std.tls` 当前是同步接口；
+- 服务端 ALPN 选择尚未实现；
 
 async / await：
 
@@ -758,6 +870,7 @@ std.process
 std.type
 std.net
 std.http
+std.tls（可选）
 std.task
 std.generator
 std.result
@@ -895,10 +1008,19 @@ std.net.shutdown_async
 std.http.request
 std.http.get
 std.http.post
+std.http.request_async
+std.http.get_async
+std.http.post_async
 std.http.listen
+std.http.listen_tls
 std.http.accept
+std.http.accept_async
 std.http.respond
+std.http.respond_async
 std.http.close
+
+std.tls.client
+std.tls.server
 
 std.task.sleep
 std.task.yield
@@ -978,7 +1100,8 @@ std.bytes.from_int
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
 - `std.net.*_async` 返回 task，底层复用同一事件循环；
-- `std.http` 提供基于 llhttp 的 HTTP/1.1 同步客户端和服务端；
+- `std.http` 提供基于 llhttp 的 HTTP/1.1 客户端和服务端；客户端支持 sync 和 async；
+- `std.tls` 提供基于 OpenSSL 的同步 TLS 流包装（可选）；
 - 异步网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
 - task 是协作式调度的，只有在 `wait` / `wait_all`、`await` 或同步网络等待运行事件循环时才推进；
@@ -2150,6 +2273,7 @@ eval_helpers.h 求值器与内置函数共享的辅助函数
 event_loop.*  libuv 事件循环与等待
 http.*        std.http 客户端与服务端
 http1_parser.* llhttp 封装与增量 HTTP/1.x 解析
+tls.*         OpenSSL TLS 流包装
 io.*          std.io 通用流式读写与辅助函数
 fiber.*       Boost.Context 有栈协程、async/await 与生成器
 generator.*   生成器迭代函数

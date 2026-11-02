@@ -548,11 +548,25 @@ value_t *build_std_namespace() {
             {"request", B_http_request},
             {"get", B_http_get},
             {"post", B_http_post},
+            {"request_async", B_http_request_async},
+            {"get_async", B_http_get_async},
+            {"post_async", B_http_post_async},
             {"listen", B_http_listen},
+            {"listen_tls", B_http_listen_tls},
             {"accept", B_http_accept},
+            {"accept_async", B_http_accept_async},
             {"respond", B_http_respond},
+            {"respond_async", B_http_respond_async},
             {"close", B_http_close},
         })));
+#ifdef CALC_ENABLE_TLS
+    root->payload->items.push_back(std::make_pair(
+        newstrval("tls"),
+        builtin_module({
+            {"client", B_tls_client},
+            {"server", B_tls_server},
+        })));
+#endif
     root->payload->items.push_back(std::make_pair(
         newstrval("error"),
         builtin_module({

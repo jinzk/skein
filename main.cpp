@@ -10,6 +10,8 @@
 #include "eval_context.h"
 #include "event_loop.h"
 #include "fiber.h"
+#include "http.h"
+#include "http2.h"
 #include "net.h"
 #include "package.h"
 #include "platform.h"
@@ -126,6 +128,10 @@ int main(int argc, char **argv) {
     fiber_disable_generator_warnings();
     task_shutdown();
     fiber_shutdown();
+    http_shutdown();
+#ifdef CALC_ENABLE_HTTP2
+    http2_shutdown();
+#endif
     net_shutdown();
     donescope();
     structtype_shutdown();

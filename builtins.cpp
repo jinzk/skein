@@ -5,6 +5,7 @@
 #include "error.h"
 #include "generator.h"
 #include "http.h"
+#include "http2.h"
 #include "io.h"
 #include "net.h"
 #include "result.h"
@@ -335,6 +336,10 @@ struct value_t *call_builtin(int functype,
         return call_io_builtin(functype, args);
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
+#ifdef CALC_ENABLE_HTTP2
+    if (functype >= B_http2_request && functype <= B_http2_serve)
+        return call_http2_builtin(functype, args);
+#endif
 #ifdef CALC_ENABLE_TLS
     if (functype >= B_tls_client && functype <= B_tls_alpn)
         return call_tls_builtin(functype, args);

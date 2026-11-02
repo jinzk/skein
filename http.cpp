@@ -1,10 +1,12 @@
 #include "http.h"
 
 #include "ast.h"
+#include "eval.h"
 #include "fiber.h"
 #include "http1_parser.h"
 #include "io.h"
 #include "net.h"
+#include "repl.h"
 #include "task.h"
 #ifdef CALC_ENABLE_TLS
 #include "tls.h"
@@ -15,7 +17,9 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
+#include <memory>
 #include <limits>
 #include <string>
 #include <utility>
@@ -57,6 +61,87 @@ void close_socket(value_t *socket) {
     value_t *result = call_io_builtin(B_io_close, args);
     free_args(args);
     freeval(result);
+}
+
+struct pooled_connection {
+    value_t *stream = NULL;
+    std::string key;
+    std::chrono::steady_clock::time_point last_used;
+    bool in_use = false;
+};
+
+std::vector<std::unique_ptr<pooled_connection>> &connection_pool() {
+    static std::vector<std::unique_ptr<pooled_connection>> pool;
+    return pool;
+}
+
+void pool_discard(pooled_connection *connection) {
+    if (!connection)
+        return;
+    std::vector<std::unique_ptr<pooled_connection>> &pool = connection_pool();
+    for (size_t i = 0; i < pool.size(); ++i) {
+        if (pool[i].get() != connection)
+            continue;
+        close_socket(connection->stream);
+        freeval(connection->stream);
+        pool.erase(pool.begin() + (std::ptrdiff_t)i);
+        return;
+    }
+}
+
+void pool_expire() {
+    std::chrono::steady_clock::time_point now =
+        std::chrono::steady_clock::now();
+    std::vector<std::unique_ptr<pooled_connection>> &pool = connection_pool();
+    for (size_t i = 0; i < pool.size();) {
+        if (!pool[i]->in_use &&
+            now - pool[i]->last_used > std::chrono::seconds(30)) {
+            close_socket(pool[i]->stream);
+            freeval(pool[i]->stream);
+            pool.erase(pool.begin() + (std::ptrdiff_t)i);
+            continue;
+        }
+        ++i;
+    }
+}
+
+pooled_connection *pool_acquire(const std::string &key) {
+    pool_expire();
+    std::vector<std::unique_ptr<pooled_connection>> &pool = connection_pool();
+    for (size_t i = 0; i < pool.size(); ++i) {
+        if (!pool[i]->in_use && pool[i]->key == key) {
+            pool[i]->in_use = true;
+            return pool[i].get();
+        }
+    }
+    return NULL;
+}
+
+pooled_connection *pool_add(const std::string &key, value_t *stream) {
+    std::unique_ptr<pooled_connection> connection(new pooled_connection());
+    connection->stream = stream;
+    connection->key = key;
+    connection->in_use = true;
+    connection->last_used = std::chrono::steady_clock::now();
+    pooled_connection *result = connection.get();
+    connection_pool().push_back(std::move(connection));
+    return result;
+}
+
+void pool_release(pooled_connection *connection) {
+    if (!connection)
+        return;
+    connection->in_use = false;
+    connection->last_used = std::chrono::steady_clock::now();
+}
+
+void pool_shutdown() {
+    std::vector<std::unique_ptr<pooled_connection>> &pool = connection_pool();
+    for (size_t i = 0; i < pool.size(); ++i) {
+        close_socket(pool[i]->stream);
+        freeval(pool[i]->stream);
+    }
+    pool.clear();
 }
 
 value_t *dict_get(value_t *dict, const char *key) {
@@ -127,6 +212,26 @@ bool header_exists(value_t *headers, const char *name) {
             return true;
     }
     return false;
+}
+
+std::string header_value(value_t *headers, const char *name) {
+    if (!headers || headers->type != T_dict)
+        return std::string();
+    std::string target = lower_ascii(name);
+    dict_value_t *dict = (dict_value_t *)headers;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *key = dict->payload->items[i].first;
+        value_t *value = dict->payload->items[i].second;
+        if (key->type == T_string && value->type == T_string &&
+            lower_ascii(((string_value_t *)key)->value) == target)
+            return ((string_value_t *)value)->value;
+    }
+    return std::string();
+}
+
+bool headers_request_close(value_t *headers) {
+    std::string connection = lower_ascii(header_value(headers, "Connection"));
+    return connection.find("close") != std::string::npos;
 }
 
 bool append_headers(std::string &out, value_t *headers, std::string &error) {
@@ -201,6 +306,22 @@ struct url_parts {
     std::string path = "/";
     bool tls = false;
 };
+
+
+std::string connection_key(const url_parts &url, bool verify,
+                           const std::string &ca_file) {
+    std::string key = url.tls ? "https://" : "http://";
+    key += url.host;
+    key += ":";
+    key += std::to_string(url.port);
+    if (url.tls) {
+        key += verify ? "|verify" : "|noverify";
+        key += "|";
+        key += ca_file;
+    }
+    return key;
+}
+
 
 bool parse_url(const std::string &url, url_parts &parts, std::string &error) {
     size_t scheme_length = 0;
@@ -287,7 +408,12 @@ bool parse_url(const std::string &url, url_parts &parts, std::string &error) {
 }
 
 bool read_message(value_t *socket, bool request, long long timeout_ms,
-                  http1::message &message) {
+                  http1::message &message, bool *clean_eof = NULL,
+                  bool *timed_out = NULL) {
+    if (clean_eof)
+        *clean_eof = false;
+    if (timed_out)
+        *timed_out = false;
     http1::parser parser(request);
     for (;;) {
         if (!parser.messages().empty()) {
@@ -299,7 +425,25 @@ bool read_message(value_t *socket, bool request, long long timeout_ms,
         args.push_back(dupval(socket));
         args.push_back(newintval(8192));
         args.push_back(newintval(timeout_ms));
-        value_t *chunk = call_io(B_io_read, args);
+        value_t *chunk = NULL;
+        if (timed_out) {
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
+            chunk = call_io(B_io_read, args);
+            eval_capture_result captured = eval_capture_end(snapshot);
+            if (captured.failed) {
+                std::string message = error_message_of(captured.error);
+                freeval(captured.error);
+                if (message.find("timed out") != std::string::npos) {
+                    *timed_out = true;
+                    return true;
+                }
+                yyerror("http: %s", message.c_str());
+                return false;
+            }
+        } else {
+            chunk = call_io(B_io_read, args);
+        }
         if (!chunk)
             return false;
 
@@ -330,6 +474,10 @@ bool read_message(value_t *socket, bool request, long long timeout_ms,
     }
 
     if (parser.messages().empty()) {
+        if (clean_eof && parser.error().empty()) {
+            *clean_eof = true;
+            return true;
+        }
         yyerror("http: incomplete message");
         return false;
     }
@@ -366,12 +514,14 @@ value_t *make_request(value_t *client, const http1::message &message) {
     dict_set(request, "body", newbytesval(message.body));
     dict_set(request, "http_major", newintval(message.http_major));
     dict_set(request, "http_minor", newintval(message.http_minor));
-    dict_set(request, "socket", client);
+    dict_set(request, "keep_alive", newboolval(message.keep_alive));
+    dict_set(request, "socket", dupval(client));
     return request;
 }
 
 std::string build_response(int status, value_t *headers,
-                           const std::string &body, std::string &error) {
+                           const std::string &body, bool keep_alive,
+                           std::string &error) {
     std::string response = "HTTP/1.1 ";
     response += std::to_string(status);
     response += " ";
@@ -383,7 +533,8 @@ std::string build_response(int status, value_t *headers,
         response += "\r\n";
     }
     if (!header_exists(headers, "Connection"))
-        response += "Connection: close\r\n";
+        response += keep_alive ? "Connection: keep-alive\r\n"
+                               : "Connection: close\r\n";
     if (!append_headers(response, headers, error))
         return std::string();
     response += "\r\n";
@@ -392,7 +543,8 @@ std::string build_response(int status, value_t *headers,
 }
 
 std::string build_request(const std::string &method, const url_parts &url,
-                          value_t *headers, const std::string &body) {
+                          value_t *headers, const std::string &body,
+                          bool keep_alive) {
     std::string request;
     request += method;
     request += " ";
@@ -409,7 +561,8 @@ std::string build_request(const std::string &method, const url_parts &url,
         request += "\r\n";
     }
     if (!header_exists(headers, "Connection"))
-        request += "Connection: close\r\n";
+        request += keep_alive ? "Connection: keep-alive\r\n"
+                              : "Connection: close\r\n";
     if (!body.empty() && !header_exists(headers, "Content-Length")) {
         request += "Content-Length: ";
         request += std::to_string(body.size());
@@ -458,69 +611,104 @@ value_t *do_request(const std::string &method, const std::string &url_text,
         timeout_ms = ((int_value_t *)timeout_value)->value;
     }
 
-    std::vector<value_t *> connect_args;
-    connect_args.push_back(newstrval(url.host.c_str()));
-    connect_args.push_back(newintval(url.port));
-    connect_args.push_back(newintval(timeout_ms));
-    value_t *client = call_net(B_net_tcp_connect, connect_args);
-    if (!client)
-        return NULL;
-
-    std::string request = build_request(method, url, headers, body);
-    if (request.empty()) {
-        close_socket(client);
-        freeval(client);
-        return NULL;
-    }
-
-    value_t *stream = client;
+    bool tls_verify = true;
+    std::string tls_ca_file;
+    value_t *tls_options = dict_get(options, "tls");
     if (url.tls) {
-#ifdef CALC_ENABLE_TLS
-        value_t *tls_options = dict_get(options, "tls");
         if (tls_options && tls_options->type != T_dict) {
             yyerror("std.http: tls options must be a dict");
-            close_socket(client);
-            freeval(client);
             return NULL;
         }
-        std::vector<value_t *> tls_args;
-        tls_args.push_back(dupval(client));
-        tls_args.push_back(newstrval(url.host.c_str()));
-        tls_args.push_back(tls_options ? dupval(tls_options) : newnull());
-        stream = call_tls(B_tls_client, tls_args);
-        if (!stream) {
-            close_socket(client);
-            freeval(client);
-            return NULL;
+        if (tls_options) {
+            tls_verify = option_bool(tls_options, "verify", true);
+            tls_ca_file = option_string(tls_options, "ca_file");
         }
-        freeval(client);
+    }
+
+    std::string key = connection_key(url, tls_verify, tls_ca_file);
+    std::string request =
+        build_request(method, url, headers, body, true);
+    if (request.empty())
+        return NULL;
+
+    bool idempotent = method == "GET" || method == "HEAD" ||
+                      method == "OPTIONS" || method == "TRACE";
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        pooled_connection *connection =
+            attempt == 0 ? pool_acquire(key) : NULL;
+        bool reused = connection != NULL;
+        value_t *stream = connection ? connection->stream : NULL;
+        if (!connection) {
+            std::vector<value_t *> connect_args;
+            connect_args.push_back(newstrval(url.host.c_str()));
+            connect_args.push_back(newintval(url.port));
+            connect_args.push_back(newintval(timeout_ms));
+            value_t *client = call_net(B_net_tcp_connect, connect_args);
+            if (!client)
+                return NULL;
+
+            stream = client;
+            if (url.tls) {
+#ifdef CALC_ENABLE_TLS
+                std::vector<value_t *> tls_args;
+                tls_args.push_back(dupval(client));
+                tls_args.push_back(newstrval(url.host.c_str()));
+                tls_args.push_back(tls_options ? dupval(tls_options)
+                                               : newnull());
+                stream = call_tls(B_tls_client, tls_args);
+                if (!stream) {
+                    close_socket(client);
+                    freeval(client);
+                    return NULL;
+                }
+                freeval(client);
 #else
-        yyerror("std.http: https is not supported (TLS disabled)");
-        close_socket(client);
-        freeval(client);
-        return NULL;
+                yyerror("std.http: https is not supported (TLS disabled)");
+                close_socket(client);
+                freeval(client);
+                return NULL;
 #endif
-    }
+            }
+            connection = pool_add(key, stream);
+        }
 
-    std::vector<value_t *> write_args;
-    write_args.push_back(dupval(stream));
-    write_args.push_back(newbytesval(request));
-    write_args.push_back(newintval(timeout_ms));
-    value_t *written = call_io(B_io_write_all, write_args);
-    if (!written) {
-        close_socket(stream);
-        freeval(stream);
-        return NULL;
-    }
-    freeval(written);
+        bool capture_errors = attempt == 0 && reused;
+        eval_capture_snapshot snapshot;
+        if (capture_errors)
+            eval_capture_begin(snapshot);
 
-    http1::message message;
-    bool ok = read_message(stream, false, timeout_ms, message);
-    close_socket(stream);
-    freeval(stream);
-    if (!ok)
-        return NULL;
-    return make_response(message);
+        std::vector<value_t *> write_args;
+        write_args.push_back(dupval(stream));
+        write_args.push_back(newbytesval(request));
+        write_args.push_back(newintval(timeout_ms));
+        value_t *written = call_io(B_io_write_all, write_args);
+        bool ok = written != NULL;
+        if (written)
+            freeval(written);
+        http1::message message;
+        if (ok)
+            ok = read_message(stream, false, timeout_ms, message);
+
+        eval_capture_result captured;
+        if (capture_errors)
+            captured = eval_capture_end(snapshot);
+
+        if (!ok) {
+            freeval(captured.error);
+            pool_discard(connection);
+            if (capture_errors && idempotent && !g_interrupted)
+                continue;
+            return NULL;
+        }
+
+        freeval(captured.error);
+        if (message.keep_alive)
+            pool_release(connection);
+        else
+            pool_discard(connection);
+        return make_response(message);
+    }
+    return NULL;
 }
 
 value_t *await_task_value(value_t *task_value) {
@@ -662,60 +850,90 @@ value_t *do_request_async(const std::string &method,
         timeout_ms = ((int_value_t *)timeout_value)->value;
     }
 
-    std::string request = build_request(method, url, headers, body);
+    std::string request =
+        build_request(method, url, headers, body, true);
     if (request.empty())
         return NULL;
 
     std::string host = url.host;
     int port = url.port;
     bool use_tls = url.tls;
+    std::string key = connection_key(url, tls_verify, tls_ca_file);
+    bool idempotent = method == "GET" || method == "HEAD" ||
+                      method == "OPTIONS" || method == "TRACE";
     task_ptr task = fiber_start_async(
         [host, port, request, timeout_ms, use_tls, tls_verify,
-         tls_ca_file]() {
-        value_t *client = async_connect(host, port, timeout_ms);
-        if (!client)
-            return (value_t *)NULL;
+         tls_ca_file, key, idempotent]() {
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            pooled_connection *connection =
+                attempt == 0 ? pool_acquire(key) : NULL;
+            bool reused = connection != NULL;
+            if (!connection) {
+                value_t *client = async_connect(host, port, timeout_ms);
+                if (!client)
+                    return (value_t *)NULL;
 
-        value_t *stream = client;
-        if (use_tls) {
+                value_t *stream = client;
+                if (use_tls) {
 #ifdef CALC_ENABLE_TLS
-            value_t *tls_options = (value_t *)newdictval();
-            dict_set(tls_options, "verify", newboolval(tls_verify));
-            if (!tls_ca_file.empty())
-                dict_set(tls_options, "ca_file",
-                         newstrval(tls_ca_file.c_str()));
-            std::vector<value_t *> tls_args;
-            tls_args.push_back(dupval(client));
-            tls_args.push_back(newstrval(host.c_str()));
-            tls_args.push_back(tls_options);
-            stream = call_tls(B_tls_client, tls_args);
-            if (!stream) {
-                close_socket(client);
-                freeval(client);
+                    value_t *tls_options = (value_t *)newdictval();
+                    dict_set(tls_options, "verify", newboolval(tls_verify));
+                    if (!tls_ca_file.empty())
+                        dict_set(tls_options, "ca_file",
+                                 newstrval(tls_ca_file.c_str()));
+                    std::vector<value_t *> tls_args;
+                    tls_args.push_back(dupval(client));
+                    tls_args.push_back(newstrval(host.c_str()));
+                    tls_args.push_back(tls_options);
+                    stream = call_tls(B_tls_client, tls_args);
+                    if (!stream) {
+                        close_socket(client);
+                        freeval(client);
+                        return (value_t *)NULL;
+                    }
+                    freeval(client);
+#else
+                    yyerror("std.http: https is not supported "
+                            "(TLS disabled)");
+                    close_socket(client);
+                    freeval(client);
+                    return (value_t *)NULL;
+#endif
+                }
+                connection = pool_add(key, stream);
+            }
+
+            bool capture_errors = attempt == 0 && reused;
+            eval_capture_snapshot snapshot;
+            if (capture_errors)
+                eval_capture_begin(snapshot);
+
+            value_t *stream = connection->stream;
+            bool ok = async_write(stream, request, timeout_ms);
+            http1::message message;
+            if (ok)
+                ok = read_message_async(stream, false, timeout_ms, message);
+
+            eval_capture_result captured;
+            if (capture_errors)
+                captured = eval_capture_end(snapshot);
+
+            if (!ok) {
+                freeval(captured.error);
+                pool_discard(connection);
+                if (capture_errors && idempotent && !g_interrupted)
+                    continue;
                 return (value_t *)NULL;
             }
-            freeval(client);
-#else
-            yyerror("std.http: https is not supported (TLS disabled)");
-            close_socket(client);
-            freeval(client);
-            return (value_t *)NULL;
-#endif
-        }
 
-        if (!async_write(stream, request, timeout_ms)) {
-            close_socket(stream);
-            freeval(stream);
-            return (value_t *)NULL;
+            freeval(captured.error);
+            if (message.keep_alive)
+                pool_release(connection);
+            else
+                pool_discard(connection);
+            return make_response(message);
         }
-
-        http1::message message;
-        bool ok = read_message_async(stream, false, timeout_ms, message);
-        close_socket(stream);
-        freeval(stream);
-        if (!ok)
-            return (value_t *)NULL;
-        return make_response(message);
+        return (value_t *)NULL;
     });
     if (!task)
         return NULL;
@@ -968,7 +1186,9 @@ value_t *http_accept(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    return make_request(stream, message);
+    value_t *request = make_request(stream, message);
+    freeval(stream);
+    return request;
 }
 
 value_t *http_accept_async(const std::vector<value_t *> &args) {
@@ -1052,6 +1272,7 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
         }
 
         value_t *request = make_request(stream, message);
+        freeval(stream);
         freeval(listener);
         return request;
     });
@@ -1091,7 +1312,7 @@ value_t *http_respond(const std::vector<value_t *> &args) {
 
     std::string error;
     std::string response =
-        build_response((int)status, headers, body, error);
+        build_response((int)status, headers, body, false, error);
     if (response.empty()) {
         yyerror("std.http.respond: %s", error.c_str());
         return NULL;
@@ -1141,7 +1362,7 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
 
     std::string error;
     std::string response =
-        build_response((int)status, headers, body, error);
+        build_response((int)status, headers, body, false, error);
     if (response.empty()) {
         yyerror("std.http.respond_async: %s", error.c_str());
         return NULL;
@@ -1164,6 +1385,179 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
     return new_task_value(std::move(task));
 }
 
+value_t *http_serve(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 5 || args[0]->type != T_dict ||
+        (args[1]->type != T_func && args[1]->type != T_builtin &&
+         args[1]->type != T_method)) {
+        yyerror("std.http.serve expects server, handler, optional "
+                "max_requests, max_per_connection, idle_timeout_ms");
+        return NULL;
+    }
+    value_t *socket = dict_get(args[0], "socket");
+    if (!socket) {
+        yyerror("std.http.serve expects a std.http server");
+        return NULL;
+    }
+    long long max_requests = 0;
+    long long max_per_connection = 100;
+    long long idle_timeout_ms = 0;
+    for (size_t i = 2; i < args.size(); ++i) {
+        if (args[i]->type != T_int ||
+            ((int_value_t *)args[i])->value < 0) {
+            yyerror("std.http.serve limits must be non-negative integers");
+            return NULL;
+        }
+        long long value = ((int_value_t *)args[i])->value;
+        if (i == 2)
+            max_requests = value;
+        else if (i == 3)
+            max_per_connection = value;
+        else
+            idle_timeout_ms = value;
+    }
+
+    std::string cert_file;
+    std::string key_file;
+    value_t *cert_value = dict_get(args[0], "cert");
+    value_t *key_value = dict_get(args[0], "key");
+    if (cert_value || key_value) {
+        if (!cert_value || !key_value ||
+            cert_value->type != T_string || key_value->type != T_string) {
+            yyerror("std.http.serve: invalid TLS server certificate");
+            return NULL;
+        }
+        cert_file = ((string_value_t *)cert_value)->value;
+        key_file = ((string_value_t *)key_value)->value;
+    }
+
+    long long served = 0;
+    while (max_requests == 0 || served < max_requests) {
+        std::vector<value_t *> accept_args;
+        accept_args.push_back(dupval(socket));
+        accept_args.push_back(newintval(0));
+        value_t *client = call_net(B_net_accept, accept_args);
+        if (!client)
+            break;
+
+        value_t *stream = client;
+        if (!cert_file.empty()) {
+#ifdef CALC_ENABLE_TLS
+            std::vector<value_t *> tls_args;
+            tls_args.push_back(dupval(client));
+            tls_args.push_back(newstrval(cert_file.c_str()));
+            tls_args.push_back(newstrval(key_file.c_str()));
+            stream = call_tls(B_tls_server, tls_args);
+            if (!stream) {
+                close_socket(client);
+                freeval(client);
+                break;
+            }
+            freeval(client);
+#else
+            yyerror("std.http.serve: TLS is disabled");
+            close_socket(client);
+            freeval(client);
+            break;
+#endif
+        }
+
+        bool connection_open = true;
+        long long connection_requests = 0;
+        while (connection_open &&
+               (max_requests == 0 || served < max_requests)) {
+            http1::message message;
+            bool clean_eof = false;
+            bool timed_out = false;
+            if (!read_message(stream, true, idle_timeout_ms, message,
+                              &clean_eof, &timed_out))
+                break;
+            if (clean_eof || timed_out)
+                break;
+
+            value_t *request = make_request(stream, message);
+            value_t *response =
+                call_value_args(args[1], std::vector<value_t *>{request});
+            if (!response) {
+                connection_open = false;
+                break;
+            }
+            if (response->type != T_dict) {
+                yyerror("std.http.serve handler must return a response dict");
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+
+            value_t *status_value = dict_get(response, "status");
+            if (!status_value || status_value->type != T_int) {
+                yyerror("std.http.serve response status must be an integer");
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            long long status = ((int_value_t *)status_value)->value;
+            if (status < 100 || status > 999) {
+                yyerror("std.http.serve response status is invalid");
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            value_t *headers = dict_get(response, "headers");
+            if (headers && headers->type != T_dict &&
+                headers->type != T_null) {
+                yyerror("std.http.serve response headers must be a dict");
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            std::string body;
+            if (!body_value(dict_get(response, "body"), body,
+                            "std.http.serve")) {
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+
+            bool keep_alive =
+                message.keep_alive && !headers_request_close(headers);
+            if (max_requests != 0 && served + 1 >= max_requests)
+                keep_alive = false;
+            if (max_per_connection != 0 &&
+                connection_requests + 1 >= max_per_connection)
+                keep_alive = false;
+            std::string error;
+            std::string response_text = build_response(
+                (int)status, headers, body, keep_alive, error);
+            if (response_text.empty()) {
+                yyerror("std.http.serve: %s", error.c_str());
+                freeval(response);
+                connection_open = false;
+                break;
+            }
+            freeval(response);
+
+            std::vector<value_t *> write_args;
+            write_args.push_back(dupval(stream));
+            write_args.push_back(newbytesval(response_text));
+            write_args.push_back(newintval(0));
+            value_t *written = call_io(B_io_write_all, write_args);
+            if (!written) {
+                connection_open = false;
+                break;
+            }
+            freeval(written);
+            ++served;
+            ++connection_requests;
+            if (!keep_alive)
+                connection_open = false;
+        }
+
+        close_socket(stream);
+        freeval(stream);
+    }
+    return newintval(served);
+}
+
 value_t *http_close(const std::vector<value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_dict) {
         yyerror("std.http.close expects a server or request handle");
@@ -1183,6 +1577,10 @@ value_t *http_close(const std::vector<value_t *> &args) {
 }
 
 } // namespace
+
+void http_shutdown() {
+    pool_shutdown();
+}
 
 struct value_t *call_http_builtin(
     int functype, const std::vector<struct value_t *> &args) {
@@ -1211,6 +1609,8 @@ struct value_t *call_http_builtin(
             return http_respond(args);
         case B_http_respond_async:
             return http_respond_async(args);
+        case B_http_serve:
+            return http_serve(args);
         case B_http_close:
             return http_close(args);
         default:

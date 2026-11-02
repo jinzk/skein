@@ -557,8 +557,25 @@ value_t *build_std_namespace() {
             {"accept_async", B_http_accept_async},
             {"respond", B_http_respond},
             {"respond_async", B_http_respond_async},
+            {"serve", B_http_serve},
             {"close", B_http_close},
         })));
+#ifdef CALC_ENABLE_HTTP2
+    root->payload->items.push_back(std::make_pair(
+        newstrval("http2"),
+        builtin_module({
+            {"request", B_http2_request},
+            {"get", B_http2_get},
+            {"post", B_http2_post},
+            {"request_async", B_http2_request_async},
+            {"get_async", B_http2_get_async},
+            {"post_async", B_http2_post_async},
+            {"listen", B_http2_listen},
+            {"listen_tls", B_http2_listen_tls},
+            {"serve", B_http2_serve},
+            {"close", B_http_close},
+        })));
+#endif
 #ifdef CALC_ENABLE_TLS
     root->payload->items.push_back(std::make_pair(
         newstrval("tls"),

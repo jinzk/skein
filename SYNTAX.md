@@ -1560,6 +1560,33 @@ await std.http.respond_async(req, 200, {"Content-Type": "text/plain"},
 std.http.close(s);
 ```
 
+keep-alive 服务端：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+
+let served = std.http.serve(s, func(req) {
+  return {
+    "status": 200,
+    "headers": {"Content-Type": "text/plain"},
+    "body": "hello " + req["path"]
+  };
+}, 100);
+
+std.http.close(s);
+```
+
+`std.http.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]])`：
+
+- handler 接收 request dict；
+- 返回 response dict；
+- 同一个连接可以处理多个请求；
+- `max_requests = 0` 表示总请求数不限制；
+- `max_per_connection` 默认 100，`0` 表示不限制；
+- `idle_timeout_ms` 默认 0，表示不设置空闲超时；
+- 达到限制或空闲超时后关闭连接；
+- 返回已处理请求数。
+
 函数：
 
 ```text
@@ -1575,6 +1602,7 @@ std.http.accept(server[, timeout_ms])
 std.http.accept_async(server[, timeout_ms])
 std.http.respond(request, status[, headers[, body]])
 std.http.respond_async(request, status[, headers[, body]])
+std.http.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]])
 std.http.close(server_or_request)
 ```
 
@@ -1594,11 +1622,73 @@ status, status_text, headers, body, http_major, http_minor
 
 - 支持 `http://` 和 `https://`；
 - `https://` 支持同步和 async 客户端/服务端；
-- 只支持 HTTP/1.1；
-- 一次连接只处理一个请求，响应后关闭；
+- 只支持 HTTP/1.1；HTTP/2 使用 `std.http2`；
+- 同步和 async 客户端共用 HTTP/1.1 keep-alive 连接池；
+- 复用连接失败时，幂等方法（GET/HEAD/OPTIONS/TRACE）会用新连接重试一次；
+- `std.http.serve` 支持服务端 keep-alive；
+- `std.http.accept` / `respond` 仍是一次连接一个请求；
 - body 整体读取，默认上限 16 MiB；
 - 同名 header 只保留最后一个；
 - 客户端和服务端都支持同步和 async。
+
+### HTTP/2
+
+```text
+std.http2.request(method, url[, options]) → response
+std.http2.get(url[, options])           → response
+std.http2.post(url[, body[, options]])  → response
+std.http2.request_async(method, url[, options]) → task
+std.http2.get_async(url[, options])             → task
+std.http2.post_async(url[, body[, options]])    → task
+std.http2.listen(host, port[, timeout_ms])      → server
+std.http2.listen_tls(host, port, cert_file, key_file[, timeout_ms]) → server
+std.http2.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]]) → int
+std.http2.close(server)
+```
+
+客户端：
+
+```text
+let a = std.http2.get("https://example.com/", {
+  "headers": {"Accept": "text/plain"},
+  "tls": {"verify": true}
+});
+
+print(str(a["status"]) + " " + a["protocol"]);
+print(bytes_to_string(a["body"]));
+
+let b = std.http2.post("https://example.com/echo", "payload");
+let c = await std.http2.get_async("https://example.com/async");
+```
+
+服务端：
+
+```text
+let s = std.http2.listen("127.0.0.1", 8080);
+
+let served = std.http2.serve(s, func(req) {
+  return {
+    "status": 200,
+    "headers": {"Content-Type": "text/plain"},
+    "body": "h2 " + req["method"] + " " + req["path"]
+  };
+}, 100);
+
+std.http2.close(s);
+```
+
+规则：
+
+- `http://` 使用 h2c prior knowledge；
+- `https://` 通过 TLS ALPN 协商 `h2`，未协商成功会报错；
+- 支持同步和 async 客户端；
+- 支持 h2c / TLS 服务端；
+- body 整体读取，默认上限 16 MiB；
+- `options` 支持 `headers`、`body`、`timeout_ms`、`max_body_bytes`、`tls`；
+- `max_requests = 0` 表示总请求数不限制；
+- `max_per_connection` 默认 100，`0` 表示不限制；
+- `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
+- 当前每个客户端请求使用独立连接，尚未实现多路复用和连接池。
 
 ### TLS
 

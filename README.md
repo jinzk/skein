@@ -133,7 +133,7 @@ shebang 行同样会被跳过。
 
 ## 包与导入
 
-默认包是 `main`。文件可以使用显式包块：
+入口脚本默认是包 `main`，也可以显式声明与所在目录同名的包。包文件使用显式包块：
 
 ```text
 package cc {
@@ -154,7 +154,10 @@ package cc {
 - `export let` / `export const` / `export func` 导出标识符；
 - 也可以使用 `export name = expr;` 简写；
 - 没有 `export` 的定义是包私有的；
-- 包名必须与所在文件夹名相同；可以多层嵌套。
+- 入口脚本默认包名是 `main`；`package main {}` 可以位于任意目录；
+- 入口脚本也可以显式声明与所在文件夹同名的普通包；
+- 被 `import` 的包名必须与所在文件夹名相同，且不能是 `main`；可以多层嵌套；
+- `main` 不能被 `import`。
 
 ### 目录结构
 
@@ -201,6 +204,8 @@ import @top.pkg;    // 项目根目录
 - `@name` 只从项目根目录解析，不回退到 `-I` / 环境变量；
 - 项目根通过从主脚本目录向上查找 `.calcroot` 文件确定；没有标记时使用主脚本目录；
 - 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
+- `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
+- 普通包文件不能声明 `package main {}`；
 - 别名必须是普通标识符，`as` 是保留字；
 - 父包没有自己的源文件也可以作为子包容器；
 - 同一个包只加载一次，之后复用缓存；
@@ -1969,7 +1974,7 @@ let q = p.moved(1, 2);
 - 构造使用 `Point { x: 3, y: 4 }`，字段顺序不限；
 - 字段可以读写：`p.x`、`p.x = 5`；
 - 方法第一个参数必须是显式 `self`；
-- 方法可以在 `struct` 内声明，也可以在同模块的 `impl Type` 中补充；
+- 方法可以在 `struct` 内声明，也可以在同一个包的 `impl Type` 中补充；
 - 方法只能通过实例调用：`p.length()`；
 - 方法本身可以作为值提取，例如 `let f = p.length; f()`；
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响已绑定的方法；
@@ -2018,11 +2023,11 @@ render(p)
 - 接口是名义式的：只有显式写了 `impl Drawable for Point`，`Point` 才能传给 `Drawable`；
 - 如果方法已经存在于 `impl Point` 中，可以只写 `impl Drawable for Point;` 做接口适配；
 - trait 方法名不能与类型已有方法冲突；
-- trait 实现和类型必须在同一模块中；
+- trait 实现和类型必须在同一个包中；
 - 一个类型对同一个 trait 只能实现一次；
-- 结构体和 trait 名称共享类型命名空间，不能在同一模块中重名；
-- 类型名按源模块注册，模块通常对应一个源文件；不同模块可以定义同名结构体或 trait；
-- 类型默认不跨模块可见；`export struct` / `export trait` 后可以按模块路径使用；
+- 结构体和 trait 名称共享类型命名空间，不能在同一个包中重名；
+- 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 trait；
+- 类型默认不跨包可见；`export struct` / `export trait` 后可以按包路径使用；
 - 导入之后用 `aa::Point`、`lib::Drawable` 这样的限定名引用：
 
 ```text
@@ -2039,14 +2044,14 @@ import aa as lib;
 let q: lib::P = lib.make();
 ```
 
-- 未导出的类型不能通过模块路径引用，但它的值仍可作为普通值传递和方法调用。
+- 未导出的类型不能通过包路径引用，但它的值仍可作为普通值传递和方法调用。
 
 运行时类型检查：
 
 ```text
 kind_of(x)        // "int" / "list" / "struct" / ...
 type_name(x)      // "int" / "Point" / ...
-type_module(x)    // 逻辑模块：主模块为 "main"，包类型为包名
+type_module(x)    // 逻辑包名：入口为 "main"，包类型为包名
 type_source(x)    // 调试用源文件路径
 
 x is int
@@ -2066,7 +2071,7 @@ for (let value in values) {
 }
 ```
 
-`is` 只接受类型名或 trait 名作为右操作数；结构体类型名按模块解析。
+`is` 只接受类型名或 trait 名作为右操作数；结构体类型名按包解析。
 
 内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 

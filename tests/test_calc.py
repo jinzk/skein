@@ -6599,6 +6599,61 @@ std.json.stringify(std.json.parse(text))
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "5\n", repr(proc.stdout)
 
+        # The entry package may be named main in any directory.
+        main_anywhere = write(
+            "mainpkg/anywhere/entry.calc",
+            "package main {\n"
+            "  export let x = 7;\n"
+            "}\n"
+            "print(main.x);\n",
+        )
+        proc = run_file(main_anywhere)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "7\n", repr(proc.stdout)
+
+        # Entry packages that are not main still follow the folder rule.
+        entry_named = write(
+            "entrypkg/entry/entry.calc",
+            "package entry { export let x = 3; }\n"
+            "print(entry.x);\n",
+        )
+        proc = run_file(entry_named)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "3\n", repr(proc.stdout)
+
+        wrong_entry = write(
+            "entrypkg/wrong/wrong.calc",
+            "package other { export let x = 3; }\n",
+        )
+        proc = run_file(wrong_entry)
+        assert proc.returncode == 1, proc.stderr
+        assert "must match folder" in proc.stderr, proc.stderr
+
+        # main is reserved for the entry package and cannot be imported.
+        reserved_import = write("reservedimport/main.calc", "import main;\n")
+        proc = run_file(reserved_import)
+        assert proc.returncode == 1, proc.stderr
+        assert "reserved for the entry script" in proc.stderr, proc.stderr
+
+        reserved_import_sub = write(
+            "reservedimport/sub.calc", "import main.sub;\n")
+        proc = run_file(reserved_import_sub)
+        assert proc.returncode == 1, proc.stderr
+        assert "reserved for the entry script" in proc.stderr, proc.stderr
+
+        # A normal package cannot declare itself as main.
+        write(
+            "reservedmain/aa/bb/bb.calc",
+            "package main { export let x = 1; }\n",
+        )
+        reserved_main = write(
+            "reservedmain/main.calc",
+            "import aa.bb;\n",
+        )
+        proc = run_file(reserved_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "reserved for the entry script" in proc.stderr, proc.stderr
+
         # Cyclic imports fail cleanly instead of hanging.
         write(
             "cycle/aa/bb/bb.calc",

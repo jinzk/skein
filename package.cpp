@@ -65,6 +65,11 @@ bool is_identifier(const std::string &name) {
     return true;
 }
 
+bool is_reserved_main_package(const std::string &dotted) {
+    return dotted == "main" ||
+           (dotted.size() > 5 && dotted.compare(0, 5, "main.") == 0);
+}
+
 std::vector<std::string> split_dotted(const std::string &path) {
     std::vector<std::string> parts;
     size_t start = 0;
@@ -658,6 +663,12 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
     if (!parse_import_spec(dotted_path, spec, error))
         return NULL;
 
+    /* `main` is the entry script's package and is never importable. */
+    if (is_reserved_main_package(spec.dotted)) {
+        error = "package name \"main\" is reserved for the entry script";
+        return NULL;
+    }
+
     /* Only a bare `std` refers to the built-in standard library. */
     if (spec.kind == IMPORT_ABSOLUTE && spec.dotted == "std") {
         std::string hidden = package_cache_key("builtin:std");
@@ -967,6 +978,10 @@ bool package_publish(const char *name, value_t *namespace_value,
 
     if (!load_stack.empty()) {
         package_load_context &context = load_stack.back();
+        if (std::strcmp(name, "main") == 0) {
+            error = "package name \"main\" is reserved for the entry script";
+            return false;
+        }
         if (context.expected_name != name) {
             error = "package name \"" + std::string(name) +
                     "\" must match folder \"" + context.expected_name + "\"";
@@ -983,7 +998,8 @@ bool package_publish(const char *name, value_t *namespace_value,
     if (!main_source_path.empty()) {
         fs::path source(main_source_path);
         std::string folder = source.parent_path().filename().string();
-        if (!folder.empty() && folder != name) {
+        bool is_main = std::strcmp(name, "main") == 0;
+        if (!is_main && !folder.empty() && folder != name) {
             error = "package name \"" + std::string(name) +
                     "\" must match folder \"" + folder + "\"";
             return false;

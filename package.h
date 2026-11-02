@@ -26,7 +26,9 @@ value_t *package_import(const char *dotted_path, const char *base_dir,
 /* Build a dictionary from exported symbols in `scope`. */
 value_t *package_build_namespace(scope_t *scope, std::string &error);
 
-/* Publish the namespace produced by a package block. */
+/* Publish the namespace produced by a package block.  The entry script may
+ * use `main` in any directory; imported packages must match their folder
+ * name and may not be named `main`. */
 bool package_publish(const char *name, value_t *namespace_value,
                      std::string &error);
 

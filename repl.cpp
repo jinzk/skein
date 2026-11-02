@@ -40,7 +40,7 @@ std::string trim_copy(const std::string &text) {
 }
 
 std::string history_path() {
-    const char *explicit_path = std::getenv("CALC_HISTORY");
+    const char *explicit_path = std::getenv("SKEIN_HISTORY");
     if (explicit_path && *explicit_path)
         return explicit_path;
 #ifdef _WIN32
@@ -50,7 +50,7 @@ std::string history_path() {
 #endif
     if (!home || !*home)
         return std::string();
-    return std::string(home) + "/.calc_history";
+    return std::string(home) + "/.skein_history";
 }
 
 void history_add(const std::string &line) {

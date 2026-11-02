@@ -1,5 +1,5 @@
-#ifndef CALC_ASYNC_SUPPORT_H
-#define CALC_ASYNC_SUPPORT_H
+#ifndef SKEIN_ASYNC_SUPPORT_H
+#define SKEIN_ASYNC_SUPPORT_H
 
 #include "task.h"
 #include "valuetype.h"
@@ -9,7 +9,7 @@
 
 #include <uv.h>
 
-namespace calc_async {
+namespace skein_async {
 
 struct state {
     std::weak_ptr<task> task_ref;
@@ -34,6 +34,6 @@ bool prepare_async(state *state, task_ptr &task, long long timeout_ms,
                    const std::string &timeout_error);
 std::string async_timeout_error(const char *operation, long long timeout_ms);
 
-} // namespace calc_async
+} // namespace skein_async
 
 #endif

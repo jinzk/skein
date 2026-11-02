@@ -1,5 +1,5 @@
-#ifndef CALC_DIAGNOSTICS_H
-#define CALC_DIAGNOSTICS_H
+#ifndef SKEIN_DIAGNOSTICS_H
+#define SKEIN_DIAGNOSTICS_H
 
 #include <string>
 #include <vector>

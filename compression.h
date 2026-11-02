@@ -1,5 +1,5 @@
-#ifndef CALC_COMPRESSION_H
-#define CALC_COMPRESSION_H
+#ifndef SKEIN_COMPRESSION_H
+#define SKEIN_COMPRESSION_H
 
 #include <string>
 

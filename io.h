@@ -1,5 +1,5 @@
-#ifndef CALC_IO_H
-#define CALC_IO_H
+#ifndef SKEIN_IO_H
+#define SKEIN_IO_H
 
 #include "valuetype.h"
 

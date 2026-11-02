@@ -1,5 +1,5 @@
-#ifndef CALC_COOKIE_H
-#define CALC_COOKIE_H
+#ifndef SKEIN_COOKIE_H
+#define SKEIN_COOKIE_H
 
 #include "valuetype.h"
 

@@ -1,5 +1,5 @@
-#ifndef CALC_FORMAT_H
-#define CALC_FORMAT_H
+#ifndef SKEIN_FORMAT_H
+#define SKEIN_FORMAT_H
 
 #include <string>
 #include <vector>

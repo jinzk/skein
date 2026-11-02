@@ -1,5 +1,5 @@
-#ifndef CALC_HTTP1_PARSER_H
-#define CALC_HTTP1_PARSER_H
+#ifndef SKEIN_HTTP1_PARSER_H
+#define SKEIN_HTTP1_PARSER_H
 
 #include <cstddef>
 #include <functional>

@@ -1,5 +1,5 @@
-#ifndef CALC_REPL_H
-#define CALC_REPL_H
+#ifndef SKEIN_REPL_H
+#define SKEIN_REPL_H
 
 #include <csignal>
 #include <cstdio>

@@ -1,5 +1,5 @@
-#ifndef CALC_PACKAGE_H
-#define CALC_PACKAGE_H
+#ifndef SKEIN_PACKAGE_H
+#define SKEIN_PACKAGE_H
 
 #include <string>
 #include <vector>

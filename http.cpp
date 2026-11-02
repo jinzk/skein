@@ -10,7 +10,7 @@
 #include "net.h"
 #include "repl.h"
 #include "task.h"
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
 #include "tls.h"
 #endif
 #include "valuetype.h"
@@ -49,7 +49,7 @@ value_t *call_io(int functype, std::vector<value_t *> args) {
     return result;
 }
 
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
 value_t *call_tls(int functype, std::vector<value_t *> args) {
     value_t *result = call_tls_builtin(functype, args);
     free_args(args);
@@ -1060,7 +1060,7 @@ value_t *do_request_once(const std::string &method,
             return NULL;
         value_t *stream = client;
         if (url.tls) {
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
             std::vector<value_t *> tls_args;
             tls_args.push_back(dupval(client));
             tls_args.push_back(newstrval(url.host.c_str()));
@@ -1133,7 +1133,7 @@ value_t *do_request_once(const std::string &method,
 
             stream = client;
             if (url.tls) {
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
                 std::vector<value_t *> tls_args;
                 tls_args.push_back(dupval(client));
                 tls_args.push_back(newstrval(url.host.c_str()));
@@ -1598,7 +1598,7 @@ value_t *do_request_async_once(const std::string &method,
                 return (value_t *)NULL;
             value_t *stream = client;
             if (use_tls) {
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
                 value_t *tls_options = (value_t *)newdictval();
                 dict_set(tls_options, "verify", newboolval(tls_verify));
                 if (!tls_ca_file.empty())
@@ -1658,7 +1658,7 @@ value_t *do_request_async_once(const std::string &method,
 
                 value_t *stream = client;
                 if (use_tls) {
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
                     value_t *tls_options = (value_t *)newdictval();
                     dict_set(tls_options, "verify", newboolval(tls_verify));
                     if (!tls_ca_file.empty())
@@ -2021,7 +2021,7 @@ value_t *http_listen_tls(const std::vector<value_t *> &args) {
                 "and optional timeout");
         return NULL;
     }
-#ifndef CALC_ENABLE_TLS
+#ifndef SKEIN_ENABLE_TLS
     yyerror("std.http.listen_tls: TLS is disabled");
     return NULL;
 #else
@@ -2096,7 +2096,7 @@ value_t *http_accept(const std::vector<value_t *> &args) {
             freeval(client);
             return NULL;
         }
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
         std::vector<value_t *> tls_args;
         tls_args.push_back(dupval(client));
         tls_args.push_back(dupval(cert));
@@ -2188,7 +2188,7 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
 
         value_t *stream = client;
         if (!cert_file.empty()) {
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
             std::vector<value_t *> tls_args;
             tls_args.push_back(dupval(client));
             tls_args.push_back(newstrval(cert_file.c_str()));
@@ -2679,7 +2679,7 @@ value_t *http_serve(const std::vector<value_t *> &args) {
 
             value_t *stream = client;
             if (!cert_file.empty()) {
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
                 std::vector<value_t *> tls_args;
                 tls_args.push_back(dupval(client));
                 tls_args.push_back(newstrval(cert_file.c_str()));

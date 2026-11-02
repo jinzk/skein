@@ -252,7 +252,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %precedence NOELSE
 %precedence ELSE
 
-%type <a> exp value stmt list scope explist arg calclist docalc line valuelist pairlist
+%type <a> exp value stmt list scope explist arg top_expression top_statement line valuelist pairlist
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> struct_decl impl_decl trait_decl struct_members struct_member
@@ -267,7 +267,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %destructor { symlistfree($$); } <sl>
 %destructor { free_type_constraint($$); } <type>
 
-%start calc
+%start program
 %%
 
 stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
@@ -710,11 +710,11 @@ type_name: NAME                           {
     | NULLVAL                             { $$ = new_type_constraint(TYPE_NULL); }
     ;
 
-calclist: exp { $$ = $1; }
+top_expression: exp { $$ = $1; }
     | list { $$ = $1; }
     ;
 
-docalc: calclist EOL {
+top_statement: top_expression EOL {
         func_yield_counts.clear();
         active_eval_context().runtime_error_count = 0;
         diag_set_location(0, 0);
@@ -776,8 +776,8 @@ docalc: calclist EOL {
     }
     ;
 
-calc: %empty
-    | calc docalc { (void)$2; }
+program: %empty
+    | program top_statement { (void)$2; }
     ;
 %%
 

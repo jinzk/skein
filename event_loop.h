@@ -1,5 +1,5 @@
-#ifndef CALC_EVENT_LOOP_H
-#define CALC_EVENT_LOOP_H
+#ifndef SKEIN_EVENT_LOOP_H
+#define SKEIN_EVENT_LOOP_H
 
 #include <uv.h>
 

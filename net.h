@@ -1,5 +1,5 @@
-#ifndef CALC_NET_H
-#define CALC_NET_H
+#ifndef SKEIN_NET_H
+#define SKEIN_NET_H
 
 #include "valuetype.h"
 

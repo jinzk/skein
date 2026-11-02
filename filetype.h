@@ -1,5 +1,5 @@
-#ifndef CALC_FILETYPE_H
-#define CALC_FILETYPE_H
+#ifndef SKEIN_FILETYPE_H
+#define SKEIN_FILETYPE_H
 
 #include <memory>
 #include <string>

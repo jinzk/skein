@@ -1,4 +1,4 @@
-# calc-demo 语法参考
+# Skein 语法参考
 
 本文只描述当前实现支持的语言语法和基本语义。包查找、文件 API 等细节可结合 `README.md` 阅读。
 
@@ -1206,7 +1206,7 @@ import @top.pkg;        // 项目根目录
 - `.name` 相对于导入语句所在文件的包目录；
 - `..name` 相对于该包目录的上一级；
 - `@name` 只从项目根目录解析，不回退到 `-I` 或环境变量；
-- 项目根由从主脚本目录向上查找的 `.calcroot` 标记文件确定；没有标记时使用主脚本目录（stdin 模式使用当前目录）；
+- 项目根由从主脚本目录向上查找的 `.skeinroot` 标记文件确定；没有标记时使用主脚本目录（stdin 模式使用当前目录）；
 - 裸 `std` 才是内置标准库；`.std`、`..std`、`@std` 都按文件系统包路径解析；
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
@@ -1220,7 +1220,7 @@ import @top.pkg;        // 项目根目录
 aa/
   bb/
     cc/
-      cc.calc
+      cc.skein
 ```
 
 导入：
@@ -1229,7 +1229,7 @@ aa/
 import aa.bb.cc;
 ```
 
-入口文件优先使用 `<name>.calc`，其次 `index.calc`；如果目录中只有一个 `.calc` 文件，也会使用它。
+入口文件优先使用 `<name>.skein`，其次 `index.skein`；如果目录中只有一个 `.skein` 文件，也会使用它。
 
 父目录没有源文件时，也可以作为纯子包容器。
 
@@ -1910,7 +1910,7 @@ print(bytes_to_string(r["body"]));
 - 删除响应 header 中的 `Content-Encoding`，并更新 `Content-Length`；
 - 不能与 `on_body` 同时使用；
 - 同步和 async 客户端都支持；
-- 构建选项 `-DCALC_ENABLE_COMPRESSION=OFF` 可关闭；
+- 构建选项 `-DSKEIN_ENABLE_COMPRESSION=OFF` 可关闭；
 - HTTP/2 单请求和 `request_many` 都支持自动解压。
 
 
@@ -2424,14 +2424,14 @@ std.ffi.buffer_free
 ```text
 入口脚本所在目录
 > 命令行 -I / --package-path
-> 环境变量 CALC_PACKAGE_PATH
+> 环境变量 SKEIN_PACKAGE_PATH
 ```
 
 示例：
 
 ```bash
-./calc-demo -I ./lib --package-path ./vendor app/main.calc
-CALC_PACKAGE_PATH=./lib:./vendor ./calc-demo app/main.calc
+./skein -I ./lib --package-path ./vendor app/main.skein
+SKEIN_PACKAGE_PATH=./lib:./vendor ./skein app/main.skein
 ```
 
 POSIX 使用 `:`，Windows 使用 `;`。
@@ -2567,7 +2567,7 @@ c()             // 2
 脚本默认在第一条错误后停止；REPL 继续交互。
 
 ```text
-calc-demo -k script.calc
+skein -k script.skein
 ```
 
 `-k` / `--keep-going` 会继续执行后续顶层语句，但最终退出码仍为 `1`。

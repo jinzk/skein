@@ -1,5 +1,5 @@
-#ifndef CALC_EVAL_CONTEXT_H
-#define CALC_EVAL_CONTEXT_H
+#ifndef SKEIN_EVAL_CONTEXT_H
+#define SKEIN_EVAL_CONTEXT_H
 
 #include "scopestack.h"
 

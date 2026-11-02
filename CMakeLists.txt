@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(calc-demo LANGUAGES C CXX)
+project(skein LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,20 +22,20 @@ if(PKG_CONFIG_FOUND)
   pkg_check_modules(LIBUV QUIET IMPORTED_TARGET libuv)
 endif()
 if(TARGET PkgConfig::LIBUV)
-  set(CALC_LIBUV_TARGET PkgConfig::LIBUV)
+  set(SKEIN_LIBUV_TARGET PkgConfig::LIBUV)
 else()
   find_path(LIBUV_INCLUDE_DIR uv.h)
   find_library(LIBUV_LIBRARY NAMES uv libuv)
   if(LIBUV_INCLUDE_DIR AND LIBUV_LIBRARY)
-    add_library(calc_libuv UNKNOWN IMPORTED)
-    set_target_properties(calc_libuv PROPERTIES
+    add_library(skein_libuv UNKNOWN IMPORTED)
+    set_target_properties(skein_libuv PROPERTIES
       IMPORTED_LOCATION "${LIBUV_LIBRARY}"
       INTERFACE_INCLUDE_DIRECTORIES "${LIBUV_INCLUDE_DIR}"
     )
-    set(CALC_LIBUV_TARGET calc_libuv)
+    set(SKEIN_LIBUV_TARGET skein_libuv)
   endif()
 endif()
-if(NOT CALC_LIBUV_TARGET)
+if(NOT SKEIN_LIBUV_TARGET)
   message(FATAL_ERROR "libuv not found; install libuv development files")
 endif()
 
@@ -44,15 +44,15 @@ if(NOT Boost_FOUND)
   find_package(Boost REQUIRED COMPONENTS context)
 endif()
 
-add_library(calc_llhttp STATIC
+add_library(skein_llhttp STATIC
   third_party/llhttp/src/llhttp.c
   third_party/llhttp/src/api.c
   third_party/llhttp/src/http.c
 )
-target_include_directories(calc_llhttp PUBLIC
+target_include_directories(skein_llhttp PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llhttp/include
 )
-set_target_properties(calc_llhttp PROPERTIES
+set_target_properties(skein_llhttp PROPERTIES
   C_STANDARD 99
   C_STANDARD_REQUIRED ON
   POSITION_INDEPENDENT_CODE ON
@@ -114,17 +114,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE
-  ${CALC_LIBUV_TARGET}
+  ${SKEIN_LIBUV_TARGET}
   Boost::context
-  calc_llhttp
+  skein_llhttp
 )
 
-option(CALC_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
-if(CALC_ENABLE_TLS)
+option(SKEIN_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
+if(SKEIN_ENABLE_TLS)
   find_package(OpenSSL QUIET)
   if(OpenSSL_FOUND)
     target_sources(${PROJECT_NAME} PRIVATE tls.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_TLS=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_TLS=1)
     target_link_libraries(${PROJECT_NAME} PRIVATE
       OpenSSL::SSL
       OpenSSL::Crypto
@@ -134,11 +134,11 @@ if(CALC_ENABLE_TLS)
   endif()
 endif()
 
-option(CALC_ENABLE_COMPRESSION "Enable gzip/deflate/brotli response decompression" ON)
-if(CALC_ENABLE_COMPRESSION)
+option(SKEIN_ENABLE_COMPRESSION "Enable gzip/deflate/brotli response decompression" ON)
+if(SKEIN_ENABLE_COMPRESSION)
   find_package(ZLIB QUIET)
   if(ZLIB_FOUND)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_ZLIB=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_ZLIB=1)
     target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
   else()
     message(STATUS "zlib not found; gzip/deflate decompression is disabled")
@@ -147,35 +147,35 @@ if(CALC_ENABLE_COMPRESSION)
     pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
   endif()
   if(BROTLIDEC_FOUND)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_BROTLI=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_BROTLI=1)
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::BROTLIDEC)
   else()
     message(STATUS "brotli decoder not found; br decompression is disabled")
   endif()
 endif()
 
-option(CALC_ENABLE_HTTP2 "Enable the optional std.http2 module (requires nghttp2)" ON)
-if(CALC_ENABLE_HTTP2)
+option(SKEIN_ENABLE_HTTP2 "Enable the optional std.http2 module (requires nghttp2)" ON)
+if(SKEIN_ENABLE_HTTP2)
   if(PKG_CONFIG_FOUND)
     pkg_check_modules(NGHTTP2 QUIET IMPORTED_TARGET libnghttp2)
   endif()
   if(NGHTTP2_FOUND)
     target_sources(${PROJECT_NAME} PRIVATE http2.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_HTTP2=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_HTTP2=1)
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::NGHTTP2)
   else()
     message(STATUS "nghttp2 not found; std.http2 is disabled")
   endif()
 endif()
 
-option(CALC_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
-if(CALC_ENABLE_FFI)
+option(SKEIN_ENABLE_FFI "Enable the optional std.ffi module (requires libffi)" ON)
+if(SKEIN_ENABLE_FFI)
   if(PKG_CONFIG_FOUND)
     pkg_check_modules(LIBFFI QUIET IMPORTED_TARGET libffi)
   endif()
   if(LIBFFI_FOUND)
     target_sources(${PROJECT_NAME} PRIVATE ffi.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE CALC_ENABLE_FFI=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_FFI=1)
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBFFI)
   else()
     message(STATUS "libffi not found; std.ffi is disabled")
@@ -200,7 +200,7 @@ if(BUILD_TESTING)
     tests/test_http1_parser.cpp
     http1_parser.cpp
   )
-  target_link_libraries(http1_parser_test PRIVATE calc_llhttp)
+  target_link_libraries(http1_parser_test PRIVATE skein_llhttp)
   target_include_directories(http1_parser_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
   )
@@ -211,19 +211,19 @@ if(BUILD_TESTING)
 
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
-    if(CALC_ENABLE_FFI AND LIBFFI_FOUND)
-      add_library(calc_ffi_shim SHARED tests/ffi_shim.cpp)
+    if(SKEIN_ENABLE_FFI AND LIBFFI_FOUND)
+      add_library(skein_ffi_shim SHARED tests/ffi_shim.cpp)
     endif()
-    set(CALC_TEST_COMMAND
+    set(SKEIN_TEST_COMMAND
       ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_calc.py
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skein.py
       $<TARGET_FILE:${PROJECT_NAME}>
     )
-    if(TARGET calc_ffi_shim)
-      list(APPEND CALC_TEST_COMMAND $<TARGET_FILE:calc_ffi_shim>)
+    if(TARGET skein_ffi_shim)
+      list(APPEND SKEIN_TEST_COMMAND $<TARGET_FILE:skein_ffi_shim>)
     endif()
-    add_test(NAME calc_tests COMMAND ${CALC_TEST_COMMAND})
+    add_test(NAME skein_tests COMMAND ${SKEIN_TEST_COMMAND})
   else()
-    message(WARNING "Python3 not found; calc_tests will not be registered")
+    message(WARNING "Python3 not found; skein_tests will not be registered")
   endif()
 endif()

@@ -1,5 +1,5 @@
-#ifndef CALC_HTTP_H
-#define CALC_HTTP_H
+#ifndef SKEIN_HTTP_H
+#define SKEIN_HTTP_H
 
 #include "valuetype.h"
 

@@ -6,11 +6,11 @@
 #include <cstring>
 #include <vector>
 
-#ifdef CALC_ENABLE_ZLIB
+#ifdef SKEIN_ENABLE_ZLIB
 #include <zlib.h>
 #endif
 
-#ifdef CALC_ENABLE_BROTLI
+#ifdef SKEIN_ENABLE_BROTLI
 #include <brotli/decode.h>
 #endif
 
@@ -36,7 +36,7 @@ std::string lower_ascii(std::string value) {
     return value;
 }
 
-#ifdef CALC_ENABLE_ZLIB
+#ifdef SKEIN_ENABLE_ZLIB
 bool zlib_decode(const std::string &input, int window_bits,
                  std::string &output, std::string &error) {
     z_stream stream;
@@ -80,7 +80,7 @@ bool zlib_decode(const std::string &input, int window_bits,
 }
 #endif
 
-#ifdef CALC_ENABLE_BROTLI
+#ifdef SKEIN_ENABLE_BROTLI
 bool brotli_decode(const std::string &input, std::string &output,
                    std::string &error) {
     std::size_t capacity = input.size() * 4 + 1024;
@@ -118,7 +118,7 @@ bool decode_one(const std::string &encoding, const std::string &input,
         return true;
     }
     if (name == "gzip" || name == "x-gzip") {
-#ifdef CALC_ENABLE_ZLIB
+#ifdef SKEIN_ENABLE_ZLIB
         return zlib_decode(input, 15 + 32, output, error);
 #else
         error = "compression: gzip support is disabled";
@@ -126,7 +126,7 @@ bool decode_one(const std::string &encoding, const std::string &input,
 #endif
     }
     if (name == "deflate") {
-#ifdef CALC_ENABLE_ZLIB
+#ifdef SKEIN_ENABLE_ZLIB
         std::string zlib_error;
         if (zlib_decode(input, 15 + 32, output, zlib_error))
             return true;
@@ -138,7 +138,7 @@ bool decode_one(const std::string &encoding, const std::string &input,
 #endif
     }
     if (name == "br") {
-#ifdef CALC_ENABLE_BROTLI
+#ifdef SKEIN_ENABLE_BROTLI
         return brotli_decode(input, output, error);
 #else
         error = "compression: brotli support is disabled";
@@ -153,10 +153,10 @@ bool decode_one(const std::string &encoding, const std::string &input,
 
 std::string compression_accept_encoding() {
     std::string encodings;
-#ifdef CALC_ENABLE_ZLIB
+#ifdef SKEIN_ENABLE_ZLIB
     encodings = "gzip, deflate";
 #endif
-#ifdef CALC_ENABLE_BROTLI
+#ifdef SKEIN_ENABLE_BROTLI
     if (!encodings.empty())
         encodings += ", ";
     encodings += "br";

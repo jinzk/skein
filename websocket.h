@@ -1,5 +1,5 @@
-#ifndef CALC_WEBSOCKET_H
-#define CALC_WEBSOCKET_H
+#ifndef SKEIN_WEBSOCKET_H
+#define SKEIN_WEBSOCKET_H
 
 #include "valuetype.h"
 

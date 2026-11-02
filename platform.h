@@ -1,5 +1,5 @@
-#ifndef CALC_PLATFORM_H
-#define CALC_PLATFORM_H
+#ifndef SKEIN_PLATFORM_H
+#define SKEIN_PLATFORM_H
 
 #include <cstdio>
 #include <memory>

@@ -1,5 +1,5 @@
-#ifndef CALC_FIBER_H
-#define CALC_FIBER_H
+#ifndef SKEIN_FIBER_H
+#define SKEIN_FIBER_H
 
 #include "task.h"
 #include "valuetype.h"

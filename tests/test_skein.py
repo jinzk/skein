@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Golden/smoke tests for the calc-demo interpreter."""
+"""Golden/smoke tests for the skein interpreter."""
 
 import base64
 import hashlib
@@ -11,11 +11,11 @@ import tempfile
 import time
 
 
-BIN = sys.argv[1] if len(sys.argv) > 1 else "./calc-demo"
+BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
 FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 else None
 
 
-def calc_string(value):
+def skein_string(value):
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
@@ -4125,7 +4125,7 @@ def main():
                 tls_server_probe.bind(("127.0.0.1", 0))
                 tls_server_port = tls_server_probe.getsockname()[1]
                 tls_server_probe.close()
-                tls_calc_server = subprocess.Popen(
+                tls_skein_server = subprocess.Popen(
                     [BIN],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -4133,9 +4133,9 @@ def main():
                     text=True,
                     encoding="utf-8",
                 )
-                tls_calc_client = None
+                tls_skein_client = None
                 try:
-                    tls_calc_server.stdin.write(
+                    tls_skein_server.stdin.write(
                         "import std;\n"
                         f'let l = std.net.tcp_listen("127.0.0.1", '
                         f"{tls_server_port}, 1000);\n"
@@ -4150,16 +4150,16 @@ def main():
                         "std.io.close(t);\n"
                         "std.net.close(l);\n"
                     )
-                    tls_calc_server.stdin.close()
+                    tls_skein_server.stdin.close()
                     deadline = time.time() + 5
                     while time.time() < deadline:
                         try:
-                            tls_calc_client = socket.create_connection(
+                            tls_skein_client = socket.create_connection(
                                 ("127.0.0.1", tls_server_port), timeout=0.2)
                             break
                         except OSError:
                             time.sleep(0.05)
-                    assert tls_calc_client is not None, (
+                    assert tls_skein_client is not None, (
                         "tls server did not listen")
                     import ssl
                     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -4167,18 +4167,18 @@ def main():
                     context.verify_mode = ssl.CERT_NONE
                     context.set_alpn_protocols(["http/1.1"])
                     tls_wrapped = context.wrap_socket(
-                        tls_calc_client, server_hostname="localhost")
+                        tls_skein_client, server_hostname="localhost")
                     assert tls_wrapped.selected_alpn_protocol() == "http/1.1"
                     tls_wrapped.sendall(b"hello")
                     tls_response = tls_wrapped.recv(100)
                     assert tls_response == b"server:hello", tls_response
                     tls_wrapped.close()
                 finally:
-                    if tls_calc_client:
-                        tls_calc_client.close()
-                    tls_calc_server.wait(timeout=10)
-                    tls_calc_output = tls_calc_server.stdout.read()
-                    assert "http/1.1" in tls_calc_output, tls_calc_output
+                    if tls_skein_client:
+                        tls_skein_client.close()
+                    tls_skein_server.wait(timeout=10)
+                    tls_skein_output = tls_skein_server.stdout.read()
+                    assert "http/1.1" in tls_skein_output, tls_skein_output
 
                 tls_async_server = socket.socket()
                 tls_async_server.setsockopt(
@@ -4269,7 +4269,7 @@ def main():
                 https_probe.bind(("127.0.0.1", 0))
                 https_server_port = https_probe.getsockname()[1]
                 https_probe.close()
-                https_calc_server = subprocess.Popen(
+                https_skein_server = subprocess.Popen(
                     [BIN],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -4277,9 +4277,9 @@ def main():
                     text=True,
                     encoding="utf-8",
                 )
-                https_calc_client = None
+                https_skein_client = None
                 try:
-                    https_calc_server.stdin.write(
+                    https_skein_server.stdin.write(
                         "import std;\n"
                         f'let s = std.http.listen_tls("127.0.0.1", '
                         f'{https_server_port}, "{tls_cert}", "{tls_key}");\n'
@@ -4288,23 +4288,23 @@ def main():
                         '"secure " + req["path"]);\n'
                         "std.http.close(s);\n"
                     )
-                    https_calc_server.stdin.close()
+                    https_skein_server.stdin.close()
                     deadline = time.time() + 5
                     while time.time() < deadline:
                         try:
-                            https_calc_client = socket.create_connection(
+                            https_skein_client = socket.create_connection(
                                 ("127.0.0.1", https_server_port), timeout=0.2)
                             break
                         except OSError:
                             time.sleep(0.05)
-                    assert https_calc_client is not None, (
+                    assert https_skein_client is not None, (
                         "https server did not listen")
                     import ssl
                     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                     context.check_hostname = False
                     context.verify_mode = ssl.CERT_NONE
                     https_wrapped = context.wrap_socket(
-                        https_calc_client, server_hostname="localhost")
+                        https_skein_client, server_hostname="localhost")
                     https_wrapped.sendall(
                         b"GET /secure HTTP/1.1\r\n"
                         b"Host: localhost\r\n"
@@ -4323,9 +4323,9 @@ def main():
                     assert "x-tls" in https_text.lower(), https_text
                     https_wrapped.close()
                 finally:
-                    if https_calc_client:
-                        https_calc_client.close()
-                    https_calc_server.wait(timeout=10)
+                    if https_skein_client:
+                        https_skein_client.close()
+                    https_skein_server.wait(timeout=10)
 
                 async_https_server = socket.socket()
                 async_https_server.setsockopt(
@@ -4381,7 +4381,7 @@ def main():
                 async_https_probe.bind(("127.0.0.1", 0))
                 async_https_server_port = async_https_probe.getsockname()[1]
                 async_https_probe.close()
-                async_https_calc = subprocess.Popen(
+                async_https_skein = subprocess.Popen(
                     [BIN],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -4391,7 +4391,7 @@ def main():
                 )
                 async_https_client = None
                 try:
-                    async_https_calc.stdin.write(
+                    async_https_skein.stdin.write(
                         "import std;\n"
                         f'let s = std.http.listen_tls("127.0.0.1", '
                         f'{async_https_server_port}, "{tls_cert}", '
@@ -4402,7 +4402,7 @@ def main():
                         'req["path"]);\n'
                         "std.http.close(s);\n"
                     )
-                    async_https_calc.stdin.close()
+                    async_https_skein.stdin.close()
                     deadline = time.time() + 5
                     while time.time() < deadline:
                         try:
@@ -4438,7 +4438,7 @@ def main():
                 finally:
                     if async_https_client:
                         async_https_client.close()
-                    async_https_calc.wait(timeout=10)
+                    async_https_skein.wait(timeout=10)
 
         serve_probe = socket.socket()
         serve_probe.bind(("127.0.0.1", 0))
@@ -5528,7 +5528,7 @@ def main():
                     if server_proc.poll() is not None:
                         break
                     time.sleep(0.02)
-            assert client is not None, "calc tcp_listen did not accept"
+            assert client is not None, "skein tcp_listen did not accept"
             client.sendall(b"hello")
             assert client.recv(100) == b"echo:hello"
             client.close()
@@ -5586,7 +5586,7 @@ def main():
                     if async_server_proc.poll() is not None:
                         break
                     time.sleep(0.02)
-            assert client is not None, "calc async listener did not accept"
+            assert client is not None, "skein async listener did not accept"
             client.sendall(b"hello")
             assert client.recv(100) == b"async:hello"
             assert client.recv(100) == b""
@@ -5762,7 +5762,7 @@ def main():
             )
 
     if has_ffi and FFI_SHIM:
-        shim = calc_string(FFI_SHIM)
+        shim = skein_string(FFI_SHIM)
         check(
             "std ffi scalar types",
             "import std;\n"
@@ -7336,10 +7336,10 @@ std.json.stringify(std.json.parse(text))
     check("crlf input", "1+2\r\n", stdout="= 3")
 
     with tempfile.TemporaryDirectory() as tmp:
-        script = os.path.join(tmp, "script.calc")
+        script = os.path.join(tmp, "script.skein")
         with open(script, "w", encoding="utf-8") as f:
             f.write(
-                "#!/usr/bin/env calc-demo\n"
+                "#!/usr/bin/env skein\n"
                 'print("script");\n'
                 "1 + 2\n"
             )
@@ -7348,14 +7348,14 @@ std.json.stringify(std.json.parse(text))
         assert proc.stdout == "script\n", repr(proc.stdout)
         assert proc.stderr == "", proc.stderr
 
-        bom_script = os.path.join(tmp, "bom.calc")
+        bom_script = os.path.join(tmp, "bom.skein")
         with open(bom_script, "w", encoding="utf-8") as f:
-            f.write("\ufeff#!/usr/bin/env calc-demo\nprint(\"bom\");\n")
+            f.write("\ufeff#!/usr/bin/env skein\nprint(\"bom\");\n")
         proc = run_file(bom_script)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "bom\n", repr(proc.stdout)
 
-        input_script = os.path.join(tmp, "input.calc")
+        input_script = os.path.join(tmp, "input.skein")
         with open(input_script, "w", encoding="utf-8") as f:
             f.write('print(input("? "));\n')
         proc = subprocess.run(
@@ -7372,7 +7372,7 @@ std.json.stringify(std.json.parse(text))
         if sys.platform != "win32":
             executable = os.path.abspath(BIN)
             if " " not in executable:
-                shebang_script = os.path.join(tmp, "shebang.calc")
+                shebang_script = os.path.join(tmp, "shebang.skein")
                 with open(shebang_script, "w", encoding="utf-8") as f:
                     f.write(f"#!{executable}\nprint(\"shebang\");\n")
                 os.chmod(shebang_script, 0o755)
@@ -7398,7 +7398,7 @@ std.json.stringify(std.json.parse(text))
     assert proc.stdout == "stdin-script\n", repr(proc.stdout)
 
     with tempfile.TemporaryDirectory() as tmp:
-        runtime_script = os.path.join(tmp, "runtime.calc")
+        runtime_script = os.path.join(tmp, "runtime.skein")
         with open(runtime_script, "w", encoding="utf-8") as f:
             f.write('print("a");\n1/0;\n')
         proc = run_file(runtime_script)
@@ -7406,7 +7406,7 @@ std.json.stringify(std.json.parse(text))
         assert "2:1: runtime error: division by zero" in proc.stderr, proc.stderr
         assert "  1/0;\n  ^" in proc.stderr, proc.stderr
 
-        nested_script = os.path.join(tmp, "nested.calc")
+        nested_script = os.path.join(tmp, "nested.skein")
         with open(nested_script, "w", encoding="utf-8") as f:
             f.write(
                 "func g() {\n"
@@ -7423,13 +7423,13 @@ std.json.stringify(std.json.parse(text))
         assert "in g() called from line 5" in proc.stderr, proc.stderr
         assert "in f() called from line 7" in proc.stderr, proc.stderr
 
-        clean_script = os.path.join(tmp, "clean.calc")
+        clean_script = os.path.join(tmp, "clean.skein")
         with open(clean_script, "w", encoding="utf-8") as f:
             f.write("print(\"ok\");\n")
         proc = run_file(clean_script)
         assert proc.returncode == 0, proc.stderr
 
-        syntax_script = os.path.join(tmp, "syntax.calc")
+        syntax_script = os.path.join(tmp, "syntax.skein")
         with open(syntax_script, "w", encoding="utf-8") as f:
             f.write("let x = ;\n")
         proc = run_file(syntax_script)
@@ -7458,15 +7458,15 @@ std.json.stringify(std.json.parse(text))
             return path
 
         write(
-            "app/aa/aa.calc",
+            "app/aa/aa.skein",
             'package aa { export let root = "aa"; }\n',
         )
         write(
-            "app/aa/bb/bb.calc",
+            "app/aa/bb/bb.skein",
             'package bb { export let name = "bb"; }\n',
         )
         write(
-            "app/aa/bb/cc/cc.calc",
+            "app/aa/bb/cc/cc.skein",
             "package cc {\n"
             "  export let value = 42;\n"
             "  export const fixed = 7;\n"
@@ -7475,7 +7475,7 @@ std.json.stringify(std.json.parse(text))
             "}\n",
         )
         app_main = write(
-            "app/main.calc",
+            "app/main.skein",
             "import aa.bb.cc;\n"
             "print(cc.value);\n"
             "print(cc.fixed);\n"
@@ -7512,7 +7512,7 @@ std.json.stringify(std.json.parse(text))
         assert proc.stderr == "", proc.stderr
 
         write(
-            "app/aa/state/state.calc",
+            "app/aa/state/state.skein",
             "package state {\n"
             "  let n = 0;\n"
             "  export func inc() { n = n + 1; return n; }\n"
@@ -7520,7 +7520,7 @@ std.json.stringify(std.json.parse(text))
             "}\n",
         )
         state_main = write(
-            "app/state_main.calc",
+            "app/state_main.skein",
             "import aa.state;\n"
             "func again() {\n"
             "  import aa.state;\n"
@@ -7536,11 +7536,11 @@ std.json.stringify(std.json.parse(text))
         assert proc.stdout.splitlines() == ["1", "2", "2"], proc.stdout
 
         write(
-            "container/aa/bb/cc/cc.calc",
+            "container/aa/bb/cc/cc.skein",
             'package cc { export let value = "deep"; }\n',
         )
         container_main = write(
-            "container/main.calc",
+            "container/main.skein",
             "import aa;\nprint(aa.bb.cc.value);\n",
         )
         proc = run_file(container_main)
@@ -7549,23 +7549,23 @@ std.json.stringify(std.json.parse(text))
 
         # Package lookup paths: source dir > CLI dirs > environment dirs.
         write(
-            "search/app/aa/bb/cc/cc.calc",
+            "search/app/aa/bb/cc/cc.skein",
             'package cc { export let value = "source"; }\n',
         )
         search_main = write(
-            "search/app/main.calc",
+            "search/app/main.skein",
             "import aa.bb.cc;\nprint(cc.value);\n",
         )
         write(
-            "search/lib1/aa/bb/cc/cc.calc",
+            "search/lib1/aa/bb/cc/cc.skein",
             'package cc { export let value = "cli1"; }\n',
         )
         write(
-            "search/lib2/aa/bb/cc/cc.calc",
+            "search/lib2/aa/bb/cc/cc.skein",
             'package cc { export let value = "cli2"; }\n',
         )
         write(
-            "search/env/aa/bb/cc/cc.calc",
+            "search/env/aa/bb/cc/cc.skein",
             'package cc { export let value = "env"; }\n',
         )
         proc = run_file(search_main)
@@ -7573,7 +7573,7 @@ std.json.stringify(std.json.parse(text))
         assert proc.stdout == "source\n", repr(proc.stdout)
 
         app_without_local = write(
-            "search/app2/main.calc",
+            "search/app2/main.skein",
             "import aa.bb.cc;\nprint(cc.value);\n",
         )
         lib1 = os.path.join(tmp, "search/lib1")
@@ -7610,7 +7610,7 @@ std.json.stringify(std.json.parse(text))
         assert proc.stdout == "cli2\n", repr(proc.stdout)
 
         env = os.environ.copy()
-        env["CALC_PACKAGE_PATH"] = envlib
+        env["SKEIN_PACKAGE_PATH"] = envlib
         proc = subprocess.run(
             [BIN, app_without_local],
             text=True,
@@ -7647,11 +7647,11 @@ std.json.stringify(std.json.parse(text))
 
         # Packages are isolated from the main package's globals.
         write(
-            "isolated/aa/bb/cc/cc.calc",
+            "isolated/aa/bb/cc/cc.skein",
             "package cc { export let leaked = main_secret; }\n",
         )
         isolated_main = write(
-            "isolated/main.calc",
+            "isolated/main.skein",
             "let main_secret = 1;\nimport aa.bb.cc;\n",
         )
         proc = run_file(isolated_main)
@@ -7660,11 +7660,11 @@ std.json.stringify(std.json.parse(text))
 
         # Package names must match their containing folder.
         write(
-            "wrongname/aa/bb/cc/cc.calc",
+            "wrongname/aa/bb/cc/cc.skein",
             "package wrong { export let value = 1; }\n",
         )
         wrong_main = write(
-            "wrongname/main.calc",
+            "wrongname/main.skein",
             "import aa.bb.cc;\n",
         )
         proc = run_file(wrong_main)
@@ -7673,7 +7673,7 @@ std.json.stringify(std.json.parse(text))
 
         # Explicit main package and exported/private names.
         main_pkg = write(
-            "mainpkg/main/main.calc",
+            "mainpkg/main/main.skein",
             "package main {\n"
             "  export let x = 5;\n"
             "  func private() { return 9; }\n"
@@ -7686,7 +7686,7 @@ std.json.stringify(std.json.parse(text))
 
         # The entry package may be named main in any directory.
         main_anywhere = write(
-            "mainpkg/anywhere/entry.calc",
+            "mainpkg/anywhere/entry.skein",
             "package main {\n"
             "  export let x = 7;\n"
             "}\n"
@@ -7698,7 +7698,7 @@ std.json.stringify(std.json.parse(text))
 
         # A file entry may only use package main.
         entry_named = write(
-            "entrypkg/entry/entry.calc",
+            "entrypkg/entry/entry.skein",
             "package entry { export let x = 3; }\n"
             "print(entry.x);\n",
         )
@@ -7715,24 +7715,24 @@ std.json.stringify(std.json.parse(text))
         assert proc.stdout == "3\n", repr(proc.stdout)
 
         # main is reserved for the entry package and cannot be imported.
-        reserved_import = write("reservedimport/main.calc", "import main;\n")
+        reserved_import = write("reservedimport/main.skein", "import main;\n")
         proc = run_file(reserved_import)
         assert proc.returncode == 1, proc.stderr
         assert "reserved for the entry script" in proc.stderr, proc.stderr
 
         reserved_import_sub = write(
-            "reservedimport/sub.calc", "import main.sub;\n")
+            "reservedimport/sub.skein", "import main.sub;\n")
         proc = run_file(reserved_import_sub)
         assert proc.returncode == 1, proc.stderr
         assert "reserved for the entry script" in proc.stderr, proc.stderr
 
         # A normal package cannot declare itself as main.
         write(
-            "reservedmain/aa/bb/bb.calc",
+            "reservedmain/aa/bb/bb.skein",
             "package main { export let x = 1; }\n",
         )
         reserved_main = write(
-            "reservedmain/main.calc",
+            "reservedmain/main.skein",
             "import aa.bb;\n",
         )
         proc = run_file(reserved_main)
@@ -7741,15 +7741,15 @@ std.json.stringify(std.json.parse(text))
 
         # Cyclic imports fail cleanly instead of hanging.
         write(
-            "cycle/aa/bb/bb.calc",
+            "cycle/aa/bb/bb.skein",
             "package bb { import aa.cc; export let x = 1; }\n",
         )
         write(
-            "cycle/aa/cc/cc.calc",
+            "cycle/aa/cc/cc.skein",
             "package cc { import aa.bb; export let y = 2; }\n",
         )
         cycle_main = write(
-            "cycle/main.calc",
+            "cycle/main.skein",
             "import aa.bb;\n",
         )
         proc = run_file(cycle_main)
@@ -7757,7 +7757,7 @@ std.json.stringify(std.json.parse(text))
         assert "cyclic package import" in proc.stderr, proc.stderr
 
         missing_main = write(
-            "missing/main.calc",
+            "missing/main.skein",
             "import no.such;\n",
         )
         proc = run_file(missing_main)
@@ -7776,23 +7776,23 @@ std.json.stringify(std.json.parse(text))
                 f.write(text)
             return path
 
-        with open(os.path.join(root, ".calcroot"), "w", encoding="utf-8"):
+        with open(os.path.join(root, ".skeinroot"), "w", encoding="utf-8"):
             pass
 
-        write("top/pkg/pkg.calc",
+        write("top/pkg/pkg.skein",
               'package pkg { export let value = "root"; }\n')
-        write("lib/top/pkg/pkg.calc",
+        write("lib/top/pkg/pkg.skein",
               'package pkg { export let value = "global"; }\n')
-        write("src/common/common.calc",
+        write("src/common/common.skein",
               'package common { export let value = "common"; }\n')
-        write("src/app/local/local.calc",
+        write("src/app/local/local.skein",
               'package local { export let value = "local"; }\n')
-        write("src/app/sibling/sibling.calc",
+        write("src/app/sibling/sibling.skein",
               'package sibling { export let value = "sibling"; }\n')
-        write("src/app/user/helper/helper.calc",
+        write("src/app/user/helper/helper.skein",
               'package helper { export let value = "helper"; }\n')
         write(
-            "src/app/user/user.calc",
+            "src/app/user/user.skein",
             "package user {\n"
             "  export func run() {\n"
             "    import .helper;\n"
@@ -7803,7 +7803,7 @@ std.json.stringify(std.json.parse(text))
             "}\n",
         )
         relative_main = write(
-            "src/app/main.calc",
+            "src/app/main.skein",
             "import @top.pkg;\n"
             "print(pkg.value);\n"
             "import .local;\n"
@@ -7843,13 +7843,13 @@ std.json.stringify(std.json.parse(text))
             "local",
         ], proc.stdout
 
-        # Without a .calcroot marker, @ falls back to the main script dir.
+        # Without a .skeinroot marker, @ falls back to the main script dir.
         nomarker = os.path.join(tmp, "nomarker")
         os.makedirs(os.path.join(nomarker, "local"), exist_ok=True)
-        with open(os.path.join(nomarker, "local", "local.calc"),
+        with open(os.path.join(nomarker, "local", "local.skein"),
                   "w", encoding="utf-8") as f:
             f.write('package local { export let value = "local"; }\n')
-        fallback_main = os.path.join(nomarker, "main.calc")
+        fallback_main = os.path.join(nomarker, "main.skein")
         with open(fallback_main, "w", encoding="utf-8") as f:
             f.write("import @local;\nprint(local.value);\n")
         proc = run_file(fallback_main)
@@ -7859,10 +7859,10 @@ std.json.stringify(std.json.parse(text))
         # @ never falls back to -I directories.
         os.makedirs(os.path.join(nomarker, "lib", "top", "pkg"),
                     exist_ok=True)
-        with open(os.path.join(nomarker, "lib", "top", "pkg", "pkg.calc"),
+        with open(os.path.join(nomarker, "lib", "top", "pkg", "pkg.skein"),
                   "w", encoding="utf-8") as f:
             f.write('package pkg { export let value = "global"; }\n')
-        nofallback_main = os.path.join(nomarker, "nofallback.calc")
+        nofallback_main = os.path.join(nomarker, "nofallback.skein")
         with open(nofallback_main, "w", encoding="utf-8") as f:
             f.write("import @top.pkg;\n")
         proc = subprocess.run(
@@ -7884,7 +7884,7 @@ std.json.stringify(std.json.parse(text))
             return path
 
         write(
-            "app/aa/aa.calc",
+            "app/aa/aa.skein",
             "package aa {\n"
             "  export struct P { x: int; }\n"
             "  struct Hidden { h: int; }\n"
@@ -7896,7 +7896,7 @@ std.json.stringify(std.json.parse(text))
             "}\n",
         )
         main = write(
-            "app/main.calc",
+            "app/main.skein",
             "import aa;\n"
             "struct P { y: string; }\n"
             "let pkg = aa.make();\n"
@@ -7924,7 +7924,7 @@ std.json.stringify(std.json.parse(text))
         assert proc.stderr == "", proc.stderr
 
         main2 = write(
-            "app/main2.calc",
+            "app/main2.skein",
             "import aa;\n"
             "let p = aa.make();\n"
             "let q: P = p;\n",
@@ -7934,7 +7934,7 @@ std.json.stringify(std.json.parse(text))
         assert "unknown type name P" in proc.stderr, proc.stderr
 
         main3 = write(
-            "app/main3.calc",
+            "app/main3.skein",
             "import aa;\n"
             'let h: aa::Hidden = aa.hidden();\n',
         )
@@ -7943,7 +7943,7 @@ std.json.stringify(std.json.parse(text))
         assert "unknown type name aa::Hidden" in proc.stderr, proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
-        failfast = os.path.join(tmp, "failfast.calc")
+        failfast = os.path.join(tmp, "failfast.skein")
         with open(failfast, "w", encoding="utf-8") as f:
             f.write('print("before");\n1/0;\nprint("after");\n')
         proc = run_file(failfast)
@@ -7962,7 +7962,7 @@ std.json.stringify(std.json.parse(text))
         assert "before\n" in proc.stdout, proc.stdout
         assert "after\n" in proc.stdout, proc.stdout
 
-        uncaught = os.path.join(tmp, "uncaught.calc")
+        uncaught = os.path.join(tmp, "uncaught.skein")
         with open(uncaught, "w", encoding="utf-8") as f:
             f.write('print("before");\nfail "boom";\nprint("after");\n')
         proc = run_file(uncaught)
@@ -7980,7 +7980,7 @@ std.json.stringify(std.json.parse(text))
             stdout="= 1",
         )
 
-        lexical_script = os.path.join(tmp, "lexical.calc")
+        lexical_script = os.path.join(tmp, "lexical.skein")
         with open(lexical_script, "w", encoding="utf-8") as f:
             f.write('1 $ 2;\nprint("after");\n')
         proc = run_file(lexical_script)
@@ -7999,7 +7999,7 @@ std.json.stringify(std.json.parse(text))
         assert proc.returncode == 2, proc.stderr
 
         proc = subprocess.run(
-            [BIN, os.path.join(tmp, "missing.calc")],
+            [BIN, os.path.join(tmp, "missing.skein")],
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -8008,7 +8008,7 @@ std.json.stringify(std.json.parse(text))
         assert proc.returncode == 2, proc.stderr
 
         if sys.platform != "win32":
-            interrupt_script = os.path.join(tmp, "interrupt.calc")
+            interrupt_script = os.path.join(tmp, "interrupt.skein")
             with open(interrupt_script, "w", encoding="utf-8") as f:
                 f.write("while (1) { }\n")
             proc = subprocess.Popen(

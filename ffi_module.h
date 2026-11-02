@@ -1,5 +1,5 @@
-#ifndef CALC_FFI_H
-#define CALC_FFI_H
+#ifndef SKEIN_FFI_H
+#define SKEIN_FFI_H
 
 #include "valuetype.h"
 

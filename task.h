@@ -1,5 +1,5 @@
-#ifndef CALC_TASK_H
-#define CALC_TASK_H
+#ifndef SKEIN_TASK_H
+#define SKEIN_TASK_H
 
 #include "valuetype.h"
 

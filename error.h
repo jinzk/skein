@@ -1,5 +1,5 @@
-#ifndef CALC_ERROR_H
-#define CALC_ERROR_H
+#ifndef SKEIN_ERROR_H
+#define SKEIN_ERROR_H
 
 #include "valuetype.h"
 

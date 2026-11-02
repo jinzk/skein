@@ -1,5 +1,5 @@
-#ifndef CALC_GENERATOR_H
-#define CALC_GENERATOR_H
+#ifndef SKEIN_GENERATOR_H
+#define SKEIN_GENERATOR_H
 
 #include "valuetype.h"
 

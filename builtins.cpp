@@ -12,10 +12,10 @@
 #include "net.h"
 #include "result.h"
 #include "task.h"
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
 #include "tls.h"
 #endif
-#ifdef CALC_ENABLE_FFI
+#ifdef SKEIN_ENABLE_FFI
 #include "ffi_module.h"
 #endif
 #include "filetype.h"
@@ -322,7 +322,7 @@ struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
     if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)
         return call_net_builtin(functype, args);
-#ifdef CALC_ENABLE_FFI
+#ifdef SKEIN_ENABLE_FFI
     if (functype >= B_ffi_open && functype <= B_ffi_buffer_free)
         return call_ffi_builtin(functype, args);
 #endif
@@ -340,11 +340,11 @@ struct value_t *call_builtin(int functype,
         return call_json_builtin(functype, args);
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
-#ifdef CALC_ENABLE_HTTP2
+#ifdef SKEIN_ENABLE_HTTP2
     if (functype >= B_http2_request && functype <= B_http2_serve)
         return call_http2_builtin(functype, args);
 #endif
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
     if (functype >= B_tls_client && functype <= B_tls_alpn)
         return call_tls_builtin(functype, args);
 #endif

@@ -1,5 +1,5 @@
-#ifndef CALC_JSON_H
-#define CALC_JSON_H
+#ifndef SKEIN_JSON_H
+#define SKEIN_JSON_H
 
 #include "valuetype.h"
 

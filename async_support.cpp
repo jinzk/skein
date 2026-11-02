@@ -2,7 +2,7 @@
 
 #include "event_loop.h"
 
-namespace calc_async {
+namespace skein_async {
 
 namespace {
 
@@ -148,4 +148,4 @@ std::string async_timeout_error(const char *operation, long long timeout_ms) {
            std::to_string(timeout_ms) + " ms";
 }
 
-} // namespace calc_async
+} // namespace skein_async

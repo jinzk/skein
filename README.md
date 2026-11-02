@@ -1,4 +1,4 @@
-# calc-demo
+# Skein
 
 一个使用 Flex + Bison + C++17 实现的动态类型脚本语言解释器（REPL）。
 
@@ -9,7 +9,7 @@
 ```bash
 cmake -S . -B build -G Ninja
 cmake --build build
-./build/calc-demo
+./build/skein
 ```
 
 `std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context。例如 Debian/Ubuntu：
@@ -26,12 +26,12 @@ TLS 是可选模块；启用时需要 OpenSSL 开发文件：
 sudo apt install libssl-dev
 ```
 
-没有 OpenSSL 时使用 `-DCALC_ENABLE_TLS=OFF`，`std.tls` 和 `https://` 不可用。
+没有 OpenSSL 时使用 `-DSKEIN_ENABLE_TLS=OFF`，`std.tls` 和 `https://` 不可用。
 
 `std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
 
 ```bash
-cmake -S . -B build -G Ninja -DCALC_ENABLE_FFI=OFF
+cmake -S . -B build -G Ninja -DSKEIN_ENABLE_FFI=OFF
 ```
 
 `std.net` 提供同步 API 和 task 形式的异步 API；libuv 只在内部驱动 socket、DNS 和 `std.task`，不向脚本暴露事件循环对象。
@@ -47,7 +47,7 @@ Windows / MinGW（64 位 MinGW-w64 GCC）：
 ```bat
 cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build
-build\calc-demo.exe
+build\skein.exe
 ```
 
 Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv 和 Boost.Context。平台相关代码集中在 `platform_win.cpp`：
@@ -65,22 +65,22 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv �
 可以直接把脚本文件作为第一个参数运行：
 
 ```bash
-./build/calc-demo script.calc
+./build/skein script.skein
 ```
 
 也可以使用 shebang：
 
 ```text
-#!/usr/bin/env calc-demo
+#!/usr/bin/env skein
 print("hello");
 ```
 
 ```bash
-chmod +x script.calc
-./script.calc
+chmod +x script.skein
+./script.skein
 ```
 
-使用 `/usr/bin/env calc-demo` 时，请确保 `calc-demo` 在 `PATH` 中；也可以直接写解释器的绝对路径。
+使用 `/usr/bin/env skein` 时，请确保 `skein` 在 `PATH` 中；也可以直接写解释器的绝对路径。
 
 脚本模式会：
 
@@ -89,14 +89,14 @@ chmod +x script.calc
 - 不打印 `> ` 提示符；
 - 不打印顶层表达式的 `= result` 结果，需要输出时请使用 `print`；
 - 忽略第一行之外的普通注释仍使用 `//`；
-- 使用 `calc-demo -` 可以从 stdin 运行脚本模式；
+- 使用 `skein -` 可以从 stdin 运行脚本模式；
 - 脚本中出现词法、语法或运行时错误时，退出码为 `1`；
 - 默认在第一处错误后停止脚本；使用 `-k` / `--keep-going` 可以继续执行后续顶层语句。
 
 Windows/MinGW 没有原生 shebang，直接使用：
 
 ```bat
-build\calc-demo.exe script.calc
+build\skein.exe script.skein
 ```
 
 shebang 行同样会被跳过。
@@ -104,10 +104,10 @@ shebang 行同样会被跳过。
 交互模式：
 
 - 只有 stdin 是终端时才显示 `> ` / `...> ` 提示符；管道输入不显示提示符；
-- 使用 `calc-demo -i` 可以强制显示提示符；
+- 使用 `skein -i` 可以强制显示提示符；
 - POSIX 终端支持方向键、Home/End、Delete、Ctrl-A/E/K/U/W、Ctrl-L；
 - 支持上下方向键浏览历史；
-- 历史默认保存到 `~/.calc_history`，可用 `CALC_HISTORY` 指定路径；
+- 历史默认保存到 `~/.skein_history`，可用 `SKEIN_HISTORY` 指定路径；
 - Windows 当前回退为基础行输入，历史文件仍会保存；
 - `Ctrl-C` 取消当前输入，或中断正在执行的程序；
 - `Ctrl-D` 退出解释器；
@@ -127,7 +127,7 @@ shebang 行同样会被跳过。
 = 12
 > _
 = 12
-> :load demo.calc
+> :load demo.skein
 > :quit
 ```
 
@@ -168,7 +168,7 @@ package cc {
 aa/
   bb/
     cc/
-      cc.calc
+      cc.skein
 ```
 
 ```text
@@ -176,13 +176,13 @@ import aa.bb.cc;
 print(cc.value);
 ```
 
-也支持入口文件名为 `index.calc`：
+也支持入口文件名为 `index.skein`：
 
 ```text
-aa/bb/cc/index.calc
+aa/bb/cc/index.skein
 ```
 
-如果目录中没有 `<name>.calc` 或 `index.calc`，但只有一个 `.calc` 文件，也会把它作为入口。
+如果目录中没有 `<name>.skein` 或 `index.skein`，但只有一个 `.skein` 文件，也会把它作为入口。
 
 ### import 规则
 
@@ -203,7 +203,7 @@ import @top.pkg;    // 项目根目录
 - `import aa.bb.cc as c` 后使用 `c`，不再绑定 `cc`；
 - `.name` 相对当前包目录，`..name` 相对上一级目录；
 - `@name` 只从项目根目录解析，不回退到 `-I` / 环境变量；
-- 项目根通过从主脚本目录向上查找 `.calcroot` 文件确定；没有标记时使用主脚本目录；
+- 项目根通过从主脚本目录向上查找 `.skeinroot` 文件确定；没有标记时使用主脚本目录；
 - 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
@@ -735,7 +735,7 @@ print(bytes_to_string(r["body"]));
 - 删除响应 header 中的 `Content-Encoding`，并更新 `Content-Length`；
 - 不能与 `on_body` 同时使用；
 - 同步和 async 客户端都支持；
-- 构建选项 `-DCALC_ENABLE_COMPRESSION=OFF` 可关闭；
+- 构建选项 `-DSKEIN_ENABLE_COMPRESSION=OFF` 可关闭；
 - HTTP/2 单请求和 `request_many` 都支持自动解压。
 
 
@@ -1720,13 +1720,13 @@ std.io.write_async(stream, data[, timeout_ms]) → task
 
 1. 入口脚本所在目录；
 2. 命令行 `-I DIR` / `--package-path DIR`，按出现顺序；
-3. 环境变量 `CALC_PACKAGE_PATH`，按声明顺序。
+3. 环境变量 `SKEIN_PACKAGE_PATH`，按声明顺序。
 
 例如：
 
 ```bash
-./calc-demo -I ./lib --package-path ./vendor app/main.calc
-CALC_PACKAGE_PATH=./lib:./vendor ./calc-demo app/main.calc
+./skein -I ./lib --package-path ./vendor app/main.skein
+SKEIN_PACKAGE_PATH=./lib:./vendor ./skein app/main.skein
 ```
 
 POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
@@ -1747,7 +1747,7 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 
 ### 限制
 
-- 每个包使用一个 `<name>.calc` 或 `index.calc` 作为入口；
+- 每个包使用一个 `<name>.skein` 或 `index.skein` 作为入口；
 - 相对导入支持 `.` / `..`，项目根导入支持 `@`；包别名通过 `as` 支持；
 - 当前不提供通配导入；
 - 子包会被父包加载时自动加载；

@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
     task_shutdown();
     fiber_shutdown();
     http_shutdown();
-#ifdef CALC_ENABLE_HTTP2
+#ifdef SKEIN_ENABLE_HTTP2
     http2_shutdown();
 #endif
     net_shutdown();

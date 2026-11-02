@@ -141,7 +141,7 @@ static bool file_stream_tell(void *data, long long &position,
 
 namespace {
 
-struct file_async_op : calc_async::state {
+struct file_async_op : skein_async::state {
     uv_fs_t request = {};
     platform_file_ptr file;
     std::shared_ptr<void> owner;
@@ -171,20 +171,20 @@ void on_file_read_async(uv_fs_t *request) {
         if (op->resource)
             op->resource->eof = false;
         finish_file_async(op);
-        calc_async::async_complete(op, newbytesval(std::move(op->buffer)));
+        skein_async::async_complete(op, newbytesval(std::move(op->buffer)));
         return;
     }
     if (result == 0) {
         if (op->resource)
             op->resource->eof = true;
         finish_file_async(op);
-        calc_async::async_complete(op, newnull());
+        skein_async::async_complete(op, newnull());
         return;
     }
     std::string error =
         std::string("read_async: ") + uv_strerror((int)result);
     finish_file_async(op);
-    calc_async::async_fail(op, error);
+    skein_async::async_fail(op, error);
 }
 
 void on_file_write_async(uv_fs_t *request) {
@@ -202,13 +202,13 @@ void on_file_write_async(uv_fs_t *request) {
         if (op->resource)
             op->resource->eof = false;
         finish_file_async(op);
-        calc_async::async_complete(op, newintval((long long)result));
+        skein_async::async_complete(op, newintval((long long)result));
         return;
     }
     std::string error =
         std::string("write_async: ") + uv_strerror((int)result);
     finish_file_async(op);
-    calc_async::async_fail(op, error);
+    skein_async::async_fail(op, error);
 }
 
 value_t *file_stream_read_async(void *data,
@@ -232,9 +232,9 @@ value_t *file_stream_read_async(void *data,
 
     file_async_op *op = new file_async_op;
     task_ptr task;
-    if (!calc_async::prepare_async(
+    if (!skein_async::prepare_async(
             op, task, timeout_ms,
-            calc_async::async_timeout_error("read_async", timeout_ms))) {
+            skein_async::async_timeout_error("read_async", timeout_ms))) {
         delete op;
         error = "read_async: cannot initialize event loop";
         return NULL;
@@ -259,7 +259,7 @@ value_t *file_stream_read_async(void *data,
                         on_file_read_async);
     if (rc < 0) {
         resource->async_pending = false;
-        calc_async::async_fail(op, std::string("read_async: ") +
+        skein_async::async_fail(op, std::string("read_async: ") +
                                        uv_strerror(rc));
     }
     return new_task_value(std::move(task));
@@ -292,9 +292,9 @@ value_t *file_stream_write_async(void *data,
 
     file_async_op *op = new file_async_op;
     task_ptr task;
-    if (!calc_async::prepare_async(
+    if (!skein_async::prepare_async(
             op, task, timeout_ms,
-            calc_async::async_timeout_error("write_async", timeout_ms))) {
+            skein_async::async_timeout_error("write_async", timeout_ms))) {
         delete op;
         error = "write_async: cannot initialize event loop";
         return NULL;
@@ -319,7 +319,7 @@ value_t *file_stream_write_async(void *data,
                          on_file_write_async);
     if (rc < 0) {
         resource->async_pending = false;
-        calc_async::async_fail(op, std::string("write_async: ") +
+        skein_async::async_fail(op, std::string("write_async: ") +
                                        uv_strerror(rc));
     }
     return new_task_value(std::move(task));

@@ -79,14 +79,14 @@ bool getaddrinfo_async(const char *node, const char *service,
     return true;
 }
 
-using async_state = calc_async::state;
-using calc_async::async_complete;
-using calc_async::async_fail;
-using calc_async::async_cancel;
-using calc_async::async_timeout;
-using calc_async::start_async_timeout;
-using calc_async::prepare_async;
-using calc_async::async_timeout_error;
+using async_state = skein_async::state;
+using skein_async::async_complete;
+using skein_async::async_fail;
+using skein_async::async_cancel;
+using skein_async::async_timeout;
+using skein_async::start_async_timeout;
+using skein_async::prepare_async;
+using skein_async::async_timeout_error;
 
 struct net_socket;
 struct accept_async_op;

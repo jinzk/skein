@@ -1,5 +1,5 @@
-#ifndef CALC_TLS_H
-#define CALC_TLS_H
+#ifndef SKEIN_TLS_H
+#define SKEIN_TLS_H
 
 #include "valuetype.h"
 

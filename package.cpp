@@ -119,7 +119,7 @@ fs::path find_project_root(const fs::path &start) {
 
     for (;;) {
         std::error_code exists_ec;
-        if (fs::exists(directory / ".calcroot", exists_ec) && !exists_ec)
+        if (fs::exists(directory / ".skeinroot", exists_ec) && !exists_ec)
             return directory;
         fs::path parent = directory.parent_path();
         if (parent.empty() || parent == directory)
@@ -173,11 +173,11 @@ std::string package_cache_key(const std::string &canonical_path) {
 bool package_file_exists(const fs::path &dir, const std::string &name,
                          fs::path &file) {
     std::error_code ec;
-    fs::path direct = dir / (name + ".calc");
+    fs::path direct = dir / (name + ".skein");
     if (fs::is_regular_file(direct, ec))
         return file = direct, true;
     ec.clear();
-    fs::path index = dir / "index.calc";
+    fs::path index = dir / "index.skein";
     if (fs::is_regular_file(index, ec))
         return file = index, true;
 
@@ -195,7 +195,7 @@ bool package_file_exists(const fs::path &dir, const std::string &name,
             ec.clear();
             continue;
         }
-        if (it->path().extension() != ".calc")
+        if (it->path().extension() != ".skein")
             continue;
         if (found)
             multiple = true;
@@ -510,7 +510,7 @@ value_t *build_std_namespace() {
             {"resolve_async", B_net_resolve_async},
             {"shutdown_async", B_net_shutdown_async},
         })));
-#ifdef CALC_ENABLE_FFI
+#ifdef SKEIN_ENABLE_FFI
     root->payload->items.push_back(std::make_pair(
         newstrval("ffi"),
         builtin_module({
@@ -576,7 +576,7 @@ value_t *build_std_namespace() {
             {"cookies", B_http_cookies},
             {"close", B_http_close},
         })));
-#ifdef CALC_ENABLE_HTTP2
+#ifdef SKEIN_ENABLE_HTTP2
     root->payload->items.push_back(std::make_pair(
         newstrval("http2"),
         builtin_module({
@@ -594,7 +594,7 @@ value_t *build_std_namespace() {
             {"close", B_http_close},
         })));
 #endif
-#ifdef CALC_ENABLE_TLS
+#ifdef SKEIN_ENABLE_TLS
     root->payload->items.push_back(std::make_pair(
         newstrval("tls"),
         builtin_module({
@@ -931,7 +931,7 @@ void package_configure(const std::string &source_path,
             search_roots.push_back(normalize_dir(dir));
     }
 
-    const char *env = std::getenv("CALC_PACKAGE_PATH");
+    const char *env = std::getenv("SKEIN_PACKAGE_PATH");
     if (env && *env) {
 #ifdef _WIN32
         const char separator = ';';

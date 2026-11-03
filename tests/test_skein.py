@@ -1315,6 +1315,34 @@ def main():
     check("std.enum.decode rejects non-enum",
           'import std;\nstd.enum.decode({"a": 1});\n',
           stderr="std.enum.decode expects an enum object")
+    check("std.enum.tag",
+          'import std;\nenum E { A { n: int; }; B; }\n'
+          'print(std.enum.tag(E::A { n: 1 }));\n'
+          'print(std.enum.tag(E::A { n: 2 }));\n'
+          'print(std.enum.tag(E::B));\n',
+          stdout_all=["main::E::A", "main::E::A", "main::E::B"])
+    check("std.enum.tag cross enum",
+          'import std;\nenum E1 { A; }\nenum E2 { A; }\n'
+          'print(std.enum.tag(E1::A) == std.enum.tag(E2::A));\n'
+          'print(std.enum.tag(E1::A));\n',
+          stdout_all=["false", "main::E1::A"])
+    check("std.enum.tag by name",
+          'import std;\nenum E { A; }\n'
+          'print(std.enum.tag("E", "A"));\n',
+          stdout="main::E::A")
+    check("std.enum.tag as dict key",
+          'import std;\nenum E { A { n: int; }; }\n'
+          'let counts = {};\n'
+          'counts[std.enum.tag(E::A { n: 1 })] = 1;\n'
+          'counts[std.enum.tag(E::A { n: 2 })] = 2;\n'
+          'print(counts[std.enum.tag(E::A { n: 3 })]);\n',
+          stdout="2")
+    check("std.enum.tag errors",
+          'import std;\nenum E { A; }\nstd.enum.tag(1);\n',
+          stderr="std.enum.tag expects an enum value")
+    check("std.enum.tag unknown variant",
+          'import std;\nenum E { A; }\nstd.enum.tag("E", "Nope");\n',
+          stderr="unknown enum variant E::Nope")
     check("std.struct.decode",
           'import std;\nstruct P { x: int; y: int; }\n'
           'let p = std.struct.decode({"x": 1, "y": 2}, "P");\n'
@@ -1574,6 +1602,94 @@ def main():
           "import std;\n"
           "print(std.list.sort([byte(3), byte(1), byte(2)]));\n",
           stdout="[1, 2, 3]")
+    check("dict large lookup and order",
+          "import std;\nlet d = {};\n"
+          "for (let i in range(200)) { d[i] = i * 2; }\n"
+          "print(len(d));\nprint(d[100]);\nprint(std.dict.keys(d)[0]);\n"
+          "print(std.dict.keys(d)[199]);\n",
+          stdout_all=["200", "200", "0", "199"])
+    check("dict scalar keys",
+          "import std;\n"
+          "let d = {1: 'i', true: 'b', 's': 's', 'a': 'c', "
+          "byte(65): 'y', bytes_from_hex(\"00\"): 'x', null: 'n'};\n"
+          "print(d[1]); print(d[true]); print(d['s']); print(d['a']);\n"
+          "print(d[byte(65)]); print(d[bytes_from_hex(\"00\")]); print(d[null]);\n",
+          stdout_all=["i", "b", "s", "c", "y", "x", "n"])
+    check("dict float key rejected",
+          "{1.5: 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got float")
+    check("dict list key rejected",
+          "{[1]: 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got list")
+    check("dict struct key rejected",
+          "struct P { x: int; }\n{P { x: 1 }: 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got P")
+    check("dict enum key rejected",
+          "enum E { A; }\n{E::A: 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got E")
+    check("dict delete reinsert order",
+          "import std;\n"
+          "let d = {1: 'a', 2: 'b', 3: 'c'};\n"
+          "d = std.dict.delete(d, 2);\n"
+          "d[2] = 'z';\n"
+          "print(std.dict.keys(d));\n",
+          stdout_all=["[1, 3, 2]"])
+    check("set basics",
+          "import std;\nimport std.set;\n"
+          "let s = set.from_list([1, 2, 2, 3]);\n"
+          "print(set.size(s));\nprint(set.values(s));\n"
+          "print(set.has(s, 2));\nprint(set.has(s, 9));\n"
+          "s = set.remove(s, 2);\nprint(set.values(s));\n",
+          stdout_all=["3", "[1, 2, 3]", "true", "false", "[1, 3]"])
+    check("set operations",
+          "import std;\nimport std.set;\n"
+          "let a = set.from_list([1, 2]);\n"
+          "let b = set.from_list([2, 3]);\n"
+          "print(set.values(set.union(a, b)));\n"
+          "print(set.values(set.intersect(a, b)));\n"
+          "print(set.values(set.difference(a, b)));\n"
+          "print(set.is_subset(set.from_list([1]), a));\n"
+          "print(set.is_subset(set.from_list([1, 9]), a));\n",
+          stdout_all=["[1, 2, 3]", "[2]", "[1]", "true", "false"])
+    check("deque basics",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.from_list([2, 3]);\n"
+          "d = deque.push_front(d, 1);\n"
+          "d = deque.push_back(d, 4);\n"
+          "print(deque.size(d));\n"
+          "print(deque.to_list(d));\n"
+          "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n"
+          "let r = deque.pop_front(d);\n"
+          "print(r[\"value\"]);\n"
+          "d = r[\"deque\"];\n"
+          "print(deque.to_list(d));\n",
+          stdout_all=["4", "[1, 2, 3, 4]", "1", "4", "1", "[2, 3, 4]"])
+    check("deque empty pop",
+          "import std;\nimport std.deque;\n"
+          "let r = deque.pop_front(deque.new());\n"
+          "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
+          stdout_all=["false", "empty deque"])
+    check("heap min",
+          "import std;\nimport std.heap;\n"
+          "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
+          "print(heap.size(h));\nprint(heap.peek(h));\n"
+          "let r = heap.pop(h); print(r[\"value\"]); h = r[\"heap\"];\n"
+          "r = heap.pop(h); print(r[\"value\"]); h = r[\"heap\"];\n"
+          "r = heap.pop(h); print(r[\"value\"]); h = r[\"heap\"];\n"
+          "print(heap.size(h));\n",
+          stdout_all=["3", "1", "1", "2", "3", "0"])
+    check("heap max",
+          "import std;\nimport std.heap;\n"
+          "let h = heap.from_list([3, 1, 2], func(a, b) { return a > b; });\n"
+          "print(heap.peek(h));\n"
+          "let r = heap.pop(h); print(r[\"value\"]);\n",
+          stdout_all=["3", "3"])
+    check("heap empty pop",
+          "import std;\nimport std.heap;\n"
+          "let h = heap.new(func(a, b) { return a < b; });\n"
+          "let r = heap.pop(h);\n"
+          "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
+          stdout_all=["false", "empty heap"])
 
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
@@ -2043,8 +2159,9 @@ def main():
     check("dict equality", "{1:2} == {1:2}\n", stdout="= true")
     check("dict literal duplicate key last wins", '{1: "a", 1: "b"}\n',
           stdout="{1: b}")
-    check("dict literal numeric duplicate key",
-          '{1: "a", 1.0: "b"} == {1: "b"}\n', stdout="= true")
+    check("dict float key rejected",
+          '{1: "a", 1.0: "b"}\n',
+          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got float")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
     check("empty dict literal", "{}\n", stdout="= {}")
@@ -2058,8 +2175,8 @@ def main():
           stdout="= {}")
     check("multi-line comment-only empty dict",
           "let d = {\n  // comment\n\n};\nd\n", stdout="= {}")
-    check("empty dict as first dict key", "let d = {{}: 1};\nd\n",
-          stdout="= {{}: 1}")
+    check("dict key container rejected", "let d = {{}: 1};\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got dict")
     check("empty dict inside block statement", "{ {}; }\n", code=0)
     check("multi-line empty if block", "if (1) {\n}\n", code=0)
     check("comment-only empty if block", "if (1) { // comment\n}\n", code=0)

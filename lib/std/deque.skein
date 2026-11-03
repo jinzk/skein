@@ -1,0 +1,93 @@
+package deque {
+  import std;
+
+  export struct Deque {
+    front: list;
+    back: list;
+  }
+
+  export func new() {
+    return Deque { front: [], back: [] };
+  }
+
+  export func from_list(items) {
+    return Deque { front: [], back: items };
+  }
+
+  export func size(d) {
+    return len(d.front) + len(d.back);
+  }
+
+  export func push_front(d, value) {
+    d.front = std.list.append(d.front, value);
+    return d;
+  }
+
+  export func push_back(d, value) {
+    d.back = std.list.append(d.back, value);
+    return d;
+  }
+
+  export func peek_front(d) {
+    if (len(d.front) > 0) {
+      return d.front[len(d.front) - 1];
+    }
+    if (len(d.back) > 0) {
+      return d.back[0];
+    }
+    return null;
+  }
+
+  export func peek_back(d) {
+    if (len(d.back) > 0) {
+      return d.back[len(d.back) - 1];
+    }
+    if (len(d.front) > 0) {
+      return d.front[0];
+    }
+    return null;
+  }
+
+  export func pop_front(d) {
+    if (len(d.front) == 0 && len(d.back) > 0) {
+      d.front = std.list.reverse(d.back);
+      d.back = [];
+    }
+    if (len(d.front) == 0) {
+      return { "ok": false, "error": "empty deque", "deque": d };
+    }
+
+    let n = len(d.front);
+    let value = d.front[n - 1];
+    d.front = std.list.slice(d.front, 0, n - 1);
+    return { "ok": true, "deque": d, "value": value };
+  }
+
+  export func pop_back(d) {
+    if (len(d.back) == 0 && len(d.front) > 0) {
+      d.back = std.list.reverse(d.front);
+      d.front = [];
+    }
+    if (len(d.back) == 0) {
+      return { "ok": false, "error": "empty deque", "deque": d };
+    }
+
+    let n = len(d.back);
+    let value = d.back[n - 1];
+    d.back = std.list.slice(d.back, 0, n - 1);
+    return { "ok": true, "deque": d, "value": value };
+  }
+
+  export func to_list(d) {
+    let out = [];
+    let i = len(d.front) - 1;
+    while (i >= 0) {
+      out = std.list.append(out, d.front[i]);
+      i = i - 1;
+    }
+    for (let value in d.back) {
+      out = std.list.append(out, value);
+    }
+    return out;
+  }
+}

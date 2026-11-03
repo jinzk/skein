@@ -1,0 +1,77 @@
+package set {
+  import std;
+
+  export struct Set {
+    values: dict;
+  }
+
+  export func new() {
+    return Set { values: {} };
+  }
+
+  export func from_list(items) {
+    let result = new();
+    for (let item in items) {
+      result.values[item] = true;
+    }
+    return result;
+  }
+
+  export func add(s, value) {
+    s.values[value] = true;
+    return s;
+  }
+
+  export func remove(s, value) {
+    s.values = std.dict.delete(s.values, value);
+    return s;
+  }
+
+  export func has(s, value) {
+    return std.dict.has(s.values, value) != 0;
+  }
+
+  export func size(s) {
+    return std.dict.len(s.values);
+  }
+
+  export func values(s) {
+    return std.dict.keys(s.values);
+  }
+
+  export func union(a, b) {
+    for (let value in values(b)) {
+      a.values[value] = true;
+    }
+    return a;
+  }
+
+  export func intersect(a, b) {
+    let result = new();
+    for (let value in values(a)) {
+      if (has(b, value)) {
+        result.values[value] = true;
+      }
+    }
+    return result;
+  }
+
+  export func difference(a, b) {
+    let result = new();
+    for (let value in values(a)) {
+      if (!has(b, value)) {
+        result.values[value] = true;
+      }
+    }
+    return result;
+  }
+
+  export func is_subset(a, b) {
+    for (let value in values(a)) {
+      if (!has(b, value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+}

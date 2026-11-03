@@ -15,6 +15,9 @@
 #include "valuetype.h"
 
 #include "std_fsm_source.inc"
+#include "std_set_source.inc"
+#include "std_deque_source.inc"
+#include "std_heap_source.inc"
 
 #include <algorithm>
 #include <cctype>
@@ -63,6 +66,9 @@ struct embedded_package_source {
 
 const embedded_package_source kEmbeddedPackages[] = {
     {"std.fsm", kStdFsmSource},
+    {"std.set", kStdSetSource},
+    {"std.deque", kStdDequeSource},
+    {"std.heap", kStdHeapSource},
 };
 
 const char *find_embedded_source(const std::string &dotted) {
@@ -637,6 +643,7 @@ value_t *build_std_namespace() {
         newstrval("enum"),
         builtin_module({
             {"decode", B_enum_decode},
+            {"tag", B_enum_tag},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("struct"),

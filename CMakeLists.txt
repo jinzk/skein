@@ -82,6 +82,7 @@ add_executable(${PROJECT_NAME}
   cookie.cpp
   crypto_builtin.cpp
   diagnostics.cpp
+  dict.cpp
   encoding.cpp
   env_builtin.cpp
   error.cpp
@@ -142,21 +143,36 @@ endif()
 # Embedded Skein standard-library packages.  Each .skein source is turned into
 # a C string at build time and imported in memory by package.cpp.
 set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
-set(SKEIN_FSM_SOURCE ${SKEIN_EMBEDDED_DIR}/std_fsm_source.inc)
-add_custom_command(
-  OUTPUT ${SKEIN_FSM_SOURCE}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SKEIN_EMBEDDED_DIR}
-  COMMAND ${CMAKE_COMMAND}
-    -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/lib/std/fsm.skein
-    -DOUTPUT=${SKEIN_FSM_SOURCE}
-    -DSYMBOL=kStdFsmSource
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
-  DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/std/fsm.skein
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
-  VERBATIM
+set(SKEIN_EMBEDDED_SOURCES
+  fsm.skein:kStdFsmSource:std_fsm_source.inc
+  set.skein:kStdSetSource:std_set_source.inc
+  deque.skein:kStdDequeSource:std_deque_source.inc
+  heap.skein:kStdHeapSource:std_heap_source.inc
 )
-add_custom_target(skein_embedded_sources DEPENDS ${SKEIN_FSM_SOURCE})
+set(SKEIN_EMBEDDED_OUTPUTS)
+foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)
+  string(REPLACE ":" ";" parts "${entry}")
+  list(GET parts 0 source_name)
+  list(GET parts 1 symbol)
+  list(GET parts 2 output_name)
+  set(source_path ${CMAKE_CURRENT_SOURCE_DIR}/lib/std/${source_name})
+  set(output_path ${SKEIN_EMBEDDED_DIR}/${output_name})
+  add_custom_command(
+    OUTPUT ${output_path}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SKEIN_EMBEDDED_DIR}
+    COMMAND ${CMAKE_COMMAND}
+      -DINPUT=${source_path}
+      -DOUTPUT=${output_path}
+      -DSYMBOL=${symbol}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
+    DEPENDS
+      ${source_path}
+      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
+    VERBATIM
+  )
+  list(APPEND SKEIN_EMBEDDED_OUTPUTS ${output_path})
+endforeach()
+add_custom_target(skein_embedded_sources DEPENDS ${SKEIN_EMBEDDED_OUTPUTS})
 add_dependencies(${PROJECT_NAME} skein_embedded_sources)
 
 target_include_directories(${PROJECT_NAME} PRIVATE

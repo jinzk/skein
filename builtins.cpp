@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "compress_builtin.h"
 #include "crypto_builtin.h"
+#include "dict.h"
 #include "encoding.h"
 #include "env_builtin.h"
 #include "eval_helpers.h"
@@ -509,6 +510,63 @@ static struct value_t *list_is_sorted_value(struct list_value_t *list,
     return newboolval(true);
 }
 
+static struct value_t *enum_tag_from_value(struct value_t *value) {
+    if (!value || value->type != T_enum) {
+        yyerror("std.enum.tag expects an enum value");
+        return NULL;
+    }
+    struct enum_value_t *ev = (struct enum_value_t *)value;
+    if (!ev->def || ev->variant < 0 ||
+        (size_t)ev->variant >= ev->def->variants.size()) {
+        yyerror("invalid enum value");
+        return NULL;
+    }
+    const struct variant_def &variant =
+        ev->def->variants[(size_t)ev->variant];
+    std::string tag = ev->def->module_name + "::" + ev->def->name + "::" +
+                      variant.name;
+    return newstrval(tag.c_str());
+}
+
+static struct value_t *enum_tag_from_name(struct value_t *type_value,
+                                          struct value_t *variant_value) {
+    if (!type_value || type_value->type != T_string) {
+        yyerror("std.enum.tag expects a type name string");
+        return NULL;
+    }
+    if (!variant_value || variant_value->type != T_string) {
+        yyerror("std.enum.tag expects a variant name string");
+        return NULL;
+    }
+
+    std::string type_name = ((struct string_value_t *)type_value)->value;
+    std::string variant_name =
+        ((struct string_value_t *)variant_value)->value;
+    std::string module_name;
+    size_t sep = type_name.find("::");
+    if (sep != std::string::npos) {
+        module_name = type_name.substr(0, sep);
+        type_name = type_name.substr(sep + 2);
+    }
+
+    enum_def *def = structtype_find_enum_by_name(
+        module_name.empty() ? NULL : module_name.c_str(),
+        type_name.c_str());
+    if (!def) {
+        yyerror("unknown or ambiguous enum type %s", type_name.c_str());
+        return NULL;
+    }
+    if (structtype_variant_index(def, variant_name) < 0) {
+        yyerror("unknown enum variant %s::%s", def->name.c_str(),
+                variant_name.c_str());
+        return NULL;
+    }
+
+    std::string tag =
+        def->module_name + "::" + def->name + "::" + variant_name;
+    return newstrval(tag.c_str());
+}
+
 static bool collect_command_env(
     const std::vector<struct value_t *> &args, size_t index,
     const char *who,
@@ -922,6 +980,12 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_enum_tag) {
+        if (args.size() < 1 || args.size() > 2) {
+            yyerror("std.enum.tag expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (functype == B_list_sort) {
         if (args.size() < 1 || args.size() > 2) {
             yyerror("std.list.sort expects 1 or 2 arguments, got %d",
@@ -1066,6 +1130,12 @@ struct value_t *call_builtin(int functype,
             break;
         case B_enum_decode:
             ret = enum_decode_value(arg);
+            break;
+        case B_enum_tag:
+            if (args.size() == 1)
+                ret = enum_tag_from_value(arg);
+            else
+                ret = enum_tag_from_name(args[0], args[1]);
             break;
         case B_struct_decode:
             ret = struct_decode_value(args[0], args[1]);
@@ -1402,13 +1472,18 @@ struct value_t *call_builtin(int functype,
                 break;
             }
             struct dict_value_t *dict = (struct dict_value_t *)args[0];
-            struct value_t *found = NULL;
-            for (auto &entry : dict->payload->items) {
-                if (value_equals(entry.first, args[1])) {
-                    found = entry.second;
-                    break;
-                }
+            if (!dict_key_allowed(args[1])) {
+                yyerror("%s: %s, got %s",
+                        functype == B_dict_get ? "std.dict.get"
+                                               : "std.dict.has",
+                        dict_key_error(), typename_of(args[1]));
+                break;
             }
+            int found_index = dict_find_index(dict, args[1]);
+            struct value_t *found =
+                found_index >= 0
+                    ? dict->payload->items[(size_t)found_index].second
+                    : NULL;
             if (functype == B_dict_has) {
                 ret = newintval(found ? 1 : 0);
             } else if (found) {
@@ -1463,13 +1538,20 @@ struct value_t *call_builtin(int functype,
                 break;
             }
             struct dict_value_t *source = (struct dict_value_t *)args[0];
+            if (!dict_key_allowed(args[1])) {
+                yyerror("std.dict.delete: %s, got %s", dict_key_error(),
+                        typename_of(args[1]));
+                break;
+            }
+            int remove_index = dict_find_index(source, args[1]);
             struct dict_value_t *out = newdictval();
             out->payload->items.reserve(source->payload->items.size());
-            for (auto &entry : source->payload->items) {
-                if (value_equals(entry.first, args[1]))
+            for (size_t i = 0; i < source->payload->items.size(); ++i) {
+                if ((int)i == remove_index)
                     continue;
-                out->payload->items.push_back(std::make_pair(
-                    dupval(entry.first), dupval(entry.second)));
+                dict_append_item(out,
+                                 dupval(source->payload->items[i].first),
+                                 dupval(source->payload->items[i].second));
             }
             ret = (struct value_t *)out;
             break;
@@ -1485,22 +1567,30 @@ struct value_t *call_builtin(int functype,
             out->payload->items.reserve(left->payload->items.size() +
                                         right->payload->items.size());
             for (auto &entry : left->payload->items) {
-                out->payload->items.push_back(std::make_pair(
-                    dupval(entry.first), dupval(entry.second)));
+                if (!dict_key_allowed(entry.first)) {
+                    yyerror("std.dict.merge: %s, got %s", dict_key_error(),
+                            typename_of(entry.first));
+                    freeval((struct value_t *)out);
+                    return NULL;
+                }
+                dict_append_item(out, dupval(entry.first),
+                                 dupval(entry.second));
             }
             for (auto &entry : right->payload->items) {
-                bool replaced = false;
-                for (auto &target : out->payload->items) {
-                    if (value_equals(target.first, entry.first)) {
-                        freeval(target.second);
-                        target.second = dupval(entry.second);
-                        replaced = true;
-                        break;
-                    }
+                if (!dict_key_allowed(entry.first)) {
+                    yyerror("std.dict.merge: %s, got %s", dict_key_error(),
+                            typename_of(entry.first));
+                    freeval((struct value_t *)out);
+                    return NULL;
                 }
-                if (!replaced) {
-                    out->payload->items.push_back(std::make_pair(
-                        dupval(entry.first), dupval(entry.second)));
+                int found = dict_find_index(out, entry.first);
+                if (found >= 0) {
+                    freeval(out->payload->items[(size_t)found].second);
+                    out->payload->items[(size_t)found].second =
+                        dupval(entry.second);
+                } else {
+                    dict_append_item(out, dupval(entry.first),
+                                     dupval(entry.second));
                 }
             }
             ret = (struct value_t *)out;

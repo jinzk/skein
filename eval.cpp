@@ -1,6 +1,7 @@
 #include "eval.h"
 #include "builtins.h"
 #include "diagnostics.h"
+#include "dict.h"
 #include "eval_context.h"
 #include "eval_helpers.h"
 #include "fiber.h"
@@ -1220,21 +1221,18 @@ static struct value_t *write_member_value(struct value_t *container,
         struct dict_value_t *dv = (struct dict_value_t *)container;
         if (field_access && !dv->payload->is_namespace) {
             yyerror("cannot access dict key with '.', use [\"...\"]");
+        } else if (!dict_key_allowed(idx)) {
+            yyerror("%s, got %s", dict_key_error(), typename_of(idx));
         } else {
             ensure_unique_dict(dv);
-            bool found = false;
-            for (size_t i = 0; i < dv->payload->items.size(); ++i) {
-                if (value_equals(dv->payload->items[i].first, idx)) {
-                    freeval(dv->payload->items[i].second);
-                    dv->payload->items[i].second = val;
-                    val = NULL;
-                    found = true;
-                    ret = dupval(dv->payload->items[i].second);
-                    break;
-                }
-            }
-            if (!found) {
-                dv->payload->items.push_back(std::make_pair(dupval(idx), val));
+            int found = dict_find_index(dv, idx);
+            if (found >= 0) {
+                freeval(dv->payload->items[(size_t)found].second);
+                dv->payload->items[(size_t)found].second = val;
+                val = NULL;
+                ret = dupval(dv->payload->items[(size_t)found].second);
+            } else {
+                dict_append_item(dv, dupval(idx), val);
                 val = NULL;
                 ret = dupval(dv->payload->items.back().second);
             }
@@ -2092,9 +2090,13 @@ static struct value_t *read_member_value(struct value_t *container,
             yyerror("cannot access dict key with '.', use [\"...\"]");
             return NULL;
         }
-        for (size_t i = 0; i < dv->payload->items.size(); ++i)
-            if (value_equals(dv->payload->items[i].first, index))
-                return dupval(dv->payload->items[i].second);
+        if (!dict_key_allowed(index)) {
+            yyerror("%s, got %s", dict_key_error(), typename_of(index));
+            return NULL;
+        }
+        int found = dict_find_index(dv, index);
+        if (found >= 0)
+            return dupval(dv->payload->items[(size_t)found].second);
         yyerror("key not found");
         return NULL;
     }
@@ -2686,18 +2688,22 @@ struct value_t *eval(struct ast *a) {
                         freeval((struct value_t *)v);
                         return NULL;
                     }
-                    bool replaced = false;
-                    for (size_t i = 0; i < v->payload->items.size(); ++i) {
-                        if (value_equals(v->payload->items[i].first, key)) {
-                            freeval(v->payload->items[i].second);
-                            v->payload->items[i].second = val;
-                            freeval(key);
-                            replaced = true;
-                            break;
-                        }
+                    if (!dict_key_allowed(key)) {
+                        yyerror("%s, got %s", dict_key_error(),
+                                typename_of(key));
+                        freeval(key);
+                        freeval(val);
+                        freeval((struct value_t *)v);
+                        return NULL;
                     }
-                    if (!replaced)
-                        v->payload->items.push_back(std::make_pair(key, val));
+                    int found = dict_find_index(v, key);
+                    if (found >= 0) {
+                        freeval(v->payload->items[(size_t)found].second);
+                        v->payload->items[(size_t)found].second = val;
+                        freeval(key);
+                    } else {
+                        dict_append_item(v, key, val);
+                    }
                 }
                 p = (struct dict_node *)p->next;
             }

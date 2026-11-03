@@ -2,8 +2,10 @@
 #define _VALUETYPE_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <utility>
 
@@ -105,6 +107,11 @@ struct dict_payload {
     std::vector<std::pair<value_t *, value_t *>> items;
     /* True for std/package namespaces, which keep dot access for exports. */
     bool is_namespace = false;
+    /* Lazily built index for large dictionaries.  Indices refer to `items`;
+     * any size change invalidates it. */
+    mutable std::unordered_map<std::uint64_t, std::vector<std::size_t>> index;
+    mutable bool index_valid = false;
+    mutable std::size_t index_size = 0;
     ~dict_payload();
 };
 

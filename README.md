@@ -1383,6 +1383,9 @@ std.enum
 std.struct
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
+std.set（内嵌 Skein 源码包）
+std.deque（内嵌 Skein 源码包）
+std.heap（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -1423,6 +1426,37 @@ import std;
 struct Point { x: int; y: int; }
 let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 ```
+
+`std.enum.tag(value)` 返回 `module::Enum::Variant` 规范字符串，丢弃载荷，可直接作 dict key：
+
+```text
+enum E { A { n: int; }; }
+std.enum.tag(E::A { n: 1 })   // "main::E::A"
+std.enum.tag(E::A { n: 2 })   // "main::E::A"
+```
+
+无实例时可用 `std.enum.tag("E", "A")`。
+
+`std.set` / `std.deque` / `std.heap` 也是内嵌 Skein 源码包：
+
+```text
+import std.set;
+let s = set.from_list([1, 2, 2, 3]);
+set.size(s)          // 3
+set.has(s, 2)        // true
+set.values(s)        // [1, 2, 3]
+
+import std.deque;
+let d = deque.from_list([2, 3]);
+d = deque.push_front(d, 1);
+deque.to_list(d)     // [1, 2, 3]
+
+import std.heap;
+let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
+heap.peek(h)         // 1
+```
+
+`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
 
 当前提供的函数：
 

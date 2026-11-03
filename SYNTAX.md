@@ -196,6 +196,19 @@ let d = {
 };
 ```
 
+字典 key 只允许：
+
+```text
+int / bool / string / char / byte / bytes / null
+```
+
+`float`、`list`、`dict`、`struct`、`enum`、`function` 等不能作为 key，会报错。
+
+- key 按值相等比较；
+- 字典保持插入顺序；
+- 删除后重新插入同一个 key 会排到末尾；
+- 大字典内部使用哈希索引，但遍历、`keys`、`values`、`items`、`print`、JSON 始终按插入顺序。
+
 ### 2.9 bytes
 
 `bytes` 没有字面量，通过内置函数创建：
@@ -1490,6 +1503,9 @@ std.enum
 std.struct
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
+std.set（内嵌 Skein 源码包）
+std.deque（内嵌 Skein 源码包）
+std.heap（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -2969,10 +2985,12 @@ fsm.restore(snap[, decode])    -> Context
 ### std.enum
 
 ```text
-std.enum.decode(value)         -> enum
+std.enum.decode(value)                  -> enum
+std.enum.tag(value)                     -> string
+std.enum.tag(type_name, variant_name)   -> string
 ```
 
-把 `std.json.parse` 得到的 `{"$enum":"Event::UserMsg","payload":{...}}` 还原成枚举值；嵌套枚举会递归还原。输入不是枚举对象时报错。
+`decode` 把 `std.json.parse` 得到的 `{"$enum":"Event::UserMsg","payload":{...}}` 还原成枚举值；嵌套枚举会递归还原。输入不是枚举对象时报错。
 
 ```text
 import std;
@@ -2980,6 +2998,21 @@ enum Event { UserMsg { text: string; }; }
 let e = std.enum.decode(std.json.parse(
   std.json.stringify(Event::UserMsg { text: "hi" })
 ));
+```
+
+`tag` 返回 `module::Enum::Variant` 形式的规范字符串，丢弃载荷：
+
+- 同一变体的不同载荷得到同一个 tag；
+- 不同 enum 类型即使变体名相同，tag 也不同；
+- tag 是普通字符串，可直接作 dict key、写进 JSON；
+- 无实例时可用 `std.enum.tag("Event", "UserMsg")` 或跨包 `std.enum.tag("aa::Event", "UserMsg")`。
+
+```text
+enum E { A { n: int; }; B; }
+std.enum.tag(E::A { n: 1 })   // "main::E::A"
+std.enum.tag(E::A { n: 2 })   // "main::E::A"
+std.enum.tag(E::B)            // "main::E::B"
+std.enum.tag("E", "A")        // "main::E::A"
 ```
 
 ### std.struct
@@ -3008,6 +3041,68 @@ print(p);          // Point { x: 1, y: 2 }
 - 递归 struct 依赖 JSON 深度限制；
 - 跨包类型写成 `module::Type`；
 - `std.json.stringify` 的输出格式不变，不引入 `$struct` 标签。
+
+### std.set / std.deque / std.heap
+
+这三个都是内嵌 Skein 源码包。
+
+#### std.set
+
+```text
+import std.set;
+
+let s = set.from_list([1, 2, 2, 3]);
+set.size(s)              // 3
+set.values(s)            // [1, 2, 3]
+set.has(s, 2)            // true
+set.add(s, 4)
+set.remove(s, 2)
+set.union(a, b)
+set.intersect(a, b)
+set.difference(a, b)
+set.is_subset(a, b)
+```
+
+元素必须是合法 dict key：`int / bool / string / char / byte / bytes / null`。
+
+#### std.deque
+
+```text
+import std.deque;
+
+let d = deque.from_list([2, 3]);
+d = deque.push_front(d, 1);
+d = deque.push_back(d, 4);
+deque.size(d)            // 4
+deque.to_list(d)         // [1, 2, 3, 4]
+deque.peek_front(d)      // 1
+deque.peek_back(d)       // 4
+
+let r = deque.pop_front(d);
+r["ok"]                  // true
+r["value"]               // 1
+d = r["deque"];
+```
+
+`pop_front` / `pop_back` 返回 `{ok, deque, value}`；空队列返回 `{ok: false, error: "empty deque", deque}`。
+
+#### std.heap
+
+```text
+import std.heap;
+
+let h = heap.new(func(a, b) { return a < b; });
+h = heap.push(h, 3);
+h = heap.push(h, 1);
+heap.peek(h)             // 1
+let r = heap.pop(h);
+r["value"]               // 1
+h = r["heap"];
+
+let h2 = heap.from_list([3, 1, 2], func(a, b) { return a > b; });  // 大顶堆
+```
+
+`less(a, b)` 返回 `true` 表示 `a` 优先出堆。`pop` 返回 `{ok, heap, value}`；空堆返回 `{ok: false, error: "empty heap", heap}`。
 
 ### 6.5 查找路径
 

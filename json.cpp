@@ -1,6 +1,7 @@
 #include "json.h"
 
 #include "ast.h"
+#include "dict.h"
 #include "structtype.h"
 #include "unicode.h"
 #include "valuetype.h"
@@ -273,8 +274,7 @@ private:
                 dict->payload->items[existing->second].second = value;
             } else {
                 size_t item = dict->payload->items.size();
-                dict->payload->items.push_back(std::make_pair(
-                    newstrval(key.c_str()), value));
+                dict_append_item(dict, newstrval(key.c_str()), value);
                 index.emplace(std::move(key), item);
             }
 

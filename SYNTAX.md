@@ -399,11 +399,24 @@ g()    // 10
 
 ```text
 let add = func(a, b) { return a + b; };
+let inc = func(x) => x + 1;
 
 (func(x) { return x + 1; })(41)
+(func(x) => x + 1)(41)
 ```
 
 匿名函数体使用 `list` 语法，支持多语句和显式 `return`。
+
+单表达式可以使用 `=>` 简写，表达式结果就是返回值：
+
+```text
+std.list.map([1, 2, 3], func(x) => x * 2)
+std.list.filter([1, 2, 3], func(x) => x % 2 == 1)
+```
+
+- `=>` 的优先级最低，`func(x) => x * 2 + 1` 的函数体是 `x * 2 + 1`；
+- 匿名表达式函数不需要分号；
+- 多语句仍然使用 `{ ... }` 和显式 `return`。
 
 ### 4.9 赋值
 
@@ -1122,6 +1135,8 @@ func typed_add(a: int, b: int) {
 func hello() {
   print("hello");
 }
+
+func double(x) => x * 2;
 ```
 
 - 参数用逗号分隔；
@@ -1130,6 +1145,8 @@ func hello() {
 - 不支持默认参数；
 - 支持最后一个参数为可变参数；
 - 函数体使用 `{ list }`；
+- 单表达式可以写成 `=> exp`，隐含 `return`；
+- 表达式函数需要以 `;` 结束；
 - 函数调用深度上限为 1000。
 
 参数类型约束在调用时进行运行时检查，不做隐式转换。支持：
@@ -1147,6 +1164,19 @@ func apply(fn: callable, x: int) {
 }
 
 apply(sqrt, 16)
+```
+
+表达式函数同样支持类型约束和 `async`：
+
+```text
+func typed_double(x: int) => x * 2;
+async func fetch_value(x) => await fetch(x);
+```
+
+结构体 / impl 方法也支持表达式体：
+
+```text
+struct Box { v: int; func twice(self) => self.v * 2; }
 ```
 
 类型不匹配会报告运行时错误，例如：

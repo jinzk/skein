@@ -397,3 +397,40 @@ def run_cases():
           stdout="true")
     check("match as pattern",
           'match (1) { case 1 as x => print(x); }\n', stdout="1")
+
+    check("expression lambda",
+          'import std;\n'
+          'print(std.list.map([1, 2, 3], func(x) => x * 2));\n'
+          'print(std.list.filter([1, 2, 3], func(x) => x % 2 == 1));\n'
+          'print(std.list.reduce([1, 2, 3], func(a, b) => a + b));\n',
+          stdout_all=["[2, 4, 6]", "[1, 3]", "6"])
+    check("expression lambda precedence",
+          'let f = func(x) => x * 2 + 1;\nprint(f(3));\n',
+          stdout="7")
+    check("nested expression lambdas",
+          'let add = func(x) => func(y) => x + y;\nprint(add(2)(3));\n',
+          stdout="5")
+    check("named expression function",
+          'func double(x) => x * 2;\nprint(double(21));\n',
+          stdout="42")
+    check("expression lambda with match",
+          'let describe = func(x) => match (x) {\n'
+          '  case 0 => "zero";\n'
+          '  default => "other";\n'
+          '};\n'
+          'print(describe(0));\nprint(describe(2));\n',
+          stdout_all=["zero", "other"])
+    check("method expression body",
+          'struct Box { v: int; func twice(self) => self.v * 2; }\n'
+          'let b = Box { v: 4 };\nprint(b.twice());\n',
+          stdout="8")
+    check("async expression function",
+          'import std;\n'
+          'async func inc(x) => x + 1;\n'
+          'print(await inc(1));\n',
+          stdout="2")
+
+    check("export expression function",
+          'package p { export func twice(x) => x * 2; }\n'
+          'print(p.twice(21));\n',
+          stdout="42")

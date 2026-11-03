@@ -2477,6 +2477,8 @@ func typed_add(a: int, b: int) {
   return a + b;
 }
 
+func double(x) => x * 2;
+
 func fib(n) {
   if (n < 2) { return n; }
   return fib(n - 1) + fib(n - 2);
@@ -2527,8 +2529,14 @@ adder(3)(4)
 let double = func(x) { return x * 2; };
 double(21)
 
+let inc = func(x) => x + 1;
+inc(41)
+
 (func(x) { return x + 1; })(41)
+(func(x) => x + 1)(41)
 ```
+
+单表达式可以用 `=>` 简写，表达式结果自动成为返回值。`=>` 优先级最低，因此 `func(x) => x * 2 + 1` 的函数体是 `x * 2 + 1`。
 
 匿名函数同样可以捕获定义处的作用域，并作为参数或返回值：
 
@@ -2556,7 +2564,8 @@ fact(5)                 → 120
 
 - 没有名字，诊断和调用栈中显示为 `<anonymous>`；
 - 每次求值都会创建新的闭包；
-- 仍然使用显式 `return`；
+- `{ ... }` 函数体使用显式 `return`；
+- `=> exp` 函数体隐含 `return exp`；
 - 支持空参数和空函数体；
 - 立即调用时建议给匿名函数加括号，例如 `(func(x) { ... })(1)`。
 

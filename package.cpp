@@ -413,6 +413,13 @@ value_t *build_std_namespace() {
             {"supports", B_encoding_supports},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("unicode"),
+        builtin_module({
+            {"normalize", B_unicode_normalize},
+            {"is_normalized", B_unicode_is_normalized},
+            {"version", B_unicode_version},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("math"),
         builtin_module({
             {"sqrt", B_sqrt},

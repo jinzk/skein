@@ -4,11 +4,13 @@
 import base64
 import hashlib
 import os
+import random
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
@@ -220,6 +222,51 @@ def check_encoding_two_byte_tables():
         actual = [line.strip() for line in proc.stdout.splitlines()
                   if line.strip()]
         assert actual == expected, f"{encoding} table round-trip mismatch"
+
+
+def check_unicode_normalization_samples():
+    """Compare std.unicode against Python's Unicode 16 normalization."""
+    rng = random.Random(2026)
+    assigned = [
+        cp for cp in range(0x110000)
+        if not (0xD800 <= cp <= 0xDFFF)
+        and unicodedata.category(chr(cp)) != "Cn"
+    ]
+    samples = [chr(cp) for cp in rng.sample(assigned, 40)]
+    marks = list(range(0x300, 0x370))
+    for _ in range(20):
+        base = rng.choice((0x41, 0x61, 0x65, 0x4E2D, 0x1100))
+        samples.append(chr(base) + chr(rng.choice(marks)))
+    for _ in range(10):
+        lead = rng.randint(0x1100, 0x1112)
+        vowel = rng.randint(0x1161, 0x1175)
+        tail = rng.choice((0, rng.randint(0x11A8, 0x11C2)))
+        samples.append(chr(lead) + chr(vowel) + (chr(tail) if tail else ""))
+
+    forms = ("nfc", "nfd", "nfkc", "nfkd")
+    lines = ["import std;"]
+    expected = []
+    for index, sample in enumerate(samples):
+        hex_data = sample.encode("utf-8").hex()
+        lines.append(
+            f'let sample{index} = std.encoding.decode('
+            f'bytes_from_hex("{hex_data}"), "utf-8");'
+        )
+        for form in forms:
+            lines.append(
+                f'bytes_hex(std.encoding.encode('
+                f'std.unicode.normalize(sample{index}, "{form}"), "utf-8"))'
+            )
+            expected.append(
+                "= " + unicodedata.normalize(
+                    form.upper(), sample).encode("utf-8").hex()
+            )
+
+    proc = run("\n".join(lines) + "\n", timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    actual = [line.strip() for line in proc.stdout.splitlines()
+              if line.strip()]
+    assert actual == expected, "unicode normalization mismatch"
 
 
 def main():
@@ -6217,6 +6264,76 @@ def main():
         'std.encoding.decode("abc", "gbk")\n',
         stderr="expects bytes",
     )
+    check(
+        "std unicode normalization forms",
+        "import std;\n"
+        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(decomposed, "nfc"), "utf-8")));\n'
+        'let composed = std.encoding.decode(bytes_from_hex("c3a9"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(composed, "nfd"), "utf-8")));\n'
+        'let circled = std.encoding.decode(bytes_from_hex("e291a0"), "utf-8");\n'
+        'print(std.unicode.normalize(circled, "nfkc"));\n'
+        'print(std.unicode.normalize(circled, "nfkd"));\n'
+        'std.unicode.version()\n',
+        stdout_all=["c3a9", "65cc81", "1", "1", "= 16.0.0"],
+    )
+    check(
+        "std unicode is normalized",
+        "import std;\n"
+        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
+        'let composed = std.encoding.decode(bytes_from_hex("c3a9"), "utf-8");\n'
+        'std.unicode.is_normalized(decomposed, "nfc")\n'
+        'std.unicode.is_normalized(composed, "nfc")\n'
+        'std.unicode.is_normalized(composed, "nfd")\n',
+        stdout_all=["= false", "= true", "= false"],
+    )
+    check(
+        "std unicode compatibility",
+        "import std;\n"
+        'let ligature = std.encoding.decode(bytes_from_hex("efac81"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(ligature, "nfc"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(ligature, "nfkc"), "utf-8")));\n'
+        'let fullwidth = std.encoding.decode(bytes_from_hex("efbc91"), "utf-8");\n'
+        'print(std.unicode.normalize(fullwidth, "nfkc"));\n',
+        stdout_all=["efac81", "6669", "1"],
+    )
+    check(
+        "std unicode hangul",
+        "import std;\n"
+        'let jamo = std.encoding.decode(bytes_from_hex("e18480e185a1"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(jamo, "nfc"), "utf-8")));\n',
+        stdout_all=["eab080"],
+    )
+    check(
+        "std unicode canonical order",
+        "import std;\n"
+        'let angstrom = std.encoding.decode(bytes_from_hex("e284ab"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(angstrom, "nfc"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(angstrom, "nfd"), "utf-8")));\n'
+        'let marks = std.encoding.decode(bytes_from_hex("61cc95cc80"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(marks, "nfd"), "utf-8")));\n',
+        stdout_all=["c385", "41cc8a", "61cc80cc95"],
+    )
+    check(
+        "std unicode unknown form",
+        "import std;\n"
+        'std.unicode.normalize("x", "invalid")\n',
+        stderr="unknown normalization form",
+    )
+    check(
+        "std unicode source type",
+        "import std;\n"
+        'std.unicode.normalize(1, "nfc")\n',
+        stderr="expects a string",
+    )
     check("std join type", 'import std;\nstd.string.join([1], ",")\n',
           stderr="expects string elements")
     check("std replace empty", 'import std;\nstd.string.replace("a", "", "b")\n',
@@ -8366,6 +8483,7 @@ std.json.stringify(std.json.parse(text))
             assert proc.returncode == 130, (proc.returncode, stdout, stderr)
 
     check_encoding_two_byte_tables()
+    check_unicode_normalization_samples()
     check_interactive_continuation()
 
     print(f"all tests passed for {BIN}")

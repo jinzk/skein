@@ -58,6 +58,19 @@ set_target_properties(skein_llhttp PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
+add_library(skein_utf8proc STATIC
+  third_party/utf8proc/utf8proc.c
+)
+target_include_directories(skein_utf8proc PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/utf8proc
+)
+target_compile_definitions(skein_utf8proc PUBLIC UTF8PROC_STATIC=1)
+set_target_properties(skein_utf8proc PROPERTIES
+  C_STANDARD 99
+  C_STANDARD_REQUIRED ON
+  POSITION_INDEPENDENT_CODE ON
+)
+
 add_executable(${PROJECT_NAME}
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
@@ -90,6 +103,7 @@ add_executable(${PROJECT_NAME}
   structtype.cpp
   symbol.cpp
   task.cpp
+  unicode.cpp
   unicode_ident.cpp
   valuetype.cpp
   websocket.cpp
@@ -119,6 +133,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   ${SKEIN_LIBUV_TARGET}
   Boost::context
   skein_llhttp
+  skein_utf8proc
 )
 
 option(SKEIN_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)

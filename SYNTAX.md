@@ -20,7 +20,7 @@ let foo变量 = 4;
 - 关键字和内置函数名仍只识别 ASCII；
 - 源码必须是合法 UTF-8；非法 UTF-8 字节属于词法错误；
 - 标识符只使用源码中的字面 UTF-8 字符，不支持 `\u` / `\u{...}` 转义；
-- 标识符不做 NFC / NFKC 归一化，不同码点序列视为不同标识符；
+- 标识符不做 NFC / NFKC 归一化，不同码点序列视为不同标识符；字符串可通过 `std.unicode.normalize` 显式归一化；
 - 函数形参、变长参数名以及类型标注中的用户类型名使用与普通变量相同的标识符规则。
 
 例如，`if` 是关键字，但 `if变量` 和全角的 `ｉｆ` 都是合法标识符；`😀`、`。` 等非 `XID` 字符不能出现在标识符开头。
@@ -1263,6 +1263,7 @@ std.json
 std.string
 std.bytes
 std.encoding
+std.unicode
 std.math
 std.io
 std.fs
@@ -1318,6 +1319,9 @@ std.bytes.hex(bytes_from_hex("00ff"))
 std.encoding.decode(bytes_from_hex("d6d0"), "gbk")
 std.encoding.encode("中国", "gbk")
 std.encoding.supports("gb18030")
+std.unicode.normalize("é", "nfc")
+std.unicode.is_normalized("é", "nfc")
+std.unicode.version()
 ```
 
 编码转换：
@@ -1341,6 +1345,29 @@ print(s);                                      // 中国
 bytes_hex(std.encoding.encode("中国", "gbk"))  // d6d0b9fa
 bytes_hex(std.encoding.encode("€", "gbk"))     // 80
 bytes_hex(std.encoding.encode("€", "gb18030")) // a2e3
+```
+
+Unicode 归一化：
+
+```text
+std.unicode.normalize(text, form)      → string
+std.unicode.is_normalized(text, form)  → bool
+std.unicode.version()                  → string
+```
+
+`form` 支持 `nfc`、`nfd`、`nfkc`、`nfkd`。归一化只在显式调用时发生，
+字符串比较、拼接、下标和 `len` 不会自动归一化。标识符也不做自动归一化。
+
+```text
+import std;
+
+let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");
+let composed = std.unicode.normalize(decomposed, "nfc");
+bytes_hex(std.encoding.encode(composed, "utf-8"))  // c3a9
+
+std.unicode.is_normalized(decomposed, "nfc")       // false
+std.unicode.is_normalized(composed, "nfc")         // true
+std.unicode.version()                              // "16.0.0"
 ```
 
 JSON：

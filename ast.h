@@ -212,7 +212,10 @@ enum bifs {
     B_json_stringify,
     B_encoding_decode,
     B_encoding_encode,
-    B_encoding_supports
+    B_encoding_supports,
+    B_unicode_normalize,
+    B_unicode_is_normalized,
+    B_unicode_version
 };
 
 struct ast {

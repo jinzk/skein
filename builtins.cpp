@@ -24,6 +24,7 @@
 #include "platform.h"
 #include "repl.h"
 #include "structtype.h"
+#include "unicode.h"
 #include "valuetype.h"
 
 #include <algorithm>
@@ -341,6 +342,8 @@ struct value_t *call_builtin(int functype,
         return call_json_builtin(functype, args);
     if (functype >= B_encoding_decode && functype <= B_encoding_supports)
         return call_encoding_builtin(functype, args);
+    if (functype >= B_unicode_normalize && functype <= B_unicode_version)
+        return call_unicode_builtin(functype, args);
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
 #ifdef SKEIN_ENABLE_HTTP2

@@ -18,7 +18,7 @@ cmake --build build
 sudo apt install libuv1-dev libboost-context-dev
 ```
 
-HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），不需要额外的系统包。
+HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），Unicode 归一化使用 vendored `utf8proc`（`third_party/utf8proc`），都不需要额外的系统包。
 
 TLS 是可选模块；启用时需要 OpenSSL 开发文件：
 
@@ -62,7 +62,7 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv �
 
 脚本文件建议保存为 UTF-8；输入开头的 UTF-8 BOM 会被忽略。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
 
-源码必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，也不做 NFC/NFKC 归一化。函数形参、变长参数名、结构体字段、类型名、label 和包名使用相同规则。
+源码必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，也不做 NFC/NFKC 归一化；字符串可以通过 `std.unicode.normalize` 显式归一化。函数形参、变长参数名、结构体字段、类型名、label 和包名使用相同规则。
 
 ## 脚本模式与 shebang
 
@@ -1350,6 +1350,7 @@ std.json
 std.string
 std.bytes
 std.encoding
+std.unicode
 std.math
 std.io
 std.fs
@@ -1591,6 +1592,10 @@ std.bytes.from_string
 std.encoding.decode
 std.encoding.encode
 std.encoding.supports
+
+std.unicode.normalize
+std.unicode.is_normalized
+std.unicode.version
 ```
 
 规则：
@@ -2738,6 +2743,46 @@ std.encoding.supports("gb18030")               // true
 - 解码结果包含 `U+0000` 时始终报错，因为 `string` 不能保存内嵌 NUL；
 - `bytes_to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
 
+### Unicode 归一化
+
+设计说明见 [docs/unicode.md](docs/unicode.md)。
+
+`std.unicode` 提供显式的 NFC / NFD / NFKC / NFKD 归一化：
+
+```text
+std.unicode.normalize(text, form)      → string
+std.unicode.is_normalized(text, form)  → bool
+std.unicode.version()                  → string
+```
+
+`form` 支持 `nfc`、`nfd`、`nfkc`、`nfkd`，大小写不敏感。底层使用 vendored
+`utf8proc` 2.10.0，Unicode 版本为 16.0.0。
+
+示例：
+
+```text
+import std;
+
+let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");
+let composed = std.unicode.normalize(decomposed, "nfc");
+bytes_hex(std.encoding.encode(composed, "utf-8"))  // c3a9
+
+std.unicode.is_normalized(decomposed, "nfc")       // false
+std.unicode.is_normalized(composed, "nfc")         // true
+
+let circled = std.encoding.decode(bytes_from_hex("e291a0"), "utf-8");
+std.unicode.normalize(circled, "nfkc")             // "1"
+std.unicode.version()                              // "16.0.0"
+```
+
+规则：
+
+- 归一化只在显式调用 `std.unicode.normalize` 时发生；
+- 字符串比较、拼接、下标和 `len` 不会自动归一化；
+- 标识符仍然不做自动 NFC/NFKC 归一化；
+- 输入必须是合法 UTF-8 `string`，输出也保持合法 UTF-8；
+- 归一化不会产生内嵌 NUL。
+
 二进制文件读写：
 
 ```text
@@ -2858,6 +2903,7 @@ tokens.l      Flex 词法分析
 parser.y      Bison 语法分析
 ast.*         AST 定义、函数代码共享与释放
 diagnostics.* 错误位置、源码片段与调用栈
+unicode.*     Unicode NFC/NFD/NFKC/NFKD 归一化
 unicode_ident.* UTF-8 解码、Unicode 标识符判定与显示宽度
 eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态

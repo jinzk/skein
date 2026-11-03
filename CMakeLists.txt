@@ -101,12 +101,14 @@ add_executable(${PROJECT_NAME}
   net.cpp
   package.cpp
   process_builtin.cpp
+  process_spawn.cpp
   random_builtin.cpp
   regex_builtin.cpp
   repl.cpp
   result.cpp
   scopestack.cpp
   source_encoding.cpp
+  stdio_stream.cpp
   structeval.cpp
   structtype.cpp
   symbol.cpp

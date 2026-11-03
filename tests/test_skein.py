@@ -418,6 +418,70 @@ def check_extended_stdlib():
             stdout_all=["0", "hello", "abc", "/tmp", "bar", "3", "out",
                         "err"],
         )
+        check(
+            "std process spawn stdout",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/echo", {"args": ["spawn"]});\n'
+            'print(std.process.pid(p) > 0);\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["true", "spawn", "0"],
+        )
+        check(
+            "std process spawn stdin",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/cat");\n'
+            'std.io.write_all(p["stdin"], "abc");\n'
+            'std.io.close(p["stdin"]);\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["abc", "0"],
+        )
+        check(
+            "std process spawn stderr",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/sh", '
+            '{"args": ["-c", "echo out; echo err >&2; exit 3"]});\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(bytes_to_string(std.io.read(p["stderr"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["out", "err", "3"],
+        )
+        check(
+            "std process spawn async",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/echo", {"args": ["async"]});\n'
+            'let data = await std.io.read_async(p["stdout"], 4096);\n'
+            'print(bytes_to_string(data));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["async", "0"],
+        )
+        check(
+            "std process spawn async write",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/cat");\n'
+            'print(await std.io.write_async(p["stdin"], "abc"));\n'
+            'std.io.close(p["stdin"]);\n'
+            'let data = await std.io.read_async(p["stdout"], 4096);\n'
+            'print(bytes_to_string(data));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["3", "abc", "0"],
+        )
+        check(
+            "std process spawn kill",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/sleep", {"args": ["5"]});\n'
+            'std.process.kill(p);\n'
+            'print(std.process.wait(p) > 0);\n',
+            stdout="true",
+        )
+        check(
+            "std io standard streams",
+            "import std;\n"
+            'std.io.write_all(std.io.stdout, "hello\\n");\n'
+            'std.io.flush(std.io.stdout);\n',
+            stdout="hello",
+        )
 
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:

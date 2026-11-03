@@ -1443,6 +1443,32 @@ std.process.run(command[, options]) → dict
 `std.process.run` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
 `{"status", "stdout", "stderr"}`，其中 stdout/stderr 是 `bytes`。
 
+长驻进程：
+
+```text
+std.process.spawn(file[, options]) → process
+std.process.wait(process[, timeout_ms]) → status
+std.process.kill(process[, signal])
+std.process.close(process)
+std.process.pid(process)
+```
+
+`options` 支持 `args`、`env`、`cwd`。`spawn` 返回包含 `pid`、`stdin`、
+`stdout`、`stderr` 和 `handle` 的 dict；四个流都支持 `std.io` 的同步和异步读写。
+
+```text
+import std;
+
+let p = std.process.spawn("/bin/cat");
+std.io.write_all(p["stdin"], "hello");
+std.io.close(p["stdin"]);
+bytes_to_string(std.io.read(p["stdout"], 4096))
+std.process.wait(p)
+std.process.close(p)
+```
+
+`std.io.stdin` / `std.io.stdout` / `std.io.stderr` 是标准流对象。
+
 JSON：
 
 ```text
@@ -1580,7 +1606,7 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
 - `std.io`：`print`、`format`、`input`，以及文件和 socket 通用的流式读写；
 - `std.fs`：文件读写和文件句柄操作；
-- `std.process`：命令执行、`command_status` / `run`；
+- `std.process`：命令执行、`command_status` / `run` / `spawn`；
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
@@ -2654,6 +2680,11 @@ kind_of type_name type_module type_source
 std.process.command
 std.process.command_status
 std.process.run
+std.process.spawn
+std.process.wait
+std.process.kill
+std.process.close
+std.process.pid
 ```
 
 ### 文件

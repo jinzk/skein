@@ -15,6 +15,7 @@
 #include "net.h"
 #include "package.h"
 #include "platform.h"
+#include "process_spawn.h"
 #include "repl.h"
 #include "scopestack.h"
 #include "source_encoding.h"
@@ -162,6 +163,7 @@ int main(int argc, char **argv) {
 #endif
     net_shutdown();
     donescope();
+    process_spawn_shutdown();
     structtype_shutdown();
     event_loop_shutdown();
     set_active_eval_context(NULL);

@@ -267,7 +267,12 @@ enum bifs {
     B_compress_zlib,
     B_compress_unzlib,
     B_compress_deflate,
-    B_compress_inflate
+    B_compress_inflate,
+    B_process_spawn,
+    B_process_wait,
+    B_process_kill,
+    B_process_close,
+    B_process_pid
 };
 
 struct ast {

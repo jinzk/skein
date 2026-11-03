@@ -27,6 +27,7 @@
 #include "format.h"
 #include "platform.h"
 #include "process_builtin.h"
+#include "process_spawn.h"
 #include "random_builtin.h"
 #include "regex_builtin.h"
 #include "repl.h"
@@ -367,6 +368,8 @@ struct value_t *call_builtin(int functype,
         return call_env_builtin(functype, args);
     if (functype == B_process_run)
         return call_process_builtin(functype, args);
+    if (functype >= B_process_spawn && functype <= B_process_pid)
+        return call_process_spawn_builtin(functype, args);
     if (functype >= B_crypto_sha256 && functype <= B_crypto_hmac_sha256)
         return call_crypto_builtin(functype, args);
     if (functype >= B_compress_gzip && functype <= B_compress_inflate)

@@ -9,6 +9,7 @@
 #include "repl.h"
 #include "scopestack.h"
 #include "source_encoding.h"
+#include "stdio_stream.h"
 #include "symbol.h"
 #include "unicode_ident.h"
 #include "valuetype.h"
@@ -480,31 +481,41 @@ value_t *build_std_namespace() {
             {"min", B_min},
             {"max", B_max},
         })));
+    value_t *io_module = (value_t *)builtin_module({
+        {"print", B_print},
+        {"format", B_format},
+        {"input", B_input},
+        {"read", B_io_read},
+        {"write", B_io_write},
+        {"write_all", B_io_write_all},
+        {"flush", B_io_flush},
+        {"close", B_io_close},
+        {"eof", B_io_eof},
+        {"readable", B_io_readable},
+        {"writable", B_io_writable},
+        {"seekable", B_io_seekable},
+        {"seek", B_io_seek},
+        {"tell", B_io_tell},
+        {"read_exact", B_io_read_exact},
+        {"read_all", B_io_read_all},
+        {"read_line", B_io_read_line},
+        {"copy", B_io_copy},
+        {"buffered", B_io_buffered},
+        {"read_async", B_io_read_async},
+        {"write_async", B_io_write_async},
+    });
+    dict_value_t *io_dict = (dict_value_t *)io_module;
+    io_dict->payload->items.push_back(std::make_pair(
+        newstrval("stdin"),
+        new_stdio_stream_value(stdin, "stdin", true, false)));
+    io_dict->payload->items.push_back(std::make_pair(
+        newstrval("stdout"),
+        new_stdio_stream_value(stdout, "stdout", false, true)));
+    io_dict->payload->items.push_back(std::make_pair(
+        newstrval("stderr"),
+        new_stdio_stream_value(stderr, "stderr", false, true)));
     root->payload->items.push_back(std::make_pair(
-        newstrval("io"),
-        builtin_module({
-            {"print", B_print},
-            {"format", B_format},
-            {"input", B_input},
-            {"read", B_io_read},
-            {"write", B_io_write},
-            {"write_all", B_io_write_all},
-            {"flush", B_io_flush},
-            {"close", B_io_close},
-            {"eof", B_io_eof},
-            {"readable", B_io_readable},
-            {"writable", B_io_writable},
-            {"seekable", B_io_seekable},
-            {"seek", B_io_seek},
-            {"tell", B_io_tell},
-            {"read_exact", B_io_read_exact},
-            {"read_all", B_io_read_all},
-            {"read_line", B_io_read_line},
-            {"copy", B_io_copy},
-            {"buffered", B_io_buffered},
-            {"read_async", B_io_read_async},
-            {"write_async", B_io_write_async},
-        })));
+        newstrval("io"), io_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("fs"),
         builtin_module({
@@ -573,6 +584,11 @@ value_t *build_std_namespace() {
             {"status", B_command_status},
             {"command_status", B_command_status},
             {"run", B_process_run},
+            {"spawn", B_process_spawn},
+            {"wait", B_process_wait},
+            {"kill", B_process_kill},
+            {"close", B_process_close},
+            {"pid", B_process_pid},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("type"),

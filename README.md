@@ -1469,6 +1469,10 @@ std.io.buffered
 std.io.read_async
 std.io.write_async
 
+std.io.stdin
+std.io.stdout
+std.io.stderr
+
 std.fs.read_file
 std.fs.write_file
 std.fs.append_file
@@ -1672,6 +1676,11 @@ std.fs.path_abs
 std.fs.path_normalize
 
 std.process.run
+std.process.spawn
+std.process.wait
+std.process.kill
+std.process.close
+std.process.pid
 ```
 
 规则：
@@ -2548,6 +2557,65 @@ r["status"]
 bytes_to_string(r["stdout"])
 ```
 
+### 长驻进程与管道
+
+```text
+std.process.spawn(file[, options]) → process
+std.process.wait(process[, timeout_ms]) → status
+std.process.kill(process[, signal])
+std.process.close(process)
+std.process.pid(process)
+```
+
+`options`：
+
+```text
+args   list[string]，不包含 argv[0]；程序路径由 file 提供
+env    dict[string, string]；省略时继承父进程环境
+cwd    string
+```
+
+`spawn` 直接执行 `file`，不经过 shell。返回：
+
+```text
+{
+  "pid": int,
+  "stdin": stream,
+  "stdout": stream,
+  "stderr": stream,
+  "handle": process
+}
+```
+
+管道是普通 `std.io` 流，支持同步和异步读写：
+
+```text
+import std;
+
+let p = std.process.spawn("/bin/cat");
+
+std.io.write_all(p["stdin"], "hello");
+std.io.close(p["stdin"]);
+
+print(bytes_to_string(std.io.read(p["stdout"], 4096)));
+print(std.process.wait(p));
+```
+
+异步形式：
+
+```text
+let data = await std.io.read_async(p["stdout"], 4096);
+```
+
+`std.io.stdin`、`std.io.stdout`、`std.io.stderr` 也作为标准流暴露，方便子进程侧实现自己的协议。
+
+注意：
+
+- `std.process.close` 只关闭管道，不杀死进程；需要终止时先 `kill`；
+- `stderr` 始终是管道，父进程应读取，避免子进程因 stderr 写满而阻塞；
+- 管道不支持 `seek` / `tell`；
+- `wait` 超时后不会自动杀死进程。
+
 环境变量名不能为空，也不能包含 `=`。在 Windows cmd 中引用变量使用 `%FOO%`，POSIX shell 使用 `$FOO`。
 
 Windows/MinGW 下命令使用 `CreateProcessW` 传递 Unicode 命令行和 Unicode 环境块；捕获的 stdout 约定为 UTF-8。
@@ -3172,6 +3240,8 @@ crypto_builtin.* std.crypto SHA-256 / HMAC
 compress_builtin.* std.compress gzip/zlib/deflate
 fs_extra.*     std.fs 目录与路径操作
 process_builtin.* std.process.run 输出捕获
+process_spawn.* std.process.spawn 与管道流
+stdio_stream.* std.io 标准流
 eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数

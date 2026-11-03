@@ -1349,6 +1349,7 @@ std.dict
 std.json
 std.string
 std.bytes
+std.encoding
 std.math
 std.io
 std.fs
@@ -1584,6 +1585,12 @@ std.bytes.hex
 std.bytes.from_hex
 std.bytes.to_int
 std.bytes.from_int
+std.bytes.to_string
+std.bytes.from_string
+
+std.encoding.decode
+std.encoding.encode
+std.encoding.supports
 ```
 
 规则：
@@ -2671,6 +2678,65 @@ bytes_hex(int_to_bytes(-1, 2, "little"))
 - `read_bytes` / `write_bytes` / `append_bytes` 不做文本 NUL 检查；
 - `file_read_bytes(h)` 读取剩余全部内容，`file_read_bytes(h, n)` 最多读取 n 字节；
 - `bytes` 是值类型，赋值和复制都会复制内容。
+
+### 编码转换
+
+设计说明见 [docs/encoding.md](docs/encoding.md)。
+
+`std.encoding` 在 `bytes` 和 UTF-8 `string` 之间做显式转码：
+
+```text
+std.encoding.decode(bytes, encoding[, errors])  → string
+std.encoding.encode(string, encoding[, errors]) → bytes
+std.encoding.supports(encoding)                 → bool
+```
+
+支持的编码：
+
+```text
+utf-8  ascii  latin-1  windows-1252
+utf-16le  utf-16be  utf-16
+gbk / cp936
+gb18030
+```
+
+`errors` 支持：
+
+```text
+"strict"   默认，非法序列或不可表示字符报错
+"replace"  decode 用 U+FFFD 替换；encode 用 "?" 替换
+"ignore"   跳过非法序列或不可表示字符
+```
+
+示例：
+
+```text
+import std;
+
+let s = std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk");
+print(s);                                      // 中国
+
+print(bytes_hex(std.encoding.encode("中国", "gbk")));
+                                               // d6d0b9fa
+
+print(bytes_hex(std.encoding.encode("€", "gbk")));
+                                               // 80
+
+print(bytes_hex(std.encoding.encode("€", "gb18030")));
+                                               // a2e3
+
+std.encoding.supports("gbk")                   // true
+std.encoding.supports("gb18030")               // true
+```
+
+规则：
+
+- GBK 和 GB18030 使用内置码表，不依赖 iconv 或 Windows 代码页；
+- `gbk` 的 `0x80` 解码为 `€`；`gb18030` 的 `€` 是 `A2 E3`；
+- `std.encoding` 的 `utf-16` 要求 BOM，`utf-16le` / `utf-16be` 使用显式字节序；
+- `utf-16` 编码固定输出 BOM + 小端；
+- 解码结果包含 `U+0000` 时始终报错，因为 `string` 不能保存内嵌 NUL；
+- `bytes_to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
 
 二进制文件读写：
 

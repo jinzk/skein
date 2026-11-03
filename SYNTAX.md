@@ -1262,6 +1262,7 @@ std.dict
 std.json
 std.string
 std.bytes
+std.encoding
 std.math
 std.io
 std.fs
@@ -1314,6 +1315,32 @@ std.string.contains("hello", "ell")
 std.string.repeat("ab", 2)
 std.string.trim_start("  x")
 std.bytes.hex(bytes_from_hex("00ff"))
+std.encoding.decode(bytes_from_hex("d6d0"), "gbk")
+std.encoding.encode("中国", "gbk")
+std.encoding.supports("gb18030")
+```
+
+编码转换：
+
+```text
+std.encoding.decode(bytes, encoding[, errors])  → string
+std.encoding.encode(string, encoding[, errors]) → bytes
+std.encoding.supports(encoding)                 → bool
+```
+
+支持的编码包括 `utf-8`、`ascii`、`latin-1`、`windows-1252`、`utf-16le`、
+`utf-16be`、`utf-16`、`gbk` / `cp936`、`gb18030`。GBK 和 GB18030 使用内置
+码表，不依赖平台 iconv 或代码页。`errors` 支持 `strict`、`replace`、`ignore`。
+
+```text
+import std;
+
+let s = std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk");
+print(s);                                      // 中国
+
+bytes_hex(std.encoding.encode("中国", "gbk"))  // d6d0b9fa
+bytes_hex(std.encoding.encode("€", "gbk"))     // 80
+bytes_hex(std.encoding.encode("€", "gb18030")) // a2e3
 ```
 
 JSON：

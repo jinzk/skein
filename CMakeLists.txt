@@ -67,6 +67,7 @@ add_executable(${PROJECT_NAME}
   compression.cpp
   cookie.cpp
   diagnostics.cpp
+  encoding.cpp
   error.cpp
   eval.cpp
   eval_context.cpp
@@ -224,6 +225,12 @@ if(BUILD_TESTING)
       list(APPEND SKEIN_TEST_COMMAND $<TARGET_FILE:skein_ffi_shim>)
     endif()
     add_test(NAME skein_tests COMMAND ${SKEIN_TEST_COMMAND})
+    add_test(
+      NAME encoding_tables_test
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_encoding_tables.py
+              --check
+    )
   else()
     message(WARNING "Python3 not found; skein_tests will not be registered")
   endif()

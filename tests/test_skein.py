@@ -196,6 +196,32 @@ def check_interactive_continuation():
         os.close(master)
 
 
+def check_encoding_two_byte_tables():
+    """Round-trip every two-byte GBK/GB18030 table position."""
+    for encoding in ("gbk", "gb18030"):
+        lines = ["import std;"]
+        expected = []
+        for lead in range(0x81, 0xFF):
+            for trail in list(range(0x40, 0x7F)) + list(range(0x80, 0xFF)):
+                data = bytes((lead, trail))
+                try:
+                    data.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+                hex_data = data.hex()
+                lines.append(
+                    f'bytes_hex(std.encoding.encode('
+                    f'std.encoding.decode(bytes_from_hex("{hex_data}"), '
+                    f'"{encoding}"), "{encoding}"))'
+                )
+                expected.append("= " + hex_data)
+        proc = run("\n".join(lines) + "\n", timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        actual = [line.strip() for line in proc.stdout.splitlines()
+                  if line.strip()]
+        assert actual == expected, f"{encoding} table round-trip mismatch"
+
+
 def main():
     check("addition", "1+2\n", stdout="= 3")
     check("pipe mode has no REPL prompt", "1+2\n", stdout="= 3")
@@ -6116,6 +6142,81 @@ def main():
         'std.bytes.len(bytes_from_hex("00ff"))\n',
         stdout_all=["= 00ff", "= 2"],
     )
+    check(
+        "std bytes string aliases",
+        "import std;\n"
+        'std.bytes.to_string(std.bytes.from_string("abc"))\n'
+        'std.bytes.to_string(bytes_from_hex("ff"))\n',
+        stdout_all=["= abc"],
+        stderr="not valid UTF-8",
+    )
+    check(
+        "std encoding gbk roundtrip",
+        "import std;\n"
+        'print(std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk"));\n'
+        'print(bytes_hex(std.encoding.encode("中国", "gbk")));\n'
+        'std.encoding.supports("gbk")\n',
+        stdout_all=["中国", "d6d0b9fa", "= true"],
+    )
+    check(
+        "std encoding gbk euro",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode("€", "gbk")));\n'
+        'print(std.encoding.decode(bytes_from_hex("80"), "gbk"));\n',
+        stdout_all=["80", "€"],
+    )
+    check(
+        "std encoding gb18030 vectors",
+        "import std;\n"
+        'print(std.encoding.decode(bytes_from_hex("d6d0"), "gb18030"));\n'
+        'print(bytes_hex(std.encoding.encode("€", "gb18030")));\n'
+        'let s = std.encoding.decode(bytes_from_hex("90308130"), "gb18030");\n'
+        'print(bytes_hex(std.encoding.encode(s, "gb18030")));\n'
+        'print(bytes_hex(std.encoding.encode("😀", "gb18030")));\n'
+        'std.encoding.supports("gb18030")\n',
+        stdout_all=["中", "a2e3", "90308130", "9439fc36", "= true"],
+    )
+    check(
+        "std encoding gb18030 invalid byte",
+        "import std;\n"
+        'std.encoding.decode(bytes_from_hex("80"), "gb18030")\n',
+        stderr="invalid gb18030",
+    )
+    check(
+        "std encoding utf16 bom",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode("中", "utf-16")));\n'
+        'print(std.encoding.decode(bytes_from_hex("fffe2d4e"), "utf-16"));\n',
+        stdout_all=["fffe2d4e", "中"],
+    )
+    check(
+        "std encoding error modes",
+        "import std;\n"
+        'print(std.encoding.decode(bytes_from_hex("ff"), "utf-8", "replace"));\n'
+        'print(bytes_hex(std.encoding.encode("é", "ascii", "replace")));\n'
+        'bytes_len(std.encoding.encode("é", "ascii", "ignore"))\n',
+        stdout_all=["�", "3f", "= 0"],
+    )
+    check(
+        "std encoding nul rejected",
+        "import std;\n"
+        'std.encoding.decode(bytes_from_hex("0000"), "utf-16le")\n',
+        stderr="NUL",
+    )
+    check(
+        "std encoding unknown name",
+        "import std;\n"
+        'std.encoding.supports("not-an-encoding")\n'
+        'std.encoding.decode(bytes_from_hex("00"), "not-an-encoding")\n',
+        stdout_all=["= false"],
+        stderr="unknown encoding",
+    )
+    check(
+        "std encoding source type",
+        "import std;\n"
+        'std.encoding.decode("abc", "gbk")\n',
+        stderr="expects bytes",
+    )
     check("std join type", 'import std;\nstd.string.join([1], ",")\n',
           stderr="expects string elements")
     check("std replace empty", 'import std;\nstd.string.replace("a", "", "b")\n',
@@ -8264,6 +8365,7 @@ std.json.stringify(std.json.parse(text))
             stdout, stderr = proc.communicate(timeout=5)
             assert proc.returncode == 130, (proc.returncode, stdout, stderr)
 
+    check_encoding_two_byte_tables()
     check_interactive_continuation()
 
     print(f"all tests passed for {BIN}")

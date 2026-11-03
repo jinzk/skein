@@ -209,7 +209,10 @@ enum bifs {
     B_ws_close,
     B_json_parse,
     B_json_try_parse,
-    B_json_stringify
+    B_json_stringify,
+    B_encoding_decode,
+    B_encoding_encode,
+    B_encoding_supports
 };
 
 struct ast {

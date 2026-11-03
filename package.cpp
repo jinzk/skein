@@ -402,6 +402,15 @@ value_t *build_std_namespace() {
             {"from_hex", B_bytes_from_hex},
             {"to_int", B_bytes_to_int},
             {"from_int", B_int_to_bytes},
+            {"to_string", B_bytes_to_string},
+            {"from_string", B_bytes_from_string},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("encoding"),
+        builtin_module({
+            {"decode", B_encoding_decode},
+            {"encode", B_encoding_encode},
+            {"supports", B_encoding_supports},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("math"),

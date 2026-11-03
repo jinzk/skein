@@ -11,6 +11,8 @@ enum type_constraint_kind {
     TYPE_NUMBER,
     TYPE_BOOL,
     TYPE_STRING,
+    TYPE_CHAR,
+    TYPE_BYTE,
     TYPE_BYTES,
     TYPE_LIST,
     TYPE_DICT,

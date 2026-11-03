@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "structtype.h"
+#include "unicode.h"
 #include "valuetype.h"
 
 #include <cctype>
@@ -553,6 +554,17 @@ private:
             case T_string:
                 return encode_string(
                     ((const struct string_value_t *)value)->value);
+            case T_char: {
+                std::string text;
+                if (!utf8_encode(
+                        ((const struct char_value_t *)value)->value, text))
+                    return fail("invalid char value");
+                return encode_string(text.c_str());
+            }
+            case T_byte:
+                out += std::to_string(
+                    ((const struct byte_value_t *)value)->value);
+                return true;
             case T_list: {
                 const struct list_value_t *list =
                     (const struct list_value_t *)value;

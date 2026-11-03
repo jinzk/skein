@@ -106,6 +106,18 @@ struct ast *newstr(char *s) {
     return (struct ast *)a;
 }
 
+struct ast *newchar(long long c) {
+    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'V';
+    set_loc(a, 0, 0);
+    a->val = newcharval((unsigned int)c);
+    return (struct ast *)a;
+}
+
 struct ast *newbuiltin(int functype) {
     struct val *a = (struct val *)std::malloc(sizeof(struct val));
     if (!a) {

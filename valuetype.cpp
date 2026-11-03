@@ -1,5 +1,6 @@
 #include "valuetype.h"
 #include "structtype.h"
+#include "unicode.h"
 
 #include <cmath>
 #include <cstdio>
@@ -64,6 +65,20 @@ struct value_t *newstrval(const char *s) {
     struct string_value_t *v = new string_value_t;
     v->type = T_string;
     v->value = dupstr(s);
+    return (struct value_t *)v;
+}
+
+struct value_t *newcharval(unsigned int codepoint) {
+    struct char_value_t *v = new char_value_t;
+    v->type = T_char;
+    v->value = codepoint;
+    return (struct value_t *)v;
+}
+
+struct value_t *newbyteval(unsigned int value) {
+    struct byte_value_t *v = new byte_value_t;
+    v->type = T_byte;
+    v->value = value & 0xFF;
     return (struct value_t *)v;
 }
 
@@ -196,6 +211,10 @@ struct value_t *dupval(struct value_t *v) {
             return newboolval(((struct bool_value_t *)v)->value);
         case T_string:
             return newstrval(((struct string_value_t *)v)->value);
+        case T_char:
+            return newcharval(((struct char_value_t *)v)->value);
+        case T_byte:
+            return newbyteval(((struct byte_value_t *)v)->value);
         case T_bytes:
             return newbytesval(((struct bytes_value_t *)v)->value);
         case T_list: {
@@ -292,6 +311,12 @@ void freeval(struct value_t *v) {
             delete s;
             break;
         }
+        case T_char:
+            delete (struct char_value_t *)v;
+            break;
+        case T_byte:
+            delete (struct byte_value_t *)v;
+            break;
         case T_bytes:
             delete (struct bytes_value_t *)v;
             break;
@@ -354,6 +379,8 @@ const char *typename_of(const struct value_t *v) {
         case T_float: return "float";
         case T_bool: return "bool";
         case T_string: return "string";
+        case T_char: return "char";
+        case T_byte: return "byte";
         case T_bytes: return "bytes";
         case T_list: return "list";
         case T_dict: return "dict";
@@ -415,6 +442,14 @@ std::string value_to_string(const struct value_t *v) {
             const char *s = ((const struct string_value_t *)v)->value;
             return s ? s : "";
         }
+        case T_char: {
+            std::string out;
+            if (!utf8_encode(((const struct char_value_t *)v)->value, out))
+                return "<char>";
+            return out;
+        }
+        case T_byte:
+            return std::to_string(((const struct byte_value_t *)v)->value);
         case T_bytes: {
             const struct bytes_value_t *b = (const struct bytes_value_t *)v;
             return "<bytes: " + std::to_string(b->value.size()) + ">";

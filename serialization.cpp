@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "structtype.h"
 #include "symbol.h"
+#include "unicode.h"
 #include "valuetype.h"
 
 #include <cstring>
@@ -157,16 +158,9 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth) {
             return NULL;
         }
         struct value_t *decoded =
-            decode_nested_value(field_value, depth + 1);
+            decode_value_for_type(field_value, &field.type, depth + 1);
         if (!decoded)
             return NULL;
-        if (!type_constraint_matches(&field.type, decoded)) {
-            yyerror("field %s of %s expects %s, got %s",
-                    field.name.c_str(), tag.c_str(),
-                    type_constraint_name(&field.type), typename_of(decoded));
-            freeval(decoded);
-            return NULL;
-        }
         payload->fields[i] = decoded;
     }
 
@@ -205,6 +199,40 @@ static struct value_t *decode_value_for_type(
     struct value_t *value, const struct type_constraint *type, int depth) {
     if (!value)
         return NULL;
+
+    if (type && type->kind == TYPE_CHAR) {
+        if (value->type == T_char)
+            return dupval(value);
+        if (value->type == T_string) {
+            const char *text = ((struct string_value_t *)value)->value;
+            size_t consumed = 0;
+            unsigned int codepoint = 0;
+            if (!utf8_decode_one(text, std::strlen(text), consumed,
+                                 codepoint) ||
+                text[consumed] != '\0') {
+                yyerror("expected char, got string");
+                return NULL;
+            }
+            return newcharval(codepoint);
+        }
+        yyerror("expected char, got %s", typename_of(value));
+        return NULL;
+    }
+
+    if (type && type->kind == TYPE_BYTE) {
+        if (value->type == T_byte)
+            return dupval(value);
+        if (value->type == T_int) {
+            long long number = ((struct int_value_t *)value)->value;
+            if (number < 0 || number > 255) {
+                yyerror("expected byte, got int out of range");
+                return NULL;
+            }
+            return newbyteval((unsigned int)number);
+        }
+        yyerror("expected byte, got %s", typename_of(value));
+        return NULL;
+    }
 
     struct_def *sdef = find_named_struct(type);
     if (sdef) {

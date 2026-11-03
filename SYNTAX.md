@@ -89,7 +89,6 @@ package import export as
 "hello"
 "line\nnext"
 "tab\there"
-'单引号字符串'
 ```
 
 支持的转义：
@@ -105,7 +104,50 @@ package import export as
 
 字符串按 UTF-8 解释，内部不能包含 NUL 字节。二进制数据请使用 `bytes`。
 
-### 2.4 null
+### 2.4 字符
+
+```text
+'a'
+'你'
+'\n'
+'\u0041'
+'\u{1F600}'
+```
+
+`char` 表示一个 Unicode 标量值。
+
+规则：
+
+- 字符字面量使用**单引号**；
+- 支持 `\n`、`\t`、`\r`、`\\`、`\'`、`\"`、`\0`、`\uXXXX`、`\u{...}`；
+- 必须恰好包含一个字符；
+- 空字符、多个字符、代理区 `D800..DFFF`、超过 `0x10FFFF` 都会报错；
+- `len(char)` 为 `1`；
+- 字符串下标和 `for ... in` 字符串返回 `char`；
+- `char` 可以与 `string` 拼接，例如 `'a' + "bc"`；
+- `int(char)` 得到码点，`str(char)` 得到单字符字符串，`char(int)` / `char(string)` 构造字符；
+- `bytes_from_char(c)` 得到 UTF-8 字节，`char_from_bytes(b)` / `char(b)` 从恰好一个 UTF-8 字符还原；
+- JSON 编码为单字符字符串。
+
+### 2.5 字节值 byte
+
+```text
+byte(0)
+byte(65)
+byte(255)
+```
+
+`byte` 表示一个 `0..255` 的字节值，没有字面量，使用 `byte(int)` 构造。
+
+规则：
+
+- `int(byte)` 取回 `0..255`；
+- `byte(int)` 超出范围报错；
+- `byte` 可以作 dict key、`switch` 值；
+- JSON 编码为整数；
+- `bytes[i]` / `bytes_get` 仍返回 `int`，需要时用 `byte(int)` 转换。
+
+### 2.6 null
 
 ```text
 null
@@ -113,7 +155,7 @@ null
 
 `null` 是正常值，不等于“错误”。没有 `return` 的函数和 `print` 返回 `null`。
 
-### 2.5 列表
+### 2.7 列表
 
 ```text
 []
@@ -123,7 +165,7 @@ null
 
 列表字面量允许尾随逗号。函数参数和调用参数也允许尾随逗号；字典字面量不允许。
 
-### 2.6 字典
+### 2.8 字典
 
 ```text
 {"x": 1, "y": 2}
@@ -154,7 +196,7 @@ let d = {
 };
 ```
 
-### 2.7 bytes
+### 2.9 bytes
 
 `bytes` 没有字面量，通过内置函数创建：
 
@@ -166,7 +208,7 @@ read_bytes("data.bin")
 
 `bytes` 可以包含任意字节，包括 `0x00`。
 
-### 2.8 函数值
+### 2.10 函数值
 
 命名函数和匿名函数都是一等值：
 
@@ -313,7 +355,7 @@ d["x"].field
 ```
 
 - list 下标必须是整数；
-- string 下标按 UTF-8 码点计数，返回单个字符的字符串，字符串索引不能赋值；
+- string 下标按 UTF-8 码点计数，返回 `char`，字符串索引不能赋值；
 - dict 键按值相等判断；
 - bytes 下标是字节下标，返回 `0..255`，索引赋值接受 `0..255`；
 - 字段访问只用于 struct 字段和 `std`/包命名空间；普通 dict 的键必须用下标。
@@ -567,16 +609,16 @@ const limit: int = 10;
 支持的类型：
 
 ```text
-any int float number bool string bytes
+any int float number bool string char byte bytes
 list dict function builtin callable null userdata result error
 ```
 
-任意类型可以加 `?` 变成可空类型，例如 `int?`、`string?`、`Node?`：
+任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`：
 
 ```text
 let a: int? = null;
 let b: int? = 3;
-let c: int?;        // 默认 null
+let c: char?;       // 默认 null
 ```
 
 可空类型接受 `null` 或对应类型的值，其它值仍会报错。
@@ -589,6 +631,8 @@ let c: int?;        // 默认 null
 | `float` | `0.0` |
 | `bool` | `false` |
 | `string` | `""` |
+| `char` | `'\0'` |
+| `byte` | `byte(0)` |
 | `bytes` | 空 bytes |
 | `list` | `[]` |
 | `dict` | `{}` |
@@ -723,7 +767,7 @@ for (let key, value in {"a": 1, "b": 2}) {
 - 双变量形式：`for (let NAME1, NAME2 in exp)`，只支持 dict；
 - list 单变量遍历元素；需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - dict 单变量遍历 key，双变量得到 `key, value`；
-- string 单变量遍历 UTF-8 字符；
+- string 单变量遍历 UTF-8 字符，元素是 `char`；
 - bytes 单变量遍历 `0..255` 的字节值；
 - 可以配合 `range()` 做计数循环；
 - 被遍历对象在循环开始时求值一次；
@@ -762,6 +806,8 @@ switch (value) {
 int
 bool
 string
+char
+byte
 bytes
 null
 ```
@@ -839,7 +885,7 @@ let next = match (state) {
 
 | 模式 | 示例 | 说明 |
 |---|---|---|
-| 字面量 | `1`、`"idle"`、`true`、`null` | 按 `==` 比较 |
+| 字面量 | `1`、`"idle"`、`'a'`、`true`、`null` | 按 `==` 比较 |
 | 绑定 | `x` | 匹配任意值并绑定 |
 | 通配 | `_` | 匹配任意值，不绑定 |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
@@ -1048,7 +1094,7 @@ func hello() {
 参数类型约束在调用时进行运行时检查，不做隐式转换。支持：
 
 ```text
-any int float number bool string bytes
+any int float number bool string char byte bytes
 list dict function builtin callable null userdata result error
 ```
 
@@ -1473,6 +1519,11 @@ std.list.slice([1, 2, 3], 1, 2)
 std.list.contains([1, 2, 3], 2)
 std.list.reverse([1, 2, 3])
 std.list.sort([3, 1, 2])
+std.list.sort([3, 1, 2], func(a, b) { return a - b; })
+std.list.sort_by([{"n": 2}, {"n": 1}], func(p) { return p["n"]; })
+std.list.sort_by(xs, key, {"desc": true})
+std.list.sort_desc([3, 1, 2])
+std.list.is_sorted([1, 2, 3])
 std.list.append([1, 2], 3)
 std.list.map([1, 2], func(x) { return x * 2; })
 std.list.filter([1, 2, 3], func(x) { return x % 2 == 1; })
@@ -1498,6 +1549,24 @@ std.unicode.normalize("é", "nfc")
 std.unicode.is_normalized("é", "nfc")
 std.unicode.version()
 ```
+
+排序：
+
+```text
+std.list.sort(xs)                          // 数字/字符串，升序
+std.list.sort(xs, cmp)                     // cmp(a, b) -> int
+std.list.sort_by(xs, key)                  // key 每个元素只调用一次
+std.list.sort_by(xs, key, {"desc": true})  // 降序
+std.list.sort_desc(xs)
+std.list.is_sorted(xs[, cmp])
+```
+
+- 稳定排序，返回新 list，不修改输入；
+- 无 `cmp` 时元素必须全是数字、字符串、`char` 或 `byte`；
+- `cmp` 返回 `< 0` / `0` / `> 0`；
+- `sort_by` 的 key 必须返回数字、字符串、`char` 或 `byte`；
+- `desc` 不破坏相等元素的原始顺序；
+- 默认排序和 `sort_by` 中，`NaN` 永远排在最后（升序和降序都一样）。
 
 编码转换：
 
@@ -1715,7 +1784,8 @@ std.http.respond(req, 200, {"Content-Type": "application/json"},
 - `parse` 遇到非法 JSON 会报运行时错误，`try_parse` 返回 `result`；
 - 重复 key 以最后一个为准；
 - `stringify` 只接受 JSON 子集；object key 必须是 `string`，否则报错；
-- `stringify` 拒绝 `bytes`、`function`、`struct`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
+- `stringify` 拒绝 `bytes`、`function`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
+- `struct` 编码为普通 object，`enum` 编码为 `{"$enum":"Type::Variant","payload":{...}}`，`char` 编码为单字符字符串，`byte` 编码为整数；
 - 字符串按 UTF-8 校验并转义控制字符；JSON 的 `\u0000` 不支持；
 - 嵌套深度上限为 512；
 - 默认输出紧凑 JSON，并保持 dict 的插入序。

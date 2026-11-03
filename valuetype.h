@@ -32,6 +32,8 @@ enum val_type {
     T_float,
     T_bool,
     T_string,
+    T_char,
+    T_byte,
     T_bytes,
     T_list,
     T_dict,
@@ -77,6 +79,16 @@ struct bool_value_t {
 struct string_value_t {
     enum val_type type;
     char *value;
+};
+
+struct char_value_t {
+    enum val_type type;
+    unsigned int value; /* Unicode scalar value */
+};
+
+struct byte_value_t {
+    enum val_type type;
+    unsigned int value; /* 0..255 */
 };
 
 struct bytes_value_t {
@@ -172,6 +184,8 @@ struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newboolval(bool b);
 struct value_t *newstrval(const char *s);
+struct value_t *newcharval(unsigned int codepoint);
+struct value_t *newbyteval(unsigned int value);
 struct value_t *newbytesval(std::string data);
 struct value_t *newbuiltinval(int functype);
 struct value_t *newerrorval(const std::string &kind,

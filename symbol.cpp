@@ -111,6 +111,10 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_bool;
         case TYPE_STRING:
             return value->type == T_string;
+        case TYPE_CHAR:
+            return value->type == T_char;
+        case TYPE_BYTE:
+            return value->type == T_byte;
         case TYPE_BYTES:
             return value->type == T_bytes;
         case TYPE_LIST:
@@ -171,6 +175,8 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_NUMBER: base = "number"; break;
         case TYPE_BOOL: base = "bool"; break;
         case TYPE_STRING: base = "string"; break;
+        case TYPE_CHAR: base = "char"; break;
+        case TYPE_BYTE: base = "byte"; break;
         case TYPE_BYTES: base = "bytes"; break;
         case TYPE_LIST: base = "list"; break;
         case TYPE_DICT: base = "dict"; break;

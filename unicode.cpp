@@ -114,6 +114,78 @@ bool normalize_nfc(const std::string &input, std::string &output,
     return normalize_text(input, NormalizationForm::Nfc, output, error);
 }
 
+bool utf8_encode(unsigned int codepoint, std::string &out) {
+    if (codepoint > 0x10FFFF ||
+        (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+        return false;
+    if (codepoint <= 0x7F) {
+        out.push_back((char)codepoint);
+    } else if (codepoint <= 0x7FF) {
+        out.push_back((char)(0xC0 | (codepoint >> 6)));
+        out.push_back((char)(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+        out.push_back((char)(0xE0 | (codepoint >> 12)));
+        out.push_back((char)(0x80 | ((codepoint >> 6) & 0x3F)));
+        out.push_back((char)(0x80 | (codepoint & 0x3F)));
+    } else {
+        out.push_back((char)(0xF0 | (codepoint >> 18)));
+        out.push_back((char)(0x80 | ((codepoint >> 12) & 0x3F)));
+        out.push_back((char)(0x80 | ((codepoint >> 6) & 0x3F)));
+        out.push_back((char)(0x80 | (codepoint & 0x3F)));
+    }
+    return true;
+}
+
+bool utf8_decode_one(const char *data, size_t size, size_t &consumed,
+                     unsigned int &codepoint) {
+    consumed = 0;
+    codepoint = 0;
+    if (!data || size == 0)
+        return false;
+
+    unsigned char c = (unsigned char)data[0];
+    size_t length = 0;
+    unsigned int value = 0;
+    unsigned int minimum = 0;
+
+    if (c < 0x80) {
+        length = 1;
+        value = c;
+        minimum = 0;
+    } else if ((c & 0xE0) == 0xC0) {
+        length = 2;
+        value = c & 0x1F;
+        minimum = 0x80;
+    } else if ((c & 0xF0) == 0xE0) {
+        length = 3;
+        value = c & 0x0F;
+        minimum = 0x800;
+    } else if ((c & 0xF8) == 0xF0) {
+        length = 4;
+        value = c & 0x07;
+        minimum = 0x10000;
+    } else {
+        return false;
+    }
+
+    if (size < length)
+        return false;
+    for (size_t i = 1; i < length; ++i) {
+        unsigned char next = (unsigned char)data[i];
+        if ((next & 0xC0) != 0x80)
+            return false;
+        value = (value << 6) | (next & 0x3F);
+    }
+
+    if (value < minimum || value > 0x10FFFF ||
+        (value >= 0xD800 && value <= 0xDFFF))
+        return false;
+
+    consumed = length;
+    codepoint = value;
+    return true;
+}
+
 struct value_t *call_unicode_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     if (functype == B_unicode_version) {

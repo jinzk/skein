@@ -109,6 +109,8 @@ static const char *builtin_field_name(int functype) {
         case B_float: return "float";
         case B_bool: return "bool";
         case B_str: return "str";
+        case B_char: return "char";
+        case B_byte: return "byte";
         case B_kind_of: return "kind_of";
         case B_type_name: return "type_name";
         case B_type_module: return "type_module";
@@ -162,6 +164,8 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
     if (std::strcmp(name, "number") == 0) return new_type_constraint(TYPE_NUMBER);
     if (std::strcmp(name, "bool") == 0) return new_type_constraint(TYPE_BOOL);
     if (std::strcmp(name, "string") == 0) return new_type_constraint(TYPE_STRING);
+    if (std::strcmp(name, "char") == 0) return new_type_constraint(TYPE_CHAR);
+    if (std::strcmp(name, "byte") == 0) return new_type_constraint(TYPE_BYTE);
     if (std::strcmp(name, "bytes") == 0) return new_type_constraint(TYPE_BYTES);
     if (std::strcmp(name, "list") == 0) return new_type_constraint(TYPE_LIST);
     if (std::strcmp(name, "dict") == 0) return new_type_constraint(TYPE_DICT);
@@ -181,6 +185,8 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
         case B_float: return new_type_constraint(TYPE_FLOAT);
         case B_bool: return new_type_constraint(TYPE_BOOL);
         case B_str: return new_type_constraint(TYPE_STRING);
+        case B_char: return new_type_constraint(TYPE_CHAR);
+        case B_byte: return new_type_constraint(TYPE_BYTE);
         case B_list: return new_type_constraint(TYPE_LIST);
         case B_dict: return new_type_constraint(TYPE_DICT);
         default: {
@@ -211,6 +217,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token <str> NAME "identifier"
 %token <fn> BUILTIN "built-in function"
 %token <str> XSTRING "string"
+%token <i> CHAR "character"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token ASYNC "async" AWAIT "await" YIELD "yield" DEFER "defer"
@@ -723,6 +730,7 @@ value: INT                                { $$ = newint($1); }
     | TRUE                                { $$ = newbool(true); }
     | FALSE                               { $$ = newbool(false); }
     | XSTRING                             { $$ = newstr($1); free($1); }
+    | CHAR                                { $$ = newchar($1); }
     | BUILTIN                             { $$ = newbuiltin($1); }
     | NULLVAL                             { $$ = newnullast(); }
     ;
@@ -783,6 +791,7 @@ match_arm: CASE pattern ARROW scope       { $$ = newmatcharm($2, NULL, $4, NULL)
 
 pattern: INT                              { $$ = newpatternlit(newint($1)); }
     | XSTRING                             { $$ = newpatternlit(newstr($1)); free($1); }
+    | CHAR                                { $$ = newpatternlit(newchar($1)); }
     | TRUE                                { $$ = newpatternlit(newbool(true)); }
     | FALSE                               { $$ = newpatternlit(newbool(false)); }
     | NULLVAL                             { $$ = newpatternlit(newnullast()); }

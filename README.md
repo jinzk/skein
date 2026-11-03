@@ -1433,6 +1433,9 @@ std.list.contains
 std.list.index
 std.list.reverse
 std.list.sort
+std.list.sort_by
+std.list.sort_desc
+std.list.is_sorted
 std.list.append
 std.list.map
 std.list.filter
@@ -1745,8 +1748,11 @@ std.worker.stats
 - `std.list.slice` 的 `start` / `length` 不能为负数；
 - `std.list.index` 找不到时返回 `-1`，`std.list.contains` 返回 `1` / `0`；
 - `std.dict.get` 缺少键时返回 `null` 或提供的默认值；
-- `std.list.reverse` / `std.list.sort` / `std.list.append` 返回新 list，不修改参数；
-- `std.list.sort` 只接受全数字或全字符串 list；
+- `std.list.reverse` / `std.list.sort` / `std.list.sort_by` / `std.list.append` 返回新 list，不修改参数；
+- 排序稳定；`std.list.sort(xs)` 接受全数字、全字符串或全 `char`；`std.list.sort(xs, cmp)` 接受自定义比较器；
+- 默认排序和 `sort_by` 中，`NaN` 永远排在最后；`char` / `byte` 按码点 / 数值排序；
+- `std.list.sort_by(xs, key[, {"desc": true}])` 的 key 每个元素只调用一次；
+- `std.list.is_sorted(xs[, cmp])` 返回 bool；
 - `std.list.map` / `std.list.filter` / `std.list.reduce` 接收函数值，回调出错时中止；
 - `std.list.reduce` 回调参数顺序是 `(accumulator, element)`；没有初始值时不能用于空 list；
 - `std.dict.items` 返回 `[[key, value], ...]`；
@@ -1756,7 +1762,8 @@ std.worker.stats
 - `std.json.try_parse` 返回 `result`，非法 JSON 不会直接抛错；
 - `std.json.stringify` 只接受 JSON 子集，dict key 必须是 `string`；
 - JSON 整数在 int64 范围内映射为 `int`，否则映射为 `float`；重复 key 以最后一个为准；
-- `std.json.stringify` 拒绝 `bytes`、`function`、`struct`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
+- `std.json.stringify` 拒绝 `bytes`、`function`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
+- `struct` 编码为普通 object，`enum` 编码为 `{"$enum":"Type::Variant","payload":{...}}`，`char` 编码为单字符字符串，`byte` 编码为整数；
 - `std.string.join` 只接受字符串元素；
 - `std.string.replace` 替换全部匹配，空查找串会报错；
 - `std.string.contains` 返回 `1` / `0`；
@@ -1991,7 +1998,7 @@ count = "three";    // 错误：variable count expects int, got string
 ```
 
 - 类型在运行时的初始化和重新赋值时检查，不做隐式转换；
-- 支持 `any int float number bool string bytes list dict function builtin callable null userdata result error`；
+- 支持 `any int float number bool string char byte bytes list dict function builtin callable null userdata result error`；
 - 带类型标注的 `let` 可以省略初始值，使用默认值：
 
 ```text
@@ -1999,6 +2006,8 @@ int / number  → 0
 float         → 0.0
 bool          → false
 string        → ""
+char          → '\0'
+byte          → byte(0)
 bytes         → 空 bytes
 list          → []
 dict          → {}
@@ -2565,7 +2574,7 @@ apply(sqrt, 16)
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
 - `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
-- `len(x)` 支持字符串、bytes、list、dict：字符串按 UTF-8 码点计数，bytes 按字节数，list/dict 按元素数。
+- `len(x)` 支持字符串、char、bytes、list、dict：字符串按 UTF-8 码点计数，char 为 1，bytes 按字节数，list/dict 按元素数。
 - `range(length)` / `range(start, length[, step])` 生成整数序列，第二参数是长度而不是结束值；`step` 不能为 0。
 - 字典键按值相等判断，`1` 和 `1.0` 是同一个键；字面量中的重复键以最后一个为准。
 - `list`、`dict` 和 `struct` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。
@@ -3033,6 +3042,42 @@ file_close(h)
 - 关闭后继续读写会报 `file is closed`；
 - `file_read` 读取到 NUL 字节会报错；读取二进制请使用 `file_read_bytes`；
 - 最终未关闭的句柄会随进程退出关闭。
+
+### 字符
+
+`char` 表示一个 Unicode 标量值，使用单引号字面量：
+
+```text
+'a'
+'你'
+'\n'
+'\u0041'
+'\u{1F600}'
+```
+
+- `len('a') == 1`；
+- 字符串下标和 `for ... in` 字符串返回 `char`；
+- `int('A') == 65`，`str('A') == "A"`，`char(65) == 'A'`；
+- `char` 可与字符串拼接：`'a' + "bc"`；
+- `bytes_from_char(c)` / `char_from_bytes(b)` / `char(b)` 做 UTF-8 字节互转；
+- JSON 编码为单字符字符串；
+- 空、多字符、代理区、超过 `0x10FFFF` 报错。
+
+### 字节值 byte
+
+`byte` 表示 `0..255` 的字节值，没有字面量：
+
+```text
+byte(0)
+byte(65)
+byte(255)
+```
+
+- `int(byte)` 取回 `0..255`；
+- `byte(int)` 超出范围报错；
+- `byte` 可以作 dict key、`switch` 值；
+- JSON 编码为整数；
+- `bytes[i]` / `bytes_get` 仍返回 `int`。
 
 ### 二进制 buffer
 

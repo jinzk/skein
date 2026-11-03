@@ -1,5 +1,6 @@
 %option noyywrap nodefault yylineno noinput nounput nounistd
 %x STRING
+%x CHARLIT
 
 %{
 #ifndef YY_NO_UNISTD_H
@@ -40,6 +41,10 @@ static std::string string_buffer;
 /* Location of the opening quote of the string currently being scanned. */
 static int string_start_line = 1;
 static int string_start_column = 1;
+
+static std::string char_buffer;
+static int char_start_line = 1;
+static int char_start_column = 1;
 
 static int last_token = 0;
 static int prev_token = 0;
@@ -187,6 +192,116 @@ static void append_unescaped(const char *s, int len) {
             string_buffer += s[i];
         }
     }
+}
+
+static int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static bool parse_char_literal(const std::string &text, unsigned int &codepoint,
+                               std::string &error) {
+    size_t pos = 0;
+    bool have_value = false;
+    unsigned int value = 0;
+
+    while (pos < text.size()) {
+        if (have_value) {
+            error = "character literal must contain exactly one character";
+            return false;
+        }
+
+        unsigned char c = (unsigned char)text[pos];
+        if (c == '\\') {
+            ++pos;
+            if (pos >= text.size()) {
+                error = "invalid escape in character literal";
+                return false;
+            }
+            char esc = text[pos++];
+            switch (esc) {
+                case 'n': value = '\n'; break;
+                case 't': value = '\t'; break;
+                case 'r': value = '\r'; break;
+                case '\\': value = '\\'; break;
+                case '\'': value = '\''; break;
+                case '"': value = '"'; break;
+                case '0': value = 0; break;
+                case 'u': {
+                    if (pos < text.size() && text[pos] == '{') {
+                        ++pos;
+                        size_t start = pos;
+                        while (pos < text.size() && text[pos] != '}')
+                            ++pos;
+                        if (pos >= text.size() || pos == start) {
+                            error = "invalid \\u{...} escape";
+                            return false;
+                        }
+                        std::string hex = text.substr(start, pos - start);
+                        ++pos; /* skip '}' */
+                        if (hex.size() > 6) {
+                            error = "invalid \\u{...} escape";
+                            return false;
+                        }
+                        unsigned int parsed = 0;
+                        for (char h : hex) {
+                            int digit = hex_digit_value(h);
+                            if (digit < 0) {
+                                error = "invalid \\u{...} escape";
+                                return false;
+                            }
+                            parsed = (parsed << 4) | (unsigned int)digit;
+                        }
+                        value = parsed;
+                    } else {
+                        if (pos + 4 > text.size()) {
+                            error = "invalid \\uXXXX escape";
+                            return false;
+                        }
+                        unsigned int parsed = 0;
+                        for (int i = 0; i < 4; ++i) {
+                            int digit = hex_digit_value(text[pos++]);
+                            if (digit < 0) {
+                                error = "invalid \\uXXXX escape";
+                                return false;
+                            }
+                            parsed = (parsed << 4) | (unsigned int)digit;
+                        }
+                        value = parsed;
+                    }
+                    break;
+                }
+                default:
+                    error = "invalid escape in character literal";
+                    return false;
+            }
+        } else {
+            size_t consumed = 0;
+            unsigned int decoded = 0;
+            if (!utf8_decode_one(text.data() + pos, text.size() - pos,
+                                 consumed, decoded)) {
+                error = "invalid UTF-8 in character literal";
+                return false;
+            }
+            pos += consumed;
+            value = decoded;
+        }
+        have_value = true;
+    }
+
+    if (!have_value) {
+        error = "empty character literal";
+        return false;
+    }
+    if (value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+        error = "character literal is not a Unicode scalar value";
+        return false;
+    }
+
+    codepoint = value;
+    return true;
 }
 
 static bool ascii_name(const char *text, int len) {
@@ -419,6 +534,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "float" { yylval.fn = B_float; YYRET(BUILTIN); }
 "bool" { yylval.fn = B_bool; YYRET(BUILTIN); }
 "str" { yylval.fn = B_str; YYRET(BUILTIN); }
+"char" { yylval.fn = B_char; YYRET(BUILTIN); }
+"byte" { yylval.fn = B_byte; YYRET(BUILTIN); }
 "kind_of" { yylval.fn = B_kind_of; YYRET(BUILTIN); }
 "type_name" { yylval.fn = B_type_name; YYRET(BUILTIN); }
 "type_module" { yylval.fn = B_type_module; YYRET(BUILTIN); }
@@ -444,6 +561,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "substr" { yylval.fn = B_substr; YYRET(BUILTIN); }
 "bytes_from_string" { yylval.fn = B_bytes_from_string; YYRET(BUILTIN); }
 "bytes_to_string" { yylval.fn = B_bytes_to_string; YYRET(BUILTIN); }
+"bytes_from_char" { yylval.fn = B_bytes_from_char; YYRET(BUILTIN); }
+"char_from_bytes" { yylval.fn = B_char_from_bytes; YYRET(BUILTIN); }
 "bytes_len" { yylval.fn = B_bytes_len; YYRET(BUILTIN); }
 "bytes_get" { yylval.fn = B_bytes_get; YYRET(BUILTIN); }
 "bytes_slice" { yylval.fn = B_bytes_slice; YYRET(BUILTIN); }
@@ -559,6 +678,50 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     . {
         append_unescaped(yytext, (int)yyleng);
+    }
+}
+
+"'" {
+    char_start_line = g_token_line;
+    char_start_column = g_token_column;
+    char_buffer.clear();
+    BEGIN(CHARLIT);
+}
+
+<CHARLIT>{
+    \n {
+        diag_report_lexical(char_start_line, char_start_column,
+                            "unterminated character literal");
+        char_buffer.clear();
+        BEGIN(INITIAL);
+        YYRET(EOL);
+    }
+    <<EOF>> {
+        diag_report_lexical(char_start_line, char_start_column,
+                            "unterminated character literal at end of input");
+        char_buffer.clear();
+        BEGIN(INITIAL);
+        yyterminate();
+    }
+    ([^\\'\n]|\\.)+ {
+        char_buffer += yytext;
+    }
+    ' {
+        BEGIN(INITIAL);
+        unsigned int codepoint = 0;
+        std::string error;
+        if (!parse_char_literal(char_buffer, codepoint, error)) {
+            diag_report_lexical(char_start_line, char_start_column, "%s",
+                                error.c_str());
+            yylval.i = 0;
+        } else {
+            yylval.i = (long long)codepoint;
+        }
+        char_buffer.clear();
+        YYRET(CHAR);
+    }
+    . {
+        char_buffer += yytext;
     }
 }
 

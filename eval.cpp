@@ -15,6 +15,7 @@
 #include "structtype.h"
 #include "symbol.h"
 #include "valuetype.h"
+#include "unicode.h"
 
 #include <cstring>
 #include <unordered_set>
@@ -401,6 +402,8 @@ bool truthy(const struct value_t *v) {
             const char *s = ((struct string_value_t *)v)->value;
             return s && *s;
         }
+        case T_char: return true;
+        case T_byte: return ((struct byte_value_t *)v)->value != 0;
         case T_bytes: return !((struct bytes_value_t *)v)->value.empty();
         case T_list: return !((struct list_value_t *)v)->payload->items.empty();
         case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
@@ -422,6 +425,8 @@ static bool switch_value_supported(const struct value_t *v) {
         case T_int:
         case T_bool:
         case T_string:
+        case T_char:
+        case T_byte:
         case T_bytes:
         case T_null:
             return true;
@@ -479,6 +484,12 @@ bool value_equals(struct value_t *a, struct value_t *b) {
         case T_string:
             return std::strcmp(((struct string_value_t *)a)->value,
                                ((struct string_value_t *)b)->value) == 0;
+        case T_char:
+            return ((struct char_value_t *)a)->value ==
+                   ((struct char_value_t *)b)->value;
+        case T_byte:
+            return ((struct byte_value_t *)a)->value ==
+                   ((struct byte_value_t *)b)->value;
         case T_bytes:
             return ((struct bytes_value_t *)a)->value ==
                    ((struct bytes_value_t *)b)->value;
@@ -577,7 +588,9 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
     if (!l || !r) return NULL;
 
     if (!(is_numeric(l) && is_numeric(r)) &&
-        !(l->type == T_string && r->type == T_string)) {
+        !(l->type == T_string && r->type == T_string) &&
+        !(l->type == T_char && r->type == T_char) &&
+        !(l->type == T_byte && r->type == T_byte)) {
         if (op == 3 || op == 4) {
             bool eq = value_equals(l, r);
             return newboolval((op == 4) ? eq : !eq);
@@ -605,9 +618,20 @@ static struct value_t *do_compare(int op, struct value_t *l, struct value_t *r) 
         }
     }
 
-    int cmp = std::strcmp(((struct string_value_t *)l)->value,
+    int cmp = 0;
+    if (l->type == T_char) {
+        unsigned int lc = ((struct char_value_t *)l)->value;
+        unsigned int rc = ((struct char_value_t *)r)->value;
+        cmp = (lc < rc) ? -1 : (lc > rc ? 1 : 0);
+    } else if (l->type == T_byte) {
+        unsigned int lc = ((struct byte_value_t *)l)->value;
+        unsigned int rc = ((struct byte_value_t *)r)->value;
+        cmp = (lc < rc) ? -1 : (lc > rc ? 1 : 0);
+    } else {
+        cmp = std::strcmp(((struct string_value_t *)l)->value,
                           ((struct string_value_t *)r)->value);
-    cmp = (cmp < 0) ? -1 : (cmp > 0 ? 1 : 0);
+        cmp = (cmp < 0) ? -1 : (cmp > 0 ? 1 : 0);
+    }
 
     switch (op) {
         case 1: return newboolval(cmp > 0);
@@ -1401,6 +1425,19 @@ static struct value_t *apply_binary_value(int op, struct value_t *l,
             s += ((struct string_value_t *)r)->value;
             return newstrval(s.c_str());
         }
+        if ((l->type == T_string || l->type == T_char) &&
+            (r->type == T_string || r->type == T_char)) {
+            std::string s;
+            if (l->type == T_string)
+                s += ((struct string_value_t *)l)->value;
+            else
+                utf8_encode(((struct char_value_t *)l)->value, s);
+            if (r->type == T_string)
+                s += ((struct string_value_t *)r)->value;
+            else
+                utf8_encode(((struct char_value_t *)r)->value, s);
+            return newstrval(s.c_str());
+        }
         if (l->type == T_list && r->type == T_list) {
             struct list_value_t *lv = newlistval();
             struct list_value_t *ll = (struct list_value_t *)l;
@@ -1784,7 +1821,11 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
         std::string ch;
         if (!utf8_char_at(s, (size_t)i, ch))
             return false;
-        *next = newstrval(ch.c_str());
+        size_t consumed = 0;
+        unsigned int codepoint = 0;
+        if (!utf8_decode_one(ch.data(), ch.size(), consumed, codepoint))
+            return false;
+        *next = newcharval(codepoint);
         *next_owned = true;
         return true;
     }
@@ -1913,6 +1954,10 @@ static struct value_t *default_value_for_type(
             return newboolval(false);
         case TYPE_STRING:
             return newstrval("");
+        case TYPE_CHAR:
+            return newcharval(0);
+        case TYPE_BYTE:
+            return newbyteval(0);
         case TYPE_BYTES:
             return newbytesval(std::string());
         case TYPE_LIST:
@@ -2019,7 +2064,11 @@ static struct value_t *read_member_value(struct value_t *container,
         std::string ch;
         if (!utf8_char_at(s, (size_t)i, ch))
             return NULL;
-        return newstrval(ch.c_str());
+        size_t consumed = 0;
+        unsigned int codepoint = 0;
+        if (!utf8_decode_one(ch.data(), ch.size(), consumed, codepoint))
+            return NULL;
+        return newcharval(codepoint);
     }
 
     if (container->type == T_bytes) {
@@ -3279,7 +3328,15 @@ struct value_t *eval(struct ast *a) {
                         leave = true;
                         break;
                     }
-                    item = newstrval(ch.c_str());
+                    size_t consumed = 0;
+                    unsigned int codepoint = 0;
+                    if (!utf8_decode_one(ch.data(), ch.size(), consumed,
+                                         codepoint)) {
+                        yyerror("invalid UTF-8 string iteration");
+                        leave = true;
+                        break;
+                    }
+                    item = newcharval(codepoint);
                 } else {
                     item = newintval((unsigned char)
                         ((struct bytes_value_t *)iter)->value[i]);

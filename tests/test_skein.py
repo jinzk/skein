@@ -1386,6 +1386,194 @@ def main():
           'func(v) { return std.struct.decode(v, "S"); });\n'
           'print(ctx2.state.n);\nprint(fsm.history(ctx2));\n',
           stdout_all=["6", "[S { n: 0 }, S { n: 1 }, S { n: 3 }, S { n: 6 }]"])
+    check("list sort numbers",
+          'import std;\nprint(std.list.sort([3, 1, 2]));\n',
+          stdout="[1, 2, 3]")
+    check("list sort strings",
+          'import std;\nprint(std.list.sort(["b", "a", "c"]));\n',
+          stdout="[a, b, c]")
+    check("list sort desc",
+          'import std;\nprint(std.list.sort_desc([3, 1, 2]));\n',
+          stdout="[3, 2, 1]")
+    check("list sort comparator",
+          'import std;\nstruct P { n: int; }\n'
+          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
+          'print(std.list.sort(xs, func(a, b) { return a.n - b.n; }));\n',
+          stdout="[P { n: 1 }, P { n: 2 }, P { n: 3 }]")
+    check("list sort_by",
+          'import std;\nstruct P { n: int; }\n'
+          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
+          'print(std.list.sort_by(xs, func(p) { return p.n; }));\n',
+          stdout="[P { n: 1 }, P { n: 2 }, P { n: 3 }]")
+    check("list sort_by desc",
+          'import std;\nstruct P { n: int; }\n'
+          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
+          'print(std.list.sort_by(xs, func(p) { return p.n; }, '
+          '{"desc": true}));\n',
+          stdout="[P { n: 3 }, P { n: 2 }, P { n: 1 }]")
+    check("list sort_by stable",
+          'import std;\nstruct Q { k: int; v: string; }\n'
+          'let qs = [Q { k: 1, v: "a" }, Q { k: 1, v: "b" }, '
+          'Q { k: 0, v: "c" }];\n'
+          'print(std.list.sort_by(qs, func(q) { return q.k; }));\n'
+          'print(std.list.sort_by(qs, func(q) { return q.k; }, '
+          '{"desc": true}));\n',
+          stdout_all=[
+              "[Q { k: 0, v: c }, Q { k: 1, v: a }, Q { k: 1, v: b }]",
+              "[Q { k: 1, v: a }, Q { k: 1, v: b }, Q { k: 0, v: c }]",
+          ])
+    check("list sort_by key called once",
+          'import std;\nstruct P { n: int; }\n'
+          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
+          'let calls = 0;\n'
+          'func key(p) { calls = calls + 1; return p.n; }\n'
+          'std.list.sort_by(xs, key);\n'
+          'print(calls);\n',
+          stdout="3")
+    check("list sort does not mutate input",
+          'import std;\nlet xs = [3, 1, 2];\n'
+          'let ys = std.list.sort(xs);\n'
+          'print(xs);\nprint(ys);\n',
+          stdout_all=["[3, 1, 2]", "[1, 2, 3]"])
+    check("list is_sorted",
+          'import std;\n'
+          'print(std.list.is_sorted([1, 2, 3]));\n'
+          'print(std.list.is_sorted([1, 3, 2]));\n'
+          'print(std.list.is_sorted([1, 3, 2], '
+          'func(a, b) { return a - b; }));\n'
+          'print(std.list.is_sorted([], func(a, b) { return a - b; }));\n',
+          stdout_all=["true", "false", "false", "true"])
+    check("list sort mixed types rejected",
+          'import std;\nstd.list.sort([1, "a"]);\n',
+          stderr="std.list.sort expects all numbers, strings, chars, or bytes")
+    check("list sort comparator must return int",
+          'import std;\nstd.list.sort([1, 2], '
+          'func(a, b) { return "x"; });\n',
+          stderr="std.list.sort comparator must return int, got string")
+    check("list sort nan last",
+          'import std;\nlet n = float("nan");\n'
+          'print(std.list.sort([2.0, n, 1.0]));\n'
+          'print(std.list.sort_desc([2.0, n, 1.0]));\n',
+          stdout_all=["[1.0, 2.0, nan]", "[2.0, 1.0, nan]"])
+    check("list sort_by nan last",
+          'import std;\nlet n = float("nan");\n'
+          'struct P { k: float; }\n'
+          'let xs = [P { k: 2.0 }, P { k: n }, P { k: 1.0 }];\n'
+          'print(std.list.sort_by(xs, func(p) { return p.k; }));\n'
+          'print(std.list.sort_by(xs, func(p) { return p.k; }, '
+          '{"desc": true}));\n',
+          stdout_all=[
+              "[P { k: 1.0 }, P { k: 2.0 }, P { k: nan }]",
+              "[P { k: 2.0 }, P { k: 1.0 }, P { k: nan }]",
+          ])
+    check("list is_sorted nan last",
+          'import std;\nlet n = float("nan");\n'
+          'print(std.list.is_sorted([1.0, 2.0, n]));\n'
+          'print(std.list.is_sorted([1.0, n, 2.0]));\n'
+          'print(std.list.is_sorted([n, n]));\n',
+          stdout_all=["true", "false", "true"])
+    check("char literal",
+          "let c = 'a';\nprint(c);\nprint(kind_of(c));\n"
+          "print(type_name(c));\nprint(len(c));\n",
+          stdout_all=["a", "char", "char", "1"])
+    check("char conversions",
+          "print(int('A'));\nprint(str('你'));\n"
+          "print(char(65));\nprint(char(\"你\"));\n",
+          stdout_all=["65", "你", "A", "你"])
+    check("char unicode escape",
+          "print('\\u{1F600}');\nprint('\\u0041');\n",
+          stdout_all=["😀", "A"])
+    check("char escapes",
+          "print('\\n' == char(10));\nprint('\\'');\nprint('\\\\');\n",
+          stdout_all=["true", "'", "\\"])
+    check("char compare",
+          "print('a' < 'b');\nprint('a' == 'a');\nprint('b' > 'a');\n",
+          stdout_all=["true", "true", "true"])
+    check("char concat",
+          "print('a' + \"bc\");\nprint(\"x\" + 'y');\nprint('a' + 'b');\n",
+          stdout_all=["abc", "xy", "ab"])
+    check("string index char",
+          'let s = "你好";\nprint(s[0]);\nprint(kind_of(s[0]));\nprint(s[1]);\n',
+          stdout_all=["你", "char", "好"])
+    check("string iteration char",
+          'let out = "";\nfor (let ch in "ab") { out = out + ch; }\nprint(out);\n',
+          stdout="ab")
+    check("char match",
+          "print(match ('a') { case 'a' => \"a\"; default => \"no\"; });\n",
+          stdout="a")
+    check("char switch",
+          "switch ('b') { case 'a' => print(\"a\"); case 'b' => print(\"b\"); }\n",
+          stdout="b")
+    check("char type annotation",
+          "let c: char = 'z';\nprint(c);\nlet n: char? = null;\nprint(n);\n",
+          stdout_all=["z", "null"])
+    check("char invalid empty",
+          "''\n", stderr="empty character literal")
+    check("char invalid multi",
+          "'ab'\n", stderr="exactly one character")
+    check("char invalid surrogate",
+          r"'\u{D800}'" + "\n", stderr="not a Unicode scalar value")
+    check("char invalid range",
+          r"'\u{110000}'" + "\n", stderr="not a Unicode scalar value")
+    check("char conversion error",
+          "char(\"ab\")\n", stderr="char() expects exactly one UTF-8 character")
+    check("char struct json",
+          "import std;\nstruct C { ch: char; }\n"
+          "let j = std.json.stringify(C { ch: 'a' });\nprint(j);\n"
+          "let c = std.struct.decode(std.json.parse(j), \"C\");\n"
+          "print(c.ch);\nprint(kind_of(c.ch));\n",
+          stdout_all=['{"ch":"a"}', "a", "char"])
+    check("char enum json",
+          "import std;\nenum E { A { ch: char; }; }\n"
+          "let e = std.enum.decode(std.json.parse("
+          "std.json.stringify(E::A { ch: '你' })));\n"
+          "print(e);\nprint(kind_of(e.ch));\n",
+          stdout_all=["E::A { ch: 你 }", "char"])
+    check("char sort",
+          "import std;\nprint(std.list.sort(['c', 'a', 'b']));\n"
+          "print(std.list.sort_desc(['c', 'a', 'b']));\n"
+          "print(std.list.is_sorted(['a', 'b', 'c']));\n",
+          stdout_all=["[a, b, c]", "[c, b, a]", "true"])
+    check("char dict key",
+          "let d = {'a': 1};\nprint(d['a']);\nprint(d[char(97)]);\n",
+          stdout_all=["1", "1"])
+    check("byte dict key",
+          "let d = {byte(65): 1};\nprint(d[byte(65)]);\n",
+          stdout="1")
+    check("char byte switch",
+          "switch ('a') { case 'a' => print(\"char\"); default => print(\"no\"); }\n"
+          "switch (byte(65)) { case byte(65) => print(\"byte\"); "
+          "default => print(\"no\"); }\n",
+          stdout_all=["char", "byte"])
+    check("char bytes roundtrip",
+          "import std;\nprint(bytes_hex(bytes_from_char('你')));\n"
+          "print(char_from_bytes(bytes_from_char('你')));\n"
+          "print(char(bytes_from_char('a')));\n",
+          stdout_all=["e4bda0", "你", "a"])
+    check("byte int conversions",
+          "print(byte(65));\nprint(int(byte(255)));\n"
+          "print(kind_of(byte(1)));\nprint(len(byte(1)));\n",
+          stdout_all=["65", "255", "byte", "1"])
+    check("byte type annotation",
+          "let b: byte = byte(1);\nprint(b);\n"
+          "let n: byte? = null;\nprint(n);\n",
+          stdout_all=["1", "null"])
+    check("byte range error",
+          "byte(256)\n", stderr="byte() value out of range")
+    check("char from bytes error",
+          'char_from_bytes(bytes_from_string("ab"))\n',
+          stderr="char_from_bytes expects exactly one UTF-8 character")
+    check("byte struct json",
+          "import std;\nstruct S { b: byte; c: char; }\n"
+          "let j = std.json.stringify(S { b: byte(255), c: 'a' });\n"
+          "print(j);\n"
+          "let s = std.struct.decode(std.json.parse(j), \"S\");\n"
+          "print(s.b);\nprint(kind_of(s.b));\nprint(s.c);\n",
+          stdout_all=['{"b":255,"c":"a"}', "255", "byte", "a"])
+    check("byte sort",
+          "import std;\n"
+          "print(std.list.sort([byte(3), byte(1), byte(2)]));\n",
+          stdout="[1, 2, 3]")
 
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
@@ -7293,7 +7481,7 @@ def main():
     check(
         "std list sort type error",
         'import std;\nstd.list.sort([1, "a"])\n',
-        stderr="expects all numbers or all strings",
+        stderr="expects all numbers, strings, chars, or bytes",
     )
     check(
         "std reduce empty error",

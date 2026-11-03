@@ -192,6 +192,8 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_float: return "float";
         case T_bool: return "bool";
         case T_string: return "string";
+        case T_char: return "char";
+        case T_byte: return "byte";
         case T_bytes: return "bytes";
         case T_list: return "list";
         case T_dict: return "dict";
@@ -210,6 +212,301 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_continue: return "continue";
         default: return "unknown";
     }
+}
+
+static struct value_t *dict_get_own(struct dict_value_t *dict,
+                                    const char *key) {
+    if (!dict || !key)
+        return NULL;
+    for (auto &entry : dict->payload->items) {
+        if (entry.first && entry.first->type == T_string &&
+            std::strcmp(((struct string_value_t *)entry.first)->value,
+                        key) == 0)
+            return entry.second;
+    }
+    return NULL;
+}
+
+static bool value_is_nan(const struct value_t *v) {
+    return v && v->type == T_float &&
+           std::isnan(((const struct float_value_t *)v)->value);
+}
+
+static bool list_sort_kind(struct list_value_t *list, bool &numeric,
+                           bool &chars, bool &bytes) {
+    numeric = true;
+    bool strings = true;
+    chars = true;
+    bytes = true;
+    for (struct value_t *item : list->payload->items) {
+        if (!is_numeric(item))
+            numeric = false;
+        if (!item || item->type != T_string)
+            strings = false;
+        if (!item || item->type != T_char)
+            chars = false;
+        if (!item || item->type != T_byte)
+            bytes = false;
+    }
+    return numeric || strings || chars || bytes;
+}
+
+static struct value_t *list_sort_default(struct list_value_t *list,
+                                         bool desc, const char *name) {
+    bool numeric = true;
+    bool chars = false;
+    bool bytes = false;
+    if (!list_sort_kind(list, numeric, chars, bytes)) {
+        yyerror("%s expects all numbers, strings, chars, or bytes", name);
+        return NULL;
+    }
+
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(list->payload->items.size());
+    for (struct value_t *item : list->payload->items)
+        out->payload->items.push_back(dupval(item));
+
+    std::stable_sort(
+        out->payload->items.begin(), out->payload->items.end(),
+        [numeric, chars, bytes, desc](struct value_t *a, struct value_t *b) {
+            bool a_nan = value_is_nan(a);
+            bool b_nan = value_is_nan(b);
+            if (a_nan || b_nan) {
+                if (a_nan && b_nan)
+                    return false;
+                return !a_nan;
+            }
+            int cmp = 0;
+            if (chars) {
+                unsigned int ac = ((struct char_value_t *)a)->value;
+                unsigned int bc = ((struct char_value_t *)b)->value;
+                cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+            } else if (bytes) {
+                unsigned int ac = ((struct byte_value_t *)a)->value;
+                unsigned int bc = ((struct byte_value_t *)b)->value;
+                cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+            } else if (numeric) {
+                bool unordered = false;
+                cmp = compare_numeric(a, b, unordered);
+                if (unordered)
+                    return false;
+            } else {
+                cmp = std::strcmp(
+                    ((struct string_value_t *)a)->value,
+                    ((struct string_value_t *)b)->value);
+            }
+            return desc ? cmp > 0 : cmp < 0;
+        });
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_sort_with_cmp(struct list_value_t *list,
+                                          struct value_t *cmp_fn,
+                                          const char *name) {
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(list->payload->items.size());
+    for (struct value_t *item : list->payload->items)
+        out->payload->items.push_back(dupval(item));
+
+    bool failed = false;
+    std::stable_sort(
+        out->payload->items.begin(), out->payload->items.end(),
+        [&](struct value_t *a, struct value_t *b) {
+            if (failed)
+                return false;
+            std::vector<struct value_t *> call_args;
+            call_args.push_back(dupval(a));
+            call_args.push_back(dupval(b));
+            struct value_t *result =
+                call_value_args(cmp_fn, std::move(call_args));
+            if (!result) {
+                failed = true;
+                return false;
+            }
+            if (result->type != T_int) {
+                yyerror("%s comparator must return int, got %s", name,
+                        typename_of(result));
+                freeval(result);
+                failed = true;
+                return false;
+            }
+            long long order = ((struct int_value_t *)result)->value;
+            freeval(result);
+            return order < 0;
+        });
+
+    if (failed) {
+        freeval((struct value_t *)out);
+        return NULL;
+    }
+    return (struct value_t *)out;
+}
+
+struct keyed_item {
+    struct value_t *key;
+    struct value_t *value;
+};
+
+static void free_keyed_items(std::vector<keyed_item> &items, bool owned) {
+    for (auto &item : items) {
+        freeval(item.key);
+        if (owned)
+            freeval(item.value);
+    }
+    items.clear();
+}
+
+static struct value_t *list_sort_by_key(struct list_value_t *list,
+                                        struct value_t *key_fn, bool desc,
+                                        const char *name) {
+    std::vector<keyed_item> items;
+    items.reserve(list->payload->items.size());
+
+    for (struct value_t *item : list->payload->items) {
+        std::vector<struct value_t *> call_args;
+        call_args.push_back(dupval(item));
+        struct value_t *key = call_value_args(key_fn, std::move(call_args));
+        if (!key) {
+            free_keyed_items(items, true);
+            return NULL;
+        }
+        items.push_back(keyed_item{key, dupval(item)});
+    }
+
+    bool numeric = true;
+    bool strings = true;
+    bool chars = true;
+    bool bytes = true;
+    for (auto &item : items) {
+        if (!is_numeric(item.key))
+            numeric = false;
+        if (!item.key || item.key->type != T_string)
+            strings = false;
+        if (!item.key || item.key->type != T_char)
+            chars = false;
+        if (!item.key || item.key->type != T_byte)
+            bytes = false;
+    }
+    if (!numeric && !strings && !chars && !bytes) {
+        yyerror("%s key must return numbers, strings, chars, or bytes", name);
+        free_keyed_items(items, true);
+        return NULL;
+    }
+
+    std::stable_sort(
+        items.begin(), items.end(),
+        [numeric, chars, bytes, desc](const keyed_item &a, const keyed_item &b) {
+            bool a_nan = value_is_nan(a.key);
+            bool b_nan = value_is_nan(b.key);
+            if (a_nan || b_nan) {
+                if (a_nan && b_nan)
+                    return false;
+                return !a_nan;
+            }
+            int cmp = 0;
+            if (chars) {
+                unsigned int ac = ((struct char_value_t *)a.key)->value;
+                unsigned int bc = ((struct char_value_t *)b.key)->value;
+                cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+            } else if (bytes) {
+                unsigned int ac = ((struct byte_value_t *)a.key)->value;
+                unsigned int bc = ((struct byte_value_t *)b.key)->value;
+                cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+            } else if (numeric) {
+                bool unordered = false;
+                cmp = compare_numeric(a.key, b.key, unordered);
+                if (unordered)
+                    return false;
+            } else {
+                cmp = std::strcmp(
+                    ((struct string_value_t *)a.key)->value,
+                    ((struct string_value_t *)b.key)->value);
+            }
+            return desc ? cmp > 0 : cmp < 0;
+        });
+
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(items.size());
+    for (auto &item : items) {
+        out->payload->items.push_back(item.value);
+        item.value = NULL;
+    }
+    free_keyed_items(items, true);
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_is_sorted_value(struct list_value_t *list,
+                                            struct value_t *cmp_fn,
+                                            const char *name) {
+    if (list->payload->items.size() < 2)
+        return newboolval(true);
+
+    if (cmp_fn) {
+        for (size_t i = 0; i + 1 < list->payload->items.size(); ++i) {
+            std::vector<struct value_t *> call_args;
+            call_args.push_back(dupval(list->payload->items[i]));
+            call_args.push_back(dupval(list->payload->items[i + 1]));
+            struct value_t *result =
+                call_value_args(cmp_fn, std::move(call_args));
+            if (!result)
+                return NULL;
+            if (result->type != T_int) {
+                yyerror("%s comparator must return int, got %s", name,
+                        typename_of(result));
+                freeval(result);
+                return NULL;
+            }
+            long long order = ((struct int_value_t *)result)->value;
+            freeval(result);
+            if (order > 0)
+                return newboolval(false);
+        }
+        return newboolval(true);
+    }
+
+    bool numeric = true;
+    bool chars = false;
+    bool bytes = false;
+    if (!list_sort_kind(list, numeric, chars, bytes)) {
+        yyerror("%s expects all numbers, strings, chars, or bytes", name);
+        return NULL;
+    }
+    for (size_t i = 0; i + 1 < list->payload->items.size(); ++i) {
+        struct value_t *prev = list->payload->items[i];
+        struct value_t *next = list->payload->items[i + 1];
+        bool prev_nan = value_is_nan(prev);
+        bool next_nan = value_is_nan(next);
+        if (prev_nan) {
+            if (!next_nan)
+                return newboolval(false);
+            continue;
+        }
+        if (next_nan)
+            continue;
+
+        int cmp = 0;
+        if (chars) {
+            unsigned int pc = ((struct char_value_t *)prev)->value;
+            unsigned int nc = ((struct char_value_t *)next)->value;
+            cmp = (pc < nc) ? -1 : (pc > nc ? 1 : 0);
+        } else if (bytes) {
+            unsigned int pc = ((struct byte_value_t *)prev)->value;
+            unsigned int nc = ((struct byte_value_t *)next)->value;
+            cmp = (pc < nc) ? -1 : (pc > nc ? 1 : 0);
+        } else if (numeric) {
+            bool unordered = false;
+            cmp = compare_numeric(prev, next, unordered);
+            if (unordered)
+                continue;
+        } else {
+            cmp = std::strcmp(
+                ((struct string_value_t *)prev)->value,
+                ((struct string_value_t *)next)->value);
+        }
+        if (cmp > 0)
+            return newboolval(false);
+    }
+    return newboolval(true);
 }
 
 static bool collect_command_env(
@@ -625,6 +922,24 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_list_sort) {
+        if (args.size() < 1 || args.size() > 2) {
+            yyerror("std.list.sort expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_sort_by) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.list.sort_by expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_is_sorted) {
+        if (args.size() < 1 || args.size() > 2) {
+            yyerror("std.list.is_sorted expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
@@ -793,6 +1108,8 @@ struct value_t *call_builtin(int functype,
             if (arg->type == T_string) {
                 ret = newintval((long long)utf8_length(
                     ((struct string_value_t *)arg)->value));
+            } else if (arg->type == T_char || arg->type == T_byte) {
+                ret = newintval(1);
             } else if (arg->type == T_bytes) {
                 ret = newintval((long long)((struct bytes_value_t *)arg)->value.size());
             } else if (arg->type == T_list) {
@@ -934,42 +1251,59 @@ struct value_t *call_builtin(int functype,
             break;
         }
         case B_list_sort: {
-            if (arg->type != T_list) {
+            if (args[0]->type != T_list) {
                 yyerror("std.list.sort expects a list, got %s",
-                        typename_of(arg));
+                        typename_of(args[0]));
                 break;
             }
-            struct list_value_t *source = (struct list_value_t *)arg;
-            bool numeric = true;
-            bool strings = true;
-            for (value_t *item : source->payload->items) {
-                if (!is_numeric(item))
-                    numeric = false;
-                if (item->type != T_string)
-                    strings = false;
+            struct list_value_t *source = (struct list_value_t *)args[0];
+            if (args.size() == 1) {
+                ret = list_sort_default(source, false, "std.list.sort");
+            } else {
+                ret = list_sort_with_cmp(source, args[1], "std.list.sort");
             }
-            if (!numeric && !strings) {
-                yyerror("std.list.sort expects all numbers or all strings");
+            break;
+        }
+        case B_list_sort_desc: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.sort_desc expects a list, got %s",
+                        typename_of(args[0]));
                 break;
             }
-            struct list_value_t *out = newlistval();
-            out->payload->items.reserve(source->payload->items.size());
-            for (value_t *item : source->payload->items)
-                out->payload->items.push_back(dupval(item));
-            bool sort_numeric = numeric;
-            std::stable_sort(
-                out->payload->items.begin(), out->payload->items.end(),
-                [sort_numeric](value_t *a, value_t *b) {
-                    if (sort_numeric) {
-                        bool unordered = false;
-                        int cmp = compare_numeric(a, b, unordered);
-                        return !unordered && cmp < 0;
-                    }
-                    return std::strcmp(
-                               ((struct string_value_t *)a)->value,
-                               ((struct string_value_t *)b)->value) < 0;
-                });
-            ret = (struct value_t *)out;
+            ret = list_sort_default((struct list_value_t *)args[0], true,
+                                    "std.list.sort_desc");
+            break;
+        }
+        case B_list_sort_by: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.sort_by expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            bool desc = false;
+            if (args.size() == 3) {
+                if (args[2]->type != T_dict) {
+                    yyerror("std.list.sort_by options must be a dict, got %s",
+                            typename_of(args[2]));
+                    break;
+                }
+                struct value_t *desc_value = dict_get_own(
+                    (struct dict_value_t *)args[2], "desc");
+                desc = desc_value && truthy(desc_value);
+            }
+            ret = list_sort_by_key((struct list_value_t *)args[0], args[1],
+                                   desc, "std.list.sort_by");
+            break;
+        }
+        case B_list_is_sorted: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.is_sorted expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            ret = list_is_sorted_value(
+                (struct list_value_t *)args[0],
+                args.size() == 2 ? args[1] : NULL, "std.list.is_sorted");
             break;
         }
         case B_list_append: {
@@ -1318,6 +1652,10 @@ struct value_t *call_builtin(int functype,
                 }
             } else if (arg->type == T_bool) {
                 ret = newintval(((struct bool_value_t *)arg)->value ? 1 : 0);
+            } else if (arg->type == T_char) {
+                ret = newintval(((struct char_value_t *)arg)->value);
+            } else if (arg->type == T_byte) {
+                ret = newintval(((struct byte_value_t *)arg)->value);
             } else if (arg->type == T_string) {
                 long long value = 0;
                 if (parse_int_string(((struct string_value_t *)arg)->value, value))
@@ -1326,7 +1664,7 @@ struct value_t *call_builtin(int functype,
                     yyerror("int() cannot convert string \"%s\"",
                             ((struct string_value_t *)arg)->value);
             } else {
-                yyerror("int() expects int, float, bool, or string, got %s",
+                yyerror("int() expects int, float, bool, char, or string, got %s",
                         typename_of(arg));
             }
             break;
@@ -1354,6 +1692,60 @@ struct value_t *call_builtin(int functype,
             break;
         case B_str:
             ret = newstrval(value_to_string(arg).c_str());
+            break;
+        case B_char:
+            if (arg->type == T_char) {
+                ret = dupval(arg);
+            } else if (arg->type == T_int) {
+                long long value = ((struct int_value_t *)arg)->value;
+                if (value < 0 || value > 0x10FFFF ||
+                    (value >= 0xD800 && value <= 0xDFFF)) {
+                    yyerror("char() codepoint out of range");
+                } else {
+                    ret = newcharval((unsigned int)value);
+                }
+            } else if (arg->type == T_string) {
+                const char *text = ((struct string_value_t *)arg)->value;
+                size_t consumed = 0;
+                unsigned int codepoint = 0;
+                if (!utf8_decode_one(text, std::strlen(text), consumed,
+                                     codepoint) ||
+                    text[consumed] != '\0') {
+                    yyerror("char() expects exactly one UTF-8 character");
+                } else {
+                    ret = newcharval(codepoint);
+                }
+            } else if (arg->type == T_bytes) {
+                const std::string &data =
+                    ((struct bytes_value_t *)arg)->value;
+                size_t consumed = 0;
+                unsigned int codepoint = 0;
+                if (!utf8_decode_one(data.data(), data.size(), consumed,
+                                     codepoint) ||
+                    consumed != data.size()) {
+                    yyerror("char() expects exactly one UTF-8 character");
+                } else {
+                    ret = newcharval(codepoint);
+                }
+            } else {
+                yyerror("char() expects int, char, string, or bytes, got %s",
+                        typename_of(arg));
+            }
+            break;
+        case B_byte:
+            if (arg->type == T_byte) {
+                ret = dupval(arg);
+            } else if (arg->type == T_int) {
+                long long value = ((struct int_value_t *)arg)->value;
+                if (value < 0 || value > 255) {
+                    yyerror("byte() value out of range");
+                } else {
+                    ret = newbyteval((unsigned int)value);
+                }
+            } else {
+                yyerror("byte() expects int or byte, got %s",
+                        typename_of(arg));
+            }
             break;
         case B_command: {
             if (arg->type != T_string) {
@@ -1804,6 +2196,38 @@ struct value_t *call_builtin(int functype,
                 break;
             }
             ret = newstrval(data.c_str());
+            break;
+        }
+        case B_bytes_from_char: {
+            if (arg->type != T_char) {
+                yyerror("bytes_from_char expects char, got %s",
+                        typename_of(arg));
+                break;
+            }
+            std::string data;
+            if (!utf8_encode(((struct char_value_t *)arg)->value, data)) {
+                yyerror("bytes_from_char: invalid char value");
+                break;
+            }
+            ret = newbytesval(data);
+            break;
+        }
+        case B_char_from_bytes: {
+            if (arg->type != T_bytes) {
+                yyerror("char_from_bytes expects bytes, got %s",
+                        typename_of(arg));
+                break;
+            }
+            const std::string &data = ((struct bytes_value_t *)arg)->value;
+            size_t consumed = 0;
+            unsigned int codepoint = 0;
+            if (!utf8_decode_one(data.data(), data.size(), consumed,
+                                 codepoint) ||
+                consumed != data.size()) {
+                yyerror("char_from_bytes expects exactly one UTF-8 character");
+                break;
+            }
+            ret = newcharval(codepoint);
             break;
         }
         case B_bytes_len: {

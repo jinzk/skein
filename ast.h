@@ -64,6 +64,9 @@ enum bifs {
     B_list_index,
     B_list_reverse,
     B_list_sort,
+    B_list_sort_by,
+    B_list_sort_desc,
+    B_list_is_sorted,
     B_list_append,
     B_list_map,
     B_list_filter,
@@ -90,6 +93,8 @@ enum bifs {
     B_float,
     B_bool,
     B_str,
+    B_char,
+    B_byte,
     B_kind_of,
     B_type_name,
     B_type_module,
@@ -117,6 +122,8 @@ enum bifs {
     B_substr,
     B_bytes_from_string,
     B_bytes_to_string,
+    B_bytes_from_char,
+    B_char_from_bytes,
     B_bytes_len,
     B_bytes_get,
     B_bytes_slice,
@@ -706,6 +713,7 @@ struct ast *newint(long long i);
 struct ast *newfloat(double d);
 struct ast *newbool(bool b);
 struct ast *newstr(char *s);
+struct ast *newchar(long long c);
 struct ast *newbuiltin(int functype);
 struct ast *newnullast();
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *tr);

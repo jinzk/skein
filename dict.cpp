@@ -6,7 +6,7 @@
 
 namespace {
 
-constexpr std::size_t kDictIndexThreshold = 8;
+constexpr std::size_t kDictIndexThreshold = 16;
 
 std::uint64_t mix_hash(std::uint64_t hash, std::uint64_t value) {
     hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);

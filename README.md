@@ -2236,6 +2236,9 @@ let next = match (state) {
 - `match` 是表达式，返回第一个匹配 arm 的值；
 - arm 体是单条语句或代码块，块的值是最后一条语句的值；
 - 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、struct（按字段）；
+- `case pattern as name` 把整个匹配值绑定到 `name`；
+- `case == IDLE` 匹配常量、名字或无载荷枚举变体；
+- `match (a, b)` 是多值 scrutinee，等价于 `match ([a, b])`；
 - 守卫写成 `case pattern if expr => ...`；
 - 绑定只读，作用域限于该 arm；
 - 无 arm 命中且无 `default` 时运行时报错；

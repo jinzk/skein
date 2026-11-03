@@ -892,15 +892,20 @@ let next = match (state) {
 - `if` 守卫失败时继续尝试下一个 arm；
 - 没有 arm 命中且没有 `default` → 运行时错误 `match: no arm matched`；
 - 模式匹配无副作用，不能调用函数，也不能写比较表达式；
-- 不支持 float 字面量，浮点判断用 `if/else`。
+- 不支持 float 字面量，浮点判断用 `if/else`；
+- `as` 可以把整个匹配值绑定到变量：`case Point {x} as p => ...`；
+- `case == CONST` 匹配一个常量/名字/无载荷枚举变体；
+- `match (a, b)` 是多值 scrutinee，会当作 `match ([a, b])` 处理。
 
 支持的模式：
 
 | 模式 | 示例 | 说明 |
 |---|---|---|
 | 字面量 | `1`、`"idle"`、`'a'`、`true`、`null` | 按 `==` 比较 |
+| 值模式 | `case == IDLE`、`case == E::A` | 匹配常量、名字或无载荷枚举变体 |
 | 绑定 | `x` | 匹配任意值并绑定 |
 | 通配 | `_` | 匹配任意值，不绑定 |
+| 整体绑定 | `p as Point {x}` | 先匹配子模式，再把整个值绑定到 `p` |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
 | dict rest | `{kind, ...rest}` | `rest` 收集未列出的键 |
 | list | `[a, b]` | 定长匹配 |
@@ -909,6 +914,18 @@ let next = match (state) {
 | struct 任意 | `Point {}` / `Point { ... }` | 只校验类型 |
 | dict 任意 | `{...}` | 匹配任意 dict |
 | 守卫 | `case n if n > 0 => ...` | 守卫可访问已绑定变量 |
+
+多值 scrutinee：
+
+```text
+match (state, event) {
+  case [State::Idle, Event::UserMsg { text }] =>
+    State::Planning { goal: text };
+  default => state;
+}
+```
+
+等价于 `match ([state, event])`，所以模式要写成 list 模式。
 
 示例：
 

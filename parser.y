@@ -264,7 +264,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <a> exp value stmt list scope explist arg top_expression top_statement line valuelist pairlist
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
-%type <a> match_arms match_arm pattern pattern_list pattern_items
+%type <a> match_arms match_arm pattern pattern_list pattern_items value_pattern match_values
 %type <pf> pattern_fields pattern_field_items pattern_field
 %type <a> let_pattern
 %type <a> struct_decl impl_decl trait_decl struct_members struct_member
@@ -642,6 +642,13 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
       }
     | MATCH '(' exp ')' '{' match_arms '}'
                                            { $$ = newmatch($3, $6); }
+    | MATCH '(' exp ',' match_values ')' '{' EMPTY_BLOCK_CLOSE
+                                           {
+        yyerror("match requires at least one arm");
+        $$ = newmatch(newlist($3, $5), NULL);
+      }
+    | MATCH '(' exp ',' match_values ')' '{' match_arms '}'
+                                           { $$ = newmatch(newlist($3, $5), $8); }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
@@ -824,6 +831,29 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
     | '{' pattern_fields '}'              { $$ = newpatterndict($2); }
     | '{' EMPTY_DICT_CLOSE                { $$ = newpatterndict(NULL); }
     | '[' pattern_list ']'                { $$ = newpatternlist($2); }
+    | pattern AS NAME                     { $$ = newpatternas($1, $3); }
+    | CMP value_pattern                   {
+        if ($1 != 4) {
+            yyerror("only == is allowed in a value pattern");
+            treefree($2);
+            $$ = newpatternnever();
+        } else {
+            $$ = newpatternlit($2);
+        }
+      }
+    ;
+
+value_pattern: value                      { $$ = $1; }
+    | NAME                                { $$ = newref($1); }
+    | NAME COLONCOLON NAME                {
+        $$ = newenumlit($1,
+                        copy_text(diag_current_source_name().c_str()),
+                        $3, NULL);
+      }
+    ;
+
+match_values: exp                         { $$ = newlist($1, NULL); }
+    | exp ',' match_values                { $$ = newlist($1, $3); }
     ;
 
 pattern_fields: %empty                    { $$ = NULL; }

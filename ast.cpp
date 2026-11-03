@@ -576,6 +576,18 @@ struct ast *newpatternrest(char *name) {
     return (struct ast *)a;
 }
 
+struct ast *newpatternas(struct ast *pattern, char *name) {
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_AS);
+    a->items = pattern;
+    a->name = name;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternnever() {
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_NEVER);
+    return (struct ast *)a;
+}
+
 struct ast *newpatterndict(struct pattern_field *fields) {
     struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
     a->fields = fields;
@@ -1296,6 +1308,18 @@ void treefree(struct ast *a) {
         case NODE_PATTERN_REST: {
             struct pattern_node *p = (struct pattern_node *)a;
             std::free(p->name);
+            treefree(p->next);
+            break;
+        }
+        case NODE_PATTERN_AS: {
+            struct pattern_node *p = (struct pattern_node *)a;
+            std::free(p->name);
+            treefree(p->items);
+            treefree(p->next);
+            break;
+        }
+        case NODE_PATTERN_NEVER: {
+            struct pattern_node *p = (struct pattern_node *)a;
             treefree(p->next);
             break;
         }

@@ -74,6 +74,12 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
             yyerror("rest pattern is only allowed at the end of a list "
                     "or dict pattern");
             return false;
+        case NODE_PATTERN_AS:
+            if (!match_pattern(pattern->items, value, bindings))
+                return false;
+            return bind_pattern_value(bindings, pattern->name, value);
+        case NODE_PATTERN_NEVER:
+            return false;
         case NODE_PATTERN_LIST: {
             if (value->type != T_list)
                 return false;

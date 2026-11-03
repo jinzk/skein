@@ -1095,6 +1095,50 @@ def main():
     check("match keeps std.regex.match",
           'import std;\nprint(std.regex.match("a+", "aaa"));\n',
           stdout="true")
+    check("match as pattern",
+          'match (1) { case 1 as x => print(x); }\n', stdout="1")
+    check("match as whole value",
+          'match ({"a": 1}) { case {a} as whole => '
+          'print(whole["a"] + a); }\n',
+          stdout="2")
+    check("match as struct",
+          'struct P { x: int; }\n'
+          'let p = P { x: 1 };\n'
+          'match (p) { case P {x} as whole => print(whole.x + x); }\n',
+          stdout="2")
+    check("match value pattern const",
+          'const IDLE = "idle";\n'
+          'match (IDLE) { case == IDLE => print("idle"); '
+          'default => print("no"); }\n',
+          stdout="idle")
+    check("match value pattern literal",
+          'match (1) { case == 1 => print("one"); default => print("no"); }\n',
+          stdout="one")
+    check("match value pattern enum",
+          'enum E { A; B; }\n'
+          'match (E::A) { case == E::A => print("a"); default => print("no"); }\n',
+          stdout="a")
+    check("match value pattern rejects comparison",
+          'match (1) { case < 1 => print("bad"); default => print("no"); }\n',
+          stderr="only == is allowed in a value pattern")
+    check("match multi scrutinee",
+          'match (1, 2) { case [a, b] => print(a + b); default => print(0); }\n',
+          stdout="3")
+    check("match multi scrutinee literal",
+          'match (1, 2) { case [1, 2] => print("pair"); '
+          'default => print("no"); }\n',
+          stdout="pair")
+    check("match multi scrutinee enum",
+          'enum S { Idle; }\n'
+          'enum E { Msg { text: string; }; }\n'
+          'match (S::Idle, E::Msg { text: "hi" }) {\n'
+          '  case [S::Idle, E::Msg {text}] => print(text);\n'
+          '  default => print("no");\n'
+          '}\n',
+          stdout="hi")
+    check("match multi scrutinee needs list pattern",
+          'match (1, 2) { case 1 => print("bad"); default => print("no"); }\n',
+          stdout="no")
 
     check("enum no payload",
           'enum E { A; B; }\nprint(E::A);\nprint(E::A == E::A);\n'

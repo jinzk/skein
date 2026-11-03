@@ -18,6 +18,7 @@ void yyerror(const char *s,...);
  *   'h'  container pattern (name == NULL: dict; name != NULL: struct/enum)
  *   'z'  list pattern
  *   ':'  rest pattern
+ *   '@'  as-pattern (whole-value binding)
  *   '`'  destructuring declaration
  *   '<'  enum declaration
  *   '>'  enum variant
@@ -30,6 +31,8 @@ constexpr int NODE_PATTERN_BINDING = 'e';
 constexpr int NODE_PATTERN_CONTAINER = 'h';
 constexpr int NODE_PATTERN_LIST = 'z';
 constexpr int NODE_PATTERN_REST = ':';
+constexpr int NODE_PATTERN_AS = '@';
+constexpr int NODE_PATTERN_NEVER = '#';
 constexpr int NODE_DESTRUCTURE = '`';
 constexpr int NODE_ENUM_DECL = '<';
 constexpr int NODE_ENUM_VARIANT = '>';
@@ -731,6 +734,8 @@ struct ast *append_matcharm(struct ast *head, struct ast *node);
 struct ast *newpatternlit(struct ast *literal);
 struct ast *newpatternname(char *name);
 struct ast *newpatternrest(char *name);
+struct ast *newpatternas(struct ast *pattern, char *name);
+struct ast *newpatternnever();
 struct ast *newpatterndict(struct pattern_field *fields);
 struct ast *newpatternlist(struct ast *items);
 struct ast *newpatternstruct(char *name, char *module,

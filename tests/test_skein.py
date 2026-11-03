@@ -1422,7 +1422,7 @@ def main():
     check("std.struct.decode type mismatch",
           'import std;\nstruct P { x: int; }\n'
           'std.struct.decode({"x": "s"}, "P");\n',
-          stderr="expected int, got string")
+          stderr="P.x expects int, got string")
     check("std.fsm snapshot restore",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(s, e) { return s + e; });\n'
@@ -1430,6 +1430,32 @@ def main():
           'let ctx2 = fsm.restore(fsm.snapshot(ctx));\n'
           'print(ctx2.state);\nprint(fsm.history(ctx2));\n',
           stdout_all=["6", "[0, 1, 3, 6]"])
+    check("std.fsm on_transition trace",
+          "import std;\nimport std.fsm;\n"
+          "let trail = [];\n"
+          "let m = fsm.define(0, func(s, e) { return s + e; },\n"
+          "  func(from, ev, to) { "
+          "trail = std.list.append(trail, [from, ev, to]); });\n"
+          "let ctx = fsm.run(m, fsm.start(m), [1, 2]);\n"
+          "print(ctx.state);\nprint(trail);\n",
+          stdout_all=["3", "[[0, 1, 1], [1, 2, 3]]"])
+    check("std.fsm on_transition must be callable",
+          "import std.fsm;\n"
+          "fsm.define(0, func(s, e) { return s; }, 1);\n",
+          stderr="on_transition must be callable")
+    check("std.fsm enum step type check",
+          "import std;\nimport std.fsm;\n"
+          "enum S { A; B; }\n"
+          "let m = fsm.define(S::A, func(s, e) { return \"x\"; });\n"
+          "fsm.step(m, fsm.start(m), 1);\n",
+          stderr="step must return S, got string string")
+    check("std.fsm struct step type check",
+          "import std;\nimport std.fsm;\n"
+          "struct P { x: int; }\n"
+          "struct Q { y: int; }\n"
+          "let m = fsm.define(P { x: 1 }, func(s, e) { return Q { y: 2 }; });\n"
+          "fsm.step(m, fsm.start(m), 1);\n",
+          stderr="step must return P, got struct Q")
     check("std.fsm json snapshot",
           'import std;\nimport std.fsm;\n'
           'enum S { Idle; Count { n: int; }; Done; }\n'
@@ -9087,6 +9113,33 @@ std.json.stringify(std.json.parse(text))
     check("empty block inside block", "if (1) { {} }\n", code=0)
     check("utf8 bom", "\ufeff1+2\n", stdout="= 3")
     check("crlf input", "1+2\r\n", stdout="= 3")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write("app/aa/aa.skein",
+              "package aa { export struct Point { x: int; y: int; } }\n")
+        main = write("app/main.skein",
+              "import std;\nimport aa;\n"
+              "let p = std.struct.decode({\"x\": 1, \"y\": 2}, "
+              "\"aa::Point\");\n"
+              "print(p);\nprint(kind_of(p));\n"
+              "let q = std.struct.decode({\"x\": 3, \"y\": 4}, "
+              "\"Point\");\n"
+              "print(q.x);\n")
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == [
+            "Point { x: 1, y: 2 }",
+            "struct",
+            "3",
+        ], proc.stdout
+        assert proc.stderr == "", proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
         script = os.path.join(tmp, "script.skein")

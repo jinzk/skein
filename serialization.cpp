@@ -25,14 +25,28 @@ static struct value_t *dict_lookup_value(struct dict_value_t *dict,
     return NULL;
 }
 
-static struct value_t *decode_nested_value(struct value_t *value, int depth);
-static struct value_t *decode_enum_object(struct value_t *value, int depth);
+static struct value_t *decode_nested_value(struct value_t *value, int depth,
+                                           const std::string &path);
+static struct value_t *decode_enum_object(struct value_t *value, int depth,
+                                          const std::string &path);
 static struct value_t *decode_struct_object(struct value_t *value,
-                                            struct_def *def, int depth);
+                                            struct_def *def, int depth,
+                                            const std::string &path);
 static struct value_t *decode_value_for_type(
-    struct value_t *value, const struct type_constraint *type, int depth);
+    struct value_t *value, const struct type_constraint *type, int depth,
+    const std::string &path);
 
-static struct value_t *decode_nested_value(struct value_t *value, int depth) {
+static std::string join_path(const std::string &base,
+                             const std::string &name) {
+    return base.empty() ? name : base + "." + name;
+}
+
+static const char *decode_path_label(const std::string &path) {
+    return path.empty() ? "value" : path.c_str();
+}
+
+static struct value_t *decode_nested_value(struct value_t *value, int depth,
+                                           const std::string &path) {
     if (!value)
         return NULL;
     if (depth > 512) {
@@ -43,11 +57,11 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth) {
     if (value->type == T_dict) {
         struct dict_value_t *dict = (struct dict_value_t *)value;
         if (dict_lookup_value(dict, "$enum"))
-            return decode_enum_object(value, depth);
+            return decode_enum_object(value, depth, path);
         struct dict_value_t *out = newdictval();
         for (auto &entry : dict->payload->items) {
             struct value_t *key = dupval(entry.first);
-            struct value_t *item = decode_nested_value(entry.second, depth + 1);
+            struct value_t *item = decode_nested_value(entry.second, depth + 1, path);
             if (!item) {
                 freeval(key);
                 freeval((struct value_t *)out);
@@ -62,7 +76,7 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth) {
         struct list_value_t *list = (struct list_value_t *)value;
         struct list_value_t *out = newlistval();
         for (struct value_t *item : list->payload->items) {
-            struct value_t *decoded = decode_nested_value(item, depth + 1);
+            struct value_t *decoded = decode_nested_value(item, depth + 1, path);
             if (!decoded) {
                 freeval((struct value_t *)out);
                 return NULL;
@@ -75,7 +89,8 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth) {
     return dupval(value);
 }
 
-static struct value_t *decode_enum_object(struct value_t *value, int depth) {
+static struct value_t *decode_enum_object(struct value_t *value, int depth,
+                                          const std::string &path) {
     if (!value || value->type != T_dict) {
         yyerror("std.enum.decode expects an enum object");
         return NULL;
@@ -157,8 +172,9 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth) {
                     tag.c_str());
             return NULL;
         }
-        struct value_t *decoded =
-            decode_value_for_type(field_value, &field.type, depth + 1);
+        struct value_t *decoded = decode_value_for_type(
+            field_value, &field.type, depth + 1,
+            join_path(path.empty() ? tag : path, field.name));
         if (!decoded)
             return NULL;
         payload->fields[i] = decoded;
@@ -196,7 +212,8 @@ static enum_def *find_named_enum(const struct type_constraint *type) {
 }
 
 static struct value_t *decode_value_for_type(
-    struct value_t *value, const struct type_constraint *type, int depth) {
+    struct value_t *value, const struct type_constraint *type, int depth,
+    const std::string &path) {
     if (!value)
         return NULL;
 
@@ -210,12 +227,13 @@ static struct value_t *decode_value_for_type(
             if (!utf8_decode_one(text, std::strlen(text), consumed,
                                  codepoint) ||
                 text[consumed] != '\0') {
-                yyerror("expected char, got string");
+                yyerror("%s expects char, got string", decode_path_label(path));
                 return NULL;
             }
             return newcharval(codepoint);
         }
-        yyerror("expected char, got %s", typename_of(value));
+        yyerror("%s expects char, got %s", decode_path_label(path),
+                        typename_of(value));
         return NULL;
     }
 
@@ -225,12 +243,14 @@ static struct value_t *decode_value_for_type(
         if (value->type == T_int) {
             long long number = ((struct int_value_t *)value)->value;
             if (number < 0 || number > 255) {
-                yyerror("expected byte, got int out of range");
+                yyerror("%s expects byte, got int out of range",
+                        decode_path_label(path));
                 return NULL;
             }
             return newbyteval((unsigned int)number);
         }
-        yyerror("expected byte, got %s", typename_of(value));
+        yyerror("%s expects byte, got %s", decode_path_label(path),
+                        typename_of(value));
         return NULL;
     }
 
@@ -239,12 +259,12 @@ static struct value_t *decode_value_for_type(
         if (value->type == T_dict) {
             struct dict_value_t *dict = (struct dict_value_t *)value;
             if (!dict_lookup_value(dict, "$enum"))
-                return decode_struct_object(value, sdef, depth);
+                return decode_struct_object(value, sdef, depth, path);
         }
-        struct value_t *decoded = decode_nested_value(value, depth);
+        struct value_t *decoded = decode_nested_value(value, depth, path);
         if (decoded && !type_constraint_matches(type, decoded)) {
-            yyerror("expected %s, got %s", type_constraint_name(type),
-                    typename_of(decoded));
+            yyerror("%s expects %s, got %s", decode_path_label(path),
+                    type_constraint_name(type), typename_of(decoded));
             freeval(decoded);
             return NULL;
         }
@@ -253,20 +273,20 @@ static struct value_t *decode_value_for_type(
 
     enum_def *edef = find_named_enum(type);
     if (edef) {
-        struct value_t *decoded = decode_nested_value(value, depth);
+        struct value_t *decoded = decode_nested_value(value, depth, path);
         if (decoded && !type_constraint_matches(type, decoded)) {
-            yyerror("expected %s, got %s", type_constraint_name(type),
-                    typename_of(decoded));
+            yyerror("%s expects %s, got %s", decode_path_label(path),
+                    type_constraint_name(type), typename_of(decoded));
             freeval(decoded);
             return NULL;
         }
         return decoded;
     }
 
-    struct value_t *decoded = decode_nested_value(value, depth);
+    struct value_t *decoded = decode_nested_value(value, depth, path);
     if (decoded && !type_constraint_matches(type, decoded)) {
-        yyerror("expected %s, got %s", type_constraint_name(type),
-                typename_of(decoded));
+        yyerror("%s expects %s, got %s", decode_path_label(path),
+                type_constraint_name(type), typename_of(decoded));
         freeval(decoded);
         return NULL;
     }
@@ -274,7 +294,8 @@ static struct value_t *decode_value_for_type(
 }
 
 static struct value_t *decode_struct_object(struct value_t *value,
-                                            struct_def *def, int depth) {
+                                            struct_def *def, int depth,
+                                            const std::string &path) {
     if (!def) {
         yyerror("invalid struct type");
         return NULL;
@@ -318,8 +339,9 @@ static struct value_t *decode_struct_object(struct value_t *value,
                     def->name.c_str());
             return NULL;
         }
-        struct value_t *decoded =
-            decode_value_for_type(field_value, &field.type, depth + 1);
+        struct value_t *decoded = decode_value_for_type(
+            field_value, &field.type, depth + 1,
+            join_path(path, field.name));
         if (!decoded)
             return NULL;
         payload->fields[i] = decoded;
@@ -354,11 +376,11 @@ static struct value_t *struct_decode(struct value_t *value,
         yyerror("unknown or ambiguous struct type %s", type_name.c_str());
         return NULL;
     }
-    return decode_struct_object(value, def, 0);
+    return decode_struct_object(value, def, 0, def->name);
 }
 
 struct value_t *enum_decode_value(struct value_t *value) {
-    return decode_enum_object(value, 0);
+    return decode_enum_object(value, 0, "");
 }
 
 struct value_t *struct_decode_value(struct value_t *value,

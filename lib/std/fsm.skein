@@ -24,6 +24,10 @@ package fsm {
   export struct Machine {
     initial: any;
     step: callable;
+    on_transition: any;
+    kind: string;
+    name: string;
+    module: string;
   }
 
   export struct Context {
@@ -176,11 +180,29 @@ package fsm {
     };
   }
 
-  export func define(initial, step) {
+  export func define(initial, step, ...rest) {
     if (kind_of(step) != "function" && kind_of(step) != "builtin") {
       fail("step must be callable");
     }
-    return Machine { initial: initial, step: step };
+
+    let on_transition = null;
+    if (len(rest) > 0) {
+      on_transition = rest[0];
+      if (on_transition != null &&
+          kind_of(on_transition) != "function" &&
+          kind_of(on_transition) != "builtin") {
+        fail("on_transition must be callable");
+      }
+    }
+
+    return Machine {
+      initial: initial,
+      step: step,
+      on_transition: on_transition,
+      kind: kind_of(initial),
+      name: type_name(initial),
+      module: type_module(initial)
+    };
   }
 
   export func initial(m) {
@@ -199,6 +221,20 @@ package fsm {
 
   export func step(m, ctx, event) {
     let next = m.step(ctx.state, event);
+
+    if (m.kind == "enum" || m.kind == "struct") {
+      if (kind_of(next) != m.kind ||
+          type_name(next) != m.name ||
+          type_module(next) != m.module) {
+        fail("step must return " + m.name + ", got " +
+             kind_of(next) + " " + type_name(next));
+      }
+    }
+
+    if (m.on_transition != null) {
+      m.on_transition(ctx.state, event, next);
+    }
+
     let r = _t_add(ctx._history, next, ctx._head);
     return Context {
       state: next,

@@ -2975,7 +2975,7 @@ print(ctx.state);            // 9
 API：
 
 ```text
-fsm.define(initial, step)      -> Machine
+fsm.define(initial, step[, on_transition]) -> Machine
 fsm.initial(m)                 -> any
 fsm.start(m)                   -> Context
 fsm.step(m, ctx, event)        -> Context
@@ -2990,6 +2990,8 @@ fsm.restore(snap[, decode])    -> Context
 规则：
 
 - `step` 是纯函数 `(state, event) -> next_state`；
+- `define` 的第三个参数可选，是 `on_transition(from, event, to)` 回调；
+- 如果初始状态是 enum 或 struct，`step` 返回值必须保持同一类型，否则 `fail("step must return ...")`；
 - `Context` 是值，可以赋值、传参、比较；
 - `history` 包含初始状态和每一步的状态；
 - `undo` / `redo` 是线性的；`undo` 之后再 `step` 会清空 redo，形成新分支；
@@ -2997,7 +2999,7 @@ fsm.restore(snap[, decode])    -> Context
 - 枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复；
 - struct 状态可传解码回调：`fsm.restore(snap, func(v) { return std.struct.decode(v, "S"); })`；
 - `ctx._history` / `ctx._head` / `ctx._redo` 是内部字段，不要依赖；
-- 非法 `step` 会 `fail("step must be callable")`。
+- 非法 `step` 会 `fail("step must be callable")`，非法回调会 `fail("on_transition must be callable")`。
 
 ### std.enum
 

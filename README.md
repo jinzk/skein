@@ -1591,6 +1591,23 @@ std.dict.items
 std.dict.delete
 std.dict.merge
 
+std.enum.decode
+std.enum.tag
+
+std.struct.decode
+
+std.lru.new
+std.lru.get
+std.lru.peek
+std.lru.put
+std.lru.delete
+std.lru.has
+std.lru.keys
+std.lru.values
+std.lru.len
+std.lru.capacity
+std.lru.clear
+
 std.json.parse
 std.json.try_parse
 std.json.stringify
@@ -1677,6 +1694,8 @@ std.fs.flush
 std.fs.read_bytes
 std.fs.write_bytes
 std.fs.append_bytes
+std.fs.file_read_bytes
+std.fs.file_write_bytes
 
 std.process.command
 std.process.status

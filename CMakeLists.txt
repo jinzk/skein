@@ -81,6 +81,7 @@ add_executable(${PROJECT_NAME}
   compression.cpp
   cookie.cpp
   crypto_builtin.cpp
+  cycle.cpp
   diagnostics.cpp
   dict.cpp
   encoding.cpp
@@ -299,6 +300,11 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE}
               ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_encoding_tables.py
               --check
+    )
+    add_test(
+      NAME docs_sync_test
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_docs_sync.py
     )
   else()
     message(WARNING "Python3 not found; skein_tests will not be registered")

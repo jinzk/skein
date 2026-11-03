@@ -1,0 +1,99 @@
+#include "cycle.h"
+
+#include "structtype.h"
+
+const void *value_payload(const struct value_t *v) {
+    if (!v)
+        return NULL;
+    switch (v->type) {
+        case T_list:
+            return ((const struct list_value_t *)v)->payload.get();
+        case T_dict:
+            return ((const struct dict_value_t *)v)->payload.get();
+        case T_struct:
+            return ((const struct struct_value_t *)v)->payload.get();
+        case T_enum:
+            return ((const struct enum_value_t *)v)->payload.get();
+        case T_lru:
+            return ((const struct lru_value_t *)v)->payload.get();
+        default:
+            return NULL;
+    }
+}
+
+bool value_reaches(const struct value_t *v, const void *target,
+                   std::unordered_set<const void *> &visited) {
+    if (!v)
+        return false;
+    const void *payload = value_payload(v);
+    if (payload) {
+        if (payload == target)
+            return true;
+        if (!visited.insert(payload).second)
+            return false;
+    }
+    switch (v->type) {
+        case T_list: {
+            const struct list_value_t *list =
+                (const struct list_value_t *)v;
+            for (struct value_t *item : list->payload->items)
+                if (value_reaches(item, target, visited))
+                    return true;
+            return false;
+        }
+        case T_dict: {
+            const struct dict_value_t *dict =
+                (const struct dict_value_t *)v;
+            for (auto &entry : dict->payload->items) {
+                if (value_reaches(entry.first, target, visited) ||
+                    value_reaches(entry.second, target, visited))
+                    return true;
+            }
+            return false;
+        }
+        case T_struct: {
+            const struct struct_value_t *sv =
+                (const struct struct_value_t *)v;
+            for (struct value_t *field : sv->payload->fields)
+                if (value_reaches(field, target, visited))
+                    return true;
+            return false;
+        }
+        case T_enum: {
+            const struct enum_value_t *ev = (const struct enum_value_t *)v;
+            for (struct value_t *field : ev->payload->fields)
+                if (value_reaches(field, target, visited))
+                    return true;
+            return false;
+        }
+        case T_lru: {
+            const struct lru_value_t *lv = (const struct lru_value_t *)v;
+            for (auto &entry : lv->payload->items) {
+                if (value_reaches(entry.first, target, visited) ||
+                    value_reaches(entry.second, target, visited))
+                    return true;
+            }
+            return false;
+        }
+        case T_result: {
+            const struct result_value_t *rv =
+                (const struct result_value_t *)v;
+            return value_reaches(rv->value, target, visited) ||
+                   value_reaches(rv->error, target, visited);
+        }
+        default:
+            return false;
+    }
+}
+
+bool value_reaches_any(const struct value_t *v,
+                       const std::vector<const void *> &targets) {
+    for (const void *target : targets) {
+        if (!target)
+            continue;
+        std::unordered_set<const void *> visited;
+        if (value_reaches(v, target, visited))
+            return true;
+    }
+    return false;
+}

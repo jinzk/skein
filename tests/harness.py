@@ -1,0 +1,734 @@
+#!/usr/bin/env python3
+"""Golden/smoke tests for the skein interpreter."""
+
+import base64
+import hashlib
+import os
+import random
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unicodedata
+
+
+BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
+FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 else None
+
+
+def skein_string(value):
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def run(source, timeout=5):
+    try:
+        return subprocess.run(
+            [BIN],
+            input=source,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssertionError(f"interpreter timed out for input {source!r}") from exc
+
+
+def run_file(path, timeout=5):
+    return subprocess.run(
+        [BIN, path],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=timeout,
+    )
+
+
+def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
+          not_stderr=None, code=0):
+    proc = run(source)
+    combined = proc.stdout + proc.stderr
+    assert "Segmentation fault" not in combined, f"{name}: crashed"
+    assert proc.returncode == code, (
+        f"{name}: expected exit {code}, got {proc.returncode}\n"
+        f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    )
+    if stdout is not None:
+        assert stdout in proc.stdout, (
+            f"{name}: expected stdout to contain {stdout!r}\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    if stdout_all is not None:
+        for expected in stdout_all:
+            assert expected in proc.stdout, (
+                f"{name}: expected stdout to contain {expected!r}\n"
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+    if stderr is not None:
+        assert stderr in proc.stderr, (
+            f"{name}: expected stderr to contain {stderr!r}\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    if not_stderr is not None:
+        assert not_stderr not in proc.stderr, (
+            f"{name}: expected stderr not to contain {not_stderr!r}\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+
+
+def ws_recv_exact(sock, count):
+    data = b""
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+        if not chunk:
+            raise AssertionError("websocket: unexpected EOF")
+        data += chunk
+    return data
+
+
+def ws_read_frame(sock):
+    first, second = ws_recv_exact(sock, 2)
+    opcode = first & 0x0f
+    masked = bool(second & 0x80)
+    length = second & 0x7f
+    if length == 126:
+        length = int.from_bytes(ws_recv_exact(sock, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(ws_recv_exact(sock, 8), "big")
+    mask = ws_recv_exact(sock, 4) if masked else b""
+    payload = ws_recv_exact(sock, length) if length else b""
+    if masked:
+        payload = bytes(
+            byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    return opcode, payload
+
+
+def ws_write_frame(sock, opcode, payload, masked):
+    header = bytes([0x80 | opcode])
+    length = len(payload)
+    mask_bit = 0x80 if masked else 0
+    if length <= 125:
+        header += bytes([mask_bit | length])
+    elif length <= 65535:
+        header += bytes([mask_bit | 126]) + length.to_bytes(2, "big")
+    else:
+        header += bytes([mask_bit | 127]) + length.to_bytes(8, "big")
+    if masked:
+        mask = b"\x11\x22\x33\x44"
+        header += mask
+        payload = bytes(
+            byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    sock.sendall(header + payload)
+
+
+def ws_accept_key(key):
+    guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    digest = hashlib.sha1((key + guid).encode()).digest()
+    return base64.b64encode(digest).decode()
+
+
+def check_interactive_continuation():
+    """Verify REPL continuation prompts for multi-line empty braces."""
+    if sys.platform == "win32":
+        return
+    try:
+        import pty
+        import select
+    except ImportError:
+        return
+
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(
+        [BIN],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+    )
+    os.close(slave)
+
+    try:
+        def read_available(timeout=1.0):
+            data = b""
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.05)
+                if ready:
+                    try:
+                        chunk = os.read(master, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    data += chunk
+                    deadline = time.time() + 0.15
+                elif data:
+                    break
+            return data.decode("utf-8", "replace")
+
+        assert ">" in read_available()
+
+        os.write(master, b"if (1) {\n")
+        assert ".." in read_available(), "missing empty-block continuation prompt"
+        os.write(master, b"}\n")
+        read_available()
+
+        os.write(master, b"let d = {\n")
+        assert ".." in read_available(), "missing empty-dict continuation prompt"
+        os.write(master, b"// comment\n")
+        assert ".." in read_available(), "missing comment continuation prompt"
+        os.write(master, b"};\n")
+        read_available()
+        os.write(master, b"d\n")
+        assert "= {}" in read_available(), "multi-line empty dict failed"
+
+        os.write(master, b"1 + 2\n")
+        assert "= 3" in read_available(), "REPL result failed"
+        os.write(master, b"ans + 1\n")
+        assert "= 4" in read_available(), "REPL ans failed"
+
+        os.write(master, b":quit\n")
+        proc.wait(timeout=2)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=2)
+        os.close(master)
+
+
+def check_encoding_two_byte_tables():
+    """Round-trip every two-byte GBK/GB18030 table position."""
+    for encoding in ("gbk", "gb18030"):
+        lines = ["import std;"]
+        expected = []
+        for lead in range(0x81, 0xFF):
+            for trail in list(range(0x40, 0x7F)) + list(range(0x80, 0xFF)):
+                data = bytes((lead, trail))
+                try:
+                    data.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+                hex_data = data.hex()
+                lines.append(
+                    f'bytes_hex(std.encoding.encode('
+                    f'std.encoding.decode(bytes_from_hex("{hex_data}"), '
+                    f'"{encoding}"), "{encoding}"))'
+                )
+                expected.append("= " + hex_data)
+        proc = run("\n".join(lines) + "\n", timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        actual = [line.strip() for line in proc.stdout.splitlines()
+                  if line.strip()]
+        assert actual == expected, f"{encoding} table round-trip mismatch"
+
+
+def check_unicode_normalization_samples():
+    """Compare std.unicode against Python's Unicode 16 normalization."""
+    rng = random.Random(2026)
+    assigned = [
+        cp for cp in range(0x110000)
+        if not (0xD800 <= cp <= 0xDFFF)
+        and unicodedata.category(chr(cp)) != "Cn"
+    ]
+    samples = [chr(cp) for cp in rng.sample(assigned, 40)]
+    marks = list(range(0x300, 0x370))
+    for _ in range(20):
+        base = rng.choice((0x41, 0x61, 0x65, 0x4E2D, 0x1100))
+        samples.append(chr(base) + chr(rng.choice(marks)))
+    for _ in range(10):
+        lead = rng.randint(0x1100, 0x1112)
+        vowel = rng.randint(0x1161, 0x1175)
+        tail = rng.choice((0, rng.randint(0x11A8, 0x11C2)))
+        samples.append(chr(lead) + chr(vowel) + (chr(tail) if tail else ""))
+
+    forms = ("nfc", "nfd", "nfkc", "nfkd")
+    lines = ["import std;"]
+    expected = []
+    for index, sample in enumerate(samples):
+        hex_data = sample.encode("utf-8").hex()
+        lines.append(
+            f'let sample{index} = std.encoding.decode('
+            f'bytes_from_hex("{hex_data}"), "utf-8");'
+        )
+        for form in forms:
+            lines.append(
+                f'bytes_hex(std.encoding.encode('
+                f'std.unicode.normalize(sample{index}, "{form}"), "utf-8"))'
+            )
+            expected.append(
+                "= " + unicodedata.normalize(
+                    form.upper(), sample).encode("utf-8").hex()
+            )
+
+    proc = run("\n".join(lines) + "\n", timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    actual = [line.strip() for line in proc.stdout.splitlines()
+              if line.strip()]
+    assert actual == expected, "unicode normalization mismatch"
+
+
+def check_extended_stdlib():
+    check(
+        "std regex basics",
+        "import std;\n"
+        'std.regex.match("a+", "aaa")\n'
+        'std.regex.match("abc", "ABC", "i")\n'
+        'let m = std.regex.search("(a+)(b)", "xxaaabyy");\n'
+        'print(m["text"]);\n'
+        'print(m["start"]);\n'
+        'print(m["groups"][1]);\n'
+        'print(std.regex.replace("(a+)", "xxaaabyy", "[$1]"));\n'
+        'print(std.regex.split(",", "a,b,c"));\n'
+        'len(std.regex.find_all("[0-9]+", "a1b22c333"))\n',
+        stdout_all=["= true", "= true", "aaab", "2", "b",
+                    "xx[aaa]byy", "[a, b, c]", "= 3"],
+    )
+    check(
+        "std regex invalid pattern",
+        'import std;\nstd.regex.match("(", "x")\n',
+        stderr="invalid pattern",
+    )
+
+    check(
+        "std time basics",
+        "import std;\n"
+        'std.time.format(0, "%Y-%m-%d %H:%M:%S", true)\n'
+        'std.time.parse("1970-01-01 00:00:00", '
+        '"%Y-%m-%d %H:%M:%S", true)\n'
+        'std.time.now() > 0\n'
+        'std.time.monotonic_ms() >= 0\n'
+        'print(std.time.sleep(0))\n',
+        stdout_all=["= 1970-01-01 00:00:00", "= 0", "= true", "= true",
+                    "null"],
+    )
+    check(
+        "std time invalid parse",
+        'import std;\nstd.time.parse("not-a-time")\n',
+        stderr="does not match format",
+    )
+
+    check(
+        "std random basics",
+        "import std;\n"
+        "std.random.seed(123);\n"
+        'std.random.int(5, 5)\n'
+        'let f = std.random.float();\n'
+        'print(f >= 0.0 && f < 1.0);\n'
+        'bytes_len(std.random.bytes(8))\n'
+        'std.random.choice([7])\n'
+        'len(std.random.shuffle([1, 2, 3]))\n'
+        'len(std.random.uuid())\n',
+        stdout_all=["= 5", "true", "= 8", "= 7", "= 3", "= 36"],
+    )
+    check(
+        "std random invalid range",
+        "import std;\nstd.random.int(2, 1)\n",
+        stderr="minimum must not exceed maximum",
+    )
+
+    check(
+        "std encoding base64 and url",
+        "import std;\n"
+        'std.encoding.base64_encode(bytes_from_string("hello"))\n'
+        'bytes_to_string(std.encoding.base64_decode("aGVsbG8="))\n'
+        'std.encoding.url_encode("a b/中")\n'
+        'std.encoding.url_decode("a%20b%2F%E4%B8%AD")\n',
+        stdout_all=["= aGVsbG8=", "= hello", "= a%20b%2F%E4%B8%AD",
+                    "= a b/中"],
+    )
+    check(
+        "std encoding invalid base64",
+        'import std;\nstd.encoding.base64_decode("!")\n',
+        stderr="invalid base64",
+    )
+
+    check(
+        "std env basics",
+        "import std;\n"
+        'std.env.set("SKEIN_TEST_ENV", "abc");\n'
+        'std.env.get("SKEIN_TEST_ENV")\n'
+        'std.env.has("SKEIN_TEST_ENV")\n'
+        'std.env.set("SKEIN_TEST_ENV", "changed");\n'
+        'std.env.get("SKEIN_TEST_ENV")\n'
+        'std.env.unset("SKEIN_TEST_ENV");\n'
+        'std.env.has("SKEIN_TEST_ENV")\n'
+        'std.env.get("SKEIN_TEST_ENV", "fallback")\n',
+        stdout_all=["= abc", "= true", "= changed", "= false",
+                    "= fallback"],
+    )
+
+    check(
+        "std crypto sha256",
+        "import std;\n"
+        'std.crypto.sha256("abc")\n'
+        'std.crypto.sha256("")\n'
+        'std.crypto.hmac_sha256("key", '
+        '"The quick brown fox jumps over the lazy dog")\n',
+        stdout_all=[
+            "= ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "= e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "= f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
+        ],
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = tmp.replace("\\", "\\\\").replace('"', '\\"')
+        check(
+            "std fs directory and path helpers",
+            "import std;\n"
+            f'std.fs.mkdir("{base}/a/b", true);\n'
+            f'std.fs.write_file("{base}/a/b/x.txt", "hi");\n'
+            f'print(std.fs.listdir("{base}/a/b"));\n'
+            f'print(std.fs.stat("{base}/a/b/x.txt")["type"]);\n'
+            f'print(std.fs.stat("{base}/a/b/x.txt")["size"]);\n'
+            f'print(std.fs.path_join("{base}", "a", "b", "x.txt"));\n'
+            f'print(std.fs.path_basename("{base}/a/b/x.txt"));\n'
+            f'print(std.fs.path_dirname("{base}/a/b/x.txt"));\n'
+            f'print(std.fs.path_extname("{base}/a/b/x.txt"));\n'
+            f'print(std.fs.path_normalize("{base}/a/../a/b/./x.txt"));\n'
+            f'std.fs.rename("{base}/a/b/x.txt", "{base}/a/b/y.txt");\n'
+            f'print(std.fs.exists("{base}/a/b/y.txt"));\n'
+            f'std.fs.remove("{base}/a/b/y.txt");\n'
+            f'std.fs.exists("{base}/a/b/y.txt")\n',
+            stdout_all=["[x.txt]", "file", "2",
+                        f"{tmp}/a/b/x.txt", "x.txt", f"{tmp}/a/b",
+                        ".txt", f"{tmp}/a/b/x.txt", "1", "= 0"],
+        )
+
+    if sys.platform != "win32":
+        check(
+            "std process run",
+            "import std;\n"
+            'let r = std.process.run("printf hello");\n'
+            'print(r["status"]);\n'
+            'print(bytes_to_string(r["stdout"]));\n'
+            'let r2 = std.process.run("cat", {"stdin": "abc"});\n'
+            'print(bytes_to_string(r2["stdout"]));\n'
+            'let r3 = std.process.run("pwd", {"cwd": "/tmp"});\n'
+            'print(bytes_to_string(r3["stdout"]));\n'
+            'let r4 = std.process.run("printf %s \\"$FOO\\"", '
+            '{"env": {"FOO": "bar"}});\n'
+            'print(bytes_to_string(r4["stdout"]));\n'
+            'let r5 = std.process.run("echo out; echo err >&2; exit 3");\n'
+            'print(r5["status"]);\n'
+            'print(bytes_to_string(r5["stdout"]));\n'
+            'print(bytes_to_string(r5["stderr"]));\n',
+            stdout_all=["0", "hello", "abc", "/tmp", "bar", "3", "out",
+                        "err"],
+        )
+        check(
+            "std process spawn stdout",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/echo", {"args": ["spawn"]});\n'
+            'print(std.process.pid(p) > 0);\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["true", "spawn", "0"],
+        )
+        check(
+            "std process spawn stdin",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/cat");\n'
+            'std.io.write_all(p["stdin"], "abc");\n'
+            'std.io.close(p["stdin"]);\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["abc", "0"],
+        )
+        check(
+            "std process spawn stderr",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/sh", '
+            '{"args": ["-c", "echo out; echo err >&2; exit 3"]});\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(bytes_to_string(std.io.read(p["stderr"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["out", "err", "3"],
+        )
+        check(
+            "std process spawn async",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/echo", {"args": ["async"]});\n'
+            'let data = await std.io.read_async(p["stdout"], 4096);\n'
+            'print(bytes_to_string(data));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["async", "0"],
+        )
+        check(
+            "std process spawn async write",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/cat");\n'
+            'print(await std.io.write_async(p["stdin"], "abc"));\n'
+            'std.io.close(p["stdin"]);\n'
+            'let data = await std.io.read_async(p["stdout"], 4096);\n'
+            'print(bytes_to_string(data));\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=["3", "abc", "0"],
+        )
+        with tempfile.TemporaryDirectory() as worker_tmp:
+            worker_script = os.path.join(worker_tmp, "worker.skein")
+            with open(worker_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "std.io.write_all(std.io.stdout, bytes_from_string("
+                    "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "while (true) {\n"
+                    "  let line = std.io.read_line(std.io.stdin);\n"
+                    "  if (line == null) { break; }\n"
+                    "  let request = std.json.parse(bytes_to_string(line));\n"
+                    "  let result = request[\"params\"][0] + "
+                    "request[\"params\"][1];\n"
+                    "  let response = {\"id\": request[\"id\"], "
+                    "\"ok\": true, \"result\": result};\n"
+                    "  std.io.write_all(std.io.stdout, bytes_from_string("
+                    "std.json.stringify(response) + \"\\n\"));\n"
+                    "  std.io.flush(std.io.stdout);\n"
+                    "}\n"
+                )
+            worker_path = worker_script.replace("\\", "\\\\")
+            binary_path = os.path.abspath(BIN).replace("\\", "\\\\")
+            check(
+                "json lines worker over pipes",
+                "import std;\n"
+                f'let p = std.process.spawn("{binary_path}", '
+                f'{{"args": ["{worker_path}"]}});\n'
+                'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
+                'std.io.write_all(p["stdin"], bytes_from_string('
+                '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
+                'std.io.flush(p["stdin"]);\n'
+                'let line = std.io.read_line(p["stdout"]);\n'
+                'print(bytes_to_string(line));\n'
+                'std.io.close(p["stdin"]);\n'
+                'print(std.process.wait(p));\n',
+                stdout_all=['{"ready":true,"version":1}',
+                            '{"id":1,"ok":true,"result":5}', "0"],
+            )
+            check(
+                "std.worker pool call and map",
+                "import std;\n"
+                f'let pool = std.worker.pool(2, "{worker_path}");\n'
+                'let one = std.worker.call(pool, "add", [2, 3]);\n'
+                'print(std.result.unwrap(one));\n'
+                'print(std.worker.map(pool, "add", '
+                '[[1, 2], [3, 4], [5, 6]]));\n'
+                'std.worker.shutdown(pool);\n',
+                stdout_all=["5", "[3, 7, 11]"],
+            )
+            restart_script = os.path.join(worker_tmp, "restart.skein")
+            with open(restart_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "std.io.write_all(std.io.stdout, bytes_from_string("
+                    "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "while (true) {\n"
+                    "  let line = std.io.read_line(std.io.stdin);\n"
+                    "  if (line == null) { break; }\n"
+                    "  let request = std.json.parse(bytes_to_string(line));\n"
+                    "  let method = request[\"method\"];\n"
+                    "  if (method == \"die\") { break; }\n"
+                    "  if (method == \"slow\") { std.time.sleep(500); }\n"
+                    "  let result = request[\"params\"][0] + "
+                    "request[\"params\"][1];\n"
+                    "  let response = {\"id\": request[\"id\"], "
+                    "\"ok\": true, \"result\": result};\n"
+                    "  std.io.write_all(std.io.stdout, bytes_from_string("
+                    "std.json.stringify(response) + \"\\n\"));\n"
+                    "  std.io.flush(std.io.stdout);\n"
+                    "}\n"
+                )
+            restart_path = restart_script.replace("\\", "\\\\")
+            check(
+                "std.worker submit and wait",
+                "import std;\n"
+                f'let pool = std.worker.pool(2, "{worker_path}");\n'
+                'let a = std.worker.submit(pool, "add", [1, 2]);\n'
+                'let b = std.worker.submit(pool, "add", [3, 4]);\n'
+                'let c = std.worker.submit(pool, "add", [5, 6]);\n'
+                'print(std.result.unwrap(std.worker.wait(a)));\n'
+                'print(std.result.unwrap(std.worker.wait(b)));\n'
+                'print(std.result.unwrap(std.worker.wait(c)));\n'
+                'let stats = std.worker.stats(pool);\n'
+                'print(stats["workers"]);\n'
+                'print(stats["available"]);\n'
+                'std.worker.shutdown(pool);\n',
+                stdout_all=["3", "7", "11", "2", "2"],
+            )
+            check(
+                "std.worker crash and timeout restart",
+                "import std;\n"
+                f'let pool = std.worker.pool(1, "{restart_path}");\n'
+                'print(std.result.is_err('
+                'std.worker.call(pool, "die", [1, 2])));\n'
+                'print(std.result.unwrap('
+                'std.worker.call(pool, "add", [2, 3])));\n'
+                'print(std.result.is_err('
+                'std.worker.call(pool, "slow", [1, 2], 100)));\n'
+                'print(std.result.unwrap('
+                'std.worker.call(pool, "add", [4, 5])));\n'
+                'std.worker.shutdown(pool);\n',
+                stdout_all=["true", "5", "true", "9"],
+            )
+        check(
+            "std process spawn repeated close",
+            "import std;\n"
+            "for (let i = 0; i < 5; i++) {\n"
+            '  let p = std.process.spawn("/bin/true");\n'
+            "  std.process.wait(p);\n"
+            "  std.process.close(p);\n"
+            "}\n"
+            "1\n",
+            stdout="= 1",
+        )
+        check(
+            "std process spawn kill",
+            "import std;\n"
+            'let p = std.process.spawn("/bin/sleep", {"args": ["5"]});\n'
+            'std.process.kill(p);\n'
+            'print(std.process.wait(p) > 0);\n',
+            stdout="true",
+        )
+        check(
+            "std io standard streams",
+            "import std;\n"
+            'std.io.write_all(std.io.stdout, "hello\\n");\n'
+            'std.io.flush(std.io.stdout);\n',
+            stdout="hello",
+        )
+
+    probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
+    if "zlib support is disabled" not in probe.stderr:
+        check(
+            "std compress roundtrips",
+            "import std;\n"
+            'let b = bytes_from_string("hello hello hello");\n'
+            'print(bytes_hex(bytes_slice(std.compress.gzip(b), 0, 2)));\n'
+            'print(bytes_to_string(std.compress.gunzip('
+            'std.compress.gzip(b))));\n'
+            'print(bytes_to_string(std.compress.unzlib('
+            'std.compress.zlib(b))));\n'
+            'print(bytes_to_string(std.compress.inflate('
+            'std.compress.deflate(b))));\n',
+            stdout_all=["1f8b", "hello hello hello", "hello hello hello",
+                        "hello hello hello"],
+        )
+
+
+def check_source_encoding():
+    """Verify BOM handling and --encoding for source files."""
+    script = 'print("你好");\n'
+    cases = [
+        ("utf8", script.encode("utf-8"), ()),
+        ("utf8 bom", b"\xef\xbb\xbf" + script.encode("utf-8"), ()),
+        ("utf16le bom", b"\xff\xfe" + script.encode("utf-16le"), ()),
+        ("utf16be bom", b"\xfe\xff" + script.encode("utf-16be"), ()),
+        ("utf32le bom", b"\xff\xfe\x00\x00" + script.encode("utf-32le"), ()),
+        ("utf32be bom", b"\x00\x00\xfe\xff" + script.encode("utf-32be"), ()),
+        ("gbk explicit", script.encode("gbk"), ("--encoding", "gbk")),
+        ("utf16le explicit", script.encode("utf-16le"),
+         ("--encoding", "utf-16le")),
+        ("utf16 explicit with bom",
+         b"\xff\xfe" + script.encode("utf-16le"),
+         ("--encoding", "utf-16")),
+    ]
+    for name, data, args in cases:
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            handle.write(data)
+            path = handle.name
+        try:
+            proc = subprocess.run(
+                [BIN, *args, path],
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                timeout=10,
+            )
+        finally:
+            os.unlink(path)
+        assert proc.returncode == 0, (name, proc.stderr)
+        assert "你好" in proc.stdout, (name, proc.stdout, proc.stderr)
+
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(b'\xef\xbb\xbf' + script.encode("gbk"))
+        path = handle.name
+    try:
+        proc = subprocess.run(
+            [BIN, "--encoding", "gbk", path],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+        )
+    finally:
+        os.unlink(path)
+    assert proc.returncode == 2, proc.returncode
+    assert "BOM" in proc.stderr and "gbk" in proc.stderr, proc.stderr
+
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(b"let a\x80b = 1;\n")
+        path = handle.name
+    try:
+        proc = subprocess.run(
+            [BIN, path],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=10,
+        )
+    finally:
+        os.unlink(path)
+    assert proc.returncode == 1, proc.returncode
+    assert "invalid UTF-8 byte" in proc.stderr, proc.stderr
+    assert "--encoding" in proc.stderr, proc.stderr
+
+    with tempfile.TemporaryDirectory() as tmp:
+        app = os.path.join(tmp, "app")
+        package = os.path.join(app, "pkg")
+        os.makedirs(package)
+        with open(os.path.join(package, "pkg.skein"), "wb") as handle:
+            handle.write('package pkg { export let value = "包"; }\n'
+                         .encode("gbk"))
+        main_path = os.path.join(app, "main.skein")
+        with open(main_path, "wb") as handle:
+            handle.write('import pkg;\nprint(pkg.value);\n'.encode("gbk"))
+        proc = subprocess.run(
+            [BIN, "--encoding", "gbk", main_path],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "包" in proc.stdout, (proc.stdout, proc.stderr)
+
+__all__ = [
+    "BIN",
+    "FFI_SHIM",
+    "skein_string",
+    "run",
+    "run_file",
+    "check",
+    "ws_recv_exact",
+    "ws_read_frame",
+    "ws_write_frame",
+    "ws_accept_key",
+    "check_interactive_continuation",
+    "check_encoding_two_byte_tables",
+    "check_unicode_normalization_samples",
+    "check_extended_stdlib",
+    "check_source_encoding",
+    "base64",
+    "hashlib",
+    "os",
+    "random",
+    "signal",
+    "subprocess",
+    "sys",
+    "tempfile",
+    "time",
+    "unicodedata",
+]

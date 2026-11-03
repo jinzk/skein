@@ -1,0 +1,1391 @@
+#!/usr/bin/env python3
+"""Standard library, FFI, encoding, traits and processes.
+
+Extracted from the original test_skein.py main() body, lines 7539-8920.
+"""
+from harness import *  # noqa: F401,F403
+
+
+def run_cases():
+    ffi_probe = run("import std;\nkind_of(std.ffi)\n")
+    has_ffi = "= dict" in ffi_probe.stdout
+    if sys.platform.startswith("linux") and has_ffi:
+        import ctypes.util
+        libm = ctypes.util.find_library("m")
+        libc = ctypes.util.find_library("c")
+        if libm and libc:
+            check(
+                "std ffi basic calls",
+                f'import std;\n'
+                f'let m = std.ffi.open("{libm}");\n'
+                f'std.ffi.call(m, "cos", "f64", ["f64"], [0.0])\n'
+                f'let c = std.ffi.open("{libc}");\n'
+                f'std.ffi.call(c, "strlen", "i64", ["cstring"], ["hello"])\n'
+                f'let x = bytes_from_string("hello");\n'
+                f'let y = bytes_from_string("hello");\n'
+                f'std.ffi.call(c, "memcmp", "i32", '
+                f'["bytes", "bytes", "usize"], [x, y, 5])\n'
+                f'let buf = std.ffi.buffer(8);\n'
+                f'std.ffi.call(c, "memcpy", "void", '
+                f'["buffer", "bytes", "usize"], [buf, x, 5]);\n'
+                f'bytes_to_string(std.ffi.buffer_bytes(buf, 5))\n'
+                f'std.ffi.buffer_len(buf)\n'
+                f'std.ffi.buffer_free(buf);\n'
+                f'std.ffi.close(m);\nstd.ffi.close(c);\n',
+                stdout_all=["= 1.0", "= 5", "= 0", "= hello", "= 8"],
+            )
+
+    if has_ffi and FFI_SHIM:
+        shim = skein_string(FFI_SHIM)
+        check(
+            "std ffi scalar types",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_i8", "i8", ["i8"], [-5])\n'
+            'std.ffi.call(lib, "shim_u8", "u8", ["u8"], [250])\n'
+            'std.ffi.call(lib, "shim_i16", "i16", ["i16"], [-30000])\n'
+            'std.ffi.call(lib, "shim_u16", "u16", ["u16"], [60000])\n'
+            'std.ffi.call(lib, "shim_i32", "i32", ["i32"], [-100000])\n'
+            'std.ffi.call(lib, "shim_u32", "u32", ["u32"], [4000000000])\n'
+            'std.ffi.call(lib, "shim_i64", "i64", ["i64"], [-9000000000])\n'
+            'std.ffi.call(lib, "shim_u64", "u64", ["u64"], [9000000000])\n'
+            'std.ffi.call(lib, "shim_f32", "f32", ["f32"], [1.5])\n'
+            'std.ffi.call(lib, "shim_f64", "f64", ["f64"], [2.5])\n'
+            'std.ffi.call(lib, "shim_cstring", "cstring", '
+            '["cstring"], ["hello"])\n'
+            'std.ffi.call(lib, "shim_usize", "usize", ["usize"], [123])\n'
+            'std.ffi.call(lib, "shim_isize", "isize", ["isize"], [-123])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=[
+                "= -5", "= 250", "= -30000", "= 60000",
+                "= -100000", "= 4000000000", "= -9000000000",
+                "= 9000000000", "= 1.5", "= 2.5", "= hello",
+                "= 123", "= -123",
+            ],
+        )
+        check(
+            "std ffi u64 overflow",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_u64_max", "u64", [], [])\n'
+            "std.ffi.close(lib);\n",
+            stderr="u64 return value exceeds int64 range",
+        )
+        if sys.maxsize > 2**31 - 1:
+            check(
+                "std ffi usize overflow",
+                "import std;\n"
+                f"let lib = std.ffi.open({shim});\n"
+                'std.ffi.call(lib, "shim_usize_max", "usize", [], [])\n'
+                "std.ffi.close(lib);\n",
+                stderr="usize return value exceeds int64 range",
+            )
+        check(
+            "std ffi library error",
+            'import std;\nstd.ffi.open("/definitely/not/a/library.so")\n',
+            stderr="cannot load",
+        )
+        check(
+            "std ffi symbol error",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_missing_symbol", "void", [], [])\n'
+            "std.ffi.close(lib);\n",
+            stderr="symbol not found",
+        )
+        check(
+            "std ffi direct bytes return",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_cstring", "bytes", '
+            '["cstring"], ["hello"])\n'
+            "std.ffi.close(lib);\n",
+            stderr="cannot be returned directly",
+        )
+        check(
+            "std ffi buffer output",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let buf = std.ffi.buffer(8);\n"
+            'std.ffi.call(lib, "shim_buffer_write", "i32", '
+            '["buffer", "usize"], [buf, 8])\n'
+            "bytes_to_string(std.ffi.buffer_bytes(buf, 5))\n"
+            "std.ffi.buffer_len(buf)\n"
+            "std.ffi.buffer_free(buf);\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 5", "= hello", "= 8"],
+        )
+        check(
+            "std ffi buffer bounds",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let buf = std.ffi.buffer(4);\n"
+            "std.ffi.buffer_bytes(buf, 5)\n"
+            "std.ffi.buffer_free(buf);\n"
+            "std.ffi.buffer_len(buf)\n"
+            "std.ffi.close(lib);\n",
+            stderr="length out of range",
+        )
+        check(
+            "std ffi freed buffer",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let buf = std.ffi.buffer(4);\n"
+            "std.ffi.buffer_free(buf);\n"
+            "std.ffi.buffer_len(buf)\n"
+            "std.ffi.close(lib);\n",
+            stderr="ffi buffer is freed",
+        )
+    check(
+        "std string format",
+        'import std;\nstd.string.format("{}", 3)\n',
+        stdout="= 3",
+    )
+    check(
+        "std list helpers",
+        "import std;\n"
+        "std.list.len([1, 2, 3])\n"
+        "std.list.slice([1, 2, 3, 4], 1, 2)\n"
+        "std.list.contains([1, 2, 3], 2)\n"
+        "std.list.index([1, 2, 3], 3)\n",
+        stdout_all=["= 3", "= [2, 3]", "= 1", "= 2"],
+    )
+    check(
+        "std list slice clamps",
+        "import std;\nstd.list.slice([1, 2], 1, 10)\n",
+        stdout="= [2]",
+    )
+    check(
+        "std dict helpers",
+        "import std;\n"
+        'std.dict.get({"a": 1}, "a")\n'
+        'std.dict.get({"a": 1}, "b")\n'
+        'std.dict.get({"a": 1}, "b", 9)\n'
+        'std.dict.has({"a": 1}, "a")\n'
+        'std.dict.keys({"a": 1, "b": 2})\n'
+        'std.dict.values({"a": 1, "b": 2})\n',
+        stdout_all=["= 1", "= 9", "= 1", "= [a, b]", "= [1, 2]"],
+    )
+    check(
+        "std string helpers",
+        "import std;\n"
+        'std.string.join(["a", "b", "c"], ",")\n'
+        'std.string.replace("a-b-c", "-", "_")\n'
+        'std.string.starts_with("hello", "he")\n'
+        'std.string.ends_with("hello", "lo")\n'
+        'std.string.find("hello", "ll")\n'
+        'std.string.trim("  x  ")\n',
+        stdout_all=["= a,b,c", "= a_b_c", "= 1", "= 1", "= 2", "= x"],
+    )
+    check(
+        "std bytes aliases",
+        "import std;\n"
+        'std.bytes.hex(bytes_from_hex("00ff"))\n'
+        'std.bytes.len(bytes_from_hex("00ff"))\n',
+        stdout_all=["= 00ff", "= 2"],
+    )
+    check(
+        "std bytes string aliases",
+        "import std;\n"
+        'std.bytes.to_string(std.bytes.from_string("abc"))\n'
+        'std.bytes.to_string(bytes_from_hex("ff"))\n',
+        stdout_all=["= abc"],
+        stderr="not valid UTF-8",
+    )
+    check(
+        "std encoding gbk roundtrip",
+        "import std;\n"
+        'print(std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk"));\n'
+        'print(bytes_hex(std.encoding.encode("中国", "gbk")));\n'
+        'std.encoding.supports("gbk")\n',
+        stdout_all=["中国", "d6d0b9fa", "= true"],
+    )
+    check(
+        "std encoding gbk euro",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode("€", "gbk")));\n'
+        'print(std.encoding.decode(bytes_from_hex("80"), "gbk"));\n',
+        stdout_all=["80", "€"],
+    )
+    check(
+        "std encoding gb18030 vectors",
+        "import std;\n"
+        'print(std.encoding.decode(bytes_from_hex("d6d0"), "gb18030"));\n'
+        'print(bytes_hex(std.encoding.encode("€", "gb18030")));\n'
+        'let s = std.encoding.decode(bytes_from_hex("90308130"), "gb18030");\n'
+        'print(bytes_hex(std.encoding.encode(s, "gb18030")));\n'
+        'print(bytes_hex(std.encoding.encode("😀", "gb18030")));\n'
+        'std.encoding.supports("gb18030")\n',
+        stdout_all=["中", "a2e3", "90308130", "9439fc36", "= true"],
+    )
+    check(
+        "std encoding gb18030 invalid byte",
+        "import std;\n"
+        'std.encoding.decode(bytes_from_hex("80"), "gb18030")\n',
+        stderr="invalid gb18030",
+    )
+    check(
+        "std encoding utf16 bom",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode("中", "utf-16")));\n'
+        'print(std.encoding.decode(bytes_from_hex("fffe2d4e"), "utf-16"));\n',
+        stdout_all=["fffe2d4e", "中"],
+    )
+    check(
+        "std encoding utf32",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode("中", "utf-32le")));\n'
+        'print(bytes_hex(std.encoding.encode("中", "utf-32be")));\n'
+        'print(bytes_hex(std.encoding.encode("中", "utf-32")));\n'
+        'print(std.encoding.decode(bytes_from_hex("2d4e0000"), "utf-32le"));\n'
+        'print(std.encoding.decode(bytes_from_hex("00004e2d"), "utf-32be"));\n'
+        'print(std.encoding.decode(bytes_from_hex("fffe00002d4e0000"), '
+        '"utf-32"));\n',
+        stdout_all=["2d4e0000", "00004e2d", "fffe00002d4e0000",
+                    "中", "中", "中"],
+    )
+    check(
+        "std encoding error modes",
+        "import std;\n"
+        'print(std.encoding.decode(bytes_from_hex("ff"), "utf-8", "replace"));\n'
+        'print(bytes_hex(std.encoding.encode("é", "ascii", "replace")));\n'
+        'bytes_len(std.encoding.encode("é", "ascii", "ignore"))\n',
+        stdout_all=["�", "3f", "= 0"],
+    )
+    check(
+        "std encoding nul rejected",
+        "import std;\n"
+        'std.encoding.decode(bytes_from_hex("0000"), "utf-16le")\n',
+        stderr="NUL",
+    )
+    check(
+        "std encoding unknown name",
+        "import std;\n"
+        'std.encoding.supports("not-an-encoding")\n'
+        'std.encoding.decode(bytes_from_hex("00"), "not-an-encoding")\n',
+        stdout_all=["= false"],
+        stderr="unknown encoding",
+    )
+    check(
+        "std encoding source type",
+        "import std;\n"
+        'std.encoding.decode("abc", "gbk")\n',
+        stderr="expects bytes",
+    )
+    check(
+        "std unicode normalization forms",
+        "import std;\n"
+        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(decomposed, "nfc"), "utf-8")));\n'
+        'let composed = std.encoding.decode(bytes_from_hex("c3a9"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(composed, "nfd"), "utf-8")));\n'
+        'let circled = std.encoding.decode(bytes_from_hex("e291a0"), "utf-8");\n'
+        'print(std.unicode.normalize(circled, "nfkc"));\n'
+        'print(std.unicode.normalize(circled, "nfkd"));\n'
+        'std.unicode.version()\n',
+        stdout_all=["c3a9", "65cc81", "1", "1", "= 16.0.0"],
+    )
+    check(
+        "std unicode is normalized",
+        "import std;\n"
+        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
+        'let composed = std.encoding.decode(bytes_from_hex("c3a9"), "utf-8");\n'
+        'std.unicode.is_normalized(decomposed, "nfc")\n'
+        'std.unicode.is_normalized(composed, "nfc")\n'
+        'std.unicode.is_normalized(composed, "nfd")\n',
+        stdout_all=["= false", "= true", "= false"],
+    )
+    check(
+        "std unicode compatibility",
+        "import std;\n"
+        'let ligature = std.encoding.decode(bytes_from_hex("efac81"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(ligature, "nfc"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(ligature, "nfkc"), "utf-8")));\n'
+        'let fullwidth = std.encoding.decode(bytes_from_hex("efbc91"), "utf-8");\n'
+        'print(std.unicode.normalize(fullwidth, "nfkc"));\n',
+        stdout_all=["efac81", "6669", "1"],
+    )
+    check(
+        "std unicode hangul",
+        "import std;\n"
+        'let jamo = std.encoding.decode(bytes_from_hex("e18480e185a1"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(jamo, "nfc"), "utf-8")));\n',
+        stdout_all=["eab080"],
+    )
+    check(
+        "std unicode canonical order",
+        "import std;\n"
+        'let angstrom = std.encoding.decode(bytes_from_hex("e284ab"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(angstrom, "nfc"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(angstrom, "nfd"), "utf-8")));\n'
+        'let marks = std.encoding.decode(bytes_from_hex("61cc95cc80"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.normalize(marks, "nfd"), "utf-8")));\n',
+        stdout_all=["c385", "41cc8a", "61cc80cc95"],
+    )
+    check(
+        "std unicode unknown form",
+        "import std;\n"
+        'std.unicode.normalize("x", "invalid")\n',
+        stderr="unknown normalization form",
+    )
+    check(
+        "std unicode source type",
+        "import std;\n"
+        'std.unicode.normalize(1, "nfc")\n',
+        stderr="expects a string",
+    )
+    check("std join type", 'import std;\nstd.string.join([1], ",")\n',
+          stderr="expects string elements")
+    check("std replace empty", 'import std;\nstd.string.replace("a", "", "b")\n',
+          stderr="search must not be empty")
+    check("std list slice type", "import std;\nstd.list.slice(1, 0)\n",
+          stderr="std.list.slice expects a list")
+    check("std list slice start", "import std;\nstd.list.slice([1], -1)\n",
+          stderr="start must be a non-negative integer")
+    check("std dict get type", 'import std;\nstd.dict.get([], "a")\n',
+          stderr="std.dict.get expects a dict")
+    check("std import missing module", "std.list.len([1])\n",
+          stderr="symbol not found std")
+    check(
+        "std namespace copy is isolated",
+        "import std;\n"
+        "func mutate(ns) { ns.list = 1; }\n"
+        "mutate(std);\n"
+        "std.list.len([1, 2])\n",
+        stdout="= 2",
+    )
+    check(
+        "std list transformations",
+        "import std;\n"
+        "std.list.reverse([1, 2, 3])\n"
+        "std.list.sort([3, 1, 2])\n"
+        "std.list.sort([2.5, 1, 3])\n"
+        'std.list.sort(["b", "a", "c"])\n'
+        "std.list.append([1, 2], 3)\n",
+        stdout_all=[
+            "= [3, 2, 1]",
+            "= [1, 2, 3]",
+            "= [1, 2.5, 3]",
+            "= [a, b, c]",
+            "= [1, 2, 3]",
+        ],
+    )
+    check(
+        "std list functional helpers",
+        "import std;\n"
+        "std.list.map([1, 2, 3], func(x) { return x * 2; })\n"
+        "std.list.filter([1, 2, 3, 4], func(x) { return x % 2 == 0; })\n"
+        "std.list.reduce([1, 2, 3, 4], func(a, b) { return a + b; })\n"
+        "std.list.reduce([1, 2, 3, 4], func(a, b) { return a + b; }, 10)\n",
+        stdout_all=["= [2, 4, 6]", "= [2, 4]", "= 10", "= 20"],
+    )
+    check(
+        "std dict items/delete/merge",
+        "import std;\n"
+        'std.dict.items({"a": 1, "b": 2})\n'
+        'std.dict.delete({"a": 1, "b": 2}, "a")\n'
+        'std.dict.delete({"a": 1}, "missing")\n'
+        'std.dict.merge({"a": 1, "b": 2}, {"b": 9, "c": 3})\n',
+        stdout_all=["= [[a, 1], [b, 2]]", "= {b: 2}", "= {a: 1}",
+                    "= {a: 1, b: 9, c: 3}"],
+    )
+    check(
+        "std string extras",
+        "import std;\n"
+        'std.string.contains("hello", "ell")\n'
+        'std.string.contains("hello", "x")\n'
+        'std.string.repeat("ab", 3)\n'
+        'std.string.repeat("ab", 0) == ""\n'
+        'std.string.trim_start("  x  ")\n'
+        'std.string.trim_end("  x  ")\n',
+        stdout_all=["= 1", "= 0", "= ababab", "= true", "= x  ", "=   x"],
+    )
+    check(
+        "std list sort type error",
+        'import std;\nstd.list.sort([1, "a"])\n',
+        stderr="expects all numbers, strings, chars, or bytes",
+    )
+    check(
+        "std reduce empty error",
+        "import std;\nstd.list.reduce([], func(a, b) { return a + b; })\n",
+        stderr="empty list without initial value",
+    )
+    check(
+        "std map callback error",
+        "import std;\n"
+        "std.list.map([1], func(x) { return 1/0; })\n",
+        stderr="division by zero",
+    )
+    check(
+        "std repeat negative",
+        'import std;\nstd.string.repeat("a", -1)\n',
+        stderr="repeat count must be non-negative",
+    )
+    check(
+        "std dict merge type",
+        "import std;\nstd.dict.merge({\"a\": 1}, 1)\n",
+        stderr="std.dict.merge expects two dicts",
+    )
+    check(
+        "std json parse",
+        r'''import std;
+    let v = std.json.parse("{\"a\": 1, \"b\": [true, null, \"x\"], \"c\": 1.5}");
+    print(v["a"]);
+    print(v["b"][0]);
+    print(v["b"][1]);
+    print(v["b"][2]);
+    print(v["c"]);
+    ''',
+        stdout_all=["1", "true", "null", "x", "1.5"],
+    )
+    check(
+        "std json stringify",
+        r'''import std;
+    std.json.stringify({"a": 1, "b": [true, null, "x"], "c": 1.5})
+    std.json.stringify({"s": "a\"b\n\\c"})
+    std.json.stringify(1.0)
+    ''',
+        stdout_all=[r'= {"a":1,"b":[true,null,"x"],"c":1.5}',
+                    r'= {"s":"a\"b\n\\c"}', "= 1.0"],
+    )
+    check(
+        "std json numbers",
+        r'''import std;
+    std.type.kind_of(std.json.parse("1"))
+    std.type.kind_of(std.json.parse("1.0"))
+    std.type.kind_of(std.json.parse("9223372036854775808"))
+    std.json.parse("-9223372036854775808")
+    ''',
+        stdout_all=["= int", "= float", "= float",
+                    "= -9223372036854775808"],
+    )
+    check(
+        "std json duplicate keys and unicode",
+        r'''import std;
+    std.json.parse("{\"a\":1,\"a\":2}")["a"]
+    std.json.parse("\"\\u4f60\\u597d\"")
+    ''',
+        stdout_all=["= 2", "= 你好"],
+    )
+    check(
+        "std json roundtrip",
+        r'''import std;
+    let text = "{\"a\": [1, 2], \"b\": {\"c\": true}, \"s\": \"\\u4f60\"}";
+    std.json.stringify(std.json.parse(text))
+    ''',
+        stdout=r'= {"a":[1,2],"b":{"c":true},"s":"你"}',
+    )
+    check(
+        "std json try_parse",
+        'import std;\n'
+        'let r = std.json.try_parse("{bad}");\n'
+        'std.result.is_err(r)\n'
+        'std.result.is_ok(std.json.try_parse("{\\"a\\":1}"))\n',
+        stdout_all=["= true", "= true"],
+    )
+    check(
+        "std json parse error",
+        'import std;\nstd.json.parse("{\\"a\\":1")\n',
+        stderr="JSON parse error",
+    )
+    check(
+        "std json parse bytes",
+        'import std;\n'
+        'std.json.parse(bytes_from_string("{\\"a\\": 7}"))["a"]\n',
+        stdout="= 7",
+    )
+    check(
+        "std json parse type",
+        "import std;\nstd.json.parse(1)\n",
+        stderr="std.json.parse expects a string or bytes",
+    )
+    check(
+        "std json parse invalid utf8",
+        'import std;\nstd.json.parse(bytes_from_hex("ff"))\n',
+        stderr="not valid UTF-8",
+    )
+    check(
+        "std json stringify key error",
+        "import std;\nstd.json.stringify({1: 2})\n",
+        stderr="JSON object keys must be strings",
+    )
+    check(
+        "std json stringify unsupported",
+        'import std;\nstd.json.stringify({"a": bytes_from_hex("00")})\n',
+        stderr="cannot encode bytes as JSON",
+    )
+
+    check(
+        "break",
+        "let i = 0;\n"
+        "while (i < 10) { i = i + 1; if (i == 3) { break; } print(i); }\n",
+        stdout="1\n2\n",
+    )
+    check(
+        "continue",
+        "let i = 0;\n"
+        "while (i < 5) { i = i + 1; if (i == 2) { continue; } print(i); }\n",
+        stdout="1\n3\n",
+    )
+    check(
+        "labeled break outer loop",
+        "label outer: for (let i in [1, 2, 3]) {\n"
+        "  for (let j in [1, 2, 3]) {\n"
+        "    if (i == 2 && j == 2) { break outer; }\n"
+        "    print(str(i) + \",\" + str(j));\n"
+        "  }\n"
+        "}\n"
+        'print("done");\n',
+        stdout_all=["1,1", "1,2", "1,3", "2,1", "done"],
+    )
+    check(
+        "labeled continue outer loop",
+        "label outer: for (let i in [1, 2]) {\n"
+        "  for (let j in [1, 2]) {\n"
+        "    if (j == 1) { continue outer; }\n"
+        "    print(\"bad\");\n"
+        "  }\n"
+        "}\n"
+        'print("done");\n',
+        stdout="done\n",
+    )
+    check(
+        "labeled break switch",
+        "label sw: switch (1) {\n"
+        "  case 1 => { break sw; }\n"
+        '  default => print("bad");\n'
+        "}\n"
+        'print("after");\n',
+        stdout="after\n",
+    )
+    check(
+        "label on non-loop rejected",
+        "label bad: if (1) { print(1); }\n",
+        stderr="label must be attached to a loop or switch",
+    )
+    check(
+        "block scope",
+        "let x = 1;\n{ let x = 2; }\nx\n",
+        stdout="= 1",
+    )
+    check(
+        "block assignment",
+        "let x = 1;\n{ x = 2; }\nx\n",
+        stdout="= 2",
+    )
+
+    check("fail caught with recover",
+          'func f() { fail "boom"; }\n'
+          "f() on error(e) { print(e); recover 0; }\n",
+          stdout_all=["boom", "= 0"])
+    check("on error handler not called on success",
+          "func f() { return 1; }\n"
+          'f() on error(e) { print("bad"); recover 0; }\n',
+          stdout="= 1")
+    check("pass propagates to outer handler",
+          'func inner() { fail "x"; }\n'
+          "func outer() { return inner() on error(e) { pass e; }; }\n"
+          'outer() on error(e) { print("caught " + str(e)); recover 7; }\n',
+          stdout_all=["caught x", "= 7"])
+    check("fail stops loop body",
+          "func f() {\n"
+          "  for (let i in [1, 2, 3]) {\n"
+          '    if (i == 2) { fail "loop"; }\n'
+          "    print(i);\n"
+          "  }\n"
+          "  return 0;\n"
+          "}\n"
+          'f() on error(e) { print("E " + str(e)); recover 9; }\n',
+          stdout_all=["1", "E loop", "= 9"])
+    check("recover value is expression result",
+          'func f() { fail "x"; }\n'
+          "(f() on error(e) { recover 2; }) + 3\n",
+          stdout="= 5")
+    check("handler accesses outer scope",
+          'let n = 3;\nfunc f() { fail "x"; }\n'
+          "f() on error(e) { recover n + 1; }\n",
+          stdout="= 4")
+    check("recover outside handler",
+          "recover 1;\n", stderr="recover outside error handler")
+    check("pass outside handler",
+          "pass 1;\n", stderr="pass outside error handler")
+    check("handler without terminal statement",
+          'func f() { fail "x"; }\n'
+          "let x = f() on error(e) { print(e); };\n",
+          stderr="error handler must end with recover, pass, or fail")
+    check("handler return rejected",
+          'func f() { fail "x"; }\n'
+          "func g() { let x = f() on error(e) { return 1; }; return 2; }\n"
+          "g()\n",
+          stderr="error handler cannot return, break, or continue")
+    check("method fail caught",
+          "struct P {\n"
+          "  x: int;\n"
+          '  func check(self) { if (self.x < 0) { fail "negative"; } '
+          "return self.x; }\n"
+          "}\n"
+          'P { x: -1 }.check() on error(e) { print(e); recover 0; }\n',
+          stdout_all=["negative", "= 0"])
+    check("recover does not cross function boundary",
+          'func bad() { recover 1; }\n'
+          'func f() { fail "x"; }\n'
+          "f() on error(e) { bad(); recover 0; };\n",
+          stderr="recover outside error handler")
+    check("uncaught fail at top level",
+          'fail "boom";\n', stderr="uncaught fail: boom")
+
+    check("variadic function",
+          "func sum(...nums: number) {\n"
+          "  let total = 0;\n"
+          "  for (let n in nums) { total = total + n; }\n"
+          "  return total;\n"
+          "}\n"
+          "sum()\nsum(1, 2, 3)\n",
+          stdout_all=["= 0", "= 6"])
+    check("variadic with fixed parameters",
+          "func f(a: int, ...rest: string) {\n"
+          "  return a + len(rest);\n"
+          "}\n"
+          "f(1)\nf(1, \"a\", \"b\")\n",
+          stdout_all=["= 1", "= 3"])
+    check("variadic rest is list",
+          "func f(...xs) {\n"
+          "  if (len(xs) == 0) { return null; }\n"
+          "  return xs[1];\n"
+          "}\n"
+          "f()\nf(10, 20)\n",
+          stdout_all=["= 20"])
+    check("variadic arity",
+          "func f(a: int, ...rest) { return a; }\nf()\n",
+          stderr="function f expects at least 1 argument(s), got 0")
+    check("variadic element type",
+          'func f(...rest: number) { return len(rest); }\nf(1, "x")\n',
+          stderr="function f rest argument 2 expects number, got string")
+    check("variadic must be last",
+          "func f(...xs, y) { return y; }\n",
+          stderr="variadic parameter must be last")
+    check("variadic method",
+          "func sum(...nums: number) {\n"
+          "  let total = 0;\n"
+          "  for (let n in nums) { total = total + n; }\n"
+          "  return total;\n"
+          "}\n"
+          "struct P { x: int; }\n"
+          "impl P {\n"
+          "  func add(self, ...nums: int) { return sum(...nums); }\n"
+          "}\n"
+          "P { x: 1 }.add(1, 2, 3)\n",
+          stdout="= 6")
+    check("variadic anonymous function",
+          "func make() { return func(...args: int) { return len(args); }; }\n"
+          "make()(1, 2, 3)\n",
+          stdout="= 3")
+    check("call spread",
+          "func sum(...nums: number) {\n"
+          "  let total = 0;\n"
+          "  for (let n in nums) { total = total + n; }\n"
+          "  return total;\n"
+          "}\n"
+          "let xs = [1, 2, 3];\n"
+          "sum(...xs)\nsum(0, ...xs)\n",
+          stdout_all=["= 6", "= 6"])
+    check("call spread requires list",
+          "func f(...xs) { return len(xs); }\nf(...1)\n",
+          stderr="spread expects a list, got int")
+    check("trait variadic rejected",
+          "trait T { func f(self, ...args); }\n",
+          stderr="trait methods cannot be variadic")
+
+    many_globals = "".join(f"let v{i} = {i};\n" for i in range(40))
+    check("large symbol table lookup", many_globals + "v0 + v39\n",
+          stdout="= 39")
+    check("large symbol table duplicate", many_globals + "let v0 = 1;\n",
+          stderr="symbol repeated")
+    check(
+        "large symbol table closure",
+        many_globals
+        + "func make() { let n = 5; func get() { return n + v39; } return get; }\n"
+        + "let g = make();\ng()\n",
+        stdout="= 44",
+    )
+    check(
+        "large symbol table shadowing",
+        many_globals + "let x = 1;\nfunc f() { let x = 2; return x; }\nf()\nx\n",
+        stdout_all=["= 2", "= 1"],
+    )
+
+    check("call non-function", "let x = 1;\nx(2)\n", stderr="cannot call int")
+    check("recursion depth limit",
+          "func f(n) { return f(n + 1); }\nf(0)\n",
+          stderr="maximum recursion depth")
+    check("function without return yields null",
+          "func noret() { }\nprint(noret())\n", stdout="null")
+    check("null arithmetic", "func noret() { }\nnoret() + 1\n",
+          stderr="cannot add null and int")
+    check("null truthiness",
+          "func noret() { }\nif (noret()) { print(1); } else { print(2); }\n",
+          stdout="2")
+    check("null as argument",
+          "func noret() { }\nfunc add(a,b) { return a+b; }\nadd(noret(), 2)\n",
+          stderr="cannot add null and int")
+    check("null equality", "func noret() { }\nnoret() == noret()\n",
+          stdout="= true")
+    check("null literal", "print(null)\n", stdout="null")
+    check("null literal equality", "null == null\n", stdout="= true")
+    check("null literal inequality", "null == 0\n", stdout="= false")
+    check("null literal falsy",
+          "if (null) { print(1); } else { print(2); }\n", stdout="2")
+    check("null literal arithmetic", "null + 1\n",
+          stderr="cannot add null and int")
+    check("null is not callable", "null()\n", stderr="cannot call null")
+    check("str null", "str(null)\n", stdout="= null")
+    check("format null", 'format("{}", null)\n', stdout="= null")
+
+    check("typed parameter ok",
+          "func f(x: int) { return x + 1; }\nf(2)\n", stdout="= 3")
+    check("typed parameter error",
+          'func f(x: int) { return x; }\nf("x")\n',
+          stderr="argument 1 (x) expects int, got string")
+    check("untyped parameter",
+          'func f(x) { return x; }\nf("x")\n', stdout="= x")
+    check("multiple typed parameters",
+          "func g(a, b: number, c: string) { return b; }\n"
+          'g(1, 2.5, "x")\n',
+          stdout="= 2.5")
+    check("typed number rejects string",
+          'func g(b: number) { return b; }\ng("x")\n',
+          stderr="expects number, got string")
+    check("typed bool",
+          "func h(x: bool) { return x; }\nh(true)\nh(false)\n",
+          stdout_all=["= true", "= false"])
+    check("typed bool rejects int",
+          "func h(x: bool) { return x; }\nh(1)\n",
+          stderr="expects bool, got int")
+    check("typed bool accepts comparison",
+          "func h(x: bool) { return x; }\nh(1 == 1)\n",
+          stdout="= true")
+    check("typed list",
+          "func f(x: list) { return len(x); }\nf([1,2])\n",
+          stdout="= 2")
+    check("typed dict",
+          "func f(x: dict) { return len(x); }\nf({1:2})\n",
+          stdout="= 1")
+    check("typed string",
+          'func f(x: string) { return x; }\nf("a")\n', stdout="= a")
+    check("typed bytes",
+          'func f(x: bytes) { return bytes_len(x); }\n'
+          'f(bytes_from_hex("00ff"))\n',
+          stdout="= 2")
+    check("typed callable",
+          "func apply(fn: callable, x: int) { return fn(x); }\n"
+          "apply(sqrt, 9)\n",
+          stdout="= 3.0")
+    check("typed function",
+          "func apply(fn: function, x: int) { return fn(x); }\n"
+          "let f = func(y) { return y * 2; };\n"
+          "apply(f, 3)\n",
+          stdout="= 6")
+    check("typed builtin",
+          "func apply(fn: builtin, x: int) { return fn(x); }\n"
+          "apply(sqrt, 16)\n",
+          stdout="= 4.0")
+    check("typed callable rejects int",
+          "func apply(fn: callable) { return fn; }\napply(1)\n",
+          stderr="expects callable, got int")
+    check("typed function rejects builtin",
+          "func apply(fn: function) { return fn; }\napply(sqrt)\n",
+          stderr="expects function, got builtin")
+    check("typed builtin rejects function",
+          "func apply(fn: builtin) { return fn; }\n"
+          "let f = func() { return 1; };\napply(f)\n",
+          stderr="expects builtin, got function")
+    check("typed any",
+          "func f(x: any) { return x; }\nf(true)\n", stdout="= true")
+    check("typed null",
+          "func f(x: null) { return x; }\nprint(f(null))\n",
+          stdout="null")
+    check("typed null rejects int",
+          "func f(x: null) { return x; }\nf(1)\n",
+          stderr="expects null, got int")
+    check("typed number accepts int and float",
+          "func f(x: number) { return x; }\nf(1)\nf(1.5)\n",
+          stdout_all=["= 1", "= 1.5"])
+    check("typed anonymous function",
+          "let f = func(x: int) { return x; };\nf(3)\n", stdout="= 3")
+    check("typed closure",
+          "func make() { func get(x: int) { return x + 1; } return get; }\n"
+          "let f = make();\nf(4)\n",
+          stdout="= 5")
+    check("typed parameter trailing comma",
+          "func f(x: int,) { return x; }\nf(1)\n", stdout="= 1")
+    check("typed parameter error prevents body",
+          "let hits = 0;\n"
+          "func f(x: int) { hits = hits + 1; }\n"
+          'f("bad");\nhits\n',
+          stdout="= 0",
+          stderr="expects int, got string")
+    check("unknown type name",
+          "func f(x: nope) { return x; }\n",
+          stderr="unknown type name nope")
+
+    check("typed variable declaration",
+          'let x: string = "hi";\nx\nx = "bye";\nx\n',
+          stdout_all=["= hi", "= bye", "= bye"])
+    check("typed variable initializer mismatch",
+          'let x: int = "bad";\n',
+          stderr="variable x expects int, got string")
+    check("typed variable reassignment mismatch",
+          'let x: int = 1;\nx = "bad";\n',
+          stderr="variable x expects int, got string")
+    check("typed variable number accepts int and float",
+          "let x: number = 1;\nx\nx = 2.5;\nx\n",
+          stdout_all=["= 1", "= 2.5", "= 2.5"])
+    check("typed variable function",
+          "let f: function = func(x) { return x + 1; };\nf(2)\n",
+          stdout="= 3")
+    check("typed variable builtin",
+          "let f: builtin = sqrt;\nf(16)\n", stdout="= 4.0")
+    check("typed variable callable",
+          "let f: callable = sqrt;\nf(9)\n", stdout="= 3.0")
+    check("typed variable requires initializer for function",
+          "let f: function;\n",
+          stderr="variable f of type function requires an initializer")
+    check("typed const declaration",
+          "const x: int = 1;\nx\n", stdout_all=["= 1"])
+    check("typed const reassignment",
+          "const x: int = 1;\nx = 2;\n",
+          stderr="cannot assign to constant x")
+    check("typed for initializer",
+          "for (let i: int = 0; i < 2; i++) { print(i); }\n",
+          stdout_all=["0", "1"])
+    check("typed parameter reassignment",
+          'func f(x: int) { x = "bad"; }\nf(1)\n',
+          stderr="variable x expects int, got string")
+    check("typed variable defaults",
+          "let s: string;\n"
+          "let i: int;\n"
+          "let f: float;\n"
+          "let b: bool;\n"
+          "let l: list;\n"
+          "let d: dict;\n"
+          "let by: bytes;\n"
+          "let a: any;\n"
+          's == "" && i == 0 && f == 0.0 && !b && len(l) == 0 && '
+          "len(d) == 0 && bytes_len(by) == 0 && a == null\n",
+          stdout="= true")
+    check("typed variable is shallow",
+          'let a: list = [0];\na[0] = "x";\na\n', stdout='= [x]')
+
+    check("struct construction and fields",
+          "struct Point { x: int; y: int; }\n"
+          "let p = Point { x: 3, y: 4 };\n"
+          "p.x + p.y\n"
+          "p.x = 10;\n"
+          "p.x\n"
+          "p\n",
+          stdout_all=["= 7", "= 10", "= Point { x: 10, y: 4 }"])
+    check("struct method in struct",
+          "struct Point {\n"
+          "  x: int;\n"
+          "  y: int;\n"
+          "  func length(self) {\n"
+          "    return sqrt(self.x * self.x + self.y * self.y);\n"
+          "  }\n"
+          "}\n"
+          "Point { x: 3, y: 4 }.length()\n",
+          stdout="= 5.0")
+    check("struct method in impl",
+          "struct Point { x: int; y: int; }\n"
+          "impl Point {\n"
+          "  func moved(self, dx: int, dy: int) {\n"
+          "    return Point { x: self.x + dx, y: self.y + dy };\n"
+          "  }\n"
+          "}\n"
+          "let p = Point { x: 3, y: 4 };\n"
+          "p.moved(1, 2)\n",
+          stdout="= Point { x: 4, y: 6 }")
+    check("struct method read-only self",
+          "struct Counter {\n"
+          "  n: int;\n"
+          "  func bump(self) { self.n = self.n + 1; }\n"
+          "}\n"
+          "let c = Counter { n: 1 };\nc.bump();\n",
+          stderr="cannot modify self in a read-only method")
+    check("struct self reassignment",
+          "struct A { func f(self) { self = null; } }\n"
+          "A {}.f();\n",
+          stderr="cannot assign to constant self")
+    check("struct missing field",
+          "struct Point { x: int; y: int; }\nPoint { x: 1 }\n",
+          stderr="field y of Point is required")
+    check("struct unknown field",
+          "struct Point { x: int; }\nPoint { x: 1, z: 2 }\n",
+          stderr="unknown field z in Point")
+    check("struct repeated field",
+          "struct Point { x: int; }\nPoint { x: 1, x: 2 }\n",
+          stderr="field x repeated in Point")
+    check("struct field initializer type",
+          'struct Point { x: int; }\nPoint { x: "bad" }\n',
+          stderr="field x of Point expects int, got string")
+    check("struct field assignment type",
+          'struct Point { x: int; }\nlet p = Point { x: 1 };\np.x = "bad";\n',
+          stderr="field x of Point expects int, got string")
+    check("typed struct variable",
+          "struct Point { x: int; }\n"
+          "let p: Point = Point { x: 7 };\n"
+          "func get_x(p: Point) { return p.x; }\n"
+          "get_x(p)\n",
+          stdout="= 7")
+    check("typed struct variable mismatch",
+          "struct Point { x: int; }\nlet p: Point = 1;\n",
+          stderr="variable p expects Point, got int")
+    check("struct copy-on-write",
+          "struct Point { x: int; }\n"
+          "let p = Point { x: 1 };\n"
+          "let q = p;\n"
+          "q.x = 9;\n"
+          "p.x\nq.x\n",
+          stdout_all=["= 1", "= 9"])
+    check("nested struct field",
+          "struct Inner { n: int; }\n"
+          "struct Outer { inner: Inner; }\n"
+          "let o = Outer { inner: Inner { n: 1 } };\n"
+          "o.inner.n = 5;\no.inner.n\n",
+          stdout="= 5")
+    check("struct in list",
+          "struct Point { x: int; }\n"
+          "let a = [Point { x: 1 }, Point { x: 2 }];\n"
+          "a[1].x++;\na[1].x\n",
+          stdout="= 3")
+    check("struct function field",
+          "struct Handler { callback: callable; }\n"
+          "let h = Handler { callback: func(x) { return x + 1; } };\n"
+          "h.callback(41)\n",
+          stdout="= 42")
+    check("struct equality",
+          "struct Point { x: int; }\n"
+          "Point { x: 1 } == Point { x: 1 }\n"
+          "Point { x: 1 } == Point { x: 2 }\n",
+          stdout_all=["= true", "= false"])
+    check("empty struct",
+          "struct Empty {}\nlet e = Empty {};\ne\n", stdout="= Empty {}")
+    check("bound method value",
+          "struct Point {\n"
+          "  x: int;\n"
+          "  func get(self) { return self.x; }\n"
+          "  func add(self, n: int) { return self.x + n; }\n"
+          "}\n"
+          "let p = Point { x: 3 };\n"
+          "let f = p.get;\n"
+          "let g = p.add;\n"
+          "f()\ng(4)\n",
+          stdout_all=["= 3", "= 7"])
+    check("bound method snapshot",
+          "struct Point { x: int; func get(self) { return self.x; } }\n"
+          "let p = Point { x: 1 };\n"
+          "let f = p.get;\n"
+          "p.x = 5;\n"
+          "f()\np.get()\n",
+          stdout_all=["= 5", "= 1", "= 5"])
+
+    check("trait implementation",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point {\n"
+          "  func draw(self) { print(\"point\"); }\n"
+          "}\n"
+          "let p = Point { x: 1 };\n"
+          "p.draw()\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(p)\n",
+          stdout_all=["point", "point"])
+    check("trait adapter with existing method",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func draw(self) { print(\"existing\"); } }\n"
+          "impl Drawable for Point;\n"
+          "let p = Point { x: 1 };\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(p)\n",
+          stdout="existing")
+    check("trait nominal only",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func draw(self) { print(\"point\"); } }\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(Point { x: 1 });\n",
+          stderr="expects Drawable, got Point")
+    check("trait typed variable",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "let d: Drawable = Point { x: 1 };\nd.draw()\n",
+          stdout="= 1")
+    check("trait adapter signature mismatch",
+          "trait Drawable { func draw(self, x: int); }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func draw(self, x: string) { return x; } }\n"
+          "impl Drawable for Point;\n",
+          stderr="method draw does not match the trait signature")
+    check("trait missing method",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point { }\n",
+          stderr="does not implement method draw required by trait Drawable")
+    check("trait extra method",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point {\n"
+          "  func other(self) { return 1; }\n"
+          "}\n",
+          stderr="method other is not declared by trait Drawable")
+    check("duplicate trait implementation",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "impl Drawable for Point { func draw(self) { return 2; } }\n",
+          stderr="method repeated draw")
+    check("duplicate method",
+          "struct Point { x: int; }\n"
+          "impl Point { func get(self) { return 1; } }\n"
+          "impl Point { func get(self) { return 2; } }\n",
+          stderr="method repeated get")
+    check("field and method name conflict",
+          "struct Point { x: int; func x(self) { return 1; } }\n",
+          stderr="field and method have the same name x")
+    check("method first parameter self",
+          "struct Point { x: int; }\n"
+          "impl Point { func get(this) { return 1; } }\n",
+          stderr="method first parameter must be self")
+    check("unknown struct type",
+          "let p = Missing { x: 1 };\n", stderr="unknown struct type Missing")
+    check("unknown field type",
+          "struct Point { x: Missing; }\n", stderr="unknown type name Missing")
+    check("struct switch unsupported",
+          "struct Point { x: int; }\n"
+          "switch (Point { x: 1 }) { default => print(\"bad\"); }\n",
+          stderr="switch does not support Point")
+
+    check("runtime kind_of",
+          "kind_of(1)\n"
+          "kind_of(1.5)\n"
+          "kind_of(true)\n"
+          'kind_of("x")\n'
+          "kind_of([1])\n"
+          "kind_of({})\n"
+          "kind_of(func() { return 1; })\n"
+          "kind_of(sqrt)\n"
+          "kind_of(null)\n",
+          stdout_all=["= int", "= float", "= bool", "= string", "= list",
+                      "= dict", "= function", "= builtin", "= null"])
+    check("runtime type_name",
+          "struct Point { x: int; }\n"
+          'type_name(1)\ntype_name("x")\ntype_name(Point { x: 1 })\n'
+          "type_name(null)\n",
+          stdout_all=["= int", "= string", "= Point", "= null"])
+    check("runtime type_module for primitive",
+          'type_module(1) == ""\n', stdout="= true")
+    check("is primitive types",
+          "1 is int\n1 is number\n1 is string\n"
+          "true is bool\n[1] is list\n{} is dict\n"
+          'null is null\n1 is any\n',
+          stdout_all=["= true", "= true", "= false", "= true",
+                      "= true", "= true", "= true", "= true"])
+    check("is struct and trait",
+          "trait Drawable { func draw(self); }\n"
+          "struct Point { x: int; }\n"
+          "struct Other { x: int; }\n"
+          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "let p = Point { x: 1 };\n"
+          "let o = Other { x: 1 };\n"
+          "p is Point\np is Other\np is Drawable\no is Drawable\n",
+          stdout_all=["= true", "= false", "= true", "= false"])
+    check("is in heterogeneous loop",
+          "struct Point { x: int; }\n"
+          'let values = [1, "x", [2], Point { x: 3 }, null];\n'
+          "for (let value in values) {\n"
+          '  if (kind_of(value) == "struct") {\n'
+          '    print("struct " + type_name(value));\n'
+          "  } else {\n"
+          "    print(kind_of(value));\n"
+          "  }\n"
+          "}\n",
+          stdout_all=["int", "string", "list", "struct Point", "null"])
+    check("is unknown type",
+          "1 is Missing\n", stderr="unknown type name Missing")
+
+    check("explicit empty return", "func f() { return; }\nprint(f())\n",
+          stdout="null")
+    check("print returns null", "let x = print(1);\nprint(x)\n",
+          stdout_all=["1", "null"])
+    check("arity error after argument evaluation",
+          "func one(a) { return a; }\none(print(1), 2)\n",
+          stdout="1", stderr="expects 1 argument")
+    check("non-callable evaluates arguments", "1(print(7))\n",
+          stdout="7", stderr="cannot call int")
+
+    check("builtin as value", "let f = sqrt;\nf(9)\n", stdout="= 3.0")
+    check("builtin as callback",
+          "func apply(f, x) { return f(x); }\napply(sqrt, 16)\n",
+          stdout="= 4.0")
+    check("builtin in list", "let fs = [sqrt, abs];\nfs[0](25)\n",
+          stdout="= 5.0")
+    check("builtin equality", "sqrt == sqrt\nsqrt == abs\n",
+          stdout_all=["= true", "= false"])
+    check("print as value", 'let p = print;\np("ok")\n', stdout="ok")
+    check("format as value", 'let f = format;\nf("{} + {}", 1, 2)\n',
+          stdout="= 1 + 2")
+    check("builtin string form", "str(sqrt)\n", stdout="= <builtin>")
+    check("command output", 'import std;\nstd.process.command("echo hi")\n',
+          stdout="= hi")
+    check("command in format",
+          'import std;\nformat("{}", std.process.command("echo hi"))\n',
+          stdout="= hi")
+    check("command as value",
+          'import std;\nlet run = std.process.command;\nrun("echo ok")\n',
+          stdout="= ok")
+    check("command type error", 'import std;\nstd.process.command(1)\n',
+          stderr="command expects a string")
+    check("command arity error", 'import std;\nstd.process.command()\n',
+          stderr="expects 1 or 2 arguments")
+    command_env_test = (
+        'import std;\nstd.process.command("echo %FOO%", {"FOO": "bar"})\n'
+        if sys.platform == "win32"
+        else 'import std;\nstd.process.command("echo $FOO", {"FOO": "bar"})\n'
+    )
+    check("command environment override", command_env_test, stdout="= bar")
+    command_status_env_test = (
+        'import std;\nstd.process.command_status("exit %CODE%", '
+        '{"CODE": "3"})\n'
+        if sys.platform == "win32"
+        else 'import std;\nstd.process.command_status("exit $CODE", '
+        '{"CODE": "3"})\n'
+    )
+    check("command_status environment override", command_status_env_test,
+          stdout="= 3")
+    check("command empty environment",
+          'import std;\nstd.process.command("echo hi", dict())\n',
+          stdout="= hi")
+    check("command env type",
+          'import std;\nstd.process.command("echo hi", 1)\n',
+          stderr="command env must be a dict")
+    check("command env key type",
+          'import std;\nstd.process.command("echo hi", {1: "x"})\n',
+          stderr="command env keys must be strings")
+    check("command env value type",
+          'import std;\nstd.process.command("echo hi", {"A": 1})\n',
+          stderr="command env values must be strings")
+    check("command env invalid name",
+          'import std;\nstd.process.command("echo hi", {"A=B": "x"})\n',
+          stderr="invalid environment variable name")
+    check("command env arity error",
+          'import std;\nstd.process.command("echo hi", dict(), 1)\n',
+          stderr="expects 1 or 2 arguments")
+    check("command_status env type",
+          'import std;\nstd.process.command_status("exit 0", 1)\n',
+          stderr="command_status env must be a dict")
+    check("command_status success",
+          'import std;\nstd.process.command_status("exit 0")\n',
+          stdout="= 0")
+    check("command_status failure",
+          'import std;\nstd.process.command_status("exit 3")\n',
+          stdout="= 3")
+    check("command_status output",
+          'import std;\nstd.process.command_status("echo hi")\n',
+          stdout_all=["hi", "= 0"])
+    check("command_status as value",
+          'import std;\nlet run = std.process.command_status;\n'
+          'run("exit 0")\n',
+          stdout="= 0")
+    check("command_status type error",
+          'import std;\nstd.process.command_status(1)\n',
+          stderr="command_status expects a string")
+    check("command_status arity error",
+          'import std;\nstd.process.command_status()\n',
+          stderr="expects 1 or 2 arguments")
+    check("global command removed", 'command("echo hi")\n',
+          stderr="symbol not found command")
+    check("command is ordinary identifier", "let command = 1;\ncommand\n",
+          stdout="= 1")
+    check("input reads a line", "input()\nhello\n", stdout="= hello")
+    check("input with prompt", 'input("Name: ")\nAlice\n',
+          stdout_all=["Name: ", "= Alice"])
+    check("input with print", 'print(input("> "))\nworld\n',
+          stdout_all=["> ", "world"])
+    check("input preserves spaces", "input()\n  hi  \n", stdout="=   hi  ")
+    check("input CRLF", "input()\r\nhello\r\n", stdout="= hello")
+    check("input backspace", "input()\nhello\x7f\x7f\n", stdout="= hel")
+    check("input EOF is null", "input() == null\n", stdout="= true")
+    check("input EOF print", "print(input())\n", stdout="null")
+    check("input prompt type", "input(1)\n",
+          stderr="input prompt must be a string")
+    check("input arity", 'input("a", "b")\n',
+          stderr="input expects 0 or 1 arguments")
+    check("input as value", 'let f = input;\nf("> ")\nvalue\n',
+          stdout_all=["> ", "= value"])
+    check("read_file type error", "read_file(1)\n",
+          stderr="read_file expects a string path")
+    check("write_file type error", 'write_file("x", 1)\n',
+          stderr="write_file expects a string path and data")
+    check("write_file arity error", 'write_file("x")\n',
+          stderr="write_file expects 2 arguments")
+    check("append_file arity error", 'append_file("x")\n',
+          stderr="append_file expects 2 arguments")
+    check("file_exists type error", "file_exists(1)\n",
+          stderr="file_exists expects a string path")
+    check("bytes_from_string display", 'bytes_from_string("abc")\n',
+          stdout="= <bytes: 3>")
+    check("bytes_len", 'bytes_len(bytes_from_string("abc"))\n', stdout="= 3")
+    check("bytes_get", 'bytes_get(bytes_from_string("abc"), 1)\n',
+          stdout="= 98")
+    check("bytes_get out of range",
+          'bytes_get(bytes_from_string("a"), 5)\n',
+          stderr="bytes_get index 5 out of range")
+    check("bytes_get type", 'bytes_get("x", 0)\n',
+          stderr="bytes_get expects bytes")
+    check("bytes_slice", 'bytes_hex(bytes_slice('
+          'bytes_from_string("abcdef"), 1, 3))\n', stdout="= 626364")
+    check("bytes_slice past end",
+          'bytes_len(bytes_slice(bytes_from_string("abc"), 10))\n',
+          stdout="= 0")
+    check("bytes_slice clamps length",
+          'bytes_hex(bytes_slice(bytes_from_string("abc"), 1, 100))\n',
+          stdout="= 6263")
+    check("bytes_concat", 'bytes_hex(bytes_concat('
+          'bytes_from_string("ab"), bytes_from_string("cd")))\n',
+          stdout="= 61626364")
+    check("bytes_hex", 'bytes_hex(bytes_from_hex("00ff10"))\n',
+          stdout="= 00ff10")
+    check("bytes_from_hex odd", 'bytes_from_hex("0")\n',
+          stderr="even number of hex digits")
+    check("bytes_from_hex invalid", 'bytes_from_hex("zz")\n',
+          stderr="invalid hex digit")
+    check("bytes_from_hex type", "bytes_from_hex(1)\n",
+          stderr="bytes_from_hex expects a string")
+    check("bytes_to_string", 'bytes_to_string(bytes_from_hex("68656c6c6f"))\n',
+          stdout="= hello")
+    check("bytes_to_string NUL", 'bytes_to_string(bytes_from_hex("00"))\n',
+          stderr="bytes contain NUL byte")
+    check("bytes_to_string invalid utf8",
+          'bytes_to_string(bytes_from_hex("ff"))\n',
+          stderr="not valid UTF-8")
+    check("bytes_to_string overlong utf8",
+          'bytes_to_string(bytes_from_hex("c080"))\n',
+          stderr="not valid UTF-8")
+    check("bytes_to_string surrogate utf8",
+          'bytes_to_string(bytes_from_hex("eda080"))\n',
+          stderr="not valid UTF-8")
+    check("bytes_to_string utf8 roundtrip",
+          'bytes_to_string(bytes_from_string("你好"))\n',
+          stdout="= 你好")
+    check("bytes_to_string emoji roundtrip",
+          'bytes_to_string(bytes_from_string("😀"))\n',
+          stdout="= 😀")
+    check("bytes_to_int little",
+          'bytes_to_int(bytes_from_hex("78563412"), 4, "little")\n',
+          stdout="= 305419896")
+    check("bytes_to_int big",
+          'bytes_to_int(bytes_from_hex("78563412"), 4, "big")\n',
+          stdout="= 2018915346")
+    check("bytes_to_int signed 16",
+          'bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 1)\n',
+          stdout="= -1")
+    check("bytes_to_int unsigned 16",
+          'bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 0)\n',
+          stdout="= 65535")
+    check("bytes_to_int signed 8",
+          'bytes_to_int(bytes_from_hex("80"), 1, "big", 0, 1)\n',
+          stdout="= -128")
+    check("bytes_to_int offset",
+          'bytes_to_int(bytes_from_hex("00ff80"), 2, "big", 1)\n',
+          stdout="= 65408")
+    check("bytes_to_int signed 64",
+          'bytes_to_int(bytes_from_hex("ffffffffffffffff"), 8, "little", 0, 1)\n',
+          stdout="= -1")
+    check("bytes_to_int unsigned 64 overflow",
+          'bytes_to_int(bytes_from_hex("ffffffffffffffff"), 8, "little")\n',
+          stderr="unsigned 64-bit value is too large")
+    check("bytes_to_int truncated",
+          'bytes_to_int(bytes_from_hex("0102"), 4, "little")\n',
+          stderr="need 4 bytes at offset 0, got 2")
+    check("bytes_to_int size range",
+          'bytes_to_int(bytes_from_hex("01"), 0, "little")\n',
+          stderr="size must be between 1 and 8")
+    check("bytes_to_int byteorder",
+          'bytes_to_int(bytes_from_hex("01"), 1, "middle")\n',
+          stderr='byteorder must be "little" or "big"')
+    check("bytes_to_int negative offset",
+          'bytes_to_int(bytes_from_hex("01"), 1, "little", -1)\n',
+          stderr="offset must be a non-negative integer")
+    check("bytes_to_int type", 'bytes_to_int("x", 1, "little")\n',
+          stderr="bytes_to_int expects bytes")
+    check("bytes_to_int arity",
+          'bytes_to_int(bytes_from_hex("01"))\n',
+          stderr="bytes_to_int expects 3 to 5 arguments")
+    check("int_to_bytes little",
+          'bytes_hex(int_to_bytes(305419896, 4, "little"))\n',
+          stdout="= 78563412")
+    check("int_to_bytes big",
+          'bytes_hex(int_to_bytes(305419896, 4, "big"))\n',
+          stdout="= 12345678")
+    check("int_to_bytes negative",
+          'bytes_hex(int_to_bytes(-1, 2, "little"))\n', stdout="= ffff")
+    check("int_to_bytes negative big",
+          'bytes_hex(int_to_bytes(-2, 4, "big"))\n', stdout="= fffffffe")
+    check("int_to_bytes unsigned 32",
+          'bytes_hex(int_to_bytes(4294967295, 4, "little"))\n',
+          stdout="= ffffffff")
+    check("int_to_bytes range high",
+          'int_to_bytes(256, 1, "little")\n',
+          stderr="does not fit in 1 bytes")
+    check("int_to_bytes range low",
+          'int_to_bytes(-129, 1, "little")\n',
+          stderr="does not fit in 1 bytes")
+    check("int_to_bytes size range",
+          'int_to_bytes(1, 9, "little")\n',
+          stderr="size must be between 1 and 8")
+    check("int_to_bytes byteorder",
+          'int_to_bytes(1, 4, "middle")\n',
+          stderr='byteorder must be "little" or "big"')
+    check("int_to_bytes type", 'int_to_bytes("x", 4, "little")\n',
+          stderr="int_to_bytes expects an integer value")
+    check("int_to_bytes arity", 'int_to_bytes(1, 4)\n',
+          stderr="int_to_bytes expects 3 arguments")
+    check("bytes/int roundtrip",
+          'bytes_to_int(int_to_bytes(-123456789, 8, "big"), '
+          '8, "big", 0, 1)\n',
+          stdout="= -123456789")
+    check("bytes index read", 'bytes_from_string("hello")[1]\n',
+          stdout="= 101")
+    check("bytes index out of range", 'bytes_from_string("a")[5]\n',
+          stderr="bytes index 5 out of range")
+    check("bytes index assignment",
+          'let b = bytes_from_string("abc");\n'
+          'b[1] = 255;\n'
+          'bytes_hex(b)\n',
+          stdout="= 61ff63")
+    check("bytes index assignment range",
+          'let b = bytes_from_string("abc");\n'
+          'b[0] = 256;\n',
+          stderr="bytes value 256 out of range")
+    check("bytes equality",
+          'bytes_from_string("ab") == bytes_from_hex("6162")\n',
+          stdout="= true")
+    check("bytes arity", "bytes_len()\n",
+          stderr="built-in function expects 1 argument")
+    check("bytes_slice arity", "bytes_slice(bytes_from_string(\"a\"))\n",
+          stderr="bytes_slice expects 2 or 3 arguments")
+    check("read_bytes type", "read_bytes(1)\n",
+          stderr="read_bytes expects a string path")
+    check("write_bytes type", 'write_bytes("x", "text")\n',
+          stderr="write_bytes expects a string path and bytes")
+    check("bytes hex roundtrip type", "bytes_hex(1)\n",
+          stderr="bytes_hex expects bytes")

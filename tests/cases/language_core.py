@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""Core language: literals, operators, control flow, switch.
+
+Extracted from the original test_skein.py main() body, lines 710-1099.
+"""
+from harness import *  # noqa: F401,F403
+
+
+def run_cases():
+    check("addition", "1+2\n", stdout="= 3")
+    check("pipe mode has no REPL prompt", "1+2\n", stdout="= 3")
+    assert "> " not in run("1+2\n").stdout
+    check("ans and underscore reference last result",
+          "1 + 2\nans * 4\n_\n_ + 1\n",
+          stdout_all=["= 3", "= 12", "= 12", "= 13"])
+    check("float", "1.5*2\n", stdout="= 3.0")
+    check("float keeps type in output", "1.0\n", stdout="= 1.0")
+    check("float shortest round-trip", "1.23456\n", stdout="= 1.23456")
+    check("float binary rounding", "0.1 + 0.2\n",
+          stdout="= 0.30000000000000004")
+    check("integer division", "10/4\n", stdout="= 2")
+    check("float division", "10/4.0\n", stdout="= 2.5")
+    check("integer division truncates toward zero", "-7 / 4\n", stdout="= -1")
+    check("int64 addition", "2147483647 + 1\n", stdout="= 2147483648")
+    check("int64 maximum", "9223372036854775807\n",
+          stdout="= 9223372036854775807")
+    check("integer overflow", "9223372036854775807 + 1\n",
+          stderr="integer overflow")
+    check("integer multiplication boundary",
+          "3037000499 * 3037000499\n", stdout="= 9223372030926249001")
+    check("integer multiplication overflow",
+          "3037000500 * 3037000500\n", stderr="integer overflow")
+    check("INT64_MIN times -1", "(-9223372036854775807 - 1) * -1\n",
+          stderr="integer overflow")
+    check("out-of-range integer literal becomes float",
+          "9223372036854775808\n", stdout="= 9.223372036854776e+18")
+    check("INT64_MIN division overflow",
+          "(-9223372036854775807 - 1) / -1\n", stderr="integer overflow")
+    check("int64 exact mixed comparison",
+          "9007199254740993 == 9007199254740992.0\n", stdout="= false")
+
+    check("modulo", "7 % 4\n", stdout="= 3")
+    check("float modulo", "7.5 % 2\n", stdout="= 1.5")
+    check("modulo sign follows dividend", "-7 % 4\n", stdout="= -3")
+    check("modulo negative divisor", "7 % -4\n", stdout="= 3")
+    check("modulo by zero", "1 % 0\n", stderr="modulo by zero")
+
+    check("postfix increment returns old value",
+          "let x = 1;\nlet a = x++;\na\nx\n", stdout_all=["= 1", "= 2"])
+    check("prefix increment returns new value",
+          "let x = 1;\nlet a = ++x;\na\nx\n", stdout_all=["= 2", "= 2"])
+    check("postfix decrement returns old value",
+          "let x = 2;\nlet a = x--;\na\nx\n", stdout_all=["= 2", "= 1"])
+    check("prefix decrement returns new value",
+          "let x = 2;\nlet a = --x;\na\nx\n", stdout_all=["= 1", "= 1"])
+    check("increment in for loop",
+          "let n = 0;\nfor (let i = 0; i < 3; i++) { n = n + i; }\nn\n",
+          stdout="= 3")
+    check("increment float", "let x = 1.5;\nx++\nx\n++x\nx\n",
+          stdout_all=["= 1.5", "= 2.5", "= 3.5", "= 3.5"])
+    check("increment list element",
+          "let a = [1, 2];\na[0]++;\n++a[1];\na\n",
+          stdout_all=["= 1", "= 3", "= [2, 3]"])
+    check("increment nested index",
+          "let a = [[1]];\na[0][0]++;\na\n",
+          stdout_all=["= 1", "= [[2]]"])
+    check("increment dict element",
+          'let d = {"x": 5};\nd["x"]++;\n++d["x"];\nd\n',
+          stdout_all=["= 5", "= 7", "= {x: 7}"])
+    check("increment bytes element",
+          'let b = bytes_from_hex("00ff");\nb[0]++;\nb[1]--;\nb\n',
+          stdout_all=["= 0", "= 255", "= <bytes: 2>"])
+    check("increment evaluates index once",
+          "let i = 0;\nlet a = [10];\na[i++]++;\ni\na\n",
+          stdout_all=["= 10", "= 1", "= [11]"])
+    check("increment const binding",
+          "const x = 1;\nx++;\n",
+          stderr="cannot assign to constant x")
+    check("increment const container element",
+          "const a = [1];\na[0]++;\na\n", stdout="= [2]")
+    check("increment string", 'let s = "a";\ns++;\n',
+          stderr="cannot increment string")
+    check("decrement bool", "let b = true;\nb--;\n",
+          stderr="cannot decrement bool")
+    check("increment literal", "1++\n",
+          stderr="cannot increment this expression")
+    check("increment missing dict key",
+          'let d = {};\nd["x"]++;\n', stderr="key not found")
+    check("increment integer overflow",
+          "let x = 9223372036854775807;\nx++;\n",
+          stderr="integer overflow")
+    check("increment precedence with unary minus",
+          "let x = 5;\n-x++\nx\n", stdout_all=["= -5", "= 6"])
+    check("compound assignment operators",
+          "let x = 10;\n"
+          "x += 5;\nx\n"
+          "x -= 3;\nx\n"
+          "x *= 2;\nx\n"
+          "x /= 4;\nx\n"
+          "x %= 4;\nx\n"
+          "x &= 3;\nx\n"
+          "x |= 4;\nx\n"
+          "x ^= 1;\nx\n"
+          "x <<= 2;\nx\n"
+          "x >>= 1;\nx\n",
+          stdout_all=["= 15", "= 12", "= 24", "= 6", "= 2", "= 2",
+                      "= 6", "= 7", "= 28", "= 14"])
+    check("compound string and list",
+          'let s = "a";\ns += "b";\ns\n'
+          "let a = [1];\na += [2, 3];\na\n",
+          stdout_all=["= ab", "= [1, 2, 3]"])
+    check("compound index and field",
+          "let a = [10];\nlet i = 0;\na[i++] += 5;\ni\na\n"
+          "let p = {\"x\": 1};\np[\"x\"] += 2;\np\n"
+          "struct P { x: int; }\nlet q = P { x: 1 };\nq.x += 4;\nq\n",
+          stdout_all=["= 15", "= 1", "= [15]", "= 3", "= {x: 3}",
+                      "= 5", "= P { x: 5 }"])
+    check("compound typed variable type error",
+          "let x: int = 1;\nx += \"bad\";\n",
+          stderr="cannot add int and string")
+    check("compound const error",
+          "const x = 1;\nx += 1;\n",
+          stderr="cannot assign to constant x")
+    check("logical and", "1 && 2\n", stdout="= true")
+    check("logical and short-circuit", "0 && (1/0)\n", stdout="= false")
+    check("logical or", "0 || 2\n", stdout="= true")
+    check("logical or short-circuit", "1 || (1/0)\n", stdout="= true")
+    check("logical or false", "0 || 0\n", stdout="= false")
+    check("logical not", "!0\n", stdout="= true")
+    check("logical not true", "!true\n", stdout="= false")
+    check("logical not string", '!""\n', stdout="= true")
+    check("logical result is bool",
+          "func f(x: bool) { return x; }\nf(1 && 2)\nf(!0)\n",
+          stdout_all=["= true", "= true"])
+    check("logical result format", 'format("{}", true && false)\n',
+          stdout="= false")
+    check("bitwise and", "1 & 3\n", stdout="= 1")
+    check("bitwise rejects bool", "1 & (1 == 1)\n",
+          stderr="bitwise operator expects ints")
+    check("bitwise or", "1 | 2\n", stdout="= 3")
+    check("bitwise xor", "5 ^ 3\n", stdout="= 6")
+    check("bitwise not", "~0\n", stdout="= -1")
+    check("shift left", "1 << 4\n", stdout="= 16")
+    check("shift right", "16 >> 2\n", stdout="= 4")
+    check("int64 shift", "1 << 62\n", stdout="= 4611686018427387904")
+    check("shift count out of range", "1 << 64\n",
+          stderr="shift count 64 out of range")
+    check("arithmetic vs equality precedence", "1 + 2 == 3\n",
+          stdout="= true")
+    check("equality result is bool",
+          "func f(x: bool) { return x; }\nf(1 < 2)\n",
+          stdout="= true")
+    check("bool true literal", "true\n", stdout="= true")
+    check("bool false literal", "false\n", stdout="= false")
+    check("bool print", "print(true)\nprint(false)\n",
+          stdout_all=["true", "false"])
+    check("bool truthiness",
+          'if (true) { print("yes"); } else { print("no"); }\n',
+          stdout="yes")
+    check("bool false truthiness",
+          'if (false) { print("yes"); } else { print("no"); }\n',
+          stdout="no")
+    check("bool equality",
+          "true == true\ntrue == false\ntrue != false\n",
+          stdout_all=["= true", "= false", "= true"])
+    check("bool is distinct from int",
+          "true == 1\ntrue != 1\n", stdout_all=["= false", "= true"])
+    check("bool conversions",
+          "str(true)\nint(true)\nint(false)\nfloat(true)\n",
+          stdout_all=["= true", "= 1", "= 0", "= 1.0"])
+    check("bool conversion builtin",
+          'bool(0)\nbool(1)\nbool("")\nbool("x")\nbool(null)\nbool([])\n',
+          stdout_all=["= false", "= true", "= false", "= true",
+                      "= false", "= false"])
+    check("bool as value", "let f = bool;\nf(1)\n", stdout="= true")
+    check("bool format", 'format("{}", true)\n', stdout="= true")
+    check("bool arithmetic error", "true + 1\n",
+          stderr="cannot add bool and int")
+
+    check("ternary true", "1 ? 2 : 3\n", stdout="= 2")
+    check("ternary false", "0 ? 2 : 3\n", stdout="= 3")
+    check("ternary string", 'true ? "yes" : "no"\n', stdout="= yes")
+    check("ternary short-circuit then", "1 ? 5 : 1/0\n", stdout="= 5")
+    check("ternary short-circuit else", "0 ? 1/0 : 5\n", stdout="= 5")
+    check("ternary right associative", "0 ? 1 : 0 ? 2 : 3\n",
+          stdout="= 3")
+    check("ternary nested then", "1 ? 0 ? 2 : 3 : 4\n",
+          stdout="= 3")
+    check("ternary comparison condition", '1 < 2 ? "a" : "b"\n',
+          stdout="= a")
+    check("ternary assignment",
+          "let x = 0;\nlet y = x ? 10 : 20;\ny\n", stdout="= 20")
+    check("ternary list element", "[0 ? 1 : 2, 3]\n", stdout="= [2, 3]")
+    check("ternary dict value", '{"a": 0 ? 1 : 2}\n', stdout="{a: 2}")
+    check("ternary dict key", '{1 ? "a" : "b": 2}\n', stdout="{a: 2}")
+    check("ternary bool result",
+          "func f(x: bool) { return x; }\nf(1 < 2 ? true : false)\n",
+          stdout="= true")
+
+    check("switch int",
+          'switch (2) { case 1 => print("one"); '
+          'case 2, 3 => print("two or three"); '
+          'default => print("other"); }\n',
+          stdout="two or three")
+    check("switch default",
+          'switch (9) { case 1 => print("one"); '
+          'default => print("other"); }\n',
+          stdout="other")
+    check("switch no match no default",
+          'switch (9) { case 1 => print("one"); }\n', code=0)
+    check("switch empty body", "switch (1) {}\n", code=0)
+    check("switch empty body spaced", "switch (1) { }\n", code=0)
+    check("switch single statement",
+          "let x = 0;\nswitch (1) { case 1 => x = 10; }\nx\n",
+          stdout="= 10")
+    check("switch block",
+          "switch (1) { case 1 => { print(1); print(2); } }\n",
+          stdout_all=["1", "2"])
+    check("switch case scope",
+          "switch (1) { case 1 => let y = 2; }\ny\n",
+          stderr="symbol not found y")
+    check("switch string",
+          'switch ("a") { case "b" => print("bad"); '
+          'case "a" => print("ok"); }\n', stdout="ok")
+    check("switch bool",
+          'switch (true) { case false => print("bad"); '
+          'case true => print("ok"); }\n', stdout="ok")
+    check("switch null",
+          'switch (null) { case null => print("null"); }\n',
+          stdout="null")
+    check("switch bytes",
+          'switch (bytes_from_hex("00ff")) { '
+          'case bytes_from_hex("00ff") => print("bytes"); }\n',
+          stdout="bytes")
+    check("switch no fallthrough",
+          'switch (1) { case 1 => print("one"); '
+          'case 2 => print("two"); }\n', stdout="one")
+    check("switch logical selector",
+          'switch (1 < 2) { case true => print("ok"); }\n', stdout="ok")
+    check("switch break exits switch",
+          "let hits = 0;\n"
+          "while (true) {\n"
+          "  switch (1) { case 1 => break; }\n"
+          "  hits = hits + 1;\n"
+          "  if (hits == 2) { break; }\n"
+          "}\n"
+          "hits\n",
+          stdout="= 2")
+    check("switch continue outer loop",
+          'let out = "";\n'
+          "for (let i in [0, 1, 2]) {\n"
+          "  switch (i) { case 1 => continue; }\n"
+          "  out = out + str(i);\n"
+          "}\n"
+          "out\n",
+          stdout="= 02")
+    check("switch return",
+          "func f(x) {\n"
+          "  switch (x) { case 1 => return 10; default => return 20; }\n"
+          "}\n"
+          "f(1)\nf(2)\n",
+          stdout_all=["= 10", "= 20"])
+    check("switch nested",
+          'switch (1) { case 1 => switch (1) { case 1 => print("nested"); } }\n',
+          stdout="nested")
+    check("switch default only",
+          'switch (1) { default => print("only"); }\n', stdout="only")
+    check("switch empty case block",
+          "switch (1) { case 1 => {} }\n", code=0)
+    check("switch empty statement case",
+          "switch (1) { case 1 => ; }\n", code=0)
+    check("switch float selector",
+          'switch (1.0) { case 1 => print("bad"); }\n',
+          stderr="switch does not support float")
+    check("switch float case",
+          'switch (1) { case 1.0 => print("bad"); }\n',
+          stderr="switch does not support float case value")
+    check("switch list case",
+          'switch (1) { case [1] => print("bad"); }\n',
+          stderr="switch does not support list case value")
+    check("switch builtin case",
+          'switch (1) { case sqrt => print("bad"); }\n',
+          stderr="switch does not support builtin case value")
+    check("switch type name is not pattern",
+          'switch (1) { case int => print("bad"); }\n',
+          stderr="switch does not support builtin case value")
+    check("switch case condition rejected",
+          'switch (true) { case 1 < 2 => print("bad"); }\n',
+          stderr="logical or comparison expressions are not allowed in case values")
+    check("switch list selector",
+          'switch ([1]) { default => print("bad"); }\n',
+          stderr="switch does not support list")
+
+    check("match int default",
+          'print(match (2) { case 1 => "one"; case 2 => "two"; '
+          'default => "other"; });\n',
+          stdout="two")
+    check("match default",
+          'print(match (9) { case 1 => "one"; default => "other"; });\n',
+          stdout="other")
+    check("match binding",
+          'print(match (42) { case n => n + 1; });\n', stdout="43")
+    check("match guard",
+          'print(match (5) { case n if n > 10 => "big"; '
+          'case n if n > 3 => "mid"; default => "small"; });\n',
+          stdout="mid")
+    check("match guard falls through",
+          'print(match (1) { case n if n > 3 => "big"; '
+          'default => "small"; });\n',
+          stdout="small")
+    check("match wildcard",
+          'print(match (1) { case _ => "wild"; });\n', stdout="wild")
+    check("match dict open",
+          'let e = {"kind": "tool", "ok": true, "data": [1, 2]};\n'
+          'print(match (e) { case {kind: "tool", ok: true, data: d} => d; '
+          'default => null; });\n',
+          stdout="[1, 2]")
+    check("match dict ignores extra keys",
+          'print(match ({"a": 1, "b": 2}) { case {a} => a; default => 0; });\n',
+          stdout="1")
+    check("match dict rest",
+          'print(match ({"a": 1, "b": 2, "c": 3}) { '
+          'case {a, ...rest} => rest; default => null; });\n',
+          stdout="{b: 2, c: 3}")
+    check("match dict missing key falls through",
+          'print(match ({"a": 1}) { case {b} => "b"; default => "no b"; });\n',
+          stdout="no b")
+    check("match nested dict",
+          'print(match ({"a": {"b": 2}}) { '
+          'case {a: {b}} => b; default => 0; });\n',
+          stdout="2")
+    check("match list exact",
+          'print(match ([1, 2]) { case [a] => "one"; '
+          'case [a, b] => "two"; default => "other"; });\n',
+          stdout="two")
+    check("match list rest",
+          'print(match ([1, 2, 3]) { case [h, ...t] => t; default => null; });\n',
+          stdout="[2, 3]")
+    check("match list ignore rest",
+          'print(match ([1, 2, 3]) { case [h, ...] => h; default => 0; });\n',
+          stdout="1")
+    check("match empty list",
+          'print(match ([]) { case [] => "empty"; default => "no"; });\n',
+          stdout="empty")
+    check("match struct pattern",
+          'struct P { x: int; y: int; }\n'
+          'let p = P { x: 1, y: 2 };\n'
+          'print(match (p) { case P {x, y} => x + y; default => 0; });\n',
+          stdout="3")
+    check("match struct type only",
+          'struct P { x: int; }\n'
+          'print(match (P {x: 1}) { case P {} => "is P"; default => "no"; });\n',
+          stdout="is P")
+    check("match dict type only",
+          'print(match ({"a": 1}) { case {...} => "dict"; default => "no"; });\n',
+          stdout="dict")
+    check("match expression value",
+          'let x = match (1) { case 1 => {"ok": true}; '
+          'default => {"ok": false}; };\n'
+          'print(x["ok"]);\n',
+          stdout="true")
+    check("match nested",
+          'print(match (1) { case 1 => match (2) { case 2 => "nested"; '
+          'default => "no"; }; default => "no"; });\n',
+          stdout="nested")
+    check("match binding scope",
+          'match (1) { case x => 0; }\nx\n', stderr="symbol not found x")
+    check("match binding is read-only",
+          'match (1) { case x => { x = 2; } }\n',
+          stderr="cannot assign to constant x")
+    check("match duplicate binding",
+          'match ({"a": 1, "b": 2}) { case {a: x, b: x} => 1; default => 0; }\n',
+          stderr="pattern binds x more than once")
+    check("match no arm matched",
+          'match (9) { case 1 => "one"; }\n',
+          stderr="match: no arm matched")
+    check("match empty body",
+          'match (1) {}\n', stderr="match requires at least one arm")
+    check("match default must be last",
+          'match (1) { default => "d"; case 1 => "one"; }\n',
+          stderr="default must be the last match arm")
+    check("match no fallthrough",
+          'print(match (1) { case 1 => "one"; case 2 => "two"; });\n',
+          stdout="one")
+    check("match return",
+          'func f(x) { let y = match (x) { '
+          'case 1 => { return 10; } default => 0; }; return y + 1; }\n'
+          'f(1)\nf(2)\n',
+          stdout_all=["= 10", "= 1"])
+    check("match break outer loop",
+          'for (let i in [1, 2, 3]) { '
+          'let x = match (i) { case 2 => { break; } default => i; }; '
+          'print(x); }\n',
+          stdout="1\n")
+    check("match keeps std.regex.match",
+          'import std;\nprint(std.regex.match("a+", "aaa"));\n',
+          stdout="true")
+    check("match as pattern",
+          'match (1) { case 1 as x => print(x); }\n', stdout="1")

@@ -1440,7 +1440,10 @@ std.task
 std.generator
 std.result
 std.error
+std.enum
+std.struct
 std.ffi（可选）
+std.fsm（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -2835,6 +2838,106 @@ std.ffi.buffer_free
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回。
 
 原有全局函数仍可使用，作为兼容别名保留；新代码建议优先使用 `std.*`。
+
+### 状态机 std.fsm
+
+`std.fsm` 是**内嵌 Skein 源码包**：源码在 `lib/std/fsm.skein`，构建时嵌入二进制，`import std.fsm;` 即可使用，不需要安装额外文件。
+
+```text
+import std.fsm;
+
+let m = fsm.define(0, func(state, event) {
+  return state + event;
+});
+
+let ctx = fsm.start(m);
+print(ctx.state);            // 0
+
+ctx = fsm.step(m, ctx, 1);
+ctx = fsm.step(m, ctx, 2);
+print(ctx.state);            // 3
+
+print(fsm.history(ctx));     // [0, 1, 3]
+
+ctx = fsm.undo(ctx);
+print(ctx.state);            // 1
+
+ctx = fsm.redo(ctx);
+print(ctx.state);            // 3
+
+ctx = fsm.run(m, ctx, [1, 2, 3]);
+print(ctx.state);            // 9
+```
+
+API：
+
+```text
+fsm.define(initial, step)      -> Machine
+fsm.initial(m)                 -> any
+fsm.start(m)                   -> Context
+fsm.step(m, ctx, event)        -> Context
+fsm.run(m, ctx, events)        -> Context
+fsm.history(ctx)               -> list
+fsm.undo(ctx)                  -> Context
+fsm.redo(ctx)                  -> Context
+fsm.snapshot(ctx)              -> dict
+fsm.restore(snap[, decode])    -> Context
+```
+
+规则：
+
+- `step` 是纯函数 `(state, event) -> next_state`；
+- `Context` 是值，可以赋值、传参、比较；
+- `history` 包含初始状态和每一步的状态；
+- `undo` / `redo` 是线性的；`undo` 之后再 `step` 会清空 redo，形成新分支；
+- `snapshot` 返回普通 dict，可 JSON 序列化；`restore` 会重建历史并校验；
+- 枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复；
+- struct 状态可传解码回调：`fsm.restore(snap, func(v) { return std.struct.decode(v, "S"); })`；
+- `ctx._history` / `ctx._head` / `ctx._redo` 是内部字段，不要依赖；
+- 非法 `step` 会 `fail("step must be callable")`。
+
+### std.enum
+
+```text
+std.enum.decode(value)         -> enum
+```
+
+把 `std.json.parse` 得到的 `{"$enum":"Event::UserMsg","payload":{...}}` 还原成枚举值；嵌套枚举会递归还原。输入不是枚举对象时报错。
+
+```text
+import std;
+enum Event { UserMsg { text: string; }; }
+let e = std.enum.decode(std.json.parse(
+  std.json.stringify(Event::UserMsg { text: "hi" })
+));
+```
+
+### std.struct
+
+```text
+std.struct.decode(value, type_name)        -> struct
+std.struct.decode(value, "aa::Point")      -> 跨包
+```
+
+schema 驱动解码：JSON 保持普通 object，类型由调用方提供。
+
+```text
+import std;
+struct Point { x: int; y: int; }
+
+let p = std.struct.decode({"x": 1, "y": 2}, "Point");
+print(p);          // Point { x: 1, y: 2 }
+```
+
+规则：
+
+- `value` 必须是 dict；
+- 缺字段、未知字段、类型不匹配报错；
+- 可空字段 `T?` 缺失时填 `null`；
+- 嵌套 struct / enum 递归解码；
+- 递归 struct 依赖 JSON 深度限制；
+- 跨包类型写成 `module::Type`；
+- `std.json.stringify` 的输出格式不变，不引入 `$struct` 标签。
 
 ### 6.5 查找路径
 

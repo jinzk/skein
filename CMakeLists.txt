@@ -137,9 +137,30 @@ else()
   target_sources(${PROJECT_NAME} PRIVATE platform_posix.cpp)
 endif()
 
+# Embedded Skein standard-library packages.  Each .skein source is turned into
+# a C string at build time and imported in memory by package.cpp.
+set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
+set(SKEIN_FSM_SOURCE ${SKEIN_EMBEDDED_DIR}/std_fsm_source.inc)
+add_custom_command(
+  OUTPUT ${SKEIN_FSM_SOURCE}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${SKEIN_EMBEDDED_DIR}
+  COMMAND ${CMAKE_COMMAND}
+    -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/lib/std/fsm.skein
+    -DOUTPUT=${SKEIN_FSM_SOURCE}
+    -DSYMBOL=kStdFsmSource
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/std/fsm.skein
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
+  VERBATIM
+)
+add_custom_target(skein_embedded_sources DEPENDS ${SKEIN_FSM_SOURCE})
+add_dependencies(${PROJECT_NAME} skein_embedded_sources)
+
 target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
+  ${SKEIN_EMBEDDED_DIR}
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE
   ${SKEIN_LIBUV_TARGET}

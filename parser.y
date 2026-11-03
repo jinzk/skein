@@ -551,6 +551,8 @@ importpath: NAME                          { $$ = $1; }
 fieldname: NAME                           { $$ = $1; }
     | YIELD                                { $$ = copy_text("yield"); }
     | MATCH                                { $$ = copy_text("match"); }
+    | ENUM                                 { $$ = copy_text("enum"); }
+    | STRUCT                               { $$ = copy_text("struct"); }
     | ERROR                                { $$ = copy_text("error"); }
     | BUILTIN {
         const char *name = builtin_field_name($1);

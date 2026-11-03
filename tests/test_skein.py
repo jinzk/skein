@@ -1249,6 +1249,144 @@ def main():
           'let d = {"a": 1, "b": 2};\nlet {a} = d;\nprint(d["b"]);\n',
           stdout="2")
 
+    check("std.fsm embedded import",
+          'import std.fsm;\n'
+          'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'
+          'let ctx = fsm.start(m);\n'
+          'print(ctx.state);\n'
+          'ctx = fsm.step(m, ctx, 2);\n'
+          'print(ctx.state);\n'
+          'ctx = fsm.run(m, ctx, [1, 2, 3]);\n'
+          'print(ctx.state);\n'
+          'print(fsm.history(ctx));\n',
+          stdout_all=["0", "2", "8", "[0, 2, 3, 5, 8]"])
+    check("std.fsm undo redo",
+          'import std.fsm;\n'
+          'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'
+          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'ctx = fsm.undo(ctx);\n'
+          'print(ctx.state);\n'
+          'print(ctx._redo);\n'
+          'ctx = fsm.redo(ctx);\n'
+          'print(ctx.state);\n',
+          stdout_all=["3", "[3]", "6"])
+    check("std.fsm branch clears redo",
+          'import std.fsm;\n'
+          'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'
+          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'ctx = fsm.undo(ctx);\n'
+          'ctx = fsm.step(m, ctx, 10);\n'
+          'print(ctx.state);\n'
+          'print(ctx._redo);\n'
+          'print(fsm.history(ctx));\n',
+          stdout_all=["13", "[]", "[0, 1, 3, 13]"])
+    check("std.fsm alias import",
+          'import std.fsm as f;\n'
+          'let m = f.define(7, func(ctx, ev) { return ctx; });\n'
+          'print(f.initial(m));\n',
+          stdout="7")
+    check("std.fsm invalid step",
+          'import std.fsm;\nfsm.define(0, 1);\n',
+          stderr="uncaught fail: step must be callable")
+    check("std.fsm private helper hidden",
+          'import std.fsm;\nprint(fsm._internal());\n',
+          stderr="key not found")
+    check("std.fsm coexists with std",
+          'import std;\nimport std.fsm;\n'
+          'print(std.regex.match("a+", "a"));\n'
+          'print(fsm.initial(fsm.define(5, func(ctx, ev) { return ctx; })));\n',
+          stdout_all=["true", "5"])
+    check("std.enum.decode",
+          'import std;\nenum E { A { n: int; }; B; }\n'
+          'let s = std.json.stringify(E::A { n: 1 });\n'
+          'let e = std.enum.decode(std.json.parse(s));\n'
+          'print(e);\nprint(kind_of(e));\n'
+          'print(match (e) { case E::A {n} => n; default => 0; });\n',
+          stdout_all=["E::A { n: 1 }", "enum", "1"])
+    check("std.enum.decode nested",
+          'import std;\nenum Inner { A { n: int; }; }\n'
+          'enum Outer { X { inner: Inner; }; }\n'
+          'let o = Outer::X { inner: Inner::A { n: 2 } };\n'
+          'let o2 = std.enum.decode(std.json.parse(std.json.stringify(o)));\n'
+          'print(match (o2) { case Outer::X {inner} => '
+          'match (inner) { case Inner::A {n} => n; default => 0; }; '
+          'default => 0; });\n',
+          stdout="2")
+    check("std.enum.decode rejects non-enum",
+          'import std;\nstd.enum.decode({"a": 1});\n',
+          stderr="std.enum.decode expects an enum object")
+    check("std.struct.decode",
+          'import std;\nstruct P { x: int; y: int; }\n'
+          'let p = std.struct.decode({"x": 1, "y": 2}, "P");\n'
+          'print(p);\nprint(kind_of(p));\nprint(p.x);\n',
+          stdout_all=["P { x: 1, y: 2 }", "struct", "1"])
+    check("std.struct.decode nested",
+          'import std;\nstruct P { x: int; }\n'
+          'struct L { a: P; b: P; }\n'
+          'let l = std.struct.decode({"a": {"x": 1}, "b": {"x": 2}}, "L");\n'
+          'print(l.a.x + l.b.x);\n',
+          stdout="3")
+    check("std.struct.decode enum field",
+          'import std;\nenum E { A { n: int; }; }\n'
+          'struct S { e: E; }\n'
+          'let s = std.struct.decode('
+          '{"e": {"$enum": "E::A", "payload": {"n": 7}}}, "S");\n'
+          'print(match (s.e) { case E::A {n} => n; default => 0; });\n',
+          stdout="7")
+    check("std.struct.decode recursive",
+          'import std;\nstruct Node { value: int; next: Node?; }\n'
+          'let n = std.struct.decode('
+          '{"value": 1, "next": {"value": 2, "next": null}}, "Node");\n'
+          'print(n.next.value);\n',
+          stdout="2")
+    check("std.struct.decode missing field",
+          'import std;\nstruct P { x: int; }\n'
+          'std.struct.decode({}, "P");\n',
+          stderr="missing field x in P")
+    check("std.struct.decode unknown field",
+          'import std;\nstruct P { x: int; }\n'
+          'std.struct.decode({"x": 1, "y": 2}, "P");\n',
+          stderr="unknown field y in P")
+    check("std.struct.decode type mismatch",
+          'import std;\nstruct P { x: int; }\n'
+          'std.struct.decode({"x": "s"}, "P");\n',
+          stderr="expected int, got string")
+    check("std.fsm snapshot restore",
+          'import std.fsm;\n'
+          'let m = fsm.define(0, func(s, e) { return s + e; });\n'
+          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'let ctx2 = fsm.restore(fsm.snapshot(ctx));\n'
+          'print(ctx2.state);\nprint(fsm.history(ctx2));\n',
+          stdout_all=["6", "[0, 1, 3, 6]"])
+    check("std.fsm json snapshot",
+          'import std;\nimport std.fsm;\n'
+          'enum S { Idle; Count { n: int; }; Done; }\n'
+          'let m = fsm.define(S::Idle, func(state, ev) {\n'
+          '  return match ([state, ev]) {\n'
+          '    case [S::Idle, "inc"] => S::Count { n: 1 };\n'
+          '    case [S::Count {n}, "inc"] => S::Count { n: n + 1 };\n'
+          '    case [S::Count {n}, "done"] => S::Done;\n'
+          '    default => state;\n'
+          '  };\n'
+          '});\n'
+          'let ctx = fsm.run(m, fsm.start(m), ["inc", "inc", "done"]);\n'
+          'let json = std.json.stringify(fsm.snapshot(ctx));\n'
+          'let ctx2 = fsm.restore(std.json.parse(json));\n'
+          'print(ctx2.state);\nprint(fsm.history(ctx2));\n',
+          stdout_all=["S::Done", "[S::Idle, S::Count { n: 1 }, S::Count { n: 2 }, S::Done]"])
+    check("std.fsm struct snapshot with decoder",
+          'import std;\nimport std.fsm;\n'
+          'struct S { n: int; }\n'
+          'let m = fsm.define(S { n: 0 }, func(state, ev) {\n'
+          '  return S { n: state.n + ev };\n'
+          '});\n'
+          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'let json = std.json.stringify(fsm.snapshot(ctx));\n'
+          'let ctx2 = fsm.restore(std.json.parse(json), '
+          'func(v) { return std.struct.decode(v, "S"); });\n'
+          'print(ctx2.state.n);\nprint(fsm.history(ctx2));\n',
+          stdout_all=["6", "[S { n: 0 }, S { n: 1 }, S { n: 3 }, S { n: 6 }]"])
+
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")

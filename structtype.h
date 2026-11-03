@@ -79,8 +79,12 @@ struct enum_value_t {
 void structtype_shutdown();
 
 struct_def *structtype_find_struct(const char *module, const char *name);
+struct_def *structtype_find_struct_by_name(const char *module_name,
+                                           const char *name);
 trait_def *structtype_find_trait(const char *module, const char *name);
 enum_def *structtype_find_enum(const char *module, const char *name);
+enum_def *structtype_find_enum_by_name(const char *module_name,
+                                       const char *name);
 bool structtype_type_exists(const char *module, const char *name);
 
 bool structtype_create_struct(const char *module, const char *module_name,

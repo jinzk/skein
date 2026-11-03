@@ -1379,7 +1379,49 @@ std.task
 std.generator
 std.result
 std.error
+std.enum
+std.struct
 std.ffi（可选）
+std.fsm（内嵌 Skein 源码包）
+```
+
+`std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
+
+```text
+import std.fsm;
+
+let m = fsm.define(0, func(state, event) { return state + event; });
+let ctx = fsm.start(m);
+ctx = fsm.run(m, ctx, [1, 2, 3]);
+print(ctx.state);          // 6
+print(fsm.history(ctx));   // [0, 1, 3, 6]
+ctx = fsm.undo(ctx);       // state 3
+ctx = fsm.redo(ctx);       // state 6
+```
+
+API：`define` / `initial` / `start` / `step` / `run` / `history` / `undo` / `redo` / `snapshot` / `restore`。
+
+`snapshot` 返回普通 dict，可 JSON 持久化；`restore` 重建历史并校验。枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复：
+
+```text
+let json = std.json.stringify(fsm.snapshot(ctx));
+ctx = fsm.restore(std.json.parse(json));
+```
+
+struct 状态可以传解码回调：
+
+```text
+ctx = fsm.restore(std.json.parse(json), func(v) {
+  return std.struct.decode(v, "S");
+});
+```
+
+`std.struct.decode(value, type_name)` 是 schema 驱动解码：JSON 保持普通 object，类型由调用方提供。
+
+```text
+import std;
+struct Point { x: int; y: int; }
+let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 ```
 
 当前提供的函数：

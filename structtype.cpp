@@ -120,6 +120,24 @@ struct_def *structtype_find_struct(const char *module, const char *name) {
     return it == struct_types.end() ? NULL : it->second.get();
 }
 
+struct_def *structtype_find_struct_by_name(const char *module_name,
+                                           const char *name) {
+    if (!name) return NULL;
+    if (module_name && *module_name) {
+        auto it = logical_structs.find(type_key(module_name, name));
+        return it == logical_structs.end() ? NULL : it->second;
+    }
+    struct_def *found = NULL;
+    for (auto &entry : logical_structs) {
+        if (!entry.second || entry.second->name != name)
+            continue;
+        if (found && found != entry.second)
+            return NULL;
+        found = entry.second;
+    }
+    return found;
+}
+
 trait_def *structtype_find_trait(const char *module, const char *name) {
     if (!name) return NULL;
     auto it = trait_types.find(type_key(module, name));
@@ -130,6 +148,24 @@ enum_def *structtype_find_enum(const char *module, const char *name) {
     if (!name) return NULL;
     auto it = enum_types.find(type_key(module, name));
     return it == enum_types.end() ? NULL : it->second.get();
+}
+
+enum_def *structtype_find_enum_by_name(const char *module_name,
+                                       const char *name) {
+    if (!name) return NULL;
+    if (module_name && *module_name) {
+        auto it = logical_enums.find(type_key(module_name, name));
+        return it == logical_enums.end() ? NULL : it->second;
+    }
+    enum_def *found = NULL;
+    for (auto &entry : logical_enums) {
+        if (!entry.second || entry.second->name != name)
+            continue;
+        if (found && found != entry.second)
+            return NULL;
+        found = entry.second;
+    }
+    return found;
 }
 
 bool structtype_type_exists(const char *module, const char *name) {

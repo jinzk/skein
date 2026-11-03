@@ -210,6 +210,8 @@ enum bifs {
     B_json_parse,
     B_json_try_parse,
     B_json_stringify,
+    B_enum_decode,
+    B_struct_decode,
     B_encoding_decode,
     B_encoding_encode,
     B_encoding_supports,

@@ -1,0 +1,290 @@
+package fsm {
+  import std;
+
+  const _NIL = -1;
+  const _MASK = (1 << 32) - 1;
+
+  struct _Node {
+    value: any;
+    prev: int;
+  }
+
+  struct _Table {
+    slots: list;
+    gens: list;
+    free: list;
+    alive: int;
+  }
+
+  struct _AddResult {
+    table: _Table;
+    id: int;
+  }
+
+  export struct Machine {
+    initial: any;
+    step: callable;
+  }
+
+  export struct Context {
+    state: any;
+    _history: any;
+    _head: int;
+    _redo: list;
+  }
+
+  func _t_new() {
+    return _Table { slots: [], gens: [], free: [], alive: 0 };
+  }
+
+  func _t_add(t, value, prev) {
+    let slot = _NIL;
+
+    if (len(t.free) > 0) {
+      let n = len(t.free);
+      slot = t.free[n - 1];
+      t.free = std.list.slice(t.free, 0, n - 1);
+      t.gens[slot] = t.gens[slot] + 1;
+      t.slots[slot] = _Node { value: value, prev: prev };
+    } else {
+      slot = len(t.slots);
+      t.slots = std.list.append(t.slots, _Node { value: value, prev: prev });
+      t.gens = std.list.append(t.gens, 0);
+    }
+
+    t.alive = t.alive + 1;
+    return _AddResult { table: t, id: (t.gens[slot] << 32) | slot };
+  }
+
+  func _t_node(t, id) {
+    let slot = id & _MASK;
+    let gen = id >> 32;
+
+    if (slot < 0 || slot >= len(t.slots)) {
+      fail("stale fsm history handle");
+    }
+    if (t.gens[slot] != gen) {
+      fail("stale fsm history handle");
+    }
+    let node = t.slots[slot];
+    if (node == null) {
+      fail("stale fsm history handle");
+    }
+    return node;
+  }
+
+  func _t_valid(t, id) {
+    let slot = id & _MASK;
+    let gen = id >> 32;
+
+    if (slot < 0 || slot >= len(t.slots)) {
+      return false;
+    }
+    if (t.gens[slot] != gen) {
+      return false;
+    }
+    return t.slots[slot] != null;
+  }
+
+  func _t_remove(t, id) {
+    let slot = id & _MASK;
+    let gen = id >> 32;
+
+    if (slot < 0 || slot >= len(t.slots)) {
+      fail("stale fsm history handle");
+    }
+    if (t.gens[slot] != gen || t.slots[slot] == null) {
+      fail("stale fsm history handle");
+    }
+
+    t.slots[slot] = null;
+    t.gens[slot] = t.gens[slot] + 1;
+    t.free = std.list.append(t.free, slot);
+    t.alive = t.alive - 1;
+    return t;
+  }
+
+  func _t_check(t) {
+    if (len(t.slots) != len(t.gens)) {
+      return false;
+    }
+    if (t.alive < 0 || t.alive > len(t.slots)) {
+      return false;
+    }
+    for (let i in range(len(t.slots))) {
+      if (t.slots[i] != null && kind_of(t.slots[i]) != "struct") {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  func _decode_state(value, decode) {
+    if (kind_of(value) != "dict") {
+      return value;
+    }
+    if (decode != null) {
+      return decode(value);
+    }
+    if (std.dict.has(value, "$enum")) {
+      return std.enum.decode(value);
+    }
+    return value;
+  }
+
+  func _t_to_value(t) {
+    let slots = [];
+
+    for (let node in t.slots) {
+      if (node == null) {
+        slots = std.list.append(slots, null);
+      } else {
+        slots = std.list.append(slots, {
+          "value": node.value,
+          "prev": node.prev
+        });
+      }
+    }
+
+    return {
+      "slots": slots,
+      "gens": t.gens,
+      "free": t.free,
+      "alive": t.alive
+    };
+  }
+
+  func _t_from_value(v, decode) {
+    let slots = [];
+
+    for (let item in v["slots"]) {
+      if (item == null) {
+        slots = std.list.append(slots, null);
+      } else {
+        slots = std.list.append(slots, _Node {
+          value: _decode_state(item["value"], decode),
+          prev: item["prev"]
+        });
+      }
+    }
+
+    return _Table {
+      slots: slots,
+      gens: v["gens"],
+      free: v["free"],
+      alive: v["alive"]
+    };
+  }
+
+  export func define(initial, step) {
+    if (kind_of(step) != "function" && kind_of(step) != "builtin") {
+      fail("step must be callable");
+    }
+    return Machine { initial: initial, step: step };
+  }
+
+  export func initial(m) {
+    return m.initial;
+  }
+
+  export func start(m) {
+    let r = _t_add(_t_new(), m.initial, _NIL);
+    return Context {
+      state: m.initial,
+      _history: r.table,
+      _head: r.id,
+      _redo: []
+    };
+  }
+
+  export func step(m, ctx, event) {
+    let next = m.step(ctx.state, event);
+    let r = _t_add(ctx._history, next, ctx._head);
+    return Context {
+      state: next,
+      _history: r.table,
+      _head: r.id,
+      _redo: []
+    };
+  }
+
+  export func run(m, ctx, events) {
+    for (let event in events) {
+      ctx = step(m, ctx, event);
+    }
+    return ctx;
+  }
+
+  export func history(ctx) {
+    let out = [];
+    let id = ctx._head;
+
+    while (id != _NIL) {
+      let node = _t_node(ctx._history, id);
+      out = std.list.append(out, node.value);
+      id = node.prev;
+    }
+
+    return std.list.reverse(out);
+  }
+
+  export func undo(ctx) {
+    let node = _t_node(ctx._history, ctx._head);
+    if (node.prev == _NIL) {
+      return ctx;
+    }
+
+    let redo = std.list.append(ctx._redo, ctx._head);
+    let prev = _t_node(ctx._history, node.prev);
+    return Context {
+      state: prev.value,
+      _history: ctx._history,
+      _head: node.prev,
+      _redo: redo
+    };
+  }
+
+  export func redo(ctx) {
+    let n = len(ctx._redo);
+    if (n == 0) {
+      return ctx;
+    }
+
+    let id = ctx._redo[n - 1];
+    let redo = std.list.slice(ctx._redo, 0, n - 1);
+    let node = _t_node(ctx._history, id);
+    return Context {
+      state: node.value,
+      _history: ctx._history,
+      _head: id,
+      _redo: redo
+    };
+  }
+
+  export func snapshot(ctx) {
+    return {
+      "state": ctx.state,
+      "history": _t_to_value(ctx._history),
+      "head": ctx._head,
+      "redo": ctx._redo
+    };
+  }
+
+  export func restore(snap, ...rest) {
+    let decode = null;
+    if (len(rest) > 0) {
+      decode = rest[0];
+    }
+
+    let history = _t_from_value(snap["history"], decode);
+    if (!_t_check(history)) {
+      fail("invalid fsm snapshot");
+    }
+    return Context {
+      state: _decode_state(snap["state"], decode),
+      _history: history,
+      _head: snap["head"],
+      _redo: snap["redo"]
+    };
+  }
+}

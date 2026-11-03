@@ -14,6 +14,8 @@
 #include "unicode_ident.h"
 #include "valuetype.h"
 
+#include "std_fsm_source.inc"
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -53,6 +55,23 @@ std::string import_base;
 fs::path project_root;
 std::vector<package_load_context> load_stack;
 std::vector<std::string> loading_paths;
+
+struct embedded_package_source {
+    const char *name;
+    const char *source;
+};
+
+const embedded_package_source kEmbeddedPackages[] = {
+    {"std.fsm", kStdFsmSource},
+};
+
+const char *find_embedded_source(const std::string &dotted) {
+    for (const auto &entry : kEmbeddedPackages) {
+        if (dotted == entry.name)
+            return entry.source;
+    }
+    return NULL;
+}
 
 bool is_identifier(const std::string &name) {
     return unicode_ident::is_identifier(name);
@@ -292,6 +311,8 @@ bool load_package_file(const resolved_package &resolved,
 bool load_child_packages(const std::string &dotted,
                          const fs::path &directory, value_t *namespace_value,
                          std::string &error);
+value_t *import_embedded_package(const std::string &dotted,
+                                 const char *source, std::string &error);
 
 value_t *import_resolved(const std::string &dotted,
                          const resolved_package &resolved,
@@ -610,6 +631,16 @@ value_t *build_std_namespace() {
             {"source", B_type_source},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("enum"),
+        builtin_module({
+            {"decode", B_enum_decode},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("struct"),
+        builtin_module({
+            {"decode", B_struct_decode},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("net"),
         builtin_module({
             {"tcp_connect", B_net_tcp_connect},
@@ -815,6 +846,11 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
         return dupval(namespace_value);
     }
 
+    if (spec.kind == IMPORT_ABSOLUTE) {
+        if (const char *source = find_embedded_source(spec.dotted))
+            return import_embedded_package(spec.dotted, source, error);
+    }
+
     resolved_package resolved;
     if (spec.kind == IMPORT_ABSOLUTE) {
         if (!resolve_package(spec.dotted, resolved, error))
@@ -937,27 +973,15 @@ void restore_parser_globals(int saved_char, const YYSTYPE &saved_lval,
     yynerrs = saved_errs;
 }
 
-bool load_package_file(const resolved_package &resolved,
-                       const std::string &expected_name,
-                       const std::string &module_name, value_t *&result,
-                       std::string &error) {
-    if (!resolved.has_source) {
-        struct dict_value_t *namespace_value = newdictval();
-        namespace_value->payload->is_namespace = true;
-        result = (value_t *)namespace_value;
-        return true;
-    }
-
-    const std::string package_path = path_to_utf8(resolved.file);
-    std::string source_text;
-    if (!load_source_file(package_path, source_encoding_get(),
-                          source_text, error)) {
-        error = "cannot load package file " + package_path + ": " + error;
-        return false;
-    }
+bool parse_package_source(const std::string &source_text,
+                          const std::string &source_name,
+                          const std::string &expected_name,
+                          const std::string &module_name,
+                          const std::string &base_dir, value_t *&result,
+                          std::string &error) {
     FILE *file = source_text_file(source_text, error);
     if (!file) {
-        error = "cannot open package file: " + package_path + ": " + error;
+        error = "cannot open package source " + source_name + ": " + error;
         return false;
     }
 
@@ -974,7 +998,8 @@ bool load_package_file(const resolved_package &resolved,
     int errors_before = diag_error_count();
     std::string saved_import_base = import_base;
 
-    import_base = normalize_dir(path_to_utf8(resolved.directory));
+    if (!base_dir.empty())
+        import_base = normalize_dir(base_dir);
     g_interactive = false;
     g_statement_invalid = false;
     ++g_package_loading;
@@ -982,7 +1007,7 @@ bool load_package_file(const resolved_package &resolved,
     yyin = file;
     reset_scanner_state(file);
     diag_start_source();
-    diag_set_source_name(path_to_utf8(resolved.file));
+    diag_set_source_name(source_name);
     diag_set_module_name(module_name);
     eval_push_isolated_scope();
 
@@ -1015,6 +1040,59 @@ bool load_package_file(const resolved_package &resolved,
         return false;
     }
     return true;
+}
+
+bool load_package_file(const resolved_package &resolved,
+                       const std::string &expected_name,
+                       const std::string &module_name, value_t *&result,
+                       std::string &error) {
+    if (!resolved.has_source) {
+        struct dict_value_t *namespace_value = newdictval();
+        namespace_value->payload->is_namespace = true;
+        result = (value_t *)namespace_value;
+        return true;
+    }
+
+    const std::string package_path = path_to_utf8(resolved.file);
+    std::string source_text;
+    if (!load_source_file(package_path, source_encoding_get(),
+                          source_text, error)) {
+        error = "cannot load package file " + package_path + ": " + error;
+        return false;
+    }
+    return parse_package_source(source_text, package_path, expected_name,
+                                module_name, path_to_utf8(resolved.directory),
+                                result, error);
+}
+
+value_t *import_embedded_package(const std::string &dotted,
+                                 const char *source, std::string &error) {
+    if (!source || !*source) {
+        error = "embedded package has no source: " + dotted;
+        return NULL;
+    }
+    std::string key = "builtin:" + dotted;
+    if (is_loading(key)) {
+        error = "cyclic package import: " + key;
+        return NULL;
+    }
+    std::string hidden = package_cache_key(key);
+    if (value_t *cached = lookup_global_symbol(hidden.c_str()))
+        return dupval(cached);
+
+    loading_paths.push_back(key);
+    value_t *namespace_value = NULL;
+    bool ok = parse_package_source(
+        source, "<" + dotted + ">", split_dotted(dotted).back(), dotted,
+        import_base, namespace_value, error);
+    loading_paths.pop_back();
+
+    if (!ok) {
+        freeval(namespace_value);
+        return NULL;
+    }
+    save_global_symbol(hidden.c_str(), namespace_value);
+    return dupval(namespace_value);
 }
 
 } // namespace

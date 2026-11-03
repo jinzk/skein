@@ -276,6 +276,8 @@ enum bifs {
     B_worker_pool,
     B_worker_call,
     B_worker_map,
+    B_worker_submit,
+    B_worker_wait,
     B_worker_shutdown
 };
 

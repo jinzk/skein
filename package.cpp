@@ -596,6 +596,8 @@ value_t *build_std_namespace() {
             {"pool", B_worker_pool},
             {"call", B_worker_call},
             {"map", B_worker_map},
+            {"submit", B_worker_submit},
+            {"wait", B_worker_wait},
             {"shutdown", B_worker_shutdown},
         })));
     root->payload->items.push_back(std::make_pair(

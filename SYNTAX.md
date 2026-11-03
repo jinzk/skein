@@ -1475,8 +1475,10 @@ Worker 进程池：
 
 ```text
 std.worker.pool(size, script) -> pool
-std.worker.call(pool, method, args) -> result
-std.worker.map(pool, method, items) -> list
+std.worker.call(pool, method, args[, timeout_ms]) -> result
+std.worker.map(pool, method, items[, timeout_ms]) -> list
+std.worker.submit(pool, method, args) -> job
+std.worker.wait(job[, timeout_ms]) -> result
 std.worker.shutdown(pool)
 ```
 
@@ -1509,6 +1511,9 @@ std.result.unwrap(std.worker.call(pool, "add", [2, 3]))
 std.worker.map(pool, "add", [[1, 2], [3, 4]])
 std.worker.shutdown(pool)
 ```
+
+`call` / `map` 的超时或 worker 崩溃会返回错误，并重启对应 worker。
+当前协议是 JSON Lines，不支持原始 `bytes`。
 
 JSON：
 
@@ -2731,6 +2736,8 @@ std.process.pid
 std.worker.pool
 std.worker.call
 std.worker.map
+std.worker.submit
+std.worker.wait
 std.worker.shutdown
 ```
 

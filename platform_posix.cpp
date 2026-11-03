@@ -58,6 +58,9 @@ static void on_sigint(int) {
 }
 
 void platform_init() {
+    /* Writes to a closed worker/network pipe should return EPIPE, not kill
+     * the interpreter with SIGPIPE. */
+    std::signal(SIGPIPE, SIG_IGN);
 }
 
 std::vector<std::string> platform_command_line_args(int argc, char **argv) {

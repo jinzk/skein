@@ -1686,6 +1686,8 @@ std.process.pid
 std.worker.pool
 std.worker.call
 std.worker.map
+std.worker.submit
+std.worker.wait
 std.worker.shutdown
 ```
 
@@ -2665,8 +2667,10 @@ print(std.process.wait(p));
 
 ```text
 std.worker.pool(size, script) -> pool
-std.worker.call(pool, method, args) -> result
-std.worker.map(pool, method, items) -> list
+std.worker.call(pool, method, args[, timeout_ms]) -> result
+std.worker.map(pool, method, items[, timeout_ms]) -> list
+std.worker.submit(pool, method, args) -> job
+std.worker.wait(job[, timeout_ms]) -> result
 std.worker.shutdown(pool)
 ```
 
@@ -2674,7 +2678,12 @@ std.worker.shutdown(pool)
 - `script`：worker 脚本路径
 - `method`：worker 脚本中负责分发的逻辑
 - `args` / `items`：JSON 可序列化数据
-- `call` 返回 `result`，worker 错误不会直接中断进程
+- `timeout_ms`：可选，0 或省略表示不设置超时
+- `call` 返回 `result`，worker 错误、超时和管道断开都不会直接中断进程
+- `submit` 立即提交任务并返回 `job`；`wait` 阻塞等待结果
+- 任务多于 worker 时进入队列，由 `wait` 驱动调度
+- worker 崩溃或超时后会关闭并重新启动该 worker
+- 单个 worker 连续重启超过 3 次后会被标记为不可用
 - `map` 把任务分批分发给多个 worker，保持输入顺序；任一任务失败时报告错误
 
 worker 脚本约定使用 JSON Lines：
@@ -2706,13 +2715,19 @@ let r = std.worker.call(pool, "add", [2, 3]);
 print(std.result.unwrap(r));
 
 print(std.worker.map(pool, "add", [[1, 2], [3, 4], [5, 6]]));
+
+let a = std.worker.submit(pool, "add", [7, 8]);
+let b = std.worker.submit(pool, "add", [9, 10]);
+print(std.result.unwrap(std.worker.wait(a)));
+print(std.result.unwrap(std.worker.wait(b)));
+
 std.worker.shutdown(pool);
 ```
 
 当前限制：
 
 - 使用 JSON Lines，不支持原始 `bytes`；
-- 第一个版本不提供超时和自动重启；
+- 超时和崩溃后只重启当前 worker，没有重启次数上限和池级熔断；
 - worker 脚本需要自己实现 `method` 分发和错误响应；
 - Windows worker 行为待单独验证。
 

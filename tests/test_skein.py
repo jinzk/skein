@@ -512,6 +512,55 @@ def check_extended_stdlib():
                 'std.worker.shutdown(pool);\n',
                 stdout_all=["5", "[3, 7, 11]"],
             )
+            restart_script = os.path.join(worker_tmp, "restart.skein")
+            with open(restart_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "while (true) {\n"
+                    "  let line = std.io.read_line(std.io.stdin);\n"
+                    "  if (line == null) { break; }\n"
+                    "  let request = std.json.parse(bytes_to_string(line));\n"
+                    "  let method = request[\"method\"];\n"
+                    "  if (method == \"die\") { break; }\n"
+                    "  if (method == \"slow\") { std.time.sleep(500); }\n"
+                    "  let result = request[\"params\"][0] + "
+                    "request[\"params\"][1];\n"
+                    "  let response = {\"id\": request[\"id\"], "
+                    "\"ok\": true, \"result\": result};\n"
+                    "  std.io.write_all(std.io.stdout, bytes_from_string("
+                    "std.json.stringify(response) + \"\\n\"));\n"
+                    "  std.io.flush(std.io.stdout);\n"
+                    "}\n"
+                )
+            restart_path = restart_script.replace("\\", "\\\\")
+            check(
+                "std.worker submit and wait",
+                "import std;\n"
+                f'let pool = std.worker.pool(2, "{worker_path}");\n'
+                'let a = std.worker.submit(pool, "add", [1, 2]);\n'
+                'let b = std.worker.submit(pool, "add", [3, 4]);\n'
+                'let c = std.worker.submit(pool, "add", [5, 6]);\n'
+                'print(std.result.unwrap(std.worker.wait(a)));\n'
+                'print(std.result.unwrap(std.worker.wait(b)));\n'
+                'print(std.result.unwrap(std.worker.wait(c)));\n'
+                'std.worker.shutdown(pool);\n',
+                stdout_all=["3", "7", "11"],
+            )
+            check(
+                "std.worker crash and timeout restart",
+                "import std;\n"
+                f'let pool = std.worker.pool(1, "{restart_path}");\n'
+                'print(std.result.is_err('
+                'std.worker.call(pool, "die", [1, 2])));\n'
+                'print(std.result.unwrap('
+                'std.worker.call(pool, "add", [2, 3])));\n'
+                'print(std.result.is_err('
+                'std.worker.call(pool, "slow", [1, 2], 100)));\n'
+                'print(std.result.unwrap('
+                'std.worker.call(pool, "add", [4, 5])));\n'
+                'std.worker.shutdown(pool);\n',
+                stdout_all=["true", "5", "true", "9"],
+            )
         check(
             "std process spawn repeated close",
             "import std;\n"

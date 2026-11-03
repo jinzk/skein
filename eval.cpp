@@ -463,8 +463,19 @@ static bool case_values_have_condition(struct ast *values) {
     return false;
 }
 
+namespace {
+thread_local int equals_depth = 0;
+struct equals_depth_guard {
+    equals_depth_guard() { ++equals_depth; }
+    ~equals_depth_guard() { --equals_depth; }
+};
+} // namespace
+
 bool value_equals(struct value_t *a, struct value_t *b) {
     if (!a || !b) return a == b;
+    if (equals_depth > 512)
+        return false;
+    equals_depth_guard guard;
     if (is_numeric(a) && is_numeric(b)) {
         bool unordered = false;
         int cmp = compare_numeric(a, b, unordered);
@@ -497,6 +508,7 @@ bool value_equals(struct value_t *a, struct value_t *b) {
         case T_list: {
             struct list_value_t *la = (struct list_value_t *)a;
             struct list_value_t *lb = (struct list_value_t *)b;
+            if (la->payload == lb->payload) return true;
             if (la->payload->items.size() != lb->payload->items.size()) return false;
             for (size_t i = 0; i < la->payload->items.size(); ++i)
                 if (!value_equals(la->payload->items[i], lb->payload->items[i])) return false;
@@ -505,6 +517,7 @@ bool value_equals(struct value_t *a, struct value_t *b) {
         case T_dict: {
             struct dict_value_t *da = (struct dict_value_t *)a;
             struct dict_value_t *db = (struct dict_value_t *)b;
+            if (da->payload == db->payload) return true;
             if (da->payload->items.size() != db->payload->items.size()) return false;
             for (size_t i = 0; i < da->payload->items.size(); ++i) {
                 bool found = false;
@@ -550,6 +563,7 @@ bool value_equals(struct value_t *a, struct value_t *b) {
             struct struct_value_t *sb = (struct struct_value_t *)b;
             if (sa->def != sb->def) return false;
             if (!sa->payload || !sb->payload) return sa->payload == sb->payload;
+            if (sa->payload == sb->payload) return true;
             if (sa->payload->fields.size() != sb->payload->fields.size())
                 return false;
             for (size_t i = 0; i < sa->payload->fields.size(); ++i)
@@ -565,6 +579,7 @@ bool value_equals(struct value_t *a, struct value_t *b) {
                 return false;
             if (!ea->payload || !eb->payload)
                 return ea->payload == eb->payload;
+            if (ea->payload == eb->payload) return true;
             if (ea->payload->fields.size() != eb->payload->fields.size())
                 return false;
             for (size_t i = 0; i < ea->payload->fields.size(); ++i)
@@ -656,17 +671,23 @@ static void free_args(std::vector<struct value_t *> &args) {
  * them left-to-right without using eval('L'), because eval('L') intentionally
  * frees intermediate statement values.
  */
-static bool collect_args(struct ast *a, std::vector<struct value_t *> &out) {
+static bool collect_args(struct ast *a, std::vector<struct value_t *> &out,
+                         struct value_t *&control) {
     if (!a) return true;
     if (out.capacity() == 0)
         out.reserve(8);
     if (a->nodetype == 'L') {
-        if (!collect_args(a->l, out)) return false;
-        return collect_args(a->r, out);
+        if (!collect_args(a->l, out, control)) return false;
+        return collect_args(a->r, out, control);
     }
     if (a->nodetype == 'x') {
         struct value_t *v = eval(((struct spread_node *)a)->value);
         if (!v) return false;
+        if (v->type == T_return || v->type == T_break ||
+            v->type == T_continue) {
+            control = v;
+            return false;
+        }
         if (v->type != T_list) {
             yyerror("spread expects a list, got %s", typename_of(v));
             freeval(v);
@@ -681,8 +702,7 @@ static bool collect_args(struct ast *a, std::vector<struct value_t *> &out) {
     struct value_t *v = eval(a);
     if (!v) return false;
     if (v->type == T_return || v->type == T_break || v->type == T_continue) {
-        freeval(v);
-        yyerror("invalid argument expression");
+        control = v;
         return false;
     }
     out.push_back(v);
@@ -948,9 +968,10 @@ static struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     call_depth_guard depth_guard;
 
     std::vector<struct value_t *> args;
-    if (!collect_args(args_ast, args)) {
+    struct value_t *control = NULL;
+    if (!collect_args(args_ast, args, control)) {
         free_args(args);
-        return NULL;
+        return control;
     }
 
     return invoke_value(callee, args);
@@ -2164,9 +2185,10 @@ static struct value_t *call_method_value(struct value_t *receiver,
     std::vector<struct value_t *> args;
     args.reserve(8);
     args.push_back(dupval(receiver));
-    if (!collect_args(args_ast, args)) {
+    struct value_t *control = NULL;
+    if (!collect_args(args_ast, args, control)) {
         free_args(args);
-        return NULL;
+        return control;
     }
 
     struct func_value_t callee;

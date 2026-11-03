@@ -8,6 +8,21 @@
 #include <cstring>
 #include <utility>
 
+namespace {
+thread_local int render_depth = 0;
+struct render_depth_guard {
+    render_depth_guard() { ++render_depth; }
+    ~render_depth_guard() { --render_depth; }
+};
+
+thread_local int free_depth = 0;
+struct free_depth_guard {
+    free_depth_guard() { ++free_depth; }
+    ~free_depth_guard() { --free_depth; }
+};
+} // namespace
+
+
 static char *dupstr(const char *s) {
     if (!s) s = "";
     size_t len = std::strlen(s) + 1;
@@ -295,6 +310,9 @@ struct value_t *dupval(struct value_t *v) {
 
 void freeval(struct value_t *v) {
     if (!v) return;
+    if (free_depth > 1000)
+        return; /* avoid C++ stack overflow on very deep values */
+    free_depth_guard guard;
     switch (v->type) {
         case T_int:
             delete (struct int_value_t *)v;
@@ -431,6 +449,9 @@ static std::string format_double(double d) {
 
 std::string value_to_string(const struct value_t *v) {
     if (!v) return "null";
+    if (render_depth > 100)
+        return "...";
+    render_depth_guard guard;
     switch (v->type) {
         case T_int:
             return std::to_string(((const struct int_value_t *)v)->value);

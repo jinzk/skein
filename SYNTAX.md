@@ -384,6 +384,17 @@ obj["fn"](3)
 
 函数调用参数从左到右求值。
 
+参数表达式中出现的 `return` / `break` / `continue` 会向外传播，当前函数调用不会执行：
+
+```text
+func f(x) { return x; }
+func g() {
+  let r = f(match (1) { case 1 => { return 10; } default => 0; });
+  return 99;
+}
+g()    // 10
+```
+
 ### 4.8 匿名函数
 
 ```text
@@ -3284,6 +3295,13 @@ let c = make_counter();
 c()             // 1
 c()             // 2
 ```
+
+递归深度保护：
+
+- `print` / `str` 超过 100 层后输出 `...`；
+- `value_equals` 超过 512 层后返回 `false`；
+- `freeval` 超过 1000 层后停止释放，避免 C++ 栈溢出（极深值可能泄漏）；
+- JSON 编解码深度上限为 512。
 
 ## 9. 错误和退出码
 

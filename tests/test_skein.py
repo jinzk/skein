@@ -1761,6 +1761,39 @@ def main():
           "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
           stdout_all=["false", "empty heap"])
 
+    check("control flow in function argument",
+          "func f(x) { return x; }\n"
+          "func g() {\n"
+          "  let r = f(match (1) { case 1 => { return 10; } default => 0; });\n"
+          "  return 99;\n"
+          "}\n"
+          "print(g());\n",
+          stdout="10")
+    check("break in function argument",
+          "func f(x) { return x; }\n"
+          "for (let i in [1, 2, 3]) {\n"
+          "  f(match (i) { case 2 => { break; } default => i; });\n"
+          "  print(i);\n"
+          "}\n",
+          stdout="1\n")
+    check("continue in function argument",
+          "func f(x) { return x; }\n"
+          "for (let i in [1, 2, 3]) {\n"
+          "  f(match (i) { case 2 => { continue; } default => i; });\n"
+          "  print(i);\n"
+          "}\n",
+          stdout="1\n3\n")
+    check("deep recursive struct print",
+          "struct Node { value: int; next: Node?; }\n"
+          "let n = null;\n"
+          "for (let i in range(2000)) { n = Node { value: i, next: n }; }\n"
+          "print(\"built\");\n"
+          "print(n == n);\n"
+          "print(n.value);\n"
+          "let s = str(n);\n"
+          "print(len(s) > 0);\n",
+          stdout_all=["built", "true", "1999", "true"])
+
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")

@@ -1,0 +1,147 @@
+package arena {
+  import std;
+
+  const _SHIFT = 32;
+  const _MASK = (1 << 32) - 1;
+
+  struct _Slot {
+    gen: int;
+    alive: bool;
+    value: any;
+  }
+
+  export struct Store {
+    slots: list;
+    free: list;
+    next: int;
+    alive: int;
+  }
+
+  func _slot_of(id) {
+    return id >> _SHIFT;
+  }
+
+  func _gen_of(id) {
+    return id & _MASK;
+  }
+
+  func _handle(slot, gen) {
+    return (slot << _SHIFT) + gen;
+  }
+
+  func _entry(s, slot) {
+    if (slot < 0 || slot >= len(s.slots)) {
+      return null;
+    }
+    return s.slots[slot];
+  }
+
+  func _valid(s, slot, gen) {
+    let entry = _entry(s, slot);
+    return entry != null && entry.alive && entry.gen == gen;
+  }
+
+  func _check(id) {
+    if (kind_of(id) != "int") {
+      fail("arena handle must be an int");
+    }
+  }
+
+  export func new() {
+    return Store { slots: [], free: [], next: 0, alive: 0 };
+  }
+
+  export func add(s, value) {
+    if (len(s.free) > 0) {
+      let n = len(s.free);
+      let slot = s.free[n - 1];
+      s.free = std.list.slice(s.free, 0, n - 1);
+      let prev = s.slots[slot];
+      let gen = prev.gen + 1;
+      s.slots[slot] = _Slot { gen: gen, alive: true, value: value };
+      s.alive = s.alive + 1;
+      return { "arena": s, "id": _handle(slot, gen) };
+    }
+
+    let slot = s.next;
+    s.next = slot + 1;
+    s.slots = std.list.append(
+      s.slots, _Slot { gen: 1, alive: true, value: value });
+    s.alive = s.alive + 1;
+    return { "arena": s, "id": _handle(slot, 1) };
+  }
+
+  export func get(s, id) {
+    _check(id);
+    let slot = _slot_of(id);
+    let gen = _gen_of(id);
+    if (!_valid(s, slot, gen)) {
+      return { "ok": false, "error": "unknown handle" };
+    }
+    return { "ok": true, "value": s.slots[slot].value };
+  }
+
+  export func has(s, id) {
+    _check(id);
+    return _valid(s, _slot_of(id), _gen_of(id));
+  }
+
+  export func set(s, id, value) {
+    _check(id);
+    let slot = _slot_of(id);
+    let gen = _gen_of(id);
+    if (!_valid(s, slot, gen)) {
+      return { "arena": s, "ok": false };
+    }
+    s.slots[slot] = _Slot { gen: gen, alive: true, value: value };
+    return { "arena": s, "ok": true };
+  }
+
+  export func remove(s, id) {
+    _check(id);
+    let slot = _slot_of(id);
+    let gen = _gen_of(id);
+    if (!_valid(s, slot, gen)) {
+      return { "arena": s, "removed": false };
+    }
+    s.slots[slot] = _Slot { gen: gen, alive: false, value: null };
+    s.free = std.list.append(s.free, slot);
+    s.alive = s.alive - 1;
+    return { "arena": s, "removed": true };
+  }
+
+  export func size(s) {
+    return s.alive;
+  }
+
+  export func capacity(s) {
+    return len(s.slots);
+  }
+
+  export func ids(s) {
+    let out = [];
+    let slot = 0;
+    while (slot < len(s.slots)) {
+      let entry = s.slots[slot];
+      if (entry.alive) {
+        out = std.list.append(out, _handle(slot, entry.gen));
+      }
+      slot = slot + 1;
+    }
+    return out;
+  }
+
+  export func values(s) {
+    let out = [];
+    for (let entry in s.slots) {
+      if (entry.alive) {
+        out = std.list.append(out, entry.value);
+      }
+    }
+    return out;
+  }
+
+  export func clear(s) {
+    return new();
+  }
+}

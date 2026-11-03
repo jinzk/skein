@@ -1389,6 +1389,7 @@ std.deque（内嵌 Skein 源码包）
 std.heap（内嵌 Skein 源码包）
 std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
+std.arena（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -1522,6 +1523,24 @@ graph.to_dot(g)               // Graphviz 文本
 API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `to_dot`。
 
 `add_node` / `add_edge` 返回 `{graph, id}`；删除节点会级联删除相关边；边标签字段是 `tag`。
+
+`std.arena` 提供带 generation 的稳定句柄：
+
+```text
+import std.arena;
+
+let s = arena.new();
+let r = arena.add(s, "a");
+s = r["arena"];
+let a = r["id"];
+
+arena.get(s, a)        // {ok: true, value: a}
+arena.set(s, a, "A")   // {arena, ok: true}
+arena.remove(s, a)     // {arena, removed: true}
+arena.has(s, a)        // false
+```
+
+API：`new` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。
 
 `std.list` 新增常用算法：
 

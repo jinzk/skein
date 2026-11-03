@@ -1537,6 +1537,7 @@ std.deque（内嵌 Skein 源码包）
 std.heap（内嵌 Skein 源码包）
 std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
+std.arena（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -3322,6 +3323,54 @@ graph.to_dot(g)                             -> string
 - `bfs` / `dfs` 返回访问顺序，不存在的起点返回空列表；
 - `path` 是 BFS 最短路径，不可达返回 `{ok: false, error: "not found"}`；
 - `neighbors` 可按 `tag` 过滤。
+
+### std.arena
+
+```text
+import std.arena;
+
+let s = arena.new();
+let r = arena.add(s, "a");
+s = r["arena"];
+let a = r["id"];
+
+r = arena.add(s, "b");
+s = r["arena"];
+let b = r["id"];
+
+arena.get(s, a)        // {ok: true, value: a}
+arena.set(s, a, "A")   // {arena, ok: true}
+arena.remove(s, b)     // {arena, removed: true}
+arena.has(s, b)        // false
+arena.size(s)          // 1
+arena.values(s)        // [A]
+```
+
+API：
+
+```text
+arena.new()                 -> Store
+arena.add(store, value)     -> {arena, id}
+arena.get(store, id)        -> {ok, value} | {ok: false, error}
+arena.set(store, id, value) -> {arena, ok}
+arena.remove(store, id)     -> {arena, removed}
+arena.has(store, id)        -> bool
+arena.size(store)           -> int
+arena.capacity(store)       -> int
+arena.ids(store)            -> list
+arena.values(store)         -> list
+arena.clear(store)          -> Store
+```
+
+规则：
+
+- 句柄是整数，包含槽位和 generation；
+- 槽位复用后 generation 递增，旧句柄永久失效，不会误指向新值；
+- `set` / `remove` 对失效句柄返回 `ok: false` / `removed: false`，不报错；
+- `size` 是存活条目数，`capacity` 是历史槽位数；
+- `ids` / `values` 按槽位顺序返回；
+- `clear` 丢弃全部槽位；
+- Store 是值语义，每次更新返回新 Store。
 
 ### 6.5 查找路径
 

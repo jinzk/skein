@@ -20,6 +20,7 @@
 #include "std_heap_source.inc"
 #include "std_route_source.inc"
 #include "std_graph_source.inc"
+#include "std_arena_source.inc"
 
 #include <algorithm>
 #include <cctype>
@@ -73,6 +74,7 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.heap", kStdHeapSource},
     {"std.route", kStdRouteSource},
     {"std.graph", kStdGraphSource},
+    {"std.arena", kStdArenaSource},
 };
 
 const char *find_embedded_source(const std::string &dotted) {

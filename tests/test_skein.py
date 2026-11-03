@@ -1948,6 +1948,58 @@ def main():
           'import std;\nstd.list.group_by([1], func(x) { return 1.5; });\n',
           stderr="std.list.group_by key: dict key must be")
 
+    check("arena add get set remove",
+          'import std;\nimport std.arena;\n'
+          'let s = arena.new();\n'
+          'let r = arena.add(s, "a"); s = r["arena"]; let a = r["id"];\n'
+          'r = arena.add(s, "b"); s = r["arena"]; let b = r["id"];\n'
+          'print(arena.size(s));\n'
+          'print(arena.values(s));\n'
+          'print(arena.get(s, a)["value"]);\n'
+          'r = arena.set(s, a, "A"); s = r["arena"];\n'
+          'print(r["ok"]);\n'
+          'r = arena.remove(s, b); s = r["arena"];\n'
+          'print(r["removed"]);\n'
+          'print(arena.size(s));\n'
+          'print(arena.has(s, b));\n'
+          'r = arena.add(s, "c"); s = r["arena"]; let c = r["id"];\n'
+          'print(arena.capacity(s));\n'
+          'print(arena.values(s));\n'
+          'print(arena.has(s, c));\n'
+          'print(arena.has(s, b));\n',
+          stdout_all=["2", "[a, b]", "a", "true", "true", "1",
+                      "false", "2", "[A, c]", "true", "false"])
+    check("arena stale handle after reuse",
+          'import std;\nimport std.arena;\n'
+          'let s = arena.new();\n'
+          'let r = arena.add(s, 1); s = r["arena"]; let a = r["id"];\n'
+          'r = arena.remove(s, a); s = r["arena"];\n'
+          'r = arena.add(s, 2); s = r["arena"];\n'
+          'print(arena.has(s, a));\n'
+          'print(arena.get(s, a)["ok"]);\n'
+          'print(arena.values(s));\n',
+          stdout_all=["false", "false", "[2]"])
+    check("arena value semantics",
+          'import std;\nimport std.arena;\n'
+          'let s0 = arena.new();\n'
+          'let r = arena.add(s0, 1);\n'
+          'let s1 = r["arena"]; let a = r["id"];\n'
+          'print(arena.size(s0));\nprint(arena.size(s1));\n'
+          'let r2 = arena.remove(s1, a);\n'
+          'print(arena.size(s1));\nprint(arena.size(r2["arena"]));\n',
+          stdout_all=["0", "1", "1", "0"])
+    check("arena clear",
+          'import std;\nimport std.arena;\n'
+          'let s = arena.new();\n'
+          'let r = arena.add(s, 1); s = r["arena"];\n'
+          's = arena.clear(s);\n'
+          'print(arena.size(s));\nprint(arena.values(s));\n',
+          stdout_all=["0", "[]"])
+    check("arena handle must be int",
+          'import std;\nimport std.arena;\n'
+          'arena.get(arena.new(), "x");\n',
+          stderr="arena handle must be an int")
+
     check("control flow in function argument",
           "func f(x) { return x; }\n"
           "func g() {\n"

@@ -2408,7 +2408,7 @@ for (let value in values) {
 
 `is` 只接受类型名或 trait 名作为右操作数；结构体类型名按包解析。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`command`、`command_status`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -2504,12 +2504,16 @@ print("x = {:.2f}", 1.5)
 
 ## 外部命令
 
-`command(cmd[, env])` 执行一个 shell 命令，并返回其标准输出字符串：
+通过 `std.process` 执行 shell 命令。全局 `command` / `command_status` 已移除。
+
+`std.process.command(cmd[, env])` 执行命令并返回标准输出字符串：
 
 ```text
-command("echo hi")                    → "hi"
-command("echo $FOO", {"FOO": "bar"})  → "bar"
-print(command("ls"))
+import std;
+
+std.process.command("echo hi")                    → "hi"
+std.process.command("echo $FOO", {"FOO": "bar"})  → "bar"
+print(std.process.command("ls"))
 ```
 
 - POSIX 使用 `/bin/sh -c`；
@@ -2521,40 +2525,34 @@ print(command("ls"))
 - 命令无法启动时报告 `command failed to start`；
 - 非零退出码不会自动报错，当前返回值只有标准输出，没有退出码。
 
-如果只需要退出码，使用 `command_status(cmd[, env])`：
+如果只需要退出码，使用 `std.process.command_status(cmd[, env])`：
 
 ```text
-command_status("exit 0")                     → 0
-command_status("exit 3")                     → 3
-command_status("exit $CODE", {"CODE": "3"})  → 3
+import std;
+
+std.process.command_status("exit 0")                     → 0
+std.process.command_status("exit 3")                     → 3
+std.process.command_status("exit $CODE", {"CODE": "3"})  → 3
 ```
 
-`command_status` 会直接继承标准输入/输出/错误，因此命令输出会正常显示；它返回退出码整数。命令处理器无法启动时报告 `command_status failed to start`。
+`std.process.command_status` 会直接继承标准输入/输出/错误，因此命令输出会正常显示；它返回退出码整数。
+
+如果需要同时获取 status、stdout、stderr，或控制 stdin/cwd/env，使用
+`std.process.run`：
+
+```text
+import std;
+
+let r = std.process.run("printf hello");
+r["status"]
+bytes_to_string(r["stdout"])
+```
 
 环境变量名不能为空，也不能包含 `=`。在 Windows cmd 中引用变量使用 `%FOO%`，POSIX shell 使用 `$FOO`。
 
-Windows/MinGW 下 `command` 使用 `CreateProcessW` 传递 Unicode 命令行和 Unicode 环境块；`command` 捕获的 stdout 约定为 UTF-8，`command_status` 直接继承控制台输出，不做额外编码转换。
+Windows/MinGW 下命令使用 `CreateProcessW` 传递 Unicode 命令行和 Unicode 环境块；捕获的 stdout 约定为 UTF-8。
 
-示例：
-
-```text
-let files = command("ls");
-print(files);
-
-let name = command("echo world");
-format("hello {}", name)
-```
-
-`command` 是普通内置函数，因此也可以保存和传递：
-
-```text
-let run = command;
-run("echo ok")
-```
-
-**安全提示**：`command()` 会执行任意 shell 命令，只应对可信输入使用。
-
-Windows 下命令输出需要是 UTF-8 字节流，否则中文内容可能与解释器内部编码不一致。
+**安全提示**：这些函数会执行任意 shell 命令，只应对可信输入使用。
 
 ## 字符串处理
 
@@ -3141,7 +3139,7 @@ f["close"]()
 - 同一行最多报告一条词法错误，并抑制由此产生的重复语法错误；
 - 包加载失败是原子失败：`import` 不会绑定部分命名空间；
 - `input()` 的 EOF 返回 `null`，不是错误；
-- `command()` 的退出状态不是解释器错误，需要状态时使用 `command_status()`。
+- `std.process.command()` 的退出状态不是解释器错误，需要状态时使用 `std.process.command_status()`。
 
 ### 退出码
 
@@ -3155,7 +3153,7 @@ f["close"]()
 | 源文件编码声明冲突或转码失败 | `2` |
 | 脚本被 Ctrl-C 中断 | `130` |
 
-外部命令的退出状态通过 `command_status()` 返回，不会直接成为解释器退出码。
+外部命令的退出状态通过 `std.process.command_status()` / `std.process.run()` 返回，不会直接成为解释器退出码。
 
 ## 目录结构
 

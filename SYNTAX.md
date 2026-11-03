@@ -1580,7 +1580,7 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
 - `std.io`：`print`、`format`、`input`，以及文件和 socket 通用的流式读写；
 - `std.fs`：文件读写和文件句柄操作；
-- `std.process`：命令执行、`status` / `command_status`；
+- `std.process`：命令执行、`command_status` / `run`；
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
@@ -2648,8 +2648,12 @@ kind_of type_name type_module type_source
 
 ### 进程
 
+进程命令通过 `std.process` 提供：
+
 ```text
-command command_status
+std.process.command
+std.process.command_status
+std.process.run
 ```
 
 ### 文件

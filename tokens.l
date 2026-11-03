@@ -422,8 +422,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "type_module" { yylval.fn = B_type_module; YYRET(BUILTIN); }
 "type_source" { yylval.fn = B_type_source; YYRET(BUILTIN); }
 "format" { yylval.fn = B_format; YYRET(BUILTIN); }
-"command" { yylval.fn = B_command; YYRET(BUILTIN); }
-"command_status" { yylval.fn = B_command_status; YYRET(BUILTIN); }
 "read_file" { yylval.fn = B_read_file; YYRET(BUILTIN); }
 "write_file" { yylval.fn = B_write_file; YYRET(BUILTIN); }
 "append_file" { yylval.fn = B_append_file; YYRET(BUILTIN); }

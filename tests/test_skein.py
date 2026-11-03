@@ -7450,54 +7450,77 @@ std.json.stringify(std.json.parse(text))
     check("format as value", 'let f = format;\nf("{} + {}", 1, 2)\n',
           stdout="= 1 + 2")
     check("builtin string form", "str(sqrt)\n", stdout="= <builtin>")
-    check("command output", 'command("echo hi")\n', stdout="= hi")
-    check("command in format", 'format("{}", command("echo hi"))\n',
+    check("command output", 'import std;\nstd.process.command("echo hi")\n',
           stdout="= hi")
-    check("command as value", 'let run = command;\nrun("echo ok")\n',
+    check("command in format",
+          'import std;\nformat("{}", std.process.command("echo hi"))\n',
+          stdout="= hi")
+    check("command as value",
+          'import std;\nlet run = std.process.command;\nrun("echo ok")\n',
           stdout="= ok")
-    check("command type error", "command(1)\n",
+    check("command type error", 'import std;\nstd.process.command(1)\n',
           stderr="command expects a string")
-    check("command arity error", "command()\n",
+    check("command arity error", 'import std;\nstd.process.command()\n',
           stderr="expects 1 or 2 arguments")
     command_env_test = (
-        'command("echo %FOO%", {"FOO": "bar"})\n'
+        'import std;\nstd.process.command("echo %FOO%", {"FOO": "bar"})\n'
         if sys.platform == "win32"
-        else 'command("echo $FOO", {"FOO": "bar"})\n'
+        else 'import std;\nstd.process.command("echo $FOO", {"FOO": "bar"})\n'
     )
     check("command environment override", command_env_test, stdout="= bar")
     command_status_env_test = (
-        'command_status("exit %CODE%", {"CODE": "3"})\n'
+        'import std;\nstd.process.command_status("exit %CODE%", '
+        '{"CODE": "3"})\n'
         if sys.platform == "win32"
-        else 'command_status("exit $CODE", {"CODE": "3"})\n'
+        else 'import std;\nstd.process.command_status("exit $CODE", '
+        '{"CODE": "3"})\n'
     )
     check("command_status environment override", command_status_env_test,
           stdout="= 3")
-    check("command empty environment", "command(\"echo hi\", dict())\n",
+    check("command empty environment",
+          'import std;\nstd.process.command("echo hi", dict())\n',
           stdout="= hi")
-    check("command env type", "command(\"echo hi\", 1)\n",
+    check("command env type",
+          'import std;\nstd.process.command("echo hi", 1)\n',
           stderr="command env must be a dict")
-    check("command env key type", 'command("echo hi", {1: "x"})\n',
+    check("command env key type",
+          'import std;\nstd.process.command("echo hi", {1: "x"})\n',
           stderr="command env keys must be strings")
-    check("command env value type", 'command("echo hi", {"A": 1})\n',
+    check("command env value type",
+          'import std;\nstd.process.command("echo hi", {"A": 1})\n',
           stderr="command env values must be strings")
-    check("command env invalid name", 'command("echo hi", {"A=B": "x"})\n',
+    check("command env invalid name",
+          'import std;\nstd.process.command("echo hi", {"A=B": "x"})\n',
           stderr="invalid environment variable name")
-    check("command env arity error", 'command("echo hi", dict(), 1)\n',
+    check("command env arity error",
+          'import std;\nstd.process.command("echo hi", dict(), 1)\n',
           stderr="expects 1 or 2 arguments")
-    check("command_status env type", "command_status(\"exit 0\", 1)\n",
+    check("command_status env type",
+          'import std;\nstd.process.command_status("exit 0", 1)\n',
           stderr="command_status env must be a dict")
-    check("command_status success", 'command_status("exit 0")\n',
+    check("command_status success",
+          'import std;\nstd.process.command_status("exit 0")\n',
           stdout="= 0")
-    check("command_status failure", 'command_status("exit 3")\n',
+    check("command_status failure",
+          'import std;\nstd.process.command_status("exit 3")\n',
           stdout="= 3")
-    check("command_status output", 'command_status("echo hi")\n',
+    check("command_status output",
+          'import std;\nstd.process.command_status("echo hi")\n',
           stdout_all=["hi", "= 0"])
     check("command_status as value",
-          'let run = command_status;\nrun("exit 0")\n', stdout="= 0")
-    check("command_status type error", "command_status(1)\n",
+          'import std;\nlet run = std.process.command_status;\n'
+          'run("exit 0")\n',
+          stdout="= 0")
+    check("command_status type error",
+          'import std;\nstd.process.command_status(1)\n',
           stderr="command_status expects a string")
-    check("command_status arity error", "command_status()\n",
+    check("command_status arity error",
+          'import std;\nstd.process.command_status()\n',
           stderr="expects 1 or 2 arguments")
+    check("global command removed", 'command("echo hi")\n',
+          stderr="symbol not found command")
+    check("command is ordinary identifier", "let command = 1;\ncommand\n",
+          stdout="= 1")
     check("input reads a line", "input()\nhello\n", stdout="= hello")
     check("input with prompt", 'input("Name: ")\nAlice\n',
           stdout_all=["Name: ", "= Alice"])

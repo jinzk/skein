@@ -388,6 +388,14 @@ value_t *build_std_namespace() {
             {"map", B_list_map},
             {"filter", B_list_filter},
             {"reduce", B_list_reduce},
+            {"unique", B_list_unique},
+            {"unique_by", B_list_unique_by},
+            {"group_by", B_list_group_by},
+            {"chunk", B_list_chunk},
+            {"window", B_list_window},
+            {"zip", B_list_zip},
+            {"top_k", B_list_top_k},
+            {"binary_search", B_list_binary_search},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("dict"),

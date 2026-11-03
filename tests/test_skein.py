@@ -1894,6 +1894,60 @@ def main():
           'import std;\nstd.json.stringify(std.lru.new(2));\n',
           stderr="cannot encode lru as JSON")
 
+    check("list unique and group_by",
+          'import std;\n'
+          'print(std.list.unique([1, 2, 1, 3, 2]));\n'
+          'print(std.list.unique(["a", "b", "a"]));\n'
+          'print(std.list.unique_by([{"n": 1}, {"n": 1}, {"n": 2}], '
+          'func(p) { return p["n"]; }));\n'
+          'print(std.list.group_by([1, 2, 3, 4], '
+          'func(x) { return x % 2; }));\n',
+          stdout_all=["[1, 2, 3]", "[a, b]", "[{n: 1}, {n: 2}]",
+                      "{1: [1, 3], 0: [2, 4]}"])
+    check("list chunk and window",
+          'import std;\n'
+          'print(std.list.chunk([1, 2, 3, 4, 5], 2));\n'
+          'print(std.list.chunk([], 3));\n'
+          'print(std.list.window([1, 2, 3, 4, 5], 3));\n'
+          'print(std.list.window([1, 2, 3, 4, 5], 3, 2));\n'
+          'print(std.list.window([1, 2], 3));\n',
+          stdout_all=["[[1, 2], [3, 4], [5]]", "[]",
+                      "[[1, 2, 3], [2, 3, 4], [3, 4, 5]]",
+                      "[[1, 2, 3], [3, 4, 5]]", "[]"])
+    check("list zip and top_k",
+          'import std;\n'
+          'print(std.list.zip([1, 2, 3], ["a", "b"]));\n'
+          'print(std.list.zip([1, 2], ["a", "b"], [true, false]));\n'
+          'print(std.list.top_k([5, 1, 4, 2, 3], 3));\n'
+          'print(std.list.top_k([5, 1, 4, 2, 3], 2, '
+          'func(a, b) { return b - a; }));\n'
+          'print(std.list.top_k([1], 0));\n',
+          stdout_all=["[[1, a], [2, b]]",
+                      "[[1, a, true], [2, b, false]]",
+                      "[1, 2, 3]", "[5, 4]", "[]"])
+    check("list binary_search",
+          'import std;\n'
+          'print(std.list.binary_search([1, 3, 5, 7], 5));\n'
+          'print(std.list.binary_search([1, 3, 5, 7], 4));\n'
+          'print(std.list.binary_search(["a", "c", "e"], "c"));\n'
+          'print(std.list.binary_search([], 1));\n',
+          stdout_all=["{found: true, index: 2}",
+                      "{found: false, index: 2}",
+                      "{found: true, index: 1}",
+                      "{found: false, index: 0}"])
+    check("list chunk size must be positive",
+          'import std;\nstd.list.chunk([1], 0);\n',
+          stderr="std.list.chunk size must be at least 1")
+    check("list window step must be positive",
+          'import std;\nstd.list.window([1], 1, 0);\n',
+          stderr="std.list.window step must be at least 1")
+    check("list top_k k must be non-negative",
+          'import std;\nstd.list.top_k([1], -1);\n',
+          stderr="std.list.top_k k must be non-negative")
+    check("list group_by key restrictions",
+          'import std;\nstd.list.group_by([1], func(x) { return 1.5; });\n',
+          stderr="std.list.group_by key: dict key must be")
+
     check("control flow in function argument",
           "func f(x) { return x; }\n"
           "func g() {\n"

@@ -1523,6 +1523,21 @@ API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` 
 
 `add_node` / `add_edge` 返回 `{graph, id}`；删除节点会级联删除相关边；边标签字段是 `tag`。
 
+`std.list` 新增常用算法：
+
+```text
+std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
+std.list.unique_by(xs, key)             // 按 key 保序去重
+std.list.group_by(xs, key)              // {key: [items]}
+std.list.chunk([1, 2, 3, 4, 5], 2)      // [[1, 2], [3, 4], [5]]
+std.list.window([1, 2, 3, 4], 2)        // [[1, 2], [2, 3], [3, 4]]
+std.list.zip([1, 2], ["a", "b"])        // [[1, a], [2, b]]
+std.list.top_k([5, 1, 4, 2, 3], 3)      // [1, 2, 3]
+std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
+```
+
+`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key。
+
 当前提供的函数：
 
 ```text
@@ -1539,6 +1554,14 @@ std.list.append
 std.list.map
 std.list.filter
 std.list.reduce
+std.list.unique
+std.list.unique_by
+std.list.group_by
+std.list.chunk
+std.list.window
+std.list.zip
+std.list.top_k
+std.list.binary_search
 
 std.dict.len
 std.dict.get

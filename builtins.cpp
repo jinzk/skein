@@ -511,6 +511,259 @@ static struct value_t *list_is_sorted_value(struct list_value_t *list,
     return newboolval(true);
 }
 
+static struct value_t *list_unique_impl(struct list_value_t *list,
+                                        struct value_t *key_fn,
+                                        const char *name) {
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(list->payload->items.size());
+    std::vector<struct value_t *> seen;
+
+    for (struct value_t *item : list->payload->items) {
+        struct value_t *key = NULL;
+        if (key_fn) {
+            std::vector<struct value_t *> call_args;
+            call_args.push_back(dupval(item));
+            key = call_value_args(key_fn, std::move(call_args));
+            if (!key) {
+                for (struct value_t *entry : seen)
+                    freeval(entry);
+                freeval((struct value_t *)out);
+                return NULL;
+            }
+        } else {
+            key = dupval(item);
+        }
+
+        bool duplicate = false;
+        for (struct value_t *entry : seen) {
+            if (value_equals(entry, key)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            freeval(key);
+        } else {
+            seen.push_back(key);
+            out->payload->items.push_back(dupval(item));
+        }
+    }
+
+    for (struct value_t *entry : seen)
+        freeval(entry);
+    (void)name;
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_group_by_impl(struct list_value_t *list,
+                                          struct value_t *key_fn,
+                                          const char *name) {
+    struct dict_value_t *out = newdictval();
+
+    for (struct value_t *item : list->payload->items) {
+        std::vector<struct value_t *> call_args;
+        call_args.push_back(dupval(item));
+        struct value_t *key = call_value_args(key_fn, std::move(call_args));
+        if (!key) {
+            freeval((struct value_t *)out);
+            return NULL;
+        }
+        if (!dict_key_allowed(key)) {
+            yyerror("%s key: %s", name, dict_key_error());
+            freeval(key);
+            freeval((struct value_t *)out);
+            return NULL;
+        }
+
+        int index = dict_find_index(out, key);
+        if (index >= 0) {
+            struct list_value_t *bucket = (struct list_value_t *)
+                out->payload->items[(size_t)index].second;
+            bucket->payload->items.push_back(dupval(item));
+            freeval(key);
+        } else {
+            struct list_value_t *bucket = newlistval();
+            bucket->payload->items.push_back(dupval(item));
+            dict_append_item(out, key, (struct value_t *)bucket);
+        }
+    }
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_chunk_impl(struct list_value_t *list,
+                                       long long size, const char *name) {
+    if (size < 1) {
+        yyerror("%s size must be at least 1", name);
+        return NULL;
+    }
+    struct list_value_t *out = newlistval();
+    size_t step = (size_t)size;
+    for (size_t start = 0; start < list->payload->items.size();
+         start += step) {
+        struct list_value_t *bucket = newlistval();
+        size_t end = start + step;
+        if (end > list->payload->items.size())
+            end = list->payload->items.size();
+        bucket->payload->items.reserve(end - start);
+        for (size_t i = start; i < end; ++i)
+            bucket->payload->items.push_back(
+                dupval(list->payload->items[i]));
+        out->payload->items.push_back((struct value_t *)bucket);
+    }
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_window_impl(struct list_value_t *list,
+                                        long long size, long long step_value,
+                                        const char *name) {
+    if (size < 1) {
+        yyerror("%s size must be at least 1", name);
+        return NULL;
+    }
+    if (step_value < 1) {
+        yyerror("%s step must be at least 1", name);
+        return NULL;
+    }
+    struct list_value_t *out = newlistval();
+    size_t window = (size_t)size;
+    size_t step = (size_t)step_value;
+    if (window > list->payload->items.size())
+        return (struct value_t *)out;
+
+    for (size_t start = 0; start + window <= list->payload->items.size();
+         start += step) {
+        struct list_value_t *bucket = newlistval();
+        bucket->payload->items.reserve(window);
+        for (size_t i = 0; i < window; ++i)
+            bucket->payload->items.push_back(
+                dupval(list->payload->items[start + i]));
+        out->payload->items.push_back((struct value_t *)bucket);
+    }
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_zip_impl(
+    const std::vector<struct value_t *> &lists) {
+    size_t shortest = 0;
+    bool first = true;
+    for (struct value_t *value : lists) {
+        struct list_value_t *list = (struct list_value_t *)value;
+        if (first || list->payload->items.size() < shortest) {
+            shortest = list->payload->items.size();
+            first = false;
+        }
+    }
+
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(shortest);
+    for (size_t i = 0; i < shortest; ++i) {
+        struct list_value_t *row = newlistval();
+        row->payload->items.reserve(lists.size());
+        for (struct value_t *value : lists) {
+            struct list_value_t *list = (struct list_value_t *)value;
+            row->payload->items.push_back(
+                dupval(list->payload->items[i]));
+        }
+        out->payload->items.push_back((struct value_t *)row);
+    }
+    return (struct value_t *)out;
+}
+
+static bool list_compare_pair(struct value_t *a, struct value_t *b,
+                              bool numeric, bool chars, bool bytes,
+                              struct value_t *cmp_fn, const char *name,
+                              int &cmp) {
+    cmp = 0;
+    if (cmp_fn) {
+        std::vector<struct value_t *> call_args;
+        call_args.push_back(dupval(a));
+        call_args.push_back(dupval(b));
+        struct value_t *result =
+            call_value_args(cmp_fn, std::move(call_args));
+        if (!result)
+            return false;
+        if (result->type != T_int) {
+            yyerror("%s comparator must return int, got %s", name,
+                    typename_of(result));
+            freeval(result);
+            return false;
+        }
+        cmp = (int)((struct int_value_t *)result)->value;
+        freeval(result);
+        return true;
+    }
+
+    bool a_nan = value_is_nan(a);
+    bool b_nan = value_is_nan(b);
+    if (a_nan || b_nan) {
+        if (a_nan && b_nan)
+            cmp = 0;
+        else
+            cmp = a_nan ? 1 : -1; /* NaN sorts last */
+        return true;
+    }
+
+    if (chars) {
+        unsigned int ac = ((struct char_value_t *)a)->value;
+        unsigned int bc = ((struct char_value_t *)b)->value;
+        cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+    } else if (bytes) {
+        unsigned int ac = ((struct byte_value_t *)a)->value;
+        unsigned int bc = ((struct byte_value_t *)b)->value;
+        cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+    } else if (numeric) {
+        bool unordered = false;
+        cmp = compare_numeric(a, b, unordered);
+        if (unordered)
+            cmp = 0;
+    } else {
+        cmp = std::strcmp(((struct string_value_t *)a)->value,
+                          ((struct string_value_t *)b)->value);
+    }
+    return true;
+}
+
+static struct value_t *list_binary_search_impl(struct list_value_t *list,
+                                               struct value_t *needle,
+                                               struct value_t *cmp_fn,
+                                               const char *name) {
+    bool numeric = true;
+    bool chars = false;
+    bool bytes = false;
+    if (!cmp_fn &&
+        !list_sort_kind(list, numeric, chars, bytes)) {
+        yyerror("%s expects all numbers, strings, chars, or bytes", name);
+        return NULL;
+    }
+
+    size_t low = 0;
+    size_t high = list->payload->items.size();
+    bool found = false;
+
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        int cmp = 0;
+        if (!list_compare_pair(list->payload->items[mid], needle,
+                               numeric, chars, bytes, cmp_fn, name, cmp))
+            return NULL;
+        if (cmp == 0) {
+            found = true;
+            low = mid;
+            break;
+        }
+        if (cmp < 0)
+            low = mid + 1;
+        else
+            high = mid;
+    }
+
+    struct dict_value_t *out = newdictval();
+    dict_append_item(out, newstrval("found"), newboolval(found));
+    dict_append_item(out, newstrval("index"),
+                     newintval((long long)low));
+    return (struct value_t *)out;
+}
+
 static struct value_t *enum_tag_from_value(struct value_t *value) {
     if (!value || value->type != T_enum) {
         yyerror("std.enum.tag expects an enum value");
@@ -1054,6 +1307,47 @@ struct value_t *call_builtin(int functype,
     } else if (functype == B_list_is_sorted) {
         if (args.size() < 1 || args.size() > 2) {
             yyerror("std.list.is_sorted expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_unique ||
+               functype == B_list_unique_by) {
+        size_t expected = functype == B_list_unique ? 1 : 2;
+        if (args.size() != expected) {
+            yyerror("%s expects %d argument%s, got %d",
+                    functype == B_list_unique ? "std.list.unique"
+                                              : "std.list.unique_by",
+                    (int)expected, expected == 1 ? "" : "s",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_group_by ||
+               functype == B_list_chunk) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_list_group_by ? "std.list.group_by"
+                                                : "std.list.chunk",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_window) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.list.window expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_zip) {
+        if (args.size() < 2) {
+            yyerror("std.list.zip expects at least 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_top_k ||
+               functype == B_list_binary_search) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("%s expects 2 or 3 arguments, got %d",
+                    functype == B_list_top_k ? "std.list.top_k"
+                                             : "std.list.binary_search",
                     (int)args.size());
             return NULL;
         }
@@ -1721,6 +2015,140 @@ struct value_t *call_builtin(int functype,
             }
             if (out)
                 ret = (struct value_t *)out;
+            break;
+        }
+        case B_list_unique:
+        case B_list_unique_by: {
+            if (args[0]->type != T_list) {
+                yyerror("%s expects a list, got %s",
+                        functype == B_list_unique ? "std.list.unique"
+                                                  : "std.list.unique_by",
+                        typename_of(args[0]));
+                break;
+            }
+            ret = list_unique_impl(
+                (struct list_value_t *)args[0],
+                functype == B_list_unique_by ? args[1] : NULL,
+                functype == B_list_unique ? "std.list.unique"
+                                          : "std.list.unique_by");
+            break;
+        }
+        case B_list_group_by: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.group_by expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            ret = list_group_by_impl((struct list_value_t *)args[0],
+                                     args[1], "std.list.group_by");
+            break;
+        }
+        case B_list_chunk: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.chunk expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            if (args[1]->type != T_int) {
+                yyerror("std.list.chunk size must be an integer, got %s",
+                        typename_of(args[1]));
+                break;
+            }
+            ret = list_chunk_impl(
+                (struct list_value_t *)args[0],
+                ((struct int_value_t *)args[1])->value, "std.list.chunk");
+            break;
+        }
+        case B_list_window: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.window expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            if (args[1]->type != T_int) {
+                yyerror("std.list.window size must be an integer, got %s",
+                        typename_of(args[1]));
+                break;
+            }
+            long long step = 1;
+            if (args.size() == 3) {
+                if (args[2]->type != T_int) {
+                    yyerror("std.list.window step must be an integer, got %s",
+                            typename_of(args[2]));
+                    break;
+                }
+                step = ((struct int_value_t *)args[2])->value;
+            }
+            ret = list_window_impl(
+                (struct list_value_t *)args[0],
+                ((struct int_value_t *)args[1])->value, step,
+                "std.list.window");
+            break;
+        }
+        case B_list_zip: {
+            bool only_lists = true;
+            for (struct value_t *value : args) {
+                if (value->type != T_list) {
+                    yyerror("std.list.zip expects lists, got %s",
+                            typename_of(value));
+                    only_lists = false;
+                    break;
+                }
+            }
+            if (!only_lists)
+                break;
+            ret = list_zip_impl(args);
+            break;
+        }
+        case B_list_top_k: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.top_k expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            if (args[1]->type != T_int) {
+                yyerror("std.list.top_k k must be an integer, got %s",
+                        typename_of(args[1]));
+                break;
+            }
+            long long k = ((struct int_value_t *)args[1])->value;
+            if (k < 0) {
+                yyerror("std.list.top_k k must be non-negative");
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)args[0];
+            bool use_cmp = args.size() == 3 && args[2]->type != T_null;
+            struct value_t *sorted =
+                use_cmp ? list_sort_with_cmp(list, args[2], "std.list.top_k")
+                        : list_sort_default(list, false, "std.list.top_k");
+            if (!sorted)
+                break;
+            if (k >= (long long)((struct list_value_t *)sorted)
+                         ->payload->items.size()) {
+                ret = sorted;
+                break;
+            }
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve((size_t)k);
+            for (long long i = 0; i < k; ++i)
+                out->payload->items.push_back(dupval(
+                    ((struct list_value_t *)sorted)->payload->items[
+                        (size_t)i]));
+            freeval(sorted);
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_list_binary_search: {
+            if (args[0]->type != T_list) {
+                yyerror("std.list.binary_search expects a list, got %s",
+                        typename_of(args[0]));
+                break;
+            }
+            struct value_t *cmp_fn =
+                args.size() == 3 && args[2]->type != T_null ? args[2] : NULL;
+            ret = list_binary_search_impl(
+                (struct list_value_t *)args[0], args[1], cmp_fn,
+                "std.list.binary_search");
             break;
         }
         case B_dict_get:

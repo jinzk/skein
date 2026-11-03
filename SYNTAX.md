@@ -1615,6 +1615,39 @@ std.list.is_sorted(xs[, cmp])
 - `desc` 不破坏相等元素的原始顺序；
 - 默认排序和 `sort_by` 中，`NaN` 永远排在最后（升序和降序都一样）。
 
+列表算法：
+
+```text
+std.list.unique(xs)                 // 保序去重
+std.list.unique_by(xs, key)         // 按 key 保序去重
+std.list.group_by(xs, key)          // dict: key -> list
+std.list.chunk(xs, n)               // [[...], [...], ...]
+std.list.window(xs, n[, step])      // 滑动窗口，step 默认 1
+std.list.zip(a, b, ...)             // [[a0, b0], ...]，取最短
+std.list.top_k(xs, k[, cmp])        // 排序后取前 k 个
+std.list.binary_search(xs, value[, cmp]) -> {found, index}
+```
+
+- `unique` / `unique_by` 保留第一次出现的元素；
+- `group_by` 的 key 必须是合法 dict key，结果 dict 保持首次出现顺序；
+- `chunk` / `window` 的 `n` 必须 >= 1，`window` 的 `step` 必须 >= 1；
+- `chunk` 最后一块可以不满；`window` 只返回完整窗口；
+- `zip` 以最短输入为准，多余元素丢弃；
+- `top_k` 不修改输入，`k` 必须 >= 0；有 `cmp` 时语义与 `sort` 一致；
+- `binary_search` 要求输入已升序；返回 `{found, index}`，未找到时 `index` 是插入点；
+- 空列表的 `binary_search` 返回 `{found: false, index: 0}`。
+
+示例：
+
+```text
+std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
+std.list.chunk([1, 2, 3, 4, 5], 2)      // [[1, 2], [3, 4], [5]]
+std.list.window([1, 2, 3, 4], 2)        // [[1, 2], [2, 3], [3, 4]]
+std.list.zip([1, 2], ["a", "b"])        // [[1, a], [2, b]]
+std.list.top_k([5, 1, 4, 2, 3], 3)      // [1, 2, 3]
+std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
+```
+
 编码转换：
 
 ```text

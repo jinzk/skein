@@ -12,6 +12,7 @@
 #include "eval_context.h"
 #include "repl.h"
 #include "scopestack.h"
+#include "gc.h"
 #include "eval.h"
 
 extern int yylex();

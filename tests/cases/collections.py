@@ -611,3 +611,44 @@ def run_cases():
         f"func e\u0301() {{ return 9; }}\n\u00e9()\n",
         stdout="= 9",
     )
+
+    # Values reachable only through newer container types must keep their
+    # captured scopes alive across the periodic cycle collector.
+    def repeated_lets(count=80):
+        return "".join(f"let tmp{i} = {i};\n" for i in range(1, count + 1))
+
+    check("enum closure survives cycle collection",
+          'import std;\n'
+          'enum Box { B { f: callable; }; }\n'
+          'func make() {\n'
+          '  let n = 41;\n'
+          '  return Box::B { f: func() { return n + 1; } };\n'
+          '}\n'
+          'let b = make();\n'
+          + repeated_lets()
+          + 'print(b.f());\n',
+          stdout="42")
+    check("lru closure survives cycle collection",
+          'import std;\n'
+          'func make() {\n'
+          '  let n = 41;\n'
+          '  let l = std.lru.new(1);\n'
+          '  let r = std.lru.put(l, "f", func() { return n + 1; });\n'
+          '  return r["lru"];\n'
+          '}\n'
+          'let l = make();\n'
+          + repeated_lets()
+          + 'let f = std.lru.get(l, "f")["value"];\n'
+          + 'print(f());\n',
+          stdout="42")
+    check("result closure survives cycle collection",
+          'import std;\n'
+          'func make() {\n'
+          '  let n = 41;\n'
+          '  return std.result.ok(func() { return n + 1; });\n'
+          '}\n'
+          'let r = make();\n'
+          + repeated_lets()
+          + 'let f = std.result.value(r);\n'
+          + 'print(f());\n',
+          stdout="42")

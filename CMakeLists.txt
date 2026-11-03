@@ -94,6 +94,7 @@ add_executable(${PROJECT_NAME}
   filetype.cpp
   format.cpp
   fs_extra.cpp
+  gc.cpp
   generator.cpp
   http.cpp
   http1_parser.cpp

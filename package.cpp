@@ -476,6 +476,8 @@ value_t *build_std_namespace() {
             {"read_file", B_read_file},
             {"write_file", B_write_file},
             {"append_file", B_append_file},
+            {"read_text", B_read_text},
+            {"write_text", B_write_text},
             {"exists", B_file_exists},
             {"open", B_file_open},
             {"read", B_file_read},

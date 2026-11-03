@@ -215,7 +215,9 @@ enum bifs {
     B_encoding_supports,
     B_unicode_normalize,
     B_unicode_is_normalized,
-    B_unicode_version
+    B_unicode_version,
+    B_read_text,
+    B_write_text
 };
 
 struct ast {

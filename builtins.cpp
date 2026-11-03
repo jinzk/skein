@@ -427,6 +427,18 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_read_text) {
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.fs.read_text expects 2 or 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_write_text) {
+        if (args.size() < 3 || args.size() > 4) {
+            yyerror("std.fs.write_text expects 3 or 4 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (functype == B_file_seek) {
         if (args.size() < 2 || args.size() > 3) {
             yyerror("file_seek expects 2 or 3 arguments, got %d",
@@ -1322,6 +1334,75 @@ struct value_t *call_builtin(int functype,
                 else
                     ret = newintval(status);
             }
+            break;
+        }
+        case B_read_text: {
+            if (args[0]->type != T_string || args[1]->type != T_string) {
+                yyerror("std.fs.read_text expects a string path and "
+                        "encoding, got %s and %s",
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            std::string errors = "strict";
+            if (args.size() == 3) {
+                if (args[2]->type != T_string) {
+                    yyerror("std.fs.read_text expects an errors string, got %s",
+                            typename_of(args[2]));
+                    break;
+                }
+                errors = ((struct string_value_t *)args[2])->value;
+            }
+            std::string data;
+            std::string error;
+            if (!platform_read_file(
+                    ((struct string_value_t *)args[0])->value, data, error)) {
+                yyerror("std.fs.read_text: %s", error.c_str());
+                break;
+            }
+            std::string text;
+            if (!decode_text(
+                    data, ((struct string_value_t *)args[1])->value, errors,
+                    text, error)) {
+                yyerror("std.fs.read_text: %s", error.c_str());
+                break;
+            }
+            ret = newstrval(text.c_str());
+            break;
+        }
+        case B_write_text: {
+            if (args[0]->type != T_string || args[1]->type != T_string ||
+                args[2]->type != T_string) {
+                yyerror("std.fs.write_text expects a string path, text and "
+                        "encoding, got %s, %s and %s",
+                        typename_of(args[0]), typename_of(args[1]),
+                        typename_of(args[2]));
+                break;
+            }
+            std::string errors = "strict";
+            if (args.size() == 4) {
+                if (args[3]->type != T_string) {
+                    yyerror("std.fs.write_text expects an errors string, got %s",
+                            typename_of(args[3]));
+                    break;
+                }
+                errors = ((struct string_value_t *)args[3])->value;
+            }
+            std::string data;
+            std::string error;
+            if (!encode_text(
+                    ((struct string_value_t *)args[1])->value,
+                    ((struct string_value_t *)args[2])->value, errors, data,
+                    error)) {
+                yyerror("std.fs.write_text: %s", error.c_str());
+                break;
+            }
+            if (!platform_write_file(
+                    ((struct string_value_t *)args[0])->value, data, false,
+                    error)) {
+                yyerror("std.fs.write_text: %s", error.c_str());
+                break;
+            }
+            ret = newnull();
             break;
         }
         case B_read_file: {

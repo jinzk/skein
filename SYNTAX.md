@@ -1291,6 +1291,8 @@ std.io.read(stream, 4096)
 std.io.write_all(stream, data)
 std.io.read_all(stream, 16 * 1024 * 1024)
 std.fs.read_file("data.txt")
+std.fs.read_text("data.txt", "gbk")
+std.fs.write_text("data.txt", "中国", "gbk")
 std.process.command_status("true")
 std.type.name(1)
 std.net.resolve("localhost")
@@ -1447,6 +1449,23 @@ let f = std.fs.open("data.bin", "rb");
 let first = await std.io.read_async(f, 4096);
 let rest = await std.io.read_async(f, 4096);
 std.io.close(f)
+```
+
+带编码的文本文件：
+
+```text
+std.fs.read_text(path, encoding[, errors])       → string
+std.fs.write_text(path, text, encoding[, errors]) → null
+```
+
+`encoding` 使用 `std.encoding` 支持的编码名；`errors` 支持 `strict`、`replace`、
+`ignore`。例如：
+
+```text
+import std;
+
+std.fs.write_text("data-gbk.txt", "中国", "gbk");
+std.fs.read_text("data-gbk.txt", "gbk")          // 中国
 ```
 
 流函数：

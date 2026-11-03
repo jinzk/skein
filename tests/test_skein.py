@@ -7543,6 +7543,73 @@ std.json.stringify(std.json.parse(text))
         check("read_bytes keeps NUL",
               f'bytes_hex(read_bytes("{quoted_nul}"))\n',
               stdout="= 610062")
+
+        text_path = os.path.join(tmp, "text-encoding.txt")
+        quoted_text = text_path.replace("\\", "\\\\").replace('"', '\\"')
+        check(
+            "std.fs read_text/write_text gbk",
+            "import std;\n"
+            f'std.fs.write_text("{quoted_text}", "中国", "gbk");\n'
+            f'print(bytes_hex(std.fs.read_bytes("{quoted_text}")));\n'
+            f'print(std.fs.read_text("{quoted_text}", "gbk"));\n',
+            stdout_all=["d6d0b9fa", "中国"],
+        )
+        check(
+            "std.fs read_text/write_text utf16",
+            "import std;\n"
+            f'std.fs.write_text("{quoted_text}", "中", "utf-16");\n'
+            f'print(bytes_hex(std.fs.read_bytes("{quoted_text}")));\n'
+            f'print(std.fs.read_text("{quoted_text}", "utf-16"));\n',
+            stdout_all=["fffe2d4e", "中"],
+        )
+        check(
+            "std.fs write_text errors replace",
+            "import std;\n"
+            f'std.fs.write_text("{quoted_text}", "é", "ascii", "replace");\n'
+            f'bytes_hex(std.fs.read_bytes("{quoted_text}"))\n',
+            stdout="= 3f",
+        )
+        invalid_text = os.path.join(tmp, "invalid-text.bin")
+        with open(invalid_text, "wb") as f:
+            f.write(b"\xff")
+        quoted_invalid_text = invalid_text.replace("\\", "\\\\")
+        check(
+            "std.fs read_text strict",
+            f'import std;\nstd.fs.read_text("{quoted_invalid_text}", "gbk")\n',
+            stderr="invalid gbk",
+        )
+        check(
+            "std.fs read_text replace",
+            f'import std;\nstd.fs.read_text("{quoted_invalid_text}", '
+            '"gbk", "replace")\n',
+            stdout="= �",
+        )
+        check(
+            "std.fs read_text ignore",
+            f'import std;\nlen(std.fs.read_text("{quoted_invalid_text}", '
+            '"gbk", "ignore"))\n',
+            stdout="= 0",
+        )
+        check(
+            "std.fs read_text type",
+            'import std;\nstd.fs.read_text(1, "gbk")\n',
+            stderr="expects a string path and encoding",
+        )
+        check(
+            "std.fs write_text type",
+            'import std;\nstd.fs.write_text("x", 1, "gbk")\n',
+            stderr="expects a string path, text and encoding",
+        )
+        check(
+            "std.fs read_text arity",
+            'import std;\nstd.fs.read_text("x")\n',
+            stderr="expects 2 or 3 arguments",
+        )
+        check(
+            "std.fs write_text arity",
+            'import std;\nstd.fs.write_text("x", "y")\n',
+            stderr="expects 3 or 4 arguments",
+        )
         binary_file = os.path.join(tmp, "binary.bin")
         quoted_binary = binary_file.replace("\\", "\\\\")
         check("write and read bytes",

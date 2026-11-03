@@ -1086,14 +1086,41 @@ std::string canonical_encoding_name(const std::string &name) {
     return std::string();
 }
 
-bool decode_to_utf8(const std::string &input, const std::string &encoding,
-                    std::string &output, std::string &error) {
+bool decode_text(const std::string &input, const std::string &encoding,
+                 const std::string &errors, std::string &output,
+                 std::string &error) {
     Encoding parsed;
     if (!lookup_encoding(encoding, parsed)) {
         error = "unknown encoding \"" + encoding + "\"";
         return false;
     }
-    return decode_with(input, parsed, ErrorMode::Strict, output, error);
+    ErrorMode mode = ErrorMode::Strict;
+    if (!errors.empty() && !parse_error_mode(errors, mode)) {
+        error = "unknown errors mode \"" + errors + "\"";
+        return false;
+    }
+    return decode_with(input, parsed, mode, output, error);
+}
+
+bool encode_text(const std::string &input, const std::string &encoding,
+                 const std::string &errors, std::string &output,
+                 std::string &error) {
+    Encoding parsed;
+    if (!lookup_encoding(encoding, parsed)) {
+        error = "unknown encoding \"" + encoding + "\"";
+        return false;
+    }
+    ErrorMode mode = ErrorMode::Strict;
+    if (!errors.empty() && !parse_error_mode(errors, mode)) {
+        error = "unknown errors mode \"" + errors + "\"";
+        return false;
+    }
+    return encode_with(input, parsed, mode, output, error);
+}
+
+bool decode_to_utf8(const std::string &input, const std::string &encoding,
+                    std::string &output, std::string &error) {
+    return decode_text(input, encoding, "strict", output, error);
 }
 
 struct value_t *call_encoding_builtin(

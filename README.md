@@ -1466,6 +1466,8 @@ std.io.write_async
 std.fs.read_file
 std.fs.write_file
 std.fs.append_file
+std.fs.read_text
+std.fs.write_text
 std.fs.exists
 std.fs.open
 std.fs.read
@@ -2590,6 +2592,42 @@ file_exists("out.txt")
 - 不会自动创建父目录；
 - 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
 - Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
+
+### 带编码的文本文件
+
+需要在 UTF-8 之外的文本编码之间读写时，使用：
+
+```text
+std.fs.read_text(path, encoding[, errors])       → string
+std.fs.write_text(path, text, encoding[, errors]) → null
+```
+
+`encoding` 使用 `std.encoding` 支持的编码名，`errors` 支持 `strict`（默认）、
+`replace`、`ignore`。
+
+示例：
+
+```text
+import std;
+
+std.fs.write_text("out-gbk.txt", "中国", "gbk");
+std.fs.read_text("out-gbk.txt", "gbk")          // 中国
+
+std.fs.write_text("out-utf16.txt", "中", "utf-16");
+std.fs.read_text("out-utf16.txt", "utf-16")     // 中
+```
+
+规则：
+
+- `read_text` 先读取字节，再按指定编码解码为 UTF-8 `string`；
+- `write_text` 先把 `string` 编码成字节，再覆盖写入文件；
+- `errors = "replace"` 时，解码用 `U+FFFD` 替换，编码用 `?` 替换；
+- `errors = "ignore"` 时跳过非法序列或不可表示字符；
+- 解码结果包含 `U+0000` 时报错；
+- `utf-16` / `utf-32` 会按 BOM 规则处理；显式字节序版本不自动剥离 BOM；
+- `utf-8` 不自动剥离 UTF-8 BOM，BOM 会作为 `U+FEFF` 保留；
+- 原有的 `read_file` / `write_file` / `file_read` / `file_write` 仍然只按 UTF-8 字节处理；
+- 文件句柄 API 不携带编码，需要其它编码时使用 `read_bytes` / `write_bytes` 或 `std.fs.read_text` / `write_text`。
 
 ### 文件句柄
 

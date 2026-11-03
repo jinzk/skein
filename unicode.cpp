@@ -109,6 +109,11 @@ static bool read_form_argument(const std::vector<struct value_t *> &args,
 
 }  // namespace
 
+bool normalize_nfc(const std::string &input, std::string &output,
+                   std::string &error) {
+    return normalize_text(input, NormalizationForm::Nfc, output, error);
+}
+
 struct value_t *call_unicode_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     if (functype == B_unicode_version) {

@@ -62,7 +62,7 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv �
 
 脚本文件建议保存为 UTF-8；输入开头的 UTF-8 BOM 会被忽略。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
 
-源码必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，也不做 NFC/NFKC 归一化；字符串可以通过 `std.unicode.normalize` 显式归一化。函数形参、变长参数名、结构体字段、类型名、label 和包名使用相同规则。
+源码必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，非 ASCII 标识符按 NFC 归一化（不做 NFKC），规范等价写法视为同一标识符；字符串可以通过 `std.unicode.normalize` 显式归一化。函数形参、变长参数名、结构体字段、类型名、label、包名和 import 路径组件使用相同的 NFC 规则。
 
 ## 脚本模式与 shebang
 
@@ -2779,7 +2779,7 @@ std.unicode.version()                              // "16.0.0"
 
 - 归一化只在显式调用 `std.unicode.normalize` 时发生；
 - 字符串比较、拼接、下标和 `len` 不会自动归一化；
-- 标识符仍然不做自动 NFC/NFKC 归一化；
+- 标识符按 NFC 归一化，不做 NFKC；
 - 输入必须是合法 UTF-8 `string`，输出也保持合法 UTF-8；
 - 归一化不会产生内嵌 NUL。
 

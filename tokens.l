@@ -30,6 +30,7 @@
 #include "diagnostics.h"
 #include "parser.hpp"
 #include "repl.h"
+#include "unicode.h"
 #include "unicode_ident.h"
 
 extern int indent_count;
@@ -188,16 +189,45 @@ static void append_unescaped(const char *s, int len) {
     }
 }
 
-/* Copy a token of explicit byte length into yylval.str. */
+static bool ascii_name(const char *text, int len) {
+    for (int i = 0; i < len; ++i) {
+        if ((unsigned char)text[i] >= 0x80)
+            return false;
+    }
+    return true;
+}
+
+/* Copy a token of explicit byte length into yylval.str, NFC-normalizing
+ * non-ASCII identifiers. */
 static int make_name_token(const char *text, int len) {
-    char *name = (char *)std::malloc((size_t)len + 1);
-    if (!name) {
+    std::string name;
+    if (ascii_name(text, len)) {
+        name.assign(text, (size_t)len);
+    } else {
+        std::string error;
+        if (!normalize_nfc(std::string(text, (size_t)len), name, error)) {
+            diag_report_lexical(g_token_line, g_token_column,
+                                "identifier normalization failed: %s",
+                                error.c_str());
+            return 0;
+        }
+        unicode_ident::scan_result scanned =
+            unicode_ident::scan_identifier(name.data(), name.size());
+        if (!scanned.valid) {
+            diag_report_lexical(g_token_line, g_token_column,
+                                "identifier is not valid after NFC normalization");
+            return 0;
+        }
+    }
+
+    char *raw = (char *)std::malloc(name.size() + 1);
+    if (!raw) {
         yyerror("out of space");
         return 0;
     }
-    std::memcpy(name, text, (size_t)len);
-    name[len] = '\0';
-    yylval.str = name;
+    std::memcpy(raw, name.data(), name.size());
+    raw[name.size()] = '\0';
+    yylval.str = raw;
     return NAME;
 }
 /*

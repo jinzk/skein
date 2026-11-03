@@ -803,6 +803,50 @@ def main():
     check("unicode fullwidth identifier", "let ｉｆ = 8;\nｉｆ\n",
           stdout="= 8")
     check(
+        "unicode identifier NFC composed access",
+        f"let e\u0301 = 42;\n\u00e9\n",
+        stdout="= 42",
+    )
+    check(
+        "unicode identifier NFC decomposed access",
+        f"let \u00e9 = 43;\ne\u0301\n",
+        stdout="= 43",
+    )
+    check(
+        "unicode identifier NFC duplicate",
+        f"let e\u0301 = 1;\nlet \u00e9 = 2;\n",
+        stderr="symbol repeated",
+    )
+    check(
+        "unicode identifier NFC function",
+        f"func e\u0301() {{ return 9; }}\n\u00e9()\n",
+        stdout="= 9",
+    )
+    check(
+        "unicode identifier NFC struct",
+        f"struct e\u0301 {{ e\u0301: int; }}\n"
+        f"let p = \u00e9 {{ \u00e9: 7 }};\np.\u00e9\n",
+        stdout="= 7",
+    )
+    check(
+        "unicode identifier NFC label",
+        f"label e\u0301: while (0) {{ break \u00e9; }}\n1\n",
+        stdout="= 1",
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        package_dir = os.path.join(tmp, "app", "\u00e9")
+        os.makedirs(package_dir)
+        with open(os.path.join(package_dir, "\u00e9.skein"),
+                  "w", encoding="utf-8") as f:
+            f.write("package \u00e9 { export let value = 11; }\n")
+        main_path = os.path.join(tmp, "app", "main.skein")
+        with open(main_path, "w", encoding="utf-8") as f:
+            f.write("import e\u0301;\nprint(\u00e9.value);\n")
+        proc = run_file(main_path)
+        assert proc.returncode == 0, proc.stderr
+        assert "11" in proc.stdout, proc.stdout
+    check(
         "unicode emoji identifier rejected",
         "let 😀 = 1;\n",
         stderr="identifier cannot start with U+1F600",

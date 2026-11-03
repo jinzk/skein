@@ -199,6 +199,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
     struct ast *a;
     struct symlist *sl;
     struct type_constraint *type;
+    struct pattern_field *pf;
     double d;
     long long i;
     int fn;
@@ -213,8 +214,9 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token ASYNC "async" AWAIT "await" YIELD "yield" DEFER "defer"
-%token STRUCT "struct" IMPL "impl" TRAIT "trait"
+%token STRUCT "struct" IMPL "impl" TRAIT "trait" ENUM "enum"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
+%token MATCH "match"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
 %token IS "is" LABEL "label"
@@ -255,7 +257,11 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <a> exp value stmt list scope explist arg top_expression top_statement line valuelist pairlist
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
+%type <a> match_arms match_arm pattern pattern_list pattern_items
+%type <pf> pattern_fields pattern_field_items pattern_field
+%type <a> let_pattern
 %type <a> struct_decl impl_decl trait_decl struct_members struct_member
+%type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> impl_methods trait_methods trait_method method_member
 %type <a> struct_fields struct_field
 %type <sl> param symlist
@@ -326,6 +332,16 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
                           copy_text(diag_current_source_name().c_str()),
                           (struct trait_method *)$5, true);
       }
+    | EXPORT ENUM NAME '{' empty_body    {
+        $$ = newenumdecl($3,
+                         copy_text(diag_current_source_name().c_str()),
+                         NULL, true);
+      }
+    | EXPORT ENUM NAME '{' enum_variants '}' {
+        $$ = newenumdecl($3,
+                         copy_text(diag_current_source_name().c_str()),
+                         (struct enum_variant *)$5, true);
+      }
     | EXPORT funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($3, $5, NULL, true, false, finish_function()); }
     | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
@@ -343,6 +359,7 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | struct_decl
     | impl_decl
     | trait_decl
+    | enum_decl
     | PACKAGE NAME '{' EMPTY_BLOCK_CLOSE  { $$ = newpackage($2, NULL); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
     | IMPORT importref ';'                { $$ = newimport($2, NULL); }
@@ -350,12 +367,44 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
     | LET NAME ':' type '=' exp ';'       { $$ = newvar($2, $6, false, false, $4); }
     | LET NAME ':' type ';'               { $$ = newvar($2, NULL, false, false, $4); }
+    | LET let_pattern '=' exp ';'          { $$ = newdestructure($2, $4); }
     | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
     | CONST NAME ':' type '=' exp ';'     { $$ = newvar($2, $6, false, true, $4); }
+    | CONST let_pattern '=' exp ';'        { $$ = newdestructure($2, $4, true); }
     ;
 
 empty_body: EMPTY_DICT_CLOSE
     | EMPTY_BLOCK_CLOSE
+    ;
+
+let_pattern: NAME '{' pattern_fields '}'  {
+        $$ = newpatternstruct($1,
+                              copy_text(diag_current_source_name().c_str()),
+                              $3);
+      }
+    | NAME '{' EMPTY_DICT_CLOSE           {
+        $$ = newpatternstruct($1,
+                              copy_text(diag_current_source_name().c_str()),
+                              NULL);
+      }
+    | NAME COLONCOLON NAME                {
+        $$ = newpatternvariant($1,
+                               copy_text(diag_current_source_name().c_str()),
+                               $3, NULL);
+      }
+    | NAME COLONCOLON NAME '{' pattern_fields '}' {
+        $$ = newpatternvariant($1,
+                               copy_text(diag_current_source_name().c_str()),
+                               $3, $5);
+      }
+    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+        $$ = newpatternvariant($1,
+                               copy_text(diag_current_source_name().c_str()),
+                               $3, NULL);
+      }
+    | '{' pattern_fields '}'              { $$ = newpatterndict($2); }
+    | '{' EMPTY_DICT_CLOSE                { $$ = newpatterndict(NULL); }
+    | '[' pattern_list ']'                { $$ = newpatternlist($2); }
     ;
 
 struct_decl: STRUCT NAME '{' empty_body  {
@@ -368,6 +417,53 @@ struct_decl: STRUCT NAME '{' empty_body  {
                            copy_text(diag_current_source_name().c_str()),
                            (struct struct_member *)$4);
       }
+    ;
+
+enum_decl: ENUM NAME '{' empty_body      {
+        $$ = newenumdecl($2,
+                         copy_text(diag_current_source_name().c_str()),
+                         NULL);
+      }
+    | ENUM NAME '{' enum_variants '}'    {
+        $$ = newenumdecl($2,
+                         copy_text(diag_current_source_name().c_str()),
+                         (struct enum_variant *)$4);
+      }
+    ;
+
+enum_variants: enum_variant              { $$ = $1; }
+    | enum_variants enum_variant         {
+        $$ = (struct ast *)append_enumvariant(
+            (struct enum_variant *)$1, (struct enum_variant *)$2);
+      }
+    ;
+
+enum_variant: NAME ';'                   { $$ = newenumvariant($1, NULL, NULL); }
+    | NAME '{' variant_fields '}'        {
+        $$ = newenumvariant($1, (struct struct_member *)$3, NULL);
+      }
+    | NAME '{' variant_fields '}' ';'    {
+        $$ = newenumvariant($1, (struct struct_member *)$3, NULL);
+      }
+    | NAME '{' EMPTY_DICT_CLOSE          {
+        yyerror("enum variant %s has an empty payload; write %s;",
+                $1, $1);
+        $$ = newenumvariant($1, NULL, NULL);
+      }
+    | NAME '{' EMPTY_DICT_CLOSE ';'      {
+        yyerror("enum variant %s has an empty payload; write %s;",
+                $1, $1);
+        $$ = newenumvariant($1, NULL, NULL);
+      }
+    ;
+
+variant_fields: variant_field            { $$ = $1; }
+    | variant_fields variant_field       {
+        $$ = append_struct_member($1, $2);
+      }
+    ;
+
+variant_field: NAME ':' type ';'         { $$ = newstructfield($1, $3); }
     ;
 
 struct_members: struct_member            { $$ = $1; }
@@ -454,6 +550,7 @@ importpath: NAME                          { $$ = $1; }
 
 fieldname: NAME                           { $$ = $1; }
     | YIELD                                { $$ = copy_text("yield"); }
+    | MATCH                                { $$ = copy_text("match"); }
     | ERROR                                { $$ = copy_text("error"); }
     | BUILTIN {
         const char *name = builtin_field_name($1);
@@ -529,6 +626,13 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHL exp                         { $$ = newast('s', $1, $3); }
     | exp SHR exp                         { $$ = newast('r', $1, $3); }
     | '(' exp ')'                         { $$ = $2; }
+    | MATCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
+                                           {
+        yyerror("match requires at least one arm");
+        $$ = newmatch($3, NULL);
+      }
+    | MATCH '(' exp ')' '{' match_arms '}'
+                                           { $$ = newmatch($3, $6); }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
@@ -575,6 +679,21 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newstructlit($1,
                           copy_text(diag_current_source_name().c_str()),
                           (struct struct_init *)$3);
+      }
+    | NAME COLONCOLON NAME                {
+        $$ = newenumlit($1,
+                        copy_text(diag_current_source_name().c_str()),
+                        $3, NULL);
+      }
+    | NAME COLONCOLON NAME '{' struct_fields '}' {
+        $$ = newenumlit($1,
+                        copy_text(diag_current_source_name().c_str()),
+                        $3, (struct struct_init *)$5);
+      }
+    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+        $$ = newenumlit($1,
+                        copy_text(diag_current_source_name().c_str()),
+                        $3, NULL);
       }
     | funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $3, NULL, false, false, finish_function()); }
@@ -651,6 +770,92 @@ case_values: exp                          { $$ = newlist($1, NULL); }
     | exp ',' case_values                 { $$ = newlist($1, $3); }
     ;
 
+match_arms: match_arm                     { $$ = $1; }
+    | match_arms match_arm                { $$ = append_matcharm($1, $2); }
+    ;
+
+match_arm: CASE pattern ARROW scope       { $$ = newmatcharm($2, NULL, $4, NULL); }
+    | CASE pattern IF exp ARROW scope     { $$ = newmatcharm($2, $4, $6, NULL); }
+    | DEFAULT ARROW scope                 { $$ = newmatcharm(NULL, NULL, $3, NULL); }
+    ;
+
+pattern: INT                              { $$ = newpatternlit(newint($1)); }
+    | XSTRING                             { $$ = newpatternlit(newstr($1)); free($1); }
+    | TRUE                                { $$ = newpatternlit(newbool(true)); }
+    | FALSE                               { $$ = newpatternlit(newbool(false)); }
+    | NULLVAL                             { $$ = newpatternlit(newnullast()); }
+    | NAME                                { $$ = newpatternname($1); }
+    | NAME '{' pattern_fields '}'         {
+        $$ = newpatternstruct($1,
+                              copy_text(diag_current_source_name().c_str()),
+                              $3);
+      }
+    | NAME '{' EMPTY_DICT_CLOSE           {
+        $$ = newpatternstruct($1,
+                              copy_text(diag_current_source_name().c_str()),
+                              NULL);
+      }
+    | NAME COLONCOLON NAME                {
+        $$ = newpatternvariant($1,
+                               copy_text(diag_current_source_name().c_str()),
+                               $3, NULL);
+      }
+    | NAME COLONCOLON NAME '{' pattern_fields '}' {
+        $$ = newpatternvariant($1,
+                               copy_text(diag_current_source_name().c_str()),
+                               $3, $5);
+      }
+    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+        $$ = newpatternvariant($1,
+                               copy_text(diag_current_source_name().c_str()),
+                               $3, NULL);
+      }
+    | '{' pattern_fields '}'              { $$ = newpatterndict($2); }
+    | '{' EMPTY_DICT_CLOSE                { $$ = newpatterndict(NULL); }
+    | '[' pattern_list ']'                { $$ = newpatternlist($2); }
+    ;
+
+pattern_fields: %empty                    { $$ = NULL; }
+    | pattern_field_items
+    | pattern_field_items ',' ELLIPSIS    {
+        $$ = append_patternfield($1, newpatternrestfield(NULL, NULL));
+      }
+    | pattern_field_items ',' ELLIPSIS NAME {
+        $$ = append_patternfield($1, newpatternrestfield($4, NULL));
+      }
+    | ELLIPSIS                            { $$ = newpatternrestfield(NULL, NULL); }
+    | ELLIPSIS NAME                       { $$ = newpatternrestfield($2, NULL); }
+    ;
+
+pattern_field_items: pattern_field        { $$ = $1; }
+    | pattern_field_items ',' pattern_field {
+        $$ = append_patternfield($1, $3);
+      }
+    ;
+
+pattern_field: NAME                       {
+        $$ = newpatternfield($1, newpatternname(copy_text($1)), NULL);
+      }
+    | NAME ':' pattern                    { $$ = newpatternfield($1, $3, NULL); }
+    | XSTRING ':' pattern                 { $$ = newpatternfield($1, $3, NULL); }
+    ;
+
+pattern_list: %empty                      { $$ = NULL; }
+    | pattern_items
+    | pattern_items ',' ELLIPSIS          {
+        $$ = append_patternitem($1, newpatternrest(NULL));
+      }
+    | pattern_items ',' ELLIPSIS NAME     {
+        $$ = append_patternitem($1, newpatternrest($4));
+      }
+    | ELLIPSIS                            { $$ = newpatternrest(NULL); }
+    | ELLIPSIS NAME                       { $$ = newpatternrest($2); }
+    ;
+
+pattern_items: pattern                    { $$ = $1; }
+    | pattern_items ',' pattern           { $$ = append_patternitem($1, $3); }
+    ;
+
 explist: %empty                            { $$ = NULL; }
     | arg
     | arg ',' explist                     { $$ = newast('L', $1, $3); }
@@ -691,6 +896,7 @@ symlist: %empty                           { $$ = NULL; }
     ;
 
 type: type_name                           { $$ = $1; }
+    | type '?'                            { $$ = $1; $$->nullable = true; }
     ;
 
 type_name: NAME                           {

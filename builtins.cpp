@@ -200,6 +200,7 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_result: return "result";
         case T_error: return "error";
         case T_struct: return "struct";
+        case T_enum: return "enum";
         case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
@@ -746,6 +747,10 @@ struct value_t *call_builtin(int functype,
                 struct struct_value_t *sv = (struct struct_value_t *)arg;
                 ret = newstrval(
                     sv->def ? sv->def->module_name.c_str() : "");
+            } else if (arg && arg->type == T_enum) {
+                struct enum_value_t *ev = (struct enum_value_t *)arg;
+                ret = newstrval(
+                    ev->def ? ev->def->module_name.c_str() : "");
             } else {
                 ret = newstrval("");
             }
@@ -754,6 +759,9 @@ struct value_t *call_builtin(int functype,
             if (arg && arg->type == T_struct) {
                 struct struct_value_t *sv = (struct struct_value_t *)arg;
                 ret = newstrval(sv->def ? sv->def->module.c_str() : "");
+            } else if (arg && arg->type == T_enum) {
+                struct enum_value_t *ev = (struct enum_value_t *)arg;
+                ret = newstrval(ev->def ? ev->def->module.c_str() : "");
             } else {
                 ret = newstrval("");
             }

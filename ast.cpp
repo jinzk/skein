@@ -240,6 +240,23 @@ struct ast *newvar(char *s, struct ast *v, bool exported, bool is_const,
     return (struct ast *)a;
 }
 
+struct ast *newdestructure(struct ast *pattern, struct ast *value,
+                           bool is_const) {
+    struct destructure_node *a =
+        (struct destructure_node *)std::malloc(
+            sizeof(struct destructure_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = '`';
+    set_loc_from(a, value ? value : pattern);
+    a->pattern = pattern;
+    a->value = value;
+    a->is_const = is_const ? 1 : 0;
+    return (struct ast *)a;
+}
+
 struct ast *newret(struct ast *v) {
     struct fnret *a = (struct fnret *)std::malloc(sizeof(struct fnret));
     if (!a) {
@@ -451,6 +468,179 @@ struct ast *append_case(struct ast *head, struct ast *node) {
     while (((struct case_node *)current)->next)
         current = ((struct case_node *)current)->next;
     ((struct case_node *)current)->next = node;
+    return head;
+}
+
+struct ast *newmatch(struct ast *expr, struct ast *arms) {
+    struct match_node *a =
+        (struct match_node *)std::malloc(sizeof(struct match_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = '7';
+    set_loc_from(a, expr);
+    a->expr = expr;
+    a->arms = arms;
+    return (struct ast *)a;
+}
+
+struct ast *newmatcharm(struct ast *pattern, struct ast *guard,
+                        struct ast *body, struct ast *next) {
+    struct match_arm *a =
+        (struct match_arm *)std::malloc(sizeof(struct match_arm));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = '8';
+    set_loc_from(a, body ? body : pattern);
+    a->pattern = pattern;
+    a->guard = guard;
+    a->body = body;
+    a->next = next;
+    return (struct ast *)a;
+}
+
+struct ast *append_matcharm(struct ast *head, struct ast *node) {
+    if (!head) return node;
+    struct ast *current = head;
+    while (((struct match_arm *)current)->next) {
+        if (!((struct match_arm *)current)->pattern) {
+            yyerror("default must be the last match arm");
+            treefree(node);
+            return head;
+        }
+        current = ((struct match_arm *)current)->next;
+    }
+    if (!((struct match_arm *)current)->pattern) {
+        yyerror("default must be the last match arm");
+        treefree(node);
+        return head;
+    }
+    ((struct match_arm *)current)->next = node;
+    return head;
+}
+
+static struct pattern_node *new_pattern_node(int nodetype) {
+    struct pattern_node *a =
+        (struct pattern_node *)std::malloc(sizeof(struct pattern_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = nodetype;
+    set_loc(a, 0, 0);
+    a->name = NULL;
+    a->module = NULL;
+    a->variant = NULL;
+    a->literal = NULL;
+    a->fields = NULL;
+    a->items = NULL;
+    a->next = NULL;
+    return a;
+}
+
+struct ast *newpatternlit(struct ast *literal) {
+    struct pattern_node *a = new_pattern_node('9');
+    set_loc_from(a, literal);
+    a->literal = literal;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternname(char *name) {
+    struct pattern_node *a = new_pattern_node('e');
+    if (name && std::strcmp(name, "_") == 0) {
+        std::free(name);
+        name = NULL; /* wildcard */
+    }
+    a->name = name;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternrest(char *name) {
+    struct pattern_node *a = new_pattern_node(':');
+    a->name = name;
+    return (struct ast *)a;
+}
+
+struct ast *newpatterndict(struct pattern_field *fields) {
+    struct pattern_node *a = new_pattern_node('h');
+    a->fields = fields;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternlist(struct ast *items) {
+    struct pattern_node *a = new_pattern_node('z');
+    a->items = items;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternstruct(char *name, char *module,
+                             struct pattern_field *fields) {
+    struct pattern_node *a = new_pattern_node('h');
+    a->name = name;
+    a->module = module;
+    a->fields = fields;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternvariant(char *name, char *module, char *variant,
+                              struct pattern_field *fields) {
+    struct pattern_node *a = new_pattern_node('h');
+    a->name = name;
+    a->module = module;
+    a->variant = variant;
+    a->fields = fields;
+    return (struct ast *)a;
+}
+
+struct pattern_field *newpatternfield(char *key, struct ast *pattern,
+                                      struct pattern_field *next) {
+    struct pattern_field *f =
+        (struct pattern_field *)std::malloc(sizeof(struct pattern_field));
+    if (!f) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    f->key = key;
+    f->rest_name = NULL;
+    f->pattern = pattern;
+    f->next = next;
+    return f;
+}
+
+struct pattern_field *newpatternrestfield(char *name,
+                                          struct pattern_field *next) {
+    struct pattern_field *f =
+        (struct pattern_field *)std::malloc(sizeof(struct pattern_field));
+    if (!f) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    f->key = NULL;
+    f->rest_name = name;
+    f->pattern = NULL;
+    f->next = next;
+    return f;
+}
+
+struct pattern_field *append_patternfield(struct pattern_field *head,
+                                          struct pattern_field *node) {
+    if (!head) return node;
+    struct pattern_field *current = head;
+    while (current->next)
+        current = current->next;
+    current->next = node;
+    return head;
+}
+
+struct ast *append_patternitem(struct ast *head, struct ast *node) {
+    if (!head) return node;
+    struct ast *current = head;
+    while (((struct pattern_node *)current)->next)
+        current = ((struct pattern_node *)current)->next;
+    ((struct pattern_node *)current)->next = node;
     return head;
 }
 
@@ -725,6 +915,66 @@ struct ast *newstructlit(char *name, char *module,
     return (struct ast *)a;
 }
 
+struct ast *newenumdecl(char *name, char *module,
+                        struct enum_variant *variants, bool exported) {
+    struct enum_node *a =
+        (struct enum_node *)std::malloc(sizeof(struct enum_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = '<';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->module = module;
+    a->variants = variants;
+    a->exported = exported ? 1 : 0;
+    return (struct ast *)a;
+}
+
+struct ast *newenumvariant(char *name, struct struct_member *fields,
+                           struct enum_variant *next) {
+    struct enum_variant *a =
+        (struct enum_variant *)std::malloc(sizeof(struct enum_variant));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = '>';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->fields = fields;
+    a->next = next;
+    return (struct ast *)a;
+}
+
+struct enum_variant *append_enumvariant(struct enum_variant *head,
+                                        struct enum_variant *node) {
+    if (!head) return node;
+    struct enum_variant *current = head;
+    while (current->next)
+        current = current->next;
+    current->next = node;
+    return head;
+}
+
+struct ast *newenumlit(char *name, char *module, char *variant,
+                       struct struct_init *fields) {
+    struct enum_lit_node *a =
+        (struct enum_lit_node *)std::malloc(sizeof(struct enum_lit_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = '?';
+    set_loc(a, 0, 0);
+    a->name = name;
+    a->module = module;
+    a->variant = variant;
+    a->fields = fields;
+    return (struct ast *)a;
+}
+
 struct ast *newstructinit(char *name, struct ast *value) {
     struct struct_init *a =
         (struct struct_init *)std::malloc(sizeof(struct struct_init));
@@ -746,6 +996,17 @@ struct ast *append_struct_init(struct ast *head, struct ast *init) {
     while (current->next) current = current->next;
     current->next = (struct struct_init *)init;
     return head;
+}
+
+static void freepatternfields(struct pattern_field *field) {
+    while (field) {
+        struct pattern_field *next = field->next;
+        std::free(field->key);
+        std::free(field->rest_name);
+        treefree(field->pattern);
+        std::free(field);
+        field = next;
+    }
 }
 
 void treefree(struct ast *a) {
@@ -840,6 +1101,12 @@ void treefree(struct ast *a) {
             free_type_constraint(((struct symdef *)a)->type);
             std::free(((struct symdef *)a)->name);
             break;
+        case '`': {
+            struct destructure_node *d = (struct destructure_node *)a;
+            treefree(d->pattern);
+            treefree(d->value);
+            break;
+        }
         case 'R':
             treefree(((struct fnret *)a)->v);
             break;
@@ -986,6 +1253,75 @@ void treefree(struct ast *a) {
             treefree((struct ast *)i->next);
             treefree(i->value);
             std::free(i->name);
+            break;
+        }
+        case '7': {
+            struct match_node *m = (struct match_node *)a;
+            treefree(m->expr);
+            treefree(m->arms);
+            break;
+        }
+        case '8': {
+            struct match_arm *m = (struct match_arm *)a;
+            treefree(m->pattern);
+            treefree(m->guard);
+            treefree(m->body);
+            treefree(m->next);
+            break;
+        }
+        case '9': {
+            struct pattern_node *p = (struct pattern_node *)a;
+            treefree(p->literal);
+            treefree(p->next);
+            break;
+        }
+        case 'e': {
+            struct pattern_node *p = (struct pattern_node *)a;
+            std::free(p->name);
+            treefree(p->next);
+            break;
+        }
+        case ':': {
+            struct pattern_node *p = (struct pattern_node *)a;
+            std::free(p->name);
+            treefree(p->next);
+            break;
+        }
+        case 'h': {
+            struct pattern_node *p = (struct pattern_node *)a;
+            std::free(p->name);
+            std::free(p->module);
+            std::free(p->variant);
+            freepatternfields(p->fields);
+            treefree(p->next);
+            break;
+        }
+        case 'z': {
+            struct pattern_node *p = (struct pattern_node *)a;
+            treefree(p->items);
+            treefree(p->next);
+            break;
+        }
+        case '<': {
+            struct enum_node *e = (struct enum_node *)a;
+            std::free(e->name);
+            std::free(e->module);
+            treefree((struct ast *)e->variants);
+            break;
+        }
+        case '>': {
+            struct enum_variant *v = (struct enum_variant *)a;
+            std::free(v->name);
+            treefree((struct ast *)v->fields);
+            treefree((struct ast *)v->next);
+            break;
+        }
+        case '?': {
+            struct enum_lit_node *e = (struct enum_lit_node *)a;
+            std::free(e->name);
+            std::free(e->module);
+            std::free(e->variant);
+            treefree((struct ast *)e->fields);
             break;
         }
         default:

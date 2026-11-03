@@ -991,6 +991,264 @@ def main():
           'switch ([1]) { default => print("bad"); }\n',
           stderr="switch does not support list")
 
+    check("match int default",
+          'print(match (2) { case 1 => "one"; case 2 => "two"; '
+          'default => "other"; });\n',
+          stdout="two")
+    check("match default",
+          'print(match (9) { case 1 => "one"; default => "other"; });\n',
+          stdout="other")
+    check("match binding",
+          'print(match (42) { case n => n + 1; });\n', stdout="43")
+    check("match guard",
+          'print(match (5) { case n if n > 10 => "big"; '
+          'case n if n > 3 => "mid"; default => "small"; });\n',
+          stdout="mid")
+    check("match guard falls through",
+          'print(match (1) { case n if n > 3 => "big"; '
+          'default => "small"; });\n',
+          stdout="small")
+    check("match wildcard",
+          'print(match (1) { case _ => "wild"; });\n', stdout="wild")
+    check("match dict open",
+          'let e = {"kind": "tool", "ok": true, "data": [1, 2]};\n'
+          'print(match (e) { case {kind: "tool", ok: true, data: d} => d; '
+          'default => null; });\n',
+          stdout="[1, 2]")
+    check("match dict ignores extra keys",
+          'print(match ({"a": 1, "b": 2}) { case {a} => a; default => 0; });\n',
+          stdout="1")
+    check("match dict rest",
+          'print(match ({"a": 1, "b": 2, "c": 3}) { '
+          'case {a, ...rest} => rest; default => null; });\n',
+          stdout="{b: 2, c: 3}")
+    check("match dict missing key falls through",
+          'print(match ({"a": 1}) { case {b} => "b"; default => "no b"; });\n',
+          stdout="no b")
+    check("match nested dict",
+          'print(match ({"a": {"b": 2}}) { '
+          'case {a: {b}} => b; default => 0; });\n',
+          stdout="2")
+    check("match list exact",
+          'print(match ([1, 2]) { case [a] => "one"; '
+          'case [a, b] => "two"; default => "other"; });\n',
+          stdout="two")
+    check("match list rest",
+          'print(match ([1, 2, 3]) { case [h, ...t] => t; default => null; });\n',
+          stdout="[2, 3]")
+    check("match list ignore rest",
+          'print(match ([1, 2, 3]) { case [h, ...] => h; default => 0; });\n',
+          stdout="1")
+    check("match empty list",
+          'print(match ([]) { case [] => "empty"; default => "no"; });\n',
+          stdout="empty")
+    check("match struct pattern",
+          'struct P { x: int; y: int; }\n'
+          'let p = P { x: 1, y: 2 };\n'
+          'print(match (p) { case P {x, y} => x + y; default => 0; });\n',
+          stdout="3")
+    check("match struct type only",
+          'struct P { x: int; }\n'
+          'print(match (P {x: 1}) { case P {} => "is P"; default => "no"; });\n',
+          stdout="is P")
+    check("match dict type only",
+          'print(match ({"a": 1}) { case {...} => "dict"; default => "no"; });\n',
+          stdout="dict")
+    check("match expression value",
+          'let x = match (1) { case 1 => {"ok": true}; '
+          'default => {"ok": false}; };\n'
+          'print(x["ok"]);\n',
+          stdout="true")
+    check("match nested",
+          'print(match (1) { case 1 => match (2) { case 2 => "nested"; '
+          'default => "no"; }; default => "no"; });\n',
+          stdout="nested")
+    check("match binding scope",
+          'match (1) { case x => 0; }\nx\n', stderr="symbol not found x")
+    check("match binding is read-only",
+          'match (1) { case x => { x = 2; } }\n',
+          stderr="cannot assign to constant x")
+    check("match duplicate binding",
+          'match ({"a": 1, "b": 2}) { case {a: x, b: x} => 1; default => 0; }\n',
+          stderr="pattern binds x more than once")
+    check("match no arm matched",
+          'match (9) { case 1 => "one"; }\n',
+          stderr="match: no arm matched")
+    check("match empty body",
+          'match (1) {}\n', stderr="match requires at least one arm")
+    check("match default must be last",
+          'match (1) { default => "d"; case 1 => "one"; }\n',
+          stderr="default must be the last match arm")
+    check("match no fallthrough",
+          'print(match (1) { case 1 => "one"; case 2 => "two"; });\n',
+          stdout="one")
+    check("match return",
+          'func f(x) { let y = match (x) { '
+          'case 1 => { return 10; } default => 0; }; return y + 1; }\n'
+          'f(1)\nf(2)\n',
+          stdout_all=["= 10", "= 1"])
+    check("match break outer loop",
+          'for (let i in [1, 2, 3]) { '
+          'let x = match (i) { case 2 => { break; } default => i; }; '
+          'print(x); }\n',
+          stdout="1\n")
+    check("match keeps std.regex.match",
+          'import std;\nprint(std.regex.match("a+", "aaa"));\n',
+          stdout="true")
+
+    check("enum no payload",
+          'enum E { A; B; }\nprint(E::A);\nprint(E::A == E::A);\n'
+          'print(E::A == E::B);\n',
+          stdout_all=["E::A", "true", "false"])
+    check("enum payload",
+          'enum E { A { n: int; s: string; }; B; }\n'
+          'let e = E::A { n: 1, s: "x" };\n'
+          'print(e.n);\nprint(e.s);\nprint(e);\n',
+          stdout_all=["1", "x", "E::A { n: 1, s: x }"])
+    check("enum type info",
+          'enum E { A; }\nprint(kind_of(E::A));\nprint(type_name(E::A));\n'
+          'print(type_module(E::A));\n',
+          stdout_all=["enum", "E", "main"])
+    check("enum type annotation",
+          'enum E { A { n: int; }; }\nlet e: E = E::A { n: 1 };\nprint(e.n);\n',
+          stdout="1")
+    check("enum variant pattern",
+          'enum E { A { n: int; }; B; }\n'
+          'print(match (E::A { n: 2 }) { '
+          'case E::A {n} if n > 1 => "big"; case E::A {n} => "small"; '
+          'case E::B => "b"; });\n',
+          stdout="big")
+    check("enum variant pattern rest",
+          'enum E { A { n: int; s: string; }; }\n'
+          'print(match (E::A { n: 1, s: "x" }) { '
+          'case E::A {n, ...rest} => rest; });\n',
+          stdout="{s: x}")
+    check("enum field wrong variant",
+          'enum E { A { n: int; }; B; }\nprint(E::B.n);\n',
+          stderr="field n not found in E::B")
+    check("enum unknown variant",
+          'enum E { A; }\nE::B\n', stderr="unknown enum variant E::B")
+    check("enum unknown field in construction",
+          'enum E { A { n: int; }; }\nE::A { m: 1 }\n',
+          stderr="unknown field m in E::A")
+    check("enum missing field",
+          'enum E { A { n: int; }; }\nE::A {}\n',
+          stderr="field n of E::A is required")
+    check("enum field type mismatch",
+          'enum E { A { n: int; }; }\nE::A { n: "x" }\n',
+          stderr="field n of E::A expects int, got string")
+    check("enum variant repeated",
+          'enum E { A; A; }\n', stderr="enum variant repeated A")
+    check("enum empty payload rejected",
+          'enum E { A {}; }\n', stderr="empty payload")
+    check("enum json",
+          'import std;\nenum E { A { n: int; }; B; }\n'
+          'print(std.json.stringify(E::A { n: 1 }));\n'
+          'print(std.json.stringify(E::B));\n',
+          stdout_all=[
+              '{"$enum":"E::A","payload":{"n":1}}',
+              '{"$enum":"E::B","payload":{}}',
+          ])
+    check("struct json",
+          'import std;\nstruct P { x: int; y: string; }\n'
+          'print(std.json.stringify(P { x: 1, y: "a" }));\n',
+          stdout='{"x":1,"y":"a"}')
+    check("recursive struct json",
+          'import std;\nstruct Node { value: int; next: Node?; }\n'
+          'print(std.json.stringify(Node { value: 1, next: null }));\n',
+          stdout='{"value":1,"next":null}')
+    check("enum nested in match",
+          'enum E { A { n: int; }; }\n'
+          'print(match (E::A { n: 3 }) { '
+          'case E::A {n} => match (n) { case 3 => "three"; default => "no"; }; '
+          'default => "no"; });\n',
+          stdout="three")
+    check("enum self reference",
+          'enum Expr { Add { l: Expr; r: Expr; }; Num { n: int; }; }\n'
+          'let e = Expr::Add { l: Expr::Num { n: 1 }, r: Expr::Num { n: 2 } };\n'
+          'print(match (e) { case Expr::Add {l, r} => "add"; '
+          'default => "other"; });\n',
+          stdout="add")
+    check("struct self reference",
+          'struct Node { value: int; next: Node?; }\n'
+          'let n = Node { value: 1, next: null };\n'
+          'let m = Node { value: 2, next: n };\n'
+          'print(m.value);\nprint(m.next.value);\nprint(m.next.next);\n',
+          stdout_all=["2", "1", "null"])
+    check("struct nullable type mismatch",
+          'struct Node { next: Node?; }\nNode { next: 1 }\n',
+          stderr="field next of Node expects Node?, got int")
+    check("nullable int",
+          'let x: int? = null;\nlet y: int? = 3;\nlet z: int?;\n'
+          'print(x);\nprint(y);\nprint(z);\n',
+          stdout_all=["null", "3", "null"])
+    check("nullable type mismatch",
+          'let x: int? = "s";\n', stderr="variable x expects int?, got string")
+    check("struct cycle rejected",
+          'struct Node { value: int; next: Node?; }\n'
+          'let a = Node { value: 1, next: null };\n'
+          'let b = Node { value: 2, next: null };\n'
+          'a.next = b;\nb.next = a;\n',
+          stderr="recursive value would create a cycle")
+    check("struct indirect cycle rejected",
+          'struct Node { value: int; kids: list; }\n'
+          'let a = Node { value: 1, kids: [] };\n'
+          'let b = Node { value: 2, kids: [] };\n'
+          'a.kids = [b];\nb.kids = [a];\n',
+          stderr="recursive value would create a cycle")
+    check("struct dag sharing allowed",
+          'struct Node { value: int; next: Node?; }\n'
+          'let c = Node { value: 3, next: null };\n'
+          'let a = Node { value: 1, next: c };\n'
+          'let b = Node { value: 2, next: c };\n'
+          'print(a.next.value);\nprint(b.next.value);\n',
+          stdout_all=["3", "3"])
+    check("struct self assignment rejected",
+          'struct Node { value: int; next: Node?; }\n'
+          'let a = Node { value: 1, next: null };\n'
+          'a.next = a;\n',
+          stderr="recursive value would create a cycle")
+
+    check("destructure dict shorthand",
+          'let {a, b} = {"a": 1, "b": 2};\nprint(a);\nprint(b);\n',
+          stdout_all=["1", "2"])
+    check("destructure dict alias",
+          'let {a: x} = {"a": 9};\nprint(x);\n', stdout="9")
+    check("destructure dict string key",
+          'let {"a-b": x} = {"a-b": 7};\nprint(x);\n', stdout="7")
+    check("destructure dict rest",
+          'let {a, ...rest} = {"a": 1, "b": 2, "c": 3};\nprint(rest);\n',
+          stdout="{b: 2, c: 3}")
+    check("destructure list",
+          'let [a, b] = [1, 2];\nprint(a + b);\n', stdout="3")
+    check("destructure list rest",
+          'let [h, ...t] = [1, 2, 3];\nprint(h);\nprint(t);\n',
+          stdout_all=["1", "[2, 3]"])
+    check("destructure nested",
+          'let {user: {name}} = {"user": {"name": "alice"}};\nprint(name);\n',
+          stdout="alice")
+    check("destructure struct",
+          'struct P { x: int; y: int; }\n'
+          'let pt = P { x: 1, y: 2 };\n'
+          'let P {x, y} = pt;\nprint(x + y);\n',
+          stdout="3")
+    check("destructure missing key",
+          'let {missing} = {};\n',
+          stderr="destructuring pattern did not match dict")
+    check("destructure list length mismatch",
+          'let [a, b] = [1];\n',
+          stderr="destructuring pattern did not match list")
+    check("destructure repeated symbol",
+          'let a = 1;\nlet {a} = {"a": 2};\n', stderr="symbol repeated a")
+    check("destructure const read-only",
+          'const {a} = {"a": 1};\na = 2;\n',
+          stderr="cannot assign to constant a")
+    check("destructure let writable",
+          'let {a} = {"a": 1};\na = 2;\nprint(a);\n', stdout="2")
+    check("destructure keeps whole via rest",
+          'let d = {"a": 1, "b": 2};\nlet {a} = d;\nprint(d["b"]);\n',
+          stdout="2")
+
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
     check("abs negative", "abs(-3)\n", stdout="= 3")

@@ -424,6 +424,55 @@ struct case_node {
     struct ast *next;
 };
 
+/* Pattern matching nodes.
+ *
+ * nodetype:
+ *   '7' match_node
+ *   '8' match_arm
+ *   '9' literal pattern      (literal)
+ *   'e' binding pattern      (name == NULL => wildcard)
+ *   'h' container pattern    (name == NULL => dict; name != NULL => struct)
+ *   'z' list pattern         (items)
+ *   ':' rest pattern         (name == NULL => ignore rest)
+ */
+struct pattern_field {
+    char *key;                 /* NULL for a rest field */
+    char *rest_name;           /* rest binding name, may be NULL */
+    struct ast *pattern;       /* NULL for a rest field */
+    struct pattern_field *next;
+};
+
+struct pattern_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    char *module;
+    char *variant;
+    struct ast *literal;
+    struct pattern_field *fields;
+    struct ast *items;
+    struct ast *next;
+};
+
+struct match_arm {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *pattern;
+    struct ast *guard;
+    struct ast *body;
+    struct ast *next;
+};
+
+struct match_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *expr;
+    struct ast *arms;
+};
+
 struct val {
     int nodetype;
     int line;
@@ -456,6 +505,15 @@ struct symdef {
     struct ast *v;
     struct type_constraint *type;
     int exported;
+    int is_const;
+};
+
+struct destructure_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *pattern;
+    struct ast *value;
     int is_const;
 };
 
@@ -523,6 +581,35 @@ struct struct_lit_node {
     int column;
     char *name;
     char *module;
+    struct struct_init *fields;
+};
+
+struct enum_variant {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    struct struct_member *fields;
+    struct enum_variant *next;
+};
+
+struct enum_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    char *module;
+    struct enum_variant *variants;
+    int exported;
+};
+
+struct enum_lit_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
+    char *module;
+    char *variant;
     struct struct_init *fields;
 };
 
@@ -597,9 +684,31 @@ struct ast *newforin(char *name, char *value_name, struct ast *iterable,
 struct ast *newswitch(struct ast *expr, struct ast *cases);
 struct ast *newcase(struct ast *values, struct ast *body, struct ast *next);
 struct ast *append_case(struct ast *head, struct ast *node);
+struct ast *newmatch(struct ast *expr, struct ast *arms);
+struct ast *newmatcharm(struct ast *pattern, struct ast *guard,
+                        struct ast *body, struct ast *next);
+struct ast *append_matcharm(struct ast *head, struct ast *node);
+struct ast *newpatternlit(struct ast *literal);
+struct ast *newpatternname(char *name);
+struct ast *newpatternrest(char *name);
+struct ast *newpatterndict(struct pattern_field *fields);
+struct ast *newpatternlist(struct ast *items);
+struct ast *newpatternstruct(char *name, char *module,
+                             struct pattern_field *fields);
+struct ast *newpatternvariant(char *name, char *module, char *variant,
+                              struct pattern_field *fields);
+struct pattern_field *newpatternfield(char *key, struct ast *pattern,
+                                      struct pattern_field *next);
+struct pattern_field *newpatternrestfield(char *name,
+                                          struct pattern_field *next);
+struct pattern_field *append_patternfield(struct pattern_field *head,
+                                          struct pattern_field *node);
+struct ast *append_patternitem(struct ast *head, struct ast *node);
 struct ast *newsname(char *s);
 struct ast *newvar(char *s, struct ast *v, bool exported = false,
                    bool is_const = false, struct type_constraint *type = NULL);
+struct ast *newdestructure(struct ast *pattern, struct ast *value,
+                           bool is_const = false);
 
 struct ast *newret(struct ast *v);
 struct ast *newbrk(char *label = NULL, int line = 0, int column = 0);
@@ -644,6 +753,15 @@ struct ast *newtraitmethod(char *name, struct symlist *params);
 struct ast *append_trait_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *module,
                          struct struct_init *fields);
+struct ast *newenumdecl(char *name, char *module,
+                        struct enum_variant *variants,
+                        bool exported = false);
+struct ast *newenumvariant(char *name, struct struct_member *fields,
+                           struct enum_variant *next);
+struct enum_variant *append_enumvariant(struct enum_variant *head,
+                                        struct enum_variant *node);
+struct ast *newenumlit(char *name, char *module, char *variant,
+                       struct struct_init *fields);
 struct ast *newstructinit(char *name, struct ast *value);
 struct ast *append_struct_init(struct ast *head, struct ast *init);
 

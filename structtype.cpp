@@ -8,8 +8,10 @@ namespace {
 
 std::unordered_map<std::string, std::unique_ptr<struct_def>> struct_types;
 std::unordered_map<std::string, std::unique_ptr<trait_def>> trait_types;
+std::unordered_map<std::string, std::unique_ptr<enum_def>> enum_types;
 std::unordered_map<std::string, struct_def *> logical_structs;
 std::unordered_map<std::string, trait_def *> logical_traits;
+std::unordered_map<std::string, enum_def *> logical_enums;
 std::unordered_map<std::string, std::string> module_aliases;
 
 std::string type_key(const char *module, const char *name) {
@@ -26,6 +28,7 @@ std::string alias_key(const char *importer, const char *alias) {
 struct resolved_type {
     struct_def *structure;
     trait_def *trait;
+    enum_def *enumeration;
 };
 
 bool split_qualified_name(const char *name, std::string &prefix,
@@ -50,7 +53,7 @@ std::string resolve_qualified_module(const char *importer,
 
 resolved_type resolve_named(const char *module, const char *name,
                             bool require_exported) {
-    resolved_type result{NULL, NULL};
+    resolved_type result{NULL, NULL, NULL};
     if (!name) return result;
 
     auto sit = struct_types.find(type_key(module, name));
@@ -61,6 +64,11 @@ resolved_type resolve_named(const char *module, const char *name,
     auto tit = trait_types.find(type_key(module, name));
     if (tit != trait_types.end()) {
         result.trait = tit->second.get();
+        return result;
+    }
+    auto eit = enum_types.find(type_key(module, name));
+    if (eit != enum_types.end()) {
+        result.enumeration = eit->second.get();
         return result;
     }
 
@@ -80,7 +88,12 @@ resolved_type resolve_named(const char *module, const char *name,
     if (ltit != logical_traits.end() &&
         (!require_exported || ltit->second->exported)) {
         result.trait = ltit->second;
+        return result;
     }
+    auto leit = logical_enums.find(type_key(target.c_str(), base.c_str()));
+    if (leit != logical_enums.end() &&
+        (!require_exported || leit->second->exported))
+        result.enumeration = leit->second;
     return result;
 }
 
@@ -94,8 +107,10 @@ struct_payload::~struct_payload() {
 void structtype_shutdown() {
     struct_types.clear();
     trait_types.clear();
+    enum_types.clear();
     logical_structs.clear();
     logical_traits.clear();
+    logical_enums.clear();
     module_aliases.clear();
 }
 
@@ -111,19 +126,26 @@ trait_def *structtype_find_trait(const char *module, const char *name) {
     return it == trait_types.end() ? NULL : it->second.get();
 }
 
+enum_def *structtype_find_enum(const char *module, const char *name) {
+    if (!name) return NULL;
+    auto it = enum_types.find(type_key(module, name));
+    return it == enum_types.end() ? NULL : it->second.get();
+}
+
 bool structtype_type_exists(const char *module, const char *name) {
     if (!name) return false;
     std::string key = type_key(module, name);
-    if (struct_types.count(key) != 0 || trait_types.count(key) != 0)
+    if (struct_types.count(key) != 0 || trait_types.count(key) != 0 ||
+        enum_types.count(key) != 0)
         return true;
     resolved_type resolved = resolve_named(module, name, true);
-    return resolved.structure != NULL || resolved.trait != NULL;
+    return resolved.structure != NULL || resolved.trait != NULL ||
+           resolved.enumeration != NULL;
 }
 
-bool structtype_create_struct(const char *module, const char *module_name,
-                              const char *name, bool exported,
-                              std::vector<field_def> fields,
-                              struct_def *&out, std::string &error) {
+bool structtype_prepare_struct(const char *module, const char *module_name,
+                               const char *name, bool exported,
+                               struct_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
         error = "invalid struct name";
@@ -135,12 +157,31 @@ bool structtype_create_struct(const char *module, const char *module_name,
     }
     std::string logical_key = type_key(module_name, name);
     if (logical_structs.count(logical_key) != 0 ||
-        logical_traits.count(logical_key) != 0) {
+        logical_traits.count(logical_key) != 0 ||
+        logical_enums.count(logical_key) != 0) {
         error = std::string("type repeated ") + name +
                 " in module " + (module_name ? module_name : "");
         return false;
     }
 
+    std::unique_ptr<struct_def> def(new struct_def);
+    def->name = name;
+    def->module = module ? module : "";
+    def->module_name = module_name ? module_name : def->module;
+    def->exported = exported;
+    out = def.get();
+    logical_structs.emplace(logical_key, out);
+    struct_types.emplace(type_key(module, name), std::move(def));
+    return true;
+}
+
+bool structtype_finalize_struct(struct_def *def,
+                                std::vector<field_def> fields,
+                                std::string &error) {
+    if (!def) {
+        error = "invalid struct";
+        return false;
+    }
     std::unordered_map<std::string, bool> seen;
     for (size_t i = 0; i < fields.size(); ++i) {
         if (fields[i].name.empty()) {
@@ -152,16 +193,39 @@ bool structtype_create_struct(const char *module, const char *module_name,
             return false;
         }
     }
-
-    std::unique_ptr<struct_def> def(new struct_def);
-    def->name = name;
-    def->module = module ? module : "";
-    def->module_name = module_name ? module_name : def->module;
-    def->exported = exported;
     def->fields = std::move(fields);
-    out = def.get();
-    logical_structs.emplace(logical_key, out);
-    struct_types.emplace(type_key(module, name), std::move(def));
+    return true;
+}
+
+void structtype_rollback_struct(struct_def *def) {
+    if (!def)
+        return;
+    for (auto it = logical_structs.begin(); it != logical_structs.end(); ++it) {
+        if (it->second == def) {
+            logical_structs.erase(it);
+            break;
+        }
+    }
+    for (auto it = struct_types.begin(); it != struct_types.end(); ++it) {
+        if (it->second.get() == def) {
+            struct_types.erase(it);
+            break;
+        }
+    }
+}
+
+bool structtype_create_struct(const char *module, const char *module_name,
+                              const char *name, bool exported,
+                              std::vector<field_def> fields,
+                              struct_def *&out, std::string &error) {
+    if (!structtype_prepare_struct(module, module_name, name, exported, out,
+                                   error))
+        return false;
+    if (!structtype_finalize_struct(out, std::move(fields), error)) {
+        structtype_rollback_struct(out);
+        out = NULL;
+        return false;
+    }
     return true;
 }
 
@@ -207,6 +271,104 @@ bool structtype_create_trait(const char *module, const char *module_name,
     out = def.get();
     logical_traits.emplace(logical_key, out);
     trait_types.emplace(type_key(module, name), std::move(def));
+    return true;
+}
+
+bool structtype_prepare_enum(const char *module, const char *module_name,
+                             const char *name, bool exported,
+                             enum_def *&out, std::string &error) {
+    out = NULL;
+    if (!name || !*name) {
+        error = "invalid enum name";
+        return false;
+    }
+    if (structtype_type_exists(module, name)) {
+        error = std::string("type repeated ") + name;
+        return false;
+    }
+    std::string logical_key = type_key(module_name, name);
+    if (logical_structs.count(logical_key) != 0 ||
+        logical_traits.count(logical_key) != 0 ||
+        logical_enums.count(logical_key) != 0) {
+        error = std::string("type repeated ") + name +
+                " in module " + (module_name ? module_name : "");
+        return false;
+    }
+
+    std::unique_ptr<enum_def> def(new enum_def);
+    def->name = name;
+    def->module = module ? module : "";
+    def->module_name = module_name ? module_name : def->module;
+    def->exported = exported;
+    out = def.get();
+    logical_enums.emplace(logical_key, out);
+    enum_types.emplace(type_key(module, name), std::move(def));
+    return true;
+}
+
+bool structtype_finalize_enum(enum_def *def, std::vector<variant_def> variants,
+                              std::string &error) {
+    if (!def) {
+        error = "invalid enum";
+        return false;
+    }
+    std::unordered_map<std::string, bool> seen_variants;
+    for (size_t i = 0; i < variants.size(); ++i) {
+        if (variants[i].name.empty()) {
+            error = "invalid enum variant name";
+            return false;
+        }
+        if (!seen_variants.emplace(variants[i].name, true).second) {
+            error = "enum variant repeated " + variants[i].name;
+            return false;
+        }
+        std::unordered_map<std::string, bool> seen_fields;
+        for (size_t j = 0; j < variants[i].fields.size(); ++j) {
+            const std::string &field = variants[i].fields[j].name;
+            if (field.empty()) {
+                error = "invalid field name in variant " + variants[i].name;
+                return false;
+            }
+            if (!seen_fields.emplace(field, true).second) {
+                error = "field repeated " + field + " in variant " +
+                        variants[i].name;
+                return false;
+            }
+        }
+    }
+    def->variants = std::move(variants);
+    return true;
+}
+
+void structtype_rollback_enum(enum_def *def) {
+    if (!def)
+        return;
+    for (auto it = logical_enums.begin(); it != logical_enums.end(); ++it) {
+        if (it->second == def) {
+            logical_enums.erase(it);
+            break;
+        }
+    }
+    for (auto it = enum_types.begin(); it != enum_types.end(); ++it) {
+        if (it->second.get() == def) {
+            enum_types.erase(it);
+            break;
+        }
+    }
+}
+
+bool structtype_create_enum(const char *module, const char *module_name,
+                            const char *name, bool exported,
+                            std::vector<variant_def> variants,
+                            enum_def *&out, std::string &error) {
+    if (!structtype_prepare_enum(module, module_name, name, exported, out,
+                                 error))
+        return false;
+    if (!structtype_finalize_enum(out, std::move(variants), error)) {
+        structtype_rollback_enum(out);
+        out = NULL;
+        return false;
+    }
     return true;
 }
 
@@ -259,11 +421,39 @@ int structtype_field_index(const struct_def *def, const std::string &name) {
     return -1;
 }
 
+int structtype_variant_index(const enum_def *def, const std::string &name) {
+    if (!def) return -1;
+    for (size_t i = 0; i < def->variants.size(); ++i)
+        if (def->variants[i].name == name)
+            return (int)i;
+    return -1;
+}
+
+int structtype_variant_field_index(const variant_def *variant,
+                                   const std::string &name) {
+    if (!variant) return -1;
+    for (size_t i = 0; i < variant->fields.size(); ++i)
+        if (variant->fields[i].name == name)
+            return (int)i;
+    return -1;
+}
+
 struct value_t *newstructval(struct_def *def,
                              std::shared_ptr<struct_payload> payload) {
     struct struct_value_t *value = new struct_value_t;
     value->type = T_struct;
     value->def = def;
+    value->payload = payload ? std::move(payload)
+                             : std::make_shared<struct_payload>();
+    return (struct value_t *)value;
+}
+
+struct value_t *newenumval(enum_def *def, int variant,
+                           std::shared_ptr<struct_payload> payload) {
+    struct enum_value_t *value = new enum_value_t;
+    value->type = T_enum;
+    value->def = def;
+    value->variant = variant;
     value->payload = payload ? std::move(payload)
                              : std::make_shared<struct_payload>();
     return (struct value_t *)value;
@@ -305,7 +495,20 @@ void structtype_register_alias(const char *importer, const char *alias,
 
 bool named_type_matches(const char *module, const char *name,
                         const struct value_t *value) {
-    if (!module || !name || !value || value->type != T_struct)
+    if (!module || !name || !value)
+        return false;
+
+    if (value->type == T_enum) {
+        const struct enum_value_t *ev = (const struct enum_value_t *)value;
+        if (!ev->def)
+            return false;
+        if (ev->def->module == module && ev->def->name == name)
+            return true;
+        resolved_type resolved = resolve_named(module, name, true);
+        return resolved.enumeration && ev->def == resolved.enumeration;
+    }
+
+    if (value->type != T_struct)
         return false;
 
     const struct struct_value_t *sv = (const struct struct_value_t *)value;

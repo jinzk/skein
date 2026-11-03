@@ -30,6 +30,7 @@ struct type_constraint {
     /* Interned; non-NULL only for TYPE_NAMED. */
     const char *name;
     const char *module;
+    bool nullable;
 };
 
 struct symbol {

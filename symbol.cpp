@@ -24,6 +24,7 @@ struct symbol *newsym(const char *name) {
     s->type.kind = TYPE_ANY;
     s->type.name = NULL;
     s->type.module = NULL;
+    s->type.nullable = false;
     s->exported = false;
     s->is_const = false;
     s->is_self = false;
@@ -74,6 +75,7 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
     type->kind = kind;
     type->name = NULL;
     type->module = NULL;
+    type->nullable = false;
     return type;
 }
 
@@ -92,6 +94,8 @@ void free_type_constraint(struct type_constraint *type) {
 bool type_constraint_matches(const struct type_constraint *type,
                              const struct value_t *value) {
     if (!type || !value)
+        return true;
+    if (type->nullable && value->type == T_null)
         return true;
 
     switch (type->kind) {
@@ -142,6 +146,8 @@ bool type_constraint_equal(const struct type_constraint *a,
         return !a && !b;
     if (a->kind != b->kind)
         return false;
+    if (a->nullable != b->nullable)
+        return false;
     if (a->kind == TYPE_NAMED) {
         if (!a->name || !b->name)
             return a->name == b->name;
@@ -157,25 +163,35 @@ bool type_constraint_equal(const struct type_constraint *a,
 const char *type_constraint_name(const struct type_constraint *type) {
     if (!type)
         return "any";
+    const char *base = "invalid";
     switch (type->kind) {
-        case TYPE_ANY: return "any";
-        case TYPE_INT: return "int";
-        case TYPE_FLOAT: return "float";
-        case TYPE_NUMBER: return "number";
-        case TYPE_BOOL: return "bool";
-        case TYPE_STRING: return "string";
-        case TYPE_BYTES: return "bytes";
-        case TYPE_LIST: return "list";
-        case TYPE_DICT: return "dict";
-        case TYPE_FUNCTION: return "function";
-        case TYPE_BUILTIN: return "builtin";
-        case TYPE_CALLABLE: return "callable";
-        case TYPE_NULL: return "null";
-        case TYPE_USERDATA: return "userdata";
-        case TYPE_RESULT: return "result";
-        case TYPE_ERROR: return "error";
-        case TYPE_NAMED: return type->name ? type->name : "invalid";
+        case TYPE_ANY: base = "any"; break;
+        case TYPE_INT: base = "int"; break;
+        case TYPE_FLOAT: base = "float"; break;
+        case TYPE_NUMBER: base = "number"; break;
+        case TYPE_BOOL: base = "bool"; break;
+        case TYPE_STRING: base = "string"; break;
+        case TYPE_BYTES: base = "bytes"; break;
+        case TYPE_LIST: base = "list"; break;
+        case TYPE_DICT: base = "dict"; break;
+        case TYPE_FUNCTION: base = "function"; break;
+        case TYPE_BUILTIN: base = "builtin"; break;
+        case TYPE_CALLABLE: base = "callable"; break;
+        case TYPE_NULL: base = "null"; break;
+        case TYPE_USERDATA: base = "userdata"; break;
+        case TYPE_RESULT: base = "result"; break;
+        case TYPE_ERROR: base = "error"; break;
+        case TYPE_NAMED:
+            base = type->name ? type->name : "invalid";
+            break;
         case TYPE_INVALID:
-        default: return "invalid";
+        default:
+            base = "invalid";
+            break;
     }
+    if (!type->nullable)
+        return base;
+    static std::string nullable_name;
+    nullable_name = std::string(base) + "?";
+    return nullable_name.c_str();
 }

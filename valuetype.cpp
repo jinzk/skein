@@ -243,6 +243,15 @@ struct value_t *dupval(struct value_t *v) {
             dst->payload = src->payload;
             return (struct value_t *)dst;
         }
+        case T_enum: {
+            struct enum_value_t *src = (struct enum_value_t *)v;
+            struct enum_value_t *dst = new enum_value_t;
+            dst->type = T_enum;
+            dst->def = src->def;
+            dst->variant = src->variant;
+            dst->payload = src->payload;
+            return (struct value_t *)dst;
+        }
         case T_method: {
             struct method_value_t *src = (struct method_value_t *)v;
             struct method_value_t *dst = new method_value_t;
@@ -314,6 +323,9 @@ void freeval(struct value_t *v) {
         case T_struct:
             delete (struct struct_value_t *)v;
             break;
+        case T_enum:
+            delete (struct enum_value_t *)v;
+            break;
         case T_method:
             delete (struct method_value_t *)v;
             break;
@@ -356,6 +368,10 @@ const char *typename_of(const struct value_t *v) {
         case T_struct: {
             const struct struct_value_t *s = (const struct struct_value_t *)v;
             return s->def ? s->def->name.c_str() : "struct";
+        }
+        case T_enum: {
+            const struct enum_value_t *e = (const struct enum_value_t *)v;
+            return e->def ? e->def->name.c_str() : "enum";
         }
         case T_method: return "method";
         case T_null: return "null";
@@ -457,6 +473,30 @@ std::string value_to_string(const struct value_t *v) {
                 out += ": ";
                 out += (i < s->payload->fields.size())
                            ? value_to_string(s->payload->fields[i])
+                           : "null";
+            }
+            out += " }";
+            return out;
+        }
+        case T_enum: {
+            const struct enum_value_t *e = (const struct enum_value_t *)v;
+            if (!e->def || !e->payload)
+                return "<enum>";
+            if (e->variant < 0 ||
+                (size_t)e->variant >= e->def->variants.size())
+                return "<enum>";
+            const struct variant_def &variant =
+                e->def->variants[(size_t)e->variant];
+            std::string out = e->def->name + "::" + variant.name;
+            if (variant.fields.empty())
+                return out;
+            out += " { ";
+            for (size_t i = 0; i < variant.fields.size(); ++i) {
+                if (i) out += ", ";
+                out += variant.fields[i].name;
+                out += ": ";
+                out += (i < e->payload->fields.size())
+                           ? value_to_string(e->payload->fields[i])
                            : "null";
             }
             out += " }";

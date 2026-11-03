@@ -2130,6 +2130,33 @@ switch (x) {
 - case 值必须是值，不能写 `case x > 1 && x < 5` 这种条件；条件判断用 `if/else`；
 - `case int` 不是类型模式，而是内置函数值，会作为不支持的 case 值报错。
 
+`match` 模式匹配（表达式）：
+
+```text
+let next = match (state) {
+  case "idle" => "planning";
+
+  case {kind: "tool_result", ok: true, data: d} => d;
+
+  case [head, ...tail] => head;
+
+  case n if n > 10 => n;
+
+  case Point {x, y} => x + y;
+
+  default => state;
+};
+```
+
+- `match` 是表达式，返回第一个匹配 arm 的值；
+- arm 体是单条语句或代码块，块的值是最后一条语句的值；
+- 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、struct（按字段）；
+- 守卫写成 `case pattern if expr => ...`；
+- 绑定只读，作用域限于该 arm；
+- 无 arm 命中且无 `default` 时运行时报错；
+- 模式不能调用函数或写比较表达式；
+- 不支持 float 字面量。
+
 错误处理：
 
 ```text
@@ -2334,7 +2361,8 @@ let q = p.moved(1, 2);
 - 第一版方法是只读的：方法内不能写 `self.x = ...`，需要修改时返回新结构体；
 - 结构体是值语义，赋值和作为参数传递时使用 copy-on-write；
 - 结构体类型可以用在变量和参数类型标注中：`let p: Point = Point { x: 1, y: 2 }`、`func f(p: Point)`；结构体类型没有默认值，变量必须初始化；
-- 字段类型必须是已声明的类型；暂不支持递归/自引用结构体；
+- 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
+- 不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；
 - 所有字段和方法都是公开的；暂不实现 `_` 私有语法；
 - 字段可以保存函数值，作为普通回调使用，不会自动绑定 `self`：
 
@@ -2398,6 +2426,34 @@ let q: lib::P = lib.make();
 ```
 
 - 未导出的类型不能通过包路径引用，但它的值仍可作为普通值传递和方法调用。
+
+枚举（带载荷变体）：
+
+```text
+enum Event {
+  UserMsg { text: string; };
+  ToolResult { ok: bool; data: any; };
+  Timeout;
+}
+
+let a = Event::UserMsg { text: "hi" };
+let b = Event::Timeout;
+
+match (a) {
+  case Event::UserMsg { text } => text;
+  case Event::ToolResult { ok: true, data: d } => d;
+  case Event::Timeout => "timeout";
+  default => "other";
+}
+```
+
+- 有载荷的变体必须写 `Event::Variant { field: value, ... }`；
+- 无载荷变体直接写 `Event::Variant`；
+- 载荷字段只读，字段访问按当前变体校验；
+- `kind_of(e)` 是 `"enum"`，`type_name(e)` 是枚举名；
+- `match` 支持变体模式、字段模式和守卫；
+- JSON 编码为 `{"$enum":"Event::UserMsg","payload":{...}}`；
+- 暂不支持互递归 enum（自引用 enum 已支持）、enum 方法/trait、enum 作为 dict key。
 
 运行时类型检查：
 

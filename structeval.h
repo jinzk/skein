@@ -18,5 +18,7 @@ void eval_struct_decl(struct struct_node *s);
 bool eval_impl_decl(struct impl_node *impl);
 void eval_trait_decl(struct trait_node *t);
 struct value_t *eval_struct_lit(struct struct_lit_node *lit);
+void eval_enum_decl(struct enum_node *e);
+struct value_t *eval_enum_lit(struct enum_lit_node *lit);
 
 #endif

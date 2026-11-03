@@ -1,6 +1,7 @@
 #include "json.h"
 
 #include "ast.h"
+#include "structtype.h"
 #include "valuetype.h"
 
 #include <cctype>
@@ -588,6 +589,50 @@ private:
                         return false;
                 }
                 out.push_back('}');
+                return true;
+            }
+            case T_struct: {
+                const struct struct_value_t *sv =
+                    (const struct struct_value_t *)value;
+                if (!sv->def || !sv->payload)
+                    return fail("invalid struct value");
+                out.push_back('{');
+                for (size_t i = 0; i < sv->def->fields.size(); ++i) {
+                    if (i)
+                        out.push_back(',');
+                    if (!encode_string(
+                            sv->def->fields[i].name.c_str()))
+                        return false;
+                    out.push_back(':');
+                    if (!encode_value(sv->payload->fields[i], depth + 1))
+                        return false;
+                }
+                out.push_back('}');
+                return true;
+            }
+            case T_enum: {
+                const struct enum_value_t *ev =
+                    (const struct enum_value_t *)value;
+                if (!ev->def || ev->variant < 0 ||
+                    (size_t)ev->variant >= ev->def->variants.size())
+                    return fail("invalid enum value");
+                const struct variant_def &variant =
+                    ev->def->variants[(size_t)ev->variant];
+                out += "{\"$enum\":";
+                std::string tag = ev->def->name + "::" + variant.name;
+                if (!encode_string(tag.c_str()))
+                    return false;
+                out += ",\"payload\":{";
+                for (size_t i = 0; i < variant.fields.size(); ++i) {
+                    if (i)
+                        out.push_back(',');
+                    if (!encode_string(variant.fields[i].name.c_str()))
+                        return false;
+                    out.push_back(':');
+                    if (!encode_value(ev->payload->fields[i], depth + 1))
+                        return false;
+                }
+                out += "}}";
                 return true;
             }
             default:

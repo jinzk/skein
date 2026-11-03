@@ -35,6 +35,7 @@ struct type_constraint any_type_constraint() {
     type.kind = TYPE_ANY;
     type.name = NULL;
     type.module = NULL;
+    type.nullable = false;
     return type;
 }
 
@@ -136,24 +137,32 @@ static bool method_signature_matches(const method_sig *sig,
 }
 
 void eval_struct_decl(struct struct_node *s) {
+    std::string error;
+    struct_def *def = NULL;
+    if (!structtype_prepare_struct(
+            s->module, diag_current_module_name().c_str(), s->name,
+            s->exported != 0, def, error)) {
+        yyerror("%s", error.c_str());
+        return;
+    }
+
     std::vector<field_def> fields;
     for (struct struct_member *m = s->members; m; m = m->next) {
         if (m->nodetype != 'f')
             continue;
-        if (!validate_type_constraint(m->type))
+        if (!validate_type_constraint(m->type)) {
+            structtype_rollback_struct(def);
             return;
+        }
         field_def field;
         field.name = m->name;
         field.type = copy_type_constraint(m->type);
         fields.push_back(field);
     }
 
-    std::string error;
-    struct_def *def = NULL;
-    if (!structtype_create_struct(
-            s->module, diag_current_module_name().c_str(), s->name,
-            s->exported != 0, std::move(fields), def, error)) {
+    if (!structtype_finalize_struct(def, std::move(fields), error)) {
         yyerror("%s", error.c_str());
+        structtype_rollback_struct(def);
         return;
     }
 
@@ -353,4 +362,111 @@ struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
     if (!ok)
         return NULL;
     return newstructval(def, payload);
+}
+
+void eval_enum_decl(struct enum_node *e) {
+    std::string error;
+    enum_def *def = NULL;
+    if (!structtype_prepare_enum(
+            e->module, diag_current_module_name().c_str(), e->name,
+            e->exported != 0, def, error)) {
+        yyerror("%s", error.c_str());
+        return;
+    }
+
+    std::vector<variant_def> variants;
+    for (struct enum_variant *v = e->variants; v; v = v->next) {
+        variant_def variant;
+        variant.name = v->name;
+        for (struct struct_member *m = v->fields; m; m = m->next) {
+            if (m->nodetype != 'f')
+                continue;
+            if (!validate_type_constraint(m->type)) {
+                structtype_rollback_enum(def);
+                return;
+            }
+            field_def field;
+            field.name = m->name;
+            field.type = copy_type_constraint(m->type);
+            variant.fields.push_back(std::move(field));
+        }
+        variants.push_back(std::move(variant));
+    }
+
+    if (!structtype_finalize_enum(def, std::move(variants), error)) {
+        yyerror("%s", error.c_str());
+        structtype_rollback_enum(def);
+    }
+}
+
+struct value_t *eval_enum_lit(struct enum_lit_node *lit) {
+    enum_def *def = structtype_find_enum(lit->module, lit->name);
+    if (!def) {
+        yyerror("unknown enum type %s", lit->name);
+        return NULL;
+    }
+
+    int variant_index = structtype_variant_index(def, lit->variant);
+    if (variant_index < 0) {
+        yyerror("unknown enum variant %s::%s", def->name.c_str(),
+                lit->variant);
+        return NULL;
+    }
+    const variant_def &variant = def->variants[(size_t)variant_index];
+
+    std::shared_ptr<struct_payload> payload =
+        std::make_shared<struct_payload>();
+    payload->fields.resize(variant.fields.size(), NULL);
+    std::vector<bool> seen(variant.fields.size(), false);
+    bool ok = true;
+
+    for (struct struct_init *init = lit->fields; init; init = init->next) {
+        int index = structtype_variant_field_index(&variant, init->name);
+        if (index < 0) {
+            yyerror("unknown field %s in %s::%s", init->name,
+                    def->name.c_str(), variant.name.c_str());
+            ok = false;
+            continue;
+        }
+        if (seen[(size_t)index]) {
+            yyerror("field %s repeated in %s::%s", init->name,
+                    def->name.c_str(), variant.name.c_str());
+            ok = false;
+            continue;
+        }
+        struct value_t *value = eval(init->value);
+        if (!value) {
+            ok = false;
+            continue;
+        }
+        if (!type_constraint_matches(&variant.fields[(size_t)index].type,
+                                     value)) {
+            yyerror("field %s of %s::%s expects %s, got %s", init->name,
+                    def->name.c_str(), variant.name.c_str(),
+                    type_constraint_name(
+                        &variant.fields[(size_t)index].type),
+                    typename_of(value));
+            freeval(value);
+            ok = false;
+            continue;
+        }
+        payload->fields[(size_t)index] = value;
+        seen[(size_t)index] = true;
+    }
+
+    if (!ok)
+        return NULL;
+
+    for (size_t i = 0; i < seen.size(); ++i) {
+        if (!seen[i]) {
+            yyerror("field %s of %s::%s is required",
+                    variant.fields[i].name.c_str(), def->name.c_str(),
+                    variant.name.c_str());
+            ok = false;
+        }
+    }
+
+    if (!ok)
+        return NULL;
+    return newenumval(def, variant_index, payload);
 }

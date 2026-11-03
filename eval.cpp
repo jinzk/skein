@@ -16,6 +16,7 @@
 #include "valuetype.h"
 
 #include <cstring>
+#include <unordered_set>
 
 static eval_context &eval_ctx() {
     return active_eval_context();
@@ -544,6 +545,21 @@ bool value_equals(struct value_t *a, struct value_t *b) {
                     return false;
             return true;
         }
+        case T_enum: {
+            struct enum_value_t *ea = (struct enum_value_t *)a;
+            struct enum_value_t *eb = (struct enum_value_t *)b;
+            if (ea->def != eb->def || ea->variant != eb->variant)
+                return false;
+            if (!ea->payload || !eb->payload)
+                return ea->payload == eb->payload;
+            if (ea->payload->fields.size() != eb->payload->fields.size())
+                return false;
+            for (size_t i = 0; i < ea->payload->fields.size(); ++i)
+                if (!value_equals(ea->payload->fields[i],
+                                  eb->payload->fields[i]))
+                    return false;
+            return true;
+        }
         case T_method: {
             struct method_value_t *ma = (struct method_value_t *)a;
             struct method_value_t *mb = (struct method_value_t *)b;
@@ -1028,6 +1044,91 @@ static struct value_t *apply_increment(struct value_t *v, int delta) {
     return NULL;
 }
 
+static const void *value_payload(const struct value_t *v) {
+    if (!v)
+        return NULL;
+    switch (v->type) {
+        case T_list:
+            return ((const struct list_value_t *)v)->payload.get();
+        case T_dict:
+            return ((const struct dict_value_t *)v)->payload.get();
+        case T_struct:
+            return ((const struct struct_value_t *)v)->payload.get();
+        case T_enum:
+            return ((const struct enum_value_t *)v)->payload.get();
+        default:
+            return NULL;
+    }
+}
+
+static bool value_reaches(const struct value_t *v, const void *target,
+                          std::unordered_set<const void *> &visited) {
+    if (!v)
+        return false;
+    const void *payload = value_payload(v);
+    if (payload) {
+        if (payload == target)
+            return true;
+        if (!visited.insert(payload).second)
+            return false;
+    }
+    switch (v->type) {
+        case T_list: {
+            const struct list_value_t *list =
+                (const struct list_value_t *)v;
+            for (struct value_t *item : list->payload->items)
+                if (value_reaches(item, target, visited))
+                    return true;
+            return false;
+        }
+        case T_dict: {
+            const struct dict_value_t *dict =
+                (const struct dict_value_t *)v;
+            for (auto &entry : dict->payload->items) {
+                if (value_reaches(entry.first, target, visited) ||
+                    value_reaches(entry.second, target, visited))
+                    return true;
+            }
+            return false;
+        }
+        case T_struct: {
+            const struct struct_value_t *sv =
+                (const struct struct_value_t *)v;
+            for (struct value_t *field : sv->payload->fields)
+                if (value_reaches(field, target, visited))
+                    return true;
+            return false;
+        }
+        case T_enum: {
+            const struct enum_value_t *ev = (const struct enum_value_t *)v;
+            for (struct value_t *field : ev->payload->fields)
+                if (value_reaches(field, target, visited))
+                    return true;
+            return false;
+        }
+        case T_result: {
+            const struct result_value_t *rv =
+                (const struct result_value_t *)v;
+            return value_reaches(rv->value, target, visited) ||
+                   value_reaches(rv->error, target, visited);
+        }
+        default:
+            return false;
+    }
+}
+
+static bool value_reaches_any(const struct value_t *v,
+                              const std::vector<const void *> &targets) {
+    for (const void *target : targets) {
+        if (!target)
+            continue;
+        std::unordered_set<const void *> visited;
+        if (value_reaches(v, target, visited))
+            return true;
+    }
+    return false;
+}
+
 /*
  * Resolve the container that owns the final index of a write path.  Every
  * intermediate container is made unique before its child is inspected, so a
@@ -1035,8 +1136,11 @@ static struct value_t *apply_increment(struct value_t *v, int delta) {
  */
 static bool resolve_write_container(
     struct symbol *s, const std::vector<struct value_t *> &indices,
-    const std::vector<bool> &fields, struct value_t *&container) {
+    const std::vector<bool> &fields, struct value_t *&container,
+    std::vector<const void *> *path_payloads = NULL) {
     container = s ? s->val : NULL;
+    if (path_payloads)
+        path_payloads->push_back(value_payload(container));
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
         ensure_unique_container(container);
         if (fields[k] && container->type == T_dict &&
@@ -1056,6 +1160,8 @@ static bool resolve_write_container(
             return false;
         }
         container = elem;
+        if (path_payloads)
+            path_payloads->push_back(value_payload(container));
     }
     return true;
 }
@@ -1428,7 +1534,15 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     }
 
     struct value_t *container = NULL;
-    if (!resolve_write_container(s, indices, fields, container)) {
+    std::vector<const void *> path_payloads;
+    if (!resolve_write_container(s, indices, fields, container,
+                                 &path_payloads)) {
+        freeval(val);
+        free_args(indices);
+        return NULL;
+    }
+    if (value_reaches_any(val, path_payloads)) {
+        yyerror("recursive value would create a cycle");
         freeval(val);
         free_args(indices);
         return NULL;
@@ -1785,6 +1899,8 @@ static bool read_index_chain(struct ast *a, struct value_t *&out) {
 
 static struct value_t *default_value_for_type(
     const struct type_constraint *type) {
+    if (type && type->nullable)
+        return newnull();
     enum type_constraint_kind kind = type ? type->kind : TYPE_ANY;
     switch (kind) {
         case TYPE_INT:
@@ -1827,6 +1943,9 @@ static struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     }
     struct value_t *v = eval(value_ast);
     if (!v) return NULL;
+    if (v->type == T_return || v->type == T_break ||
+        v->type == T_continue)
+        return v;
     if (!type_constraint_matches(&s->type, v)) {
         yyerror("variable %s expects %s, got %s", s->name,
                 type_constraint_name(&s->type), typename_of(v));
@@ -1953,6 +2072,30 @@ static struct value_t *read_member_value(struct value_t *container,
         return NULL;
     }
 
+    if (container->type == T_enum) {
+        if (index->type != T_string) {
+            yyerror("enum field name must be a string, got %s",
+                    typename_of(index));
+            return NULL;
+        }
+        struct enum_value_t *ev = (struct enum_value_t *)container;
+        if (!ev->def || ev->variant < 0 ||
+            (size_t)ev->variant >= ev->def->variants.size()) {
+            yyerror("invalid enum value");
+            return NULL;
+        }
+        const struct variant_def &variant =
+            ev->def->variants[(size_t)ev->variant];
+        const char *name = ((struct string_value_t *)index)->value;
+        int field = structtype_variant_field_index(&variant, name);
+        if (field >= 0 && ev->payload &&
+            (size_t)field < ev->payload->fields.size())
+            return dupval(ev->payload->fields[(size_t)field]);
+        yyerror("field %s not found in %s::%s", name,
+                ev->def->name.c_str(), variant.name.c_str());
+        return NULL;
+    }
+
     yyerror("cannot index %s", typename_of(container));
     return NULL;
 }
@@ -1978,6 +2121,271 @@ static struct value_t *call_method_value(struct value_t *receiver,
     callee.type = T_func;
     callee.def = std::move(def);
     return invoke_value((struct value_t *)&callee, args);
+}
+
+struct pattern_binding {
+    std::string name;
+    struct value_t *value;
+};
+
+static void free_pattern_bindings(std::vector<pattern_binding> &bindings) {
+    for (auto &binding : bindings)
+        freeval(binding.value);
+    bindings.clear();
+}
+
+static bool bind_pattern_value(std::vector<pattern_binding> &bindings,
+                               const char *name, struct value_t *value) {
+    if (!name || !*name || std::strcmp(name, "_") == 0)
+        return true;
+    for (auto &binding : bindings) {
+        if (binding.name == name) {
+            yyerror("pattern binds %s more than once", name);
+            return false;
+        }
+    }
+    pattern_binding binding;
+    binding.name = name;
+    binding.value = dupval(value);
+    bindings.push_back(std::move(binding));
+    return true;
+}
+
+static int dict_string_key_index(struct dict_value_t *dict, const char *key) {
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        struct value_t *item_key = dict->payload->items[i].first;
+        if (item_key && item_key->type == T_string &&
+            std::strcmp(((struct string_value_t *)item_key)->value, key) == 0)
+            return (int)i;
+    }
+    return -1;
+}
+
+static bool pattern_has_key(struct pattern_field *fields, const char *key) {
+    for (struct pattern_field *field = fields; field; field = field->next) {
+        if (field->key && std::strcmp(field->key, key) == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool match_pattern(struct ast *pattern_ast, struct value_t *value,
+                          std::vector<pattern_binding> &bindings) {
+    if (!pattern_ast || !value)
+        return false;
+    struct pattern_node *pattern = (struct pattern_node *)pattern_ast;
+
+    switch (pattern->nodetype) {
+        case '9': {
+            struct value_t *literal = eval(pattern->literal);
+            if (!literal)
+                return false;
+            bool equal = value_equals(literal, value);
+            freeval(literal);
+            return equal;
+        }
+        case 'e':
+            return bind_pattern_value(bindings, pattern->name, value);
+        case ':':
+            yyerror("rest pattern is only allowed at the end of a list "
+                    "or dict pattern");
+            return false;
+        case 'z': {
+            if (value->type != T_list)
+                return false;
+            struct list_value_t *list = (struct list_value_t *)value;
+            size_t index = 0;
+            for (struct ast *item_ast = pattern->items; item_ast;
+                 item_ast = ((struct pattern_node *)item_ast)->next) {
+                struct pattern_node *item = (struct pattern_node *)item_ast;
+                if (item->nodetype == ':') {
+                    if (item->next) {
+                        yyerror("rest pattern must be last");
+                        return false;
+                    }
+                    struct list_value_t *rest = newlistval();
+                    while (index < list->payload->items.size())
+                        rest->payload->items.push_back(
+                            dupval(list->payload->items[index++]));
+                    bool ok = bind_pattern_value(bindings, item->name,
+                                                 (struct value_t *)rest);
+                    freeval((struct value_t *)rest);
+                    return ok;
+                }
+                if (index >= list->payload->items.size())
+                    return false;
+                if (!match_pattern(item_ast, list->payload->items[index],
+                                   bindings))
+                    return false;
+                ++index;
+            }
+            return index == list->payload->items.size();
+        }
+        case 'h': {
+            if (pattern->variant) {
+                if (value->type != T_enum)
+                    return false;
+                struct enum_value_t *instance = (struct enum_value_t *)value;
+                enum_def *def =
+                    structtype_find_enum(pattern->module, pattern->name);
+                if (!def || instance->def != def)
+                    return false;
+                int variant_index =
+                    structtype_variant_index(def, pattern->variant);
+                if (variant_index < 0) {
+                    yyerror("unknown enum variant %s::%s", def->name.c_str(),
+                            pattern->variant);
+                    return false;
+                }
+                if (instance->variant != variant_index)
+                    return false;
+                const struct variant_def &variant =
+                    def->variants[(size_t)variant_index];
+                std::vector<bool> seen(variant.fields.size(), false);
+                for (struct pattern_field *field = pattern->fields; field;
+                     field = field->next) {
+                    if (!field->key)
+                        continue;
+                    int index =
+                        structtype_variant_field_index(&variant, field->key);
+                    if (index < 0) {
+                        yyerror("unknown field %s in %s::%s", field->key,
+                                def->name.c_str(), variant.name.c_str());
+                        return false;
+                    }
+                    if (seen[(size_t)index]) {
+                        yyerror("field %s repeated in pattern", field->key);
+                        return false;
+                    }
+                    seen[(size_t)index] = true;
+                    if (!match_pattern(field->pattern,
+                                       instance->payload->fields[(size_t)index],
+                                       bindings))
+                        return false;
+                }
+                for (struct pattern_field *field = pattern->fields; field;
+                     field = field->next) {
+                    if (field->key)
+                        continue;
+                    if (field->rest_name) {
+                        struct dict_value_t *rest = newdictval();
+                        for (size_t i = 0; i < variant.fields.size(); ++i) {
+                            if (seen[i])
+                                continue;
+                            rest->payload->items.push_back(std::make_pair(
+                                newstrval(variant.fields[i].name.c_str()),
+                                dupval(instance->payload->fields[i])));
+                        }
+                        bool ok = bind_pattern_value(
+                            bindings, field->rest_name,
+                            (struct value_t *)rest);
+                        freeval((struct value_t *)rest);
+                        if (!ok)
+                            return false;
+                    }
+                    break;
+                }
+                return true;
+            }
+            if (pattern->name) {
+                if (value->type != T_struct)
+                    return false;
+                struct struct_value_t *instance = (struct struct_value_t *)value;
+                struct_def *def =
+                    structtype_find_struct(pattern->module, pattern->name);
+                if (!def || instance->def != def)
+                    return false;
+                std::vector<bool> seen(def->fields.size(), false);
+                for (struct pattern_field *field = pattern->fields; field;
+                     field = field->next) {
+                    if (!field->key)
+                        continue;
+                    int index = structtype_field_index(def, field->key);
+                    if (index < 0) {
+                        yyerror("unknown field %s in %s", field->key,
+                                def->name.c_str());
+                        return false;
+                    }
+                    if (seen[(size_t)index]) {
+                        yyerror("field %s repeated in pattern", field->key);
+                        return false;
+                    }
+                    seen[(size_t)index] = true;
+                    if (!match_pattern(field->pattern,
+                                       instance->payload->fields[(size_t)index],
+                                       bindings))
+                        return false;
+                }
+                for (struct pattern_field *field = pattern->fields; field;
+                     field = field->next) {
+                    if (field->key)
+                        continue;
+                    if (field->rest_name) {
+                        struct dict_value_t *rest = newdictval();
+                        for (size_t i = 0; i < def->fields.size(); ++i) {
+                            if (seen[i])
+                                continue;
+                            rest->payload->items.push_back(std::make_pair(
+                                newstrval(def->fields[i].name.c_str()),
+                                dupval(instance->payload->fields[i])));
+                        }
+                        bool ok = bind_pattern_value(
+                            bindings, field->rest_name,
+                            (struct value_t *)rest);
+                        freeval((struct value_t *)rest);
+                        if (!ok)
+                            return false;
+                    }
+                    break;
+                }
+                return true;
+            }
+
+            if (value->type != T_dict)
+                return false;
+            struct dict_value_t *dict = (struct dict_value_t *)value;
+            for (struct pattern_field *field = pattern->fields; field;
+                 field = field->next) {
+                if (!field->key)
+                    continue;
+                int index = dict_string_key_index(dict, field->key);
+                if (index < 0)
+                    return false;
+                if (!match_pattern(field->pattern,
+                                   dict->payload->items[(size_t)index].second,
+                                   bindings))
+                    return false;
+            }
+            for (struct pattern_field *field = pattern->fields; field;
+                 field = field->next) {
+                if (field->key)
+                    continue;
+                if (field->rest_name) {
+                    struct dict_value_t *rest = newdictval();
+                    for (auto &entry : dict->payload->items) {
+                        bool listed = false;
+                        if (entry.first && entry.first->type == T_string)
+                            listed = pattern_has_key(
+                                pattern->fields,
+                                ((struct string_value_t *)entry.first)->value);
+                        if (!listed) {
+                            rest->payload->items.push_back(std::make_pair(
+                                dupval(entry.first), dupval(entry.second)));
+                        }
+                    }
+                    bool ok = bind_pattern_value(
+                        bindings, field->rest_name, (struct value_t *)rest);
+                    freeval((struct value_t *)rest);
+                    if (!ok)
+                        return false;
+                }
+                break;
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
 }
 
 struct value_t *eval(struct ast *a) {
@@ -2082,6 +2490,52 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
+        case '`': {
+            struct destructure_node *d = (struct destructure_node *)a;
+            int errors_before = eval_ctx().runtime_error_count;
+            struct value_t *value = eval(d->value);
+            if (!value ||
+                eval_ctx().runtime_error_count != errors_before) {
+                freeval(value);
+                break;
+            }
+
+            std::vector<pattern_binding> bindings;
+            if (!match_pattern(d->pattern, value, bindings)) {
+                free_pattern_bindings(bindings);
+                if (eval_ctx().runtime_error_count == errors_before)
+                    yyerror("destructuring pattern did not match %s",
+                            typename_of(value));
+                freeval(value);
+                break;
+            }
+
+            bool ok = true;
+            for (auto &binding : bindings) {
+                if (isrepeated(binding.name.c_str())) {
+                    yyerror("symbol repeated %s", binding.name.c_str());
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok) {
+                free_pattern_bindings(bindings);
+                freeval(value);
+                break;
+            }
+
+            for (auto &binding : bindings) {
+                struct symbol *symbol = newsym(binding.name.c_str());
+                symbol->val = binding.value;
+                binding.value = NULL;
+                symbol->is_const = d->is_const != 0;
+                savesym(symbol);
+            }
+            bindings.clear();
+            freeval(value);
+            break;
+        }
+
         case 'D': {
             struct symdef *def = (struct symdef *)a;
             char *name = def->name;
@@ -2097,6 +2551,11 @@ struct value_t *eval(struct ast *a) {
                     if (!def->v)
                         yyerror("variable %s of type %s requires an initializer",
                                 name, type_constraint_name(def->type));
+                    break;
+                }
+                if (v->type == T_return || v->type == T_break ||
+                    v->type == T_continue) {
+                    ret = v;
                     break;
                 }
                 if (!type_constraint_matches(def->type, v)) {
@@ -2122,6 +2581,10 @@ struct value_t *eval(struct ast *a) {
             eval_struct_decl((struct struct_node *)a);
             break;
 
+        case '<':
+            eval_enum_decl((struct enum_node *)a);
+            break;
+
         case 'H':
             eval_impl_decl((struct impl_node *)a);
             break;
@@ -2132,6 +2595,10 @@ struct value_t *eval(struct ast *a) {
 
         case 'y':
             ret = eval_struct_lit((struct struct_lit_node *)a);
+            break;
+
+        case '?':
+            ret = eval_enum_lit((struct enum_lit_node *)a);
             break;
 
         case 'Z': {
@@ -2590,6 +3057,82 @@ struct value_t *eval(struct ast *a) {
                 ret = do_compare(a->nodetype - '0', l, r);
             freeval(l);
             freeval(r);
+            break;
+        }
+
+        case '7': {
+            struct match_node *m = (struct match_node *)a;
+            int errors_before = eval_ctx().runtime_error_count;
+            struct value_t *subject = eval(m->expr);
+            if (!subject ||
+                eval_ctx().runtime_error_count != errors_before) {
+                freeval(subject);
+                break;
+            }
+
+            bool matched = false;
+            bool aborted = false;
+
+            for (struct ast *arm_ast = m->arms; arm_ast;
+                 arm_ast = ((struct match_arm *)arm_ast)->next) {
+                struct match_arm *arm = (struct match_arm *)arm_ast;
+                std::vector<pattern_binding> bindings;
+
+                if (arm->pattern &&
+                    !match_pattern(arm->pattern, subject, bindings)) {
+                    free_pattern_bindings(bindings);
+                    if (eval_ctx().runtime_error_count != errors_before) {
+                        aborted = true;
+                        break;
+                    }
+                    continue;
+                }
+
+                eval_pushscope();
+                for (auto &binding : bindings) {
+                    struct symbol *symbol = newsym(binding.name.c_str());
+                    symbol->val = binding.value;
+                    binding.value = NULL;
+                    symbol->is_const = true;
+                    savesym(symbol);
+                }
+                bindings.clear();
+
+                bool guard_ok = true;
+                if (arm->guard) {
+                    struct value_t *guard = eval(arm->guard);
+                    if (!guard) {
+                        eval_popscope();
+                        aborted = true;
+                        break;
+                    }
+                    guard_ok = truthy(guard);
+                    freeval(guard);
+                }
+                if (!guard_ok) {
+                    eval_popscope();
+                    continue;
+                }
+
+                int body_errors = eval_ctx().runtime_error_count;
+                struct value_t *body_ret = eval(arm->body);
+                eval_popscope();
+                if (eval_ctx().runtime_error_count != body_errors) {
+                    freeval(body_ret);
+                    aborted = true;
+                    break;
+                }
+
+                matched = true;
+                ret = body_ret;
+                break;
+            }
+
+            if (!matched && !aborted &&
+                eval_ctx().runtime_error_count == errors_before) {
+                yyerror("match: no arm matched");
+            }
+            freeval(subject);
             break;
         }
 

@@ -571,6 +571,16 @@ any int float number bool string bytes
 list dict function builtin callable null userdata result error
 ```
 
+任意类型可以加 `?` 变成可空类型，例如 `int?`、`string?`、`Node?`：
+
+```text
+let a: int? = null;
+let b: int? = 3;
+let c: int?;        // 默认 null
+```
+
+可空类型接受 `null` 或对应类型的值，其它值仍会报错。
+
 默认值：
 
 | 类型 | 默认值 |
@@ -583,6 +593,7 @@ list dict function builtin callable null userdata result error
 | `list` | `[]` |
 | `dict` | `{}` |
 | `any` / `null` | `null` |
+| `T?` | `null` |
 
 `function`、`builtin`、`callable`、`userdata` 没有默认值，必须提供初始值。
 
@@ -611,6 +622,30 @@ for (let i: int = 0; i < 3; i++) {
   print(i);
 }
 ```
+
+解构声明：
+
+```text
+let {a, b} = {"a": 1, "b": 2};
+let {a: x} = {"a": 9};              // key "a" 绑定到 x
+let {"a-b": z} = {"a-b": 7};        // 非标识符 key 用字符串
+let [h, ...t] = [1, 2, 3];
+let {user: {name}} = {"user": {"name": "alice"}};
+
+struct P { x: int; y: int; }
+let P {x, y} = P { x: 1, y: 2 };
+```
+
+规则：
+
+- `:` 左边是**字面量 key**，右边是绑定名；省略 `:` 时绑定名等于 key；
+- dict 开放匹配：只要求列出的 key 存在，多余的忽略；
+- `...rest` 收集未列出的键或剩余元素；
+- list 没有 `...rest` 时要求长度完全相等；
+- 缺 key、长度不匹配、struct 字段不匹配 → 运行时错误；
+- 绑定进入当前作用域：`let` 可写，`const` 只读；
+- 不支持默认值、解构赋值、多变量声明、`as` 整体绑定；
+- 未绑定的 key 可以通过 `...rest` 或先保留原值访问。
 
 ### 5.3 条件语句
 
@@ -768,7 +803,71 @@ switch (null) {
 }
 ```
 
-### 5.7 代码块
+### 5.7 match
+
+`match` 是**表达式**：按顺序尝试模式，返回第一个匹配 arm 的值。
+
+```text
+let next = match (state) {
+  case "idle" => "planning";
+
+  case {kind: "tool_result", ok: true, data: d} => d;
+
+  case [head, ...tail] => head;
+
+  case n if n > 10 => n;
+
+  case Point {x, y} => x + y;
+
+  default => state;
+};
+```
+
+规则：
+
+- 选择值只求值一次；
+- 首匹配生效，无 fallthrough；
+- arm 体可以是单条语句或代码块；表达式 arm 需要 `;`，块不需要；
+- arm 的值是块内最后一条语句的值；
+- 绑定只读，作用域限于该 arm；
+- `if` 守卫失败时继续尝试下一个 arm；
+- 没有 arm 命中且没有 `default` → 运行时错误 `match: no arm matched`；
+- 模式匹配无副作用，不能调用函数，也不能写比较表达式；
+- 不支持 float 字面量，浮点判断用 `if/else`。
+
+支持的模式：
+
+| 模式 | 示例 | 说明 |
+|---|---|---|
+| 字面量 | `1`、`"idle"`、`true`、`null` | 按 `==` 比较 |
+| 绑定 | `x` | 匹配任意值并绑定 |
+| 通配 | `_` | 匹配任意值，不绑定 |
+| dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
+| dict rest | `{kind, ...rest}` | `rest` 收集未列出的键 |
+| list | `[a, b]` | 定长匹配 |
+| list rest | `[h, ...t]` | `t` 是剩余元素组成的新 list |
+| struct | `Point {x, y}` | 按字段匹配，未知字段报错 |
+| struct 任意 | `Point {}` / `Point { ... }` | 只校验类型 |
+| dict 任意 | `{...}` | 匹配任意 dict |
+| 守卫 | `case n if n > 0 => ...` | 守卫可访问已绑定变量 |
+
+示例：
+
+```text
+print(match ({"kind": "tool", "ok": true, "data": [1, 2]}) {
+  case {kind: "tool", ok: true, data: d} => d;
+  default => null;
+});
+```
+
+`std.regex.match` 的 `match` 是字段名，不受关键字影响，仍然可用：
+
+```text
+import std;
+std.regex.match("a+", "aaa")
+```
+
+### 5.8 代码块
 
 ```text
 {
@@ -781,7 +880,7 @@ switch (null) {
 
 空代码块可以写在控制流/函数体位置（如 `if (x) {}`、`func f() {}`），也可以显式写成 `{ ; }`。块内单独出现的 `{}` 按空字典表达式处理；表达式位置的 `{}` 也是空字典。
 
-### 5.8 return / break / continue
+### 5.9 return / break / continue
 
 ```text
 return;
@@ -820,7 +919,7 @@ label outer: for (let i in [1, 2, 3]) {
 - 无标签的 `break` / `continue` 仍然作用于最近的循环或 switch；
 - 标签找不到时按普通越界 `break` / `continue` 报错。
 
-### 5.9 错误处理
+### 5.10 错误处理
 
 抛出错误：
 
@@ -922,7 +1021,7 @@ func load() {
 }
 ```
 
-### 5.10 命名函数
+### 5.11 命名函数
 
 ```text
 func add(a, b) {
@@ -1014,7 +1113,7 @@ sum(0, ...xs)    // 6
 let add = func(a, b) { return a + b; };
 ```
 
-### 5.11 结构体、impl 与 trait
+### 5.12 结构体、impl 与 trait
 
 结构体：
 
@@ -1060,7 +1159,8 @@ p.length()
 - 第一版方法是只读的，不允许 `self.x = ...`；
 - 结构体使用 copy-on-write 值语义；
 - 所有成员都是公开的，`_` 前缀没有特殊含义；
-- 字段类型必须是已声明的类型；暂不支持递归/自引用结构体；
+- 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
+- 不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
 - 不支持继承、静态方法、泛型、动态添加方法或运算符重载。
 
@@ -1143,7 +1243,63 @@ render(Point { x: 1, y: 2 });
 - 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 trait；
 - 类型名不会自动跨包可见；跨包返回的结构体值仍可以通过字段和方法使用。
 
-### 5.12 导出声明
+### 5.13 枚举
+
+```text
+enum Event {
+  UserMsg { text: string; };
+  ToolResult { ok: bool; data: any; };
+  Timeout;
+}
+```
+
+构造：
+
+```text
+let a = Event::UserMsg { text: "hi" };
+let b = Event::Timeout;
+```
+
+规则：
+
+- 变体字段必须全部初始化；
+- 未知字段、重复字段、字段类型不匹配都会报错；
+- 无载荷变体直接写成 `Event::Timeout`；
+- 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
+- 字段访问按当前变体校验：`Event::Timeout.text` 报错；
+- `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_module(e)` → 包名；
+- 类型标注：`let e: Event = Event::UserMsg { text: "hi" };`；
+- 相等按 `def + variant + payload` 比较。
+
+`match` 变体模式：
+
+```text
+match (e) {
+  case Event::UserMsg { text } => text;
+  case Event::ToolResult { ok: true, data: d } => d;
+  case Event::Timeout => "timeout";
+  default => "other";
+}
+```
+
+- 同一变体可以出现多个 arm，靠字段模式或守卫分流；
+- 未列出的载荷字段忽略，写错字段名报错；
+- `case Event::Timeout` 只匹配该变体；
+- `case Event::ToolResult { ... }` 匹配该变体的任意载荷。
+
+JSON：
+
+```text
+std.json.stringify(Event::UserMsg { text: "hi" })
+// {"$enum":"Event::UserMsg","payload":{"text":"hi"}}
+
+std.json.stringify(Event::Timeout)
+// {"$enum":"Event::Timeout","payload":{}}
+```
+
+暂不支持：互递归 enum（自引用 enum 已支持）、enum 方法/trait、enum 作为 dict key、enum 的 JSON 自动解码。
+
+### 5.14 导出声明
 
 只能在包中有实际意义：
 
@@ -2877,7 +3033,7 @@ try/catch
 私有成员
 struct 继承
 trait 继承 / 默认方法
-泛型 / Option / 联合类型
+泛型 / Option / 匿名联合类型
 ```
 
 动态链接库加载目前是设计方向，尚未作为语言语法实现。

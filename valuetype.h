@@ -41,6 +41,7 @@ enum val_type {
     T_result,
     T_error,
     T_struct,
+    T_enum,
     T_method,
     T_null,
     T_class,

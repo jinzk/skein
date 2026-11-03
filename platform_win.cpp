@@ -337,6 +337,18 @@ std::vector<std::string> platform_command_line_args(int argc, char **argv) {
     return args;
 }
 
+std::string platform_executable_path() {
+    wchar_t buffer[32768];
+    const DWORD length = GetModuleFileNameW(
+        nullptr, buffer, (DWORD)(sizeof buffer / sizeof buffer[0]));
+    if (length == 0 || length >= sizeof buffer / sizeof buffer[0])
+        return std::string();
+    std::string result;
+    if (!narrow_utf8(std::wstring(buffer, length), result))
+        return std::string();
+    return result;
+}
+
 bool platform_get_env(const std::string &name, std::string &value) {
     value.clear();
 

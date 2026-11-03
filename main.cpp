@@ -166,6 +166,7 @@ int main(int argc, char **argv) {
     process_spawn_shutdown();
     structtype_shutdown();
     event_loop_shutdown();
+    process_spawn_finish();
     set_active_eval_context(NULL);
     if (script)
         std::fclose(script);

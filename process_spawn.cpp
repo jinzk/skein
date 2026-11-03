@@ -664,6 +664,7 @@ value_t *call_process_spawn_builtin(
         std::vector<std::string> arguments;
         std::vector<std::string> environment;
         std::string cwd;
+        bool inherit_stderr = false;
         if (args.size() == 2) {
             if (args[1]->type != T_dict) {
                 yyerror("%s options must be a dict", name);
@@ -714,6 +715,21 @@ value_t *call_process_spawn_builtin(
                         return NULL;
                     }
                     cwd = ((string_value_t *)entry.second)->value;
+                } else if (key == "stderr") {
+                    if (entry.second->type != T_string) {
+                        yyerror("%s stderr must be \"pipe\" or \"inherit\"",
+                                name);
+                        return NULL;
+                    }
+                    const std::string value =
+                        ((string_value_t *)entry.second)->value;
+                    if (value == "inherit") {
+                        inherit_stderr = true;
+                    } else if (value != "pipe") {
+                        yyerror("%s stderr must be \"pipe\" or \"inherit\"",
+                                name);
+                        return NULL;
+                    }
                 }
             }
         }
@@ -727,13 +743,15 @@ value_t *call_process_spawn_builtin(
         process->process.data = process.get();
         process->stdin_pipe = new process_pipe;
         process->stdout_pipe = new process_pipe;
-        process->stderr_pipe = new process_pipe;
+        process->stderr_pipe = inherit_stderr ? nullptr : new process_pipe;
         process->stdin_pipe->process = process.get();
         process->stdout_pipe->process = process.get();
-        process->stderr_pipe->process = process.get();
         process->stdin_pipe->kind = 0;
         process->stdout_pipe->kind = 1;
-        process->stderr_pipe->kind = 2;
+        if (process->stderr_pipe) {
+            process->stderr_pipe->process = process.get();
+            process->stderr_pipe->kind = 2;
+        }
 
         const std::string file = ((string_value_t *)args[0])->value;
         arguments.insert(arguments.begin(), file);
@@ -749,8 +767,12 @@ value_t *call_process_spawn_builtin(
 
         uv_pipe_t *pipes[3] = {&process->stdin_pipe->handle,
                                &process->stdout_pipe->handle,
-                               &process->stderr_pipe->handle};
+                               process->stderr_pipe
+                                   ? &process->stderr_pipe->handle
+                                   : nullptr};
         for (int i = 0; i < 3; ++i) {
+            if (!pipes[i])
+                continue;
             if (uv_pipe_init(event_loop_handle(), pipes[i], 0) != 0) {
                 close_process_handles(process.get());
                 yyerror("%s: cannot create pipe", name);
@@ -759,15 +781,23 @@ value_t *call_process_spawn_builtin(
         }
         process->stdin_pipe->handle.data = process->stdin_pipe;
         process->stdout_pipe->handle.data = process->stdout_pipe;
-        process->stderr_pipe->handle.data = process->stderr_pipe;
+        if (process->stderr_pipe)
+            process->stderr_pipe->handle.data = process->stderr_pipe;
 
         uv_stdio_container_t stdio[3];
         stdio[0].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE);
         stdio[0].data.stream = (uv_stream_t *)&process->stdin_pipe->handle;
         stdio[1].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
         stdio[1].data.stream = (uv_stream_t *)&process->stdout_pipe->handle;
-        stdio[2].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
-        stdio[2].data.stream = (uv_stream_t *)&process->stderr_pipe->handle;
+        if (inherit_stderr) {
+            stdio[2].flags = UV_INHERIT_FD;
+            stdio[2].data.fd = 2;
+        } else {
+            stdio[2].flags =
+                (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+            stdio[2].data.stream =
+                (uv_stream_t *)&process->stderr_pipe->handle;
+        }
 
         uv_process_options_t options = {};
         options.exit_cb = on_process_exit;
@@ -800,7 +830,9 @@ value_t *call_process_spawn_builtin(
             new_pipe_value(process, process->stdout_pipe)));
         result->payload->items.push_back(std::make_pair(
             newstrval("stderr"),
-            new_pipe_value(process, process->stderr_pipe)));
+            process->stderr_pipe
+                ? new_pipe_value(process, process->stderr_pipe)
+                : newnull()));
         result->payload->items.push_back(std::make_pair(
             newstrval("handle"), new_process_value(process)));
         return (value_t *)result;
@@ -883,12 +915,6 @@ value_t *call_process_spawn_builtin(
             return NULL;
         }
         close_process_handles(process.get());
-        if (process->exited) {
-            auto &registry = process_registry();
-            registry.erase(std::remove(registry.begin(), registry.end(),
-                                       process),
-                           registry.end());
-        }
         return newnull();
     }
 
@@ -920,7 +946,10 @@ void process_spawn_shutdown() {
             uv_process_kill(&process->process, SIGTERM);
         close_process_handles(process.get());
     }
-    // Keep resources alive until process exit; libuv may still hold closing
-    // handles until the loop is shut down.
+    // Keep resources alive until the event loop is shut down; uv_close()
+    // callbacks may still reference the handles.
+}
 
+void process_spawn_finish() {
+    process_registry().clear();
 }

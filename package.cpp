@@ -591,6 +591,14 @@ value_t *build_std_namespace() {
             {"pid", B_process_pid},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("worker"),
+        builtin_module({
+            {"pool", B_worker_pool},
+            {"call", B_worker_call},
+            {"map", B_worker_map},
+            {"shutdown", B_worker_shutdown},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("type"),
         builtin_module({
             {"kind_of", B_kind_of},

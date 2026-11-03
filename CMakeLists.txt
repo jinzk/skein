@@ -118,6 +118,7 @@ add_executable(${PROJECT_NAME}
   unicode_ident.cpp
   valuetype.cpp
   websocket.cpp
+  worker_pool.cpp
 )
 
 if(WIN32)

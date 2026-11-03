@@ -467,6 +467,62 @@ def check_extended_stdlib():
             'print(std.process.wait(p));\n',
             stdout_all=["3", "abc", "0"],
         )
+        with tempfile.TemporaryDirectory() as worker_tmp:
+            worker_script = os.path.join(worker_tmp, "worker.skein")
+            with open(worker_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "while (true) {\n"
+                    "  let line = std.io.read_line(std.io.stdin);\n"
+                    "  if (line == null) { break; }\n"
+                    "  let request = std.json.parse(bytes_to_string(line));\n"
+                    "  let result = request[\"params\"][0] + "
+                    "request[\"params\"][1];\n"
+                    "  let response = {\"id\": request[\"id\"], "
+                    "\"ok\": true, \"result\": result};\n"
+                    "  std.io.write_all(std.io.stdout, bytes_from_string("
+                    "std.json.stringify(response) + \"\\n\"));\n"
+                    "  std.io.flush(std.io.stdout);\n"
+                    "}\n"
+                )
+            worker_path = worker_script.replace("\\", "\\\\")
+            binary_path = os.path.abspath(BIN).replace("\\", "\\\\")
+            check(
+                "json lines worker over pipes",
+                "import std;\n"
+                f'let p = std.process.spawn("{binary_path}", '
+                f'{{"args": ["{worker_path}"]}});\n'
+                'std.io.write_all(p["stdin"], bytes_from_string('
+                '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
+                'std.io.flush(p["stdin"]);\n'
+                'let line = std.io.read_line(p["stdout"]);\n'
+                'print(bytes_to_string(line));\n'
+                'std.io.close(p["stdin"]);\n'
+                'print(std.process.wait(p));\n',
+                stdout_all=['{"id":1,"ok":true,"result":5}', "0"],
+            )
+            check(
+                "std.worker pool call and map",
+                "import std;\n"
+                f'let pool = std.worker.pool(2, "{worker_path}");\n'
+                'let one = std.worker.call(pool, "add", [2, 3]);\n'
+                'print(std.result.unwrap(one));\n'
+                'print(std.worker.map(pool, "add", '
+                '[[1, 2], [3, 4], [5, 6]]));\n'
+                'std.worker.shutdown(pool);\n',
+                stdout_all=["5", "[3, 7, 11]"],
+            )
+        check(
+            "std process spawn repeated close",
+            "import std;\n"
+            "for (let i = 0; i < 5; i++) {\n"
+            '  let p = std.process.spawn("/bin/true");\n'
+            "  std.process.wait(p);\n"
+            "  std.process.close(p);\n"
+            "}\n"
+            "1\n",
+            stdout="= 1",
+        )
         check(
             "std process spawn kill",
             "import std;\n"

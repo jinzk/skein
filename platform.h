@@ -15,6 +15,9 @@ void platform_init();
  * ANSI code page. */
 std::vector<std::string> platform_command_line_args(int argc, char **argv);
 
+/* Absolute path of the running interpreter, or an empty string. */
+std::string platform_executable_path();
+
 /* Read an environment variable as UTF-8.  Returns false when it is unset. */
 bool platform_get_env(const std::string &name, std::string &value);
 

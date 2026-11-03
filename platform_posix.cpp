@@ -66,6 +66,17 @@ std::vector<std::string> platform_command_line_args(int argc, char **argv) {
     return std::vector<std::string>(argv, argv + argc);
 }
 
+std::string platform_executable_path() {
+#if defined(__linux__)
+    char buffer[4096];
+    const ssize_t length =
+        readlink("/proc/self/exe", buffer, sizeof buffer - 1);
+    if (length > 0)
+        return std::string(buffer, (size_t)length);
+#endif
+    return std::string();
+}
+
 bool platform_get_env(const std::string &name, std::string &value) {
     const char *env = std::getenv(name.c_str());
     if (!env)

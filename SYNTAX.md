@@ -1275,6 +1275,7 @@ std.math
 std.io
 std.fs
 std.process
+std.worker
 std.type
 std.net
 std.http
@@ -1453,8 +1454,9 @@ std.process.close(process)
 std.process.pid(process)
 ```
 
-`options` 支持 `args`、`env`、`cwd`。`spawn` 返回包含 `pid`、`stdin`、
-`stdout`、`stderr` 和 `handle` 的 dict；四个流都支持 `std.io` 的同步和异步读写。
+`options` 支持 `args`、`env`、`cwd`、`stderr`（`pipe` 或 `inherit`）。
+`spawn` 返回包含 `pid`、`stdin`、`stdout`、`stderr` 和 `handle` 的 dict；
+四个流都支持 `std.io` 的同步和异步读写；`stderr = "inherit"` 时 `stderr` 为 `null`。
 
 ```text
 import std;
@@ -1468,6 +1470,45 @@ std.process.close(p)
 ```
 
 `std.io.stdin` / `std.io.stdout` / `std.io.stderr` 是标准流对象。
+
+Worker 进程池：
+
+```text
+std.worker.pool(size, script) -> pool
+std.worker.call(pool, method, args) -> result
+std.worker.map(pool, method, items) -> list
+std.worker.shutdown(pool)
+```
+
+worker 脚本使用 JSON Lines 协议：
+
+```text
+import std;
+
+while (true) {
+  let line = std.io.read_line(std.io.stdin);
+  if (line == null) { break; }
+
+  let request = std.json.parse(bytes_to_string(line));
+  let result = request["params"][0] + request["params"][1];
+  let response = {"id": request["id"], "ok": true, "result": result};
+
+  std.io.write_all(std.io.stdout,
+                   bytes_from_string(std.json.stringify(response) + "\n"));
+  std.io.flush(std.io.stdout);
+}
+```
+
+主进程：
+
+```text
+import std;
+
+let pool = std.worker.pool(4, "worker.skein");
+std.result.unwrap(std.worker.call(pool, "add", [2, 3]))
+std.worker.map(pool, "add", [[1, 2], [3, 4]])
+std.worker.shutdown(pool)
+```
 
 JSON：
 
@@ -1607,6 +1648,7 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.io`：`print`、`format`、`input`，以及文件和 socket 通用的流式读写；
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`command_status` / `run` / `spawn`；
+- `std.worker`：JSON Lines 进程池；
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
@@ -2685,6 +2727,11 @@ std.process.wait
 std.process.kill
 std.process.close
 std.process.pid
+
+std.worker.pool
+std.worker.call
+std.worker.map
+std.worker.shutdown
 ```
 
 ### 文件

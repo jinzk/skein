@@ -1370,6 +1370,7 @@ std.math
 std.io
 std.fs
 std.process
+std.worker
 std.type
 std.net
 std.http
@@ -1681,6 +1682,11 @@ std.process.wait
 std.process.kill
 std.process.close
 std.process.pid
+
+std.worker.pool
+std.worker.call
+std.worker.map
+std.worker.shutdown
 ```
 
 规则：
@@ -2573,6 +2579,7 @@ std.process.pid(process)
 args   list[string]，不包含 argv[0]；程序路径由 file 提供
 env    dict[string, string]；省略时继承父进程环境
 cwd    string
+stderr "pipe"（默认）或 "inherit"
 ```
 
 `spawn` 直接执行 `file`，不经过 shell。返回：
@@ -2615,6 +2622,99 @@ let data = await std.io.read_async(p["stdout"], 4096);
 - `stderr` 始终是管道，父进程应读取，避免子进程因 stderr 写满而阻塞；
 - 管道不支持 `seek` / `tell`；
 - `wait` 超时后不会自动杀死进程。
+
+#### JSON Lines worker 示例
+
+worker 脚本：
+
+```text
+import std;
+
+while (true) {
+  let line = std.io.read_line(std.io.stdin);
+  if (line == null) { break; }
+
+  let request = std.json.parse(bytes_to_string(line));
+  let result = request["params"][0] + request["params"][1];
+  let response = {"id": request["id"], "ok": true, "result": result};
+
+  std.io.write_all(std.io.stdout,
+                   bytes_from_string(std.json.stringify(response) + "\n"));
+  std.io.flush(std.io.stdout);
+}
+```
+
+父进程：
+
+```text
+import std;
+
+let p = std.process.spawn("skein", {"args": ["worker.skein"]});
+std.io.write_all(p["stdin"],
+                 bytes_from_string("{\"id\":1,\"params\":[2,3]}\n"));
+std.io.flush(p["stdin"]);
+
+print(bytes_to_string(std.io.read_line(p["stdout"])));
+std.io.close(p["stdin"]);
+print(std.process.wait(p));
+```
+
+### Worker 池
+
+在 spawn + JSON Lines 协议之上提供进程池：
+
+```text
+std.worker.pool(size, script) -> pool
+std.worker.call(pool, method, args) -> result
+std.worker.map(pool, method, items) -> list
+std.worker.shutdown(pool)
+```
+
+- `size`：worker 进程数
+- `script`：worker 脚本路径
+- `method`：worker 脚本中负责分发的逻辑
+- `args` / `items`：JSON 可序列化数据
+- `call` 返回 `result`，worker 错误不会直接中断进程
+- `map` 把任务分批分发给多个 worker，保持输入顺序；任一任务失败时报告错误
+
+worker 脚本约定使用 JSON Lines：
+
+```text
+import std;
+
+while (true) {
+  let line = std.io.read_line(std.io.stdin);
+  if (line == null) { break; }
+
+  let request = std.json.parse(bytes_to_string(line));
+  let result = request["params"][0] + request["params"][1];
+  let response = {"id": request["id"], "ok": true, "result": result};
+
+  std.io.write_all(std.io.stdout,
+                   bytes_from_string(std.json.stringify(response) + "\n"));
+  std.io.flush(std.io.stdout);
+}
+```
+
+主进程：
+
+```text
+import std;
+
+let pool = std.worker.pool(4, "worker.skein");
+let r = std.worker.call(pool, "add", [2, 3]);
+print(std.result.unwrap(r));
+
+print(std.worker.map(pool, "add", [[1, 2], [3, 4], [5, 6]]));
+std.worker.shutdown(pool);
+```
+
+当前限制：
+
+- 使用 JSON Lines，不支持原始 `bytes`；
+- 第一个版本不提供超时和自动重启；
+- worker 脚本需要自己实现 `method` 分发和错误响应；
+- Windows worker 行为待单独验证。
 
 环境变量名不能为空，也不能包含 `=`。在 Windows cmd 中引用变量使用 `%FOO%`，POSIX shell 使用 `$FOO`。
 
@@ -3241,6 +3341,7 @@ compress_builtin.* std.compress gzip/zlib/deflate
 fs_extra.*     std.fs 目录与路径操作
 process_builtin.* std.process.run 输出捕获
 process_spawn.* std.process.spawn 与管道流
+worker_pool.* std.worker 进程池
 stdio_stream.* std.io 标准流
 eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态

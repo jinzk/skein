@@ -272,7 +272,11 @@ enum bifs {
     B_process_wait,
     B_process_kill,
     B_process_close,
-    B_process_pid
+    B_process_pid,
+    B_worker_pool,
+    B_worker_call,
+    B_worker_map,
+    B_worker_shutdown
 };
 
 struct ast {

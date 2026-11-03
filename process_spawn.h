@@ -9,5 +9,6 @@ struct value_t *call_process_spawn_builtin(
     int functype, const std::vector<struct value_t *> &args);
 
 void process_spawn_shutdown();
+void process_spawn_finish();
 
 #endif

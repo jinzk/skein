@@ -989,6 +989,18 @@ static const char *math_builtin_name(int functype) {
         case B_hypot: return "hypot";
         case B_min: return "min";
         case B_max: return "max";
+        case B_math_sign: return "std.math.sign";
+        case B_math_clamp: return "std.math.clamp";
+        case B_math_fmod: return "std.math.fmod";
+        case B_math_mod: return "std.math.mod";
+        case B_math_is_nan: return "std.math.is_nan";
+        case B_math_is_inf: return "std.math.is_inf";
+        case B_math_is_finite: return "std.math.is_finite";
+        case B_math_cbrt: return "std.math.cbrt";
+        case B_math_gcd: return "std.math.gcd";
+        case B_math_lcm: return "std.math.lcm";
+        case B_math_degrees: return "std.math.degrees";
+        case B_math_radians: return "std.math.radians";
         default: return "math function";
     }
 }
@@ -1275,6 +1287,33 @@ struct value_t *call_builtin(int functype,
                     math_builtin_name(functype), (int)args.size());
             return NULL;
         }
+    } else if (functype == B_math_sign ||
+               functype == B_math_is_nan ||
+               functype == B_math_is_inf ||
+               functype == B_math_is_finite ||
+               functype == B_math_cbrt ||
+               functype == B_math_degrees ||
+               functype == B_math_radians) {
+        if (args.size() != 1) {
+            yyerror("%s expects 1 argument, got %d",
+                    math_builtin_name(functype), (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_math_fmod ||
+               functype == B_math_mod ||
+               functype == B_math_gcd ||
+               functype == B_math_lcm) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    math_builtin_name(functype), (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_math_clamp) {
+        if (args.size() != 3) {
+            yyerror("%s expects 3 arguments, got %d",
+                    math_builtin_name(functype), (int)args.size());
+            return NULL;
+        }
     } else if (functype == B_min || functype == B_max) {
         if (args.empty()) {
             yyerror("%s expects at least 1 argument", math_builtin_name(functype));
@@ -1458,16 +1497,190 @@ struct value_t *call_builtin(int functype,
             break;
         }
         case B_log2:
-        case B_log10:
+        case B_log10: {
             if (!is_numeric(arg)) {
                 yyerror("%s expects a number, got %s",
                         math_builtin_name(functype), typename_of(arg));
                 break;
             }
-            ret = newfloatval(functype == B_log2
-                                  ? std::log2(as_double(arg))
-                                  : std::log10(as_double(arg)));
+            double value = as_double(arg);
+            if (value <= 0.0)
+                ret = newfloatval(std::nan(""));
+            else
+                ret = newfloatval(functype == B_log2
+                                      ? std::log2(value)
+                                      : std::log10(value));
             break;
+        }
+        case B_math_sign: {
+            if (!is_numeric(arg)) {
+                yyerror("std.math.sign expects a number, got %s",
+                        typename_of(arg));
+                break;
+            }
+            if (arg->type == T_float) {
+                double value = ((struct float_value_t *)arg)->value;
+                if (std::isnan(value))
+                    ret = newfloatval(value);
+                else
+                    ret = newintval(value < 0.0 ? -1 : (value > 0.0 ? 1 : 0));
+            } else {
+                long long value = ((struct int_value_t *)arg)->value;
+                ret = newintval(value < 0 ? -1 : (value > 0 ? 1 : 0));
+            }
+            break;
+        }
+        case B_math_clamp: {
+            for (struct value_t *value : args) {
+                if (!is_numeric(value)) {
+                    yyerror("std.math.clamp expects numbers, got %s",
+                            typename_of(value));
+                    return NULL;
+                }
+            }
+            if (args[0]->type == T_int && args[1]->type == T_int &&
+                args[2]->type == T_int) {
+                long long value = ((struct int_value_t *)args[0])->value;
+                long long low = ((struct int_value_t *)args[1])->value;
+                long long high = ((struct int_value_t *)args[2])->value;
+                if (low > high) {
+                    yyerror("std.math.clamp lower bound exceeds upper bound");
+                    break;
+                }
+                if (value < low)
+                    value = low;
+                else if (value > high)
+                    value = high;
+                ret = newintval(value);
+            } else {
+                double value = as_double(args[0]);
+                double low = as_double(args[1]);
+                double high = as_double(args[2]);
+                if (low > high) {
+                    yyerror("std.math.clamp lower bound exceeds upper bound");
+                    break;
+                }
+                if (value < low)
+                    value = low;
+                else if (value > high)
+                    value = high;
+                ret = newfloatval(value);
+            }
+            break;
+        }
+        case B_math_fmod: {
+            if (!is_numeric(args[0]) || !is_numeric(args[1])) {
+                yyerror("std.math.fmod expects numbers, got %s and %s",
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            ret = newfloatval(
+                std::fmod(as_double(args[0]), as_double(args[1])));
+            break;
+        }
+        case B_math_mod: {
+            if (!is_numeric(args[0]) || !is_numeric(args[1])) {
+                yyerror("std.math.mod expects numbers, got %s and %s",
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            if (args[0]->type == T_int && args[1]->type == T_int) {
+                long long left = ((struct int_value_t *)args[0])->value;
+                long long right = ((struct int_value_t *)args[1])->value;
+                if (right == 0) {
+                    yyerror("modulo by zero");
+                    break;
+                }
+                long long value = left % right;
+                if (value != 0 && ((value < 0) != (right < 0)))
+                    value += right;
+                ret = newintval(value);
+            } else {
+                double left = as_double(args[0]);
+                double right = as_double(args[1]);
+                double value = std::fmod(left, right);
+                if (value != 0.0 && ((value < 0.0) != (right < 0.0)))
+                    value += right;
+                ret = newfloatval(value);
+            }
+            break;
+        }
+        case B_math_is_nan:
+        case B_math_is_inf:
+        case B_math_is_finite: {
+            if (!is_numeric(arg)) {
+                yyerror("%s expects a number, got %s",
+                        math_builtin_name(functype), typename_of(arg));
+                break;
+            }
+            double value = as_double(arg);
+            if (functype == B_math_is_nan)
+                ret = newboolval(std::isnan(value));
+            else if (functype == B_math_is_inf)
+                ret = newboolval(std::isinf(value));
+            else
+                ret = newboolval(std::isfinite(value));
+            break;
+        }
+        case B_math_cbrt: {
+            if (!is_numeric(arg)) {
+                yyerror("std.math.cbrt expects a number, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = newfloatval(std::cbrt(as_double(arg)));
+            break;
+        }
+        case B_math_gcd:
+        case B_math_lcm: {
+            if (args[0]->type != T_int || args[1]->type != T_int) {
+                yyerror("%s expects integers, got %s and %s",
+                        math_builtin_name(functype),
+                        typename_of(args[0]), typename_of(args[1]));
+                break;
+            }
+            __int128 left = ((struct int_value_t *)args[0])->value;
+            __int128 right = ((struct int_value_t *)args[1])->value;
+            if (left < 0)
+                left = -left;
+            if (right < 0)
+                right = -right;
+            __int128 a = left;
+            __int128 b = right;
+            while (b != 0) {
+                __int128 next = a % b;
+                a = b;
+                b = next;
+            }
+            if (functype == B_math_gcd) {
+                ret = new_int_checked(a);
+            } else if (left == 0 || right == 0) {
+                ret = newintval(0);
+            } else {
+                ret = new_int_checked((left / a) * right);
+            }
+            break;
+        }
+        case B_math_degrees: {
+            if (!is_numeric(arg)) {
+                yyerror("std.math.degrees expects a number, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = newfloatval(
+                as_double(arg) * (180.0 / 3.14159265358979323846));
+            break;
+        }
+        case B_math_radians: {
+            if (!is_numeric(arg)) {
+                yyerror("std.math.radians expects a number, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = newfloatval(
+                as_double(arg) * (3.14159265358979323846 / 180.0));
+            break;
+        }
         case B_min:
         case B_max: {
             bool all_int = true;
@@ -3304,12 +3517,17 @@ struct value_t *call_builtin(int functype,
                 yyerror("math function expects a number, got %s", typename_of(arg));
                 break;
             }
-            if (functype == B_sqrt)
-                ret = newfloatval(std::sqrt(as_double(arg)));
-            else if (functype == B_exp)
+            if (functype == B_sqrt) {
+                double value = as_double(arg);
+                ret = newfloatval(value < 0.0 ? std::nan("")
+                                             : std::sqrt(value));
+            } else if (functype == B_exp) {
                 ret = newfloatval(std::exp(as_double(arg)));
-            else
-                ret = newfloatval(std::log(as_double(arg)));
+            } else {
+                double value = as_double(arg);
+                ret = newfloatval(value <= 0.0 ? std::nan("")
+                                              : std::log(value));
+            }
             break;
         default:
             yyerror("unknown built-in function %d", functype);

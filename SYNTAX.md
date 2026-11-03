@@ -3446,6 +3446,16 @@ POSIX 使用 `:`，Windows 使用 `;`。
 ```text
 sqrt exp log abs sin cos tan asin acos atan atan2
 pow floor ceil round trunc log2 log10 hypot min max
+sign clamp fmod mod is_nan is_inf is_finite cbrt
+gcd lcm degrees radians
+```
+
+常量：
+
+```text
+std.math.pi     // 3.141592653589793
+std.math.e      // 2.718281828459045
+std.math.tau    // 6.283185307179586
 ```
 
 规则：
@@ -3454,6 +3464,13 @@ pow floor ceil round trunc log2 log10 hypot min max
 - `floor`、`ceil`、`round`、`trunc` 返回 `int`，超出整数范围会报错；
 - `round` 按远离零的方向处理半值，例如 `round(-1.5) == -2`；
 - `min` / `max` 至少需要一个数值参数；全为 `int` 时返回 `int`，否则返回 `float`；
+- `sqrt(-1)`、`log(0)`、`log2(0)`、`log10(<=0)` 返回 `nan`；
+- `sign(x)` 返回 `-1` / `0` / `1`；`sign(nan)` 返回 `nan`；
+- `clamp(x, lo, hi)` 要求 `lo <= hi`，全为 `int` 时返回 `int`，否则返回 `float`；
+- `fmod` 始终返回 `float`，`mod` 的结果符号跟随除数；
+- `is_nan` / `is_inf` / `is_finite` 返回 `bool`；
+- `gcd` / `lcm` 只接受整数并返回非负值，`lcm(0, x) == 0`；
+- `degrees` / `radians` 返回 `float`；
 - `atan2(y, x)` 返回 `atan(y / x)` 的角度；
 - 所有数学函数的参数必须是数值，不做隐式转换。
 

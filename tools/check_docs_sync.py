@@ -68,14 +68,16 @@ def builtin_registry(package_text):
             r'\{"([a-z0-9_]+)",\s*B_[a-z0-9_]+\}', match.group(2))
         registry[module] = set(functions)
 
-    # std.io is assembled into a local variable rather than a direct
-    # newstrval("io") pair.
-    io_match = re.search(
-        r"io_module\s*=\s*\(value_t \*\)builtin_module\(\{(.*?)\}\);",
-        package_text, re.S)
-    if io_match:
-        registry.setdefault("io", set()).update(re.findall(
-            r'\{"([a-z0-9_]+)",\s*B_[a-z0-9_]+\}', io_match.group(1)))
+    # Some modules are assembled into local variables first, for example
+    # `value_t *math_module = builtin_module({...});`.
+    variable_pattern = re.compile(
+        r"(\w+)_module\s*=\s*(?:\(value_t \*\))?builtin_module\(\{(.*?)\}\);",
+        re.S)
+    for match in variable_pattern.finditer(package_text):
+        module = match.group(1)
+        functions = re.findall(
+            r'\{"([a-z0-9_]+)",\s*B_[a-z0-9_]+\}', match.group(2))
+        registry.setdefault(module, set()).update(functions)
     return registry
 
 

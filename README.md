@@ -257,6 +257,22 @@ std.type.name(1)
 std.net.resolve("localhost")
 ```
 
+数学补充：
+
+```text
+std.math.pi / e / tau
+
+std.math.sign(-3)          // -1
+std.math.clamp(5, 1, 3)    // 3
+std.math.mod(-7, 3)        // 2
+std.math.gcd(12, 18)       // 6
+std.math.lcm(4, 6)         // 12
+std.math.degrees(std.math.pi)  // 180.0
+std.math.is_nan(float("nan"))  // true
+```
+
+`sqrt(-1)`、`log(0)`、`log2(0)`、`log10(负数)` 返回 `nan`。`round` 的半值向远离零方向，例如 `round(-1.5) == -2`。`fmod` 始终返回 `float`；`mod` 的结果符号跟随除数。`gcd` / `lcm` 只接受整数并返回非负值。
+
 TCP：
 
 ```text
@@ -1679,6 +1695,18 @@ std.math.log10
 std.math.hypot
 std.math.min
 std.math.max
+std.math.sign
+std.math.clamp
+std.math.fmod
+std.math.mod
+std.math.is_nan
+std.math.is_inf
+std.math.is_finite
+std.math.cbrt
+std.math.gcd
+std.math.lcm
+std.math.degrees
+std.math.radians
 
 std.io.print
 std.io.format

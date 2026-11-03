@@ -500,31 +500,50 @@ value_t *build_std_namespace() {
             {"shuffle", B_random_shuffle},
             {"uuid", B_random_uuid},
         })));
+    value_t *math_module = builtin_module({
+        {"sqrt", B_sqrt},
+        {"exp", B_exp},
+        {"log", B_log},
+        {"abs", B_abs},
+        {"sin", B_sin},
+        {"cos", B_cos},
+        {"tan", B_tan},
+        {"asin", B_asin},
+        {"acos", B_acos},
+        {"atan", B_atan},
+        {"atan2", B_atan2},
+        {"pow", B_pow},
+        {"floor", B_floor},
+        {"ceil", B_ceil},
+        {"round", B_round},
+        {"trunc", B_trunc},
+        {"log2", B_log2},
+        {"log10", B_log10},
+        {"hypot", B_hypot},
+        {"min", B_min},
+        {"max", B_max},
+        {"sign", B_math_sign},
+        {"clamp", B_math_clamp},
+        {"fmod", B_math_fmod},
+        {"mod", B_math_mod},
+        {"is_nan", B_math_is_nan},
+        {"is_inf", B_math_is_inf},
+        {"is_finite", B_math_is_finite},
+        {"cbrt", B_math_cbrt},
+        {"gcd", B_math_gcd},
+        {"lcm", B_math_lcm},
+        {"degrees", B_math_degrees},
+        {"radians", B_math_radians},
+    });
+    dict_value_t *math_dict = (dict_value_t *)math_module;
+    math_dict->payload->items.push_back(std::make_pair(
+        newstrval("pi"), newfloatval(3.14159265358979323846)));
+    math_dict->payload->items.push_back(std::make_pair(
+        newstrval("e"), newfloatval(2.71828182845904523536)));
+    math_dict->payload->items.push_back(std::make_pair(
+        newstrval("tau"), newfloatval(6.28318530717958647692)));
     root->payload->items.push_back(std::make_pair(
-        newstrval("math"),
-        builtin_module({
-            {"sqrt", B_sqrt},
-            {"exp", B_exp},
-            {"log", B_log},
-            {"abs", B_abs},
-            {"sin", B_sin},
-            {"cos", B_cos},
-            {"tan", B_tan},
-            {"asin", B_asin},
-            {"acos", B_acos},
-            {"atan", B_atan},
-            {"atan2", B_atan2},
-            {"pow", B_pow},
-            {"floor", B_floor},
-            {"ceil", B_ceil},
-            {"round", B_round},
-            {"trunc", B_trunc},
-            {"log2", B_log2},
-            {"log10", B_log10},
-            {"hypot", B_hypot},
-            {"min", B_min},
-            {"max", B_max},
-        })));
+        newstrval("math"), math_module));
     value_t *io_module = (value_t *)builtin_module({
         {"print", B_print},
         {"format", B_format},

@@ -591,3 +591,64 @@ def run_cases():
             "= true",
         ],
     )
+
+    check("std math constants and helpers",
+          'import std;\n'
+          'print(std.math.pi > 3.14 && std.math.pi < 3.15);\n'
+          'print(std.math.e > 2.71 && std.math.e < 2.72);\n'
+          'print(std.math.tau > 6.28 && std.math.tau < 6.29);\n'
+          'print(std.math.sign(-3));\n'
+          'print(std.math.sign(2.5));\n'
+          'print(std.math.clamp(5, 1, 3));\n'
+          'print(std.math.clamp(1.5, 0, 2));\n'
+          'print(std.math.cbrt(-8));\n',
+          stdout_all=["true", "true", "true", "-1", "1", "3", "1.5", "-2.0"])
+    check("std math remainder variants",
+          'import std;\n'
+          'print(std.math.fmod(7, 3));\n'
+          'print(std.math.fmod(-7, 3));\n'
+          'print(std.math.mod(7, 3));\n'
+          'print(std.math.mod(-7, 3));\n'
+          'print(std.math.mod(7, -3));\n',
+          stdout_all=["1.0", "-1.0", "1", "2", "-2"])
+    check("std math float classification",
+          'import std;\n'
+          'let nan = float("nan");\n'
+          'let inf = float("inf");\n'
+          'print(std.math.is_nan(nan));\n'
+          'print(std.math.is_inf(inf));\n'
+          'print(std.math.is_finite(1));\n'
+          'print(std.math.is_finite(inf));\n'
+          'print(std.math.sign(nan));\n',
+          stdout_all=["true", "true", "true", "false", "nan"])
+    check("std math gcd and lcm",
+          'import std;\n'
+          'print(std.math.gcd(12, 18));\n'
+          'print(std.math.gcd(-12, 18));\n'
+          'print(std.math.lcm(4, 6));\n'
+          'print(std.math.lcm(0, 5));\n'
+          'print(std.math.lcm(-4, 6));\n',
+          stdout_all=["6", "6", "12", "0", "12"])
+    check("std math angle conversion",
+          'import std;\n'
+          'print(std.math.degrees(std.math.pi));\n'
+          'print(std.math.radians(180));\n',
+          stdout_all=["180.0", "3.141592653589793"])
+    check("std math domain errors are nan",
+          'import std;\n'
+          'print(std.math.is_nan(std.math.sqrt(-1)));\n'
+          'print(std.math.is_nan(std.math.log(0)));\n'
+          'print(std.math.is_nan(std.math.log2(0)));\n'
+          'print(std.math.is_nan(std.math.log10(-1)));\n',
+          stdout_all=["true", "true", "true", "true"])
+    check("std math round negative halves down",
+          'import std;\n'
+          'print(std.math.round(-1.5));\n'
+          'print(std.math.round(-1.4));\n',
+          stdout_all=["-2", "-1"])
+    check("std math min rejects non-numbers",
+          'import std;\nstd.math.min(1, "x");\n',
+          stderr="min expects numbers")
+    check("std math gcd rejects floats",
+          'import std;\nstd.math.gcd(1.5, 2);\n',
+          stderr="std.math.gcd expects integers")

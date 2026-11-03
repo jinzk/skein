@@ -6,6 +6,35 @@
 extern int yylineno;
 void yyerror(const char *s,...);
 
+/* AST node tags introduced by match/enum/destructuring.
+ *
+ * The parser still uses single-character tags for historical reasons; keep
+ * this table in sync with ast.cpp's treefree and eval.cpp's dispatch.
+ *
+ *   '7'  match expression
+ *   '8'  match arm
+ *   '9'  literal pattern
+ *   'e'  binding pattern (name == NULL is a wildcard)
+ *   'h'  container pattern (name == NULL: dict; name != NULL: struct/enum)
+ *   'z'  list pattern
+ *   ':'  rest pattern
+ *   '`'  destructuring declaration
+ *   '<'  enum declaration
+ *   '>'  enum variant
+ *   '?'  enum literal
+ */
+constexpr int NODE_MATCH = '7';
+constexpr int NODE_MATCH_ARM = '8';
+constexpr int NODE_PATTERN_LITERAL = '9';
+constexpr int NODE_PATTERN_BINDING = 'e';
+constexpr int NODE_PATTERN_CONTAINER = 'h';
+constexpr int NODE_PATTERN_LIST = 'z';
+constexpr int NODE_PATTERN_REST = ':';
+constexpr int NODE_DESTRUCTURE = '`';
+constexpr int NODE_ENUM_DECL = '<';
+constexpr int NODE_ENUM_VARIANT = '>';
+constexpr int NODE_ENUM_LITERAL = '?';
+
 enum bifs {
     B_sqrt = 1,
     B_exp,

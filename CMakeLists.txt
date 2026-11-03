@@ -100,6 +100,7 @@ add_executable(${PROJECT_NAME}
   main.cpp
   net.cpp
   package.cpp
+  pattern.cpp
   process_builtin.cpp
   process_spawn.cpp
   random_builtin.cpp
@@ -107,6 +108,7 @@ add_executable(${PROJECT_NAME}
   repl.cpp
   result.cpp
   scopestack.cpp
+  serialization.cpp
   source_encoding.cpp
   stdio_stream.cpp
   structeval.cpp

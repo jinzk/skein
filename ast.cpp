@@ -249,7 +249,7 @@ struct ast *newdestructure(struct ast *pattern, struct ast *value,
         yyerror("out of space");
         std::exit(0);
     }
-    a->nodetype = '`';
+    a->nodetype = NODE_DESTRUCTURE;
     set_loc_from(a, value ? value : pattern);
     a->pattern = pattern;
     a->value = value;
@@ -478,7 +478,7 @@ struct ast *newmatch(struct ast *expr, struct ast *arms) {
         yyerror("out of space");
         std::exit(0);
     }
-    a->nodetype = '7';
+    a->nodetype = NODE_MATCH;
     set_loc_from(a, expr);
     a->expr = expr;
     a->arms = arms;
@@ -493,7 +493,7 @@ struct ast *newmatcharm(struct ast *pattern, struct ast *guard,
         yyerror("out of space");
         std::exit(0);
     }
-    a->nodetype = '8';
+    a->nodetype = NODE_MATCH_ARM;
     set_loc_from(a, body ? body : pattern);
     a->pattern = pattern;
     a->guard = guard;
@@ -542,14 +542,14 @@ static struct pattern_node *new_pattern_node(int nodetype) {
 }
 
 struct ast *newpatternlit(struct ast *literal) {
-    struct pattern_node *a = new_pattern_node('9');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_LITERAL);
     set_loc_from(a, literal);
     a->literal = literal;
     return (struct ast *)a;
 }
 
 struct ast *newpatternname(char *name) {
-    struct pattern_node *a = new_pattern_node('e');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_BINDING);
     if (name && std::strcmp(name, "_") == 0) {
         std::free(name);
         name = NULL; /* wildcard */
@@ -559,26 +559,26 @@ struct ast *newpatternname(char *name) {
 }
 
 struct ast *newpatternrest(char *name) {
-    struct pattern_node *a = new_pattern_node(':');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_REST);
     a->name = name;
     return (struct ast *)a;
 }
 
 struct ast *newpatterndict(struct pattern_field *fields) {
-    struct pattern_node *a = new_pattern_node('h');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
     a->fields = fields;
     return (struct ast *)a;
 }
 
 struct ast *newpatternlist(struct ast *items) {
-    struct pattern_node *a = new_pattern_node('z');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_LIST);
     a->items = items;
     return (struct ast *)a;
 }
 
 struct ast *newpatternstruct(char *name, char *module,
                              struct pattern_field *fields) {
-    struct pattern_node *a = new_pattern_node('h');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
     a->name = name;
     a->module = module;
     a->fields = fields;
@@ -587,7 +587,7 @@ struct ast *newpatternstruct(char *name, char *module,
 
 struct ast *newpatternvariant(char *name, char *module, char *variant,
                               struct pattern_field *fields) {
-    struct pattern_node *a = new_pattern_node('h');
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
     a->name = name;
     a->module = module;
     a->variant = variant;
@@ -923,7 +923,7 @@ struct ast *newenumdecl(char *name, char *module,
         yyerror("out of space");
         std::exit(0);
     }
-    a->nodetype = '<';
+    a->nodetype = NODE_ENUM_DECL;
     set_loc(a, 0, 0);
     a->name = name;
     a->module = module;
@@ -940,7 +940,7 @@ struct ast *newenumvariant(char *name, struct struct_member *fields,
         yyerror("out of space");
         std::exit(0);
     }
-    a->nodetype = '>';
+    a->nodetype = NODE_ENUM_VARIANT;
     set_loc(a, 0, 0);
     a->name = name;
     a->fields = fields;
@@ -966,7 +966,7 @@ struct ast *newenumlit(char *name, char *module, char *variant,
         yyerror("out of space");
         std::exit(0);
     }
-    a->nodetype = '?';
+    a->nodetype = NODE_ENUM_LITERAL;
     set_loc(a, 0, 0);
     a->name = name;
     a->module = module;
@@ -1101,7 +1101,7 @@ void treefree(struct ast *a) {
             free_type_constraint(((struct symdef *)a)->type);
             std::free(((struct symdef *)a)->name);
             break;
-        case '`': {
+        case NODE_DESTRUCTURE: {
             struct destructure_node *d = (struct destructure_node *)a;
             treefree(d->pattern);
             treefree(d->value);
@@ -1255,13 +1255,13 @@ void treefree(struct ast *a) {
             std::free(i->name);
             break;
         }
-        case '7': {
+        case NODE_MATCH: {
             struct match_node *m = (struct match_node *)a;
             treefree(m->expr);
             treefree(m->arms);
             break;
         }
-        case '8': {
+        case NODE_MATCH_ARM: {
             struct match_arm *m = (struct match_arm *)a;
             treefree(m->pattern);
             treefree(m->guard);
@@ -1269,25 +1269,25 @@ void treefree(struct ast *a) {
             treefree(m->next);
             break;
         }
-        case '9': {
+        case NODE_PATTERN_LITERAL: {
             struct pattern_node *p = (struct pattern_node *)a;
             treefree(p->literal);
             treefree(p->next);
             break;
         }
-        case 'e': {
+        case NODE_PATTERN_BINDING: {
             struct pattern_node *p = (struct pattern_node *)a;
             std::free(p->name);
             treefree(p->next);
             break;
         }
-        case ':': {
+        case NODE_PATTERN_REST: {
             struct pattern_node *p = (struct pattern_node *)a;
             std::free(p->name);
             treefree(p->next);
             break;
         }
-        case 'h': {
+        case NODE_PATTERN_CONTAINER: {
             struct pattern_node *p = (struct pattern_node *)a;
             std::free(p->name);
             std::free(p->module);
@@ -1296,27 +1296,27 @@ void treefree(struct ast *a) {
             treefree(p->next);
             break;
         }
-        case 'z': {
+        case NODE_PATTERN_LIST: {
             struct pattern_node *p = (struct pattern_node *)a;
             treefree(p->items);
             treefree(p->next);
             break;
         }
-        case '<': {
+        case NODE_ENUM_DECL: {
             struct enum_node *e = (struct enum_node *)a;
             std::free(e->name);
             std::free(e->module);
             treefree((struct ast *)e->variants);
             break;
         }
-        case '>': {
+        case NODE_ENUM_VARIANT: {
             struct enum_variant *v = (struct enum_variant *)a;
             std::free(v->name);
             treefree((struct ast *)v->fields);
             treefree((struct ast *)v->next);
             break;
         }
-        case '?': {
+        case NODE_ENUM_LITERAL: {
             struct enum_lit_node *e = (struct enum_lit_node *)a;
             std::free(e->name);
             std::free(e->module);

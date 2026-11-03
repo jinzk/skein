@@ -642,3 +642,68 @@ def run_cases():
         stdout="= true",
         stderr="task was cancelled",
     )
+
+    check("task retry succeeds after failures",
+          'import std;\n'
+          'let n = 0;\n'
+          'let r = std.task.retry(func() {\n'
+          '  n = n + 1;\n'
+          '  if (n < 3) { return std.result.err("boom"); }\n'
+          '  return std.result.ok(n);\n'
+          '}, {"attempts": 5, "delay_ms": 0});\n'
+          'print(r);\nprint(n);\n',
+          stdout_all=["ok(3)", "3"])
+    check("task retry exhausts attempts",
+          'import std;\n'
+          'let n = 0;\n'
+          'let r = std.task.retry(func() {\n'
+          '  n = n + 1;\n'
+          '  return std.result.err("boom");\n'
+          '}, {"attempts": 3});\n'
+          'print(n);\nprint(std.result.is_err(r));\n',
+          stdout_all=["3", "true"])
+    check("task retry filters error kinds",
+          'import std;\n'
+          'let n = 0;\n'
+          'let r = std.task.retry(func() {\n'
+          '  n = n + 1;\n'
+          '  return std.result.err("boom");\n'
+          '}, {"attempts": 5, "retry_on": "other"});\n'
+          'print(n);\nprint(std.result.is_err(r));\n',
+          stdout_all=["1", "true"])
+    check("task retry rejects bad options",
+          'import std;\n'
+          'std.task.retry(func() { return 1; }, {"attempts": 0});\n',
+          stderr="std.task.retry attempts must be at least 1")
+    check("task timeout returns result",
+          'import std;\n'
+          'let r = std.task.timeout(std.task.sleep(100), 1);\n'
+          'print(std.result.is_err(r));\n',
+          stdout="true")
+    check("task rate limit",
+          'import std;\n'
+          'let l = std.task.rate_limit(20, 1);\n'
+          'let start = std.time.monotonic_ms();\n'
+          'std.task.acquire(l);\n'
+          'std.task.acquire(l);\n'
+          'std.task.acquire(l);\n'
+          'print(std.time.monotonic_ms() - start >= 90);\n',
+          stdout="true")
+    check("task bounded parallel map",
+          'import std;\n'
+          'async func work(x) {\n'
+          '  std.task.wait(std.task.sleep(5));\n'
+          '  if (x == 2) { fail "bad"; }\n'
+          '  return x * 2;\n'
+          '}\n'
+          'let r = std.task.bounded_parallel_map(\n'
+          '  [1, 2, 3], 2, func(x) { return work(x); });\n'
+          'print(len(r));\n'
+          'print(std.result.value(r[0]));\n'
+          'print(std.result.is_err(r[1]));\n'
+          'print(std.result.value(r[2]));\n',
+          stdout_all=["3", "2", "true", "6"])
+    check("task bounded parallel map limit",
+          'import std;\n'
+          'std.task.bounded_parallel_map([1], 0, func(x) { return x; });\n',
+          stderr="std.task.bounded_parallel_map limit must be at least 1")

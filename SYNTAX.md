@@ -2066,6 +2066,11 @@ done(task)                 → bool
 catch(task)                → result task
 try_wait(task[, timeout_ms]) → result
 try_wait_all(tasks[, timeout_ms]) → result
+retry(factory[, options]) → result
+timeout(task, timeout_ms) → result
+rate_limit(rate, burst) → rate_limiter
+acquire(limiter[, tokens]) → bool
+bounded_parallel_map(items, limit, fn) → list[result]
 ```
 
 `std.task.yield` 是函数字段；单独的 `yield` 关键字用于生成器。`wait` 超时不会自动取消 task；需要显式调用 `cancel`。
@@ -2073,6 +2078,34 @@ try_wait_all(tasks[, timeout_ms]) → result
 task 是协作式调度的：只有运行事件循环时才会推进，例如 `wait`、`wait_all`、`await` 或同步网络调用期间。
 
 目前 task 覆盖原生定时器、async 函数和 `std.net.*_async` 异步 I/O。
+
+可靠性工具：
+
+```text
+std.task.retry(factory[, options]) -> result
+std.task.timeout(task, timeout_ms) -> result
+std.task.rate_limit(rate, burst)   -> rate_limiter
+std.task.acquire(limiter[, tokens]) -> bool
+std.task.bounded_parallel_map(items, limit, fn) -> list[result]
+```
+
+`retry` 每次调用 `factory()`；factory 可以直接返回值、返回 `result`，或返回 task。失败后按退避等待再试，最终失败返回最后一个 `err`。
+
+options：
+
+```text
+attempts      总尝试次数，默认 3
+delay_ms      首次等待毫秒数，默认 0
+backoff       退避倍数，默认 2.0
+max_delay_ms  单次等待上限，0 表示不限制
+retry_on      错误 kind 字符串或列表；省略表示所有错误都重试
+```
+
+`timeout` 等价于带超时的 `try_wait`，超时返回 `err`，不会自动取消 task。
+
+`rate_limit(rate, burst)` 返回共享的限流器；`acquire` 阻塞到拿到令牌为止。rate 是每秒补充的令牌数，burst 是上限。
+
+`bounded_parallel_map` 最多同时运行 `limit` 个 task，结果按输入顺序返回，每个元素是 `result`；单项失败不会中断其他项。
 
 ### HTTP/1.1
 
@@ -3278,7 +3311,7 @@ r = graph.add_node(g, "b");
 g = r["graph"];
 let b = r["id"];
 
-r = graph.add_edge(g, a, b, "next");
+r = graph.add_edge(g, a, b, "next", 1);
 g = r["graph"];
 
 graph.bfs(g, a)               // [1, 2]
@@ -3287,6 +3320,10 @@ graph.neighbors(g, a)         // [2]
 graph.topo_sort(g)            // {ok: true, order: [1, 2]}
 graph.has_cycle(g)            // false
 graph.path(g, a, b)           // {ok: true, path: [1, 2]}
+graph.shortest_path(g, a, b)  // {ok: true, path: [1, 2], cost: 1}
+graph.components(g)           // [[1, 2]]
+graph.reverse(g)              // 反向图
+graph.subgraph(g, [a])        // 只保留指定节点
 graph.to_dot(g)               // Graphviz 文本
 ```
 
@@ -3301,7 +3338,7 @@ graph.get_node(g, id)                       -> value
 graph.set_node(g, id, value)                -> Graph
 graph.node_count(g) / graph.edge_count(g)   -> int
 graph.node_ids(g) / graph.nodes(g)          -> list
-graph.add_edge(g, from, to[, tag])          -> {graph, id}
+graph.add_edge(g, from, to[, tag[, weight]]) -> {graph, id}
 graph.remove_edge(g, id)                    -> Graph
 graph.edges(g)                              -> list
 graph.neighbors(g, id[, tag])               -> list
@@ -3309,6 +3346,10 @@ graph.bfs(g, start) / graph.dfs(g, start)   -> list
 graph.topo_sort(g)                          -> {ok, order} | {ok: false, error}
 graph.has_cycle(g)                          -> bool
 graph.path(g, from, to)                     -> {ok, path} | {ok: false, error}
+graph.shortest_path(g, from, to[, weight])  -> {ok, path, cost} | {ok: false, error}
+graph.components(g)                         -> list[list[id]]
+graph.reverse(g)                            -> Graph
+graph.subgraph(g, ids)                      -> Graph
 graph.to_dot(g)                             -> string
 ```
 
@@ -3322,6 +3363,13 @@ graph.to_dot(g)                             -> string
 - `topo_sort` 遇到环返回 `{ok: false, error: "cycle"}`；
 - `bfs` / `dfs` 返回访问顺序，不存在的起点返回空列表；
 - `path` 是 BFS 最短路径，不可达返回 `{ok: false, error: "not found"}`；
+- `shortest_path` 使用 Dijkstra；默认用边的 `weight`（默认 1），也可传 `func(edge) -> number` 自定义权重；
+- 负权重或非数字权重返回 `{ok: false, error: "negative edge weight"}` / `"edge weight must be a number"`；
+- `add_edge` 的 `weight` 必须是非负数字；
+- `edges` 返回的 dict 包含 `id / from / to / tag / weight`；
+- `components` 返回弱连通分量，按节点插入顺序；
+- `reverse` 保留节点和边 id，只反转方向；
+- `subgraph` 保留给定节点，以及两端都在集合内的边；
 - `neighbors` 可按 `tag` 过滤。
 
 ### std.arena

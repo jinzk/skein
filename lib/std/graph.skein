@@ -5,6 +5,7 @@ package graph {
     from: int;
     to: int;
     tag: string;
+    weight: any;
   }
 
   export struct Graph {
@@ -82,8 +83,24 @@ package graph {
       tag = rest[0];
     }
 
+    let weight = 1;
+    if (len(rest) > 1 && rest[1] != null) {
+      weight = rest[1];
+    }
+    if (kind_of(weight) != "int" && kind_of(weight) != "float") {
+      fail("graph edge weight must be a number");
+    }
+    if (weight != weight || weight < 0) {
+      fail("graph edge weight must be non-negative");
+    }
+
     let id = g.next_edge;
-    g.edges[id] = Edge { from: from, to: to, tag: tag };
+    g.edges[id] = Edge {
+      from: from,
+      to: to,
+      tag: tag,
+      weight: weight
+    };
     g.next_edge = id + 1;
     return { "graph": g, "id": id };
   }
@@ -100,7 +117,8 @@ package graph {
         "id": eid,
         "from": edge.from,
         "to": edge.to,
-        "tag": edge.tag
+        "tag": edge.tag,
+        "weight": edge.weight
       });
     }
     return out;
@@ -262,6 +280,180 @@ package graph {
     }
 
     return { "ok": false, "error": "not found" };
+  }
+
+  export func shortest_path(g, from, to, ...rest) {
+    if (!has_node(g, from) || !has_node(g, to)) {
+      return { "ok": false, "error": "node not found" };
+    }
+
+    let weight_fn = null;
+    if (len(rest) > 0 && rest[0] != null) {
+      weight_fn = rest[0];
+      if (kind_of(weight_fn) != "function" &&
+          kind_of(weight_fn) != "builtin") {
+        fail("graph weight must be callable");
+      }
+    }
+
+    let dist = {};
+    let prev = {};
+    let visited = {};
+    dist[from] = 0;
+
+    while (true) {
+      let best = null;
+      let best_dist = 0;
+      for (let id in std.dict.keys(g.nodes)) {
+        if (std.dict.has(visited, id) || !std.dict.has(dist, id)) {
+          continue;
+        }
+        let d = dist[id];
+        if (best == null || d < best_dist) {
+          best = id;
+          best_dist = d;
+        }
+      }
+      if (best == null) {
+        break;
+      }
+      if (best == to) {
+        break;
+      }
+      visited[best] = true;
+
+      for (let eid, edge in g.edges) {
+        if (edge.from != best) {
+          continue;
+        }
+        let info = {
+          "id": eid,
+          "from": edge.from,
+          "to": edge.to,
+          "tag": edge.tag,
+          "weight": edge.weight
+        };
+        let weight = edge.weight;
+        if (weight_fn != null) {
+          weight = weight_fn(info);
+        }
+        if (kind_of(weight) != "int" && kind_of(weight) != "float") {
+          return { "ok": false, "error": "edge weight must be a number" };
+        }
+        if (weight != weight || weight < 0) {
+          return { "ok": false, "error": "negative edge weight" };
+        }
+
+        let candidate = best_dist + weight;
+        if (!std.dict.has(dist, edge.to) || candidate < dist[edge.to]) {
+          dist[edge.to] = candidate;
+          prev[edge.to] = best;
+        }
+      }
+    }
+
+    if (!std.dict.has(dist, to)) {
+      return { "ok": false, "error": "not found" };
+    }
+
+    let path = [to];
+    let current = to;
+    while (current != from) {
+      current = prev[current];
+      path = std.list.append(path, current);
+    }
+    return {
+      "ok": true,
+      "path": std.list.reverse(path),
+      "cost": dist[to]
+    };
+  }
+
+  export func components(g) {
+    let seen = {};
+    let out = [];
+
+    for (let start in std.dict.keys(g.nodes)) {
+      if (std.dict.has(seen, start)) {
+        continue;
+      }
+      let component = [];
+      let queue = [start];
+      let head = 0;
+      seen[start] = true;
+
+      while (head < len(queue)) {
+        let id = queue[head];
+        head = head + 1;
+        component = std.list.append(component, id);
+
+        for (let eid, edge in g.edges) {
+          let next = null;
+          if (edge.from == id) {
+            next = edge.to;
+          } else {
+            if (edge.to == id) {
+              next = edge.from;
+            }
+          }
+          if (next != null && !std.dict.has(seen, next)) {
+            seen[next] = true;
+            queue = std.list.append(queue, next);
+          }
+        }
+      }
+      out = std.list.append(out, component);
+    }
+    return out;
+  }
+
+  export func reverse(g) {
+    let out = Graph {
+      nodes: g.nodes,
+      edges: {},
+      next_node: g.next_node,
+      next_edge: g.next_edge
+    };
+    for (let eid, edge in g.edges) {
+      out.edges[eid] = Edge {
+        from: edge.to,
+        to: edge.from,
+        tag: edge.tag,
+        weight: edge.weight
+      };
+    }
+    return out;
+  }
+
+  export func subgraph(g, ids) {
+    if (kind_of(ids) != "list") {
+      fail("graph.subgraph ids must be a list");
+    }
+
+    let keep = {};
+    for (let id in ids) {
+      if (has_node(g, id)) {
+        keep[id] = true;
+      }
+    }
+
+    let out = Graph {
+      nodes: {},
+      edges: {},
+      next_node: g.next_node,
+      next_edge: g.next_edge
+    };
+    for (let id in std.dict.keys(g.nodes)) {
+      if (std.dict.has(keep, id)) {
+        out.nodes[id] = g.nodes[id];
+      }
+    }
+    for (let eid, edge in g.edges) {
+      if (std.dict.has(keep, edge.from) && std.dict.has(keep, edge.to)) {
+        out.edges[eid] = edge;
+      }
+    }
+    return out;
   }
 
   export func to_dot(g) {

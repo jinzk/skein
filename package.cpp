@@ -725,6 +725,11 @@ value_t *build_std_namespace() {
             {"catch", B_task_catch},
             {"try_wait", B_task_try_wait},
             {"try_wait_all", B_task_try_wait_all},
+            {"retry", B_task_retry},
+            {"timeout", B_task_timeout},
+            {"rate_limit", B_task_rate_limit},
+            {"acquire", B_task_acquire},
+            {"bounded_parallel_map", B_task_bounded_parallel_map},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("generator"),

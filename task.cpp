@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "eval.h"
 #include "eval_context.h"
+#include "eval_helpers.h"
 #include "event_loop.h"
 #include "fiber.h"
 #include "repl.h"
@@ -11,6 +12,9 @@
 #include <uv.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -559,6 +563,447 @@ static value_t *task_try_wait_all(const std::vector<value_t *> &args) {
     return task_capture_call(task_wait_all, args);
 }
 
+static value_t *task_timeout(const std::vector<value_t *> &args) {
+    return task_capture_call(task_wait, args);
+}
+
+static bool task_sleep_ms(long long ms) {
+    if (ms <= 0)
+        return true;
+    std::shared_ptr<task> timer = new_sleep_task(ms);
+    if (!timer) {
+        yyerror("task.sleep: cannot create timer");
+        return false;
+    }
+    if (!event_loop_init()) {
+        yyerror("task: cannot initialize event loop");
+        return false;
+    }
+    while (!timer->done()) {
+        if (g_interrupted)
+            return false;
+        uv_run(event_loop_handle(), UV_RUN_ONCE);
+        fiber_pump();
+    }
+    return true;
+}
+
+static bool task_wait_done(const std::shared_ptr<task> &value) {
+    if (!value)
+        return false;
+    if (value->done())
+        return true;
+    if (!event_loop_init()) {
+        yyerror("task: cannot initialize event loop");
+        return false;
+    }
+    while (!value->done()) {
+        if (g_interrupted)
+            return false;
+        uv_run(event_loop_handle(), UV_RUN_ONCE);
+        fiber_pump();
+    }
+    return true;
+}
+
+static struct value_t *task_dict_lookup(struct dict_value_t *dict,
+                                        const char *key) {
+    if (!dict || !key)
+        return NULL;
+    for (auto &entry : dict->payload->items) {
+        if (entry.first && entry.first->type == T_string &&
+            std::strcmp(((struct string_value_t *)entry.first)->value,
+                        key) == 0)
+            return entry.second;
+    }
+    return NULL;
+}
+
+static bool task_number_value(struct value_t *value, double &out,
+                              const char *name) {
+    if (!value || !is_numeric(value)) {
+        yyerror("%s must be a number", name);
+        return false;
+    }
+    out = as_double(value);
+    return true;
+}
+
+static bool task_integer_value(struct value_t *value, long long &out,
+                               const char *name) {
+    if (!value || value->type != T_int) {
+        yyerror("%s must be an integer", name);
+        return false;
+    }
+    out = ((struct int_value_t *)value)->value;
+    return true;
+}
+
+static bool task_callable_value(struct value_t *value, const char *name) {
+    if (!value ||
+        (value->type != T_func && value->type != T_builtin &&
+         value->type != T_method)) {
+        yyerror("%s must be callable", name);
+        return false;
+    }
+    return true;
+}
+
+static value_t *task_retry(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2) {
+        yyerror("std.task.retry expects 1 or 2 arguments");
+        return NULL;
+    }
+    if (!task_callable_value(args[0], "std.task.retry factory"))
+        return NULL;
+
+    long long attempts = 3;
+    long long delay_ms = 0;
+    long long max_delay_ms = 0;
+    double backoff = 2.0;
+    std::vector<std::string> retry_on;
+
+    if (args.size() == 2) {
+        if (args[1]->type != T_dict) {
+            yyerror("std.task.retry options must be a dict");
+            return NULL;
+        }
+        struct dict_value_t *options = (struct dict_value_t *)args[1];
+        if (struct value_t *value = task_dict_lookup(options, "attempts")) {
+            if (!task_integer_value(value, attempts,
+                                    "std.task.retry attempts"))
+                return NULL;
+        }
+        if (struct value_t *value = task_dict_lookup(options, "delay_ms")) {
+            if (!task_integer_value(value, delay_ms,
+                                    "std.task.retry delay_ms"))
+                return NULL;
+        }
+        if (struct value_t *value = task_dict_lookup(options, "max_delay_ms")) {
+            if (!task_integer_value(value, max_delay_ms,
+                                    "std.task.retry max_delay_ms"))
+                return NULL;
+        }
+        if (struct value_t *value = task_dict_lookup(options, "backoff")) {
+            if (!task_number_value(value, backoff,
+                                   "std.task.retry backoff"))
+                return NULL;
+        }
+        if (struct value_t *value = task_dict_lookup(options, "retry_on")) {
+            if (value->type == T_string) {
+                retry_on.push_back(
+                    ((struct string_value_t *)value)->value);
+            } else if (value->type == T_list) {
+                struct list_value_t *list = (struct list_value_t *)value;
+                for (struct value_t *item : list->payload->items) {
+                    if (item->type != T_string) {
+                        yyerror("std.task.retry retry_on entries must be strings");
+                        return NULL;
+                    }
+                    retry_on.push_back(
+                        ((struct string_value_t *)item)->value);
+                }
+            } else {
+                yyerror("std.task.retry retry_on must be a string or list");
+                return NULL;
+            }
+        }
+    }
+
+    if (attempts < 1) {
+        yyerror("std.task.retry attempts must be at least 1");
+        return NULL;
+    }
+    if (delay_ms < 0 || max_delay_ms < 0) {
+        yyerror("std.task.retry delays must be non-negative");
+        return NULL;
+    }
+    if (backoff < 1.0) {
+        yyerror("std.task.retry backoff must be at least 1.0");
+        return NULL;
+    }
+
+    for (long long attempt = 0; attempt < attempts; ++attempt) {
+        value_t *produced = call_value_args(args[0], {});
+        if (!produced)
+            return NULL;
+
+        value_t *result = NULL;
+        if (is_task_value(produced)) {
+            std::shared_ptr<task> value;
+            if (!get_task_value(produced, value)) {
+                freeval(produced);
+                return NULL;
+            }
+            freeval(produced);
+            if (!task_wait_done(value))
+                return NULL;
+            result = task_as_result(value);
+        } else if (produced->type == T_result) {
+            result = produced;
+        } else {
+            result = newresultok(produced);
+        }
+
+        if (!result)
+            return NULL;
+        if (result->type != T_result) {
+            freeval(result);
+            return newresulterr_message(
+                "retry", "factory returned an invalid result");
+        }
+        struct result_value_t *result_value =
+            (struct result_value_t *)result;
+        if (result_value->ok)
+            return result;
+
+        std::string kind = error_kind_of(result_value->error);
+        bool retryable = retry_on.empty();
+        for (const std::string &allowed : retry_on) {
+            if (allowed == kind) {
+                retryable = true;
+                break;
+            }
+        }
+        if (!retryable || attempt + 1 >= attempts)
+            return result;
+
+        freeval(result);
+        if (!task_sleep_ms(delay_ms))
+            return NULL;
+
+        double next = (double)delay_ms * backoff;
+        if (max_delay_ms > 0 && next > (double)max_delay_ms)
+            next = (double)max_delay_ms;
+        delay_ms = (long long)next;
+    }
+
+    return newresulterr_message("retry", "retry failed");
+}
+
+struct rate_limiter {
+    double rate = 1.0;
+    double burst = 1.0;
+    double tokens = 1.0;
+    std::chrono::steady_clock::time_point last =
+        std::chrono::steady_clock::now();
+};
+
+static std::string rate_limiter_describe(const void *data) {
+    const rate_limiter *limiter = (const rate_limiter *)data;
+    if (!limiter)
+        return "<rate_limiter>";
+    return "<rate_limiter rate=" + std::to_string(limiter->rate) +
+           " burst=" + std::to_string(limiter->burst) + ">";
+}
+
+static const struct native_type rate_limiter_type = {
+    "rate_limiter", rate_limiter_describe
+};
+
+static value_t *task_rate_limit(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.task.rate_limit expects 2 arguments");
+        return NULL;
+    }
+    double rate = 0.0;
+    double burst = 0.0;
+    if (!task_number_value(args[0], rate, "std.task.rate_limit rate"))
+        return NULL;
+    if (!task_number_value(args[1], burst, "std.task.rate_limit burst"))
+        return NULL;
+    if (rate <= 0.0) {
+        yyerror("std.task.rate_limit rate must be positive");
+        return NULL;
+    }
+    if (burst < 1.0) {
+        yyerror("std.task.rate_limit burst must be at least 1");
+        return NULL;
+    }
+
+    std::shared_ptr<rate_limiter> limiter =
+        std::make_shared<rate_limiter>();
+    limiter->rate = rate;
+    limiter->burst = burst;
+    limiter->tokens = burst;
+    limiter->last = std::chrono::steady_clock::now();
+    return newuserdataval(&rate_limiter_type, limiter);
+}
+
+static void rate_limiter_refill(const std::shared_ptr<rate_limiter> &limiter) {
+    auto now = std::chrono::steady_clock::now();
+    double elapsed =
+        std::chrono::duration<double>(now - limiter->last).count();
+    limiter->last = now;
+    if (elapsed <= 0.0)
+        return;
+    limiter->tokens =
+        std::min(limiter->burst, limiter->tokens + elapsed * limiter->rate);
+}
+
+static bool get_rate_limiter(value_t *value,
+                             std::shared_ptr<rate_limiter> &out) {
+    if (!value || value->type != T_userdata) {
+        yyerror("expected a rate_limiter, got %s", typename_of(value));
+        return false;
+    }
+    struct userdata_value_t *userdata = (struct userdata_value_t *)value;
+    if (userdata->meta != &rate_limiter_type) {
+        yyerror("expected a rate_limiter, got %s", typename_of(value));
+        return false;
+    }
+    out = std::static_pointer_cast<rate_limiter>(userdata->data);
+    if (!out) {
+        yyerror("invalid rate_limiter");
+        return false;
+    }
+    return true;
+}
+
+static value_t *task_acquire(const std::vector<value_t *> &args) {
+    if (args.size() < 1 || args.size() > 2) {
+        yyerror("std.task.acquire expects 1 or 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<rate_limiter> limiter;
+    if (!get_rate_limiter(args[0], limiter))
+        return NULL;
+
+    long long tokens = 1;
+    if (args.size() == 2 &&
+        !task_integer_value(args[1], tokens, "std.task.acquire tokens"))
+        return NULL;
+    if (tokens < 1) {
+        yyerror("std.task.acquire tokens must be at least 1");
+        return NULL;
+    }
+
+    for (;;) {
+        rate_limiter_refill(limiter);
+        if (limiter->tokens >= (double)tokens) {
+            limiter->tokens -= (double)tokens;
+            return newboolval(true);
+        }
+        double missing = (double)tokens - limiter->tokens;
+        double wait_seconds = missing / limiter->rate;
+        long long wait_ms = (long long)std::ceil(wait_seconds * 1000.0);
+        if (wait_ms < 1)
+            wait_ms = 1;
+        if (!task_sleep_ms(wait_ms))
+            return NULL;
+    }
+}
+
+static value_t *task_bounded_parallel_map(
+    const std::vector<value_t *> &args) {
+    if (args.size() != 3) {
+        yyerror("std.task.bounded_parallel_map expects 3 arguments");
+        return NULL;
+    }
+    if (args[0]->type != T_list) {
+        yyerror("std.task.bounded_parallel_map expects a list, got %s",
+                typename_of(args[0]));
+        return NULL;
+    }
+    long long limit = 0;
+    if (!task_integer_value(args[1], limit,
+                            "std.task.bounded_parallel_map limit"))
+        return NULL;
+    if (limit < 1) {
+        yyerror("std.task.bounded_parallel_map limit must be at least 1");
+        return NULL;
+    }
+    if (!task_callable_value(args[2],
+                             "std.task.bounded_parallel_map callback"))
+        return NULL;
+
+    struct list_value_t *items = (struct list_value_t *)args[0];
+    size_t count = items->payload->items.size();
+    std::vector<value_t *> results(count, NULL);
+    std::vector<task_ptr> active;
+    std::vector<size_t> active_index;
+    size_t next = 0;
+
+    auto start_ready = [&]() -> bool {
+        while (active.size() < (size_t)limit && next < count) {
+            std::vector<value_t *> call_args;
+            call_args.push_back(dupval(items->payload->items[next]));
+            value_t *produced =
+                call_value_args(args[2], std::move(call_args));
+            if (!produced) {
+                for (value_t *value : results)
+                    freeval(value);
+                return false;
+            }
+            if (is_task_value(produced)) {
+                task_ptr value;
+                if (!get_task_value(produced, value)) {
+                    freeval(produced);
+                    for (value_t *result : results)
+                        freeval(result);
+                    return false;
+                }
+                freeval(produced);
+                active.push_back(std::move(value));
+                active_index.push_back(next);
+            } else if (produced->type == T_result) {
+                results[next] = produced;
+            } else {
+                results[next] = newresultok(produced);
+            }
+            ++next;
+        }
+        return true;
+    };
+
+    if (!start_ready())
+        return NULL;
+
+    while (!active.empty()) {
+        bool progressed = false;
+        for (size_t i = 0; i < active.size();) {
+            if (active[i]->done()) {
+                results[active_index[i]] = task_as_result(active[i]);
+                active.erase(active.begin() + i);
+                active_index.erase(active_index.begin() + i);
+                progressed = true;
+            } else {
+                ++i;
+            }
+        }
+        if (!start_ready()) {
+            for (value_t *value : results)
+                freeval(value);
+            return NULL;
+        }
+        if (active.empty())
+            break;
+        if (progressed)
+            continue;
+        if (g_interrupted) {
+            for (value_t *value : results)
+                freeval(value);
+            return NULL;
+        }
+        if (!event_loop_init()) {
+            yyerror("task: cannot initialize event loop");
+            for (value_t *value : results)
+                freeval(value);
+            return NULL;
+        }
+        uv_run(event_loop_handle(), UV_RUN_ONCE);
+        fiber_pump();
+    }
+
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(count);
+    for (size_t i = 0; i < count; ++i)
+        out->payload->items.push_back(
+            results[i] ? results[i] : newresulterr_message(
+                "task", "missing task result"));
+    return (value_t *)out;
+}
+
 void task_shutdown() {
     std::vector<task *> &tasks = task_registry();
     for (size_t i = 0; i < tasks.size(); ++i) {
@@ -588,6 +1033,16 @@ struct value_t *call_task_builtin(
             return task_try_wait(args);
         case B_task_try_wait_all:
             return task_try_wait_all(args);
+        case B_task_retry:
+            return task_retry(args);
+        case B_task_timeout:
+            return task_timeout(args);
+        case B_task_rate_limit:
+            return task_rate_limit(args);
+        case B_task_acquire:
+            return task_acquire(args);
+        case B_task_bounded_parallel_map:
+            return task_bounded_parallel_map(args);
         default:
             yyerror("unknown task function");
             return NULL;

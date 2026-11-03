@@ -652,3 +652,55 @@ def run_cases():
           + 'let f = std.result.value(r);\n'
           + 'print(f());\n',
           stdout="42")
+
+    check("graph weighted shortest path",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
+          'r = graph.add_node(g, "d"); g = r["graph"]; let d = r["id"];\n'
+          'r = graph.add_edge(g, a, b, "x", 1); g = r["graph"];\n'
+          'r = graph.add_edge(g, b, c, "x", 1); g = r["graph"];\n'
+          'r = graph.add_edge(g, a, c, "y", 10); g = r["graph"];\n'
+          'r = graph.add_edge(g, c, d, "z", 2); g = r["graph"];\n'
+          'print(graph.shortest_path(g, a, c));\n'
+          'print(graph.shortest_path(g, a, d)["cost"]);\n'
+          'print(graph.shortest_path(g, a, d, '
+          'func(e) { return e["weight"] * 10; })["cost"]);\n',
+          stdout_all=["{ok: true, path: [1, 2, 3], cost: 2}",
+                      "4", "40"])
+    check("graph components",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_node(g, "c"); g = r["graph"];\n'
+          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
+          'print(graph.components(g));\n',
+          stdout="[[1, 2], [3]]")
+    check("graph reverse and subgraph",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
+          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
+          'r = graph.add_edge(g, b, c); g = r["graph"];\n'
+          'let rev = graph.reverse(g);\n'
+          'print(graph.path(rev, c, a));\n'
+          'let sub = graph.subgraph(g, [a, b]);\n'
+          'print(graph.node_count(sub));\n'
+          'print(graph.edge_count(sub));\n',
+          stdout_all=["{ok: true, path: [3, 2, 1]}", "2", "1"])
+    check("graph rejects negative edge weight",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'graph.add_edge(g, a, b, "x", -1);\n',
+          stderr="graph edge weight must be non-negative")
+    check("graph shortest_path missing node",
+          'import std;\nimport std.graph;\n'
+          'print(graph.shortest_path(graph.new(), 1, 2));\n',
+          stdout="{ok: false, error: node not found}")

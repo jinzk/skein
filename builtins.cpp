@@ -1001,7 +1001,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_ffi_open && functype <= B_ffi_buffer_free)
         return call_ffi_builtin(functype, args);
 #endif
-    if (functype >= B_task_sleep && functype <= B_task_try_wait_all)
+    if (functype >= B_task_sleep && functype <= B_task_bounded_parallel_map)
         return call_task_builtin(functype, args);
     if (functype >= B_generator_next && functype <= B_generator_close)
         return call_generator_builtin(functype, args);

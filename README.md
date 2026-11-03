@@ -350,7 +350,33 @@ std.task.done(task)           → true / false
 std.task.catch(task)          → result task
 std.task.try_wait(task[, timeout_ms]) → result
 std.task.try_wait_all(tasks[, timeout_ms]) → result
+std.task.retry(factory[, options]) → result
+std.task.timeout(task, timeout_ms) → result
+std.task.rate_limit(rate, burst) → rate_limiter
+std.task.acquire(limiter[, tokens]) → bool
+std.task.bounded_parallel_map(items, limit, fn) → list[result]
 ```
+
+可靠性工具：
+
+```text
+import std;
+
+let r = std.task.retry(
+  func() { return fetch_job(); },
+  {"attempts": 5, "delay_ms": 100, "backoff": 2.0, "retry_on": "network"}
+);
+
+let t = std.task.timeout(std.task.sleep(100), 50);  // result
+
+let limiter = std.task.rate_limit(10, 2);           // 10 次/秒，突发 2
+std.task.acquire(limiter);
+
+let results = std.task.bounded_parallel_map(
+  jobs, 4, func(job) { return run(job); });
+```
+
+`retry` 的 options 支持 `attempts`、`delay_ms`、`backoff`、`max_delay_ms`、`retry_on`（错误 kind 或列表）。`retry` / `timeout` / `bounded_parallel_map` 都返回 `result`；`bounded_parallel_map` 保持输入顺序，单项失败记为 `err`。
 
 - `sleep` / `yield` 是目前内置的原生 task；
 - `std.task.yield` 是函数字段；单独的 `yield` 关键字用于生成器；
@@ -1510,19 +1536,23 @@ r = graph.add_node(g, "b");
 g = r["graph"];
 let b = r["id"];
 
-r = graph.add_edge(g, a, b, "next");
+r = graph.add_edge(g, a, b, "next", 1);
 g = r["graph"];
 
 graph.bfs(g, a)               // [1, 2]
 graph.topo_sort(g)            // {ok: true, order: [1, 2]}
 graph.has_cycle(g)            // false
 graph.path(g, a, b)           // {ok: true, path: [1, 2]}
+graph.shortest_path(g, a, b)  // {ok: true, path: [1, 2], cost: 1}
+graph.components(g)           // [[1, 2]]
+graph.reverse(g)              // 反向图
+graph.subgraph(g, [a])        // 指定节点子图
 graph.to_dot(g)               // Graphviz 文本
 ```
 
-API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `to_dot`。
+API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `shortest_path` / `components` / `reverse` / `subgraph` / `to_dot`。
 
-`add_node` / `add_edge` 返回 `{graph, id}`；删除节点会级联删除相关边；边标签字段是 `tag`。
+`add_node` / `add_edge` 返回 `{graph, id}`；`add_edge(g, from, to[, tag[, weight]])`，`weight` 默认 1 且必须非负；删除节点会级联删除相关边；边标签字段是 `tag`。`shortest_path` 默认用边权重，也可传 `func(edge) -> number`。
 
 `std.arena` 提供带 generation 的稳定句柄：
 
@@ -1778,6 +1808,11 @@ std.task.done
 std.task.catch
 std.task.try_wait
 std.task.try_wait_all
+std.task.retry
+std.task.timeout
+std.task.rate_limit
+std.task.acquire
+std.task.bounded_parallel_map
 
 std.generator.next
 std.generator.done

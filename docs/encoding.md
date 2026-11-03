@@ -163,6 +163,22 @@ let e = std.encoding.decode(bytes_from_hex("ff"), "utf-8", "replace");
 print(e);                                      // U+FFFD
 ```
 
+### 4.4 Base64 和 URL 工具
+
+`std.encoding` 还提供：
+
+```text
+std.encoding.base64_encode(bytes) → string
+std.encoding.base64_decode(string) → bytes
+std.encoding.url_encode(string) → string
+std.encoding.url_decode(string) → string
+```
+
+- Base64 使用标准字母表和 `=` 填充，解码时忽略空白。
+- URL 编码只保留 `A-Z a-z 0-9 - . _ ~`，其余字节编码为 `%XX`。
+- `url_decode` 把 `+` 解释为空格，并校验解码结果是合法 UTF-8。
+- 这些函数不做字符集转换；需要时先配合 `decode` / `encode` 使用。
+
 ## 5. 语义细则
 
 ### 5.1 错误策略

@@ -269,6 +269,174 @@ def check_unicode_normalization_samples():
     assert actual == expected, "unicode normalization mismatch"
 
 
+def check_extended_stdlib():
+    check(
+        "std regex basics",
+        "import std;\n"
+        'std.regex.match("a+", "aaa")\n'
+        'std.regex.match("abc", "ABC", "i")\n'
+        'let m = std.regex.search("(a+)(b)", "xxaaabyy");\n'
+        'print(m["text"]);\n'
+        'print(m["start"]);\n'
+        'print(m["groups"][1]);\n'
+        'print(std.regex.replace("(a+)", "xxaaabyy", "[$1]"));\n'
+        'print(std.regex.split(",", "a,b,c"));\n'
+        'len(std.regex.find_all("[0-9]+", "a1b22c333"))\n',
+        stdout_all=["= true", "= true", "aaab", "2", "b",
+                    "xx[aaa]byy", "[a, b, c]", "= 3"],
+    )
+    check(
+        "std regex invalid pattern",
+        'import std;\nstd.regex.match("(", "x")\n',
+        stderr="invalid pattern",
+    )
+
+    check(
+        "std time basics",
+        "import std;\n"
+        'std.time.format(0, "%Y-%m-%d %H:%M:%S", true)\n'
+        'std.time.parse("1970-01-01 00:00:00", '
+        '"%Y-%m-%d %H:%M:%S", true)\n'
+        'std.time.now() > 0\n'
+        'std.time.monotonic_ms() >= 0\n'
+        'print(std.time.sleep(0))\n',
+        stdout_all=["= 1970-01-01 00:00:00", "= 0", "= true", "= true",
+                    "null"],
+    )
+    check(
+        "std time invalid parse",
+        'import std;\nstd.time.parse("not-a-time")\n',
+        stderr="does not match format",
+    )
+
+    check(
+        "std random basics",
+        "import std;\n"
+        "std.random.seed(123);\n"
+        'std.random.int(5, 5)\n'
+        'let f = std.random.float();\n'
+        'print(f >= 0.0 && f < 1.0);\n'
+        'bytes_len(std.random.bytes(8))\n'
+        'std.random.choice([7])\n'
+        'len(std.random.shuffle([1, 2, 3]))\n'
+        'len(std.random.uuid())\n',
+        stdout_all=["= 5", "true", "= 8", "= 7", "= 3", "= 36"],
+    )
+    check(
+        "std random invalid range",
+        "import std;\nstd.random.int(2, 1)\n",
+        stderr="minimum must not exceed maximum",
+    )
+
+    check(
+        "std encoding base64 and url",
+        "import std;\n"
+        'std.encoding.base64_encode(bytes_from_string("hello"))\n'
+        'bytes_to_string(std.encoding.base64_decode("aGVsbG8="))\n'
+        'std.encoding.url_encode("a b/中")\n'
+        'std.encoding.url_decode("a%20b%2F%E4%B8%AD")\n',
+        stdout_all=["= aGVsbG8=", "= hello", "= a%20b%2F%E4%B8%AD",
+                    "= a b/中"],
+    )
+    check(
+        "std encoding invalid base64",
+        'import std;\nstd.encoding.base64_decode("!")\n',
+        stderr="invalid base64",
+    )
+
+    check(
+        "std env basics",
+        "import std;\n"
+        'std.env.set("SKEIN_TEST_ENV", "abc");\n'
+        'std.env.get("SKEIN_TEST_ENV")\n'
+        'std.env.has("SKEIN_TEST_ENV")\n'
+        'std.env.set("SKEIN_TEST_ENV", "changed");\n'
+        'std.env.get("SKEIN_TEST_ENV")\n'
+        'std.env.unset("SKEIN_TEST_ENV");\n'
+        'std.env.has("SKEIN_TEST_ENV")\n'
+        'std.env.get("SKEIN_TEST_ENV", "fallback")\n',
+        stdout_all=["= abc", "= true", "= changed", "= false",
+                    "= fallback"],
+    )
+
+    check(
+        "std crypto sha256",
+        "import std;\n"
+        'std.crypto.sha256("abc")\n'
+        'std.crypto.sha256("")\n'
+        'std.crypto.hmac_sha256("key", '
+        '"The quick brown fox jumps over the lazy dog")\n',
+        stdout_all=[
+            "= ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "= e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "= f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
+        ],
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = tmp.replace("\\", "\\\\").replace('"', '\\"')
+        check(
+            "std fs directory and path helpers",
+            "import std;\n"
+            f'std.fs.mkdir("{base}/a/b", true);\n'
+            f'std.fs.write_file("{base}/a/b/x.txt", "hi");\n'
+            f'print(std.fs.listdir("{base}/a/b"));\n'
+            f'print(std.fs.stat("{base}/a/b/x.txt")["type"]);\n'
+            f'print(std.fs.stat("{base}/a/b/x.txt")["size"]);\n'
+            f'print(std.fs.path_join("{base}", "a", "b", "x.txt"));\n'
+            f'print(std.fs.path_basename("{base}/a/b/x.txt"));\n'
+            f'print(std.fs.path_dirname("{base}/a/b/x.txt"));\n'
+            f'print(std.fs.path_extname("{base}/a/b/x.txt"));\n'
+            f'print(std.fs.path_normalize("{base}/a/../a/b/./x.txt"));\n'
+            f'std.fs.rename("{base}/a/b/x.txt", "{base}/a/b/y.txt");\n'
+            f'print(std.fs.exists("{base}/a/b/y.txt"));\n'
+            f'std.fs.remove("{base}/a/b/y.txt");\n'
+            f'std.fs.exists("{base}/a/b/y.txt")\n',
+            stdout_all=["[x.txt]", "file", "2",
+                        f"{tmp}/a/b/x.txt", "x.txt", f"{tmp}/a/b",
+                        ".txt", f"{tmp}/a/b/x.txt", "1", "= 0"],
+        )
+
+    if sys.platform != "win32":
+        check(
+            "std process run",
+            "import std;\n"
+            'let r = std.process.run("printf hello");\n'
+            'print(r["status"]);\n'
+            'print(bytes_to_string(r["stdout"]));\n'
+            'let r2 = std.process.run("cat", {"stdin": "abc"});\n'
+            'print(bytes_to_string(r2["stdout"]));\n'
+            'let r3 = std.process.run("pwd", {"cwd": "/tmp"});\n'
+            'print(bytes_to_string(r3["stdout"]));\n'
+            'let r4 = std.process.run("printf %s \\"$FOO\\"", '
+            '{"env": {"FOO": "bar"}});\n'
+            'print(bytes_to_string(r4["stdout"]));\n'
+            'let r5 = std.process.run("echo out; echo err >&2; exit 3");\n'
+            'print(r5["status"]);\n'
+            'print(bytes_to_string(r5["stdout"]));\n'
+            'print(bytes_to_string(r5["stderr"]));\n',
+            stdout_all=["0", "hello", "abc", "/tmp", "bar", "3", "out",
+                        "err"],
+        )
+
+    probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
+    if "zlib support is disabled" not in probe.stderr:
+        check(
+            "std compress roundtrips",
+            "import std;\n"
+            'let b = bytes_from_string("hello hello hello");\n'
+            'print(bytes_hex(bytes_slice(std.compress.gzip(b), 0, 2)));\n'
+            'print(bytes_to_string(std.compress.gunzip('
+            'std.compress.gzip(b))));\n'
+            'print(bytes_to_string(std.compress.unzlib('
+            'std.compress.zlib(b))));\n'
+            'print(bytes_to_string(std.compress.inflate('
+            'std.compress.deflate(b))));\n',
+            stdout_all=["1f8b", "hello hello hello", "hello hello hello",
+                        "hello hello hello"],
+        )
+
+
 def check_source_encoding():
     """Verify BOM handling and --encoding for source files."""
     script = 'print("你好");\n'
@@ -8697,6 +8865,7 @@ std.json.stringify(std.json.parse(text))
 
     check_encoding_two_byte_tables()
     check_unicode_normalization_samples()
+    check_extended_stdlib()
     check_source_encoding()
     check_interactive_continuation()
 

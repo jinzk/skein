@@ -18,6 +18,14 @@ std::vector<std::string> platform_command_line_args(int argc, char **argv);
 /* Read an environment variable as UTF-8.  Returns false when it is unset. */
 bool platform_get_env(const std::string &name, std::string &value);
 
+/* Mutate the current process environment. */
+bool platform_set_env(const std::string &name, const std::string &value);
+bool platform_unset_env(const std::string &name);
+
+/* Snapshot the current environment as UTF-8 name/value pairs. */
+bool platform_environ(
+    std::vector<std::pair<std::string, std::string>> &entries);
+
 /* True when stdin is an interactive terminal. */
 bool platform_stdin_is_tty();
 

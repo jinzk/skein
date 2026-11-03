@@ -1265,6 +1265,12 @@ std.string
 std.bytes
 std.encoding
 std.unicode
+std.regex
+std.time
+std.random
+std.env
+std.crypto
+std.compress
 std.math
 std.io
 std.fs
@@ -1293,6 +1299,12 @@ std.io.read_all(stream, 16 * 1024 * 1024)
 std.fs.read_file("data.txt")
 std.fs.read_text("data.txt", "gbk")
 std.fs.write_text("data.txt", "中国", "gbk")
+std.regex.replace("[0-9]+", "a1b2", "#")
+std.time.format(0, "%Y-%m-%d", true)
+std.random.uuid()
+std.env.get("HOME")
+std.crypto.sha256("abc")
+std.compress.gzip(bytes_from_string("x"))
 std.process.command_status("true")
 std.type.name(1)
 std.net.resolve("localhost")
@@ -1373,6 +1385,63 @@ std.unicode.is_normalized(decomposed, "nfc")       // false
 std.unicode.is_normalized(composed, "nfc")         // true
 std.unicode.version()                              // "16.0.0"
 ```
+
+正则表达式：
+
+```text
+std.regex.match(pattern, text[, flags])       → bool
+std.regex.search(pattern, text[, flags])      → dict / null
+std.regex.find_all(pattern, text[, flags[, limit]]) → list
+std.regex.replace(pattern, text, replacement[, flags]) → string
+std.regex.split(pattern, text[, flags])       → list
+```
+
+使用 ECMAScript 语法，`flags` 支持 `i` 和 `m`；匹配偏移是字节偏移。
+`replace` 使用 `$1` / `${1}` 引用捕获组。
+
+时间、随机数和编码工具：
+
+```text
+std.time.now() / now_ms() / monotonic_ms() / utc_offset()
+std.time.format(timestamp[, format[, utc]])
+std.time.parse(text[, format[, utc]])
+std.time.sleep(ms)
+
+std.random.seed(n)
+std.random.int(min, max)
+std.random.float()
+std.random.bytes(n)
+std.random.choice(list)
+std.random.shuffle(list)
+std.random.uuid()
+
+std.encoding.base64_encode(bytes) / base64_decode(string)
+std.encoding.url_encode(string) / url_decode(string)
+std.crypto.sha256(data)
+std.crypto.hmac_sha256(key, data)
+std.compress.gzip(bytes) / gunzip(bytes)
+std.compress.zlib(bytes) / unzlib(bytes)
+std.compress.deflate(bytes) / inflate(bytes)
+```
+
+环境变量、目录、路径和进程：
+
+```text
+std.env.get(name[, default]) / has(name) / set(name, value)
+std.env.unset(name) / all()
+
+std.fs.listdir(path) / mkdir(path[, recursive])
+std.fs.remove(path) / rename(old, new) / stat(path)
+std.fs.cwd() / chdir(path)
+std.fs.path_join(parts...) / path_basename(path)
+std.fs.path_dirname(path) / path_extname(path)
+std.fs.path_abs(path) / path_normalize(path)
+
+std.process.run(command[, options]) → dict
+```
+
+`std.process.run` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
+`{"status", "stdout", "stderr"}`，其中 stdout/stderr 是 `bytes`。
 
 JSON：
 

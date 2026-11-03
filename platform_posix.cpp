@@ -74,6 +74,35 @@ bool platform_get_env(const std::string &name, std::string &value) {
     return true;
 }
 
+bool platform_set_env(const std::string &name, const std::string &value) {
+    if (name.empty() || name.find('=') != std::string::npos)
+        return false;
+    return setenv(name.c_str(), value.c_str(), 1) == 0;
+}
+
+bool platform_unset_env(const std::string &name) {
+    if (name.empty() || name.find('=') != std::string::npos)
+        return false;
+    return unsetenv(name.c_str()) == 0;
+}
+
+bool platform_environ(
+    std::vector<std::pair<std::string, std::string>> &entries) {
+    entries.clear();
+    extern char **environ;
+    if (!environ)
+        return true;
+    for (char **entry = environ; *entry; ++entry) {
+        const char *separator = std::strchr(*entry, '=');
+        if (!separator)
+            continue;
+        entries.push_back(std::make_pair(
+            std::string(*entry, (size_t)(separator - *entry)),
+            std::string(separator + 1)));
+    }
+    return true;
+}
+
 bool platform_stdin_is_tty() {
     return isatty(fileno(stdin)) != 0;
 }

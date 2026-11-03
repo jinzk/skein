@@ -77,10 +77,13 @@ add_executable(${PROJECT_NAME}
   ast.cpp
   async_support.cpp
   builtins.cpp
+  compress_builtin.cpp
   compression.cpp
   cookie.cpp
+  crypto_builtin.cpp
   diagnostics.cpp
   encoding.cpp
+  env_builtin.cpp
   error.cpp
   eval.cpp
   eval_context.cpp
@@ -88,6 +91,7 @@ add_executable(${PROJECT_NAME}
   fiber.cpp
   filetype.cpp
   format.cpp
+  fs_extra.cpp
   generator.cpp
   http.cpp
   http1_parser.cpp
@@ -96,6 +100,9 @@ add_executable(${PROJECT_NAME}
   main.cpp
   net.cpp
   package.cpp
+  process_builtin.cpp
+  random_builtin.cpp
+  regex_builtin.cpp
   repl.cpp
   result.cpp
   scopestack.cpp
@@ -104,6 +111,7 @@ add_executable(${PROJECT_NAME}
   structtype.cpp
   symbol.cpp
   task.cpp
+  time_builtin.cpp
   unicode.cpp
   unicode_ident.cpp
   valuetype.cpp

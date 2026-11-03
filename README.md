@@ -1360,6 +1360,12 @@ std.string
 std.bytes
 std.encoding
 std.unicode
+std.regex
+std.time
+std.random
+std.env
+std.crypto
+std.compress
 std.math
 std.io
 std.fs
@@ -1607,6 +1613,65 @@ std.encoding.supports
 std.unicode.normalize
 std.unicode.is_normalized
 std.unicode.version
+
+std.encoding.base64_encode
+std.encoding.base64_decode
+std.encoding.url_encode
+std.encoding.url_decode
+
+std.regex.match
+std.regex.search
+std.regex.find_all
+std.regex.replace
+std.regex.split
+
+std.time.now
+std.time.now_ms
+std.time.monotonic_ms
+std.time.utc_offset
+std.time.format
+std.time.parse
+std.time.sleep
+
+std.random.seed
+std.random.int
+std.random.float
+std.random.bytes
+std.random.choice
+std.random.shuffle
+std.random.uuid
+
+std.env.get
+std.env.has
+std.env.set
+std.env.unset
+std.env.all
+
+std.crypto.sha256
+std.crypto.hmac_sha256
+
+std.compress.gzip
+std.compress.gunzip
+std.compress.zlib
+std.compress.unzlib
+std.compress.deflate
+std.compress.inflate
+
+std.fs.listdir
+std.fs.mkdir
+std.fs.remove
+std.fs.rename
+std.fs.stat
+std.fs.cwd
+std.fs.chdir
+std.fs.path_join
+std.fs.path_basename
+std.fs.path_dirname
+std.fs.path_extname
+std.fs.path_abs
+std.fs.path_normalize
+
+std.process.run
 ```
 
 规则：
@@ -2831,6 +2896,153 @@ std.unicode.version()                              // "16.0.0"
 - 输入必须是合法 UTF-8 `string`，输出也保持合法 UTF-8；
 - 归一化不会产生内嵌 NUL。
 
+### 正则表达式
+
+```text
+std.regex.match(pattern, text[, flags])       → bool（整串匹配）
+std.regex.search(pattern, text[, flags])      → dict / null
+std.regex.find_all(pattern, text[, flags[, limit]]) → list
+std.regex.replace(pattern, text, replacement[, flags]) → string
+std.regex.split(pattern, text[, flags])       → list
+```
+
+示例：
+
+```text
+import std;
+
+std.regex.match("a+", "aaa")                  // true
+std.regex.match("abc", "ABC", "i")            // true
+
+let m = std.regex.search("(a+)(b)", "xxaaabyy");
+m["text"]                                     // aaab
+m["start"]                                    // 2
+m["groups"]                                   // [aaa, b]
+
+std.regex.replace("(a+)", "xxaaabyy", "[$1]") // xx[aaa]byy
+std.regex.split(",", "a,b,c")                  // [a, b, c]
+```
+
+规则：
+
+- 使用 ECMAScript 正则语法；
+- 匹配按下标/字节偏移，不是 Unicode 码点偏移；
+- `flags` 支持 `i`（忽略大小写）和 `m`（多行）；
+- `replace` 使用 `$1` / `${1}` 形式引用捕获组；
+- 非法正则会报运行时错误。
+
+### 时间、随机数和 UUID
+
+```text
+std.time.now()                    → Unix 秒
+std.time.now_ms()                 → Unix 毫秒
+std.time.monotonic_ms()           → 进程内单调毫秒
+std.time.utc_offset()             → 本地时区偏移秒数
+std.time.format(ts[, format[, utc]]) → string
+std.time.parse(text[, format[, utc]]) → int
+std.time.sleep(ms)                → null
+
+std.random.seed(n)
+std.random.int(min, max)          → 闭区间整数
+std.random.float()                → [0, 1)
+std.random.bytes(n)               → bytes
+std.random.choice(list)
+std.random.shuffle(list)          → 新 list
+std.random.uuid()                 → UUID v4 字符串
+```
+
+默认时间格式是 `%Y-%m-%d %H:%M:%S`，默认使用本地时间；第三个参数传 `true`
+使用 UTC。
+
+### Base64、URL 和哈希
+
+```text
+std.encoding.base64_encode(bytes) → string
+std.encoding.base64_decode(string) → bytes
+std.encoding.url_encode(string) → string
+std.encoding.url_decode(string) → string
+
+std.crypto.sha256(data)            → 小写 hex
+std.crypto.hmac_sha256(key, data)  → 小写 hex
+```
+
+`sha256` / `hmac_sha256` 接受 `string` 或 `bytes`。`url_decode` 会把 `+`
+当作空格，并校验解码结果是合法 UTF-8。
+
+### 环境变量和进程捕获
+
+```text
+std.env.get(name[, default])
+std.env.has(name)
+std.env.set(name, value)
+std.env.unset(name)
+std.env.all()                     → dict
+
+std.process.run(command[, options]) → dict
+```
+
+`std.process.run` 的 `options` 支持：
+
+```text
+stdin   string / bytes，默认空
+cwd     工作目录
+env     dict，覆盖子进程环境
+```
+
+返回：
+
+```text
+{"status": int, "stdout": bytes, "stderr": bytes}
+```
+
+示例：
+
+```text
+import std;
+
+let r = std.process.run("printf hello");
+print(bytes_to_string(r["stdout"]));
+
+let r2 = std.process.run("cat", {"stdin": "abc"});
+bytes_to_string(r2["stdout"])
+```
+
+注意：当前实现通过 shell 重定向捕获输出，不提供超时和流式读写。
+
+### 目录、路径和压缩
+
+```text
+std.fs.listdir(path)              → list[string]
+std.fs.mkdir(path[, recursive])
+std.fs.remove(path)
+std.fs.rename(old, new)
+std.fs.stat(path)                 → dict
+std.fs.cwd()
+std.fs.chdir(path)
+
+std.fs.path_join(parts...)
+std.fs.path_basename(path)
+std.fs.path_dirname(path)
+std.fs.path_extname(path)
+std.fs.path_abs(path)
+std.fs.path_normalize(path)
+
+std.compress.gzip(bytes)          → bytes
+std.compress.gunzip(bytes)        → bytes
+std.compress.zlib(bytes)          → bytes
+std.compress.unzlib(bytes)        → bytes
+std.compress.deflate(bytes)       → bytes
+std.compress.inflate(bytes)       → bytes
+```
+
+`std.fs.stat` 返回：
+
+```text
+{"type": "file" / "dir" / "other", "size": int, "mtime": int}
+```
+
+压缩函数需要构建时启用 zlib；未启用时调用会报告 `zlib support is disabled`。
+
 二进制文件读写：
 
 ```text
@@ -2954,6 +3166,14 @@ ast.*         AST 定义、函数代码共享与释放
 diagnostics.* 错误位置、源码片段与调用栈
 unicode.*     Unicode NFC/NFD/NFKC/NFKD 归一化
 unicode_ident.* UTF-8 解码、Unicode 标识符判定与显示宽度
+regex_builtin.* std.regex 正则表达式
+time_builtin.* std.time 时间与格式化
+random_builtin.* std.random 随机数与 UUID
+env_builtin.* std.env 环境变量
+crypto_builtin.* std.crypto SHA-256 / HMAC
+compress_builtin.* std.compress gzip/zlib/deflate
+fs_extra.*     std.fs 目录与路径操作
+process_builtin.* std.process.run 输出捕获
 eval.*        树遍历求值
 eval_context.* 每个求值上下文的 scope、控制流和错误状态
 eval_helpers.h 求值器与内置函数共享的辅助函数

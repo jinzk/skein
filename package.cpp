@@ -412,6 +412,10 @@ value_t *build_std_namespace() {
             {"decode", B_encoding_decode},
             {"encode", B_encoding_encode},
             {"supports", B_encoding_supports},
+            {"base64_encode", B_encoding_base64_encode},
+            {"base64_decode", B_encoding_base64_decode},
+            {"url_encode", B_encoding_url_encode},
+            {"url_decode", B_encoding_url_decode},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("unicode"),
@@ -419,6 +423,37 @@ value_t *build_std_namespace() {
             {"normalize", B_unicode_normalize},
             {"is_normalized", B_unicode_is_normalized},
             {"version", B_unicode_version},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("regex"),
+        builtin_module({
+            {"match", B_regex_match},
+            {"search", B_regex_search},
+            {"find_all", B_regex_find_all},
+            {"replace", B_regex_replace},
+            {"split", B_regex_split},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("time"),
+        builtin_module({
+            {"now", B_time_now},
+            {"now_ms", B_time_now_ms},
+            {"monotonic_ms", B_time_monotonic_ms},
+            {"utc_offset", B_time_utc_offset},
+            {"format", B_time_format},
+            {"parse", B_time_parse},
+            {"sleep", B_time_sleep},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("random"),
+        builtin_module({
+            {"seed", B_random_seed},
+            {"int", B_random_int},
+            {"float", B_random_float},
+            {"bytes", B_random_bytes},
+            {"choice", B_random_choice},
+            {"shuffle", B_random_shuffle},
+            {"uuid", B_random_uuid},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("math"),
@@ -492,6 +527,44 @@ value_t *build_std_namespace() {
             {"append_bytes", B_append_bytes},
             {"file_read_bytes", B_file_read_bytes},
             {"file_write_bytes", B_file_write_bytes},
+            {"listdir", B_fs_listdir},
+            {"mkdir", B_fs_mkdir},
+            {"remove", B_fs_remove},
+            {"rename", B_fs_rename},
+            {"stat", B_fs_stat},
+            {"cwd", B_fs_cwd},
+            {"chdir", B_fs_chdir},
+            {"path_join", B_fs_path_join},
+            {"path_basename", B_fs_path_basename},
+            {"path_dirname", B_fs_path_dirname},
+            {"path_extname", B_fs_path_extname},
+            {"path_abs", B_fs_path_abs},
+            {"path_normalize", B_fs_path_normalize},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("env"),
+        builtin_module({
+            {"get", B_env_get},
+            {"has", B_env_has},
+            {"set", B_env_set},
+            {"unset", B_env_unset},
+            {"all", B_env_all},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("crypto"),
+        builtin_module({
+            {"sha256", B_crypto_sha256},
+            {"hmac_sha256", B_crypto_hmac_sha256},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("compress"),
+        builtin_module({
+            {"gzip", B_compress_gzip},
+            {"gunzip", B_compress_gunzip},
+            {"zlib", B_compress_zlib},
+            {"unzlib", B_compress_unzlib},
+            {"deflate", B_compress_deflate},
+            {"inflate", B_compress_inflate},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("process"),
@@ -499,6 +572,7 @@ value_t *build_std_namespace() {
             {"command", B_command},
             {"status", B_command_status},
             {"command_status", B_command_status},
+            {"run", B_process_run},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("type"),

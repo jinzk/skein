@@ -364,6 +364,51 @@ bool platform_get_env(const std::string &name, std::string &value) {
     return narrow_utf8(wide_value, value);
 }
 
+bool platform_set_env(const std::string &name, const std::string &value) {
+    if (name.empty() || name.find('=') != std::string::npos)
+        return false;
+    std::wstring wide_name;
+    std::wstring wide_value;
+    if (!widen_utf8(name, wide_name) || !widen_utf8(value, wide_value))
+        return false;
+    return SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str()) != 0;
+}
+
+bool platform_unset_env(const std::string &name) {
+    if (name.empty() || name.find('=') != std::string::npos)
+        return false;
+    std::wstring wide_name;
+    if (!widen_utf8(name, wide_name))
+        return false;
+    return SetEnvironmentVariableW(wide_name.c_str(), nullptr) != 0;
+}
+
+bool platform_environ(
+    std::vector<std::pair<std::string, std::string>> &entries) {
+    entries.clear();
+    wchar_t *block = GetEnvironmentStringsW();
+    if (!block)
+        return false;
+    for (wchar_t *entry = block; *entry; entry += std::wcslen(entry) + 1) {
+        if (*entry == L'=')
+            continue;
+        const wchar_t *separator = std::wcschr(entry, L'=');
+        if (!separator)
+            continue;
+        std::string name;
+        std::string value;
+        if (!narrow_utf8(std::wstring(entry, separator), name) ||
+            !narrow_utf8(std::wstring(separator + 1), value)) {
+            FreeEnvironmentStringsW(block);
+            entries.clear();
+            return false;
+        }
+        entries.push_back(std::make_pair(std::move(name), std::move(value)));
+    }
+    FreeEnvironmentStringsW(block);
+    return true;
+}
+
 bool platform_run_command(
     const std::string &command,
     const std::vector<std::pair<std::string, std::string>> &env,

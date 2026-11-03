@@ -1,9 +1,13 @@
 #include "builtins.h"
 
 #include "ast.h"
+#include "compress_builtin.h"
+#include "crypto_builtin.h"
 #include "encoding.h"
+#include "env_builtin.h"
 #include "eval_helpers.h"
 #include "error.h"
+#include "fs_extra.h"
 #include "generator.h"
 #include "http.h"
 #include "http2.h"
@@ -22,8 +26,12 @@
 #include "filetype.h"
 #include "format.h"
 #include "platform.h"
+#include "process_builtin.h"
+#include "random_builtin.h"
+#include "regex_builtin.h"
 #include "repl.h"
 #include "structtype.h"
+#include "time_builtin.h"
 #include "unicode.h"
 #include "valuetype.h"
 
@@ -342,8 +350,27 @@ struct value_t *call_builtin(int functype,
         return call_json_builtin(functype, args);
     if (functype >= B_encoding_decode && functype <= B_encoding_supports)
         return call_encoding_builtin(functype, args);
+    if (functype >= B_encoding_base64_encode &&
+        functype <= B_encoding_url_decode)
+        return call_encoding_builtin(functype, args);
     if (functype >= B_unicode_normalize && functype <= B_unicode_version)
         return call_unicode_builtin(functype, args);
+    if (functype >= B_regex_match && functype <= B_regex_split)
+        return call_regex_builtin(functype, args);
+    if (functype >= B_time_now && functype <= B_time_sleep)
+        return call_time_builtin(functype, args);
+    if (functype >= B_random_seed && functype <= B_random_uuid)
+        return call_random_builtin(functype, args);
+    if (functype >= B_fs_listdir && functype <= B_fs_path_normalize)
+        return call_fs_extra_builtin(functype, args);
+    if (functype >= B_env_get && functype <= B_env_all)
+        return call_env_builtin(functype, args);
+    if (functype == B_process_run)
+        return call_process_builtin(functype, args);
+    if (functype >= B_crypto_sha256 && functype <= B_crypto_hmac_sha256)
+        return call_crypto_builtin(functype, args);
+    if (functype >= B_compress_gzip && functype <= B_compress_inflate)
+        return call_compress_builtin(functype, args);
     if (functype >= B_http_request && functype <= B_http_close)
         return call_http_builtin(functype, args);
 #ifdef SKEIN_ENABLE_HTTP2

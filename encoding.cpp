@@ -1017,6 +1017,166 @@ static bool encode_with(const std::string &input, Encoding encoding,
     return false;
 }
 
+static const char kBase64Alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static std::string base64_encode(const std::string &data) {
+    std::string result;
+    result.reserve(((data.size() + 2) / 3) * 4);
+    size_t i = 0;
+    while (i + 3 <= data.size()) {
+        const uint32_t value =
+            ((uint32_t)(unsigned char)data[i] << 16) |
+            ((uint32_t)(unsigned char)data[i + 1] << 8) |
+            (uint32_t)(unsigned char)data[i + 2];
+        result.push_back(kBase64Alphabet[(value >> 18) & 0x3F]);
+        result.push_back(kBase64Alphabet[(value >> 12) & 0x3F]);
+        result.push_back(kBase64Alphabet[(value >> 6) & 0x3F]);
+        result.push_back(kBase64Alphabet[value & 0x3F]);
+        i += 3;
+    }
+    const size_t remaining = data.size() - i;
+    if (remaining == 1) {
+        const uint32_t value = (uint32_t)(unsigned char)data[i] << 16;
+        result.push_back(kBase64Alphabet[(value >> 18) & 0x3F]);
+        result.push_back(kBase64Alphabet[(value >> 12) & 0x3F]);
+        result.push_back('=');
+        result.push_back('=');
+    } else if (remaining == 2) {
+        const uint32_t value =
+            ((uint32_t)(unsigned char)data[i] << 16) |
+            ((uint32_t)(unsigned char)data[i + 1] << 8);
+        result.push_back(kBase64Alphabet[(value >> 18) & 0x3F]);
+        result.push_back(kBase64Alphabet[(value >> 12) & 0x3F]);
+        result.push_back(kBase64Alphabet[(value >> 6) & 0x3F]);
+        result.push_back('=');
+    }
+    return result;
+}
+
+static int base64_value(unsigned char c) {
+    if (c >= 'A' && c <= 'Z')
+        return c - 'A';
+    if (c >= 'a' && c <= 'z')
+        return c - 'a' + 26;
+    if (c >= '0' && c <= '9')
+        return c - '0' + 52;
+    if (c == '+')
+        return 62;
+    if (c == '/')
+        return 63;
+    return -1;
+}
+
+static bool base64_decode(const std::string &text, std::string &output,
+                          std::string &error) {
+    std::string clean;
+    clean.reserve(text.size());
+    for (unsigned char c : text) {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+            continue;
+        clean.push_back((char)c);
+    }
+    if (clean.size() % 4 != 0) {
+        error = "invalid base64 length";
+        return false;
+    }
+    output.clear();
+    output.reserve((clean.size() / 4) * 3);
+    for (size_t i = 0; i < clean.size(); i += 4) {
+        const unsigned char c0 = (unsigned char)clean[i];
+        const unsigned char c1 = (unsigned char)clean[i + 1];
+        const unsigned char c2 = (unsigned char)clean[i + 2];
+        const unsigned char c3 = (unsigned char)clean[i + 3];
+        const int v0 = base64_value(c0);
+        const int v1 = base64_value(c1);
+        const int v2 = c2 == '=' ? -2 : base64_value(c2);
+        const int v3 = c3 == '=' ? -2 : base64_value(c3);
+        const bool last = i + 4 == clean.size();
+        if (v0 < 0 || v1 < 0 || v2 == -1 || v3 == -1 ||
+            (v2 == -2 && v3 != -2) || (!last && (v2 == -2 || v3 == -2))) {
+            error = "invalid base64 character";
+            return false;
+        }
+        const uint32_t value =
+            ((uint32_t)v0 << 18) | ((uint32_t)v1 << 12) |
+            ((uint32_t)(v2 < 0 ? 0 : v2) << 6) |
+            (uint32_t)(v3 < 0 ? 0 : v3);
+        output.push_back((char)((value >> 16) & 0xFF));
+        if (v2 != -2)
+            output.push_back((char)((value >> 8) & 0xFF));
+        if (v3 != -2)
+            output.push_back((char)(value & 0xFF));
+    }
+    return true;
+}
+
+static bool url_unreserved(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' ||
+           c == '~';
+}
+
+static std::string url_encode(const std::string &text) {
+    static const char hex[] = "0123456789ABCDEF";
+    std::string result;
+    result.reserve(text.size());
+    for (unsigned char c : text) {
+        if (url_unreserved(c)) {
+            result.push_back((char)c);
+        } else {
+            result.push_back('%');
+            result.push_back(hex[c >> 4]);
+            result.push_back(hex[c & 0x0F]);
+        }
+    }
+    return result;
+}
+
+static int hex_value(unsigned char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+static bool url_decode(const std::string &text, std::string &output,
+                       std::string &error) {
+    std::string bytes;
+    bytes.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        const unsigned char c = (unsigned char)text[i];
+        if (c == '%') {
+            if (i + 2 >= text.size()) {
+                error = "invalid percent escape";
+                return false;
+            }
+            const int high = hex_value((unsigned char)text[i + 1]);
+            const int low = hex_value((unsigned char)text[i + 2]);
+            if (high < 0 || low < 0) {
+                error = "invalid percent escape";
+                return false;
+            }
+            bytes.push_back((char)((high << 4) | low));
+            i += 2;
+        } else if (c == '+') {
+            bytes.push_back(' ');
+        } else {
+            bytes.push_back((char)c);
+        }
+    }
+    std::string decoded;
+    if (!decode_utf8(bytes, ErrorMode::Strict, decoded, error)) {
+        error = "URL-decoded bytes are not valid UTF-8: " + error;
+        return false;
+    }
+    output = std::move(decoded);
+    return true;
+}
+
 static bool read_encoding_argument(const std::vector<struct value_t *> &args,
                                    const char *name, Encoding &encoding) {
     if (args[1]->type != T_string) {
@@ -1125,6 +1285,51 @@ bool decode_to_utf8(const std::string &input, const std::string &encoding,
 
 struct value_t *call_encoding_builtin(
     int functype, const std::vector<struct value_t *> &args) {
+    if (functype == B_encoding_base64_encode) {
+        if (args.size() != 1 || args[0]->type != T_bytes) {
+            yyerror("std.encoding.base64_encode expects 1 bytes argument");
+            return NULL;
+        }
+        return newstrval(base64_encode(
+            ((struct bytes_value_t *)args[0])->value).c_str());
+    }
+    if (functype == B_encoding_base64_decode) {
+        if (args.size() != 1 || args[0]->type != T_string) {
+            yyerror("std.encoding.base64_decode expects 1 string argument");
+            return NULL;
+        }
+        std::string output;
+        std::string error;
+        if (!base64_decode(
+                ((struct string_value_t *)args[0])->value, output, error)) {
+            yyerror("std.encoding.base64_decode: %s", error.c_str());
+            return NULL;
+        }
+        return newbytesval(std::move(output));
+    }
+    if (functype == B_encoding_url_encode) {
+        if (args.size() != 1 || args[0]->type != T_string) {
+            yyerror("std.encoding.url_encode expects 1 string argument");
+            return NULL;
+        }
+        return newstrval(url_encode(
+            ((struct string_value_t *)args[0])->value).c_str());
+    }
+    if (functype == B_encoding_url_decode) {
+        if (args.size() != 1 || args[0]->type != T_string) {
+            yyerror("std.encoding.url_decode expects 1 string argument");
+            return NULL;
+        }
+        std::string output;
+        std::string error;
+        if (!url_decode(
+                ((struct string_value_t *)args[0])->value, output, error)) {
+            yyerror("std.encoding.url_decode: %s", error.c_str());
+            return NULL;
+        }
+        return newstrval(output.c_str());
+    }
+
     if (functype != B_encoding_decode && functype != B_encoding_encode &&
         functype != B_encoding_supports) {
         yyerror("unknown encoding function");

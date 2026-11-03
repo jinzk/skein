@@ -1689,6 +1689,7 @@ std.worker.map
 std.worker.submit
 std.worker.wait
 std.worker.shutdown
+std.worker.stats
 ```
 
 规则：
@@ -2666,12 +2667,21 @@ print(std.process.wait(p));
 在 spawn + JSON Lines 协议之上提供进程池：
 
 ```text
-std.worker.pool(size, script) -> pool
+std.worker.pool(size, script[, options]) -> pool
 std.worker.call(pool, method, args[, timeout_ms]) -> result
 std.worker.map(pool, method, items[, timeout_ms]) -> list
 std.worker.submit(pool, method, args) -> job
 std.worker.wait(job[, timeout_ms]) -> result
 std.worker.shutdown(pool)
+std.worker.stats(pool) -> dict
+```
+
+`options`：
+
+```text
+queue_limit       默认 1024
+restart_limit     默认 3
+ready_timeout_ms  默认 5000
 ```
 
 - `size`：worker 进程数
@@ -2686,10 +2696,14 @@ std.worker.shutdown(pool)
 - 单个 worker 连续重启超过 3 次后会被标记为不可用
 - `map` 把任务分批分发给多个 worker，保持输入顺序；任一任务失败时报告错误
 
-worker 脚本约定使用 JSON Lines：
+worker 脚本约定使用 JSON Lines，并在启动后先发送 ready 帧：
 
 ```text
 import std;
+
+std.io.write_all(std.io.stdout,
+                 bytes_from_string("{\"ready\":true,\"version\":1}\n"));
+std.io.flush(std.io.stdout);
 
 while (true) {
   let line = std.io.read_line(std.io.stdin);
@@ -2722,6 +2736,18 @@ print(std.result.unwrap(std.worker.wait(a)));
 print(std.result.unwrap(std.worker.wait(b)));
 
 std.worker.shutdown(pool);
+```
+
+`std.worker.stats(pool)` 返回：
+
+```text
+{
+  "workers": int,
+  "busy": int,
+  "available": int,
+  "queued": int,
+  "restarts": int
+}
 ```
 
 当前限制：

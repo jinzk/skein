@@ -472,6 +472,9 @@ def check_extended_stdlib():
             with open(worker_script, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
+                    "std.io.write_all(std.io.stdout, bytes_from_string("
+                    "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
+                    "std.io.flush(std.io.stdout);\n"
                     "while (true) {\n"
                     "  let line = std.io.read_line(std.io.stdin);\n"
                     "  if (line == null) { break; }\n"
@@ -492,6 +495,7 @@ def check_extended_stdlib():
                 "import std;\n"
                 f'let p = std.process.spawn("{binary_path}", '
                 f'{{"args": ["{worker_path}"]}});\n'
+                'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
                 'std.io.write_all(p["stdin"], bytes_from_string('
                 '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
                 'std.io.flush(p["stdin"]);\n'
@@ -499,7 +503,8 @@ def check_extended_stdlib():
                 'print(bytes_to_string(line));\n'
                 'std.io.close(p["stdin"]);\n'
                 'print(std.process.wait(p));\n',
-                stdout_all=['{"id":1,"ok":true,"result":5}', "0"],
+                stdout_all=['{"ready":true,"version":1}',
+                            '{"id":1,"ok":true,"result":5}', "0"],
             )
             check(
                 "std.worker pool call and map",
@@ -516,6 +521,9 @@ def check_extended_stdlib():
             with open(restart_script, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
+                    "std.io.write_all(std.io.stdout, bytes_from_string("
+                    "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
+                    "std.io.flush(std.io.stdout);\n"
                     "while (true) {\n"
                     "  let line = std.io.read_line(std.io.stdin);\n"
                     "  if (line == null) { break; }\n"
@@ -543,8 +551,11 @@ def check_extended_stdlib():
                 'print(std.result.unwrap(std.worker.wait(a)));\n'
                 'print(std.result.unwrap(std.worker.wait(b)));\n'
                 'print(std.result.unwrap(std.worker.wait(c)));\n'
+                'let stats = std.worker.stats(pool);\n'
+                'print(stats["workers"]);\n'
+                'print(stats["available"]);\n'
                 'std.worker.shutdown(pool);\n',
-                stdout_all=["3", "7", "11"],
+                stdout_all=["3", "7", "11", "2", "2"],
             )
             check(
                 "std.worker crash and timeout restart",

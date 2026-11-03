@@ -371,7 +371,7 @@ struct value_t *call_builtin(int functype,
         return call_process_builtin(functype, args);
     if (functype >= B_process_spawn && functype <= B_process_pid)
         return call_process_spawn_builtin(functype, args);
-    if (functype >= B_worker_pool && functype <= B_worker_shutdown)
+    if (functype >= B_worker_pool && functype <= B_worker_stats)
         return call_worker_builtin(functype, args);
     if (functype >= B_crypto_sha256 && functype <= B_crypto_hmac_sha256)
         return call_crypto_builtin(functype, args);

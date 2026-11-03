@@ -278,7 +278,8 @@ enum bifs {
     B_worker_map,
     B_worker_submit,
     B_worker_wait,
-    B_worker_shutdown
+    B_worker_shutdown,
+    B_worker_stats
 };
 
 struct ast {

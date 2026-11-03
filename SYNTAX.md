@@ -1474,18 +1474,23 @@ std.process.close(p)
 Worker 进程池：
 
 ```text
-std.worker.pool(size, script) -> pool
+std.worker.pool(size, script[, options]) -> pool
 std.worker.call(pool, method, args[, timeout_ms]) -> result
 std.worker.map(pool, method, items[, timeout_ms]) -> list
 std.worker.submit(pool, method, args) -> job
 std.worker.wait(job[, timeout_ms]) -> result
 std.worker.shutdown(pool)
+std.worker.stats(pool) -> dict
 ```
 
-worker 脚本使用 JSON Lines 协议：
+worker 脚本使用 JSON Lines 协议，并先发送 ready 帧：
 
 ```text
 import std;
+
+std.io.write_all(std.io.stdout,
+                 bytes_from_string("{\"ready\":true,\"version\":1}\n"));
+std.io.flush(std.io.stdout);
 
 while (true) {
   let line = std.io.read_line(std.io.stdin);
@@ -2739,6 +2744,7 @@ std.worker.map
 std.worker.submit
 std.worker.wait
 std.worker.shutdown
+std.worker.stats
 ```
 
 ### 文件

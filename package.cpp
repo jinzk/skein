@@ -599,6 +599,7 @@ value_t *build_std_namespace() {
             {"submit", B_worker_submit},
             {"wait", B_worker_wait},
             {"shutdown", B_worker_shutdown},
+            {"stats", B_worker_stats},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("type"),

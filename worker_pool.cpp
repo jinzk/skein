@@ -49,6 +49,10 @@ struct worker_pool {
     std::vector<std::shared_ptr<worker_job>> queue;
     std::string script;
     long long next_id = 1;
+    long long queue_limit = 1024;
+    long long restart_limit = 3;
+    long long ready_timeout_ms = 5000;
+    long long restarts = 0;
 
     ~worker_pool() {
         for (worker_slot &worker : workers) {
@@ -235,8 +239,10 @@ value_t *json_parse(value_t *value) {
     return call_json_builtin(B_json_parse, {value});
 }
 
+void close_worker(worker_slot &slot, bool kill_if_running);
+
 bool spawn_worker(worker_slot &slot, const std::string &script,
-                  std::string &error) {
+                  long long ready_timeout_ms, std::string &error) {
     const std::string executable = platform_executable_path();
     if (executable.empty()) {
         error = "cannot locate the skein executable";
@@ -271,6 +277,28 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
     slot.process = process;
     slot.stdin_stream = stdin_stream;
     slot.stdout_stream = stdout_stream;
+
+    value_t *ready_line = read_line(stdout_stream, ready_timeout_ms, error);
+    if (!ready_line) {
+        close_worker(slot, true);
+        if (error.empty())
+            error = "worker did not send a ready frame";
+        return false;
+    }
+    value_t *ready = json_parse(ready_line);
+    freeval(ready_line);
+    value_t *ready_flag = dict_get(ready, "ready");
+    value_t *version = dict_get(ready, "version");
+    if (!ready || !ready_flag || ready_flag->type != T_bool ||
+        !((bool_value_t *)ready_flag)->value || !version ||
+        version->type != T_int ||
+        ((int_value_t *)version)->value != 1) {
+        freeval(ready);
+        close_worker(slot, true);
+        error = "worker ready frame is invalid";
+        return false;
+    }
+    freeval(ready);
     return true;
 }
 
@@ -311,13 +339,16 @@ bool worker_usable(const worker_slot &slot) {
 bool restart_worker(worker_pool *pool, worker_slot &slot,
                     std::string &error) {
     close_worker(slot, true);
-    if (slot.failures >= 3) {
+    if (slot.failures >= pool->restart_limit) {
         error = "worker restart limit exceeded";
         return false;
     }
     ++slot.failures;
-    if (!pool->script.empty() && spawn_worker(slot, pool->script, error))
+    if (!pool->script.empty() &&
+        spawn_worker(slot, pool->script, pool->ready_timeout_ms, error)) {
+        ++pool->restarts;
         return true;
+    }
     error = "cannot restart worker";
     return false;
 }
@@ -478,20 +509,55 @@ long long remaining_timeout(
 value_t *call_worker_builtin(
     int functype, const std::vector<value_t *> &args) {
     if (functype == B_worker_pool) {
-        if (args.size() != 2 || args[0]->type != T_int ||
+        if ((args.size() != 2 && args.size() != 3) ||
+            args[0]->type != T_int ||
             ((int_value_t *)args[0])->value <= 0 ||
             args[1]->type != T_string) {
-            yyerror("std.worker.pool expects a positive size and script");
+            yyerror("std.worker.pool expects size, script and optional "
+                    "options");
             return NULL;
         }
         const long long size = ((int_value_t *)args[0])->value;
         std::shared_ptr<worker_pool> pool = std::make_shared<worker_pool>();
         pool->script = ((string_value_t *)args[1])->value;
+        if (args.size() == 3) {
+            if (args[2]->type != T_dict) {
+                yyerror("std.worker.pool options must be a dict");
+                return NULL;
+            }
+            dict_value_t *options = (dict_value_t *)args[2];
+            for (const auto &entry : options->payload->items) {
+                if (entry.first->type != T_string)
+                    continue;
+                const std::string key =
+                    ((string_value_t *)entry.first)->value;
+                if (entry.second->type != T_int ||
+                    ((int_value_t *)entry.second)->value < 0) {
+                    yyerror("std.worker.pool option %s must be a "
+                            "non-negative integer", key.c_str());
+                    return NULL;
+                }
+                const long long value =
+                    ((int_value_t *)entry.second)->value;
+                if (key == "queue_limit")
+                    pool->queue_limit = value;
+                else if (key == "restart_limit")
+                    pool->restart_limit = value;
+                else if (key == "ready_timeout_ms")
+                    pool->ready_timeout_ms = value;
+                else {
+                    yyerror("std.worker.pool: unknown option %s",
+                            key.c_str());
+                    return NULL;
+                }
+            }
+        }
         pool->workers.resize((size_t)size);
         for (long long i = 0; i < size; ++i) {
             std::string error;
             if (!spawn_worker(pool->workers[(size_t)i],
-                              ((string_value_t *)args[1])->value, error)) {
+                              ((string_value_t *)args[1])->value,
+                              pool->ready_timeout_ms, error)) {
                 for (worker_slot &worker : pool->workers) {
                     if (worker.process)
                         close_worker(worker, true);
@@ -527,6 +593,39 @@ value_t *call_worker_builtin(
         return newnull();
     }
 
+    if (functype == B_worker_stats) {
+        if (args.size() != 1) {
+            yyerror("std.worker.stats expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        std::shared_ptr<worker_pool> pool;
+        if (!get_pool(args[0], pool)) {
+            yyerror("std.worker.stats expects a worker pool");
+            return NULL;
+        }
+        long long busy = 0;
+        long long available = 0;
+        for (const worker_slot &worker : pool->workers) {
+            if (worker.busy)
+                ++busy;
+            if (worker_usable(worker))
+                ++available;
+        }
+        dict_value_t *result = newdictval();
+        result->payload->items.push_back(std::make_pair(
+            newstrval("workers"), newintval((long long)pool->workers.size())));
+        result->payload->items.push_back(std::make_pair(
+            newstrval("busy"), newintval(busy)));
+        result->payload->items.push_back(std::make_pair(
+            newstrval("available"), newintval(available)));
+        result->payload->items.push_back(std::make_pair(
+            newstrval("queued"), newintval((long long)pool->queue.size())));
+        result->payload->items.push_back(std::make_pair(
+            newstrval("restarts"), newintval(pool->restarts)));
+        return (value_t *)result;
+    }
+
     if (functype == B_worker_submit) {
         if (args.size() != 3 || args[1]->type != T_string ||
             args[2]->type != T_list) {
@@ -544,6 +643,10 @@ value_t *call_worker_builtin(
         if (!make_request(job->id, ((string_value_t *)args[1])->value,
                           args[2], job->request)) {
             yyerror("std.worker.submit: cannot encode request");
+            return NULL;
+        }
+        if ((long long)pool->queue.size() >= pool->queue_limit) {
+            yyerror("std.worker.submit: worker queue is full");
             return NULL;
         }
         pool->queue.push_back(job);

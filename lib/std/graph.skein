@@ -1,0 +1,282 @@
+package graph {
+  import std;
+
+  export struct Edge {
+    from: int;
+    to: int;
+    tag: string;
+  }
+
+  export struct Graph {
+    nodes: dict;
+    edges: dict;
+    next_node: int;
+    next_edge: int;
+  }
+
+  export func new() {
+    return Graph { nodes: {}, edges: {}, next_node: 1, next_edge: 1 };
+  }
+
+  export func add_node(g, value) {
+    let id = g.next_node;
+    g.nodes[id] = value;
+    g.next_node = id + 1;
+    return { "graph": g, "id": id };
+  }
+
+  export func remove_node(g, id) {
+    g.nodes = std.dict.delete(g.nodes, id);
+
+    let remove = [];
+    for (let eid, edge in g.edges) {
+      if (edge.from == id || edge.to == id) {
+        remove = std.list.append(remove, eid);
+      }
+    }
+    for (let eid in remove) {
+      g.edges = std.dict.delete(g.edges, eid);
+    }
+    return g;
+  }
+
+  export func has_node(g, id) {
+    return std.dict.has(g.nodes, id) != 0;
+  }
+
+  export func get_node(g, id) {
+    return std.dict.get(g.nodes, id);
+  }
+
+  export func set_node(g, id, value) {
+    if (!has_node(g, id)) {
+      fail("graph node not found: " + str(id));
+    }
+    g.nodes[id] = value;
+    return g;
+  }
+
+  export func node_count(g) {
+    return std.dict.len(g.nodes);
+  }
+
+  export func edge_count(g) {
+    return std.dict.len(g.edges);
+  }
+
+  export func node_ids(g) {
+    return std.dict.keys(g.nodes);
+  }
+
+  export func nodes(g) {
+    return std.dict.values(g.nodes);
+  }
+
+  export func add_edge(g, from, to, ...rest) {
+    if (!has_node(g, from) || !has_node(g, to)) {
+      fail("graph edge endpoints must exist");
+    }
+
+    let tag = "";
+    if (len(rest) > 0 && rest[0] != null) {
+      tag = rest[0];
+    }
+
+    let id = g.next_edge;
+    g.edges[id] = Edge { from: from, to: to, tag: tag };
+    g.next_edge = id + 1;
+    return { "graph": g, "id": id };
+  }
+
+  export func remove_edge(g, id) {
+    g.edges = std.dict.delete(g.edges, id);
+    return g;
+  }
+
+  export func edges(g) {
+    let out = [];
+    for (let eid, edge in g.edges) {
+      out = std.list.append(out, {
+        "id": eid,
+        "from": edge.from,
+        "to": edge.to,
+        "tag": edge.tag
+      });
+    }
+    return out;
+  }
+
+  export func neighbors(g, id, ...rest) {
+    let filter = null;
+    if (len(rest) > 0) {
+      filter = rest[0];
+    }
+
+    let out = [];
+    for (let eid, edge in g.edges) {
+      if (edge.from != id) {
+        continue;
+      }
+      if (filter != null && edge.tag != filter) {
+        continue;
+      }
+      out = std.list.append(out, edge.to);
+    }
+    return out;
+  }
+
+  export func bfs(g, start) {
+    let order = [];
+    if (!has_node(g, start)) {
+      return order;
+    }
+
+    let queue = [start];
+    let seen = {};
+    seen[start] = true;
+    let head = 0;
+
+    while (head < len(queue)) {
+      let id = queue[head];
+      head = head + 1;
+      order = std.list.append(order, id);
+
+      for (let next in neighbors(g, id)) {
+        if (!std.dict.has(seen, next)) {
+          seen[next] = true;
+          queue = std.list.append(queue, next);
+        }
+      }
+    }
+    return order;
+  }
+
+  export func dfs(g, start) {
+    let order = [];
+    if (!has_node(g, start)) {
+      return order;
+    }
+
+    let stack = [start];
+    let seen = {};
+
+    while (len(stack) > 0) {
+      let n = len(stack);
+      let id = stack[n - 1];
+      stack = std.list.slice(stack, 0, n - 1);
+
+      if (std.dict.has(seen, id)) {
+        continue;
+      }
+      seen[id] = true;
+      order = std.list.append(order, id);
+
+      let nexts = neighbors(g, id);
+      let i = len(nexts) - 1;
+      while (i >= 0) {
+        if (!std.dict.has(seen, nexts[i])) {
+          stack = std.list.append(stack, nexts[i]);
+        }
+        i = i - 1;
+      }
+    }
+    return order;
+  }
+
+  export func topo_sort(g) {
+    let indeg = {};
+    for (let id in std.dict.keys(g.nodes)) {
+      indeg[id] = 0;
+    }
+    for (let eid, edge in g.edges) {
+      indeg[edge.to] = indeg[edge.to] + 1;
+    }
+
+    let queue = [];
+    for (let id in std.dict.keys(indeg)) {
+      if (indeg[id] == 0) {
+        queue = std.list.append(queue, id);
+      }
+    }
+
+    let order = [];
+    let head = 0;
+    while (head < len(queue)) {
+      let id = queue[head];
+      head = head + 1;
+      order = std.list.append(order, id);
+
+      for (let next in neighbors(g, id)) {
+        indeg[next] = indeg[next] - 1;
+        if (indeg[next] == 0) {
+          queue = std.list.append(queue, next);
+        }
+      }
+    }
+
+    if (len(order) != len(g.nodes)) {
+      return { "ok": false, "error": "cycle" };
+    }
+    return { "ok": true, "order": order };
+  }
+
+  export func has_cycle(g) {
+    return !topo_sort(g)["ok"];
+  }
+
+  export func path(g, from, to) {
+    if (!has_node(g, from) || !has_node(g, to)) {
+      return { "ok": false, "error": "node not found" };
+    }
+    if (from == to) {
+      return { "ok": true, "path": [from] };
+    }
+
+    let queue = [from];
+    let seen = {};
+    let parent = {};
+    seen[from] = true;
+    let head = 0;
+
+    while (head < len(queue)) {
+      let id = queue[head];
+      head = head + 1;
+
+      for (let next in neighbors(g, id)) {
+        if (std.dict.has(seen, next)) {
+          continue;
+        }
+        seen[next] = true;
+        parent[next] = id;
+        if (next == to) {
+          let out = [to];
+          let current = to;
+          while (current != from) {
+            current = parent[current];
+            out = std.list.append(out, current);
+          }
+          return { "ok": true, "path": std.list.reverse(out) };
+        }
+        queue = std.list.append(queue, next);
+      }
+    }
+
+    return { "ok": false, "error": "not found" };
+  }
+
+  export func to_dot(g) {
+    let out = "digraph G {\n";
+    for (let id in std.dict.keys(g.nodes)) {
+      out = out + "  n" + str(id) + ";\n";
+    }
+    for (let eid, edge in g.edges) {
+      out = out + "  n" + str(edge.from) + " -> n" + str(edge.to);
+      if (edge.tag != "") {
+        out = out + " [label=\"" + edge.tag + "\"]";
+      }
+      out = out + ";\n";
+    }
+    out = out + "}\n";
+    return out;
+  }
+}

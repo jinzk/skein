@@ -18,6 +18,8 @@
 #include "std_set_source.inc"
 #include "std_deque_source.inc"
 #include "std_heap_source.inc"
+#include "std_route_source.inc"
+#include "std_graph_source.inc"
 
 #include <algorithm>
 #include <cctype>
@@ -69,6 +71,8 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.set", kStdSetSource},
     {"std.deque", kStdDequeSource},
     {"std.heap", kStdHeapSource},
+    {"std.route", kStdRouteSource},
+    {"std.graph", kStdGraphSource},
 };
 
 const char *find_embedded_source(const std::string &dotted) {
@@ -649,6 +653,21 @@ value_t *build_std_namespace() {
         newstrval("struct"),
         builtin_module({
             {"decode", B_struct_decode},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("lru"),
+        builtin_module({
+            {"new", B_lru_new},
+            {"get", B_lru_get},
+            {"peek", B_lru_peek},
+            {"put", B_lru_put},
+            {"delete", B_lru_delete},
+            {"has", B_lru_has},
+            {"keys", B_lru_keys},
+            {"values", B_lru_values},
+            {"len", B_lru_len},
+            {"capacity", B_lru_capacity},
+            {"clear", B_lru_clear},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("net"),

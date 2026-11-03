@@ -1761,6 +1761,139 @@ def main():
           "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
           stdout_all=["false", "empty heap"])
 
+    check("route dispatch",
+          'import std;\nimport std.route;\n'
+          'let r = route.new();\n'
+          'r = route.get(r, "/users/:id", func(req) { '
+          'return {"status": 200, "body": req["params"]["id"]}; });\n'
+          'r = route.get(r, "/users/me", func(req) { '
+          'return {"status": 200, "body": "me"}; });\n'
+          'print(route.dispatch(r, {"method": "GET", "path": "/users/42"})["body"]);\n'
+          'print(route.dispatch(r, {"method": "GET", "path": "/users/me"})["body"]);\n'
+          'print(route.dispatch(r, {"method": "POST", "path": "/users/42"})["status"]);\n'
+          'print(route.dispatch(r, {"method": "GET", "path": "/nope"})["status"]);\n',
+          stdout_all=["42", "me", "405", "404"])
+    check("route wildcard",
+          'import std;\nimport std.route;\n'
+          'let r = route.new();\n'
+          'r = route.get(r, "/files/*path", func(req) { '
+          'return {"status": 200, "body": req["params"]["path"]}; });\n'
+          'print(route.dispatch(r, {"method": "GET", "path": "/files/a/b.txt"})["body"]);\n',
+          stdout="a/b.txt")
+    check("route middleware",
+          'import std;\nimport std.route;\n'
+          'let r = route.new();\n'
+          'r = route.get(r, "/private", func(req) { '
+          'return {"status": 200, "body": "ok"}; });\n'
+          'r = route.use(r, func(req) { '
+          'if (req["path"] == "/private") { return {"status": 401, "body": "no"}; } '
+          'return null; });\n'
+          'print(route.dispatch(r, {"method": "GET", "path": "/private"})["status"]);\n'
+          'print(route.dispatch(r, {"method": "GET", "path": "/public"})["status"]);\n',
+          stdout_all=["401", "404"])
+    check("route duplicate",
+          'import std;\nimport std.route;\n'
+          'let r = route.new();\n'
+          'r = route.get(r, "/x", func(req) { return null; });\n'
+          'route.get(r, "/x", func(req) { return null; });\n',
+          stderr="duplicate route GET /x")
+    check("route wildcard method",
+          'import std;\nimport std.route;\n'
+          'let r = route.new();\n'
+          'r = route.add(r, "*", "/any", func(req) { '
+          'return {"status": 200, "body": req["method"]}; });\n'
+          'print(route.dispatch(r, {"method": "PATCH", "path": "/any"})["body"]);\n',
+          stdout="PATCH")
+
+    check("graph basics",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
+          'r = graph.add_edge(g, a, b, "next"); g = r["graph"];\n'
+          'r = graph.add_edge(g, b, c, "next"); g = r["graph"];\n'
+          'print(graph.node_count(g));\nprint(graph.edge_count(g));\n'
+          'print(graph.neighbors(g, a));\n'
+          'print(graph.neighbors(g, a, "next"));\n'
+          'print(graph.bfs(g, a));\nprint(graph.dfs(g, a));\n',
+          stdout_all=["3", "2", "[2]", "[2]", "[1, 2, 3]", "[1, 2, 3]"])
+    check("graph topo and cycle",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
+          'print(graph.topo_sort(g)["ok"]);\nprint(graph.has_cycle(g));\n'
+          'r = graph.add_edge(g, b, a); g = r["graph"];\n'
+          'print(graph.topo_sort(g)["ok"]);\nprint(graph.has_cycle(g));\n',
+          stdout_all=["true", "false", "false", "true"])
+    check("graph path",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
+          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
+          'r = graph.add_edge(g, b, c); g = r["graph"];\n'
+          'print(graph.path(g, a, c));\n'
+          'print(graph.path(g, c, a)["ok"]);\n',
+          stdout_all=["{ok: true, path: [1, 2, 3]}", "false"])
+    check("graph remove node cascades",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
+          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
+          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
+          'g = graph.remove_node(g, a);\n'
+          'print(graph.node_count(g));\nprint(graph.edge_count(g));\n',
+          stdout_all=["1", "0"])
+
+    check("lru basics",
+          'import std;\n'
+          'let l = std.lru.new(2);\n'
+          'let r = std.lru.put(l, "a", 1); l = r["lru"];\n'
+          'r = std.lru.put(l, "b", 2); l = r["lru"];\n'
+          'print(std.lru.keys(l));\n'
+          'r = std.lru.get(l, "a"); l = r["lru"];\n'
+          'print(std.lru.keys(l));\n'
+          'r = std.lru.put(l, "c", 3); l = r["lru"];\n'
+          'print(r["evicted"]["key"]);\n'
+          'print(std.lru.keys(l));\n'
+          'let p = std.lru.peek(l, "a")["lru"];\n'
+          'print(std.lru.keys(p));\n'
+          'r = std.lru.delete(l, "a"); l = r["lru"];\n'
+          'print(r["removed"]);\n'
+          'print(std.lru.len(l));\n'
+          'print(std.lru.capacity(l));\n'
+          'print(std.lru.clear(l));\n',
+          stdout_all=["[a, b]", "[b, a]", "b", "[a, c]", "[a, c]",
+                      "true", "1", "2", "lru(0/2, {})"])
+    check("lru get default",
+          'import std;\n'
+          'let l = std.lru.new(2);\n'
+          'let r = std.lru.get(l, "missing", 42);\n'
+          'print(r["found"]);\nprint(r["value"]);\n',
+          stdout_all=["false", "42"])
+    check("lru value semantics",
+          'import std;\n'
+          'let a = std.lru.new(2);\n'
+          'let r = std.lru.put(a, 1, "x");\n'
+          'let b = r["lru"];\n'
+          'print(std.lru.len(a));\nprint(std.lru.len(b));\n'
+          'let r2 = std.lru.put(a, 1, "x");\n'
+          'print(b == r2["lru"]);\n',
+          stdout_all=["0", "1", "true"])
+    check("lru capacity must be positive",
+          'import std;\nstd.lru.new(0);\n',
+          stderr="std.lru.new capacity must be at least 1")
+    check("lru key restrictions",
+          'import std;\nlet l = std.lru.new(2);\nstd.lru.get(l, 1.5);\n',
+          stderr="std.lru key: dict key must be")
+    check("lru json encode rejected",
+          'import std;\nstd.json.stringify(std.lru.new(2));\n',
+          stderr="cannot encode lru as JSON")
+
     check("control flow in function argument",
           "func f(x) { return x; }\n"
           "func g() {\n"

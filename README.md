@@ -1381,11 +1381,14 @@ std.result
 std.error
 std.enum
 std.struct
+std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
 std.set（内嵌 Skein 源码包）
 std.deque（内嵌 Skein 源码包）
 std.heap（内嵌 Skein 源码包）
+std.route（内嵌 Skein 源码包）
+std.graph（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -1439,6 +1442,24 @@ std.enum.tag(E::A { n: 2 })   // "main::E::A"
 
 无实例时可用 `std.enum.tag("E", "A")`。
 
+`std.lru` 是 C++ 值类型，每次更新返回新 lru：
+
+```text
+import std;
+
+let l = std.lru.new(2);
+let r = std.lru.put(l, "a", 1);
+l = r["lru"];
+r = std.lru.put(l, "b", 2);
+l = r["lru"];
+r = std.lru.get(l, "a");       // a 变成最近使用
+l = r["lru"];
+r = std.lru.put(l, "c", 3);    // 淘汰 b
+r["evicted"]                   // {key: b, value: 2}
+```
+
+API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `len` / `capacity` / `clear`。key 必须是合法 dict key；`keys` / `values` 从最久未使用到最近使用排列。
+
 `std.set` / `std.deque` / `std.heap` 也是内嵌 Skein 源码包：
 
 ```text
@@ -1459,6 +1480,48 @@ heap.peek(h)         // 1
 ```
 
 `set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
+
+`std.route` 是显式注册的 Web 路由：
+
+```text
+import std.route;
+
+let r = route.new();
+r = route.get(r, "/users/:id", func(req) {
+  return {"status": 200, "body": req["params"]["id"]};
+});
+route.dispatch(r, {"method": "GET", "path": "/users/42"});
+```
+
+支持 `:name` 参数、`*name` 通配、404/405、`route.use` 中间件；不做反射或装饰器。
+
+`std.graph` 提供有向图和常用算法：
+
+```text
+import std.graph;
+
+let g = graph.new();
+let r = graph.add_node(g, "a");
+g = r["graph"];
+let a = r["id"];
+
+r = graph.add_node(g, "b");
+g = r["graph"];
+let b = r["id"];
+
+r = graph.add_edge(g, a, b, "next");
+g = r["graph"];
+
+graph.bfs(g, a)               // [1, 2]
+graph.topo_sort(g)            // {ok: true, order: [1, 2]}
+graph.has_cycle(g)            // false
+graph.path(g, a, b)           // {ok: true, path: [1, 2]}
+graph.to_dot(g)               // Graphviz 文本
+```
+
+API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `to_dot`。
+
+`add_node` / `add_edge` 返回 `{graph, id}`；删除节点会级联删除相关边；边标签字段是 `tag`。
 
 当前提供的函数：
 

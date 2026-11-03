@@ -409,6 +409,7 @@ bool truthy(const struct value_t *v) {
         case T_list: return !((struct list_value_t *)v)->payload->items.empty();
         case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
         case T_struct: return true;
+        case T_lru: return !((struct lru_value_t *)v)->payload->items.empty();
         case T_method: return true;
         case T_func: return true;
         case T_builtin: return true;
@@ -586,6 +587,22 @@ bool value_equals(struct value_t *a, struct value_t *b) {
                 if (!value_equals(ea->payload->fields[i],
                                   eb->payload->fields[i]))
                     return false;
+            return true;
+        }
+        case T_lru: {
+            struct lru_value_t *la = (struct lru_value_t *)a;
+            struct lru_value_t *lb = (struct lru_value_t *)b;
+            if (la->payload == lb->payload) return true;
+            if (la->payload->capacity != lb->payload->capacity) return false;
+            if (la->payload->items.size() != lb->payload->items.size())
+                return false;
+            for (size_t i = 0; i < la->payload->items.size(); ++i) {
+                if (!value_equals(la->payload->items[i].first,
+                                  lb->payload->items[i].first) ||
+                    !value_equals(la->payload->items[i].second,
+                                  lb->payload->items[i].second))
+                    return false;
+            }
             return true;
         }
         case T_method: {
@@ -1103,6 +1120,8 @@ static const void *value_payload(const struct value_t *v) {
             return ((const struct struct_value_t *)v)->payload.get();
         case T_enum:
             return ((const struct enum_value_t *)v)->payload.get();
+        case T_lru:
+            return ((const struct lru_value_t *)v)->payload.get();
         default:
             return NULL;
     }
@@ -1151,6 +1170,15 @@ static bool value_reaches(const struct value_t *v, const void *target,
             for (struct value_t *field : ev->payload->fields)
                 if (value_reaches(field, target, visited))
                     return true;
+            return false;
+        }
+        case T_lru: {
+            const struct lru_value_t *lv = (const struct lru_value_t *)v;
+            for (auto &entry : lv->payload->items) {
+                if (value_reaches(entry.first, target, visited) ||
+                    value_reaches(entry.second, target, visited))
+                    return true;
+            }
             return false;
         }
         case T_result: {

@@ -148,6 +148,8 @@ set(SKEIN_EMBEDDED_SOURCES
   set.skein:kStdSetSource:std_set_source.inc
   deque.skein:kStdDequeSource:std_deque_source.inc
   heap.skein:kStdHeapSource:std_heap_source.inc
+  route.skein:kStdRouteSource:std_route_source.inc
+  graph.skein:kStdGraphSource:std_graph_source.inc
 )
 set(SKEIN_EMBEDDED_OUTPUTS)
 foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)

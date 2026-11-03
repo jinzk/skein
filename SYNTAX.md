@@ -1529,11 +1529,14 @@ std.result
 std.error
 std.enum
 std.struct
+std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
 std.set（内嵌 Skein 源码包）
 std.deque（内嵌 Skein 源码包）
 std.heap（内嵌 Skein 源码包）
+std.route（内嵌 Skein 源码包）
+std.graph（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -3072,6 +3075,53 @@ print(p);          // Point { x: 1, y: 2 }
 - 跨包类型写成 `module::Type`；
 - `std.json.stringify` 的输出格式不变，不引入 `$struct` 标签。
 
+### std.lru
+
+```text
+std.lru.new(capacity)              -> lru
+std.lru.get(lru, key[, default])   -> {lru, found, value}
+std.lru.peek(lru, key[, default])  -> {lru, found, value}
+std.lru.put(lru, key, value)       -> {lru, evicted}
+std.lru.delete(lru, key)           -> {lru, removed}
+std.lru.has(lru, key)              -> bool
+std.lru.keys(lru)                  -> list
+std.lru.values(lru)                -> list
+std.lru.len(lru)                   -> int
+std.lru.capacity(lru)              -> int
+std.lru.clear(lru)                 -> lru
+```
+
+`std.lru` 是 C++ 值类型，具有值语义（每次更新返回新 lru）：
+
+```text
+import std;
+
+let l = std.lru.new(2);
+let r = std.lru.put(l, "a", 1);
+l = r["lru"];
+
+r = std.lru.put(l, "b", 2);
+l = r["lru"];
+
+r = std.lru.get(l, "a");       // a 变成最近使用
+l = r["lru"];
+
+r = std.lru.put(l, "c", 3);    // 淘汰最久未使用的 b
+print(r["evicted"]);           // {key: b, value: 2}
+```
+
+规则：
+
+- `capacity` 必须 >= 1；
+- key 必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）；
+- 顺序从最久未使用到最近使用：`keys` / `values` 按此顺序返回；
+- `get` 命中时把 key 移到最近使用端，`peek` 不改变顺序；
+- 未命中时返回 `found: false`，`value` 是第三个参数或 `null`；
+- `put` 返回被淘汰的 `{key, value}`，没有淘汰时 `evicted` 为 `null`；
+- `delete` 返回 `{lru, removed}`；
+- `clear` 保留 capacity；
+- lru 目前不能 JSON 序列化。
+
 ### std.set / std.deque / std.heap
 
 这三个都是内嵌 Skein 源码包。
@@ -3133,6 +3183,112 @@ let h2 = heap.from_list([3, 1, 2], func(a, b) { return a > b; });  // 大顶堆
 ```
 
 `less(a, b)` 返回 `true` 表示 `a` 优先出堆。`pop` 返回 `{ok, heap, value}`；空堆返回 `{ok: false, error: "empty heap", heap}`。
+
+### std.route
+
+```text
+import std.route;
+
+let r = route.new();
+r = route.get(r, "/users/:id", func(req) {
+  return {"status": 200, "body": req["params"]["id"]};
+});
+r = route.get(r, "/users/me", func(req) {
+  return {"status": 200, "body": "me"};
+});
+r = route.get(r, "/files/*path", func(req) {
+  return {"status": 200, "body": req["params"]["path"]};
+});
+r = route.use(r, func(req) {
+  if (req["path"] == "/private") {
+    return {"status": 401, "body": "no"};
+  }
+  return null;
+});
+
+route.dispatch(r, {"method": "GET", "path": "/users/42"});
+```
+
+API：
+
+```text
+route.new()                         -> Routes
+route.add(routes, method, pattern, handler) -> Routes
+route.get/post/put/delete(routes, pattern, handler) -> Routes
+route.use(routes, middleware)       -> Routes
+route.dispatch(routes, request)     -> response
+```
+
+规则：
+
+- `:name` 匹配单段并写入 `req["params"][name]`；
+- `*name` 匹配剩余路径；
+- 优先级：静态段 > `:name` > `*name`；
+- 方法不匹配但路径存在 → 405；完全不存在 → 404；
+- 同一个 `(method, pattern)` 重复注册会 `fail`；
+- middleware 签名是 `func(req) -> response|null`，返回 `null` 继续，否则短路；
+- handler 返回 response dict；`req["params"]` 已填好；
+- async handler 返回的 task 会原样从 `dispatch` 返回，可交给 `std.http.serve` 或外层 `await`。
+
+### std.graph
+
+```text
+import std.graph;
+
+let g = graph.new();
+let r = graph.add_node(g, "a");
+g = r["graph"];
+let a = r["id"];
+
+r = graph.add_node(g, "b");
+g = r["graph"];
+let b = r["id"];
+
+r = graph.add_edge(g, a, b, "next");
+g = r["graph"];
+
+graph.bfs(g, a)               // [1, 2]
+graph.dfs(g, a)               // [1, 2]
+graph.neighbors(g, a)         // [2]
+graph.topo_sort(g)            // {ok: true, order: [1, 2]}
+graph.has_cycle(g)            // false
+graph.path(g, a, b)           // {ok: true, path: [1, 2]}
+graph.to_dot(g)               // Graphviz 文本
+```
+
+API：
+
+```text
+graph.new()                                 -> Graph
+graph.add_node(g, value)                    -> {graph, id}
+graph.remove_node(g, id)                    -> Graph
+graph.has_node(g, id)                       -> bool
+graph.get_node(g, id)                       -> value
+graph.set_node(g, id, value)                -> Graph
+graph.node_count(g) / graph.edge_count(g)   -> int
+graph.node_ids(g) / graph.nodes(g)          -> list
+graph.add_edge(g, from, to[, tag])          -> {graph, id}
+graph.remove_edge(g, id)                    -> Graph
+graph.edges(g)                              -> list
+graph.neighbors(g, id[, tag])               -> list
+graph.bfs(g, start) / graph.dfs(g, start)   -> list
+graph.topo_sort(g)                          -> {ok, order} | {ok: false, error}
+graph.has_cycle(g)                          -> bool
+graph.path(g, from, to)                     -> {ok, path} | {ok: false, error}
+graph.to_dot(g)                             -> string
+```
+
+规则：
+
+- 节点 id 和边 id 都是递增整数；
+- `add_node` / `add_edge` 返回新 graph，必须用 `r["graph"]` 取回；
+- `add_edge` 的两个端点必须已存在，否则 `fail`；
+- `remove_node` 会级联删除所有相关边；
+- 边标签字段叫 `tag`（`label` 是保留字）；
+- `topo_sort` 遇到环返回 `{ok: false, error: "cycle"}`；
+- `bfs` / `dfs` 返回访问顺序，不存在的起点返回空列表；
+- `path` 是 BFS 最短路径，不可达返回 `{ok: false, error: "not found"}`；
+- `neighbors` 可按 `tag` 过滤。
 
 ### 6.5 查找路径
 

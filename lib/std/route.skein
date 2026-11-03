@@ -1,0 +1,177 @@
+package route {
+  import std;
+
+  export struct Route {
+    method: string;
+    pattern: string;
+    handler: callable;
+  }
+
+  export struct Routes {
+    entries: list;
+    middlewares: list;
+  }
+
+  export func new() {
+    return Routes { entries: [], middlewares: [] };
+  }
+
+  func _segments(path) {
+    let out = [];
+    for (let part in std.string.split(path, "/")) {
+      if (part != "") {
+        out = std.list.append(out, part);
+      }
+    }
+    return out;
+  }
+
+  func _match(pattern, path) {
+    let pats = _segments(pattern);
+    let parts = _segments(path);
+    let params = {};
+    let score = 0;
+    let pi = 0;
+    let si = 0;
+
+    while (pi < len(pats)) {
+      let part = pats[pi];
+
+      if (std.string.starts_with(part, "*")) {
+        let name = std.string.substr(part, 1);
+        let rest = [];
+        while (si < len(parts)) {
+          rest = std.list.append(rest, parts[si]);
+          si = si + 1;
+        }
+        if (name != "") {
+          params[name] = std.string.join(rest, "/");
+        }
+        score = score + 1;
+        pi = pi + 1;
+        continue;
+      }
+
+      if (si >= len(parts)) {
+        return { "ok": false };
+      }
+
+      if (std.string.starts_with(part, ":")) {
+        let name = std.string.substr(part, 1);
+        if (name != "") {
+          params[name] = parts[si];
+        }
+        score = score + 2;
+      } else {
+        if (part != parts[si]) {
+          return { "ok": false };
+        }
+        score = score + 3;
+      }
+
+      pi = pi + 1;
+      si = si + 1;
+    }
+
+    if (si != len(parts)) {
+      return { "ok": false };
+    }
+    return { "ok": true, "params": params, "score": score };
+  }
+
+  func _response(status, body) {
+    return {
+      "status": status,
+      "headers": { "Content-Type": "text/plain" },
+      "body": body
+    };
+  }
+
+  export func add(routes, method, pattern, handler) {
+    if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
+      fail("route handler must be callable");
+    }
+
+    for (let entry in routes.entries) {
+      if (entry.method == method && entry.pattern == pattern) {
+        fail("duplicate route " + method + " " + pattern);
+      }
+    }
+
+    routes.entries = std.list.append(routes.entries, Route {
+      method: method,
+      pattern: pattern,
+      handler: handler
+    });
+    return routes;
+  }
+
+  export func get(routes, pattern, handler) {
+    return add(routes, "GET", pattern, handler);
+  }
+
+  export func post(routes, pattern, handler) {
+    return add(routes, "POST", pattern, handler);
+  }
+
+  export func put(routes, pattern, handler) {
+    return add(routes, "PUT", pattern, handler);
+  }
+
+  export func delete(routes, pattern, handler) {
+    return add(routes, "DELETE", pattern, handler);
+  }
+
+  export func use(routes, middleware) {
+    if (kind_of(middleware) != "function" &&
+        kind_of(middleware) != "builtin") {
+      fail("route middleware must be callable");
+    }
+    routes.middlewares = std.list.append(routes.middlewares, middleware);
+    return routes;
+  }
+
+  export func dispatch(routes, req) {
+    for (let middleware in routes.middlewares) {
+      let result = middleware(req);
+      if (result != null) {
+        return result;
+      }
+    }
+
+    let method = req["method"];
+    let path = req["path"];
+    let best = null;
+    let best_score = -1;
+    let best_params = null;
+
+    for (let entry in routes.entries) {
+      if (entry.method != method && entry.method != "*") {
+        continue;
+      }
+      let matched = _match(entry.pattern, path);
+      if (matched["ok"] && matched["score"] > best_score) {
+        best = entry;
+        best_score = matched["score"];
+        best_params = matched["params"];
+      }
+    }
+
+    if (best == null) {
+      let known_path = false;
+      for (let entry in routes.entries) {
+        if (_match(entry.pattern, path)["ok"]) {
+          known_path = true;
+          break;
+        }
+      }
+      if (known_path) {
+        return _response(405, "method not allowed");
+      }
+      return _response(404, "not found");
+    }
+
+    req["params"] = best_params;
+    return best.handler(req);
+  }
+}

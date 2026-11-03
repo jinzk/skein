@@ -46,6 +46,7 @@ enum val_type {
     T_error,
     T_struct,
     T_enum,
+    T_lru,
     T_method,
     T_null,
     T_class,
@@ -118,6 +119,19 @@ struct dict_payload {
 struct list_value_t {
     enum val_type type;
     std::shared_ptr<list_payload> payload;
+};
+
+struct lru_payload {
+    /* Recency order: index 0 is the least recently used entry, the last
+     * element is the most recently used one. */
+    std::vector<std::pair<value_t *, value_t *>> items;
+    std::size_t capacity = 0;
+    ~lru_payload();
+};
+
+struct lru_value_t {
+    enum val_type type;
+    std::shared_ptr<lru_payload> payload;
 };
 
 struct dict_value_t {
@@ -216,6 +230,7 @@ struct value_t *dupval(struct value_t *v);
 
 struct list_value_t *newlistval();
 struct dict_value_t *newdictval();
+struct lru_value_t *newlruval(std::size_t capacity);
 
 /* Free a value and everything it owns. NULL is safe. */
 void freeval(struct value_t *v);

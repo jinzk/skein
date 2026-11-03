@@ -99,6 +99,7 @@ add_executable(${PROJECT_NAME}
   repl.cpp
   result.cpp
   scopestack.cpp
+  source_encoding.cpp
   structeval.cpp
   structtype.cpp
   symbol.cpp

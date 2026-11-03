@@ -35,6 +35,7 @@ Skein 当前的 `string` 是 UTF-8 文本，二进制数据使用独立的 `byte
   - `latin-1` / `iso-8859-1`
   - `windows-1252`
   - `utf-16le` / `utf-16be` / `utf-16`
+  - `utf-32le` / `utf-32be` / `utf-32`
   - `gbk` / `cp936`
   - `gb18030`
 - GBK / GB18030 的双向转换
@@ -58,7 +59,7 @@ GBK / GB18030 的可用性。
 
 | 层级 | 编码 | 实现 | 可用性 |
 |---|---|---|---|
-| L0 | `utf-8`、`ascii`、`latin-1`、`windows-1252`、`utf-16*` | 内置算法 | 始终 |
+| L0 | `utf-8`、`ascii`、`latin-1`、`windows-1252`、`utf-16*`、`utf-32*` | 内置算法 | 始终 |
 | L1 | `gbk` / `cp936` | 内置 GBK 码表 | 始终 |
 | L2 | `gb18030` | 内置双字节表 + 四字节范围表 | 始终 |
 | L3 | 其它旧编码 | 可选 iconv / Windows 代码页 | 有条件 |
@@ -128,6 +129,9 @@ std.encoding.supports(encoding)                 → bool
 | `utf-16le` | `utf16le`、`utf-16-le` |
 | `utf-16be` | `utf16be`、`utf-16-be` |
 | `utf-16` | `utf16` |
+| `utf-32le` | `utf32le`、`utf-32-le` |
+| `utf-32be` | `utf32be`、`utf-32-be` |
+| `utf-32` | `utf32` |
 | `gbk` | `cp936`、`ms936`、`windows-936` |
 | `gb18030` | `gb-18030` |
 
@@ -189,15 +193,15 @@ Skein 的 `string` 以 `char*` 保存，`newstrval` 通过 `strlen` 复制，
 
 ### 5.3 BOM
 
-- `utf-16le` / `utf-16be`：
+- `utf-16le` / `utf-16be`、`utf-32le` / `utf-32be`：
   - 不自动剥离 BOM；BOM 按 `U+FEFF` 处理。
-- `utf-16`：
+- `utf-16` / `utf-32`：
   - 解码时读取 BOM，自动选择大小端并剥离 BOM。
-  - 没有 BOM 时报错，提示使用 `utf-16le` / `utf-16be`。
-  - 编码时固定输出 BOM + 小端 UTF-16（`FF FE`），保证跨平台一致。
+  - 没有 BOM 时报错，提示使用显式字节序版本。
+  - 编码时固定输出 BOM + 小端（`FF FE` / `FF FE 00 00`），保证跨平台一致。
 - `utf-8`：
   - 默认不剥离 BOM，`EF BB BF` 解码为 `U+FEFF`。
-- `utf-32` 暂不纳入首版；如后续加入，BOM 规则与 `utf-16` 一致。
+- 源文件加载层会先按 BOM 识别并剥离 BOM，再调用对应显式编码解码。
 
 ### 5.4 非法序列消费规则
 

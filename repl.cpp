@@ -2,6 +2,7 @@
 
 #include "platform.h"
 #include "scopestack.h"
+#include "source_encoding.h"
 #include "symbol.h"
 #include "valuetype.h"
 
@@ -395,7 +396,7 @@ bool handle_command(const std::string &line) {
         }
         std::string data;
         std::string error;
-        if (!platform_read_file(path, data, error)) {
+        if (!load_source_file(path, source_encoding_get(), data, error)) {
             std::fprintf(stderr, ":load %s: %s\n", path.c_str(),
                          error.c_str());
             return true;

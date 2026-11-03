@@ -33,6 +33,9 @@ enum class Encoding {
     Utf16Le,
     Utf16Be,
     Utf16,
+    Utf32Le,
+    Utf32Be,
+    Utf32,
     Gbk,
     Gb18030,
 };
@@ -94,6 +97,20 @@ static bool lookup_encoding(const std::string &name, Encoding &encoding) {
     }
     if (normalized == "utf-16" || normalized == "utf16") {
         encoding = Encoding::Utf16;
+        return true;
+    }
+    if (normalized == "utf-32le" || normalized == "utf32le" ||
+        normalized == "utf-32-le") {
+        encoding = Encoding::Utf32Le;
+        return true;
+    }
+    if (normalized == "utf-32be" || normalized == "utf32be" ||
+        normalized == "utf-32-be") {
+        encoding = Encoding::Utf32Be;
+        return true;
+    }
+    if (normalized == "utf-32" || normalized == "utf32") {
+        encoding = Encoding::Utf32;
         return true;
     }
     if (normalized == "gbk" || normalized == "cp936" ||
@@ -394,6 +411,34 @@ static uint16_t read_u16(const std::string &data, size_t offset,
     return (uint16_t)(((uint16_t)second << 8) | first);
 }
 
+static void append_u32(uint32_t value, bool big_endian, std::string &out) {
+    if (big_endian) {
+        out.push_back((char)(value >> 24));
+        out.push_back((char)((value >> 16) & 0xFF));
+        out.push_back((char)((value >> 8) & 0xFF));
+        out.push_back((char)(value & 0xFF));
+    } else {
+        out.push_back((char)(value & 0xFF));
+        out.push_back((char)((value >> 8) & 0xFF));
+        out.push_back((char)((value >> 16) & 0xFF));
+        out.push_back((char)(value >> 24));
+    }
+}
+
+static uint32_t read_u32(const std::string &data, size_t offset,
+                         bool big_endian) {
+    const unsigned char first = (unsigned char)data[offset];
+    const unsigned char second = (unsigned char)data[offset + 1];
+    const unsigned char third = (unsigned char)data[offset + 2];
+    const unsigned char fourth = (unsigned char)data[offset + 3];
+    if (big_endian) {
+        return ((uint32_t)first << 24) | ((uint32_t)second << 16) |
+               ((uint32_t)third << 8) | (uint32_t)fourth;
+    }
+    return ((uint32_t)fourth << 24) | ((uint32_t)third << 16) |
+           ((uint32_t)second << 8) | (uint32_t)first;
+}
+
 static void append_gb18030_four_byte(uint32_t index, std::string &out) {
     const uint32_t lead = 0x81 + index / (10 * 126 * 10);
     index %= 10 * 126 * 10;
@@ -543,6 +588,54 @@ static bool decode_utf16(const std::string &input, bool big_endian,
         if (!handle_decode_error("utf-16", pos, mode, out, error))
             return false;
         pos = input.size();
+    }
+    return true;
+}
+
+static bool decode_utf32(const std::string &input, bool big_endian,
+                         bool require_bom, ErrorMode mode, std::string &out,
+                         std::string &error) {
+    size_t pos = 0;
+    if (require_bom) {
+        if (input.size() < 4) {
+            error = "utf-32 requires a BOM";
+            return false;
+        }
+        const unsigned char first = (unsigned char)input[0];
+        const unsigned char second = (unsigned char)input[1];
+        const unsigned char third = (unsigned char)input[2];
+        const unsigned char fourth = (unsigned char)input[3];
+        if (first == 0x00 && second == 0x00 && third == 0xFE &&
+            fourth == 0xFF) {
+            big_endian = true;
+            pos = 4;
+        } else if (first == 0xFF && second == 0xFE && third == 0x00 &&
+                   fourth == 0x00) {
+            big_endian = false;
+            pos = 4;
+        } else {
+            error = "utf-32 requires a BOM";
+            return false;
+        }
+    }
+
+    while (pos + 3 < input.size()) {
+        const uint32_t codepoint = read_u32(input, pos, big_endian);
+        if (codepoint > 0x10FFFF ||
+            (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+            if (!handle_decode_error("utf-32", pos, mode, out, error))
+                return false;
+            pos += 4;
+            continue;
+        }
+        if (!append_decoded_codepoint(codepoint, out, error))
+            return false;
+        pos += 4;
+    }
+
+    if (pos < input.size()) {
+        if (!handle_decode_error("utf-32", pos, mode, out, error))
+            return false;
     }
     return true;
 }
@@ -772,6 +865,27 @@ static bool encode_utf16(const std::string &input, bool big_endian,
                      });
 }
 
+static bool encode_utf32(const std::string &input, bool big_endian,
+                         bool with_bom, ErrorMode mode, std::string &output,
+                         std::string &error) {
+    if (with_bom) {
+        output.push_back((char)0xFF);
+        output.push_back((char)0xFE);
+        output.push_back((char)0x00);
+        output.push_back((char)0x00);
+    }
+    return walk_utf8(input, mode, output, error,
+                     [&](uint32_t codepoint) {
+                         if (codepoint > 0x10FFFF ||
+                             (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+                             return handle_unrepresentable(
+                                 codepoint, "utf-32", mode, output, error);
+                         }
+                         append_u32(codepoint, big_endian, output);
+                         return true;
+                     });
+}
+
 static bool encode_gbk(const std::string &input, ErrorMode mode,
                        std::string &output, std::string &error) {
     const auto &reverse = gb18030_reverse();
@@ -855,6 +969,12 @@ static bool decode_with(const std::string &input, Encoding encoding,
             return decode_utf16(input, true, false, mode, output, error);
         case Encoding::Utf16:
             return decode_utf16(input, false, true, mode, output, error);
+        case Encoding::Utf32Le:
+            return decode_utf32(input, false, false, mode, output, error);
+        case Encoding::Utf32Be:
+            return decode_utf32(input, true, false, mode, output, error);
+        case Encoding::Utf32:
+            return decode_utf32(input, false, true, mode, output, error);
         case Encoding::Gbk:
             return decode_gbk(input, mode, output, error);
         case Encoding::Gb18030:
@@ -882,6 +1002,12 @@ static bool encode_with(const std::string &input, Encoding encoding,
             return encode_utf16(input, true, false, mode, output, error);
         case Encoding::Utf16:
             return encode_utf16(input, false, true, mode, output, error);
+        case Encoding::Utf32Le:
+            return encode_utf32(input, false, false, mode, output, error);
+        case Encoding::Utf32Be:
+            return encode_utf32(input, true, false, mode, output, error);
+        case Encoding::Utf32:
+            return encode_utf32(input, false, true, mode, output, error);
         case Encoding::Gbk:
             return encode_gbk(input, mode, output, error);
         case Encoding::Gb18030:
@@ -926,6 +1052,49 @@ static bool read_error_mode(const std::vector<struct value_t *> &args,
 }
 
 }  // namespace
+
+std::string canonical_encoding_name(const std::string &name) {
+    Encoding encoding;
+    if (!lookup_encoding(name, encoding))
+        return std::string();
+    switch (encoding) {
+        case Encoding::Utf8:
+            return "utf-8";
+        case Encoding::Ascii:
+            return "ascii";
+        case Encoding::Latin1:
+            return "latin-1";
+        case Encoding::Windows1252:
+            return "windows-1252";
+        case Encoding::Utf16Le:
+            return "utf-16le";
+        case Encoding::Utf16Be:
+            return "utf-16be";
+        case Encoding::Utf16:
+            return "utf-16";
+        case Encoding::Utf32Le:
+            return "utf-32le";
+        case Encoding::Utf32Be:
+            return "utf-32be";
+        case Encoding::Utf32:
+            return "utf-32";
+        case Encoding::Gbk:
+            return "gbk";
+        case Encoding::Gb18030:
+            return "gb18030";
+    }
+    return std::string();
+}
+
+bool decode_to_utf8(const std::string &input, const std::string &encoding,
+                    std::string &output, std::string &error) {
+    Encoding parsed;
+    if (!lookup_encoding(encoding, parsed)) {
+        error = "unknown encoding \"" + encoding + "\"";
+        return false;
+    }
+    return decode_with(input, parsed, ErrorMode::Strict, output, error);
+}
 
 struct value_t *call_encoding_builtin(
     int functype, const std::vector<struct value_t *> &args) {

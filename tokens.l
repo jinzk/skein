@@ -492,7 +492,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
                             (unsigned int)scanned.bad_codepoint);
     else
         diag_report_lexical(g_token_line, g_token_column,
-                            "invalid UTF-8 byte 0x%02x in identifier",
+                            "invalid UTF-8 byte 0x%02x in identifier; "
+                            "source must be UTF-8 or use --encoding <name>",
                             (unsigned char)yytext[scanned.bad_offset]);
 
     int bad = (int)scanned.bad_length;
@@ -577,7 +578,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
                                 "unexpected byte 0x%02x", c);
     } else {
         diag_report_lexical(g_token_line, g_token_column,
-                            "invalid UTF-8 byte 0x%02x", c);
+                            "invalid UTF-8 byte 0x%02x; source must be "
+                            "UTF-8 or use --encoding <name>", c);
     }
 }
 

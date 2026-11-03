@@ -269,6 +269,95 @@ def check_unicode_normalization_samples():
     assert actual == expected, "unicode normalization mismatch"
 
 
+def check_source_encoding():
+    """Verify BOM handling and --encoding for source files."""
+    script = 'print("你好");\n'
+    cases = [
+        ("utf8", script.encode("utf-8"), ()),
+        ("utf8 bom", b"\xef\xbb\xbf" + script.encode("utf-8"), ()),
+        ("utf16le bom", b"\xff\xfe" + script.encode("utf-16le"), ()),
+        ("utf16be bom", b"\xfe\xff" + script.encode("utf-16be"), ()),
+        ("utf32le bom", b"\xff\xfe\x00\x00" + script.encode("utf-32le"), ()),
+        ("utf32be bom", b"\x00\x00\xfe\xff" + script.encode("utf-32be"), ()),
+        ("gbk explicit", script.encode("gbk"), ("--encoding", "gbk")),
+        ("utf16le explicit", script.encode("utf-16le"),
+         ("--encoding", "utf-16le")),
+        ("utf16 explicit with bom",
+         b"\xff\xfe" + script.encode("utf-16le"),
+         ("--encoding", "utf-16")),
+    ]
+    for name, data, args in cases:
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            handle.write(data)
+            path = handle.name
+        try:
+            proc = subprocess.run(
+                [BIN, *args, path],
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                timeout=10,
+            )
+        finally:
+            os.unlink(path)
+        assert proc.returncode == 0, (name, proc.stderr)
+        assert "你好" in proc.stdout, (name, proc.stdout, proc.stderr)
+
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(b'\xef\xbb\xbf' + script.encode("gbk"))
+        path = handle.name
+    try:
+        proc = subprocess.run(
+            [BIN, "--encoding", "gbk", path],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+        )
+    finally:
+        os.unlink(path)
+    assert proc.returncode == 2, proc.returncode
+    assert "BOM" in proc.stderr and "gbk" in proc.stderr, proc.stderr
+
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(b"let a\x80b = 1;\n")
+        path = handle.name
+    try:
+        proc = subprocess.run(
+            [BIN, path],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=10,
+        )
+    finally:
+        os.unlink(path)
+    assert proc.returncode == 1, proc.returncode
+    assert "invalid UTF-8 byte" in proc.stderr, proc.stderr
+    assert "--encoding" in proc.stderr, proc.stderr
+
+    with tempfile.TemporaryDirectory() as tmp:
+        app = os.path.join(tmp, "app")
+        package = os.path.join(app, "pkg")
+        os.makedirs(package)
+        with open(os.path.join(package, "pkg.skein"), "wb") as handle:
+            handle.write('package pkg { export let value = "包"; }\n'
+                         .encode("gbk"))
+        main_path = os.path.join(app, "main.skein")
+        with open(main_path, "wb") as handle:
+            handle.write('import pkg;\nprint(pkg.value);\n'.encode("gbk"))
+        proc = subprocess.run(
+            [BIN, "--encoding", "gbk", main_path],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "包" in proc.stdout, (proc.stdout, proc.stderr)
+
+
 def main():
     check("addition", "1+2\n", stdout="= 3")
     check("pipe mode has no REPL prompt", "1+2\n", stdout="= 3")
@@ -6281,6 +6370,19 @@ def main():
         stdout_all=["fffe2d4e", "中"],
     )
     check(
+        "std encoding utf32",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode("中", "utf-32le")));\n'
+        'print(bytes_hex(std.encoding.encode("中", "utf-32be")));\n'
+        'print(bytes_hex(std.encoding.encode("中", "utf-32")));\n'
+        'print(std.encoding.decode(bytes_from_hex("2d4e0000"), "utf-32le"));\n'
+        'print(std.encoding.decode(bytes_from_hex("00004e2d"), "utf-32be"));\n'
+        'print(std.encoding.decode(bytes_from_hex("fffe00002d4e0000"), '
+        '"utf-32"));\n',
+        stdout_all=["2d4e0000", "00004e2d", "fffe00002d4e0000",
+                    "中", "中", "中"],
+    )
+    check(
         "std encoding error modes",
         "import std;\n"
         'print(std.encoding.decode(bytes_from_hex("ff"), "utf-8", "replace"));\n'
@@ -8528,6 +8630,7 @@ std.json.stringify(std.json.parse(text))
 
     check_encoding_two_byte_tables()
     check_unicode_normalization_samples()
+    check_source_encoding()
     check_interactive_continuation()
 
     print(f"all tests passed for {BIN}")

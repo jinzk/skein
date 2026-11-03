@@ -18,7 +18,7 @@ let foo变量 = 4;
 - 标识符区分大小写；
 - 当前使用 Unicode 16.0.0 的 `XID_Start` / `XID_Continue` 数据；
 - 关键字和内置函数名仍只识别 ASCII；
-- 源码必须是合法 UTF-8；非法 UTF-8 字节属于词法错误；
+- 源码默认按 UTF-8 读取；UTF-16/UTF-32 BOM 会自动转码，无 BOM 时可用 `--encoding NAME` 指定；转码后必须是合法 UTF-8；
 - 标识符只使用源码中的字面 UTF-8 字符，不支持 `\u` / `\u{...}` 转义；
 - 非 ASCII 标识符按 NFC 归一化（不做 NFKC），规范等价写法视为同一标识符；字符串可通过 `std.unicode.normalize` 显式归一化；
 - 函数形参、变长参数名以及类型标注中的用户类型名使用与普通变量相同的标识符规则。
@@ -58,7 +58,8 @@ package import export as
 - 在括号外的换行通常表示语句结束；
 - 同级语句可以用分号分隔；
 - 脚本第一行的 `#!` shebang 会被跳过；
-- 文件开头的 UTF-8 BOM 会被跳过。
+- 文件开头会按 BOM 识别 UTF-8 / UTF-16 / UTF-32 并转成 UTF-8；
+- 没有 BOM 时默认 UTF-8，也可以用 `--encoding NAME` 显式指定其它编码。
 
 ## 2. 字面量
 
@@ -1333,8 +1334,9 @@ std.encoding.supports(encoding)                 → bool
 ```
 
 支持的编码包括 `utf-8`、`ascii`、`latin-1`、`windows-1252`、`utf-16le`、
-`utf-16be`、`utf-16`、`gbk` / `cp936`、`gb18030`。GBK 和 GB18030 使用内置
-码表，不依赖平台 iconv 或代码页。`errors` 支持 `strict`、`replace`、`ignore`。
+`utf-16be`、`utf-16`、`utf-32le`、`utf-32be`、`utf-32`、`gbk` / `cp936`、
+`gb18030`。GBK 和 GB18030 使用内置码表，不依赖平台 iconv 或代码页。
+`errors` 支持 `strict`、`replace`、`ignore`。
 
 ```text
 import std;

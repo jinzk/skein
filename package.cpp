@@ -8,6 +8,7 @@
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
+#include "source_encoding.h"
 #include "symbol.h"
 #include "unicode_ident.h"
 #include "valuetype.h"
@@ -844,10 +845,16 @@ bool load_package_file(const resolved_package &resolved,
         return true;
     }
 
-    FILE *file = platform_open_file(path_to_utf8(resolved.file), "rb");
+    const std::string package_path = path_to_utf8(resolved.file);
+    std::string source_text;
+    if (!load_source_file(package_path, source_encoding_get(),
+                          source_text, error)) {
+        error = "cannot load package file " + package_path + ": " + error;
+        return false;
+    }
+    FILE *file = source_text_file(source_text, error);
     if (!file) {
-        error = "cannot open package file: " +
-                path_to_utf8(resolved.file);
+        error = "cannot open package file: " + package_path + ": " + error;
         return false;
     }
 

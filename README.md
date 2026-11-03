@@ -60,9 +60,9 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv �
 
 当前只面向 MinGW-w64/GCC，不包含 MSVC 专用适配。
 
-脚本文件建议保存为 UTF-8；输入开头的 UTF-8 BOM 会被忽略。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
+脚本文件默认按 UTF-8 读取；UTF-8 / UTF-16LE / UTF-16BE / UTF-32LE / UTF-32BE 的 BOM 会被自动识别并转成 UTF-8。没有 BOM 的其它编码可以用 `--encoding NAME` 显式指定，例如 `--encoding gbk`。显式编码与 BOM 冲突时会直接报错。如果控制台无法切换到 UTF-8，中文下标、格式化和输出可能无法正常工作，需要在输入输出边界额外做代码页转换。
 
-源码必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，非 ASCII 标识符按 NFC 归一化（不做 NFKC），规范等价写法视为同一标识符；字符串可以通过 `std.unicode.normalize` 显式归一化。函数形参、变长参数名、结构体字段、类型名、label、包名和 import 路径组件使用相同的 NFC 规则。
+源码在转码后必须是合法 UTF-8，非法 UTF-8 字节会报词法错误。标识符首字符支持 Unicode `XID_Start`（以及 `_`），后续字符支持 `XID_Continue`、`_` 和 ASCII 数字，例如 `let 变量 = 1;`、`let café = 2;`、`let foo变量 = 3;`。当前使用 Unicode 16.0.0 的 XID 数据。关键字和内置函数名仍只识别 ASCII；标识符不支持 `\u` 转义，非 ASCII 标识符按 NFC 归一化（不做 NFKC），规范等价写法视为同一标识符；字符串可以通过 `std.unicode.normalize` 显式归一化。函数形参、变长参数名、结构体字段、类型名、label、包名和 import 路径组件使用相同的 NFC 规则。
 
 ## 脚本模式与 shebang
 
@@ -71,6 +71,14 @@ Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv �
 ```bash
 ./build/skein script.skein
 ```
+
+如果脚本不是 UTF-8，可以显式指定源文件编码：
+
+```bash
+./build/skein --encoding gbk script.skein
+```
+
+该编码同样应用于 `import` 加载的包文件和 `:load` 文件。带 BOM 的 UTF-16/UTF-32 文件不需要再指定编码。
 
 也可以使用 shebang：
 
@@ -89,7 +97,8 @@ chmod +x script.skein
 脚本模式会：
 
 - 跳过第一行的 `#!`；
-- 跳过 UTF-8 BOM；
+- 默认按 UTF-8 读取，并自动识别 UTF-8 / UTF-16 / UTF-32 BOM；
+- 没有 BOM 时可用 `--encoding NAME` 指定 GBK、GB18030 等编码；
 - 不打印 `> ` 提示符；
 - 不打印顶层表达式的 `= result` 结果，需要输出时请使用 `print`；
 - 忽略第一行之外的普通注释仍使用 `//`；
@@ -2701,6 +2710,7 @@ std.encoding.supports(encoding)                 → bool
 ```text
 utf-8  ascii  latin-1  windows-1252
 utf-16le  utf-16be  utf-16
+utf-32le  utf-32be  utf-32
 gbk / cp936
 gb18030
 ```
@@ -2738,8 +2748,8 @@ std.encoding.supports("gb18030")               // true
 
 - GBK 和 GB18030 使用内置码表，不依赖 iconv 或 Windows 代码页；
 - `gbk` 的 `0x80` 解码为 `€`；`gb18030` 的 `€` 是 `A2 E3`；
-- `std.encoding` 的 `utf-16` 要求 BOM，`utf-16le` / `utf-16be` 使用显式字节序；
-- `utf-16` 编码固定输出 BOM + 小端；
+- `std.encoding` 的 `utf-16` / `utf-32` 要求 BOM，显式字节序版本不自动处理 BOM；
+- `utf-16` / `utf-32` 编码固定输出 BOM + 小端；
 - 解码结果包含 `U+0000` 时始终报错，因为 `string` 不能保存内嵌 NUL；
 - `bytes_to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
 
@@ -2892,6 +2902,7 @@ f["close"]()
 | 脚本语言错误（词法/语法/运行时/包） | `1` |
 | 命令行参数错误 | `2` |
 | 脚本文件无法打开 | `2` |
+| 源文件编码声明冲突或转码失败 | `2` |
 | 脚本被 Ctrl-C 中断 | `130` |
 
 外部命令的退出状态通过 `command_status()` 返回，不会直接成为解释器退出码。
@@ -2924,6 +2935,7 @@ net.*         std.net TCP / DNS
 ffi.*         可选的 std.ffi
 package.*     包查找、加载、缓存与导入
 repl.*        REPL 输入、历史、命令和上次结果
+source_encoding.* 源文件 BOM 检测与 --encoding 转码
 scopestack.*  词法作用域链与闭包环境
 symbol.*      符号表
 task.*        std.task 原生 task

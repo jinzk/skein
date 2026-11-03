@@ -17,6 +17,7 @@
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
+#include "source_encoding.h"
 #include "structtype.h"
 #include "task.h"
 
@@ -36,7 +37,7 @@ int indent_count = 0;
 static void print_usage(const char *program) {
     std::fprintf(stderr,
                  "usage: %s [-i] [-I dir] [--package-path dir] "
-                 "[-k|--keep-going] [script|-]\n",
+                 "[--encoding name] [-k|--keep-going] [script|-]\n",
                  program);
 }
 
@@ -50,6 +51,7 @@ int main(int argc, char **argv) {
 
     std::string script_path;
     std::vector<std::string> package_dirs;
+    std::string source_encoding;
     bool force_interactive = false;
 
     for (size_t i = 1; i < args.size(); ++i) {
@@ -64,6 +66,18 @@ int main(int argc, char **argv) {
             package_dirs.push_back(arg.substr(2));
         } else if (arg.rfind("--package-path=", 0) == 0) {
             package_dirs.push_back(arg.substr(15));
+        } else if (arg == "--encoding") {
+            if (i + 1 >= args.size() || args[i + 1].empty()) {
+                print_usage(program);
+                return 2;
+            }
+            source_encoding = args[++i];
+        } else if (arg.rfind("--encoding=", 0) == 0) {
+            source_encoding = arg.substr(11);
+            if (source_encoding.empty()) {
+                print_usage(program);
+                return 2;
+            }
         } else if (arg == "-i") {
             force_interactive = true;
         } else if (arg == "-k" || arg == "--keep-going") {
@@ -80,6 +94,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    source_encoding_set(source_encoding);
     package_configure(script_path, package_dirs);
     diag_set_module_name("main");
     if (!script_path.empty() && script_path != "-")
@@ -93,9 +108,18 @@ int main(int argc, char **argv) {
     }
     if (!script_path.empty()) {
         if (script_path != "-") {
-            script = platform_open_file(script_path, "rb");
+            std::string source_text;
+            std::string source_error;
+            if (!load_source_file(script_path, source_encoding_get(),
+                                  source_text, source_error)) {
+                std::fprintf(stderr, "%s: %s\n", script_path.c_str(),
+                             source_error.c_str());
+                return 2;
+            }
+            script = source_text_file(source_text, source_error);
             if (!script) {
-                std::perror(script_path.c_str());
+                std::fprintf(stderr, "%s: %s\n", script_path.c_str(),
+                             source_error.c_str());
                 return 2;
             }
             yyin = script;

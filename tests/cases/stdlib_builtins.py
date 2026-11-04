@@ -439,6 +439,24 @@ def run_cases():
             stderr="unsupported calling convention",
         )
         check(
+            "std ffi callback field call",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "types": {"Hooks": {"kind": "struct", '
+            '"fields": {"cmp": {"kind": "callback", "result": "i32", '
+            '"args": ["i32", "i32"]}}}}, "functions": {'
+            '"shim_make_hooks": {"result": "Hooks"}, '
+            '"shim_call_hook": {"result": "i32", '
+            '"args": ["Hooks", "i32", "i32"]}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'let hooks = std.ffi.call(lib, "shim_make_hooks", []);\n'
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "std.ffi.call_address(hooks.cmp, Cmp, [9, 4])\n"
+            'std.ffi.call(lib, "shim_call_hook", [hooks, 9, 4])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 5", "= 5"],
+        )
+        check(
             "std ffi callback basic",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
@@ -1183,6 +1201,10 @@ def run_cases():
         assert generated["library"] == "sample"
         assert generated["types"]["SamplePoint"]["kind"] == "struct"
         assert generated["types"]["SampleCompare"]["kind"] == "callback"
+        hooks = generated["types"]["SampleHooks"]["fields"]
+        assert hooks[0]["type"] == "SampleCompare"
+        assert hooks[1]["type"]["kind"] == "callback"
+        assert hooks[1]["type"]["args"] == ["cstring"]
         assert generated["functions"]["sample_add"]["result"] == "i32"
         assert generated["functions"]["sample_varargs"]["variadic"] is True
         assert (generated["functions"]["sample_stdcall"]

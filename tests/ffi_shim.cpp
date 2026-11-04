@@ -38,6 +38,10 @@ typedef const char *(*shim_string_fn)(const char *);
 typedef void (*shim_void_fn)(std::int32_t);
 typedef void (*shim_notify_fn)(std::int32_t);
 
+struct shim_hooks {
+    shim_cmp_fn cmp;
+};
+
 extern "C" {
     SHIM_EXPORT std::int32_t shim_global = 7;
     SHIM_EXPORT extern const std::int32_t shim_const_global = 42;
@@ -183,6 +187,20 @@ SHIM_EXPORT const struct shim_point *shim_point_global(void) {
 SHIM_EXPORT std::int32_t shim_apply_cmp(shim_cmp_fn fn, std::int32_t a,
                                         std::int32_t b) {
     return fn(a, b);
+}
+
+static std::int32_t shim_hook_subtract(std::int32_t a, std::int32_t b) {
+    return a - b;
+}
+
+SHIM_EXPORT struct shim_hooks shim_make_hooks(void) {
+    struct shim_hooks hooks = {shim_hook_subtract};
+    return hooks;
+}
+
+SHIM_EXPORT std::int32_t shim_call_hook(struct shim_hooks hooks,
+                                        std::int32_t a, std::int32_t b) {
+    return hooks.cmp ? hooks.cmp(a, b) : 0;
 }
 
 SHIM_EXPORT std::int32_t shim_apply_cmp_twice(shim_cmp_fn fn, std::int32_t a,

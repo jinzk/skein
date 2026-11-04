@@ -33,6 +33,11 @@ typedef struct {
 
 typedef int (*SampleCompare)(const void *left, const void *right);
 
+typedef struct SampleHooks {
+    SampleCompare compare;
+    int (*hash)(const char *key);
+} SampleHooks;
+
 int sample_add(int left, int right);
 int sample_varargs(int count, ...);
 int __stdcall sample_stdcall(int value);

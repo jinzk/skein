@@ -1486,8 +1486,6 @@ private:
                     fail("bitfields are not supported", true);
                 if (d.name.empty())
                     fail("anonymous struct members are not supported", true);
-                if (d.is_callback)
-                    fail("function pointer fields are not supported", true);
                 for (std::size_t dim : d.arrays)
                     if (dim == 0)
                         fail("flexible array members are not supported", true);

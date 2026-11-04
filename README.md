@@ -1729,6 +1729,7 @@ skein --ffi-gen \
   不引入 libclang；
 - 支持 struct、typedef、指针、数组、函数声明、函数指针 typedef、enum、
   `extern` 全局变量和对象式宏常量；`static` 函数/变量视为内部符号并跳过；
+  struct 里的函数指针字段会生成 inline callback 类型，可用 `ffi.call_address` 调用；
 - 支持无条件 `extern "C" { ... }` 块；`const` 全局变量标记为只读；
   `_Thread_local` / `__thread` 变量直接拒绝；
 - `__stdcall` / `WINAPI` / `CALLBACK` / `APIENTRY` 生成

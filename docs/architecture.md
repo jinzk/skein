@@ -21,16 +21,18 @@
 ## 2. 分层
 
 ```text
-L4  host/CLI          main.cpp（参数、入口、hook 装配）
+L4  host/CLI          src/app/main.cpp（参数、入口、hook 装配）
       │
-L3  builtins          builtins.cpp + 宿主/可选模块（net/http/tls/ffi/...）
+L3  builtins          src/builtins/：builtins.cpp + 宿主/可选模块
+      │               （net/http/tls/ffi/...）
       │
-L2  interpreter       lexer/parser/AST/eval/package/执行模型（fiber/task）
+L2  interpreter       src/interpreter/：lexer/parser/AST/eval/package/
+      │               执行模型（fiber/task）
       │
-L1  runtime           值表示、容器、GC 生命周期、unicode/encoding、
-      │               json/format、核心 builtins、模块注册表
+L1  runtime           src/runtime/：值表示、容器、GC 生命周期、
+      │               unicode/encoding、json/format、核心 builtins、模块注册表
       │
-L0  platform          OS 原语（文件/时间/线程/进程/socket 抽象）
+L0  platform          src/platform/：OS 原语（文件/时间/线程/进程/socket 抽象）
 ```
 
 依赖规则：
@@ -54,19 +56,21 @@ L0  platform          OS 原语（文件/时间/线程/进程/socket 抽象）
 
 ## 4. 文件归属
 
-| 层 | 内容 |
-|---|---|
-| L1 runtime | `valuetype.*`、`value_ops.*`、`dict.*`、`structtype.*`、`symbol.*`、`cycle.*`、`serialization.*`、`json.*`、`format.*`、`encoding.*`、`unicode.*`、`unicode_ident.*`、`stdio_stream.*`、`runtime_context.*`、`runtime_error.*`、`skein_module.h`、`binding_registry.*` |
-| L2 interpreter | `tokens.l`、`parser.y`、`ast.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_context.*`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
-| L3 builtins | `builtins.cpp`、`compress_builtin.*`、`compression.*`、`cookie.*`、`crypto_builtin.*`、`env_builtin.*`、`error.*`、`filetype.*`、`fs_extra.*`、`http.*`、`http1_parser.*`、`io.*`、`net.*`、`process_builtin.*`、`process_spawn.*`、`random_builtin.*`、`regex_builtin.*`、`result.*`、`time_builtin.*`、`websocket.*`、`worker_pool.*`、`tls.*`、`http2.*`、`ffi_types.*`、`ffi_value.*`、`ffi_marshal.*`、`ffi_callbacks.*`、`ffi_manifest.*`、`ffi.cpp`（可选）、`example_binding.*` |
-| L0 platform | `platform_posix.cpp`、`platform_win.cpp`、`dynamic_library.*`、`runtime_state.*` |
-| L4 CLI | `main.cpp` |
+| 层 | 目录 | 内容 |
+|---|---|---|
+| L1 runtime | `src/runtime/` | `valuetype.*`、`value_ops.*`、`dict.*`、`structtype.*`、`symbol.*`、`cycle.*`、`serialization.*`、`json.*`、`format.*`、`encoding.*`、`unicode.*`、`unicode_ident.*`、`stdio_stream.*`、`runtime_context.*`、`runtime_error.*`、`skein_module.h`、`binding_registry.*`、`builtin_ids.h` |
+| L1 生成数据 | `src/runtime/data/` | `encoding_gb18030_data.inc`、`encoding_gbk_validity.inc`、`unicode_ident_data.inc` |
+| L2 interpreter | `src/interpreter/` | `tokens.l`、`parser.y`、`ast.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_context.*`、`eval_helpers.h`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
+| L3 builtins | `src/builtins/` | `builtins.cpp`、`compress_builtin.*`、`compression.*`、`cookie.*`、`crypto_builtin.*`、`env_builtin.*`、`error.*`、`filetype.*`、`fs_extra.*`、`http.*`、`http1_parser.*`、`io.*`、`net.*`、`process_builtin.*`、`process_spawn.*`、`random_builtin.*`、`regex_builtin.*`、`result.*`、`time_builtin.*`、`websocket.*`、`worker_pool.*`、`tls.*`、`http2.*`、`example_binding.*` |
+| L3 可选 FFI | `src/builtins/ffi/` | `ffi.cpp`、`ffi_types.*`、`ffi_value.*`、`ffi_marshal.*`、`ffi_callbacks.*`、`ffi_manifest.*`、`ffi_check.*`、`ffi_bindgen.*` |
+| L0 platform | `src/platform/` | `platform.h`、`platform_posix.cpp`、`platform_win.cpp`、`dynamic_library.*`、`runtime_state.*` |
+| L4 CLI | `src/app/` | `main.cpp` |
 
 说明：
 
 - `repl.*`/`source_encoding.*` 暂时归入 L2，因为 lexer 的交互式读取直接依赖 REPL；后续可拆为独立的 input provider。
 - `std.set` / `deque` / `heap` 的值类型在 L1，`lib/std/*.skein` 别名包由 L2 的 package loader 加载。
-- `lib/std/internal/container_adapter.skein` 是私有嵌入源，只由 `std_namespace.cpp` 解析，不进入公开 package 列表。
+- `lib/std/internal/container_adapter.skein` 是私有嵌入源，只由 `src/interpreter/std_namespace.cpp` 解析，不进入公开 package 列表。
 - `std.regex` 依赖 PCRE2、`std.compress` 依赖 zlib/brotli、`std.net` 依赖 libuv、`std.tls` 依赖 OpenSSL、`std.http2` 依赖 nghttp2、`std.ffi` 依赖 libffi：都属于 L3 可选模块。
 
 ## 5. 关键接口
@@ -131,6 +135,7 @@ typedef struct {
 - fsm 内部表示与批量 run；
 - P5 易用性、P6 基准；
 - 静态库拆分：`skein_platform` / `skein_runtime` / `skein_interpreter` / `skein_builtins` / `skein`；
+- 源码按层落到 `src/platform` / `src/runtime` / `src/interpreter` / `src/builtins` / `src/app`，include 目录按层收敛；
 - `skein_context` 的 `call` / `call_builtin` / `error` hook；
 - `builtin_ids.h`、`runtime_state.*`、`runtime_error.*`、`value_ops.*`；
 - FFI Beta：类型/布局/marshal/回调/manifest/bindgen/原生模块，见 `docs/ffi.md`；
@@ -149,5 +154,6 @@ typedef struct {
 - `skein_builtins` 依赖 interpreter，但 interpreter 不反向依赖 builtins；
 - 关闭所有可选模块后，core + interpreter + CLI 仍可构建并通过核心测试；
 - L1 源文件不 include `eval.h` / `eval_context.h` / `eval_helpers.h` / `ast.h` / `parser.hpp` / `package.h` / `repl.h` / `builtins.h` / `diagnostics.h`；
+- 各 CMake target 的 include 目录限定为本层及以下层，反向引用在编译期失败；
 - `tools/check_boundaries.py` 通过；
 - `ctest` 全绿。

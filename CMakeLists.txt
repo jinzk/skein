@@ -28,8 +28,10 @@ endif()
 find_package(BISON REQUIRED)
 find_package(FLEX REQUIRED)
 
-BISON_TARGET(MyParser parser.y ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp)
-FLEX_TARGET(MyScanner tokens.l ${CMAKE_CURRENT_BINARY_DIR}/tokens.cpp)
+BISON_TARGET(MyParser src/interpreter/parser.y
+  ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp)
+FLEX_TARGET(MyScanner src/interpreter/tokens.l
+  ${CMAKE_CURRENT_BINARY_DIR}/tokens.cpp)
 ADD_FLEX_BISON_DEPENDENCY(MyScanner MyParser)
 
 find_package(PkgConfig QUIET)
@@ -111,18 +113,18 @@ set_target_properties(skein_utf8proc PROPERTIES
 set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
 
 set(SKEIN_PLATFORM_SOURCES
-  dynamic_library.cpp
-  runtime_state.cpp
+  src/platform/dynamic_library.cpp
+  src/platform/runtime_state.cpp
 )
 if(WIN32)
-  list(APPEND SKEIN_PLATFORM_SOURCES platform_win.cpp)
+  list(APPEND SKEIN_PLATFORM_SOURCES src/platform/platform_win.cpp)
 else()
-  list(APPEND SKEIN_PLATFORM_SOURCES platform_posix.cpp)
+  list(APPEND SKEIN_PLATFORM_SOURCES src/platform/platform_posix.cpp)
 endif()
 add_library(skein_platform STATIC ${SKEIN_PLATFORM_SOURCES})
 set_target_properties(skein_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_platform PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 if(WIN32)
@@ -143,27 +145,31 @@ if(CMAKE_DL_LIBS)
 endif()
 
 add_library(skein_runtime STATIC
-  valuetype.cpp
-  value_ops.cpp
-  dict.cpp
-  structtype.cpp
-  symbol.cpp
-  cycle.cpp
-  serialization.cpp
-  json.cpp
-  format.cpp
-  encoding.cpp
-  unicode.cpp
-  unicode_ident.cpp
-  stdio_stream.cpp
-  runtime_context.cpp
-  runtime_error.cpp
-  binding_registry.cpp
+  src/runtime/valuetype.cpp
+  src/runtime/value_ops.cpp
+  src/runtime/dict.cpp
+  src/runtime/structtype.cpp
+  src/runtime/symbol.cpp
+  src/runtime/cycle.cpp
+  src/runtime/serialization.cpp
+  src/runtime/json.cpp
+  src/runtime/format.cpp
+  src/runtime/encoding.cpp
+  src/runtime/unicode.cpp
+  src/runtime/unicode_ident.cpp
+  src/runtime/stdio_stream.cpp
+  src/runtime/runtime_context.cpp
+  src/runtime/runtime_error.cpp
+  src/runtime/binding_registry.cpp
 )
 set_target_properties(skein_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_runtime PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
   ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_include_directories(skein_runtime PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/data
 )
 target_link_libraries(skein_runtime PUBLIC
   skein_platform
@@ -173,28 +179,30 @@ target_link_libraries(skein_runtime PUBLIC
 add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
-  ast.cpp
-  diagnostics.cpp
-  error_report.cpp
-  eval.cpp
-  eval_context.cpp
-  gc.cpp
-  package.cpp
-  std_namespace.cpp
-  pattern.cpp
-  scopestack.cpp
-  structeval.cpp
-  fiber.cpp
-  generator.cpp
-  async_support.cpp
-  task.cpp
-  event_loop.cpp
-  repl.cpp
-  source_encoding.cpp
+  src/interpreter/ast.cpp
+  src/interpreter/diagnostics.cpp
+  src/interpreter/error_report.cpp
+  src/interpreter/eval.cpp
+  src/interpreter/eval_context.cpp
+  src/interpreter/gc.cpp
+  src/interpreter/package.cpp
+  src/interpreter/std_namespace.cpp
+  src/interpreter/pattern.cpp
+  src/interpreter/scopestack.cpp
+  src/interpreter/structeval.cpp
+  src/interpreter/fiber.cpp
+  src/interpreter/generator.cpp
+  src/interpreter/async_support.cpp
+  src/interpreter/task.cpp
+  src/interpreter/event_loop.cpp
+  src/interpreter/repl.cpp
+  src/interpreter/source_encoding.cpp
 )
 set_target_properties(skein_interpreter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_interpreter PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
   ${CMAKE_CURRENT_BINARY_DIR}
   ${SKEIN_EMBEDDED_DIR}
 )
@@ -206,33 +214,37 @@ target_link_libraries(skein_interpreter PUBLIC
 add_dependencies(skein_interpreter skein_embedded_sources)
 
 add_library(skein_builtins STATIC
-  builtins.cpp
-  compress_builtin.cpp
-  compression.cpp
-  cookie.cpp
-  crypto_builtin.cpp
-  env_builtin.cpp
-  error.cpp
-  filetype.cpp
-  fs_extra.cpp
-  http.cpp
-  http1_parser.cpp
-  io.cpp
-  net.cpp
-  process_builtin.cpp
-  process_spawn.cpp
-  random_builtin.cpp
-  regex_builtin.cpp
-  result.cpp
-  time_builtin.cpp
-  websocket.cpp
-  worker_pool.cpp
-  example_binding.cpp
-  ffi_bindgen.cpp
+  src/builtins/builtins.cpp
+  src/builtins/compress_builtin.cpp
+  src/builtins/compression.cpp
+  src/builtins/cookie.cpp
+  src/builtins/crypto_builtin.cpp
+  src/builtins/env_builtin.cpp
+  src/builtins/error.cpp
+  src/builtins/filetype.cpp
+  src/builtins/fs_extra.cpp
+  src/builtins/http.cpp
+  src/builtins/http1_parser.cpp
+  src/builtins/io.cpp
+  src/builtins/net.cpp
+  src/builtins/process_builtin.cpp
+  src/builtins/process_spawn.cpp
+  src/builtins/random_builtin.cpp
+  src/builtins/regex_builtin.cpp
+  src/builtins/result.cpp
+  src/builtins/time_builtin.cpp
+  src/builtins/websocket.cpp
+  src/builtins/worker_pool.cpp
+  src/builtins/example_binding.cpp
+  src/builtins/ffi/ffi_bindgen.cpp
 )
 set_target_properties(skein_builtins PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_builtins PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins/ffi
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_link_libraries(skein_builtins PUBLIC
@@ -244,9 +256,14 @@ target_link_libraries(skein_builtins PUBLIC
   Boost::context
 )
 
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(${PROJECT_NAME} src/app/main.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/app
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins/ffi
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE skein_builtins)
@@ -324,7 +341,7 @@ option(SKEIN_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
 if(SKEIN_ENABLE_TLS)
   find_package(OpenSSL QUIET)
   if(OpenSSL_FOUND)
-    target_sources(skein_builtins PRIVATE tls.cpp)
+    target_sources(skein_builtins PRIVATE src/builtins/tls.cpp)
     target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_TLS=1)
     target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_TLS=1)
     target_link_libraries(skein_builtins PUBLIC
@@ -362,7 +379,7 @@ if(SKEIN_ENABLE_HTTP2)
     pkg_check_modules(NGHTTP2 QUIET IMPORTED_TARGET libnghttp2)
   endif()
   if(NGHTTP2_FOUND)
-    target_sources(skein_builtins PRIVATE http2.cpp)
+    target_sources(skein_builtins PRIVATE src/builtins/http2.cpp)
     target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_HTTP2=1)
     target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_HTTP2=1)
     target_link_libraries(skein_builtins PUBLIC PkgConfig::NGHTTP2)
@@ -382,9 +399,14 @@ if(SKEIN_ENABLE_FFI)
         "std.ffi requires libffi >= 3.3 for layout validation; "
         "use -DSKEIN_ENABLE_FFI=OFF or install a newer libffi")
     endif()
-    target_sources(skein_builtins PRIVATE ffi.cpp ffi_types.cpp ffi_value.cpp
-                   ffi_marshal.cpp ffi_callbacks.cpp ffi_manifest.cpp
-                   ffi_check.cpp)
+    target_sources(skein_builtins PRIVATE
+                   src/builtins/ffi/ffi.cpp
+                   src/builtins/ffi/ffi_types.cpp
+                   src/builtins/ffi/ffi_value.cpp
+                   src/builtins/ffi/ffi_marshal.cpp
+                   src/builtins/ffi/ffi_callbacks.cpp
+                   src/builtins/ffi/ffi_manifest.cpp
+                   src/builtins/ffi/ffi_check.cpp)
     target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_FFI=1)
     target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_FFI=1)
     target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_FFI=1)
@@ -413,11 +435,13 @@ include(CTest)
 if(BUILD_TESTING)
   add_executable(http1_parser_test
     tests/test_http1_parser.cpp
-    http1_parser.cpp
+    src/builtins/http1_parser.cpp
   )
   target_link_libraries(http1_parser_test PRIVATE skein_llhttp)
   target_include_directories(http1_parser_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
   )
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(http1_parser_test PRIVATE -Wall -Wextra)
@@ -431,7 +455,8 @@ if(BUILD_TESTING)
     endif()
     add_library(skein_native_module SHARED tests/native_module.cpp)
     target_include_directories(skein_native_module PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
     )
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
       target_compile_options(skein_native_module PRIVATE -Wall -Wextra)

@@ -432,8 +432,8 @@ GBK 有效性位图从 Python `gbk` codec 生成，并单独处理 `0x80 → U+2
 
 ```text
 tools/gen_encoding_tables.py
-encoding_gb18030_data.inc
-encoding_gbk_validity.inc
+src/runtime/data/encoding_gb18030_data.inc
+src/runtime/data/encoding_gbk_validity.inc
 ```
 
 生成脚本：
@@ -476,14 +476,14 @@ RLE 作为后续优化；无论哪种形式，GBK 都复用同一张规范表。
 ### 7.1 新文件
 
 ```text
-encoding.h
-encoding.cpp
-encoding_gb18030_data.inc
-encoding_gbk_validity.inc
+src/runtime/encoding.h
+src/runtime/encoding.cpp
+src/runtime/data/encoding_gb18030_data.inc
+src/runtime/data/encoding_gbk_validity.inc
 tools/gen_encoding_tables.py
 ```
 
-`encoding.cpp` 负责：
+`src/runtime/encoding.cpp` 负责：
 
 - 编码名归一化与别名解析
 - UTF-8 / ASCII / Latin-1 / Windows-1252 / UTF-16 编解码
@@ -494,7 +494,7 @@ tools/gen_encoding_tables.py
 
 ### 7.2 枚举与分发
 
-在 `ast.h` 的 `enum bifs` 末尾新增：
+在 `src/interpreter/ast.h` 的 `enum bifs` 末尾新增：
 
 ```cpp
 B_encoding_decode,
@@ -502,9 +502,9 @@ B_encoding_encode,
 B_encoding_supports
 ```
 
-在 `builtins.cpp` 中：
+在 `src/builtins/builtins.cpp` 中：
 
-- 引入 `encoding.h`
+- 引入 `src/runtime/encoding.h`
 - 在 `call_builtin()` 中增加范围分发：
 
   ```cpp
@@ -516,7 +516,7 @@ B_encoding_supports
 
 ### 7.3 std 模块注册
 
-在 `package.cpp` 的 `build_std_namespace()` 中新增：
+在 `src/interpreter/package.cpp` 的 `build_std_namespace()` 中新增：
 
 ```cpp
 root->payload->items.push_back(std::make_pair(
@@ -529,7 +529,7 @@ root->payload->items.push_back(std::make_pair(
 ```
 
 只通过 `std.encoding.*` 暴露，不新增全局函数名，因此不需要修改
-`tokens.l` / `parser.y`。
+`src/interpreter/tokens.l` / `src/interpreter/parser.y`。
 
 首版已补充 `std.bytes.to_string` / `std.bytes.from_string`，在
 `std.bytes` 模块中映射到现有枚举：
@@ -551,7 +551,7 @@ encoding.cpp
 
 如果后续加入 L3 可选旧编码，再增加：
 
-- `encoding_backend.cpp`
+- `src/builtins/encoding_backend.cpp`
 - `SKEIN_ENABLE_LEGACY_ENCODINGS` 选项
 - POSIX `iconv` 检测
 - Windows 代码页 API
@@ -682,8 +682,8 @@ GB18030 用例类似，并测试 `std.encoding.supports("gb18030")`。
 1. 编写 `tools/gen_encoding_tables.py`，生成 GB18030 规范表、GBK 有效性位图和
    四字节范围表；断言 GBK 是 GB18030 的子集且映射一致。
 2. 交叉验证固定向量与 iconv / Python codec。
-3. 实现 `encoding.h` / `encoding.cpp` 的核心编码、GBK/GB18030 和 RLE 解码。
-4. 增加 `ast.h` 枚举、`builtins.cpp` 分发、`package.cpp` 模块注册。
+3. 实现 `src/runtime/encoding.h` / `src/runtime/encoding.cpp` 的核心编码、GBK/GB18030 和 RLE 解码。
+4. 增加 `src/interpreter/ast.h` 枚举、`src/builtins/builtins.cpp` 分发、`src/interpreter/package.cpp` 模块注册。
 5. 更新 `CMakeLists.txt`。
 6. 增加 C++ 穷举测试与 Python 集成测试。
 7. 更新 `README.md` / `SYNTAX.md`。
@@ -733,10 +733,10 @@ GB18030 用例类似，并测试 `std.encoding.supports("gb18030")`。
 
 首版已实现：
 
-- `encoding.h` / `encoding.cpp`
+- `src/runtime/encoding.h` / `src/runtime/encoding.cpp`
 - `tools/gen_encoding_tables.py`
-- `encoding_gb18030_data.inc`
-- `encoding_gbk_validity.inc`
+- `src/runtime/data/encoding_gb18030_data.inc`
+- `src/runtime/data/encoding_gbk_validity.inc`
 - `std.encoding.decode` / `encode` / `supports`
 - `std.bytes.to_string` / `from_string` 严格 UTF-8 别名
 - `tests/test_skein.py` 中的 GBK / GB18030 / UTF-16 / 错误模式测试

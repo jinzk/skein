@@ -59,14 +59,14 @@ third_party/utf8proc/
 选择 2.10.0 的原因：
 
 - 对应 Unicode 16.0.0；
-- 与当前 `unicode_ident_data.inc` 的 Unicode 版本一致；
+- 与当前 `src/runtime/data/unicode_ident_data.inc` 的 Unicode 版本一致；
 - MIT 许可；
 - 支持完整的 NFC / NFD / NFKC / NFKD；
 - 不需要系统 ICU。
 
 ### 3.2 调用方式
 
-`unicode.cpp` 使用 `utf8proc_map`：
+`src/runtime/unicode.cpp` 使用 `utf8proc_map`：
 
 ```text
 NFC   = UTF8PROC_STABLE | UTF8PROC_COMPOSE
@@ -89,7 +89,7 @@ add_library(skein_utf8proc STATIC third_party/utf8proc/utf8proc.c)
 target_compile_definitions(skein_utf8proc PUBLIC UTF8PROC_STATIC=1)
 ```
 
-`unicode.cpp` 加入主程序源文件，并链接 `skein_utf8proc`。
+`src/runtime/unicode.cpp` 加入主程序源文件，并链接 `skein_utf8proc`。
 
 ## 4. 语义决定
 

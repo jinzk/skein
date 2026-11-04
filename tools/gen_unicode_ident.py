@@ -6,9 +6,9 @@ XID_Start/XID_Continue).  Pass a path to DerivedCoreProperties.txt to generate
 from an explicit UCD release instead.
 
 Usage:
-    tools/gen_unicode_ident.py > unicode_ident_data.inc
+    tools/gen_unicode_ident.py > src/runtime/data/unicode_ident_data.inc
     tools/gen_unicode_ident.py --ucd DerivedCoreProperties.txt \
-        > unicode_ident_data.inc
+        > src/runtime/data/unicode_ident_data.inc
 """
 
 import argparse

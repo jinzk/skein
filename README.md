@@ -4243,47 +4243,36 @@ f["close"]()
 ## 目录结构
 
 ```text
-tokens.l      Flex 词法分析
-parser.y      Bison 语法分析
-ast.*         AST 定义、函数代码共享与释放
-diagnostics.* 错误位置、源码片段与调用栈
-unicode.*     Unicode NFC/NFD/NFKC/NFKD 归一化
-unicode_ident.* UTF-8 解码、Unicode 标识符判定与显示宽度
-regex_builtin.* std.regex 正则表达式
-time_builtin.* std.time 时间与格式化
-random_builtin.* std.random 随机数与 UUID
-env_builtin.* std.env 环境变量
-crypto_builtin.* std.crypto SHA-256 / HMAC
-compress_builtin.* std.compress gzip/zlib/deflate
-fs_extra.*     std.fs 目录与路径操作
-process_builtin.* std.process.run 输出捕获
-process_spawn.* std.process.spawn 与管道流
-worker_pool.* std.worker 进程池
-stdio_stream.* std.io 标准流
-eval.*        树遍历求值
-eval_context.* 每个求值上下文的 scope、控制流和错误状态
-eval_helpers.h 求值器与内置函数共享的辅助函数
-event_loop.*  libuv 事件循环与等待
-http.*        std.http 客户端与服务端
-http1_parser.* llhttp 封装与增量 HTTP/1.x 解析
-tls.*         OpenSSL TLS 流包装
-io.*          std.io 通用流式读写与辅助函数
-fiber.*       Boost.Context 有栈协程、async/await 与生成器
-generator.*   生成器迭代函数
-result.*      result 值与错误捕获
-error.*       error 值与 kind / message
-builtins.*    内置函数实现
-filetype.*    原生文件资源类型
-format.*      Python 风格格式化
-net.*         std.net TCP / DNS
-ffi.*         可选的 std.ffi
-package.*     包查找、加载、缓存与导入
-repl.*        REPL 输入、历史、命令和上次结果
-source_encoding.* 源文件 BOM 检测与 --encoding 转码
-scopestack.*  词法作用域链与闭包环境
-symbol.*      符号表
-task.*        std.task 原生 task
-valuetype.*   运行时值类型、深拷贝与释放
-platform.*    POSIX / Windows 平台适配
-tests/        自动化回归测试
+src/
+  platform/      L0  OS 原语：platform.*、platform_posix.cpp、platform_win.cpp、
+                 dynamic_library.*、runtime_state.*
+  runtime/       L1  值/容器/编码/JSON/格式化：
+                 valuetype.*、value_ops.*、dict.*、structtype.*、symbol.*、cycle.*、
+                 serialization.*、json.*、format.*、encoding.*、unicode.*、
+                 unicode_ident.*、stdio_stream.*、runtime_context.*、runtime_error.*、
+                 binding_registry.*、builtin_ids.h、skein_module.h
+    data/        L1  提交到仓库的生成表：encoding_gb18030_data.inc、
+                 encoding_gbk_validity.inc、unicode_ident_data.inc
+  interpreter/   L2  词法/语法/AST/求值/执行模型：
+                 tokens.l、parser.y、ast.*、diagnostics.*、error_report.*、eval.*、
+                 eval_context.*、eval_helpers.h、gc.*、package.*、std_namespace.*、
+                 pattern.*、scopestack.*、structeval.*、fiber.*、generator.*、
+                 async_support.*、task.*、event_loop.*、repl.*、source_encoding.*
+  builtins/      L3  内置函数与宿主模块：
+                 builtins.*、*_builtin.*、compression.*、cookie.*、error.*、
+                 filetype.*、fs_extra.*、http.*、http1_parser.*、http2.*、io.*、
+                 net.*、process_*.*、result.*、tls.*、websocket.*、worker_pool.*、
+                 example_binding.*
+    ffi/         L3  可选的 std.ffi：ffi.*、ffi_types.*、ffi_value.*、ffi_marshal.*、
+                 ffi_callbacks.*、ffi_manifest.*、ffi_check.*、ffi_bindgen.*
+  app/           L4  main.cpp（参数、入口、hook 装配）
+docs/            架构、编码、FFI、Unicode 文档
+lib/std/         以 Skein 编写的标准库包（构建时嵌入）
+tests/           自动化回归测试（test_skein.py + cases/）
+tools/           生成器与一致性检查脚本
+third_party/     llhttp、utf8proc
+cmake/           构建辅助脚本
 ```
+
+每层只向本层及以下层暴露 include 目录，配合 `tools/check_boundaries.py`
+同时约束源码包含关系和静态库符号依赖。

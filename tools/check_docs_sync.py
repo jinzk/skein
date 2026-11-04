@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
 SYNTAX = ROOT / "SYNTAX.md"
 CMAKE = ROOT / "CMakeLists.txt"
-PACKAGE = ROOT / "package.cpp"
-STD_NAMESPACE = ROOT / "std_namespace.cpp"
+PACKAGE = ROOT / "src/interpreter/package.cpp"
+STD_NAMESPACE = ROOT / "src/interpreter/std_namespace.cpp"
 
 errors = []
 

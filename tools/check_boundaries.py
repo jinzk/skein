@@ -137,8 +137,12 @@ def main():
         errors.append("cannot find skein_runtime sources in CMakeLists.txt")
     for name in runtime_sources:
         scan_includes(source_dir / name, errors)
+    runtime_dirs = (source_dir / "src/runtime", source_dir / "src/platform")
     for name in RUNTIME_HEADERS:
-        path = source_dir / name
+        path = next(
+            (d / name for d in runtime_dirs if (d / name).exists()),
+            runtime_dirs[0] / name,
+        )
         if not path.exists():
             errors.append(f"missing runtime header: {name}")
             continue

@@ -4,7 +4,6 @@
 #include "eval_context.h"
 #include "eval_helpers.h"
 #include "fiber.h"
-#include "filetype.h"
 #include "format.h"
 #include "package.h"
 #include "pattern.h"

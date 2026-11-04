@@ -235,7 +235,7 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=root,
+        default=root / "src/runtime/data",
         help="directory for the generated .inc files",
     )
     args = parser.parse_args()

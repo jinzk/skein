@@ -3,9 +3,11 @@
 #include "ast.h"
 #include "dynamic_library.h"
 #include "eval_helpers.h"
+#include "ffi_callbacks.h"
 #include "ffi_marshal.h"
 #include "ffi_types.h"
 #include "ffi_value.h"
+#include "structtype.h"
 #include "valuetype.h"
 
 #include <ffi.h>
@@ -191,6 +193,51 @@ static value_t *ffi_signature(const std::vector<value_t *> &args) {
         return NULL;
     }
     return ffi::new_type_value(std::move(type));
+}
+
+static value_t *ffi_callback(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.callback expects 2 arguments");
+        return NULL;
+    }
+    std::string error;
+    type_ptr signature;
+    if (!ffi::resolve_type(args[0], signature, error)) {
+        yyerror("ffi.callback: %s", error.c_str());
+        return NULL;
+    }
+    if (signature->kind != kind_t::callback) {
+        yyerror("ffi.callback expects a callback signature");
+        return NULL;
+    }
+
+    value_t *function = args[1];
+    if (function->type == T_func) {
+        func_value_t *callee = (func_value_t *)function;
+        if (callee->def && callee->def->code &&
+            (callee->def->code->is_async ||
+             callee->def->code->is_generator)) {
+            yyerror("ffi callbacks must be synchronous functions");
+            return NULL;
+        }
+    } else if (function->type == T_method) {
+        method_value_t *method = (method_value_t *)function;
+        if (method->method && method->method->code &&
+            (method->method->code->is_async ||
+             method->method->code->is_generator)) {
+            yyerror("ffi callbacks must be synchronous functions");
+            return NULL;
+        }
+    } else if (function->type != T_builtin) {
+        yyerror("ffi.callback expects a function, got %s",
+                typename_of(function));
+        return NULL;
+    }
+
+    value_t *value = ffi::new_callback_value(signature, function, error);
+    if (!value)
+        yyerror("ffi.callback: %s", error.c_str());
+    return value;
 }
 
 /* -------------------------------------------------------------------------
@@ -912,9 +959,14 @@ static value_t *ffi_call(const std::vector<value_t *> &args) {
         return NULL;
     }
 
+    ffi::callback_scope_guard callback_scope;
     if (return_type->kind == kind_t::void_) {
         ffi_call(&cif, FFI_FN(symbol), nullptr,
                  argv.empty() ? nullptr : argv.data());
+        if (callback_scope.failed()) {
+            yyerror("ffi.call: %s", callback_scope.error().c_str());
+            return NULL;
+        }
         return newnull();
     }
 
@@ -931,6 +983,10 @@ static value_t *ffi_call(const std::vector<value_t *> &args) {
 
     ffi_call(&cif, FFI_FN(symbol), result,
              argv.empty() ? nullptr : argv.data());
+    if (callback_scope.failed()) {
+        yyerror("ffi.call: %s", callback_scope.error().c_str());
+        return NULL;
+    }
 
     switch (return_type->kind) {
         case kind_t::f32:
@@ -1018,6 +1074,8 @@ struct value_t *call_ffi_builtin(
             return ffi_sizeof(args);
         case B_ffi_alignof:
             return ffi_alignof(args);
+        case B_ffi_callback:
+            return ffi_callback(args);
         default:
             yyerror("unknown ffi function");
             return NULL;

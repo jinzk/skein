@@ -1429,6 +1429,32 @@ std.ffi.call(lib, "point_make", Point, ["f64", "f64"], [1.0, 2.0]);
 - `ffi.get` / `ffi.set` 用于数组和指针索引，`ffi.offset` / `ffi.cast` 只做受控的指针运算；
 - 脚本层没有 `free` / `release` / `own`；内存由引用计数和 GC 回收，C 返回的指针默认借用。
 
+FFI 回调：
+
+```text
+import std;
+
+let lib = std.ffi.open("./libalgo.so");
+let Cmp = std.ffi.signature("i32", ["ptr", "ptr"]);
+
+let cmp = std.ffi.callback(Cmp, func(a, b) {
+  let left = std.ffi.deref(std.ffi.cast(a, std.ffi.pointer("i32")));
+  let right = std.ffi.deref(std.ffi.cast(b, std.ffi.pointer("i32")));
+  if (left < right) { return -1; }
+  if (left > right) { return 1; }
+  return 0;
+});
+
+std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
+```
+
+- 回调必须是同步函数；`async` 函数和生成器在 `ffi.callback` 时直接拒绝；
+- 只允许同步、同一 OS 线程、同一 fiber、且在活动的 `ffi.call` 范围内的回调；
+- 回调里可以继续调用 `ffi.call`（受递归深度限制），也可以 `spawn` 后立即返回；
+- 回调里不能 `await` / `yield`，延迟回调和跨线程回调暂不支持；
+- 回调失败不会跨 C ABI 抛异常，错误在 `ffi.call` 返回后统一报告；
+- C 侧保存函数指针并稍后调用属于未定义行为，需要静态 C++ 绑定管理生命周期。
+
 模块：
 
 ```text
@@ -1954,6 +1980,7 @@ std.ffi.set
 std.ffi.to_dict
 std.ffi.sizeof
 std.ffi.alignof
+std.ffi.callback
 
 std.bytes.len
 std.bytes.get

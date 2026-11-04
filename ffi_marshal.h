@@ -52,6 +52,11 @@ bool write_value(const type_ptr &t, unsigned char *dst, struct value_t *v,
 bool write_value(const type_ptr &t, unsigned char *dst, struct value_t *v,
                  keepalive &keep, std::string &error, int depth);
 
+/* Write a callback return value into the libffi return buffer.  Integer
+ * results are widened to `ffi_arg`, matching what libffi reads back. */
+bool write_return(const type_ptr &t, void *ret, struct value_t *v,
+                  keepalive &keep, std::string &error);
+
 struct arg_slot {
     void *value = nullptr;
     std::shared_ptr<void> keep;

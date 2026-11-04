@@ -343,6 +343,111 @@ def run_cases():
             stdout_all=["= 7", "= 9"],
             stderr="out of range",
         )
+        check(
+            "std ffi callback basic",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let calls = 0;\n"
+            'let cb = std.ffi.callback(Cmp, func(a, b) { calls = calls + 1; '
+            "if (a < b) { return -1; } if (a > b) { return 1; } "
+            "return 0; });\n"
+            'std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 3, 5])\n'
+            'std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 7, 5])\n'
+            'std.ffi.call(lib, "shim_apply_cmp_twice", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 3, 7])\n'
+            "calls\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= -1", "= 1", "= -2", "= 4"],
+        )
+        check(
+            "std ffi callback struct and pointer args",
+            "import std;\n"
+            + point_decl
+            + f'let lib = std.ffi.open({shim});\n'
+            'let Score = std.ffi.signature("f64", [Point]);\n'
+            'let score = std.ffi.callback(Score, func(p) { '
+            "return p.x * 2.0 + p.y; });\n"
+            'let p = std.ffi.new(Point, {"x": 1.5, "y": 2.0});\n'
+            'std.ffi.call(lib, "shim_apply_point", "f64", '
+            "[Score, Point], [score, p])\n"
+            'let PCmp = std.ffi.signature("i32", ["ptr", "ptr"]);\n'
+            "let pcmp = std.ffi.callback(PCmp, func(a, b) {\n"
+            "  let x = std.ffi.deref(std.ffi.cast(a, "
+            'std.ffi.pointer("i32")));\n'
+            "  let y = std.ffi.deref(std.ffi.cast(b, "
+            'std.ffi.pointer("i32")));\n'
+            "  return x - y;\n"
+            "});\n"
+            'std.ffi.call(lib, "shim_apply_ptr_cmp", "i32", '
+            '[PCmp, "i32", "i32"], [pcmp, 3, 5])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 5.0", "= -2"],
+        )
+        check(
+            "std ffi callback string return",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let S = std.ffi.signature("cstring", ["cstring"]);\n'
+            'let cb = std.ffi.callback(S, func(text) { '
+            'return text + "!"; });\n'
+            'std.ffi.call(lib, "shim_apply_string", "cstring", '
+            '[S, "cstring"], [cb, "hi"])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= hi!",
+        )
+        check(
+            "std ffi callback error propagates",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return 1 / 0; });\n"
+            'std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 3, 5])\n',
+            stderr="division by zero",
+        )
+        check(
+            "std ffi callback result type",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            'let cb = std.ffi.callback(Cmp, func(a, b) { return "x"; });\n'
+            'std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 3, 5])\n',
+            stderr="ffi callback result",
+        )
+        check(
+            "std ffi callback rejects async",
+            "import std;\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "std.ffi.callback(Cmp, async func(a, b) { return 0; })\n",
+            stderr="ffi callbacks must be synchronous functions",
+        )
+        check(
+            "std ffi callback rejects generator",
+            "import std;\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "std.ffi.callback(Cmp, func(a, b) { yield 0; })\n",
+            stderr="ffi callbacks must be synchronous functions",
+        )
+        check(
+            "std ffi callback reentrant call",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let inner = std.ffi.callback(Cmp, func(a, b) { "
+            "return a - b; });\n"
+            "let outer = std.ffi.callback(Cmp, func(a, b) {\n"
+            '  return std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [inner, a, b]);\n'
+            "});\n"
+            'std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [outer, 9, 4])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 5",
+        )
     check(
         "std string format",
         'import std;\nstd.string.format("{}", 3)\n',

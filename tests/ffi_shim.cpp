@@ -27,6 +27,13 @@ struct shim_words {
     std::int32_t values[3];
 };
 
+typedef std::int32_t (*shim_cmp_fn)(std::int32_t, std::int32_t);
+typedef std::int32_t (*shim_ptr_cmp_fn)(const std::int32_t *,
+                                        const std::int32_t *);
+typedef double (*shim_point_fn)(struct shim_point);
+typedef const char *(*shim_string_fn)(const char *);
+typedef void (*shim_void_fn)(std::int32_t);
+
 extern "C" {
 
 SHIM_EXPORT std::int8_t shim_i8(std::int8_t value) {
@@ -155,6 +162,46 @@ SHIM_EXPORT std::int32_t shim_words_sum(struct shim_words words) {
 SHIM_EXPORT const struct shim_point *shim_point_global(void) {
     static struct shim_point point = {3.0, 4.0};
     return &point;
+}
+
+SHIM_EXPORT std::int32_t shim_apply_cmp(shim_cmp_fn fn, std::int32_t a,
+                                        std::int32_t b) {
+    return fn(a, b);
+}
+
+SHIM_EXPORT std::int32_t shim_apply_cmp_twice(shim_cmp_fn fn, std::int32_t a,
+                                              std::int32_t b) {
+    return fn(a, b) - fn(b, a);
+}
+
+SHIM_EXPORT std::int32_t shim_apply_ptr_cmp(shim_ptr_cmp_fn fn,
+                                            std::int32_t a,
+                                            std::int32_t b) {
+    return fn(&a, &b);
+}
+
+SHIM_EXPORT double shim_apply_point(shim_point_fn fn,
+                                    struct shim_point point) {
+    return fn(point);
+}
+
+SHIM_EXPORT const char *shim_apply_string(shim_string_fn fn,
+                                          const char *text) {
+    return fn(text);
+}
+
+SHIM_EXPORT std::int32_t shim_apply_void(shim_void_fn fn,
+                                         std::int32_t value) {
+    fn(value);
+    return value;
+}
+
+static shim_cmp_fn shim_saved_cmp = nullptr;
+
+SHIM_EXPORT void shim_save_cmp(shim_cmp_fn fn) { shim_saved_cmp = fn; }
+
+SHIM_EXPORT std::int32_t shim_call_saved(std::int32_t a, std::int32_t b) {
+    return shim_saved_cmp ? shim_saved_cmp(a, b) : 0;
 }
 
 } // extern "C"

@@ -1,6 +1,7 @@
 #include "ffi_marshal.h"
 
 #include "dict.h"
+#include "ffi_callbacks.h"
 #include "ffi_value.h"
 #include "value_ops.h"
 
@@ -369,9 +370,39 @@ bool write_value(const type_ptr &t, unsigned char *dst, struct value_t *v,
             store<void *>(dst, buffer->bytes.data());
             return true;
         }
-        case kind_t::pointer:
-        case kind_t::opaque:
         case kind_t::callback: {
+            if (v->type == T_null) {
+                store<void *>(dst, nullptr);
+                return true;
+            }
+            if (is_callback_value(v)) {
+                callback_prepare(v);
+                void *code = callback_code(v);
+                if (!code) {
+                    error = "ffi callback is not initialized";
+                    return false;
+                }
+                keep.owners.push_back(((userdata_value_t *)v)->data);
+                store<void *>(dst, code);
+                return true;
+            }
+            if (!is_pointer_value(v)) {
+                error = "expected an ffi callback";
+                return false;
+            }
+            std::shared_ptr<pointer_handle> pointer =
+                std::static_pointer_cast<pointer_handle>(
+                    ((userdata_value_t *)v)->data);
+            if (!pointer) {
+                error = "invalid ffi pointer";
+                return false;
+            }
+            keep.owners.push_back(pointer);
+            store<void *>(dst, pointer->address);
+            return true;
+        }
+        case kind_t::pointer:
+        case kind_t::opaque: {
             if (v->type == T_null) {
                 store<void *>(dst, nullptr);
                 return true;
@@ -504,6 +535,53 @@ bool prepare_arg(const type_ptr &t, struct value_t *v, arg_slot &out,
     out.value = holder->block->data;
     out.keep = holder;
     return true;
+}
+
+bool write_return(const type_ptr &t, void *ret, struct value_t *v,
+                  keepalive &keep, std::string &error) {
+    if (!t || !ret) {
+        error = "missing ffi type or result buffer";
+        return false;
+    }
+    if (!v) {
+        error = "missing value";
+        return false;
+    }
+    if (is_integer(t->kind)) {
+        if (v->type != T_int) {
+            error = "expected an integer, got " + std::string(typename_of(v));
+            return false;
+        }
+        long long number = ((int_value_t *)v)->value;
+        if (!check_integer_range(t->kind, number, error))
+            return false;
+        if (t->size <= sizeof(ffi_arg)) {
+            ffi_arg widened = (ffi_arg)(unsigned long long)number;
+            std::memcpy(ret, &widened, sizeof widened);
+        } else if (t->kind == kind_t::u64 || t->kind == kind_t::usize) {
+            std::uint64_t widened = (std::uint64_t)number;
+            std::memcpy(ret, &widened, sizeof widened);
+        } else {
+            std::int64_t widened = (std::int64_t)number;
+            std::memcpy(ret, &widened, sizeof widened);
+        }
+        return true;
+    }
+    if (is_float(t->kind)) {
+        if (v->type != T_int && v->type != T_float) {
+            error = "expected a number, got " + std::string(typename_of(v));
+            return false;
+        }
+        double number = as_double(v);
+        if (t->kind == kind_t::f32) {
+            float narrowed = (float)number;
+            std::memcpy(ret, &narrowed, sizeof narrowed);
+        } else {
+            std::memcpy(ret, &number, sizeof number);
+        }
+        return true;
+    }
+    return write_value(t, (unsigned char *)ret, v, keep, error);
 }
 
 } // namespace ffi

@@ -162,6 +162,7 @@ enum bifs {
     B_ffi_to_dict,
     B_ffi_sizeof,
     B_ffi_alignof,
+    B_ffi_callback,
     B_task_sleep,
     B_task_yield,
     B_task_wait,

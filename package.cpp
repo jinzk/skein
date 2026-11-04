@@ -785,6 +785,7 @@ value_t *build_std_namespace() {
             {"to_dict", B_ffi_to_dict},
             {"sizeof", B_ffi_sizeof},
             {"alignof", B_ffi_alignof},
+            {"callback", B_ffi_callback},
         })));
 #endif
     root->payload->items.push_back(std::make_pair(

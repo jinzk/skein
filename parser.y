@@ -606,7 +606,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
-%destructor { symlistfree($$); } <sl>
+%destructor { symlistfree_full($$); } <sl>
 %destructor { free_type_constraint($$); } <type>
 
 %start program
@@ -1466,6 +1466,16 @@ param: NAME {
         struct symbol *s = newsym($1);
         free($1);
         $$ = newsymlist(s, $3, NULL);
+      }
+    | NAME '=' exp {
+        struct symbol *s = newsym($1);
+        free($1);
+        $$ = newsymlist(s, NULL, NULL, false, $3);
+      }
+    | NAME ':' type '=' exp {
+        struct symbol *s = newsym($1);
+        free($1);
+        $$ = newsymlist(s, $3, NULL, false, $5);
       }
     | ELLIPSIS NAME {
         struct symbol *s = newsym($2);

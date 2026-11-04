@@ -494,6 +494,9 @@ void push_func_location(int line, int column);
 void clear_func_locations();
 std::shared_ptr<function_code> get_function_code(struct funcdef *node);
 void release_function_code(struct funcdef *node);
+/* Free a parameter list, including any default-value expression ASTs.
+ * symlistfree() itself stays runtime-only and does not inspect AST nodes. */
+void symlistfree_full(struct symlist *sl);
 
 
 struct ast *newlist(struct ast *v, struct ast *l);

@@ -740,10 +740,16 @@ struct ast *newimport(char *path, char *alias) {
     return (struct ast *)a;
 }
 
+void symlistfree_full(struct symlist *sl) {
+    for (struct symlist *p = sl; p; p = p->next)
+        treefree(p->default_value);
+    symlistfree(sl);
+}
+
 void free_function_code(struct function_code *code) {
     if (!code) return;
     if (code->ast) treefree(code->ast);
-    if (code->sl) symlistfree(code->sl);
+    if (code->sl) symlistfree_full(code->sl);
     delete code;
 }
 
@@ -762,15 +768,19 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
         return it->second;
 
     int nparams = 0;
+    int required_params = 0;
     bool variadic = false;
     for (struct symlist *sl = node->sl; sl; sl = sl->next) {
-        if (sl->variadic)
+        if (sl->variadic) {
             variadic = true;
-        else
+        } else {
             ++nparams;
+            if (!sl->default_value)
+                ++required_params;
+        }
     }
     std::shared_ptr<function_code> code(
-        new function_code{node->ast, node->sl, nparams,
+        new function_code{node->ast, node->sl, nparams, required_params,
                           node->name ? node->name : "", false, variadic,
                           node->is_async != 0, node->is_generator != 0},
         free_function_code);
@@ -1145,7 +1155,7 @@ void treefree(struct ast *a) {
                 release_function_code(f);
             } else {
                 treefree(f->ast);
-                if (f->sl) symlistfree(f->sl);
+                if (f->sl) symlistfree_full(f->sl);
             }
             std::free(f->name);
             break;
@@ -1261,7 +1271,7 @@ void treefree(struct ast *a) {
         case 'q': {
             struct trait_method *m = (struct trait_method *)a;
             treefree((struct ast *)m->next);
-            symlistfree(m->params);
+            symlistfree_full(m->params);
             std::free(m->name);
             break;
         }

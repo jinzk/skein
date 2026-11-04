@@ -47,6 +47,8 @@ struct symbol {
     bool is_const;
     /* True for the implicit receiver binding of a read-only method. */
     bool is_self;
+    /* True for a parameter bound without a value while evaluating defaults. */
+    bool is_uninitialized;
 };
 
 struct symlist {
@@ -54,11 +56,14 @@ struct symlist {
     struct type_constraint *type;
     struct symlist *next;
     bool variadic;
+    /* Default value expression evaluated when the argument is omitted. */
+    struct ast *default_value;
 };
 
 struct symbol *newsym(const char *name);
 struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
-                           struct symlist *next, bool variadic = false);
+                           struct symlist *next, bool variadic = false,
+                           struct ast *default_value = NULL);
 void symlistfree(struct symlist *sl);
 
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);

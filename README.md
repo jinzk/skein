@@ -2955,6 +2955,28 @@ apply(sqrt, 16)
 - 类型错误不会进入函数体；
 - 逻辑运算和比较运算都返回 `bool`。
 
+参数可以使用默认值：
+
+```text
+func greet(name: string, greeting: string = "hello") {
+  return greeting + ", " + name;
+}
+
+func offset(a: int, b: int = a + 1) => b;
+
+greet("alice");          // "hello, alice"
+greet("alice", "hi");    // "hi, alice"
+offset(10);              // 11
+```
+
+- 默认参数必须排在必填参数之后；
+- 省略参数时才求值，每次调用重新求值；
+- 默认值可以引用更早的参数，例如 `b = a + 1`；
+- 默认值不能引用后面的参数，否则报 `parameter ... is used before it is initialized`；
+- 方法中的默认值可以引用 `self`，但 `self` 本身不能有默认值；
+- trait 方法声明不能有默认值，`impl` 方法可以额外提供默认值；
+- 可变参数必须最后，且不能有默认值。
+
 函数是一等值，可以保存到变量、列表或字典中，并通过任意表达式调用：
 
 ```text
@@ -3008,6 +3030,7 @@ fact(5)                 → 120
 - `{ ... }` 函数体使用显式 `return`；
 - `=> exp` 函数体隐含 `return exp`；
 - 支持空参数和空函数体；
+- 参数支持类型约束、默认值和可变参数，规则与命名函数一致；
 - 立即调用时建议给匿名函数加括号，例如 `(func(x) { ... })(1)`。
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
@@ -3081,6 +3104,7 @@ let q = p.moved(1, 2);
 - 构造使用 `Point { x: 3, y: 4 }`，字段顺序不限；
 - 字段可以读写：`p.x`、`p.x = 5`；
 - 方法第一个参数必须是显式 `self`；
+- 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
 - 方法可以在 `struct` 内声明，也可以在同一个包的 `impl Type` 中补充；
 - 方法只能通过实例调用：`p.length()`；
 - 方法本身可以作为值提取，例如 `let f = p.length; f()`；
@@ -3128,6 +3152,7 @@ render(p)
 ```
 
 - `trait` 只包含方法签名，不包含字段、默认方法或 trait 继承；
+- trait 方法声明不能有默认值；`impl` 方法可以额外提供默认值；
 - 接口是名义式的：只有显式写了 `impl Drawable for Point`，`Point` 才能传给 `Drawable`；
 - 如果方法已经存在于 `impl Point` 中，可以只写 `impl Drawable for Point;` 做接口适配；
 - trait 方法名不能与类型已有方法冲突；

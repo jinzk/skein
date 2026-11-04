@@ -1160,7 +1160,10 @@ func double(x) => x * 2;
 - 参数用逗号分隔；
 - 参数可以带可选的类型约束：`name: type`；
 - 支持空参数；
-- 不支持默认参数；
+- 支持默认参数：`name = expr` 或 `name: type = expr`；
+- 默认参数必须排在必填参数之后；
+- 默认值在调用时求值，可以引用更早的参数和方法中的 `self`，不能引用后面的参数；
+- 默认值每次调用重新求值；
 - 支持最后一个参数为可变参数；
 - 函数体使用 `{ list }`；
 - 单表达式可以写成 `=> exp`，隐含 `return`；
@@ -1183,6 +1186,50 @@ func apply(fn: callable, x: int) {
 
 apply(sqrt, 16)
 ```
+
+默认参数：
+
+```text
+func greet(name: string, greeting: string = "hello") {
+  return greeting + ", " + name;
+}
+
+func offset(a: int, b: int = a + 1) => b;
+
+greet("alice");          // "hello, alice"
+greet("alice", "hi");    // "hi, alice"
+offset(10);              // 11
+```
+
+默认值可以引用更早的参数：
+
+```text
+func span(start: int, end: int = start + 1, step: int = end - start) {
+  return [start, end, step];
+}
+
+span(3)                  // [3, 4, 1]
+```
+
+默认值读取后面的参数会报错：
+
+```text
+func bad(a = b + 1, b = 2) { ... }
+bad()                    // parameter b is used before it is initialized
+```
+
+方法中的默认值可以引用 `self`：
+
+```text
+struct Box {
+  v: int;
+  func add(self, x: int = self.v + 1) => self.v + x;
+}
+
+Box { v: 10 }.add()      // 21
+```
+
+`self` 本身不能有默认值，trait 方法声明也不能有默认值。
 
 表达式函数同样支持类型约束和 `async`：
 
@@ -1248,6 +1295,8 @@ sum(0, ...xs)    // 6
 let add = func(a, b) { return a + b; };
 ```
 
+匿名函数的参数同样支持类型约束、默认值和可变参数。默认值规则与命名函数一致，例如 `let inc = func(x = 0) => x + 1;`。
+
 ### 5.12 结构体、impl 与 trait
 
 结构体：
@@ -1288,6 +1337,7 @@ p.length()
 - `impl Type` 用于在结构体外部补充该类型的固有方法；
 - 方法第一个参数必须是显式 `self`；
 - `self` 的类型隐式为当前结构体；
+- 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
 - 方法通过实例调用：`p.length()`，调用时不传 `self`；
 - 方法值可以提取：`let f = p.length; f()`；
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响它；
@@ -1370,6 +1420,7 @@ render(Point { x: 1, y: 2 });
 - 接口是名义式的，必须显式 `impl Trait for Type`；
 - 实现块只能定义 trait 中声明的方法；
 - 实现方法的参数数量和除 `self` 外的参数类型必须与 trait 一致；
+- trait 方法声明不支持默认值；实现方法可以额外提供默认值；
 - 一个类型对同一个 trait 只能实现一次；
 - trait 方法名不能与类型已有方法冲突；
 - trait 和类型必须在同一个包；
@@ -3774,7 +3825,7 @@ var
 for ... of
 try/catch
 通配导入
-默认参数 / 命名参数
+命名参数
 静态方法 / 关联函数
 可变 self
 私有成员

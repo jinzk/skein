@@ -481,6 +481,82 @@ def run_cases():
           'print(await inc(1));\n',
           stdout="2")
 
+    check("default parameter basic",
+          'func f(a, b = a + 1) { return b; }\n'
+          'print(f(10));\nprint(f(10, 3));\n',
+          stdout_all=["11", "3"])
+    check("default parameter chain",
+          'func f(a, b = a + 1, c = b + 1) { return c; }\n'
+          'print(f(1));\n',
+          stdout="3")
+    check("default parameter typed",
+          'func f(a: int, b: int = a + 1) { return b; }\n'
+          'print(f(2));\n',
+          stdout="3")
+    check("default parameter nullable",
+          'func f(x: int? = null) { return x; }\n'
+          'print(f());\nprint(f(5));\n',
+          stdout_all=["null", "5"])
+    check("default parameter method self",
+          'struct S { v: int; func add(self, x: int = self.v + 1) '
+          '=> self.v + x; }\n'
+          'print(S { v: 10 }.add());\n',
+          stdout="21")
+    check("default parameter anonymous",
+          'let inc = func(x = 0) => x + 1;\n'
+          'print(inc());\nprint(inc(10));\n',
+          stdout_all=["1", "11"])
+    check("default parameter variadic",
+          'func f(a, b = a + 1, ...rest) { return [a, b, rest]; }\n'
+          'print(f(1));\nprint(f(1, 3, 4, 5));\n',
+          stdout_all=["[1, 2, []]", "[1, 3, [4, 5]]"])
+    check("default parameter fresh per call",
+          'import std;\n'
+          'func f(xs = []) { xs = std.list.append(xs, 1); return xs; }\n'
+          'print(f());\nprint(f());\n',
+          stdout_all=["[1]", "[1]"])
+    check("default parameter closure snapshot",
+          'func f(a, cb = func() => a) { a = 99; return cb(); }\n'
+          'print(f(1));\n',
+          stdout="1")
+    check("default parameter forward reference",
+          'func f(a = b + 1, b = 2) { return a; }\nf();\n',
+          stderr="parameter b is used before it is initialized")
+    check("default parameter self reference",
+          'func f(a = a + 1) { return a; }\nf();\n',
+          stderr="parameter a is used before it is initialized")
+    check("default parameter order",
+          'func f(a, b = 1, c) { return c; }\n',
+          stderr="without default cannot follow")
+    check("default parameter type mismatch",
+          'func f(x: int = "a") { return x; }\nf();\n',
+          stderr="parameter x default expects int, got string")
+    check("default parameter too few",
+          'func f(a, b = a + 1) { return b; }\nf();\n',
+          stderr="expects at least 1 argument(s)")
+    check("default parameter too many",
+          'func f(a, b = 1) { return b; }\nf(1, 2, 3);\n',
+          stderr="expects at most 2 argument(s)")
+    check("default parameter self default rejected",
+          'struct S { func m(self = S {}, x = 1) => x; }\n',
+          stderr="method self cannot have a default value")
+    check("default parameter trait rejected",
+          'trait T { func m(self, x: int = 1); }\n',
+          stderr="trait method m cannot have default parameter values")
+    check("default parameter async",
+          'import std;\n'
+          'async func f(a, b = a + 1) => b;\n'
+          'print(await f(1));\n',
+          stdout="2")
+    check("default parameter generator",
+          'func gen(a, b = a + 1) { yield b; }\n'
+          'for (let x in gen(3)) { print(x); }\n',
+          stdout="4")
+    check("default parameter spread",
+          'func f(a, b = a + 1) { return b; }\n'
+          'let xs = [10];\nprint(f(...xs));\n',
+          stdout="11")
+
     check("export expression function",
           'package p { export func twice(x) => x * 2; }\n'
           'print(p.twice(21));\n',

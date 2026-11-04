@@ -28,6 +28,7 @@ struct symbol *newsym(const char *name) {
     s->exported = false;
     s->is_const = false;
     s->is_self = false;
+    s->is_uninitialized = false;
     return s;
 }
 
@@ -40,7 +41,8 @@ static const char *intern_type_name(const char *name) {
 }
 
 struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
-                           struct symlist *next, bool variadic) {
+                           struct symlist *next, bool variadic,
+                           struct ast *default_value) {
     struct symlist *sl = (struct symlist *)std::malloc(sizeof(struct symlist));
     if (!sl) {
         yyerror("out of space");
@@ -50,6 +52,7 @@ struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
     sl->type = type;
     sl->next = next;
     sl->variadic = variadic;
+    sl->default_value = default_value;
     return sl;
 }
 

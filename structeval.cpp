@@ -55,6 +55,10 @@ static bool method_self_ok(struct symlist *sl, const char *owner,
         error = "method first parameter must be self";
         return false;
     }
+    if (sl->default_value) {
+        error = "method self cannot have a default value";
+        return false;
+    }
     if (sl->type && sl->type->kind != TYPE_ANY) {
         if (sl->type->kind != TYPE_NAMED || !owner ||
             !sl->type->name || std::strcmp(sl->type->name, owner) != 0) {
@@ -290,6 +294,11 @@ void eval_trait_decl(struct trait_node *t) {
         for (struct symlist *p = m->params; p; p = p->next) {
             if (p->variadic) {
                 yyerror("trait methods cannot be variadic");
+                return;
+            }
+            if (p->default_value) {
+                yyerror("trait method %s cannot have default parameter values",
+                        m->name);
                 return;
             }
             if (!validate_type_constraint(p->type))

@@ -554,6 +554,101 @@ static struct value_t *invoke_function_body(
     return result ? result : newnull();
 }
 
+/*
+ * Fill trailing parameters from their default expressions.  Defaults are
+ * evaluated in a temporary scope parented to the function's defining scope,
+ * with earlier parameters already bound so expressions such as `b = a + 1`
+ * work.  Later parameters are pre-bound as uninitialized symbols so a
+ * forward reference cannot silently resolve an outer variable.
+ */
+static bool fill_default_arguments(
+    const std::shared_ptr<function_def> &def,
+    const std::string &frame_name,
+    std::vector<struct value_t *> &args) {
+    int nparams = def->code->nparams;
+    size_t provided = args.size();
+
+    eval_push_closure_scope(def->closure);
+    struct default_scope_guard {
+        ~default_scope_guard() { eval_popscope(); }
+    } scope_guard;
+
+    std::vector<struct symbol *> temp_syms;
+    temp_syms.reserve((size_t)nparams + 1);
+    int index = 0;
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next) {
+        struct symbol *s = newsym(sl->sym->name);
+        s->val = NULL;
+        s->is_uninitialized = true;
+        s->is_const = true;
+        if (sl->variadic) {
+            s->type.kind = TYPE_LIST;
+            s->type.name = NULL;
+        } else if (sl->type) {
+            s->type = copy_type_constraint(sl->type);
+        }
+        if (index == 0 && def->code->is_method)
+            s->is_self = true;
+        savesym(s);
+        temp_syms.push_back(s);
+        if (sl->variadic)
+            break;
+        ++index;
+    }
+
+    int i = 0;
+    for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
+         sl = sl->next, ++i) {
+        struct value_t *v = NULL;
+        bool from_default = false;
+        if ((size_t)i < provided) {
+            v = args[(size_t)i];
+        } else {
+            from_default = true;
+            if (!sl->default_value) {
+                yyerror("function %s is missing required argument %s",
+                        frame_name.c_str(), sl->sym->name);
+                free_args(args);
+                return false;
+            }
+            v = eval(sl->default_value);
+            if (!v) {
+                free_args(args);
+                return false;
+            }
+            if (v->type == T_return || v->type == T_break ||
+                v->type == T_continue) {
+                yyerror("default value for parameter %s cannot return "
+                        "control flow", sl->sym->name);
+                freeval(v);
+                free_args(args);
+                return false;
+            }
+        }
+
+        if (!type_constraint_matches(sl->type, v)) {
+            if (from_default) {
+                yyerror("function %s parameter %s default expects %s, got %s",
+                        frame_name.c_str(), sl->sym->name,
+                        type_constraint_name(sl->type), typename_of(v));
+                freeval(v);
+            } else {
+                yyerror("function %s argument %d (%s) expects %s, got %s",
+                        frame_name.c_str(), i + 1, sl->sym->name,
+                        type_constraint_name(sl->type), typename_of(v));
+            }
+            free_args(args);
+            return false;
+        }
+
+        temp_syms[(size_t)i]->val = dupval(v);
+        temp_syms[(size_t)i]->is_uninitialized = false;
+        if (from_default)
+            args.push_back(v);
+    }
+    return true;
+}
+
 static struct value_t *invoke_value(
     struct value_t *callee, std::vector<struct value_t *> &args) {
     if (!callee) {
@@ -609,19 +704,34 @@ static struct value_t *invoke_value(
      */
     std::shared_ptr<function_def> def = fv->def;
     int nparams = def->code->nparams;
+    int required = def->code->required_params;
     bool variadic = def->code->variadic;
+    bool has_defaults = required != nparams;
     std::string frame_name =
         def->code->name.empty() ? "<anonymous>" : def->code->name;
-    if ((int)args.size() < nparams ||
-        (!variadic && (int)args.size() != nparams)) {
-        if (variadic)
+    if ((int)args.size() < required) {
+        if (variadic || has_defaults)
             yyerror("function %s expects at least %d argument(s), got %d",
+                    frame_name.c_str(), required, (int)args.size());
+        else
+            yyerror("function expects %d argument(s), got %d",
+                    nparams, (int)args.size());
+        free_args(args);
+        return NULL;
+    }
+    if (!variadic && (int)args.size() > nparams) {
+        if (has_defaults)
+            yyerror("function %s expects at most %d argument(s), got %d",
                     frame_name.c_str(), nparams, (int)args.size());
         else
             yyerror("function expects %d argument(s), got %d",
                     nparams, (int)args.size());
         free_args(args);
         return NULL;
+    }
+    if ((int)args.size() < nparams) {
+        if (!fill_default_arguments(def, frame_name, args))
+            return NULL;
     }
 
     struct symlist *rest = NULL;
@@ -1952,6 +2062,9 @@ struct value_t *eval(struct ast *a) {
             struct symbol *s = lookupsym(((struct symref *)a)->name);
             if (!s) {
                 yyerror("symbol not found %s", ((struct symref *)a)->name);
+            } else if (s->is_uninitialized) {
+                yyerror("parameter %s is used before it is initialized",
+                        s->name);
             } else {
                 ret = dupval(s->val);
             }
@@ -2169,6 +2282,19 @@ struct value_t *eval(struct ast *a) {
                     bad = true;
                 if (p->variadic && p->next) {
                     yyerror("variadic parameter must be last");
+                    bad = true;
+                }
+            }
+            bool seen_default = false;
+            for (struct symlist *p = sl; p && !bad; p = p->next) {
+                if (p->variadic)
+                    continue;
+                if (p->default_value) {
+                    seen_default = true;
+                } else if (seen_default) {
+                    yyerror("parameter %s without default cannot follow a "
+                            "parameter with default",
+                            p->sym->name);
                     bad = true;
                 }
             }

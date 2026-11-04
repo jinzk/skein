@@ -18,6 +18,7 @@ struct function_code {
     struct ast *ast;
     struct symlist *sl;
     int nparams;
+    int required_params;
     std::string name;
     bool is_method;
     bool variadic;

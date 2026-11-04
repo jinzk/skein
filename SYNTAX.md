@@ -1663,6 +1663,7 @@ std.process.command_status("true")
 std.type.name(1)
 std.net.resolve("localhost")
 
+std.list.slice([1, 2, 3], 1)
 std.list.slice([1, 2, 3], 1, 2)
 std.list.contains([1, 2, 3], 2)
 std.list.reverse([1, 2, 3])

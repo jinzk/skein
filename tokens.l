@@ -579,7 +579,21 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "len" { yylval.fn = B_len; YYRET(BUILTIN); }
 "range" { yylval.fn = B_range; YYRET(BUILTIN); }
 "print" { yylval.fn = B_print; YYRET(BUILTIN); }
+"list"/"." {
+    int token = make_name_token("list", 4);
+    if (token)
+        YYRET(token);
+    yylval.fn = B_list;
+    YYRET(BUILTIN);
+}
 "list" { yylval.fn = B_list; YYRET(BUILTIN); }
+"dict"/"." {
+    int token = make_name_token("dict", 4);
+    if (token)
+        YYRET(token);
+    yylval.fn = B_dict;
+    YYRET(BUILTIN);
+}
 "dict" { yylval.fn = B_dict; YYRET(BUILTIN); }
 "int" { yylval.fn = B_int; YYRET(BUILTIN); }
 "float" { yylval.fn = B_float; YYRET(BUILTIN); }

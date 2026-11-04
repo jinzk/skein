@@ -1973,6 +1973,7 @@ API：`new` / `from_list` / `add` / `get` / `set` / `remove` / `has` / `size` / 
 `std.list` 新增常用算法：
 
 ```text
+std.list.slice(xs, start, end = len(xs))  // end 省略时到末尾
 std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
 std.list.unique_by(xs, key)             // 按 key 保序去重
 std.list.group_by(xs, key)              // {key: [items]}
@@ -1984,6 +1985,8 @@ std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 ```
 
 `zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
+
+`std.list` 由内部适配层提供，原生入口保留在 `std.raw.list`；当前只有 `slice` 使用语言级默认参数，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
 
 当前提供的函数：
 

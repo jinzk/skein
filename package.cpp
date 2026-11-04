@@ -1,5 +1,7 @@
 #include "package.h"
 
+#include "dict.h"
+
 #include "binding_registry.h"
 
 #include "ast.h"
@@ -78,6 +80,26 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.graph", kStdGraphSource},
     {"std.arena", kStdArenaSource},
 };
+
+/* Internal adapter for std.list.  It is parsed directly instead of being a
+ * public package so import std; std.list keeps the original native namespace
+ * while slice gains a language-level default argument. */
+const char kStdListAdapterSource[] = R"SK(
+package list_adapter {
+  import std;
+
+  func _slice_end(values) {
+    if (kind_of(values) != "list") {
+      fail("std.list.slice expects a list");
+    }
+    return len(values);
+  }
+
+  export func slice(values, start, end = _slice_end(values)) {
+    return std.raw.list.slice(values, start, end);
+  }
+}
+)SK";
 
 const char *find_embedded_source(const std::string &dotted) {
     for (const auto &entry : kEmbeddedPackages) {
@@ -327,6 +349,12 @@ bool load_child_packages(const std::string &dotted,
                          std::string &error);
 value_t *import_embedded_package(const std::string &dotted,
                                  const char *source, std::string &error);
+bool parse_package_source(const std::string &source_text,
+                          const std::string &source_name,
+                          const std::string &expected_name,
+                          const std::string &module_name,
+                          const std::string &base_dir, value_t *&result,
+                          std::string &error);
 
 value_t *import_resolved(const std::string &dotted,
                          const resolved_package &resolved,
@@ -376,31 +404,43 @@ value_t *builtin_module(
 value_t *build_std_namespace() {
     struct dict_value_t *root = newdictval();
     root->payload->is_namespace = true;
+    value_t *list_module = builtin_module({
+        {"len", B_len},
+        {"slice", B_list_slice},
+        {"contains", B_list_contains},
+        {"index", B_list_index},
+        {"reverse", B_list_reverse},
+        {"sort", B_list_sort},
+        {"sort_by", B_list_sort_by},
+        {"sort_desc", B_list_sort_desc},
+        {"is_sorted", B_list_is_sorted},
+        {"append", B_list_append},
+        {"map", B_list_map},
+        {"filter", B_list_filter},
+        {"reduce", B_list_reduce},
+        {"unique", B_list_unique},
+        {"unique_by", B_list_unique_by},
+        {"group_by", B_list_group_by},
+        {"chunk", B_list_chunk},
+        {"window", B_list_window},
+        {"zip", B_list_zip},
+        {"top_k", B_list_top_k},
+        {"binary_search", B_list_binary_search},
+    });
+    value_t *raw_list = (value_t *)newdictval();
+    ((dict_value_t *)raw_list)->payload->is_namespace = true;
+    for (const auto &entry : ((dict_value_t *)list_module)->payload->items) {
+        dict_append_item((dict_value_t *)raw_list, dupval(entry.first),
+                         dupval(entry.second));
+    }
     root->payload->items.push_back(std::make_pair(
-        newstrval("list"),
-        builtin_module({
-            {"len", B_len},
-            {"slice", B_list_slice},
-            {"contains", B_list_contains},
-            {"index", B_list_index},
-            {"reverse", B_list_reverse},
-            {"sort", B_list_sort},
-            {"sort_by", B_list_sort_by},
-            {"sort_desc", B_list_sort_desc},
-            {"is_sorted", B_list_is_sorted},
-            {"append", B_list_append},
-            {"map", B_list_map},
-            {"filter", B_list_filter},
-            {"reduce", B_list_reduce},
-            {"unique", B_list_unique},
-            {"unique_by", B_list_unique_by},
-            {"group_by", B_list_group_by},
-            {"chunk", B_list_chunk},
-            {"window", B_list_window},
-            {"zip", B_list_zip},
-            {"top_k", B_list_top_k},
-            {"binary_search", B_list_binary_search},
-        })));
+        newstrval("list"), list_module));
+    struct dict_value_t *raw = newdictval();
+    raw->payload->is_namespace = true;
+    raw->payload->items.push_back(std::make_pair(
+        newstrval("list"), raw_list));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("raw"), (value_t *)raw));
     root->payload->items.push_back(std::make_pair(
         newstrval("dict"),
         builtin_module({
@@ -968,6 +1008,57 @@ bool parse_import_spec(const char *raw, import_spec &spec, std::string &error) {
     return true;
 }
 
+bool is_std_submodule(const std::string &dotted) {
+    return dotted.size() > 4 && dotted.compare(0, 4, "std.") == 0;
+}
+
+value_t *dict_lookup_string(const dict_value_t *dict, const std::string &key) {
+    if (!dict)
+        return NULL;
+    for (const auto &entry : dict->payload->items) {
+        if (entry.first->type == T_string &&
+            std::strcmp(((const string_value_t *)entry.first)->value,
+                        key.c_str()) == 0)
+            return entry.second;
+    }
+    return NULL;
+}
+
+value_t *import_std_submodule(const std::string &dotted,
+                              const char *base_dir, std::string &error) {
+    std::string std_error;
+    value_t *root = package_import("std", base_dir, std_error);
+    if (!root) {
+        error = std_error;
+        return NULL;
+    }
+
+    value_t *current = root;
+    size_t start = 4; /* skip "std." */
+    while (start <= dotted.size()) {
+        size_t end = dotted.find('.', start);
+        if (end == std::string::npos)
+            end = dotted.size();
+        std::string part = dotted.substr(start, end - start);
+        value_t *next = NULL;
+        if (current->type == T_dict)
+            next = dict_lookup_string((const dict_value_t *)current, part);
+        if (!next) {
+            error = "package not found: " + dotted;
+            freeval(root);
+            return NULL;
+        }
+        current = next;
+        if (end == dotted.size())
+            break;
+        start = end + 1;
+    }
+
+    value_t *result = dupval(current);
+    freeval(root);
+    return result;
+}
+
 value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                              std::string &error) {
     import_spec spec;
@@ -987,6 +1078,65 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
             return dupval(cached);
         value_t *namespace_value = build_std_namespace();
         save_global_symbol(hidden.c_str(), namespace_value);
+
+        value_t *adapter = NULL;
+        std::string list_error;
+        if (!parse_package_source(kStdListAdapterSource, "<std.list>",
+                                  "list_adapter", "std.list", import_base,
+                                  adapter, list_error)) {
+            error = "cannot load std.list adapter: " + list_error;
+            save_global_symbol(hidden.c_str(), newnull());
+            return NULL;
+        }
+
+        value_t *slice_wrapper = NULL;
+        dict_value_t *adapter_dict = (dict_value_t *)adapter;
+        for (auto &entry : adapter_dict->payload->items) {
+            if (entry.first->type == T_string &&
+                std::strcmp(((string_value_t *)entry.first)->value,
+                            "slice") == 0) {
+                slice_wrapper = dupval(entry.second);
+                break;
+            }
+        }
+        freeval(adapter);
+        if (!slice_wrapper) {
+            error = "std.list adapter did not export slice";
+            save_global_symbol(hidden.c_str(), newnull());
+            return NULL;
+        }
+
+        dict_value_t *root = (dict_value_t *)namespace_value;
+        dict_value_t *list_dict = NULL;
+        for (auto &entry : root->payload->items) {
+            if (entry.first->type == T_string &&
+                std::strcmp(((string_value_t *)entry.first)->value,
+                            "list") == 0) {
+                list_dict = (dict_value_t *)entry.second;
+                break;
+            }
+        }
+        bool replaced = false;
+        if (list_dict) {
+            for (auto &entry : list_dict->payload->items) {
+                if (entry.first->type == T_string &&
+                    std::strcmp(((string_value_t *)entry.first)->value,
+                                "slice") == 0) {
+                    freeval(entry.second);
+                    entry.second = slice_wrapper;
+                    slice_wrapper = NULL;
+                    dict_invalidate_index(list_dict);
+                    replaced = true;
+                    break;
+                }
+            }
+        }
+        if (!replaced) {
+            freeval(slice_wrapper);
+            error = "std.list adapter could not replace slice";
+            save_global_symbol(hidden.c_str(), newnull());
+            return NULL;
+        }
         return dupval(namespace_value);
     }
 
@@ -1007,6 +1157,8 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
         if (!resolve_package(spec.dotted, resolved, resolve_error)) {
             if (skein::module_registered(spec.dotted))
                 return skein::import_module(spec.dotted, error);
+            if (is_std_submodule(spec.dotted))
+                return import_std_submodule(spec.dotted, base_dir, error);
             error = resolve_error;
             return NULL;
         }

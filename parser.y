@@ -1098,6 +1098,17 @@ importpath: NAME                          { $$ = $1; }
         free($1);
         free($3);
       }
+    | importpath '.' BUILTIN               {
+        const char *name = builtin_field_name($3);
+        if (!name) {
+            yyerror("invalid import path");
+            $$ = copy_text("");
+            free($1);
+        } else {
+            $$ = join_import_path($1, name);
+            free($1);
+        }
+      }
     ;
 
 fieldname: NAME                           { $$ = $1; }

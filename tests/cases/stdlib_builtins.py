@@ -1477,6 +1477,27 @@ def run_cases():
         stdout_all=["= 3", "= [2, 3]", "= 1", "= 2"],
     )
     check(
+        "std list slice default end",
+        "import std;\n"
+        "std.list.slice([1, 2, 3, 4], 1)\n"
+        "kind_of(std.list.slice)\n"
+        "kind_of(std.list.append)\n",
+        stdout_all=["= [2, 3, 4]", "= function", "= builtin"],
+    )
+    check(
+        "std list import",
+        "import std.list;\n"
+        "list.slice([1, 2, 3, 4], 1)\n"
+        "list.append([1, 2], 3)\n",
+        stdout_all=["= [2, 3, 4]", "= [1, 2, 3]"],
+    )
+    check(
+        "std dict import",
+        "import std.dict;\n"
+        'dict.get({"a": 1}, "a")\n',
+        stdout="= 1",
+    )
+    check(
         "std list slice clamps",
         "import std;\nstd.list.slice([1, 2], 1, 10)\n",
         stdout="= [2]",

@@ -6,6 +6,7 @@
 
 #include "parser.hpp"
 #include "builtins.h"
+#include "ffi_bindgen.h"
 #include "diagnostics.h"
 #include "error_report.h"
 #include "eval.h"
@@ -51,6 +52,19 @@ static void print_usage(const char *program) {
 int main(int argc, char **argv) {
     platform_init();
     platform_install_interrupt_handler();
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--ffi-gen") == 0) {
+            std::vector<std::string> gen_args;
+            for (int j = i + 1; j < argc; ++j)
+                gen_args.emplace_back(argv[j]);
+            std::string gen_error;
+            int code = skein::run_ffi_gen(gen_args, gen_error);
+            if (code != 0 && !gen_error.empty())
+                std::fprintf(stderr, "skein: %s\n", gen_error.c_str());
+            return code;
+        }
+    }
 
     struct skein_context runtime_hooks = {runtime_call,
                                           runtime_call_builtin,

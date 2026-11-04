@@ -1534,6 +1534,26 @@ example.math.ANSWER;
 - 模块名是建议 import path，内部 key 由 loader 生成；
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错。
 
+从 C 头文件生成 manifest：
+
+```text
+skein --ffi-gen \
+  --header include/shape.h \
+  --ffi-include include \
+  --ffi-define SHAPE_API= \
+  --module shape \
+  --cc gcc \
+  -o shape.ffi.json
+```
+
+- 使用系统 C 编译器（gcc/clang，Windows 为 MinGW gcc）的 `-E` 做预处理，
+  不引入 libclang；
+- 只解析 `--header` 指定头文件里的声明，支持 struct、typedef、指针、数组、
+  函数声明、函数指针 typedef、enum 和对象式宏常量；
+- packed、bitfield、变参、柔性数组、匿名 struct/union 会报告并跳过；
+- `--check` 用于 CI 校验生成的 manifest 是否过期；
+- 运行时不依赖 C 编译器和头文件，只读 manifest。
+
 模块：
 
 ```text

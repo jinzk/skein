@@ -737,6 +737,33 @@ def run_cases():
                 f"std.module.load({skein_string(FFI_SHIM)})\n",
                 stderr="missing skein_module_descriptor",
             )
+    import json as _json
+    bindgen_header = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "bindgen_sample.h"))
+    with tempfile.TemporaryDirectory() as bindgen_dir:
+        bindgen_output = os.path.join(bindgen_dir, "sample.ffi.json")
+        proc = subprocess.run(
+            [BIN, "--ffi-gen", "--header", bindgen_header,
+             "--module", "sample", "-o", bindgen_output],
+            text=True, capture_output=True, timeout=60)
+        assert proc.returncode == 0, (proc.stdout, proc.stderr)
+        with open(bindgen_output, encoding="utf-8") as handle:
+            generated = _json.load(handle)
+        assert generated["library"] == "sample"
+        assert generated["types"]["SamplePoint"]["kind"] == "struct"
+        assert generated["types"]["SampleCompare"]["kind"] == "callback"
+        assert generated["functions"]["sample_add"]["result"] == "i32"
+        assert (generated["functions"]["sample_sort"]["args"][2]
+                == "SampleCompare")
+        assert generated["constants"]["SAMPLE_MAX"] == 16
+        if has_ffi:
+            check(
+                "ffi bindgen manifest validates",
+                "import std;\n"
+                f'std.ffi.manifest({skein_string(bindgen_output)})\n',
+                stdout="= <ffi_manifest sample>",
+            )
     check(
         "std string format",
         'import std;\nstd.string.format("{}", 3)\n',

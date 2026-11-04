@@ -212,6 +212,7 @@ add_library(skein_builtins STATIC
   websocket.cpp
   worker_pool.cpp
   example_binding.cpp
+  ffi_bindgen.cpp
 )
 set_target_properties(skein_builtins PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_builtins PUBLIC

@@ -224,6 +224,13 @@ def run_cases():
           'ctx = fsm.redo(ctx);\n'
           'print(ctx.state);\n',
           stdout_all=["3", "[3]", "6"])
+    check("std.fsm large run",
+          'import std.fsm;\n'
+          'let m = fsm.define(0, func(state, ev) { return state + 1; });\n'
+          'let ctx = fsm.run(m, fsm.start(m), range(20000));\n'
+          'print(ctx.state);\n'
+          'print(len(fsm.history(ctx)));\n',
+          stdout_all=["20000", "20001"])
     check("std.fsm branch clears redo",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'

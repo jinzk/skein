@@ -51,6 +51,25 @@ package arena {
     return Store { slots: [], free: [], next: 0, alive: 0 };
   }
 
+  // Batched construction: one COW clone / one list build instead of n adds.
+  export func from_list(values) {
+    if (kind_of(values) != "list") {
+      fail("arena.from_list expects a list");
+    }
+    let slots = std.deque.new();
+    for (let value in values) {
+      slots = std.deque.push_back(
+        slots, _Slot { gen: 1, alive: true, value: value });
+    }
+    let n = len(values);
+    return Store {
+      slots: std.deque.to_list(slots),
+      free: [],
+      next: n,
+      alive: n
+    };
+  }
+
   export func add(s, value) {
     if (len(s.free) > 0) {
       let n = len(s.free);

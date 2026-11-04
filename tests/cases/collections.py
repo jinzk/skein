@@ -14,6 +14,21 @@ def run_cases():
           "d[2] = 'z';\n"
           "print(std.dict.keys(d));\n",
           stdout_all=["[1, 3, 2]"])
+    check("dict large indexed reads",
+          "import std;\n"
+          "let d = {};\n"
+          "let i = 0;\n"
+          "while (i < 20000) { d[i] = i; i = i + 1; }\n"
+          "let s = 0;\n"
+          "i = 0;\n"
+          "while (i < 100000) {\n"
+          "  let k = i % 20000;\n"
+          "  s = s + d[k];\n"
+          "  d[k] += 1;\n"
+          "  i = i + 1;\n"
+          "}\n"
+          "print(s);\nprint(d[0]);\n",
+          stdout_all=["1000150000", "5"])
     check("set basics",
           "import std;\nimport std.set;\n"
           "let s = set.from_list([1, 2, 2, 3]);\n"
@@ -266,6 +281,29 @@ def run_cases():
           'g = graph.remove_node(g, a);\n'
           'print(graph.node_count(g));\nprint(graph.edge_count(g));\n',
           stdout_all=["1", "0"])
+    check("graph batch build",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.from_edges(5, [[1, 2], [2, 3], [3, 4], [4, 5]]);\n'
+          'print(graph.node_count(g));\nprint(graph.edge_count(g));\n'
+          'print(graph.bfs(g, 1));\n'
+          'print(graph.dfs(g, 1));\n'
+          'print(graph.path(g, 1, 5)["path"]);\n'
+          'print(graph.topo_sort(g)["order"]);\n'
+          'print(graph.components(g));\n',
+          stdout_all=["5", "4", "[1, 2, 3, 4, 5]", "[1, 2, 3, 4, 5]",
+                      "[1, 2, 3, 4, 5]", "[1, 2, 3, 4, 5]",
+                      "[[1, 2, 3, 4, 5]]"])
+    check("graph batch add nodes and edges",
+          'import std;\nimport std.graph;\n'
+          'let g = graph.new();\n'
+          'let r = graph.add_nodes(g, ["a", "b", "c"]);\n'
+          'g = r["graph"];\nlet ids = r["ids"];\n'
+          'g = graph.add_edges(g, [[ids[0], ids[1], "x", 2], '
+          '[ids[1], ids[2]]]);\n'
+          'print(ids);\nprint(graph.edge_count(g));\n'
+          'print(graph.neighbors(g, ids[0]));\n'
+          'print(graph.shortest_path(g, ids[0], ids[2])["cost"]);\n',
+          stdout_all=["[1, 2, 3]", "2", "[2]", "3"])
 
     check("lru basics",
           'import std;\n'
@@ -397,6 +435,14 @@ def run_cases():
           'print(arena.get(s, a)["ok"]);\n'
           'print(arena.values(s));\n',
           stdout_all=["false", "false", "[2]"])
+    check("arena from_list",
+          'import std;\nimport std.arena;\n'
+          'let s = arena.from_list(["a", "b", "c"]);\n'
+          'print(arena.size(s));\nprint(arena.capacity(s));\n'
+          'print(arena.values(s));\n'
+          'let ids = arena.ids(s);\n'
+          'print(arena.get(s, ids[1])["value"]);\n',
+          stdout_all=["3", "3", "[a, b, c]", "b"])
     check("arena value semantics",
           'import std;\nimport std.arena;\n'
           'let s0 = arena.new();\n'

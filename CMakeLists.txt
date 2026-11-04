@@ -39,6 +39,28 @@ if(NOT SKEIN_LIBUV_TARGET)
   message(FATAL_ERROR "libuv not found; install libuv development files")
 endif()
 
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(PCRE2 QUIET IMPORTED_TARGET libpcre2-8)
+endif()
+if(TARGET PkgConfig::PCRE2)
+  set(SKEIN_PCRE2_TARGET PkgConfig::PCRE2)
+else()
+  find_path(PCRE2_INCLUDE_DIR pcre2.h)
+  find_library(PCRE2_LIBRARY NAMES pcre2-8 libpcre2-8)
+  if(PCRE2_INCLUDE_DIR AND PCRE2_LIBRARY)
+    add_library(skein_pcre2 UNKNOWN IMPORTED)
+    set_target_properties(skein_pcre2 PROPERTIES
+      IMPORTED_LOCATION "${PCRE2_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${PCRE2_INCLUDE_DIR}"
+    )
+    set(SKEIN_PCRE2_TARGET skein_pcre2)
+  endif()
+endif()
+if(NOT SKEIN_PCRE2_TARGET)
+  message(FATAL_ERROR
+    "PCRE2 8-bit not found; install libpcre2-dev or the pcre2 package")
+endif()
+
 find_package(Boost CONFIG QUIET COMPONENTS context)
 if(NOT Boost_FOUND)
   find_package(Boost REQUIRED COMPONENTS context)
@@ -187,6 +209,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE
   ${SKEIN_LIBUV_TARGET}
+  ${SKEIN_PCRE2_TARGET}
   Boost::context
   skein_llhttp
   skein_utf8proc

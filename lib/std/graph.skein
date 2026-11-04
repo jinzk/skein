@@ -26,6 +26,21 @@ package graph {
     return { "graph": g, "id": id };
   }
 
+  // Batched node insertion: one COW clone instead of one per node.
+  export func add_nodes(g, values) {
+    if (kind_of(values) != "list") {
+      fail("graph.add_nodes values must be a list");
+    }
+    let ids = std.deque.new();
+    for (let value in values) {
+      let id = g.next_node;
+      g.nodes[id] = value;
+      g.next_node = id + 1;
+      ids = std.deque.push_back(ids, id);
+    }
+    return { "graph": g, "ids": std.deque.to_list(ids) };
+  }
+
   export func remove_node(g, id) {
     g.nodes = std.dict.delete(g.nodes, id);
 
@@ -105,6 +120,64 @@ package graph {
     return { "graph": g, "id": id };
   }
 
+  // Batched edge insertion: one COW clone instead of one per edge.
+  // Each edge is [from, to], [from, to, tag] or [from, to, tag, weight].
+  export func add_edges(g, edges) {
+    if (kind_of(edges) != "list") {
+      fail("graph.add_edges edges must be a list");
+    }
+    for (let spec in edges) {
+      if (kind_of(spec) != "list" || len(spec) < 2 || len(spec) > 4) {
+        fail("graph.add_edges edge must be [from, to[, tag[, weight]]]");
+      }
+      let from = spec[0];
+      let to = spec[1];
+      if (!std.dict.has(g.nodes, from) || !std.dict.has(g.nodes, to)) {
+        fail("graph edge endpoints must exist");
+      }
+
+      let tag = "";
+      if (len(spec) > 2 && spec[2] != null) {
+        tag = spec[2];
+      }
+      let weight = 1;
+      if (len(spec) > 3 && spec[3] != null) {
+        weight = spec[3];
+      }
+      if (kind_of(weight) != "int" && kind_of(weight) != "float") {
+        fail("graph edge weight must be a number");
+      }
+      if (weight != weight || weight < 0) {
+        fail("graph edge weight must be non-negative");
+      }
+
+      let id = g.next_edge;
+      g.edges[id] = Edge {
+        from: from,
+        to: to,
+        tag: tag,
+        weight: weight
+      };
+      g.next_edge = id + 1;
+    }
+    return g;
+  }
+
+  // Convenience batch builder: nodes 1..count with value = id.
+  export func from_edges(count, edges) {
+    if (kind_of(count) != "int" || count < 0) {
+      fail("graph.from_edges count must be a non-negative int");
+    }
+    let values = std.deque.new();
+    let i = 0;
+    while (i < count) {
+      values = std.deque.push_back(values, i + 1);
+      i = i + 1;
+    }
+    let g = add_nodes(new(), std.deque.to_list(values))["graph"];
+    return add_edges(g, edges);
+  }
+
   export func remove_edge(g, id) {
     g.edges = std.dict.delete(g.edges, id);
     return g;
@@ -143,12 +216,78 @@ package graph {
     return std.deque.to_list(out);
   }
 
+  // Directed adjacency: node id -> list of target ids, in edge insertion order.
+  func _adjacency(g) {
+    let buckets = {};
+    for (let eid, edge in g.edges) {
+      let bucket = std.dict.get(buckets, edge.from);
+      if (bucket == null) {
+        bucket = std.deque.new();
+      }
+      buckets[edge.from] = std.deque.push_back(bucket, edge.to);
+    }
+    let out = {};
+    for (let id, bucket in buckets) {
+      out[id] = std.deque.to_list(bucket);
+    }
+    return out;
+  }
+
+  // Undirected adjacency: both endpoints are connected.
+  func _undirected_adjacency(g) {
+    let buckets = {};
+    for (let eid, edge in g.edges) {
+      let forward = std.dict.get(buckets, edge.from);
+      if (forward == null) {
+        forward = std.deque.new();
+      }
+      buckets[edge.from] = std.deque.push_back(forward, edge.to);
+      if (edge.from == edge.to) {
+        continue;
+      }
+      let backward = std.dict.get(buckets, edge.to);
+      if (backward == null) {
+        backward = std.deque.new();
+      }
+      buckets[edge.to] = std.deque.push_back(backward, edge.from);
+    }
+    let out = {};
+    for (let id, bucket in buckets) {
+      out[id] = std.deque.to_list(bucket);
+    }
+    return out;
+  }
+
+  // Weighted adjacency: node id -> list of edge dicts, ready for weight_fn.
+  func _weighted_adjacency(g) {
+    let buckets = {};
+    for (let eid, edge in g.edges) {
+      let bucket = std.dict.get(buckets, edge.from);
+      if (bucket == null) {
+        bucket = std.deque.new();
+      }
+      buckets[edge.from] = std.deque.push_back(bucket, {
+        "id": eid,
+        "from": edge.from,
+        "to": edge.to,
+        "tag": edge.tag,
+        "weight": edge.weight
+      });
+    }
+    let out = {};
+    for (let id, bucket in buckets) {
+      out[id] = std.deque.to_list(bucket);
+    }
+    return out;
+  }
+
   export func bfs(g, start) {
     let order = std.deque.new();
     if (!has_node(g, start)) {
       return std.deque.to_list(order);
     }
 
+    let adj = _adjacency(g);
     let queue = std.deque.from_list([start]);
     let seen = {};
     seen[start] = true;
@@ -159,7 +298,11 @@ package graph {
       queue = popped["deque"];
       order = std.deque.push_back(order, id);
 
-      for (let next in neighbors(g, id)) {
+      let nexts = std.dict.get(adj, id);
+      if (nexts == null) {
+        continue;
+      }
+      for (let next in nexts) {
         if (!std.dict.has(seen, next)) {
           seen[next] = true;
           queue = std.deque.push_back(queue, next);
@@ -175,6 +318,7 @@ package graph {
       return std.deque.to_list(order);
     }
 
+    let adj = _adjacency(g);
     let stack = std.deque.from_list([start]);
     let seen = {};
 
@@ -189,7 +333,10 @@ package graph {
       seen[id] = true;
       order = std.deque.push_back(order, id);
 
-      let nexts = neighbors(g, id);
+      let nexts = std.dict.get(adj, id);
+      if (nexts == null) {
+        continue;
+      }
       let i = len(nexts) - 1;
       while (i >= 0) {
         if (!std.dict.has(seen, nexts[i])) {
@@ -217,6 +364,7 @@ package graph {
       }
     }
 
+    let adj = _adjacency(g);
     let order = std.deque.new();
     while (std.deque.size(queue) > 0) {
       let popped = std.deque.pop_front(queue);
@@ -224,7 +372,11 @@ package graph {
       queue = popped["deque"];
       order = std.deque.push_back(order, id);
 
-      for (let next in neighbors(g, id)) {
+      let nexts = std.dict.get(adj, id);
+      if (nexts == null) {
+        continue;
+      }
+      for (let next in nexts) {
         indeg[next] = indeg[next] - 1;
         if (indeg[next] == 0) {
           queue = std.deque.push_back(queue, next);
@@ -250,6 +402,7 @@ package graph {
       return { "ok": true, "path": [from] };
     }
 
+    let adj = _adjacency(g);
     let queue = std.deque.from_list([from]);
     let seen = {};
     let parent = {};
@@ -260,7 +413,11 @@ package graph {
       let id = popped["value"];
       queue = popped["deque"];
 
-      for (let next in neighbors(g, id)) {
+      let nexts = std.dict.get(adj, id);
+      if (nexts == null) {
+        continue;
+      }
+      for (let next in nexts) {
         if (std.dict.has(seen, next)) {
           continue;
         }
@@ -301,6 +458,7 @@ package graph {
     let visited = {};
     dist[from] = 0;
 
+    let adj = _weighted_adjacency(g);
     while (true) {
       let best = null;
       let best_dist = 0;
@@ -322,18 +480,12 @@ package graph {
       }
       visited[best] = true;
 
-      for (let eid, edge in g.edges) {
-        if (edge.from != best) {
-          continue;
-        }
-        let info = {
-          "id": eid,
-          "from": edge.from,
-          "to": edge.to,
-          "tag": edge.tag,
-          "weight": edge.weight
-        };
-        let weight = edge.weight;
+      let outgoing = std.dict.get(adj, best);
+      if (outgoing == null) {
+        continue;
+      }
+      for (let info in outgoing) {
+        let weight = info["weight"];
         if (weight_fn != null) {
           weight = weight_fn(info);
         }
@@ -345,9 +497,10 @@ package graph {
         }
 
         let candidate = best_dist + weight;
-        if (!std.dict.has(dist, edge.to) || candidate < dist[edge.to]) {
-          dist[edge.to] = candidate;
-          prev[edge.to] = best;
+        if (!std.dict.has(dist, info["to"]) ||
+            candidate < dist[info["to"]]) {
+          dist[info["to"]] = candidate;
+          prev[info["to"]] = best;
         }
       }
     }
@@ -372,6 +525,7 @@ package graph {
   export func components(g) {
     let seen = {};
     let out = std.deque.new();
+    let adj = _undirected_adjacency(g);
 
     for (let start in std.dict.keys(g.nodes)) {
       if (std.dict.has(seen, start)) {
@@ -387,16 +541,12 @@ package graph {
         queue = popped["deque"];
         component = std.deque.push_back(component, id);
 
-        for (let eid, edge in g.edges) {
-          let next = null;
-          if (edge.from == id) {
-            next = edge.to;
-          } else {
-            if (edge.to == id) {
-              next = edge.from;
-            }
-          }
-          if (next != null && !std.dict.has(seen, next)) {
+        let nexts = std.dict.get(adj, id);
+        if (nexts == null) {
+          continue;
+        }
+        for (let next in nexts) {
+          if (!std.dict.has(seen, next)) {
             seen[next] = true;
             queue = std.deque.push_back(queue, next);
           }

@@ -12,10 +12,10 @@ cmake --build build
 ./build/skein
 ```
 
-`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context。例如 Debian/Ubuntu：
+`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context；`std.regex` 使用 PCRE2 8-bit。例如 Debian/Ubuntu：
 
 ```bash
-sudo apt install libuv1-dev libboost-context-dev
+sudo apt install libuv1-dev libboost-context-dev libpcre2-dev
 ```
 
 HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），Unicode 归一化使用 vendored `utf8proc`（`third_party/utf8proc`），都不需要额外的系统包。
@@ -50,7 +50,7 @@ cmake --build build
 build\skein.exe
 ```
 
-Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv 和 Boost.Context。平台相关代码集中在 `platform_win.cpp`：
+Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv、PCRE2 和 Boost.Context。平台相关代码集中在 `platform_win.cpp`：
 
 - 设置控制台输入输出代码页为 UTF-8；
 - 命令行参数通过 `GetCommandLineW` / `CommandLineToArgvW` 转换为 UTF-8，脚本路径和 `-I` / `--package-path` 支持中文路径；
@@ -1450,7 +1450,7 @@ ctx = fsm.redo(ctx);       // state 6
 
 API：`define` / `initial` / `start` / `step` / `run` / `history` / `undo` / `redo` / `snapshot` / `restore`。
 
-`define(initial, step[, on_transition])` 支持可选的转换回调；enum / struct 状态会校验 `step` 返回值仍是同一类型。`step` 每次 O(history)，超长历史请等待原生 fsm 实现。
+`define(initial, step[, on_transition])` 支持可选的转换回调；enum / struct 状态会校验 `step` 返回值仍是同一类型。单步 `step` 每次 O(history)；批量 `run` 在单次调用内完成，整体 O(events)。
 
 `snapshot` 返回普通 dict，可 JSON 持久化；`restore` 重建历史并校验。枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复：
 
@@ -1566,11 +1566,13 @@ graph.subgraph(g, [a])        // 指定节点子图
 graph.to_dot(g)               // Graphviz 文本
 ```
 
-API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `shortest_path` / `components` / `reverse` / `subgraph` / `to_dot`。
+API：`new` / `add_node` / `add_nodes` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `add_edges` / `from_edges` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `shortest_path` / `components` / `reverse` / `subgraph` / `to_dot`。
+
+`add_nodes(g, values)` 返回 `{graph, ids}`；`add_edges(g, edges)` 批量添加 `[from, to[, tag[, weight]]]`；`from_edges(count, edges)` 直接构造 1..count 节点的图。批量入口只触发一次 COW，O(V+E)。
 
 `add_node` / `add_edge` 返回 `{graph, id}`；`add_edge(g, from, to[, tag[, weight]])`，`weight` 默认 1 且必须非负；删除节点会级联删除相关边；边标签字段是 `tag`。`shortest_path` 默认用边权重，也可传 `func(edge) -> number`。
 
-性能提示：`add_node` / `add_edge` 每次为值语义复制对应 dict（O(V) / O(E)/次），`neighbors` 扫描全部边 O(E)；大图请尽量批量构造。
+性能提示：`add_node` / `add_edge` 每次为值语义复制对应 dict（O(V) / O(E)/次），大图请用 `add_nodes` / `add_edges` / `from_edges` 批量构造；`bfs` / `dfs` / `topo_sort` / `path` / `components` / `shortest_path` 会先构建一次邻接表，遍历为 O(V+E)，单次 `neighbors` 仍扫描全部边 O(E)。
 
 `std.arena` 提供带 generation 的稳定句柄：
 
@@ -1588,7 +1590,7 @@ arena.remove(s, a)     // {arena, removed: true}
 arena.has(s, a)        // false
 ```
 
-API：`new` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。`add` / `set` / `remove` 每次 O(capacity)，适合中小规模。
+API：`new` / `from_list` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。`from_list` 批量构造 O(n)；逐条 `add` / `set` / `remove` 每次 O(capacity)，适合中小规模。
 
 `std.list` 新增常用算法：
 
@@ -3526,11 +3528,18 @@ import std;
 
 std.regex.match("a+", "aaa")                  // true
 std.regex.match("abc", "ABC", "i")            // true
+std.regex.match(".", "你", "u")               // true
+std.regex.match("\\p{L}+", "中文", "u")        // true
 
 let m = std.regex.search("(a+)(b)", "xxaaabyy");
 m["text"]                                     // aaab
 m["start"]                                    // 2
 m["groups"]                                   // [aaa, b]
+
+let u = std.regex.search("(\\p{L}+)", "123中文456", "u");
+u["text"]                                     // 中文
+u["start"]                                    // 3（码点偏移）
+u["end"]                                      // 5（码点偏移）
 
 std.regex.replace("(a+)", "xxaaabyy", "[$1]") // xx[aaa]byy
 std.regex.split(",", "a,b,c")                  // [a, b, c]
@@ -3538,9 +3547,11 @@ std.regex.split(",", "a,b,c")                  // [a, b, c]
 
 规则：
 
-- 使用 ECMAScript 正则语法；
-- 匹配按下标/字节偏移，不是 Unicode 码点偏移；
-- `flags` 支持 `i`（忽略大小写）和 `m`（多行）；
+- 使用 PCRE2 正则语法，兼容常用 ECMAScript 写法；Unicode 码点转义使用 `\x{...}`（如 `\x{4f60}`），不是 `\uXXXX`；
+- `flags` 支持 `i`（忽略大小写）、`m`（多行）和 `u`（Unicode 模式）；
+- 不带 `u` 时按 UTF-8 字节匹配，`search` / `find_all` 的 `start` / `end` 是字节偏移；
+- 带 `u` 时按 Unicode 码点匹配，支持 `\p{...}`、Unicode 字符类和 Unicode 大小写折叠，`start` / `end` 是码点偏移；
+- `u` 模式要求模式和文本是合法 UTF-8；
 - `replace` 使用 `$1` / `${1}` 形式引用捕获组；
 - 非法正则会报运行时错误。
 

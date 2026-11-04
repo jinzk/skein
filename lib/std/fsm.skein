@@ -10,9 +10,9 @@ package fsm {
   }
 
   struct _Table {
-    slots: list;
-    gens: list;
-    free: list;
+    slots: dict;
+    gens: dict;
+    free: any;
     alive: int;
   }
 
@@ -38,22 +38,27 @@ package fsm {
   }
 
   func _t_new() {
-    return _Table { slots: [], gens: [], free: [], alive: 0 };
+    return _Table {
+      slots: {},
+      gens: {},
+      free: std.deque.new(),
+      alive: 0
+    };
   }
 
   func _t_add(t, value, prev) {
     let slot = _NIL;
 
-    if (len(t.free) > 0) {
-      let n = len(t.free);
-      slot = t.free[n - 1];
-      t.free = std.list.slice(t.free, 0, n - 1);
+    if (std.deque.size(t.free) > 0) {
+      let popped = std.deque.pop_back(t.free);
+      slot = popped["value"];
+      t.free = popped["deque"];
       t.gens[slot] = t.gens[slot] + 1;
       t.slots[slot] = _Node { value: value, prev: prev };
     } else {
       slot = len(t.slots);
-      t.slots = std.list.append(t.slots, _Node { value: value, prev: prev });
-      t.gens = std.list.append(t.gens, 0);
+      t.slots[slot] = _Node { value: value, prev: prev };
+      t.gens[slot] = 0;
     }
 
     t.alive = t.alive + 1;
@@ -103,7 +108,7 @@ package fsm {
 
     t.slots[slot] = null;
     t.gens[slot] = t.gens[slot] + 1;
-    t.free = std.list.append(t.free, slot);
+    t.free = std.deque.push_back(t.free, slot);
     t.alive = t.alive - 1;
     return t;
   }
@@ -138,8 +143,10 @@ package fsm {
 
   func _t_to_value(t) {
     let slots = std.deque.new();
-
-    for (let node in t.slots) {
+    let gens = std.deque.new();
+    let i = 0;
+    while (i < len(t.slots)) {
+      let node = t.slots[i];
       if (node == null) {
         slots = std.deque.push_back(slots, null);
       } else {
@@ -148,34 +155,42 @@ package fsm {
           "prev": node.prev
         });
       }
+      gens = std.deque.push_back(gens, t.gens[i]);
+      i = i + 1;
     }
 
     return {
       "slots": std.deque.to_list(slots),
-      "gens": t.gens,
-      "free": t.free,
+      "gens": std.deque.to_list(gens),
+      "free": std.deque.to_list(t.free),
       "alive": t.alive
     };
   }
 
   func _t_from_value(v, decode) {
-    let slots = std.deque.new();
-
-    for (let item in v["slots"]) {
+    let source_slots = v["slots"];
+    let source_gens = v["gens"];
+    let slots = {};
+    let gens = {};
+    let i = 0;
+    while (i < len(source_slots)) {
+      let item = source_slots[i];
       if (item == null) {
-        slots = std.deque.push_back(slots, null);
+        slots[i] = null;
       } else {
-        slots = std.deque.push_back(slots, _Node {
+        slots[i] = _Node {
           value: _decode_state(item["value"], decode),
           prev: item["prev"]
-        });
+        };
       }
+      gens[i] = source_gens[i];
+      i = i + 1;
     }
 
     return _Table {
-      slots: std.deque.to_list(slots),
-      gens: v["gens"],
-      free: v["free"],
+      slots: slots,
+      gens: gens,
+      free: std.deque.from_list(v["free"]),
       alive: v["alive"]
     };
   }
@@ -246,7 +261,40 @@ package fsm {
 
   export func run(m, ctx, events) {
     for (let event in events) {
-      ctx = step(m, ctx, event);
+      let next = m.step(ctx.state, event);
+
+      if (m.kind == "enum" || m.kind == "struct") {
+        if (kind_of(next) != m.kind ||
+            type_name(next) != m.name ||
+            type_module(next) != m.module) {
+          fail("step must return " + m.name + ", got " +
+               kind_of(next) + " " + type_name(next));
+        }
+      }
+
+      if (m.on_transition != null) {
+        m.on_transition(ctx.state, event, next);
+      }
+
+      // Inline _t_add: after the first COW fork inside this call, the history
+      // table is uniquely owned and every following event is O(1).
+      let slot = _NIL;
+      if (std.deque.size(ctx._history.free) > 0) {
+        let popped = std.deque.pop_back(ctx._history.free);
+        slot = popped["value"];
+        ctx._history.free = popped["deque"];
+        ctx._history.gens[slot] = ctx._history.gens[slot] + 1;
+        ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
+      } else {
+        slot = len(ctx._history.slots);
+        ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
+        ctx._history.gens[slot] = 0;
+      }
+      ctx._history.alive = ctx._history.alive + 1;
+
+      ctx.state = next;
+      ctx._head = (ctx._history.gens[slot] << 32) | slot;
+      ctx._redo = [];
     }
     return ctx;
   }

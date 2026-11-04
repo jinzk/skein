@@ -1317,22 +1317,19 @@ static struct value_t *increment_member_value(struct value_t *container,
             yyerror("cannot access dict key with '.', use [\"...\"]");
         } else {
             ensure_unique_dict(dv);
-            bool found = false;
-            for (size_t i = 0; i < dv->payload->items.size(); ++i) {
-                if (!value_equals(dv->payload->items[i].first, idx))
-                    continue;
-                found = true;
-                struct value_t *old = dv->payload->items[i].second;
+            int index = dict_find_index(dv, idx);
+            if (index >= 0) {
+                struct value_t *old =
+                    dv->payload->items[(size_t)index].second;
                 struct value_t *newv = apply_increment(old, delta);
                 if (newv) {
                     ret = prefix ? dupval(newv) : dupval(old);
                     freeval(old);
-                    dv->payload->items[i].second = newv;
+                    dv->payload->items[(size_t)index].second = newv;
                 }
-                break;
-            }
-            if (!found)
+            } else {
                 yyerror("key not found");
+            }
         }
     } else if (container->type == T_struct) {
         if (idx->type != T_string) {
@@ -1837,11 +1834,10 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
 
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
-        for (size_t i = 0; i < dv->payload->items.size(); ++i) {
-            if (value_equals(dv->payload->items[i].first, index)) {
-                *next = dv->payload->items[i].second;
-                return true;
-            }
+        int found = dict_find_index(dv, index);
+        if (found >= 0) {
+            *next = dv->payload->items[(size_t)found].second;
+            return true;
         }
         yyerror("key not found");
         return false;

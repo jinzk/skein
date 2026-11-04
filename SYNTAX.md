@@ -1751,8 +1751,23 @@ std.regex.replace(pattern, text, replacement[, flags]) → string
 std.regex.split(pattern, text[, flags])       → list
 ```
 
-使用 ECMAScript 语法，`flags` 支持 `i` 和 `m`；匹配偏移是字节偏移。
-`replace` 使用 `$1` / `${1}` 引用捕获组。
+使用 PCRE2 语法，兼容常用 ECMAScript 写法；Unicode 码点转义使用 `\x{...}`（如 `\x{4f60}`），不是 `\uXXXX`。`flags` 支持 `i`（忽略大小写）、`m`（多行）和 `u`（Unicode 模式）。
+
+```text
+std.regex.match(".", "你", "u")               // true
+std.regex.match("\\p{L}+", "中文", "u")        // true
+std.regex.match("é", "É", "iu")               // true
+
+let m = std.regex.search("(\\p{L}+)", "123中文456", "u");
+m["text"]                                     // 中文
+m["start"]                                    // 3（码点偏移）
+m["end"]                                      // 5（码点偏移）
+```
+
+- 不带 `u` 时按 UTF-8 字节匹配，`search` / `find_all` 的 `start` / `end` 是字节偏移；
+- 带 `u` 时按 Unicode 码点匹配，支持 `\p{...}`、Unicode 字符类和 Unicode 大小写折叠，`start` / `end` 是码点偏移；
+- `u` 模式要求模式和文本是合法 UTF-8；
+- `replace` 使用 `$1` / `${1}` 引用捕获组。
 
 时间、随机数和编码工具：
 
@@ -3127,7 +3142,7 @@ fsm.restore(snap[, decode])    -> Context
 - `ctx._history` / `ctx._head` / `ctx._redo` 是内部字段，不要依赖；
 - 非法 `step` 会 `fail("step must be callable")`，非法回调会 `fail("on_transition must be callable")`。
 
-性能提示：`step` 每次都会为值语义复制历史表，O(history)/次；`history` 已是 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。
+性能提示：单步 `step` 每次都会为值语义复制历史表，O(history)/次；`run` 在单次调用内复用同一份历史，整体 O(events)，`history` 为 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。
 
 ### std.enum
 
@@ -3387,6 +3402,7 @@ API：
 ```text
 graph.new()                                 -> Graph
 graph.add_node(g, value)                    -> {graph, id}
+graph.add_nodes(g, values)                  -> {graph, ids}
 graph.remove_node(g, id)                    -> Graph
 graph.has_node(g, id)                       -> bool
 graph.get_node(g, id)                       -> value
@@ -3394,6 +3410,8 @@ graph.set_node(g, id, value)                -> Graph
 graph.node_count(g) / graph.edge_count(g)   -> int
 graph.node_ids(g) / graph.nodes(g)          -> list
 graph.add_edge(g, from, to[, tag[, weight]]) -> {graph, id}
+graph.add_edges(g, edges)                   -> Graph
+graph.from_edges(count, edges)              -> Graph
 graph.remove_edge(g, id)                    -> Graph
 graph.edges(g)                              -> list
 graph.neighbors(g, id[, tag])               -> list
@@ -3412,6 +3430,7 @@ graph.to_dot(g)                             -> string
 
 - 节点 id 和边 id 都是递增整数；
 - `add_node` / `add_edge` 返回新 graph，必须用 `r["graph"]` 取回；
+- `add_nodes(g, values)` 返回 `{graph, ids}`；`add_edges(g, edges)` 的每条边是 `[from, to[, tag[, weight]]]`；`from_edges(count, edges)` 创建 1..count 节点；三者都只触发一次 COW；
 - `add_edge` 的两个端点必须已存在，否则 `fail`；
 - `remove_node` 会级联删除所有相关边；
 - 边标签字段叫 `tag`（`label` 是保留字）；
@@ -3427,7 +3446,7 @@ graph.to_dot(g)                             -> string
 - `subgraph` 保留给定节点，以及两端都在集合内的边；
 - `neighbors` 可按 `tag` 过滤。
 
-性能提示：`add_node` / `add_edge` / `set_node` 每次都会为值语义复制对应的 dict，分别是 O(V) / O(E)/次；`neighbors` 需要扫描全部边 O(E)。图较大时请尽量批量构造，或等待后续原生 graph 实现。
+性能提示：`add_node` / `add_edge` / `set_node` 每次都会为值语义复制对应的 dict，分别是 O(V) / O(E)/次；大图请用 `add_nodes` / `add_edges` / `from_edges` 批量构造（只触发一次 COW）。`bfs` / `dfs` / `topo_sort` / `path` / `components` / `shortest_path` 会先构建一次邻接表，遍历为 O(V+E)；单次 `neighbors` 仍扫描全部边 O(E)。
 
 ### std.arena
 
@@ -3455,6 +3474,7 @@ API：
 
 ```text
 arena.new()                 -> Store
+arena.from_list(values)     -> Store
 arena.add(store, value)     -> {arena, id}
 arena.get(store, id)        -> {ok, value} | {ok: false, error}
 arena.set(store, id, value) -> {arena, ok}
@@ -3467,7 +3487,7 @@ arena.values(store)         -> list
 arena.clear(store)          -> Store
 ```
 
-性能提示：`add` / `set` / `remove` 每次都会为值语义复制 `slots` 列表，O(capacity)/次；`ids` / `values` 已是 O(n)。适合中小规模；超大规模请等待原生 arena 实现。
+性能提示：`add` / `set` / `remove` 每次都会为值语义复制 `slots` 列表，O(capacity)/次；`from_list` 批量构造 O(n)，`ids` / `values` 也是 O(n)。适合中小规模；超大规模请等待原生 arena 实现。
 
 规则：
 

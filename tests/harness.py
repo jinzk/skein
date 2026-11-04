@@ -286,9 +286,47 @@ def check_extended_stdlib():
                     "xx[aaa]byy", "[a, b, c]", "= 3"],
     )
     check(
+        "std regex unicode mode",
+        "import std;\n"
+        'std.regex.match(".", "你", "u")\n'
+        'std.regex.match("...", "你", "u")\n'
+        'std.regex.match("...", "你")\n'
+        'std.regex.match("\\\\p{L}+", "中文", "u")\n'
+        'std.regex.match("\\\\x{4f60}", "你", "u")\n'
+        'std.regex.match("\\\\w+", "中文", "u")\n'
+        'std.regex.match("\\\\d+", "１２３", "u")\n'
+        'std.regex.match("é", "É", "iu")\n'
+        'std.regex.match("a|ab", "ab")\n'
+        'len(std.regex.find_all(".", "a你b", "u"))\n'
+        'len(std.regex.find_all(".", "a你b"))\n'
+        'len(std.regex.find_all("", "ab"))\n'
+        'let u = std.regex.search("(\\\\p{L}+)", "123中文456", "u");\n'
+        'print(u["text"]);\n'
+        'print(u["start"]);\n'
+        'print(u["end"]);\n'
+        'print(u["groups"][0]);\n'
+        'print(std.regex.replace("(\\\\p{Han}+)", "a你b", "[$1]", "u"));\n'
+        'print(std.regex.split("\\\\s+", "a\u3000b", "u"));\n'
+        'let xs = std.regex.find_all("你", "a你b你c", "u");\n'
+        'xs[1]["start"]\n'
+        'xs[1]["end"]\n'
+        'let b = std.regex.search("你", "a你b");\n'
+        'b["start"]\n'
+        'b["end"]\n',
+        stdout_all=["= true", "= false", "= true", "= true", "= true",
+                    "= true", "= true", "= true", "= true", "= 3", "= 5",
+                    "= 3", "中文", "= 3", "= 5", "中文", "a[你]b",
+                    "[a, b]", "= 3", "= 4", "= 1", "= 4"],
+    )
+    check(
         "std regex invalid pattern",
         'import std;\nstd.regex.match("(", "x")\n',
         stderr="invalid pattern",
+    )
+    check(
+        "std regex invalid flag",
+        'import std;\nstd.regex.match("a", "a", "z")\n',
+        stderr="unknown regex flag 'z'",
     )
 
     check(

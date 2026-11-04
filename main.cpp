@@ -7,6 +7,9 @@
 #include "parser.hpp"
 #include "builtins.h"
 #include "ffi_bindgen.h"
+#ifdef SKEIN_ENABLE_FFI
+#include "ffi_check.h"
+#endif
 #include "diagnostics.h"
 #include "error_report.h"
 #include "eval.h"
@@ -54,6 +57,24 @@ int main(int argc, char **argv) {
     platform_install_interrupt_handler();
 
     for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--check-ffi") == 0) {
+#ifdef SKEIN_ENABLE_FFI
+            if (i + 2 >= argc) {
+                std::fprintf(stderr,
+                             "usage: skein --check-ffi <library> <manifest>\n");
+                return 2;
+            }
+            std::string check_error;
+            int check_code =
+                ffi_check::run_check(argv[i + 1], argv[i + 2], check_error);
+            if (check_code != 0 && !check_error.empty())
+                std::fprintf(stderr, "skein: %s\n", check_error.c_str());
+            return check_code;
+#else
+            std::fprintf(stderr, "skein: built without FFI support\n");
+            return 2;
+#endif
+        }
         if (std::strcmp(argv[i], "--ffi-gen") == 0) {
             std::vector<std::string> gen_args;
             for (int j = i + 1; j < argc; ++j)

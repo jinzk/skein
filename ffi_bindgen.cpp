@@ -31,6 +31,7 @@ struct options {
     std::vector<std::string> headers;
     std::vector<std::string> includes;
     std::vector<std::string> defines;
+    std::vector<std::string> symbols;
     std::string module;
     std::string cc;
     std::string output;
@@ -515,6 +516,8 @@ public:
     }
 
     std::string render(const options &o, const std::string &source_hash);
+
+    void keep_functions(const std::vector<std::string> &patterns);
 
 private:
     void preload_typedefs() {
@@ -1154,6 +1157,55 @@ public:
     const std::vector<std::string> &warnings() const { return warnings_; }
 };
 
+namespace {
+
+bool glob_match(const char *pattern, const char *text) {
+    while (*pattern) {
+        if (*pattern == '*') {
+            while (*pattern == '*')
+                ++pattern;
+            if (!*pattern)
+                return true;
+            while (*text) {
+                if (glob_match(pattern, text))
+                    return true;
+                ++text;
+            }
+            return false;
+        }
+        if (*pattern == '?') {
+            if (!*text)
+                return false;
+            ++pattern;
+            ++text;
+            continue;
+        }
+        if (*pattern != *text)
+            return false;
+        ++pattern;
+        ++text;
+    }
+    return *text == '\0';
+}
+
+} // namespace
+
+void parser::keep_functions(const std::vector<std::string> &patterns) {
+    if (patterns.empty())
+        return;
+    functions_.erase(
+        std::remove_if(functions_.begin(), functions_.end(),
+                       [&](const function_out &function) {
+                           for (const std::string &pattern : patterns) {
+                               if (glob_match(pattern.c_str(),
+                                              function.name.c_str()))
+                                   return false;
+                           }
+                           return true;
+                       }),
+        functions_.end());
+}
+
 std::string parser::render(const options &o, const std::string &source_hash) {
     std::ostringstream out;
     out << "{\n";
@@ -1296,6 +1348,7 @@ void print_usage() {
         "  --ffi-include <dir>   add an include directory\n"
         "  --ffi-define <def>    add a preprocessor definition\n"
         "  --cc <compiler>       C compiler used for -E (default: cc)\n"
+        "  --symbols <pattern>   only emit matching function names (repeatable)\n"
         "  --module <name>       manifest library name (default: header stem)\n"
         "  -o, --output <path>   write the manifest here (default: stdout)\n"
         "  --no-constants        do not emit #define/enum constants\n"
@@ -1334,6 +1387,13 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
                 return 2;
             }
             o.defines.push_back(define);
+        } else if (arg == "--symbols") {
+            std::string pattern = value();
+            if (pattern.empty()) {
+                error = "--symbols requires a pattern";
+                return 2;
+            }
+            o.symbols.push_back(pattern);
         } else if (arg == "--module") {
             o.module = value();
         } else if (arg == "--cc") {
@@ -1369,6 +1429,7 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
     parser p(std::move(tokens), std::move(constants));
     if (!p.parse(error))
         return 1;
+    p.keep_functions(o.symbols);
 
     char hash_buffer[32];
     std::snprintf(hash_buffer, sizeof hash_buffer, "%016llx",

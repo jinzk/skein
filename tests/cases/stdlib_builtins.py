@@ -757,6 +757,50 @@ def run_cases():
         assert (generated["functions"]["sample_sort"]["args"][2]
                 == "SampleCompare")
         assert generated["constants"]["SAMPLE_MAX"] == 16
+
+        check_proc = subprocess.run(
+            [BIN, "--ffi-gen", "--header", bindgen_header,
+             "--module", "sample", "--check", "-o", bindgen_output],
+            text=True, capture_output=True, timeout=60)
+        assert check_proc.returncode == 0, (check_proc.stdout,
+                                            check_proc.stderr)
+
+        filtered_output = os.path.join(bindgen_dir, "filtered.ffi.json")
+        filter_proc = subprocess.run(
+            [BIN, "--ffi-gen", "--header", bindgen_header,
+             "--symbols", "sample_add", "-o", filtered_output],
+            text=True, capture_output=True, timeout=60)
+        assert filter_proc.returncode == 0, filter_proc.stderr
+        with open(filtered_output, encoding="utf-8") as handle:
+            filtered = _json.load(handle)
+        assert list(filtered["functions"]) == ["sample_add"]
+
+        if has_ffi and FFI_SHIM:
+            good_manifest = os.path.join(bindgen_dir, "shim_good.ffi.json")
+            with open(good_manifest, "w", encoding="utf-8") as handle:
+                _json.dump({
+                    "ffi": 1,
+                    "functions": {
+                        "shim_i32": {"result": "i32", "args": ["i32"]},
+                    },
+                }, handle)
+            good = subprocess.run(
+                [BIN, "--check-ffi", FFI_SHIM, good_manifest],
+                text=True, capture_output=True, timeout=60)
+            assert good.returncode == 0, (good.stdout, good.stderr)
+
+            bad_manifest = os.path.join(bindgen_dir, "shim_bad.ffi.json")
+            with open(bad_manifest, "w", encoding="utf-8") as handle:
+                _json.dump({
+                    "ffi": 1,
+                    "functions": {"nope": {"result": "i32"}},
+                }, handle)
+            bad = subprocess.run(
+                [BIN, "--check-ffi", FFI_SHIM, bad_manifest],
+                text=True, capture_output=True, timeout=60)
+            assert bad.returncode == 1, (bad.stdout, bad.stderr)
+            assert "missing symbol: nope" in bad.stderr
+
         if has_ffi:
             check(
                 "ffi bindgen manifest validates",

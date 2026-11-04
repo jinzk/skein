@@ -330,9 +330,11 @@ if(SKEIN_ENABLE_FFI)
   endif()
   if(LIBFFI_FOUND)
     target_sources(skein_builtins PRIVATE ffi.cpp ffi_types.cpp ffi_value.cpp
-                   ffi_marshal.cpp ffi_callbacks.cpp ffi_manifest.cpp)
+                   ffi_marshal.cpp ffi_callbacks.cpp ffi_manifest.cpp
+                   ffi_check.cpp)
     target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_FFI=1)
     target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_FFI=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_FFI=1)
     target_link_libraries(skein_builtins PUBLIC PkgConfig::LIBFFI)
   else()
     message(STATUS "libffi not found; std.ffi is disabled")

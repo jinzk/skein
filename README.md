@@ -1541,6 +1541,7 @@ skein --ffi-gen \
   --header include/shape.h \
   --ffi-include include \
   --ffi-define SHAPE_API= \
+  --symbols "shape_*" \
   --module shape \
   --cc gcc \
   -o shape.ffi.json
@@ -1551,8 +1552,19 @@ skein --ffi-gen \
 - 只解析 `--header` 指定头文件里的声明，支持 struct、typedef、指针、数组、
   函数声明、函数指针 typedef、enum 和对象式宏常量；
 - packed、bitfield、变参、柔性数组、匿名 struct/union 会报告并跳过；
+- `--symbols` 只导出匹配的函数（`*`/`?` 通配符）；
 - `--check` 用于 CI 校验生成的 manifest 是否过期；
 - 运行时不依赖 C 编译器和头文件，只读 manifest。
+
+校验 manifest 与库是否匹配（不执行脚本）：
+
+```text
+skein --check-ffi ./libshape.so shape.ffi.json
+```
+
+- 加载库和 manifest，校验 ABI/布局，并解析所有声明的符号；
+- 缺失符号会逐条列出并以非零状态退出；
+- 适合作为构建/发布前的检查。
 
 模块：
 

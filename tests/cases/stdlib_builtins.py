@@ -1116,6 +1116,50 @@ def run_cases():
             'dynamic.dict_value(4)["value"]\n',
             stdout_all=["= 7", "= 6", "= 4"],
         )
+        check(
+            "native module unload keeps live bindings",
+            "import std;\n"
+            f"std.module.load({native_module});\n"
+            "import test.dynamic;\n"
+            "dynamic.twice(21)\n"
+            'std.module.unload("test.dynamic");\n'
+            "dynamic.twice(21)\n",
+            stdout_all=["= 42", "= 42"],
+        )
+        check(
+            "native module unload removes import",
+            "import std;\n"
+            f"std.module.load({native_module});\n"
+            'std.module.unload("test.dynamic");\n'
+            "import test.dynamic;\n",
+            stderr="package not found",
+        )
+        check(
+            "native module cannot unload static",
+            "import std;\n"
+            'std.module.unload("example.math")\n',
+            stderr="cannot unload a static native module",
+        )
+        with tempfile.TemporaryDirectory() as fini_dir:
+            fini_path = os.path.join(fini_dir, "fini.txt")
+            fini_env = dict(os.environ)
+            fini_env["SKEIN_TEST_FINI_FILE"] = fini_path
+            check(
+                "native module fini",
+                "import std;\n"
+                f"std.module.load({native_module});\n"
+                "func use() {\n"
+                "  import test.dynamic;\n"
+                "  return dynamic.twice(1);\n"
+                "}\n"
+                "use();\n"
+                'std.module.unload("test.dynamic");\n',
+                stdout="= 2",
+                env=fini_env,
+            )
+            assert os.path.exists(fini_path), "module fini was not called"
+            with open(fini_path, encoding="utf-8") as handle:
+                assert handle.read() == "fini"
         if FFI_SHIM:
             check(
                 "native module missing descriptor",

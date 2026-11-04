@@ -39,7 +39,7 @@ def skein_string(value):
     return f'"{escaped}"'
 
 
-def run(source, timeout=None):
+def run(source, timeout=None, env=None):
     if timeout is None:
         timeout = DEFAULT_TIMEOUT
     try:
@@ -50,6 +50,7 @@ def run(source, timeout=None):
             encoding="utf-8",
             capture_output=True,
             timeout=timeout,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(f"interpreter timed out for input {source!r}") from exc
@@ -68,8 +69,8 @@ def run_file(path, timeout=None):
 
 
 def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
-          not_stderr=None, code=0):
-    proc = run(source)
+          not_stderr=None, code=0, env=None):
+    proc = run(source, env=env)
     combined = proc.stdout + proc.stderr
     assert "Segmentation fault" not in combined, f"{name}: crashed"
     assert proc.returncode == code, (

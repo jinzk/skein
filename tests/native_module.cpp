@@ -1,6 +1,9 @@
 /* Dynamic test module for the native module ABI. */
 #include "skein_module.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 namespace {
 
 const skein_api *g_api = nullptr;
@@ -102,11 +105,23 @@ skein_status module_init(skein_context *ctx, const skein_api *api) {
     return SKEIN_OK;
 }
 
+void module_fini(skein_context *ctx) {
+    (void)ctx;
+    const char *path = std::getenv("SKEIN_TEST_FINI_FILE");
+    if (!path || !*path)
+        return;
+    FILE *file = std::fopen(path, "w");
+    if (!file)
+        return;
+    std::fputs("fini", file);
+    std::fclose(file);
+}
+
 const skein_module module = {
     SKEIN_MODULE_ABI_VERSION,
     "test.dynamic",
     module_init,
-    nullptr,
+    module_fini,
     functions,
     5,
     types,

@@ -1705,6 +1705,8 @@ example.math.ANSWER;
 - `skein_api` v1 追加了 `new_list` / `new_dict` / `as_userdata`；使用新字段前
   应检查 `size`，旧 host 的 ABI 表会更短；
 - 静态绑定在启动时注册，动态插件通过 `std.module.load` 加载；
+- `std.module.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
+  模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
 - packed/bitfield 不进通用 FFI，由 C++ 绑定通过 `get_field`/`set_field` 处理，
@@ -2166,6 +2168,7 @@ std.type.module
 std.type.source
 
 std.module.load
+std.module.unload
 
 std.net.tcp_connect
 std.net.tcp_listen

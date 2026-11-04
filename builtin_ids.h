@@ -181,6 +181,7 @@ enum bifs {
     B_ffi_declare,
     B_ffi_bind,
     B_module_load,
+    B_module_unload,
     B_task_sleep,
     B_task_yield,
     B_task_wait,

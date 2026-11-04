@@ -810,6 +810,7 @@ value_t *build_std_namespace() {
         newstrval("module"),
         builtin_module({
             {"load", B_module_load},
+            {"unload", B_module_unload},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("task"),

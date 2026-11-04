@@ -119,10 +119,25 @@ skein_value *api_new_bytes(skein_context *ctx, const void *data, size_t len) {
 struct c_userdata {
     const skein_native_type *type = nullptr;
     void *data = nullptr;
+    std::shared_ptr<void> module_owner;
 
     ~c_userdata() {
         if (type && type->destroy)
             type->destroy(data);
+    }
+};
+
+thread_local std::shared_ptr<void> current_module_owner;
+
+struct module_owner_guard {
+    std::shared_ptr<void> previous;
+
+    explicit module_owner_guard(std::shared_ptr<void> owner)
+        : previous(std::move(current_module_owner)) {
+        current_module_owner = std::move(owner);
+    }
+    ~module_owner_guard() {
+        current_module_owner = std::move(previous);
     }
 };
 
@@ -211,6 +226,7 @@ skein_value *api_new_userdata(skein_context *ctx,
     std::shared_ptr<c_userdata> payload = std::make_shared<c_userdata>();
     payload->type = type;
     payload->data = data;
+    payload->module_owner = current_module_owner;
     return as_handle(newuserdataval(meta_for(type), payload));
 }
 
@@ -364,12 +380,24 @@ const skein_api *api_table() {
  * Registry
  * ---------------------------------------------------------------------- */
 
-struct registered_module {
-    std::string import_path;
-    std::string internal_key;
+struct module_state {
     const skein_module *module = nullptr;
     std::shared_ptr<dynamic_library> library;
     bool initialized = false;
+    bool finished = false;
+
+    ~module_state() {
+        if (!finished && initialized && module && module->fini &&
+            skein_context_current())
+            module->fini(skein_context_current());
+        finished = true;
+    }
+};
+
+struct registered_module {
+    std::string import_path;
+    std::string internal_key;
+    std::shared_ptr<module_state> state;
 };
 
 std::vector<registered_module> &modules() {
@@ -405,15 +433,16 @@ value_t *build_namespace(registered_module &entry) {
     dict_value_t *namespace_value = newdictval();
     namespace_value->payload->is_namespace = true;
 
-    const skein_module *module = entry.module;
+    std::shared_ptr<module_state> state = entry.state;
+    const skein_module *module = state->module;
     for (size_t i = 0; i < module->function_count; ++i) {
         const skein_function &function = module->functions[i];
         if (!function.name || !function.call)
             continue;
-        std::shared_ptr<dynamic_library> keep = entry.library;
         value_t *native = newnativeval(
-            [module, call = function.call,
-             keep](const std::vector<value_t *> &args) -> value_t * {
+            [state, call = function.call](
+                const std::vector<value_t *> &args) -> value_t * {
+                module_owner_guard guard(state);
                 std::vector<const skein_value *> call_args;
                 call_args.reserve(args.size());
                 for (value_t *arg : args)
@@ -427,7 +456,7 @@ value_t *build_namespace(registered_module &entry) {
                     return NULL;
                 return as_value(result);
             },
-            keep);
+            state);
         dict_append_item(namespace_value, newstrval(function.name), native);
     }
 
@@ -472,10 +501,12 @@ bool register_module(const skein_module *module,
 
     registered_module entry;
     entry.import_path = module->name;
-    entry.internal_key = library ? std::string("dyn:") + module->name
+    const bool dynamic = library != nullptr;
+    entry.internal_key = dynamic ? std::string("dyn:") + module->name
                                  : std::string("static:") + module->name;
-    entry.module = module;
-    entry.library = std::move(library);
+    entry.state = std::make_shared<module_state>();
+    entry.state->module = module;
+    entry.state->library = std::move(library);
     modules().push_back(std::move(entry));
     return true;
 }
@@ -515,16 +546,33 @@ struct value_t *import_module(const std::string &name, std::string &error) {
         error = "native module not found: " + name;
         return NULL;
     }
-    if (!entry->initialized) {
-        if (entry->module->init &&
-            entry->module->init(skein_context_current(), api_table()) !=
+    if (!entry->state->initialized) {
+        module_owner_guard guard(entry->state);
+        if (entry->state->module->init &&
+            entry->state->module->init(skein_context_current(), api_table()) !=
                 SKEIN_OK) {
             error = "native module " + name + " failed to initialize";
             return NULL;
         }
-        entry->initialized = true;
+        entry->state->initialized = true;
     }
     return build_namespace(*entry);
+}
+
+bool unload_module(const std::string &name, std::string &error) {
+    std::vector<registered_module> &entries = modules();
+    for (auto it = entries.begin(); it != entries.end(); ++it) {
+        if (it->import_path != name)
+            continue;
+        if (!it->state->library) {
+            error = "cannot unload a static native module";
+            return false;
+        }
+        entries.erase(it);
+        return true;
+    }
+    error = "native module not found: " + name;
+    return false;
 }
 
 } // namespace skein

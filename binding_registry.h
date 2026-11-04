@@ -27,6 +27,10 @@ bool load_dynamic_module(const std::string &path, std::string &import_path,
  * module's init hook once. */
 struct value_t *import_module(const std::string &name, std::string &error);
 
+/* Remove a dynamic module from the registry.  The library stays loaded until
+ * the last bound function/userdata is released, then fini/dlclose run. */
+bool unload_module(const std::string &name, std::string &error);
+
 } // namespace skein
 
 #endif

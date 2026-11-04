@@ -777,6 +777,11 @@ def run_cases():
         assert (generated["functions"]["sample_sort"]["args"][2]
                 == "SampleCompare")
         assert generated["constants"]["SAMPLE_MAX"] == 16
+        assert generated["constants"]["SAMPLE_SHIFT"] == 16
+        assert generated["constants"]["SAMPLE_MASK"] == 9
+        assert generated["constants"]["SAMPLE_KIND_A"] == 4
+        assert generated["constants"]["SAMPLE_KIND_B"] == 5
+        assert generated["constants"]["SAMPLE_KIND_C"] == 6
 
         check_proc = subprocess.run(
             [BIN, "--ffi-gen", "--header", bindgen_header,

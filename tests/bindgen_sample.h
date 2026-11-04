@@ -4,6 +4,14 @@
 #define SAMPLE_MAX 16
 #define SAMPLE_PI 3.5
 #define SAMPLE_NAME "sample"
+#define SAMPLE_SHIFT (1 << 4)
+#define SAMPLE_MASK ((1 << 3) | 1)
+
+enum SampleKind {
+    SAMPLE_KIND_A = 1 << 2,
+    SAMPLE_KIND_B = SAMPLE_KIND_A | 1,
+    SAMPLE_KIND_C
+};
 
 typedef struct SamplePoint {
     double x;

@@ -119,6 +119,10 @@ void tokenize_line(const std::string &line, int pack,
         } else if (line.compare(i, 3, "...") == 0) {
             t.text = "...";
             i += 3;
+        } else if (line.compare(i, 2, "<<") == 0 ||
+                   line.compare(i, 2, ">>") == 0) {
+            t.text = line.substr(i, 2);
+            i += 2;
         } else {
             t.text.assign(1, (char)c);
             ++i;
@@ -224,7 +228,225 @@ bool parse_pack_directive(const std::string &line, int &pack,
     return true;
 }
 
-bool parse_constant_text(const std::string &text, constant_out &out) {
+
+/* Small integer constant-expression evaluator for #define/enum values. */
+class integer_expression {
+public:
+    integer_expression(const std::string &text,
+                       const std::map<std::string, long long> &names)
+        : text_(text), names_(names) {}
+
+    bool evaluate(long long &out) {
+        out = parse_or();
+        skip();
+        return ok_ && position_ == text_.size();
+    }
+
+private:
+    void skip() {
+        while (position_ < text_.size() &&
+               std::isspace((unsigned char)text_[position_]))
+            ++position_;
+    }
+
+    bool eat(char c) {
+        skip();
+        if (position_ < text_.size() && text_[position_] == c) {
+            ++position_;
+            return true;
+        }
+        return false;
+    }
+
+    bool eat(const char *text) {
+        skip();
+        size_t length = std::strlen(text);
+        if (text_.compare(position_, length, text) == 0) {
+            position_ += length;
+            return true;
+        }
+        return false;
+    }
+
+    long long parse_or() {
+        long long value = parse_xor();
+        while (ok_ && eat('|'))
+            value |= parse_xor();
+        return value;
+    }
+
+    long long parse_xor() {
+        long long value = parse_and();
+        while (ok_ && eat('^'))
+            value ^= parse_and();
+        return value;
+    }
+
+    long long parse_and() {
+        long long value = parse_shift();
+        while (ok_ && eat('&'))
+            value &= parse_shift();
+        return value;
+    }
+
+    long long parse_shift() {
+        long long value = parse_add();
+        for (;;) {
+            skip();
+            if (text_.compare(position_, 2, "<<") == 0) {
+                position_ += 2;
+                value = (long long)((unsigned long long)value
+                                    << (parse_add() & 63));
+            } else if (text_.compare(position_, 2, ">>") == 0) {
+                position_ += 2;
+                value = value >> (parse_add() & 63);
+            } else {
+                break;
+            }
+        }
+        return value;
+    }
+
+    long long parse_add() {
+        long long value = parse_mul();
+        for (;;) {
+            if (eat('+'))
+                value += parse_mul();
+            else if (eat('-'))
+                value -= parse_mul();
+            else
+                break;
+        }
+        return value;
+    }
+
+    long long parse_mul() {
+        long long value = parse_unary();
+        for (;;) {
+            if (eat('*')) {
+                value *= parse_unary();
+            } else if (eat('/')) {
+                long long divisor = parse_unary();
+                if (divisor == 0) {
+                    ok_ = false;
+                    return 0;
+                }
+                value /= divisor;
+            } else if (eat('%')) {
+                long long divisor = parse_unary();
+                if (divisor == 0) {
+                    ok_ = false;
+                    return 0;
+                }
+                value %= divisor;
+            } else {
+                break;
+            }
+        }
+        return value;
+    }
+
+    long long parse_unary() {
+        if (eat('+'))
+            return parse_unary();
+        if (eat('-'))
+            return -parse_unary();
+        if (eat('~'))
+            return ~parse_unary();
+        if (eat('!'))
+            return parse_unary() == 0 ? 1 : 0;
+        return parse_primary();
+    }
+
+    long long parse_primary() {
+        skip();
+        if (position_ >= text_.size()) {
+            ok_ = false;
+            return 0;
+        }
+        if (eat('(')) {
+            long long value = parse_or();
+            if (!eat(')'))
+                ok_ = false;
+            return value;
+        }
+        if (text_[position_] == '\'') {
+            ++position_;
+            long long value = 0;
+            while (position_ < text_.size() && text_[position_] != '\'') {
+                char c = text_[position_++];
+                if (c == '\\' && position_ < text_.size()) {
+                    char next = text_[position_++];
+                    switch (next) {
+                        case 'n': value = '\n'; break;
+                        case 'r': value = '\r'; break;
+                        case 't': value = '\t'; break;
+                        case '0': value = 0; break;
+                        case '\\': value = '\\'; break;
+                        case '\'': value = '\''; break;
+                        default: value = (unsigned char)next; break;
+                    }
+                } else {
+                    value = (unsigned char)c;
+                }
+            }
+            if (!eat('\''))
+                ok_ = false;
+            return value;
+        }
+        if (std::isdigit((unsigned char)text_[position_])) {
+            size_t start = position_;
+            if (text_.compare(position_, 2, "0x") == 0 ||
+                text_.compare(position_, 2, "0X") == 0) {
+                position_ += 2;
+                while (position_ < text_.size() &&
+                       std::isxdigit((unsigned char)text_[position_]))
+                    ++position_;
+            } else {
+                while (position_ < text_.size() &&
+                       std::isdigit((unsigned char)text_[position_]))
+                    ++position_;
+            }
+            std::string digits = text_.substr(start, position_ - start);
+            while (position_ < text_.size() &&
+                   (text_[position_] == 'u' || text_[position_] == 'U' ||
+                    text_[position_] == 'l' || text_[position_] == 'L'))
+                ++position_;
+            char *end = NULL;
+            long long value = std::strtoll(digits.c_str(), &end, 0);
+            if (!end || *end != '\0') {
+                ok_ = false;
+                return 0;
+            }
+            return value;
+        }
+        if (std::isalpha((unsigned char)text_[position_]) ||
+            text_[position_] == '_') {
+            size_t start = position_;
+            while (position_ < text_.size() &&
+                   is_ident_char((unsigned char)text_[position_]))
+                ++position_;
+            std::string name = text_.substr(start, position_ - start);
+            auto it = names_.find(name);
+            if (it == names_.end()) {
+                ok_ = false;
+                return 0;
+            }
+            return it->second;
+        }
+        ok_ = false;
+        return 0;
+    }
+
+    const std::string &text_;
+    const std::map<std::string, long long> &names_;
+    size_t position_ = 0;
+    bool ok_ = true;
+};
+
+bool parse_constant_text(const std::string &text,
+                             const std::map<std::string, long long> &names,
+                             constant_out &out) {
     std::string value = trim(text);
     if (value.empty())
         return false;
@@ -249,20 +471,12 @@ bool parse_constant_text(const std::string &text, constant_out &out) {
         }
         return true;
     }
-    /* Integer literal, optionally with U/L suffixes. */
-    std::string int_text = value;
-    while (!int_text.empty() &&
-           (int_text.back() == 'u' || int_text.back() == 'U' ||
-            int_text.back() == 'l' || int_text.back() == 'L'))
-        int_text.pop_back();
-    if (!int_text.empty()) {
-        char *end = NULL;
-        long long parsed = std::strtoll(int_text.c_str(), &end, 0);
-        if (end && *end == '\0') {
-            out.kind = constant_out::INT;
-            out.i = parsed;
-            return true;
-        }
+    long long integer = 0;
+    integer_expression expression(value, names);
+    if (expression.evaluate(integer)) {
+        out.kind = constant_out::INT;
+        out.i = integer;
+        return true;
     }
     if (value.find('.') != std::string::npos ||
         value.find('e') != std::string::npos ||
@@ -359,8 +573,14 @@ bool preprocess(const options &o, std::vector<token> &tokens,
                 bool function_like =
                     i < trimmed.size() && trimmed[i] == '(';
                 if (!name.empty() && !function_like) {
+                    std::map<std::string, long long> names;
+                    for (const auto &entry : constants) {
+                        if (entry.second.kind == constant_out::INT)
+                            names[entry.first] = entry.second.i;
+                    }
                     constant_out constant;
-                    if (parse_constant_text(trimmed.substr(i), constant))
+                    if (parse_constant_text(trimmed.substr(i), names,
+                                            constant))
                         constants[name] = std::move(constant);
                 }
             }
@@ -594,7 +814,8 @@ private:
                         --depth;
                         advance();
                     } else {
-                        if (cur().text == "packed")
+                        if (cur().text == "packed" ||
+                            cur().text == "__packed__")
                             packed = true;
                         advance();
                     }
@@ -776,26 +997,39 @@ private:
             advance();
             long long value = next;
             if (accept("=")) {
-                bool negative = accept("-");
-                if (is("+"))
+                std::string expression_text;
+                int depth = 0;
+                while (!eof()) {
+                    if (depth == 0 && (is(",") || is("}")))
+                        break;
+                    if (is("("))
+                        ++depth;
+                    else if (is(")"))
+                        --depth;
+                    expression_text += cur().text;
+                    expression_text += ' ';
                     advance();
-                if (!ident_at() && cur().kind != TOK_NUMBER)
+                }
+                std::map<std::string, long long> names;
+                for (const auto &entry : constants_) {
+                    if (entry.second.kind == constant_out::INT)
+                        names[entry.first] = entry.second.i;
+                }
+                long long parsed = 0;
+                integer_expression expression(expression_text, names);
+                if (!expression.evaluate(parsed))
                     fail("unsupported enumerator value");
-                std::string text = cur().text;
-                advance();
-                char *end = NULL;
-                long long parsed = std::strtoll(text.c_str(), &end, 0);
-                if (!end || *end != '\0')
-                    fail("unsupported enumerator value");
-                value = negative ? -parsed : parsed;
+                value = parsed;
             }
             constant_out constant;
             constant.kind = constant_out::INT;
             constant.i = value;
             constants_[name] = constant;
             next = value + 1;
-            if (!accept(","))
+            if (!accept(",")) {
+                accept("}");
                 break;
+            }
         }
     }
 

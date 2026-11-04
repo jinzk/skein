@@ -34,6 +34,53 @@ def run_cases():
           stderr="integer overflow")
     check("out-of-range integer literal becomes float",
           "9223372036854775808\n", stdout="= 9.223372036854776e+18")
+    check("integer literal underscores", "1_000_000\n", stdout="= 1000000")
+    check("integer literal underscores near int64 max",
+          "9_223_372_036_854_775_807\n",
+          stdout="= 9223372036854775807")
+    check("out-of-range integer literal with underscores becomes float",
+          "9_223_372_036_854_775_808\n",
+          stdout="= 9.223372036854776e+18")
+    check("hex integer literal", "0xff\n", stdout="= 255")
+    check("uppercase hex integer literal", "0XFF\n", stdout="= 255")
+    check("hex integer literal mixed case", "0xDeAdBeEf\n",
+          stdout="= 3735928559")
+    check("hex integer literal underscores", "0xFF_FF\n", stdout="= 65535")
+    check("binary integer literal", "0b1010\n", stdout="= 10")
+    check("uppercase binary integer literal", "0B1111\n", stdout="= 15")
+    check("binary integer literal underscores", "0b1010_0101\n",
+          stdout="= 165")
+    check("octal integer literal", "0o17\n", stdout="= 15")
+    check("uppercase octal integer literal", "0O777\n", stdout="= 511")
+    check("octal integer literal underscores", "0o7_7\n", stdout="= 63")
+    check("prefixed literals in arithmetic",
+          "0x10 + 0b10 + 0o10\n", stdout="= 26")
+    check("hex int64 maximum", "0x7FFFFFFFFFFFFFFF\n",
+          stdout="= 9223372036854775807")
+    check("hex integer literal out of range", "0x8000000000000000\n",
+          stderr="hexadecimal integer literal out of range")
+    check("invalid binary digit", "0b102\n",
+          stderr="invalid binary integer literal")
+    check("invalid octal digit", "0o8\n",
+          stderr="invalid octal integer literal")
+    check("empty hex literal", "0x\n",
+          stderr="invalid hexadecimal integer literal")
+    check("hex literal trailing underscore", "0xF_\n",
+          stderr="invalid hexadecimal integer literal")
+    check("hex literal underscore after prefix", "0x_FF\n",
+          stderr="invalid hexadecimal integer literal")
+    check("consecutive integer underscores", "1__0\n",
+          stderr="invalid numeric literal")
+    check("scientific notation", "1e3\n", stdout="= 1000.0")
+    check("scientific notation uppercase", "1E+3\n", stdout="= 1000.0")
+    check("scientific notation negative exponent", "1e-3\n",
+          stdout="= 0.001")
+    check("scientific notation with dot and no fraction", "1.e2\n",
+          stdout="= 100.0")
+    check("scientific notation leading dot", ".5e2\n", stdout="= 50.0")
+    check("float literal underscores", "1_000.5_5\n", stdout="= 1000.55")
+    check("scientific notation exponent underscores", "1.5e1_0\n",
+          stdout="= 15000000000.0")
     check("INT64_MIN division overflow",
           "(-9223372036854775807 - 1) / -1\n", stderr="integer overflow")
     check("int64 exact mixed comparison",
@@ -202,6 +249,10 @@ def run_cases():
           'case 2, 3 => print("two or three"); '
           'default => print("other"); }\n',
           stdout="two or three")
+    check("switch prefixed integer",
+          'switch (0xff) { case 0b1111_1111 => print("match"); '
+          'default => print("other"); }\n',
+          stdout="match")
     check("switch default",
           'switch (9) { case 1 => print("one"); '
           'default => print("other"); }\n',

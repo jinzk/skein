@@ -312,6 +312,51 @@ static bool ascii_name(const char *text, int len) {
     return true;
 }
 
+/* Numeric literals may contain underscores between digits.  Parsing always
+ * happens on a copy with the separators removed. */
+static std::string strip_numeric_underscores(const char *text, int len) {
+    std::string out;
+    out.reserve((size_t)len);
+    for (int i = 0; i < len; ++i) {
+        if (text[i] != '_')
+            out.push_back(text[i]);
+    }
+    return out;
+}
+
+static int lex_decimal_integer(const char *text, int len) {
+    std::string clean = strip_numeric_underscores(text, len);
+    errno = 0;
+    long long value = std::strtoll(clean.c_str(), NULL, 10);
+    if (errno == ERANGE) {
+        yylval.d = std::strtod(clean.c_str(), NULL);
+        return FLOAT;
+    }
+    yylval.i = value;
+    return INT;
+}
+
+static int lex_prefixed_integer(const char *text, int len, int base,
+                                const char *kind) {
+    std::string clean = strip_numeric_underscores(text, len);
+    errno = 0;
+    unsigned long long value = std::strtoull(clean.c_str() + 2, NULL, base);
+    if (errno == ERANGE || value > (unsigned long long)LLONG_MAX) {
+        diag_report_lexical(g_token_line, g_token_column,
+                            "%s integer literal out of range", kind);
+        yylval.i = 0;
+        return INT;
+    }
+    yylval.i = (long long)value;
+    return INT;
+}
+
+static int lex_float(const char *text, int len) {
+    std::string clean = strip_numeric_underscores(text, len);
+    yylval.d = std::strtod(clean.c_str(), NULL);
+    return FLOAT;
+}
+
 /* Copy a token of explicit byte length into yylval.str, NFC-normalizing
  * non-ASCII identifiers. */
 static int make_name_token(const char *text, int len) {
@@ -376,7 +421,12 @@ static void note_token(int tok) {
 
 %}
 
-EXP ([Ee][-+]?[0-9]+)
+DIGITS [0-9](_?[0-9])*
+HEX_DIGITS [0-9A-Fa-f](_?[0-9A-Fa-f])*
+BIN_DIGITS [01](_?[01])*
+OCT_DIGITS [0-7](_?[0-7])*
+
+EXP ([Ee][-+]?{DIGITS})
 
 ASCII_NAME [A-Za-z_][A-Za-z0-9_]*
 
@@ -620,19 +670,40 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     yyless(bad);
 }
 
-[0-9]+ {
-    errno = 0;
-    long long v = std::strtoll(yytext, NULL, 10);
-    if (errno == ERANGE) {
-        yylval.d = std::strtod(yytext, NULL);
-        YYRET(FLOAT);
-    }
-    yylval.i = v;
+0[xX]{HEX_DIGITS} { YYRET(lex_prefixed_integer(yytext, yyleng, 16, "hexadecimal")); }
+0[bB]{BIN_DIGITS} { YYRET(lex_prefixed_integer(yytext, yyleng, 2, "binary")); }
+0[oO]{OCT_DIGITS} { YYRET(lex_prefixed_integer(yytext, yyleng, 8, "octal")); }
+
+0[xX][0-9A-Za-z_]* {
+    diag_report_lexical(g_token_line, g_token_column,
+                        "invalid hexadecimal integer literal");
+    yylval.i = 0;
+    YYRET(INT);
+}
+0[bB][0-9A-Za-z_]* {
+    diag_report_lexical(g_token_line, g_token_column,
+                        "invalid binary integer literal");
+    yylval.i = 0;
+    YYRET(INT);
+}
+0[oO][0-9A-Za-z_]* {
+    diag_report_lexical(g_token_line, g_token_column,
+                        "invalid octal integer literal");
+    yylval.i = 0;
     YYRET(INT);
 }
 
-([0-9]+"."[0-9]*|"."[0-9]+)({EXP})? { yylval.d = std::strtod(yytext, NULL); YYRET(FLOAT); }
-[0-9]+{EXP} { yylval.d = std::strtod(yytext, NULL); YYRET(FLOAT); }
+{DIGITS} { YYRET(lex_decimal_integer(yytext, yyleng)); }
+
+({DIGITS}"."({DIGITS})?|"."{DIGITS})({EXP})? { YYRET(lex_float(yytext, yyleng)); }
+{DIGITS}{EXP} { YYRET(lex_float(yytext, yyleng)); }
+
+[0-9][0-9A-Za-z_]* {
+    diag_report_lexical(g_token_line, g_token_column,
+                        "invalid numeric literal");
+    yylval.i = 0;
+    YYRET(INT);
+}
 
 "." { YYRET('.'); }
 

@@ -38,6 +38,7 @@ struct options {
     bool emit_constants = true;
     bool check = false;
     bool tolerate_errors = false;
+    bool include_types = true;
 };
 
 struct constant_out {
@@ -45,6 +46,7 @@ struct constant_out {
     long long i = 0;
     double f = 0.0;
     std::string s;
+    bool exported = true;
 };
 
 /* Widths reported by the selected C compiler.  These are used instead of the
@@ -70,13 +72,14 @@ struct token {
     std::string text;
     int kind = TOK_PUNCT;
     int pack = 0;
+    bool exported = true;
 };
 
 bool is_ident_char(unsigned char c) {
     return std::isalnum(c) || c == '_' || c == '$';
 }
 
-void tokenize_line(const std::string &line, int pack,
+void tokenize_line(const std::string &line, int pack, bool exported,
                    std::vector<token> &out) {
     size_t i = 0;
     const size_t n = line.size();
@@ -88,6 +91,7 @@ void tokenize_line(const std::string &line, int pack,
         }
         token t;
         t.pack = pack;
+        t.exported = exported;
         if (std::isalpha(c) || c == '_' || c == '$') {
             size_t start = i;
             while (i < n && is_ident_char((unsigned char)line[i]))
@@ -876,8 +880,9 @@ bool preprocess(const options &o, const abi_info &abi,
                         constants[name] = std::move(constant);
                 }
             }
-        } else if (targets.count(current_file)) {
-            tokenize_line(line, pack, tokens);
+        } else if (o.include_types || targets.count(current_file)) {
+            tokenize_line(line, pack, targets.count(current_file) != 0,
+                          tokens);
         }
 
         if (end == preprocessed.size())
@@ -966,11 +971,13 @@ bool is_calling_convention(const std::string &word) {
 
 struct record_out {
     std::string name;
+    bool exported = true;
     std::vector<std::pair<std::string, ctype_ptr>> fields;
 };
 
 struct callback_out {
     std::string name;
+    bool exported = true;
     ctype_ptr result;
     std::vector<ctype_ptr> params;
 };
@@ -1027,6 +1034,7 @@ public:
     bool parse(std::string &error) {
         while (!eof()) {
             size_t start = position_;
+            declaration_exported_ = cur().exported;
             try {
                 if (accept(";"))
                     continue;
@@ -1036,6 +1044,16 @@ public:
                 }
                 if (is("typedef")) {
                     parse_typedef();
+                    continue;
+                }
+                if (!declaration_exported_) {
+                    if (starts_type_definition()) {
+                        parse_specifiers();
+                        if (!accept(";"))
+                            skip_declaration();
+                    } else {
+                        skip_declaration();
+                    }
                     continue;
                 }
                 spec s = parse_specifiers();
@@ -1062,8 +1080,36 @@ public:
     std::string render(const options &o, const std::string &source_hash);
 
     void keep_symbols(const std::vector<std::string> &patterns);
+    void finalize_types();
 
 private:
+    bool starts_type_definition() const {
+        size_t i = position_;
+        while (i < tokens_.size()) {
+            const std::string &text = tokens_[i].text;
+            if (text == "static" || text == "extern" || text == "const" ||
+                text == "volatile" || text == "register" ||
+                text == "auto" || text == "inline" || text == "__inline" ||
+                text == "__inline__" || text == "__extension__") {
+                ++i;
+                continue;
+            }
+            break;
+        }
+        if (i >= tokens_.size())
+            return false;
+        const std::string &first = tokens_[i].text;
+        if (first != "struct" && first != "union" && first != "enum")
+            return false;
+        for (; i < tokens_.size(); ++i) {
+            if (tokens_[i].text == ";")
+                return false;
+            if (tokens_[i].text == "{")
+                return true;
+        }
+        return false;
+    }
+
     void preload_typedefs() {
         typedefs_["int8_t"] = make_scalar("i8");
         typedefs_["uint8_t"] = make_scalar("u8");
@@ -1131,8 +1177,18 @@ private:
 
     void record_error(const parse_error &error) {
         warnings_.push_back(error.message);
-        if (error.fatal && !tolerate_errors_)
+        if (error.fatal && declaration_exported_ && !tolerate_errors_)
             fatal_ = true;
+    }
+
+    void mark_record(const std::string &name) {
+        if (!kept_records_.insert(name).second)
+            return;
+        auto it = records_.find(name);
+        if (it == records_.end())
+            return;
+        for (const auto &field : it->second.fields)
+            mark_type(field.second);
     }
 
     void mark_type(const ctype_ptr &type) {
@@ -1142,15 +1198,7 @@ private:
             case ctype::SCALAR:
                 return;
             case ctype::RECORD:
-                if (!kept_records_.insert(type->name).second)
-                    return;
-                {
-                    auto it = records_.find(type->name);
-                    if (it != records_.end()) {
-                        for (const auto &field : it->second.fields)
-                            mark_type(field.second);
-                    }
-                }
+                mark_record(type->name);
                 return;
             case ctype::POINTER:
             case ctype::ARRAY:
@@ -1353,6 +1401,8 @@ private:
             if (keyword == "enum") {
                 parse_enum_body();
                 result = integer_type(abi_.int_bytes, false);
+                if (!tag.empty())
+                    enum_tags_[tag] = result;
             } else if (keyword == "union") {
                 skip_declaration();
                 fail("unions are not supported", true);
@@ -1360,7 +1410,17 @@ private:
                 result = parse_struct_body(tag, flags.packed);
             }
         } else {
-            result = record_ref(tag);
+            if (keyword == "enum") {
+                auto known = enum_tags_.find(tag);
+                if (known != enum_tags_.end())
+                    result = known->second;
+                else
+                    result = integer_type(abi_.int_bytes, false);
+                if (!tag.empty())
+                    enum_tags_[tag] = result;
+            } else {
+                result = record_ref(tag);
+            }
         }
         skip_attributes(flags);
         if (flags.packed)
@@ -1380,6 +1440,7 @@ private:
 
         record_out out;
         out.name = tag;
+        out.exported = declaration_exported_;
 
         while (!eof() && !accept("}")) {
             if (cur().pack != 0)
@@ -1422,8 +1483,12 @@ private:
             record->name = "__anon_" + std::to_string(++anon_counter_);
             out.name = record->name;
         }
-        if (records_.count(out.name))
-            fail("duplicate struct " + out.name);
+        if (records_.count(out.name)) {
+            if (declaration_exported_)
+                fail("duplicate struct " + out.name);
+            record->name = tag.empty() ? record->name : tag;
+            return record;
+        }
         records_[out.name] = std::move(out);
         record->name = tag.empty() ? record->name : tag;
         return record;
@@ -1475,6 +1540,7 @@ private:
             constant_out constant;
             constant.kind = constant_out::INT;
             constant.i = value;
+            constant.exported = declaration_exported_;
             constants_[name] = constant;
             next = value + 1;
             if (!accept(",")) {
@@ -1722,6 +1788,7 @@ private:
                 ctype_ptr result = apply_pointers(s.base, d.pointers);
                 callback_out out;
                 out.name = d.name;
+                out.exported = declaration_exported_;
                 out.result = result;
                 out.params = d.params;
                 callbacks_[d.name] = std::move(out);
@@ -1893,6 +1960,7 @@ private:
     std::map<std::string, constant_out> constants_;
     abi_info abi_;
     std::map<std::string, ctype_ptr> typedefs_;
+    std::map<std::string, ctype_ptr> enum_tags_;
     std::map<std::string, record_out> records_;
     std::map<std::string, callback_out> callbacks_;
     std::vector<function_out> functions_;
@@ -1906,6 +1974,7 @@ private:
     size_t anon_counter_ = 0;
     bool fatal_ = false;
     bool tolerate_errors_ = false;
+    bool declaration_exported_ = true;
 
 public:
     const std::vector<std::string> &warnings() const { return warnings_; }
@@ -1983,6 +2052,26 @@ void parser::keep_symbols(const std::vector<std::string> &patterns) {
         mark_type(variable.type);
 }
 
+void parser::finalize_types() {
+    if (!filtered_) {
+        for (const auto &entry : records_) {
+            if (entry.second.exported)
+                mark_record(entry.first);
+        }
+        for (const auto &entry : callbacks_) {
+            if (entry.second.exported)
+                kept_callbacks_.insert(entry.first);
+        }
+    }
+    for (const function_out &function : functions_) {
+        mark_type(function.result);
+        for (const ctype_ptr &argument : function.args)
+            mark_type(argument);
+    }
+    for (const variable_out &variable : variables_)
+        mark_type(variable.type);
+}
+
 std::string parser::render(const options &o, const std::string &source_hash) {
     std::ostringstream out;
     out << "{\n";
@@ -2021,7 +2110,7 @@ std::string parser::render(const options &o, const std::string &source_hash) {
     std::vector<std::string> type_entries;
     for (const auto &entry : records_) {
         const record_out &record = entry.second;
-        if (filtered_ && !kept_records_.count(record.name))
+        if (!kept_records_.count(record.name))
             continue;
         std::string text = "    " + json_string(record.name) +
                            ": {\"kind\":\"struct\",\"fields\":[";
@@ -2038,7 +2127,7 @@ std::string parser::render(const options &o, const std::string &source_hash) {
     }
     for (const auto &entry : callbacks_) {
         const callback_out &callback = entry.second;
-        if (filtered_ && !kept_callbacks_.count(callback.name))
+        if (!kept_callbacks_.count(callback.name))
             continue;
         std::string text = "    " + json_string(callback.name) + ": " +
                            render_callback(callback.result, callback.params);
@@ -2047,7 +2136,7 @@ std::string parser::render(const options &o, const std::string &source_hash) {
     for (const std::string &name : referenced_records_) {
         if (records_.count(name))
             continue;
-        if (filtered_ && !kept_records_.count(name))
+        if (!kept_records_.count(name))
             continue;
         type_entries.push_back("    " + json_string(name) +
                                ": {\"kind\":\"opaque\"}");
@@ -2097,6 +2186,8 @@ std::string parser::render(const options &o, const std::string &source_hash) {
         out << ",\n  \"constants\": {";
         bool first = true;
         for (const auto &entry : constants_) {
+            if (!entry.second.exported)
+                continue;
             out << (first ? "\n    " : ",\n    ");
             first = false;
             out << json_string(entry.first) << ": ";
@@ -2132,6 +2223,8 @@ bool detect_cpp(const std::vector<token> &tokens, std::string &what) {
         "decltype", "constexpr", "typename"};
     for (size_t i = 0; i < tokens.size(); ++i) {
         const token &value = tokens[i];
+        if (!value.exported)
+            continue;
         if (value.kind == TOK_PUNCT && value.text == "::") {
             what = "::";
             return true;
@@ -2173,6 +2266,7 @@ void print_usage() {
         "  --module <name>       manifest library name (default: header stem)\n"
         "  -o, --output <path>   write the manifest here (default: stdout)\n"
         "  --no-constants        do not emit #define/enum constants\n"
+        "  --no-include-types    only parse declarations from --header files\n"
         "  --tolerate-errors     downgrade unsupported declarations to warnings\n"
         "  --check               fail if the output file is out of date\n");
 }
@@ -2224,6 +2318,8 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
             o.output = value();
         } else if (arg == "--no-constants") {
             o.emit_constants = false;
+        } else if (arg == "--no-include-types") {
+            o.include_types = false;
         } else if (arg == "--tolerate-errors") {
             o.tolerate_errors = true;
         } else if (arg == "--check") {
@@ -2269,6 +2365,7 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
     if (!p.parse(error))
         return 1;
     p.keep_symbols(o.symbols);
+    p.finalize_types();
 
     char hash_buffer[32];
     std::snprintf(hash_buffer, sizeof hash_buffer, "%016llx",

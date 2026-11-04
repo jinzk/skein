@@ -1153,6 +1153,32 @@ def run_cases():
             "kind": "pointer",
             "to": {"kind": "array", "element": "i32", "count": 4}}
 
+        dep_header = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "bindgen_dep_main.h"))
+        dep_output = os.path.join(bindgen_dir, "dep.ffi.json")
+        dep_proc = subprocess.run(
+            [BIN, "--ffi-gen", "--header", dep_header,
+             "-o", dep_output],
+            text=True, capture_output=True, timeout=60)
+        assert dep_proc.returncode == 0, (dep_proc.stdout, dep_proc.stderr)
+        with open(dep_output, encoding="utf-8") as handle:
+            generated_dep = _json.load(handle)
+        assert "DepPoint" in generated_dep["types"]
+        assert (generated_dep["types"]["DepPoint"]["kind"] == "struct")
+        assert (generated_dep["functions"]["dep_make_point"]["args"][0]
+                == "u64")
+        assert (generated_dep["functions"]["dep_set_mode"]["args"][0]
+                == "i32")
+
+        dep_isolated = subprocess.run(
+            [BIN, "--ffi-gen", "--header", dep_header,
+             "--no-include-types"],
+            text=True, capture_output=True, timeout=60)
+        assert dep_isolated.returncode == 1, (dep_isolated.stdout,
+                                              dep_isolated.stderr)
+        assert "unknown type" in dep_isolated.stderr
+
         if has_ffi and FFI_SHIM:
             good_manifest = os.path.join(bindgen_dir, "shim_good.ffi.json")
             with open(good_manifest, "w", encoding="utf-8") as handle:

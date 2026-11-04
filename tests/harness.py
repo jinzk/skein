@@ -15,6 +15,7 @@ import unicodedata
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
 FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
+DEFAULT_TIMEOUT = float(os.environ.get("SKEIN_TEST_TIMEOUT", "5"))
 
 
 def _find_native_module():
@@ -38,7 +39,9 @@ def skein_string(value):
     return f'"{escaped}"'
 
 
-def run(source, timeout=5):
+def run(source, timeout=None):
+    if timeout is None:
+        timeout = DEFAULT_TIMEOUT
     try:
         return subprocess.run(
             [BIN],
@@ -52,7 +55,9 @@ def run(source, timeout=5):
         raise AssertionError(f"interpreter timed out for input {source!r}") from exc
 
 
-def run_file(path, timeout=5):
+def run_file(path, timeout=None):
+    if timeout is None:
+        timeout = DEFAULT_TIMEOUT
     return subprocess.run(
         [BIN, path],
         text=True,

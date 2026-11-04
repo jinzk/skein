@@ -6,6 +6,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
+if(SKEIN_SANITIZE)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(SKEIN_SANITIZE_FLAGS "-fsanitize=address,undefined -fno-omit-frame-pointer")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${SKEIN_SANITIZE_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SKEIN_SANITIZE_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS
+        "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined")
+    set(CMAKE_SHARED_LINKER_FLAGS
+        "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address,undefined")
+  else()
+    message(FATAL_ERROR "SKEIN_SANITIZE requires GCC or Clang")
+  endif()
+endif()
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()

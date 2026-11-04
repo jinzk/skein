@@ -42,6 +42,18 @@ cmake -S . -B build -G Ninja -DSKEIN_ENABLE_FFI=OFF
 ctest --test-dir build --output-on-failure
 ```
 
+ASan/UBSan 构建：
+
+```bash
+cmake -S . -B build-asan -G Ninja -DSKEIN_SANITIZE=ON
+cmake --build build-asan
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  SKEIN_TEST_TIMEOUT=120 \
+  ctest --test-dir build-asan --output-on-failure -E container_bench
+```
+
+`SKEIN_TEST_TIMEOUT` 只影响测试子进程的超时，默认 5 秒；sanitizer 构建需要放宽。
+
 容器基准与增长回归（不做绝对耗时断言，只检查 n 翻倍时是否出现超线性增长）：
 
 ```bash
@@ -1653,9 +1665,11 @@ skein --ffi-gen \
 
 - 使用系统 C 编译器（gcc/clang，Windows 为 MinGW gcc）的 `-E` 做预处理，
   不引入 libclang；
-- 只解析 `--header` 指定头文件里的声明，支持 struct、typedef、指针、数组、
-  函数声明、函数指针 typedef、enum、`extern` 全局变量和对象式宏常量；
-  `static` 函数/变量视为内部符号并跳过；
+- 支持 struct、typedef、指针、数组、函数声明、函数指针 typedef、enum、
+  `extern` 全局变量和对象式宏常量；`static` 函数/变量视为内部符号并跳过；
+- 只导出 `--header` 指定头文件里的符号，但会解析被包含头文件里的
+  typedef/struct/enum，用于解析跨头文件类型；依赖头里的不支持构造只记 warning；
+  `--no-include-types` 可以关闭依赖头解析；
 - 常量支持整数表达式（算术、位运算、比较、逻辑、三元、标量强制转换、
   二进制字面量）以及浮点字面量（含 `f` 后缀）；
 - 通过 `cc -dM` 探测目标 ABI 的 `long`/指针/`wchar_t` 宽度，支持 `--cc`、

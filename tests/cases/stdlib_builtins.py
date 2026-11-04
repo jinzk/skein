@@ -1371,6 +1371,30 @@ def run_cases():
                                               dep_isolated.stderr)
         assert "unknown type" in dep_isolated.stderr
 
+        opaque_header = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "bindgen_opaque.h"))
+        opaque_strict = subprocess.run(
+            [BIN, "--ffi-gen", "--header", opaque_header],
+            text=True, capture_output=True, timeout=60)
+        assert opaque_strict.returncode == 1, (opaque_strict.stdout,
+                                                opaque_strict.stderr)
+
+        opaque_output = os.path.join(bindgen_dir, "opaque.ffi.json")
+        opaque = subprocess.run(
+            [BIN, "--ffi-gen", "--header", opaque_header,
+             "--allow-opaque-types", "-o", opaque_output],
+            text=True, capture_output=True, timeout=60)
+        assert opaque.returncode == 0, (opaque.stdout, opaque.stderr)
+        assert "by-value opaque type" in opaque.stderr
+        with open(opaque_output, encoding="utf-8") as handle:
+            generated_opaque = _json.load(handle)
+        assert generated_opaque["types"]["OpaqueRecord"] == {
+            "kind": "opaque"}
+        assert "opaque_record_new" in generated_opaque["functions"]
+        assert "opaque_record_read" in generated_opaque["functions"]
+        assert "opaque_record_take" not in generated_opaque["functions"]
+
         extern_c_header = os.path.normpath(os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "..", "bindgen_extern_c.h"))

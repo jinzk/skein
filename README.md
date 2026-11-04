@@ -1755,6 +1755,9 @@ skein --ffi-gen \
   函数参数里的定长数组会按 C 规则退化为指针；
 - packed、bitfield、柔性数组、匿名 struct/union、影响布局的属性、
   未知类型默认直接失败；`--tolerate-errors` 可显式降级为警告并继续；
+- `--allow-opaque-types` 会把无法解析的 struct/union/typedef 恢复为 opaque
+  类型，继续生成使用其指针的函数，并跳过按值使用该类型的函数/变量；
+  这是 best-effort，默认仍然 fail-closed；
 - `--symbols` 过滤函数、变量和常量，并裁剪未被引用到的类型（`*`/`?` 通配符）；
 - `--check` 用于 CI 校验生成的 manifest 是否过期；
 - 运行时不依赖 C 编译器和头文件，只读 manifest。

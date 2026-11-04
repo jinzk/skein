@@ -113,6 +113,12 @@ ABI 校验：
 默认 fail-closed：遇到不支持的目标头声明直接失败；依赖头里的不支持声明只记
 warning。`--tolerate-errors` 可降级为 warning 并继续生成。
 
+`--allow-opaque-types` 是 opt-in 的 best-effort 模式：解析失败的
+struct/union/typedef 会注册成 opaque，使用其指针的函数继续生成；按值使用
+opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适合
+`mysql.h` 这类内部类型复杂、但公开 API 主要传 opaque 指针的头文件；不能
+替代人工确认 ABI。
+
 ## 6. 原生模块 ABI
 
 `skein_module` v1：

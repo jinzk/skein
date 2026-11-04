@@ -3,6 +3,7 @@
 import ctypes.util
 import json
 import os
+import subprocess
 import tempfile
 
 from harness import *  # noqa: F401,F403
@@ -17,6 +18,28 @@ def _write_manifest(directory, name, manifest):
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(manifest, handle)
     return path
+
+
+def _mysql_bindgen_case(directory):
+    headers = (
+        "/usr/include/mysql/mysql.h",
+        "/usr/local/include/mysql/mysql.h",
+        "/usr/include/mariadb/mysql.h",
+    )
+    header = next((path for path in headers if os.path.exists(path)), None)
+    if not header:
+        return
+    output = os.path.join(directory, "mysql.ffi.json")
+    proc = subprocess.run(
+        [BIN, "--ffi-gen", "--header", header, "--allow-opaque-types",
+         "--symbols", "mysql_*", "-o", output],
+        text=True, capture_output=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    with open(output, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    for name in ("mysql_init", "mysql_real_connect", "mysql_query",
+                 "mysql_store_result", "mysql_fetch_row", "mysql_close"):
+        assert name in manifest["functions"], name
 
 
 def _sqlite_cases(directory):
@@ -159,3 +182,4 @@ def run_cases():
     with tempfile.TemporaryDirectory() as directory:
         _sqlite_cases(directory)
         _zlib_cases(directory)
+        _mysql_bindgen_case(directory)

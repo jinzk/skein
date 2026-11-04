@@ -39,6 +39,7 @@ struct options {
     bool check = false;
     bool tolerate_errors = false;
     bool include_types = true;
+    bool allow_opaque_types = false;
 };
 
 struct constant_out {
@@ -1030,9 +1031,12 @@ class parser {
 public:
     parser(std::vector<token> tokens,
            std::map<std::string, constant_out> constants,
-           const abi_info &abi, bool tolerate_errors)
+           const abi_info &abi, bool tolerate_errors,
+           bool allow_opaque_types)
         : tokens_(std::move(tokens)), constants_(std::move(constants)),
-          abi_(abi), tolerate_errors_(tolerate_errors) {
+          abi_(abi), tolerate_errors_(tolerate_errors ||
+                                      allow_opaque_types),
+          allow_opaque_types_(allow_opaque_types) {
         preload_typedefs();
     }
 
@@ -1086,8 +1090,12 @@ public:
                 skip_declaration();
                 if (position_ == start)
                     ++position_;
+                if (allow_opaque_types_)
+                    recover_opaque_typedef(start, position_);
             }
         }
+        if (allow_opaque_types_)
+            filter_unsafe_declarations();
         try {
             validate_value_types();
         } catch (const parse_error &e) {
@@ -1231,6 +1239,191 @@ private:
                 for (const ctype_ptr &param : type->params)
                     mark_type(param);
                 return;
+        }
+    }
+
+    void register_opaque_type(const std::string &name) {
+        if (name.empty() || is_type_keyword(name) || name == "struct" ||
+            name == "union" || name == "enum" || name == "typedef" ||
+            name == "const" || name == "volatile" || name == "restrict" ||
+            name == "static" || name == "extern")
+            return;
+        if (name.size() > 1 && name[0] == '_' && name[1] == '_')
+            return;
+        if (typedefs_.count(name))
+            return;
+        ctype_ptr type = std::make_shared<ctype>();
+        type->kind = ctype::RECORD;
+        type->name = name;
+        typedefs_[name] = std::move(type);
+        referenced_records_.insert(name);
+        warnings_.push_back("treating type '" + name + "' as opaque");
+    }
+
+    void recover_opaque_typedef(size_t start, size_t end) {
+        if (start >= end || start >= tokens_.size() ||
+            tokens_[start].text != "typedef")
+            return;
+
+        int depth = 0;
+        size_t after_body = start;
+        for (size_t i = start; i < end; ++i) {
+            const std::string &text = tokens_[i].text;
+            if (text == "{") {
+                ++depth;
+            } else if (text == "}") {
+                if (depth > 0)
+                    --depth;
+                if (depth == 0)
+                    after_body = i + 1;
+            }
+        }
+        if (after_body <= start)
+            return;
+
+        int paren = 0;
+        int bracket = 0;
+        bool complex_declarator = false;
+        for (size_t i = after_body; i < end; ++i) {
+            const std::string &text = tokens_[i].text;
+            if (text == "(") {
+                ++paren;
+                complex_declarator = true;
+            } else if (text == ")") {
+                if (paren > 0)
+                    --paren;
+            } else if (text == "[") {
+                ++bracket;
+                complex_declarator = true;
+            } else if (text == "]") {
+                if (bracket > 0)
+                    --bracket;
+            } else if (text == ";") {
+                if (paren == 0 && bracket == 0)
+                    break;
+            } else if (text == "*") {
+                if (paren == 0 && bracket == 0)
+                    complex_declarator = true;
+            } else if (text == ",") {
+                if (paren == 0 && bracket == 0)
+                    complex_declarator = false;
+            } else if (tokens_[i].kind == TOK_IDENT && paren == 0 &&
+                       bracket == 0 && !complex_declarator) {
+                register_opaque_type(text);
+            }
+        }
+    }
+
+    bool type_is_safe(const ctype_ptr &type,
+                      std::set<std::string> &visiting) {
+        if (!type)
+            return true;
+        switch (type->kind) {
+            case ctype::SCALAR:
+                return true;
+            case ctype::POINTER:
+                return true;
+            case ctype::ARRAY:
+                return type_is_safe(type->element, visiting);
+            case ctype::CALLBACK:
+                if (!type_is_safe(type->result, visiting))
+                    return false;
+                for (const ctype_ptr &param : type->params) {
+                    if (!type_is_safe(param, visiting))
+                        return false;
+                }
+                return true;
+            case ctype::RECORD: {
+                if (!records_.count(type->name))
+                    return false;
+                if (!visiting.insert(type->name).second)
+                    return false;
+                auto it = records_.find(type->name);
+                for (const auto &field : it->second.fields) {
+                    if (!type_is_safe(field.second, visiting)) {
+                        visiting.erase(type->name);
+                        return false;
+                    }
+                }
+                visiting.erase(type->name);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool type_is_safe(const ctype_ptr &type) {
+        std::set<std::string> visiting;
+        return type_is_safe(type, visiting);
+    }
+
+    bool callback_is_safe(const callback_out &callback) {
+        if (!type_is_safe(callback.result))
+            return false;
+        for (const ctype_ptr &param : callback.params) {
+            if (!type_is_safe(param))
+                return false;
+        }
+        return true;
+    }
+
+    void filter_unsafe_declarations() {
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (auto it = records_.begin(); it != records_.end();) {
+                bool safe = true;
+                for (const auto &field : it->second.fields) {
+                    if (!type_is_safe(field.second)) {
+                        safe = false;
+                        break;
+                    }
+                }
+                if (!safe) {
+                    warnings_.push_back(
+                        "skipping struct " + it->first +
+                        ": by-value opaque type");
+                    it = records_.erase(it);
+                    changed = true;
+                } else {
+                    ++it;
+                }
+            }
+        }
+        for (auto it = callbacks_.begin(); it != callbacks_.end();) {
+            if (!callback_is_safe(it->second)) {
+                warnings_.push_back("skipping callback " + it->first +
+                                    ": by-value opaque type");
+                it = callbacks_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        auto safe_type = [&](const ctype_ptr &type) {
+            return type_is_safe(type);
+        };
+        for (auto it = functions_.begin(); it != functions_.end();) {
+            bool safe = safe_type(it->result);
+            for (const ctype_ptr &arg : it->args)
+                safe = safe && safe_type(arg);
+            if (!safe) {
+                warnings_.push_back(
+                    "skipping function " + it->name +
+                    ": by-value opaque type");
+                it = functions_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (auto it = variables_.begin(); it != variables_.end();) {
+            if (!safe_type(it->type)) {
+                warnings_.push_back(
+                    "skipping variable " + it->name +
+                    ": by-value opaque type");
+                it = variables_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
 
@@ -2015,6 +2208,7 @@ private:
     size_t anon_counter_ = 0;
     bool fatal_ = false;
     bool tolerate_errors_ = false;
+    bool allow_opaque_types_ = false;
     bool declaration_exported_ = true;
     int extern_c_depth_ = 0;
 
@@ -2321,6 +2515,7 @@ void print_usage() {
         "  --no-constants        do not emit #define/enum constants\n"
         "  --no-include-types    only parse declarations from --header files\n"
         "  --tolerate-errors     downgrade unsupported declarations to warnings\n"
+        "  --allow-opaque-types  recover unparsable types as opaque (best effort)\n"
         "  --check               fail if the output file is out of date\n");
 }
 
@@ -2375,6 +2570,8 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
             o.include_types = false;
         } else if (arg == "--tolerate-errors") {
             o.tolerate_errors = true;
+        } else if (arg == "--allow-opaque-types") {
+            o.allow_opaque_types = true;
         } else if (arg == "--check") {
             o.check = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -2414,7 +2611,7 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
     }
 
     parser p(std::move(tokens), std::move(constants), abi,
-             o.tolerate_errors);
+             o.tolerate_errors, o.allow_opaque_types);
     if (!p.parse(error))
         return 1;
     p.keep_symbols(o.symbols);

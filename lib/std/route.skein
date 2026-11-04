@@ -17,13 +17,13 @@ package route {
   }
 
   func _segments(path) {
-    let out = [];
+    let out = std.deque.new();
     for (let part in std.string.split(path, "/")) {
       if (part != "") {
-        out = std.list.append(out, part);
+        out = std.deque.push_back(out, part);
       }
     }
-    return out;
+    return std.deque.to_list(out);
   }
 
   func _match(pattern, path) {
@@ -39,13 +39,13 @@ package route {
 
       if (std.string.starts_with(part, "*")) {
         let name = std.string.substr(part, 1);
-        let rest = [];
+        let rest = std.deque.new();
         while (si < len(parts)) {
-          rest = std.list.append(rest, parts[si]);
+          rest = std.deque.push_back(rest, parts[si]);
           si = si + 1;
         }
         if (name != "") {
-          params[name] = std.string.join(rest, "/");
+          params[name] = std.string.join(std.deque.to_list(rest), "/");
         }
         score = score + 1;
         pi = pi + 1;

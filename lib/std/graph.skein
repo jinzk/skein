@@ -29,13 +29,13 @@ package graph {
   export func remove_node(g, id) {
     g.nodes = std.dict.delete(g.nodes, id);
 
-    let remove = [];
+    let remove = std.deque.new();
     for (let eid, edge in g.edges) {
       if (edge.from == id || edge.to == id) {
-        remove = std.list.append(remove, eid);
+        remove = std.deque.push_back(remove, eid);
       }
     }
-    for (let eid in remove) {
+    for (let eid in std.deque.to_list(remove)) {
       g.edges = std.dict.delete(g.edges, eid);
     }
     return g;
@@ -111,9 +111,9 @@ package graph {
   }
 
   export func edges(g) {
-    let out = [];
+    let out = std.deque.new();
     for (let eid, edge in g.edges) {
-      out = std.list.append(out, {
+      out = std.deque.push_back(out, {
         "id": eid,
         "from": edge.from,
         "to": edge.to,
@@ -121,7 +121,7 @@ package graph {
         "weight": edge.weight
       });
     }
-    return out;
+    return std.deque.to_list(out);
   }
 
   export func neighbors(g, id, ...rest) {
@@ -130,7 +130,7 @@ package graph {
       filter = rest[0];
     }
 
-    let out = [];
+    let out = std.deque.new();
     for (let eid, edge in g.edges) {
       if (edge.from != id) {
         continue;
@@ -138,67 +138,67 @@ package graph {
       if (filter != null && edge.tag != filter) {
         continue;
       }
-      out = std.list.append(out, edge.to);
+      out = std.deque.push_back(out, edge.to);
     }
-    return out;
+    return std.deque.to_list(out);
   }
 
   export func bfs(g, start) {
-    let order = [];
+    let order = std.deque.new();
     if (!has_node(g, start)) {
-      return order;
+      return std.deque.to_list(order);
     }
 
-    let queue = [start];
+    let queue = std.deque.from_list([start]);
     let seen = {};
     seen[start] = true;
-    let head = 0;
 
-    while (head < len(queue)) {
-      let id = queue[head];
-      head = head + 1;
-      order = std.list.append(order, id);
+    while (std.deque.size(queue) > 0) {
+      let popped = std.deque.pop_front(queue);
+      let id = popped["value"];
+      queue = popped["deque"];
+      order = std.deque.push_back(order, id);
 
       for (let next in neighbors(g, id)) {
         if (!std.dict.has(seen, next)) {
           seen[next] = true;
-          queue = std.list.append(queue, next);
+          queue = std.deque.push_back(queue, next);
         }
       }
     }
-    return order;
+    return std.deque.to_list(order);
   }
 
   export func dfs(g, start) {
-    let order = [];
+    let order = std.deque.new();
     if (!has_node(g, start)) {
-      return order;
+      return std.deque.to_list(order);
     }
 
-    let stack = [start];
+    let stack = std.deque.from_list([start]);
     let seen = {};
 
-    while (len(stack) > 0) {
-      let n = len(stack);
-      let id = stack[n - 1];
-      stack = std.list.slice(stack, 0, n - 1);
+    while (std.deque.size(stack) > 0) {
+      let popped = std.deque.pop_back(stack);
+      let id = popped["value"];
+      stack = popped["deque"];
 
       if (std.dict.has(seen, id)) {
         continue;
       }
       seen[id] = true;
-      order = std.list.append(order, id);
+      order = std.deque.push_back(order, id);
 
       let nexts = neighbors(g, id);
       let i = len(nexts) - 1;
       while (i >= 0) {
         if (!std.dict.has(seen, nexts[i])) {
-          stack = std.list.append(stack, nexts[i]);
+          stack = std.deque.push_back(stack, nexts[i]);
         }
         i = i - 1;
       }
     }
-    return order;
+    return std.deque.to_list(order);
   }
 
   export func topo_sort(g) {
@@ -210,32 +210,32 @@ package graph {
       indeg[edge.to] = indeg[edge.to] + 1;
     }
 
-    let queue = [];
+    let queue = std.deque.new();
     for (let id in std.dict.keys(indeg)) {
       if (indeg[id] == 0) {
-        queue = std.list.append(queue, id);
+        queue = std.deque.push_back(queue, id);
       }
     }
 
-    let order = [];
-    let head = 0;
-    while (head < len(queue)) {
-      let id = queue[head];
-      head = head + 1;
-      order = std.list.append(order, id);
+    let order = std.deque.new();
+    while (std.deque.size(queue) > 0) {
+      let popped = std.deque.pop_front(queue);
+      let id = popped["value"];
+      queue = popped["deque"];
+      order = std.deque.push_back(order, id);
 
       for (let next in neighbors(g, id)) {
         indeg[next] = indeg[next] - 1;
         if (indeg[next] == 0) {
-          queue = std.list.append(queue, next);
+          queue = std.deque.push_back(queue, next);
         }
       }
     }
 
-    if (len(order) != len(g.nodes)) {
+    if (std.deque.size(order) != len(g.nodes)) {
       return { "ok": false, "error": "cycle" };
     }
-    return { "ok": true, "order": order };
+    return { "ok": true, "order": std.deque.to_list(order) };
   }
 
   export func has_cycle(g) {
@@ -250,15 +250,15 @@ package graph {
       return { "ok": true, "path": [from] };
     }
 
-    let queue = [from];
+    let queue = std.deque.from_list([from]);
     let seen = {};
     let parent = {};
     seen[from] = true;
-    let head = 0;
 
-    while (head < len(queue)) {
-      let id = queue[head];
-      head = head + 1;
+    while (std.deque.size(queue) > 0) {
+      let popped = std.deque.pop_front(queue);
+      let id = popped["value"];
+      queue = popped["deque"];
 
       for (let next in neighbors(g, id)) {
         if (std.dict.has(seen, next)) {
@@ -267,15 +267,15 @@ package graph {
         seen[next] = true;
         parent[next] = id;
         if (next == to) {
-          let out = [to];
+          let out = std.deque.from_list([to]);
           let current = to;
           while (current != from) {
             current = parent[current];
-            out = std.list.append(out, current);
+            out = std.deque.push_front(out, current);
           }
-          return { "ok": true, "path": std.list.reverse(out) };
+          return { "ok": true, "path": std.deque.to_list(out) };
         }
-        queue = std.list.append(queue, next);
+        queue = std.deque.push_back(queue, next);
       }
     }
 
@@ -356,36 +356,36 @@ package graph {
       return { "ok": false, "error": "not found" };
     }
 
-    let path = [to];
+    let path = std.deque.from_list([to]);
     let current = to;
     while (current != from) {
       current = prev[current];
-      path = std.list.append(path, current);
+      path = std.deque.push_front(path, current);
     }
     return {
       "ok": true,
-      "path": std.list.reverse(path),
+      "path": std.deque.to_list(path),
       "cost": dist[to]
     };
   }
 
   export func components(g) {
     let seen = {};
-    let out = [];
+    let out = std.deque.new();
 
     for (let start in std.dict.keys(g.nodes)) {
       if (std.dict.has(seen, start)) {
         continue;
       }
-      let component = [];
-      let queue = [start];
-      let head = 0;
+      let component = std.deque.new();
+      let queue = std.deque.from_list([start]);
       seen[start] = true;
 
-      while (head < len(queue)) {
-        let id = queue[head];
-        head = head + 1;
-        component = std.list.append(component, id);
+      while (std.deque.size(queue) > 0) {
+        let popped = std.deque.pop_front(queue);
+        let id = popped["value"];
+        queue = popped["deque"];
+        component = std.deque.push_back(component, id);
 
         for (let eid, edge in g.edges) {
           let next = null;
@@ -398,13 +398,13 @@ package graph {
           }
           if (next != null && !std.dict.has(seen, next)) {
             seen[next] = true;
-            queue = std.list.append(queue, next);
+            queue = std.deque.push_back(queue, next);
           }
         }
       }
-      out = std.list.append(out, component);
+      out = std.deque.push_back(out, std.deque.to_list(component));
     }
-    return out;
+    return std.deque.to_list(out);
   }
 
   export func reverse(g) {
@@ -457,18 +457,19 @@ package graph {
   }
 
   export func to_dot(g) {
-    let out = "digraph G {\n";
+    let parts = std.deque.new();
+    parts = std.deque.push_back(parts, "digraph G {\n");
     for (let id in std.dict.keys(g.nodes)) {
-      out = out + "  n" + str(id) + ";\n";
+      parts = std.deque.push_back(parts, "  n" + str(id) + ";\n");
     }
     for (let eid, edge in g.edges) {
-      out = out + "  n" + str(edge.from) + " -> n" + str(edge.to);
+      let line = "  n" + str(edge.from) + " -> n" + str(edge.to);
       if (edge.tag != "") {
-        out = out + " [label=\"" + edge.tag + "\"]";
+        line = line + " [label=\"" + edge.tag + "\"]";
       }
-      out = out + ";\n";
+      parts = std.deque.push_back(parts, line + ";\n");
     }
-    out = out + "}\n";
-    return out;
+    parts = std.deque.push_back(parts, "}\n");
+    return std.string.join(std.deque.to_list(parts), "");
   }
 }

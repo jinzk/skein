@@ -47,6 +47,8 @@ enum val_type {
     T_struct,
     T_enum,
     T_lru,
+    T_deque,
+    T_heap,
     T_method,
     T_null,
     T_class,
@@ -132,6 +134,57 @@ struct lru_payload {
 struct lru_value_t {
     enum val_type type;
     std::shared_ptr<lru_payload> payload;
+};
+
+/*
+ * Persistent deque: two singly-linked stacks sharing their tails with older
+ * versions, so push/pop are O(1) amortized while the value keeps value
+ * semantics.  `front` is in queue order (head is the front element); `back`
+ * is stored reversed (head is the back element).
+ */
+struct deque_node {
+    value_t *value = nullptr;
+    std::shared_ptr<deque_node> next;
+    ~deque_node();
+};
+
+struct deque_payload {
+    std::shared_ptr<deque_node> front;
+    std::shared_ptr<deque_node> front_tail;
+    std::shared_ptr<deque_node> back;
+    std::shared_ptr<deque_node> back_tail;
+    std::size_t front_size = 0;
+    std::size_t back_size = 0;
+    ~deque_payload();
+};
+
+struct deque_value_t {
+    enum val_type type;
+    std::shared_ptr<deque_payload> payload;
+};
+
+/*
+ * Persistent leftist heap: immutable nodes shared between versions, so push
+ * and pop create O(log n) new nodes while the value keeps value semantics.
+ */
+struct heap_node {
+    value_t *value = nullptr;
+    std::shared_ptr<heap_node> left;
+    std::shared_ptr<heap_node> right;
+    int rank = 1;
+    ~heap_node();
+};
+
+struct heap_payload {
+    std::shared_ptr<heap_node> root;
+    value_t *less = nullptr;
+    std::size_t size = 0;
+    ~heap_payload();
+};
+
+struct heap_value_t {
+    enum val_type type;
+    std::shared_ptr<heap_payload> payload;
 };
 
 struct dict_value_t {
@@ -231,6 +284,16 @@ struct value_t *dupval(struct value_t *v);
 struct list_value_t *newlistval();
 struct dict_value_t *newdictval();
 struct lru_value_t *newlruval(std::size_t capacity);
+struct deque_value_t *newdequeval();
+/* Takes ownership of `less`. */
+struct heap_value_t *newheapval(struct value_t *less);
+
+/* Borrowed pointers in queue order; no dupval. */
+void deque_items_in_order(const struct deque_payload *payload,
+                          std::vector<value_t *> &out);
+/* Borrowed pointers in level order; no dupval. */
+void heap_items_level_order(const struct heap_payload *payload,
+                            std::vector<value_t *> &out);
 
 /* Free a value and everything it owns. NULL is safe. */
 void freeval(struct value_t *v);

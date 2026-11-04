@@ -1427,8 +1427,8 @@ std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
 std.set（内嵌 Skein 源码包）
-std.deque（内嵌 Skein 源码包）
-std.heap（内嵌 Skein 源码包）
+std.deque（原生实现）
+std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
@@ -1450,7 +1450,7 @@ ctx = fsm.redo(ctx);       // state 6
 
 API：`define` / `initial` / `start` / `step` / `run` / `history` / `undo` / `redo` / `snapshot` / `restore`。
 
-`define(initial, step[, on_transition])` 支持可选的转换回调；enum / struct 状态会校验 `step` 返回值仍是同一类型。
+`define(initial, step[, on_transition])` 支持可选的转换回调；enum / struct 状态会校验 `step` 返回值仍是同一类型。`step` 每次 O(history)，超长历史请等待原生 fsm 实现。
 
 `snapshot` 返回普通 dict，可 JSON 持久化；`restore` 重建历史并校验。枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复：
 
@@ -1503,7 +1503,7 @@ r["evicted"]                   // {key: b, value: 2}
 
 API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `len` / `capacity` / `clear`。key 必须是合法 dict key；`keys` / `values` 从最久未使用到最近使用排列。
 
-`std.set` / `std.deque` / `std.heap` 也是内嵌 Skein 源码包：
+`std.set` 是内嵌 Skein 源码包；`std.deque` / `std.heap` 是原生实现（`import std.deque` / `import std.heap` 仍然可用，也可以直接使用 `std.deque.*` / `std.heap.*`）：
 
 ```text
 import std.set;
@@ -1522,7 +1522,7 @@ let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
 heap.peek(h)         // 1
 ```
 
-`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
+`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）。`deque` / `heap` 是原生值类型：`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
 
 `std.route` 是显式注册的 Web 路由：
 
@@ -1536,7 +1536,7 @@ r = route.get(r, "/users/:id", func(req) {
 route.dispatch(r, {"method": "GET", "path": "/users/42"});
 ```
 
-支持 `:name` 参数、`*name` 通配、404/405、`route.use` 中间件；不做反射或装饰器。
+支持 `:name` 参数、`*name` 通配、404/405、`route.use` 中间件；不做反射或装饰器。路由数量通常很小，`route.add` 每次 O(路由数)。
 
 `std.graph` 提供有向图和常用算法：
 
@@ -1570,6 +1570,8 @@ API：`new` / `add_node` / `remove_node` / `has_node` / `get_node` / `set_node` 
 
 `add_node` / `add_edge` 返回 `{graph, id}`；`add_edge(g, from, to[, tag[, weight]])`，`weight` 默认 1 且必须非负；删除节点会级联删除相关边；边标签字段是 `tag`。`shortest_path` 默认用边权重，也可传 `func(edge) -> number`。
 
+性能提示：`add_node` / `add_edge` 每次为值语义复制对应 dict（O(V) / O(E)/次），`neighbors` 扫描全部边 O(E)；大图请尽量批量构造。
+
 `std.arena` 提供带 generation 的稳定句柄：
 
 ```text
@@ -1586,7 +1588,7 @@ arena.remove(s, a)     // {arena, removed: true}
 arena.has(s, a)        // false
 ```
 
-API：`new` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。
+API：`new` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。`add` / `set` / `remove` 每次 O(capacity)，适合中小规模。
 
 `std.list` 新增常用算法：
 
@@ -1653,6 +1655,25 @@ std.lru.values
 std.lru.len
 std.lru.capacity
 std.lru.clear
+
+std.deque.new
+std.deque.from_list
+std.deque.size
+std.deque.push_front
+std.deque.push_back
+std.deque.peek_front
+std.deque.peek_back
+std.deque.pop_front
+std.deque.pop_back
+std.deque.to_list
+
+std.heap.new
+std.heap.from_list
+std.heap.size
+std.heap.peek
+std.heap.push
+std.heap.pop
+std.heap.to_list
 
 std.json.parse
 std.json.try_parse

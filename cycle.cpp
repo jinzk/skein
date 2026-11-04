@@ -16,6 +16,10 @@ const void *value_payload(const struct value_t *v) {
             return ((const struct enum_value_t *)v)->payload.get();
         case T_lru:
             return ((const struct lru_value_t *)v)->payload.get();
+        case T_deque:
+            return ((const struct deque_value_t *)v)->payload.get();
+        case T_heap:
+            return ((const struct heap_value_t *)v)->payload.get();
         default:
             return NULL;
     }
@@ -61,6 +65,33 @@ void for_each_value_child(
             for (const auto &entry : lv->payload->items) {
                 fn(entry.first);
                 fn(entry.second);
+            }
+            break;
+        }
+        case T_deque: {
+            const struct deque_value_t *dv = (const struct deque_value_t *)v;
+            for (std::shared_ptr<deque_node> node = dv->payload->front; node;
+                 node = node->next)
+                fn(node->value);
+            for (std::shared_ptr<deque_node> node = dv->payload->back; node;
+                 node = node->next)
+                fn(node->value);
+            break;
+        }
+        case T_heap: {
+            const struct heap_value_t *hv = (const struct heap_value_t *)v;
+            fn(hv->payload->less);
+            std::vector<const heap_node *> pending;
+            if (hv->payload->root)
+                pending.push_back(hv->payload->root.get());
+            while (!pending.empty()) {
+                const heap_node *node = pending.back();
+                pending.pop_back();
+                fn(node->value);
+                if (node->left)
+                    pending.push_back(node->left.get());
+                if (node->right)
+                    pending.push_back(node->right.get());
             }
             break;
         }

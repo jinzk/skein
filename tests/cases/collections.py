@@ -49,6 +49,73 @@ def run_cases():
           "let r = deque.pop_front(deque.new());\n"
           "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
           stdout_all=["false", "empty deque"])
+    check("deque pops both ends",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.from_list([1, 2, 3, 4, 5]);\n"
+          "let out = [];\n"
+          "while (deque.size(d) > 0) {\n"
+          "  let r = deque.pop_front(d);\n"
+          "  out = std.list.append(out, r[\"value\"]);\n"
+          "  d = r[\"deque\"];\n"
+          "}\n"
+          "print(out);\n"
+          "d = deque.from_list([1, 2, 3, 4, 5]);\n"
+          "out = [];\n"
+          "while (deque.size(d) > 0) {\n"
+          "  let r = deque.pop_back(d);\n"
+          "  out = std.list.append(out, r[\"value\"]);\n"
+          "  d = r[\"deque\"];\n"
+          "}\n"
+          "print(out);\n",
+          stdout_all=["[1, 2, 3, 4, 5]", "[5, 4, 3, 2, 1]"])
+    check("deque interleaved ends",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.new();\n"
+          "let i = 0;\n"
+          "while (i < 20) {\n"
+          "  if (i % 2 == 0) { d = deque.push_back(d, i); }\n"
+          "  else { d = deque.push_front(d, i); }\n"
+          "  i = i + 1;\n"
+          "}\n"
+          "print(deque.to_list(d));\n"
+          "print(deque.size(d));\n",
+          stdout_all=["[19, 17, 15, 13, 11, 9, 7, 5, 3, 1, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18]", "20"])
+    check("deque value semantics",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.from_list([1, 2]);\n"
+          "let e = deque.push_back(d, 3);\n"
+          "print(deque.size(d));\nprint(deque.size(e));\n"
+          "print(deque.to_list(d));\nprint(deque.to_list(e));\n",
+          stdout_all=["2", "3", "[1, 2]", "[1, 2, 3]"])
+    check("deque to_list is detached",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.from_list([1, 2, 3]);\n"
+          "let l = deque.to_list(d);\n"
+          "l[0] = 99;\n"
+          "print(deque.to_list(d));\nprint(l);\n",
+          stdout_all=["[1, 2, 3]", "[99, 2, 3]"])
+    check("deque empty peek",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.new();\n"
+          "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n"
+          "print(deque.size(d));\nprint(deque.to_list(d));\n",
+          stdout_all=["null", "null", "0", "[]"])
+    check("deque via std namespace",
+          "import std;\n"
+          "let d = std.deque.from_list([1, 2, 3]);\n"
+          "print(std.deque.to_list(d));\n"
+          "print(kind_of(d));\n"
+          "print(d == std.deque.from_list([1, 2, 3]));\n"
+          "print(d == std.deque.from_list([1, 2]));\n",
+          stdout_all=["[1, 2, 3]", "deque", "true", "false"])
+    check("deque large",
+          "import std;\nimport std.deque;\n"
+          "let d = deque.new();\n"
+          "let i = 0;\n"
+          "while (i < 50000) { d = deque.push_back(d, i); i = i + 1; }\n"
+          "print(deque.size(d));\n"
+          "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n",
+          stdout_all=["50000", "0", "49999"])
     check("heap min",
           "import std;\nimport std.heap;\n"
           "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
@@ -70,6 +137,47 @@ def run_cases():
           "let r = heap.pop(h);\n"
           "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
           stdout_all=["false", "empty heap"])
+    check("heap drains sorted",
+          "import std;\nimport std.heap;\n"
+          "let h = heap.from_list([5, 3, 8, 1, 9, 2, 7, 4, 6, 0], "
+          "func(a, b) { return a < b; });\n"
+          "let out = std.deque.new();\n"
+          "while (heap.size(h) > 0) {\n"
+          "  let r = heap.pop(h);\n"
+          "  out = std.deque.push_back(out, r[\"value\"]);\n"
+          "  h = r[\"heap\"];\n"
+          "}\n"
+          "print(std.deque.to_list(out));\n",
+          stdout_all=["[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]"])
+    check("heap value semantics",
+          "import std;\nimport std.heap;\n"
+          "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
+          "let h2 = heap.push(h, 0);\n"
+          "print(heap.size(h));\nprint(heap.size(h2));\n"
+          "print(heap.peek(h));\nprint(heap.peek(h2));\n"
+          "let r = heap.pop(h);\n"
+          "print(r[\"value\"]);\nprint(heap.size(h));\n",
+          stdout_all=["3", "4", "1", "0", "1", "3"])
+    check("heap via std namespace",
+          "import std;\n"
+          "let h = std.heap.from_list([2, 1, 3], "
+          "func(a, b) { return a < b; });\n"
+          "print(std.heap.peek(h));\n"
+          "print(kind_of(h));\n"
+          "print(len(std.heap.to_list(h)));\n"
+          "print(h == std.heap.from_list([2, 1, 3], "
+          "func(a, b) { return a < b; }));\n",
+          stdout_all=["1", "heap", "3", "true"])
+    check("heap large",
+          "import std;\nimport std.heap;\n"
+          "let h = heap.new(func(a, b) { return a < b; });\n"
+          "let i = 0;\n"
+          "while (i < 50000) { h = heap.push(h, i); i = i + 1; }\n"
+          "print(heap.size(h));\n"
+          "i = 0;\n"
+          "while (i < 50000) { h = heap.pop(h)[\"heap\"]; i = i + 1; }\n"
+          "print(heap.size(h));\n",
+          stdout_all=["50000", "0"])
 
     check("route dispatch",
           'import std;\nimport std.route;\n'

@@ -211,6 +211,21 @@ struct lru_value_t *newlruval(std::size_t capacity) {
     return v;
 }
 
+struct deque_value_t *newdequeval() {
+    struct deque_value_t *v = new deque_value_t;
+    v->type = T_deque;
+    v->payload = std::make_shared<deque_payload>();
+    return v;
+}
+
+struct heap_value_t *newheapval(struct value_t *less) {
+    struct heap_value_t *v = new heap_value_t;
+    v->type = T_heap;
+    v->payload = std::make_shared<heap_payload>();
+    v->payload->less = less;
+    return v;
+}
+
 list_payload::~list_payload() {
     for (size_t i = 0; i < items.size(); ++i)
         freeval(items[i]);
@@ -227,6 +242,112 @@ lru_payload::~lru_payload() {
     for (auto &entry : items) {
         freeval(entry.first);
         freeval(entry.second);
+    }
+}
+
+deque_node::~deque_node() {
+    freeval(value);
+}
+
+namespace {
+
+/*
+ * Release a chain iteratively: a long deque would otherwise recurse through
+ * shared_ptr destructors and overflow the C++ stack.
+ */
+void release_deque_chain(std::shared_ptr<deque_node> &head) {
+    while (head) {
+        if (head.use_count() != 1) {
+            head.reset();
+            return;
+        }
+        std::shared_ptr<deque_node> next = std::move(head->next);
+        head.reset();
+        head = std::move(next);
+    }
+}
+
+} // namespace
+
+deque_payload::~deque_payload() {
+    /* Drop the tail references first so the last node becomes unique. */
+    front_tail.reset();
+    back_tail.reset();
+    release_deque_chain(front);
+    release_deque_chain(back);
+}
+
+void deque_items_in_order(const struct deque_payload *payload,
+                          std::vector<value_t *> &out) {
+    out.clear();
+    if (!payload)
+        return;
+    out.reserve(payload->front_size + payload->back_size);
+    for (std::shared_ptr<deque_node> node = payload->front; node;
+         node = node->next)
+        out.push_back(node->value);
+    std::vector<value_t *> reversed_back;
+    reversed_back.reserve(payload->back_size);
+    for (std::shared_ptr<deque_node> node = payload->back; node;
+         node = node->next)
+        reversed_back.push_back(node->value);
+    for (std::size_t i = reversed_back.size(); i > 0; --i)
+        out.push_back(reversed_back[i - 1]);
+}
+
+heap_node::~heap_node() {
+    freeval(value);
+}
+
+namespace {
+
+/*
+ * Release a heap tree iteratively.  A leftist heap bounds the right spine but
+ * the left spine can still be linear, so recursive shared_ptr teardown is not
+ * safe for large heaps.
+ */
+void release_heap_tree(std::shared_ptr<heap_node> root) {
+    std::vector<std::shared_ptr<heap_node>> pending;
+    if (root)
+        pending.push_back(std::move(root));
+    while (!pending.empty()) {
+        std::shared_ptr<heap_node> node = std::move(pending.back());
+        pending.pop_back();
+        if (!node)
+            continue;
+        if (node.use_count() != 1)
+            continue;
+        if (node->left)
+            pending.push_back(std::move(node->left));
+        if (node->right)
+            pending.push_back(std::move(node->right));
+        node.reset();
+    }
+}
+
+} // namespace
+
+heap_payload::~heap_payload() {
+    freeval(less);
+    less = nullptr;
+    release_heap_tree(std::move(root));
+}
+
+void heap_items_level_order(const struct heap_payload *payload,
+                            std::vector<value_t *> &out) {
+    out.clear();
+    if (!payload || !payload->root)
+        return;
+    out.reserve(payload->size);
+    std::vector<const heap_node *> queue;
+    queue.push_back(payload->root.get());
+    for (std::size_t i = 0; i < queue.size(); ++i) {
+        const heap_node *node = queue[i];
+        out.push_back(node->value);
+        if (node->left)
+            queue.push_back(node->left.get());
+        if (node->right)
+            queue.push_back(node->right.get());
     }
 }
 
@@ -305,6 +426,20 @@ struct value_t *dupval(struct value_t *v) {
             struct lru_value_t *src = (struct lru_value_t *)v;
             struct lru_value_t *dst = new lru_value_t;
             dst->type = T_lru;
+            dst->payload = src->payload;
+            return (struct value_t *)dst;
+        }
+        case T_deque: {
+            struct deque_value_t *src = (struct deque_value_t *)v;
+            struct deque_value_t *dst = new deque_value_t;
+            dst->type = T_deque;
+            dst->payload = src->payload;
+            return (struct value_t *)dst;
+        }
+        case T_heap: {
+            struct heap_value_t *src = (struct heap_value_t *)v;
+            struct heap_value_t *dst = new heap_value_t;
+            dst->type = T_heap;
             dst->payload = src->payload;
             return (struct value_t *)dst;
         }
@@ -394,6 +529,12 @@ void freeval(struct value_t *v) {
         case T_lru:
             delete (struct lru_value_t *)v;
             break;
+        case T_deque:
+            delete (struct deque_value_t *)v;
+            break;
+        case T_heap:
+            delete (struct heap_value_t *)v;
+            break;
         case T_method:
             delete (struct method_value_t *)v;
             break;
@@ -444,6 +585,8 @@ const char *typename_of(const struct value_t *v) {
             return e->def ? e->def->name.c_str() : "enum";
         }
         case T_lru: return "lru";
+        case T_deque: return "deque";
+        case T_heap: return "heap";
         case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
@@ -597,6 +740,30 @@ std::string value_to_string(const struct value_t *v) {
                 out += value_to_string(l->payload->items[i].second);
             }
             out += "})";
+            return out;
+        }
+        case T_deque: {
+            const struct deque_value_t *d = (const struct deque_value_t *)v;
+            std::vector<value_t *> items;
+            deque_items_in_order(d->payload.get(), items);
+            std::string out = "deque([";
+            for (size_t i = 0; i < items.size(); ++i) {
+                if (i) out += ", ";
+                out += value_to_string(items[i]);
+            }
+            out += "])";
+            return out;
+        }
+        case T_heap: {
+            const struct heap_value_t *h = (const struct heap_value_t *)v;
+            std::vector<value_t *> items;
+            heap_items_level_order(h->payload.get(), items);
+            std::string out = "heap([";
+            for (size_t i = 0; i < items.size(); ++i) {
+                if (i) out += ", ";
+                out += value_to_string(items[i]);
+            }
+            out += "])";
             return out;
         }
         case T_method:

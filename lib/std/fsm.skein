@@ -137,13 +137,13 @@ package fsm {
   }
 
   func _t_to_value(t) {
-    let slots = [];
+    let slots = std.deque.new();
 
     for (let node in t.slots) {
       if (node == null) {
-        slots = std.list.append(slots, null);
+        slots = std.deque.push_back(slots, null);
       } else {
-        slots = std.list.append(slots, {
+        slots = std.deque.push_back(slots, {
           "value": node.value,
           "prev": node.prev
         });
@@ -151,7 +151,7 @@ package fsm {
     }
 
     return {
-      "slots": slots,
+      "slots": std.deque.to_list(slots),
       "gens": t.gens,
       "free": t.free,
       "alive": t.alive
@@ -159,13 +159,13 @@ package fsm {
   }
 
   func _t_from_value(v, decode) {
-    let slots = [];
+    let slots = std.deque.new();
 
     for (let item in v["slots"]) {
       if (item == null) {
-        slots = std.list.append(slots, null);
+        slots = std.deque.push_back(slots, null);
       } else {
-        slots = std.list.append(slots, _Node {
+        slots = std.deque.push_back(slots, _Node {
           value: _decode_state(item["value"], decode),
           prev: item["prev"]
         });
@@ -173,7 +173,7 @@ package fsm {
     }
 
     return _Table {
-      slots: slots,
+      slots: std.deque.to_list(slots),
       gens: v["gens"],
       free: v["free"],
       alive: v["alive"]
@@ -252,16 +252,16 @@ package fsm {
   }
 
   export func history(ctx) {
-    let out = [];
+    let out = std.deque.new();
     let id = ctx._head;
 
     while (id != _NIL) {
       let node = _t_node(ctx._history, id);
-      out = std.list.append(out, node.value);
+      out = std.deque.push_front(out, node.value);
       id = node.prev;
     }
 
-    return std.list.reverse(out);
+    return std.deque.to_list(out);
   }
 
   export func undo(ctx) {

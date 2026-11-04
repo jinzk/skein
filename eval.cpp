@@ -411,6 +411,12 @@ bool truthy(const struct value_t *v) {
         case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
         case T_struct: return true;
         case T_lru: return !((struct lru_value_t *)v)->payload->items.empty();
+        case T_deque:
+            return ((struct deque_value_t *)v)->payload->front_size +
+                       ((struct deque_value_t *)v)->payload->back_size >
+                   0;
+        case T_heap:
+            return ((struct heap_value_t *)v)->payload->size > 0;
         case T_method: return true;
         case T_func: return true;
         case T_builtin: return true;
@@ -604,6 +610,36 @@ bool value_equals(struct value_t *a, struct value_t *b) {
                                   lb->payload->items[i].second))
                     return false;
             }
+            return true;
+        }
+        case T_deque: {
+            struct deque_value_t *da = (struct deque_value_t *)a;
+            struct deque_value_t *db = (struct deque_value_t *)b;
+            if (da->payload == db->payload) return true;
+            if (da->payload->front_size + da->payload->back_size !=
+                db->payload->front_size + db->payload->back_size)
+                return false;
+            std::vector<value_t *> left;
+            std::vector<value_t *> right;
+            deque_items_in_order(da->payload.get(), left);
+            deque_items_in_order(db->payload.get(), right);
+            for (size_t i = 0; i < left.size(); ++i)
+                if (!value_equals(left[i], right[i]))
+                    return false;
+            return true;
+        }
+        case T_heap: {
+            struct heap_value_t *ha = (struct heap_value_t *)a;
+            struct heap_value_t *hb = (struct heap_value_t *)b;
+            if (ha->payload == hb->payload) return true;
+            if (ha->payload->size != hb->payload->size) return false;
+            std::vector<value_t *> left;
+            std::vector<value_t *> right;
+            heap_items_level_order(ha->payload.get(), left);
+            heap_items_level_order(hb->payload.get(), right);
+            for (size_t i = 0; i < left.size(); ++i)
+                if (!value_equals(left[i], right[i]))
+                    return false;
             return true;
         }
         case T_method: {

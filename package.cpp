@@ -699,6 +699,31 @@ value_t *build_std_namespace() {
             {"clear", B_lru_clear},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("deque"),
+        builtin_module({
+            {"new", B_deque_new},
+            {"from_list", B_deque_from_list},
+            {"size", B_deque_size},
+            {"push_front", B_deque_push_front},
+            {"push_back", B_deque_push_back},
+            {"peek_front", B_deque_peek_front},
+            {"peek_back", B_deque_peek_back},
+            {"pop_front", B_deque_pop_front},
+            {"pop_back", B_deque_pop_back},
+            {"to_list", B_deque_to_list},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("heap"),
+        builtin_module({
+            {"new", B_heap_new},
+            {"from_list", B_heap_from_list},
+            {"size", B_heap_size},
+            {"peek", B_heap_peek},
+            {"push", B_heap_push},
+            {"pop", B_heap_pop},
+            {"to_list", B_heap_to_list},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("net"),
         builtin_module({
             {"tcp_connect", B_net_tcp_connect},

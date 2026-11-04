@@ -119,26 +119,26 @@ package arena {
   }
 
   export func ids(s) {
-    let out = [];
+    let out = std.deque.new();
     let slot = 0;
     while (slot < len(s.slots)) {
       let entry = s.slots[slot];
       if (entry.alive) {
-        out = std.list.append(out, _handle(slot, entry.gen));
+        out = std.deque.push_back(out, _handle(slot, entry.gen));
       }
       slot = slot + 1;
     }
-    return out;
+    return std.deque.to_list(out);
   }
 
   export func values(s) {
-    let out = [];
+    let out = std.deque.new();
     for (let entry in s.slots) {
       if (entry.alive) {
-        out = std.list.append(out, entry.value);
+        out = std.deque.push_back(out, entry.value);
       }
     }
-    return out;
+    return std.deque.to_list(out);
   }
 
   export func clear(s) {

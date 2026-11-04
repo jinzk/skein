@@ -206,6 +206,8 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_struct: return "struct";
         case T_enum: return "enum";
         case T_lru: return "lru";
+        case T_deque: return "deque";
+        case T_heap: return "heap";
         case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
@@ -873,6 +875,210 @@ static struct value_t *lru_evicted_result(struct value_t *lru,
     return (struct value_t *)out;
 }
 
+static std::shared_ptr<deque_payload> deque_shell_copy(
+    const std::shared_ptr<deque_payload> &source) {
+    std::shared_ptr<deque_payload> out = std::make_shared<deque_payload>();
+    if (!source)
+        return out;
+    out->front = source->front;
+    out->front_tail = source->front_tail;
+    out->back = source->back;
+    out->back_tail = source->back_tail;
+    out->front_size = source->front_size;
+    out->back_size = source->back_size;
+    return out;
+}
+
+static struct value_t *deque_from_payload(
+    const std::shared_ptr<deque_payload> &payload) {
+    struct deque_value_t *out = new deque_value_t;
+    out->type = T_deque;
+    out->payload = payload;
+    return (struct value_t *)out;
+}
+
+static std::shared_ptr<deque_payload> deque_push_front_payload(
+    const std::shared_ptr<deque_payload> &source, struct value_t *value) {
+    std::shared_ptr<deque_payload> out = deque_shell_copy(source);
+    std::shared_ptr<deque_node> entry = std::make_shared<deque_node>();
+    entry->value = dupval(value);
+    entry->next = out->front;
+    out->front = entry;
+    out->front_size += 1;
+    if (out->front_size == 1)
+        out->front_tail = entry;
+    return out;
+}
+
+static std::shared_ptr<deque_payload> deque_push_back_payload(
+    const std::shared_ptr<deque_payload> &source, struct value_t *value) {
+    std::shared_ptr<deque_payload> out = deque_shell_copy(source);
+    std::shared_ptr<deque_node> entry = std::make_shared<deque_node>();
+    entry->value = dupval(value);
+    entry->next = out->back;
+    out->back = entry;
+    out->back_size += 1;
+    if (out->back_size == 1)
+        out->back_tail = entry;
+    return out;
+}
+
+/* Move every back element to the front, reversing the order. */
+static void deque_reverse_back_to_front(deque_payload *payload) {
+    std::shared_ptr<deque_node> new_front;
+    std::shared_ptr<deque_node> new_tail;
+    for (std::shared_ptr<deque_node> node = payload->back; node;
+         node = node->next) {
+        std::shared_ptr<deque_node> entry = std::make_shared<deque_node>();
+        entry->value = dupval(node->value);
+        entry->next = new_front;
+        if (!new_tail)
+            new_tail = entry;
+        new_front = entry;
+    }
+    payload->front = new_front;
+    payload->front_tail = new_tail;
+    payload->front_size = payload->back_size;
+    payload->back.reset();
+    payload->back_tail.reset();
+    payload->back_size = 0;
+}
+
+/* Move every front element to the back, reversing the order. */
+static void deque_reverse_front_to_back(deque_payload *payload) {
+    std::shared_ptr<deque_node> new_back;
+    std::shared_ptr<deque_node> new_tail;
+    for (std::shared_ptr<deque_node> node = payload->front; node;
+         node = node->next) {
+        std::shared_ptr<deque_node> entry = std::make_shared<deque_node>();
+        entry->value = dupval(node->value);
+        entry->next = new_back;
+        if (!new_tail)
+            new_tail = entry;
+        new_back = entry;
+    }
+    payload->back = new_back;
+    payload->back_tail = new_tail;
+    payload->back_size = payload->front_size;
+    payload->front.reset();
+    payload->front_tail.reset();
+    payload->front_size = 0;
+}
+
+static struct value_t *deque_pop_result(
+    const std::shared_ptr<deque_payload> &payload, struct value_t *value) {
+    struct dict_value_t *out = newdictval();
+    dict_append_item(out, newstrval("ok"), newboolval(true));
+    dict_append_item(out, newstrval("deque"),
+                     deque_from_payload(payload));
+    dict_append_item(out, newstrval("value"), value);
+    return (struct value_t *)out;
+}
+
+static struct value_t *deque_empty_result(
+    const struct deque_value_t *deque) {
+    struct dict_value_t *out = newdictval();
+    dict_append_item(out, newstrval("ok"), newboolval(false));
+    dict_append_item(out, newstrval("error"), newstrval("empty deque"));
+    dict_append_item(out, newstrval("deque"),
+                     dupval((struct value_t *)deque));
+    return (struct value_t *)out;
+}
+
+static int heap_rank(const std::shared_ptr<heap_node> &node) {
+    return node ? node->rank : 0;
+}
+
+static bool heap_call_less(struct value_t *less, struct value_t *a,
+                           struct value_t *b, bool &result) {
+    std::vector<struct value_t *> call_args;
+    call_args.push_back(dupval(a));
+    call_args.push_back(dupval(b));
+    struct value_t *r = call_value_args(less, std::move(call_args));
+    if (!r)
+        return false;
+    result = truthy(r);
+    freeval(r);
+    return true;
+}
+
+struct heap_merge_state {
+    struct value_t *less;
+    bool failed = false;
+};
+
+/* Merge two leftist heaps; returns NULL and sets `failed` on comparator error. */
+static std::shared_ptr<heap_node> heap_merge(
+    struct heap_merge_state &state, std::shared_ptr<heap_node> left,
+    std::shared_ptr<heap_node> right) {
+    if (!left)
+        return right;
+    if (!right)
+        return left;
+
+    bool left_first = false;
+    if (!heap_call_less(state.less, left->value, right->value, left_first)) {
+        state.failed = true;
+        return NULL;
+    }
+    if (!left_first)
+        std::swap(left, right);
+
+    std::shared_ptr<heap_node> rest = heap_merge(state, left->right, right);
+    if (state.failed)
+        return NULL;
+
+    std::shared_ptr<heap_node> node = std::make_shared<heap_node>();
+    node->value = dupval(left->value);
+    node->left = left->left;
+    node->right = rest;
+    if (heap_rank(node->left) < heap_rank(node->right))
+        std::swap(node->left, node->right);
+    node->rank = heap_rank(node->right) + 1;
+    return node;
+}
+
+static std::shared_ptr<heap_node> heap_singleton(struct value_t *value) {
+    std::shared_ptr<heap_node> node = std::make_shared<heap_node>();
+    node->value = dupval(value);
+    node->rank = 1;
+    return node;
+}
+
+static struct value_t *heap_from_parts(const struct heap_payload *source,
+                                       std::shared_ptr<heap_node> root,
+                                       std::size_t size) {
+    struct heap_value_t *out = newheapval(dupval(source->less));
+    out->payload->root = std::move(root);
+    out->payload->size = size;
+    return (struct value_t *)out;
+}
+
+static struct value_t *heap_pop_result(const struct heap_value_t *heap,
+                                       std::shared_ptr<heap_node> root,
+                                       struct value_t *value) {
+    struct dict_value_t *out = newdictval();
+    dict_append_item(out, newstrval("ok"), newboolval(true));
+    dict_append_item(out, newstrval("heap"),
+                     heap_from_parts(heap->payload.get(), std::move(root),
+                                     heap->payload->size - 1));
+    dict_append_item(out, newstrval("value"), value);
+    return (struct value_t *)out;
+}
+
+static struct value_t *heap_empty_result(const struct heap_value_t *heap) {
+    struct dict_value_t *out = newdictval();
+    dict_append_item(out, newstrval("ok"), newboolval(false));
+    dict_append_item(out, newstrval("error"), newstrval("empty heap"));
+    dict_append_item(out, newstrval("heap"),
+                     dupval((struct value_t *)heap));
+    return (struct value_t *)out;
+}
+
+static bool heap_callable(struct value_t *value) {
+    return value && (value->type == T_func || value->type == T_builtin);
+}
+
 static bool collect_command_env(
     const std::vector<struct value_t *> &args, size_t index,
     const char *who,
@@ -1423,6 +1629,49 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
+    } else if (functype == B_deque_new) {
+        if (!args.empty()) {
+            yyerror("std.deque.new expects 0 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_deque_push_front ||
+               functype == B_deque_push_back) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_deque_push_front
+                        ? "std.deque.push_front"
+                        : "std.deque.push_back",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype >= B_deque_from_list &&
+               functype <= B_deque_to_list) {
+        if (args.size() != 1) {
+            yyerror("std.deque function expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_heap_new) {
+        if (args.size() != 1) {
+            yyerror("std.heap.new expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_heap_from_list || functype == B_heap_push) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_heap_from_list ? "std.heap.from_list"
+                                                 : "std.heap.push",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype >= B_heap_size && functype <= B_heap_to_list) {
+        if (args.size() != 1) {
+            yyerror("std.heap function expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (args.size() != 1) {
         yyerror("built-in function expects 1 argument, got %d", (int)args.size());
         return NULL;
@@ -1906,6 +2155,280 @@ struct value_t *call_builtin(int functype,
             }
             ret = (struct value_t *)newlruval(
                 ((struct lru_value_t *)arg)->payload->capacity);
+            break;
+        }
+        case B_deque_new:
+            ret = (struct value_t *)newdequeval();
+            break;
+        case B_deque_from_list: {
+            if (arg->type != T_list) {
+                yyerror("std.deque.from_list expects a list, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)arg;
+            std::shared_ptr<deque_payload> payload =
+                std::make_shared<deque_payload>();
+            std::shared_ptr<deque_node> head;
+            std::shared_ptr<deque_node> tail;
+            for (struct value_t *item : list->payload->items) {
+                std::shared_ptr<deque_node> entry =
+                    std::make_shared<deque_node>();
+                entry->value = dupval(item);
+                entry->next = head;
+                head = entry;
+                if (!tail)
+                    tail = entry;
+            }
+            payload->back = head;
+            payload->back_tail = tail;
+            payload->back_size = list->payload->items.size();
+            ret = deque_from_payload(payload);
+            break;
+        }
+        case B_deque_size: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.size expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)arg;
+            ret = newintval((long long)(deque->payload->front_size +
+                                        deque->payload->back_size));
+            break;
+        }
+        case B_deque_push_front: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.push_front expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = deque_from_payload(deque_push_front_payload(
+                ((struct deque_value_t *)arg)->payload, args[1]));
+            break;
+        }
+        case B_deque_push_back: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.push_back expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = deque_from_payload(deque_push_back_payload(
+                ((struct deque_value_t *)arg)->payload, args[1]));
+            break;
+        }
+        case B_deque_peek_front: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.peek_front expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)arg;
+            if (deque->payload->front_size > 0)
+                ret = dupval(deque->payload->front->value);
+            else if (deque->payload->back_size > 0)
+                ret = dupval(deque->payload->back_tail->value);
+            else
+                ret = newnull();
+            break;
+        }
+        case B_deque_peek_back: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.peek_back expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)arg;
+            if (deque->payload->back_size > 0)
+                ret = dupval(deque->payload->back->value);
+            else if (deque->payload->front_size > 0)
+                ret = dupval(deque->payload->front_tail->value);
+            else
+                ret = newnull();
+            break;
+        }
+        case B_deque_pop_front: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.pop_front expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)arg;
+            if (deque->payload->front_size == 0 &&
+                deque->payload->back_size == 0) {
+                ret = deque_empty_result(deque);
+                break;
+            }
+            std::shared_ptr<deque_payload> payload =
+                deque_shell_copy(deque->payload);
+            if (payload->front_size == 0)
+                deque_reverse_back_to_front(payload.get());
+            std::shared_ptr<deque_node> node = payload->front;
+            struct value_t *value = dupval(node->value);
+            payload->front = node->next;
+            payload->front_size -= 1;
+            if (payload->front_size == 0)
+                payload->front_tail.reset();
+            ret = deque_pop_result(payload, value);
+            break;
+        }
+        case B_deque_pop_back: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.pop_back expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)arg;
+            if (deque->payload->front_size == 0 &&
+                deque->payload->back_size == 0) {
+                ret = deque_empty_result(deque);
+                break;
+            }
+            std::shared_ptr<deque_payload> payload =
+                deque_shell_copy(deque->payload);
+            if (payload->back_size == 0)
+                deque_reverse_front_to_back(payload.get());
+            std::shared_ptr<deque_node> node = payload->back;
+            struct value_t *value = dupval(node->value);
+            payload->back = node->next;
+            payload->back_size -= 1;
+            if (payload->back_size == 0)
+                payload->back_tail.reset();
+            ret = deque_pop_result(payload, value);
+            break;
+        }
+        case B_deque_to_list: {
+            if (arg->type != T_deque) {
+                yyerror("std.deque.to_list expects a deque, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)arg;
+            std::vector<value_t *> items;
+            deque_items_in_order(deque->payload.get(), items);
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(items.size());
+            for (struct value_t *item : items)
+                out->payload->items.push_back(dupval(item));
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_heap_new: {
+            if (!heap_callable(arg)) {
+                yyerror("std.heap.new expects a callable comparator, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = (struct value_t *)newheapval(dupval(arg));
+            break;
+        }
+        case B_heap_from_list: {
+            if (arg->type != T_list) {
+                yyerror("std.heap.from_list expects a list, got %s",
+                        typename_of(arg));
+                break;
+            }
+            if (!heap_callable(args[1])) {
+                yyerror("std.heap.from_list expects a callable comparator, got %s",
+                        typename_of(args[1]));
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)arg;
+            struct heap_merge_state state;
+            state.less = args[1];
+            std::shared_ptr<heap_node> root;
+            for (struct value_t *item : list->payload->items) {
+                root = heap_merge(state, root, heap_singleton(item));
+                if (state.failed)
+                    break;
+            }
+            if (state.failed)
+                break;
+            struct heap_value_t *out = newheapval(dupval(args[1]));
+            out->payload->root = std::move(root);
+            out->payload->size = list->payload->items.size();
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_heap_size: {
+            if (arg->type != T_heap) {
+                yyerror("std.heap.size expects a heap, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = newintval((long long)((struct heap_value_t *)arg)
+                                ->payload->size);
+            break;
+        }
+        case B_heap_peek: {
+            if (arg->type != T_heap) {
+                yyerror("std.heap.peek expects a heap, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct heap_value_t *heap = (struct heap_value_t *)arg;
+            if (heap->payload->size == 0)
+                ret = newnull();
+            else
+                ret = dupval(heap->payload->root->value);
+            break;
+        }
+        case B_heap_push: {
+            if (arg->type != T_heap) {
+                yyerror("std.heap.push expects a heap, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct heap_value_t *heap = (struct heap_value_t *)arg;
+            struct heap_merge_state state;
+            state.less = heap->payload->less;
+            std::shared_ptr<heap_node> root =
+                heap_merge(state, heap->payload->root,
+                           heap_singleton(args[1]));
+            if (state.failed)
+                break;
+            ret = heap_from_parts(heap->payload.get(), std::move(root),
+                                  heap->payload->size + 1);
+            break;
+        }
+        case B_heap_pop: {
+            if (arg->type != T_heap) {
+                yyerror("std.heap.pop expects a heap, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct heap_value_t *heap = (struct heap_value_t *)arg;
+            if (heap->payload->size == 0) {
+                ret = heap_empty_result(heap);
+                break;
+            }
+            struct value_t *value = dupval(heap->payload->root->value);
+            struct heap_merge_state state;
+            state.less = heap->payload->less;
+            std::shared_ptr<heap_node> root =
+                heap_merge(state, heap->payload->root->left,
+                           heap->payload->root->right);
+            if (state.failed) {
+                freeval(value);
+                break;
+            }
+            ret = heap_pop_result(heap, std::move(root), value);
+            break;
+        }
+        case B_heap_to_list: {
+            if (arg->type != T_heap) {
+                yyerror("std.heap.to_list expects a heap, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct heap_value_t *heap = (struct heap_value_t *)arg;
+            std::vector<value_t *> items;
+            heap_items_level_order(heap->payload.get(), items);
+            struct list_value_t *out = newlistval();
+            out->payload->items.reserve(items.size());
+            for (struct value_t *item : items)
+                out->payload->items.push_back(dupval(item));
+            ret = (struct value_t *)out;
             break;
         }
         case B_type_module:

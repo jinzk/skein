@@ -357,7 +357,24 @@ enum bifs {
     B_worker_submit,
     B_worker_wait,
     B_worker_shutdown,
-    B_worker_stats
+    B_worker_stats,
+    B_deque_new,
+    B_deque_from_list,
+    B_deque_size,
+    B_deque_push_front,
+    B_deque_push_back,
+    B_deque_peek_front,
+    B_deque_peek_back,
+    B_deque_pop_front,
+    B_deque_pop_back,
+    B_deque_to_list,
+    B_heap_new,
+    B_heap_from_list,
+    B_heap_size,
+    B_heap_peek,
+    B_heap_push,
+    B_heap_pop,
+    B_heap_to_list
 };
 
 struct ast {

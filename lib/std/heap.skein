@@ -1,105 +1,15 @@
 package heap {
   import std;
 
-  export struct Heap {
-    items: list;
-    less: callable;
-  }
+  // Native persistent heap module.  Keeping this file as a re-export lets
+  // scripts use both `import std.heap;` and `import std; std.heap.*` without
+  // adding a wrapper call to every operation.
 
-  func _sift_up(items, less, index) {
-    let i = index;
-    while (i > 0) {
-      let parent = (i - 1) / 2;
-      if (!less(items[i], items[parent])) {
-        break;
-      }
-      let tmp = items[i];
-      items[i] = items[parent];
-      items[parent] = tmp;
-      i = parent;
-    }
-    return items;
-  }
-
-  func _sift_down(items, less, index) {
-    let i = index;
-    let n = len(items);
-
-    while (true) {
-      let left = i * 2 + 1;
-      let right = left + 1;
-      let smallest = i;
-
-      if (left < n && less(items[left], items[smallest])) {
-        smallest = left;
-      }
-      if (right < n && less(items[right], items[smallest])) {
-        smallest = right;
-      }
-      if (smallest == i) {
-        break;
-      }
-
-      let tmp = items[i];
-      items[i] = items[smallest];
-      items[smallest] = tmp;
-      i = smallest;
-    }
-
-    return items;
-  }
-
-  export func new(less) {
-    if (kind_of(less) != "function" && kind_of(less) != "builtin") {
-      fail("heap less must be callable");
-    }
-    return Heap { items: [], less: less };
-  }
-
-  export func from_list(items, less) {
-    let h = new(less);
-    for (let item in items) {
-      h.items = std.list.append(h.items, item);
-      h.items = _sift_up(h.items, h.less, len(h.items) - 1);
-    }
-    return h;
-  }
-
-  export func size(h) {
-    return len(h.items);
-  }
-
-  export func peek(h) {
-    if (len(h.items) == 0) {
-      return null;
-    }
-    return h.items[0];
-  }
-
-  export func push(h, value) {
-    h.items = std.list.append(h.items, value);
-    h.items = _sift_up(h.items, h.less, len(h.items) - 1);
-    return h;
-  }
-
-  export func pop(h) {
-    if (len(h.items) == 0) {
-      return { "ok": false, "error": "empty heap", "heap": h };
-    }
-
-    let value = h.items[0];
-    let n = len(h.items);
-    h.items[0] = h.items[n - 1];
-    h.items = std.list.slice(h.items, 0, n - 1);
-
-    if (len(h.items) > 0) {
-      h.items = _sift_down(h.items, h.less, 0);
-    }
-
-    return { "ok": true, "heap": h, "value": value };
-  }
-
-  export func to_list(h) {
-    return h.items;
-  }
+  export let new = std.heap.new;
+  export let from_list = std.heap.from_list;
+  export let size = std.heap.size;
+  export let peek = std.heap.peek;
+  export let push = std.heap.push;
+  export let pop = std.heap.pop;
+  export let to_list = std.heap.to_list;
 }

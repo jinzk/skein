@@ -1563,8 +1563,8 @@ std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
 std.set（内嵌 Skein 源码包）
-std.deque（内嵌 Skein 源码包）
-std.heap（内嵌 Skein 源码包）
+std.deque（原生实现）
+std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
@@ -3112,6 +3112,8 @@ fsm.restore(snap[, decode])    -> Context
 - `ctx._history` / `ctx._head` / `ctx._redo` 是内部字段，不要依赖；
 - 非法 `step` 会 `fail("step must be callable")`，非法回调会 `fail("on_transition must be callable")`。
 
+性能提示：`step` 每次都会为值语义复制历史表，O(history)/次；`history` 已是 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。
+
 ### std.enum
 
 ```text
@@ -3219,9 +3221,11 @@ print(r["evicted"]);           // {key: b, value: 2}
 - `clear` 保留 capacity；
 - lru 目前不能 JSON 序列化。
 
+性能提示：`put` / `get` 每次都会为值语义 clone 整个 lru，O(n)/次；适合小容量缓存。
+
 ### std.set / std.deque / std.heap
 
-这三个都是内嵌 Skein 源码包。
+`std.set` 是内嵌 Skein 源码包；`std.deque` / `std.heap` 是原生实现。`deque` 的 push/pop/size/peek 为均摊 O(1)，`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)。
 
 #### std.set
 
@@ -3241,6 +3245,8 @@ set.is_subset(a, b)
 ```
 
 元素必须是合法 dict key：`int / bool / string / char / byte / bytes / null`。
+
+性能提示：`from_list` 在单次调用内构造，O(n)；逐条 `set.add` / `set.remove` 每次都会为值语义复制整个 dict，O(n)/次。大批量请优先用 `from_list`，热路径也可以直接用普通 dict 当 set（`d[x] = true`，O(1) 均摊）。
 
 #### std.deque
 
@@ -3263,6 +3269,8 @@ d = r["deque"];
 
 `pop_front` / `pop_back` 返回 `{ok, deque, value}`；空队列返回 `{ok: false, error: "empty deque", deque}`。
 
+`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `std.lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。
+
 #### std.heap
 
 ```text
@@ -3280,6 +3288,8 @@ let h2 = heap.from_list([3, 1, 2], func(a, b) { return a > b; });  // 大顶堆
 ```
 
 `less(a, b)` 返回 `true` 表示 `a` 优先出堆。`pop` 返回 `{ok, heap, value}`；空堆返回 `{ok: false, error: "empty heap", heap}`。
+
+`std.heap` 是 C++ 原生持久化左偏堆（leftist heap），具有值语义：push/pop 返回新堆，不修改原堆；push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)（层序）。也可以只 `import std;` 然后使用 `std.heap.*`。
 
 ### std.route
 
@@ -3402,6 +3412,8 @@ graph.to_dot(g)                             -> string
 - `subgraph` 保留给定节点，以及两端都在集合内的边；
 - `neighbors` 可按 `tag` 过滤。
 
+性能提示：`add_node` / `add_edge` / `set_node` 每次都会为值语义复制对应的 dict，分别是 O(V) / O(E)/次；`neighbors` 需要扫描全部边 O(E)。图较大时请尽量批量构造，或等待后续原生 graph 实现。
+
 ### std.arena
 
 ```text
@@ -3439,6 +3451,8 @@ arena.ids(store)            -> list
 arena.values(store)         -> list
 arena.clear(store)          -> Store
 ```
+
+性能提示：`add` / `set` / `remove` 每次都会为值语义复制 `slots` 列表，O(capacity)/次；`ids` / `values` 已是 O(n)。适合中小规模；超大规模请等待原生 arena 实现。
 
 规则：
 
@@ -3601,6 +3615,8 @@ range(5, 3, -2)      → [5, 3, 1]
 - `string`：复制内容；
 - `bytes`：复制内容；
 - `list` / `dict`：值语义，内部使用写时复制；
+- `deque`：值语义，push/pop 返回新 deque，内部节点结构共享；
+- `heap`：值语义，push/pop 返回新 heap，内部节点结构共享；
 - 函数值：共享函数代码和闭包环境；
 - 文件句柄等 userdata：共享底层资源。
 
@@ -3670,7 +3686,6 @@ skein -k script.skein
 ```text
 def
 var
-解构声明
 多变量声明
 for ... of
 try/catch

@@ -88,20 +88,11 @@ package graph {
     return std.dict.values(g.nodes);
   }
 
-  export func add_edge(g, from, to, ...rest) {
+  export func add_edge(g, from, to, tag = "", weight = 1) {
     if (!has_node(g, from) || !has_node(g, to)) {
       fail("graph edge endpoints must exist");
     }
 
-    let tag = "";
-    if (len(rest) > 0 && rest[0] != null) {
-      tag = rest[0];
-    }
-
-    let weight = 1;
-    if (len(rest) > 1 && rest[1] != null) {
-      weight = rest[1];
-    }
     if (kind_of(weight) != "int" && kind_of(weight) != "float") {
       fail("graph edge weight must be a number");
     }
@@ -197,18 +188,13 @@ package graph {
     return std.deque.to_list(out);
   }
 
-  export func neighbors(g, id, ...rest) {
-    let filter = null;
-    if (len(rest) > 0) {
-      filter = rest[0];
-    }
-
+  export func neighbors(g, id, tag = null) {
     let out = std.deque.new();
     for (let eid, edge in g.edges) {
       if (edge.from != id) {
         continue;
       }
-      if (filter != null && edge.tag != filter) {
+      if (tag != null && edge.tag != tag) {
         continue;
       }
       out = std.deque.push_back(out, edge.to);
@@ -439,18 +425,15 @@ package graph {
     return { "ok": false, "error": "not found" };
   }
 
-  export func shortest_path(g, from, to, ...rest) {
+  export func shortest_path(g, from, to, weight_fn = null) {
     if (!has_node(g, from) || !has_node(g, to)) {
       return { "ok": false, "error": "node not found" };
     }
 
-    let weight_fn = null;
-    if (len(rest) > 0 && rest[0] != null) {
-      weight_fn = rest[0];
-      if (kind_of(weight_fn) != "function" &&
-          kind_of(weight_fn) != "builtin") {
-        fail("graph weight must be callable");
-      }
+    if (weight_fn != null &&
+        kind_of(weight_fn) != "function" &&
+        kind_of(weight_fn) != "builtin") {
+      fail("graph weight must be callable");
     }
 
     let dist = {};

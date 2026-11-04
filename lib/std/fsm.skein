@@ -195,19 +195,15 @@ package fsm {
     };
   }
 
-  export func define(initial, step, ...rest) {
+  export func define(initial, step, on_transition = null) {
     if (kind_of(step) != "function" && kind_of(step) != "builtin") {
       fail("step must be callable");
     }
 
-    let on_transition = null;
-    if (len(rest) > 0) {
-      on_transition = rest[0];
-      if (on_transition != null &&
-          kind_of(on_transition) != "function" &&
-          kind_of(on_transition) != "builtin") {
-        fail("on_transition must be callable");
-      }
+    if (on_transition != null &&
+        kind_of(on_transition) != "function" &&
+        kind_of(on_transition) != "builtin") {
+      fail("on_transition must be callable");
     }
 
     return Machine {
@@ -354,12 +350,7 @@ package fsm {
     };
   }
 
-  export func restore(snap, ...rest) {
-    let decode = null;
-    if (len(rest) > 0) {
-      decode = rest[0];
-    }
-
+  export func restore(snap, decode = null) {
     let history = _t_from_value(snap["history"], decode);
     if (!_t_check(history)) {
       fail("invalid fsm snapshot");

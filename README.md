@@ -1948,7 +1948,7 @@ API：`new` / `add_node` / `add_nodes` / `remove_node` / `has_node` / `get_node`
 
 `add_nodes(g, values)` 返回 `{graph, ids}`；`add_edges(g, edges)` 批量添加 `[from, to[, tag[, weight]]]`；`from_edges(count, edges)` 直接构造 1..count 节点的图。批量入口只触发一次 COW，O(V+E)。
 
-`add_node` / `add_edge` 返回 `{graph, id}`；`add_edge(g, from, to[, tag[, weight]])`，`weight` 默认 1 且必须非负；删除节点会级联删除相关边；边标签字段是 `tag`。`shortest_path` 默认用边权重，也可传 `func(edge) -> number`。
+`add_node` / `add_edge` 返回 `{graph, id}`；`add_edge(g, from, to, tag = "", weight = 1)`，`weight` 必须非负；删除节点会级联删除相关边；边标签字段是 `tag`。`shortest_path(g, from, to, weight_fn = null)` 默认用边权重，也可传 `func(edge) -> number`。
 
 性能提示：`add_node` / `add_edge` 每次为值语义复制对应 dict（O(V) / O(E)/次），大图请用 `add_nodes` / `add_edges` / `from_edges` 批量构造；`bfs` / `dfs` / `topo_sort` / `path` / `components` / `shortest_path` 会先构建一次邻接表，遍历为 O(V+E)，单次 `neighbors` 仍扫描全部边 O(E)。
 

@@ -3217,7 +3217,7 @@ print(ctx.state);            // 9
 API：
 
 ```text
-fsm.define(initial, step[, on_transition]) -> Machine
+fsm.define(initial, step, on_transition = null) -> Machine
 fsm.initial(m)                 -> any
 fsm.start(m)                   -> Context
 fsm.step(m, ctx, event)        -> Context
@@ -3226,7 +3226,7 @@ fsm.history(ctx)               -> list
 fsm.undo(ctx)                  -> Context
 fsm.redo(ctx)                  -> Context
 fsm.snapshot(ctx)              -> dict
-fsm.restore(snap[, decode])    -> Context
+fsm.restore(snap, decode = null)    -> Context
 ```
 
 规则：
@@ -3510,17 +3510,17 @@ graph.get_node(g, id)                       -> value
 graph.set_node(g, id, value)                -> Graph
 graph.node_count(g) / graph.edge_count(g)   -> int
 graph.node_ids(g) / graph.nodes(g)          -> list
-graph.add_edge(g, from, to[, tag[, weight]]) -> {graph, id}
+graph.add_edge(g, from, to, tag = "", weight = 1) -> {graph, id}
 graph.add_edges(g, edges)                   -> Graph
 graph.from_edges(count, edges)              -> Graph
 graph.remove_edge(g, id)                    -> Graph
 graph.edges(g)                              -> list
-graph.neighbors(g, id[, tag])               -> list
+graph.neighbors(g, id, tag = null)          -> list
 graph.bfs(g, start) / graph.dfs(g, start)   -> list
 graph.topo_sort(g)                          -> {ok, order} | {ok: false, error}
 graph.has_cycle(g)                          -> bool
 graph.path(g, from, to)                     -> {ok, path} | {ok: false, error}
-graph.shortest_path(g, from, to[, weight])  -> {ok, path, cost} | {ok: false, error}
+graph.shortest_path(g, from, to, weight_fn = null) -> {ok, path, cost} | {ok: false, error}
 graph.components(g)                         -> list[list[id]]
 graph.reverse(g)                            -> Graph
 graph.subgraph(g, ids)                      -> Graph

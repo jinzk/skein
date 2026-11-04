@@ -1,5 +1,6 @@
 #include "http2.h"
 
+#include "runtime_context.h"
 #include "ast.h"
 #include "compression.h"
 #include "cookie.h"
@@ -984,7 +985,7 @@ int client_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
         if (it->second.on_body) {
             value_t *chunk =
                 newbytesval(std::string((const char *)data, len));
-            value_t *result = call_value_args(
+            value_t *result = skein_call_function(
                 it->second.on_body, std::vector<value_t *>{chunk});
             if (!result) {
                 it->second.failure = "on_body callback failed";
@@ -1006,7 +1007,7 @@ int client_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
     connection->received_body_bytes += len;
     if (connection->on_body) {
         value_t *chunk = newbytesval(std::string((const char *)data, len));
-        value_t *result = call_value_args(
+        value_t *result = skein_call_function(
             connection->on_body, std::vector<value_t *>{chunk});
         if (!result) {
             connection->failure = "on_body callback failed";
@@ -1196,7 +1197,7 @@ int server_on_data(nghttp2_session *, uint8_t, int32_t stream_id,
     if (connection->on_request_body) {
         value_t *chunk =
             newbytesval(std::string((const char *)data, len));
-        value_t *result = call_value_args(
+        value_t *result = skein_call_function(
             connection->on_request_body, std::vector<value_t *>{chunk});
         if (!result) {
             connection->failure = "on_request_body callback failed";
@@ -2931,7 +2932,7 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 task_ptr handler_task = fiber_start_async(
                     [handler, request]() {
                     value_t *result =
-                        call_value_args(handler,
+                        skein_call_function(handler,
                                         std::vector<value_t *>{request});
                     if (result && is_task_value(result))
                         result = await_task_value(result);

@@ -21,7 +21,7 @@
 #include <fcntl.h>
 #include <io.h>
 
-#include "repl.h"
+#include "runtime_state.h"
 
 static HANDLE main_thread = NULL;
 

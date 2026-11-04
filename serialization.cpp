@@ -1,6 +1,5 @@
 #include "serialization.h"
 
-#include "ast.h"
 #include "structtype.h"
 #include "symbol.h"
 #include "unicode.h"

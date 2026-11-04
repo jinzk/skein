@@ -93,80 +93,142 @@ set_target_properties(skein_utf8proc PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
-add_executable(${PROJECT_NAME}
-  ${BISON_MyParser_OUTPUTS}
-  ${FLEX_MyScanner_OUTPUTS}
-  ast.cpp
-  async_support.cpp
-  builtins.cpp
-  compress_builtin.cpp
-  compression.cpp
-  cookie.cpp
-  crypto_builtin.cpp
-  cycle.cpp
-  diagnostics.cpp
-  dict.cpp
-  encoding.cpp
-  env_builtin.cpp
-  error.cpp
-  eval.cpp
-  eval_context.cpp
-  event_loop.cpp
-  fiber.cpp
-  filetype.cpp
-  format.cpp
-  fs_extra.cpp
-  gc.cpp
-  generator.cpp
-  http.cpp
-  http1_parser.cpp
-  io.cpp
-  json.cpp
-  main.cpp
-  net.cpp
-  package.cpp
-  pattern.cpp
-  process_builtin.cpp
-  process_spawn.cpp
-  random_builtin.cpp
-  regex_builtin.cpp
-  repl.cpp
-  result.cpp
-  scopestack.cpp
-  serialization.cpp
-  source_encoding.cpp
-  stdio_stream.cpp
-  structeval.cpp
-  structtype.cpp
-  symbol.cpp
-  task.cpp
-  time_builtin.cpp
-  unicode.cpp
-  unicode_ident.cpp
-  valuetype.cpp
-  websocket.cpp
-  worker_pool.cpp
-)
+set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
 
+set(SKEIN_PLATFORM_SOURCES
+  runtime_state.cpp
+)
 if(WIN32)
-  target_sources(${PROJECT_NAME} PRIVATE platform_win.cpp)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE
+  list(APPEND SKEIN_PLATFORM_SOURCES platform_win.cpp)
+else()
+  list(APPEND SKEIN_PLATFORM_SOURCES platform_posix.cpp)
+endif()
+add_library(skein_platform STATIC ${SKEIN_PLATFORM_SOURCES})
+set_target_properties(skein_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_platform PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+if(WIN32)
+  target_compile_definitions(skein_platform PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
   if(MINGW)
     # Ensure C99 printf length modifiers such as %lld work with MinGW.
-    target_compile_definitions(${PROJECT_NAME} PRIVATE
+    target_compile_definitions(skein_platform PRIVATE
       __USE_MINGW_ANSI_STDIO=1
     )
   endif()
-else()
-  target_sources(${PROJECT_NAME} PRIVATE platform_posix.cpp)
 endif()
+
+add_library(skein_runtime STATIC
+  valuetype.cpp
+  value_ops.cpp
+  dict.cpp
+  structtype.cpp
+  symbol.cpp
+  cycle.cpp
+  serialization.cpp
+  json.cpp
+  format.cpp
+  encoding.cpp
+  unicode.cpp
+  unicode_ident.cpp
+  stdio_stream.cpp
+  runtime_context.cpp
+  runtime_error.cpp
+)
+set_target_properties(skein_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_runtime PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(skein_runtime PUBLIC
+  skein_platform
+  skein_utf8proc
+)
+
+add_library(skein_interpreter STATIC
+  ${BISON_MyParser_OUTPUTS}
+  ${FLEX_MyScanner_OUTPUTS}
+  ast.cpp
+  diagnostics.cpp
+  error_report.cpp
+  eval.cpp
+  eval_context.cpp
+  gc.cpp
+  package.cpp
+  pattern.cpp
+  scopestack.cpp
+  structeval.cpp
+  fiber.cpp
+  generator.cpp
+  async_support.cpp
+  task.cpp
+  event_loop.cpp
+  repl.cpp
+  source_encoding.cpp
+)
+set_target_properties(skein_interpreter PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_interpreter PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${SKEIN_EMBEDDED_DIR}
+)
+target_link_libraries(skein_interpreter PUBLIC
+  skein_runtime
+  ${SKEIN_LIBUV_TARGET}
+  Boost::context
+)
+add_dependencies(skein_interpreter skein_embedded_sources)
+
+add_library(skein_builtins STATIC
+  builtins.cpp
+  compress_builtin.cpp
+  compression.cpp
+  cookie.cpp
+  crypto_builtin.cpp
+  env_builtin.cpp
+  error.cpp
+  filetype.cpp
+  fs_extra.cpp
+  http.cpp
+  http1_parser.cpp
+  io.cpp
+  net.cpp
+  process_builtin.cpp
+  process_spawn.cpp
+  random_builtin.cpp
+  regex_builtin.cpp
+  result.cpp
+  time_builtin.cpp
+  websocket.cpp
+  worker_pool.cpp
+)
+set_target_properties(skein_builtins PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_builtins PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(skein_builtins PUBLIC
+  skein_interpreter
+  skein_runtime
+  skein_llhttp
+  ${SKEIN_LIBUV_TARGET}
+  ${SKEIN_PCRE2_TARGET}
+  Boost::context
+)
+
+add_executable(${PROJECT_NAME} main.cpp)
+target_include_directories(${PROJECT_NAME} PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(${PROJECT_NAME} PRIVATE skein_builtins)
 
 # Embedded Skein standard-library packages.  Each .skein source is turned into
 # a C string at build time and imported in memory by package.cpp.
-set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
 set(SKEIN_EMBEDDED_SOURCES
   fsm.skein:kStdFsmSource:std_fsm_source.inc
   set.skein:kStdSetSource:std_set_source.inc
@@ -200,28 +262,16 @@ foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)
   list(APPEND SKEIN_EMBEDDED_OUTPUTS ${output_path})
 endforeach()
 add_custom_target(skein_embedded_sources DEPENDS ${SKEIN_EMBEDDED_OUTPUTS})
-add_dependencies(${PROJECT_NAME} skein_embedded_sources)
-
-target_include_directories(${PROJECT_NAME} PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_BINARY_DIR}
-  ${SKEIN_EMBEDDED_DIR}
-)
-target_link_libraries(${PROJECT_NAME} PRIVATE
-  ${SKEIN_LIBUV_TARGET}
-  ${SKEIN_PCRE2_TARGET}
-  Boost::context
-  skein_llhttp
-  skein_utf8proc
-)
+add_dependencies(skein_interpreter skein_embedded_sources)
 
 option(SKEIN_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
 if(SKEIN_ENABLE_TLS)
   find_package(OpenSSL QUIET)
   if(OpenSSL_FOUND)
-    target_sources(${PROJECT_NAME} PRIVATE tls.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_TLS=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
+    target_sources(skein_builtins PRIVATE tls.cpp)
+    target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_TLS=1)
+    target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_TLS=1)
+    target_link_libraries(skein_builtins PUBLIC
       OpenSSL::SSL
       OpenSSL::Crypto
     )
@@ -234,8 +284,8 @@ option(SKEIN_ENABLE_COMPRESSION "Enable gzip/deflate/brotli response decompressi
 if(SKEIN_ENABLE_COMPRESSION)
   find_package(ZLIB QUIET)
   if(ZLIB_FOUND)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_ZLIB=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
+    target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_ZLIB=1)
+    target_link_libraries(skein_builtins PUBLIC ZLIB::ZLIB)
   else()
     message(STATUS "zlib not found; gzip/deflate decompression is disabled")
   endif()
@@ -243,8 +293,8 @@ if(SKEIN_ENABLE_COMPRESSION)
     pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
   endif()
   if(BROTLIDEC_FOUND)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_BROTLI=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::BROTLIDEC)
+    target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_BROTLI=1)
+    target_link_libraries(skein_builtins PUBLIC PkgConfig::BROTLIDEC)
   else()
     message(STATUS "brotli decoder not found; br decompression is disabled")
   endif()
@@ -256,9 +306,10 @@ if(SKEIN_ENABLE_HTTP2)
     pkg_check_modules(NGHTTP2 QUIET IMPORTED_TARGET libnghttp2)
   endif()
   if(NGHTTP2_FOUND)
-    target_sources(${PROJECT_NAME} PRIVATE http2.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_HTTP2=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::NGHTTP2)
+    target_sources(skein_builtins PRIVATE http2.cpp)
+    target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_HTTP2=1)
+    target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_HTTP2=1)
+    target_link_libraries(skein_builtins PUBLIC PkgConfig::NGHTTP2)
   else()
     message(STATUS "nghttp2 not found; std.http2 is disabled")
   endif()
@@ -270,24 +321,28 @@ if(SKEIN_ENABLE_FFI)
     pkg_check_modules(LIBFFI QUIET IMPORTED_TARGET libffi)
   endif()
   if(LIBFFI_FOUND)
-    target_sources(${PROJECT_NAME} PRIVATE ffi.cpp)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE SKEIN_ENABLE_FFI=1)
-    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBFFI)
+    target_sources(skein_builtins PRIVATE ffi.cpp)
+    target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_FFI=1)
+    target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_FFI=1)
+    target_link_libraries(skein_builtins PUBLIC PkgConfig::LIBFFI)
   else()
     message(STATUS "libffi not found; std.ffi is disabled")
   endif()
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
+  foreach(skein_target skein_platform skein_runtime skein_interpreter
+                       skein_builtins ${PROJECT_NAME})
+    target_compile_options(${skein_target} PRIVATE -Wall -Wextra)
+  endforeach()
 endif()
 
 if(UNIX)
-  target_link_libraries(${PROJECT_NAME} PRIVATE m)
+  target_link_libraries(skein_runtime PUBLIC m)
 endif()
 
 if(WIN32)
-  target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 shell32)
+  target_link_libraries(skein_builtins PUBLIC ws2_32 shell32)
 endif()
 
 include(CTest)
@@ -329,6 +384,13 @@ if(BUILD_TESTING)
       NAME docs_sync_test
       COMMAND ${Python3_EXECUTABLE}
               ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_docs_sync.py
+    )
+    add_test(
+      NAME boundary_check_test
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_boundaries.py
+              --source-dir ${CMAKE_CURRENT_SOURCE_DIR}
+              --build-dir ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
       NAME container_bench_test

@@ -1,6 +1,7 @@
 #include "encoding.h"
 
-#include "ast.h"
+#include "symbol.h"
+#include "builtin_ids.h"
 #include "valuetype.h"
 
 #include <array>

@@ -50,6 +50,8 @@ python3 tools/bench_containers.py --bin ./build/skein --check
 
 `--json` 输出 JSON，`--repeat` 控制每个规模的采样次数；该工具也注册为 CTest 的 `container_bench_test`。
 
+运行时、解释器与 builtins 的分层边界见 [docs/architecture.md](docs/architecture.md)。
+
 Windows / MinGW（64 位 MinGW-w64 GCC）：
 
 ```bat

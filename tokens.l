@@ -34,7 +34,7 @@
 #include "unicode.h"
 #include "unicode_ident.h"
 
-extern int indent_count;
+int indent_count = 0;
 
 static std::string string_buffer;
 

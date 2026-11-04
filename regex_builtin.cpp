@@ -1,6 +1,7 @@
 #include "regex_builtin.h"
 
-#include "ast.h"
+#include "symbol.h"
+#include "builtin_ids.h"
 #include "valuetype.h"
 
 #define PCRE2_CODE_UNIT_WIDTH 8

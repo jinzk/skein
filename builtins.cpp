@@ -1,6 +1,8 @@
 #include "builtins.h"
 
-#include "ast.h"
+#include "runtime_context.h"
+#include "symbol.h"
+#include "builtin_ids.h"
 #include "compress_builtin.h"
 #include "crypto_builtin.h"
 #include "dict.h"
@@ -332,7 +334,7 @@ static struct value_t *list_sort_with_cmp(struct list_value_t *list,
             call_args.push_back(dupval(a));
             call_args.push_back(dupval(b));
             struct value_t *result =
-                call_value_args(cmp_fn, std::move(call_args));
+                skein_call_function(cmp_fn, std::move(call_args));
             if (!result) {
                 failed = true;
                 return false;
@@ -396,7 +398,7 @@ static struct value_t *list_top_k_impl(struct list_value_t *list, long long k,
                 call_args.push_back(dupval(a));
                 call_args.push_back(dupval(b));
                 struct value_t *result =
-                    call_value_args(cmp_fn, std::move(call_args));
+                    skein_call_function(cmp_fn, std::move(call_args));
                 if (!result) {
                     failed = true;
                     return false;
@@ -451,7 +453,7 @@ static struct value_t *list_sort_by_key(struct list_value_t *list,
     for (struct value_t *item : list->payload->items) {
         std::vector<struct value_t *> call_args;
         call_args.push_back(dupval(item));
-        struct value_t *key = call_value_args(key_fn, std::move(call_args));
+        struct value_t *key = skein_call_function(key_fn, std::move(call_args));
         if (!key) {
             free_keyed_items(items, true);
             return NULL;
@@ -533,7 +535,7 @@ static struct value_t *list_is_sorted_value(struct list_value_t *list,
             call_args.push_back(dupval(list->payload->items[i]));
             call_args.push_back(dupval(list->payload->items[i + 1]));
             struct value_t *result =
-                call_value_args(cmp_fn, std::move(call_args));
+                skein_call_function(cmp_fn, std::move(call_args));
             if (!result)
                 return NULL;
             if (result->type != T_int) {
@@ -609,7 +611,7 @@ static struct value_t *list_unique_impl(struct list_value_t *list,
         if (key_fn) {
             std::vector<struct value_t *> call_args;
             call_args.push_back(dupval(item));
-            key = call_value_args(key_fn, std::move(call_args));
+            key = skein_call_function(key_fn, std::move(call_args));
             if (!key) {
                 failed = true;
                 break;
@@ -682,7 +684,7 @@ static struct value_t *list_group_by_impl(struct list_value_t *list,
     for (struct value_t *item : list->payload->items) {
         std::vector<struct value_t *> call_args;
         call_args.push_back(dupval(item));
-        struct value_t *key = call_value_args(key_fn, std::move(call_args));
+        struct value_t *key = skein_call_function(key_fn, std::move(call_args));
         if (!key) {
             freeval((struct value_t *)out);
             return NULL;
@@ -798,7 +800,7 @@ static bool list_compare_pair(struct value_t *a, struct value_t *b,
         call_args.push_back(dupval(a));
         call_args.push_back(dupval(b));
         struct value_t *result =
-            call_value_args(cmp_fn, std::move(call_args));
+            skein_call_function(cmp_fn, std::move(call_args));
         if (!result)
             return false;
         if (result->type != T_int) {
@@ -1111,7 +1113,7 @@ static bool heap_call_less(struct value_t *less, struct value_t *a,
     std::vector<struct value_t *> call_args;
     call_args.push_back(dupval(a));
     call_args.push_back(dupval(b));
-    struct value_t *r = call_value_args(less, std::move(call_args));
+    struct value_t *r = skein_call_function(less, std::move(call_args));
     if (!r)
         return false;
     result = truthy(r);
@@ -3071,7 +3073,7 @@ struct value_t *call_builtin(int functype,
                     call_args.push_back(
                         dupval(list->payload->items[index]));
                     struct value_t *next =
-                        call_value_args(fn, std::move(call_args));
+                        skein_call_function(fn, std::move(call_args));
                     if (!next) {
                         freeval(acc);
                         acc = NULL;
@@ -3090,7 +3092,7 @@ struct value_t *call_builtin(int functype,
                 std::vector<struct value_t *> call_args;
                 call_args.push_back(dupval(item));
                 struct value_t *result =
-                    call_value_args(fn, std::move(call_args));
+                    skein_call_function(fn, std::move(call_args));
                 if (!result) {
                     freeval((struct value_t *)out);
                     out = NULL;

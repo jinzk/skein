@@ -1,6 +1,7 @@
 #include "json.h"
 
-#include "ast.h"
+#include "symbol.h"
+#include "builtin_ids.h"
 #include "dict.h"
 #include "structtype.h"
 #include "unicode.h"

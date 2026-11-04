@@ -1094,38 +1094,3 @@ int yyreport_syntax_error(const yypcontext_t *ctx) {
     clear_func_locations();
     return 0;
 }
-
-void yyerror(const char *s, ...) {
-    if (g_interrupted)
-        return;
-
-    char buffer[2048];
-    va_list ap;
-    va_start(ap, s);
-    std::vsnprintf(buffer, sizeof(buffer), s, ap);
-    va_end(ap);
-
-    const char *message = buffer;
-    const char *category = "runtime error";
-    if (std::strncmp(message, "syntax error", 12) == 0) {
-        category = "syntax error";
-        message += 12;
-        while (*message == ',' || *message == ' ')
-            ++message;
-        if (*message == '\0')
-            message = "invalid syntax";
-    }
-
-    eval_context &context = active_eval_context();
-    ++context.runtime_error_count;
-    if (context.capture_errors &&
-        std::strcmp(category, "runtime error") == 0) {
-        if (!context.has_captured_error) {
-            context.has_captured_error = true;
-            context.captured_error = message;
-        }
-        return;
-    }
-
-    diag_report(g_error_line, g_error_column, category, message);
-}

@@ -1,5 +1,6 @@
 #include "http.h"
 
+#include "runtime_context.h"
 #include "ast.h"
 #include "compression.h"
 #include "cookie.h"
@@ -454,7 +455,7 @@ bool read_message(value_t *socket, bool request, long long timeout_ms,
         parser.set_body_sink([&](const char *data, std::size_t length) {
             value_t *chunk = newbytesval(std::string(data, length));
             value_t *result =
-                call_value_args(on_body, std::vector<value_t *>{chunk});
+                skein_call_function(on_body, std::vector<value_t *>{chunk});
             if (!result) {
                 sink_failed = true;
                 return false;
@@ -1438,7 +1439,7 @@ bool read_message_async(value_t *socket, bool request,
         parser.set_body_sink([&](const char *data, std::size_t length) {
             value_t *chunk = newbytesval(std::string(data, length));
             value_t *result =
-                call_value_args(on_body, std::vector<value_t *>{chunk});
+                skein_call_function(on_body, std::vector<value_t *>{chunk});
             if (!result) {
                 sink_failed = true;
                 return false;
@@ -2639,7 +2640,7 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             break;
         }
         value_t *response =
-            call_value_args(handler, std::vector<value_t *>{request});
+            skein_call_function(handler, std::vector<value_t *>{request});
         if (response && is_task_value(response))
             response = await_task_value(response);
         if (!response) {

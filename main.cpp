@@ -5,9 +5,12 @@
 #include <vector>
 
 #include "parser.hpp"
+#include "builtins.h"
 #include "diagnostics.h"
+#include "error_report.h"
 #include "eval.h"
 #include "eval_context.h"
+#include "eval_helpers.h"
 #include "event_loop.h"
 #include "fiber.h"
 #include "http.h"
@@ -17,23 +20,26 @@
 #include "platform.h"
 #include "process_spawn.h"
 #include "repl.h"
+#include "runtime_context.h"
 #include "scopestack.h"
 #include "source_encoding.h"
 #include "structtype.h"
 #include "task.h"
 
+#include <utility>
+
 extern FILE *yyin;
+extern int indent_count;
 
-volatile std::sig_atomic_t g_interrupted = 0;
-volatile std::sig_atomic_t g_stdin_eof = 0;
+static struct value_t *runtime_call(struct value_t *callee,
+                                    std::vector<struct value_t *> args) {
+    return call_value_args(callee, std::move(args));
+}
 
-bool g_interactive = true;
-bool g_show_prompt = false;
-int g_package_loading = 0;
-bool g_keep_going = false;
-bool g_script_stop = false;
-bool g_statement_invalid = false;
-int indent_count = 0;
+static struct value_t *runtime_call_builtin(
+    int functype, const std::vector<struct value_t *> &args) {
+    return call_builtin(functype, args);
+}
 
 static void print_usage(const char *program) {
     std::fprintf(stderr,
@@ -45,6 +51,11 @@ static void print_usage(const char *program) {
 int main(int argc, char **argv) {
     platform_init();
     platform_install_interrupt_handler();
+
+    struct skein_context runtime_hooks = {runtime_call,
+                                          runtime_call_builtin,
+                                          runtime_error_report};
+    skein_context_set(&runtime_hooks);
 
     std::vector<std::string> args = platform_command_line_args(argc, argv);
     const char *program =

@@ -1,34 +1,10 @@
 #ifndef SKEIN_REPL_H
 #define SKEIN_REPL_H
 
-#include <csignal>
+#include "runtime_state.h"
+
 #include <cstdio>
 #include <string>
-
-/* Set from the SIGINT handler; only async-signal-safe writes are allowed. */
-extern volatile std::sig_atomic_t g_interrupted;
-
-/* Set when stdin really reaches EOF (not when Ctrl-C aborts a read). */
-extern volatile std::sig_atomic_t g_stdin_eof;
-
-
-/* True for the interactive stdin REPL; false when running a script file. */
-extern bool g_interactive;
-
-/* True when the REPL should display prompts and use the line editor. */
-extern bool g_show_prompt;
-
-/* Nonzero while evaluating an imported package source file. */
-extern int g_package_loading;
-
-/* Continue after script errors instead of stopping at the first one. */
-extern bool g_keep_going;
-
-/* Set when a script error requires stopping the current parse. */
-extern bool g_script_stop;
-
-/* Set when the current statement has a lexical error and must not evaluate. */
-extern bool g_statement_invalid;
 
 enum repl_line_status {
     REPL_LINE,

@@ -1,6 +1,6 @@
 #include "valuetype.h"
 #include "dict.h"
-#include "eval_helpers.h"
+#include "value_ops.h"
 #include "structtype.h"
 #include "unicode.h"
 

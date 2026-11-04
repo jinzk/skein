@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -261,6 +262,16 @@ struct native_type {
     /* Return a human-readable representation of one instance. */
     std::string (*describe)(const void *data);
     const struct stream_ops *stream = nullptr;
+    /* Optional named field access for dot syntax (`p.x`, `p.x = v`).
+     * Implementations report their own errors. */
+    struct value_t *(*get_field)(void *data, const char *name) = nullptr;
+    bool (*set_field)(void *data, const char *name,
+                      struct value_t *value) = nullptr;
+    /* Visit script values owned by the userdata payload so the cycle
+     * collector can see them (e.g. a callback holding a script function). */
+    void (*for_each_child)(
+        const void *data,
+        const std::function<void(const struct value_t *)> &fn) = nullptr;
 };
 
 struct userdata_value_t {

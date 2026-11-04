@@ -770,6 +770,21 @@ value_t *build_std_namespace() {
             {"buffer_len", B_ffi_buffer_len},
             {"buffer_bytes", B_ffi_buffer_bytes},
             {"buffer_free", B_ffi_buffer_free},
+            {"struct", B_ffi_struct},
+            {"pointer", B_ffi_pointer},
+            {"array", B_ffi_array},
+            {"signature", B_ffi_signature},
+            {"new", B_ffi_new},
+            {"alloc", B_ffi_alloc},
+            {"ptr", B_ffi_ptr},
+            {"deref", B_ffi_deref},
+            {"offset", B_ffi_offset},
+            {"cast", B_ffi_cast},
+            {"get", B_ffi_get},
+            {"set", B_ffi_set},
+            {"to_dict", B_ffi_to_dict},
+            {"sizeof", B_ffi_sizeof},
+            {"alignof", B_ffi_alignof},
         })));
 #endif
     root->payload->items.push_back(std::make_pair(

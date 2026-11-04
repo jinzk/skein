@@ -846,11 +846,32 @@ static struct value_t *apply_increment(struct value_t *v, int delta) {
 static bool resolve_write_container(
     struct symbol *s, const std::vector<struct value_t *> &indices,
     const std::vector<bool> &fields, struct value_t *&container,
-    std::vector<const void *> *path_payloads = NULL) {
+    std::vector<const void *> *path_payloads = NULL,
+    std::vector<struct value_t *> *holds = NULL) {
     container = s ? s->val : NULL;
     if (path_payloads)
         path_payloads->push_back(value_payload(container));
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
+        if (container->type == T_userdata) {
+            struct userdata_value_t *userdata =
+                (struct userdata_value_t *)container;
+            if (!fields[k] || indices[k]->type != T_string ||
+                !userdata->meta || !userdata->meta->get_field) {
+                yyerror("invalid index assignment path");
+                return false;
+            }
+            struct value_t *elem = userdata->meta->get_field(
+                userdata->data.get(),
+                ((struct string_value_t *)indices[k])->value);
+            if (!elem)
+                return false;
+            if (holds)
+                holds->push_back(elem);
+            container = elem;
+            if (path_payloads)
+                path_payloads->push_back(value_payload(container));
+            continue;
+        }
         ensure_unique_container(container);
         if (fields[k] && container->type == T_dict &&
             !((struct dict_value_t *)container)->payload->is_namespace) {
@@ -969,6 +990,21 @@ static struct value_t *write_member_value(struct value_t *container,
                 data[(size_t)i] = (char)(unsigned char)byte;
                 ret = newintval(byte);
             }
+        }
+    } else if (container->type == T_userdata) {
+        struct userdata_value_t *userdata =
+            (struct userdata_value_t *)container;
+        if (!field_access) {
+            yyerror("cannot index-assign into %s", typename_of(container));
+        } else if (idx->type != T_string) {
+            yyerror("%s field name must be a string, got %s",
+                    typename_of(container), typename_of(idx));
+        } else if (!userdata->meta || !userdata->meta->set_field) {
+            yyerror("%s fields are read-only", typename_of(container));
+        } else if (userdata->meta->set_field(
+                       userdata->data.get(),
+                       ((struct string_value_t *)idx)->value, val)) {
+            ret = dupval(val);
         }
     } else {
         yyerror("cannot index-assign into %s", typename_of(container));
@@ -1251,14 +1287,17 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
 
     struct value_t *container = NULL;
     std::vector<const void *> path_payloads;
+    std::vector<struct value_t *> holds;
     if (!resolve_write_container(s, indices, fields, container,
-                                 &path_payloads)) {
+                                 &path_payloads, &holds)) {
+        free_args(holds);
         freeval(val);
         free_args(indices);
         return NULL;
     }
     if (value_reaches_any(val, path_payloads)) {
         yyerror("recursive value would create a cycle");
+        free_args(holds);
         freeval(val);
         free_args(indices);
         return NULL;
@@ -1266,6 +1305,7 @@ static struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
 
     struct value_t *ret =
         write_member_value(container, indices.back(), val, fields.back());
+    free_args(holds);
     free_args(indices);
     return ret;
 }
@@ -1307,13 +1347,17 @@ static struct value_t *increment_index(struct ast *target, int delta,
     }
 
     struct value_t *container = NULL;
-    if (!resolve_write_container(s, indices, fields, container)) {
+    std::vector<struct value_t *> holds;
+    if (!resolve_write_container(s, indices, fields, container, NULL,
+                                 &holds)) {
+        free_args(holds);
         free_args(indices);
         return NULL;
     }
 
     struct value_t *ret = increment_member_value(
         container, indices.back(), delta, prefix, fields.back());
+    free_args(holds);
     free_args(indices);
     return ret;
 }
@@ -1394,7 +1438,10 @@ static struct value_t *compound_index(struct ast *target, int op,
     }
 
     struct value_t *container = NULL;
-    if (!resolve_write_container(s, indices, fields, container)) {
+    std::vector<struct value_t *> holds;
+    if (!resolve_write_container(s, indices, fields, container, NULL,
+                                 &holds)) {
+        free_args(holds);
         freeval(rhs);
         free_args(indices);
         return NULL;
@@ -1403,6 +1450,7 @@ static struct value_t *compound_index(struct ast *target, int op,
     struct value_t *idx = indices.back();
     struct value_t *old = read_member_value(container, idx, fields.back());
     if (!old) {
+        free_args(holds);
         freeval(rhs);
         free_args(indices);
         return NULL;
@@ -1411,12 +1459,14 @@ static struct value_t *compound_index(struct ast *target, int op,
     freeval(old);
     freeval(rhs);
     if (!value) {
+        free_args(holds);
         free_args(indices);
         return NULL;
     }
 
     struct value_t *ret = write_member_value(container, idx, value,
                                              fields.back());
+    free_args(holds);
     free_args(indices);
     return ret;
 }
@@ -1829,6 +1879,26 @@ static struct value_t *read_member_value(struct value_t *container,
         yyerror("field %s not found in %s::%s", name,
                 ev->def->name.c_str(), variant.name.c_str());
         return NULL;
+    }
+
+    if (container->type == T_userdata) {
+        struct userdata_value_t *userdata =
+            (struct userdata_value_t *)container;
+        if (!field_access) {
+            yyerror("cannot index %s", typename_of(container));
+            return NULL;
+        }
+        if (index->type != T_string) {
+            yyerror("%s field name must be a string, got %s",
+                    typename_of(container), typename_of(index));
+            return NULL;
+        }
+        if (!userdata->meta || !userdata->meta->get_field) {
+            yyerror("%s values do not have fields", typename_of(container));
+            return NULL;
+        }
+        return userdata->meta->get_field(
+            userdata->data.get(), ((struct string_value_t *)index)->value);
     }
 
     yyerror("cannot index %s", typename_of(container));

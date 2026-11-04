@@ -152,6 +152,197 @@ def run_cases():
             "std.ffi.close(lib);\n",
             stderr="ffi buffer is freed",
         )
+        point_decl = (
+            'let Point = std.ffi.struct("Point", '
+            '[["x", "f64"], ["y", "f64"]]);\n'
+        )
+        check(
+            "std ffi struct fields",
+            "import std;\n"
+            + point_decl
+            + 'let p = std.ffi.new(Point, {"x": 1.5, "y": 2.5});\n'
+            "p.x\n"
+            "p.y\n"
+            "p.x = 4.0;\n"
+            "p.x\n"
+            "std.ffi.to_dict(p)\n"
+            "std.ffi.sizeof(Point)\n"
+            "std.ffi.alignof(Point)\n",
+            stdout_all=[
+                "= 1.5", "= 2.5", "= 4.0", "= {x: 4.0, y: 2.5}",
+                "= 16", "= 8",
+            ],
+        )
+        check(
+            "std ffi struct by value",
+            "import std;\n"
+            + point_decl
+            + f'let lib = std.ffi.open({shim});\n'
+            'let p = std.ffi.new(Point, {"x": 1.5, "y": 2.5});\n'
+            'std.ffi.call(lib, "shim_point_sum", "f64", [Point], [p])\n'
+            'let made = std.ffi.call(lib, "shim_point_make", Point, '
+            '["f64", "f64"], [1.0, 2.0]);\n'
+            "made.x\n"
+            "made.y\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 4.0", "= 1.0", "= 2.0"],
+        )
+        check(
+            "std ffi struct padding",
+            "import std;\n"
+            'let Pair = std.ffi.struct("Pair", '
+            '[["tag", "i8"], ["value", "i64"]]);\n'
+            "std.ffi.sizeof(Pair)\n"
+            f'let lib = std.ffi.open({shim});\n'
+            'let pair = std.ffi.new(Pair, {"tag": -3, "value": 9000000000});\n'
+            'std.ffi.call(lib, "shim_pair_sum", "i64", [Pair], [pair])\n'
+            'let made = std.ffi.call(lib, "shim_pair_make", Pair, '
+            '["i8", "i64"], [-1, 41]);\n'
+            "made.tag\n"
+            "made.value\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 16", "= 8999999997", "= -1", "= 41"],
+        )
+        check(
+            "std ffi pointer arguments",
+            "import std;\n"
+            + point_decl
+            + f'let lib = std.ffi.open({shim});\n'
+            "let raw = std.ffi.alloc(Point);\n"
+            "let view = std.ffi.deref(raw);\n"
+            "view.x = 3.0;\n"
+            "view.y = 4.0;\n"
+            'std.ffi.call(lib, "shim_point_dot", "f64", ["ptr"], [raw])\n'
+            'std.ffi.call(lib, "shim_point_scale", "void", '
+            '["ptr", "f64"], [raw, 2.0]);\n'
+            "std.ffi.deref(raw).x\n"
+            "std.ffi.deref(raw).y\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 25.0", "= 6.0", "= 8.0"],
+        )
+        check(
+            "std ffi pointer return",
+            "import std;\n"
+            + point_decl
+            + f'let lib = std.ffi.open({shim});\n'
+            'let global = std.ffi.call(lib, "shim_point_global", '
+            "std.ffi.pointer(Point), [], []);\n"
+            "std.ffi.deref(global).x\n"
+            "std.ffi.deref(global).y\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 3.0", "= 4.0"],
+        )
+        check(
+            "std ffi nested struct and array",
+            "import std;\n"
+            + point_decl
+            + 'let Nested = std.ffi.struct("Nested", '
+            '[["point", Point], ["tag", "i32"]]);\n'
+            'let Words = std.ffi.struct("Words", '
+            '[["values", std.ffi.array("i32", 3)]]);\n'
+            f'let lib = std.ffi.open({shim});\n'
+            'let n = std.ffi.new(Nested, '
+            '{"point": {"x": 1.0, "y": 2.0}, "tag": 3});\n'
+            "n.point.x\n"
+            "n.point.x = 10.0;\n"
+            "n.point.x\n"
+            'std.ffi.call(lib, "shim_nested_score", "f64", '
+            '[Nested], [n]);\n'
+            'let w = std.ffi.new(Words, {"values": [1, 2, 3]});\n'
+            "std.ffi.get(w.values, 1)\n"
+            "std.ffi.set(w.values, 1, 9);\n"
+            'std.ffi.call(lib, "shim_words_sum", "i32", [Words], [w])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 1.0", "= 10.0", "= 15.0", "= 2", "= 9",
+                        "= 13"],
+        )
+        check(
+            "std ffi struct errors",
+            "import std;\n" + point_decl + 'let p = std.ffi.new(Point);\n'
+            "p.z\n",
+            stderr="has no field z",
+        )
+        check(
+            "std ffi null deref",
+            "import std;\n" + point_decl
+            + "std.ffi.deref(std.ffi.ptr(Point))\n",
+            stderr="null pointer",
+        )
+        check(
+            "std ffi field type error",
+            "import std;\n" + point_decl
+            + 'let p = std.ffi.new(Point);\np.x = "bad";\n',
+            stderr="expected a number",
+        )
+        check(
+            "std ffi new scalar rejected",
+            'import std;\nstd.ffi.new("i32")\n',
+            stderr="expects a struct or array type",
+        )
+        check(
+            "std ffi empty struct rejected",
+            'import std;\nstd.ffi.struct("Empty", [])\n',
+            stderr="must have at least one field",
+        )
+        check(
+            "std ffi duplicate field rejected",
+            "import std;\n"
+            'std.ffi.struct("P", [["x", "i32"], ["x", "i32"]])\n',
+            stderr="duplicate field x",
+        )
+        check(
+            "std ffi void field rejected",
+            "import std;\n"
+            'std.ffi.struct("P", [["x", "void"]])\n',
+            stderr="cannot be passed by value",
+        )
+        check(
+            "std ffi array bounds",
+            "import std;\n"
+            'let A = std.ffi.array("i32", 3);\n'
+            "let a = std.ffi.new(A, [1, 2, 3]);\n"
+            "std.ffi.get(a, 5)\n",
+            stderr="out of range",
+        )
+        check(
+            "std ffi struct dict output",
+            "import std;\n"
+            + point_decl
+            + 'let p = std.ffi.new(Point, {"x": 1, "y": 2});\n'
+            'std.ffi.to_dict(p)["y"]\n',
+            stdout="= 2.0",
+        )
+        check(
+            "std ffi nested cstring keepalive",
+            "import std;\n"
+            'let Inner = std.ffi.struct("Inner", '
+            '[["text", "cstring"], ["n", "i32"]]);\n'
+            'let Outer = std.ffi.struct("Outer", [["inner", Inner]]);\n'
+            "let o = std.ffi.new(Outer);\n"
+            'o.inner.text = "hello";\n'
+            "o.inner.text\n"
+            "o.inner.n = 5;\n"
+            "o.inner.n\n"
+            "o.inner.text\n"
+            "let p = std.ffi.alloc(Inner);\n"
+            'std.ffi.set(p, 0, {"text": "world", "n": 9});\n'
+            "std.ffi.get(p, 0).text\n"
+            "std.ffi.get(p, 0).n\n",
+            stdout_all=["= hello", "= 5", "= hello", "= world", "= 9"],
+        )
+        check(
+            "std ffi pointer to array indexing",
+            "import std;\n"
+            'let A = std.ffi.array("i32", 3);\n'
+            "let a = std.ffi.alloc(A);\n"
+            "std.ffi.set(a, 0, 7);\n"
+            "std.ffi.set(a, 2, 9);\n"
+            "std.ffi.get(a, 0)\n"
+            "std.ffi.get(a, 2)\n"
+            "std.ffi.get(a, 3)\n",
+            stdout_all=["= 7", "= 9"],
+            stderr="out of range",
+        )
     check(
         "std string format",
         'import std;\nstd.string.format("{}", 3)\n',

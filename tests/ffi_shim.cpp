@@ -8,6 +8,25 @@
 #define SHIM_EXPORT __attribute__((visibility("default")))
 #endif
 
+struct shim_point {
+    double x;
+    double y;
+};
+
+struct shim_pair {
+    std::int8_t tag;
+    std::int64_t value;
+};
+
+struct shim_nested {
+    struct shim_point point;
+    std::int32_t tag;
+};
+
+struct shim_words {
+    std::int32_t values[3];
+};
+
 extern "C" {
 
 SHIM_EXPORT std::int8_t shim_i8(std::int8_t value) {
@@ -95,6 +114,47 @@ SHIM_EXPORT std::int32_t shim_buffer_write(std::uint8_t *buffer,
 
 SHIM_EXPORT const char *shim_error(void) {
     return "shim error";
+}
+
+SHIM_EXPORT double shim_point_sum(struct shim_point point) {
+    return point.x + point.y;
+}
+
+SHIM_EXPORT struct shim_point shim_point_make(double x, double y) {
+    struct shim_point point = {x, y};
+    return point;
+}
+
+SHIM_EXPORT double shim_point_dot(const struct shim_point *point) {
+    return point->x * point->x + point->y * point->y;
+}
+
+SHIM_EXPORT void shim_point_scale(struct shim_point *point, double factor) {
+    point->x *= factor;
+    point->y *= factor;
+}
+
+SHIM_EXPORT std::int64_t shim_pair_sum(struct shim_pair pair) {
+    return pair.value + pair.tag;
+}
+
+SHIM_EXPORT struct shim_pair shim_pair_make(std::int8_t tag,
+                                            std::int64_t value) {
+    struct shim_pair pair = {tag, value};
+    return pair;
+}
+
+SHIM_EXPORT double shim_nested_score(struct shim_nested nested) {
+    return nested.point.x + nested.point.y + nested.tag;
+}
+
+SHIM_EXPORT std::int32_t shim_words_sum(struct shim_words words) {
+    return words.values[0] + words.values[1] + words.values[2];
+}
+
+SHIM_EXPORT const struct shim_point *shim_point_global(void) {
+    static struct shim_point point = {3.0, 4.0};
+    return &point;
 }
 
 } // extern "C"

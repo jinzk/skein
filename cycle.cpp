@@ -131,6 +131,13 @@ void for_each_value_child(
             fn(rv->error);
             break;
         }
+        case T_userdata: {
+            const struct userdata_value_t *u =
+                (const struct userdata_value_t *)v;
+            if (u->meta && u->meta->for_each_child && u->data)
+                u->meta->for_each_child(u->data.get(), fn);
+            break;
+        }
         case T_method: {
             const struct method_value_t *method =
                 (const struct method_value_t *)v;

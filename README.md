@@ -1402,6 +1402,33 @@ usize        size_t
 isize        ssize_t / intptr_t 宽度
 ```
 
+FFI 结构体与指针：
+
+```text
+import std;
+
+let Point = std.ffi.struct("Point", [["x", "f64"], ["y", "f64"]]);
+let p = std.ffi.new(Point, {"x": 1.0, "y": 2.0});
+p.x
+p.x = 3.0
+std.ffi.to_dict(p)
+
+let raw = std.ffi.alloc(Point);   // 零初始化，返回指针
+let view = std.ffi.deref(raw);
+view.x = 1.0;
+
+let lib = std.ffi.open("./libpoints.so");
+std.ffi.call(lib, "point_len", "f64", [std.ffi.pointer(Point)], [raw]);
+std.ffi.call(lib, "point_make", Point, ["f64", "f64"], [1.0, 2.0]);
+```
+
+- 结构体按标准 C ABI 自然对齐布局，加载时用 libffi 校验 size/offset/alignment；
+- packed 和 bitfield 不由通用 FFI 支持，需要静态 C++ 绑定；
+- `ffi.new` 创建由 C++ 管理内存的值，`ffi.alloc` 返回指针，`ffi.deref` 共享同一块内存；
+- 字段读写使用 `p.x` / `p.x = v`，类型和布局检查在 C++ 完成；
+- `ffi.get` / `ffi.set` 用于数组和指针索引，`ffi.offset` / `ffi.cast` 只做受控的指针运算；
+- 脚本层没有 `free` / `release` / `own`；内存由引用计数和 GC 回收，C 返回的指针默认借用。
+
 模块：
 
 ```text
@@ -1912,6 +1939,21 @@ std.ffi.buffer
 std.ffi.buffer_len
 std.ffi.buffer_bytes
 std.ffi.buffer_free
+std.ffi.struct
+std.ffi.pointer
+std.ffi.array
+std.ffi.signature
+std.ffi.new
+std.ffi.alloc
+std.ffi.ptr
+std.ffi.deref
+std.ffi.offset
+std.ffi.cast
+std.ffi.get
+std.ffi.set
+std.ffi.to_dict
+std.ffi.sizeof
+std.ffi.alignof
 
 std.bytes.len
 std.bytes.get

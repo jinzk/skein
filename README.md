@@ -1508,6 +1508,7 @@ FFI manifest（可选）：
 //     "point_new": {"result": "pointer", "args": ["f64", "f64"],
 //                   "returns_owned": {"free": "point_free"}}
 //   },
+//   "variables": {"POINT_COUNT": {"type": "i32"}},
 //   "constants": {"POINT_MAX": 16}
 // }
 
@@ -1518,10 +1519,16 @@ let Point = std.ffi.type(lib, "Point");
 let p = std.ffi.new(Point, {"x": 1.0, "y": 2.0});
 std.ffi.call(lib, "point_len", [p]);
 std.ffi.constant(lib, "POINT_MAX");
+std.ffi.variable(lib, "POINT_COUNT");      // 读取全局变量
+lib.POINT_COUNT;                           // 等价的点语法
+lib.POINT_COUNT = 3;                       // 写入全局变量
+std.ffi.set_variable(lib, "POINT_COUNT", 4);
 ```
 
 - manifest 是纯数据，JSON 文件和脚本 dict 共用同一套校验与类型模型；
-- 支持 struct / pointer / array / opaque / callback、函数签名和常量；
+- 支持 struct / pointer / array / opaque / callback、函数签名、全局变量和常量；
+- 全局变量通过 `ffi.variable` / `ffi.set_variable` 或 `lib.VAR` 读写；
+  `--check-ffi` 会同时校验函数、变量和 `returns_owned` 的 free 符号；
 - `returns_owned` / `consumes` / `retains` 由 manifest 声明所有权，脚本层不出现 `free`；
   `consumes` 对 `ffi.alloc`/`returns_owned` 的内存会真正释放运行时所有权，
   之后由 C 负责释放；对借用指针只标记为已被消费；
@@ -1647,7 +1654,8 @@ skein --ffi-gen \
 - 使用系统 C 编译器（gcc/clang，Windows 为 MinGW gcc）的 `-E` 做预处理，
   不引入 libclang；
 - 只解析 `--header` 指定头文件里的声明，支持 struct、typedef、指针、数组、
-  函数声明、函数指针 typedef、enum 和对象式宏常量；
+  函数声明、函数指针 typedef、enum、`extern` 全局变量和对象式宏常量；
+  `static` 函数/变量视为内部符号并跳过；
 - 常量支持整数表达式（算术、位运算、比较、逻辑、三元、标量强制转换、
   二进制字面量）以及浮点字面量（含 `f` 后缀）；
 - 通过 `cc -dM` 探测目标 ABI 的 `long`/指针/`wchar_t` 宽度，支持 `--cc`、
@@ -1656,7 +1664,7 @@ skein --ffi-gen \
   函数参数里的定长数组会按 C 规则退化为指针；
 - packed、bitfield、变参、柔性数组、匿名 struct/union、影响布局的属性、
   未知类型默认直接失败；`--tolerate-errors` 可显式降级为警告并继续；
-- `--symbols` 只导出匹配的函数（`*`/`?` 通配符）；
+- `--symbols` 过滤函数、变量和常量，并裁剪未被引用到的类型（`*`/`?` 通配符）；
 - `--check` 用于 CI 校验生成的 manifest 是否过期；
 - 运行时不依赖 C 编译器和头文件，只读 manifest。
 
@@ -2205,6 +2213,8 @@ std.ffi.address_of
 std.ffi.callback
 std.ffi.manifest
 std.ffi.constant
+std.ffi.variable
+std.ffi.set_variable
 std.ffi.function
 std.ffi.declare
 std.ffi.type

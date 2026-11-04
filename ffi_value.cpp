@@ -139,8 +139,8 @@ struct value_t *type_get_field(void *data, const char *name) {
 } // namespace
 
 const native_type library_native_type = {
-    "ffi_library", describe_library, nullptr, library_get_field, nullptr,
-    library_for_each_child};
+    "ffi_library", describe_library, nullptr, library_get_field,
+    library_set_field, library_for_each_child};
 
 const native_type buffer_native_type = {"ffi_buffer", describe_buffer};
 

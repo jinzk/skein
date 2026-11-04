@@ -981,6 +981,11 @@ struct function_out {
     std::vector<ctype_ptr> args;
 };
 
+struct variable_out {
+    std::string name;
+    ctype_ptr type;
+};
+
 struct declarator {
     std::string name;
     int pointers = 0;
@@ -1002,6 +1007,7 @@ struct attribute_flags {
 struct spec {
     ctype_ptr base;
     bool is_typedef = false;
+    bool is_static = false;
     bool packed = false;
     bool layout_unsafe = false;
     std::string layout_name;
@@ -1055,7 +1061,7 @@ public:
 
     std::string render(const options &o, const std::string &source_hash);
 
-    void keep_functions(const std::vector<std::string> &patterns);
+    void keep_symbols(const std::vector<std::string> &patterns);
 
 private:
     void preload_typedefs() {
@@ -1129,6 +1135,37 @@ private:
             fatal_ = true;
     }
 
+    void mark_type(const ctype_ptr &type) {
+        if (!type)
+            return;
+        switch (type->kind) {
+            case ctype::SCALAR:
+                return;
+            case ctype::RECORD:
+                if (!kept_records_.insert(type->name).second)
+                    return;
+                {
+                    auto it = records_.find(type->name);
+                    if (it != records_.end()) {
+                        for (const auto &field : it->second.fields)
+                            mark_type(field.second);
+                    }
+                }
+                return;
+            case ctype::POINTER:
+            case ctype::ARRAY:
+                mark_type(type->element);
+                return;
+            case ctype::CALLBACK:
+                if (!type->name.empty())
+                    kept_callbacks_.insert(type->name);
+                mark_type(type->result);
+                for (const ctype_ptr &param : type->params)
+                    mark_type(param);
+                return;
+        }
+    }
+
     void collect_value_type(const ctype_ptr &type, const std::string &where,
                             std::vector<std::string> &errors) {
         if (!type)
@@ -1162,6 +1199,9 @@ private:
                                        " of " + function.name,
                                    errors);
         }
+        for (const auto &variable : variables_)
+            collect_value_type(variable.type,
+                               "variable " + variable.name, errors);
         for (const std::string &message : errors) {
             warnings_.push_back(message);
             if (!tolerate_errors_)
@@ -1460,7 +1500,12 @@ private:
                 advance();
                 continue;
             }
-            if (text == "static" || text == "extern" || text == "register" ||
+            if (text == "static") {
+                s.is_static = true;
+                advance();
+                continue;
+            }
+            if (text == "extern" || text == "register" ||
                 text == "auto" || text == "inline" || text == "__inline" ||
                 text == "__inline__" || text == "const" ||
                 text == "volatile" || text == "restrict" ||
@@ -1724,11 +1769,18 @@ private:
                     fail("variadic functions are not supported");
                 if (s.unsupported_convention)
                     fail("unsupported calling convention");
-                function_out function;
-                function.name = d.name;
-                function.result = apply_pointers(s.base, d.pointers);
-                function.args = d.params;
-                functions_.push_back(std::move(function));
+                if (!s.is_static) {
+                    function_out function;
+                    function.name = d.name;
+                    function.result = apply_pointers(s.base, d.pointers);
+                    function.args = d.params;
+                    functions_.push_back(std::move(function));
+                }
+            } else if (!s.is_static) {
+                variable_out variable;
+                variable.name = d.name;
+                variable.type = apply_type(s.base, d);
+                variables_.push_back(std::move(variable));
             }
             if (!accept(","))
                 break;
@@ -1844,6 +1896,10 @@ private:
     std::map<std::string, record_out> records_;
     std::map<std::string, callback_out> callbacks_;
     std::vector<function_out> functions_;
+    std::vector<variable_out> variables_;
+    bool filtered_ = false;
+    std::set<std::string> kept_records_;
+    std::set<std::string> kept_callbacks_;
     std::set<std::string> referenced_records_;
     std::vector<std::string> warnings_;
     size_t position_ = 0;
@@ -1889,20 +1945,42 @@ bool glob_match(const char *pattern, const char *text) {
 
 } // namespace
 
-void parser::keep_functions(const std::vector<std::string> &patterns) {
+void parser::keep_symbols(const std::vector<std::string> &patterns) {
     if (patterns.empty())
         return;
+    filtered_ = true;
+    auto keep = [&](const std::string &name) {
+        for (const std::string &pattern : patterns) {
+            if (glob_match(pattern.c_str(), name.c_str()))
+                return true;
+        }
+        return false;
+    };
     functions_.erase(
         std::remove_if(functions_.begin(), functions_.end(),
                        [&](const function_out &function) {
-                           for (const std::string &pattern : patterns) {
-                               if (glob_match(pattern.c_str(),
-                                              function.name.c_str()))
-                                   return false;
-                           }
-                           return true;
+                           return !keep(function.name);
                        }),
         functions_.end());
+    variables_.erase(
+        std::remove_if(variables_.begin(), variables_.end(),
+                       [&](const variable_out &variable) {
+                           return !keep(variable.name);
+                       }),
+        variables_.end());
+    for (auto it = constants_.begin(); it != constants_.end();) {
+        if (keep(it->first))
+            ++it;
+        else
+            it = constants_.erase(it);
+    }
+    for (const function_out &function : functions_) {
+        mark_type(function.result);
+        for (const ctype_ptr &argument : function.args)
+            mark_type(argument);
+    }
+    for (const variable_out &variable : variables_)
+        mark_type(variable.type);
 }
 
 std::string parser::render(const options &o, const std::string &source_hash) {
@@ -1943,6 +2021,8 @@ std::string parser::render(const options &o, const std::string &source_hash) {
     std::vector<std::string> type_entries;
     for (const auto &entry : records_) {
         const record_out &record = entry.second;
+        if (filtered_ && !kept_records_.count(record.name))
+            continue;
         std::string text = "    " + json_string(record.name) +
                            ": {\"kind\":\"struct\",\"fields\":[";
         for (size_t i = 0; i < record.fields.size(); ++i) {
@@ -1958,12 +2038,16 @@ std::string parser::render(const options &o, const std::string &source_hash) {
     }
     for (const auto &entry : callbacks_) {
         const callback_out &callback = entry.second;
+        if (filtered_ && !kept_callbacks_.count(callback.name))
+            continue;
         std::string text = "    " + json_string(callback.name) + ": " +
                            render_callback(callback.result, callback.params);
         type_entries.push_back(std::move(text));
     }
     for (const std::string &name : referenced_records_) {
         if (records_.count(name))
+            continue;
+        if (filtered_ && !kept_records_.count(name))
             continue;
         type_entries.push_back("    " + json_string(name) +
                                ": {\"kind\":\"opaque\"}");
@@ -1994,6 +2078,18 @@ std::string parser::render(const options &o, const std::string &source_hash) {
             out << ",";
     }
     if (!functions_.empty())
+        out << "\n  ";
+    out << "}";
+
+    out << ",\n  \"variables\": {";
+    for (size_t i = 0; i < variables_.size(); ++i) {
+        const variable_out &variable = variables_[i];
+        out << "\n    " << json_string(variable.name) << ": "
+            << render_type(variable.type);
+        if (i + 1 < variables_.size())
+            out << ",";
+    }
+    if (!variables_.empty())
         out << "\n  ";
     out << "}";
 
@@ -2172,7 +2268,7 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
              o.tolerate_errors);
     if (!p.parse(error))
         return 1;
-    p.keep_functions(o.symbols);
+    p.keep_symbols(o.symbols);
 
     char hash_buffer[32];
     std::snprintf(hash_buffer, sizeof hash_buffer, "%016llx",

@@ -169,6 +169,8 @@ enum bifs {
     B_ffi_callback,
     B_ffi_manifest,
     B_ffi_constant,
+    B_ffi_variable,
+    B_ffi_set_variable,
     B_ffi_type_lookup,
     B_ffi_function,
     B_ffi_declare,

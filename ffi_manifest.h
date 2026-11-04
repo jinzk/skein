@@ -22,11 +22,18 @@ struct manifest_function {
     std::string free_function;
 };
 
+struct manifest_variable {
+    std::string name;
+    std::string symbol;
+    type_ptr type;
+};
+
 struct manifest {
     int version = 1;
     std::string name;
     std::map<std::string, type_ptr> types;
     std::map<std::string, manifest_function> functions;
+    std::map<std::string, manifest_variable> variables;
     std::map<std::string, struct value_t *> constants;
 
     ~manifest();

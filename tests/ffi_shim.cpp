@@ -38,6 +38,7 @@ typedef void (*shim_void_fn)(std::int32_t);
 typedef void (*shim_notify_fn)(std::int32_t);
 
 extern "C" {
+    SHIM_EXPORT std::int32_t shim_global = 7;
 
 SHIM_EXPORT std::int8_t shim_i8(std::int8_t value) {
     return value;

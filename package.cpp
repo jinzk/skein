@@ -794,6 +794,8 @@ value_t *build_std_namespace() {
             {"callback", B_ffi_callback},
             {"manifest", B_ffi_manifest},
             {"constant", B_ffi_constant},
+            {"variable", B_ffi_variable},
+            {"set_variable", B_ffi_set_variable},
             {"type", B_ffi_type_lookup},
             {"function", B_ffi_function},
             {"declare", B_ffi_declare},

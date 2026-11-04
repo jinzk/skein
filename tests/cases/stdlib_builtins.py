@@ -604,6 +604,22 @@ def run_cases():
             stdout="= 5.0",
         )
         check(
+            "std ffi manifest variables",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "variables": '
+            '{"shim_global": {"type": "i32"}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'std.ffi.variable(lib, "shim_global")\n'
+            "lib.shim_global\n"
+            "lib.shim_global = 11;\n"
+            "lib.shim_global\n"
+            'std.ffi.set_variable(lib, "shim_global", 13);\n'
+            'std.ffi.variable(lib, "shim_global")\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 7", "= 7", "= 11", "= 13"],
+        )
+        check(
             "std ffi manifest callbacks and ownership",
             "import std;\n"
             f"let path = {shim};\n"
@@ -1038,6 +1054,7 @@ def run_cases():
         assert generated["constants"]["SAMPLE_CAST"] == 255
         assert generated["constants"]["SAMPLE_BINARY"] == 5
         assert generated["constants"]["SAMPLE_FLOAT_SUFFIX"] == 2.5
+        assert generated["variables"] == {"sample_global": "i32"}
         assert generated["constants"]["SAMPLE_KIND_A"] == 4
         assert generated["constants"]["SAMPLE_KIND_B"] == 5
         assert generated["constants"]["SAMPLE_KIND_C"] == 6
@@ -1059,6 +1076,8 @@ def run_cases():
         with open(filtered_output, encoding="utf-8") as handle:
             filtered = _json.load(handle)
         assert list(filtered["functions"]) == ["sample_add"]
+        assert filtered["variables"] == {}
+        assert filtered["types"] == {}
 
         cpp_header = os.path.normpath(os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
@@ -1176,6 +1195,33 @@ def run_cases():
                 text=True, capture_output=True, timeout=60)
             assert no_free.returncode == 1, (no_free.stdout, no_free.stderr)
             assert "missing symbol: no_such_free" in no_free.stderr
+
+            variables_manifest = os.path.join(bindgen_dir,
+                                              "shim_variables.ffi.json")
+            with open(variables_manifest, "w", encoding="utf-8") as handle:
+                _json.dump({
+                    "ffi": 1,
+                    "variables": {"shim_global": {"type": "i32"}},
+                }, handle)
+            variables = subprocess.run(
+                [BIN, "--check-ffi", FFI_SHIM, variables_manifest],
+                text=True, capture_output=True, timeout=60)
+            assert variables.returncode == 0, (variables.stdout,
+                                               variables.stderr)
+
+            missing_variable = os.path.join(bindgen_dir,
+                                            "shim_no_variable.ffi.json")
+            with open(missing_variable, "w", encoding="utf-8") as handle:
+                _json.dump({
+                    "ffi": 1,
+                    "variables": {"nope_global": {"type": "i32"}},
+                }, handle)
+            no_variable = subprocess.run(
+                [BIN, "--check-ffi", FFI_SHIM, missing_variable],
+                text=True, capture_output=True, timeout=60)
+            assert no_variable.returncode == 1, (no_variable.stdout,
+                                                 no_variable.stderr)
+            assert "missing symbol: nope_global" in no_variable.stderr
 
         if has_ffi:
             check(

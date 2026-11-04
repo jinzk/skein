@@ -76,8 +76,10 @@ struct value_t *new_object_value(type_ptr type, unsigned char *address,
 bool get_library(struct value_t *value,
                  std::shared_ptr<library_handle> &out);
 
-/* Dot access on a library handle: manifest functions and constants. */
+/* Dot access on a library handle: manifest functions, variables and
+ * constants. */
 struct value_t *library_get_field(void *data, const char *name);
+bool library_set_field(void *data, const char *name, struct value_t *value);
 bool get_buffer(struct value_t *value, std::shared_ptr<buffer_handle> &out);
 bool get_type(struct value_t *value, type_ptr &out);
 bool get_pointer(struct value_t *value, std::shared_ptr<pointer_handle> &out);

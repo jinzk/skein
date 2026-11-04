@@ -68,11 +68,19 @@ int run_check(const std::string &library_path,
         if (!library->symbol(free_name.c_str(), symbol_error))
             missing.push_back(free_name);
     }
+    for (const auto &entry : manifest->variables) {
+        const ffi::manifest_variable &variable = entry.second;
+        std::string symbol_error;
+        if (checked.insert(variable.symbol).second &&
+            !library->symbol(variable.symbol.c_str(), symbol_error))
+            missing.push_back(variable.symbol);
+    }
 
     std::printf("manifest: %s\n", manifest_path.c_str());
     std::printf("library:  %s\n", library_path.c_str());
     std::printf("types:    %zu\n", manifest->types.size());
     std::printf("functions: %zu\n", manifest->functions.size());
+    std::printf("variables: %zu\n", manifest->variables.size());
     std::printf("constants: %zu\n", manifest->constants.size());
 
     if (!missing.empty()) {

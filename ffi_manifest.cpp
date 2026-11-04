@@ -722,6 +722,47 @@ bool build_manifest(struct value_t *spec,
         }
     }
 
+    if (dict_lookup(root, "variables", value)) {
+        if (value->type != T_dict) {
+            error = "manifest variables must be a dict";
+            return false;
+        }
+        for (const auto &entry :
+             ((dict_value_t *)value)->payload->items) {
+            std::string name;
+            if (!as_string(entry.first, name) || name.empty()) {
+                error = "manifest variable names must be non-empty strings";
+                return false;
+            }
+            if (result->functions.count(name) ||
+                result->variables.count(name)) {
+                error = "duplicate manifest symbol " + name;
+                return false;
+            }
+            manifest_variable variable;
+            variable.name = name;
+            variable.symbol = name;
+            struct value_t *type_value = entry.second;
+            if (entry.second->type == T_dict) {
+                dict_value_t *decl = (dict_value_t *)entry.second;
+                struct value_t *item = nullptr;
+                if (dict_lookup(decl, "symbol", item)) {
+                    if (!as_string(item, variable.symbol) ||
+                        variable.symbol.empty()) {
+                        error = "variable " + name +
+                                " has an invalid symbol";
+                        return false;
+                    }
+                }
+                if (dict_lookup(decl, "type", item))
+                    type_value = item;
+            }
+            if (!resolver.resolve_ref(type_value, variable.type, 0))
+                return false;
+            result->variables.emplace(name, std::move(variable));
+        }
+    }
+
     if (dict_lookup(root, "constants", value)) {
         if (value->type != T_dict) {
             error = "manifest constants must be a dict";
@@ -731,6 +772,11 @@ bool build_manifest(struct value_t *spec,
             std::string name;
             if (!as_string(entry.first, name) || name.empty()) {
                 error = "manifest constant names must be non-empty strings";
+                return false;
+            }
+            if (result->functions.count(name) ||
+                result->variables.count(name)) {
+                error = "duplicate manifest symbol " + name;
                 return false;
             }
             switch (entry.second->type) {
@@ -763,6 +809,7 @@ std::shared_ptr<manifest> clone_manifest(const manifest &source) {
     copy->name = source.name;
     copy->types = source.types;
     copy->functions = source.functions;
+    copy->variables = source.variables;
     for (const auto &entry : source.constants)
         copy->constants.emplace(entry.first, dupval(entry.second));
     return copy;
@@ -792,13 +839,23 @@ bool extend_manifest(const manifest &base, struct value_t *spec,
         }
     }
     for (const auto &entry : extension->functions) {
-        if (!merged->functions.emplace(entry.first, entry.second).second) {
+        if (merged->variables.count(entry.first) ||
+            !merged->functions.emplace(entry.first, entry.second).second) {
             error = "duplicate manifest function " + entry.first;
             return false;
         }
     }
+    for (const auto &entry : extension->variables) {
+        if (merged->functions.count(entry.first) ||
+            !merged->variables.emplace(entry.first, entry.second).second) {
+            error = "duplicate manifest variable " + entry.first;
+            return false;
+        }
+    }
     for (const auto &entry : extension->constants) {
-        if (merged->constants.count(entry.first)) {
+        if (merged->constants.count(entry.first) ||
+            merged->functions.count(entry.first) ||
+            merged->variables.count(entry.first)) {
             error = "duplicate manifest constant " + entry.first;
             return false;
         }

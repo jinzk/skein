@@ -40,4 +40,7 @@ void sample_sort(void *base, size_t count, SampleCompare cmp);
 const char *sample_name(void);
 int32_t sample_flags(const SampleRecord *record);
 
+extern int sample_global;
+static int sample_internal;
+
 #endif

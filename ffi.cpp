@@ -921,6 +921,49 @@ static value_t *ffi_constant(const std::vector<value_t *> &args) {
     return dupval(it->second);
 }
 
+static value_t *ffi_variable(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.variable expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.variable name must be a string");
+        return NULL;
+    }
+    if (!library->spec) {
+        yyerror("ffi.variable: library has no manifest");
+        return NULL;
+    }
+    return ffi::library_get_field(library.get(),
+                                  ((string_value_t *)args[1])->value);
+}
+
+static value_t *ffi_set_variable(const std::vector<value_t *> &args) {
+    if (args.size() != 3) {
+        yyerror("std.ffi.set_variable expects 3 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.set_variable name must be a string");
+        return NULL;
+    }
+    if (!library->spec) {
+        yyerror("ffi.set_variable: library has no manifest");
+        return NULL;
+    }
+    if (!ffi::library_set_field(library.get(),
+                                ((string_value_t *)args[1])->value,
+                                args[2]))
+        return NULL;
+    return newnull();
+}
+
 static value_t *ffi_close(const std::vector<value_t *> &args) {
     if (args.size() != 1) {
         yyerror("std.ffi.close expects 1 argument");
@@ -1697,6 +1740,10 @@ struct value_t *call_ffi_builtin(
             return ffi_manifest_builtin(args);
         case B_ffi_constant:
             return ffi_constant(args);
+        case B_ffi_variable:
+            return ffi_variable(args);
+        case B_ffi_set_variable:
+            return ffi_set_variable(args);
         case B_ffi_type_lookup:
             return ffi_type_lookup(args);
         case B_ffi_function:
@@ -1722,9 +1769,55 @@ struct value_t *ffi::library_get_field(void *data, const char *name) {
                                    library->spec, function->second,
                                    library->self);
     }
+    auto variable = library->spec->variables.find(key);
+    if (variable != library->spec->variables.end()) {
+        const ffi::manifest_variable &decl = variable->second;
+        std::string error;
+        void *symbol =
+            library->library->symbol(decl.symbol.c_str(), error);
+        if (!symbol) {
+            yyerror("ffi variable %s: %s", decl.symbol.c_str(),
+                    error.c_str());
+            return NULL;
+        }
+        value_t *value = ffi::read_value(
+            decl.type, (const unsigned char *)symbol,
+            library->shared_from_this());
+        if (!value)
+            yyerror("ffi variable %s cannot be read", key.c_str());
+        return value;
+    }
     auto constant = library->spec->constants.find(key);
     if (constant != library->spec->constants.end())
         return dupval(constant->second);
     yyerror("ffi library has no member %s", key.c_str());
     return NULL;
+}
+
+bool ffi::library_set_field(void *data, const char *name,
+                            struct value_t *value) {
+    ffi::library_handle *library = (ffi::library_handle *)data;
+    if (!library || !library->spec) {
+        yyerror("ffi library has no manifest");
+        return false;
+    }
+    std::string key = name ? name : "";
+    auto variable = library->spec->variables.find(key);
+    if (variable == library->spec->variables.end()) {
+        yyerror("ffi library has no writable variable %s", key.c_str());
+        return false;
+    }
+    const ffi::manifest_variable &decl = variable->second;
+    std::string error;
+    void *symbol = library->library->symbol(decl.symbol.c_str(), error);
+    if (!symbol) {
+        yyerror("ffi variable %s: %s", decl.symbol.c_str(), error.c_str());
+        return false;
+    }
+    if (!ffi::write_value(decl.type, (unsigned char *)symbol, value,
+                          library->retained, error)) {
+        yyerror("ffi variable %s: %s", key.c_str(), error.c_str());
+        return false;
+    }
+    return true;
 }

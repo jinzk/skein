@@ -5,8 +5,8 @@ Checks:
   1. README and SYNTAX expose the same std module list, in the same order.
   2. Every embedded package listed in CMakeLists.txt is documented in both
      files and registered in package.cpp.
-  3. Every builtin function registered in package.cpp appears in the README
-     function list.
+  3. Every builtin function registered in package.cpp or std_namespace.cpp
+     appears in the README function list.
   4. Every README function-list entry belongs to a known module and is
      actually registered.
 
@@ -22,6 +22,7 @@ README = ROOT / "README.md"
 SYNTAX = ROOT / "SYNTAX.md"
 CMAKE = ROOT / "CMakeLists.txt"
 PACKAGE = ROOT / "package.cpp"
+STD_NAMESPACE = ROOT / "std_namespace.cpp"
 
 errors = []
 
@@ -107,6 +108,7 @@ def main():
     syntax_text = read(SYNTAX)
     cmake_text = read(CMAKE)
     package_text = read(PACKAGE)
+    std_namespace_text = read(STD_NAMESPACE)
 
     readme_modules = module_list(readme_text, "README.md")
     syntax_modules = module_list(syntax_text, "SYNTAX.md")
@@ -124,6 +126,8 @@ def main():
             fail("README and SYNTAX module lists are in a different order")
 
     registry = builtin_registry(package_text)
+    for module, functions in builtin_registry(std_namespace_text).items():
+        registry.setdefault(module, set()).update(functions)
     listed = function_list(readme_text)
 
     for package in embedded_packages(cmake_text):

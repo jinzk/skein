@@ -57,7 +57,7 @@ L0  platform          OS 原语（文件/时间/线程/进程/socket 抽象）
 | 层 | 内容 |
 |---|---|
 | L1 runtime | `valuetype.*`、`value_ops.*`、`dict.*`、`structtype.*`、`symbol.*`、`cycle.*`、`serialization.*`、`json.*`、`format.*`、`encoding.*`、`unicode.*`、`unicode_ident.*`、`stdio_stream.*`、`runtime_context.*`、`runtime_error.*`、`skein_module.h`、`binding_registry.*` |
-| L2 interpreter | `tokens.l`、`parser.y`、`ast.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_context.*`、`gc.*`、`package.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
+| L2 interpreter | `tokens.l`、`parser.y`、`ast.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_context.*`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
 | L3 builtins | `builtins.cpp`、`compress_builtin.*`、`compression.*`、`cookie.*`、`crypto_builtin.*`、`env_builtin.*`、`error.*`、`filetype.*`、`fs_extra.*`、`http.*`、`http1_parser.*`、`io.*`、`net.*`、`process_builtin.*`、`process_spawn.*`、`random_builtin.*`、`regex_builtin.*`、`result.*`、`time_builtin.*`、`websocket.*`、`worker_pool.*`、`tls.*`、`http2.*`、`ffi_types.*`、`ffi_value.*`、`ffi_marshal.*`、`ffi_callbacks.*`、`ffi_manifest.*`、`ffi.cpp`（可选）、`example_binding.*` |
 | L0 platform | `platform_posix.cpp`、`platform_win.cpp`、`dynamic_library.*`、`runtime_state.*` |
 | L4 CLI | `main.cpp` |
@@ -66,6 +66,7 @@ L0  platform          OS 原语（文件/时间/线程/进程/socket 抽象）
 
 - `repl.*`/`source_encoding.*` 暂时归入 L2，因为 lexer 的交互式读取直接依赖 REPL；后续可拆为独立的 input provider。
 - `std.set` / `deque` / `heap` 的值类型在 L1，`lib/std/*.skein` 别名包由 L2 的 package loader 加载。
+- `lib/std/internal/container_adapter.skein` 是私有嵌入源，只由 `std_namespace.cpp` 解析，不进入公开 package 列表。
 - `std.regex` 依赖 PCRE2、`std.compress` 依赖 zlib/brotli、`std.net` 依赖 libuv、`std.tls` 依赖 OpenSSL、`std.http2` 依赖 nghttp2、`std.ffi` 依赖 libffi：都属于 L3 可选模块。
 
 ## 5. 关键接口

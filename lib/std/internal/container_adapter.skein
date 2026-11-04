@@ -1,0 +1,85 @@
+package container_adapter {
+  import std;
+
+  func _list_end(values) {
+    if (kind_of(values) != "list") {
+      fail("std.list.slice expects a list");
+    }
+    return len(values);
+  }
+
+  export func adapter_list_slice(values, start, end = _list_end(values)) {
+    return std.raw.list.slice(values, start, end);
+  }
+
+  export func adapter_list_sort(values, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.sort(values);
+    }
+    return std.raw.list.sort(values, cmp);
+  }
+
+  export func adapter_list_sort_by(values, key, options = null) {
+    if (options == null) {
+      return std.raw.list.sort_by(values, key);
+    }
+    return std.raw.list.sort_by(values, key, options);
+  }
+
+  export func adapter_list_is_sorted(values, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.is_sorted(values);
+    }
+    return std.raw.list.is_sorted(values, cmp);
+  }
+
+  export func adapter_list_top_k(values, k, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.top_k(values, k);
+    }
+    return std.raw.list.top_k(values, k, cmp);
+  }
+
+  export func adapter_list_binary_search(values, value, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.binary_search(values, value);
+    }
+    return std.raw.list.binary_search(values, value, cmp);
+  }
+
+  func _reduce_missing() {
+    return null;
+  }
+
+  export func adapter_list_reduce(values, fn, initial = _reduce_missing) {
+    if (initial == _reduce_missing) {
+      return std.raw.list.reduce(values, fn);
+    }
+    return std.raw.list.reduce(values, fn, initial);
+  }
+
+  export func adapter_dict_get(mapping, key, fallback = null) {
+    return std.raw.dict.get(mapping, key, fallback);
+  }
+
+  export func adapter_lru_get(mapping, key, fallback = null) {
+    if (fallback == null) {
+      return std.raw.lru.get(mapping, key);
+    }
+    return std.raw.lru.get(mapping, key, fallback);
+  }
+
+  export func adapter_lru_peek(mapping, key, fallback = null) {
+    if (fallback == null) {
+      return std.raw.lru.peek(mapping, key);
+    }
+    return std.raw.lru.peek(mapping, key, fallback);
+  }
+
+  export func adapter_bytes_slice(values, start, count = null) {
+    if (count == null) {
+      return std.raw.bytes.slice(values, start);
+    }
+    return std.raw.bytes.slice(values, start, count);
+  }
+}

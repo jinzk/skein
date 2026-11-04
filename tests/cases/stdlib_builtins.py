@@ -1510,6 +1510,23 @@ def run_cases():
                     "= function", "= function"],
     )
     check(
+        "std container adapter bindings",
+        "import std;\n"
+        "kind_of(std.list.slice)\n"
+        "kind_of(std.list.sort)\n"
+        "kind_of(std.list.sort_by)\n"
+        "kind_of(std.list.is_sorted)\n"
+        "kind_of(std.list.top_k)\n"
+        "kind_of(std.list.binary_search)\n"
+        "kind_of(std.list.reduce)\n"
+        "kind_of(std.dict.get)\n"
+        "kind_of(std.lru.get)\n"
+        "kind_of(std.lru.peek)\n"
+        "kind_of(std.bytes.slice)\n"
+        "kind_of(std.raw.list.slice)\n",
+        stdout_all=["= function"] * 11 + ["= builtin"],
+    )
+    check(
         "std list slice clamps",
         "import std;\nstd.list.slice([1, 2], 1, 10)\n",
         stdout="= [2]",

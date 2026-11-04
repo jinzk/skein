@@ -180,6 +180,7 @@ add_library(skein_interpreter STATIC
   eval_context.cpp
   gc.cpp
   package.cpp
+  std_namespace.cpp
   pattern.cpp
   scopestack.cpp
   structeval.cpp
@@ -286,6 +287,38 @@ foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)
 endforeach()
 add_custom_target(skein_embedded_sources DEPENDS ${SKEIN_EMBEDDED_OUTPUTS})
 add_dependencies(skein_interpreter skein_embedded_sources)
+
+# Private embedded sources are implementation details (not public packages),
+# so they are intentionally excluded from check_docs_sync's package list.
+set(SKEIN_PRIVATE_EMBEDDED_SOURCES
+  internal/container_adapter.skein:kStdContainerAdapterSource:std_container_adapter_source.inc
+)
+set(SKEIN_PRIVATE_EMBEDDED_OUTPUTS)
+foreach(entry IN LISTS SKEIN_PRIVATE_EMBEDDED_SOURCES)
+  string(REPLACE ":" ";" parts "${entry}")
+  list(GET parts 0 source_name)
+  list(GET parts 1 symbol)
+  list(GET parts 2 output_name)
+  set(source_path ${CMAKE_CURRENT_SOURCE_DIR}/lib/std/${source_name})
+  set(output_path ${SKEIN_EMBEDDED_DIR}/${output_name})
+  add_custom_command(
+    OUTPUT ${output_path}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SKEIN_EMBEDDED_DIR}
+    COMMAND ${CMAKE_COMMAND}
+      -DINPUT=${source_path}
+      -DOUTPUT=${output_path}
+      -DSYMBOL=${symbol}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
+    DEPENDS
+      ${source_path}
+      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_source.cmake
+    VERBATIM
+  )
+  list(APPEND SKEIN_PRIVATE_EMBEDDED_OUTPUTS ${output_path})
+endforeach()
+add_custom_target(skein_private_embedded_sources
+  DEPENDS ${SKEIN_PRIVATE_EMBEDDED_OUTPUTS})
+add_dependencies(skein_interpreter skein_private_embedded_sources)
 
 option(SKEIN_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
 if(SKEIN_ENABLE_TLS)

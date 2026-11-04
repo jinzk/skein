@@ -42,6 +42,14 @@ cmake -S . -B build -G Ninja -DSKEIN_ENABLE_FFI=OFF
 ctest --test-dir build --output-on-failure
 ```
 
+容器基准与增长回归（不做绝对耗时断言，只检查 n 翻倍时是否出现超线性增长）：
+
+```bash
+python3 tools/bench_containers.py --bin ./build/skein --check
+```
+
+`--json` 输出 JSON，`--repeat` 控制每个规模的采样次数；该工具也注册为 CTest 的 `container_bench_test`。
+
 Windows / MinGW（64 位 MinGW-w64 GCC）：
 
 ```bat

@@ -330,6 +330,17 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE}
               ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_docs_sync.py
     )
+    add_test(
+      NAME container_bench_test
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_containers.py
+              --bin $<TARGET_FILE:${PROJECT_NAME}>
+              --check
+    )
+    set_tests_properties(container_bench_test PROPERTIES
+      TIMEOUT 180
+      RUN_SERIAL TRUE
+    )
   else()
     message(WARNING "Python3 not found; skein_tests will not be registered")
   endif()

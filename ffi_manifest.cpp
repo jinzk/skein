@@ -643,19 +643,23 @@ bool build_manifest(struct value_t *spec,
                     return false;
                 }
             }
-            bool variadic = false;
             if (dict_lookup(decl, "variadic", item) &&
-                as_bool(item, variadic) && variadic) {
-                error = "variadic functions are not supported by generic ffi";
+                !as_bool(item, fn.variadic)) {
+                error = "function " + name +
+                        " has an invalid variadic flag";
                 return false;
             }
             if (dict_lookup(decl, "calling_convention", item)) {
                 std::string convention;
-                if (!as_string(item, convention) || convention != "c") {
+                if (!as_string(item, convention) ||
+                    (convention != "c" && convention != "cdecl" &&
+                     convention != "stdcall" && convention != "fastcall" &&
+                     convention != "thiscall")) {
                     error = "function " + name +
                             " uses an unsupported calling convention";
                     return false;
                 }
+                fn.calling_convention = convention;
             }
 
             fn.result = scalar("void");
@@ -756,6 +760,15 @@ bool build_manifest(struct value_t *spec,
                 }
                 if (dict_lookup(decl, "type", item))
                     type_value = item;
+                bool read_only = false;
+                if ((dict_lookup(decl, "const", item) ||
+                     dict_lookup(decl, "readonly", item)) &&
+                    !as_bool(item, read_only)) {
+                    error = "variable " + name +
+                            " has an invalid const flag";
+                    return false;
+                }
+                variable.writable = !read_only;
             }
             if (!resolver.resolve_ref(type_value, variable.type, 0))
                 return false;

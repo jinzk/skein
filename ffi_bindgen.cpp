@@ -986,11 +986,14 @@ struct function_out {
     std::string name;
     ctype_ptr result;
     std::vector<ctype_ptr> args;
+    bool variadic = false;
+    std::string calling_convention;
 };
 
 struct variable_out {
     std::string name;
     ctype_ptr type;
+    bool is_const = false;
 };
 
 struct declarator {
@@ -1015,9 +1018,11 @@ struct spec {
     ctype_ptr base;
     bool is_typedef = false;
     bool is_static = false;
+    bool is_const = false;
     bool packed = false;
     bool layout_unsafe = false;
     std::string layout_name;
+    std::string calling_convention;
     bool unsupported_convention = false;
 };
 
@@ -1038,6 +1043,21 @@ public:
             try {
                 if (accept(";"))
                     continue;
+                if (extern_c_depth_ > 0 && is("}")) {
+                    advance();
+                    --extern_c_depth_;
+                    continue;
+                }
+                if (is("extern") && position_ + 1 < tokens_.size() &&
+                    tokens_[position_ + 1].kind == TOK_STRING) {
+                    if (tokens_[position_ + 1].text != "\"C\"")
+                        fail("only extern \"C\" is supported");
+                    advance();
+                    advance();
+                    if (accept("{"))
+                        ++extern_c_depth_;
+                    continue;
+                }
                 if (is("_Static_assert")) {
                     skip_declaration();
                     continue;
@@ -1571,9 +1591,19 @@ private:
                 advance();
                 continue;
             }
+            if (text == "__thread" || text == "_Thread_local" ||
+                text == "thread_local") {
+                fail("thread-local variables are not supported");
+            }
+            if (text == "const" || text == "__const" ||
+                text == "__const__") {
+                s.is_const = true;
+                advance();
+                continue;
+            }
             if (text == "extern" || text == "register" ||
                 text == "auto" || text == "inline" || text == "__inline" ||
-                text == "__inline__" || text == "const" ||
+                text == "__inline__" ||
                 text == "volatile" || text == "restrict" ||
                 text == "__restrict" || text == "__restrict__" ||
                 text == "_Nullable" || text == "__nullable" ||
@@ -1590,7 +1620,15 @@ private:
                 continue;
             }
             if (is_calling_convention(text)) {
-                s.unsupported_convention = true;
+                if (text == "__stdcall" || text == "WINAPI" ||
+                    text == "CALLBACK" || text == "APIENTRY")
+                    s.calling_convention = "stdcall";
+                else if (text == "__fastcall")
+                    s.calling_convention = "fastcall";
+                else if (text == "__cdecl" || text == "__attribute_cdecl")
+                    s.calling_convention = "c";
+                else
+                    s.unsupported_convention = true;
                 advance();
                 continue;
             }
@@ -1647,6 +1685,10 @@ private:
                    is("__restrict") || is("__restrict__"))
                 advance();
         }
+
+        if (is("(") && position_ + 1 < tokens_.size() &&
+            is_calling_convention(tokens_[position_ + 1].text))
+            fail("calling conventions on callbacks are not supported");
 
         if (is("(") && is("*", 1)) {
             expect("(");
@@ -1832,8 +1874,6 @@ private:
                 fail("layout-changing attribute '" + d.layout_name +
                      "' is not supported", true);
             if (d.function) {
-                if (d.variadic)
-                    fail("variadic functions are not supported");
                 if (s.unsupported_convention)
                     fail("unsupported calling convention");
                 if (!s.is_static) {
@@ -1841,12 +1881,15 @@ private:
                     function.name = d.name;
                     function.result = apply_pointers(s.base, d.pointers);
                     function.args = d.params;
+                    function.variadic = d.variadic;
+                    function.calling_convention = s.calling_convention;
                     functions_.push_back(std::move(function));
                 }
             } else if (!s.is_static) {
                 variable_out variable;
                 variable.name = d.name;
                 variable.type = apply_type(s.base, d);
+                variable.is_const = s.is_const && d.pointers == 0;
                 variables_.push_back(std::move(variable));
             }
             if (!accept(","))
@@ -1975,6 +2018,7 @@ private:
     bool fatal_ = false;
     bool tolerate_errors_ = false;
     bool declaration_exported_ = true;
+    int extern_c_depth_ = 0;
 
 public:
     const std::vector<std::string> &warnings() const { return warnings_; }
@@ -2162,7 +2206,14 @@ std::string parser::render(const options &o, const std::string &source_hash) {
                 out << ", ";
             out << render_type(function.args[j]);
         }
-        out << "]}";
+        out << "]";
+        if (function.variadic)
+            out << ",\"variadic\":true";
+        if (!function.calling_convention.empty() &&
+            function.calling_convention != "c")
+            out << ",\"calling_convention\":"
+                << json_string(function.calling_convention);
+        out << "}";
         if (i + 1 < functions_.size())
             out << ",";
     }
@@ -2173,8 +2224,12 @@ std::string parser::render(const options &o, const std::string &source_hash) {
     out << ",\n  \"variables\": {";
     for (size_t i = 0; i < variables_.size(); ++i) {
         const variable_out &variable = variables_[i];
-        out << "\n    " << json_string(variable.name) << ": "
-            << render_type(variable.type);
+        out << "\n    " << json_string(variable.name) << ": ";
+        if (variable.is_const)
+            out << "{\"type\":" << render_type(variable.type)
+                << ",\"const\":true}";
+        else
+            out << render_type(variable.type);
         if (i + 1 < variables_.size())
             out << ",";
     }

@@ -1469,7 +1469,10 @@ std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
   （`await` / `std.task.wait` / `sleep`）时执行，C 侧立即返回默认值；
 - 跨线程回调必须返回 `void`；需要返回值的回调必须在同步 `ffi.call` 内执行；
 - 回调失败不会跨 C ABI 抛异常，错误在 `ffi.call` 返回后统一报告；
-- C 侧保存函数指针并稍后调用属于未定义行为，需要静态 C++ 绑定管理生命周期。
+- C 侧保存函数指针时，用 `std.ffi.retain(lib, cb)` 把回调挂到库的生命周期，
+  之后再释放脚本变量也仍然安全；
+- C 调用后可以用 `std.ffi.errno()` / `std.ffi.set_errno(v)` 读写当前线程的 errno；
+  建议在同一个函数或表达式中紧随 C 调用读取，顶层语句边界可能被解释器内部 I/O 改变。
 
 需要从其他线程执行 C 调用并等待回调结果时，使用 `std.ffi.call_async`：
 
@@ -1508,6 +1511,58 @@ std.ffi.call_address(fn, "i32", ["i32", "i32"], [9, 4]);
 - 4 参数形式显式提供返回类型、参数类型列表和参数值列表；
 - 空指针会报错，不会尝试调用。
 
+`ffi.symbol(lib, name)` 可以直接解析任意导出符号，配合 `ffi.call_address`
+或 `ffi.cast` 使用：
+
+```skein
+let sym = std.ffi.symbol(lib, "strlen");
+std.ffi.call_address(sym, "usize", ["cstring"], ["hello"]);
+```
+
+`ffi.offsetof` 现在也接受 struct 值/指针；`ffi.address_of` 接受 pointer 并返回
+同一地址的共享视图。
+
+变参函数使用 `ffi.call_variadic`：
+
+```text
+import std;
+
+let lib = std.ffi.open("./libutil.so");
+
+// 显式形式：返回类型、完整参数类型、完整参数值、固定参数个数
+std.ffi.call_variadic(lib, "log_message", "i32",
+                      ["cstring", "i32", "f64"],
+                      ["value", 7, 2.5], 1);
+```
+
+manifest 声明 `"variadic": true` 后，也可以只传固定参数：
+
+```text
+std.ffi.call(lib, "log_message", ["value"]);
+std.ffi.call_variadic(lib, "log_message", ["value"],
+                      ["i32", "f64"], [7, 2.5]);
+```
+
+- 变参部分必须显式提供类型；调用者负责 C 默认提升（`float`→`f64`、
+  窄整数→`i32`）；
+- 普通 `ffi.call` / `lib.fn` 只能传固定参数，变参部分会报错提示使用
+  `ffi.call_variadic`。
+
+manifest 函数可以声明调用约定：
+
+```json
+"shim_i32": {
+  "result": "i32",
+  "args": ["i32"],
+  "calling_convention": "stdcall"
+}
+```
+
+- 支持 `"c"`/`"cdecl"`、`"stdcall"`、`"fastcall"`，平台/架构不支持时
+  manifest 加载或调用会报错；
+- x86_64/ARM64 上 stdcall/fastcall 与默认约定一致，会按默认 ABI 调用；
+- 回调目前固定使用默认 ABI，带调用约定的回调类型会被 bindgen 拒绝。
+
 FFI manifest（可选）：
 
 ```text
@@ -1520,7 +1575,10 @@ FFI manifest（可选）：
 //     "point_new": {"result": "pointer", "args": ["f64", "f64"],
 //                   "returns_owned": {"free": "point_free"}}
 //   },
-//   "variables": {"POINT_COUNT": {"type": "i32"}},
+//   "variables": {
+//     "POINT_COUNT": {"type": "i32"},
+//     "POINT_VERSION": {"type": "i32", "const": true}
+//   },
 //   "constants": {"POINT_MAX": 16}
 // }
 
@@ -1540,6 +1598,7 @@ std.ffi.set_variable(lib, "POINT_COUNT", 4);
 - manifest 是纯数据，JSON 文件和脚本 dict 共用同一套校验与类型模型；
 - 支持 struct / pointer / array / opaque / callback、函数签名、全局变量和常量；
 - 全局变量通过 `ffi.variable` / `ffi.set_variable` 或 `lib.VAR` 读写；
+  `"const": true` 的变量拒绝写入；
   `--check-ffi` 会同时校验函数、变量和 `returns_owned` 的 free 符号；
 - `returns_owned` / `consumes` / `retains` 由 manifest 声明所有权，脚本层不出现 `free`；
   `consumes` 对 `ffi.alloc`/`returns_owned` 的内存会真正释放运行时所有权，
@@ -1580,8 +1639,9 @@ FFI 支持范围：
 - 只支持 **C ABI 边界**：C 编译的库，或 C++ 中 `extern "C"` 导出的函数；
 - 不支持 C++ ABI：类、模板、异常、RTTI、引用、`std::` 类型、重载；
 - 即使合法 C，下列也拒绝：packed/bitfield、union、柔性数组、匿名
-  struct/union、变参函数、`long double`、`_Complex`、`__int128`、
-  非 cdecl 调用约定，以及 `aligned` / `vector_size` / `mode` 等影响布局的属性；
+  struct/union、`long double`、`_Complex`、`__int128`、平台不支持的调用约定，
+  以及 `aligned` / `vector_size` / `mode` 等影响布局的属性；
+  变参函数通过 `ffi.call_variadic` 显式传入变参类型；
 - `--ffi-gen` 遇到 C++ 头文件或影响布局的属性时直接失败，避免生成错误 manifest。
 
 声明式 FFI 绑定（`extern lib`）：
@@ -1667,6 +1727,11 @@ skein --ffi-gen \
   不引入 libclang；
 - 支持 struct、typedef、指针、数组、函数声明、函数指针 typedef、enum、
   `extern` 全局变量和对象式宏常量；`static` 函数/变量视为内部符号并跳过；
+- 支持无条件 `extern "C" { ... }` 块；`const` 全局变量标记为只读；
+  `_Thread_local` / `__thread` 变量直接拒绝；
+- `__stdcall` / `WINAPI` / `CALLBACK` / `APIENTRY` 生成
+  `"calling_convention": "stdcall"`，`__fastcall` 生成 `"fastcall"`；
+  `__vectorcall` 和带调用约定的回调类型会被拒绝；
 - 只导出 `--header` 指定头文件里的符号，但会解析被包含头文件里的
   typedef/struct/enum，用于解析跨头文件类型；依赖头里的不支持构造只记 warning；
   `--no-include-types` 可以关闭依赖头解析；
@@ -1676,7 +1741,7 @@ skein --ffi-gen \
   `-m32` 和 sysroot，而不是假设生成机就是目标机；
 - `char*` 映射为 `cstring`，`unsigned char*` / `uint8_t*` 映射为 `bytes`；
   函数参数里的定长数组会按 C 规则退化为指针；
-- packed、bitfield、变参、柔性数组、匿名 struct/union、影响布局的属性、
+- packed、bitfield、柔性数组、匿名 struct/union、影响布局的属性、
   未知类型默认直接失败；`--tolerate-errors` 可显式降级为警告并继续；
 - `--symbols` 过滤函数、变量和常量，并裁剪未被引用到的类型（`*`/`?` 通配符）；
 - `--check` 用于 CI 校验生成的 manifest 是否过期；
@@ -2203,6 +2268,7 @@ std.ffi.close
 std.ffi.call
 std.ffi.call_async
 std.ffi.call_address
+std.ffi.call_variadic
 std.ffi.buffer
 std.ffi.buffer_len
 std.ffi.buffer_bytes
@@ -2227,8 +2293,12 @@ std.ffi.address_of
 std.ffi.callback
 std.ffi.manifest
 std.ffi.constant
+std.ffi.symbol
 std.ffi.variable
 std.ffi.set_variable
+std.ffi.retain
+std.ffi.errno
+std.ffi.set_errno
 std.ffi.function
 std.ffi.declare
 std.ffi.type

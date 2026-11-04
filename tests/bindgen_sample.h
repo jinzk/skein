@@ -34,6 +34,8 @@ typedef struct {
 typedef int (*SampleCompare)(const void *left, const void *right);
 
 int sample_add(int left, int right);
+int sample_varargs(int count, ...);
+int __stdcall sample_stdcall(int value);
 double sample_len(SamplePoint point);
 SamplePoint sample_make(double x, double y);
 void sample_sort(void *base, size_t count, SampleCompare cmp);
@@ -41,6 +43,7 @@ const char *sample_name(void);
 int32_t sample_flags(const SampleRecord *record);
 
 extern int sample_global;
+extern const int sample_const;
 static int sample_internal;
 
 #endif

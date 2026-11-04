@@ -168,10 +168,11 @@ def run_cases():
             "std.ffi.to_dict(p)\n"
             "std.ffi.sizeof(Point)\n"
             "std.ffi.alignof(Point)\n"
-            'std.ffi.offsetof(Point, "y")\n',
+            'std.ffi.offsetof(Point, "y")\n'
+            'std.ffi.offsetof(p, "y")\n',
             stdout_all=[
                 "= 1.5", "= 2.5", "= 4.0", "= {x: 4.0, y: 2.5}",
-                "= 16", "= 8", "= 8",
+                "= 16", "= 8", "= 8", "= 8",
             ],
         )
         check(
@@ -366,6 +367,76 @@ def run_cases():
             'std.ffi.call_address(fn, "i32", ["i32", "i32"], [9, 4])\n'
             "std.ffi.close(lib);\n",
             stdout_all=["= 5", "= 5"],
+        )
+        check(
+            "std ffi errno",
+            "import std;\n"
+            "func probe() {\n"
+            "  std.ffi.set_errno(42);\n"
+            "  return std.ffi.errno();\n"
+            "}\n"
+            "probe()\n",
+            stdout="= 42",
+        )
+        check(
+            "std ffi symbol",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let sym = std.ffi.symbol(lib, "shim_i32");\n'
+            'std.ffi.call_address(sym, "i32", ["i32"], [42])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 42",
+        )
+        check(
+            "std ffi call variadic",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call_variadic(lib, "shim_sum_varargs", "i32", '
+            '["i32", "i32", "i32"], [2, 5, 7], 1)\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 12",
+        )
+        check(
+            "std ffi manifest variadic",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "functions": {"shim_sum_varargs": '
+            '{"result": "i32", "args": ["i32"], "variadic": true}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'std.ffi.call(lib, "shim_sum_varargs", [0])\n'
+            'std.ffi.call_variadic(lib, "shim_sum_varargs", [2], '
+            '["i32", "i32"], [5, 7])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 0", "= 12"],
+        )
+        check(
+            "std ffi manifest variadic needs typed call",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "functions": {"shim_sum_varargs": '
+            '{"result": "i32", "args": ["i32"], "variadic": true}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'std.ffi.call(lib, "shim_sum_varargs", [2, 5, 7])\n',
+            stderr="call_variadic",
+        )
+        check(
+            "std ffi calling convention",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "functions": {"shim_i32": '
+            '{"result": "i32", "args": ["i32"], '
+            '"calling_convention": "stdcall"}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'std.ffi.call(lib, "shim_i32", [42])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 42",
+        )
+        check(
+            "std ffi rejects unknown calling convention",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "functions": {"f": '
+            '{"result": "i32", "calling_convention": "vectorcall"}}})\n',
+            stderr="unsupported calling convention",
         )
         check(
             "std ffi callback basic",
@@ -620,6 +691,18 @@ def run_cases():
             stdout_all=["= 7", "= 7", "= 11", "= 13"],
         )
         check(
+            "std ffi read-only variable",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "variables": '
+            '{"shim_const_global": {"type": "i32", "const": true}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'std.ffi.variable(lib, "shim_const_global")\n'
+            "lib.shim_const_global = 1;\n",
+            stdout="= 42",
+            stderr="is read-only",
+        )
+        check(
             "std ffi manifest callbacks and ownership",
             "import std;\n"
             f"let path = {shim};\n"
@@ -827,6 +910,20 @@ def run_cases():
             'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
             '[Cmp, "i32", "i32"], [outer, 9, 4])\n',
             stdout="= 5",
+        )
+        check(
+            "std ffi retain callback",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return a + b; });\n"
+            'std.ffi.call(lib, "shim_save_cmp", "void", [Cmp], [cb]);\n'
+            "std.ffi.retain(lib, cb);\n"
+            "cb = null;\n"
+            'std.ffi.call(lib, "shim_call_saved", "i32", '
+            '["i32", "i32"], [3, 4])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 7",
         )
         check(
             "std ffi callback reentrant call",
@@ -1043,6 +1140,9 @@ def run_cases():
         assert generated["types"]["SamplePoint"]["kind"] == "struct"
         assert generated["types"]["SampleCompare"]["kind"] == "callback"
         assert generated["functions"]["sample_add"]["result"] == "i32"
+        assert generated["functions"]["sample_varargs"]["variadic"] is True
+        assert (generated["functions"]["sample_stdcall"]
+                ["calling_convention"] == "stdcall")
         assert (generated["functions"]["sample_sort"]["args"][2]
                 == "SampleCompare")
         assert generated["constants"]["SAMPLE_MAX"] == 16
@@ -1054,7 +1154,10 @@ def run_cases():
         assert generated["constants"]["SAMPLE_CAST"] == 255
         assert generated["constants"]["SAMPLE_BINARY"] == 5
         assert generated["constants"]["SAMPLE_FLOAT_SUFFIX"] == 2.5
-        assert generated["variables"] == {"sample_global": "i32"}
+        assert generated["variables"] == {
+            "sample_global": "i32",
+            "sample_const": {"type": "i32", "const": True},
+        }
         assert generated["constants"]["SAMPLE_KIND_A"] == 4
         assert generated["constants"]["SAMPLE_KIND_B"] == 5
         assert generated["constants"]["SAMPLE_KIND_C"] == 6
@@ -1116,11 +1219,11 @@ def run_cases():
             text=True, capture_output=True, timeout=60)
         assert strict.returncode == 1, (strict.stdout, strict.stderr)
         for needle in (
-                "variadic functions are not supported",
                 "unsupported calling convention",
                 "long double is not supported",
                 "unknown type 'unknown_type'",
-                "unknown type '_Alignas'"):
+                "unknown type '_Alignas'",
+                "thread-local variables are not supported"):
             assert needle in strict.stderr, (needle, strict.stderr)
 
         tolerated = subprocess.run(
@@ -1178,6 +1281,20 @@ def run_cases():
         assert dep_isolated.returncode == 1, (dep_isolated.stdout,
                                               dep_isolated.stderr)
         assert "unknown type" in dep_isolated.stderr
+
+        extern_c_header = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "bindgen_extern_c.h"))
+        extern_c_output = os.path.join(bindgen_dir, "extern_c.ffi.json")
+        extern_c = subprocess.run(
+            [BIN, "--ffi-gen", "--header", extern_c_header,
+             "-o", extern_c_output],
+            text=True, capture_output=True, timeout=60)
+        assert extern_c.returncode == 0, (extern_c.stdout, extern_c.stderr)
+        with open(extern_c_output, encoding="utf-8") as handle:
+            generated_extern_c = _json.load(handle)
+        assert (generated_extern_c["functions"]["extern_c_add"]["args"]
+                == ["i32", "i32"])
 
         if has_ffi and FFI_SHIM:
             good_manifest = os.path.join(bindgen_dir, "shim_good.ffi.json")

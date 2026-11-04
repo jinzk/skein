@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
 #include <thread>
@@ -39,6 +40,7 @@ typedef void (*shim_notify_fn)(std::int32_t);
 
 extern "C" {
     SHIM_EXPORT std::int32_t shim_global = 7;
+    SHIM_EXPORT extern const std::int32_t shim_const_global = 42;
 
 SHIM_EXPORT std::int8_t shim_i8(std::int8_t value) {
     return value;
@@ -58,6 +60,16 @@ SHIM_EXPORT std::uint16_t shim_u16(std::uint16_t value) {
 
 SHIM_EXPORT std::int32_t shim_i32(std::int32_t value) {
     return value;
+}
+
+SHIM_EXPORT std::int32_t shim_sum_varargs(std::int32_t count, ...) {
+    va_list args;
+    va_start(args, count);
+    std::int32_t sum = 0;
+    for (std::int32_t i = 0; i < count; ++i)
+        sum += va_arg(args, int);
+    va_end(args);
+    return sum;
 }
 
 SHIM_EXPORT std::uint32_t shim_u32(std::uint32_t value) {

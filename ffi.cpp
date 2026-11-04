@@ -16,6 +16,8 @@
 #include <ffi.h>
 
 #include <atomic>
+#include <cerrno>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -763,12 +765,27 @@ static value_t *ffi_offsetof(const std::vector<value_t *> &args) {
     }
     std::string error;
     type_ptr type;
-    if (!ffi::resolve_type(args[0], type, error)) {
+    if (args[0] && args[0]->type == T_userdata) {
+        const native_type *meta = ((userdata_value_t *)args[0])->meta;
+        if (meta == &ffi::object_native_type ||
+            meta == &ffi::array_native_type) {
+            std::shared_ptr<ffi::object_handle> object;
+            if (!ffi::get_object(args[0], object))
+                return NULL;
+            type = object->type;
+        } else if (meta == &ffi::pointer_native_type) {
+            std::shared_ptr<ffi::pointer_handle> pointer;
+            if (!ffi::get_pointer(args[0], pointer))
+                return NULL;
+            type = pointer->pointee;
+        }
+    }
+    if (!type && !ffi::resolve_type(args[0], type, error)) {
         yyerror("ffi.offsetof: %s", error.c_str());
         return NULL;
     }
     if (!type || type->kind != kind_t::record) {
-        yyerror("ffi.offsetof expects a struct type");
+        yyerror("ffi.offsetof expects a struct type or value");
         return NULL;
     }
     if (args[1]->type != T_string) {
@@ -810,6 +827,21 @@ static value_t *ffi_address_of(const std::vector<value_t *> &args) {
             set_release_owner(value, object->release_owner);
         return value;
     }
+    if (meta == &ffi::pointer_native_type) {
+        std::shared_ptr<ffi::pointer_handle> pointer;
+        if (!ffi::get_pointer(args[0], pointer))
+            return NULL;
+        if (!pointer->address) {
+            yyerror("ffi.address_of: null pointer");
+            return NULL;
+        }
+        value_t *value = ffi::new_pointer_value(
+            pointer->pointee, pointer->address, pointer->owner,
+            pointer->keep);
+        if (pointer->release_owner)
+            set_release_owner(value, pointer->release_owner);
+        return value;
+    }
     if (meta == &ffi::buffer_native_type) {
         std::shared_ptr<ffi::buffer_handle> buffer;
         if (!ffi::get_buffer(args[0], buffer))
@@ -820,7 +852,7 @@ static value_t *ffi_address_of(const std::vector<value_t *> &args) {
             pointer, buffer->bytes.data(),
             std::static_pointer_cast<void>(buffer));
     }
-    yyerror("ffi.address_of expects a struct, array, or buffer");
+    yyerror("ffi.address_of expects a struct, array, pointer, or buffer");
     return NULL;
 }
 
@@ -921,6 +953,29 @@ static value_t *ffi_constant(const std::vector<value_t *> &args) {
     return dupval(it->second);
 }
 
+static value_t *ffi_symbol(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.symbol expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.symbol name must be a string");
+        return NULL;
+    }
+    std::string error;
+    const char *name = ((string_value_t *)args[1])->value;
+    void *symbol = library->library->symbol(name, error);
+    if (!symbol) {
+        yyerror("ffi.symbol: %s: %s", name, error.c_str());
+        return NULL;
+    }
+    return ffi::new_pointer_value(nullptr, (unsigned char *)symbol,
+                                  library->shared_from_this());
+}
+
 static value_t *ffi_variable(const std::vector<value_t *> &args) {
     if (args.size() != 2) {
         yyerror("std.ffi.variable expects 2 arguments");
@@ -961,6 +1016,44 @@ static value_t *ffi_set_variable(const std::vector<value_t *> &args) {
                                 ((string_value_t *)args[1])->value,
                                 args[2]))
         return NULL;
+    return newnull();
+}
+
+static value_t *ffi_retain(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.retain expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_userdata) {
+        yyerror("ffi.retain expects an ffi callback, pointer, or struct");
+        return NULL;
+    }
+    ffi::retain_value(library, args[1]);
+    return newnull();
+}
+
+static value_t *ffi_errno(const std::vector<value_t *> &args) {
+    if (!args.empty()) {
+        yyerror("std.ffi.errno expects no arguments");
+        return NULL;
+    }
+    return newintval((long long)errno);
+}
+
+static value_t *ffi_set_errno(const std::vector<value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_int) {
+        yyerror("std.ffi.set_errno expects an integer");
+        return NULL;
+    }
+    long long value = ((int_value_t *)args[0])->value;
+    if (value < INT_MIN || value > INT_MAX) {
+        yyerror("ffi.set_errno value is out of range");
+        return NULL;
+    }
+    errno = (int)value;
     return newnull();
 }
 
@@ -1096,11 +1189,54 @@ struct prepared_call {
     std::vector<void *> argv;
     std::vector<value_t *> values;
     const ffi::manifest_function *declared = nullptr;
+    std::size_t fixed_args = 0;
 };
+
+static bool resolve_abi(const std::string &name, ffi_abi &out,
+                        std::string &error) {
+    if (name.empty() || name == "c" || name == "cdecl") {
+        out = FFI_DEFAULT_ABI;
+        return true;
+    }
+#if defined(FFI_STDCALL)
+    if (name == "stdcall") {
+        out = FFI_STDCALL;
+        return true;
+    }
+#elif defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || \
+    defined(_M_ARM64)
+    if (name == "stdcall") {
+        out = FFI_DEFAULT_ABI;
+        return true;
+    }
+#endif
+#if defined(FFI_FASTCALL)
+    if (name == "fastcall") {
+        out = FFI_FASTCALL;
+        return true;
+    }
+#elif defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || \
+    defined(_M_ARM64)
+    if (name == "fastcall") {
+        out = FFI_DEFAULT_ABI;
+        return true;
+    }
+#endif
+#if defined(FFI_THISCALL)
+    if (name == "thiscall") {
+        out = FFI_THISCALL;
+        return true;
+    }
+#endif
+    error = "calling convention " + name +
+            " is not supported on this platform";
+    return false;
+}
 
 static bool prepare_call_interface(
     const type_ptr &return_type, const std::vector<type_ptr> &arg_types,
-    const std::vector<value_t *> &values, prepared_call &out,
+    const std::vector<value_t *> &values, bool variadic,
+    std::size_t fixed_args, ffi_abi abi, prepared_call &out,
     std::string &error) {
     if (return_type->kind == kind_t::bytes ||
         return_type->kind == kind_t::buffer) {
@@ -1117,9 +1253,14 @@ static bool prepare_call_interface(
         error = "too many arguments";
         return false;
     }
+    if (variadic && fixed_args > count) {
+        error = "fixed argument count exceeds the total argument count";
+        return false;
+    }
 
     out.return_type = return_type;
     out.values = values;
+    out.fixed_args = fixed_args;
     out.slots.resize(count);
     out.cif_types.reserve(count);
     out.argv.reserve(count);
@@ -1145,10 +1286,20 @@ static bool prepare_call_interface(
         error = return_type->name + " cannot be returned by value";
         return false;
     }
-    if (ffi_prep_cif(&out.cif, FFI_DEFAULT_ABI, (unsigned int)count,
-                     return_type->cif,
-                     out.cif_types.empty() ? nullptr
-                                           : out.cif_types.data()) != FFI_OK) {
+    if (variadic && count != fixed_args) {
+        if (ffi_prep_cif_var(&out.cif, abi, (unsigned int)fixed_args,
+                             (unsigned int)count, return_type->cif,
+                             out.cif_types.empty() ? nullptr
+                                                   : out.cif_types.data()) !=
+            FFI_OK) {
+            error = "cannot prepare variadic call interface";
+            return false;
+        }
+    } else if (ffi_prep_cif(&out.cif, abi, (unsigned int)count,
+                            return_type->cif,
+                            out.cif_types.empty()
+                                ? nullptr
+                                : out.cif_types.data()) != FFI_OK) {
         error = "cannot prepare call interface";
         return false;
     }
@@ -1159,10 +1310,15 @@ static bool prepare_call(
     const std::shared_ptr<ffi::library_handle> &library,
     const std::string &symbol_name, const type_ptr &return_type,
     const std::vector<type_ptr> &arg_types,
-    const std::vector<value_t *> &values, prepared_call &out,
-    std::string &error) {
+    const std::vector<value_t *> &values, bool variadic,
+    std::size_t fixed_args, const std::string &calling_convention,
+    prepared_call &out, std::string &error) {
     out.library = library;
-    if (!prepare_call_interface(return_type, arg_types, values, out, error))
+    ffi_abi abi = FFI_DEFAULT_ABI;
+    if (!resolve_abi(calling_convention, abi, error))
+        return false;
+    if (!prepare_call_interface(return_type, arg_types, values, variadic,
+                                fixed_args, abi, out, error))
         return false;
     out.symbol = library->library->symbol(symbol_name.c_str(), error);
     if (!out.symbol) {
@@ -1178,7 +1334,8 @@ static bool prepare_address_call(
     const std::vector<value_t *> &values, prepared_call &out,
     std::string &error) {
     out.symbol = address;
-    return prepare_call_interface(return_type, arg_types, values, out, error);
+    return prepare_call_interface(return_type, arg_types, values, false, 0,
+                                  FFI_DEFAULT_ABI, out, error);
 }
 
 struct owned_pointer : ffi::releasable {
@@ -1323,8 +1480,12 @@ static value_t *perform_call(
     const ffi::manifest_function *declared) {
     prepared_call call;
     std::string error;
+    const bool variadic = declared && declared->variadic;
+    const std::size_t fixed_args = declared ? declared->args.size() : 0;
+    const std::string convention =
+        declared ? declared->calling_convention : std::string("c");
     if (!prepare_call(library, symbol_name, return_type, arg_types, values,
-                      call, error)) {
+                      variadic, fixed_args, convention, call, error)) {
         yyerror("ffi.call: %s", error.c_str());
         return NULL;
     }
@@ -1423,6 +1584,11 @@ static value_t *make_bound_function(
                 !bound->library->library ||
                 !bound->library->library->valid()) {
                 yyerror("ffi library is closed");
+                return NULL;
+            }
+            if (bound->declared->variadic &&
+                args.size() != bound->declared->args.size()) {
+                yyerror("variadic function requires std.ffi.call_variadic");
                 return NULL;
             }
             return perform_call(bound->library, bound->declared->symbol,
@@ -1524,6 +1690,11 @@ static bool resolve_call(
         return_type = function->second.result;
         arg_types = function->second.args;
         values = ((list_value_t *)args[2])->payload->items;
+        if (function->second.variadic &&
+            values.size() != arg_types.size()) {
+            error = "variadic function requires std.ffi.call_variadic";
+            return false;
+        }
         return true;
     }
 
@@ -1590,8 +1761,12 @@ static value_t *ffi_call_async(const std::vector<value_t *> &args) {
     }
 
     prepared_call call;
-    if (!prepare_call(library, symbol, return_type, arg_types, values, call,
-                      error)) {
+    const bool variadic = declared && declared->variadic;
+    const std::size_t fixed_args = declared ? declared->args.size() : 0;
+    const std::string convention =
+        declared ? declared->calling_convention : std::string("c");
+    if (!prepare_call(library, symbol, return_type, arg_types, values,
+                      variadic, fixed_args, convention, call, error)) {
         yyerror("ffi.call_async: %s", error.c_str());
         return NULL;
     }
@@ -1653,6 +1828,120 @@ static bool resolve_address_call(
     return true;
 }
 
+static value_t *ffi_call_variadic(const std::vector<value_t *> &args) {
+    if (args.size() != 5 && args.size() != 6) {
+        yyerror("ffi.call_variadic expects 5 or 6 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.call_variadic symbol must be a string");
+        return NULL;
+    }
+    std::string symbol = ((string_value_t *)args[1])->value;
+    type_ptr return_type;
+    std::vector<type_ptr> arg_types;
+    std::vector<value_t *> values;
+    std::size_t fixed = 0;
+    const ffi::manifest_function *declared = nullptr;
+    std::string error;
+
+    if (args.size() == 5) {
+        if (!library->spec) {
+            yyerror("ffi.call_variadic: library has no manifest");
+            return NULL;
+        }
+        auto function = library->spec->functions.find(symbol);
+        if (function == library->spec->functions.end()) {
+            yyerror("ffi.call_variadic: function %s is not declared",
+                    symbol.c_str());
+            return NULL;
+        }
+        if (!function->second.variadic) {
+            yyerror("ffi.call_variadic: %s is not variadic", symbol.c_str());
+            return NULL;
+        }
+        if (args[2]->type != T_list || args[3]->type != T_list ||
+            args[4]->type != T_list) {
+            yyerror("ffi.call_variadic expects lists");
+            return NULL;
+        }
+        declared = &function->second;
+        return_type = declared->result;
+        arg_types = declared->args;
+        fixed = arg_types.size();
+        values = ((list_value_t *)args[2])->payload->items;
+        if (values.size() != fixed) {
+            yyerror("ffi.call_variadic: fixed argument count mismatch");
+            return NULL;
+        }
+        list_value_t *var_types = (list_value_t *)args[3];
+        list_value_t *var_values = (list_value_t *)args[4];
+        if (var_types->payload->items.size() !=
+            var_values->payload->items.size()) {
+            yyerror("ffi.call_variadic: variadic type/value count mismatch");
+            return NULL;
+        }
+        for (value_t *item : var_types->payload->items) {
+            type_ptr type;
+            if (!ffi::resolve_type(item, type, error)) {
+                yyerror("ffi.call_variadic: %s", error.c_str());
+                return NULL;
+            }
+            arg_types.push_back(std::move(type));
+        }
+        for (value_t *item : var_values->payload->items)
+            values.push_back(item);
+    } else {
+        if (!ffi::resolve_type(args[2], return_type, error)) {
+            yyerror("ffi.call_variadic: %s", error.c_str());
+            return NULL;
+        }
+        if (args[3]->type != T_list || args[4]->type != T_list) {
+            yyerror("ffi.call_variadic expects lists");
+            return NULL;
+        }
+        if (args[5]->type != T_int) {
+            yyerror("ffi.call_variadic fixed count must be an integer");
+            return NULL;
+        }
+        long long fixed_count = ((int_value_t *)args[5])->value;
+        if (fixed_count < 0) {
+            yyerror("ffi.call_variadic fixed count is negative");
+            return NULL;
+        }
+        fixed = (std::size_t)fixed_count;
+        list_value_t *types = (list_value_t *)args[3];
+        list_value_t *value_list = (list_value_t *)args[4];
+        if (types->payload->items.size() != value_list->payload->items.size()) {
+            yyerror("ffi.call_variadic type/value count mismatch");
+            return NULL;
+        }
+        for (value_t *item : types->payload->items) {
+            type_ptr type;
+            if (!ffi::resolve_type(item, type, error)) {
+                yyerror("ffi.call_variadic: %s", error.c_str());
+                return NULL;
+            }
+            arg_types.push_back(std::move(type));
+        }
+        values = value_list->payload->items;
+    }
+
+    prepared_call call;
+    const std::string convention =
+        declared ? declared->calling_convention : std::string("c");
+    if (!prepare_call(library, symbol, return_type, arg_types, values, true,
+                      fixed, convention, call, error)) {
+        yyerror("ffi.call_variadic: %s", error.c_str());
+        return NULL;
+    }
+    call.declared = declared;
+    return invoke_sync(call);
+}
+
 static value_t *ffi_call_address(const std::vector<value_t *> &args) {
     std::shared_ptr<ffi::pointer_handle> pointer;
     type_ptr return_type;
@@ -1692,6 +1981,8 @@ struct value_t *call_ffi_builtin(
             return ffi_call_async(args);
         case B_ffi_call_address:
             return ffi_call_address(args);
+        case B_ffi_call_variadic:
+            return ffi_call_variadic(args);
         case B_ffi_buffer:
             return ffi_buffer_new(args);
         case B_ffi_buffer_len:
@@ -1740,10 +2031,18 @@ struct value_t *call_ffi_builtin(
             return ffi_manifest_builtin(args);
         case B_ffi_constant:
             return ffi_constant(args);
+        case B_ffi_symbol:
+            return ffi_symbol(args);
         case B_ffi_variable:
             return ffi_variable(args);
         case B_ffi_set_variable:
             return ffi_set_variable(args);
+        case B_ffi_retain:
+            return ffi_retain(args);
+        case B_ffi_errno:
+            return ffi_errno(args);
+        case B_ffi_set_errno:
+            return ffi_set_errno(args);
         case B_ffi_type_lookup:
             return ffi_type_lookup(args);
         case B_ffi_function:
@@ -1808,6 +2107,10 @@ bool ffi::library_set_field(void *data, const char *name,
         return false;
     }
     const ffi::manifest_variable &decl = variable->second;
+    if (!decl.writable) {
+        yyerror("ffi variable %s is read-only", key.c_str());
+        return false;
+    }
     std::string error;
     void *symbol = library->library->symbol(decl.symbol.c_str(), error);
     if (!symbol) {

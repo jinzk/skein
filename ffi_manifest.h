@@ -19,6 +19,8 @@ struct manifest_function {
     std::vector<std::size_t> consumes;
     std::vector<std::size_t> retains;
     bool returns_owned = false;
+    bool variadic = false;
+    std::string calling_convention = "c";
     std::string free_function;
 };
 
@@ -26,6 +28,7 @@ struct manifest_variable {
     std::string name;
     std::string symbol;
     type_ptr type;
+    bool writable = true;
 };
 
 struct manifest {

@@ -7,6 +7,16 @@
 namespace ffi {
 namespace {
 
+void library_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *)> &fn) {
+    const library_handle *library = (const library_handle *)data;
+    if (!library)
+        return;
+    for (const struct value_t *v : library->retained.values)
+        fn(v);
+}
+
 std::string describe_library(const void *data) {
     const library_handle *handle = (const library_handle *)data;
     if (!handle || handle->closed || !handle->library ||
@@ -128,7 +138,9 @@ struct value_t *type_get_field(void *data, const char *name) {
 
 } // namespace
 
-const native_type library_native_type = {"ffi_library", describe_library};
+const native_type library_native_type = {
+    "ffi_library", describe_library, nullptr, nullptr, nullptr,
+    library_for_each_child};
 
 const native_type buffer_native_type = {"ffi_buffer", describe_buffer};
 
@@ -147,9 +159,11 @@ const native_type array_native_type = {
     "ffi_array", describe_object, nullptr, nullptr, nullptr,
     object_for_each_child};
 
-struct value_t *new_library_value(std::shared_ptr<dynamic_library> library) {
+struct value_t *new_library_value(std::shared_ptr<dynamic_library> library,
+                                  std::shared_ptr<const manifest> spec) {
     std::shared_ptr<library_handle> handle = std::make_shared<library_handle>();
     handle->library = std::move(library);
+    handle->spec = std::move(spec);
     return newuserdataval(&library_native_type, handle);
 }
 
@@ -253,6 +267,10 @@ bool get_pointer(struct value_t *value, std::shared_ptr<pointer_handle> &out) {
         yyerror("invalid ffi pointer");
         return false;
     }
+    if (out->consumed) {
+        yyerror("ffi pointer was consumed by C");
+        return false;
+    }
     return true;
 }
 
@@ -270,6 +288,10 @@ bool get_object(struct value_t *value, std::shared_ptr<object_handle> &out) {
         ((userdata_value_t *)value)->data);
     if (!out || !out->type || !out->address) {
         yyerror("invalid ffi struct data");
+        return false;
+    }
+    if (out->consumed) {
+        yyerror("ffi value was consumed by C");
         return false;
     }
     return true;
@@ -305,6 +327,31 @@ bool resolve_type(struct value_t *value, type_ptr &out, std::string &error) {
     error = "expected an ffi type or type name, got " +
             std::string(typename_of(value));
     return false;
+}
+
+void mark_consumed(struct value_t *value) {
+    if (!value || value->type != T_userdata)
+        return;
+    const userdata_value_t *userdata = (const userdata_value_t *)value;
+    if (userdata->meta == &pointer_native_type) {
+        std::static_pointer_cast<pointer_handle>(userdata->data)->consumed =
+            true;
+    } else if (userdata->meta == &object_native_type ||
+               userdata->meta == &array_native_type) {
+        std::static_pointer_cast<object_handle>(userdata->data)->consumed =
+            true;
+    }
+}
+
+void retain_value(const std::shared_ptr<library_handle> &library,
+                  struct value_t *value) {
+    if (!library || !value || value->type != T_userdata)
+        return;
+    userdata_value_t *userdata = (userdata_value_t *)value;
+    if (!userdata->data)
+        return;
+    library->retained.owners.push_back(userdata->data);
+    library->retained.values.push_back(dupval(value));
 }
 
 } // namespace ffi

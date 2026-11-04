@@ -1455,6 +1455,37 @@ std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
 - 回调失败不会跨 C ABI 抛异常，错误在 `ffi.call` 返回后统一报告；
 - C 侧保存函数指针并稍后调用属于未定义行为，需要静态 C++ 绑定管理生命周期。
 
+FFI manifest（可选）：
+
+```text
+// shapelib.ffi.json
+// {
+//   "ffi": 1,
+//   "types": {"Point": {"kind": "struct", "fields": {"x": "f64", "y": "f64"}}},
+//   "functions": {
+//     "point_len": {"result": "f64", "args": ["Point"]},
+//     "point_new": {"result": "pointer", "args": ["f64", "f64"],
+//                   "returns_owned": {"free": "point_free"}}
+//   },
+//   "constants": {"POINT_MAX": 16}
+// }
+
+import std;
+
+let lib = std.ffi.open("./libshape.so", "./shapelib.ffi.json");
+let Point = std.ffi.type(lib, "Point");
+let p = std.ffi.new(Point, {"x": 1.0, "y": 2.0});
+std.ffi.call(lib, "point_len", [p]);
+std.ffi.constant(lib, "POINT_MAX");
+```
+
+- manifest 是纯数据，JSON 文件和脚本 dict 共用同一套校验与类型模型；
+- 支持 struct / pointer / array / opaque / callback、函数签名和常量；
+- `returns_owned` / `consumes` / `retains` 由 manifest 声明所有权，脚本层不出现 `free`；
+- 加载时校验 ABI、布局、重复类型、递归 by-value 类型和参数索引；
+- packed / bitfield 直接拒绝，交给静态 C++ 绑定；
+- 显式传入 manifest，不做自动 sidecar 查找。
+
 模块：
 
 ```text
@@ -1981,6 +2012,9 @@ std.ffi.to_dict
 std.ffi.sizeof
 std.ffi.alignof
 std.ffi.callback
+std.ffi.manifest
+std.ffi.constant
+std.ffi.type
 
 std.bytes.len
 std.bytes.get

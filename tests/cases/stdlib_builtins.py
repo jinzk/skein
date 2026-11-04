@@ -432,6 +432,162 @@ def run_cases():
             "std.ffi.callback(Cmp, func(a, b) { yield 0; })\n",
             stderr="ffi callbacks must be synchronous functions",
         )
+        manifest_spec = (
+            "let spec = {\n"
+            '  "ffi": 1,\n'
+            '  "types": {\n'
+            '    "Point": {"kind": "struct", '
+            '"fields": {"x": "f64", "y": "f64"}},\n'
+            '    "Cmp": {"kind": "callback", "result": "i32", '
+            '"args": ["i32", "i32"]},\n'
+            '    "PointPtr": {"kind": "pointer", "to": "Point"}\n'
+            "  },\n"
+            '  "functions": {\n'
+            '    "shim_point_sum": {"result": "f64", "args": ["Point"]},\n'
+            '    "shim_point_make": {"result": "Point", '
+            '"args": ["f64", "f64"]},\n'
+            '    "shim_apply_cmp": {"result": "i32", '
+            '"args": ["Cmp", "i32", "i32"]},\n'
+            '    "shim_alloc_point": {"result": "PointPtr", '
+            '"returns_owned": {"free": "shim_free_point"}},\n'
+            '    "shim_free_count": {"result": "i32"},\n'
+            '    "shim_consume_point": {"result": "void", '
+            '"args": ["PointPtr"], "consumes": [0]},\n'
+            '    "shim_save_cmp": {"result": "void", "args": ["Cmp"], '
+            '"retains": [0]},\n'
+            '    "shim_call_saved": {"result": "i32", '
+            '"args": ["i32", "i32"]}\n'
+            "  },\n"
+            '  "constants": {"SHIM_MAX": 16}\n'
+            "};\n"
+        )
+        check(
+            "std ffi dynamic manifest",
+            "import std;\n"
+            f"let path = {shim};\n"
+            + manifest_spec
+            + "let lib = std.ffi.open(path, spec);\n"
+            'std.ffi.call(lib, "shim_point_sum", '
+            '[{"x": 1.5, "y": 2.5}])\n'
+            'std.ffi.call(lib, "shim_point_make", [3.0, 4.0]).y\n'
+            'std.ffi.constant(lib, "SHIM_MAX")\n'
+            'let Point = std.ffi.type(lib, "Point");\n'
+            "std.ffi.sizeof(Point)\n"
+            "std.ffi.alignof(Point)\n"
+            'let p = std.ffi.new(Point, {"x": 1.0, "y": 2.0});\n'
+            'std.ffi.call(lib, "shim_point_sum", [p])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 4.0", "= 4.0", "= 16", "= 16", "= 8", "= 3.0"],
+        )
+        import json
+        manifest_path = os.path.join(tempfile.gettempdir(),
+                                     "skein_ffi_manifest_test.json")
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump({
+                "ffi": 1,
+                "abi": {
+                    "pointer_bits": 64 if sys.maxsize > 2**32 else 32,
+                    "endian": "native",
+                    "calling_convention": "c",
+                },
+                "types": {
+                    "Point": {
+                        "kind": "struct",
+                        "fields": {"x": "f64", "y": "f64"},
+                    }
+                },
+                "functions": {
+                    "shim_point_sum": {"result": "f64", "args": ["Point"]},
+                },
+            }, handle)
+        check(
+            "std ffi json manifest",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim}, "
+            f"{skein_string(manifest_path)});\n"
+            'std.ffi.call(lib, "shim_point_sum", [{"x": 2.0, "y": 3.0}])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 5.0",
+        )
+        check(
+            "std ffi manifest callbacks and ownership",
+            "import std;\n"
+            f"let path = {shim};\n"
+            + manifest_spec
+            + "let lib = std.ffi.open(path, spec);\n"
+            'let Cmp = std.ffi.type(lib, "Cmp");\n'
+            'let point = std.ffi.type(lib, "Point");\n'
+            "let cmp = std.ffi.callback(Cmp, func(a, b) { return a - b; });\n"
+            'std.ffi.call(lib, "shim_apply_cmp", [cmp, 9, 4])\n'
+            'let owned = std.ffi.call(lib, "shim_alloc_point", []);\n'
+            "std.ffi.deref(owned).x\n"
+            "owned = null;\n"
+            'std.ffi.call(lib, "shim_free_count", [])\n'
+            "let saved = std.ffi.callback(Cmp, func(a, b) { return a + b; });\n"
+            'std.ffi.call(lib, "shim_save_cmp", [saved]);\n'
+            "saved = null;\n"
+            'std.ffi.call(lib, "shim_call_saved", [3, 4])\n'
+            'let raw = std.ffi.alloc(point);\n'
+            'std.ffi.call(lib, "shim_consume_point", [raw]);\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 5", "= 1.0", "= 1", "= 7"],
+        )
+        check(
+            "std ffi manifest consumes",
+            "import std;\n"
+            f"let path = {shim};\n"
+            + manifest_spec
+            + "let lib = std.ffi.open(path, spec);\n"
+            'let Point = std.ffi.type(lib, "Point");\n'
+            "let raw = std.ffi.alloc(Point);\n"
+            'std.ffi.call(lib, "shim_consume_point", [raw]);\n'
+            "std.ffi.deref(raw)\n",
+            stderr="consumed by C",
+        )
+        check(
+            "std ffi library without manifest",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call(lib, "shim_i32", [1])\n',
+            stderr="library has no manifest",
+        )
+        check(
+            "std ffi manifest rejects bad version",
+            'import std;\nstd.ffi.manifest({"ffi": 2})\n',
+            stderr="unsupported manifest version",
+        )
+        check(
+            "std ffi manifest rejects unknown type",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "types": {"X": '
+            '{"kind": "struct", "fields": {"a": "Missing"}}}})\n',
+            stderr="unknown manifest type Missing",
+        )
+        check(
+            "std ffi manifest rejects packed",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "types": {"X": '
+            '{"kind": "struct", "packed": true, '
+            '"fields": {"a": "i32"}}}})\n',
+            stderr="packed structs are not supported",
+        )
+        check(
+            "std ffi manifest rejects bitfield",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "types": {"X": '
+            '{"kind": "struct", "fields": ['
+            '{"name": "a", "type": "i32", "bits": 1}]}}})\n',
+            stderr="bitfields are not supported",
+        )
+        check(
+            "std ffi manifest rejects recursion",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "types": {'
+            '"A": {"kind": "struct", "fields": {"b": "B"}}, '
+            '"B": {"kind": "struct", "fields": {"a": "A"}}}})\n',
+            stderr="recursive by-value type",
+        )
+
         check(
             "std ffi callback reentrant call",
             "import std;\n"

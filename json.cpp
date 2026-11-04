@@ -751,6 +751,16 @@ struct value_t *json_stringify(
 
 }  // namespace
 
+struct value_t *json_parse_text(const std::string &text, std::string &error) {
+    JsonParser parser(text);
+    struct value_t *value = parser.parse_document();
+    if (!value) {
+        error = parser.error_message();
+        return NULL;
+    }
+    return value;
+}
+
 struct value_t *call_json_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     switch (functype) {

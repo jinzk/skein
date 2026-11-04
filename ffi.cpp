@@ -4,6 +4,7 @@
 #include "dynamic_library.h"
 #include "eval_helpers.h"
 #include "ffi_callbacks.h"
+#include "ffi_manifest.h"
 #include "ffi_marshal.h"
 #include "ffi_types.h"
 #include "ffi_value.h"
@@ -723,13 +724,21 @@ static value_t *ffi_alignof(const std::vector<value_t *> &args) {
  * ---------------------------------------------------------------------- */
 
 static value_t *ffi_open(const std::vector<value_t *> &args) {
-    if (args.size() != 1) {
-        yyerror("std.ffi.open expects 1 argument");
+    if (args.size() != 1 && args.size() != 2) {
+        yyerror("std.ffi.open expects 1 or 2 arguments");
         return NULL;
     }
     if (args[0]->type != T_string) {
         yyerror("ffi.open path must be a string");
         return NULL;
+    }
+    std::shared_ptr<const ffi::manifest> spec;
+    if (args.size() == 2) {
+        std::string error;
+        if (!ffi::load_manifest(args[1], spec, error)) {
+            yyerror("ffi.open: %s", error.c_str());
+            return NULL;
+        }
     }
     const char *path = ((string_value_t *)args[0])->value;
     std::string error;
@@ -739,7 +748,72 @@ static value_t *ffi_open(const std::vector<value_t *> &args) {
         yyerror("ffi.open: cannot load %s: %s", path, error.c_str());
         return NULL;
     }
-    return ffi::new_library_value(std::move(library));
+    return ffi::new_library_value(std::move(library), std::move(spec));
+}
+
+static value_t *ffi_manifest_builtin(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.ffi.manifest expects 1 argument");
+        return NULL;
+    }
+    std::string error;
+    std::shared_ptr<const ffi::manifest> spec;
+    if (!ffi::load_manifest(args[0], spec, error)) {
+        yyerror("ffi.manifest: %s", error.c_str());
+        return NULL;
+    }
+    return ffi::new_manifest_value(std::move(spec));
+}
+
+static value_t *ffi_type_lookup(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.type expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.type name must be a string");
+        return NULL;
+    }
+    if (!library->spec) {
+        yyerror("ffi.type: library has no manifest");
+        return NULL;
+    }
+    std::string name = ((string_value_t *)args[1])->value;
+    auto it = library->spec->types.find(name);
+    if (it == library->spec->types.end()) {
+        yyerror("ffi.type: %s is not declared in the manifest", name.c_str());
+        return NULL;
+    }
+    return ffi::new_type_value(it->second);
+}
+
+static value_t *ffi_constant(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.constant expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.constant name must be a string");
+        return NULL;
+    }
+    if (!library->spec) {
+        yyerror("ffi.constant: library has no manifest");
+        return NULL;
+    }
+    std::string name = ((string_value_t *)args[1])->value;
+    auto it = library->spec->constants.find(name);
+    if (it == library->spec->constants.end()) {
+        yyerror("ffi.constant: %s is not declared in the manifest",
+                name.c_str());
+        return NULL;
+    }
+    return dupval(it->second);
 }
 
 static value_t *ffi_close(const std::vector<value_t *> &args) {
@@ -864,29 +938,12 @@ static value_t *integer_result(kind_t kind, const unsigned char *buffer) {
     }
 }
 
-static value_t *ffi_call(const std::vector<value_t *> &args) {
-    if (args.size() != 5) {
-        yyerror("std.ffi.call expects 5 arguments");
-        return NULL;
-    }
-    std::shared_ptr<ffi::library_handle> library;
-    if (!ffi::get_library(args[0], library))
-        return NULL;
-    if (args[1]->type != T_string) {
-        yyerror("ffi.call symbol must be a string");
-        return NULL;
-    }
-    if (args[3]->type != T_list || args[4]->type != T_list) {
-        yyerror("ffi.call argument types and values must be lists");
-        return NULL;
-    }
-
-    std::string error;
-    type_ptr return_type;
-    if (!ffi::resolve_type(args[2], return_type, error)) {
-        yyerror("ffi.call: %s", error.c_str());
-        return NULL;
-    }
+static value_t *perform_call(
+    const std::shared_ptr<ffi::library_handle> &library,
+    const std::string &symbol_name, const type_ptr &return_type,
+    const std::vector<type_ptr> &arg_types,
+    const std::vector<value_t *> &values,
+    const ffi::manifest_function *declared) {
     if (return_type->kind == kind_t::bytes ||
         return_type->kind == kind_t::buffer) {
         yyerror("ffi.call: bytes/buffer cannot be returned directly; "
@@ -894,53 +951,41 @@ static value_t *ffi_call(const std::vector<value_t *> &args) {
         return NULL;
     }
 
-    list_value_t *types = (list_value_t *)args[3];
-    list_value_t *values = (list_value_t *)args[4];
-    if (types->payload->items.size() != values->payload->items.size()) {
+    const std::size_t count = arg_types.size();
+    if (values.size() != count) {
         yyerror("ffi.call: argument type/value count mismatch");
         return NULL;
     }
-    if (types->payload->items.size() > 32) {
+    if (count > 32) {
         yyerror("ffi.call: too many arguments");
         return NULL;
     }
 
-    const std::size_t count = types->payload->items.size();
-    std::vector<ffi::type_ptr> arg_types;
+    std::string error;
     std::vector<ffi::arg_slot> slots(count);
     std::vector<ffi_type *> cif_types;
     std::vector<void *> argv;
-    arg_types.reserve(count);
     cif_types.reserve(count);
     argv.reserve(count);
 
     for (std::size_t i = 0; i < count; ++i) {
-        type_ptr type;
-        if (!ffi::resolve_type(types->payload->items[i], type, error)) {
-            yyerror("ffi.call: %s", error.c_str());
-            return NULL;
-        }
-        if (type->kind == kind_t::void_) {
+        if (!arg_types[i] || arg_types[i]->kind == kind_t::void_) {
             yyerror("ffi.call: invalid argument type");
             return NULL;
         }
-        if (!ffi::prepare_arg(type, values->payload->items[i], slots[i],
-                              error)) {
+        if (!ffi::prepare_arg(arg_types[i], values[i], slots[i], error)) {
             yyerror("ffi.call: argument %d: %s", (int)i + 1,
                     error.c_str());
             return NULL;
         }
-        arg_types.push_back(std::move(type));
-    }
-    for (std::size_t i = 0; i < count; ++i) {
         cif_types.push_back(arg_types[i]->cif);
-        argv.push_back(slots[i].value);
     }
+    for (const ffi::arg_slot &slot : slots)
+        argv.push_back(slot.value);
 
-    const char *symbol_name = ((string_value_t *)args[1])->value;
-    void *symbol = library->library->symbol(symbol_name, error);
+    void *symbol = library->library->symbol(symbol_name.c_str(), error);
     if (!symbol) {
-        yyerror("ffi.call: symbol not found: %s: %s", symbol_name,
+        yyerror("ffi.call: symbol not found: %s: %s", symbol_name.c_str(),
                 error.c_str());
         return NULL;
     }
@@ -967,60 +1012,182 @@ static value_t *ffi_call(const std::vector<value_t *> &args) {
             yyerror("ffi.call: %s", callback_scope.error().c_str());
             return NULL;
         }
-        return newnull();
-    }
-
-    std::shared_ptr<ffi::memory_block> result_block;
-    unsigned char *result = nullptr;
-    alignas(16) unsigned char scalar[16] = {0};
-    if (ffi::is_aggregate(return_type->kind)) {
-        result_block = std::make_shared<ffi::memory_block>(
-            return_type->size, return_type->align);
-        result = result_block->data;
     } else {
-        result = scalar;
+        std::shared_ptr<ffi::memory_block> result_block;
+        unsigned char *result = nullptr;
+        alignas(16) unsigned char scalar[16] = {0};
+        if (ffi::is_aggregate(return_type->kind)) {
+            result_block = std::make_shared<ffi::memory_block>(
+                return_type->size, return_type->align);
+            result = result_block->data;
+        } else {
+            result = scalar;
+        }
+
+        ffi_call(&cif, FFI_FN(symbol), result,
+                 argv.empty() ? nullptr : argv.data());
+        if (callback_scope.failed()) {
+            yyerror("ffi.call: %s", callback_scope.error().c_str());
+            return NULL;
+        }
+
+        if (declared) {
+            for (std::size_t index : declared->consumes) {
+                if (index < values.size())
+                    ffi::mark_consumed(values[index]);
+            }
+            for (std::size_t index : declared->retains) {
+                if (index < values.size())
+                    ffi::retain_value(library, values[index]);
+            }
+        }
+
+        switch (return_type->kind) {
+            case kind_t::f32:
+                return newfloatval((double)load_bytes<float>(result));
+            case kind_t::f64:
+                return newfloatval(load_bytes<double>(result));
+            case kind_t::cstring: {
+                const char *value = load_bytes<const char *>(result);
+                return value ? newstrval(value) : newnull();
+            }
+            case kind_t::pointer:
+            case kind_t::opaque:
+            case kind_t::callback: {
+                void *raw = load_bytes<void *>(result);
+                std::shared_ptr<void> owner = library;
+                if (declared && declared->returns_owned && raw) {
+                    std::string free_name = declared->free_function.empty()
+                                                ? std::string("free")
+                                                : declared->free_function;
+                    std::string free_error;
+                    void *free_symbol =
+                        library->library->symbol(free_name.c_str(),
+                                                 free_error);
+                    if (!free_symbol) {
+                        yyerror("ffi.call: returns_owned free function not "
+                                "found: %s: %s", free_name.c_str(),
+                                free_error.c_str());
+                        return NULL;
+                    }
+                    using free_fn_t = void (*)(void *);
+                    free_fn_t release = (free_fn_t)free_symbol;
+                    std::shared_ptr<dynamic_library> keep =
+                        library->library;
+                    owner = std::shared_ptr<void>(
+                        raw, [keep, release](void *pointer) {
+                            if (pointer)
+                                release(pointer);
+                        });
+                }
+                return ffi::new_pointer_value(
+                    return_type->kind == kind_t::pointer
+                        ? return_type->element
+                        : nullptr,
+                    (unsigned char *)raw, owner);
+            }
+            case kind_t::record:
+            case kind_t::array: {
+                std::string read_error;
+                value_t *value = ffi::read_value(
+                    return_type, result, result_block, &read_error,
+                    result_block->keep);
+                if (!value)
+                    yyerror("ffi.call: %s", read_error.c_str());
+                return value;
+            }
+            case kind_t::void_:
+                return newnull();
+            default:
+                return integer_result(return_type->kind, result);
+        }
     }
 
-    ffi_call(&cif, FFI_FN(symbol), result,
-             argv.empty() ? nullptr : argv.data());
-    if (callback_scope.failed()) {
-        yyerror("ffi.call: %s", callback_scope.error().c_str());
+    if (declared) {
+        for (std::size_t index : declared->consumes) {
+            if (index < values.size())
+                ffi::mark_consumed(values[index]);
+        }
+        for (std::size_t index : declared->retains) {
+            if (index < values.size())
+                ffi::retain_value(library, values[index]);
+        }
+    }
+    return newnull();
+}
+
+static value_t *ffi_call(const std::vector<value_t *> &args) {
+    if (args.size() != 3 && args.size() != 5) {
+        yyerror("std.ffi.call expects 3 or 5 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.call symbol must be a string");
+        return NULL;
+    }
+    const std::string symbol = ((string_value_t *)args[1])->value;
+
+    if (args.size() == 3) {
+        if (!library->spec) {
+            yyerror("ffi.call: library has no manifest; "
+                    "pass types explicitly");
+            return NULL;
+        }
+        auto declared = library->spec->functions.find(symbol);
+        if (declared == library->spec->functions.end()) {
+            yyerror("ffi.call: function %s is not declared in the manifest",
+                    symbol.c_str());
+            return NULL;
+        }
+        if (args[2]->type != T_list) {
+            yyerror("ffi.call arguments must be a list");
+            return NULL;
+        }
+        return perform_call(library, declared->second.symbol,
+                            declared->second.result,
+                            declared->second.args,
+                            ((list_value_t *)args[2])->payload->items,
+                            &declared->second);
+    }
+
+    if (args[3]->type != T_list || args[4]->type != T_list) {
+        yyerror("ffi.call argument types and values must be lists");
         return NULL;
     }
 
-    switch (return_type->kind) {
-        case kind_t::f32:
-            return newfloatval((double)load_bytes<float>(result));
-        case kind_t::f64:
-            return newfloatval(load_bytes<double>(result));
-        case kind_t::cstring: {
-            const char *value = load_bytes<const char *>(result);
-            return value ? newstrval(value) : newnull();
-        }
-        case kind_t::pointer:
-            return ffi::new_pointer_value(
-                return_type->element,
-                (unsigned char *)load_bytes<void *>(result), library);
-        case kind_t::opaque:
-        case kind_t::callback:
-            return ffi::new_pointer_value(
-                nullptr, (unsigned char *)load_bytes<void *>(result),
-                library);
-        case kind_t::record:
-        case kind_t::array: {
-            std::string read_error;
-            value_t *value = ffi::read_value(return_type, result,
-                                             result_block, &read_error,
-                                             result_block->keep);
-            if (!value)
-                yyerror("ffi.call: %s", read_error.c_str());
-            return value;
-        }
-        case kind_t::void_:
-            return newnull();
-        default:
-            return integer_result(return_type->kind, result);
+    std::string error;
+    type_ptr return_type;
+    if (!ffi::resolve_type(args[2], return_type, error)) {
+        yyerror("ffi.call: %s", error.c_str());
+        return NULL;
     }
+
+    list_value_t *types = (list_value_t *)args[3];
+    list_value_t *values = (list_value_t *)args[4];
+    if (types->payload->items.size() != values->payload->items.size()) {
+        yyerror("ffi.call: argument type/value count mismatch");
+        return NULL;
+    }
+    if (types->payload->items.size() > 32) {
+        yyerror("ffi.call: too many arguments");
+        return NULL;
+    }
+
+    std::vector<type_ptr> arg_types;
+    arg_types.reserve(types->payload->items.size());
+    for (value_t *item : types->payload->items) {
+        type_ptr type;
+        if (!ffi::resolve_type(item, type, error)) {
+            yyerror("ffi.call: %s", error.c_str());
+            return NULL;
+        }
+        arg_types.push_back(std::move(type));
+    }
+    return perform_call(library, symbol, return_type, arg_types,
+                        values->payload->items, nullptr);
 }
 
 /* -------------------------------------------------------------------------
@@ -1076,6 +1243,12 @@ struct value_t *call_ffi_builtin(
             return ffi_alignof(args);
         case B_ffi_callback:
             return ffi_callback(args);
+        case B_ffi_manifest:
+            return ffi_manifest_builtin(args);
+        case B_ffi_constant:
+            return ffi_constant(args);
+        case B_ffi_type_lookup:
+            return ffi_type_lookup(args);
         default:
             yyerror("unknown ffi function");
             return NULL;

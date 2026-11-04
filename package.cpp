@@ -786,6 +786,9 @@ value_t *build_std_namespace() {
             {"sizeof", B_ffi_sizeof},
             {"alignof", B_ffi_alignof},
             {"callback", B_ffi_callback},
+            {"manifest", B_ffi_manifest},
+            {"constant", B_ffi_constant},
+            {"type", B_ffi_type_lookup},
         })));
 #endif
     root->payload->items.push_back(std::make_pair(

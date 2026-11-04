@@ -1397,7 +1397,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)
         return call_net_builtin(functype, args);
 #ifdef SKEIN_ENABLE_FFI
-    if (functype >= B_ffi_open && functype <= B_ffi_callback)
+    if (functype >= B_ffi_open && functype <= B_ffi_type_lookup)
         return call_ffi_builtin(functype, args);
 #endif
     if (functype >= B_task_sleep && functype <= B_task_bounded_parallel_map)

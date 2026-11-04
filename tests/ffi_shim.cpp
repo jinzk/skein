@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -194,6 +195,31 @@ SHIM_EXPORT std::int32_t shim_apply_void(shim_void_fn fn,
                                          std::int32_t value) {
     fn(value);
     return value;
+}
+
+static std::int32_t shim_free_counter = 0;
+
+SHIM_EXPORT void *shim_alloc_point(void) {
+    struct shim_point *point =
+        (struct shim_point *)std::malloc(sizeof(struct shim_point));
+    if (!point)
+        return nullptr;
+    point->x = 1.0;
+    point->y = 2.0;
+    return point;
+}
+
+SHIM_EXPORT void shim_free_point(void *pointer) {
+    if (!pointer)
+        return;
+    ++shim_free_counter;
+    std::free(pointer);
+}
+
+SHIM_EXPORT std::int32_t shim_free_count(void) { return shim_free_counter; }
+
+SHIM_EXPORT void shim_consume_point(struct shim_point *point) {
+    (void)point;
 }
 
 static shim_cmp_fn shim_saved_cmp = nullptr;

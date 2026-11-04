@@ -1,6 +1,7 @@
 #include "ffi_module.h"
 
 #include "ast.h"
+#include "dynamic_library.h"
 #include "eval_helpers.h"
 #include "valuetype.h"
 
@@ -13,34 +14,18 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 namespace {
 
 struct ffi_library {
-    void *handle = nullptr;
-    bool closed = false;
-
-    ~ffi_library() {
-        if (handle && !closed) {
-#ifdef _WIN32
-            FreeLibrary((HMODULE)handle);
-#else
-            dlclose(handle);
-#endif
-        }
-    }
+    std::shared_ptr<dynamic_library> library;
 };
 
 std::string ffi_describe(const void *data) {
     const ffi_library *library = (const ffi_library *)data;
-    if (!library || library->closed)
+    if (!library || !library->library)
         return "<ffi_library closed>";
     return "<ffi_library>";
 }
@@ -93,9 +78,9 @@ bool get_buffer(value_t *value, std::shared_ptr<ffi_buffer> &buffer) {
     return true;
 }
 
-value_t *new_library_value(void *handle) {
+value_t *new_library_value(std::shared_ptr<dynamic_library> lib) {
     std::shared_ptr<ffi_library> library = std::make_shared<ffi_library>();
-    library->handle = handle;
+    library->library = std::move(lib);
     return newuserdataval(&ffi_library_type, library);
 }
 
@@ -110,7 +95,7 @@ bool get_library(value_t *value, std::shared_ptr<ffi_library> &library) {
         return false;
     }
     library = std::static_pointer_cast<ffi_library>(userdata->data);
-    if (!library || library->closed || !library->handle) {
+    if (!library || !library->library || !library->library->valid()) {
         yyerror("ffi library is closed");
         return false;
     }
@@ -182,29 +167,6 @@ ffi_type *ffi_type_for(ffi_kind kind) {
     }
 }
 
-std::string ffi_native_error() {
-#ifdef _WIN32
-    DWORD code = GetLastError();
-    char *message = NULL;
-    DWORD length = FormatMessageA(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-            FORMAT_MESSAGE_IGNORE_INSERTS,
-        NULL, code, 0, (LPSTR)&message, 0, NULL);
-    std::string result = length && message
-        ? std::string(message, length)
-        : "error " + std::to_string(code);
-    if (message)
-        LocalFree(message);
-    while (!result.empty() &&
-           (result.back() == '\r' || result.back() == '\n'))
-        result.pop_back();
-    return result;
-#else
-    const char *message = dlerror();
-    return message ? message : "unknown dynamic loader error";
-#endif
-}
-
 value_t *ffi_open(const std::vector<value_t *> &args) {
     if (args.size() != 1) {
         yyerror("std.ffi.open expects 1 argument");
@@ -215,20 +177,14 @@ value_t *ffi_open(const std::vector<value_t *> &args) {
         return NULL;
     }
     const char *path = ((struct string_value_t *)args[0])->value;
-    void *handle = NULL;
-#ifdef _WIN32
-    SetLastError(0);
-    handle = (void *)LoadLibraryA(path);
-#else
-    dlerror();
-    handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-#endif
-    if (!handle) {
-        yyerror("ffi.open: cannot load %s: %s", path,
-                ffi_native_error().c_str());
+    std::string error;
+    std::shared_ptr<dynamic_library> lib =
+        dynamic_library::open(path, error);
+    if (!lib) {
+        yyerror("ffi.open: cannot load %s: %s", path, error.c_str());
         return NULL;
     }
-    return new_library_value(handle);
+    return new_library_value(std::move(lib));
 }
 
 value_t *ffi_close(const std::vector<value_t *> &args) {
@@ -239,13 +195,7 @@ value_t *ffi_close(const std::vector<value_t *> &args) {
     std::shared_ptr<ffi_library> library;
     if (!get_library(args[0], library))
         return NULL;
-#ifdef _WIN32
-    FreeLibrary((HMODULE)library->handle);
-#else
-    dlclose(library->handle);
-#endif
-    library->handle = NULL;
-    library->closed = true;
+    library->library.reset();
     return newnull();
 }
 
@@ -504,17 +454,12 @@ value_t *ffi_call(const std::vector<value_t *> &args) {
     }
 
     const char *symbol_name = ((struct string_value_t *)args[1])->value;
-    void *symbol = NULL;
-#ifdef _WIN32
-    SetLastError(0);
-    symbol = (void *)GetProcAddress((HMODULE)library->handle, symbol_name);
-#else
-    dlerror();
-    symbol = dlsym(library->handle, symbol_name);
-#endif
+    std::shared_ptr<dynamic_library> lib = library->library;
+    std::string error;
+    void *symbol = lib->symbol(symbol_name, error);
     if (!symbol) {
         yyerror("ffi.call: symbol not found: %s: %s", symbol_name,
-                ffi_native_error().c_str());
+                error.c_str());
         return NULL;
     }
 

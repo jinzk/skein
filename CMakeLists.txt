@@ -96,6 +96,7 @@ set_target_properties(skein_utf8proc PROPERTIES
 set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
 
 set(SKEIN_PLATFORM_SOURCES
+  dynamic_library.cpp
   runtime_state.cpp
 )
 if(WIN32)
@@ -120,6 +121,10 @@ if(WIN32)
       __USE_MINGW_ANSI_STDIO=1
     )
   endif()
+endif()
+
+if(CMAKE_DL_LIBS)
+  target_link_libraries(skein_platform PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
 add_library(skein_runtime STATIC

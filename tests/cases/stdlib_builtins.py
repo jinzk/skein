@@ -94,6 +94,22 @@ def run_cases():
             stderr="symbol not found",
         )
         check(
+            "std ffi call after close",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "std.ffi.close(lib);\n"
+            'std.ffi.call(lib, "shim_i8", "i8", ["i8"], [1])\n',
+            stderr="ffi library is closed",
+        )
+        check(
+            "std ffi double close",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "std.ffi.close(lib);\n"
+            "std.ffi.close(lib);\n",
+            stderr="ffi library is closed",
+        )
+        check(
             "std ffi direct bytes return",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"

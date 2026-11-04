@@ -690,6 +690,26 @@ def run_cases():
         stdout_all=["= 5", "= 9", "= Counter", "<Counter>"],
     )
     check(
+        "native module packed and bitfield",
+        "import example.math;\n"
+        "let h = math.packed_header_new(7, 0x11223344, 0xABCD);\n"
+        "h.tag\n"
+        "h.length\n"
+        "h.flags\n"
+        "math.packed_header_size()\n"
+        "h.length = 5;\n"
+        "h.length\n"
+        "let f = math.packed_flags_new(1, 5, 9);\n"
+        "f.a\n"
+        "f.b\n"
+        "f.c\n"
+        "f.b = 7;\n"
+        "f.b\n"
+        "type_name(h)\n",
+        stdout_all=["= 7", "= 287454020", "= 43981", "= 7", "= 5",
+                    "= 1", "= 5", "= 9", "= 7", "= PackedHeader"],
+    )
+    check(
         "native module import alias",
         "import example.math as m;\nm.ANSWER\n",
         stdout="= 42",

@@ -1532,7 +1532,9 @@ example.math.ANSWER;
 - `skein_api` 由 host 通过 `init` 传入，值以 opaque handle 传递；
 - 静态绑定在启动时注册，动态插件通过 `std.module.load` 加载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
-- 重复 import path、模块与包同名、ABI 版本不匹配都会报错。
+- 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
+- packed/bitfield 不进通用 FFI，由 C++ 绑定通过 `get_field`/`set_field` 处理，
+  `example.math` 里的 `PackedHeader` / `PackedFlags` 是示例。
 
 从 C 头文件生成 manifest：
 

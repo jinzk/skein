@@ -1702,12 +1702,10 @@ std.unicode.version()
 排序：
 
 ```text
-std.list.sort(xs)                          // 数字/字符串，升序
-std.list.sort(xs, cmp)                     // cmp(a, b) -> int
-std.list.sort_by(xs, key)                  // key 每个元素只调用一次
-std.list.sort_by(xs, key, {"desc": true})  // 降序
+std.list.sort(xs, cmp = null)              // 数字/字符串，升序
+std.list.sort_by(xs, key, options = null)  // options: {"desc": true}
 std.list.sort_desc(xs)
-std.list.is_sorted(xs[, cmp])
+std.list.is_sorted(xs, cmp = null)
 ```
 
 - 稳定排序，返回新 list，不修改输入；
@@ -1726,8 +1724,8 @@ std.list.group_by(xs, key)          // dict: key -> list
 std.list.chunk(xs, n)               // [[...], [...], ...]
 std.list.window(xs, n[, step])      // 滑动窗口，step 默认 1
 std.list.zip(a, b, ...)             // [[a0, b0], ...]，取最短
-std.list.top_k(xs, k[, cmp])        // 排序后取前 k 个（O(n log k)）
-std.list.binary_search(xs, value[, cmp]) -> {found, index}
+std.list.top_k(xs, k, cmp = null)        // 排序后取前 k 个（O(n log k)）
+std.list.binary_search(xs, value, cmp = null) -> {found, index}
 ```
 
 - `unique` / `unique_by` 保留第一次出现的元素；

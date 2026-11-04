@@ -1498,6 +1498,18 @@ def run_cases():
         stdout="= 1",
     )
     check(
+        "std container adapter defaults",
+        "import std;\n"
+        'bytes_to_string(std.bytes.slice(bytes_from_string("abc"), 1))\n'
+        "kind_of(std.list.sort)\n"
+        "kind_of(std.list.reduce)\n"
+        "kind_of(std.dict.get)\n"
+        "kind_of(std.lru.get)\n"
+        "kind_of(std.bytes.slice)\n",
+        stdout_all=["= bc", "= function", "= function", "= function",
+                    "= function", "= function"],
+    )
+    check(
         "std list slice clamps",
         "import std;\nstd.list.slice([1, 2], 1, 10)\n",
         stdout="= [2]",

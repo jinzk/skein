@@ -1986,7 +1986,7 @@ std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 
 `zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
 
-`std.list` 由内部适配层提供，原生入口保留在 `std.raw.list`；当前只有 `slice` 使用语言级默认参数，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
+`std.list` / `std.dict` / `std.bytes` / `std.lru` 由内部适配层提供，原生入口保留在 `std.raw.list` / `std.raw.dict` / `std.raw.bytes` / `std.raw.lru`；当前使用语言级默认参数的有 `list.slice`、`list.sort`、`list.sort_by`、`list.is_sorted`、`list.top_k`、`list.binary_search`、`list.reduce`、`dict.get`、`lru.get`、`lru.peek` 和 `bytes.slice`，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
 
 当前提供的函数：
 

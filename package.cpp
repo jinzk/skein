@@ -81,25 +81,156 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.arena", kStdArenaSource},
 };
 
-/* Internal adapter for std.list.  It is parsed directly instead of being a
- * public package so import std; std.list keeps the original native namespace
- * while slice gains a language-level default argument. */
-const char kStdListAdapterSource[] = R"SK(
-package list_adapter {
+/* Internal adapter for container builtins.  It is parsed directly instead of
+ * being a public package so import std; std.list / std.dict / std.bytes keep
+ * their original native namespaces while selected functions gain language-level
+ * default arguments. */
+const char kStdContainerAdapterSource[] = R"SK(
+package container_adapter {
   import std;
 
-  func _slice_end(values) {
+  func _list_end(values) {
     if (kind_of(values) != "list") {
       fail("std.list.slice expects a list");
     }
     return len(values);
   }
 
-  export func slice(values, start, end = _slice_end(values)) {
+  export func adapter_list_slice(values, start, end = _list_end(values)) {
     return std.raw.list.slice(values, start, end);
+  }
+
+  export func adapter_list_sort(values, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.sort(values);
+    }
+    return std.raw.list.sort(values, cmp);
+  }
+
+  export func adapter_list_sort_by(values, key, options = null) {
+    if (options == null) {
+      return std.raw.list.sort_by(values, key);
+    }
+    return std.raw.list.sort_by(values, key, options);
+  }
+
+  export func adapter_list_is_sorted(values, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.is_sorted(values);
+    }
+    return std.raw.list.is_sorted(values, cmp);
+  }
+
+  export func adapter_list_top_k(values, k, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.top_k(values, k);
+    }
+    return std.raw.list.top_k(values, k, cmp);
+  }
+
+  export func adapter_list_binary_search(values, value, cmp = null) {
+    if (cmp == null) {
+      return std.raw.list.binary_search(values, value);
+    }
+    return std.raw.list.binary_search(values, value, cmp);
+  }
+
+  func _reduce_missing() {
+    return null;
+  }
+
+  export func adapter_list_reduce(values, fn, initial = _reduce_missing) {
+    if (initial == _reduce_missing) {
+      return std.raw.list.reduce(values, fn);
+    }
+    return std.raw.list.reduce(values, fn, initial);
+  }
+
+  export func adapter_dict_get(mapping, key, fallback = null) {
+    return std.raw.dict.get(mapping, key, fallback);
+  }
+
+  export func adapter_lru_get(mapping, key, fallback = null) {
+    if (fallback == null) {
+      return std.raw.lru.get(mapping, key);
+    }
+    return std.raw.lru.get(mapping, key, fallback);
+  }
+
+  export func adapter_lru_peek(mapping, key, fallback = null) {
+    if (fallback == null) {
+      return std.raw.lru.peek(mapping, key);
+    }
+    return std.raw.lru.peek(mapping, key, fallback);
+  }
+
+  export func adapter_bytes_slice(values, start, count = null) {
+    if (count == null) {
+      return std.raw.bytes.slice(values, start);
+    }
+    return std.raw.bytes.slice(values, start, count);
   }
 }
 )SK";
+
+struct std_adapter_binding {
+    const char *module;
+    const char *name;
+    const char *export_name;
+};
+
+const std_adapter_binding kStdAdapterBindings[] = {
+    {"list", "slice", "adapter_list_slice"},
+    {"list", "sort", "adapter_list_sort"},
+    {"list", "sort_by", "adapter_list_sort_by"},
+    {"list", "is_sorted", "adapter_list_is_sorted"},
+    {"list", "top_k", "adapter_list_top_k"},
+    {"list", "binary_search", "adapter_list_binary_search"},
+    {"list", "reduce", "adapter_list_reduce"},
+    {"dict", "get", "adapter_dict_get"},
+    {"lru", "get", "adapter_lru_get"},
+    {"lru", "peek", "adapter_lru_peek"},
+    {"bytes", "slice", "adapter_bytes_slice"},
+};
+
+value_t *take_adapter_export(dict_value_t *adapter, const char *name) {
+    if (!adapter || !name)
+        return NULL;
+    for (const auto &entry : adapter->payload->items) {
+        if (entry.first->type == T_string &&
+            std::strcmp(((const string_value_t *)entry.first)->value,
+                        name) == 0)
+            return dupval(entry.second);
+    }
+    return NULL;
+}
+
+bool replace_module_function(dict_value_t *root, const char *module,
+                             const char *name, value_t *wrapper) {
+    if (!root || !module || !name || !wrapper)
+        return false;
+    for (auto &module_entry : root->payload->items) {
+        if (module_entry.first->type != T_string ||
+            std::strcmp(((const string_value_t *)module_entry.first)->value,
+                        module) != 0)
+            continue;
+        if (module_entry.second->type != T_dict)
+            return false;
+        dict_value_t *functions = (dict_value_t *)module_entry.second;
+        for (auto &entry : functions->payload->items) {
+            if (entry.first->type == T_string &&
+                std::strcmp(((const string_value_t *)entry.first)->value,
+                            name) == 0) {
+                freeval(entry.second);
+                entry.second = wrapper;
+                dict_invalidate_index(functions);
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
 
 const char *find_embedded_source(const std::string &dotted) {
     for (const auto &entry : kEmbeddedPackages) {
@@ -427,32 +558,70 @@ value_t *build_std_namespace() {
         {"top_k", B_list_top_k},
         {"binary_search", B_list_binary_search},
     });
-    value_t *raw_list = (value_t *)newdictval();
-    ((dict_value_t *)raw_list)->payload->is_namespace = true;
-    for (const auto &entry : ((dict_value_t *)list_module)->payload->items) {
-        dict_append_item((dict_value_t *)raw_list, dupval(entry.first),
-                         dupval(entry.second));
-    }
-    root->payload->items.push_back(std::make_pair(
-        newstrval("list"), list_module));
+    value_t *dict_module = builtin_module({
+        {"len", B_len},
+        {"get", B_dict_get},
+        {"has", B_dict_has},
+        {"keys", B_dict_keys},
+        {"values", B_dict_values},
+        {"items", B_dict_items},
+        {"delete", B_dict_delete},
+        {"merge", B_dict_merge},
+    });
+    value_t *bytes_module = builtin_module({
+        {"len", B_bytes_len},
+        {"get", B_bytes_get},
+        {"slice", B_bytes_slice},
+        {"concat", B_bytes_concat},
+        {"hex", B_bytes_hex},
+        {"from_hex", B_bytes_from_hex},
+        {"to_int", B_bytes_to_int},
+        {"from_int", B_int_to_bytes},
+        {"to_string", B_bytes_to_string},
+        {"from_string", B_bytes_from_string},
+    });
+    value_t *lru_module = builtin_module({
+        {"new", B_lru_new},
+        {"get", B_lru_get},
+        {"peek", B_lru_peek},
+        {"put", B_lru_put},
+        {"delete", B_lru_delete},
+        {"has", B_lru_has},
+        {"keys", B_lru_keys},
+        {"values", B_lru_values},
+        {"len", B_lru_len},
+        {"capacity", B_lru_capacity},
+        {"clear", B_lru_clear},
+    });
+    auto copy_module = [](value_t *module) -> value_t * {
+        value_t *copy = (value_t *)newdictval();
+        ((dict_value_t *)copy)->payload->is_namespace = true;
+        for (const auto &entry : ((dict_value_t *)module)->payload->items) {
+            dict_append_item((dict_value_t *)copy, dupval(entry.first),
+                             dupval(entry.second));
+        }
+        return copy;
+    };
     struct dict_value_t *raw = newdictval();
     raw->payload->is_namespace = true;
     raw->payload->items.push_back(std::make_pair(
-        newstrval("list"), raw_list));
+        newstrval("list"), copy_module(list_module)));
+    raw->payload->items.push_back(std::make_pair(
+        newstrval("dict"), copy_module(dict_module)));
+    raw->payload->items.push_back(std::make_pair(
+        newstrval("bytes"), copy_module(bytes_module)));
+    raw->payload->items.push_back(std::make_pair(
+        newstrval("lru"), copy_module(lru_module)));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("list"), list_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("dict"), dict_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("bytes"), bytes_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("lru"), lru_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("raw"), (value_t *)raw));
-    root->payload->items.push_back(std::make_pair(
-        newstrval("dict"),
-        builtin_module({
-            {"len", B_len},
-            {"get", B_dict_get},
-            {"has", B_dict_has},
-            {"keys", B_dict_keys},
-            {"values", B_dict_values},
-            {"items", B_dict_items},
-            {"delete", B_dict_delete},
-            {"merge", B_dict_merge},
-        })));
     root->payload->items.push_back(std::make_pair(
         newstrval("json"),
         builtin_module({
@@ -478,20 +647,6 @@ value_t *build_std_namespace() {
             {"trim_start", B_string_trim_start},
             {"trim_end", B_string_trim_end},
             {"format", B_format},
-        })));
-    root->payload->items.push_back(std::make_pair(
-        newstrval("bytes"),
-        builtin_module({
-            {"len", B_bytes_len},
-            {"get", B_bytes_get},
-            {"slice", B_bytes_slice},
-            {"concat", B_bytes_concat},
-            {"hex", B_bytes_hex},
-            {"from_hex", B_bytes_from_hex},
-            {"to_int", B_bytes_to_int},
-            {"from_int", B_int_to_bytes},
-            {"to_string", B_bytes_to_string},
-            {"from_string", B_bytes_from_string},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("encoding"),
@@ -724,21 +879,6 @@ value_t *build_std_namespace() {
         newstrval("struct"),
         builtin_module({
             {"decode", B_struct_decode},
-        })));
-    root->payload->items.push_back(std::make_pair(
-        newstrval("lru"),
-        builtin_module({
-            {"new", B_lru_new},
-            {"get", B_lru_get},
-            {"peek", B_lru_peek},
-            {"put", B_lru_put},
-            {"delete", B_lru_delete},
-            {"has", B_lru_has},
-            {"keys", B_lru_keys},
-            {"values", B_lru_values},
-            {"len", B_lru_len},
-            {"capacity", B_lru_capacity},
-            {"clear", B_lru_clear},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("deque"),
@@ -1081,62 +1221,32 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
 
         value_t *adapter = NULL;
         std::string list_error;
-        if (!parse_package_source(kStdListAdapterSource, "<std.list>",
-                                  "list_adapter", "std.list", import_base,
-                                  adapter, list_error)) {
-            error = "cannot load std.list adapter: " + list_error;
-            save_global_symbol(hidden.c_str(), newnull());
-            return NULL;
-        }
-
-        value_t *slice_wrapper = NULL;
-        dict_value_t *adapter_dict = (dict_value_t *)adapter;
-        for (auto &entry : adapter_dict->payload->items) {
-            if (entry.first->type == T_string &&
-                std::strcmp(((string_value_t *)entry.first)->value,
-                            "slice") == 0) {
-                slice_wrapper = dupval(entry.second);
-                break;
-            }
-        }
-        freeval(adapter);
-        if (!slice_wrapper) {
-            error = "std.list adapter did not export slice";
+        if (!parse_package_source(kStdContainerAdapterSource, "<std.adapter>",
+                                  "container_adapter", "std.adapter",
+                                  import_base, adapter, list_error)) {
+            error = "cannot load std container adapter: " + list_error;
             save_global_symbol(hidden.c_str(), newnull());
             return NULL;
         }
 
         dict_value_t *root = (dict_value_t *)namespace_value;
-        dict_value_t *list_dict = NULL;
-        for (auto &entry : root->payload->items) {
-            if (entry.first->type == T_string &&
-                std::strcmp(((string_value_t *)entry.first)->value,
-                            "list") == 0) {
-                list_dict = (dict_value_t *)entry.second;
-                break;
+        dict_value_t *adapter_dict = (dict_value_t *)adapter;
+        for (const std_adapter_binding &binding : kStdAdapterBindings) {
+            value_t *wrapper =
+                take_adapter_export(adapter_dict, binding.export_name);
+            if (!wrapper ||
+                !replace_module_function(root, binding.module, binding.name,
+                                         wrapper)) {
+                if (wrapper)
+                    freeval(wrapper);
+                freeval(adapter);
+                error = std::string("std adapter could not install ") +
+                        binding.module + "." + binding.name;
+                save_global_symbol(hidden.c_str(), newnull());
+                return NULL;
             }
         }
-        bool replaced = false;
-        if (list_dict) {
-            for (auto &entry : list_dict->payload->items) {
-                if (entry.first->type == T_string &&
-                    std::strcmp(((string_value_t *)entry.first)->value,
-                                "slice") == 0) {
-                    freeval(entry.second);
-                    entry.second = slice_wrapper;
-                    slice_wrapper = NULL;
-                    dict_invalidate_index(list_dict);
-                    replaced = true;
-                    break;
-                }
-            }
-        }
-        if (!replaced) {
-            freeval(slice_wrapper);
-            error = "std.list adapter could not replace slice";
-            save_global_symbol(hidden.c_str(), newnull());
-            return NULL;
-        }
+        freeval(adapter);
         return dupval(namespace_value);
     }
 

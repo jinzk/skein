@@ -167,11 +167,24 @@ def run_cases():
             "p.x\n"
             "std.ffi.to_dict(p)\n"
             "std.ffi.sizeof(Point)\n"
-            "std.ffi.alignof(Point)\n",
+            "std.ffi.alignof(Point)\n"
+            'std.ffi.offsetof(Point, "y")\n',
             stdout_all=[
                 "= 1.5", "= 2.5", "= 4.0", "= {x: 4.0, y: 2.5}",
-                "= 16", "= 8",
+                "= 16", "= 8", "= 8",
             ],
+        )
+        check(
+            "std ffi address_of",
+            "import std;\n"
+            + point_decl
+            + f"let lib = std.ffi.open({shim});\n"
+            'let p = std.ffi.new(Point, {"x": 3.0, "y": 4.0});\n'
+            "let ptr = std.ffi.address_of(p);\n"
+            'std.ffi.call(lib, "shim_point_dot", "f64", '
+            "[std.ffi.pointer(Point)], [ptr])\n"
+            "std.ffi.close(lib);\n",
+            stdout="= 25.0",
         )
         check(
             "std ffi struct by value",
@@ -344,6 +357,17 @@ def run_cases():
             stderr="out of range",
         )
         check(
+            "std ffi call address",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let fn = std.ffi.call(lib, "shim_get_cmp", "ptr", [], []);\n'
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "std.ffi.call_address(fn, Cmp, [9, 4])\n"
+            'std.ffi.call_address(fn, "i32", ["i32", "i32"], [9, 4])\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 5", "= 5"],
+        )
+        check(
             "std ffi callback basic",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
@@ -453,10 +477,16 @@ def run_cases():
             '    "shim_free_count": {"result": "i32"},\n'
             '    "shim_consume_point": {"result": "void", '
             '"args": ["PointPtr"], "consumes": [0]},\n'
+            '    "shim_consume_free_point": {"result": "void", '
+            '"args": ["PointPtr"], "consumes": [0]},\n'
             '    "shim_save_cmp": {"result": "void", "args": ["Cmp"], '
             '"retains": [0]},\n'
             '    "shim_call_saved": {"result": "i32", '
-            '"args": ["i32", "i32"]}\n'
+            '"args": ["i32", "i32"]},\n'
+            '    "shim_save_text": {"result": "void", "args": ["cstring"], '
+            '"retains": [0]},\n'
+            '    "shim_saved_text_value": {"result": "cstring"},\n'
+            '    "shim_churn_text": {"result": "void", "args": ["usize"]}\n'
             "  },\n"
             '  "constants": {"SHIM_MAX": 16}\n'
             "};\n"
@@ -609,6 +639,47 @@ def run_cases():
             stderr="consumed by C",
         )
         check(
+            "std ffi consumes transfers allocation",
+            "import std;\n"
+            f"let path = {shim};\n"
+            + manifest_spec
+            + "let lib = std.ffi.open(path, spec);\n"
+            'let Point = std.ffi.type(lib, "Point");\n'
+            "let raw = std.ffi.alloc(Point);\n"
+            'std.ffi.call(lib, "shim_consume_free_point", [raw]);\n'
+            "raw = null;\n"
+            'std.ffi.call(lib, "shim_free_count", [])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 1",
+        )
+        check(
+            "std ffi consumes owned pointer",
+            "import std;\n"
+            f"let path = {shim};\n"
+            + manifest_spec
+            + "let lib = std.ffi.open(path, spec);\n"
+            'let owned = std.ffi.call(lib, "shim_alloc_point", []);\n'
+            'std.ffi.call(lib, "shim_consume_free_point", [owned]);\n'
+            "owned = null;\n"
+            'std.ffi.call(lib, "shim_free_count", [])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 1",
+        )
+        check(
+            "std ffi retains cstring",
+            "import std;\n"
+            f"let path = {shim};\n"
+            + manifest_spec
+            + "let lib = std.ffi.open(path, spec);\n"
+            'let text = std.string.repeat("retained-", 64);\n'
+            'std.ffi.call(lib, "shim_save_text", [text]);\n'
+            'std.ffi.call(lib, "shim_churn_text", '
+            "[std.string.len(text)]);\n"
+            'std.ffi.call(lib, "shim_saved_text_value", [])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= " + "retained-" * 64,
+        )
+        check(
             "std ffi library without manifest",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
@@ -634,6 +705,27 @@ def run_cases():
             '{"kind": "struct", "packed": true, '
             '"fields": {"a": "i32"}}}})\n',
             stderr="packed structs are not supported",
+        )
+        check(
+            "std ffi manifest rejects consumes non-pointer",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "functions": {"f": '
+            '{"args": ["i32"], "consumes": [0]}}})\n',
+            stderr="consumes a non-pointer argument",
+        )
+        check(
+            "std ffi manifest rejects retains non-pointer",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "functions": {"f": '
+            '{"args": ["i32"], "retains": [0]}}})\n',
+            stderr="retains a non-pointer argument",
+        )
+        check(
+            "std ffi manifest rejects owned non-pointer",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "functions": {"f": '
+            '{"result": "i32", "returns_owned": true}}})\n',
+            stderr="returns_owned needs a pointer result",
         )
         check(
             "std ffi manifest rejects bitfield",
@@ -900,6 +992,17 @@ def run_cases():
             'import std;\nstd.module.load("/definitely/not/a/module.so")\n',
             stderr="std.module.load",
         )
+        check(
+            "native module v1 additions",
+            "import std;\n"
+            f"std.module.load({native_module});\n"
+            "import test.dynamic;\n"
+            "let c = dynamic.counter_new(7);\n"
+            "dynamic.counter_value(c)\n"
+            "dynamic.list_pair(3)[1]\n"
+            'dynamic.dict_value(4)["value"]\n',
+            stdout_all=["= 7", "= 6", "= 4"],
+        )
         if FFI_SHIM:
             check(
                 "native module missing descriptor",
@@ -929,9 +1032,16 @@ def run_cases():
         assert generated["constants"]["SAMPLE_MAX"] == 16
         assert generated["constants"]["SAMPLE_SHIFT"] == 16
         assert generated["constants"]["SAMPLE_MASK"] == 9
+        assert generated["constants"]["SAMPLE_COMPARE"] == 1
+        assert generated["constants"]["SAMPLE_LOGICAL"] == 0
+        assert generated["constants"]["SAMPLE_TERNARY"] == 7
+        assert generated["constants"]["SAMPLE_CAST"] == 255
+        assert generated["constants"]["SAMPLE_BINARY"] == 5
+        assert generated["constants"]["SAMPLE_FLOAT_SUFFIX"] == 2.5
         assert generated["constants"]["SAMPLE_KIND_A"] == 4
         assert generated["constants"]["SAMPLE_KIND_B"] == 5
         assert generated["constants"]["SAMPLE_KIND_C"] == 6
+        assert generated["constants"]["SAMPLE_KIND_D"] == 7
 
         check_proc = subprocess.run(
             [BIN, "--ffi-gen", "--header", bindgen_header,
@@ -979,6 +1089,51 @@ def run_cases():
         assert packed.returncode == 1
         assert "packed structs are not supported" in packed.stderr
 
+        strict_header = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "bindgen_strict.h"))
+        strict = subprocess.run(
+            [BIN, "--ffi-gen", "--header", strict_header],
+            text=True, capture_output=True, timeout=60)
+        assert strict.returncode == 1, (strict.stdout, strict.stderr)
+        for needle in (
+                "variadic functions are not supported",
+                "unsupported calling convention",
+                "long double is not supported",
+                "unknown type 'unknown_type'",
+                "unknown type '_Alignas'"):
+            assert needle in strict.stderr, (needle, strict.stderr)
+
+        tolerated = subprocess.run(
+            [BIN, "--ffi-gen", "--header", strict_header,
+             "--tolerate-errors"],
+            text=True, capture_output=True, timeout=60)
+        assert tolerated.returncode == 0, (tolerated.stdout,
+                                           tolerated.stderr)
+        assert "warning:" in tolerated.stderr
+
+        types_header = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "bindgen_types.h"))
+        types_output = os.path.join(bindgen_dir, "types.ffi.json")
+        types_gen = subprocess.run(
+            [BIN, "--ffi-gen", "--header", types_header,
+             "-o", types_output],
+            text=True, capture_output=True, timeout=60)
+        assert types_gen.returncode == 0, (types_gen.stdout,
+                                           types_gen.stderr)
+        with open(types_output, encoding="utf-8") as handle:
+            generated_types = _json.load(handle)
+        byte_args = generated_types["functions"]["type_bytes"]["args"]
+        assert byte_args == ["bytes", "bytes", "i32"]
+        assert (generated_types["functions"]["type_text"]["args"][0]
+                == "cstring")
+        assert generated_types["functions"]["type_array"]["args"][0] == {
+            "kind": "pointer", "to": "i32"}
+        assert generated_types["functions"]["type_matrix"]["args"][0] == {
+            "kind": "pointer",
+            "to": {"kind": "array", "element": "i32", "count": 4}}
+
         if has_ffi and FFI_SHIM:
             good_manifest = os.path.join(bindgen_dir, "shim_good.ffi.json")
             with open(good_manifest, "w", encoding="utf-8") as handle:
@@ -1004,6 +1159,23 @@ def run_cases():
                 text=True, capture_output=True, timeout=60)
             assert bad.returncode == 1, (bad.stdout, bad.stderr)
             assert "missing symbol: nope" in bad.stderr
+
+            missing_free = os.path.join(bindgen_dir, "shim_no_free.ffi.json")
+            with open(missing_free, "w", encoding="utf-8") as handle:
+                _json.dump({
+                    "ffi": 1,
+                    "functions": {
+                        "shim_alloc_point": {
+                            "result": "ptr",
+                            "returns_owned": {"free": "no_such_free"},
+                        },
+                    },
+                }, handle)
+            no_free = subprocess.run(
+                [BIN, "--check-ffi", FFI_SHIM, missing_free],
+                text=True, capture_output=True, timeout=60)
+            assert no_free.returncode == 1, (no_free.stdout, no_free.stderr)
+            assert "missing symbol: no_such_free" in no_free.stderr
 
         if has_ffi:
             check(

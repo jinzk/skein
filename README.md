@@ -1427,6 +1427,7 @@ std.ffi.call(lib, "point_make", Point, ["f64", "f64"], [1.0, 2.0]);
 - `ffi.new` 创建由 C++ 管理内存的值，`ffi.alloc` 返回指针，`ffi.deref` 共享同一块内存；
 - 字段读写使用 `p.x` / `p.x = v`，类型和布局检查在 C++ 完成；
 - `ffi.get` / `ffi.set` 用于数组和指针索引，`ffi.offset` / `ffi.cast` 只做受控的指针运算；
+- `ffi.offsetof` 查询字段偏移，`ffi.address_of` 取 struct/array/buffer 的地址并共享 owner；
 - 脚本层没有 `free` / `release` / `own`；内存由引用计数和 GC 回收，C 返回的指针默认借用。
 
 FFI 回调：
@@ -1477,6 +1478,24 @@ std.ffi.call_async(lib, "compare", "i32",
 - 回调仍然运行在解释器线程，可以安全访问脚本状态；
 - 回调内可以继续 `ffi.call` / `ffi.call_async`（有递归深度限制）。
 
+C 函数指针（例如 C 返回的函数指针或 struct 里的 callback 字段）可以用
+`ffi.call_address` 调用：
+
+```text
+import std;
+
+let lib = std.ffi.open("./libalgo.so");
+let fn = std.ffi.call(lib, "get_compare", "ptr", [], []);
+let Cmp = std.ffi.signature("i32", ["i32", "i32"]);
+
+std.ffi.call_address(fn, Cmp, [9, 4]);
+std.ffi.call_address(fn, "i32", ["i32", "i32"], [9, 4]);
+```
+
+- 3 参数形式使用 `ffi.signature` 的 callback 类型；
+- 4 参数形式显式提供返回类型、参数类型列表和参数值列表；
+- 空指针会报错，不会尝试调用。
+
 FFI manifest（可选）：
 
 ```text
@@ -1504,6 +1523,9 @@ std.ffi.constant(lib, "POINT_MAX");
 - manifest 是纯数据，JSON 文件和脚本 dict 共用同一套校验与类型模型；
 - 支持 struct / pointer / array / opaque / callback、函数签名和常量；
 - `returns_owned` / `consumes` / `retains` 由 manifest 声明所有权，脚本层不出现 `free`；
+  `consumes` 对 `ffi.alloc`/`returns_owned` 的内存会真正释放运行时所有权，
+  之后由 C 负责释放；对借用指针只标记为已被消费；
+  `retains` 同时支持 userdata 和 `cstring`/`bytes` 参数存储；
 - 加载时校验 ABI、布局、重复类型、递归 by-value 类型和参数索引；
 - packed / bitfield 直接拒绝，交给静态 C++ 绑定；
 - 显式传入 manifest，不做自动 sidecar 查找。
@@ -1601,6 +1623,8 @@ example.math.ANSWER;
 
 - 插件只包含 `skein_module.h`，不链接解释器符号；
 - `skein_api` 由 host 通过 `init` 传入，值以 opaque handle 传递；
+- `skein_api` v1 追加了 `new_list` / `new_dict` / `as_userdata`；使用新字段前
+  应检查 `size`，旧 host 的 ABI 表会更短；
 - 静态绑定在启动时注册，动态插件通过 `std.module.load` 加载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
@@ -1624,8 +1648,14 @@ skein --ffi-gen \
   不引入 libclang；
 - 只解析 `--header` 指定头文件里的声明，支持 struct、typedef、指针、数组、
   函数声明、函数指针 typedef、enum 和对象式宏常量；
-  常量支持整数表达式（`+ - * / % << >> & | ^ ~` 和括号）；
-- packed、bitfield、变参、柔性数组、匿名 struct/union 会报告并跳过；
+- 常量支持整数表达式（算术、位运算、比较、逻辑、三元、标量强制转换、
+  二进制字面量）以及浮点字面量（含 `f` 后缀）；
+- 通过 `cc -dM` 探测目标 ABI 的 `long`/指针/`wchar_t` 宽度，支持 `--cc`、
+  `-m32` 和 sysroot，而不是假设生成机就是目标机；
+- `char*` 映射为 `cstring`，`unsigned char*` / `uint8_t*` 映射为 `bytes`；
+  函数参数里的定长数组会按 C 规则退化为指针；
+- packed、bitfield、变参、柔性数组、匿名 struct/union、影响布局的属性、
+  未知类型默认直接失败；`--tolerate-errors` 可显式降级为警告并继续；
 - `--symbols` 只导出匹配的函数（`*`/`?` 通配符）；
 - `--check` 用于 CI 校验生成的 manifest 是否过期；
 - 运行时不依赖 C 编译器和头文件，只读 manifest。
@@ -2150,6 +2180,7 @@ std.ffi.open
 std.ffi.close
 std.ffi.call
 std.ffi.call_async
+std.ffi.call_address
 std.ffi.buffer
 std.ffi.buffer_len
 std.ffi.buffer_bytes
@@ -2169,6 +2200,8 @@ std.ffi.set
 std.ffi.to_dict
 std.ffi.sizeof
 std.ffi.alignof
+std.ffi.offsetof
+std.ffi.address_of
 std.ffi.callback
 std.ffi.manifest
 std.ffi.constant

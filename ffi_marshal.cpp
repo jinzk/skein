@@ -6,8 +6,10 @@
 #include "value_ops.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <new>
 
 namespace ffi {
 namespace {
@@ -22,12 +24,6 @@ T load(const unsigned char *src) {
 template <typename T>
 void store(unsigned char *dst, T value) {
     std::memcpy(dst, &value, sizeof(T));
-}
-
-std::size_t align_up(std::size_t value, std::size_t alignment) {
-    if (alignment <= 1)
-        return value;
-    return (value + alignment - 1) / alignment * alignment;
 }
 
 bool is_pointer_value(const struct value_t *v) {
@@ -139,14 +135,24 @@ keepalive::~keepalive() {
 
 memory_block::memory_block(std::size_t size, std::size_t alignment)
     : keep(std::make_shared<keepalive>()) {
+    /* malloc returns storage aligned for every fundamental type; the manifest
+     * type system has no over-aligned types (C aligned attributes are
+     * rejected by --ffi-gen). */
+    (void)alignment;
     this->size = size ? size : 1;
-    const std::size_t align = alignment ? alignment : 1;
-    raw = std::make_shared<std::vector<unsigned char>>(this->size + align);
-    const std::uintptr_t base = (std::uintptr_t)raw->data();
-    const std::uintptr_t aligned = align_up(base, align);
-    data = raw->data() + (aligned - base);
+    base = (unsigned char *)std::malloc(this->size);
+    if (!base)
+        throw std::bad_alloc();
+    data = base;
     std::memset(data, 0, this->size);
 }
+
+memory_block::~memory_block() {
+    if (!released && base)
+        std::free(base);
+}
+
+void memory_block::release() { released = true; }
 
 struct value_t *read_value(const type_ptr &t, const unsigned char *src,
                            std::shared_ptr<void> owner, std::string *error,

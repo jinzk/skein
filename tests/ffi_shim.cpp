@@ -224,6 +224,13 @@ SHIM_EXPORT void shim_consume_point(struct shim_point *point) {
     (void)point;
 }
 
+SHIM_EXPORT void shim_consume_free_point(struct shim_point *point) {
+    if (!point)
+        return;
+    ++shim_free_counter;
+    std::free(point);
+}
+
 SHIM_EXPORT void shim_spawn_notify(shim_notify_fn fn, std::int32_t value) {
     std::thread worker([fn, value]() { fn(value); });
     worker.join();
@@ -241,6 +248,34 @@ SHIM_EXPORT void shim_save_cmp(shim_cmp_fn fn) { shim_saved_cmp = fn; }
 
 SHIM_EXPORT std::int32_t shim_call_saved(std::int32_t a, std::int32_t b) {
     return shim_saved_cmp ? shim_saved_cmp(a, b) : 0;
+}
+
+static const char *shim_saved_text = nullptr;
+
+SHIM_EXPORT void shim_save_text(const char *text) { shim_saved_text = text; }
+
+SHIM_EXPORT const char *shim_saved_text_value(void) {
+    return shim_saved_text;
+}
+
+static std::int32_t shim_subtract(std::int32_t a, std::int32_t b) {
+    return a - b;
+}
+
+SHIM_EXPORT shim_cmp_fn shim_get_cmp(void) { return shim_subtract; }
+
+SHIM_EXPORT void shim_churn_text(std::size_t size) {
+    std::size_t begin = size > 16 ? size - 16 : 1;
+    std::size_t end = size + 16;
+    for (int pass = 0; pass < 4; ++pass) {
+        for (std::size_t n = begin; n <= end; ++n) {
+            void *block = std::malloc(n ? n : 1);
+            if (!block)
+                return;
+            std::memset(block, 0x7f, n ? n : 1);
+            std::free(block);
+        }
+    }
 }
 
 } // extern "C"

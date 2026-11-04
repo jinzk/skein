@@ -336,12 +336,26 @@ void mark_consumed(struct value_t *value) {
         return;
     const userdata_value_t *userdata = (const userdata_value_t *)value;
     if (userdata->meta == &pointer_native_type) {
-        std::static_pointer_cast<pointer_handle>(userdata->data)->consumed =
-            true;
+        std::shared_ptr<pointer_handle> pointer =
+            std::static_pointer_cast<pointer_handle>(userdata->data);
+        pointer->consumed = true;
+        if (pointer->release_owner) {
+            pointer->release_owner();
+            pointer->release_owner = nullptr;
+        }
+        pointer->owner.reset();
+        pointer->keep.reset();
     } else if (userdata->meta == &object_native_type ||
                userdata->meta == &array_native_type) {
-        std::static_pointer_cast<object_handle>(userdata->data)->consumed =
-            true;
+        std::shared_ptr<object_handle> object =
+            std::static_pointer_cast<object_handle>(userdata->data);
+        object->consumed = true;
+        if (object->release_owner) {
+            object->release_owner();
+            object->release_owner = nullptr;
+        }
+        object->owner.reset();
+        object->keep.reset();
     }
 }
 

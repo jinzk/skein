@@ -37,6 +37,7 @@ struct options {
     std::string output;
     bool emit_constants = true;
     bool check = false;
+    bool tolerate_errors = false;
 };
 
 struct constant_out {
@@ -44,6 +45,19 @@ struct constant_out {
     long long i = 0;
     double f = 0.0;
     std::string s;
+};
+
+/* Widths reported by the selected C compiler.  These are used instead of the
+ * host's sizeof() so that --cc/-m32/sysroot produce target-correct manifests. */
+struct abi_info {
+    int short_bytes = (int)sizeof(short);
+    int int_bytes = (int)sizeof(int);
+    int long_bytes = (int)sizeof(long);
+    int long_long_bytes = (int)sizeof(long long);
+    int pointer_bytes = (int)sizeof(void *);
+    int wchar_bytes = 4;
+    bool char_unsigned = false;
+    bool wchar_unsigned = false;
 };
 
 /* -------------------------------------------------------------------------
@@ -120,7 +134,13 @@ void tokenize_line(const std::string &line, int pack,
             t.text = "...";
             i += 3;
         } else if (line.compare(i, 2, "<<") == 0 ||
-                   line.compare(i, 2, ">>") == 0) {
+                   line.compare(i, 2, ">>") == 0 ||
+                   line.compare(i, 2, "==") == 0 ||
+                   line.compare(i, 2, "!=") == 0 ||
+                   line.compare(i, 2, "<=") == 0 ||
+                   line.compare(i, 2, ">=") == 0 ||
+                   line.compare(i, 2, "&&") == 0 ||
+                   line.compare(i, 2, "||") == 0) {
             t.text = line.substr(i, 2);
             i += 2;
         } else {
@@ -230,14 +250,17 @@ bool parse_pack_directive(const std::string &line, int &pack,
 
 
 /* Small integer constant-expression evaluator for #define/enum values. */
+bool is_type_keyword(const std::string &word);
+
 class integer_expression {
 public:
     integer_expression(const std::string &text,
-                       const std::map<std::string, long long> &names)
-        : text_(text), names_(names) {}
+                       const std::map<std::string, long long> &names,
+                       const abi_info &abi)
+        : text_(text), names_(names), abi_(abi) {}
 
     bool evaluate(long long &out) {
-        out = parse_or();
+        out = parse_conditional();
         skip();
         return ok_ && position_ == text_.size();
     }
@@ -268,24 +291,184 @@ private:
         return false;
     }
 
-    long long parse_or() {
+    long long apply_cast(int bytes, bool is_unsigned_type, long long value) {
+        if (bytes >= 8)
+            return value;
+        const int bits = bytes * 8;
+        unsigned long long mask = (1ULL << bits) - 1;
+        unsigned long long narrowed = (unsigned long long)value & mask;
+        if (!is_unsigned_type && (narrowed & (1ULL << (bits - 1))))
+            narrowed |= ~mask;
+        return (long long)narrowed;
+    }
+
+    /* Parse the type name of a simple scalar cast.  The caller consumes the
+     * closing parenthesis. */
+    bool parse_cast_type(int &bytes, bool &is_unsigned_type) {
+        skip();
+        const size_t save = position_;
+        bool has_unsigned = false;
+        bool has_signed = false;
+        bool has_short = false;
+        bool has_char = false;
+        bool has_bool = false;
+        bool has_float = false;
+        bool has_double = false;
+        bool has_void = false;
+        bool has_complex = false;
+        int longs = 0;
+        bool any = false;
+        for (;;) {
+            skip();
+            if (position_ >= text_.size() ||
+                (!std::isalpha((unsigned char)text_[position_]) &&
+                 text_[position_] != '_'))
+                break;
+            const size_t start = position_;
+            while (position_ < text_.size() &&
+                   is_ident_char((unsigned char)text_[position_]))
+                ++position_;
+            std::string word = text_.substr(start, position_ - start);
+            if (!is_type_keyword(word)) {
+                position_ = save;
+                return false;
+            }
+            any = true;
+            if (word == "unsigned" || word == "__unsigned__")
+                has_unsigned = true;
+            else if (word == "signed" || word == "__signed__")
+                has_signed = true;
+            else if (word == "short")
+                has_short = true;
+            else if (word == "char")
+                has_char = true;
+            else if (word == "long")
+                ++longs;
+            else if (word == "_Bool" || word == "bool")
+                has_bool = true;
+            else if (word == "float")
+                has_float = true;
+            else if (word == "double")
+                has_double = true;
+            else if (word == "void")
+                has_void = true;
+            else if (word == "_Complex")
+                has_complex = true;
+        }
+        skip();
+        if (!any || position_ >= text_.size() || text_[position_] != ')' ||
+            has_float || has_double || has_void || has_complex) {
+            position_ = save;
+            return false;
+        }
+        if (has_char || has_bool)
+            bytes = 1;
+        else if (has_short)
+            bytes = abi_.short_bytes;
+        else if (longs >= 2)
+            bytes = abi_.long_long_bytes;
+        else if (longs == 1)
+            bytes = abi_.long_bytes;
+        else
+            bytes = abi_.int_bytes;
+        is_unsigned_type = has_unsigned && !has_signed;
+        return true;
+    }
+
+    long long parse_conditional() {
+        long long condition = parse_logical_or();
+        if (ok_ && eat('?')) {
+            long long yes = parse_conditional();
+            if (!eat(':')) {
+                ok_ = false;
+                return 0;
+            }
+            long long no = parse_conditional();
+            return condition ? yes : no;
+        }
+        return condition;
+    }
+
+    long long parse_logical_or() {
+        long long value = parse_logical_and();
+        while (ok_ && eat("||")) {
+            long long right = parse_logical_and();
+            value = (value != 0 || right != 0) ? 1 : 0;
+        }
+        return value;
+    }
+
+    long long parse_logical_and() {
+        long long value = parse_bitor();
+        while (ok_ && eat("&&")) {
+            long long right = parse_bitor();
+            value = (value != 0 && right != 0) ? 1 : 0;
+        }
+        return value;
+    }
+
+    bool eat_bitor() {
+        skip();
+        if (text_.compare(position_, 2, "||") == 0)
+            return false;
+        return eat('|');
+    }
+
+    bool eat_bitand() {
+        skip();
+        if (text_.compare(position_, 2, "&&") == 0)
+            return false;
+        return eat('&');
+    }
+
+    long long parse_bitor() {
         long long value = parse_xor();
-        while (ok_ && eat('|'))
+        while (ok_ && eat_bitor())
             value |= parse_xor();
         return value;
     }
 
     long long parse_xor() {
-        long long value = parse_and();
+        long long value = parse_bitand();
         while (ok_ && eat('^'))
-            value ^= parse_and();
+            value ^= parse_bitand();
         return value;
     }
 
-    long long parse_and() {
+    long long parse_bitand() {
+        long long value = parse_equality();
+        while (ok_ && eat_bitand())
+            value &= parse_equality();
+        return value;
+    }
+
+    long long parse_equality() {
+        long long value = parse_relational();
+        for (;;) {
+            if (ok_ && eat("=="))
+                value = value == parse_relational() ? 1 : 0;
+            else if (ok_ && eat("!="))
+                value = value != parse_relational() ? 1 : 0;
+            else
+                break;
+        }
+        return value;
+    }
+
+    long long parse_relational() {
         long long value = parse_shift();
-        while (ok_ && eat('&'))
-            value &= parse_shift();
+        for (;;) {
+            if (ok_ && eat("<="))
+                value = value <= parse_shift() ? 1 : 0;
+            else if (ok_ && eat(">="))
+                value = value >= parse_shift() ? 1 : 0;
+            else if (ok_ && eat('<'))
+                value = value < parse_shift() ? 1 : 0;
+            else if (ok_ && eat('>'))
+                value = value > parse_shift() ? 1 : 0;
+            else
+                break;
+        }
         return value;
     }
 
@@ -365,7 +548,18 @@ private:
             return 0;
         }
         if (eat('(')) {
-            long long value = parse_or();
+            const size_t save = position_;
+            int cast_bytes = 0;
+            bool cast_unsigned = false;
+            if (parse_cast_type(cast_bytes, cast_unsigned)) {
+                if (!eat(')')) {
+                    ok_ = false;
+                    return 0;
+                }
+                return apply_cast(cast_bytes, cast_unsigned, parse_unary());
+            }
+            position_ = save;
+            long long value = parse_conditional();
             if (!eat(')'))
                 ok_ = false;
             return value;
@@ -392,6 +586,21 @@ private:
             }
             if (!eat('\''))
                 ok_ = false;
+            return value;
+        }
+        if (text_.compare(position_, 2, "0b") == 0 ||
+            text_.compare(position_, 2, "0B") == 0) {
+            position_ += 2;
+            long long value = 0;
+            while (position_ < text_.size() &&
+                   (text_[position_] == '0' || text_[position_] == '1')) {
+                value = (value << 1) | (text_[position_] - '0');
+                ++position_;
+            }
+            while (position_ < text_.size() &&
+                   (text_[position_] == 'u' || text_[position_] == 'U' ||
+                    text_[position_] == 'l' || text_[position_] == 'L'))
+                ++position_;
             return value;
         }
         if (std::isdigit((unsigned char)text_[position_])) {
@@ -440,13 +649,14 @@ private:
 
     const std::string &text_;
     const std::map<std::string, long long> &names_;
+    const abi_info &abi_;
     size_t position_ = 0;
     bool ok_ = true;
 };
 
 bool parse_constant_text(const std::string &text,
                              const std::map<std::string, long long> &names,
-                             constant_out &out) {
+                             const abi_info &abi, constant_out &out) {
     std::string value = trim(text);
     if (value.empty())
         return false;
@@ -472,17 +682,25 @@ bool parse_constant_text(const std::string &text,
         return true;
     }
     long long integer = 0;
-    integer_expression expression(value, names);
+    integer_expression expression(value, names, abi);
     if (expression.evaluate(integer)) {
         out.kind = constant_out::INT;
         out.i = integer;
         return true;
     }
-    if (value.find('.') != std::string::npos ||
-        value.find('e') != std::string::npos ||
-        value.find('E') != std::string::npos) {
+    std::string float_text = value;
+    bool has_float_marker = float_text.find('.') != std::string::npos ||
+                            float_text.find('e') != std::string::npos ||
+                            float_text.find('E') != std::string::npos ||
+                            float_text.find('p') != std::string::npos ||
+                            float_text.find('P') != std::string::npos;
+    while (!float_text.empty() &&
+           (float_text.back() == 'f' || float_text.back() == 'F' ||
+            float_text.back() == 'l' || float_text.back() == 'L'))
+        float_text.pop_back();
+    if (has_float_marker) {
         char *end = NULL;
-        double parsed = std::strtod(value.c_str(), &end);
+        double parsed = std::strtod(float_text.c_str(), &end);
         if (end && *end == '\0') {
             out.kind = constant_out::FLOAT;
             out.f = parsed;
@@ -501,16 +719,90 @@ std::uint64_t fnv1a(const std::string &text) {
     return hash;
 }
 
-bool preprocess(const options &o, std::vector<token> &tokens,
-                std::map<std::string, constant_out> &constants,
-                std::string &preprocessed, std::string &error) {
-    std::string cc = o.cc.empty() ? "cc" : o.cc;
+std::string compiler_flags(const options &o) {
     std::ostringstream command;
-    command << shell_quote(cc) << " -E -x c -std=gnu11 -dD";
     for (const std::string &include : o.includes)
         command << " -I" << shell_quote(include);
     for (const std::string &define : o.defines)
         command << " -D" << shell_quote(define);
+    return command.str();
+}
+
+int macro_int(const std::map<std::string, std::string> &macros,
+              const char *name, int fallback) {
+    auto it = macros.find(name);
+    if (it == macros.end())
+        return fallback;
+    char *end = NULL;
+    long value = std::strtol(it->second.c_str(), &end, 10);
+    if (!end || *end != '\0' || value <= 0 || value > 64)
+        return fallback;
+    return (int)value;
+}
+
+/* Ask the selected compiler for its target data model instead of assuming the
+ * host's.  This keeps `--cc`, `-m32`, and sysroot flags honest. */
+void probe_abi(const options &o, abi_info &abi, std::string &warning) {
+    std::string cc = o.cc.empty() ? "cc" : o.cc;
+    std::ostringstream command;
+    command << shell_quote(cc) << " -dM -E -x c -std=gnu11"
+            << compiler_flags(o) << " - ";
+#ifdef _WIN32
+    command << "< NUL 2>&1";
+#else
+    command << "</dev/null 2>&1";
+#endif
+    std::string output;
+    int status = -1;
+    if (!platform_run_command(command.str(), {}, output, status) ||
+        status != 0) {
+        warning = "cannot probe the target ABI; using host widths";
+        return;
+    }
+
+    std::map<std::string, std::string> macros;
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.compare(0, 8, "#define ") != 0)
+            continue;
+        size_t start = 8;
+        while (start < line.size() &&
+               std::isspace((unsigned char)line[start]))
+            ++start;
+        size_t end = start;
+        while (end < line.size() &&
+               is_ident_char((unsigned char)line[end]))
+            ++end;
+        if (end == start)
+            continue;
+        size_t value = end;
+        while (value < line.size() &&
+               std::isspace((unsigned char)line[value]))
+            ++value;
+        macros[line.substr(start, end - start)] = line.substr(value);
+    }
+
+    abi.short_bytes = macro_int(macros, "__SIZEOF_SHORT__", abi.short_bytes);
+    abi.int_bytes = macro_int(macros, "__SIZEOF_INT__", abi.int_bytes);
+    abi.long_bytes = macro_int(macros, "__SIZEOF_LONG__", abi.long_bytes);
+    abi.long_long_bytes =
+        macro_int(macros, "__SIZEOF_LONG_LONG__", abi.long_long_bytes);
+    abi.pointer_bytes =
+        macro_int(macros, "__SIZEOF_POINTER__", abi.pointer_bytes);
+    abi.wchar_bytes = macro_int(macros, "__SIZEOF_WCHAR_T__", abi.wchar_bytes);
+    abi.char_unsigned = macros.count("__CHAR_UNSIGNED__") != 0;
+    abi.wchar_unsigned = macros.count("__WCHAR_UNSIGNED__") != 0;
+}
+
+bool preprocess(const options &o, const abi_info &abi,
+                std::vector<token> &tokens,
+                std::map<std::string, constant_out> &constants,
+                std::string &preprocessed, std::string &error) {
+    std::string cc = o.cc.empty() ? "cc" : o.cc;
+    std::ostringstream command;
+    command << shell_quote(cc) << " -E -x c -std=gnu11 -dD"
+            << compiler_flags(o);
     for (size_t i = 1; i < o.headers.size(); ++i)
         command << " -include " << shell_quote(o.headers[i]);
     command << " " << shell_quote(o.headers[0]) << " 2>&1";
@@ -579,7 +871,7 @@ bool preprocess(const options &o, std::vector<token> &tokens,
                             names[entry.first] = entry.second.i;
                     }
                     constant_out constant;
-                    if (parse_constant_text(trimmed.substr(i), names,
+                    if (parse_constant_text(trimmed.substr(i), names, abi,
                                             constant))
                         constants[name] = std::move(constant);
                 }
@@ -719,8 +1011,10 @@ struct spec {
 class parser {
 public:
     parser(std::vector<token> tokens,
-           std::map<std::string, constant_out> constants)
-        : tokens_(std::move(tokens)), constants_(std::move(constants)) {
+           std::map<std::string, constant_out> constants,
+           const abi_info &abi, bool tolerate_errors)
+        : tokens_(std::move(tokens)), constants_(std::move(constants)),
+          abi_(abi), tolerate_errors_(tolerate_errors) {
         preload_typedefs();
     }
 
@@ -743,14 +1037,17 @@ public:
                     continue;
                 parse_declaration_rest(s);
             } catch (const parse_error &e) {
-                warnings_.push_back(e.message);
-                if (e.fatal)
-                    fatal_ = true;
+                record_error(e);
                 position_ = start;
                 skip_declaration();
                 if (position_ == start)
                     ++position_;
             }
+        }
+        try {
+            validate_value_types();
+        } catch (const parse_error &e) {
+            record_error(e);
         }
         error.clear();
         return true;
@@ -770,11 +1067,30 @@ private:
         typedefs_["uint32_t"] = make_scalar("u32");
         typedefs_["int64_t"] = make_scalar("i64");
         typedefs_["uint64_t"] = make_scalar("u64");
-        typedefs_["intptr_t"] = make_scalar("isize");
-        typedefs_["uintptr_t"] = make_scalar("usize");
-        typedefs_["ptrdiff_t"] = make_scalar("isize");
-        typedefs_["size_t"] = make_scalar("usize");
-        typedefs_["ssize_t"] = make_scalar("isize");
+        const char *signed_pointer =
+            abi_.pointer_bytes == 4 ? "i32" : "i64";
+        const char *unsigned_pointer =
+            abi_.pointer_bytes == 4 ? "u32" : "u64";
+        typedefs_["intptr_t"] = make_scalar(signed_pointer);
+        typedefs_["uintptr_t"] = make_scalar(unsigned_pointer);
+        typedefs_["ptrdiff_t"] = make_scalar(signed_pointer);
+        typedefs_["size_t"] = make_scalar(unsigned_pointer);
+        typedefs_["ssize_t"] = make_scalar(signed_pointer);
+        typedefs_["intmax_t"] =
+            make_scalar(abi_.long_long_bytes == 8 ? "i64" : "i32");
+        typedefs_["uintmax_t"] =
+            make_scalar(abi_.long_long_bytes == 8 ? "u64" : "u32");
+        if (abi_.wchar_bytes == 1)
+            typedefs_["wchar_t"] =
+                make_scalar(abi_.wchar_unsigned ? "u8" : "i8");
+        else if (abi_.wchar_bytes == 2)
+            typedefs_["wchar_t"] =
+                make_scalar(abi_.wchar_unsigned ? "u16" : "i16");
+        else
+            typedefs_["wchar_t"] =
+                make_scalar(abi_.wchar_unsigned ? "u32" : "i32");
+        typedefs_["char16_t"] = make_scalar("u16");
+        typedefs_["char32_t"] = make_scalar("u32");
         typedefs_["bool"] = make_scalar("u8");
         typedefs_["_Bool"] = make_scalar("u8");
     }
@@ -803,8 +1119,54 @@ private:
             fail("expected '" + text + "'");
     }
 
-    [[noreturn]] void fail(const std::string &message, bool fatal = false) {
+    [[noreturn]] void fail(const std::string &message, bool fatal = true) {
         throw parse_error{message, fatal};
+    }
+
+    void record_error(const parse_error &error) {
+        warnings_.push_back(error.message);
+        if (error.fatal && !tolerate_errors_)
+            fatal_ = true;
+    }
+
+    void collect_value_type(const ctype_ptr &type, const std::string &where,
+                            std::vector<std::string> &errors) {
+        if (!type)
+            return;
+        if (type->kind == ctype::RECORD) {
+            if (!records_.count(type->name))
+                errors.push_back(
+                    "struct " + type->name +
+                    " is only forward-declared and cannot be used by value (" +
+                    where + ")");
+            return;
+        }
+        if (type->kind == ctype::ARRAY)
+            collect_value_type(type->element, where, errors);
+    }
+
+    void validate_value_types() {
+        std::vector<std::string> errors;
+        for (const auto &entry : records_) {
+            for (const auto &field : entry.second.fields)
+                collect_value_type(field.second,
+                                   "field " + entry.first + "." + field.first,
+                                   errors);
+        }
+        for (const auto &function : functions_) {
+            collect_value_type(function.result,
+                               "return type of " + function.name, errors);
+            for (std::size_t i = 0; i < function.args.size(); ++i)
+                collect_value_type(function.args[i],
+                                   "argument " + std::to_string(i + 1) +
+                                       " of " + function.name,
+                                   errors);
+        }
+        for (const std::string &message : errors) {
+            warnings_.push_back(message);
+            if (!tolerate_errors_)
+                fatal_ = true;
+        }
     }
 
     void advance() {
@@ -855,6 +1217,17 @@ private:
                 continue;
             }
             break;
+        }
+    }
+
+    ctype_ptr integer_type(int bytes, bool is_unsigned_type) {
+        switch (bytes) {
+            case 1: return make_scalar(is_unsigned_type ? "u8" : "i8");
+            case 2: return make_scalar(is_unsigned_type ? "u16" : "i16");
+            case 4: return make_scalar(is_unsigned_type ? "u32" : "i32");
+            case 8: return make_scalar(is_unsigned_type ? "u64" : "i64");
+            default:
+                fail("unsupported integer width");
         }
     }
 
@@ -916,15 +1289,14 @@ private:
         if (is_char)
             return make_scalar(is_unsigned ? "u8" : "i8");
         if (is_short)
-            return make_scalar(is_unsigned ? "u16" : "i16");
+            return integer_type(abi_.short_bytes, is_unsigned);
         if (longs >= 2)
-            return make_scalar(is_unsigned ? "u64" : "i64");
+            return integer_type(abi_.long_long_bytes, is_unsigned);
         if (longs == 1)
-            return make_scalar(is_unsigned
-                                   ? (sizeof(long) == 8 ? "u64" : "u32")
-                                   : (sizeof(long) == 8 ? "i64" : "i32"));
-        (void)is_int;
-        return make_scalar(is_unsigned ? "u32" : "i32");
+            return integer_type(abi_.long_bytes, is_unsigned);
+        if (is_int)
+            return integer_type(abi_.int_bytes, is_unsigned);
+        return integer_type(abi_.int_bytes, is_unsigned);
     }
 
     ctype_ptr parse_tag(const attribute_flags &outer) {
@@ -940,7 +1312,7 @@ private:
         if (accept("{")) {
             if (keyword == "enum") {
                 parse_enum_body();
-                result = make_scalar("i32");
+                result = integer_type(abi_.int_bytes, false);
             } else if (keyword == "union") {
                 skip_declaration();
                 fail("unions are not supported", true);
@@ -1055,7 +1427,7 @@ private:
                         names[entry.first] = entry.second.i;
                 }
                 long long parsed = 0;
-                integer_expression expression(expression_text, names);
+                integer_expression expression(expression_text, names, abi_);
                 if (!expression.evaluate(parsed))
                     fail("unsupported enumerator value", true);
                 value = parsed;
@@ -1129,7 +1501,10 @@ private:
                     advance();
                     continue;
                 }
-                fail("unknown type '" + text + "'");
+                fail("unknown type '" + text +
+                         "'; pass the header that defines it with "
+                         "--header",
+                     true);
             }
             break;
         }
@@ -1226,14 +1601,18 @@ private:
                 return;
             }
             spec s = parse_specifiers();
+            if (s.unsupported_convention)
+                fail("unsupported calling convention");
             declarator d = parse_declarator();
             if (d.variadic)
                 variadic = true;
             if (d.is_callback) {
+                if (d.variadic)
+                    fail("variadic callbacks are not supported");
                 ctype_ptr result = apply_pointers(s.base, d.pointers);
                 params.push_back(make_callback(result, d.params));
             } else {
-                params.push_back(apply_type(s.base, d));
+                params.push_back(decay_parameter(apply_type(s.base, d)));
             }
             if (!accept(","))
                 break;
@@ -1244,8 +1623,11 @@ private:
         ctype_ptr type = std::move(base);
         for (int i = 0; i < pointers; ++i) {
             if (type && type->kind == ctype::SCALAR &&
-                (type->name == "i8" || type->name == "u8")) {
+                type->name == "i8") {
                 type = make_scalar("cstring");
+            } else if (type && type->kind == ctype::SCALAR &&
+                       type->name == "u8") {
+                type = make_scalar("bytes");
             } else if (type && type->kind == ctype::SCALAR &&
                        type->name == "void") {
                 type = make_scalar("ptr");
@@ -1265,9 +1647,20 @@ private:
         return type;
     }
 
+    /* C function parameters of array type are adjusted to pointers one level
+     * at a time: `int a[4]` becomes `int *`, `int a[][4]` becomes
+     * `int (*)[4]`. */
+    ctype_ptr decay_parameter(ctype_ptr type) {
+        while (type && type->kind == ctype::ARRAY)
+            type = make_pointer(type->element);
+        return type;
+    }
+
     void parse_typedef() {
         expect("typedef");
         spec s = parse_specifiers();
+        if (s.unsupported_convention)
+            fail("unsupported calling convention");
         if (s.layout_unsafe)
             fail("layout-changing attribute '" + s.layout_name +
                      "' is not supported", true);
@@ -1279,6 +1672,8 @@ private:
                 fail("layout-changing attribute '" + d.layout_name +
                      "' is not supported", true);
             if (d.is_callback) {
+                if (d.variadic)
+                    fail("variadic callbacks are not supported");
                 ctype_ptr result = apply_pointers(s.base, d.pointers);
                 callback_out out;
                 out.name = d.name;
@@ -1444,6 +1839,7 @@ private:
 
     std::vector<token> tokens_;
     std::map<std::string, constant_out> constants_;
+    abi_info abi_;
     std::map<std::string, ctype_ptr> typedefs_;
     std::map<std::string, record_out> records_;
     std::map<std::string, callback_out> callbacks_;
@@ -1453,6 +1849,7 @@ private:
     size_t position_ = 0;
     size_t anon_counter_ = 0;
     bool fatal_ = false;
+    bool tolerate_errors_ = false;
 
 public:
     const std::vector<std::string> &warnings() const { return warnings_; }
@@ -1680,6 +2077,7 @@ void print_usage() {
         "  --module <name>       manifest library name (default: header stem)\n"
         "  -o, --output <path>   write the manifest here (default: stdout)\n"
         "  --no-constants        do not emit #define/enum constants\n"
+        "  --tolerate-errors     downgrade unsupported declarations to warnings\n"
         "  --check               fail if the output file is out of date\n");
 }
 
@@ -1730,6 +2128,8 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
             o.output = value();
         } else if (arg == "--no-constants") {
             o.emit_constants = false;
+        } else if (arg == "--tolerate-errors") {
+            o.tolerate_errors = true;
         } else if (arg == "--check") {
             o.check = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -1748,10 +2148,17 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
     if (o.module.empty())
         o.module = default_module(o.headers.front());
 
+    abi_info abi;
+    std::string abi_warning;
+    probe_abi(o, abi, abi_warning);
+    if (!abi_warning.empty())
+        std::fprintf(stderr, "skein --ffi-gen: warning: %s\n",
+                     abi_warning.c_str());
+
     std::vector<token> tokens;
     std::map<std::string, constant_out> constants;
     std::string preprocessed;
-    if (!preprocess(o, tokens, constants, preprocessed, error))
+    if (!preprocess(o, abi, tokens, constants, preprocessed, error))
         return 1;
 
     std::string cpp_token;
@@ -1761,7 +2168,8 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
         return 1;
     }
 
-    parser p(std::move(tokens), std::move(constants));
+    parser p(std::move(tokens), std::move(constants), abi,
+             o.tolerate_errors);
     if (!p.parse(error))
         return 1;
     p.keep_functions(o.symbols);

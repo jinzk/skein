@@ -6,6 +6,7 @@
 #include "ffi_types.h"
 #include "valuetype.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,6 +38,7 @@ struct pointer_handle {
     unsigned char *address = nullptr;
     std::shared_ptr<void> owner;
     std::shared_ptr<keepalive> keep;
+    std::function<void()> release_owner;
     bool consumed = false;
 };
 
@@ -48,6 +50,7 @@ struct object_handle {
     unsigned char *address = nullptr;
     std::shared_ptr<void> owner;
     std::shared_ptr<keepalive> keep;
+    std::function<void()> release_owner;
     bool consumed = false;
 };
 

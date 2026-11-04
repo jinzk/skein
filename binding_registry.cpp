@@ -300,6 +300,32 @@ skein_value *api_call(skein_context *ctx, const skein_value *callee,
                             std::move(call_args)));
 }
 
+skein_value *api_new_list(skein_context *ctx) {
+    (void)ctx;
+    return as_handle((value_t *)newlistval());
+}
+
+skein_value *api_new_dict(skein_context *ctx) {
+    (void)ctx;
+    return as_handle((value_t *)newdictval());
+}
+
+bool api_as_userdata(const skein_value *value,
+                     const skein_native_type *type, void **data) {
+    if (!value || !type || as_value(value)->type != T_userdata)
+        return false;
+    const userdata_value_t *userdata =
+        (const userdata_value_t *)as_value(value);
+    if (userdata->meta != meta_for(type))
+        return false;
+    const c_userdata *payload = (const c_userdata *)userdata->data.get();
+    if (!payload || payload->type != type)
+        return false;
+    if (data)
+        *data = payload->data;
+    return true;
+}
+
 const skein_api *api_table() {
     static const skein_api api = {
         SKEIN_MODULE_ABI_VERSION,
@@ -327,6 +353,9 @@ const skein_api *api_table() {
         api_dup_value,
         api_free_value,
         api_call,
+        api_new_list,
+        api_new_dict,
+        api_as_userdata,
     };
     return &api;
 }

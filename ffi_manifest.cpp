@@ -695,6 +695,29 @@ bool build_manifest(struct value_t *spec,
                 !parse_returns_owned(item, fn.returns_owned,
                                      fn.free_function, error))
                 return false;
+            for (std::size_t index : fn.consumes) {
+                kind_t kind = fn.args[index]->kind;
+                if (kind != kind_t::pointer && kind != kind_t::opaque) {
+                    error = "function " + name +
+                            " consumes a non-pointer argument";
+                    return false;
+                }
+            }
+            for (std::size_t index : fn.retains) {
+                if (!is_pointer_like(fn.args[index]->kind)) {
+                    error = "function " + name +
+                            " retains a non-pointer argument";
+                    return false;
+                }
+            }
+            if (fn.returns_owned &&
+                fn.result->kind != kind_t::pointer &&
+                fn.result->kind != kind_t::opaque &&
+                fn.result->kind != kind_t::callback) {
+                error = "function " + name +
+                        " returns_owned needs a pointer result";
+                return false;
+            }
             result->functions.emplace(name, std::move(fn));
         }
     }

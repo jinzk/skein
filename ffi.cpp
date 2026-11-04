@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -249,6 +250,21 @@ static value_t *ffi_callback(const std::vector<value_t *> &args) {
  * Values
  * ---------------------------------------------------------------------- */
 
+static void set_release_owner(value_t *value,
+                              std::function<void()> release) {
+    if (!value || value->type != T_userdata)
+        return;
+    userdata_value_t *userdata = (userdata_value_t *)value;
+    if (userdata->meta == &ffi::pointer_native_type) {
+        std::static_pointer_cast<ffi::pointer_handle>(userdata->data)
+            ->release_owner = std::move(release);
+    } else if (userdata->meta == &ffi::object_native_type ||
+               userdata->meta == &ffi::array_native_type) {
+        std::static_pointer_cast<ffi::object_handle>(userdata->data)
+            ->release_owner = std::move(release);
+    }
+}
+
 static value_t *ffi_new(const std::vector<value_t *> &args) {
     if (args.size() != 1 && args.size() != 2) {
         yyerror("std.ffi.new expects 1 or 2 arguments");
@@ -278,8 +294,10 @@ static value_t *ffi_new(const std::vector<value_t *> &args) {
             return NULL;
         }
     }
-    return ffi::new_object_value(std::move(type), block->data, block,
-                                 block->keep);
+    value_t *result = ffi::new_object_value(std::move(type), block->data,
+                                            block, block->keep);
+    set_release_owner(result, [block]() { block->release(); });
+    return result;
 }
 
 static value_t *ffi_alloc(const std::vector<value_t *> &args) {
@@ -300,8 +318,10 @@ static value_t *ffi_alloc(const std::vector<value_t *> &args) {
     }
     std::shared_ptr<ffi::memory_block> block =
         std::make_shared<ffi::memory_block>(type->size, type->align);
-    return ffi::new_pointer_value(std::move(type), block->data, block,
-                                  block->keep);
+    value_t *result = ffi::new_pointer_value(std::move(type), block->data,
+                                             block, block->keep);
+    set_release_owner(result, [block]() { block->release(); });
+    return result;
 }
 
 static value_t *ffi_ptr(const std::vector<value_t *> &args) {
@@ -342,6 +362,8 @@ static value_t *ffi_deref(const std::vector<value_t *> &args) {
     if (!value)
         yyerror("ffi.deref: %s", error.empty() ? "cannot read value"
                                                : error.c_str());
+    else if (pointer->release_owner)
+        set_release_owner(value, pointer->release_owner);
     return value;
 }
 
@@ -363,9 +385,13 @@ static value_t *ffi_offset(const std::vector<value_t *> &args) {
     }
     long long index = ((int_value_t *)args[1])->value;
     if (!pointer->address) {
-        if (index == 0)
-            return ffi::new_pointer_value(pointer->pointee, nullptr,
-                                          pointer->owner, pointer->keep);
+        if (index == 0) {
+            value_t *value = ffi::new_pointer_value(
+                pointer->pointee, nullptr, pointer->owner, pointer->keep);
+            if (pointer->release_owner)
+                set_release_owner(value, pointer->release_owner);
+            return value;
+        }
         yyerror("ffi.offset: null pointer");
         return NULL;
     }
@@ -377,8 +403,11 @@ static value_t *ffi_offset(const std::vector<value_t *> &args) {
     }
     unsigned char *address =
         pointer->address + (std::ptrdiff_t)(index * size);
-    return ffi::new_pointer_value(pointer->pointee, address, pointer->owner,
-                                  pointer->keep);
+    value_t *value = ffi::new_pointer_value(pointer->pointee, address,
+                                            pointer->owner, pointer->keep);
+    if (pointer->release_owner)
+        set_release_owner(value, pointer->release_owner);
+    return value;
 }
 
 static value_t *ffi_cast(const std::vector<value_t *> &args) {
@@ -399,8 +428,12 @@ static value_t *ffi_cast(const std::vector<value_t *> &args) {
         yyerror("ffi.cast: cannot cast to void");
         return NULL;
     }
-    return ffi::new_pointer_value(cast_target(type), pointer->address,
-                                  pointer->owner, pointer->keep);
+    value_t *value = ffi::new_pointer_value(cast_target(type),
+                                            pointer->address, pointer->owner,
+                                            pointer->keep);
+    if (pointer->release_owner)
+        set_release_owner(value, pointer->release_owner);
+    return value;
 }
 
 static value_t *ffi_get(const std::vector<value_t *> &args) {
@@ -723,6 +756,74 @@ static value_t *ffi_alignof(const std::vector<value_t *> &args) {
     return newintval((long long)align);
 }
 
+static value_t *ffi_offsetof(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.offsetof expects 2 arguments");
+        return NULL;
+    }
+    std::string error;
+    type_ptr type;
+    if (!ffi::resolve_type(args[0], type, error)) {
+        yyerror("ffi.offsetof: %s", error.c_str());
+        return NULL;
+    }
+    if (!type || type->kind != kind_t::record) {
+        yyerror("ffi.offsetof expects a struct type");
+        return NULL;
+    }
+    if (args[1]->type != T_string) {
+        yyerror("ffi.offsetof field name must be a string");
+        return NULL;
+    }
+    const char *name = ((string_value_t *)args[1])->value;
+    const ffi::field *field = ffi::find_field(*type, name ? name : "");
+    if (!field) {
+        yyerror("ffi.offsetof: %s has no field %s", type->name.c_str(),
+                name ? name : "");
+        return NULL;
+    }
+    return newintval((long long)field->offset);
+}
+
+static value_t *ffi_address_of(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.ffi.address_of expects 1 argument");
+        return NULL;
+    }
+    if (!args[0] || args[0]->type != T_userdata) {
+        yyerror("ffi.address_of expects an ffi value");
+        return NULL;
+    }
+    const native_type *meta = ((userdata_value_t *)args[0])->meta;
+    if (meta == &ffi::object_native_type ||
+        meta == &ffi::array_native_type) {
+        std::shared_ptr<ffi::object_handle> object;
+        if (!ffi::get_object(args[0], object))
+            return NULL;
+        if (!object->address) {
+            yyerror("ffi.address_of: null value");
+            return NULL;
+        }
+        value_t *value = ffi::new_pointer_value(
+            object->type, object->address, object->owner, object->keep);
+        if (object->release_owner)
+            set_release_owner(value, object->release_owner);
+        return value;
+    }
+    if (meta == &ffi::buffer_native_type) {
+        std::shared_ptr<ffi::buffer_handle> buffer;
+        if (!ffi::get_buffer(args[0], buffer))
+            return NULL;
+        type_ptr byte = ffi::scalar("u8");
+        type_ptr pointer = ffi::make_pointer(byte);
+        return ffi::new_pointer_value(
+            pointer, buffer->bytes.data(),
+            std::static_pointer_cast<void>(buffer));
+    }
+    yyerror("ffi.address_of expects a struct, array, or buffer");
+    return NULL;
+}
+
 /* -------------------------------------------------------------------------
  * Library and calls
  * ---------------------------------------------------------------------- */
@@ -954,10 +1055,8 @@ struct prepared_call {
     const ffi::manifest_function *declared = nullptr;
 };
 
-static bool prepare_call(
-    const std::shared_ptr<ffi::library_handle> &library,
-    const std::string &symbol_name, const type_ptr &return_type,
-    const std::vector<type_ptr> &arg_types,
+static bool prepare_call_interface(
+    const type_ptr &return_type, const std::vector<type_ptr> &arg_types,
     const std::vector<value_t *> &values, prepared_call &out,
     std::string &error) {
     if (return_type->kind == kind_t::bytes ||
@@ -976,7 +1075,6 @@ static bool prepare_call(
         return false;
     }
 
-    out.library = library;
     out.return_type = return_type;
     out.values = values;
     out.slots.resize(count);
@@ -1000,12 +1098,6 @@ static bool prepare_call(
     for (const ffi::arg_slot &slot : out.slots)
         out.argv.push_back(slot.value);
 
-    out.symbol = library->library->symbol(symbol_name.c_str(), error);
-    if (!out.symbol) {
-        error = "symbol not found: " + symbol_name + ": " + error;
-        return false;
-    }
-
     if (!return_type->cif) {
         error = return_type->name + " cannot be returned by value";
         return false;
@@ -1020,6 +1112,47 @@ static bool prepare_call(
     return true;
 }
 
+static bool prepare_call(
+    const std::shared_ptr<ffi::library_handle> &library,
+    const std::string &symbol_name, const type_ptr &return_type,
+    const std::vector<type_ptr> &arg_types,
+    const std::vector<value_t *> &values, prepared_call &out,
+    std::string &error) {
+    out.library = library;
+    if (!prepare_call_interface(return_type, arg_types, values, out, error))
+        return false;
+    out.symbol = library->library->symbol(symbol_name.c_str(), error);
+    if (!out.symbol) {
+        error = "symbol not found: " + symbol_name + ": " + error;
+        return false;
+    }
+    return true;
+}
+
+static bool prepare_address_call(
+    void *address, const type_ptr &return_type,
+    const std::vector<type_ptr> &arg_types,
+    const std::vector<value_t *> &values, prepared_call &out,
+    std::string &error) {
+    out.symbol = address;
+    return prepare_call_interface(return_type, arg_types, values, out, error);
+}
+
+struct owned_pointer : ffi::releasable {
+    using free_fn_t = void (*)(void *);
+
+    void *pointer = nullptr;
+    free_fn_t free_fn = nullptr;
+    std::shared_ptr<dynamic_library> keep;
+    bool released = false;
+
+    ~owned_pointer() override {
+        if (!released && pointer && free_fn)
+            free_fn(pointer);
+    }
+    void release() override { released = true; }
+};
+
 static void apply_ownership(prepared_call &call) {
     const ffi::manifest_function *declared = call.declared;
     if (!declared)
@@ -1029,8 +1162,13 @@ static void apply_ownership(prepared_call &call) {
             ffi::mark_consumed(call.values[index]);
     }
     for (std::size_t index : declared->retains) {
-        if (index < call.values.size())
-            ffi::retain_value(call.library, call.values[index]);
+        if (index >= call.values.size())
+            continue;
+        /* Keep the prepared argument storage alive too.  cstring/bytes
+         * arguments point into that storage, not into a userdata handle. */
+        if (index < call.slots.size() && call.slots[index].keep)
+            call.library->retained.owners.push_back(call.slots[index].keep);
+        ffi::retain_value(call.library, call.values[index]);
     }
 }
 
@@ -1054,6 +1192,7 @@ static value_t *convert_result(
         case kind_t::callback: {
             void *raw = load_bytes<void *>(result);
             std::shared_ptr<void> owner = call.library;
+            std::shared_ptr<owned_pointer> owned;
             if (declared && declared->returns_owned && raw) {
                 std::string free_name = declared->free_function.empty()
                                             ? std::string("free")
@@ -1069,18 +1208,20 @@ static value_t *convert_result(
                 }
                 using free_fn_t = void (*)(void *);
                 free_fn_t release = (free_fn_t)free_symbol;
-                std::shared_ptr<dynamic_library> keep =
-                    call.library->library;
-                owner = std::shared_ptr<void>(
-                    raw, [keep, release](void *pointer) {
-                        if (pointer)
-                            release(pointer);
-                    });
+                owned = std::make_shared<owned_pointer>();
+                owned->pointer = raw;
+                owned->free_fn = release;
+                owned->keep = call.library->library;
+                owner = owned;
             }
-            return ffi::new_pointer_value(
+            value_t *value = ffi::new_pointer_value(
                 return_type->kind == kind_t::pointer ? return_type->element
                                                      : nullptr,
                 (unsigned char *)raw, owner);
+            if (owned)
+                set_release_owner(value,
+                                  [owned]() { owned->release(); });
+            return value;
         }
         case kind_t::record:
         case kind_t::array: {
@@ -1415,6 +1556,81 @@ static value_t *ffi_call_async(const std::vector<value_t *> &args) {
     return run_async(call);
 }
 
+static bool resolve_address_call(
+    const std::vector<value_t *> &args,
+    std::shared_ptr<ffi::pointer_handle> &pointer, type_ptr &return_type,
+    std::vector<type_ptr> &arg_types, std::vector<value_t *> &values,
+    std::string &error) {
+    if (args.size() != 3 && args.size() != 4) {
+        error = "expects 3 or 4 arguments";
+        return false;
+    }
+    if (!ffi::get_pointer(args[0], pointer))
+        return false;
+    if (!pointer->address) {
+        error = "cannot call a null function pointer";
+        return false;
+    }
+    if (args.size() == 3) {
+        if (!ffi::resolve_type(args[1], return_type, error))
+            return false;
+        if (return_type->kind != kind_t::callback) {
+            error = "expected a callback signature";
+            return false;
+        }
+        if (args[2]->type != T_list) {
+            error = "arguments must be a list";
+            return false;
+        }
+        arg_types = return_type->params;
+        values = ((list_value_t *)args[2])->payload->items;
+        return_type = return_type->result;
+        return true;
+    }
+    if (!ffi::resolve_type(args[1], return_type, error))
+        return false;
+    if (args[2]->type != T_list || args[3]->type != T_list) {
+        error = "argument types and values must be lists";
+        return false;
+    }
+    list_value_t *types = (list_value_t *)args[2];
+    list_value_t *value_list = (list_value_t *)args[3];
+    if (types->payload->items.size() != value_list->payload->items.size()) {
+        error = "argument type/value count mismatch";
+        return false;
+    }
+    arg_types.clear();
+    for (value_t *item : types->payload->items) {
+        type_ptr type;
+        if (!ffi::resolve_type(item, type, error))
+            return false;
+        arg_types.push_back(std::move(type));
+    }
+    values = value_list->payload->items;
+    return true;
+}
+
+static value_t *ffi_call_address(const std::vector<value_t *> &args) {
+    std::shared_ptr<ffi::pointer_handle> pointer;
+    type_ptr return_type;
+    std::vector<type_ptr> arg_types;
+    std::vector<value_t *> values;
+    std::string error;
+    if (!resolve_address_call(args, pointer, return_type, arg_types, values,
+                              error)) {
+        if (!error.empty())
+            yyerror("ffi.call_address: %s", error.c_str());
+        return NULL;
+    }
+    prepared_call call;
+    if (!prepare_address_call(pointer->address, return_type, arg_types, values,
+                              call, error)) {
+        yyerror("ffi.call_address: %s", error.c_str());
+        return NULL;
+    }
+    return invoke_sync(call);
+}
+
 /* -------------------------------------------------------------------------
  * Dispatch
  * ---------------------------------------------------------------------- */
@@ -1431,6 +1647,8 @@ struct value_t *call_ffi_builtin(
             return ffi_call(args);
         case B_ffi_call_async:
             return ffi_call_async(args);
+        case B_ffi_call_address:
+            return ffi_call_address(args);
         case B_ffi_buffer:
             return ffi_buffer_new(args);
         case B_ffi_buffer_len:
@@ -1469,6 +1687,10 @@ struct value_t *call_ffi_builtin(
             return ffi_sizeof(args);
         case B_ffi_alignof:
             return ffi_alignof(args);
+        case B_ffi_offsetof:
+            return ffi_offsetof(args);
+        case B_ffi_address_of:
+            return ffi_address_of(args);
         case B_ffi_callback:
             return ffi_callback(args);
         case B_ffi_manifest:

@@ -145,6 +145,17 @@ typedef struct skein_api {
     /* Returns an owned value; the module must call free_value when done. */
     skein_value *(*call)(skein_context *ctx, const skein_value *callee,
                          const skein_value *const *args, size_t argc);
+
+    /*
+     * Added after the initial v1 table.  Modules compiled against this header
+     * may use them; check `size` before using fields past the original call
+     * entry when loading into an older host.
+     */
+    skein_value *(*new_list)(skein_context *ctx);
+    skein_value *(*new_dict)(skein_context *ctx);
+    /* `type` must be non-null; on success stores the module payload. */
+    bool (*as_userdata)(const skein_value *value,
+                        const skein_native_type *type, void **data);
 } skein_api;
 
 typedef struct skein_module {

@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -50,11 +51,22 @@ int run_check(const std::string &library_path,
     }
 
     std::vector<std::string> missing;
+    std::set<std::string> checked;
     for (const auto &entry : manifest->functions) {
         const ffi::manifest_function &function = entry.second;
         std::string symbol_error;
-        if (!library->symbol(function.symbol.c_str(), symbol_error))
+        if (checked.insert(function.symbol).second &&
+            !library->symbol(function.symbol.c_str(), symbol_error))
             missing.push_back(function.symbol);
+        if (!function.returns_owned)
+            continue;
+        std::string free_name = function.free_function.empty()
+                                    ? std::string("free")
+                                    : function.free_function;
+        if (!checked.insert(free_name).second)
+            continue;
+        if (!library->symbol(free_name.c_str(), symbol_error))
+            missing.push_back(free_name);
     }
 
     std::printf("manifest: %s\n", manifest_path.c_str());
@@ -69,7 +81,7 @@ int run_check(const std::string &library_path,
         error = std::to_string(missing.size()) + " missing symbol(s)";
         return 1;
     }
-    std::printf("all %zu symbols resolved\n", manifest->functions.size());
+    std::printf("all %zu symbols resolved\n", checked.size());
     return 0;
 }
 

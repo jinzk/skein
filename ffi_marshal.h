@@ -21,15 +21,26 @@ struct keepalive {
     ~keepalive();
 };
 
+/* An allocation whose ownership can be handed to C.  `release` must make the
+ * destructor skip freeing the memory. */
+struct releasable {
+    virtual ~releasable() = default;
+    virtual void release() = 0;
+};
+
 /* Byte buffer aligned for every C scalar and standard-layout struct.  The
- * keepalive travels with the memory owner. */
-struct memory_block {
-    std::shared_ptr<std::vector<unsigned char>> raw;
+ * keepalive travels with the memory owner.  Backed by malloc so C code that
+ * takes ownership can free it safely. */
+struct memory_block : releasable {
+    unsigned char *base = nullptr;
     unsigned char *data = nullptr;
     std::size_t size = 0;
     std::shared_ptr<keepalive> keep;
+    bool released = false;
 
     memory_block(std::size_t size, std::size_t alignment);
+    ~memory_block() override;
+    void release() override;
 };
 
 /* Convert C memory into a script value.  `owner` keeps the memory alive when

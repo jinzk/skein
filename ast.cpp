@@ -94,7 +94,7 @@ struct ast *newbool(bool b) {
     return (struct ast *)a;
 }
 
-struct ast *newstr(char *s) {
+struct ast *newstr(const char *s) {
     struct val *a = (struct val *)std::malloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");

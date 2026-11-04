@@ -3051,8 +3051,19 @@ shape.POINT_MAX;
 ```
 
 块内条目用 `;` 结束，返回类型箭头是 `=>`；声明 lowering 到 manifest，
-运行时等价于 `std.ffi.open(path, manifest)`。`owns` / `consumes` / `retains`
-暂未加入语法。
+运行时等价于 `std.ffi.open(path, manifest)`。
+
+函数可以带所有权注解：
+
+```text
+func point_new(x: f64, y: f64) => *Point owns "point_free";
+func point_destroy(p: *Point) consumes p;
+func point_sort(base: *Point, n: usize, cmp: Compare) retains cmp;
+```
+
+- `owns "free_fn"`：返回的指针由绑定自动释放；
+- `consumes p`：参数所有权转移给 C，之后脚本再访问会报错；
+- `retains cb`：C 保存该回调/指针，绑定保持其存活。
 
 FFI 示例：
 

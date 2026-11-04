@@ -1541,7 +1541,16 @@ shape.POINT_MAX;
 - 块内声明会 lowering 到 manifest，运行时走 `ffi.open`，不新增 FFI 语义；
 - `type` 支持 struct、别名、指针和定长数组；`callback` 声明回调签名；
 - 块内条目用 `;` 结束，返回类型箭头是 `=>`（与 `func` 一致）；
-- `owns` / `consumes` / `retains` 暂未加入语法，继续用 manifest / `ffi.declare`。
+- 所有权注解：
+  - `func make() => *Point owns "point_free";`：返回值由 C++ 自动释放；
+  - `func destroy(p: *Point) consumes p;`：参数所有权转移给 C；
+  - `func watch(cb: Cmp) retains cb;`：C 保留回调，库生命周期内保持存活。
+
+```text
+func point_new(x: f64, y: f64) => *Point owns "point_free";
+func point_destroy(p: *Point) consumes p;
+func point_sort(base: *Point, n: usize, cmp: Compare) retains cmp;
+```
 
 原生模块（C ABI）：
 

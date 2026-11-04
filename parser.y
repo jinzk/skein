@@ -144,7 +144,70 @@ static struct ast *ffi_list_append(struct ast *list_node,
 }
 
 static struct ast *ffi_params_new() {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "types", (struct value_t *)newlistval());
+    ffi_dict_set(dict, "names", (struct value_t *)newlistval());
+    return ffi_value_node(dict);
+}
+
+static struct value_t *ffi_params_list(struct ast *params, const char *key) {
+    return ffi_dict_value(((struct val *)params)->val, key);
+}
+
+static void ffi_params_push(struct ast *params, struct value_t *type,
+                            char *name) {
+    struct value_t *types = ffi_params_list(params, "types");
+    struct value_t *names = ffi_params_list(params, "names");
+    ((struct list_value_t *)types)->payload->items.push_back(type);
+    ((struct list_value_t *)names)->payload->items.push_back(
+        newstrval(name ? name : ""));
+    if (name)
+        std::free(name);
+}
+
+static struct ast *ffi_param_one(struct ast *type, char *name) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "type", dupval(((struct val *)type)->val));
+    ffi_dict_set(dict, "name", newstrval(name ? name : ""));
+    if (name)
+        std::free(name);
+    treefree(type);
+    return ffi_value_node(dict);
+}
+
+static void ffi_param_append(struct ast *params, struct ast *param) {
+    struct value_t *dict = ((struct val *)param)->val;
+    struct value_t *type = ffi_dict_value(dict, "type");
+    struct value_t *name = ffi_dict_value(dict, "name");
+    const char *text = (name && name->type == T_string)
+                           ? ((struct string_value_t *)name)->value
+                           : "";
+    ffi_params_push(params, dupval(type), copy_text(text));
+}
+
+static struct ast *ffi_annotations_new() {
     return ffi_value_node((struct value_t *)newlistval());
+}
+
+static struct ast *ffi_annotation_node(char *kind, char *name,
+                                       long long index, bool has_index) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "kind", newstrval(kind));
+    if (has_index)
+        ffi_dict_set(dict, "index", newintval(index));
+    else
+        ffi_dict_set(dict, "name", newstrval(name ? name : ""));
+    std::free(kind);
+    if (name)
+        std::free(name);
+    return ffi_value_node(dict);
+}
+
+static void ffi_annotation_append(struct ast *annotations,
+                                  struct ast *annotation) {
+    struct list_value_t *list =
+        (struct list_value_t *)((struct val *)annotations)->val;
+    list->payload->items.push_back(dupval(((struct val *)annotation)->val));
 }
 
 static struct ast *ffi_fields_new() {
@@ -181,19 +244,99 @@ static struct value_t *ffi_callback_decl(struct ast *params,
     struct value_t *dict = ffi_dict_new();
     ffi_dict_set(dict, "kind", newstrval("callback"));
     ffi_dict_set(dict, "result", dupval(((struct val *)result)->val));
-    ffi_dict_set(dict, "args", dupval(((struct val *)params)->val));
+    ffi_dict_set(dict, "args",
+                 dupval(ffi_params_list(params, "types")));
     treefree(params);
     treefree(result);
     return dict;
 }
 
+static long long ffi_param_index(struct ast *params, const char *name) {
+    struct value_t *names = ffi_params_list(params, "names");
+    if (!names || names->type != T_list)
+        return -1;
+    struct list_value_t *list = (struct list_value_t *)names;
+    for (size_t i = 0; i < list->payload->items.size(); ++i) {
+        struct value_t *entry = list->payload->items[i];
+        if (entry->type == T_string &&
+            std::strcmp(((struct string_value_t *)entry)->value, name) == 0)
+            return (long long)i;
+    }
+    return -1;
+}
+
 static struct value_t *ffi_function_decl(struct ast *params,
-                                         struct ast *result) {
+                                         struct ast *result,
+                                         struct ast *annotations) {
     struct value_t *dict = ffi_dict_new();
     ffi_dict_set(dict, "result", dupval(((struct val *)result)->val));
-    ffi_dict_set(dict, "args", dupval(((struct val *)params)->val));
+    ffi_dict_set(dict, "args",
+                 dupval(ffi_params_list(params, "types")));
+
+    struct value_t *consumes = NULL;
+    struct value_t *retains = NULL;
+    if (annotations) {
+        struct list_value_t *list =
+            (struct list_value_t *)((struct val *)annotations)->val;
+        for (struct value_t *annotation : list->payload->items) {
+            const char *kind = ffi_dict_string(annotation, "kind");
+            if (!kind)
+                continue;
+            if (std::strcmp(kind, "owns") == 0) {
+                const char *free_name =
+                    ffi_dict_string(annotation, "name");
+                if (!free_name) {
+                    yyerror("ffi binding: owns expects a free function name");
+                    continue;
+                }
+                struct value_t *owned = ffi_dict_new();
+                ffi_dict_set(owned, "free", newstrval(free_name));
+                ffi_dict_set(dict, "returns_owned", owned);
+                continue;
+            }
+            long long index = -1;
+            struct value_t *index_value =
+                ffi_dict_value(annotation, "index");
+            if (index_value && index_value->type == T_int) {
+                index = ((struct int_value_t *)index_value)->value;
+            } else {
+                const char *name = ffi_dict_string(annotation, "name");
+                if (name)
+                    index = ffi_param_index(params, name);
+            }
+            struct value_t *types = ffi_params_list(params, "types");
+            size_t count =
+                types && types->type == T_list
+                    ? ((struct list_value_t *)types)->payload->items.size()
+                    : 0;
+            if (index < 0 || (size_t)index >= count) {
+                yyerror("ffi binding: annotation refers to an unknown "
+                        "parameter");
+                continue;
+            }
+            if (std::strcmp(kind, "consumes") == 0) {
+                if (!consumes)
+                    consumes = (struct value_t *)newlistval();
+                ((struct list_value_t *)consumes)
+                    ->payload->items.push_back(newintval(index));
+            } else if (std::strcmp(kind, "retains") == 0) {
+                if (!retains)
+                    retains = (struct value_t *)newlistval();
+                ((struct list_value_t *)retains)
+                    ->payload->items.push_back(newintval(index));
+            } else {
+                yyerror("ffi binding: unknown annotation");
+            }
+        }
+    }
+    if (consumes)
+        ffi_dict_set(dict, "consumes", consumes);
+    if (retains)
+        ffi_dict_set(dict, "retains", retains);
     treefree(params);
     treefree(result);
+    if (annotations)
+        treefree(annotations);
     return dict;
 }
 
@@ -459,7 +602,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <sl> param symlist
 %type <type> type type_name
 %type <str> importref importpath fieldname
-%type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value
+%type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
@@ -701,13 +844,13 @@ ffi_item: NAME NAME '{' ffi_fields '}' {
             free($1);
         }
       }
-    | FUNC NAME '(' ffi_params ')' ARROW ffi_type ';' {
+    | FUNC NAME '(' ffi_params ')' ARROW ffi_type ffi_annotations ';' {
         $$ = ffi_item_node("function", $2,
-                           ffi_function_decl($4, $7));
+                           ffi_function_decl($4, $7, $8));
       }
-    | FUNC NAME '(' ffi_params ')' ';' {
+    | FUNC NAME '(' ffi_params ')' ffi_annotations ';' {
         $$ = ffi_item_node("function", $2,
-                           ffi_function_decl($4, newstr("void")));
+                           ffi_function_decl($4, newstr("void"), $6));
       }
     | CONST NAME ':' ffi_type '=' ffi_const_value ';' {
         treefree($4);
@@ -735,17 +878,39 @@ ffi_params: %empty                        { $$ = ffi_params_new(); }
 
 ffi_param_list: ffi_param {
         $$ = ffi_params_new();
-        ffi_list_append($$, $1);
+        ffi_param_append($$, $1);
         treefree($1);
       }
     | ffi_param_list ',' ffi_param {
-        $$ = ffi_list_append($1, $3);
+        ffi_param_append($1, $3);
         treefree($3);
+        $$ = $1;
       }
     ;
 
-ffi_param: ffi_type                       { $$ = $1; }
-    | NAME ':' ffi_type                   { free($1); $$ = $3; }
+ffi_param: ffi_type                       { $$ = ffi_param_one($1, NULL); }
+    | NAME ':' ffi_type                   { $$ = ffi_param_one($3, $1); }
+    ;
+
+ffi_annotations: %empty                   { $$ = ffi_annotations_new(); }
+    | ffi_annotation_list                 { $$ = $1; }
+    ;
+
+ffi_annotation_list: ffi_annotation {
+        $$ = ffi_annotations_new();
+        ffi_annotation_append($$, $1);
+        treefree($1);
+      }
+    | ffi_annotation_list ',' ffi_annotation {
+        ffi_annotation_append($1, $3);
+        treefree($3);
+        $$ = $1;
+      }
+    ;
+
+ffi_annotation: NAME XSTRING              { $$ = ffi_annotation_node($1, $2, 0, false); }
+    | NAME NAME                           { $$ = ffi_annotation_node($1, $2, 0, false); }
+    | NAME INT                            { $$ = ffi_annotation_node($1, NULL, $2, true); }
     ;
 
 ffi_type: NAME                            { $$ = ffi_value_node(newstrval($1)); free($1); }

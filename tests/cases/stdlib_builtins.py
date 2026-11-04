@@ -765,6 +765,50 @@ def run_cases():
             stdout="= 5",
         )
         check(
+            "extern lib ownership annotations",
+            "import std;\n"
+            'extern "c" lib sample from ' + shim + ' {\n'
+            "  type Point { x: f64; y: f64; }\n"
+            "  type PointPtr = *Point;\n"
+            "  callback Cmp(a: i32, b: i32) => i32;\n"
+            '  func shim_alloc_point() => PointPtr owns "shim_free_point";\n'
+            "  func shim_free_count() => i32;\n"
+            "  func shim_save_cmp(cb: Cmp) retains cb;\n"
+            "  func shim_call_saved(a: i32, b: i32) => i32;\n"
+            "}\n"
+            "let owned = sample.shim_alloc_point();\n"
+            "std.ffi.deref(owned).x\n"
+            "owned = null;\n"
+            "sample.shim_free_count()\n"
+            'let Cmp = std.ffi.type(sample, "Cmp");\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return a + b; });\n"
+            "sample.shim_save_cmp(cb);\n"
+            "cb = null;\n"
+            "sample.shim_call_saved(3, 4)\n",
+            stdout_all=["= 1.0", "= 1", "= 7"],
+        )
+        check(
+            "extern lib consumes annotation",
+            "import std;\n"
+            'extern "c" lib sample from ' + shim + ' {\n'
+            "  type Point { x: f64; y: f64; }\n"
+            "  type PointPtr = *Point;\n"
+            "  func shim_consume_point(p: PointPtr) consumes p;\n"
+            "}\n"
+            'let Point = std.ffi.type(sample, "Point");\n'
+            "let raw = std.ffi.alloc(Point);\n"
+            "sample.shim_consume_point(raw);\n"
+            "std.ffi.deref(raw)\n",
+            stderr="consumed by C",
+        )
+        check(
+            "extern lib unknown annotation parameter",
+            'extern "c" lib sample from ' + shim + ' {\n'
+            "  func shim_i32(value: i32) consumes missing;\n"
+            "}\n",
+            stderr="unknown parameter",
+        )
+        check(
             "extern lib manifest error",
             'extern "c" lib sample from ' + shim + ' {\n'
             "  type Empty {\n"

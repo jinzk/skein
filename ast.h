@@ -432,7 +432,7 @@ struct ast *newscope(struct ast *v);
 struct ast *newint(long long i);
 struct ast *newfloat(double d);
 struct ast *newbool(bool b);
-struct ast *newstr(char *s);
+struct ast *newstr(const char *s);
 struct ast *newchar(long long c);
 struct ast *newbuiltin(int functype);
 struct ast *newnullast();

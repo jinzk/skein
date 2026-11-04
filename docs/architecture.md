@@ -48,7 +48,7 @@ L0  platform          OS 原语（文件/时间/线程/进程/socket 抽象）
 | 边界 | 使用者 | 类型 | 稳定性 |
 |---|---|---|---|
 | 内部 ABI | interpreter、核心 builtins、静态模块 | C++（`value_t*`、`std::vector`） | 与源码版本强绑定 |
-| 外部 ABI | 插件、嵌入、未来 AOT | 纯 C、opaque handle、固定宽度整数 | 版本号 + 兼容承诺（未来） |
+| 外部 ABI | 插件、嵌入、未来 AOT | 纯 C、opaque handle、固定宽度整数 | v1 只追加字段，使用前检查 `size` |
 
 内部 ABI 保留 `value_t*` 和 `dupval/freeval` 的性能；外部 ABI 使用 `skein_value*` 不透明句柄，不暴露 C++ 类型。
 
@@ -95,7 +95,10 @@ void skein_context_set(skein_context *ctx);
 - 外部 ABI 使用 `skein_status` + `skein_error { kind, message }`；
 - 不允许 C++ 异常跨外部 ABI。
 
-### 5.3 模块注册（未来）
+### 5.3 模块注册（v1 已实现）
+
+> `skein_module` v1 已实现；权威定义见 `skein_module.h`，支持范围、生命周期和
+> 兼容策略见 [`docs/ffi.md`](ffi.md)。下面是早期设计草案，字段以头文件为准。
 
 ```c
 typedef struct {
@@ -129,14 +132,14 @@ typedef struct {
 - 静态库拆分：`skein_platform` / `skein_runtime` / `skein_interpreter` / `skein_builtins` / `skein`；
 - `skein_context` 的 `call` / `call_builtin` / `error` hook；
 - `builtin_ids.h`、`runtime_state.*`、`runtime_error.*`、`value_ops.*`；
+- FFI Beta：类型/布局/marshal/回调/manifest/bindgen/原生模块，见 `docs/ffi.md`；
 - `tools/check_boundaries.py` 与 CTest `boundary_check_test`；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
 
 未开始：
 
-- 外部 C ABI 的正式冻结；
-- 动态插件加载；
-- AOT 代码生成与 GC 栈图。
+- AOT 代码生成与 GC 栈图；
+- FFI 的 Windows/32 位/ARM CI 与 fuzz。
 
 ## 7. 验收标准
 

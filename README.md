@@ -28,7 +28,7 @@ sudo apt install libssl-dev
 
 没有 OpenSSL 时使用 `-DSKEIN_ENABLE_TLS=OFF`，`std.tls` 和 `https://` 不可用。
 
-`std.ffi` 是可选模块，需要 libffi；找不到 libffi 时会自动禁用。可以显式关闭：
+`std.ffi` 是可选模块，需要 libffi >= 3.3（用于布局校验）；找不到 libffi 时会自动禁用。可以显式关闭：
 
 ```bash
 cmake -S . -B build -G Ninja -DSKEIN_ENABLE_FFI=OFF
@@ -1379,6 +1379,9 @@ func work() {
 
 FFI：
 
+> 状态：**Beta**。完整支持范围、所有权契约和已知限制见
+> [docs/ffi.md](docs/ffi.md)。
+
 ```text
 import std;
 
@@ -1491,7 +1494,10 @@ std.ffi.call_async(lib, "compare", "i32",
 
 - 比同步 `ffi.call` 多了线程切换，适合会阻塞或回调耗时较长的 C 调用；
 - 回调仍然运行在解释器线程，可以安全访问脚本状态；
-- 回调内可以继续 `ffi.call` / `ffi.call_async`（有递归深度限制）。
+- 回调内可以继续 `ffi.call` / `ffi.call_async`（有递归深度限制）；
+- `ffi.call_async` **不可取消，也没有超时**：当前 fiber 会一直等到 C 返回；
+  每次调用创建一个 worker 线程，不适合高频短调用；
+- 对可能永久阻塞或不受信任的 C 调用，建议放到外部进程，而不是依赖进程内取消。
 
 C 函数指针（例如 C 返回的函数指针或 struct 里的 callback 字段）可以用
 `ffi.call_address` 调用：
@@ -1519,6 +1525,7 @@ let sym = std.ffi.symbol(lib, "strlen");
 std.ffi.call_address(sym, "usize", ["cstring"], ["hello"]);
 ```
 
+`ffi.string(pointer)` 把 `char*` 地址按 NUL 结尾字符串读成脚本 string；
 `ffi.offsetof` 现在也接受 struct 值/指针；`ffi.address_of` 接受 pointer 并返回
 同一地址的共享视图。
 
@@ -1601,8 +1608,10 @@ std.ffi.set_variable(lib, "POINT_COUNT", 4);
   `"const": true` 的变量拒绝写入；
   `--check-ffi` 会同时校验函数、变量和 `returns_owned` 的 free 符号；
 - `returns_owned` / `consumes` / `retains` 由 manifest 声明所有权，脚本层不出现 `free`；
-  `consumes` 对 `ffi.alloc`/`returns_owned` 的内存会真正释放运行时所有权，
-  之后由 C 负责释放；对借用指针只标记为已被消费；
+  `returns_owned` 的 free 函数必须接收一个指针参数；默认按 `void(void*)` 调用，
+  也支持 `{"free": "name", "free_result": "i32"}` 这类有返回值的 free；
+  `consumes` 只保证被传递的那个 handle 被标记为已消费；同一块内存的其他
+  alias/view 在 C 接管后不应再访问；对借用指针只标记为已被消费；
   `retains` 同时支持 userdata 和 `cstring`/`bytes` 参数存储；
 - 加载时校验 ABI、布局、重复类型、递归 by-value 类型和参数索引；
 - packed / bitfield 直接拒绝，交给静态 C++ 绑定；
@@ -1634,7 +1643,7 @@ lib2.add(1, 2);
 - `ffi.declare(lib, spec)` 增量合并声明，重复类型/函数/常量会报错；
 - 绑定函数持有库句柄；`ffi.close` 后再次调用会报 "ffi library is closed"。
 
-FFI 支持范围：
+FFI 支持范围（完整契约见 [docs/ffi.md](docs/ffi.md)）：
 
 - 只支持 **C ABI 边界**：C 编译的库，或 C++ 中 `extern "C"` 导出的函数；
 - 不支持 C++ ABI：类、模板、异常、RTTI、引用、`std::` 类型、重载；
@@ -2298,6 +2307,7 @@ std.ffi.callback
 std.ffi.manifest
 std.ffi.constant
 std.ffi.symbol
+std.ffi.string
 std.ffi.variable
 std.ffi.set_variable
 std.ffi.retain

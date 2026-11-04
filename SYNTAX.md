@@ -3168,6 +3168,7 @@ std.ffi.buffer_free
   `aligned` / `vector_size` / `mode` 等影响布局的属性；
 - 变参函数通过 `std.ffi.call_variadic` 显式传入变参类型；
 - `stdcall` / `fastcall` 通过 manifest 的 `calling_convention` 指定；
+- `ffi.call_async` 不可取消、没有超时，当前 fiber 会等到 C 返回；可能挂死的调用应放到外部进程；
 - 网络和 FFI 错误是运行时错误，可以通过 `on error` 或 `std.result.capture` 捕获；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.net` 暂不支持 TLS、HTTP；

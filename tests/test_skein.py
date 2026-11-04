@@ -9,6 +9,7 @@ import harness
 from cases import (
     async_errors,
     collections,
+    ffi_real,
     io_scripts,
     language_core,
     match_types,
@@ -25,6 +26,7 @@ MODULES = [
     async_errors,
     net,
     stdlib_builtins,
+    ffi_real,
     io_scripts,
 ]
 

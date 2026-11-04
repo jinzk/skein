@@ -976,6 +976,21 @@ static value_t *ffi_symbol(const std::vector<value_t *> &args) {
                                   library->shared_from_this());
 }
 
+static value_t *ffi_string(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.ffi.string expects 1 argument");
+        return NULL;
+    }
+    std::shared_ptr<ffi::pointer_handle> pointer;
+    if (!ffi::get_pointer(args[0], pointer))
+        return NULL;
+    if (!pointer->address) {
+        yyerror("ffi.string: null pointer");
+        return NULL;
+    }
+    return newstrval((const char *)pointer->address);
+}
+
 static value_t *ffi_variable(const std::vector<value_t *> &args) {
     if (args.size() != 2) {
         yyerror("std.ffi.variable expects 2 arguments");
@@ -1339,16 +1354,22 @@ static bool prepare_address_call(
 }
 
 struct owned_pointer : ffi::releasable {
-    using free_fn_t = void (*)(void *);
-
     void *pointer = nullptr;
-    free_fn_t free_fn = nullptr;
+    void *free_symbol = nullptr;
+    ffi_cif cif{};
+    std::vector<ffi_type *> types;
+    void *argv[1] = {nullptr};
+    bool has_result = false;
     std::shared_ptr<dynamic_library> keep;
     bool released = false;
 
     ~owned_pointer() override {
-        if (!released && pointer && free_fn)
-            free_fn(pointer);
+        if (released || !pointer || !free_symbol)
+            return;
+        alignas(16) unsigned char result[16] = {0};
+        argv[0] = &pointer;
+        ffi_call(&cif, FFI_FN(free_symbol), has_result ? result : nullptr,
+                 argv);
     }
     void release() override { released = true; }
 };
@@ -1406,11 +1427,29 @@ static value_t *convert_result(
                             op, free_name.c_str(), free_error.c_str());
                     return NULL;
                 }
-                using free_fn_t = void (*)(void *);
-                free_fn_t release = (free_fn_t)free_symbol;
+                type_ptr free_arg =
+                    declared->free_args.empty()
+                        ? ffi::scalar("ptr")
+                        : declared->free_args.front();
+                type_ptr free_ret = declared->free_result
+                                        ? declared->free_result
+                                        : ffi::scalar("void");
+                if (!free_arg || !free_arg->cif || !free_ret ||
+                    !free_ret->cif) {
+                    yyerror("%s: invalid returns_owned free signature", op);
+                    return NULL;
+                }
                 owned = std::make_shared<owned_pointer>();
                 owned->pointer = raw;
-                owned->free_fn = release;
+                owned->free_symbol = free_symbol;
+                owned->has_result = free_ret->kind != kind_t::void_;
+                owned->types.push_back(free_arg->cif);
+                if (ffi_prep_cif(&owned->cif, FFI_DEFAULT_ABI, 1,
+                                 free_ret->cif,
+                                 owned->types.data()) != FFI_OK) {
+                    yyerror("%s: cannot prepare returns_owned free call", op);
+                    return NULL;
+                }
                 owned->keep = call.library->library;
                 owner = owned;
             }
@@ -2033,6 +2072,8 @@ struct value_t *call_ffi_builtin(
             return ffi_constant(args);
         case B_ffi_symbol:
             return ffi_symbol(args);
+        case B_ffi_string:
+            return ffi_string(args);
         case B_ffi_variable:
             return ffi_variable(args);
         case B_ffi_set_variable:

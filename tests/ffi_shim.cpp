@@ -249,6 +249,14 @@ SHIM_EXPORT void shim_free_point(void *pointer) {
     std::free(pointer);
 }
 
+SHIM_EXPORT std::int32_t shim_free_point_int(void *pointer) {
+    if (!pointer)
+        return 0;
+    ++shim_free_counter;
+    std::free(pointer);
+    return 7;
+}
+
 SHIM_EXPORT std::int32_t shim_free_count(void) { return shim_free_counter; }
 
 SHIM_EXPORT void shim_consume_point(struct shim_point *point) {

@@ -796,6 +796,7 @@ value_t *build_std_namespace() {
             {"manifest", B_ffi_manifest},
             {"constant", B_ffi_constant},
             {"symbol", B_ffi_symbol},
+            {"string", B_ffi_string},
             {"variable", B_ffi_variable},
             {"set_variable", B_ffi_set_variable},
             {"retain", B_ffi_retain},

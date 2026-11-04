@@ -540,31 +540,71 @@ bool parse_index_list(struct value_t *value, std::size_t limit,
 }
 
 bool parse_returns_owned(struct value_t *value, bool &owned,
-                         std::string &free_function, std::string &error) {
+                         std::string &free_function, type_ptr &free_result,
+                         std::vector<type_ptr> &free_args,
+                         type_resolver &resolver, std::string &error) {
     owned = false;
     free_function.clear();
+    free_result = scalar("void");
+    free_args.clear();
     if (!value)
         return true;
     if (value->type == T_bool) {
         owned = ((bool_value_t *)value)->value;
-        if (owned)
+        if (owned) {
             free_function = "free";
-        return true;
-    }
-    if (value->type == T_dict) {
-        owned = true;
-        free_function = "free";
-        struct value_t *name = nullptr;
-        if (dict_lookup((dict_value_t *)value, "free", name)) {
-            if (!as_string(name, free_function) || free_function.empty()) {
-                error = "returns_owned.free must be a function name";
-                return false;
-            }
+            free_args.push_back(scalar("ptr"));
         }
         return true;
     }
-    error = "returns_owned must be a bool or an object";
-    return false;
+    if (value->type != T_dict) {
+        error = "returns_owned must be a bool or an object";
+        return false;
+    }
+
+    owned = true;
+    free_function = "free";
+    free_args.push_back(scalar("ptr"));
+    dict_value_t *decl = (dict_value_t *)value;
+    struct value_t *item = nullptr;
+    if (dict_lookup(decl, "free", item)) {
+        if (!as_string(item, free_function) || free_function.empty()) {
+            error = "returns_owned.free must be a function name";
+            return false;
+        }
+    }
+    if (dict_lookup(decl, "free_result", item)) {
+        if (!resolver.resolve_ref(item, free_result, 0))
+            return false;
+        if (free_result->kind == kind_t::record ||
+            free_result->kind == kind_t::array) {
+            error = "returns_owned.free_result must be a scalar or void";
+            return false;
+        }
+    }
+    free_args.clear();
+    if (dict_lookup(decl, "free_args", item)) {
+        if (item->type != T_list) {
+            error = "returns_owned.free_args must be a list";
+            return false;
+        }
+        for (struct value_t *arg :
+             ((list_value_t *)item)->payload->items) {
+            type_ptr type;
+            if (!resolver.resolve_ref(arg, type, 0))
+                return false;
+            free_args.push_back(std::move(type));
+        }
+    } else {
+        free_args.push_back(scalar("ptr"));
+    }
+    if (free_args.size() != 1 ||
+        (free_args[0]->kind != kind_t::pointer &&
+         free_args[0]->kind != kind_t::opaque)) {
+        error = "returns_owned.free must take one pointer argument";
+        return false;
+    }
+    return true;
 }
 
 bool build_manifest(struct value_t *spec,
@@ -697,7 +737,8 @@ bool build_manifest(struct value_t *spec,
                 return false;
             if (dict_lookup(decl, "returns_owned", item) &&
                 !parse_returns_owned(item, fn.returns_owned,
-                                     fn.free_function, error))
+                                     fn.free_function, fn.free_result,
+                                     fn.free_args, resolver, error))
                 return false;
             for (std::size_t index : fn.consumes) {
                 kind_t kind = fn.args[index]->kind;

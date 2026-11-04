@@ -783,6 +783,29 @@ def run_cases():
             stdout="= 1",
         )
         check(
+            "std ffi returns_owned int free",
+            "import std;\n"
+            f"let path = {shim};\n"
+            'let spec = {"ffi": 1, "functions": {'
+            '"shim_alloc_point": {"result": "ptr", "returns_owned": '
+            '{"free": "shim_free_point_int", "free_result": "i32"}}, '
+            '"shim_free_count": {"result": "i32"}}};\n'
+            "let lib = std.ffi.open(path, spec);\n"
+            'let owned = std.ffi.call(lib, "shim_alloc_point", []);\n'
+            "owned = null;\n"
+            'std.ffi.call(lib, "shim_free_count", [])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 1",
+        )
+        check(
+            "std ffi rejects invalid free signature",
+            "import std;\n"
+            'std.ffi.manifest({"ffi": 1, "functions": {"f": '
+            '{"result": "ptr", "returns_owned": {"free": "x", '
+            '"free_args": ["i32"]}}}})\n',
+            stderr="free must take one pointer argument",
+        )
+        check(
             "std ffi retains cstring",
             "import std;\n"
             f"let path = {shim};\n"

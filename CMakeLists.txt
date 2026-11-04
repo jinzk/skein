@@ -344,6 +344,11 @@ if(SKEIN_ENABLE_FFI)
     pkg_check_modules(LIBFFI QUIET IMPORTED_TARGET libffi)
   endif()
   if(LIBFFI_FOUND)
+    if(LIBFFI_VERSION VERSION_LESS 3.3)
+      message(FATAL_ERROR
+        "std.ffi requires libffi >= 3.3 for layout validation; "
+        "use -DSKEIN_ENABLE_FFI=OFF or install a newer libffi")
+    endif()
     target_sources(skein_builtins PRIVATE ffi.cpp ffi_types.cpp ffi_value.cpp
                    ffi_marshal.cpp ffi_callbacks.cpp ffi_manifest.cpp
                    ffi_check.cpp)

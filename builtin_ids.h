@@ -177,6 +177,7 @@ enum bifs {
     B_ffi_set_errno,
     B_ffi_type_lookup,
     B_ffi_symbol,
+    B_ffi_string,
     B_ffi_function,
     B_ffi_declare,
     B_ffi_bind,

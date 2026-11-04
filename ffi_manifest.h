@@ -22,6 +22,8 @@ struct manifest_function {
     bool variadic = false;
     std::string calling_convention = "c";
     std::string free_function;
+    type_ptr free_result;
+    std::vector<type_ptr> free_args;
 };
 
 struct manifest_variable {

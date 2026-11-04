@@ -768,6 +768,7 @@ value_t *build_std_namespace() {
             {"open", B_ffi_open},
             {"close", B_ffi_close},
             {"call", B_ffi_call},
+            {"call_async", B_ffi_call_async},
             {"buffer", B_ffi_buffer},
             {"buffer_len", B_ffi_buffer_len},
             {"buffer_bytes", B_ffi_buffer_bytes},

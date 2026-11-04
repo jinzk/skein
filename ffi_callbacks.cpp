@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <condition_variable>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -35,6 +36,12 @@ struct callback_handle : public std::enable_shared_from_this<callback_handle> {
     }
 };
 
+struct async_call_context {
+    std::shared_ptr<keepalive> keep;
+    std::shared_ptr<std::atomic<bool>> failed;
+    async_call_context *previous = nullptr;
+};
+
 struct callback_call_scope {
     std::thread::id thread;
     std::shared_ptr<keepalive> keep;
@@ -47,6 +54,7 @@ namespace {
 
 thread_local callback_call_scope *tls_scope = nullptr;
 thread_local int tls_call_depth = 0;
+thread_local async_call_context *tls_async_call = nullptr;
 
 constexpr int MAX_CALLBACK_DEPTH = 32;
 
@@ -106,6 +114,56 @@ std::deque<pending_callback> &background_queue() {
     return queue;
 }
 
+struct blocking_callback_job {
+    std::shared_ptr<callback_handle> handle;
+    std::shared_ptr<std::atomic<bool>> failed_flag;
+    std::vector<std::shared_ptr<std::vector<unsigned char>>> args;
+    std::vector<unsigned char> result;
+    std::shared_ptr<keepalive> keep;
+    bool done = false;
+    bool failed = false;
+    std::string error;
+    std::mutex mutex;
+    std::condition_variable cv;
+};
+
+std::deque<std::shared_ptr<blocking_callback_job>> &blocking_queue() {
+    static std::deque<std::shared_ptr<blocking_callback_job>> queue;
+    return queue;
+}
+
+std::shared_ptr<blocking_callback_job> make_blocking_job(
+    callback_handle *handle, void **args, ffi_cif *cif) {
+    std::shared_ptr<blocking_callback_job> job =
+        std::make_shared<blocking_callback_job>();
+    job->handle = handle->shared_from_this();
+    job->keep = tls_async_call ? tls_async_call->keep
+                               : std::make_shared<keepalive>();
+    job->failed_flag = tls_async_call ? tls_async_call->failed : nullptr;
+    const std::vector<type_ptr> &params = handle->signature->params;
+    job->args.reserve(params.size());
+    for (size_t i = 0; i < params.size(); ++i) {
+        std::shared_ptr<std::vector<unsigned char>> block =
+            std::make_shared<std::vector<unsigned char>>(
+                params[i]->size ? params[i]->size : 1);
+        if (params[i]->size)
+            std::memcpy(block->data(), args[i], params[i]->size);
+        job->args.push_back(std::move(block));
+    }
+    size_t size = 0;
+    if (cif && cif->rtype && cif->rtype->type != FFI_TYPE_VOID) {
+        size = cif->rtype->size;
+        if (cif->rtype->type != FFI_TYPE_STRUCT && size < sizeof(ffi_arg))
+            size = sizeof(ffi_arg);
+    }
+    job->result.assign(size ? size : 1, 0);
+    {
+        std::lock_guard<std::mutex> lock(background_mutex());
+        blocking_queue().push_back(job);
+    }
+    return job;
+}
+
 void enqueue_background_error(callback_handle *handle,
                               const char *message) {
     if (!handle)
@@ -158,6 +216,26 @@ extern "C" void ffi_callback_entry(ffi_cif *cif, void *ret, void **args,
         if (!scope) {
             if (!handle) {
                 zero_return(cif, ret);
+                return;
+            }
+            if (tls_async_call) {
+                if (handle->failed || !handle->function) {
+                    zero_return(cif, ret);
+                    return;
+                }
+                std::shared_ptr<blocking_callback_job> job =
+                    make_blocking_job(handle, args, cif);
+                std::unique_lock<std::mutex> lock(job->mutex);
+                job->cv.wait(lock, [&job] { return job->done; });
+                lock.unlock();
+                if (job->failed) {
+                    zero_return(cif, ret);
+                    return;
+                }
+                if (ret && cif && cif->rtype &&
+                    cif->rtype->type != FFI_TYPE_VOID)
+                    std::memcpy(ret, job->result.data(),
+                                job->result.size());
                 return;
             }
             if (skein_context_current() != nullptr) {
@@ -256,6 +334,19 @@ std::shared_ptr<callback_handle> get_callback(const struct value_t *value) {
 
 } // namespace
 
+async_scope::async_scope(std::shared_ptr<std::atomic<bool>> failed) {
+    context_ = new async_call_context();
+    context_->keep = std::make_shared<keepalive>();
+    context_->failed = std::move(failed);
+    context_->previous = tls_async_call;
+    tls_async_call = context_;
+}
+
+async_scope::~async_scope() {
+    tls_async_call = context_->previous;
+    delete context_;
+}
+
 const native_type callback_native_type = {
     "ffi_callback", describe_callback, nullptr, nullptr, nullptr,
     callback_for_each_child};
@@ -282,6 +373,66 @@ const std::string &callback_scope_guard::error() const {
 }
 
 
+void drain_blocking_job(
+    const std::shared_ptr<blocking_callback_job> &job) {
+    if (!job->handle || !job->handle->function) {
+        job->failed = true;
+        job->error = "ffi callback is no longer available";
+    } else {
+        std::vector<value_t *> call_args;
+        bool ok = true;
+        const std::vector<type_ptr> &params = job->handle->signature->params;
+        for (size_t i = 0; i < params.size(); ++i) {
+            value_t *arg = read_value(params[i], job->args[i]->data(),
+                                      job->args[i]);
+            if (!arg) {
+                ok = false;
+                break;
+            }
+            call_args.push_back(arg);
+        }
+        if (!ok) {
+            for (value_t *arg : call_args)
+                freeval(arg);
+            job->failed = true;
+            job->error = "ffi callback argument conversion failed";
+        } else {
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
+            value_t *result = skein_call_function(job->handle->function,
+                                                  std::move(call_args));
+            eval_capture_result captured = eval_capture_end(snapshot);
+            if (captured.failed || !result) {
+                job->failed = true;
+                job->error = captured.failed
+                                 ? error_message_of(captured.error)
+                                 : std::string("ffi callback failed");
+            } else if (job->handle->signature->result->kind !=
+                       kind_t::void_) {
+                std::string error;
+                if (!write_return(job->handle->signature->result,
+                                  job->result.data(), result, *job->keep,
+                                  error)) {
+                    job->failed = true;
+                    job->error = error;
+                }
+            }
+            freeval(captured.error);
+            freeval(result);
+        }
+    }
+    if (job->failed) {
+        if (job->failed_flag)
+            *job->failed_flag = true;
+        yyerror("ffi cross-thread callback: %s", job->error.c_str());
+    }
+    {
+        std::lock_guard<std::mutex> lock(job->mutex);
+        job->done = true;
+    }
+    job->cv.notify_all();
+}
+
 struct drain_guard {
     bool &flag;
     explicit drain_guard(bool &value) : flag(value) { flag = true; }
@@ -293,14 +444,18 @@ void background_drain() {
     if (draining)
         return;
     std::deque<pending_callback> jobs;
+    std::deque<std::shared_ptr<blocking_callback_job>> blocking;
     {
         std::lock_guard<std::mutex> lock(background_mutex());
-        if (background_queue().empty())
+        if (background_queue().empty() && blocking_queue().empty())
             return;
         jobs.swap(background_queue());
+        blocking.swap(blocking_queue());
     }
 
     drain_guard guard(draining);
+    for (const std::shared_ptr<blocking_callback_job> &job : blocking)
+        drain_blocking_job(job);
     for (pending_callback &job : jobs) {
         if (job.error_only) {
             yyerror("ffi cross-thread callback: %s", job.error.c_str());

@@ -5,7 +5,9 @@
 #include "eval_helpers.h"
 #include "ffi_callbacks.h"
 #include "ffi_manifest.h"
+#include "event_loop.h"
 #include "ffi_marshal.h"
+#include "fiber.h"
 #include "ffi_types.h"
 #include "ffi_value.h"
 #include "structtype.h"
@@ -13,11 +15,13 @@
 
 #include <ffi.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -938,182 +942,279 @@ static value_t *integer_result(kind_t kind, const unsigned char *buffer) {
     }
 }
 
+struct prepared_call {
+    std::shared_ptr<ffi::library_handle> library;
+    void *symbol = nullptr;
+    ffi_cif cif{};
+    type_ptr return_type;
+    std::vector<ffi::arg_slot> slots;
+    std::vector<ffi_type *> cif_types;
+    std::vector<void *> argv;
+    std::vector<value_t *> values;
+    const ffi::manifest_function *declared = nullptr;
+};
+
+static bool prepare_call(
+    const std::shared_ptr<ffi::library_handle> &library,
+    const std::string &symbol_name, const type_ptr &return_type,
+    const std::vector<type_ptr> &arg_types,
+    const std::vector<value_t *> &values, prepared_call &out,
+    std::string &error) {
+    if (return_type->kind == kind_t::bytes ||
+        return_type->kind == kind_t::buffer) {
+        error = "bytes/buffer cannot be returned directly; use std.ffi.buffer";
+        return false;
+    }
+
+    const std::size_t count = arg_types.size();
+    if (values.size() != count) {
+        error = "argument type/value count mismatch";
+        return false;
+    }
+    if (count > 32) {
+        error = "too many arguments";
+        return false;
+    }
+
+    out.library = library;
+    out.return_type = return_type;
+    out.values = values;
+    out.slots.resize(count);
+    out.cif_types.reserve(count);
+    out.argv.reserve(count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!arg_types[i] || arg_types[i]->kind == kind_t::void_) {
+            error = "invalid argument type";
+            return false;
+        }
+        std::string argument_error;
+        if (!ffi::prepare_arg(arg_types[i], values[i], out.slots[i],
+                              argument_error)) {
+            error = "argument " + std::to_string(i + 1) + ": " +
+                    argument_error;
+            return false;
+        }
+        out.cif_types.push_back(arg_types[i]->cif);
+    }
+    for (const ffi::arg_slot &slot : out.slots)
+        out.argv.push_back(slot.value);
+
+    out.symbol = library->library->symbol(symbol_name.c_str(), error);
+    if (!out.symbol) {
+        error = "symbol not found: " + symbol_name + ": " + error;
+        return false;
+    }
+
+    if (!return_type->cif) {
+        error = return_type->name + " cannot be returned by value";
+        return false;
+    }
+    if (ffi_prep_cif(&out.cif, FFI_DEFAULT_ABI, (unsigned int)count,
+                     return_type->cif,
+                     out.cif_types.empty() ? nullptr
+                                           : out.cif_types.data()) != FFI_OK) {
+        error = "cannot prepare call interface";
+        return false;
+    }
+    return true;
+}
+
+static void apply_ownership(prepared_call &call) {
+    const ffi::manifest_function *declared = call.declared;
+    if (!declared)
+        return;
+    for (std::size_t index : declared->consumes) {
+        if (index < call.values.size())
+            ffi::mark_consumed(call.values[index]);
+    }
+    for (std::size_t index : declared->retains) {
+        if (index < call.values.size())
+            ffi::retain_value(call.library, call.values[index]);
+    }
+}
+
+static value_t *convert_result(
+    prepared_call &call, const unsigned char *result,
+    const std::shared_ptr<ffi::memory_block> &block, const char *op) {
+    const type_ptr &return_type = call.return_type;
+    const ffi::manifest_function *declared = call.declared;
+
+    switch (return_type->kind) {
+        case kind_t::f32:
+            return newfloatval((double)load_bytes<float>(result));
+        case kind_t::f64:
+            return newfloatval(load_bytes<double>(result));
+        case kind_t::cstring: {
+            const char *value = load_bytes<const char *>(result);
+            return value ? newstrval(value) : newnull();
+        }
+        case kind_t::pointer:
+        case kind_t::opaque:
+        case kind_t::callback: {
+            void *raw = load_bytes<void *>(result);
+            std::shared_ptr<void> owner = call.library;
+            if (declared && declared->returns_owned && raw) {
+                std::string free_name = declared->free_function.empty()
+                                            ? std::string("free")
+                                            : declared->free_function;
+                std::string free_error;
+                void *free_symbol =
+                    call.library->library->symbol(free_name.c_str(),
+                                                  free_error);
+                if (!free_symbol) {
+                    yyerror("%s: returns_owned free function not found: %s: %s",
+                            op, free_name.c_str(), free_error.c_str());
+                    return NULL;
+                }
+                using free_fn_t = void (*)(void *);
+                free_fn_t release = (free_fn_t)free_symbol;
+                std::shared_ptr<dynamic_library> keep =
+                    call.library->library;
+                owner = std::shared_ptr<void>(
+                    raw, [keep, release](void *pointer) {
+                        if (pointer)
+                            release(pointer);
+                    });
+            }
+            return ffi::new_pointer_value(
+                return_type->kind == kind_t::pointer ? return_type->element
+                                                     : nullptr,
+                (unsigned char *)raw, owner);
+        }
+        case kind_t::record:
+        case kind_t::array: {
+            std::string read_error;
+            value_t *value = ffi::read_value(return_type, result, block,
+                                             &read_error, block->keep);
+            if (!value)
+                yyerror("%s: %s", op, read_error.c_str());
+            return value;
+        }
+        case kind_t::void_:
+            return newnull();
+        default:
+            return integer_result(return_type->kind, result);
+    }
+}
+
+static value_t *invoke_sync(prepared_call &call) {
+    ffi::callback_scope_guard callback_scope;
+    if (call.return_type->kind == kind_t::void_) {
+        ffi_call(&call.cif, FFI_FN(call.symbol), nullptr,
+                 call.argv.empty() ? nullptr : call.argv.data());
+        if (callback_scope.failed()) {
+            yyerror("ffi.call: %s", callback_scope.error().c_str());
+            return NULL;
+        }
+        apply_ownership(call);
+        return newnull();
+    }
+
+    std::shared_ptr<ffi::memory_block> block;
+    alignas(16) unsigned char scalar[16] = {0};
+    void *result = scalar;
+    if (ffi::is_aggregate(call.return_type->kind)) {
+        block = std::make_shared<ffi::memory_block>(call.return_type->size,
+                                                    call.return_type->align);
+        result = block->data;
+    }
+
+    ffi_call(&call.cif, FFI_FN(call.symbol), result,
+             call.argv.empty() ? nullptr : call.argv.data());
+    if (callback_scope.failed()) {
+        yyerror("ffi.call: %s", callback_scope.error().c_str());
+        return NULL;
+    }
+    apply_ownership(call);
+    return convert_result(call, (const unsigned char *)result, block,
+                          "ffi.call");
+}
+
 static value_t *perform_call(
     const std::shared_ptr<ffi::library_handle> &library,
     const std::string &symbol_name, const type_ptr &return_type,
     const std::vector<type_ptr> &arg_types,
     const std::vector<value_t *> &values,
     const ffi::manifest_function *declared) {
-    if (return_type->kind == kind_t::bytes ||
-        return_type->kind == kind_t::buffer) {
-        yyerror("ffi.call: bytes/buffer cannot be returned directly; "
-                "use std.ffi.buffer");
-        return NULL;
-    }
-
-    const std::size_t count = arg_types.size();
-    if (values.size() != count) {
-        yyerror("ffi.call: argument type/value count mismatch");
-        return NULL;
-    }
-    if (count > 32) {
-        yyerror("ffi.call: too many arguments");
-        return NULL;
-    }
-
+    prepared_call call;
     std::string error;
-    std::vector<ffi::arg_slot> slots(count);
-    std::vector<ffi_type *> cif_types;
-    std::vector<void *> argv;
-    cif_types.reserve(count);
-    argv.reserve(count);
-
-    for (std::size_t i = 0; i < count; ++i) {
-        if (!arg_types[i] || arg_types[i]->kind == kind_t::void_) {
-            yyerror("ffi.call: invalid argument type");
-            return NULL;
-        }
-        if (!ffi::prepare_arg(arg_types[i], values[i], slots[i], error)) {
-            yyerror("ffi.call: argument %d: %s", (int)i + 1,
-                    error.c_str());
-            return NULL;
-        }
-        cif_types.push_back(arg_types[i]->cif);
+    if (!prepare_call(library, symbol_name, return_type, arg_types, values,
+                      call, error)) {
+        yyerror("ffi.call: %s", error.c_str());
+        return NULL;
     }
-    for (const ffi::arg_slot &slot : slots)
-        argv.push_back(slot.value);
+    call.declared = declared;
+    return invoke_sync(call);
+}
 
-    void *symbol = library->library->symbol(symbol_name.c_str(), error);
-    if (!symbol) {
-        yyerror("ffi.call: symbol not found: %s: %s", symbol_name.c_str(),
-                error.c_str());
+static value_t *run_async(prepared_call &call) {
+    static thread_local int async_depth = 0;
+    if (async_depth >= 4) {
+        yyerror("ffi.call_async: recursion limit exceeded");
+        return NULL;
+    }
+    ++async_depth;
+    struct depth_guard {
+        int &depth;
+        ~depth_guard() { --depth; }
+    } guard{async_depth};
+
+    if (!event_loop_init()) {
+        yyerror("ffi.call_async: cannot initialize the event loop");
         return NULL;
     }
 
-    ffi_cif cif;
-    if (!return_type->cif) {
-        yyerror("ffi.call: %s cannot be returned by value",
-                return_type->name.c_str());
+    std::shared_ptr<ffi::memory_block> block;
+    alignas(16) unsigned char scalar[16] = {0};
+    void *result = scalar;
+    if (call.return_type->kind != kind_t::void_ &&
+        ffi::is_aggregate(call.return_type->kind)) {
+        block = std::make_shared<ffi::memory_block>(call.return_type->size,
+                                                    call.return_type->align);
+        result = block->data;
+    }
+
+    std::atomic<bool> done{false};
+    std::shared_ptr<std::atomic<bool>> callback_failed =
+        std::make_shared<std::atomic<bool>>(false);
+    std::string worker_error;
+    std::thread worker([&call, &done, &worker_error, result,
+                        callback_failed]() {
+        ffi::async_scope scope(callback_failed);
+        try {
+            if (call.return_type->kind == kind_t::void_) {
+                ffi_call(&call.cif, FFI_FN(call.symbol), nullptr,
+                         call.argv.empty() ? nullptr : call.argv.data());
+            } else {
+                ffi_call(&call.cif, FFI_FN(call.symbol), result,
+                         call.argv.empty() ? nullptr : call.argv.data());
+            }
+        } catch (...) {
+            worker_error = "worker failed";
+        }
+        done = true;
+    });
+
+    while (!done) {
+        uv_run(event_loop_handle(), UV_RUN_ONCE);
+        fiber_pump();
+    }
+    worker.join();
+
+    if (!worker_error.empty()) {
+        yyerror("ffi.call_async: %s", worker_error.c_str());
         return NULL;
     }
-    if (ffi_prep_cif(&cif, FFI_DEFAULT_ABI, (unsigned int)count,
-                     return_type->cif,
-                     cif_types.empty() ? nullptr : cif_types.data()) !=
-        FFI_OK) {
-        yyerror("ffi.call: cannot prepare call interface");
+    if (callback_failed->load())
         return NULL;
+    if (call.return_type->kind == kind_t::void_) {
+        apply_ownership(call);
+        return newnull();
     }
-
-    ffi::callback_scope_guard callback_scope;
-    if (return_type->kind == kind_t::void_) {
-        ffi_call(&cif, FFI_FN(symbol), nullptr,
-                 argv.empty() ? nullptr : argv.data());
-        if (callback_scope.failed()) {
-            yyerror("ffi.call: %s", callback_scope.error().c_str());
-            return NULL;
-        }
-    } else {
-        std::shared_ptr<ffi::memory_block> result_block;
-        unsigned char *result = nullptr;
-        alignas(16) unsigned char scalar[16] = {0};
-        if (ffi::is_aggregate(return_type->kind)) {
-            result_block = std::make_shared<ffi::memory_block>(
-                return_type->size, return_type->align);
-            result = result_block->data;
-        } else {
-            result = scalar;
-        }
-
-        ffi_call(&cif, FFI_FN(symbol), result,
-                 argv.empty() ? nullptr : argv.data());
-        if (callback_scope.failed()) {
-            yyerror("ffi.call: %s", callback_scope.error().c_str());
-            return NULL;
-        }
-
-        if (declared) {
-            for (std::size_t index : declared->consumes) {
-                if (index < values.size())
-                    ffi::mark_consumed(values[index]);
-            }
-            for (std::size_t index : declared->retains) {
-                if (index < values.size())
-                    ffi::retain_value(library, values[index]);
-            }
-        }
-
-        switch (return_type->kind) {
-            case kind_t::f32:
-                return newfloatval((double)load_bytes<float>(result));
-            case kind_t::f64:
-                return newfloatval(load_bytes<double>(result));
-            case kind_t::cstring: {
-                const char *value = load_bytes<const char *>(result);
-                return value ? newstrval(value) : newnull();
-            }
-            case kind_t::pointer:
-            case kind_t::opaque:
-            case kind_t::callback: {
-                void *raw = load_bytes<void *>(result);
-                std::shared_ptr<void> owner = library;
-                if (declared && declared->returns_owned && raw) {
-                    std::string free_name = declared->free_function.empty()
-                                                ? std::string("free")
-                                                : declared->free_function;
-                    std::string free_error;
-                    void *free_symbol =
-                        library->library->symbol(free_name.c_str(),
-                                                 free_error);
-                    if (!free_symbol) {
-                        yyerror("ffi.call: returns_owned free function not "
-                                "found: %s: %s", free_name.c_str(),
-                                free_error.c_str());
-                        return NULL;
-                    }
-                    using free_fn_t = void (*)(void *);
-                    free_fn_t release = (free_fn_t)free_symbol;
-                    std::shared_ptr<dynamic_library> keep =
-                        library->library;
-                    owner = std::shared_ptr<void>(
-                        raw, [keep, release](void *pointer) {
-                            if (pointer)
-                                release(pointer);
-                        });
-                }
-                return ffi::new_pointer_value(
-                    return_type->kind == kind_t::pointer
-                        ? return_type->element
-                        : nullptr,
-                    (unsigned char *)raw, owner);
-            }
-            case kind_t::record:
-            case kind_t::array: {
-                std::string read_error;
-                value_t *value = ffi::read_value(
-                    return_type, result, result_block, &read_error,
-                    result_block->keep);
-                if (!value)
-                    yyerror("ffi.call: %s", read_error.c_str());
-                return value;
-            }
-            case kind_t::void_:
-                return newnull();
-            default:
-                return integer_result(return_type->kind, result);
-        }
-    }
-
-    if (declared) {
-        for (std::size_t index : declared->consumes) {
-            if (index < values.size())
-                ffi::mark_consumed(values[index]);
-        }
-        for (std::size_t index : declared->retains) {
-            if (index < values.size())
-                ffi::retain_value(library, values[index]);
-        }
-    }
-    return newnull();
+    apply_ownership(call);
+    return convert_result(call, (const unsigned char *)result, block,
+                          "ffi.call_async");
 }
 
 struct ffi_bound_function {
@@ -1202,78 +1303,116 @@ static value_t *ffi_declare(const std::vector<value_t *> &args) {
     return newnull();
 }
 
-static value_t *ffi_call(const std::vector<value_t *> &args) {
+static bool resolve_call(
+    const std::vector<value_t *> &args,
+    std::shared_ptr<ffi::library_handle> &library, std::string &symbol,
+    type_ptr &return_type, std::vector<type_ptr> &arg_types,
+    std::vector<value_t *> &values,
+    const ffi::manifest_function *&declared, std::string &error) {
+    declared = nullptr;
     if (args.size() != 3 && args.size() != 5) {
-        yyerror("std.ffi.call expects 3 or 5 arguments");
-        return NULL;
+        error = "expects 3 or 5 arguments";
+        return false;
     }
-    std::shared_ptr<ffi::library_handle> library;
     if (!ffi::get_library(args[0], library))
-        return NULL;
+        return false;
     if (args[1]->type != T_string) {
-        yyerror("ffi.call symbol must be a string");
-        return NULL;
+        error = "symbol must be a string";
+        return false;
     }
-    const std::string symbol = ((string_value_t *)args[1])->value;
+    symbol = ((string_value_t *)args[1])->value;
 
     if (args.size() == 3) {
         if (!library->spec) {
-            yyerror("ffi.call: library has no manifest; "
-                    "pass types explicitly");
-            return NULL;
+            error = "library has no manifest; pass types explicitly";
+            return false;
         }
-        auto declared = library->spec->functions.find(symbol);
-        if (declared == library->spec->functions.end()) {
-            yyerror("ffi.call: function %s is not declared in the manifest",
-                    symbol.c_str());
-            return NULL;
+        auto function = library->spec->functions.find(symbol);
+        if (function == library->spec->functions.end()) {
+            error = "function " + symbol + " is not declared in the manifest";
+            return false;
         }
         if (args[2]->type != T_list) {
-            yyerror("ffi.call arguments must be a list");
-            return NULL;
+            error = "arguments must be a list";
+            return false;
         }
-        return perform_call(library, declared->second.symbol,
-                            declared->second.result,
-                            declared->second.args,
-                            ((list_value_t *)args[2])->payload->items,
-                            &declared->second);
+        declared = &function->second;
+        return_type = function->second.result;
+        arg_types = function->second.args;
+        values = ((list_value_t *)args[2])->payload->items;
+        return true;
     }
 
     if (args[3]->type != T_list || args[4]->type != T_list) {
-        yyerror("ffi.call argument types and values must be lists");
-        return NULL;
+        error = "argument types and values must be lists";
+        return false;
     }
-
-    std::string error;
-    type_ptr return_type;
-    if (!ffi::resolve_type(args[2], return_type, error)) {
-        yyerror("ffi.call: %s", error.c_str());
-        return NULL;
-    }
+    if (!ffi::resolve_type(args[2], return_type, error))
+        return false;
 
     list_value_t *types = (list_value_t *)args[3];
-    list_value_t *values = (list_value_t *)args[4];
-    if (types->payload->items.size() != values->payload->items.size()) {
-        yyerror("ffi.call: argument type/value count mismatch");
-        return NULL;
+    list_value_t *value_list = (list_value_t *)args[4];
+    if (types->payload->items.size() != value_list->payload->items.size()) {
+        error = "argument type/value count mismatch";
+        return false;
     }
     if (types->payload->items.size() > 32) {
-        yyerror("ffi.call: too many arguments");
-        return NULL;
+        error = "too many arguments";
+        return false;
     }
-
-    std::vector<type_ptr> arg_types;
+    arg_types.clear();
     arg_types.reserve(types->payload->items.size());
     for (value_t *item : types->payload->items) {
         type_ptr type;
-        if (!ffi::resolve_type(item, type, error)) {
-            yyerror("ffi.call: %s", error.c_str());
-            return NULL;
-        }
+        if (!ffi::resolve_type(item, type, error))
+            return false;
         arg_types.push_back(std::move(type));
     }
-    return perform_call(library, symbol, return_type, arg_types,
-                        values->payload->items, nullptr);
+    values = value_list->payload->items;
+    return true;
+}
+
+static value_t *ffi_call(const std::vector<value_t *> &args) {
+    std::shared_ptr<ffi::library_handle> library;
+    std::string symbol;
+    type_ptr return_type;
+    std::vector<type_ptr> arg_types;
+    std::vector<value_t *> values;
+    const ffi::manifest_function *declared = nullptr;
+    std::string error;
+    if (!resolve_call(args, library, symbol, return_type, arg_types, values,
+                      declared, error)) {
+        if (!error.empty())
+            yyerror("ffi.call: %s", error.c_str());
+        return NULL;
+    }
+    return perform_call(library, symbol, return_type, arg_types, values,
+                        declared);
+}
+
+static value_t *ffi_call_async(const std::vector<value_t *> &args) {
+    std::shared_ptr<ffi::library_handle> library;
+    std::string symbol;
+    type_ptr return_type;
+    std::vector<type_ptr> arg_types;
+    std::vector<value_t *> values;
+    const ffi::manifest_function *declared = nullptr;
+    std::string error;
+    if (!resolve_call(args, library, symbol, return_type, arg_types, values,
+                      declared, error)) {
+        if (!error.empty())
+            yyerror("ffi.call_async: %s", error.c_str());
+        return NULL;
+    }
+
+    prepared_call call;
+    if (!prepare_call(library, symbol, return_type, arg_types, values, call,
+                      error)) {
+        yyerror("ffi.call_async: %s", error.c_str());
+        return NULL;
+    }
+    call.declared = declared;
+    return run_async(call);
 }
 
 /* -------------------------------------------------------------------------
@@ -1290,6 +1429,8 @@ struct value_t *call_ffi_builtin(
             return ffi_close(args);
         case B_ffi_call:
             return ffi_call(args);
+        case B_ffi_call_async:
+            return ffi_call_async(args);
         case B_ffi_buffer:
             return ffi_buffer_new(args);
         case B_ffi_buffer_len:

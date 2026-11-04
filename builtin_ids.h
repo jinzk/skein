@@ -143,6 +143,7 @@ enum bifs {
     B_ffi_open,
     B_ffi_close,
     B_ffi_call,
+    B_ffi_call_async,
     B_ffi_buffer,
     B_ffi_buffer_len,
     B_ffi_buffer_bytes,

@@ -678,6 +678,49 @@ def run_cases():
             stderr="cross-thread callbacks must return void",
         )
         check(
+            "std ffi call_async",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call_async(lib, "shim_i32", "i32", ["i32"], [21])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 21",
+        )
+        check(
+            "std ffi call_async blocking callback",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return a - b; });\n"
+            'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 9, 4])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 5",
+        )
+        check(
+            "std ffi call_async callback error",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return 1 / 0; });\n"
+            'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [cb, 1, 2])\n',
+            stderr="division by zero",
+        )
+        check(
+            "std ffi call_async nested ffi.call",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let inner = std.ffi.callback(Cmp, func(a, b) { return a - b; });\n"
+            "let outer = std.ffi.callback(Cmp, func(a, b) {\n"
+            '  return std.ffi.call(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [inner, a, b]);\n'
+            "});\n"
+            'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
+            '[Cmp, "i32", "i32"], [outer, 9, 4])\n',
+            stdout="= 5",
+        )
+        check(
             "std ffi callback reentrant call",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"

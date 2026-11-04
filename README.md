@@ -1458,6 +1458,25 @@ std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
 - 回调失败不会跨 C ABI 抛异常，错误在 `ffi.call` 返回后统一报告；
 - C 侧保存函数指针并稍后调用属于未定义行为，需要静态 C++ 绑定管理生命周期。
 
+需要从其他线程执行 C 调用并等待回调结果时，使用 `std.ffi.call_async`：
+
+```text
+import std;
+
+let lib = std.ffi.open("./libalgo.so");
+let Cmp = std.ffi.signature("i32", ["i32", "i32"]);
+let cmp = std.ffi.callback(Cmp, func(a, b) { return a - b; });
+
+// C 函数在 worker 线程执行；脚本阻塞，但事件循环继续运行，
+// 回调会被投递回解释器线程并等待返回值。
+std.ffi.call_async(lib, "compare", "i32",
+                   [Cmp, "i32", "i32"], [cmp, 9, 4]);
+```
+
+- 比同步 `ffi.call` 多了线程切换，适合会阻塞或回调耗时较长的 C 调用；
+- 回调仍然运行在解释器线程，可以安全访问脚本状态；
+- 回调内可以继续 `ffi.call` / `ffi.call_async`（有递归深度限制）。
+
 FFI manifest（可选）：
 
 ```text
@@ -2121,6 +2140,7 @@ std.error.message
 std.ffi.open
 std.ffi.close
 std.ffi.call
+std.ffi.call_async
 std.ffi.buffer
 std.ffi.buffer_len
 std.ffi.buffer_bytes

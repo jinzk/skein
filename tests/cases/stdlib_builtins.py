@@ -669,6 +669,75 @@ def run_cases():
             stdout="= 5",
         )
     check(
+        "native module functions and constants",
+        "import example.math;\n"
+        "math.add(2, 3)\n"
+        'math.join("a", "b")\n'
+        "math.ANSWER\n"
+        "math.PI\n"
+        "math.NAME\n",
+        stdout_all=["= 5", "= ab", "= 42", "= 3.14159", "= example"],
+    )
+    check(
+        "native module userdata",
+        "import example.math;\n"
+        "let c = math.counter_new(5);\n"
+        "c.value\n"
+        "c.value = 9;\n"
+        "c.value\n"
+        "type_name(c)\n"
+        "print(c)\n",
+        stdout_all=["= 5", "= 9", "= Counter", "<Counter>"],
+    )
+    check(
+        "native module import alias",
+        "import example.math as m;\nm.ANSWER\n",
+        stdout="= 42",
+    )
+    check(
+        "native module argument error",
+        "import example.math;\nmath.add(1)\n",
+        stderr="add expects 2 arguments",
+    )
+    check(
+        "native module type error",
+        'import example.math;\nmath.add("x", 1)\n',
+        stderr="add expects integers",
+    )
+    check(
+        "native module field error",
+        "import example.math;\nlet c = math.counter_new();\nc.missing\n",
+        stderr="Counter has no such field",
+    )
+    check(
+        "native module unknown",
+        "import example.nope;\n",
+        stderr="package not found",
+    )
+    if NATIVE_MODULE:
+        native_module = skein_string(NATIVE_MODULE)
+        check(
+            "native module dynamic load",
+            "import std;\n"
+            f"let name = std.module.load({native_module});\n"
+            "name\n"
+            "import test.dynamic;\n"
+            "dynamic.twice(21)\n",
+            stdout_all=["= test.dynamic", "= 42"],
+        )
+        check(
+            "native module dynamic load error",
+            'import std;\nstd.module.load("/definitely/not/a/module.so")\n',
+            stderr="std.module.load",
+        )
+        if FFI_SHIM:
+            check(
+                "native module missing descriptor",
+                "import std;\n"
+                f"std.module.load({skein_string(FFI_SHIM)})\n",
+                stderr="missing skein_module_descriptor",
+            )
+    check(
         "std string format",
         'import std;\nstd.string.format("{}", 3)\n',
         stdout="= 3",

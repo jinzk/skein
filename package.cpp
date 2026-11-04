@@ -1,5 +1,7 @@
 #include "package.h"
 
+#include "binding_registry.h"
+
 #include "ast.h"
 #include "diagnostics.h"
 #include "eval.h"
@@ -794,6 +796,11 @@ value_t *build_std_namespace() {
         })));
 #endif
     root->payload->items.push_back(std::make_pair(
+        newstrval("module"),
+        builtin_module({
+            {"load", B_module_load},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("task"),
         builtin_module({
             {"sleep", B_task_sleep},
@@ -971,14 +978,30 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
     }
 
     if (spec.kind == IMPORT_ABSOLUTE) {
-        if (const char *source = find_embedded_source(spec.dotted))
+        if (const char *source = find_embedded_source(spec.dotted)) {
+            if (skein::module_registered(spec.dotted)) {
+                error = "ambiguous import: " + spec.dotted +
+                        " is both a package and a native module";
+                return NULL;
+            }
             return import_embedded_package(spec.dotted, source, error);
+        }
     }
 
     resolved_package resolved;
     if (spec.kind == IMPORT_ABSOLUTE) {
-        if (!resolve_package(spec.dotted, resolved, error))
+        std::string resolve_error;
+        if (!resolve_package(spec.dotted, resolved, resolve_error)) {
+            if (skein::module_registered(spec.dotted))
+                return skein::import_module(spec.dotted, error);
+            error = resolve_error;
             return NULL;
+        }
+        if (skein::module_registered(spec.dotted)) {
+            error = "ambiguous import: " + spec.dotted +
+                    " is both a package and a native module";
+            return NULL;
+        }
     } else {
         fs::path base;
         if (spec.kind == IMPORT_PROJECT) {

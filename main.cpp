@@ -57,6 +57,12 @@ int main(int argc, char **argv) {
                                           runtime_error_report};
     skein_context_set(&runtime_hooks);
 
+    std::string module_error;
+    if (!builtins_register_modules(module_error)) {
+        std::fprintf(stderr, "skein: %s\n", module_error.c_str());
+        return 1;
+    }
+
     std::vector<std::string> args = platform_command_line_args(argc, argv);
     const char *program =
         args.empty() || args[0].empty() ? "skein" : args[0].c_str();

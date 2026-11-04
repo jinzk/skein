@@ -1,5 +1,7 @@
 #include "builtins.h"
 
+#include "binding_registry.h"
+
 #include "runtime_context.h"
 #include "symbol.h"
 #include "builtin_ids.h"
@@ -10,6 +12,7 @@
 #include "env_builtin.h"
 #include "eval_helpers.h"
 #include "error.h"
+#include "example_binding.h"
 #include "fs_extra.h"
 #include "generator.h"
 #include "http.h"
@@ -1393,8 +1396,30 @@ static const char *math_builtin_name(int functype) {
     }
 }
 
+static struct value_t *module_load_builtin(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_string) {
+        yyerror("std.module.load expects a string path");
+        return NULL;
+    }
+    std::string import_path;
+    std::string error;
+    if (!skein::load_dynamic_module(
+            ((struct string_value_t *)args[0])->value, import_path, error)) {
+        yyerror("std.module.load: %s", error.c_str());
+        return NULL;
+    }
+    return newstrval(import_path.c_str());
+}
+
+bool builtins_register_modules(std::string &error) {
+    return skein::register_module(skein_example_module(), nullptr, error);
+}
+
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
+    if (functype == B_module_load)
+        return module_load_builtin(args);
     if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)
         return call_net_builtin(functype, args);
 #ifdef SKEIN_ENABLE_FFI

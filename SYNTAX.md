@@ -1568,6 +1568,7 @@ std.fs
 std.process
 std.worker
 std.type
+std.module
 std.net
 std.http
 std.tls（可选）

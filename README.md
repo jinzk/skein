@@ -1512,6 +1512,28 @@ lib2.add(1, 2);
 - `ffi.declare(lib, spec)` 增量合并声明，重复类型/函数/常量会报错；
 - 绑定函数持有库句柄；`ffi.close` 后再次调用会报 "ffi library is closed"。
 
+原生模块（C ABI）：
+
+```text
+// 插件导出唯一符号：
+// const skein_module *skein_module_descriptor(void);
+
+import std;
+
+let name = std.module.load("./libexample.so");
+print(name);              // example.math
+
+import example.math;
+example.math.add(1, 2);
+example.math.ANSWER;
+```
+
+- 插件只包含 `skein_module.h`，不链接解释器符号；
+- `skein_api` 由 host 通过 `init` 传入，值以 opaque handle 传递；
+- 静态绑定在启动时注册，动态插件通过 `std.module.load` 加载；
+- 模块名是建议 import path，内部 key 由 loader 生成；
+- 重复 import path、模块与包同名、ABI 版本不匹配都会报错。
+
 模块：
 
 ```text
@@ -1534,6 +1556,7 @@ std.fs
 std.process
 std.worker
 std.type
+std.module
 std.net
 std.http
 std.tls（可选）
@@ -1918,6 +1941,8 @@ std.type.kind_of
 std.type.name
 std.type.module
 std.type.source
+
+std.module.load
 
 std.net.tcp_connect
 std.net.tcp_listen

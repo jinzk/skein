@@ -14,7 +14,23 @@ import unicodedata
 
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
-FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 else None
+FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
+
+
+def _find_native_module():
+    if not BIN:
+        return None
+    directory = os.path.dirname(os.path.abspath(BIN))
+    for name in ("libskein_native_module.so",
+                 "libskein_native_module.dylib",
+                 "skein_native_module.dll"):
+        candidate = os.path.join(directory, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+NATIVE_MODULE = _find_native_module()
 
 
 def skein_string(value):
@@ -746,6 +762,7 @@ def check_source_encoding():
 __all__ = [
     "BIN",
     "FFI_SHIM",
+    "NATIVE_MODULE",
     "skein_string",
     "run",
     "run_file",

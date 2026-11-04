@@ -143,6 +143,7 @@ add_library(skein_runtime STATIC
   stdio_stream.cpp
   runtime_context.cpp
   runtime_error.cpp
+  binding_registry.cpp
 )
 set_target_properties(skein_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_runtime PUBLIC
@@ -210,6 +211,7 @@ add_library(skein_builtins STATIC
   time_builtin.cpp
   websocket.cpp
   worker_pool.cpp
+  example_binding.cpp
 )
 set_target_properties(skein_builtins PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_builtins PUBLIC
@@ -370,6 +372,13 @@ if(BUILD_TESTING)
   if(Python3_Interpreter_FOUND)
     if(SKEIN_ENABLE_FFI AND LIBFFI_FOUND)
       add_library(skein_ffi_shim SHARED tests/ffi_shim.cpp)
+    endif()
+    add_library(skein_native_module SHARED tests/native_module.cpp)
+    target_include_directories(skein_native_module PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(skein_native_module PRIVATE -Wall -Wextra)
     endif()
     set(SKEIN_TEST_COMMAND
       ${Python3_EXECUTABLE}

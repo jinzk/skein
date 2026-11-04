@@ -1413,6 +1413,10 @@ static struct value_t *module_load_builtin(
 }
 
 bool builtins_register_modules(std::string &error) {
+#ifdef SKEIN_ENABLE_FFI
+    if (struct skein_context *context = skein_context_current())
+        context->drain_background = ffi::background_drain;
+#endif
     return skein::register_module(skein_example_module(), nullptr, error);
 }
 

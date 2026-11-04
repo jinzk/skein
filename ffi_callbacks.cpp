@@ -7,21 +7,24 @@
 
 #include <ffi.h>
 
+#include <atomic>
 #include <cstring>
+#include <deque>
+#include <mutex>
 #include <thread>
 #include <utility>
 #include <vector>
 
 namespace ffi {
 
-struct callback_handle {
+struct callback_handle : public std::enable_shared_from_this<callback_handle> {
     type_ptr signature;
     ffi_closure *closure = nullptr;
     void *code = nullptr;
     ffi_cif cif{};
     std::vector<ffi_type *> arg_types;
     struct value_t *function = nullptr;
-    bool failed = false;
+    std::atomic<bool> failed{false};
     std::string error;
 
     ~callback_handle() {
@@ -85,18 +88,89 @@ void record_failure(callback_handle *handle, callback_call_scope *scope,
     }
 }
 
+
+struct pending_callback {
+    std::shared_ptr<callback_handle> handle;
+    bool error_only = false;
+    std::string error;
+    std::vector<std::shared_ptr<std::vector<unsigned char>>> args;
+};
+
+std::mutex &background_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::deque<pending_callback> &background_queue() {
+    static std::deque<pending_callback> queue;
+    return queue;
+}
+
+void enqueue_background_error(callback_handle *handle,
+                              const char *message) {
+    if (!handle)
+        return;
+    std::shared_ptr<callback_handle> owned;
+    try {
+        owned = handle->shared_from_this();
+    } catch (...) {
+        return;
+    }
+    pending_callback job;
+    job.handle = std::move(owned);
+    job.error_only = true;
+    job.error = message ? message : "ffi callback failed";
+    std::lock_guard<std::mutex> lock(background_mutex());
+    background_queue().push_back(std::move(job));
+}
+
+void enqueue_background_call(callback_handle *handle, void **args) {
+    if (!handle || !handle->signature)
+        return;
+    std::shared_ptr<callback_handle> owned;
+    try {
+        owned = handle->shared_from_this();
+    } catch (...) {
+        return;
+    }
+    pending_callback job;
+    job.handle = std::move(owned);
+    const std::vector<type_ptr> &params = handle->signature->params;
+    job.args.reserve(params.size());
+    for (size_t i = 0; i < params.size(); ++i) {
+        const type_ptr &type = params[i];
+        std::shared_ptr<std::vector<unsigned char>> block =
+            std::make_shared<std::vector<unsigned char>>(
+                type->size ? type->size : 1);
+        if (type->size)
+            std::memcpy(block->data(), args[i], type->size);
+        job.args.push_back(std::move(block));
+    }
+    std::lock_guard<std::mutex> lock(background_mutex());
+    background_queue().push_back(std::move(job));
+}
+
 extern "C" void ffi_callback_entry(ffi_cif *cif, void *ret, void **args,
                                    void *user_data) {
     callback_handle *handle = (callback_handle *)user_data;
     try {
         callback_call_scope *scope = tls_scope;
         if (!scope) {
-            if (handle) {
-                record_failure(
-                    handle, nullptr,
-                    skein_context_current()
-                        ? "ffi callback invoked outside an active ffi.call"
-                        : "ffi callback invoked from a non-interpreter thread");
+            if (!handle) {
+                zero_return(cif, ret);
+                return;
+            }
+            if (skein_context_current() != nullptr) {
+                record_failure(handle, nullptr,
+                               "ffi callback invoked outside an active "
+                               "ffi.call");
+            } else if (!handle->signature ||
+                       handle->signature->result->kind != kind_t::void_) {
+                handle->failed = true;
+                enqueue_background_error(
+                    handle, "cross-thread callbacks must return void");
+            } else {
+                enqueue_background_call(handle, args);
             }
             zero_return(cif, ret);
             return;
@@ -205,6 +279,73 @@ bool callback_scope_guard::failed() const { return scope_->failed; }
 
 const std::string &callback_scope_guard::error() const {
     return scope_->error;
+}
+
+
+struct drain_guard {
+    bool &flag;
+    explicit drain_guard(bool &value) : flag(value) { flag = true; }
+    ~drain_guard() { flag = false; }
+};
+
+void background_drain() {
+    static thread_local bool draining = false;
+    if (draining)
+        return;
+    std::deque<pending_callback> jobs;
+    {
+        std::lock_guard<std::mutex> lock(background_mutex());
+        if (background_queue().empty())
+            return;
+        jobs.swap(background_queue());
+    }
+
+    drain_guard guard(draining);
+    for (pending_callback &job : jobs) {
+        if (job.error_only) {
+            yyerror("ffi cross-thread callback: %s", job.error.c_str());
+            continue;
+        }
+        std::shared_ptr<callback_handle> handle = job.handle;
+        if (!handle || !handle->function)
+            continue;
+
+        std::vector<value_t *> call_args;
+        bool ok = true;
+        for (size_t i = 0; i < handle->signature->params.size(); ++i) {
+            value_t *arg = read_value(handle->signature->params[i],
+                                      job.args[i]->data(), job.args[i]);
+            if (!arg) {
+                ok = false;
+                break;
+            }
+            call_args.push_back(arg);
+        }
+        if (!ok) {
+            for (value_t *arg : call_args)
+                freeval(arg);
+            continue;
+        }
+
+        eval_capture_snapshot snapshot;
+        eval_capture_begin(snapshot);
+        value_t *result =
+            skein_call_function(handle->function, std::move(call_args));
+        eval_capture_result captured = eval_capture_end(snapshot);
+        if (captured.failed || !result) {
+            std::string message =
+                captured.failed ? error_message_of(captured.error)
+                                : std::string("ffi callback failed");
+            freeval(captured.error);
+            freeval(result);
+            handle->failed = true;
+            handle->error = message;
+            yyerror("ffi cross-thread callback: %s", message.c_str());
+        } else {
+            freeval(captured.error);
+            freeval(result);
+        }
+    }
 }
 
 struct value_t *new_callback_value(const type_ptr &signature,

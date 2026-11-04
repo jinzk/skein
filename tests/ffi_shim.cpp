@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 #if defined(_WIN32)
 #define SHIM_EXPORT __declspec(dllexport)
@@ -34,6 +35,7 @@ typedef std::int32_t (*shim_ptr_cmp_fn)(const std::int32_t *,
 typedef double (*shim_point_fn)(struct shim_point);
 typedef const char *(*shim_string_fn)(const char *);
 typedef void (*shim_void_fn)(std::int32_t);
+typedef void (*shim_notify_fn)(std::int32_t);
 
 extern "C" {
 
@@ -220,6 +222,17 @@ SHIM_EXPORT std::int32_t shim_free_count(void) { return shim_free_counter; }
 
 SHIM_EXPORT void shim_consume_point(struct shim_point *point) {
     (void)point;
+}
+
+SHIM_EXPORT void shim_spawn_notify(shim_notify_fn fn, std::int32_t value) {
+    std::thread worker([fn, value]() { fn(value); });
+    worker.join();
+}
+
+SHIM_EXPORT void shim_spawn_cmp(shim_cmp_fn fn, std::int32_t a,
+                                std::int32_t b) {
+    std::thread worker([fn, a, b]() { (void)fn(a, b); });
+    worker.join();
 }
 
 static shim_cmp_fn shim_saved_cmp = nullptr;

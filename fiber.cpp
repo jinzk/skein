@@ -6,6 +6,7 @@
 #include "eval_context.h"
 #include "event_loop.h"
 #include "repl.h"
+#include "runtime_context.h"
 #include "scopestack.h"
 #include "task.h"
 #include "valuetype.h"
@@ -513,6 +514,9 @@ value_t *fiber_await_task(const task_ptr &task) {
 }
 
 void fiber_pump() {
+    struct skein_context *runtime = skein_context_current();
+    if (runtime && runtime->drain_background)
+        runtime->drain_background();
     for (;;) {
         for (size_t i = 0; i < all_fibers.size(); ++i) {
             fiber *value = all_fibers[i];

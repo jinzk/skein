@@ -16,6 +16,9 @@ struct skein_context {
     struct value_t *(*call_builtin)(
         int functype, const std::vector<struct value_t *> &args);
     void (*error)(const char *message);
+    /* Optional background work (for example queued FFI callbacks) drained
+     * while the interpreter pumps the event loop. */
+    void (*drain_background)() = nullptr;
 };
 
 struct skein_context *skein_context_current();

@@ -1451,7 +1451,10 @@ std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
 - 回调必须是同步函数；`async` 函数和生成器在 `ffi.callback` 时直接拒绝；
 - 只允许同步、同一 OS 线程、同一 fiber、且在活动的 `ffi.call` 范围内的回调；
 - 回调里可以继续调用 `ffi.call`（受递归深度限制），也可以 `spawn` 后立即返回；
-- 回调里不能 `await` / `yield`，延迟回调和跨线程回调暂不支持；
+- 回调里不能 `await` / `yield`；
+- 其他线程调用 `void` 回调时，回调会投递到 event loop，在脚本下次 pump
+  （`await` / `std.task.wait` / `sleep`）时执行，C 侧立即返回默认值；
+- 跨线程回调必须返回 `void`；需要返回值的回调必须在同步 `ffi.call` 内执行；
 - 回调失败不会跨 C ABI 抛异常，错误在 `ffi.call` 返回后统一报告；
 - C 侧保存函数指针并稍后调用属于未定义行为，需要静态 C++ 绑定管理生命周期。
 

@@ -653,6 +653,31 @@ def run_cases():
         )
 
         check(
+            "std ffi cross-thread callback",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            "let seen = 0;\n"
+            'let Notify = std.ffi.signature("void", ["i32"]);\n'
+            "let cb = std.ffi.callback(Notify, func(x) { seen = seen + x; });\n"
+            'std.ffi.call(lib, "shim_spawn_notify", "void", '
+            '[Notify, "i32"], [cb, 7]);\n'
+            "std.task.wait(std.task.sleep(5));\n"
+            "seen\n"
+            "std.ffi.close(lib);\n",
+            stdout="= 7",
+        )
+        check(
+            "std ffi cross-thread callback must return void",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return a - b; });\n"
+            'std.ffi.call(lib, "shim_spawn_cmp", "void", '
+            '[Cmp, "i32", "i32"], [cb, 1, 2]);\n'
+            "std.task.wait(std.task.sleep(5));\n",
+            stderr="cross-thread callbacks must return void",
+        )
+        check(
             "std ffi callback reentrant call",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"

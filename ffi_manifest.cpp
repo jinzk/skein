@@ -341,6 +341,10 @@ private:
             out = std::move(alias);
             return true;
         }
+        if (decl->type == T_userdata &&
+            ((userdata_value_t *)decl)->meta == &type_native_type) {
+            return resolve_ref(decl, out, depth);
+        }
         if (decl->type != T_dict) {
             error_ = "type declaration must be an object or a name";
             return false;

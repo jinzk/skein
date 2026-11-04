@@ -479,6 +479,18 @@ def run_cases():
             "std.ffi.close(lib);\n",
             stdout_all=["= 4.0", "= 4.0", "= 16", "= 16", "= 8", "= 3.0"],
         )
+        check(
+            "std ffi manifest type objects",
+            "import std;\n"
+            'let Point = std.ffi.struct("Point", {"x": "f64", "y": "f64"});\n'
+            f"let lib = std.ffi.open({shim}, "
+            '{"ffi": 1, "types": {"P": Point}, '
+            '"functions": {"shim_point_sum": '
+            '{"result": "f64", "args": ["P"]}}});\n'
+            'std.ffi.call(lib, "shim_point_sum", '
+            '[{"x": 1.0, "y": 2.0}])\n',
+            stdout="= 3.0",
+        )
         import json
         manifest_path = os.path.join(tempfile.gettempdir(),
                                      "skein_ffi_manifest_test.json")

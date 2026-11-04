@@ -1116,6 +1116,92 @@ static value_t *perform_call(
     return newnull();
 }
 
+struct ffi_bound_function {
+    std::shared_ptr<ffi::library_handle> library;
+    std::shared_ptr<const ffi::manifest> spec;
+    const ffi::manifest_function *declared = nullptr;
+};
+
+static value_t *make_bound_function(
+    const std::shared_ptr<ffi::library_handle> &library,
+    const std::shared_ptr<const ffi::manifest> &spec,
+    const ffi::manifest_function &declared, value_t *library_value) {
+    std::shared_ptr<ffi_bound_function> bound =
+        std::make_shared<ffi_bound_function>();
+    bound->library = library;
+    bound->spec = spec;
+    bound->declared = &declared;
+
+    value_t *value = newnativeval(
+        [bound](const std::vector<value_t *> &args) -> value_t * {
+            if (!bound->library || bound->library->closed ||
+                !bound->library->library ||
+                !bound->library->library->valid()) {
+                yyerror("ffi library is closed");
+                return NULL;
+            }
+            return perform_call(bound->library, bound->declared->symbol,
+                                bound->declared->result,
+                                bound->declared->args, args,
+                                bound->declared);
+        },
+        bound);
+    if (library_value) {
+        native_function_value *native = (native_function_value *)value;
+        native->children.push_back(dupval(library_value));
+    }
+    return value;
+}
+
+static value_t *ffi_function(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.function expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    if (args[1]->type != T_string) {
+        yyerror("ffi.function name must be a string");
+        return NULL;
+    }
+    if (!library->spec) {
+        yyerror("ffi.function: library has no manifest");
+        return NULL;
+    }
+    std::string name = ((string_value_t *)args[1])->value;
+    auto it = library->spec->functions.find(name);
+    if (it == library->spec->functions.end()) {
+        yyerror("ffi.function: %s is not declared in the manifest",
+                name.c_str());
+        return NULL;
+    }
+    return make_bound_function(library, library->spec, it->second, args[0]);
+}
+
+static value_t *ffi_declare(const std::vector<value_t *> &args) {
+    if (args.size() != 2) {
+        yyerror("std.ffi.declare expects 2 arguments");
+        return NULL;
+    }
+    std::shared_ptr<ffi::library_handle> library;
+    if (!ffi::get_library(args[0], library))
+        return NULL;
+    std::string error;
+    std::shared_ptr<const ffi::manifest> merged;
+    bool ok = false;
+    if (library->spec)
+        ok = ffi::extend_manifest(*library->spec, args[1], merged, error);
+    else
+        ok = ffi::load_manifest(args[1], merged, error);
+    if (!ok) {
+        yyerror("ffi.declare: %s", error.c_str());
+        return NULL;
+    }
+    library->spec = std::move(merged);
+    return newnull();
+}
+
 static value_t *ffi_call(const std::vector<value_t *> &args) {
     if (args.size() != 3 && args.size() != 5) {
         yyerror("std.ffi.call expects 3 or 5 arguments");
@@ -1249,8 +1335,32 @@ struct value_t *call_ffi_builtin(
             return ffi_constant(args);
         case B_ffi_type_lookup:
             return ffi_type_lookup(args);
+        case B_ffi_function:
+            return ffi_function(args);
+        case B_ffi_declare:
+            return ffi_declare(args);
         default:
             yyerror("unknown ffi function");
             return NULL;
     }
+}
+
+struct value_t *ffi::library_get_field(void *data, const char *name) {
+    ffi::library_handle *library = (ffi::library_handle *)data;
+    if (!library || !library->spec) {
+        yyerror("ffi library has no manifest");
+        return NULL;
+    }
+    std::string key = name ? name : "";
+    auto function = library->spec->functions.find(key);
+    if (function != library->spec->functions.end()) {
+        return make_bound_function(library->shared_from_this(),
+                                   library->spec, function->second,
+                                   library->self);
+    }
+    auto constant = library->spec->constants.find(key);
+    if (constant != library->spec->constants.end())
+        return dupval(constant->second);
+    yyerror("ffi library has no member %s", key.c_str());
+    return NULL;
 }

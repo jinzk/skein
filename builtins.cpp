@@ -202,6 +202,7 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_dict: return "dict";
         case T_func: return "function";
         case T_builtin: return "builtin";
+        case T_native: return "native";
         case T_userdata: return "userdata";
         case T_result: return "result";
         case T_error: return "error";
@@ -1397,7 +1398,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)
         return call_net_builtin(functype, args);
 #ifdef SKEIN_ENABLE_FFI
-    if (functype >= B_ffi_open && functype <= B_ffi_type_lookup)
+    if (functype >= B_ffi_open && functype <= B_ffi_declare)
         return call_ffi_builtin(functype, args);
 #endif
     if (functype >= B_task_sleep && functype <= B_task_bounded_parallel_map)

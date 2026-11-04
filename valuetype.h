@@ -52,6 +52,7 @@ enum val_type {
     T_heap,
     T_set,
     T_method,
+    T_native,
     T_null,
     T_class,
     T_return,
@@ -234,6 +235,19 @@ struct builtin_value_t {
     int functype;
 };
 
+/* Native callable value: static bindings and manifest-bound FFI functions.
+ * `children` keeps script values reachable for the cycle collector. */
+struct native_function_value {
+    enum val_type type;
+    std::function<struct value_t *(
+        const std::vector<struct value_t *> &args)>
+        call;
+    std::shared_ptr<void> owner;
+    std::vector<struct value_t *> children;
+
+    ~native_function_value();
+};
+
 struct stream_ops {
     bool (*read)(void *data, std::size_t max_bytes, long long timeout_ms,
                  std::string &out, bool &eof, std::string &error);
@@ -304,6 +318,10 @@ struct value_t *newcharval(unsigned int codepoint);
 struct value_t *newbyteval(unsigned int value);
 struct value_t *newbytesval(std::string data);
 struct value_t *newbuiltinval(int functype);
+struct value_t *newnativeval(
+    std::function<struct value_t *(
+        const std::vector<struct value_t *> &args)> call,
+    std::shared_ptr<void> owner = nullptr);
 struct value_t *newerrorval(const std::string &kind,
                             const std::string &message);
 struct value_t *newresultok(struct value_t *value);

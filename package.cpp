@@ -789,6 +789,8 @@ value_t *build_std_namespace() {
             {"manifest", B_ffi_manifest},
             {"constant", B_ffi_constant},
             {"type", B_ffi_type_lookup},
+            {"function", B_ffi_function},
+            {"declare", B_ffi_declare},
         })));
 #endif
     root->payload->items.push_back(std::make_pair(

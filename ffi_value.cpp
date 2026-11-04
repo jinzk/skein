@@ -139,7 +139,7 @@ struct value_t *type_get_field(void *data, const char *name) {
 } // namespace
 
 const native_type library_native_type = {
-    "ffi_library", describe_library, nullptr, nullptr, nullptr,
+    "ffi_library", describe_library, nullptr, library_get_field, nullptr,
     library_for_each_child};
 
 const native_type buffer_native_type = {"ffi_buffer", describe_buffer};
@@ -164,7 +164,9 @@ struct value_t *new_library_value(std::shared_ptr<dynamic_library> library,
     std::shared_ptr<library_handle> handle = std::make_shared<library_handle>();
     handle->library = std::move(library);
     handle->spec = std::move(spec);
-    return newuserdataval(&library_native_type, handle);
+    struct value_t *value = newuserdataval(&library_native_type, handle);
+    handle->self = value;
+    return value;
 }
 
 struct value_t *new_buffer_value(std::size_t size) {

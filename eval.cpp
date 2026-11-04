@@ -574,6 +574,14 @@ static struct value_t *invoke_value(
         return ret;
     }
 
+    if (callee->type == T_native) {
+        struct native_function_value *fn =
+            (struct native_function_value *)callee;
+        struct value_t *ret = fn->call ? fn->call(args) : NULL;
+        free_args(args);
+        return ret;
+    }
+
     if (callee->type == T_method) {
         struct method_value_t *method = (struct method_value_t *)callee;
         std::vector<struct value_t *> all_args;

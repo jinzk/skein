@@ -106,6 +106,22 @@ struct value_t *newbytesval(std::string data) {
     return (struct value_t *)v;
 }
 
+native_function_value::~native_function_value() {
+    for (struct value_t *child : children)
+        freeval(child);
+}
+
+struct value_t *newnativeval(
+    std::function<struct value_t *(
+        const std::vector<struct value_t *> &args)> call,
+    std::shared_ptr<void> owner) {
+    native_function_value *v = new native_function_value;
+    v->type = T_native;
+    v->call = std::move(call);
+    v->owner = std::move(owner);
+    return (struct value_t *)v;
+}
+
 struct value_t *newbuiltinval(int functype) {
     struct builtin_value_t *v = new builtin_value_t;
     v->type = T_builtin;
@@ -643,6 +659,17 @@ struct value_t *dupval(struct value_t *v) {
         }
         case T_builtin:
             return newbuiltinval(((struct builtin_value_t *)v)->functype);
+        case T_native: {
+            struct native_function_value *src =
+                (struct native_function_value *)v;
+            struct value_t *copy = newnativeval(src->call, src->owner);
+            struct native_function_value *dst =
+                (struct native_function_value *)copy;
+            dst->children.reserve(src->children.size());
+            for (struct value_t *child : src->children)
+                dst->children.push_back(dupval(child));
+            return copy;
+        }
         case T_userdata: {
             struct userdata_value_t *src = (struct userdata_value_t *)v;
             return newuserdataval(src->meta, src->data);
@@ -765,6 +792,9 @@ void freeval(struct value_t *v) {
             break;
         case T_builtin:
             delete (struct builtin_value_t *)v;
+            break;
+        case T_native:
+            delete (struct native_function_value *)v;
             break;
         case T_userdata:
             delete (struct userdata_value_t *)v;
@@ -933,6 +963,8 @@ std::string value_to_string(const struct value_t *v) {
             return "<function>";
         case T_builtin:
             return "<builtin>";
+        case T_native:
+            return "<native>";
         case T_userdata: {
             const struct userdata_value_t *u = (const struct userdata_value_t *)v;
             if (u->meta && u->meta->describe)

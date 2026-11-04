@@ -14,10 +14,11 @@ namespace ffi {
 
 struct manifest;
 
-struct library_handle {
+struct library_handle : std::enable_shared_from_this<library_handle> {
     std::shared_ptr<dynamic_library> library;
     std::shared_ptr<const manifest> spec;
     keepalive retained;
+    struct value_t *self = nullptr;
     bool closed = false;
 };
 
@@ -71,6 +72,9 @@ struct value_t *new_object_value(type_ptr type, unsigned char *address,
 
 bool get_library(struct value_t *value,
                  std::shared_ptr<library_handle> &out);
+
+/* Dot access on a library handle: manifest functions and constants. */
+struct value_t *library_get_field(void *data, const char *name);
 bool get_buffer(struct value_t *value, std::shared_ptr<buffer_handle> &out);
 bool get_type(struct value_t *value, type_ptr &out);
 bool get_pointer(struct value_t *value, std::shared_ptr<pointer_handle> &out);

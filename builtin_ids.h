@@ -166,6 +166,8 @@ enum bifs {
     B_ffi_manifest,
     B_ffi_constant,
     B_ffi_type_lookup,
+    B_ffi_function,
+    B_ffi_declare,
     B_task_sleep,
     B_task_yield,
     B_task_wait,

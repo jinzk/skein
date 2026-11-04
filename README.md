@@ -1486,6 +1486,32 @@ std.ffi.constant(lib, "POINT_MAX");
 - packed / bitfield 直接拒绝，交给静态 C++ 绑定；
 - 显式传入 manifest，不做自动 sidecar 查找。
 
+manifest 绑定函数：
+
+```text
+import std;
+
+let lib = std.ffi.open("./libshape.so", "./shapelib.ffi.json");
+
+let point_len = std.ffi.function(lib, "point_len");
+point_len(p);
+
+lib.point_len(p);      // 等价的点语法
+lib.POINT_MAX;         // manifest 常量
+
+// 也可以再打开库后增量声明
+let lib2 = std.ffi.open("./libother.so");
+std.ffi.declare(lib2, {"ffi": 1, "functions": {
+  "add": {"result": "i32", "args": ["i32", "i32"]}
+}});
+lib2.add(1, 2);
+```
+
+- `std.ffi.function(lib, name)` 返回原生可调用值，`kind_of` 为 `native`；
+- `lib.foo(...)` 和 `lib.CONST` 直接读取 manifest 声明的函数和常量；
+- `ffi.declare(lib, spec)` 增量合并声明，重复类型/函数/常量会报错；
+- 绑定函数持有库句柄；`ffi.close` 后再次调用会报 "ffi library is closed"。
+
 模块：
 
 ```text
@@ -2014,6 +2040,8 @@ std.ffi.alignof
 std.ffi.callback
 std.ffi.manifest
 std.ffi.constant
+std.ffi.function
+std.ffi.declare
 std.ffi.type
 
 std.bytes.len

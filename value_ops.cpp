@@ -141,6 +141,7 @@ bool truthy(const struct value_t *v) {
         case T_method: return true;
         case T_func: return true;
         case T_builtin: return true;
+        case T_native: return true;
         case T_userdata: return true;
         case T_result: return ((struct result_value_t *)v)->ok;
         case T_error: return true;
@@ -222,6 +223,13 @@ bool value_equals(struct value_t *a, struct value_t *b) {
         case T_builtin:
             return ((struct builtin_value_t *)a)->functype ==
                    ((struct builtin_value_t *)b)->functype;
+        case T_native: {
+            struct native_function_value *fa =
+                (struct native_function_value *)a;
+            struct native_function_value *fb =
+                (struct native_function_value *)b;
+            return fa->owner.get() == fb->owner.get();
+        }
         case T_userdata: {
             struct userdata_value_t *ua = (struct userdata_value_t *)a;
             struct userdata_value_t *ub = (struct userdata_value_t *)b;

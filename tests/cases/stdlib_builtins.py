@@ -480,6 +480,58 @@ def run_cases():
             stdout_all=["= 4.0", "= 4.0", "= 16", "= 16", "= 8", "= 3.0"],
         )
         check(
+            "std ffi bound functions",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.declare(lib, {"ffi": 1, "types": {"P": '
+            '{"kind": "struct", "fields": {"x": "f64", "y": "f64"}}}, '
+            '"functions": {"shim_point_sum": {"result": "f64", '
+            '"args": ["P"]}, "shim_i32": {"result": "i32", '
+            '"args": ["i32"]}}, "constants": {"K": 5}});\n'
+            'let sum = std.ffi.function(lib, "shim_point_sum");\n'
+            'sum({"x": 1.0, "y": 2.0})\n'
+            "kind_of(sum)\n"
+            'lib.shim_point_sum({"x": 3.0, "y": 4.0})\n'
+            "lib.K\n"
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 3.0", "= native", "= 7.0", "= 5"],
+        )
+        check(
+            "std ffi declare incrementally",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.declare(lib, {"ffi": 1, "types": {"P": '
+            '{"kind": "struct", "fields": {"x": "f64", "y": "f64"}}}});\n'
+            'std.ffi.declare(lib, {"ffi": 1, "functions": '
+            '{"shim_point_sum": {"result": "f64", "args": ["P"]}}});\n'
+            'std.ffi.call(lib, "shim_point_sum", '
+            '[{"x": 1.0, "y": 2.0}])\n'
+            'lib.shim_point_sum({"x": 2.0, "y": 2.0})\n'
+            "std.ffi.close(lib);\n",
+            stdout_all=["= 3.0", "= 4.0"],
+        )
+        check(
+            "std ffi declare duplicate",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.declare(lib, {"ffi": 1, "types": {"P": '
+            '{"kind": "struct", "fields": {"x": "f64"}}}});\n'
+            'std.ffi.declare(lib, {"ffi": 1, "types": {"P": '
+            '{"kind": "struct", "fields": {"y": "f64"}}}});\n',
+            stderr="duplicate manifest type P",
+        )
+        check(
+            "std ffi bound function after close",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.declare(lib, {"ffi": 1, "functions": '
+            '{"shim_i32": {"result": "i32", "args": ["i32"]}}});\n'
+            'let f = std.ffi.function(lib, "shim_i32");\n'
+            "std.ffi.close(lib);\n"
+            "f(1)\n",
+            stderr="ffi library is closed",
+        )
+        check(
             "std ffi manifest type objects",
             "import std;\n"
             'let Point = std.ffi.struct("Point", {"x": "f64", "y": "f64"});\n'

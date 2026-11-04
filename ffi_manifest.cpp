@@ -126,8 +126,10 @@ bool validate_abi(struct value_t *abi, std::string &error) {
  * are rejected during the fill pass. */
 class type_resolver {
 public:
-    type_resolver(const dict_value_t *types, std::string &error)
-        : types_(types), error_(error) {}
+    type_resolver(const dict_value_t *types,
+                  const std::map<std::string, type_ptr> *base,
+                  std::string &error)
+        : types_(types), base_(base), error_(error) {}
 
     bool prepare() {
         if (!types_)
@@ -148,6 +150,10 @@ public:
                 return false;
             }
             if (slots_.count(name)) {
+                error_ = "duplicate manifest type " + name;
+                return false;
+            }
+            if (base_ && base_->count(name)) {
                 error_ = "duplicate manifest type " + name;
                 return false;
             }
@@ -183,6 +189,13 @@ public:
             if (builtin) {
                 out = std::move(builtin);
                 return true;
+            }
+            if (base_) {
+                auto base_it = base_->find(name);
+                if (base_it != base_->end()) {
+                    out = base_it->second;
+                    return true;
+                }
             }
             auto it = slots_.find(name);
             if (it == slots_.end()) {
@@ -229,6 +242,13 @@ private:
             if (builtin) {
                 out = std::move(builtin);
                 return true;
+            }
+            if (base_) {
+                auto base_it = base_->find(name);
+                if (base_it != base_->end()) {
+                    out = base_it->second;
+                    return true;
+                }
             }
             auto it = slots_.find(name);
             if (it == slots_.end()) {
@@ -491,6 +511,7 @@ private:
     }
 
     const dict_value_t *types_;
+    const std::map<std::string, type_ptr> *base_;
     std::string &error_;
     std::map<std::string, std::shared_ptr<type>> slots_;
     std::map<std::string, type_ptr> resolved_;
@@ -547,8 +568,8 @@ bool parse_returns_owned(struct value_t *value, bool &owned,
 }
 
 bool build_manifest(struct value_t *spec,
-                    std::shared_ptr<const manifest> &out,
-                    std::string &error) {
+                    const std::map<std::string, type_ptr> *base,
+                    std::shared_ptr<manifest> &out, std::string &error) {
     if (!spec || spec->type != T_dict) {
         error = "manifest must be a dict";
         return false;
@@ -582,7 +603,7 @@ bool build_manifest(struct value_t *spec,
         }
         types = (dict_value_t *)value;
     }
-    type_resolver resolver(types, error);
+    type_resolver resolver(types, base, error);
     if (!resolver.prepare() || !resolver.finish())
         return false;
     result->types = resolver.types();
@@ -713,6 +734,17 @@ struct manifest_handle {
     std::shared_ptr<const manifest> value;
 };
 
+std::shared_ptr<manifest> clone_manifest(const manifest &source) {
+    std::shared_ptr<manifest> copy = std::make_shared<manifest>();
+    copy->version = source.version;
+    copy->name = source.name;
+    copy->types = source.types;
+    copy->functions = source.functions;
+    for (const auto &entry : source.constants)
+        copy->constants.emplace(entry.first, dupval(entry.second));
+    return copy;
+}
+
 std::string describe_manifest(const void *data) {
     const manifest_handle *handle = (const manifest_handle *)data;
     if (!handle || !handle->value)
@@ -721,6 +753,37 @@ std::string describe_manifest(const void *data) {
 }
 
 } // namespace
+
+bool extend_manifest(const manifest &base, struct value_t *spec,
+                     std::shared_ptr<const manifest> &out,
+                     std::string &error) {
+    std::shared_ptr<manifest> extension;
+    if (!build_manifest(spec, &base.types, extension, error))
+        return false;
+
+    std::shared_ptr<manifest> merged = clone_manifest(base);
+    for (const auto &entry : extension->types) {
+        if (!merged->types.emplace(entry.first, entry.second).second) {
+            error = "duplicate manifest type " + entry.first;
+            return false;
+        }
+    }
+    for (const auto &entry : extension->functions) {
+        if (!merged->functions.emplace(entry.first, entry.second).second) {
+            error = "duplicate manifest function " + entry.first;
+            return false;
+        }
+    }
+    for (const auto &entry : extension->constants) {
+        if (merged->constants.count(entry.first)) {
+            error = "duplicate manifest constant " + entry.first;
+            return false;
+        }
+        merged->constants.emplace(entry.first, dupval(entry.second));
+    }
+    out = std::move(merged);
+    return true;
+}
 
 const native_type manifest_native_type = {
     "ffi_manifest", describe_manifest};
@@ -752,9 +815,12 @@ bool load_manifest(struct value_t *spec,
         return false;
     }
 
-    bool ok = build_manifest(parsed, out, error);
+    std::shared_ptr<manifest> built;
+    bool ok = build_manifest(parsed, nullptr, built, error);
     if (parsed != spec)
         freeval(parsed);
+    if (ok)
+        out = std::move(built);
     return ok;
 }
 

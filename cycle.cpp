@@ -138,6 +138,13 @@ void for_each_value_child(
                 u->meta->for_each_child(u->data.get(), fn);
             break;
         }
+        case T_native: {
+            const struct native_function_value *native =
+                (const struct native_function_value *)v;
+            for (const struct value_t *child : native->children)
+                fn(child);
+            break;
+        }
         case T_method: {
             const struct method_value_t *method =
                 (const struct method_value_t *)v;

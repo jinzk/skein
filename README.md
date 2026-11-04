@@ -1534,6 +1534,15 @@ lib2.add(1, 2);
 - `ffi.declare(lib, spec)` 增量合并声明，重复类型/函数/常量会报错；
 - 绑定函数持有库句柄；`ffi.close` 后再次调用会报 "ffi library is closed"。
 
+FFI 支持范围：
+
+- 只支持 **C ABI 边界**：C 编译的库，或 C++ 中 `extern "C"` 导出的函数；
+- 不支持 C++ ABI：类、模板、异常、RTTI、引用、`std::` 类型、重载；
+- 即使合法 C，下列也拒绝：packed/bitfield、union、柔性数组、匿名
+  struct/union、变参函数、`long double`、`_Complex`、`__int128`、
+  非 cdecl 调用约定，以及 `aligned` / `vector_size` / `mode` 等影响布局的属性；
+- `--ffi-gen` 遇到 C++ 头文件或影响布局的属性时直接失败，避免生成错误 manifest。
+
 声明式 FFI 绑定（`extern lib`）：
 
 ```text

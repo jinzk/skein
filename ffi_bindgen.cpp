@@ -646,6 +646,7 @@ ctype_ptr make_callback(ctype_ptr result, std::vector<ctype_ptr> params) {
 
 struct parse_error {
     std::string message;
+    bool fatal = false;
 };
 
 bool is_type_keyword(const std::string &word) {
@@ -654,6 +655,14 @@ bool is_type_keyword(const std::string &word) {
         "signed", "unsigned", "_Bool", "bool", "_Complex", "__signed__",
         "__unsigned__", "__int8", "__int16", "__int32", "__int64"};
     return keywords.count(word) != 0;
+}
+
+bool is_layout_attribute(const std::string &word) {
+    static const std::set<std::string> attributes = {
+        "aligned", "__aligned__", "align", "vector_size",
+        "__vector_size__", "mode", "__mode__", "transparent_union",
+        "ms_struct", "gcc_struct", "scalar_storage_order"};
+    return attributes.count(word) != 0;
 }
 
 bool is_calling_convention(const std::string &word) {
@@ -688,12 +697,22 @@ struct declarator {
     std::vector<ctype_ptr> params;
     bool variadic = false;
     bool function = false;
+    bool layout_unsafe = false;
+    std::string layout_name;
+};
+
+struct attribute_flags {
+    bool packed = false;
+    bool layout_unsafe = false;
+    std::string layout_name;
 };
 
 struct spec {
     ctype_ptr base;
     bool is_typedef = false;
     bool packed = false;
+    bool layout_unsafe = false;
+    std::string layout_name;
     bool unsupported_convention = false;
 };
 
@@ -725,6 +744,8 @@ public:
                 parse_declaration_rest(s);
             } catch (const parse_error &e) {
                 warnings_.push_back(e.message);
+                if (e.fatal)
+                    fatal_ = true;
                 position_ = start;
                 skip_declaration();
                 if (position_ == start)
@@ -782,8 +803,8 @@ private:
             fail("expected '" + text + "'");
     }
 
-    [[noreturn]] void fail(const std::string &message) {
-        throw parse_error{message};
+    [[noreturn]] void fail(const std::string &message, bool fatal = false) {
+        throw parse_error{message, fatal};
     }
 
     void advance() {
@@ -796,7 +817,7 @@ private:
                tokens_[position_ + offset].kind == TOK_IDENT;
     }
 
-    void skip_attributes(bool &packed) {
+    void skip_attributes(attribute_flags &flags) {
         while (!eof()) {
             const std::string &text = cur().text;
             if (text == "__attribute__" || text == "__attribute" ||
@@ -815,8 +836,13 @@ private:
                         advance();
                     } else {
                         if (cur().text == "packed" ||
-                            cur().text == "__packed__")
-                            packed = true;
+                            cur().text == "__packed__") {
+                            flags.packed = true;
+                        } else if (is_layout_attribute(cur().text)) {
+                            flags.layout_unsafe = true;
+                            if (flags.layout_name.empty())
+                                flags.layout_name = cur().text;
+                        }
                         advance();
                     }
                 }
@@ -901,11 +927,11 @@ private:
         return make_scalar(is_unsigned ? "u32" : "i32");
     }
 
-    ctype_ptr parse_tag(bool &outer_packed) {
+    ctype_ptr parse_tag(const attribute_flags &outer) {
         std::string keyword = cur().text;
         advance();
-        bool packed = false;
-        skip_attributes(packed);
+        attribute_flags flags = outer;
+        skip_attributes(flags);
         std::string tag;
         if (ident_at() && !is("{"))
             tag = cur().text, advance();
@@ -917,14 +943,19 @@ private:
                 result = make_scalar("i32");
             } else if (keyword == "union") {
                 skip_declaration();
-                fail("unions are not supported");
+                fail("unions are not supported", true);
             } else {
-                result = parse_struct_body(tag, packed || outer_packed);
+                result = parse_struct_body(tag, flags.packed);
             }
         } else {
             result = record_ref(tag);
         }
-        skip_attributes(packed);
+        skip_attributes(flags);
+        if (flags.packed)
+            fail("packed structs are not supported", true);
+        if (flags.layout_unsafe)
+            fail("layout-changing attribute '" + flags.layout_name +
+                     "' is not supported", true);
         return result;
     }
 
@@ -933,32 +964,40 @@ private:
         record->kind = ctype::RECORD;
         record->name = tag;
         if (packed)
-            fail("packed structs are not supported");
+            fail("packed structs are not supported", true);
 
         record_out out;
         out.name = tag;
 
         while (!eof() && !accept("}")) {
             if (cur().pack != 0)
-                fail("packed structs are not supported");
+                fail("packed structs are not supported", true);
             spec s = parse_specifiers();
+            if (s.layout_unsafe)
+                fail("layout-changing attribute '" + s.layout_name +
+                     "' is not supported",
+                 true);
             if (accept(";")) {
                 if (s.base && s.base->kind == ctype::RECORD &&
                     s.base->name.rfind("__anon_", 0) == 0)
-                    fail("anonymous struct members are not supported");
+                    fail("anonymous struct members are not supported", true);
                 continue;
             }
             for (;;) {
                 declarator d = parse_declarator();
+                if (d.layout_unsafe)
+                    fail("layout-changing attribute '" + d.layout_name +
+                         "' is not supported",
+                     true);
                 if (accept(":"))
-                    fail("bitfields are not supported");
+                    fail("bitfields are not supported", true);
                 if (d.name.empty())
-                    fail("anonymous struct members are not supported");
+                    fail("anonymous struct members are not supported", true);
                 if (d.is_callback)
-                    fail("function pointer fields are not supported");
+                    fail("function pointer fields are not supported", true);
                 for (std::size_t dim : d.arrays)
                     if (dim == 0)
-                        fail("flexible array members are not supported");
+                        fail("flexible array members are not supported", true);
                 ctype_ptr field_type = apply_type(s.base, d);
                 out.fields.emplace_back(d.name, field_type);
                 if (!accept(","))
@@ -980,7 +1019,7 @@ private:
 
     ctype_ptr record_ref(const std::string &tag) {
         if (tag.empty())
-            fail("anonymous struct without a declarator is not supported");
+            fail("anonymous struct without a declarator is not supported", true);
         ctype_ptr type = std::make_shared<ctype>();
         type->kind = ctype::RECORD;
         type->name = tag;
@@ -1018,7 +1057,7 @@ private:
                 long long parsed = 0;
                 integer_expression expression(expression_text, names);
                 if (!expression.evaluate(parsed))
-                    fail("unsupported enumerator value");
+                    fail("unsupported enumerator value", true);
                 value = parsed;
             }
             constant_out constant;
@@ -1037,7 +1076,7 @@ private:
         spec s;
         std::vector<std::string> words;
         bool saw_base = false;
-        bool packed = false;
+        attribute_flags flags;
 
         while (!eof()) {
             const token &t = cur();
@@ -1064,7 +1103,7 @@ private:
                 text == "__declspec" || text == "__asm__" ||
                 text == "__asm" || text == "asm" ||
                 text == "__extension__") {
-                skip_attributes(packed);
+                skip_attributes(flags);
                 continue;
             }
             if (is_calling_convention(text)) {
@@ -1073,7 +1112,7 @@ private:
                 continue;
             }
             if (text == "struct" || text == "union" || text == "enum") {
-                s.base = parse_tag(packed);
+                s.base = parse_tag(flags);
                 saw_base = true;
                 continue;
             }
@@ -1100,7 +1139,10 @@ private:
                 fail("missing type specifier");
             s.base = scalar_from_words(words);
         }
-        s.packed = packed;
+        s.packed = s.packed || flags.packed;
+        s.layout_unsafe = s.layout_unsafe || flags.layout_unsafe;
+        if (s.layout_name.empty())
+            s.layout_name = flags.layout_name;
         return s;
     }
 
@@ -1108,8 +1150,13 @@ private:
         declarator d;
         while (accept("*")) {
             ++d.pointers;
-            bool ignored = false;
-            skip_attributes(ignored);
+            attribute_flags pointer_flags;
+            skip_attributes(pointer_flags);
+            if (pointer_flags.layout_unsafe) {
+                d.layout_unsafe = true;
+                if (d.layout_name.empty())
+                    d.layout_name = pointer_flags.layout_name;
+            }
             while (is("const") || is("volatile") || is("restrict") ||
                    is("__restrict") || is("__restrict__"))
                 advance();
@@ -1155,6 +1202,13 @@ private:
                 break;
             }
             break;
+        }
+        attribute_flags trailing;
+        skip_attributes(trailing);
+        if (trailing.layout_unsafe) {
+            d.layout_unsafe = true;
+            if (d.layout_name.empty())
+                d.layout_name = trailing.layout_name;
         }
         return d;
     }
@@ -1214,10 +1268,16 @@ private:
     void parse_typedef() {
         expect("typedef");
         spec s = parse_specifiers();
+        if (s.layout_unsafe)
+            fail("layout-changing attribute '" + s.layout_name +
+                     "' is not supported", true);
         for (;;) {
             declarator d = parse_declarator();
             if (d.name.empty())
                 fail("typedef requires a name");
+            if (d.layout_unsafe)
+                fail("layout-changing attribute '" + d.layout_name +
+                     "' is not supported", true);
             if (d.is_callback) {
                 ctype_ptr result = apply_pointers(s.base, d.pointers);
                 callback_out out;
@@ -1254,10 +1314,16 @@ private:
     }
 
     void parse_declaration_rest(spec &s) {
+        if (s.layout_unsafe)
+            fail("layout-changing attribute '" + s.layout_name +
+                     "' is not supported", true);
         for (;;) {
             declarator d = parse_declarator();
             if (d.name.empty())
                 fail("declaration requires a name");
+            if (d.layout_unsafe)
+                fail("layout-changing attribute '" + d.layout_name +
+                     "' is not supported", true);
             if (d.function) {
                 if (d.variadic)
                     fail("variadic functions are not supported");
@@ -1386,9 +1452,11 @@ private:
     std::vector<std::string> warnings_;
     size_t position_ = 0;
     size_t anon_counter_ = 0;
+    bool fatal_ = false;
 
 public:
     const std::vector<std::string> &warnings() const { return warnings_; }
+    bool fatal() const { return fatal_; }
 };
 
 namespace {
@@ -1565,6 +1633,32 @@ std::string parser::render(const options &o, const std::string &source_hash) {
  * Driver
  * ---------------------------------------------------------------------- */
 
+bool detect_cpp(const std::vector<token> &tokens, std::string &what) {
+    static const std::set<std::string> keywords = {
+        "class", "template", "namespace", "virtual", "noexcept",
+        "decltype", "constexpr", "typename"};
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const token &value = tokens[i];
+        if (value.kind == TOK_PUNCT && value.text == "::") {
+            what = "::";
+            return true;
+        }
+        if (value.kind != TOK_IDENT)
+            continue;
+        if (keywords.count(value.text)) {
+            what = value.text;
+            return true;
+        }
+        if ((value.text == "public" || value.text == "private" ||
+             value.text == "protected") &&
+            i + 1 < tokens.size() && tokens[i + 1].text == ":") {
+            what = value.text + ":";
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string default_module(const std::string &header) {
     fs::path path(header);
     std::string stem = path.stem().string();
@@ -1660,6 +1754,13 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
     if (!preprocess(o, tokens, constants, preprocessed, error))
         return 1;
 
+    std::string cpp_token;
+    if (detect_cpp(tokens, cpp_token)) {
+        error = "C++ headers are not supported (found '" + cpp_token +
+                "'); provide a C header";
+        return 1;
+    }
+
     parser p(std::move(tokens), std::move(constants));
     if (!p.parse(error))
         return 1;
@@ -1673,6 +1774,10 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
     for (const std::string &warning : p.warnings())
         std::fprintf(stderr, "skein --ffi-gen: warning: %s\n",
                      warning.c_str());
+    if (p.fatal()) {
+        error = "header contains unsupported declarations";
+        return 1;
+    }
 
     if (o.check) {
         if (o.output.empty()) {

@@ -3111,7 +3111,10 @@ std.ffi.buffer_free
 
 限制：
 
-- 只支持 C ABI；
+- 只支持 C ABI 边界（C 库或 `extern "C"` 导出）；不支持 C++ ABI；
+- 拒绝 packed/bitfield、union、柔性数组、匿名 struct/union、变参函数、
+  `long double`、`_Complex`、`__int128`、非 cdecl 约定，以及 `aligned` /
+  `vector_size` / `mode` 等影响布局的属性；
 - 不支持结构体、回调、可变参数；
 - 网络和 FFI 错误是运行时错误，可以通过 `on error` 或 `std.result.capture` 捕获；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；

@@ -950,6 +950,35 @@ def run_cases():
             filtered = _json.load(handle)
         assert list(filtered["functions"]) == ["sample_add"]
 
+        cpp_header = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "bindgen_cpp.h"))
+        cpp = subprocess.run(
+            [BIN, "--ffi-gen", "--header", cpp_header],
+            text=True, capture_output=True, timeout=60)
+        assert cpp.returncode == 1
+        assert "C++ headers are not supported" in cpp.stderr
+
+        aligned_header = os.path.join(bindgen_dir, "aligned.h")
+        with open(aligned_header, "w", encoding="utf-8") as handle:
+            handle.write(
+                "struct __attribute__((aligned(16))) Aligned { int x; };\n")
+        aligned = subprocess.run(
+            [BIN, "--ffi-gen", "--header", aligned_header],
+            text=True, capture_output=True, timeout=60)
+        assert aligned.returncode == 1
+        assert "layout-changing attribute" in aligned.stderr
+
+        packed_header = os.path.join(bindgen_dir, "packed.h")
+        with open(packed_header, "w", encoding="utf-8") as handle:
+            handle.write(
+                "struct Packed { int x; } __attribute__((packed));\n")
+        packed = subprocess.run(
+            [BIN, "--ffi-gen", "--header", packed_header],
+            text=True, capture_output=True, timeout=60)
+        assert packed.returncode == 1
+        assert "packed structs are not supported" in packed.stderr
+
         if has_ffi and FFI_SHIM:
             good_manifest = os.path.join(bindgen_dir, "shim_good.ffi.json")
             with open(good_manifest, "w", encoding="utf-8") as handle:

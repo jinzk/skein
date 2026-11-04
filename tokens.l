@@ -521,6 +521,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "do" { YYRET(DO); }
 "for" { YYRET(FOR); }
 "struct" { YYRET(STRUCT); }
+"extern" { YYRET(EXTERN); }
 "enum" { YYRET(ENUM); }
 "impl" { YYRET(IMPL); }
 "trait" { YYRET(TRAIT); }

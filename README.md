@@ -1512,6 +1512,37 @@ lib2.add(1, 2);
 - `ffi.declare(lib, spec)` 增量合并声明，重复类型/函数/常量会报错；
 - 绑定函数持有库句柄；`ffi.close` 后再次调用会报 "ffi library is closed"。
 
+声明式 FFI 绑定（`extern lib`）：
+
+```text
+import std;
+
+extern "c" lib shape from "./libshape.so" {
+  type Point {
+    x: f64;
+    y: f64;
+  }
+
+  type PointPtr = *Point;
+
+  callback Compare(a: i32, b: i32) => i32;
+
+  func point_len(p: Point) => f64;
+  func point_new(x: f64, y: f64) => Point;
+  func sort(base: *Point, n: usize, cmp: Compare);
+
+  const POINT_MAX: i32 = 16;
+}
+
+shape.point_len({"x": 1.0, "y": 2.0});
+shape.POINT_MAX;
+```
+
+- 块内声明会 lowering 到 manifest，运行时走 `ffi.open`，不新增 FFI 语义；
+- `type` 支持 struct、别名、指针和定长数组；`callback` 声明回调签名；
+- 块内条目用 `;` 结束，返回类型箭头是 `=>`（与 `func` 一致）；
+- `owns` / `consumes` / `retains` 暂未加入语法，继续用 manifest / `ffi.declare`。
+
 原生模块（C ABI）：
 
 ```text

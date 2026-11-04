@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ast.h"
+#include "dict.h"
 #include "diagnostics.h"
 #include "eval_context.h"
 #include "repl.h"
@@ -76,6 +77,184 @@ static char *copy_text(const char *text) {
     }
     std::memcpy(copy, text, len);
     return copy;
+}
+
+/* -------------------------------------------------------------------------
+ * extern lib bindings: build a manifest dict at parse time, then hand it to
+ * the FFI builtin as a normal call expression.
+ * ---------------------------------------------------------------------- */
+
+struct val;
+
+static struct ast *ffi_value_node(struct value_t *value) {
+    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'V';
+    a->line = 0;
+    a->column = 0;
+    a->val = value;
+    return (struct ast *)a;
+}
+
+static struct value_t *ffi_dict_new() {
+    return (struct value_t *)newdictval();
+}
+
+static struct value_t *ffi_dict_set(struct value_t *dict, const char *key,
+                                    struct value_t *value) {
+    dict_append_item((struct dict_value_t *)dict, newstrval(key), value);
+    return dict;
+}
+
+static struct value_t *ffi_dict_value(const struct value_t *dict,
+                                      const char *key) {
+    if (!dict || dict->type != T_dict)
+        return NULL;
+    const struct dict_value_t *d = (const struct dict_value_t *)dict;
+    for (const auto &entry : d->payload->items) {
+        if (entry.first->type == T_string &&
+            std::strcmp(((const struct string_value_t *)entry.first)->value,
+                        key) == 0)
+            return entry.second;
+    }
+    return NULL;
+}
+
+static const char *ffi_dict_string(const struct value_t *dict,
+                                   const char *key) {
+    struct value_t *value = ffi_dict_value(dict, key);
+    if (!value || value->type != T_string)
+        return NULL;
+    return ((const struct string_value_t *)value)->value;
+}
+
+static struct ast *ffi_items_new() {
+    return ffi_value_node((struct value_t *)newlistval());
+}
+
+static struct ast *ffi_list_append(struct ast *list_node,
+                                   struct ast *item) {
+    struct list_value_t *list =
+        (struct list_value_t *)((struct val *)list_node)->val;
+    list->payload->items.push_back(dupval(((struct val *)item)->val));
+    return list_node;
+}
+
+static struct ast *ffi_params_new() {
+    return ffi_value_node((struct value_t *)newlistval());
+}
+
+static struct ast *ffi_fields_new() {
+    return ffi_value_node(ffi_dict_new());
+}
+
+static struct ast *ffi_type_pointer(struct ast *inner) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "kind", newstrval("pointer"));
+    ffi_dict_set(dict, "to", dupval(((struct val *)inner)->val));
+    treefree(inner);
+    return ffi_value_node(dict);
+}
+
+static struct ast *ffi_type_array(struct ast *inner, long long count) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "kind", newstrval("array"));
+    ffi_dict_set(dict, "element", dupval(((struct val *)inner)->val));
+    ffi_dict_set(dict, "count", newintval(count));
+    treefree(inner);
+    return ffi_value_node(dict);
+}
+
+static struct value_t *ffi_struct_decl(struct ast *fields) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "kind", newstrval("struct"));
+    ffi_dict_set(dict, "fields", dupval(((struct val *)fields)->val));
+    treefree(fields);
+    return dict;
+}
+
+static struct value_t *ffi_callback_decl(struct ast *params,
+                                         struct ast *result) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "kind", newstrval("callback"));
+    ffi_dict_set(dict, "result", dupval(((struct val *)result)->val));
+    ffi_dict_set(dict, "args", dupval(((struct val *)params)->val));
+    treefree(params);
+    treefree(result);
+    return dict;
+}
+
+static struct value_t *ffi_function_decl(struct ast *params,
+                                         struct ast *result) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "result", dupval(((struct val *)result)->val));
+    ffi_dict_set(dict, "args", dupval(((struct val *)params)->val));
+    treefree(params);
+    treefree(result);
+    return dict;
+}
+
+static struct ast *ffi_item_node(const char *section, char *name,
+                                 struct value_t *decl) {
+    struct value_t *dict = ffi_dict_new();
+    ffi_dict_set(dict, "section", newstrval(section));
+    ffi_dict_set(dict, "name", newstrval(name));
+    ffi_dict_set(dict, "decl", decl);
+    std::free(name);
+    return ffi_value_node(dict);
+}
+
+static struct value_t *ffi_build_manifest(const char *binding_name,
+                                          struct ast *items_node) {
+    struct list_value_t *items =
+        (struct list_value_t *)((struct val *)items_node)->val;
+    struct value_t *types = ffi_dict_new();
+    struct value_t *functions = ffi_dict_new();
+    struct value_t *constants = ffi_dict_new();
+    for (struct value_t *item : items->payload->items) {
+        const char *section = ffi_dict_string(item, "section");
+        struct value_t *name = ffi_dict_value(item, "name");
+        struct value_t *decl = ffi_dict_value(item, "decl");
+        if (!section || !name || !decl)
+            continue;
+        if (std::strcmp(section, "type") == 0)
+            dict_append_item((struct dict_value_t *)types, dupval(name),
+                             dupval(decl));
+        else if (std::strcmp(section, "function") == 0)
+            dict_append_item((struct dict_value_t *)functions, dupval(name),
+                             dupval(decl));
+        else if (std::strcmp(section, "constant") == 0)
+            dict_append_item((struct dict_value_t *)constants, dupval(name),
+                             dupval(decl));
+    }
+    struct value_t *manifest = ffi_dict_new();
+    ffi_dict_set(manifest, "ffi", newintval(1));
+    ffi_dict_set(manifest, "library", newstrval(binding_name));
+    ffi_dict_set(manifest, "types", types);
+    ffi_dict_set(manifest, "functions", functions);
+    ffi_dict_set(manifest, "constants", constants);
+    return manifest;
+}
+
+static struct ast *ffi_binding_node(char *name, const char *path,
+                                    struct value_t *manifest) {
+    struct ast *args = newast(
+        'L', ffi_value_node(newstrval(path)),
+        newast('L', ffi_value_node(manifest), NULL));
+    return newvar(name, newcall(newbuiltin(B_ffi_bind), args));
+}
+
+static struct value_t *ffi_empty_manifest(const char *binding_name) {
+    struct value_t *manifest = ffi_dict_new();
+    ffi_dict_set(manifest, "ffi", newintval(1));
+    ffi_dict_set(manifest, "library", newstrval(binding_name));
+    ffi_dict_set(manifest, "types", ffi_dict_new());
+    ffi_dict_set(manifest, "functions", ffi_dict_new());
+    ffi_dict_set(manifest, "constants", ffi_dict_new());
+    return manifest;
 }
 
 static const char *builtin_field_name(int functype) {
@@ -226,6 +405,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token ASYNC "async" AWAIT "await" YIELD "yield" DEFER "defer"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait" ENUM "enum"
+%token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token MATCH "match"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
@@ -279,6 +459,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <sl> param symlist
 %type <type> type type_name
 %type <str> importref importpath fieldname
+%type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value
 
 %destructor { treefree($$); } <a>
 %destructor { free($$); } <str>
@@ -395,11 +576,191 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | CONST NAME '=' exp ';'              { $$ = newvar($2, $4, false, true); }
     | CONST NAME ':' type '=' exp ';'     { $$ = newvar($2, $6, false, true, $4); }
     | CONST let_pattern '=' exp ';'        { $$ = newdestructure($2, $4, true); }
+    | EXTERN XSTRING NAME NAME NAME XSTRING '{' ffi_items '}' {
+        if (std::strcmp($2, "c") != 0 || std::strcmp($3, "lib") != 0 ||
+            std::strcmp($5, "from") != 0) {
+            yyerror("expected: extern \"c\" lib NAME from \"path\" { ... }");
+            free($2);
+            free($3);
+            free($5);
+            free($6);
+            free($4);
+            treefree($8);
+            $$ = NULL;
+        } else {
+            struct value_t *manifest = ffi_build_manifest($4, $8);
+            treefree($8);
+            struct ast *args = newast(
+                'L', ffi_value_node(newstrval($6)),
+                newast('L', ffi_value_node(manifest), NULL));
+            $$ = newvar($4, newcall(newbuiltin(B_ffi_bind), args));
+            free($2);
+            free($3);
+            free($5);
+            free($6);
+        }
+    }
+    | EXTERN XSTRING NAME NAME NAME XSTRING '{' EMPTY_DICT_CLOSE {
+        if (std::strcmp($2, "c") != 0 || std::strcmp($3, "lib") != 0 ||
+            std::strcmp($5, "from") != 0) {
+            yyerror("expected: extern \"c\" lib NAME from \"path\" { ... }");
+            free($2);
+            free($3);
+            free($5);
+            free($6);
+            free($4);
+            $$ = NULL;
+        } else {
+            $$ = ffi_binding_node($4, $6, ffi_empty_manifest($4));
+            free($2);
+            free($3);
+            free($5);
+            free($6);
+        }
+    }
+    | EXTERN XSTRING NAME NAME NAME XSTRING '{' EMPTY_BLOCK_CLOSE {
+        if (std::strcmp($2, "c") != 0 || std::strcmp($3, "lib") != 0 ||
+            std::strcmp($5, "from") != 0) {
+            yyerror("expected: extern \"c\" lib NAME from \"path\" { ... }");
+            free($2);
+            free($3);
+            free($5);
+            free($6);
+            free($4);
+            $$ = NULL;
+        } else {
+            $$ = ffi_binding_node($4, $6, ffi_empty_manifest($4));
+            free($2);
+            free($3);
+            free($5);
+            free($6);
+        }
+    }
     ;
 
 empty_body: EMPTY_DICT_CLOSE
     | EMPTY_BLOCK_CLOSE
     ;
+
+ffi_items: %empty                         { $$ = ffi_items_new(); }
+    | ffi_items ffi_item {
+        $$ = ffi_list_append($1, $2);
+        treefree($2);
+      }
+    ;
+
+ffi_item: NAME NAME '{' ffi_fields '}' {
+        if (std::strcmp($1, "type") != 0) {
+            yyerror("expected type NAME { ... }");
+            free($1);
+            free($2);
+            treefree($4);
+            $$ = ffi_value_node(newnull());
+        } else {
+            $$ = ffi_item_node("type", $2, ffi_struct_decl($4));
+            free($1);
+        }
+      }
+    | NAME NAME '{' EMPTY_DICT_CLOSE {
+        if (std::strcmp($1, "type") != 0) {
+            yyerror("expected type NAME { ... }");
+            free($1);
+            free($2);
+            $$ = ffi_value_node(newnull());
+        } else {
+            $$ = ffi_item_node("type", $2,
+                               ffi_struct_decl(ffi_fields_new()));
+            free($1);
+        }
+      }
+    | NAME NAME '=' ffi_type ';' {
+        if (std::strcmp($1, "type") != 0) {
+            yyerror("expected type NAME = TYPE;");
+            free($1);
+            free($2);
+            treefree($4);
+            $$ = ffi_value_node(newnull());
+        } else {
+            $$ = ffi_item_node("type", $2,
+                               dupval(((struct val *)$4)->val));
+            free($1);
+            treefree($4);
+        }
+      }
+    | NAME NAME '(' ffi_params ')' ARROW ffi_type ';' {
+        if (std::strcmp($1, "callback") != 0) {
+            yyerror("expected callback NAME(...) -> TYPE;");
+            free($1);
+            free($2);
+            treefree($4);
+            treefree($7);
+            $$ = ffi_value_node(newnull());
+        } else {
+            $$ = ffi_item_node("type", $2,
+                               ffi_callback_decl($4, $7));
+            free($1);
+        }
+      }
+    | FUNC NAME '(' ffi_params ')' ARROW ffi_type ';' {
+        $$ = ffi_item_node("function", $2,
+                           ffi_function_decl($4, $7));
+      }
+    | FUNC NAME '(' ffi_params ')' ';' {
+        $$ = ffi_item_node("function", $2,
+                           ffi_function_decl($4, newstr("void")));
+      }
+    | CONST NAME ':' ffi_type '=' ffi_const_value ';' {
+        treefree($4);
+        $$ = ffi_item_node("constant", $2,
+                           dupval(((struct val *)$6)->val));
+        treefree($6);
+      }
+    ;
+
+ffi_fields: %empty                        { $$ = ffi_fields_new(); }
+    | ffi_fields NAME ':' ffi_type ';' {
+        struct dict_value_t *dict =
+            (struct dict_value_t *)((struct val *)$1)->val;
+        dict_append_item(dict, newstrval($2),
+                         dupval(((struct val *)$4)->val));
+        treefree($4);
+        free($2);
+        $$ = $1;
+      }
+    ;
+
+ffi_params: %empty                        { $$ = ffi_params_new(); }
+    | ffi_param_list                      { $$ = $1; }
+    ;
+
+ffi_param_list: ffi_param {
+        $$ = ffi_params_new();
+        ffi_list_append($$, $1);
+        treefree($1);
+      }
+    | ffi_param_list ',' ffi_param {
+        $$ = ffi_list_append($1, $3);
+        treefree($3);
+      }
+    ;
+
+ffi_param: ffi_type                       { $$ = $1; }
+    | NAME ':' ffi_type                   { free($1); $$ = $3; }
+    ;
+
+ffi_type: NAME                            { $$ = ffi_value_node(newstrval($1)); free($1); }
+    | '*' ffi_type                        { $$ = ffi_type_pointer($2); }
+    | '[' ffi_type ';' INT ']'            { $$ = ffi_type_array($2, $4); }
+    ;
+
+ffi_const_value: INT                      { $$ = newint($1); }
+    | '-' INT                             { $$ = newint(-$2); }
+    | FLOAT                               { $$ = newfloat($1); }
+    | XSTRING                             { $$ = newstr($1); free($1); }
+    | TRUE                                { $$ = newbool(true); }
+    | FALSE                               { $$ = newbool(false); }
+    ;
+
 
 let_pattern: NAME '{' pattern_fields '}'  {
         $$ = newpatternstruct($1,

@@ -1418,6 +1418,14 @@ bool builtins_register_modules(std::string &error) {
 
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
+    if (functype == B_ffi_bind) {
+#ifdef SKEIN_ENABLE_FFI
+        return call_ffi_builtin(functype, args);
+#else
+        yyerror("ffi bindings require an FFI-enabled build");
+        return NULL;
+#endif
+    }
     if (functype == B_module_load)
         return module_load_builtin(args);
     if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)

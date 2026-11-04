@@ -734,6 +734,44 @@ def run_cases():
         "import example.nope;\n",
         stderr="package not found",
     )
+    if has_ffi and FFI_SHIM:
+        check(
+            "extern lib binding",
+            'extern "c" lib sample from ' + shim + ' {\n'
+            "  type Point {\n"
+            "    x: f64;\n"
+            "    y: f64;\n"
+            "  }\n"
+            "  func shim_point_sum(p: Point) => f64;\n"
+            "  func shim_point_make(x: f64, y: f64) => Point;\n"
+            "  const ANSWER: i32 = 42;\n"
+            "}\n"
+            'sample.shim_point_sum({"x": 1.0, "y": 2.0})\n'
+            "let made = sample.shim_point_make(3.0, 4.0);\n"
+            "made.y\n"
+            "sample.ANSWER\n",
+            stdout_all=["= 3.0", "= 4.0", "= 42"],
+        )
+        check(
+            "extern lib callback",
+            "import std;\n"
+            'extern "c" lib sample from ' + shim + ' {\n'
+            "  callback Cmp(a: i32, b: i32) => i32;\n"
+            "  func shim_apply_cmp(cmp: Cmp, a: i32, b: i32) => i32;\n"
+            "}\n"
+            'let Cmp = std.ffi.type(sample, "Cmp");\n'
+            "let cb = std.ffi.callback(Cmp, func(a, b) { return a - b; });\n"
+            "sample.shim_apply_cmp(cb, 9, 4)\n",
+            stdout="= 5",
+        )
+        check(
+            "extern lib manifest error",
+            'extern "c" lib sample from ' + shim + ' {\n'
+            "  type Empty {\n"
+            "  }\n"
+            "}\n",
+            stderr="must have at least one field",
+        )
     if NATIVE_MODULE:
         native_module = skein_string(NATIVE_MODULE)
         check(

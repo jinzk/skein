@@ -1284,6 +1284,7 @@ struct value_t *call_ffi_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     switch (functype) {
         case B_ffi_open:
+        case B_ffi_bind:
             return ffi_open(args);
         case B_ffi_close:
             return ffi_close(args);

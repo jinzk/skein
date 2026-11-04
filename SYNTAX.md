@@ -3026,6 +3026,34 @@ func work() {
 - `std.generator.close(g)` 会执行生成器的 defer；
 - 直接丢弃挂起生成器不会执行脚本级 defer；如果仍有待执行 defer，会打印 warning。
 
+声明式 FFI 绑定：
+
+```text
+extern "c" lib shape from "./libshape.so" {
+  type Point {
+    x: f64;
+    y: f64;
+  }
+
+  type PointPtr = *Point;
+
+  callback Compare(a: i32, b: i32) => i32;
+
+  func point_len(p: Point) => f64;
+  func point_new(x: f64, y: f64) => Point;
+  func sort(base: *Point, n: usize, cmp: Compare);
+
+  const POINT_MAX: i32 = 16;
+}
+
+shape.point_len({"x": 1.0, "y": 2.0});
+shape.POINT_MAX;
+```
+
+块内条目用 `;` 结束，返回类型箭头是 `=>`；声明 lowering 到 manifest，
+运行时等价于 `std.ffi.open(path, manifest)`。`owns` / `consumes` / `retains`
+暂未加入语法。
+
 FFI 示例：
 
 ```text

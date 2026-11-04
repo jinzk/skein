@@ -1,77 +1,19 @@
 package set {
   import std;
 
-  export struct Set {
-    values: dict;
-  }
+  // Native persistent set module.  Keeping this file as a re-export lets
+  // scripts use both `import std.set;` and `import std; std.set.*` without
+  // adding a wrapper call to every operation.
 
-  export func new() {
-    return Set { values: {} };
-  }
-
-  export func from_list(items) {
-    let result = new();
-    for (let item in items) {
-      result.values[item] = true;
-    }
-    return result;
-  }
-
-  export func add(s, value) {
-    s.values[value] = true;
-    return s;
-  }
-
-  export func remove(s, value) {
-    s.values = std.dict.delete(s.values, value);
-    return s;
-  }
-
-  export func has(s, value) {
-    return std.dict.has(s.values, value) != 0;
-  }
-
-  export func size(s) {
-    return std.dict.len(s.values);
-  }
-
-  export func values(s) {
-    return std.dict.keys(s.values);
-  }
-
-  export func union(a, b) {
-    for (let value in values(b)) {
-      a.values[value] = true;
-    }
-    return a;
-  }
-
-  export func intersect(a, b) {
-    let result = new();
-    for (let value in values(a)) {
-      if (has(b, value)) {
-        result.values[value] = true;
-      }
-    }
-    return result;
-  }
-
-  export func difference(a, b) {
-    let result = new();
-    for (let value in values(a)) {
-      if (!has(b, value)) {
-        result.values[value] = true;
-      }
-    }
-    return result;
-  }
-
-  export func is_subset(a, b) {
-    for (let value in values(a)) {
-      if (!has(b, value)) {
-        return false;
-      }
-    }
-    return true;
-  }
+  export let new = std.set.new;
+  export let from_list = std.set.from_list;
+  export let add = std.set.add;
+  export let remove = std.set.remove;
+  export let has = std.set.has;
+  export let size = std.set.size;
+  export let values = std.set.values;
+  export let union = std.set.union;
+  export let intersect = std.set.intersect;
+  export let difference = std.set.difference;
+  export let is_subset = std.set.is_subset;
 }

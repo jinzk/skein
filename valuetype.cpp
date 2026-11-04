@@ -1,4 +1,6 @@
 #include "valuetype.h"
+#include "dict.h"
+#include "eval_helpers.h"
 #include "structtype.h"
 #include "unicode.h"
 
@@ -226,6 +228,14 @@ struct heap_value_t *newheapval(struct value_t *less) {
     return v;
 }
 
+struct set_value_t *newsetval() {
+    struct set_value_t *v = new set_value_t;
+    v->type = T_set;
+    v->payload = std::make_shared<set_payload>();
+    v->payload->order = std::make_shared<deque_payload>();
+    return v;
+}
+
 list_payload::~list_payload() {
     for (size_t i = 0; i < items.size(); ++i)
         freeval(items[i]);
@@ -351,6 +361,248 @@ void heap_items_level_order(const struct heap_payload *payload,
     }
 }
 
+set_bucket::~set_bucket() {
+    for (value_t *key : keys)
+        freeval(key);
+}
+
+namespace {
+
+std::uint64_t splitmix64(std::uint64_t x) {
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+bool bucket_has(const set_bucket *bucket, const value_t *key) {
+    if (!bucket)
+        return false;
+    for (value_t *entry : bucket->keys) {
+        if (value_equals(entry, const_cast<value_t *>(key)))
+            return true;
+    }
+    return false;
+}
+
+void release_set_tree(std::shared_ptr<set_node> root) {
+    std::vector<std::shared_ptr<set_node>> pending;
+    if (root)
+        pending.push_back(std::move(root));
+    while (!pending.empty()) {
+        std::shared_ptr<set_node> node = std::move(pending.back());
+        pending.pop_back();
+        if (!node)
+            continue;
+        if (node.use_count() != 1)
+            continue;
+        if (node->left)
+            pending.push_back(std::move(node->left));
+        if (node->right)
+            pending.push_back(std::move(node->right));
+        node.reset();
+    }
+}
+
+std::shared_ptr<set_node> make_set_node(std::uint64_t hash,
+                                        const value_t *key) {
+    std::shared_ptr<set_node> node = std::make_shared<set_node>();
+    node->hash = hash;
+    node->priority = splitmix64(hash);
+    node->bucket = std::make_shared<set_bucket>();
+    node->bucket->keys.push_back(dupval(const_cast<value_t *>(key)));
+    return node;
+}
+
+std::shared_ptr<set_node> clone_set_node(
+    const std::shared_ptr<set_node> &node) {
+    std::shared_ptr<set_node> out = std::make_shared<set_node>();
+    out->hash = node->hash;
+    out->priority = node->priority;
+    out->bucket = node->bucket;
+    out->left = node->left;
+    out->right = node->right;
+    return out;
+}
+
+std::shared_ptr<set_node> set_rotate_right(std::shared_ptr<set_node> y) {
+    std::shared_ptr<set_node> x = clone_set_node(y->left);
+    std::shared_ptr<set_node> y2 = clone_set_node(y);
+    y2->left = x->right;
+    x->right = y2;
+    return x;
+}
+
+std::shared_ptr<set_node> set_rotate_left(std::shared_ptr<set_node> x) {
+    std::shared_ptr<set_node> y = clone_set_node(x->right);
+    std::shared_ptr<set_node> x2 = clone_set_node(x);
+    x2->right = y->left;
+    y->left = x2;
+    return y;
+}
+
+std::shared_ptr<set_node> set_merge(std::shared_ptr<set_node> a,
+                                    std::shared_ptr<set_node> b) {
+    if (!a)
+        return b;
+    if (!b)
+        return a;
+    if (a->priority < b->priority) {
+        std::shared_ptr<set_node> out = clone_set_node(a);
+        out->right = set_merge(a->right, b);
+        return out;
+    }
+    std::shared_ptr<set_node> out = clone_set_node(b);
+    out->left = set_merge(a, b->left);
+    return out;
+}
+
+std::shared_ptr<set_node> set_insert_impl(
+    const std::shared_ptr<set_node> &node, std::uint64_t hash,
+    const value_t *key, bool &added) {
+    if (!node) {
+        added = true;
+        return make_set_node(hash, key);
+    }
+    if (hash == node->hash) {
+        if (bucket_has(node->bucket.get(), key)) {
+            added = false;
+            return node;
+        }
+        added = true;
+        std::shared_ptr<set_node> out = clone_set_node(node);
+        std::shared_ptr<set_bucket> bucket = std::make_shared<set_bucket>();
+        bucket->keys.reserve(node->bucket->keys.size() + 1);
+        for (value_t *entry : node->bucket->keys)
+            bucket->keys.push_back(dupval(entry));
+        bucket->keys.push_back(dupval(const_cast<value_t *>(key)));
+        out->bucket = bucket;
+        return out;
+    }
+    std::shared_ptr<set_node> out = clone_set_node(node);
+    if (hash < node->hash) {
+        out->left = set_insert_impl(node->left, hash, key, added);
+        if (!added)
+            return node;
+        if (out->left->priority < out->priority)
+            out = set_rotate_right(out);
+    } else {
+        out->right = set_insert_impl(node->right, hash, key, added);
+        if (!added)
+            return node;
+        if (out->right->priority < out->priority)
+            out = set_rotate_left(out);
+    }
+    return out;
+}
+
+std::shared_ptr<set_node> set_erase_impl(
+    const std::shared_ptr<set_node> &node, std::uint64_t hash,
+    const value_t *key, bool &removed) {
+    if (!node) {
+        removed = false;
+        return node;
+    }
+    if (hash == node->hash) {
+        std::size_t index = node->bucket->keys.size();
+        for (std::size_t i = 0; i < node->bucket->keys.size(); ++i) {
+            if (value_equals(node->bucket->keys[i],
+                             const_cast<value_t *>(key))) {
+                index = i;
+                break;
+            }
+        }
+        if (index >= node->bucket->keys.size()) {
+            removed = false;
+            return node;
+        }
+        removed = true;
+        if (node->bucket->keys.size() == 1)
+            return set_merge(node->left, node->right);
+        std::shared_ptr<set_node> out = clone_set_node(node);
+        std::shared_ptr<set_bucket> bucket = std::make_shared<set_bucket>();
+        bucket->keys.reserve(node->bucket->keys.size() - 1);
+        for (std::size_t i = 0; i < node->bucket->keys.size(); ++i) {
+            if (i != index)
+                bucket->keys.push_back(dupval(node->bucket->keys[i]));
+        }
+        out->bucket = bucket;
+        return out;
+    }
+    std::shared_ptr<set_node> out = clone_set_node(node);
+    if (hash < node->hash)
+        out->left = set_erase_impl(node->left, hash, key, removed);
+    else
+        out->right = set_erase_impl(node->right, hash, key, removed);
+    if (!removed)
+        return node;
+    return out;
+}
+
+} // namespace
+
+set_payload::~set_payload() {
+    release_set_tree(std::move(root));
+    order.reset();
+}
+
+bool set_contains(const struct set_payload *payload,
+                  const struct value_t *key) {
+    if (!payload || !payload->root || !key || !dict_key_allowed(key))
+        return false;
+    std::uint64_t hash = dict_key_hash(key);
+    for (std::shared_ptr<set_node> node = payload->root; node;) {
+        if (hash == node->hash)
+            return bucket_has(node->bucket.get(), key);
+        node = hash < node->hash ? node->left : node->right;
+    }
+    return false;
+}
+
+std::shared_ptr<set_node> set_insert(const std::shared_ptr<set_node> &root,
+                                     const struct value_t *key, bool &added) {
+    if (!key || !dict_key_allowed(key)) {
+        added = false;
+        return root;
+    }
+    return set_insert_impl(root, dict_key_hash(key), key, added);
+}
+
+std::shared_ptr<set_node> set_erase(const std::shared_ptr<set_node> &root,
+                                    const struct value_t *key,
+                                    bool &removed) {
+    if (!key || !dict_key_allowed(key)) {
+        removed = false;
+        return root;
+    }
+    return set_erase_impl(root, dict_key_hash(key), key, removed);
+}
+
+void set_values_in_order(const struct set_payload *payload,
+                         std::vector<value_t *> &out) {
+    out.clear();
+    if (!payload)
+        return;
+    std::vector<value_t *> log;
+    deque_items_in_order(payload->order.get(), log);
+    std::vector<value_t *> latest;
+    latest.reserve(payload->size);
+    struct dict_value_t *seen = newdictval();
+    for (std::size_t i = log.size(); i > 0; --i) {
+        value_t *key = log[i - 1];
+        if (!set_contains(payload, key))
+            continue;
+        if (dict_find_index(seen, key) >= 0)
+            continue;
+        dict_append_item(seen, dupval(key), newboolval(true));
+        latest.push_back(key);
+    }
+    freeval((struct value_t *)seen);
+    out.reserve(latest.size());
+    for (std::size_t i = latest.size(); i > 0; --i)
+        out.push_back(latest[i - 1]);
+}
+
 struct value_t *dupval(struct value_t *v) {
     if (!v) return NULL;
     switch (v->type) {
@@ -440,6 +692,13 @@ struct value_t *dupval(struct value_t *v) {
             struct heap_value_t *src = (struct heap_value_t *)v;
             struct heap_value_t *dst = new heap_value_t;
             dst->type = T_heap;
+            dst->payload = src->payload;
+            return (struct value_t *)dst;
+        }
+        case T_set: {
+            struct set_value_t *src = (struct set_value_t *)v;
+            struct set_value_t *dst = new set_value_t;
+            dst->type = T_set;
             dst->payload = src->payload;
             return (struct value_t *)dst;
         }
@@ -535,6 +794,9 @@ void freeval(struct value_t *v) {
         case T_heap:
             delete (struct heap_value_t *)v;
             break;
+        case T_set:
+            delete (struct set_value_t *)v;
+            break;
         case T_method:
             delete (struct method_value_t *)v;
             break;
@@ -587,6 +849,7 @@ const char *typename_of(const struct value_t *v) {
         case T_lru: return "lru";
         case T_deque: return "deque";
         case T_heap: return "heap";
+        case T_set: return "set";
         case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
@@ -759,6 +1022,18 @@ std::string value_to_string(const struct value_t *v) {
             std::vector<value_t *> items;
             heap_items_level_order(h->payload.get(), items);
             std::string out = "heap([";
+            for (size_t i = 0; i < items.size(); ++i) {
+                if (i) out += ", ";
+                out += value_to_string(items[i]);
+            }
+            out += "])";
+            return out;
+        }
+        case T_set: {
+            const struct set_value_t *s = (const struct set_value_t *)v;
+            std::vector<value_t *> items;
+            set_values_in_order(s->payload.get(), items);
+            std::string out = "set([";
             for (size_t i = 0; i < items.size(); ++i) {
                 if (i) out += ", ";
                 out += value_to_string(items[i]);

@@ -417,6 +417,8 @@ bool truthy(const struct value_t *v) {
                    0;
         case T_heap:
             return ((struct heap_value_t *)v)->payload->size > 0;
+        case T_set:
+            return ((struct set_value_t *)v)->payload->size > 0;
         case T_method: return true;
         case T_func: return true;
         case T_builtin: return true;
@@ -527,17 +529,12 @@ bool value_equals(struct value_t *a, struct value_t *b) {
             struct dict_value_t *db = (struct dict_value_t *)b;
             if (da->payload == db->payload) return true;
             if (da->payload->items.size() != db->payload->items.size()) return false;
-            for (size_t i = 0; i < da->payload->items.size(); ++i) {
-                bool found = false;
-                for (size_t j = 0; j < db->payload->items.size(); ++j) {
-                    if (value_equals(da->payload->items[i].first, db->payload->items[j].first)) {
-                        if (!value_equals(da->payload->items[i].second, db->payload->items[j].second))
-                            return false;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) return false;
+            for (const auto &entry : da->payload->items) {
+                int found = dict_find_index(db, entry.first);
+                if (found < 0) return false;
+                if (!value_equals(entry.second,
+                                  db->payload->items[(size_t)found].second))
+                    return false;
             }
             return true;
         }
@@ -639,6 +636,18 @@ bool value_equals(struct value_t *a, struct value_t *b) {
             heap_items_level_order(hb->payload.get(), right);
             for (size_t i = 0; i < left.size(); ++i)
                 if (!value_equals(left[i], right[i]))
+                    return false;
+            return true;
+        }
+        case T_set: {
+            struct set_value_t *sa = (struct set_value_t *)a;
+            struct set_value_t *sb = (struct set_value_t *)b;
+            if (sa->payload == sb->payload) return true;
+            if (sa->payload->size != sb->payload->size) return false;
+            std::vector<value_t *> items;
+            set_values_in_order(sa->payload.get(), items);
+            for (value_t *item : items)
+                if (!set_contains(sb->payload.get(), item))
                     return false;
             return true;
         }
@@ -1948,6 +1957,10 @@ static struct value_t *default_value_for_type(
             return (struct value_t *)newlistval();
         case TYPE_DICT:
             return (struct value_t *)newdictval();
+        case TYPE_DEQUE:
+            return (struct value_t *)newdequeval();
+        case TYPE_SET:
+            return (struct value_t *)newsetval();
         case TYPE_NULL:
         case TYPE_ANY:
             return newnull();
@@ -3256,6 +3269,26 @@ struct value_t *eval(struct ast *a) {
                 eval_popscope();
                 freeval(iter);
                 break;
+            }
+
+            if (iter->type == T_deque || iter->type == T_heap ||
+                iter->type == T_set) {
+                struct list_value_t *materialized = newlistval();
+                std::vector<value_t *> items;
+                if (iter->type == T_deque)
+                    deque_items_in_order(
+                        ((struct deque_value_t *)iter)->payload.get(), items);
+                else if (iter->type == T_heap)
+                    heap_items_level_order(
+                        ((struct heap_value_t *)iter)->payload.get(), items);
+                else
+                    set_values_in_order(
+                        ((struct set_value_t *)iter)->payload.get(), items);
+                materialized->payload->items.reserve(items.size());
+                for (struct value_t *item : items)
+                    materialized->payload->items.push_back(dupval(item));
+                freeval(iter);
+                iter = (struct value_t *)materialized;
             }
 
             size_t count = 0;

@@ -1426,7 +1426,7 @@ std.struct
 std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
-std.set（内嵌 Skein 源码包）
+std.set（原生实现）
 std.deque（原生实现）
 std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
@@ -1503,7 +1503,7 @@ r["evicted"]                   // {key: b, value: 2}
 
 API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `len` / `capacity` / `clear`。key 必须是合法 dict key；`keys` / `values` 从最久未使用到最近使用排列。
 
-`std.set` 是内嵌 Skein 源码包；`std.deque` / `std.heap` 是原生实现（`import std.deque` / `import std.heap` 仍然可用，也可以直接使用 `std.deque.*` / `std.heap.*`）：
+`std.set` / `std.deque` / `std.heap` 是原生实现（`import std.set` / `import std.deque` / `import std.heap` 仍然可用，也可以直接使用对应的 `std.*`）：
 
 ```text
 import std.set;
@@ -1522,7 +1522,7 @@ let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
 heap.peek(h)         // 1
 ```
 
-`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）。`deque` / `heap` 是原生值类型：`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
+`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
 
 `std.route` 是显式注册的 Web 路由：
 
@@ -1605,7 +1605,7 @@ std.list.top_k([5, 1, 4, 2, 3], 3)      // [1, 2, 3]
 std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 ```
 
-`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key。
+`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
 
 当前提供的函数：
 
@@ -1676,6 +1676,18 @@ std.heap.peek
 std.heap.push
 std.heap.pop
 std.heap.to_list
+
+std.set.new
+std.set.from_list
+std.set.add
+std.set.remove
+std.set.has
+std.set.size
+std.set.values
+std.set.union
+std.set.intersect
+std.set.difference
+std.set.is_subset
 
 std.json.parse
 std.json.try_parse
@@ -2002,8 +2014,10 @@ std.worker.stats
 - `std.list.map` / `std.list.filter` / `std.list.reduce` 接收函数值，回调出错时中止；
 - `std.list.reduce` 回调参数顺序是 `(accumulator, element)`；没有初始值时不能用于空 list；
 - `std.dict.items` 返回 `[[key, value], ...]`；
-- `std.dict.delete` 删除缺失键时返回原 dict 的副本；
-- `std.dict.merge` 中右侧 dict 覆盖同名键；
+- `std.dict.delete` 删除缺失键时返回原 dict 的副本；单次删除 O(n)（重建），批量删除请尽量一次构造；
+- `std.dict.merge` 中右侧 dict 覆盖同名键；`dict` 的 `==` 使用哈希索引逐键比较，O(n)；
+- JSON 编码中 `deque` / `heap` / `set` 按数组输出；
+- 循环拼接字符串是 O(n²)，建议用 list/deque 收集片段后 `std.string.join`；
 - `std.json.parse` 把 JSON object 映射为 `dict`，key 一律是 `string`；参数可以是 `string` 或 `bytes`；
 - `std.json.try_parse` 返回 `result`，非法 JSON 不会直接抛错；
 - `std.json.stringify` 只接受 JSON 子集，dict key 必须是 `string`；
@@ -2244,7 +2258,7 @@ count = "three";    // 错误：variable count expects int, got string
 ```
 
 - 类型在运行时的初始化和重新赋值时检查，不做隐式转换；
-- 支持 `any int float number bool string char byte bytes list dict function builtin callable null userdata result error`；
+- 支持 `any int float number bool string char byte bytes list dict deque heap set function builtin callable null userdata result error`；
 - 带类型标注的 `let` 可以省略初始值，使用默认值：
 
 ```text
@@ -2374,7 +2388,7 @@ for (let key in {"a": 1, "b": 2}) {
 
 `for ... in` 规则：
 
-- 单变量：list 遍历元素，dict 遍历键；
+- 单变量：list 遍历元素，dict 遍历键；deque / heap / set 也遍历元素（heap 按层序，set 按插入顺序）；
 - 双变量只能用于 dict，得到 `key, value`；
 - list 需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
@@ -2831,13 +2845,13 @@ apply(sqrt, 16)
 - 整数除法向零截断，取模结果符号随被除数：`-7 / 4 == -1`，`-7 % 4 == -3`，`7 % -4 == 3`。
 - 位运算按 64 位进行，移位次数必须在 `0..63` 之间。
 - `bool` 类型有 `true` / `false` 两个字面量；`bool(x)` 按真值规则转换。
-- 真值规则：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典为假；其余值（包括 `true`、函数和内置函数）为真。
+- 真值规则：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典、空 deque、空 heap、空 set 为假；其余值（包括 `true`、函数和内置函数）为真。
 - `str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
 - `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `format("{}", null)` 输出。
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
 - `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
-- `len(x)` 支持字符串、char、bytes、list、dict：字符串按 UTF-8 码点计数，char 为 1，bytes 按字节数，list/dict 按元素数。
+- `len(x)` 支持字符串、char、bytes、list、dict、deque、heap、set：字符串按 UTF-8 码点计数，char 为 1，bytes 按字节数，其余按元素数。
 - `range(length)` / `range(start, length[, step])` 生成整数序列，第二参数是长度而不是结束值；`step` 不能为 0。
 - 字典键按值相等判断，`1` 和 `1.0` 是同一个键；字面量中的重复键以最后一个为准。
 - `list`、`dict` 和 `struct` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。

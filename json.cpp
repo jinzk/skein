@@ -578,6 +578,51 @@ private:
                 out.push_back(']');
                 return true;
             }
+            case T_deque: {
+                const struct deque_value_t *deque =
+                    (const struct deque_value_t *)value;
+                std::vector<value_t *> items;
+                deque_items_in_order(deque->payload.get(), items);
+                out.push_back('[');
+                for (size_t i = 0; i < items.size(); ++i) {
+                    if (i)
+                        out.push_back(',');
+                    if (!encode_value(items[i], depth + 1))
+                        return false;
+                }
+                out.push_back(']');
+                return true;
+            }
+            case T_heap: {
+                const struct heap_value_t *heap =
+                    (const struct heap_value_t *)value;
+                std::vector<value_t *> items;
+                heap_items_level_order(heap->payload.get(), items);
+                out.push_back('[');
+                for (size_t i = 0; i < items.size(); ++i) {
+                    if (i)
+                        out.push_back(',');
+                    if (!encode_value(items[i], depth + 1))
+                        return false;
+                }
+                out.push_back(']');
+                return true;
+            }
+            case T_set: {
+                const struct set_value_t *set =
+                    (const struct set_value_t *)value;
+                std::vector<value_t *> items;
+                set_values_in_order(set->payload.get(), items);
+                out.push_back('[');
+                for (size_t i = 0; i < items.size(); ++i) {
+                    if (i)
+                        out.push_back(',');
+                    if (!encode_value(items[i], depth + 1))
+                        return false;
+                }
+                out.push_back(']');
+                return true;
+            }
             case T_dict: {
                 const struct dict_value_t *dict =
                     (const struct dict_value_t *)value;

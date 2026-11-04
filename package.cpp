@@ -724,6 +724,21 @@ value_t *build_std_namespace() {
             {"to_list", B_heap_to_list},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("set"),
+        builtin_module({
+            {"new", B_set_new},
+            {"from_list", B_set_from_list},
+            {"add", B_set_add},
+            {"remove", B_set_remove},
+            {"has", B_set_has},
+            {"size", B_set_size},
+            {"values", B_set_values},
+            {"union", B_set_union},
+            {"intersect", B_set_intersect},
+            {"difference", B_set_difference},
+            {"is_subset", B_set_is_subset},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("net"),
         builtin_module({
             {"tcp_connect", B_net_tcp_connect},

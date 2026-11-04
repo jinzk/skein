@@ -20,6 +20,8 @@ const void *value_payload(const struct value_t *v) {
             return ((const struct deque_value_t *)v)->payload.get();
         case T_heap:
             return ((const struct heap_value_t *)v)->payload.get();
+        case T_set:
+            return ((const struct set_value_t *)v)->payload.get();
         default:
             return NULL;
     }
@@ -92,6 +94,33 @@ void for_each_value_child(
                     pending.push_back(node->left.get());
                 if (node->right)
                     pending.push_back(node->right.get());
+            }
+            break;
+        }
+        case T_set: {
+            const struct set_value_t *sv = (const struct set_value_t *)v;
+            std::vector<const set_node *> pending;
+            if (sv->payload->root)
+                pending.push_back(sv->payload->root.get());
+            while (!pending.empty()) {
+                const set_node *node = pending.back();
+                pending.pop_back();
+                for (const value_t *key : node->bucket->keys)
+                    fn(key);
+                if (node->left)
+                    pending.push_back(node->left.get());
+                if (node->right)
+                    pending.push_back(node->right.get());
+            }
+            if (sv->payload->order) {
+                for (std::shared_ptr<deque_node> node =
+                         sv->payload->order->front;
+                     node; node = node->next)
+                    fn(node->value);
+                for (std::shared_ptr<deque_node> node =
+                         sv->payload->order->back;
+                     node; node = node->next)
+                    fn(node->value);
             }
             break;
         }

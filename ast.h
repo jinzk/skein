@@ -374,7 +374,18 @@ enum bifs {
     B_heap_peek,
     B_heap_push,
     B_heap_pop,
-    B_heap_to_list
+    B_heap_to_list,
+    B_set_new,
+    B_set_from_list,
+    B_set_add,
+    B_set_remove,
+    B_set_has,
+    B_set_size,
+    B_set_values,
+    B_set_union,
+    B_set_intersect,
+    B_set_difference,
+    B_set_is_subset
 };
 
 struct ast {

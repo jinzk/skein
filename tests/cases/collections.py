@@ -46,6 +46,56 @@ def run_cases():
           "print(set.is_subset(set.from_list([1]), a));\n"
           "print(set.is_subset(set.from_list([1, 9]), a));\n",
           stdout_all=["[1, 2, 3]", "[2]", "[1]", "true", "false"])
+    check("set value semantics and order",
+          "import std;\nimport std.set;\n"
+          "let s = set.from_list([1, 2, 3]);\n"
+          "s = set.remove(s, 2);\n"
+          "s = set.add(s, 2);\n"
+          "print(set.values(s));\n"
+          "let t = set.add(set.from_list([1]), 2);\n"
+          "print(set.values(t));\n"
+          "let u = set.from_list([1]);\n"
+          "let v = set.add(u, 2);\n"
+          "print(set.size(u));\nprint(set.size(v));\n",
+          stdout_all=["[1, 3, 2]", "[1, 2]", "1", "2"])
+    check("set len json iterate type",
+          "import std;\nimport std.set;\n"
+          "let s: set = set.from_list([2, 1, 3]);\n"
+          "print(len(s));\n"
+          "print(std.json.stringify(s));\n"
+          "let out = [];\n"
+          "for (let x in s) { out = std.list.append(out, x); }\n"
+          "print(out);\n",
+          stdout_all=["3", "[2,1,3]", "[2, 1, 3]"])
+    check("set differential",
+          "import std;\nimport std.set;\n"
+          "let s = set.new();\nlet ref = {};\n"
+          "let i = 0;\nlet seed = 12345;\n"
+          "while (i < 2000) {\n"
+          "  seed = (seed * 1103515245 + 12345) % 2147483648;\n"
+          "  let v = seed % 200;\n"
+          "  seed = (seed * 1103515245 + 12345) % 2147483648;\n"
+          "  if (seed % 3 == 0) {\n"
+          "    s = set.remove(s, v);\n"
+          "    ref = std.dict.delete(ref, v);\n"
+          "  } else {\n"
+          "    s = set.add(s, v);\n"
+          "    ref[v] = true;\n"
+          "  }\n"
+          "  if (set.size(s) != len(ref)) { fail(\"size mismatch\"); }\n"
+          "  if (set.has(s, v) != (std.dict.has(ref, v) != 0)) { fail(\"has mismatch\"); }\n"
+          "  i = i + 1;\n"
+          "}\n"
+          "print(std.list.sort(set.values(s)) == "
+          "std.list.sort(std.dict.keys(ref)));\n",
+          stdout_all=["true"])
+    check("set large add",
+          "import std;\nimport std.set;\n"
+          "let s = set.new();\n"
+          "let i = 0;\n"
+          "while (i < 20000) { s = set.add(s, i); i = i + 1; }\n"
+          "print(set.size(s));\nprint(set.has(s, 19999));\n",
+          stdout_all=["20000", "true"])
     check("deque basics",
           "import std;\nimport std.deque;\n"
           "let d = deque.from_list([2, 3]);\n"
@@ -131,6 +181,28 @@ def run_cases():
           "print(deque.size(d));\n"
           "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n",
           stdout_all=["50000", "0", "49999"])
+    check("deque and heap len json iterate",
+          "import std;\nimport std.deque;\nimport std.heap;\n"
+          "let d = deque.from_list([1, 2, 3]);\n"
+          "print(len(d));\nprint(std.json.stringify(d));\n"
+          "let out = [];\n"
+          "for (let x in d) { out = std.list.append(out, x); }\n"
+          "print(out);\n"
+          "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
+          "print(len(h));\nprint(std.json.stringify(h));\n"
+          "out = [];\n"
+          "for (let x in h) { out = std.list.append(out, x); }\n"
+          "print(out);\n",
+          stdout_all=["3", "[1,2,3]", "[1, 2, 3]", "3", "[1,3,2]",
+                      "[1, 3, 2]"])
+    check("deque and heap type annotations",
+          "import std;\nimport std.deque;\nimport std.heap;\n"
+          "let d: deque = deque.new();\nprint(len(d));\n"
+          "let h: heap = heap.from_list([1], func(a, b) { return a < b; });\n"
+          "print(len(h));\n"
+          "struct Box { items: deque; }\n"
+          "let b = Box { items: d };\nprint(len(b.items));\n",
+          stdout_all=["0", "1", "0"])
     check("heap min",
           "import std;\nimport std.heap;\n"
           "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
@@ -360,6 +432,23 @@ def run_cases():
           'func(x) { return x % 2; }));\n',
           stdout_all=["[1, 2, 3]", "[a, b]", "[{n: 1}, {n: 2}]",
                       "{1: [1, 3], 0: [2, 4]}"])
+    check("list unique large and non-hashable",
+          'import std;\n'
+          'let xs = range(20000);\n'
+          'print(len(std.list.unique(xs)));\n'
+          'let ys = std.list.map(xs, func(i) { return i % 1000; });\n'
+          'print(len(std.list.unique(ys)));\n'
+          'print(std.list.unique([[1], [1], [2]]));\n',
+          stdout_all=["20000", "1000", "[[1], [2]]"])
+    check("dict equality large",
+          'import std;\n'
+          'let a = {};\nlet b = {};\nlet i = 0;\n'
+          'while (i < 20000) { a[i] = i; b[i] = i; i = i + 1; }\n'
+          'print(a == b);\n'
+          'let c = b;\n'
+          'c[19999] = -1;\n'
+          'print(a == c);\n',
+          stdout_all=["true", "false"])
     check("list chunk and window",
           'import std;\n'
           'print(std.list.chunk([1, 2, 3, 4, 5], 2));\n'
@@ -381,6 +470,13 @@ def run_cases():
           stdout_all=["[[1, a], [2, b]]",
                       "[[1, a, true], [2, b, false]]",
                       "[1, 2, 3]", "[5, 4]", "[]"])
+    check("list top_k large and full",
+          'import std;\n'
+          'let xs = range(20000);\n'
+          'print(std.list.top_k(xs, 5));\n'
+          'print(std.list.top_k([3, 1, 2], 10));\n'
+          'print(std.list.top_k(["b", "a", "c"], 2));\n',
+          stdout_all=["[0, 1, 2, 3, 4]", "[1, 2, 3]", "[a, b]"])
     check("list binary_search",
           'import std;\n'
           'print(std.list.binary_search([1, 3, 5, 7], 5));\n'

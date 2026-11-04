@@ -121,6 +121,12 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_list;
         case TYPE_DICT:
             return value->type == T_dict;
+        case TYPE_DEQUE:
+            return value->type == T_deque;
+        case TYPE_HEAP:
+            return value->type == T_heap;
+        case TYPE_SET:
+            return value->type == T_set;
         case TYPE_FUNCTION:
             return value->type == T_func;
         case TYPE_BUILTIN:
@@ -180,6 +186,9 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_BYTES: base = "bytes"; break;
         case TYPE_LIST: base = "list"; break;
         case TYPE_DICT: base = "dict"; break;
+        case TYPE_DEQUE: base = "deque"; break;
+        case TYPE_HEAP: base = "heap"; break;
+        case TYPE_SET: base = "set"; break;
         case TYPE_FUNCTION: base = "function"; break;
         case TYPE_BUILTIN: base = "builtin"; break;
         case TYPE_CALLABLE: base = "callable"; break;

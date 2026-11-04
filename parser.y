@@ -170,6 +170,9 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
     if (std::strcmp(name, "bytes") == 0) return new_type_constraint(TYPE_BYTES);
     if (std::strcmp(name, "list") == 0) return new_type_constraint(TYPE_LIST);
     if (std::strcmp(name, "dict") == 0) return new_type_constraint(TYPE_DICT);
+    if (std::strcmp(name, "deque") == 0) return new_type_constraint(TYPE_DEQUE);
+    if (std::strcmp(name, "heap") == 0) return new_type_constraint(TYPE_HEAP);
+    if (std::strcmp(name, "set") == 0) return new_type_constraint(TYPE_SET);
     if (std::strcmp(name, "function") == 0) return new_type_constraint(TYPE_FUNCTION);
     if (std::strcmp(name, "builtin") == 0) return new_type_constraint(TYPE_BUILTIN);
     if (std::strcmp(name, "callable") == 0) return new_type_constraint(TYPE_CALLABLE);

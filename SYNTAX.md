@@ -545,7 +545,7 @@ x is Type
 `kind_of` 返回值：
 
 ```text
-int float bool string bytes list dict
+int float bool string bytes list dict deque heap set
 function builtin userdata struct null
 ```
 
@@ -662,7 +662,7 @@ const limit: int = 10;
 
 ```text
 any int float number bool string char byte bytes
-list dict function builtin callable null userdata result error
+list dict deque heap set function builtin callable null userdata result error
 ```
 
 任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`：
@@ -688,10 +688,12 @@ let c: char?;       // 默认 null
 | `bytes` | 空 bytes |
 | `list` | `[]` |
 | `dict` | `{}` |
+| `deque` | 空 deque |
+| `set` | 空 set |
 | `any` / `null` | `null` |
 | `T?` | `null` |
 
-`function`、`builtin`、`callable`、`userdata` 没有默认值，必须提供初始值。
+`function`、`builtin`、`callable`、`userdata`、`heap` 没有默认值，必须提供初始值。
 
 已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
@@ -818,6 +820,7 @@ for (let key, value in {"a": 1, "b": 2}) {
 - 单变量形式：`for (let NAME in exp)`；
 - 双变量形式：`for (let NAME1, NAME2 in exp)`，只支持 dict；
 - list 单变量遍历元素；需要下标时用 `range(len(list))` 或 C 风格 `for`；
+- deque / heap / set 单变量遍历元素（heap 按层序，set 按插入顺序）；双变量形式仍只支持 dict；
 - dict 单变量遍历 key，双变量得到 `key, value`；
 - string 单变量遍历 UTF-8 字符，元素是 `char`；
 - bytes 单变量遍历 `0..255` 的字节值；
@@ -1168,7 +1171,7 @@ func double(x) => x * 2;
 
 ```text
 any int float number bool string char byte bytes
-list dict function builtin callable null userdata result error
+list dict deque heap set function builtin callable null userdata result error
 ```
 
 示例：
@@ -1577,7 +1580,7 @@ std.struct
 std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
-std.set（内嵌 Skein 源码包）
+std.set（原生实现）
 std.deque（原生实现）
 std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
@@ -1670,7 +1673,7 @@ std.list.group_by(xs, key)          // dict: key -> list
 std.list.chunk(xs, n)               // [[...], [...], ...]
 std.list.window(xs, n[, step])      // 滑动窗口，step 默认 1
 std.list.zip(a, b, ...)             // [[a0, b0], ...]，取最短
-std.list.top_k(xs, k[, cmp])        // 排序后取前 k 个
+std.list.top_k(xs, k[, cmp])        // 排序后取前 k 个（O(n log k)）
 std.list.binary_search(xs, value[, cmp]) -> {found, index}
 ```
 
@@ -1693,6 +1696,8 @@ std.list.zip([1, 2], ["a", "b"])        // [[1, a], [2, b]]
 std.list.top_k([5, 1, 4, 2, 3], 3)      // [1, 2, 3]
 std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 ```
+
+`unique` / `unique_by` 在 key 可哈希（int/bool/string/char/byte/bytes/null）时使用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)，结果仍按升序排列。
 
 编码转换：
 
@@ -3255,7 +3260,7 @@ print(r["evicted"]);           // {key: b, value: 2}
 
 ### std.set / std.deque / std.heap
 
-`std.set` 是内嵌 Skein 源码包；`std.deque` / `std.heap` 是原生实现。`deque` 的 push/pop/size/peek 为均摊 O(1)，`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)。
+`std.set` / `std.deque` / `std.heap` 都是原生实现。`deque` 的 push/pop/size/peek 为均摊 O(1)，`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)；`set` 的 add/remove/has 为 O(log n)，`from_list` O(n log n)，`values` O(n log n) 且保持插入顺序。
 
 #### std.set
 
@@ -3276,7 +3281,7 @@ set.is_subset(a, b)
 
 元素必须是合法 dict key：`int / bool / string / char / byte / bytes / null`。
 
-性能提示：`from_list` 在单次调用内构造，O(n)；逐条 `set.add` / `set.remove` 每次都会为值语义复制整个 dict，O(n)/次。大批量请优先用 `from_list`，热路径也可以直接用普通 dict 当 set（`d[x] = true`，O(1) 均摊）。
+`std.set` 是 C++ 原生持久化集合（哈希 treap + 插入日志），具有值语义：`add` / `remove` 返回新 set，不修改原 set。`add` / `remove` / `has` 为 O(log n)，`from_list` 为 O(n log n)，`values` 为 O(n log n) 并保持插入顺序（删除后重新添加会排到末尾）。也可以只 `import std;` 然后使用 `std.set.*`。`len(s)`、`for ... in s`、JSON 编码（数组）和类型标注 `set` 均支持；`set` 默认值为空集合。
 
 #### std.deque
 
@@ -3299,7 +3304,7 @@ d = r["deque"];
 
 `pop_front` / `pop_back` 返回 `{ok, deque, value}`；空队列返回 `{ok: false, error: "empty deque", deque}`。
 
-`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `std.lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。
+`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `std.lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。`len(d)`、`for ... in d`、JSON 编码（数组）和类型标注 `deque` 均支持。
 
 #### std.heap
 
@@ -3319,7 +3324,7 @@ let h2 = heap.from_list([3, 1, 2], func(a, b) { return a > b; });  // 大顶堆
 
 `less(a, b)` 返回 `true` 表示 `a` 优先出堆。`pop` 返回 `{ok, heap, value}`；空堆返回 `{ok: false, error: "empty heap", heap}`。
 
-`std.heap` 是 C++ 原生持久化左偏堆（leftist heap），具有值语义：push/pop 返回新堆，不修改原堆；push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)（层序）。也可以只 `import std;` 然后使用 `std.heap.*`。
+`std.heap` 是 C++ 原生持久化左偏堆（leftist heap），具有值语义：push/pop 返回新堆，不修改原堆；push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)（层序）。也可以只 `import std;` 然后使用 `std.heap.*`。`len(h)`、`for ... in h`（层序）、JSON 编码（数组）和类型标注 `heap` 均支持；`heap` 没有默认值，声明时必须提供初始值。
 
 ### std.route
 

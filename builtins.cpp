@@ -208,6 +208,7 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_lru: return "lru";
         case T_deque: return "deque";
         case T_heap: return "heap";
+        case T_set: return "set";
         case T_method: return "method";
         case T_null: return "null";
         case T_class: return "class";
@@ -255,6 +256,43 @@ static bool list_sort_kind(struct list_value_t *list, bool &numeric,
     return numeric || strings || chars || bytes;
 }
 
+struct default_order {
+    bool numeric = true;
+    bool chars = false;
+    bool bytes = false;
+    bool desc = false;
+
+    bool operator()(struct value_t *a, struct value_t *b) const {
+        bool a_nan = value_is_nan(a);
+        bool b_nan = value_is_nan(b);
+        if (a_nan || b_nan) {
+            if (a_nan && b_nan)
+                return false;
+            return !a_nan;
+        }
+        int cmp = 0;
+        if (chars) {
+            unsigned int ac = ((struct char_value_t *)a)->value;
+            unsigned int bc = ((struct char_value_t *)b)->value;
+            cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+        } else if (bytes) {
+            unsigned int ac = ((struct byte_value_t *)a)->value;
+            unsigned int bc = ((struct byte_value_t *)b)->value;
+            cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
+        } else if (numeric) {
+            bool unordered = false;
+            cmp = compare_numeric(a, b, unordered);
+            if (unordered)
+                return false;
+        } else {
+            cmp = std::strcmp(
+                ((struct string_value_t *)a)->value,
+                ((struct string_value_t *)b)->value);
+        }
+        return desc ? cmp > 0 : cmp < 0;
+    }
+};
+
 static struct value_t *list_sort_default(struct list_value_t *list,
                                          bool desc, const char *name) {
     bool numeric = true;
@@ -270,37 +308,9 @@ static struct value_t *list_sort_default(struct list_value_t *list,
     for (struct value_t *item : list->payload->items)
         out->payload->items.push_back(dupval(item));
 
-    std::stable_sort(
-        out->payload->items.begin(), out->payload->items.end(),
-        [numeric, chars, bytes, desc](struct value_t *a, struct value_t *b) {
-            bool a_nan = value_is_nan(a);
-            bool b_nan = value_is_nan(b);
-            if (a_nan || b_nan) {
-                if (a_nan && b_nan)
-                    return false;
-                return !a_nan;
-            }
-            int cmp = 0;
-            if (chars) {
-                unsigned int ac = ((struct char_value_t *)a)->value;
-                unsigned int bc = ((struct char_value_t *)b)->value;
-                cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
-            } else if (bytes) {
-                unsigned int ac = ((struct byte_value_t *)a)->value;
-                unsigned int bc = ((struct byte_value_t *)b)->value;
-                cmp = (ac < bc) ? -1 : (ac > bc ? 1 : 0);
-            } else if (numeric) {
-                bool unordered = false;
-                cmp = compare_numeric(a, b, unordered);
-                if (unordered)
-                    return false;
-            } else {
-                cmp = std::strcmp(
-                    ((struct string_value_t *)a)->value,
-                    ((struct string_value_t *)b)->value);
-            }
-            return desc ? cmp > 0 : cmp < 0;
-        });
+    std::stable_sort(out->payload->items.begin(),
+                     out->payload->items.end(),
+                     default_order{numeric, chars, bytes, desc});
     return (struct value_t *)out;
 }
 
@@ -343,6 +353,78 @@ static struct value_t *list_sort_with_cmp(struct list_value_t *list,
         freeval((struct value_t *)out);
         return NULL;
     }
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_top_k_impl(struct list_value_t *list, long long k,
+                                       struct value_t *cmp_fn,
+                                       const char *name) {
+    if (k <= 0)
+        return (struct value_t *)newlistval();
+    size_t size = list->payload->items.size();
+    if ((size_t)k >= size) {
+        return cmp_fn ? list_sort_with_cmp(list, cmp_fn, name)
+                      : list_sort_default(list, false, name);
+    }
+
+    std::vector<struct value_t *> items;
+    items.reserve(size);
+    for (struct value_t *item : list->payload->items)
+        items.push_back(dupval(item));
+
+    bool failed = false;
+    if (!cmp_fn) {
+        bool numeric = true;
+        bool chars = false;
+        bool bytes = false;
+        if (!list_sort_kind(list, numeric, chars, bytes)) {
+            yyerror("%s expects all numbers, strings, chars, or bytes", name);
+            for (struct value_t *item : items)
+                freeval(item);
+            return NULL;
+        }
+        std::partial_sort(items.begin(), items.begin() + (size_t)k,
+                          items.end(),
+                          default_order{numeric, chars, bytes, false});
+    } else {
+        std::partial_sort(
+            items.begin(), items.begin() + (size_t)k, items.end(),
+            [&](struct value_t *a, struct value_t *b) {
+                if (failed)
+                    return false;
+                std::vector<struct value_t *> call_args;
+                call_args.push_back(dupval(a));
+                call_args.push_back(dupval(b));
+                struct value_t *result =
+                    call_value_args(cmp_fn, std::move(call_args));
+                if (!result) {
+                    failed = true;
+                    return false;
+                }
+                if (result->type != T_int) {
+                    yyerror("%s comparator must return int, got %s", name,
+                            typename_of(result));
+                    freeval(result);
+                    failed = true;
+                    return false;
+                }
+                long long order = ((struct int_value_t *)result)->value;
+                freeval(result);
+                return order < 0;
+            });
+        if (failed) {
+            for (struct value_t *item : items)
+                freeval(item);
+            return NULL;
+        }
+    }
+
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve((size_t)k);
+    for (long long i = 0; i < k; ++i)
+        out->payload->items.push_back(items[(size_t)i]);
+    for (size_t i = (size_t)k; i < items.size(); ++i)
+        freeval(items[i]);
     return (struct value_t *)out;
 }
 
@@ -518,8 +600,10 @@ static struct value_t *list_unique_impl(struct list_value_t *list,
                                         const char *name) {
     struct list_value_t *out = newlistval();
     out->payload->items.reserve(list->payload->items.size());
-    std::vector<struct value_t *> seen;
+    std::vector<struct value_t *> keys;
+    keys.reserve(list->payload->items.size());
 
+    bool failed = false;
     for (struct value_t *item : list->payload->items) {
         struct value_t *key = NULL;
         if (key_fn) {
@@ -527,32 +611,65 @@ static struct value_t *list_unique_impl(struct list_value_t *list,
             call_args.push_back(dupval(item));
             key = call_value_args(key_fn, std::move(call_args));
             if (!key) {
-                for (struct value_t *entry : seen)
-                    freeval(entry);
-                freeval((struct value_t *)out);
-                return NULL;
+                failed = true;
+                break;
             }
         } else {
             key = dupval(item);
         }
+        keys.push_back(key);
+    }
 
-        bool duplicate = false;
-        for (struct value_t *entry : seen) {
-            if (value_equals(entry, key)) {
-                duplicate = true;
-                break;
-            }
-        }
-        if (duplicate) {
-            freeval(key);
-        } else {
-            seen.push_back(key);
-            out->payload->items.push_back(dupval(item));
+    if (failed) {
+        for (struct value_t *entry : keys)
+            freeval(entry);
+        freeval((struct value_t *)out);
+        return NULL;
+    }
+
+    bool hashable = true;
+    for (struct value_t *key : keys) {
+        if (!dict_key_allowed(key)) {
+            hashable = false;
+            break;
         }
     }
 
-    for (struct value_t *entry : seen)
-        freeval(entry);
+    if (hashable) {
+        struct dict_value_t *seen = newdictval();
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            if (dict_find_index(seen, keys[i]) >= 0) {
+                freeval(keys[i]);
+                continue;
+            }
+            dict_append_item(seen, dupval(keys[i]), newboolval(true));
+            out->payload->items.push_back(
+                dupval(list->payload->items[i]));
+            freeval(keys[i]);
+        }
+        freeval((struct value_t *)seen);
+    } else {
+        std::vector<struct value_t *> seen;
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            bool duplicate = false;
+            for (struct value_t *entry : seen) {
+                if (value_equals(entry, keys[i])) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                freeval(keys[i]);
+            } else {
+                seen.push_back(keys[i]);
+                out->payload->items.push_back(
+                    dupval(list->payload->items[i]));
+            }
+        }
+        for (struct value_t *entry : seen)
+            freeval(entry);
+    }
+
     (void)name;
     return (struct value_t *)out;
 }
@@ -1077,6 +1194,68 @@ static struct value_t *heap_empty_result(const struct heap_value_t *heap) {
 
 static bool heap_callable(struct value_t *value) {
     return value && (value->type == T_func || value->type == T_builtin);
+}
+
+static struct value_t *set_from_parts_payload(
+    std::shared_ptr<set_node> root, std::shared_ptr<deque_payload> order,
+    std::size_t size) {
+    struct set_value_t *out = new set_value_t;
+    out->type = T_set;
+    out->payload = std::make_shared<set_payload>();
+    out->payload->root = std::move(root);
+    out->payload->order = std::move(order);
+    out->payload->size = size;
+    return (struct value_t *)out;
+}
+
+static struct value_t *set_add_value(const struct set_value_t *set,
+                                     struct value_t *key, bool &added) {
+    std::shared_ptr<set_node> root =
+        set_insert(set->payload->root, key, added);
+    if (!added)
+        return dupval((struct value_t *)set);
+    std::shared_ptr<deque_payload> order =
+        deque_push_back_payload(set->payload->order, key);
+    return set_from_parts_payload(std::move(root), std::move(order),
+                                  set->payload->size + 1);
+}
+
+static struct value_t *set_remove_value(const struct set_value_t *set,
+                                        struct value_t *key, bool &removed) {
+    std::shared_ptr<set_node> root =
+        set_erase(set->payload->root, key, removed);
+    if (!removed)
+        return dupval((struct value_t *)set);
+    return set_from_parts_payload(std::move(root), set->payload->order,
+                                  set->payload->size - 1);
+}
+
+static struct value_t *set_values_list(const struct set_value_t *set) {
+    std::vector<value_t *> items;
+    set_values_in_order(set->payload.get(), items);
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(items.size());
+    for (struct value_t *item : items)
+        out->payload->items.push_back(dupval(item));
+    return (struct value_t *)out;
+}
+
+static void set_add_in_place(struct set_payload *payload,
+                             struct value_t *key) {
+    bool added = false;
+    std::shared_ptr<set_node> root = set_insert(payload->root, key, added);
+    if (!added)
+        return;
+    payload->root = std::move(root);
+    payload->order = deque_push_back_payload(payload->order, key);
+    payload->size += 1;
+}
+
+static bool set_key_ok(struct value_t *key, const char *name) {
+    if (dict_key_allowed(key))
+        return true;
+    yyerror("%s: %s, got %s", name, dict_key_error(), typename_of(key));
+    return false;
 }
 
 static bool collect_command_env(
@@ -1669,6 +1848,38 @@ struct value_t *call_builtin(int functype,
     } else if (functype >= B_heap_size && functype <= B_heap_to_list) {
         if (args.size() != 1) {
             yyerror("std.heap function expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_set_new) {
+        if (!args.empty()) {
+            yyerror("std.set.new expects 0 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_set_from_list || functype == B_set_size ||
+               functype == B_set_values) {
+        if (args.size() != 1) {
+            yyerror("%s expects 1 argument, got %d",
+                    functype == B_set_from_list ? "std.set.from_list"
+                    : functype == B_set_size ? "std.set.size"
+                                             : "std.set.values",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_set_add || functype == B_set_remove ||
+               functype == B_set_has || functype == B_set_union ||
+               functype == B_set_intersect || functype == B_set_difference ||
+               functype == B_set_is_subset) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_set_add ? "std.set.add"
+                    : functype == B_set_remove ? "std.set.remove"
+                    : functype == B_set_has ? "std.set.has"
+                    : functype == B_set_union ? "std.set.union"
+                    : functype == B_set_intersect ? "std.set.intersect"
+                    : functype == B_set_difference ? "std.set.difference"
+                                                   : "std.set.is_subset",
                     (int)args.size());
             return NULL;
         }
@@ -2431,6 +2642,141 @@ struct value_t *call_builtin(int functype,
             ret = (struct value_t *)out;
             break;
         }
+        case B_set_new:
+            ret = (struct value_t *)newsetval();
+            break;
+        case B_set_from_list: {
+            if (arg->type != T_list) {
+                yyerror("std.set.from_list expects a list, got %s",
+                        typename_of(arg));
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)arg;
+            struct set_value_t *out = newsetval();
+            bool ok = true;
+            for (struct value_t *item : list->payload->items) {
+                if (!set_key_ok(item, "std.set.from_list")) {
+                    ok = false;
+                    break;
+                }
+                set_add_in_place(out->payload.get(), item);
+            }
+            if (!ok) {
+                freeval((struct value_t *)out);
+                break;
+            }
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_set_add: {
+            if (arg->type != T_set) {
+                yyerror("std.set.add expects a set, got %s",
+                        typename_of(arg));
+                break;
+            }
+            if (!set_key_ok(args[1], "std.set.add"))
+                break;
+            bool added = false;
+            ret = set_add_value((struct set_value_t *)arg, args[1], added);
+            break;
+        }
+        case B_set_remove: {
+            if (arg->type != T_set) {
+                yyerror("std.set.remove expects a set, got %s",
+                        typename_of(arg));
+                break;
+            }
+            if (!set_key_ok(args[1], "std.set.remove"))
+                break;
+            bool removed = false;
+            ret = set_remove_value((struct set_value_t *)arg, args[1],
+                                   removed);
+            break;
+        }
+        case B_set_has: {
+            if (arg->type != T_set) {
+                yyerror("std.set.has expects a set, got %s",
+                        typename_of(arg));
+                break;
+            }
+            if (!set_key_ok(args[1], "std.set.has"))
+                break;
+            ret = newboolval(set_contains(((struct set_value_t *)arg)
+                                              ->payload.get(),
+                                          args[1]));
+            break;
+        }
+        case B_set_size: {
+            if (arg->type != T_set) {
+                yyerror("std.set.size expects a set, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = newintval((long long)((struct set_value_t *)arg)
+                                ->payload->size);
+            break;
+        }
+        case B_set_values: {
+            if (arg->type != T_set) {
+                yyerror("std.set.values expects a set, got %s",
+                        typename_of(arg));
+                break;
+            }
+            ret = set_values_list((struct set_value_t *)arg);
+            break;
+        }
+        case B_set_union:
+        case B_set_intersect:
+        case B_set_difference: {
+            if (args[0]->type != T_set || args[1]->type != T_set) {
+                yyerror("%s expects two sets", functype == B_set_union
+                                                   ? "std.set.union"
+                                               : functype == B_set_intersect
+                                                   ? "std.set.intersect"
+                                                   : "std.set.difference");
+                break;
+            }
+            struct set_value_t *left = (struct set_value_t *)args[0];
+            struct set_value_t *right = (struct set_value_t *)args[1];
+            struct set_value_t *out = newsetval();
+            std::vector<value_t *> items;
+            set_values_in_order(left->payload.get(), items);
+            for (struct value_t *item : items) {
+                bool keep = true;
+                if (functype == B_set_intersect)
+                    keep = set_contains(right->payload.get(), item);
+                else if (functype == B_set_difference)
+                    keep = !set_contains(right->payload.get(), item);
+                if (keep)
+                    set_add_in_place(out->payload.get(), item);
+            }
+            if (functype == B_set_union) {
+                set_values_in_order(right->payload.get(), items);
+                for (struct value_t *item : items)
+                    set_add_in_place(out->payload.get(), item);
+            }
+            ret = (struct value_t *)out;
+            break;
+        }
+        case B_set_is_subset: {
+            if (args[0]->type != T_set || args[1]->type != T_set) {
+                yyerror("std.set.is_subset expects two sets");
+                break;
+            }
+            struct set_value_t *left = (struct set_value_t *)args[0];
+            struct set_value_t *right = (struct set_value_t *)args[1];
+            std::vector<value_t *> items;
+            set_values_in_order(left->payload.get(), items);
+            bool subset = true;
+            for (struct value_t *item : items) {
+                if (!set_contains(right->payload.get(), item)) {
+                    subset = false;
+                    break;
+                }
+            }
+            ret = newboolval(subset);
+            break;
+        }
         case B_type_module:
             if (arg && arg->type == T_struct) {
                 struct struct_value_t *sv = (struct struct_value_t *)arg;
@@ -2477,8 +2823,18 @@ struct value_t *call_builtin(int functype,
                 ret = newintval((long long)((struct list_value_t *)arg)->payload->items.size());
             } else if (arg->type == T_dict) {
                 ret = newintval((long long)((struct dict_value_t *)arg)->payload->items.size());
+            } else if (arg->type == T_deque) {
+                struct deque_value_t *deque = (struct deque_value_t *)arg;
+                ret = newintval((long long)(deque->payload->front_size +
+                                            deque->payload->back_size));
+            } else if (arg->type == T_heap) {
+                ret = newintval(
+                    (long long)((struct heap_value_t *)arg)->payload->size);
+            } else if (arg->type == T_set) {
+                ret = newintval(
+                    (long long)((struct set_value_t *)arg)->payload->size);
             } else {
-                yyerror("len expects string, bytes, list, or dict, got %s",
+                yyerror("len expects string, bytes, list, dict, deque, heap, or set, got %s",
                         typename_of(arg));
             }
             break;
@@ -2854,24 +3210,9 @@ struct value_t *call_builtin(int functype,
             }
             struct list_value_t *list = (struct list_value_t *)args[0];
             bool use_cmp = args.size() == 3 && args[2]->type != T_null;
-            struct value_t *sorted =
-                use_cmp ? list_sort_with_cmp(list, args[2], "std.list.top_k")
-                        : list_sort_default(list, false, "std.list.top_k");
-            if (!sorted)
-                break;
-            if (k >= (long long)((struct list_value_t *)sorted)
-                         ->payload->items.size()) {
-                ret = sorted;
-                break;
-            }
-            struct list_value_t *out = newlistval();
-            out->payload->items.reserve((size_t)k);
-            for (long long i = 0; i < k; ++i)
-                out->payload->items.push_back(dupval(
-                    ((struct list_value_t *)sorted)->payload->items[
-                        (size_t)i]));
-            freeval(sorted);
-            ret = (struct value_t *)out;
+            ret = list_top_k_impl(list, k,
+                                  use_cmp ? args[2] : NULL,
+                                  "std.list.top_k");
             break;
         }
         case B_list_binary_search: {

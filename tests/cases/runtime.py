@@ -289,7 +289,7 @@ def run_cases():
     check("len utf8 string", 'len("你好a")\n', stdout="= 3")
     check("len bytes", 'len(bytes_from_hex("00ff"))\n', stdout="= 2")
     check("len invalid type", "len(1)\n",
-          stderr="len expects string, bytes, list, or dict")
+          stderr="len expects string, bytes, list, dict, deque, heap, or set")
     check(
         "for in list",
         "for (let x in [1, 2, 3]) { print(x); }\n",

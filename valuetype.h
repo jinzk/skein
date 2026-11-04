@@ -49,6 +49,7 @@ enum val_type {
     T_lru,
     T_deque,
     T_heap,
+    T_set,
     T_method,
     T_null,
     T_class,
@@ -187,6 +188,36 @@ struct heap_value_t {
     std::shared_ptr<heap_payload> payload;
 };
 
+/*
+ * Persistent set: a randomized treap ordered by key hash (with a bucket per
+ * hash for collisions) plus a persistent insertion log, so add/remove are
+ * O(log n) and the value keeps value semantics.
+ */
+struct set_bucket {
+    std::vector<value_t *> keys;
+    ~set_bucket();
+};
+
+struct set_node {
+    std::uint64_t hash = 0;
+    std::uint64_t priority = 0;
+    std::shared_ptr<set_bucket> bucket;
+    std::shared_ptr<set_node> left;
+    std::shared_ptr<set_node> right;
+};
+
+struct set_payload {
+    std::shared_ptr<set_node> root;
+    std::shared_ptr<deque_payload> order;
+    std::size_t size = 0;
+    ~set_payload();
+};
+
+struct set_value_t {
+    enum val_type type;
+    std::shared_ptr<set_payload> payload;
+};
+
 struct dict_value_t {
     enum val_type type;
     std::shared_ptr<dict_payload> payload;
@@ -287,6 +318,7 @@ struct lru_value_t *newlruval(std::size_t capacity);
 struct deque_value_t *newdequeval();
 /* Takes ownership of `less`. */
 struct heap_value_t *newheapval(struct value_t *less);
+struct set_value_t *newsetval();
 
 /* Borrowed pointers in queue order; no dupval. */
 void deque_items_in_order(const struct deque_payload *payload,
@@ -294,6 +326,15 @@ void deque_items_in_order(const struct deque_payload *payload,
 /* Borrowed pointers in level order; no dupval. */
 void heap_items_level_order(const struct heap_payload *payload,
                             std::vector<value_t *> &out);
+/* Set membership and persistent updates. */
+bool set_contains(const struct set_payload *payload, const struct value_t *key);
+std::shared_ptr<set_node> set_insert(const std::shared_ptr<set_node> &root,
+                                     const struct value_t *key, bool &added);
+std::shared_ptr<set_node> set_erase(const std::shared_ptr<set_node> &root,
+                                    const struct value_t *key, bool &removed);
+/* Borrowed keys in insertion order (latest occurrence wins); no dupval. */
+void set_values_in_order(const struct set_payload *payload,
+                         std::vector<value_t *> &out);
 
 /* Free a value and everything it owns. NULL is safe. */
 void freeval(struct value_t *v);

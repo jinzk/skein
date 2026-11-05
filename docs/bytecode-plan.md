@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (40.57s)
+ctest: 8/8 passed (42.76s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.26s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.18s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 66.70s
-LSan:           skein_vm_lsan_tests Passed 79.16s
+skein_tests:    Passed 12.42s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.38s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 66.10s
+LSan:           skein_vm_lsan_tests Passed 79.11s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -639,40 +639,42 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W4-5 把 VM 执行缓存移出 runtime（P1，M）
 
-现状：`function_code` 属于 L1 runtime，但持有 L2 的执行缓存：
+状态：**完成（2026-11-05）**。
 
-```cpp
-std::shared_ptr<const void> vm_proto;
-std::shared_ptr<const void> vm_param_patterns;
-```
+实施结果：
 
-这不会产生静态链接反向依赖，但让 L1 结构体知道 VM 的执行模型，属于
-分层软债务。
-
-实施：
-
-1. 在 `vm.cpp` 建立 L2 side table：
+1. `function_code` 不再持有：
+   - `vm_proto`
+   - `vm_param_patterns`
+   - `vm_compile_failed`
+2. `vm.cpp` 新增 L2 side table：
 
    ```cpp
-   std::unordered_map<function_code *, function_execution_cache> caches;
+   struct function_execution_cache {
+       ProtoPtr proto;
+       std::shared_ptr<const compiled_pattern_set> param_patterns;
+       bool compile_failed = false;
+   };
+   std::unordered_map<function_code *, function_execution_cache>
+       execution_cache;
    ```
 
-2. `function_execution_cache` 持有：
-   - 函数体 `Proto`
-   - 参数 pattern 编译结果
-   - 默认参数 Proto
-   - 编译失败标记
-3. `skein_vm_forget_function_code()` 清理 side table；`free_function_code()`
-   继续作为唯一释放入口。
-4. 从 `function_code` 删除 `vm_proto` 与 `vm_param_patterns`。
-5. 审计函数值生命周期：`function_code*` 作为 key 必须在其释放前移除。
-6. 增加回归检查：只链接 `skein_runtime` 时不出现 interpreter 符号。
+3. 默认参数 Proto 继续使用独立的 `default_cache`，同样以
+   `function_code*` 为键。
+4. `skein_vm_forget_function_code()` 同时清理：
+   - `execution_cache`
+   - `default_cache`
+5. `free_function_code()` 仍是唯一释放入口，删除 `function_code`
+   前会调用 forget hook。
+6. `function_code` 现在只包含签名、行号、模块和 upvalue 名称等
+   执行无关元数据。
 
-验收：
+验收结果：
 
-- `valuetype.h` 不再包含任何 VM 执行缓存字段。
-- `boundary_check` 与 runtime-only 链接检查通过。
-- VM 标准测试集通过。
+- `valuetype.h` 不再包含 VM 执行缓存字段。
+- `boundary_check` 通过。
+- VM 标准测试集与 LSan 通过。
+- 工作区 `function_code*` 生命周期由 `free_function_code()` 统一管理。
 - 释放函数后 side table 无残留条目。
 
 ### 3.5 W5：工具链与产品化
@@ -881,7 +883,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 | W4-2 移除 function AST | P1 | M | TODO | W4-1/W2-2 |
 | W4-3 参数元数据 Proto 化 | P2 | M | TODO | W1-1 |
 | W4-4 调试信息 | P3 | M | TODO | W2-1 |
-| W4-5 VM 缓存移出 runtime | P1 | M | TODO | W2-1/W4-2 |
+| W4-5 VM 缓存移出 runtime | P1 | M | 完成（2026-11-05） | W2-1/W4-2 |
 | W5-1 VM 统计 | P2 | S | 完成（基础统计） | - |
 | W5-2 差分/模糊测试 | P2 | L | TODO | W1-2 |
 | W5-3 基准回归 | P2 | M | TODO | W2-1 |

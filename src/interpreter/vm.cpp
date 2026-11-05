@@ -122,16 +122,24 @@ struct default_cache_entry {
     std::vector<ProtoPtr> protos;
 };
 
+struct function_execution_cache {
+    ProtoPtr proto;
+    std::shared_ptr<const compiled_pattern_set> param_patterns;
+    bool compile_failed = false;
+};
+
 std::unordered_map<function_code *, default_cache_entry> default_cache;
+std::unordered_map<function_code *, function_execution_cache> execution_cache;
 
 ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
     if (!def || !def->code)
         return nullptr;
     function_code *code = def->code.get();
-    if (code->vm_compile_failed)
+    function_execution_cache &cache = execution_cache[code];
+    if (cache.compile_failed)
         return nullptr;
-    if (code->vm_proto)
-        return std::static_pointer_cast<const Proto>(code->vm_proto);
+    if (cache.proto)
+        return cache.proto;
 
     ensure_stats_flags();
     std::string error;
@@ -139,13 +147,13 @@ ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
     if (!proto) {
         if (vm_stats.enabled)
             ++vm_stats.functions_fallback;
-        code->vm_compile_failed = true;
+        cache.compile_failed = true;
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback function %s: %s\n",
                          code->name.c_str(), error.c_str());
         return nullptr;
     }
-    code->vm_proto = proto;
+    cache.proto = proto;
     if (vm_stats.enabled)
         ++vm_stats.functions_compiled;
     if (code->ast && !keep_function_ast()) {
@@ -3568,6 +3576,7 @@ void skein_vm_forget_function_code(function_code *code) {
     if (!code)
         return;
     default_cache.erase(code);
+    execution_cache.erase(code);
 }
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {
@@ -3654,7 +3663,8 @@ ParamPatternResult skein_vm_match_parameter_pattern(
         return ParamPatternResult::Unsupported;
 
     function_code *code = def->code.get();
-    if (!code->vm_param_patterns) {
+    function_execution_cache &cache = execution_cache[code];
+    if (!cache.param_patterns) {
         if (!skein_vm_enabled())
             return ParamPatternResult::Unsupported;
         std::string error;
@@ -3664,7 +3674,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
             std::shared_ptr<compiled_pattern_set> failed =
                 std::make_shared<compiled_pattern_set>();
             failed->failed = true;
-            code->vm_param_patterns = failed;
+            cache.param_patterns = failed;
             if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty()) {
                 std::fprintf(stderr,
                              "[vm] fallback parameter pattern %s: %s\n",
@@ -3672,7 +3682,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
             }
             return ParamPatternResult::Unsupported;
         }
-        code->vm_param_patterns = compiled;
+        cache.param_patterns = compiled;
         if (read_bool_env("SKEIN_VM_DEBUG", false)) {
             std::fprintf(stderr,
                          "[vm] compiled parameter patterns for %s\n",
@@ -3691,8 +3701,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
     }
 
     std::shared_ptr<const compiled_pattern_set> compiled =
-        std::static_pointer_cast<const compiled_pattern_set>(
-            code->vm_param_patterns);
+        cache.param_patterns;
     if (compiled->failed || !compiled->proto ||
         (size_t)index >= compiled->roots.size())
         return ParamPatternResult::Unsupported;
@@ -3714,7 +3723,9 @@ bool skein_vm_try_execute_function_body(
         return false;
 
     function_code *code = def->code.get();
-    if (!code->vm_proto && !skein_vm_enabled())
+    auto cached = execution_cache.find(code);
+    if ((cached == execution_cache.end() || !cached->second.proto) &&
+        !skein_vm_enabled())
         return false;
 
     ProtoPtr proto = prepare_function_body(def);

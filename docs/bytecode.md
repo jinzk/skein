@@ -219,7 +219,10 @@ struct Instr {
 - `eval_call.cpp` 的 `invoke_function_body()` 在函数作用域和参数绑定完成后
   尝试 `skein_vm_try_execute_function_body()`；
 - `ast.cpp` 的 `free_function_code()` 调用
-  `skein_vm_forget_function_code()` 清理 Proto 缓存；
+  `skein_vm_forget_function_code()` 清理 VM side table；
+- 函数体 Proto、参数 pattern 和默认参数 Proto 保存在 `vm.cpp` 的
+  `execution_cache` / `default_cache` 中，`function_code` 本身不再持有
+  VM 执行缓存；
 - 所有 AST 回退都复用现有 `eval()`，因此值语义、错误捕获、defer、fiber
   行为保持一致。
 
@@ -230,8 +233,8 @@ struct Instr {
   match binding、destructuring、on-error 绑定和 import 绑定共享。
 - 普通嵌套函数使用 `LOAD_UPVALUE` / `STORE_UPVALUE` 等索引访问捕获
   变量；upvalue 指向 `symbol*` cell，而不是显式 open/closed frame slot。
-- 小整数/`true`/`false`/`null` 已单例化；局部变量密集的循环基准已明显
-  快于 AST，但函数调用密集的基准仍受 C++ 递归和每帧分配的拖累。
+- 小整数/`true`/`false`/`null` 已单例化；普通调用走 fast frame，
+  但非 fast path 调用仍受 C++ 递归和每帧分配拖累。
 - 常规语法结构已经全部有字节码路径，编译失败时整条语句/函数回退 AST。
 - 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
   成功编译后也会释放对应 AST。`function_code->sl` 仍保留参数/默认值/trait

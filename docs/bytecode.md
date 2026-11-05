@@ -63,11 +63,12 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 - `if` / `while` / `do while` / C 风格 `for`
 - `for ... in`（list/dict/string/bytes/deque/heap/set/generator）
 - `switch`（case 值列表、default、break/continue 传播）
-- `match` / destructuring（pattern 复用现有 matcher，arm/guard/body 为字节码）
+- `match` / destructuring（pattern 编译为 `PatternDesc`，arm/guard/body 为字节码）
 - `break` / `continue` / 标签（循环和 switch）
 - `return`
 - 函数定义 / 闭包（`CLOSURE` / `BIND_FUNC`，函数体首次调用时编译并缓存在 `function_code`）
 - 参数 fast path（`LOAD_PARAM` / `STORE_PARAM` / `COMPOUND_PARAM` / `INCDEC_PARAM`；参数未被本函数局部声明遮蔽时）
+- 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
 - list / dict 字面量
 - 索引与字段读取
@@ -90,11 +91,15 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 常规用户语法结构已经全部有字节码路径，`EVAL_AST` 仅作为编译器兜底保留，
 用于未来新增节点或无法安全降级的子树。
 
+VM 的 `match` pattern 已经编译为 `PatternDesc` 描述树，不再在运行时遍历
+pattern AST；literal pattern 的表达式会编译为独立 Proto 执行。
+
 仍使用 AST 但不是 `EVAL_AST` 的运行时代码：
 
-- 函数/方法默认参数表达式（调用时由 `fill_default_arguments` 求值）
-- `match` pattern 本身（复用现有 `pattern.cpp` matcher，arm/guard/body 为字节码）
 - 类型注册表、trait 元数据等 runtime 辅助逻辑
+
+默认参数表达式已经编译为独立 Proto，由 `fill_default_arguments` 在调用时
+通过 VM 执行，并复用参数 fast path。
 
 ### 3.3 回退安全规则
 

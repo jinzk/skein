@@ -26,4 +26,9 @@ skein::bc::ProtoPtr skein_compile_function_body(struct function_code *code,
                                                  const std::string &module,
                                                  std::string &error);
 
+/* Compile one default-parameter expression in the function's parameter scope. */
+skein::bc::ProtoPtr skein_compile_default_expression(
+    struct function_code *code, struct ast *expression, int index,
+    const std::string &module, std::string &error);
+
 #endif

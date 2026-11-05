@@ -147,8 +147,7 @@ std::string disassemble(const Proto &proto) {
             op == Op::StoreName || op == Op::CompoundName ||
             op == Op::IncDecName || op == Op::DefineName ||
             op == Op::IsType || op == Op::EvalAst ||
-            op == Op::MatchBegin || op == Op::MatchTest ||
-            op == Op::MatchBind || op == Op::BindName ||
+            op == Op::BindName ||
             op == Op::Closure || op == Op::BindFunc ||
             op == Op::ControlBreak || op == Op::ControlContinue ||
             op == Op::RuntimeError;

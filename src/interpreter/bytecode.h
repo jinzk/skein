@@ -187,6 +187,48 @@ struct CallDesc {
     std::vector<bool> spread;
 };
 
+struct PatternFieldDesc {
+    std::string key;
+    std::string rest_name;
+    uint32_t pattern = UINT32_MAX;
+    bool rest = false;
+};
+
+struct PatternDesc {
+    enum class Kind {
+        Literal,
+        Binding,
+        Type,
+        Or,
+        Range,
+        As,
+        Rest,
+        Never,
+        List,
+        Container
+    };
+
+    Kind kind = Kind::Never;
+    std::string name;
+    std::string module;
+    std::string type_name;
+    std::string variant;
+    type_constraint type;
+    long long range_start = 0;
+    long long range_end = 0;
+    std::shared_ptr<value_t> literal_value;
+    std::shared_ptr<const Proto> literal_expr;
+    std::vector<uint32_t> items;
+    uint32_t child = UINT32_MAX;
+    std::vector<PatternFieldDesc> fields;
+    bool is_dict = false;
+};
+
+struct MatchArmDesc {
+    uint32_t pattern = UINT32_MAX;
+    bool has_guard = false;
+};
+
 struct DeclFieldMeta {
     std::string name;
     type_constraint type;
@@ -293,6 +335,8 @@ struct Proto {
     std::vector<TraitDeclMeta> trait_decls;
     std::vector<ImplDeclMeta> impl_decls;
     std::vector<PackageDesc> packages;
+    std::vector<PatternDesc> patterns;
+    std::vector<std::vector<MatchArmDesc>> match_arms;
     std::vector<CallDesc> call_descs;
     std::vector<std::shared_ptr<const Proto>> defer_protos;
 

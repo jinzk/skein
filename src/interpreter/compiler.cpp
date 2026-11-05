@@ -320,21 +320,27 @@ struct Compiler {
         return static_cast<uint32_t>(proto.constructs.size() - 1);
     }
 
-    uint32_t add_defer_proto(struct ast *expression) {
+    uint32_t add_expression_proto(struct ast *expression,
+                                  const std::string &suffix) {
         Compiler child(proto.module);
         child.inside_function = inside_function;
         child.handler_body_depth = handler_body_depth;
-        child.proto.name = proto.name.empty() ? "$defer"
-                                              : proto.name + "$defer";
+        child.proto.name =
+            (proto.name.empty() ? std::string("<anonymous>") : proto.name) +
+            suffix;
         child.compile(expression);
         if (!child.ok) {
-            fail(child.error.empty() ? "cannot compile defer expression"
+            fail(child.error.empty() ? "cannot compile expression"
                                      : child.error.c_str());
             return 0;
         }
         proto.defer_protos.push_back(
             std::make_shared<const Proto>(std::move(child.proto)));
         return static_cast<uint32_t>(proto.defer_protos.size() - 1);
+    }
+
+    uint32_t add_defer_proto(struct ast *expression) {
+        return add_expression_proto(expression, "$defer");
     }
 
     uint32_t add_import(const struct import_node *node) {
@@ -1175,7 +1181,8 @@ struct Compiler {
                 struct destructure_node *d = (struct destructure_node *)node;
                 compile(d->value);
                 if (!ok) return;
-                uint32_t pattern = add_ast(d->pattern);
+                uint32_t pattern = add_pattern(d->pattern);
+                if (!ok) return;
                 emit(Op::MatchBind, d->is_const ? 1 : 0, 0, pattern, here);
                 return;
             }
@@ -1657,13 +1664,151 @@ struct Compiler {
         emit(Op::LoadNull, 0, 0, 0, here);
     }
 
+    uint32_t add_pattern(struct ast *node) {
+        if (!node || !ok) {
+            fail("invalid pattern");
+            return UINT32_MAX;
+        }
+        struct pattern_node *pattern = (struct pattern_node *)node;
+        skein::bc::PatternDesc desc;
+
+        switch (pattern->nodetype) {
+            case NODE_PATTERN_LITERAL: {
+                desc.kind = skein::bc::PatternDesc::Kind::Literal;
+                struct ast *literal = pattern->literal;
+                if (literal && literal->nodetype == 'V') {
+                    struct val *value = (struct val *)literal;
+                    if (value->val)
+                        desc.literal_value = own_value(dupval(value->val));
+                } else if (literal &&
+                           literal->nodetype == NODE_ENUM_LITERAL) {
+                    struct enum_lit_node *enum_literal =
+                        (struct enum_lit_node *)literal;
+                    desc.module = enum_literal->module
+                                      ? enum_literal->module
+                                      : "";
+                    desc.type_name = enum_literal->name
+                                         ? enum_literal->name
+                                         : "";
+                    desc.variant = enum_literal->variant
+                                       ? enum_literal->variant
+                                       : "";
+                }
+                if (!desc.literal_value) {
+                    uint32_t proto_index =
+                        add_expression_proto(literal, "$pattern");
+                    if (!ok)
+                        return UINT32_MAX;
+                    desc.literal_expr = proto.defer_protos[proto_index];
+                }
+                break;
+            }
+            case NODE_PATTERN_BINDING:
+                desc.kind = skein::bc::PatternDesc::Kind::Binding;
+                desc.name = pattern->name ? pattern->name : "";
+                break;
+            case NODE_PATTERN_TYPE:
+                desc.kind = skein::bc::PatternDesc::Kind::Type;
+                desc.type = pattern->type
+                                ? copy_type_constraint(pattern->type)
+                                : any_type_constraint();
+                break;
+            case NODE_PATTERN_OR:
+                desc.kind = skein::bc::PatternDesc::Kind::Or;
+                for (struct pattern_node *item =
+                         (struct pattern_node *)pattern->items;
+                     item; item = (struct pattern_node *)item->next) {
+                    uint32_t child = add_pattern((struct ast *)item);
+                    if (!ok)
+                        return UINT32_MAX;
+                    desc.items.push_back(child);
+                }
+                break;
+            case NODE_PATTERN_RANGE:
+                desc.kind = skein::bc::PatternDesc::Kind::Range;
+                desc.range_start = pattern->range_start;
+                desc.range_end = pattern->range_end;
+                break;
+            case NODE_PATTERN_REST:
+                desc.kind = skein::bc::PatternDesc::Kind::Rest;
+                desc.name = pattern->name ? pattern->name : "";
+                break;
+            case NODE_PATTERN_AS: {
+                desc.kind = skein::bc::PatternDesc::Kind::As;
+                desc.name = pattern->name ? pattern->name : "";
+                desc.child = add_pattern(pattern->items);
+                if (!ok)
+                    return UINT32_MAX;
+                break;
+            }
+            case NODE_PATTERN_NEVER:
+                desc.kind = skein::bc::PatternDesc::Kind::Never;
+                break;
+            case NODE_PATTERN_LIST:
+                desc.kind = skein::bc::PatternDesc::Kind::List;
+                for (struct pattern_node *item =
+                         (struct pattern_node *)pattern->items;
+                     item; item = (struct pattern_node *)item->next) {
+                    uint32_t child = add_pattern((struct ast *)item);
+                    if (!ok)
+                        return UINT32_MAX;
+                    desc.items.push_back(child);
+                }
+                break;
+            case NODE_PATTERN_CONTAINER:
+                desc.kind = skein::bc::PatternDesc::Kind::Container;
+                desc.module = pattern->module ? pattern->module : "";
+                desc.type_name = pattern->name ? pattern->name : "";
+                desc.variant = pattern->variant ? pattern->variant : "";
+                desc.is_dict = pattern->name == NULL &&
+                               pattern->variant == NULL;
+                for (struct pattern_field *field = pattern->fields; field;
+                     field = field->next) {
+                    skein::bc::PatternFieldDesc field_desc;
+                    if (field->key) {
+                        field_desc.key = field->key;
+                        field_desc.pattern = add_pattern(field->pattern);
+                        if (!ok)
+                            return UINT32_MAX;
+                    } else {
+                        field_desc.rest = true;
+                        field_desc.rest_name =
+                            field->rest_name ? field->rest_name : "";
+                    }
+                    desc.fields.push_back(std::move(field_desc));
+                }
+                break;
+            default:
+                fail("unsupported pattern");
+                return UINT32_MAX;
+        }
+
+        proto.patterns.push_back(std::move(desc));
+        return static_cast<uint32_t>(proto.patterns.size() - 1);
+    }
+
     void compile_match(ast *node) {
         struct match_node *m = (struct match_node *)node;
         SourceLoc here = loc_of(node);
 
         compile(m->expr);
         if (!ok) return;
-        uint32_t arms = add_ast(m->arms);
+
+        std::vector<uint32_t> pattern_indices;
+        std::vector<skein::bc::MatchArmDesc> arm_descs;
+        for (struct match_arm *arm = (struct match_arm *)m->arms; arm;
+             arm = (struct match_arm *)arm->next) {
+            skein::bc::MatchArmDesc desc;
+            if (arm->pattern) {
+                desc.pattern = add_pattern(arm->pattern);
+                if (!ok) return;
+            }
+            desc.has_guard = arm->guard != NULL;
+            pattern_indices.push_back(desc.pattern);
+            arm_descs.push_back(desc);
+        }
+        uint32_t arms = static_cast<uint32_t>(proto.match_arms.size());
+        proto.match_arms.push_back(std::move(arm_descs));
         emit(Op::MatchBegin, 0, 0, arms, here);
 
         LoopContext ctx;
@@ -1677,9 +1822,10 @@ struct Compiler {
         loops.push_back(ctx);
 
         std::vector<size_t> end_jumps;
+        size_t arm_index = 0;
 
         for (struct match_arm *arm = (struct match_arm *)m->arms; arm;
-             arm = (struct match_arm *)arm->next) {
+             arm = (struct match_arm *)arm->next, ++arm_index) {
             SourceLoc arm_loc = loc_of((struct ast *)arm);
             bool is_default = arm->pattern == NULL;
 
@@ -1691,8 +1837,8 @@ struct Compiler {
 
             if (!is_default) {
                 emit(Op::Dup, 0, 0, 0, arm_loc);
-                uint32_t pattern = add_ast(arm->pattern);
-                emit(Op::MatchTest, 0, 0, pattern, here);
+                emit(Op::MatchTest, 0, 0, pattern_indices[arm_index],
+                     here);
                 fail_jump = emit_jump(Op::JumpIfFalse, arm_loc);
             }
 
@@ -1970,6 +2116,34 @@ ProtoPtr skein_compile_statement(struct ast *statement,
         return nullptr;
     }
     compiler.proto.max_stack = 0;
+    return std::make_shared<const Proto>(std::move(compiler.proto));
+}
+
+ProtoPtr skein_compile_default_expression(
+    struct function_code *code, struct ast *expression, int index,
+    const std::string &module, std::string &error) {
+    if (!code || !expression) {
+        error = "invalid default expression";
+        return nullptr;
+    }
+
+    Compiler compiler(module);
+    compiler.proto.name =
+        (code->name.empty() ? std::string("<anonymous>") : code->name) +
+        "$default" + std::to_string(index);
+    for (struct symlist *param = code->sl; param; param = param->next) {
+        compiler.param_names.push_back(
+            param->sym && param->sym->name ? param->sym->name : "");
+    }
+    compiler.param_fast_path =
+        !Compiler::has_local_declarations(expression);
+    compiler.proto.param_names = compiler.param_names;
+    compiler.compile(expression);
+    if (!compiler.ok) {
+        error = compiler.error.empty() ? "cannot compile default expression"
+                                       : compiler.error;
+        return nullptr;
+    }
     return std::make_shared<const Proto>(std::move(compiler.proto));
 }
 

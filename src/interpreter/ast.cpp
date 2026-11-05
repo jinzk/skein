@@ -815,7 +815,8 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     std::shared_ptr<function_code> code(
         new function_code{node->ast, node->sl, nparams, required_params,
                           node->name ? node->name : "", false, variadic,
-                          node->is_async != 0, node->is_generator != 0},
+                          node->is_async != 0, node->is_generator != 0,
+                          nullptr, false},
         free_function_code);
     function_codes[node] = code;
     return code;

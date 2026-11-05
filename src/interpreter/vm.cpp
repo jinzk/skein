@@ -82,6 +82,13 @@ void ensure_runtime_flags() {
     }
 }
 
+struct default_cache_entry {
+    std::vector<ProtoPtr> protos;
+    bool failed = false;
+};
+
+std::unordered_map<function_code *, default_cache_entry> default_cache;
+
 const Constant *constant_at(const Proto &proto, uint32_t index) {
     if (index >= proto.consts.size())
         return NULL;
@@ -91,6 +98,29 @@ const Constant *constant_at(const Proto &proto, uint32_t index) {
 const char *name_at(const Proto &proto, uint32_t index) {
     const Constant *c = constant_at(proto, index);
     return c ? c->name.c_str() : "";
+}
+
+int pattern_dict_string_key_index(const dict_value_t *dict,
+                                  const char *key) {
+    if (!dict || !dict->payload || !key)
+        return -1;
+    for (size_t i = 0; i < dict->payload->items.size(); ++i) {
+        value_t *item_key = dict->payload->items[i].first;
+        if (item_key && item_key->type == T_string &&
+            std::strcmp(((struct string_value_t *)item_key)->value, key) == 0)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+bool pattern_fields_have_key(
+    const std::vector<skein::bc::PatternFieldDesc> &fields,
+    const char *key) {
+    for (const auto &field : fields) {
+        if (!field.rest && field.key == key)
+            return true;
+    }
+    return false;
 }
 
 void pop_scopes_to(size_t mark) {
@@ -943,31 +973,22 @@ public:
                 }
 
                 case Op::MatchBegin: {
-                    const Constant *c = constant_at(proto_, ins.b);
-                    if (!c || !c->ast) {
-                        yyerror("invalid bytecode match arms");
-                        return abort_error();
-                    }
                     if (stack_.empty()) {
                         yyerror("internal bytecode stack underflow");
                         return abort_error();
                     }
-                    if (!match_exhaustive_check(c->ast, stack_.back()))
+                    if (!match_exhaustive_desc(ins.b, stack_.back()))
                         return abort_error();
                     break;
                 }
 
                 case Op::MatchTest: {
-                    const Constant *c = constant_at(proto_, ins.b);
-                    if (!c || !c->ast) {
-                        yyerror("invalid bytecode match pattern");
-                        return abort_error();
-                    }
                     value_t *subject = pop_checked();
                     if (!subject)
                         return abort_error();
                     std::vector<pattern_binding> bindings;
-                    bool matched = match_pattern(c->ast, subject, bindings);
+                    bool matched =
+                        match_pattern_desc(ins.b, subject, bindings);
                     freeval(subject);
                     if (context_.runtime_error_count != errors_before_) {
                         free_pattern_bindings(bindings);
@@ -992,16 +1013,12 @@ public:
                 }
 
                 case Op::MatchBind: {
-                    const Constant *c = constant_at(proto_, ins.b);
-                    if (!c || !c->ast) {
-                        yyerror("invalid bytecode destructuring pattern");
-                        return abort_error();
-                    }
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
                     std::vector<pattern_binding> bindings;
-                    bool matched = match_pattern(c->ast, value, bindings);
+                    bool matched =
+                        match_pattern_desc(ins.b, value, bindings);
                     if (context_.runtime_error_count != errors_before_) {
                         free_pattern_bindings(bindings);
                         freeval(value);
@@ -1856,6 +1873,374 @@ private:
                          value->type == T_continue);
     }
 
+    bool match_pattern_desc(uint32_t index, value_t *value,
+                            std::vector<pattern_binding> &bindings) {
+        if (index >= proto_.patterns.size() || !value)
+            return false;
+        const skein::bc::PatternDesc &pattern = proto_.patterns[index];
+
+        switch (pattern.kind) {
+            case skein::bc::PatternDesc::Kind::Literal: {
+                value_t *literal = NULL;
+                if (pattern.literal_value) {
+                    literal = dupval(pattern.literal_value.get());
+                } else if (pattern.literal_expr) {
+                    literal = execute_proto(*pattern.literal_expr);
+                }
+                if (!literal)
+                    return false;
+                bool equal = value_equals(literal, value);
+                freeval(literal);
+                return equal;
+            }
+            case skein::bc::PatternDesc::Kind::Binding:
+                return bind_pattern_value(bindings, pattern.name.c_str(),
+                                          value);
+            case skein::bc::PatternDesc::Kind::Type:
+                return type_constraint_matches(&pattern.type, value);
+            case skein::bc::PatternDesc::Kind::Or: {
+                size_t mark = bindings.size();
+                for (uint32_t item_index : pattern.items) {
+                    if (match_pattern_desc(item_index, value, bindings))
+                        return true;
+                    for (size_t i = mark; i < bindings.size(); ++i)
+                        freeval(bindings[i].value);
+                    bindings.resize(mark);
+                }
+                return false;
+            }
+            case skein::bc::PatternDesc::Kind::Range:
+                return value->type == T_int &&
+                       ((struct int_value_t *)value)->value >=
+                           pattern.range_start &&
+                       ((struct int_value_t *)value)->value <=
+                           pattern.range_end;
+            case skein::bc::PatternDesc::Kind::As:
+                if (!match_pattern_desc(pattern.child, value, bindings))
+                    return false;
+                return bind_pattern_value(bindings, pattern.name.c_str(),
+                                          value);
+            case skein::bc::PatternDesc::Kind::Rest:
+                yyerror("rest pattern is only allowed at the end of a "
+                        "list or dict pattern");
+                return false;
+            case skein::bc::PatternDesc::Kind::Never:
+                return false;
+            case skein::bc::PatternDesc::Kind::List: {
+                if (value->type != T_list)
+                    return false;
+                struct list_value_t *list = (struct list_value_t *)value;
+                size_t item_index = 0;
+                for (size_t pattern_index_pos = 0;
+                     pattern_index_pos < pattern.items.size();
+                     ++pattern_index_pos) {
+                    uint32_t pattern_index =
+                        pattern.items[pattern_index_pos];
+                    const skein::bc::PatternDesc &item =
+                        proto_.patterns[pattern_index];
+                    if (item.kind ==
+                        skein::bc::PatternDesc::Kind::Rest) {
+                        if (pattern_index_pos + 1 !=
+                            pattern.items.size()) {
+                            yyerror("rest pattern must be last");
+                            return false;
+                        }
+                        struct list_value_t *rest = newlistval();
+                        while (item_index < list->payload->items.size())
+                            rest->payload->items.push_back(
+                                dupval(list->payload->items[item_index++]));
+                        bool ok = bind_pattern_value(
+                            bindings, item.name.c_str(),
+                            (struct value_t *)rest);
+                        freeval((struct value_t *)rest);
+                        return ok;
+                    }
+                    if (item_index >= list->payload->items.size())
+                        return false;
+                    if (!match_pattern_desc(
+                            pattern_index,
+                            list->payload->items[item_index], bindings))
+                        return false;
+                    ++item_index;
+                }
+                return item_index == list->payload->items.size();
+            }
+            case skein::bc::PatternDesc::Kind::Container: {
+                if (!pattern.variant.empty()) {
+                    if (value->type != T_enum)
+                        return false;
+                    struct enum_value_t *instance =
+                        (struct enum_value_t *)value;
+                    enum_def *def = structtype_find_enum(
+                        pattern.module.c_str(), pattern.type_name.c_str());
+                    if (!def || instance->def != def)
+                        return false;
+                    int variant_index = structtype_variant_index(
+                        def, pattern.variant.c_str());
+                    if (variant_index < 0) {
+                        yyerror("unknown enum variant %s::%s",
+                                def->name.c_str(),
+                                pattern.variant.c_str());
+                        return false;
+                    }
+                    if (instance->variant != variant_index)
+                        return false;
+                    const variant_def &variant =
+                        def->variants[(size_t)variant_index];
+                    std::vector<bool> seen(variant.fields.size(), false);
+                    for (const auto &field : pattern.fields) {
+                        if (field.rest)
+                            continue;
+                        int field_index =
+                            structtype_variant_field_index(
+                                &variant, field.key.c_str());
+                        if (field_index < 0) {
+                            yyerror("unknown field %s in %s::%s",
+                                    field.key.c_str(), def->name.c_str(),
+                                    variant.name.c_str());
+                            return false;
+                        }
+                        if (seen[(size_t)field_index]) {
+                            yyerror("field %s repeated in pattern",
+                                    field.key.c_str());
+                            return false;
+                        }
+                        seen[(size_t)field_index] = true;
+                        if (!match_pattern_desc(
+                                field.pattern,
+                                instance->payload
+                                    ->fields[(size_t)field_index],
+                                bindings))
+                            return false;
+                    }
+                    for (const auto &field : pattern.fields) {
+                        if (!field.rest)
+                            continue;
+                        if (!field.rest_name.empty()) {
+                            struct dict_value_t *rest = newdictval();
+                            for (size_t i = 0; i < variant.fields.size();
+                                 ++i) {
+                                if (seen[i])
+                                    continue;
+                                rest->payload->items.push_back(
+                                    std::make_pair(
+                                        newstrval(variant.fields[i]
+                                                      .name.c_str()),
+                                        dupval(instance->payload
+                                                   ->fields[i])));
+                            }
+                            bool ok = bind_pattern_value(
+                                bindings, field.rest_name.c_str(),
+                                (struct value_t *)rest);
+                            freeval((struct value_t *)rest);
+                            if (!ok)
+                                return false;
+                        }
+                        break;
+                    }
+                    return true;
+                }
+
+                if (!pattern.type_name.empty()) {
+                    if (value->type != T_struct)
+                        return false;
+                    struct struct_value_t *instance =
+                        (struct struct_value_t *)value;
+                    struct_def *def = structtype_find_struct(
+                        pattern.module.c_str(), pattern.type_name.c_str());
+                    if (!def || instance->def != def)
+                        return false;
+                    std::vector<bool> seen(def->fields.size(), false);
+                    for (const auto &field : pattern.fields) {
+                        if (field.rest)
+                            continue;
+                        int field_index = structtype_field_index(
+                            def, field.key.c_str());
+                        if (field_index < 0) {
+                            yyerror("unknown field %s in %s",
+                                    field.key.c_str(), def->name.c_str());
+                            return false;
+                        }
+                        if (seen[(size_t)field_index]) {
+                            yyerror("field %s repeated in pattern",
+                                    field.key.c_str());
+                            return false;
+                        }
+                        seen[(size_t)field_index] = true;
+                        if (!match_pattern_desc(
+                                field.pattern,
+                                instance->payload
+                                    ->fields[(size_t)field_index],
+                                bindings))
+                            return false;
+                    }
+                    for (const auto &field : pattern.fields) {
+                        if (!field.rest)
+                            continue;
+                        if (!field.rest_name.empty()) {
+                            struct dict_value_t *rest = newdictval();
+                            for (size_t i = 0; i < def->fields.size(); ++i) {
+                                if (seen[i])
+                                    continue;
+                                rest->payload->items.push_back(
+                                    std::make_pair(
+                                        newstrval(
+                                            def->fields[i].name.c_str()),
+                                        dupval(instance->payload
+                                                   ->fields[i])));
+                            }
+                            bool ok = bind_pattern_value(
+                                bindings, field.rest_name.c_str(),
+                                (struct value_t *)rest);
+                            freeval((struct value_t *)rest);
+                            if (!ok)
+                                return false;
+                        }
+                        break;
+                    }
+                    return true;
+                }
+
+                if (value->type != T_dict)
+                    return false;
+                struct dict_value_t *dict = (struct dict_value_t *)value;
+                for (const auto &field : pattern.fields) {
+                    if (field.rest)
+                        continue;
+                    int field_index = pattern_dict_string_key_index(
+                        dict, field.key.c_str());
+                    if (field_index < 0)
+                        return false;
+                    if (!match_pattern_desc(
+                            field.pattern,
+                            dict->payload->items[(size_t)field_index].second,
+                            bindings))
+                        return false;
+                }
+                for (const auto &field : pattern.fields) {
+                    if (!field.rest)
+                        continue;
+                    if (!field.rest_name.empty()) {
+                        struct dict_value_t *rest = newdictval();
+                        for (const auto &entry : dict->payload->items) {
+                            bool listed = false;
+                            if (entry.first &&
+                                entry.first->type == T_string) {
+                                listed = pattern_fields_have_key(
+                                    pattern.fields,
+                                    ((struct string_value_t *)entry.first)
+                                        ->value);
+                            }
+                            if (!listed) {
+                                rest->payload->items.push_back(
+                                    std::make_pair(
+                                        dupval(entry.first),
+                                        dupval(entry.second)));
+                            }
+                        }
+                        bool ok = bind_pattern_value(
+                            bindings, field.rest_name.c_str(),
+                            (struct value_t *)rest);
+                        freeval((struct value_t *)rest);
+                        if (!ok)
+                            return false;
+                    }
+                    break;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool pattern_covers_all_desc(enum_def *def, value_t *subject,
+                                 uint32_t index) {
+        if (index >= proto_.patterns.size())
+            return false;
+        const skein::bc::PatternDesc &pattern = proto_.patterns[index];
+        if (pattern.kind == skein::bc::PatternDesc::Kind::As)
+            return pattern_covers_all_desc(def, subject, pattern.child);
+        if (pattern.kind == skein::bc::PatternDesc::Kind::Binding)
+            return true;
+        if (pattern.kind == skein::bc::PatternDesc::Kind::Type &&
+            type_constraint_matches(&pattern.type, subject))
+            return true;
+        if (pattern.kind == skein::bc::PatternDesc::Kind::Or) {
+            for (uint32_t child : pattern.items) {
+                if (pattern_covers_all_desc(def, subject, child))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    void collect_enum_variants_desc(enum_def *def, uint32_t index,
+                                    std::vector<bool> &covered) {
+        if (index >= proto_.patterns.size())
+            return;
+        const skein::bc::PatternDesc &pattern = proto_.patterns[index];
+        if (pattern.kind == skein::bc::PatternDesc::Kind::As) {
+            collect_enum_variants_desc(def, pattern.child, covered);
+            return;
+        }
+        if (pattern.kind == skein::bc::PatternDesc::Kind::Or) {
+            for (uint32_t child : pattern.items)
+                collect_enum_variants_desc(def, child, covered);
+            return;
+        }
+        if ((pattern.kind ==
+                 skein::bc::PatternDesc::Kind::Container ||
+             pattern.kind ==
+                 skein::bc::PatternDesc::Kind::Literal) &&
+            !pattern.variant.empty()) {
+            enum_def *pattern_def = structtype_find_enum(
+                pattern.module.c_str(), pattern.type_name.c_str());
+            if (pattern_def != def)
+                return;
+            int variant = structtype_variant_index(
+                def, pattern.variant.c_str());
+            if (variant >= 0)
+                covered[(size_t)variant] = true;
+        }
+    }
+
+    bool match_exhaustive_desc(uint32_t arms_index, value_t *subject) {
+        if (!subject || subject->type != T_enum)
+            return true;
+        if (arms_index >= proto_.match_arms.size())
+            return false;
+        struct enum_value_t *instance = (struct enum_value_t *)subject;
+        enum_def *def = instance->def;
+        if (!def || def->variants.empty())
+            return true;
+
+        std::vector<bool> covered(def->variants.size(), false);
+        for (const skein::bc::MatchArmDesc &arm :
+             proto_.match_arms[arms_index]) {
+            if (arm.pattern == UINT32_MAX)
+                return true;
+            if (arm.has_guard)
+                continue;
+            if (pattern_covers_all_desc(def, subject, arm.pattern))
+                return true;
+            collect_enum_variants_desc(def, arm.pattern, covered);
+        }
+
+        std::string missing;
+        for (size_t i = 0; i < def->variants.size(); ++i) {
+            if (covered[i])
+                continue;
+            if (!missing.empty())
+                missing += ", ";
+            missing += def->name + "::" + def->variants[i].name;
+        }
+        if (missing.empty())
+            return true;
+
+        yyerror("match is not exhaustive: missing %s", missing.c_str());
+        return false;
+    }
+
     bool has_handler(UnwindKind kind) const {
         for (const handler_state &handler : handlers_) {
             if (handler.kind == kind)
@@ -2168,7 +2553,9 @@ void skein_vm_set_enabled(bool enabled) {
 }
 
 void skein_vm_forget_function_code(function_code *code) {
-    (void)code;
+    if (!code)
+        return;
+    default_cache.erase(code);
 }
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {
@@ -2185,6 +2572,49 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
         return eval(statement);
     }
     return execute_proto(*proto);
+}
+
+bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
+                               int index, struct value_t *&out) {
+    out = NULL;
+    if (!skein_vm_enabled() || !def || !def->code || index < 0)
+        return false;
+
+    function_code *code = def->code.get();
+    auto it = default_cache.find(code);
+    if (it == default_cache.end()) {
+        default_cache_entry entry;
+        entry.protos.resize(code->nparams);
+        int i = 0;
+        for (struct symlist *param = code->sl;
+             param && i < code->nparams; param = param->next, ++i) {
+            if (!param->default_value)
+                continue;
+            std::string error;
+            ProtoPtr proto = skein_compile_default_expression(
+                code, param->default_value, i,
+                diag_current_module_name(), error);
+            if (!proto) {
+                entry.failed = true;
+                if (read_bool_env("SKEIN_VM_DEBUG", false) &&
+                    !error.empty()) {
+                    std::fprintf(stderr,
+                                 "[vm] fallback default %s[%d]: %s\n",
+                                 code->name.c_str(), i, error.c_str());
+                }
+                break;
+            }
+            entry.protos[(size_t)i] = std::move(proto);
+        }
+        it = default_cache.emplace(code, std::move(entry)).first;
+    }
+
+    if (it->second.failed || (size_t)index >= it->second.protos.size() ||
+        !it->second.protos[(size_t)index])
+        return false;
+
+    out = execute_proto(*it->second.protos[(size_t)index]);
+    return true;
 }
 
 bool skein_vm_try_execute_function_body(

@@ -299,7 +299,8 @@ static bool fill_default_arguments(
                 free_args(args);
                 return false;
             }
-            v = eval(sl->default_value);
+            if (!skein_vm_try_eval_default(def, i, v))
+                v = eval(sl->default_value);
             if (!v) {
                 free_args(args);
                 return false;

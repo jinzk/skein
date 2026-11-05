@@ -30,6 +30,10 @@ struct value_t *skein_vm_eval_statement(struct ast *statement);
 bool skein_vm_try_execute_function_body(
     const std::shared_ptr<function_def> &def, struct value_t *&out);
 
+/* Try to evaluate one default-parameter expression in the current scope. */
+bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
+                               int index, struct value_t *&out);
+
 /* Drop cached bytecode before a function_code is freed. */
 void skein_vm_forget_function_code(struct function_code *code);
 

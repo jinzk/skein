@@ -37,14 +37,170 @@ std::shared_ptr<value_t> own_value(value_t *value) {
     return std::shared_ptr<value_t>(value, value_deleter());
 }
 
+bool bytecode_optimization_enabled() {
+    static const bool enabled = []() {
+        const char *configured = std::getenv("SKEIN_VM_OPT");
+        if (!configured || !*configured)
+            return true;
+        return std::strcmp(configured, "0") != 0 &&
+               std::strcmp(configured, "false") != 0 &&
+               std::strcmp(configured, "off") != 0;
+    }();
+    return enabled;
+}
+
+bool op_has_jump_target(Op op) {
+    switch (op) {
+        case Op::Jump:
+        case Op::JumpIfFalse:
+        case Op::JumpIfTrue:
+        case Op::CmpJump:
+        case Op::IterNext:
+        case Op::PushFailHandler:
+        case Op::PushRecoverHandler:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool op_is_conditional_jump(Op op) {
+    switch (op) {
+        case Op::JumpIfFalse:
+        case Op::JumpIfTrue:
+        case Op::CmpJump:
+        case Op::IterNext:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool op_is_threadable_jump(Op op) {
+    return op == Op::Jump || op_is_conditional_jump(op);
+}
+
+bool op_is_terminal(Op op) {
+    switch (op) {
+        case Op::Return:
+        case Op::TailCall:
+        case Op::Fail:
+        case Op::Pass:
+        case Op::Recover:
+        case Op::ControlBreak:
+        case Op::ControlContinue:
+        case Op::RuntimeError:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void thread_jumps(Proto &proto) {
+    const size_t count = proto.code.size();
+    for (size_t pc = 0; pc < count; ++pc) {
+        Instr &ins = proto.code[pc];
+        const Op op = static_cast<Op>(ins.op);
+        if (!op_is_threadable_jump(op))
+            continue;
+        uint32_t target = ins.b;
+        for (int depth = 0; depth < 64 && target < count; ++depth) {
+            if (static_cast<Op>(proto.code[target].op) != Op::Jump)
+                break;
+            const uint32_t next = proto.code[target].b;
+            if (next == target)
+                break;
+            target = next;
+        }
+        ins.b = target;
+    }
+}
+
+void eliminate_unreachable(Proto &proto) {
+    const size_t count = proto.code.size();
+    if (count == 0)
+        return;
+
+    /*
+     * The verifier performs a linear handler-balance pass over the whole
+     * instruction stream, including unreachable handler-closing opcodes.
+     * Keep those protos intact rather than removing bookkeeping instructions
+     * that the runtime never executes but verification still requires.
+     */
+    for (const Instr &ins : proto.code) {
+        const Op op = static_cast<Op>(ins.op);
+        if (op == Op::PushFailHandler || op == Op::PushRecoverHandler ||
+            op == Op::PopHandler || op == Op::EnterHandlerBody ||
+            op == Op::LeaveHandlerBody)
+            return;
+    }
+
+    std::vector<uint8_t> reachable(count, 0);
+    std::vector<uint32_t> worklist;
+    worklist.push_back(0);
+    while (!worklist.empty()) {
+        const uint32_t pc = worklist.back();
+        worklist.pop_back();
+        if (pc >= count || reachable[pc])
+            continue;
+        reachable[pc] = 1;
+        const Instr &ins = proto.code[pc];
+        const Op op = static_cast<Op>(ins.op);
+        if (op_has_jump_target(op) && ins.b < count)
+            worklist.push_back(ins.b);
+        if (op == Op::Jump || op_is_terminal(op))
+            continue;
+        if (pc + 1 < count)
+            worklist.push_back(pc + 1);
+    }
+
+    std::vector<uint32_t> new_pc(count + 1, 0);
+    uint32_t kept = 0;
+    for (size_t pc = 0; pc < count; ++pc) {
+        new_pc[pc] = kept;
+        if (reachable[pc])
+            ++kept;
+    }
+    new_pc[count] = kept;
+    if (kept == count)
+        return;
+
+    std::vector<Instr> code;
+    std::vector<SourceLoc> locs;
+    code.reserve(kept);
+    locs.reserve(kept);
+    for (size_t pc = 0; pc < count; ++pc) {
+        if (!reachable[pc])
+            continue;
+        Instr ins = proto.code[pc];
+        const Op op = static_cast<Op>(ins.op);
+        if (op_has_jump_target(op))
+            ins.b = new_pc[ins.b < count ? ins.b : count];
+        code.push_back(ins);
+        if (pc < proto.locs.size())
+            locs.push_back(proto.locs[pc]);
+        else
+            locs.push_back(SourceLoc());
+    }
+    proto.code = std::move(code);
+    proto.locs = std::move(locs);
+}
+
+void optimize_proto(Proto &proto) {
+    if (!bytecode_optimization_enabled())
+        return;
+    thread_jumps(proto);
+    eliminate_unreachable(proto);
+}
+
 bool finalize_proto(Proto &proto, std::string &error) {
+    optimize_proto(proto);
     uint32_t max_stack = 0;
     if (!skein::bc::verify(proto, error, &max_stack))
         return false;
     proto.max_stack = max_stack;
     return true;
 }
-
 struct LoopContext {
     std::string label;
     std::vector<size_t> break_patches;
@@ -1311,8 +1467,16 @@ struct Compiler {
         }
     }
 
-    static value_t *fold_node(ast *node) {
-        if (!node)
+    static const char *literal_string(ast *node) {
+        if (!node || node->nodetype != 'V')
+            return NULL;
+        struct val *literal = (struct val *)node;
+        if (!literal->val || literal->val->type != T_string)
+            return NULL;
+        return ((struct string_value_t *)literal->val)->value;
+    }
+
+    static value_t *fold_node(ast *node) {        if (!node)
             return NULL;
         if (node->nodetype == 'V') {
             struct val *literal = (struct val *)node;
@@ -1836,12 +2000,20 @@ struct Compiler {
                 emit(Op::GetIndex, 0, 0, 0, here);
                 return;
 
-            case 'j':
+            case 'j': {
                 compile(node->l);
+                if (!ok) return;
+                const char *field = literal_string(node->r);
+                if (field) {
+                    uint32_t name = add_name(field);
+                    emit(Op::GetFieldName, 0, 0, name, here);
+                    return;
+                }
                 compile(node->r);
                 if (!ok) return;
                 emit(Op::GetField, 0, 0, 0, here);
                 return;
+            }
 
             case 'C':
                 compile_call(node);

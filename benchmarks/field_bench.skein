@@ -1,0 +1,17 @@
+struct Point {
+  x: int;
+  y: int;
+}
+
+func sum(n) {
+  let p = Point { x: 1, y: 2 };
+  let total = 0;
+  let i = 0;
+  while (i < n) {
+    total = total + p.x + p.y;
+    i = i + 1;
+  }
+  return total;
+}
+
+print(sum(1000000));

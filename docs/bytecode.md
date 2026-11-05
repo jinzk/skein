@@ -57,6 +57,10 @@ SKEIN_FIBER_STACK_KB=8192 ./build/skein script.skein
 # 统一检查：Debug/Release、ASan+UBSan、LSan、VM-only、
 # runtime-only 链接、docs/boundary/diff
 tools/check_all.sh --clean
+
+# 差分 / 长时间 fuzz；失败时自动逐行最小化
+python3 tests/vm_differential.py ./build/skein 400 --seed 1
+python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 ```
 
 ## 3. 执行模型
@@ -171,6 +175,8 @@ defer 中失败也遵循同一规则。`CHECK_RESULT`、handler 清理、隐式 
 
 - 编译以整条顶层语句或整个函数体为单位回退，不做子树级混合执行；
 - 编译器对未知节点、非法 list spread 等直接报告失败；
+- 编译完成后执行跳转线程化和不可达指令消除；`SKEIN_VM_OPT=0`
+  可关闭这些优化；
 - `SKEIN_VM_DEBUG=1` 会打印回退的语句/函数和原因；
 - 回退到 AST 后复用现有 `eval()`，因此值语义、错误捕获、defer、fiber
   行为保持一致。
@@ -189,7 +195,7 @@ BIT_AND / BIT_OR / BIT_XOR / SHL / SHR / BIT_NOT / NOT
 CMP_EQ / CMP_NE / CMP_LT / CMP_LE / CMP_GT / CMP_GE
 IS_TYPE
 JUMP / JUMP_IF_FALSE / JUMP_IF_TRUE
-NEW_LIST / NEW_DICT / GET_INDEX / GET_FIELD
+NEW_LIST / NEW_DICT / GET_INDEX / GET_FIELD / GET_FIELD_NAME
 ITER_NEW / ITER_NEXT / ITER_END
 SWITCH_CHECK / CASE_MATCH
 MATCH_BEGIN / MATCH_TEST / MATCH_BIND
@@ -269,7 +275,8 @@ struct Instr {
 - fast frame 支持普通函数以及 handler、defer、iterator；generator、
   async、默认参数、variadic、method 和参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
-- 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；默认参数、variadic、
+- 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；`obj.field` 的
+  per-site 字段/方法 IC 已覆盖 struct/enum；默认参数、variadic、
   method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
 - 顶层块内函数、方法闭包仍使用名字查找；默认参数 / defer 子 Proto
   暂未使用 upvalue 索引。

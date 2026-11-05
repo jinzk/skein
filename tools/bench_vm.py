@@ -21,6 +21,8 @@ BENCHMARKS = [
     ("fib", ROOT / "benchmarks" / "fib_bench.skein", 1.5),
     ("call", ROOT / "benchmarks" / "call_bench.skein", 1.5),
     ("pattern", ROOT / "benchmarks" / "pattern_bench.skein", 1.5),
+    ("field", ROOT / "benchmarks" / "field_bench.skein", 1.5),
+    ("method", ROOT / "benchmarks" / "method_bench.skein", 1.5),
 ]
 
 

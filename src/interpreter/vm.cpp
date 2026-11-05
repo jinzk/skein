@@ -65,6 +65,8 @@ struct vm_stats_data {
     uint64_t fallback_calls = 0;
     uint64_t name_ic_hits = 0;
     uint64_t name_ic_misses = 0;
+    uint64_t member_ic_hits = 0;
+    uint64_t member_ic_misses = 0;
     uint64_t max_depth = 0;
     uint64_t max_stack = 0;
     uint64_t max_handler_depth = 0;
@@ -1143,6 +1145,20 @@ public:
                         container, index, static_cast<Op>(ins.op) == Op::GetField);
                     freeval(container);
                     freeval(index);
+                    if (!result)
+                        return abort_error();
+                    push(result);
+                    break;
+                }
+
+                case Op::GetFieldName: {
+                    value_t *container = pop_checked();
+                    if (!container)
+                        return abort_error();
+                    value_t *result = read_field_cached(
+                        container, name_at(proto(), ins.b),
+                        member_cache(ins.b));
+                    freeval(container);
                     if (!result)
                         return abort_error();
                     push(result);
@@ -2651,8 +2667,127 @@ private:
         return value;
     }
 
-    struct symbol *cached_symbol(uint32_t index) {
-        if (index < name_cache_.size() && name_cache_[index])
+    value_t *read_field_cached(value_t *container, const char *name,
+                               skein::bc::MemberCacheEntry *cache) {
+        if (!container || !name)
+            return NULL;
+
+        if (container->type == T_struct) {
+            struct struct_value_t *sv = (struct struct_value_t *)container;
+            if (!sv->def) {
+                yyerror("invalid struct value");
+                return NULL;
+            }
+            if (cache && cache->owner == sv->def) {
+                if (cache->field >= 0 && sv->payload &&
+                    (size_t)cache->field < sv->payload->fields.size()) {
+                    if (vm_stats.enabled)
+                        ++vm_stats.member_ic_hits;
+                    return dupval(sv->payload->fields[(size_t)cache->field]);
+                }
+                if (cache->field < 0 && cache->method) {
+                    if (vm_stats.enabled)
+                        ++vm_stats.member_ic_hits;
+                    return newmethodval(dupval(container), cache->method);
+                }
+            }
+            if (vm_stats.enabled)
+                ++vm_stats.member_ic_misses;
+            int field = structtype_field_index(sv->def, name);
+            if (field >= 0 && sv->payload &&
+                (size_t)field < sv->payload->fields.size()) {
+                if (cache) {
+                    cache->owner = sv->def;
+                    cache->variant = -1;
+                    cache->field = field;
+                    cache->method.reset();
+                }
+                return dupval(sv->payload->fields[(size_t)field]);
+            }
+            auto method = sv->def->methods.find(name);
+            if (method != sv->def->methods.end()) {
+                if (cache) {
+                    cache->owner = sv->def;
+                    cache->variant = -1;
+                    cache->field = -1;
+                    cache->method = method->second;
+                }
+                return newmethodval(dupval(container), method->second);
+            }
+            yyerror("field %s not found in %s", name, sv->def->name.c_str());
+            return NULL;
+        }
+
+        if (container->type == T_enum) {
+            struct enum_value_t *ev = (struct enum_value_t *)container;
+            if (!ev->def || ev->variant < 0 ||
+                (size_t)ev->variant >= ev->def->variants.size()) {
+                yyerror("invalid enum value");
+                return NULL;
+            }
+            const struct variant_def &variant =
+                ev->def->variants[(size_t)ev->variant];
+            if (cache && cache->owner == ev->def &&
+                cache->variant == ev->variant) {
+                if (cache->field >= 0 && ev->payload &&
+                    (size_t)cache->field < ev->payload->fields.size()) {
+                    if (vm_stats.enabled)
+                        ++vm_stats.member_ic_hits;
+                    return dupval(ev->payload->fields[(size_t)cache->field]);
+                }
+                if (cache->field < 0 && cache->method) {
+                    if (vm_stats.enabled)
+                        ++vm_stats.member_ic_hits;
+                    return newmethodval(dupval(container), cache->method);
+                }
+            }
+            if (vm_stats.enabled)
+                ++vm_stats.member_ic_misses;
+            int field = structtype_variant_field_index(&variant, name);
+            if (field >= 0 && ev->payload &&
+                (size_t)field < ev->payload->fields.size()) {
+                if (cache) {
+                    cache->owner = ev->def;
+                    cache->variant = ev->variant;
+                    cache->field = field;
+                    cache->method.reset();
+                }
+                return dupval(ev->payload->fields[(size_t)field]);
+            }
+            auto method = ev->def->methods.find(name);
+            if (method != ev->def->methods.end()) {
+                if (cache) {
+                    cache->owner = ev->def;
+                    cache->variant = ev->variant;
+                    cache->field = -1;
+                    cache->method = method->second;
+                }
+                return newmethodval(dupval(container), method->second);
+            }
+            yyerror("field %s not found in %s::%s", name,
+                    ev->def->name.c_str(), variant.name.c_str());
+            return NULL;
+        }
+
+        /*
+         * Dict namespaces, userdata and invalid member kinds keep the
+         * generic path.  A stack string avoids allocating a key value.
+         */
+        struct string_value_t key;
+        key.type = T_string;
+        key.value = const_cast<char *>(name);
+        return read_member_value(container, (struct value_t *)&key, true);
+    }
+
+    skein::bc::MemberCacheEntry *member_cache(uint32_t index) {
+        if (proto().member_ic.size() < proto().consts.size())
+            proto().member_ic.resize(proto().consts.size());
+        if (index >= proto().member_ic.size())
+            return NULL;
+        return &proto().member_ic[index];
+    }
+
+    struct symbol *cached_symbol(uint32_t index) {        if (index < name_cache_.size() && name_cache_[index])
             return name_cache_[index];
 
         scope_context &scope_context = active_scope_context();
@@ -3646,6 +3781,10 @@ void skein_vm_stats_report() {
                  "[vm-stats] name-ic hits=%llu misses=%llu\n",
                  (unsigned long long)vm_stats.name_ic_hits,
                  (unsigned long long)vm_stats.name_ic_misses);
+    std::fprintf(stderr,
+                 "[vm-stats] member-ic hits=%llu misses=%llu\n",
+                 (unsigned long long)vm_stats.member_ic_hits,
+                 (unsigned long long)vm_stats.member_ic_misses);
     std::fprintf(stderr,
                  "[vm-stats] max-depth=%llu max-stack=%llu "
                  "max-handler=%llu max-defer=%llu max-iterator=%llu\n",

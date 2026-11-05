@@ -96,6 +96,7 @@ enum class Op : uint8_t {
     NewDict,
     GetIndex,
     GetField,
+    GetFieldName,
 
     IterNew,
     IterNext,
@@ -344,6 +345,19 @@ struct NameCacheEntry {
 };
 
 /*
+ * Per-call-site member cache for `obj.field` with a literal field name.
+ * It stores the resolved struct/enum owner, field slot or method.  The
+ * owner pointer identifies the type definition, so redefinitions naturally
+ * miss the cache.
+ */
+struct MemberCacheEntry {
+    const void *owner = nullptr;
+    int variant = -1;
+    int field = -1;
+    std::shared_ptr<function_def> method;
+};
+
+/*
  * A compiled function or top-level chunk.
  *
  * `locs` is parallel to `code`: one source location per instruction.  This is
@@ -359,6 +373,7 @@ struct Proto {
     std::vector<Instr> code;
     std::vector<Constant> consts;
     mutable std::vector<NameCacheEntry> name_ic;
+    mutable std::vector<MemberCacheEntry> member_ic;
     std::vector<SourceLoc> locs;
     std::vector<IterDesc> iters;
     std::vector<IndexDesc> index_ops;

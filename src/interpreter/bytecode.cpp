@@ -62,6 +62,7 @@ const char *op_name(Op op) {
         case Op::NewDict: return "NEW_DICT";
         case Op::GetIndex: return "GET_INDEX";
         case Op::GetField: return "GET_FIELD";
+        case Op::GetFieldName: return "GET_FIELD_NAME";
         case Op::IterNew: return "ITER_NEW";
         case Op::IterNext: return "ITER_NEXT";
         case Op::IterEnd: return "ITER_END";
@@ -154,6 +155,7 @@ std::string disassemble(const Proto &proto) {
             op == Op::LoadConst || op == Op::LoadName ||
             op == Op::StoreName || op == Op::CompoundName ||
             op == Op::IncDecName ||
+            op == Op::GetFieldName ||
             op == Op::IsType ||
             op == Op::BindName ||
             op == Op::Closure || op == Op::BindFunc ||

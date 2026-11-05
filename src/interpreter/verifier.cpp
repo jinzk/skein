@@ -313,6 +313,13 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             need(2);
             stack(2, 1);
             break;
+        case Op::GetFieldName:
+            if (!check_constant(proto, ins.b, pc, error, true,
+                                ConstantKind::Name))
+                return false;
+            need(1);
+            stack(1, 1);
+            break;
         case Op::IterNew:
             if (!check_iter(proto, ins.a, pc, error))
                 return false;

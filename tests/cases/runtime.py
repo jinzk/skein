@@ -38,6 +38,20 @@ def run_cases():
                  SKEIN_VM_MAX_DEPTH="10000"),
     )
     check(
+        "VM optimizer can be disabled",
+        "struct P { x: int; }\n"
+        "func sum(n) {\n"
+        "  let p = P { x: 2 };\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < n) { total = total + p.x; i = i + 1; }\n"
+        "  return total;\n"
+        "}\n"
+        "print(sum(20));\n",
+        stdout="40",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
+    )
+    check(
         "closure captures through upvalues",
         "func counter() {\n"
         "  let n = 0;\n"

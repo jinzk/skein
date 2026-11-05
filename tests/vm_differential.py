@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Deterministic AST/VM differential smoke test.
+"""Deterministic AST/VM differential test.
 
 Generates small valid programs and runs both backends.  Any difference in
 stdout, stderr or exit status is reported with the generated source.
+
+The default run also checks that the VM did not silently fall back to the AST
+for generated programs.  ``--fuzz-seconds`` keeps generating cases for a
+longer period, and failures are reduced line-by-line before reporting.
 """
 
+import argparse
 import os
 import random
 import subprocess
 import sys
+import time
 
-BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
-CASES = int(sys.argv[2]) if len(sys.argv) > 2 else 160
 TIMEOUT = float(os.environ.get("SKEIN_TEST_TIMEOUT", "20"))
-
-rng = random.Random(0x5EED)
 
 
 def literal():
@@ -50,7 +52,7 @@ def simple_expr():
     return rng.choice(["[x, y]", '{"v": x}', "x < y", "x == y"])
 
 
-def statement(depth=0):
+def statement():
     kind = rng.randrange(9)
     if kind == 0:
         return f"print({simple_expr()});"
@@ -95,18 +97,124 @@ def statement(depth=0):
     )
 
 
-def program():
+def basic_program():
     lines = ["let x = 1;", "let y = 2;", "let z = 3;"]
     for _ in range(rng.randint(2, 6)):
         lines.append(statement())
     return "\n".join(lines) + "\n"
 
 
-def run(source, vm):
+def struct_program():
+    return (
+        "struct Point { x: int = 1; y: int = 2; }\n"
+        "impl Point { func sum(self) { return self.x + self.y; } }\n"
+        "let a = Point {};\n"
+        "let b = Point { x: 5 };\n"
+        "let c = Point { ...a, y: 9 };\n"
+        "let f = b.sum;\n"
+        "print(a.sum());\n"
+        "print(f());\n"
+        "print(c.x + c.y);\n"
+    )
+
+
+def enum_program():
+    return (
+        "enum E { A { n: int = 0; s: string = \"x\"; }; B; }\n"
+        "let a = E::A {};\n"
+        "let b = E::A { n: 7 };\n"
+        "print(a.n);\n"
+        "print(b.n);\n"
+        "print(a.s);\n"
+        "print(E::B is E);\n"
+    )
+
+
+def empty_program():
+    return (
+        "print(len([]));\n"
+        "print(len({}));\n"
+        "print(len(\"\"));\n"
+        "print(str([]));\n"
+        "print(str({}));\n"
+        "print([][0] on error(e) { recover \"caught\"; });\n"
+        "print({\"k\": 1}[\"missing\"] on error(e) { recover \"miss\"; });\n"
+    )
+
+
+def overflow_program():
+    return (
+        "print(9223372036854775807 + 1);\n"
+        "print(-9223372036854775807 - 2);\n"
+        "print(1.0e308 * 10.0);\n"
+        "print(-1.0e308 * 10.0);\n"
+    )
+
+
+def error_program():
+    return rng.choice([
+        "print(1 / 0);\n",
+        "struct S { x: int; }\nlet s = S { x: 1 };\nprint(s.y);\n",
+        "print([1, 2][9]);\n",
+        "func f() { fail \"boom\"; }\nf();\n",
+        "func f(a) { return a; }\nf();\n",
+        "print(1 + \"x\");\n",
+    ])
+
+
+def generator_program():
+    return (
+        "import std;\n"
+        "func gen(n) {\n"
+        "  let i = 0;\n"
+        "  while (i < n) { yield i; i = i + 1; }\n"
+        "  return 99;\n"
+        "}\n"
+        "let g = gen(3);\n"
+        "print(std.generator.next(g)[\"value\"]);\n"
+        "print(std.generator.next(g)[\"value\"]);\n"
+        "print(std.generator.next(g)[\"value\"]);\n"
+        "print(std.generator.next(g)[\"value\"]);\n"
+        "std.generator.close(g);\n"
+    )
+
+
+def async_program():
+    return (
+        "import std;\n"
+        "async func inc(x) => x + 1;\n"
+        "print(await inc(3));\n"
+        "print(await inc(await inc(4)));\n"
+    )
+
+
+FEATURES = [
+    basic_program,
+    struct_program,
+    enum_program,
+    empty_program,
+    overflow_program,
+    error_program,
+    generator_program,
+    async_program,
+]
+
+
+def program():
+    # Keep the original shape common, but regularly exercise feature-focused
+    # programs that are difficult to reach with the random expression grammar.
+    if rng.randrange(3) == 0:
+        return rng.choice(FEATURES)()
+    return basic_program()
+
+
+def run(binary, source, vm, debug=False):
     env = dict(os.environ)
     env["SKEIN_VM"] = vm
+    if debug:
+        env["SKEIN_VM_DEBUG"] = "1"
     return subprocess.run(
-        [BIN],
+        [binary],
         input=source,
         text=True,
         encoding="utf-8",
@@ -116,24 +224,99 @@ def run(source, vm):
     )
 
 
+def outcome(binary, source):
+    ast = run(binary, source, "0")
+    vm = run(binary, source, "1")
+    return (ast.returncode, ast.stdout, ast.stderr), (
+        vm.returncode, vm.stdout, vm.stderr)
+
+
+def differs(binary, source):
+    ast, vm = outcome(binary, source)
+    return ast != vm
+
+
+def minimize(binary, source):
+    lines = source.splitlines(keepends=True)
+    changed = True
+    while changed and len(lines) > 1:
+        changed = False
+        for index in range(len(lines)):
+            candidate = "".join(lines[:index] + lines[index + 1:])
+            try:
+                if candidate.strip() and differs(binary, candidate):
+                    lines = candidate.splitlines(keepends=True)
+                    changed = True
+                    break
+            except subprocess.TimeoutExpired:
+                continue
+    return "".join(lines)
+
+
+def report_failure(binary, source):
+    ast, vm = outcome(binary, source)
+    print("differential mismatch", file=sys.stderr)
+    print("--- source ---", file=sys.stderr)
+    print(source, file=sys.stderr)
+    minimized = minimize(binary, source)
+    if minimized != source:
+        print("--- minimized source ---", file=sys.stderr)
+        print(minimized, file=sys.stderr)
+    print("--- AST ---", file=sys.stderr)
+    print(repr(ast), file=sys.stderr)
+    print("--- VM ---", file=sys.stderr)
+    print(repr(vm), file=sys.stderr)
+
+
+def check_fallbacks(binary, source):
+    debug = run(binary, source, "1", debug=True)
+    if "[vm] fallback" in debug.stderr:
+        print("unexpected VM fallback", file=sys.stderr)
+        print("--- source ---", file=sys.stderr)
+        print(source, file=sys.stderr)
+        print("--- VM debug ---", file=sys.stderr)
+        print(debug.stderr, file=sys.stderr)
+        return False
+    return True
+
+
 def main():
-    for index in range(CASES):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary", nargs="?", default="./skein")
+    parser.add_argument("cases", nargs="?", type=int, default=160)
+    parser.add_argument("--seed", type=int, default=0x5EED)
+    parser.add_argument("--fuzz-seconds", type=float, default=0.0)
+    parser.add_argument("--skip-fallback-check", action="store_true")
+    args = parser.parse_args()
+
+    global rng
+    rng = random.Random(args.seed)
+
+    started = time.monotonic()
+    index = 0
+    while True:
+        if args.fuzz_seconds > 0:
+            if time.monotonic() - started >= args.fuzz_seconds:
+                break
+        elif index >= args.cases:
+            break
+
         source = program()
-        ast = run(source, "0")
-        vm = run(source, "1")
-        if (ast.returncode, ast.stdout, ast.stderr) != (
-                vm.returncode, vm.stdout, vm.stderr):
-            print(f"differential mismatch at case {index}", file=sys.stderr)
+        try:
+            if differs(args.binary, source):
+                report_failure(args.binary, source)
+                return 1
+            if not args.skip_fallback_check and not check_fallbacks(
+                    args.binary, source):
+                return 1
+        except subprocess.TimeoutExpired:
+            print(f"timeout at case {index}", file=sys.stderr)
             print("--- source ---", file=sys.stderr)
             print(source, file=sys.stderr)
-            print("--- AST ---", file=sys.stderr)
-            print(repr((ast.returncode, ast.stdout, ast.stderr)),
-                  file=sys.stderr)
-            print("--- VM ---", file=sys.stderr)
-            print(repr((vm.returncode, vm.stdout, vm.stderr)),
-                  file=sys.stderr)
             return 1
-    print(f"vm differential: {CASES} cases matched")
+        index += 1
+
+    print(f"vm differential: {index} cases matched")
     return 0
 
 

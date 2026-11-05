@@ -56,12 +56,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 11/11 passed (49.38s)
+ctest: 11/11 passed (52.49s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.12s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.29s (SKEIN_VM=1)
-vm_differential_test: Passed 0.80s (160 cases)
-vm_bench_test:  Passed 7.84s
+skein_tests:    Passed 12.14s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.24s (SKEIN_VM=1)
+vm_differential_test: Passed 1.17s (160 cases)
+vm_bench_test:  Passed 10.73s
 ASan/UBSan:     skein_vm_tests 67.21s
 LSan:           skein_vm_lsan_tests Passed 80.31s
 SKEIN_VM_ONLY:  11/11 passed (49.12s)
@@ -70,6 +70,7 @@ glibcxx-debug:  4/4 core tests passed
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
+Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
 ```
 
 | 基准 | AST | VM |
@@ -78,6 +79,8 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 | `fib(30)` | 0.70s | 0.74s |
 | 200 万次函数调用 | 0.83s | 0.85s |
 | 参数 pattern 密集调用 | 0.52s | 0.63s |
+| 100 万次字段读取 | 0.366s | 0.259s |
+| 30 万次方法调用 | 0.16s | 0.15s |
 
 ### 2.4 基线缺口
 
@@ -86,17 +89,18 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
   async、默认参数、variadic、method、参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
 - 尾调用只覆盖无 spread 的普通调用。
-- 全局名字 IC 已完成；显式全局 slot、per-call-site 字段/索引/方法 IC
-  仍待完成。
+- 全局名字 IC、字段/方法 per-site IC 已完成；显式全局 slot、
+  索引读取/赋值 IC 仍待完成。
 - 值表示仍是堆分配 `value_t*`，尚无 tagged value / unboxed slot。
-- 指令优化已有运算快路径、`CMP_JUMP`、常量折叠；仍缺死代码消除、
-  跳转线程化、computed goto。
+- 指令优化已有运算快路径、`CMP_JUMP`、常量折叠、跳转线程化和
+  不可达指令消除；仍缺更多超指令、computed goto、宽指令格式。
 - handler / defer 仍是运行时动态结构，尚无编译期表。
 - generator / async 仍依赖原生 fiber 栈。
 - 函数体、默认参数、参数 pattern 的 AST 已移出 `function_code` /
   `symlist`，由 L2 side table 管理。
 - 没有字节码序列化、AOT 缓存。
-- 差分测试已有基础 160 例；模糊测试、opcode 覆盖统计仍待扩展。
+- 差分测试已有随机生成、错误/边界/协程覆盖、fallback 断言和 fuzz
+  最小化；opcode 覆盖统计仍待扩展。
 - sanitizer 已有 ASan/UBSan/LSan 目标；`tools/check_all.sh` 覆盖完整
   Debug / Release / sanitizer / VM-only / runtime-only 矩阵。
 
@@ -559,7 +563,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-2 全局 slot 与内联缓存（P2，L）
 
-状态：**部分完成（2026-11-05，全局名字 IC）**。
+状态：**部分完成（2026-11-05，全局名字 IC + 字段/方法 per-site IC）**。
 
 已完成：
 
@@ -583,17 +587,25 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - for-in 变量
    - match / destructuring binding
    - `PopScope` 仍保留整表失效，保证作用域退出安全
+8. `obj.field` 常量字段名编译为 `GET_FIELD_NAME`：
+   - 新增 `Proto::member_ic` per-site `MemberCacheEntry`；
+   - 缓存 `struct_def` / `enum_def` 指针、variant、字段索引或方法；
+   - 类型定义重新创建时通过 owner 指针自然失效；
+   - dict namespace / userdata / 其他成员访问保留通用路径；
+   - 方法读取也使用同一 per-site IC。
+9. VM 统计新增 `member-ic hits/misses`；新增 `field` / `method` 基准。
 
 效果：
 
 - `fib(30)` 从约 0.75s 降到约 0.70s，与 AST 持平。
 - `call_bench` VM 约 0.82s，AST 约 0.85s。
 - 结构体字段 / enum variant 查找从线性扫描改为哈希查找。
+- `field_bench` VM/AST 约 0.71；`method_bench` VM/AST 约 0.94。
 
 剩余：
 
 1. 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位与模块级符号表。
-2. per-call-site 字段 / 索引 / 方法调用 inline cache。
+2. 索引读取 / 赋值的 per-call-site IC。
 3. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
 
 验收：
@@ -613,7 +625,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-4 指令优化（P2，M）
 
-状态：**部分完成（2026-11-05，比较跳转融合）**。
+状态：**部分完成（2026-11-05，比较跳转融合 + 跳转线程化/DCE）**。
 
 已完成：
 
@@ -636,20 +648,25 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - 一元负号和按位取反
    - 溢出、除零、非法移位时不折叠，保留运行时错误路径
    - 字符串、容器和混合数值比较不折叠
+6. 新增编译后优化 pass：
+   - 无条件 / 条件跳转线程化，跳过链式 `JUMP`；
+   - 不可达指令消除（DCE），同步重映射跳转目标与源码位置；
+   - 含 handler/defer 静态配对的 Proto 保守跳过 DCE；
+   - `SKEIN_VM_OPT=0` 可关闭优化。
 
 效果：
 
 ```text
-slot ratio  0.78
-fib ratio   1.03
-call ratio  1.00
-pattern     1.18
+slot ratio  0.81
+fib ratio   1.05
+call ratio  1.03
+pattern     1.19
+field       0.71
+method      0.94
 ```
 
 剩余：
 
-- 死代码消除
-- 跳转线程化
 - 更多超指令
 - computed goto / table dispatch
 - 宽指令格式与 16 位操作数上限
@@ -816,6 +833,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 - tail call 数
 - fallback call 数
 - 全局名字 IC 命中/未命中
+- 字段 / 方法 per-site member IC 命中/未命中
 - 最大 VM 调用深度
 - 最大操作数栈深
 - 最大 handler / defer / active iterator 深度
@@ -830,6 +848,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 [vm-stats] functions compiled=2 fallback=0
 [vm-stats] instructions=32 calls=4 fast=2 tail=0 fallback=2
 [vm-stats] name-ic hits=0 misses=3
+[vm-stats] member-ic hits=1998 misses=2
 [vm-stats] max-depth=2 max-stack=4 max-handler=1 max-defer=0 max-iterator=0
 [vm-stats] compile=0.016ms execute=0.068ms
 [vm-stats] opcodes LOAD_CONST=5 CALL=4 ...
@@ -864,13 +883,25 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
    - VM 原先在 initializer 求值后检查
    - 新增 `CHECK_REDEFINE` 指令，在 initializer 前执行检查
    - AST / VM 现在的错误位置和文本一致
+4. 生成器扩展覆盖：
+   - 错误路径：除零、缺字段、越界、未捕获 fail、参数数量、类型错误；
+   - 空容器与空字符串；
+   - 整数 / 浮点边界；
+   - struct 字段默认值、copy-with、方法读取；
+   - enum variant 字段默认值；
+   - generator 的 next / return / close；
+   - async / await。
+5. VM 默认运行增加 fallback 断言：生成程序在 `SKEIN_VM_DEBUG=1`
+   下不得出现 `[vm] fallback`。
+6. 新增 `--seed`、`--skip-fallback-check` 和 `--fuzz-seconds`：
+   - 长时间 fuzz 按时间循环生成；
+   - 失败时逐行删除语句做最小化，再打印最小复现源码。
+7. 额外以 seed 1/2/3 各跑 400 个用例，全部一致。
 
 剩余：
 
-- 生成器和错误路径覆盖继续扩展
 - opcode 级覆盖统计
-- fallback 原因断言
-- 可选的长时间 fuzz 模式
+- 更复杂的作用域 / 闭包 / 错误嵌套生成器
 
 #### W5-3 基准回归（P2，M）
 
@@ -883,6 +914,8 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
    - `fib_bench.skein`
    - `call_bench.skein`
    - `pattern_bench.skein`
+   - `field_bench.skein`
+   - `method_bench.skein`
 2. 新增 `tools/bench_vm.py`：
    - 每个基准分别用 `SKEIN_VM=0` / `SKEIN_VM=1` 运行
    - 默认 3 次，报告中位数
@@ -1091,16 +1124,16 @@ W5-4 按需暂缓）。
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
 | W2-6 尾调用优化 | P2 | M | 完成（fast-frame） | W2-1 |
 | W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
-| W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC + 字段索引 + 精确失效） | W2-1 |
+| W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC + 字段/方法 per-site IC + 精确失效） | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |
-| W3-4 指令优化 | P2 | M | 部分完成（CMP_JUMP + 常量折叠） | W3-1 |
+| W3-4 指令优化 | P2 | M | 部分完成（CMP_JUMP + 常量折叠 + 跳转线程化/DCE） | W3-1 |
 | W4-1 声明常量去 AST | P1 | M | 完成（2026-11-05） | W1-2 |
 | W4-2 移除 function AST | P1 | M | 完成（2026-11-05） | W4-1/W2-2 |
 | W4-3 参数元数据 Proto 化 | P2 | M | 完成（2026-11-05） | W1-1 |
 | W4-4 调试信息 | P3 | M | 暂缓（按需） | W2-1 |
 | W4-5 VM 缓存移出 runtime | P1 | M | 完成（2026-11-05） | W2-1 |
 | W5-1 VM 统计 | P2 | S | 完成（2026-11-05） | - |
-| W5-2 差分/模糊测试 | P2 | L | 部分完成（基础差分） | W1-2 |
+| W5-2 差分/模糊测试 | P2 | L | 部分完成（基础差分 + 错误/边界/协程 + fallback 断言） | W1-2 |
 | W5-3 基准回归 | P2 | M | 完成（2026-11-05） | W2-1 |
 | W5-4 序列化/AOT | P3 | XL | 暂缓（按需） | W2-5/W4 |
 | W5-5 CI/Sanitizer | P2 | M | 完成（2026-11-05） | - |
@@ -1180,10 +1213,21 @@ W5-4 按需暂缓）。
 
 #### N2-1 W3-2 全局 slot 与 per-site IC
 
-- 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位。
-- per-call-site 字段 / 索引 / 方法 IC。
-- IC 命中率与失效统计。
-- 验收：调用密集、字段访问密集基准不退化；`vm_bench_test` 通过。
+状态：**部分完成（2026-11-05）**。
+
+已完成：
+
+- `obj.field`（常量字段名）使用 `GET_FIELD_NAME` 与 per-site
+  `MemberCacheEntry`，覆盖 struct/enum 字段与方法读取；
+- IC 命中/未命中统计；
+- 新增 `field` / `method` 基准。
+
+仍未完成：
+
+- 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位；
+- 索引读取 / 赋值的 per-call-site IC。
+
+验收：调用密集、字段访问密集基准不退化；`vm_bench_test` 通过。
 
 #### N2-2 W3-3 值表示与分配
 
@@ -1195,20 +1239,39 @@ W5-4 按需暂缓）。
 
 #### N2-3 W3-4 指令优化收尾
 
-- 死代码消除。
-- 跳转线程化。
-- 更多超指令。
-- computed goto / table dispatch。
+状态：**部分完成（2026-11-05）**。
+
+已完成：
+
+- 跳转线程化；
+- 不可达指令消除（含跳转目标/源码位置重映射）；
+- `SKEIN_VM_OPT=0` 优化开关。
+
+仍未完成：
+
+- 更多超指令；
+- computed goto / table dispatch；
 - 宽指令格式，解决 16 位操作数上限。
-- 验收：优化可开关，关闭时语义一致；基准有可量化收益。
+
+验收：优化可开关，关闭时语义一致；基准有可量化收益。
 
 #### N2-4 W5-2 差分与模糊测试扩展
 
-- 增加错误路径、空容器、边界溢出、generator / async 生成。
-- 每个 opcode 至少一个直接或间接用例。
-- fallback 原因断言。
-- 可选长时间 fuzz 模式。
-- 验收：随机差分稳定，失败时能最小化复现。
+状态：**部分完成（2026-11-05）**。
+
+已完成：
+
+- 错误路径、空容器、边界溢出、generator / async 生成；
+- VM fallback 原因断言；
+- 可选长时间 fuzz 与失败最小化；
+- 3 个额外 seed 各 400 例通过。
+
+仍未完成：
+
+- 每个 opcode 至少一个直接或间接用例；
+- opcode 覆盖统计。
+
+验收：随机差分稳定，失败时能最小化复现。
 
 ### 8.4 N3：架构阶段（P2，按需）
 

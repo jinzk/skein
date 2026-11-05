@@ -18,6 +18,7 @@ from cases import (
     match_types,
     meta,
     net,
+    paths,
     runtime,
     stdlib_builtins,
 )
@@ -27,6 +28,7 @@ MODULES = [
     match_types,
     meta,
     collections,
+    paths,
     runtime,
     diagnostics,
     async_errors,

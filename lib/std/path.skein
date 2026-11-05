@@ -1,0 +1,687 @@
+package path {
+  import std;
+
+  // Pure lexical path manipulation.  The host filesystem is only consulted by
+  // absolute() when it needs the current directory.
+
+  export const AUTO = "auto";
+  export const POSIX = "posix";
+  export const WINDOWS = "windows";
+
+  func _is_drive_prefix(text) {
+    if (len(text) < 2) {
+      return false;
+    }
+    let first = int(text[0]);
+    if (!((first >= 65 && first <= 90) || (first >= 97 && first <= 122))) {
+      return false;
+    }
+    return int(text[1]) == 58;
+  }
+
+  func _looks_windows(text) {
+    if (_is_drive_prefix(text)) {
+      return true;
+    }
+    if (std.string.starts_with(text, "\\\\")) {
+      return true;
+    }
+    if (std.string.starts_with(text, "//?/") ||
+        std.string.starts_with(text, "//./")) {
+      return true;
+    }
+    return std.string.contains(text, "\\") != 0;
+  }
+
+  func _require_string(who, value, what) {
+    if (kind_of(value) != "string") {
+      fail(who + " expects " + what + " string, got " + kind_of(value));
+    }
+  }
+
+  func _require_style(style) {
+    if (kind_of(style) != "string") {
+      fail("path: style must be a string");
+    }
+    if (style != AUTO && style != POSIX && style != WINDOWS) {
+      fail("path: style must be \"auto\", \"posix\" or \"windows\"");
+    }
+  }
+
+  func _style_or_host(style) {
+    _require_style(style);
+    if (style == AUTO) {
+      return host();
+    }
+    return style;
+  }
+
+  func _style_for(style, value) {
+    _require_style(style);
+    if (style == AUTO) {
+      return detect(value);
+    }
+    return style;
+  }
+
+  func _style_for_pair(style, a, b) {
+    _require_style(style);
+    if (style != AUTO) {
+      return style;
+    }
+    if (_looks_windows(a) || _looks_windows(b)) {
+      return WINDOWS;
+    }
+    return host();
+  }
+
+  func _sep_for(style) {
+    if (style == WINDOWS) {
+      return "\\";
+    }
+    return "/";
+  }
+
+  func _to_slash(text) {
+    return std.string.replace(text, "\\", "/");
+  }
+
+  func _ascii_fold(text) {
+    let out = std.deque.new();
+    for (let ch in text) {
+      let code = int(ch);
+      if (code >= 65 && code <= 90) {
+        code = code + 32;
+      }
+      out = std.deque.push_back(out, str(char(code)));
+    }
+    return std.string.join(std.deque.to_list(out), "");
+  }
+
+  func _starts_fold(text, prefix) {
+    if (len(text) < len(prefix)) {
+      return false;
+    }
+    return _ascii_fold(std.string.substr(text, 0, len(prefix))) ==
+           _ascii_fold(prefix);
+  }
+
+  func _split_nonempty(text, separator) {
+    let out = std.deque.new();
+    for (let part in std.string.split(text, separator)) {
+      if (part != "") {
+        out = std.deque.push_back(out, part);
+      }
+    }
+    return std.deque.to_list(out);
+  }
+
+  func _win_prefix(slash_prefix) {
+    if (slash_prefix == "//?/") {
+      return "\\\\?\\";
+    }
+    if (slash_prefix == "//./") {
+      return "\\\\.\\";
+    }
+    return "\\\\?\\";
+  }
+
+  func _analyze_posix(text) {
+    let root = "";
+    let absolute = false;
+    let rest = text;
+    if (std.string.starts_with(text, "/")) {
+      root = "/";
+      absolute = true;
+      let index = 0;
+      while (index < len(text) && int(text[index]) == 47) {
+        index = index + 1;
+      }
+      rest = std.string.substr(text, index);
+    }
+    return {
+      "root": root,
+      "drive": "",
+      "parts": _split_nonempty(rest, "/"),
+      "absolute": absolute,
+      "rooted": root != ""
+    };
+  }
+
+  func _analyze_windows_verbatim(slash_text, prefix) {
+    let tail = std.string.substr(slash_text, 4);
+    let win_prefix = _win_prefix(prefix);
+    let root = "";
+    let drive = "";
+    let parts = [];
+    let absolute = false;
+
+    if (_starts_fold(tail, "unc/")) {
+      let segments = _split_nonempty(std.string.substr(tail, 4), "/");
+      if (len(segments) >= 2) {
+        root = win_prefix + "UNC\\" + segments[0] + "\\" +
+               segments[1] + "\\";
+        parts = std.list.slice(segments, 2);
+        absolute = true;
+      } else if (len(segments) == 1) {
+        root = win_prefix + "UNC\\" + segments[0] + "\\";
+        absolute = true;
+      } else {
+        root = win_prefix + "UNC\\";
+        absolute = true;
+      }
+    } else if (_is_drive_prefix(tail)) {
+      drive = std.string.substr(tail, 0, 2);
+      if (len(tail) >= 3 && int(tail[2]) == 47) {
+        root = win_prefix + drive + "\\";
+        parts = _split_nonempty(std.string.substr(tail, 3), "/");
+        absolute = true;
+      } else {
+        root = win_prefix + drive;
+        parts = _split_nonempty(std.string.substr(tail, 2), "/");
+      }
+    } else {
+      let segments = _split_nonempty(tail, "/");
+      if (len(segments) > 0) {
+        root = win_prefix + segments[0] + "\\";
+        parts = std.list.slice(segments, 1);
+        absolute = true;
+      } else {
+        root = win_prefix;
+      }
+    }
+
+    return {
+      "root": root,
+      "drive": drive,
+      "parts": parts,
+      "absolute": absolute,
+      "rooted": std.string.ends_with(root, "\\") != 0
+    };
+  }
+
+  func _analyze_windows(text) {
+    let slash_text = _to_slash(text);
+    if (std.string.starts_with(slash_text, "//?/") ||
+        std.string.starts_with(slash_text, "//./")) {
+      return _analyze_windows_verbatim(
+        slash_text, std.string.substr(slash_text, 0, 4));
+    }
+
+    let root = "";
+    let drive = "";
+    let parts = [];
+    let absolute = false;
+
+    let is_unc = len(slash_text) >= 3 &&
+                 int(slash_text[0]) == 47 &&
+                 int(slash_text[1]) == 47 &&
+                 int(slash_text[2]) != 47;
+    if (is_unc) {
+      let segments = _split_nonempty(std.string.substr(slash_text, 2), "/");
+      if (len(segments) >= 2) {
+        root = "\\\\" + segments[0] + "\\" + segments[1] + "\\";
+        parts = std.list.slice(segments, 2);
+      } else if (len(segments) == 1) {
+        root = "\\\\" + segments[0] + "\\";
+      } else {
+        root = "\\\\";
+      }
+      absolute = true;
+    } else if (_is_drive_prefix(slash_text)) {
+      drive = std.string.substr(slash_text, 0, 2);
+      if (len(slash_text) >= 3 && int(slash_text[2]) == 47) {
+        root = drive + "\\";
+        parts = _split_nonempty(std.string.substr(slash_text, 3), "/");
+        absolute = true;
+      } else {
+        root = drive;
+        parts = _split_nonempty(std.string.substr(slash_text, 2), "/");
+      }
+    } else if (std.string.starts_with(slash_text, "/")) {
+      root = "\\";
+      parts = _split_nonempty(std.string.substr(slash_text, 1), "/");
+    } else {
+      parts = _split_nonempty(slash_text, "/");
+    }
+
+    return {
+      "root": root,
+      "drive": drive,
+      "parts": parts,
+      "absolute": absolute,
+      "rooted": std.string.ends_with(root, "\\") != 0
+    };
+  }
+
+  func _analyze(text, style) {
+    if (style == WINDOWS) {
+      return _analyze_windows(text);
+    }
+    return _analyze_posix(text);
+  }
+
+  func _clean(parts, clamp) {
+    let out = std.deque.new();
+    for (let part in parts) {
+      if (part == "" || part == ".") {
+        continue;
+      }
+      if (part == "..") {
+        if (std.deque.size(out) > 0 &&
+            std.deque.peek_back(out) != "..") {
+          let popped = std.deque.pop_back(out);
+          out = popped["deque"];
+        } else if (!clamp) {
+          out = std.deque.push_back(out, "..");
+        }
+      } else {
+        out = std.deque.push_back(out, part);
+      }
+    }
+    return std.deque.to_list(out);
+  }
+
+  func _render(root, parts, style) {
+    if (len(parts) == 0) {
+      if (root == "") {
+        return ".";
+      }
+      return root;
+    }
+
+    let separator = _sep_for(style);
+    let body = std.string.join(parts, separator);
+    if (root == "") {
+      return body;
+    }
+    if (std.string.ends_with(root, separator) ||
+        std.string.ends_with(root, ":")) {
+      return root + body;
+    }
+    return root + separator + body;
+  }
+
+  func _split_ext(base) {
+    if (base == "" || base == "." || base == "..") {
+      return { "stem": base, "ext": "" };
+    }
+
+    let dot = -1;
+    let index = 0;
+    while (index < len(base)) {
+      if (int(base[index]) == 46) {
+        dot = index;
+      }
+      index = index + 1;
+    }
+
+    if (dot <= 0) {
+      return { "stem": base, "ext": "" };
+    }
+    return {
+      "stem": std.string.substr(base, 0, dot),
+      "ext": std.string.substr(base, dot)
+    };
+  }
+
+  func _parse_resolved(text, style) {
+    let info = _analyze(text, style);
+    let parts = info["parts"];
+    let base = "";
+    if (len(parts) > 0) {
+      base = parts[len(parts) - 1];
+    }
+
+    let dir = "";
+    if (len(parts) > 1) {
+      dir = _render(
+        info["root"], std.list.slice(parts, 0, len(parts) - 1), style);
+    } else if (info["root"] != "") {
+      dir = info["root"];
+    }
+
+    let extension = _split_ext(base);
+    let clean_parts = _clean(parts, info["rooted"]);
+    return {
+      "style": style,
+      "input": text,
+      "root": info["root"],
+      "drive": info["drive"],
+      "dir": dir,
+      "base": base,
+      "stem": extension["stem"],
+      "ext": extension["ext"],
+      "parts": parts,
+      "absolute": info["absolute"],
+      "rooted": info["rooted"],
+      "normalized": _render(info["root"], clean_parts, style),
+      "sep": _sep_for(style)
+    };
+  }
+
+  func _combine_rooted(base, info, style) {
+    let base_info = _analyze(normalize(base, style), style);
+    if (!base_info["absolute"]) {
+      fail("path.resolve: base must be an absolute path");
+    }
+    return _render(
+      base_info["root"], _clean(info["parts"], true), style);
+  }
+
+  func _combine_drive(base, info, style) {
+    let base_info = _analyze(normalize(base, style), style);
+    if (!base_info["absolute"]) {
+      fail("path.resolve: base must be an absolute path");
+    }
+    let combined = std.deque.new();
+    for (let part in base_info["parts"]) {
+      combined = std.deque.push_back(combined, part);
+    }
+    for (let part in info["parts"]) {
+      combined = std.deque.push_back(combined, part);
+    }
+    return _render(
+      base_info["root"],
+      _clean(std.deque.to_list(combined), true),
+      style);
+  }
+
+  export func host() {
+    let cwd = std.fs.cwd();
+    if (_is_drive_prefix(cwd) || std.string.starts_with(cwd, "\\\\")) {
+      return WINDOWS;
+    }
+    return POSIX;
+  }
+
+  export func detect(text) {
+    _require_string("path.detect", text, "a path");
+    if (_looks_windows(text)) {
+      return WINDOWS;
+    }
+    return host();
+  }
+
+  export func sep(style = AUTO) {
+    return _sep_for(_style_or_host(style));
+  }
+
+  export func delimiter(style = AUTO) {
+    if (_style_or_host(style) == WINDOWS) {
+      return ";";
+    }
+    return ":";
+  }
+
+  export func parse(text, style = AUTO) {
+    _require_string("path.parse", text, "a path");
+    let resolved = _style_for(style, text);
+    return _parse_resolved(text, resolved);
+  }
+
+  export func join_list(parts, style = AUTO) {
+    if (kind_of(parts) != "list") {
+      fail("path.join_list expects a list of paths");
+    }
+    for (let part in parts) {
+      _require_string("path.join_list", part, "a path");
+    }
+
+    let resolved = style;
+    _require_style(resolved);
+    if (resolved == AUTO) {
+      let matched = false;
+      for (let part in parts) {
+        if (_looks_windows(part)) {
+          resolved = WINDOWS;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        resolved = host();
+      }
+    }
+
+    let separator = _sep_for(resolved);
+    let out = "";
+    for (let part in parts) {
+      if (part == "") {
+        continue;
+      }
+      let info = _analyze(part, resolved);
+      if (info["root"] != "") {
+        out = part;
+      } else if (out == "") {
+        out = part;
+      } else {
+        out = out + separator + part;
+      }
+    }
+    return normalize(out, resolved);
+  }
+
+  export func join(...parts) {
+    let style = AUTO;
+    let values = parts;
+    let count = len(parts);
+    if (count > 0 && kind_of(parts[count - 1]) == "dict") {
+      let options = parts[count - 1];
+      if (!std.dict.has(options, "style")) {
+        fail("path.join options must contain a style key");
+      }
+      style = options["style"];
+      values = std.list.slice(parts, 0, count - 1);
+    }
+    return join_list(values, style);
+  }
+
+  export func normalize(text, style = AUTO) {
+    _require_string("path.normalize", text, "a path");
+    let resolved = _style_for(style, text);
+    let info = _analyze(text, resolved);
+    return _render(
+      info["root"], _clean(info["parts"], info["rooted"]), resolved);
+  }
+
+  export func is_absolute(text, style = AUTO) {
+    return parse(text, style)["absolute"];
+  }
+
+  export func is_relative(text, style = AUTO) {
+    return !parse(text, style)["absolute"];
+  }
+
+  export func resolve(base, text, style = AUTO) {
+    _require_string("path.resolve", base, "a base path");
+    _require_string("path.resolve", text, "a path");
+    let resolved = _style_for_pair(style, base, text);
+    let info = _analyze(text, resolved);
+    if (info["absolute"]) {
+      return normalize(text, resolved);
+    }
+
+    let base_info = _analyze(normalize(base, resolved), resolved);
+    if (!base_info["absolute"]) {
+      fail("path.resolve: base must be an absolute path");
+    }
+    if (info["root"] != "") {
+      if (resolved != WINDOWS) {
+        fail("path.resolve: unsupported rooted path");
+      }
+      if (info["drive"] == "") {
+        return _combine_rooted(base, info, resolved);
+      }
+      if (base_info["drive"] == "" ||
+          _ascii_fold(base_info["drive"]) !=
+          _ascii_fold(info["drive"])) {
+        fail("path.resolve: drive-relative path needs a matching base drive");
+      }
+      return _combine_drive(base, info, resolved);
+    }
+    return join_list([base, text], resolved);
+  }
+
+  export func absolute(text, style = AUTO, cwd = null) {
+    _require_string("path.absolute", text, "a path");
+    if (cwd != null) {
+      _require_string("path.absolute", cwd, "a cwd");
+    }
+
+    let resolved = style;
+    _require_style(resolved);
+    if (resolved == AUTO) {
+      if (_looks_windows(text) || (cwd != null && _looks_windows(cwd))) {
+        resolved = WINDOWS;
+      } else {
+        resolved = host();
+      }
+    }
+
+    let info = _analyze(text, resolved);
+    if (info["absolute"]) {
+      return normalize(text, resolved);
+    }
+
+    if (cwd == null) {
+      if (resolved != host()) {
+        fail("path.absolute: cwd is required for non-host style");
+      }
+      cwd = std.fs.cwd();
+    }
+    if (!_analyze(cwd, resolved)["absolute"]) {
+      fail("path.absolute: cwd must be an absolute path");
+    }
+    return resolve(cwd, text, resolved);
+  }
+
+  export func relative(from, to, style = AUTO) {
+    _require_string("path.relative", from, "a path");
+    _require_string("path.relative", to, "a path");
+    let resolved = _style_for_pair(style, from, to);
+    let from_info = _parse_resolved(normalize(from, resolved), resolved);
+    let to_info = _parse_resolved(normalize(to, resolved), resolved);
+
+    if (from_info["absolute"] != to_info["absolute"]) {
+      fail("path.relative: paths must both be absolute or both be relative");
+    }
+
+    if (_ascii_fold(from_info["root"]) != _ascii_fold(to_info["root"])) {
+      return to_info["normalized"];
+    }
+
+    let from_parts = _clean(from_info["parts"], from_info["rooted"]);
+    let to_parts = _clean(to_info["parts"], to_info["rooted"]);
+    let common = 0;
+    while (common < len(from_parts) && common < len(to_parts)) {
+      let left = from_parts[common];
+      let right = to_parts[common];
+      if (resolved == WINDOWS) {
+        left = _ascii_fold(left);
+        right = _ascii_fold(right);
+      }
+      if (left != right) {
+        break;
+      }
+      common = common + 1;
+    }
+
+    let out = std.deque.new();
+    let index = common;
+    while (index < len(from_parts)) {
+      out = std.deque.push_back(out, "..");
+      index = index + 1;
+    }
+    index = common;
+    while (index < len(to_parts)) {
+      out = std.deque.push_back(out, to_parts[index]);
+      index = index + 1;
+    }
+    let parts = std.deque.to_list(out);
+    if (len(parts) == 0) {
+      return ".";
+    }
+    return std.string.join(parts, _sep_for(resolved));
+  }
+
+  export func basename(text, style = AUTO) {
+    return parse(text, style)["base"];
+  }
+
+  export func dirname(text, style = AUTO) {
+    let dir = parse(text, style)["dir"];
+    if (dir == "") {
+      return ".";
+    }
+    return dir;
+  }
+
+  export func extname(text, style = AUTO) {
+    return parse(text, style)["ext"];
+  }
+
+  export func stem(text, style = AUTO) {
+    return parse(text, style)["stem"];
+  }
+
+  export func with_ext(text, extension, style = AUTO) {
+    _require_string("path.with_ext", text, "a path");
+    _require_string("path.with_ext", extension, "an extension");
+    let resolved = _style_for(style, text);
+    let info = _analyze(text, resolved);
+    let parts = info["parts"];
+    if (len(parts) == 0) {
+      fail("path.with_ext: path has no file name");
+    }
+
+    let base = parts[len(parts) - 1];
+    if (base == "." || base == "..") {
+      fail("path.with_ext: path has no file stem");
+    }
+
+    let suffix = extension;
+    if (suffix != "" && !std.string.starts_with(suffix, ".")) {
+      suffix = "." + suffix;
+    }
+
+    let ext_info = _split_ext(base);
+    let new_base = ext_info["stem"] + suffix;
+    let out = std.deque.new();
+    let index = 0;
+    while (index < len(parts) - 1) {
+      out = std.deque.push_back(out, parts[index]);
+      index = index + 1;
+    }
+    out = std.deque.push_back(out, new_base);
+    return normalize(
+      _render(info["root"], std.deque.to_list(out), resolved), resolved);
+  }
+
+  export func equals(a, b, style = AUTO) {
+    _require_string("path.equals", a, "a path");
+    _require_string("path.equals", b, "a path");
+    let resolved = _style_for_pair(style, a, b);
+    let left = normalize(a, resolved);
+    let right = normalize(b, resolved);
+    if (resolved == WINDOWS) {
+      return _ascii_fold(left) == _ascii_fold(right);
+    }
+    return left == right;
+  }
+
+  export func to_posix(text, style = AUTO) {
+    _require_string("path.to_posix", text, "a path");
+    let resolved = _style_for(style, text);
+    if (resolved == POSIX) {
+      return text;
+    }
+    return std.string.replace(text, "\\", "/");
+  }
+
+  export func to_windows(text, style = AUTO) {
+    _require_string("path.to_windows", text, "a path");
+    _style_for(style, text);
+    return std.string.replace(text, "/", "\\");
+  }
+}

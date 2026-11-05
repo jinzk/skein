@@ -1767,6 +1767,7 @@ std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
+std.path（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -3883,6 +3884,47 @@ arena.clear(store)          -> Store
 - `ids` / `values` 按槽位顺序返回；
 - `clear` 丢弃全部槽位；
 - Store 是值语义，每次更新返回新 Store。
+
+### std.path
+
+```text
+import std.path;
+
+path.parse(path, style = "auto")             -> dict
+path.join(parts..., options?)                -> string
+path.join_list(parts, style = "auto")        -> string
+path.normalize(path, style = "auto")         -> string
+path.is_absolute(path, style = "auto")       -> bool
+path.is_relative(path, style = "auto")       -> bool
+path.absolute(path, style = "auto", cwd = null) -> string
+path.resolve(base, path, style = "auto")     -> string
+path.relative(from, to, style = "auto")      -> string
+path.basename(path, style = "auto")          -> string
+path.dirname(path, style = "auto")           -> string
+path.extname(path, style = "auto")           -> string
+path.stem(path, style = "auto")              -> string
+path.with_ext(path, ext, style = "auto")     -> string
+path.equals(a, b, style = "auto")            -> bool
+path.to_posix(path, style = "auto")          -> string
+path.to_windows(path, style = "auto")        -> string
+path.sep(style = "auto")                     -> "/" | "\\"
+path.delimiter(style = "auto")               -> ":" | ";"
+path.detect(path)                            -> "posix" | "windows"
+path.host()                                  -> "posix" | "windows"
+```
+
+`style` 取 `"auto"`、`"posix"` 或 `"windows"`。`std.path` 是纯词法路径库，
+不访问文件系统；只有宿主风格下的 `absolute` 会读取 `std.fs.cwd()`。
+Windows 模式支持盘符、UNC、`\\?\`、drive-relative、rooted 路径和混合分隔符，
+输出统一使用 `\`。`parse` 返回 `style / input / root / drive / dir / base /
+stem / ext / parts / absolute / rooted / normalized / sep`；`parts` 保留原始
+`.` 和 `..`。
+
+`join` 遇到带根的后续片段时重置累积结果，最后一个 dict 参数可传
+`{"style": "windows"}`。`resolve` 要求 base 是绝对路径；`relative` 在根不同时
+返回规范化后的目标绝对路径。`\\?\` 只作为词法前缀处理；`equals` 在 Windows
+模式下只做 ASCII 大小写不敏感比较。真实文件 I/O 仍使用 `std.fs`，现有
+`std.fs.path_*` 保持宿主原生行为。
 
 ### 6.5 查找路径
 

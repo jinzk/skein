@@ -306,6 +306,7 @@ set(SKEIN_EMBEDDED_SOURCES
   route.skein:kStdRouteSource:std_route_source.inc
   graph.skein:kStdGraphSource:std_graph_source.inc
   arena.skein:kStdArenaSource:std_arena_source.inc
+  path.skein:kStdPathSource:std_path_source.inc
 )
 set(SKEIN_EMBEDDED_OUTPUTS)
 foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)

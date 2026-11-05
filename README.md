@@ -1839,6 +1839,7 @@ std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
+std.path（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -2022,6 +2023,83 @@ arena.has(s, a)        // false
 ```
 
 API：`new` / `from_list` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。`from_list` 批量构造 O(n)；逐条 `add` / `set` / `remove` 每次 O(capacity)，适合中小规模。
+
+`std.path` 是纯词法的跨平台路径库，不访问文件系统；`style` 可以显式指定
+`"posix"` 或 `"windows"`，因此可以在 Linux 上完整测试 Windows 路径：
+
+```text
+import std.path;
+
+let p = path.parse("C:/Users/alice/../notes.txt", "windows");
+p["style"]       // "windows"
+p["root"]        // "C:\\"
+p["drive"]       // "C:"
+p["base"]        // "notes.txt"
+p["ext"]         // ".txt"
+p["parts"]       // ["Users", "alice", "..", "notes.txt"]
+p["absolute"]    // true
+p["normalized"]  // "C:\\Users\\notes.txt"
+
+path.normalize("/a/./b/../c")                    // "/a/c"
+path.join("C:/a", "b", {"style": "windows"})     // "C:\\a\\b"
+path.relative("/a/b", "/a/c/d")                  // "../c/d"
+path.with_ext("a/b.txt", "md")                   // "a/b.md"
+path.to_posix("C:/a/b")                          // "C:/a/b"
+```
+
+API：
+
+```text
+path.host()                                  -> "posix" | "windows"
+path.detect(path)                            -> "posix" | "windows"
+path.sep(style = "auto")                     -> "/" | "\\"
+path.delimiter(style = "auto")               -> ":" | ";"
+path.parse(path, style = "auto")             -> dict
+path.join(parts..., options?)                -> string
+path.join_list(parts, style = "auto")        -> string
+path.normalize(path, style = "auto")         -> string
+path.is_absolute(path, style = "auto")       -> bool
+path.is_relative(path, style = "auto")       -> bool
+path.absolute(path, style = "auto", cwd = null) -> string
+path.resolve(base, path, style = "auto")     -> string
+path.relative(from, to, style = "auto")      -> string
+path.basename(path, style = "auto")          -> string
+path.dirname(path, style = "auto")           -> string
+path.extname(path, style = "auto")           -> string
+path.stem(path, style = "auto")              -> string
+path.with_ext(path, ext, style = "auto")     -> string
+path.equals(a, b, style = "auto")            -> bool
+path.to_posix(path, style = "auto")          -> string
+path.to_windows(path, style = "auto")        -> string
+```
+
+`parse` 返回：
+
+```text
+style / input / root / drive / dir / base / stem / ext
+parts / absolute / rooted / normalized / sep
+```
+
+`parts` 保留原始 `.` 和 `..`；`normalized` 是规范化后的结果。`rooted` 表示路径
+带可钳制 `..` 的根（如 `/`、`C:\\`、`\\server\share\`、`\\?\C:\\`），
+drive-relative 的 `C:foo` 和普通相对路径为 `false`。
+
+规则：
+
+- `style = "auto"` 时，出现盘符、`\\` 前缀或反斜杠按 Windows 处理，否则使用宿主风格；
+- POSIX 只把 `/` 当分隔符，反斜杠是普通文件名字符；
+- Windows 输入同时接受 `/` 和 `\`，输出统一为 `\`；支持盘符、UNC、`\\?\`、`\\?\UNC\`、
+  drive-relative（`C:foo`）和 rooted（`\foo`）；
+- `..` 在根处钳制；drive-relative 路径可以保留开头的 `..`；
+- `join` 遇到带根的后续片段会重置累积结果；`join` 的最后一个 dict 参数可传
+  `{"style": "windows"}`；
+- `absolute` 在宿主风格下读取 `std.fs.cwd()`；非宿主风格必须显式传 `cwd`；
+- `resolve` 要求 `base` 是绝对路径；跨盘符的 drive-relative 路径会报错；
+- `relative` 在根不同（不同盘符 / UNC / verbatim 前缀）时返回规范化后的目标绝对路径；
+- `\\?\` 只作为词法前缀处理，不会调用 Win32 长路径或 `GetFullPathName` 规范化；
+- `equals` 的 Windows 比较只做 ASCII 大小写不敏感，不做 Unicode 大小写折叠；
+- `std.path` 只做路径字符串运算；真实文件 I/O 仍由 `std.fs` 完成，现有
+  `std.fs.path_*` 是宿主原生接口，行为随平台变化。
 
 `std.list` 新增常用算法：
 

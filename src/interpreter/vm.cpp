@@ -73,6 +73,10 @@ bool read_bool_env(const char *name, bool fallback) {
     return true;
 }
 
+bool keep_function_ast() {
+    return read_bool_env("SKEIN_KEEP_AST", false);
+}
+
 void ensure_runtime_flags() {
     if (vm_enabled_state < 0)
         vm_enabled_state = read_bool_env("SKEIN_VM", false) ? 1 : 0;
@@ -84,7 +88,6 @@ void ensure_runtime_flags() {
 
 struct default_cache_entry {
     std::vector<ProtoPtr> protos;
-    bool failed = false;
 };
 
 std::unordered_map<function_code *, default_cache_entry> default_cache;
@@ -576,25 +579,24 @@ public:
                     break;
 
                 case Op::DefineName: {
-                    const Constant *c = constant_at(proto_, ins.b);
-                    if (!c || c->kind != ConstantKind::Decl || !c->decl) {
+                    if (ins.b >= proto_.decls.size()) {
                         yyerror("invalid bytecode declaration");
                         return abort_error();
                     }
-                    struct symdef *def = c->decl;
+                    const skein::bc::DeclDesc &def = proto_.decls[ins.b];
                     value_t *value = NULL;
                     if (ins.flags & 1) {
                         value = pop_checked();
                         if (!value)
                             return abort_error();
                     } else {
-                        value = default_value_for_type(def->type);
+                        value = default_value_for_type(&def.type);
                         if (!value) {
                             yyerror(
                                 "variable %s of type %s requires an "
                                 "initializer",
-                                def->name ? def->name : "",
-                                type_constraint_name(def->type));
+                                def.name.c_str(),
+                                type_constraint_name(&def.type));
                             return abort_error();
                         }
                     }
@@ -602,33 +604,30 @@ public:
                     if (is_control(value))
                         return abort_control(value);
 
-                    if (isrepeated(def->name)) {
-                        yyerror("symbol repeated %s",
-                                def->name ? def->name : "");
+                    if (isrepeated(def.name.c_str())) {
+                        yyerror("symbol repeated %s", def.name.c_str());
                         freeval(value);
                         return abort_error();
                     }
-                    if (!validate_type_constraint(def->type)) {
+                    if (!validate_type_constraint(&def.type)) {
                         freeval(value);
                         return abort_error();
                     }
-                    if (!type_constraint_matches(def->type, value)) {
+                    if (!type_constraint_matches(&def.type, value)) {
                         yyerror("variable %s expects %s, got %s",
-                                def->name ? def->name : "",
-                                type_constraint_name(def->type),
+                                def.name.c_str(),
+                                type_constraint_name(&def.type),
                                 typename_of(value));
                         freeval(value);
                         return abort_error();
                     }
 
-                    struct symbol *sym = newsym(def->name);
+                    struct symbol *sym = newsym(def.name.c_str());
                     sym->val = value;
-                    if (def->type) {
-                        sym->type.kind = def->type->kind;
-                        sym->type.name = def->type->name;
-                    }
-                    sym->exported = def->exported != 0;
-                    sym->is_const = def->is_const != 0;
+                    sym->type.kind = def.type.kind;
+                    sym->type.name = def.type.name;
+                    sym->exported = def.exported;
+                    sym->is_const = def.is_const;
                     savesym(sym);
                     invalidate_name_cache();
                     push(newnull());
@@ -1153,7 +1152,7 @@ public:
                         return abort_error();
                     std::vector<pattern_binding> bindings;
                     bool matched =
-                        match_pattern_desc(ins.b, subject, bindings);
+                        match_pattern_proto(proto_, ins.b, subject, bindings);
                     freeval(subject);
                     if (context_.runtime_error_count != errors_before_) {
                         free_pattern_bindings(bindings);
@@ -1184,7 +1183,7 @@ public:
                         return abort_error();
                     std::vector<pattern_binding> bindings;
                     bool matched =
-                        match_pattern_desc(ins.b, value, bindings);
+                        match_pattern_proto(proto_, ins.b, value, bindings);
                     if (context_.runtime_error_count != errors_before_) {
                         free_pattern_bindings(bindings);
                         freeval(value);
@@ -1924,28 +1923,6 @@ public:
                     break;
                 }
 
-                case Op::EvalAst: {
-                    const Constant *c = constant_at(proto_, ins.b);
-                    if (!c || !c->ast) {
-                        yyerror("invalid bytecode AST constant");
-                        return abort_error();
-                    }
-                    value_t *result = eval(c->ast);
-                    invalidate_name_cache();
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (result && is_control(result))
-                        return abort_control(result);
-                    push(result ? result : newnull());
-                    break;
-                }
-
                 case Op::ControlBreak:
                 case Op::ControlContinue: {
                     const char *label = NULL;
@@ -2062,11 +2039,13 @@ private:
         }
     }
 
-    bool match_pattern_desc(uint32_t index, value_t *value,
-                            std::vector<pattern_binding> &bindings) {
-        if (index >= proto_.patterns.size() || !value)
+public:
+    static bool match_pattern_proto(const Proto &proto, uint32_t index,
+                                    value_t *value,
+                                    std::vector<pattern_binding> &bindings) {
+        if (index >= proto.patterns.size() || !value)
             return false;
-        const skein::bc::PatternDesc &pattern = proto_.patterns[index];
+        const skein::bc::PatternDesc &pattern = proto.patterns[index];
 
         switch (pattern.kind) {
             case skein::bc::PatternDesc::Kind::Literal: {
@@ -2090,7 +2069,7 @@ private:
             case skein::bc::PatternDesc::Kind::Or: {
                 size_t mark = bindings.size();
                 for (uint32_t item_index : pattern.items) {
-                    if (match_pattern_desc(item_index, value, bindings))
+                    if (match_pattern_proto(proto, item_index, value, bindings))
                         return true;
                     for (size_t i = mark; i < bindings.size(); ++i)
                         freeval(bindings[i].value);
@@ -2105,7 +2084,7 @@ private:
                        ((struct int_value_t *)value)->value <=
                            pattern.range_end;
             case skein::bc::PatternDesc::Kind::As:
-                if (!match_pattern_desc(pattern.child, value, bindings))
+                if (!match_pattern_proto(proto, pattern.child, value, bindings))
                     return false;
                 return bind_pattern_value(bindings, pattern.name.c_str(),
                                           value);
@@ -2126,7 +2105,7 @@ private:
                     uint32_t pattern_index =
                         pattern.items[pattern_index_pos];
                     const skein::bc::PatternDesc &item =
-                        proto_.patterns[pattern_index];
+                        proto.patterns[pattern_index];
                     if (item.kind ==
                         skein::bc::PatternDesc::Kind::Rest) {
                         if (pattern_index_pos + 1 !=
@@ -2146,8 +2125,8 @@ private:
                     }
                     if (item_index >= list->payload->items.size())
                         return false;
-                    if (!match_pattern_desc(
-                            pattern_index,
+                    if (!match_pattern_proto(
+                            proto, pattern_index,
                             list->payload->items[item_index], bindings))
                         return false;
                     ++item_index;
@@ -2195,7 +2174,7 @@ private:
                             return false;
                         }
                         seen[(size_t)field_index] = true;
-                        if (!match_pattern_desc(
+                        if (!match_pattern_proto(proto,
                                 field.pattern,
                                 instance->payload
                                     ->fields[(size_t)field_index],
@@ -2256,7 +2235,7 @@ private:
                             return false;
                         }
                         seen[(size_t)field_index] = true;
-                        if (!match_pattern_desc(
+                        if (!match_pattern_proto(proto,
                                 field.pattern,
                                 instance->payload
                                     ->fields[(size_t)field_index],
@@ -2300,7 +2279,7 @@ private:
                         dict, field.key.c_str());
                     if (field_index < 0)
                         return false;
-                    if (!match_pattern_desc(
+                    if (!match_pattern_proto(proto,
                             field.pattern,
                             dict->payload->items[(size_t)field_index].second,
                             bindings))
@@ -2342,6 +2321,7 @@ private:
         return false;
     }
 
+private:
     bool pattern_covers_all_desc(enum_def *def, value_t *subject,
                                  uint32_t index) {
         if (index >= proto_.patterns.size())
@@ -2760,45 +2740,58 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
                          error.c_str());
         return eval(statement);
     }
-    return execute_proto(*proto);
+    value_t *result = execute_proto(*proto);
+    /*
+     * The AST evaluator restores the source location when a control value
+     * escapes a statement.  Uncaught fail/recover is therefore reported at
+     * the statement token, not at the fail/pass/defer instruction.  Match
+     * that behavior for the VM path.
+     */
+    if (active_eval_context().control != EVAL_CONTROL_NONE)
+        diag_set_location(0, 0);
+    return result;
 }
 
 bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
                                int index, struct value_t *&out) {
     out = NULL;
-    if (!skein_vm_enabled() || !def || !def->code || index < 0)
+    if (!def || !def->code || index < 0)
         return false;
 
     function_code *code = def->code.get();
     auto it = default_cache.find(code);
     if (it == default_cache.end()) {
+        if (!skein_vm_enabled())
+            return false;
         default_cache_entry entry;
         entry.protos.resize(code->nparams);
         int i = 0;
         for (struct symlist *param = code->sl;
              param && i < code->nparams; param = param->next, ++i) {
-            if (!param->default_value)
+            if (!param->has_default || !param->default_value)
                 continue;
             std::string error;
             ProtoPtr proto = skein_compile_default_expression(
-                code, param->default_value, i,
-                diag_current_module_name(), error);
+                code, param->default_value, i, code->module, error);
             if (!proto) {
-                entry.failed = true;
                 if (read_bool_env("SKEIN_VM_DEBUG", false) &&
                     !error.empty()) {
                     std::fprintf(stderr,
                                  "[vm] fallback default %s[%d]: %s\n",
                                  code->name.c_str(), i, error.c_str());
                 }
-                break;
+                continue;
             }
             entry.protos[(size_t)i] = std::move(proto);
+            if (!keep_function_ast()) {
+                treefree(param->default_value);
+                param->default_value = NULL;
+            }
         }
         it = default_cache.emplace(code, std::move(entry)).first;
     }
 
-    if (it->second.failed || (size_t)index >= it->second.protos.size() ||
+    if ((size_t)index >= it->second.protos.size() ||
         !it->second.protos[(size_t)index])
         return false;
 
@@ -2806,19 +2799,81 @@ bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
     return true;
 }
 
+ParamPatternResult skein_vm_match_parameter_pattern(
+    const std::shared_ptr<function_def> &def, int index,
+    struct value_t *value, std::vector<pattern_binding> &bindings) {
+    if (!def || !def->code || index < 0 || !value)
+        return ParamPatternResult::Unsupported;
+
+    function_code *code = def->code.get();
+    if (!code->vm_param_patterns) {
+        if (!skein_vm_enabled())
+            return ParamPatternResult::Unsupported;
+        std::string error;
+        std::shared_ptr<const compiled_pattern_set> compiled =
+            skein_compile_parameter_patterns(code, code->module, error);
+        if (!compiled) {
+            std::shared_ptr<compiled_pattern_set> failed =
+                std::make_shared<compiled_pattern_set>();
+            failed->failed = true;
+            code->vm_param_patterns = failed;
+            if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty()) {
+                std::fprintf(stderr,
+                             "[vm] fallback parameter pattern %s: %s\n",
+                             code->name.c_str(), error.c_str());
+            }
+            return ParamPatternResult::Unsupported;
+        }
+        code->vm_param_patterns = compiled;
+        if (read_bool_env("SKEIN_VM_DEBUG", false)) {
+            std::fprintf(stderr,
+                         "[vm] compiled parameter patterns for %s\n",
+                         code->name.empty() ? "<anonymous>"
+                                            : code->name.c_str());
+        }
+        if (!keep_function_ast()) {
+            for (struct symlist *param = code->sl; param;
+                 param = param->next) {
+                if (param->pattern) {
+                    treefree(param->pattern);
+                    param->pattern = NULL;
+                }
+            }
+        }
+    }
+
+    std::shared_ptr<const compiled_pattern_set> compiled =
+        std::static_pointer_cast<const compiled_pattern_set>(
+            code->vm_param_patterns);
+    if (compiled->failed || !compiled->proto ||
+        (size_t)index >= compiled->roots.size())
+        return ParamPatternResult::Unsupported;
+
+    uint32_t root = compiled->roots[(size_t)index];
+    if (root == UINT32_MAX)
+        return ParamPatternResult::Unsupported;
+
+    bool matched = Executor::match_pattern_proto(
+        *compiled->proto, root, value, bindings);
+    return matched ? ParamPatternResult::Matched
+                   : ParamPatternResult::NotMatched;
+}
+
 bool skein_vm_try_execute_function_body(
     const std::shared_ptr<function_def> &def, struct value_t *&out) {
     out = NULL;
-    if (!skein_vm_enabled() || !def || !def->code)
+    if (!def || !def->code)
         return false;
 
     function_code *code = def->code.get();
     if (code->vm_compile_failed)
         return false;
     if (!code->vm_proto) {
+        if (!skein_vm_enabled())
+            return false;
         std::string error;
         ProtoPtr proto = skein_compile_function_body(
-            code, diag_current_module_name(), error);
+            code, code->module, error);
         if (!proto) {
             code->vm_compile_failed = true;
             if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
@@ -2827,6 +2882,10 @@ bool skein_vm_try_execute_function_body(
             return false;
         }
         code->vm_proto = proto;
+        if (code->ast && !keep_function_ast()) {
+            treefree(code->ast);
+            code->ast = NULL;
+        }
     }
 
     ProtoPtr proto = std::static_pointer_cast<const Proto>(code->vm_proto);

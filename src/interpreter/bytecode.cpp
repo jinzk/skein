@@ -95,7 +95,6 @@ const char *op_name(Op op) {
         case Op::Return: return "RETURN";
         case Op::PushScope: return "PUSH_SCOPE";
         case Op::PopScope: return "POP_SCOPE";
-        case Op::EvalAst: return "EVAL_AST";
         case Op::ControlBreak: return "CONTROL_BREAK";
         case Op::ControlContinue: return "CONTROL_CONTINUE";
         case Op::RuntimeError: return "RUNTIME_ERROR";
@@ -112,10 +111,6 @@ std::string constant_brief(const Constant &c) {
             return c.value ? value_to_string(c.value.get()) : "null";
         case ConstantKind::Name:
             return c.name;
-        case ConstantKind::Ast:
-            return "<ast>";
-        case ConstantKind::Decl:
-            return "<decl>";
         case ConstantKind::Type:
             return "<type>";
         case ConstantKind::Function:
@@ -151,14 +146,16 @@ std::string disassemble(const Proto &proto) {
         bool const_operand =
             op == Op::LoadConst || op == Op::LoadName ||
             op == Op::StoreName || op == Op::CompoundName ||
-            op == Op::IncDecName || op == Op::DefineName ||
-            op == Op::IsType || op == Op::EvalAst ||
+            op == Op::IncDecName ||
+            op == Op::IsType ||
             op == Op::BindName ||
             op == Op::Closure || op == Op::BindFunc ||
             op == Op::ControlBreak || op == Op::ControlContinue ||
             op == Op::RuntimeError;
         if (const_operand && ins.b < proto.consts.size())
             out << " (" << constant_brief(proto.consts[ins.b]) << ")";
+        if (op == Op::DefineName && ins.b < proto.decls.size())
+            out << " (" << proto.decls[ins.b].name << ")";
         if ((op == Op::IterNew || op == Op::IterNext || op == Op::IterEnd) &&
             ins.a < proto.iters.size()) {
             out << " iter=" << ins.a << "(" << proto.iters[ins.a].key_name;

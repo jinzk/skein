@@ -808,7 +808,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
             variadic = true;
         } else {
             ++nparams;
-            if (!sl->default_value)
+            if (!sl->has_default)
                 ++required_params;
         }
     }
@@ -816,7 +816,10 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
         new function_code{node->ast, node->sl, nparams, required_params,
                           node->name ? node->name : "", false, variadic,
                           node->is_async != 0, node->is_generator != 0,
-                          nullptr, false},
+                          nullptr, false,
+                          node->ast ? node->ast->line : 0,
+                          node->ast ? node->ast->column : 0,
+                          diag_current_module_name(), nullptr},
         free_function_code);
     function_codes[node] = code;
     return code;

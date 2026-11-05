@@ -1,6 +1,7 @@
 #ifndef SKEIN_VM_H
 #define SKEIN_VM_H
 
+#include "pattern.h"
 #include "valuetype.h"
 
 #include <memory>
@@ -9,8 +10,19 @@ struct ast;
 struct function_code;
 struct function_def;
 
+enum class ParamPatternResult {
+    Matched,
+    NotMatched,
+    Unsupported
+};
+
 /* Enabled by SKEIN_VM=1 or --vm; disabled by default during bring-up. */
 bool skein_vm_enabled();
+/*
+ * Turn the VM on or off.  This only affects work that has not been compiled
+ * yet: functions with a cached Proto continue to run through the VM even
+ * after the VM is disabled, because their source AST may already be gone.
+ */
 void skein_vm_set_enabled(bool enabled);
 
 /*
@@ -33,6 +45,17 @@ bool skein_vm_try_execute_function_body(
 /* Try to evaluate one default-parameter expression in the current scope. */
 bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
                                int index, struct value_t *&out);
+
+/*
+ * Match one destructuring parameter using its compiled descriptor.
+ *
+ * `Unsupported` means the pattern has not been compiled (or compilation
+ * failed); the caller should fall back to the AST matcher.  `NotMatched`
+ * leaves any partial bindings in `bindings`; the caller owns and frees them.
+ */
+ParamPatternResult skein_vm_match_parameter_pattern(
+    const std::shared_ptr<function_def> &def, int index,
+    struct value_t *value, std::vector<pattern_binding> &bindings);
 
 /* Drop cached bytecode before a function_code is freed. */
 void skein_vm_forget_function_code(struct function_code *code);

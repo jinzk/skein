@@ -1,6 +1,7 @@
 # Skein 字节码与 VM（实验阶段）
 
-本文描述当前已经落地的字节码执行器，以及后续演进方向。
+本文描述当前已经落地的字节码执行器，以及后续演进方向。具体任务拆分、
+里程碑、依赖和验收标准见 [bytecode-plan.md](bytecode-plan.md)。
 
 ## 1. 当前状态
 
@@ -32,6 +33,9 @@ SKEIN_VM=1 SKEIN_VM_DEBUG=1 ./build/skein script.skein
 
 # 限制 VM 递归深度（默认 1000；sanitizer 测试使用更小的值）
 SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
+
+# 保留函数体/默认参数/参数 pattern 的 AST，便于调试或运行期切换后端
+SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 ```
 
 ## 3. 执行模型
@@ -69,6 +73,7 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 - 函数定义 / 闭包（`CLOSURE` / `BIND_FUNC`，函数体首次调用时编译并缓存在 `function_code`）
 - 参数 fast path（`LOAD_PARAM` / `STORE_PARAM` / `COMPOUND_PARAM` / `INCDEC_PARAM`；参数未被本函数局部声明遮蔽时）
 - 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；通过 `symbol*` cell 兼容闭包/defer/方法/for-in/match/destructuring/on-error/import）
+- 参数 destructuring pattern（编译为 `PatternDesc`，调用绑定时原生匹配）
 - 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
 - list / dict 字面量
@@ -87,33 +92,53 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 - 自增/自减、复合赋值（变量目标）
 - 名字查找的内联缓存（`LOAD_NAME` / `STORE_NAME` 等）
 
-### 3.2 当前回退到 AST 的结构
+### 3.2 回退到 AST 的结构
 
-常规用户语法结构已经全部有字节码路径，`EVAL_AST` 仅作为编译器兜底保留，
-用于未来新增节点或无法安全降级的子树。
+编译器不再生成 `EVAL_AST`，也没有子树级 AST 执行路径。常规用户语法结构
+全部有字节码路径；无法编译时，整条语句或整个函数体回退 AST。
+
+复杂 lvalue（例如 `f().x = 1`）保持原有语义：不执行求值，直接产生
+`cannot assign through this expression` 的运行时错误，但由
+`RUNTIME_ERROR` 指令原生抛出，不再经过 AST。
 
 VM 的 `match` pattern 已经编译为 `PatternDesc` 描述树，不再在运行时遍历
 pattern AST；literal pattern 的表达式会编译为独立 Proto 执行。
 
-仍使用 AST 但不是 `EVAL_AST` 的运行时代码：
+参数 destructuring pattern 已经编译为 `PatternDesc`，由
+`skein_vm_match_parameter_pattern()` 在参数绑定时原生匹配；匹配成功后，
+对应的 `symlist::pattern` AST 会被释放。
 
-- 类型注册表、trait 元数据等 runtime 辅助逻辑
+仍使用 AST 的运行时代码：
+
+- 函数体 AST（编译失败、`--no-vm` 或 `SKEIN_KEEP_AST=1` 时保留）；
+- 默认参数 AST（默认参数 Proto 编译失败时用于回退）；
+- 参数 pattern AST（编译失败或 `SKEIN_KEEP_AST=1` 时保留）。
 
 默认参数表达式已经编译为独立 Proto，由 `fill_default_arguments` 在调用时
 通过 VM 执行，并复用参数 fast path。
 
-### 3.3 回退安全规则
+函数体成功编译为 Proto 后会释放 `function_code->ast`（除非设置了
+`SKEIN_KEEP_AST=1`）。`let` / `const` 的 `DEFINE_NAME` 元数据已迁移到
+`Proto::decls` 的 `DeclDesc`，不再借用 `symdef*`。
 
-AST 回退会分析回退子树中的循环控制：
+每个 `function_code` 记录定义时的模块名，函数体、默认参数和参数 pattern
+的懒编译都使用该模块，而不是调用点所在模块；编译嵌套函数时会继承父
+Proto 的模块名。`vm_compile_failed` 与
+`function_code` 同生命周期；源码重新解析或函数重新定义会创建新的
+`function_code`，从而自然清除失败缓存。
 
-- 子树内部的 `break` / `continue` 若被它自己的循环或 `switch` 消费，则允许回退；
-- 会逃逸回退边界、进入外层 VM 循环的 `break` / `continue` 会导致整个
-  语句/函数体回退；
-- 带标签的循环控制保守地视为逃逸；
-- 因此剩余可回退结构只要不向外传播控制值，就可以在 VM 循环内部通过
-  `EVAL_AST` 执行。
+诊断位置规则与 AST 保持一致：普通运行时错误使用触发错误的指令位置；
+未捕获的 `fail` / `recover` 在逃出顶层语句后使用语句 token 位置，
+defer 中失败也遵循同一规则。`CHECK_RESULT`、handler 清理、隐式 `POP`、
+`PUSH_SCOPE` / `POP_SCOPE`、`CLEAR_SLOT` 都携带对应的源位置。
 
-无法编译时，`SKEIN_VM_DEBUG=1` 会打印原因。
+### 3.3 编译失败回退规则
+
+- 编译以整条顶层语句或整个函数体为单位回退，不做子树级混合执行；
+- 编译器对未知节点、非法 list spread 等直接报告失败；
+- `SKEIN_VM_DEBUG=1` 会打印回退的语句/函数和原因；
+- 回退到 AST 后复用现有 `eval()`，因此值语义、错误捕获、defer、fiber
+  行为保持一致。
 
 ## 4. 指令集（当前）
 
@@ -145,7 +170,6 @@ CLOSURE / BIND_FUNC
 IMPORT
 CALL / CALL_SPREAD / RETURN
 PUSH_SCOPE / POP_SCOPE
-EVAL_AST
 CONTROL_BREAK / CONTROL_CONTINUE / RUNTIME_ERROR
 ```
 
@@ -181,21 +205,22 @@ struct Instr {
   真正的 upvalue 索引，闭包内部对捕获变量的访问仍走名字查找。
 - 小整数/`true`/`false`/`null` 已单例化；局部变量密集的循环基准已明显
   快于 AST，但函数调用密集的基准仍受 C++ 递归和每帧分配的拖累。
-- 常规语法结构已经全部有字节码路径，`EVAL_AST` 只作为兜底。
-- `function_code` 仍保留 AST 元数据（默认参数、trait 签名等）；最终目标
-  是把默认参数等编译进 Proto，并移除 runtime 中的 `ast*`。
-- 尚未实现 handler table、defer 表、精确 GC 栈图、字节码序列化。
+- 常规语法结构已经全部有字节码路径，编译失败时整条语句/函数回退 AST。
+- 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
+  成功编译后也会释放对应 AST。`function_code->sl` 仍保留参数/默认值/trait
+  签名元数据，以及编译失败时用于回退的默认值 AST 和 pattern AST。
+- 还没有真正的 upvalue 索引和 frame-based VM。
+- 尚未实现精确 GC 栈图、字节码序列化。
 
 ## 7. 后续阶段
 
-1. 局部变量 slot + 捕获环境/upvalue；
-2. `for-in`、`switch`、`match` 原生编译；
-3. `on error` / `recover` / `pass` / `defer` 的 handler 表；
-4. 函数定义改为 `CLOSURE proto`，移除 `function_code->ast`；
-5. struct/enum/trait/impl、package/import 编译为元数据 + Proto；
-6. generator/async 与 VM 状态整合；
-7. unboxed slot、内联缓存、超指令、computed goto；
-8. AST 后端降级为可选参考实现。
+1. 真正的 upvalue 索引（闭包直接访问捕获 cell）；
+2. frame-based VM，去掉每帧 Executor 分配和 C++ 递归；
+3. 把默认参数、参数 pattern 等剩余 AST 元数据移出 `function_code`；
+4. 精确 GC 栈图与字节码序列化；
+5. generator/async 与 VM 状态整合；
+6. unboxed slot、内联缓存、超指令、computed goto；
+7. AST 后端降级为可选参考实现。
 
 ## 8. 验收标准
 

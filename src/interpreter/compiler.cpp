@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -56,6 +57,7 @@ struct Compiler {
 
     std::string pending_label;
     std::vector<std::string> param_names;
+    std::unordered_set<std::string> declared_names;
     std::vector<SlotScope> slot_scopes;
     int scope_depth = 0;
     bool slot_fast_path = false;
@@ -142,26 +144,25 @@ struct Compiler {
         return static_cast<uint32_t>(proto.consts.size() - 1);
     }
 
-    uint32_t add_ast(struct ast *node) {
-        Constant c;
-        c.kind = ConstantKind::Ast;
-        c.ast = node;
-        proto.consts.push_back(std::move(c));
-        return static_cast<uint32_t>(proto.consts.size() - 1);
-    }
-
     uint32_t add_decl(struct symdef *decl) {
-        Constant c;
-        c.kind = ConstantKind::Decl;
-        c.decl = decl;
-        proto.consts.push_back(std::move(c));
-        return static_cast<uint32_t>(proto.consts.size() - 1);
+        skein::bc::DeclDesc desc;
+        desc.name = decl && decl->name ? decl->name : "";
+        desc.type = decl && decl->type
+                        ? copy_type_constraint(decl->type)
+                        : any_type_constraint();
+        desc.exported = decl && decl->exported != 0;
+        desc.is_const = decl && decl->is_const != 0;
+        proto.decls.push_back(std::move(desc));
+        return static_cast<uint32_t>(proto.decls.size() - 1);
     }
 
     uint32_t add_type(const struct type_constraint *type) {
         Constant c;
         c.kind = ConstantKind::Type;
-        c.type = type;
+        c.type_storage =
+            std::make_shared<type_constraint>(
+                type ? *type : any_type_constraint());
+        c.type = c.type_storage.get();
         proto.consts.push_back(std::move(c));
         return static_cast<uint32_t>(proto.consts.size() - 1);
     }
@@ -278,7 +279,7 @@ struct Compiler {
                     param->type ? copy_type_constraint(param->type)
                                 : any_type_constraint();
                 param_meta.variadic = param->variadic;
-                param_meta.has_default = param->default_value != NULL;
+                param_meta.has_default = param->has_default;
                 method_meta.params.push_back(std::move(param_meta));
             }
             meta.methods.push_back(std::move(method_meta));
@@ -311,6 +312,8 @@ struct Compiler {
 
     uint32_t add_function(struct funcdef *node) {
         std::shared_ptr<function_code> code = get_function_code(node);
+        if (code)
+            code->module = proto.module;
         if (node)
             node->moved = 1;
         Constant c;
@@ -408,230 +411,9 @@ struct Compiler {
         ok = false;
     }
 
-    /*
-     * Fallback safety: an Op::EvalAst subtree is executed by the AST
-     * interpreter in the current scope.  If that subtree contains a break or
-     * continue that is meant for an enclosing bytecode loop, the AST
-     * interpreter would return a control value which the VM cannot route to
-     * the loop.  In that case we decline the whole statement/function.
-     */
-    static bool escapes_control(const ast *node, int loop_depth,
-                                int switch_depth) {
-        if (!node)
-            return false;
-
-        switch (node->nodetype) {
-            case 'V':
-            case 'N':
-            case 'J': // import executes in its own package/scope
-            case 'K': // package body is a separate compilation unit
-            case 'Z': // function body is not executed now
-            case 'Y': // struct declaration; methods are not executed now
-            case 'H': // impl declaration
-            case 't': // trait declaration
-            case '<':
-            case '>':
-            case 'n': // defer registration; body runs later with its own scope
-                return false;
-
-            case 'B': {
-                struct nbreak *brk = (struct nbreak *)node;
-                if (brk->label)
-                    return true;
-                return loop_depth == 0 && switch_depth == 0;
-            }
-
-            case 'O': {
-                struct ncontinue *ctn = (struct ncontinue *)node;
-                if (ctn->label)
-                    return true;
-                return loop_depth == 0;
-            }
-
-            case 'W': {
-                struct flow *f = (struct flow *)node;
-                return escapes_control(f->cond, loop_depth, switch_depth) ||
-                       escapes_control(f->tl, loop_depth + 1, switch_depth);
-            }
-
-            case 'E': {
-                struct flow *f = (struct flow *)node;
-                return escapes_control(f->tl, loop_depth + 1,
-                                       switch_depth) ||
-                       escapes_control(f->cond, loop_depth, switch_depth);
-            }
-
-            case 'P': {
-                struct forloop *f = (struct forloop *)node;
-                return escapes_control(f->init, loop_depth, switch_depth) ||
-                       escapes_control(f->cond, loop_depth, switch_depth) ||
-                       escapes_control(f->step, loop_depth, switch_depth) ||
-                       escapes_control(f->body, loop_depth + 1,
-                                       switch_depth);
-            }
-
-            case 'F': {
-                struct forinloop *f = (struct forinloop *)node;
-                return escapes_control(f->iterable, loop_depth,
-                                       switch_depth) ||
-                       escapes_control(f->body, loop_depth + 1,
-                                       switch_depth);
-            }
-
-            case 'S': {
-                struct switch_node *s = (struct switch_node *)node;
-                if (escapes_control(s->expr, loop_depth, switch_depth))
-                    return true;
-                for (struct case_node *c = (struct case_node *)s->cases; c;
-                     c = (struct case_node *)c->next) {
-                    if (escapes_control(c->values, loop_depth,
-                                        switch_depth) ||
-                        escapes_control(c->body, loop_depth,
-                                        switch_depth + 1))
-                        return true;
-                }
-                return false;
-            }
-
-            case '7': {
-                struct match_node *m = (struct match_node *)node;
-                if (escapes_control(m->expr, loop_depth, switch_depth))
-                    return true;
-                for (struct match_arm *arm = (struct match_arm *)m->arms;
-                     arm; arm = (struct match_arm *)arm->next) {
-                    if (escapes_control(arm->guard, loop_depth,
-                                        switch_depth) ||
-                        escapes_control(arm->body, loop_depth,
-                                        switch_depth))
-                        return true;
-                }
-                return false;
-            }
-
-            case 'o': {
-                struct on_error_node *handler = (struct on_error_node *)node;
-                return escapes_control(handler->call, loop_depth,
-                                       switch_depth) ||
-                       escapes_control(handler->body, loop_depth,
-                                       switch_depth);
-            }
-
-            case 'I':
-            case 'T': {
-                struct flow *f = (struct flow *)node;
-                return escapes_control(f->cond, loop_depth, switch_depth) ||
-                       escapes_control(f->tl, loop_depth, switch_depth) ||
-                       escapes_control(f->el, loop_depth, switch_depth);
-            }
-
-            case 'X':
-                return escapes_control(((struct nscope *)node)->ast,
-                                       loop_depth, switch_depth);
-
-            case 'L':
-                return escapes_control(node->l, loop_depth, switch_depth) ||
-                       escapes_control(node->r, loop_depth, switch_depth);
-
-            case 'D':
-                return escapes_control(((struct symdef *)node)->v,
-                                       loop_depth, switch_depth);
-
-            case '=': {
-                struct symasgn *asgn = (struct symasgn *)node;
-                return escapes_control(asgn->target, loop_depth,
-                                       switch_depth) ||
-                       escapes_control(asgn->v, loop_depth, switch_depth);
-            }
-
-            case 'a': {
-                struct compound_asgn *asgn = (struct compound_asgn *)node;
-                return escapes_control(asgn->target, loop_depth,
-                                       switch_depth) ||
-                       escapes_control(asgn->v, loop_depth, switch_depth);
-            }
-
-            case 'U':
-                return escapes_control(((struct incdec_node *)node)->target,
-                                       loop_depth, switch_depth);
-
-            case 'R':
-                return escapes_control(((struct fnret *)node)->v,
-                                       loop_depth, switch_depth);
-
-            case 'u':
-            case 'v':
-            case 'p':
-                return escapes_control(((struct control_stmt *)node)->value,
-                                       loop_depth, switch_depth);
-
-            case 'b':
-            case 'w':
-                return escapes_control(node->l, loop_depth, switch_depth);
-
-            case 'C': {
-                struct ufncall *call = (struct ufncall *)node;
-                return escapes_control(call->callee, loop_depth,
-                                       switch_depth) ||
-                       escapes_control(call->args, loop_depth, switch_depth);
-            }
-
-            case 'k':
-                return escapes_control(((struct is_node *)node)->value,
-                                       loop_depth, switch_depth);
-
-            case 'x':
-                return escapes_control(((struct spread_node *)node)->value,
-                                       loop_depth, switch_depth);
-
-            case 'g':
-                return escapes_control(((struct label_node *)node)->stmt,
-                                       loop_depth, switch_depth);
-
-            case '`':
-                return escapes_control(
-                    ((struct destructure_node *)node)->value, loop_depth,
-                    switch_depth);
-
-            case 'l': {
-                for (struct list_node *item = (struct list_node *)node; item;
-                     item = (struct list_node *)item->next) {
-                    if (escapes_control(item->value, loop_depth,
-                                        switch_depth))
-                        return true;
-                }
-                return false;
-            }
-
-            case 'd': {
-                for (struct dict_node *entry = (struct dict_node *)node;
-                     entry; entry = (struct dict_node *)entry->next) {
-                    if (escapes_control(entry->key, loop_depth,
-                                        switch_depth) ||
-                        escapes_control(entry->value, loop_depth,
-                                        switch_depth))
-                        return true;
-                }
-                return false;
-            }
-
-            case 'y':
-            case '?': {
-                struct struct_init *init =
-                    node->nodetype == 'y'
-                        ? ((struct struct_lit_node *)node)->fields
-                        : ((struct enum_lit_node *)node)->fields;
-                for (; init; init = init->next) {
-                    if (escapes_control(init->value, loop_depth,
-                                        switch_depth))
-                        return true;
-                }
-                return false;
-            }
-
-            default:
-                return escapes_control(node->l, loop_depth, switch_depth) ||
-                       escapes_control(node->r, loop_depth, switch_depth);
-        }
+    void compile_runtime_error(const char *message, SourceLoc loc) {
+        uint32_t index = add_name(message ? message : "runtime error");
+        emit(Op::RuntimeError, 0, 0, index, loc);
     }
 
     static bool has_local_declarations(const ast *node) {
@@ -776,14 +558,8 @@ struct Compiler {
         }
     }
 
-    bool fallback_safe(const ast *node) const {
-        if (loops.empty())
-            return true;
-        return !escapes_control(node, 0, 0);
-    }
-
     int param_index(const char *name) const {
-        if (!name)
+        if (!name || declared_names.count(name) != 0)
             return -1;
         for (size_t i = 0; i < param_names.size(); ++i) {
             if (param_names[i] == name)
@@ -968,20 +744,20 @@ struct Compiler {
             slot_scopes.emplace_back();
     }
 
-    void emit_clear_current_slots() {
+    void emit_clear_current_slots(SourceLoc loc) {
         if (!slot_fast_path || slot_scopes.empty())
             return;
         for (int index : slot_scopes.back().declared) {
             emit(Op::ClearSlot, 0, 0,
-                 static_cast<uint32_t>(index), SourceLoc());
+                 static_cast<uint32_t>(index), loc);
         }
     }
 
-    void pop_slot_scope(bool clear) {
+    void pop_slot_scope(bool clear, SourceLoc loc) {
         if (!slot_fast_path || slot_scopes.empty())
             return;
         if (clear)
-            emit_clear_current_slots();
+            emit_clear_current_slots(loc);
         slot_scopes.pop_back();
     }
 
@@ -1036,6 +812,222 @@ struct Compiler {
         }
     }
 
+    static void collect_local_declared_names(
+        const struct ast *node,
+        std::unordered_set<std::string> &names) {
+        if (!node)
+            return;
+        switch (node->nodetype) {
+            case 'D': {
+                struct symdef *def = (struct symdef *)node;
+                if (def->name)
+                    names.insert(def->name);
+                collect_local_declared_names(def->v, names);
+                return;
+            }
+            case 'Z': {
+                struct funcdef *def = (struct funcdef *)node;
+                if (def->name)
+                    names.insert(def->name);
+                /* Nested function body has its own scope. */
+                return;
+            }
+            case 'F': {
+                struct forinloop *loop = (struct forinloop *)node;
+                if (loop->name)
+                    names.insert(loop->name);
+                if (loop->value_name)
+                    names.insert(loop->value_name);
+                collect_local_declared_names(loop->iterable, names);
+                collect_local_declared_names(loop->body, names);
+                return;
+            }
+            case 'o': {
+                struct on_error_node *handler =
+                    (struct on_error_node *)node;
+                if (handler->name)
+                    names.insert(handler->name);
+                collect_local_declared_names(handler->call, names);
+                collect_local_declared_names(handler->body, names);
+                return;
+            }
+            case '7': {
+                struct match_node *match = (struct match_node *)node;
+                collect_local_declared_names(match->expr, names);
+                for (struct match_arm *arm =
+                         (struct match_arm *)match->arms;
+                     arm; arm = (struct match_arm *)arm->next) {
+                    if (arm->pattern) {
+                        std::vector<std::string> bindings;
+                        collect_pattern_bindings(arm->pattern, bindings);
+                        for (const std::string &name : bindings)
+                            names.insert(name);
+                    }
+                    collect_local_declared_names(arm->guard, names);
+                    collect_local_declared_names(arm->body, names);
+                }
+                return;
+            }
+            case NODE_DESTRUCTURE: {
+                struct destructure_node *d =
+                    (struct destructure_node *)node;
+                std::vector<std::string> bindings;
+                collect_pattern_bindings(d->pattern, bindings);
+                for (const std::string &name : bindings)
+                    names.insert(name);
+                collect_local_declared_names(d->value, names);
+                return;
+            }
+            case 'J': {
+                struct import_node *imp = (struct import_node *)node;
+                const char *binding =
+                    imp->alias ? imp->alias
+                               : import_binding_name(imp->path);
+                if (binding && *binding)
+                    names.insert(binding);
+                return;
+            }
+            case 'Y':
+            case 'H':
+            case 't':
+            case '<':
+            case '>':
+            case 'K':
+                return;
+            case 'X':
+                collect_local_declared_names(
+                    ((struct nscope *)node)->ast, names);
+                return;
+            case 'L':
+                collect_local_declared_names(node->l, names);
+                collect_local_declared_names(node->r, names);
+                return;
+            case 'I':
+            case 'T': {
+                struct flow *f = (struct flow *)node;
+                collect_local_declared_names(f->cond, names);
+                collect_local_declared_names(f->tl, names);
+                collect_local_declared_names(f->el, names);
+                return;
+            }
+            case 'W': {
+                struct flow *f = (struct flow *)node;
+                collect_local_declared_names(f->cond, names);
+                collect_local_declared_names(f->tl, names);
+                return;
+            }
+            case 'E': {
+                struct flow *f = (struct flow *)node;
+                collect_local_declared_names(f->tl, names);
+                collect_local_declared_names(f->cond, names);
+                return;
+            }
+            case 'P': {
+                struct forloop *f = (struct forloop *)node;
+                collect_local_declared_names(f->init, names);
+                collect_local_declared_names(f->cond, names);
+                collect_local_declared_names(f->step, names);
+                collect_local_declared_names(f->body, names);
+                return;
+            }
+            case 'S': {
+                struct switch_node *s = (struct switch_node *)node;
+                collect_local_declared_names(s->expr, names);
+                for (struct case_node *c = (struct case_node *)s->cases; c;
+                     c = (struct case_node *)c->next) {
+                    collect_local_declared_names(c->values, names);
+                    collect_local_declared_names(c->body, names);
+                }
+                return;
+            }
+            case 'R':
+                collect_local_declared_names(((struct fnret *)node)->v,
+                                             names);
+                return;
+            case 'C': {
+                struct ufncall *call = (struct ufncall *)node;
+                collect_local_declared_names(call->callee, names);
+                collect_local_declared_names(call->args, names);
+                return;
+            }
+            case '=': {
+                struct symasgn *asgn = (struct symasgn *)node;
+                collect_local_declared_names(asgn->target, names);
+                collect_local_declared_names(asgn->v, names);
+                return;
+            }
+            case 'a': {
+                struct compound_asgn *asgn = (struct compound_asgn *)node;
+                collect_local_declared_names(asgn->target, names);
+                collect_local_declared_names(asgn->v, names);
+                return;
+            }
+            case 'U':
+                collect_local_declared_names(
+                    ((struct incdec_node *)node)->target, names);
+                return;
+            case 'u':
+            case 'v':
+            case 'p':
+                collect_local_declared_names(
+                    ((struct control_stmt *)node)->value, names);
+                return;
+            case 'b':
+            case 'w':
+                collect_local_declared_names(node->l, names);
+                return;
+            case 'g':
+                collect_local_declared_names(
+                    ((struct label_node *)node)->stmt, names);
+                return;
+            case 'l': {
+                for (struct list_node *item = (struct list_node *)node; item;
+                     item = (struct list_node *)item->next)
+                    collect_local_declared_names(item->value, names);
+                return;
+            }
+            case 'd': {
+                for (struct dict_node *entry = (struct dict_node *)node;
+                     entry; entry = (struct dict_node *)entry->next) {
+                    collect_local_declared_names(entry->key, names);
+                    collect_local_declared_names(entry->value, names);
+                }
+                return;
+            }
+            case 'k':
+                collect_local_declared_names(
+                    ((struct is_node *)node)->value, names);
+                return;
+            case 'x':
+                collect_local_declared_names(
+                    ((struct spread_node *)node)->value, names);
+                return;
+            case 'y':
+            case '?': {
+                struct struct_init *init =
+                    node->nodetype == 'y'
+                        ? ((struct struct_lit_node *)node)->fields
+                        : ((struct enum_lit_node *)node)->fields;
+                for (; init; init = init->next)
+                    collect_local_declared_names(init->value, names);
+                return;
+            }
+            case 'n':
+                collect_local_declared_names(node->l, names);
+                return;
+            case 'V':
+            case 'N':
+            case 'B':
+            case 'O':
+            case '#':
+                return;
+            default:
+                collect_local_declared_names(node->l, names);
+                collect_local_declared_names(node->r, names);
+                return;
+        }
+    }
+
     void attach_pattern_slots(uint32_t pattern_index,
                               const std::vector<std::string> &names,
                               bool is_const) {
@@ -1065,16 +1057,6 @@ struct Compiler {
         proto.slots.push_back(std::move(slot));
         proto.uses_slots = true;
         return static_cast<uint32_t>(proto.slots.size() - 1);
-    }
-
-    void compile_fallback(ast *node) {
-        if (!fallback_safe(node)) {
-            fail("unsupported control flow in fallback expression");
-            return;
-        }
-        SourceLoc loc = loc_of(node);
-        uint32_t index = add_ast(node);
-        emit(Op::EvalAst, 0, 0, index, loc);
     }
 
     void emit_null(SourceLoc loc) {
@@ -1185,7 +1167,8 @@ struct Compiler {
                     if (!collect_index_chain(asgn->target, indices, fields,
                                              base) ||
                         !base || base->nodetype != 'N') {
-                        compile_fallback(node);
+                        compile_runtime_error(
+                            "cannot assign through this expression", here);
                         return;
                     }
                     compile(asgn->v);
@@ -1199,7 +1182,8 @@ struct Compiler {
                     emit(Op::AssignIndex, 0, 0, desc, here);
                     return;
                 }
-                compile_fallback(node);
+                compile_runtime_error("cannot assign to this expression",
+                                      here);
                 return;
             }
 
@@ -1239,7 +1223,8 @@ struct Compiler {
                     if (!collect_index_chain(asgn->target, indices, fields,
                                              base) ||
                         !base || base->nodetype != 'N') {
-                        compile_fallback(node);
+                        compile_runtime_error(
+                            "cannot assign through this expression", here);
                         return;
                     }
                     compile(asgn->v);
@@ -1254,7 +1239,8 @@ struct Compiler {
                          static_cast<uint8_t>(asgn->op), 0, desc, here);
                     return;
                 }
-                compile_fallback(node);
+                compile_runtime_error("cannot assign to this expression",
+                                      here);
                 return;
             }
 
@@ -1291,7 +1277,8 @@ struct Compiler {
                     if (!collect_index_chain(inc->target, indices, fields,
                                              base) ||
                         !base || base->nodetype != 'N') {
-                        compile_fallback(node);
+                        compile_runtime_error(
+                            "cannot assign through this expression", here);
                         return;
                     }
                     for (ast *idx_ast : indices) {
@@ -1304,7 +1291,10 @@ struct Compiler {
                          inc->delta > 0 ? 1 : 0, desc, here);
                     return;
                 }
-                compile_fallback(node);
+                compile_runtime_error(
+                    inc->delta > 0 ? "cannot increment this expression"
+                                   : "cannot decrement this expression",
+                    here);
                 return;
             }
 
@@ -1475,7 +1465,8 @@ struct Compiler {
                     compile(child);
                     pending_label = saved;
                 } else {
-                    compile_fallback(node);
+                    compile_runtime_error(
+                        "label must be attached to a loop or switch", here);
                 }
                 return;
             }
@@ -1513,7 +1504,7 @@ struct Compiler {
                 push_slot_scope();
                 compile(scope->ast);
                 if (!ok) return;
-                pop_slot_scope(true);
+                pop_slot_scope(true, here);
                 emit(Op::PopScope, 0, 0, 0, here);
                 --scope_depth;
                 return;
@@ -1731,10 +1722,8 @@ struct Compiler {
                 return;
             }
 
-            case '>':
-            case 'x':
             default:
-                compile_fallback(node);
+                fail("unsupported expression");
                 return;
         }
     }
@@ -1908,7 +1897,7 @@ struct Compiler {
         if (jf != static_cast<size_t>(-1))
             patch(jf, end);
 
-        pop_slot_scope(true);
+        pop_slot_scope(true, here);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
         emit(Op::LoadNull, 0, 0, 0, here);
@@ -1976,7 +1965,7 @@ struct Compiler {
         iter_stack.pop_back();
 
         emit(Op::IterEnd, 0, static_cast<uint16_t>(desc), 0, here);
-        pop_slot_scope(true);
+        pop_slot_scope(true, here);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
         emit(Op::LoadNull, 0, 0, 0, here);
@@ -2025,7 +2014,7 @@ struct Compiler {
             push_slot_scope();
             compile(c->body);
             if (!ok) return;
-            pop_slot_scope(true);
+            pop_slot_scope(true, case_loc);
             emit(Op::PopScope, 0, 0, 0, case_loc);
             --scope_depth;
             emit(Op::Pop, 0, 0, 0, case_loc);
@@ -2040,7 +2029,7 @@ struct Compiler {
             push_slot_scope();
             compile(default_case->body);
             if (!ok) return;
-            pop_slot_scope(true);
+            pop_slot_scope(true, case_loc);
             emit(Op::PopScope, 0, 0, 0, case_loc);
             --scope_depth;
             emit(Op::Pop, 0, 0, 0, case_loc);
@@ -2251,7 +2240,7 @@ struct Compiler {
             compile(arm->body);
             if (!ok) return;
 
-            emit_clear_current_slots();
+            emit_clear_current_slots(arm_loc);
             emit(Op::PopScope, 0, 0, 0, arm_loc);
             --scope_depth;
             emit(Op::Swap, 0, 0, 0, arm_loc);
@@ -2260,7 +2249,7 @@ struct Compiler {
 
             if (is_default) {
                 // A default arm always matches; later arms are unreachable.
-                pop_slot_scope(false);
+                pop_slot_scope(false, arm_loc);
                 break;
             }
 
@@ -2271,9 +2260,9 @@ struct Compiler {
                 patch(guard_jump, fail_target);
 
             // Failure path: discard the arm scope, then try the next arm.
-            emit_clear_current_slots();
+            emit_clear_current_slots(arm_loc);
             emit(Op::PopScope, 0, 0, 0, arm_loc);
-            pop_slot_scope(false);
+            pop_slot_scope(false, arm_loc);
         }
 
         uint32_t message = add_name("match: no arm matched");
@@ -2333,7 +2322,7 @@ struct Compiler {
         emit(Op::LeaveHandlerBody, 0, 0, 0, here);
         --handler_body_depth;
         emit(Op::PopHandler, 0, 0, 0, here);
-        pop_slot_scope(true);
+        pop_slot_scope(true, here);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
 
@@ -2442,7 +2431,7 @@ struct Compiler {
         for (; item; item = (struct list_node *)item->next) {
             if (!item->value) continue;
             if (item->value->nodetype == 'x') {
-                compile_fallback(node);
+                fail("spread is not allowed in a list literal");
                 return;
             }
             values.push_back(item->value);
@@ -2562,6 +2551,42 @@ ProtoPtr skein_compile_default_expression(
     return std::make_shared<const Proto>(std::move(compiler.proto));
 }
 
+std::shared_ptr<const compiled_pattern_set>
+skein_compile_parameter_patterns(struct function_code *code,
+                                 const std::string &module,
+                                 std::string &error) {
+    if (!code) {
+        error = "invalid parameter pattern owner";
+        return nullptr;
+    }
+
+    Compiler compiler(module);
+    compiler.inside_function = true;
+    compiler.proto.name =
+        (code->name.empty() ? std::string("<anonymous>") : code->name) +
+        "$patterns";
+
+    std::shared_ptr<compiled_pattern_set> compiled =
+        std::make_shared<compiled_pattern_set>();
+    for (struct symlist *param = code->sl; param; param = param->next) {
+        if (!param->pattern) {
+            compiled->roots.push_back(UINT32_MAX);
+            continue;
+        }
+        uint32_t index = compiler.add_pattern(param->pattern);
+        if (!compiler.ok || index == UINT32_MAX) {
+            error = compiler.error.empty() ? "cannot compile parameter pattern"
+                                           : compiler.error;
+            return nullptr;
+        }
+        compiled->roots.push_back(index);
+    }
+
+    compiled->proto =
+        std::make_shared<const Proto>(std::move(compiler.proto));
+    return compiled;
+}
+
 ProtoPtr skein_compile_function_body(struct function_code *code,
                                      const std::string &module,
                                      std::string &error) {
@@ -2577,8 +2602,9 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
         compiler.param_names.push_back(
             param->sym && param->sym->name ? param->sym->name : "");
     }
-    compiler.param_fast_path =
-        !Compiler::has_local_declarations(code->ast);
+    Compiler::collect_local_declared_names(code->ast,
+                                            compiler.declared_names);
+    compiler.param_fast_path = true;
     compiler.slot_fast_path = Compiler::can_use_slots(code->ast);
     if (compiler.slot_fast_path)
         compiler.slot_scopes.emplace_back();

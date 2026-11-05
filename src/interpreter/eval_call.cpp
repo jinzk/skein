@@ -55,7 +55,7 @@ bool validate_function_params(const char *name, struct symlist *params) {
     for (struct symlist *p = params; p && !bad; p = p->next) {
         if (p->variadic)
             continue;
-        if (p->default_value) {
+        if (p->has_default) {
             seen_default = true;
         } else if (seen_default) {
             yyerror("parameter %s without default cannot follow a "
@@ -143,9 +143,9 @@ static struct value_t *invoke_function_body(
     int errors_before = eval_ctx().runtime_error_count;
     int frame_line = g_error_line;
     int frame_column = g_error_column;
-    if (frame_line <= 0 && def->code->ast) {
-        frame_line = def->code->ast->line;
-        frame_column = def->code->ast->column;
+    if (frame_line <= 0 && def->code->def_line > 0) {
+        frame_line = def->code->def_line;
+        frame_column = def->code->def_column;
     }
     call_stack_guard frame_guard(frame_name, frame_line, frame_column);
     bool saved_allow_await = eval_ctx().allow_await;
@@ -167,9 +167,17 @@ static struct value_t *invoke_function_body(
         }
         savesym(sym);
 
-        if (sl->pattern) {
+        if (sl->has_pattern) {
             std::vector<pattern_binding> bindings;
-            if (!match_pattern(sl->pattern, sym->val, bindings)) {
+            ParamPatternResult native = skein_vm_match_parameter_pattern(
+                def, i, sym->val, bindings);
+            bool matched = false;
+            if (native == ParamPatternResult::Unsupported) {
+                matched = match_pattern(sl->pattern, sym->val, bindings);
+            } else {
+                matched = native == ParamPatternResult::Matched;
+            }
+            if (!matched) {
                 free_pattern_bindings(bindings);
                 yyerror("function parameter does not match its pattern");
                 pattern_failed = true;
@@ -293,14 +301,22 @@ static bool fill_default_arguments(
             v = args[(size_t)i];
         } else {
             from_default = true;
-            if (!sl->default_value) {
+            if (!sl->has_default) {
                 yyerror("function %s is missing required argument %s",
                         frame_name.c_str(), sl->sym->name);
                 free_args(args);
                 return false;
             }
-            if (!skein_vm_try_eval_default(def, i, v))
+            if (!skein_vm_try_eval_default(def, i, v)) {
+                if (!sl->default_value) {
+                    yyerror("function %s cannot evaluate default "
+                            "parameter %s", frame_name.c_str(),
+                            sl->sym->name);
+                    free_args(args);
+                    return false;
+                }
                 v = eval(sl->default_value);
+            }
             if (!v) {
                 free_args(args);
                 return false;

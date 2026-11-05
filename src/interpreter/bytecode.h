@@ -143,16 +143,6 @@ enum class Op : uint8_t {
     PushScope,
     PopScope,
 
-    /*
-     * Transitional escape hatch: evaluate a subtree with the AST
-     * interpreter in the current runtime scope.  It is used for constructs
-     * that have not been lowered to bytecode yet.  The compiler guarantees
-     * that a fallback subtree cannot contain control flow that would escape
-     * the surrounding bytecode loop; otherwise the whole statement/function
-     * falls back to the AST interpreter instead.
-     */
-    EvalAst,
-
     ControlBreak,
     ControlContinue,
     RuntimeError,
@@ -249,6 +239,13 @@ struct SlotDesc {
     bool is_const = false;
 };
 
+struct DeclDesc {
+    std::string name;
+    type_constraint type;
+    bool exported = false;
+    bool is_const = false;
+};
+
 struct DeclFieldMeta {
     std::string name;
     type_constraint type;
@@ -314,8 +311,6 @@ struct PackageDesc {
 enum class ConstantKind {
     Value,
     Name,
-    Ast,
-    Decl,
     Type,
     Function
 };
@@ -324,9 +319,8 @@ struct Constant {
     ConstantKind kind = ConstantKind::Value;
     std::shared_ptr<value_t> value;
     std::string name;
-    struct ast *ast = nullptr;
-    struct symdef *decl = nullptr;
     const struct type_constraint *type = nullptr;
+    std::shared_ptr<type_constraint> type_storage;
     std::shared_ptr<function_code> function;
 };
 
@@ -362,6 +356,7 @@ struct Proto {
 
     std::vector<std::string> param_names;
     std::vector<SlotDesc> slots;
+    std::vector<DeclDesc> decls;
     bool uses_names = false;
     bool uses_params = false;
     bool uses_defers = false;

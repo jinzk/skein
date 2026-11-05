@@ -27,6 +27,12 @@ struct function_code {
     /* Opaque bytecode cache owned by the interpreter layer. */
     std::shared_ptr<const void> vm_proto;
     bool vm_compile_failed = false;
+    int def_line = 0;
+    int def_column = 0;
+    /* Module that defined this function, used for lazy compilation. */
+    std::string module;
+    /* Opaque compiled parameter-pattern cache owned by the VM layer. */
+    std::shared_ptr<const void> vm_param_patterns;
 };
 
 struct function_def {

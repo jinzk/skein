@@ -3,6 +3,8 @@
 
 Extracted from the original test_skein.py main() body, lines 2304-2887.
 """
+import os
+
 from harness import *  # noqa: F401,F403
 
 
@@ -250,6 +252,35 @@ def run_cases():
     check("index assignment to string", 'let s = "abc";\ns[0] = "z";\n',
           stderr="cannot index-assign into string")
     check("assignment to literal", "1 = 2\n", stderr="cannot assign to this expression")
+    check(
+        "assignment through call result rejected",
+        'func f() { return {"x": 1}; }\nf().x = 2;\n',
+        stderr="cannot assign through this expression",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_DEBUG="1"),
+        not_stderr="fallback statement",
+    )
+    check(
+        "compound assignment through call result rejected",
+        'func f() { return {"x": 1}; }\nf().x += 2;\n',
+        stderr="cannot assign through this expression",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_DEBUG="1"),
+        not_stderr="fallback statement",
+    )
+    check(
+        "increment through call result rejected",
+        'func f() { return [1]; }\nf()[0]++;\n',
+        stderr="cannot assign through this expression",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_DEBUG="1"),
+        not_stderr="fallback statement",
+    )
+    check(
+        "keep AST keeps parameter metadata",
+        'func f([a], b = 1) { return a + b; }\n'
+        'print(f([2]));\n'
+        'print(f([3], 4));\n',
+        stdout_all=["3", "7"],
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_KEEP_AST="1"),
+    )
 
     check(
         "for loop",

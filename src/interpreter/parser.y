@@ -513,6 +513,7 @@ static struct symlist *new_destructure_param(struct ast *pattern) {
     std::snprintf(name, sizeof(name), "#%d", ++destructure_param_id);
     struct symbol *symbol = newsym(name);
     struct symlist *params = newsymlist(symbol, NULL, NULL);
+    params->has_pattern = true;
     params->pattern = pattern;
     return params;
 }

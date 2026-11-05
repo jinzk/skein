@@ -3,6 +3,8 @@
 
 Extracted from the original test_skein.py main() body, lines 1100-1699.
 """
+import os
+
 from harness import *  # noqa: F401,F403
 
 
@@ -687,6 +689,16 @@ def run_cases():
           'func f([a, b]) { return a + b; }\n'
           'f([1]);\n',
           stderr="function parameter does not match its pattern")
+    check("function parameter destructuring uses compiled pattern",
+          'func sum([a, b]) { return a + b; }\n'
+          'func pair({x, y}) { return x * y; }\n'
+          'func rest([h, ...t]) { return str(h) + ":" + str(len(t)); }\n'
+          'print(sum([2, 3]));\n'
+          'print(pair({"x": 3, "y": 4}));\n'
+          'print(rest([9, 8, 7]));\n',
+          stdout_all=["5", "12", "9:2"],
+          env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_DEBUG="1"),
+          not_stderr="fallback parameter pattern")
 
     check("match or pattern binding rollback",
           'print(match ([1, 2]) { case [a] | [a, b] => a + b; '

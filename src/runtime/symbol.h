@@ -56,8 +56,12 @@ struct symlist {
     struct type_constraint *type;
     struct symlist *next;
     bool variadic;
+    /* True when this parameter has a default expression. */
+    bool has_default;
     /* Default value expression evaluated when the argument is omitted. */
     struct ast *default_value;
+    /* True when this parameter has a destructuring pattern. */
+    bool has_pattern;
     /* Optional destructuring pattern for this parameter. */
     struct ast *pattern;
 };

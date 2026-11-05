@@ -55,7 +55,7 @@ static bool method_self_ok(struct symlist *sl, const char *owner,
         error = "method first parameter must be self";
         return false;
     }
-    if (sl->default_value) {
+    if (sl->has_default) {
         error = "method self cannot have a default value";
         return false;
     }
@@ -296,7 +296,7 @@ void eval_trait_decl(struct trait_node *t) {
                 yyerror("trait methods cannot be variadic");
                 return;
             }
-            if (p->default_value) {
+            if (p->has_default) {
                 yyerror("trait method %s cannot have default parameter values",
                         m->name);
                 return;

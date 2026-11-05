@@ -505,6 +505,17 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
                                      diag_current_source_name().c_str());
 }
 
+static int destructure_param_id = 0;
+
+static struct symlist *new_destructure_param(struct ast *pattern) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "#%d", ++destructure_param_id);
+    struct symbol *symbol = newsym(name);
+    struct symlist *params = newsymlist(symbol, NULL, NULL);
+    params->pattern = pattern;
+    return params;
+}
+
 static struct type_constraint *type_constraint_from_builtin(int functype) {
     switch (functype) {
         case B_int: return new_type_constraint(TYPE_INT);
@@ -563,16 +574,20 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 %token INC "++" DEC "--"
 %token ELLIPSIS "..."
+%token DOTDOT ".."
+%token PIPE "|>"
+%token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
 
-%right ARROW
+%right ARROW RARROW
 %right '=' PLUS_ASSIGN MINUS_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
 %right AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 %right '?'
 %left LOGOR
 %left LOGAND
 %left '|'
+%precedence AS
 %left '^'
 %left '&'
 %nonassoc <fn> CMP
@@ -580,6 +595,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %left SHL SHR
 %left '+' '-'
 %left '*' '/' '%'
+%left PIPE
 %precedence UMINUS NOT BITNOT
 %right INC DEC
 %precedence '['
@@ -599,7 +615,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> impl_methods trait_methods trait_method method_member
 %type <a> struct_fields struct_field
-%type <sl> param symlist
+%type <sl> param symlist lambda_param_tail
 %type <type> type type_name
 %type <str> importref importpath fieldname
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
@@ -1089,6 +1105,7 @@ struct_field: NAME ':' exp               { $$ = newstructinit($1, $3); }
 importref: importpath                     { $$ = $1; }
     | '.' importpath                      { $$ = join_import_prefix(".", $2); }
     | '.' '.' importpath                  { $$ = join_import_prefix("..", $3); }
+    | DOTDOT importpath                    { $$ = join_import_prefix("..", $2); }
     | '@' importpath                      { $$ = join_import_prefix("@", $2); }
     ;
 
@@ -1190,6 +1207,28 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '^' exp                         { $$ = newast('^', $1, $3); }
     | exp SHL exp                         { $$ = newast('s', $1, $3); }
     | exp SHR exp                         { $$ = newast('r', $1, $3); }
+    | exp PIPE exp                        {
+        if ($3->nodetype == 'C') {
+            struct ufncall *call = (struct ufncall *)$3;
+            call->args = newast('L', $1, call->args);
+            $$ = $3;
+        } else {
+            $$ = newcall($3, newast('L', $1, NULL));
+        }
+      }
+    | NAME RARROW lambda_start exp         {
+        $$ = newfunc(NULL, newsymlist(newsym($1), NULL, NULL),
+                     newret($4), false, false, finish_function());
+      }
+    | '(' ')' RARROW lambda_start exp      {
+        $$ = newfunc(NULL, NULL, newret($5), false, false,
+                     finish_function());
+      }
+    | '(' NAME ',' lambda_param_tail ')' RARROW lambda_start exp {
+        $$ = newfunc(NULL,
+                     newsymlist(newsym($2), NULL, $4),
+                     newret($8), false, false, finish_function());
+      }
     | '(' exp ')'                         { $$ = $2; }
     | MATCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
                                            {
@@ -1294,6 +1333,22 @@ funcstart: FUNC {
     }
     ;
 
+lambda_start: %empty {
+        push_func_location(g_token_line, g_token_column);
+        start_function();
+    }
+    ;
+
+lambda_param_tail: NAME                   {
+        $$ = newsymlist(newsym($1), NULL, NULL);
+        free($1);
+      }
+    | NAME ',' lambda_param_tail           {
+        $$ = newsymlist(newsym($1), NULL, $3);
+        free($1);
+      }
+    ;
+
 value: INT                                { $$ = newint($1); }
     | FLOAT                               { $$ = newfloat($1); }
     | TRUE                                { $$ = newbool(true); }
@@ -1394,6 +1449,11 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
     | '{' pattern_fields '}'              { $$ = newpatterndict($2); }
     | '{' EMPTY_DICT_CLOSE                { $$ = newpatterndict(NULL); }
     | '[' pattern_list ']'                { $$ = newpatternlist($2); }
+    | pattern '|' pattern                  { $$ = newpatternor($1, $3); }
+    | INT DOTDOT INT                       { $$ = newpatternrange($1, $3); }
+    | '-' INT DOTDOT INT                   { $$ = newpatternrange(-$2, $4); }
+    | INT DOTDOT '-' INT                   { $$ = newpatternrange($1, -$4); }
+    | '-' INT DOTDOT '-' INT               { $$ = newpatternrange(-$2, -$5); }
     | pattern AS NAME                     { $$ = newpatternas($1, $3); }
     | CMP value_pattern                   {
         if ($1 != 4) {
@@ -1498,6 +1558,28 @@ param: NAME {
         struct symbol *s = newsym($2);
         free($2);
         $$ = newsymlist(s, $4, NULL, true);
+      }
+    | '[' pattern_list ']' {
+        $$ = new_destructure_param(newpatternlist($2));
+      }
+    | '{' pattern_fields '}' {
+        $$ = new_destructure_param(newpatterndict($2));
+      }
+    | NAME '{' pattern_fields '}' {
+        $$ = new_destructure_param(newpatternstruct(
+            $1, copy_text(diag_current_source_name().c_str()), $3));
+      }
+    | NAME '{' EMPTY_DICT_CLOSE {
+        $$ = new_destructure_param(newpatternstruct(
+            $1, copy_text(diag_current_source_name().c_str()), NULL));
+      }
+    | NAME COLONCOLON NAME '{' pattern_fields '}' {
+        $$ = new_destructure_param(newpatternvariant(
+            $1, copy_text(diag_current_source_name().c_str()), $3, $5));
+      }
+    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+        $$ = new_destructure_param(newpatternvariant(
+            $1, copy_text(diag_current_source_name().c_str()), $3, NULL));
       }
     ;
 

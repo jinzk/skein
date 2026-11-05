@@ -561,3 +561,27 @@ def run_cases():
           'package p { export func twice(x) => x * 2; }\n'
           'print(p.twice(21));\n',
           stdout="42")
+
+    check("lambda shorthand",
+          'let inc = x -> x + 1;\n'
+          'let add = (a, b) -> a + b;\n'
+          'let zero = () -> 7;\n'
+          'print(inc(2));\nprint(add(3, 4));\nprint(zero());\n',
+          stdout_all=["3", "7", "7"])
+    check("lambda shorthand expression body",
+          'import std;\n'
+          'print([1, 2, 3] |> std.list.map(x -> x * 2));\n',
+          stdout="[2, 4, 6]")
+    check("pipe operator",
+          'import std;\n'
+          'print(range(0, 6) '
+          '|> std.iter.filter(x -> x % 2 == 0) '
+          '|> std.iter.collect());\n'
+          'print([1, 2, 3] |> std.list.len);\n'
+          'print(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len);\n',
+          stdout_all=["[0, 2, 4]", "3", "3"])
+    check("pipe struct method",
+          'struct Box { v: int; }\n'
+          'impl Box { func add(self, x) => self.v + x; }\n'
+          'print(5 |> Box { v: 10 }.add());\n',
+          stdout="15")

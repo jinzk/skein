@@ -58,6 +58,8 @@ struct symlist {
     bool variadic;
     /* Default value expression evaluated when the argument is omitted. */
     struct ast *default_value;
+    /* Optional destructuring pattern for this parameter. */
+    struct ast *pattern;
 };
 
 struct symbol *newsym(const char *name);

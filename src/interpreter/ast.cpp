@@ -548,6 +548,8 @@ static struct pattern_node *new_pattern_node(int nodetype) {
     a->variant = NULL;
     a->literal = NULL;
     a->type = NULL;
+    a->range_start = 0;
+    a->range_end = 0;
     a->fields = NULL;
     a->items = NULL;
     a->next = NULL;
@@ -592,6 +594,26 @@ struct ast *newpatternnever() {
 struct ast *newpatterntype(struct type_constraint *type) {
     struct pattern_node *a = new_pattern_node(NODE_PATTERN_TYPE);
     a->type = type;
+    return (struct ast *)a;
+}
+
+struct ast *newpatternor(struct ast *left, struct ast *right) {
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_OR);
+    a->items = left;
+    if (left) {
+        struct pattern_node *current = (struct pattern_node *)left;
+        while (current->next) current = (struct pattern_node *)current->next;
+        current->next = right;
+    } else {
+        a->items = right;
+    }
+    return (struct ast *)a;
+}
+
+struct ast *newpatternrange(long long start, long long end) {
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_RANGE);
+    a->range_start = start;
+    a->range_end = end;
     return (struct ast *)a;
 }
 
@@ -748,8 +770,10 @@ struct ast *newimport(char *path, char *alias) {
 }
 
 void symlistfree_full(struct symlist *sl) {
-    for (struct symlist *p = sl; p; p = p->next)
+    for (struct symlist *p = sl; p; p = p->next) {
         treefree(p->default_value);
+        treefree(p->pattern);
+    }
     symlistfree(sl);
 }
 
@@ -1343,6 +1367,17 @@ void treefree(struct ast *a) {
         case NODE_PATTERN_TYPE: {
             struct pattern_node *p = (struct pattern_node *)a;
             free_type_constraint(p->type);
+            treefree(p->next);
+            break;
+        }
+        case NODE_PATTERN_OR: {
+            struct pattern_node *p = (struct pattern_node *)a;
+            treefree(p->items);
+            treefree(p->next);
+            break;
+        }
+        case NODE_PATTERN_RANGE: {
+            struct pattern_node *p = (struct pattern_node *)a;
             treefree(p->next);
             break;
         }

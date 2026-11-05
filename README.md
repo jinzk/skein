@@ -2692,6 +2692,18 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 支持 `%`、`&&`、`||`、`!`、`&`、`|`、`^`、`~`、`<<`、`>>`。
 `&&` / `||` 短路求值。
 
+管道 `|>` 把左侧值作为右侧调用的第一个参数：
+
+```text
+xs |> f              // f(xs)
+xs |> f(a)           // f(xs, a)
+range(0, 10) |> std.iter.filter(func(x) => x % 2 == 0) |> std.iter.collect()
+```
+
+- `|>` 左结合，优先级高于算术和比较运算，低于一元运算和后缀调用；
+- 右侧不是调用时按 `f(xs)` 处理；右侧是调用时插入为第一个参数；
+- 适合 `std.list` / `std.iter` 这类“主体在第一个参数”的 API。
+
 三元表达式：
 
 ```text
@@ -2935,6 +2947,8 @@ let next = match (state) {
 - `match` 是表达式，返回第一个匹配 arm 的值；
 - arm 体是单条语句或代码块，块的值是最后一条语句的值；
 - 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、struct（按字段）；
+- 支持 or-pattern：`case 1 | 2 | 3`、`case E::A | E::B`；
+- 支持整数范围模式：`case 1..9`（包含两端）；
 - `case is Type` 是类型模式，例如 `case is int`、`case is Point`、`case is callable`；
 - enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive`；
 - `case pattern as name` 把整个匹配值绑定到 `name`；
@@ -3057,6 +3071,18 @@ d["handler"](42)
 adder(3)(4)
 ```
 
+匿名函数可以使用 `->` 简写；单参数、多参数和零参数都支持，函数体是单个表达式：
+
+```text
+let inc = x -> x + 1;
+let add = (a, b) -> a + b;
+let zero = () -> 7;
+
+[1, 2, 3] |> std.list.map(x -> x * 2)
+```
+
+`->` 的函数体只支持表达式；需要多语句或显式 `return` 时用 `func(x) => { ... }` 或 `func(x) { ... }`。
+
 匿名函数使用同一个 `func` 关键字，省略函数名：
 
 ```text
@@ -3105,6 +3131,20 @@ fact(5)                 → 120
 - 立即调用时建议给匿名函数加括号，例如 `(func(x) { ... })(1)`。
 
 没有显式 `return` 的函数，以及 `print`，返回 `null`。`null` 是假值，可用于条件判断，也可以作为参数传递。
+
+函数参数也可以直接解构：
+
+```text
+func sum([a, b]) { return a + b; }
+func pair({x, y}) { return x * y; }
+struct P { x: int; y: int; }
+func point(P {x, y}) { return x + y; }
+func first([head, ...tail]) { return head; }
+```
+
+- 解构参数占一个位置，不参与命名查找；
+- 支持 list、dict、struct、enum 变体模式；
+- 解构失败会报 `function parameter does not match its pattern`。
 
 可变参数：
 

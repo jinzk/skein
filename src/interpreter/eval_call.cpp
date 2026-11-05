@@ -114,6 +114,7 @@ static struct value_t *invoke_function_body(
     eval_ctx().allow_await = def->code->is_async;
     eval_push_closure_scope(def->closure);
     int i = 0;
+    bool pattern_failed = false;
     for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
          sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
@@ -127,6 +128,31 @@ static struct value_t *invoke_function_body(
             sym->is_const = true;
         }
         savesym(sym);
+
+        if (sl->pattern) {
+            std::vector<pattern_binding> bindings;
+            if (!match_pattern(sl->pattern, sym->val, bindings)) {
+                free_pattern_bindings(bindings);
+                yyerror("function parameter does not match its pattern");
+                pattern_failed = true;
+                break;
+            }
+            for (auto &binding : bindings) {
+                struct symbol *target = newsym(binding.name.c_str());
+                target->val = binding.value;
+                binding.value = NULL;
+                savesym(target);
+            }
+            bindings.clear();
+        }
+    }
+    if (pattern_failed) {
+        for (size_t k = (size_t)i + 1; k < args.size(); ++k)
+            freeval(args[k]);
+        args.clear();
+        eval_popscope();
+        eval_ctx().allow_await = saved_allow_await;
+        return NULL;
     }
     if (rest) {
         struct list_value_t *list = newlistval();

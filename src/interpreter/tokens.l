@@ -451,6 +451,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "%=" { YYRET(MOD_ASSIGN); }
 "&=" { YYRET(AND_ASSIGN); }
 "|=" { YYRET(OR_ASSIGN); }
+"|>" { YYRET(PIPE); }
 "^=" { YYRET(XOR_ASSIGN); }
 "<<=" { YYRET(SHL_ASSIGN); }
 ">>=" { YYRET(SHR_ASSIGN); }
@@ -474,7 +475,10 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 
 "..." { YYRET(ELLIPSIS); }
 
+".." { YYRET(DOTDOT); }
+
 "=>" { YYRET(ARROW); }
+"->" { YYRET(RARROW); }
 
 "::" { YYRET(COLONCOLON); }
 
@@ -708,6 +712,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     YYRET(INT);
 }
 
+{DIGITS}".." { yyless((int)(yyleng - 2)); YYRET(lex_decimal_integer(yytext, yyleng)); }
 {DIGITS} { YYRET(lex_decimal_integer(yytext, yyleng)); }
 
 ({DIGITS}"."({DIGITS})?|"."{DIGITS})({EXP})? { YYRET(lex_float(yytext, yyleng)); }

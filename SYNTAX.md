@@ -399,6 +399,17 @@ obj["fn"](3)
 
 函数调用参数从左到右求值。
 
+管道 `|>` 把左侧值插入右侧调用的第一个参数：
+
+```text
+xs |> f          // f(xs)
+xs |> f(a)       // f(xs, a)
+```
+
+- 右侧不是调用：等价于 `f(xs)`；
+- 右侧是调用：等价于 `f(xs, ...)`；
+- 左结合，适合 `std.list` / `std.iter` 等主体在第一个参数的 API。
+
 参数表达式中出现的 `return` / `break` / `continue` 会向外传播，当前函数调用不会执行：
 
 ```text
@@ -419,6 +430,31 @@ let inc = func(x) => x + 1;
 (func(x) { return x + 1; })(41)
 (func(x) => x + 1)(41)
 ```
+
+也可以使用 `->` 简写，函数体是单个表达式：
+
+```text
+let inc = x -> x + 1;
+let add = (a, b) -> a + b;
+let zero = () -> 7;
+```
+
+- `->` 只会生成表达式体；多语句请使用 `func`；
+- 单参数使用 `x -> ...`，多参数使用 `(a, b) -> ...`，零参数使用 `() -> ...`；
+- `->` 的优先级最低，函数体延伸到表达式末尾。
+
+命名函数和 `func` 匿名函数的参数可以直接解构：
+
+```text
+func sum([a, b]) { return a + b; }
+func pair({x, y}) { return x * y; }
+struct P { x: int; y: int; }
+func point(P {x, y}) { return x + y; }
+func first([head, ...tail]) { return head; }
+```
+
+解构参数占一个参数位置；支持 list、dict、struct 和 enum 变体模式。解构失败会报
+`function parameter does not match its pattern`。
 
 匿名函数体使用 `list` 语法，支持多语句和显式 `return`。
 
@@ -601,6 +637,7 @@ p is Drawable     // true
 从低到高：
 
 ```text
+->
 = += -= *= /= %= &= |= ^= <<= >>=
 ? :
 ||
@@ -608,10 +645,12 @@ p is Drawable     // true
 |
 ^
 &
-比较运算 / is
+比较运算
+is
 << >>
 + -
 * / %
+|>
 一元 - ! ~
 前缀 ++ --
 索引/字段/调用
@@ -955,6 +994,8 @@ let next = match (state) {
 | 通配 | `_` | 匹配任意值，不绑定 |
 | 整体绑定 | `p as Point {x}` | 先匹配子模式，再把整个值绑定到 `p` |
 | 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 trait |
+| or | `case 1 \| 2`、`case E::A \| E::B` | 任一子模式匹配即可 |
+| 整数范围 | `case 1..9` | 包含两端，按 int 比较 |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
 | dict rest | `{kind, ...rest}` | `rest` 收集未列出的键 |
 | list | `[a, b]` | 定长匹配 |

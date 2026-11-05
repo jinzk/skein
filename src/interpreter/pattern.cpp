@@ -72,6 +72,22 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
             return bind_pattern_value(bindings, pattern->name, value);
         case NODE_PATTERN_TYPE:
             return type_constraint_matches(pattern->type, value);
+        case NODE_PATTERN_OR: {
+            size_t mark = bindings.size();
+            for (struct pattern_node *item = (struct pattern_node *)pattern->items;
+                 item; item = (struct pattern_node *)item->next) {
+                if (match_pattern((struct ast *)item, value, bindings))
+                    return true;
+                for (size_t i = mark; i < bindings.size(); ++i)
+                    freeval(bindings[i].value);
+                bindings.resize(mark);
+            }
+            return false;
+        }
+        case NODE_PATTERN_RANGE:
+            return value->type == T_int &&
+                   ((struct int_value_t *)value)->value >= pattern->range_start &&
+                   ((struct int_value_t *)value)->value <= pattern->range_end;
         case NODE_PATTERN_REST:
             yyerror("rest pattern is only allowed at the end of a list "
                     "or dict pattern");
@@ -287,6 +303,30 @@ static struct pattern_node *pattern_unwrap_as(struct ast *pattern_ast) {
     return pattern;
 }
 
+static bool pattern_covers_all(enum_def *def, struct value_t *subject,
+                              struct pattern_node *pattern) {
+    pattern = pattern_unwrap_as((struct ast *)pattern);
+    if (!pattern)
+        return false;
+    if (pattern->nodetype == NODE_PATTERN_BINDING)
+        return true;
+    if (pattern->nodetype == NODE_PATTERN_TYPE &&
+        type_constraint_matches(pattern->type, subject))
+        return true;
+    if (pattern->nodetype == NODE_PATTERN_OR) {
+        for (struct pattern_node *item = (struct pattern_node *)pattern->items;
+             item; item = (struct pattern_node *)item->next) {
+            if (pattern_covers_all(def, subject, item))
+                return true;
+        }
+    }
+    return false;
+}
+
+static void collect_enum_variants(enum_def *def,
+                                  struct pattern_node *pattern,
+                                  std::vector<bool> &covered);
+
 static bool pattern_enum_variant(enum_def *def,
                                  struct pattern_node *pattern,
                                  int &variant) {
@@ -314,6 +354,23 @@ static bool pattern_enum_variant(enum_def *def,
     return false;
 }
 
+static void collect_enum_variants(enum_def *def,
+                                  struct pattern_node *pattern,
+                                  std::vector<bool> &covered) {
+    pattern = pattern_unwrap_as((struct ast *)pattern);
+    if (!pattern)
+        return;
+    if (pattern->nodetype == NODE_PATTERN_OR) {
+        for (struct pattern_node *item = (struct pattern_node *)pattern->items;
+             item; item = (struct pattern_node *)item->next)
+            collect_enum_variants(def, item, covered);
+        return;
+    }
+    int variant = -1;
+    if (pattern_enum_variant(def, pattern, variant))
+        covered[(size_t)variant] = true;
+}
+
 bool match_exhaustive_check(struct ast *arms, struct value_t *subject) {
     if (!subject || subject->type != T_enum)
         return true;
@@ -335,15 +392,9 @@ bool match_exhaustive_check(struct ast *arms, struct value_t *subject) {
         struct pattern_node *pattern = pattern_unwrap_as(arm->pattern);
         if (!pattern)
             continue;
-        if (pattern->nodetype == NODE_PATTERN_BINDING)
-            return true; /* binding or wildcard */
-        if (pattern->nodetype == NODE_PATTERN_TYPE &&
-            type_constraint_matches(pattern->type, subject))
+        if (pattern_covers_all(def, subject, pattern))
             return true;
-
-        int variant = -1;
-        if (pattern_enum_variant(def, pattern, variant))
-            covered[(size_t)variant] = true;
+        collect_enum_variants(def, pattern, covered);
     }
 
     std::string missing;

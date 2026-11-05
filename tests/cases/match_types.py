@@ -651,3 +651,46 @@ def run_cases():
           'let e = E::A;\n'
           'match (e) { case E::A if true => 1; }\n',
           stderr="match is not exhaustive: missing E::A, E::B")
+
+    check("match or pattern",
+          'print(match (2) { case 1 | 2 | 3 => "small"; default => "other"; });\n'
+          'print(match ("b") { case "a" | "b" => "ab"; default => "x"; });\n',
+          stdout_all=["small", "ab"])
+    check("match range pattern",
+          'print(match (3) { case 1..5 => "low"; case 6..9 => "high"; '
+          'default => "other"; });\n'
+          'print(match (7) { case 1..5 => "low"; case 6..9 => "high"; '
+          'default => "other"; });\n',
+          stdout_all=["low", "high"])
+    check("match enum or exhaustive",
+          'enum E { A; B; C; }\n'
+          'let e = E::B;\n'
+          'print(match (e) { case E::A | E::B | E::C => "all"; });\n',
+          stdout="all")
+    check("match enum or missing variant",
+          'enum E { A; B; C; }\n'
+          'let e = E::A;\n'
+          'match (e) { case E::A | E::B => 1; }\n',
+          stderr="match is not exhaustive: missing E::C")
+    check("function parameter destructuring",
+          'func sum([a, b]) { return a + b; }\n'
+          'func pair({x, y}) { return x * y; }\n'
+          'struct P { x: int; y: int; }\n'
+          'func point(P {x, y}) { return x + y; }\n'
+          'func rest([h, ...t]) { return str(h) + ":" + str(len(t)); }\n'
+          'print(sum([2, 3]));\n'
+          'print(pair({"x": 3, "y": 4}));\n'
+          'print(point(P { x: 5, y: 6 }));\n'
+          'print(rest([9, 8, 7]));\n',
+          stdout_all=["5", "12", "11", "9:2"])
+    check("function parameter destructuring mismatch",
+          'func f([a, b]) { return a + b; }\n'
+          'f([1]);\n',
+          stderr="function parameter does not match its pattern")
+
+    check("match or pattern binding rollback",
+          'print(match ([1, 2]) { case [a] | [a, b] => a + b; '
+          'default => 0; });\n'
+          'print(match ({"x": 1}) { case {x: a, y: b} | {x: a} => a; '
+          'default => 0; });\n',
+          stdout_all=["3", "1"])

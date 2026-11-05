@@ -53,6 +53,7 @@ struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
     sl->next = next;
     sl->variadic = variadic;
     sl->default_value = default_value;
+    sl->pattern = NULL;
     return sl;
 }
 

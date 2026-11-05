@@ -28,6 +28,7 @@ struct symbol *newsym(const char *name) {
     s->exported = false;
     s->is_const = false;
     s->is_uninitialized = false;
+    s->global_slot = UINT32_MAX;
     return s;
 }
 

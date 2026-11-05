@@ -52,6 +52,52 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
     )
     check(
+        "global slot compound updates",
+        "let g = 1;\n"
+        "func f() {\n"
+        "  g += 2;\n"
+        "  g++;\n"
+        "  ++g;\n"
+        "  return g;\n"
+        "}\n"
+        "print(f());\n"
+        "print(g);\n",
+        stdout_all=["5", "5"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
+        "global slot respects local shadowing",
+        "let x = 10;\n"
+        "func f() {\n"
+        "  let x = 1;\n"
+        "  if (true) { let x = 2; print(x); }\n"
+        "  return x;\n"
+        "}\n"
+        "print(f());\n"
+        "print(x);\n",
+        stdout_all=["2", "1", "10"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
+        "index cache key and mutation",
+        "let d = {\"a\": 1, \"b\": 2};\n"
+        "func get(k) { return d[k]; }\n"
+        "print(get(\"a\"));\n"
+        "print(get(\"b\"));\n"
+        "print(get(\"a\"));\n"
+        "d[\"a\"] = 9;\n"
+        "print(d[\"a\"]);\n"
+        "d[\"c\"] = 4;\n"
+        "print(d[\"a\"]);\n"
+        "print(d[\"c\"]);\n"
+        "let e = d;\n"
+        "d[\"a\"] = 7;\n"
+        "print(e[\"a\"]);\n"
+        "print(d[\"a\"]);\n",
+        stdout_all=["1", "2", "1", "9", "9", "4", "9", "7"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
         "fast call argument buffers",
         "func zero() { return 0; }\n"
         "func add(a, b, c, d, e, f, g, h) {\n"

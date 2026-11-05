@@ -4,6 +4,7 @@
 #include "verifier.h"
 #include "eval_context.h"
 #include "eval_internal.h"
+#include "scopestack.h"
 #include "structeval.h"
 
 #include <algorithm>
@@ -377,6 +378,11 @@ struct Compiler {
         desc.fields = fields;
         proto.index_ops.push_back(std::move(desc));
         return static_cast<uint32_t>(proto.index_ops.size() - 1);
+    }
+
+    uint32_t add_index_read_cache() {
+        proto.index_read_ic.emplace_back();
+        return static_cast<uint32_t>(proto.index_read_ic.size() - 1);
     }
 
     uint32_t add_struct_decl(struct struct_node *node) {
@@ -869,6 +875,16 @@ struct Compiler {
                 return static_cast<int>(i);
         }
         return -1;
+    }
+
+    int global_index(const char *name) const {
+        if (!slot_fast_path || !name ||
+            declared_names.count(name) != 0)
+            return -1;
+        int slot = global_symbol_slot(name);
+        if (slot < 0 || slot > UINT16_MAX)
+            return -1;
+        return slot;
     }
 
     static bool can_use_slots(const ast *node) {
@@ -1652,9 +1668,16 @@ struct Compiler {
                             emit(Op::LoadUpvalue, 0, 0,
                                  static_cast<uint32_t>(upvalue), here);
                         } else {
+                            int global = global_index(ref->name);
                             uint32_t index =
                                 add_name(ref->name ? ref->name : "");
-                            emit(Op::LoadName, 0, 0, index, here);
+                            if (global >= 0) {
+                                emit(Op::LoadGlobal, 0,
+                                     static_cast<uint16_t>(global),
+                                     index, here);
+                            } else {
+                                emit(Op::LoadName, 0, 0, index, here);
+                            }
                         }
                     }
                 }
@@ -1723,9 +1746,16 @@ struct Compiler {
                                 emit(Op::StoreUpvalue, 0, 0,
                                      static_cast<uint32_t>(upvalue), here);
                             } else {
+                                int global = global_index(ref->name);
                                 uint32_t index =
                                     add_name(ref->name ? ref->name : "");
-                                emit(Op::StoreName, 0, 0, index, here);
+                                if (global >= 0) {
+                                    emit(Op::StoreGlobal, 0,
+                                         static_cast<uint16_t>(global),
+                                         index, here);
+                                } else {
+                                    emit(Op::StoreName, 0, 0, index, here);
+                                }
                             }
                         }
                     }
@@ -1784,11 +1814,19 @@ struct Compiler {
                                      static_cast<uint8_t>(asgn->op), 0,
                                      static_cast<uint32_t>(upvalue), here);
                             } else {
+                                int global = global_index(ref->name);
                                 uint32_t index =
                                     add_name(ref->name ? ref->name : "");
-                                emit(Op::CompoundName,
-                                     static_cast<uint8_t>(asgn->op), 0,
-                                     index, here);
+                                if (global >= 0) {
+                                    emit(Op::CompoundGlobal,
+                                         static_cast<uint8_t>(asgn->op),
+                                         static_cast<uint16_t>(global),
+                                         index, here);
+                                } else {
+                                    emit(Op::CompoundName,
+                                         static_cast<uint8_t>(asgn->op), 0,
+                                         index, here);
+                                }
                             }
                         }
                     }
@@ -1847,11 +1885,22 @@ struct Compiler {
                                      inc->delta > 0 ? 1 : 0,
                                      static_cast<uint32_t>(upvalue), here);
                             } else {
+                                int global = global_index(ref->name);
                                 uint32_t index =
                                     add_name(ref->name ? ref->name : "");
-                                emit(Op::IncDecName,
-                                     inc->prefix ? 1 : 0,
-                                     inc->delta > 0 ? 1 : 0, index, here);
+                                if (global >= 0) {
+                                    emit(Op::IncDecGlobal,
+                                         static_cast<uint8_t>(
+                                             (inc->prefix ? 1 : 0) |
+                                             (inc->delta > 0 ? 2 : 0)),
+                                         static_cast<uint16_t>(global),
+                                         index, here);
+                                } else {
+                                    emit(Op::IncDecName,
+                                         inc->prefix ? 1 : 0,
+                                         inc->delta > 0 ? 1 : 0,
+                                         index, here);
+                                }
                             }
                         }
                     }
@@ -2074,7 +2123,8 @@ struct Compiler {
                 compile(node->l);
                 compile(node->r);
                 if (!ok) return;
-                emit(Op::GetIndex, 0, 0, 0, here);
+                emit(Op::GetIndexCached, 0, 0, add_index_read_cache(),
+                     here);
                 return;
 
             case 'j': {
@@ -3168,8 +3218,9 @@ static bool check_proto_default_references(
     std::unordered_set<const struct function_code *> &visited,
     std::string &error) {
     for (const skein::bc::Instr &ins : proto.code) {
-        if (static_cast<skein::bc::Op>(ins.op) !=
-            skein::bc::Op::LoadName)
+        const skein::bc::Op op = static_cast<skein::bc::Op>(ins.op);
+        if (op != skein::bc::Op::LoadName &&
+            op != skein::bc::Op::LoadGlobal)
             continue;
         if (ins.b >= proto.consts.size())
             continue;

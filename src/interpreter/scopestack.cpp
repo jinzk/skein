@@ -150,6 +150,7 @@ void initscope(scope_context &context) {
     context.global_scope = s;
     context.current = s;
     context.restore_stack.clear();
+    context.global_slots.clear();
     ++context.global_generation;
 }
 
@@ -171,6 +172,7 @@ void adopt_scopes(scope_context &from, scope_context &to) {
         to.all_scopes.push_back(scope);
     from.all_scopes.clear();
     from.restore_stack.clear();
+    from.global_slots.clear();
     from.current.reset();
     from.global_scope.reset();
 }
@@ -193,6 +195,7 @@ void donescope(scope_context &context) {
     context.current.reset();
     context.global_scope.reset();
     context.all_scopes.clear();
+    context.global_slots.clear();
     context.statements_since_collect = 0;
     context.scopes_at_last_collect = 0;
     ++context.global_generation;
@@ -213,7 +216,22 @@ void save_global_symbol(const char *name, value_t *v) {
     struct symbol *sym = newsym(name);
     sym->val = v;
     context.global_scope->syms.insert(sym);
+    if (sym->global_slot == UINT32_MAX) {
+        sym->global_slot = static_cast<uint32_t>(context.global_slots.size());
+        context.global_slots.push_back(sym);
+    }
     ++context.global_generation;
+}
+
+int global_symbol_slot(const char *name) {
+    scope_context &context = active_scope_context();
+    if (!context.global_scope || !name)
+        return -1;
+    struct symbol *sym =
+        context.global_scope->syms.find(std::string_view(name));
+    if (!sym || sym->global_slot == UINT32_MAX)
+        return -1;
+    return static_cast<int>(sym->global_slot);
 }
 
 value_t *lookup_global_symbol(const char *name) {
@@ -246,8 +264,14 @@ void savesym(struct symbol *sp) {
     scope_context &context = active_scope_context();
     if (!context.current) return;
     context.current->syms.insert(sp);
-    if (context.current->is_global)
+    if (context.current->is_global) {
+        if (sp && sp->global_slot == UINT32_MAX) {
+            sp->global_slot =
+                static_cast<uint32_t>(context.global_slots.size());
+            context.global_slots.push_back(sp);
+        }
         ++context.global_generation;
+    }
 }
 
 bool retval(struct value_t *r) {

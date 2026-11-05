@@ -125,6 +125,9 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - 自增/自减、复合赋值（变量目标）
 - 名字查找的内联缓存（`LOAD_NAME` / `STORE_NAME` 等）；全局名字使用
   Proto 级缓存，跨 `Executor` 复用，并以 global scope + generation 校验
+- 显式全局槽位：函数体内已解析的全局名使用
+  `LOAD_GLOBAL` / `STORE_GLOBAL` / `COMPOUND_GLOBAL` / `INCDEC_GLOBAL`；
+  槽位失效或名称不一致时回退名字查找
 
 ### 3.2 回退到 AST 的结构
 
@@ -187,6 +190,7 @@ defer 中失败也遵循同一规则。`CHECK_RESULT`、handler 清理、隐式 
 NOP
 LOAD_NULL / LOAD_CONST / LOAD_NAME
 STORE_NAME / COMPOUND_NAME / INCDEC_NAME / DEFINE_NAME
+LOAD_GLOBAL / STORE_GLOBAL / COMPOUND_GLOBAL / INCDEC_GLOBAL
 LOAD_PARAM / STORE_PARAM / COMPOUND_PARAM / INCDEC_PARAM
 DEFINE_SLOT / LOAD_SLOT / STORE_SLOT / COMPOUND_SLOT / INCDEC_SLOT / CLEAR_SLOT
 POP / DUP / SWAP
@@ -195,7 +199,7 @@ BIT_AND / BIT_OR / BIT_XOR / SHL / SHR / BIT_NOT / NOT
 CMP_EQ / CMP_NE / CMP_LT / CMP_LE / CMP_GT / CMP_GE
 IS_TYPE
 JUMP / JUMP_IF_FALSE / JUMP_IF_TRUE
-NEW_LIST / NEW_DICT / GET_INDEX / GET_FIELD / GET_FIELD_NAME
+NEW_LIST / NEW_DICT / GET_INDEX / GET_INDEX_CACHED / GET_FIELD / GET_FIELD_NAME
 ITER_NEW / ITER_NEXT / ITER_END
 SWITCH_CHECK / CASE_MATCH
 MATCH_BEGIN / MATCH_TEST / MATCH_BIND
@@ -276,8 +280,10 @@ struct Instr {
 - fast frame 支持普通函数以及 handler、defer、iterator；generator、
   async、默认参数、variadic、method 和参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
-- 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；`obj.field` 的
-  per-site 字段/方法 IC 已覆盖 struct/enum；默认参数、variadic、
+- 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；已解析的全局访问使用
+  显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位；`obj.field` 的
+  per-site 字段/方法 IC 已覆盖 struct/enum；dict 索引读取使用
+  `GET_INDEX_CACHED` per-site 缓存；默认参数、variadic、
   method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
 - 顶层块内函数、方法闭包仍使用名字查找；默认参数 / defer 子 Proto
   暂未使用 upvalue 索引。

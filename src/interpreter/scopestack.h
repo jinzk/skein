@@ -45,6 +45,8 @@ struct scope_context {
     std::shared_ptr<scope_t> global_scope;
     std::vector<std::shared_ptr<scope_t>> restore_stack;
     std::vector<std::weak_ptr<scope_t>> all_scopes;
+    /* Stable index table for global symbols, used by LOAD_GLOBAL et al. */
+    std::vector<struct symbol *> global_slots;
     int statements_since_collect = 0;
     size_t scopes_at_last_collect = 0;
     uint64_t global_generation = 0;
@@ -70,6 +72,8 @@ void clear_scope(struct scope_t *s);
 void prune_scopes(scope_context &context);
 void save_global_symbol(const char *name, value_t *v);
 value_t *lookup_global_symbol(const char *name);
+/* Stable global slot for `name`, or -1 if it is not a current global. */
+int global_symbol_slot(const char *name);
 struct symbol *lookupsym(const char *);
 bool isrepeated(const char *);
 void savesym(struct symbol *);

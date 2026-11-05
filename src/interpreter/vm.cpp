@@ -67,6 +67,8 @@ struct vm_stats_data {
     uint64_t name_ic_misses = 0;
     uint64_t member_ic_hits = 0;
     uint64_t member_ic_misses = 0;
+    uint64_t index_ic_hits = 0;
+    uint64_t index_ic_misses = 0;
     uint64_t max_depth = 0;
     uint64_t max_stack = 0;
     uint64_t max_handler_depth = 0;
@@ -435,6 +437,22 @@ public:
                     break;
                 }
 
+                case Op::LoadGlobal: {
+                    const char *name = name_at(proto(), ins.b);
+                    struct symbol *sym = global_symbol(ins.a, ins.b);
+                    if (!sym) {
+                        yyerror("symbol not found %s", name);
+                        return abort_error();
+                    }
+                    if (sym->is_uninitialized) {
+                        yyerror("parameter %s is used before it is initialized",
+                                name);
+                        return abort_error();
+                    }
+                    push(dupval(sym->val));
+                    break;
+                }
+
                 case Op::StoreName: {
                     value_t *value = pop_checked();
                     if (!value)
@@ -485,6 +503,65 @@ public:
                     }
                     value_t *result = increment_symbol_direct(
                         sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::StoreGlobal: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    struct symbol *sym = global_symbol(ins.a, ins.b);
+                    if (!sym) {
+                        yyerror("symbol not found %s",
+                                name_at(proto(), ins.b));
+                        freeval(value);
+                        return abort_error();
+                    }
+                    value_t *result = assign_symbol_direct(sym, value);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::CompoundGlobal: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    struct symbol *sym = global_symbol(ins.a, ins.b);
+                    if (!sym) {
+                        yyerror("symbol not found %s",
+                                name_at(proto(), ins.b));
+                        freeval(value);
+                        return abort_error();
+                    }
+                    value_t *result = compound_symbol_direct(
+                        sym, (int)ins.flags, value);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::IncDecGlobal: {
+                    struct symbol *sym = global_symbol(ins.a, ins.b);
+                    if (!sym) {
+                        yyerror("symbol not found %s",
+                                name_at(proto(), ins.b));
+                        return abort_error();
+                    }
+                    value_t *result = increment_symbol_direct(
+                        sym, (ins.flags & 2) ? 1 : -1,
+                        (ins.flags & 1) != 0);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -1145,6 +1222,27 @@ public:
                     }
                     value_t *result = read_member_value(
                         container, index, static_cast<Op>(ins.op) == Op::GetField);
+                    freeval(container);
+                    freeval(index);
+                    if (!result)
+                        return abort_error();
+                    push(result);
+                    break;
+                }
+
+                case Op::GetIndexCached: {
+                    value_t *index = pop_checked();
+                    value_t *container = pop_checked();
+                    if (!index || !container) {
+                        freeval(index);
+                        freeval(container);
+                        return abort_error();
+                    }
+                    skein::bc::IndexReadCacheEntry *cache = NULL;
+                    if (ins.b < proto().index_read_ic.size())
+                        cache = &proto().index_read_ic[ins.b];
+                    value_t *result =
+                        read_index_cached(container, index, cache);
                     freeval(container);
                     freeval(index);
                     if (!result)
@@ -2722,6 +2820,39 @@ private:
         return value;
     }
 
+    value_t *read_index_cached(value_t *container, value_t *index,
+                               skein::bc::IndexReadCacheEntry *cache) {
+        if (container && container->type == T_dict) {
+            struct dict_value_t *dict = (struct dict_value_t *)container;
+            if (!dict_key_allowed(index)) {
+                yyerror("%s, got %s", dict_key_error(),
+                        typename_of(index));
+                return NULL;
+            }
+            const auto &items = dict->payload->items;
+            if (cache && cache->index >= 0 && cache->size == items.size() &&
+                (size_t)cache->index < items.size() &&
+                value_equals(items[(size_t)cache->index].first, index)) {
+                if (vm_stats.enabled)
+                    ++vm_stats.index_ic_hits;
+                return dupval(items[(size_t)cache->index].second);
+            }
+            if (vm_stats.enabled)
+                ++vm_stats.index_ic_misses;
+            int found = dict_find_index(dict, index);
+            if (found < 0) {
+                yyerror("key not found");
+                return NULL;
+            }
+            if (cache) {
+                cache->size = items.size();
+                cache->index = found;
+            }
+            return dupval(items[(size_t)found].second);
+        }
+        return read_member_value(container, index, false);
+    }
+
     value_t *read_field_cached(value_t *container, const char *name,
                                skein::bc::MemberCacheEntry *cache) {
         if (!container || !name)
@@ -2840,6 +2971,17 @@ private:
         if (index >= proto().member_ic.size())
             return NULL;
         return &proto().member_ic[index];
+    }
+
+    struct symbol *global_symbol(uint16_t slot, uint32_t name_index) {
+        scope_context &scope = active_scope_context();
+        const char *name = name_at(proto(), name_index);
+        if (slot < scope.global_slots.size()) {
+            struct symbol *sym = scope.global_slots[slot];
+            if (sym && sym->name && std::strcmp(sym->name, name) == 0)
+                return sym;
+        }
+        return cached_symbol(name_index);
     }
 
     struct symbol *cached_symbol(uint32_t index) {
@@ -3866,6 +4008,10 @@ void skein_vm_stats_report() {
                  "[vm-stats] member-ic hits=%llu misses=%llu\n",
                  (unsigned long long)vm_stats.member_ic_hits,
                  (unsigned long long)vm_stats.member_ic_misses);
+    std::fprintf(stderr,
+                 "[vm-stats] index-ic hits=%llu misses=%llu\n",
+                 (unsigned long long)vm_stats.index_ic_hits,
+                 (unsigned long long)vm_stats.index_ic_misses);
     std::fprintf(stderr,
                  "[vm-stats] max-depth=%llu max-stack=%llu "
                  "max-handler=%llu max-defer=%llu max-iterator=%llu\n",

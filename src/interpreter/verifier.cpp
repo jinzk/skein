@@ -140,6 +140,26 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
                 return false;
             stack(0, 1);
             break;
+        case Op::LoadGlobal:
+            if (!check_constant(proto, ins.b, pc, error, true,
+                                ConstantKind::Name))
+                return false;
+            stack(0, 1);
+            break;
+        case Op::StoreGlobal:
+        case Op::CompoundGlobal:
+            if (!check_constant(proto, ins.b, pc, error, true,
+                                ConstantKind::Name))
+                return false;
+            need(1);
+            stack(1, 1);
+            break;
+        case Op::IncDecGlobal:
+            if (!check_constant(proto, ins.b, pc, error, true,
+                                ConstantKind::Name))
+                return false;
+            stack(0, 1);
+            break;
         case Op::LoadParam:
             if (!check_param(proto, ins.b, pc, error))
                 return false;
@@ -310,6 +330,13 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
         }
         case Op::GetIndex:
         case Op::GetField:
+            need(2);
+            stack(2, 1);
+            break;
+        case Op::GetIndexCached:
+            if (ins.b >= proto.index_read_ic.size())
+                return fail(error,
+                            at_pc("index cache descriptor out of range", pc));
             need(2);
             stack(2, 1);
             break;

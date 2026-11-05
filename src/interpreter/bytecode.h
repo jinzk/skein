@@ -43,6 +43,10 @@ enum class Op : uint8_t {
     StoreName,
     CompoundName,
     IncDecName,
+    LoadGlobal,
+    StoreGlobal,
+    CompoundGlobal,
+    IncDecGlobal,
     DefineName,
     CheckRedefine,
     LoadParam,
@@ -95,6 +99,7 @@ enum class Op : uint8_t {
     NewList,
     NewDict,
     GetIndex,
+    GetIndexCached,
     GetField,
     GetFieldName,
 
@@ -358,6 +363,15 @@ struct MemberCacheEntry {
 };
 
 /*
+ * Per-call-site cache for indexing.  The key at `index` is revalidated on
+ * every hit, so copy-on-write payload replacement and reordering stay safe.
+ */
+struct IndexReadCacheEntry {
+    size_t size = 0;
+    int index = -1;
+};
+
+/*
  * A compiled function or top-level chunk.
  *
  * `locs` is parallel to `code`: one source location per instruction.  This is
@@ -374,6 +388,7 @@ struct Proto {
     std::vector<Constant> consts;
     mutable std::vector<NameCacheEntry> name_ic;
     mutable std::vector<MemberCacheEntry> member_ic;
+    mutable std::vector<IndexReadCacheEntry> index_read_ic;
     std::vector<SourceLoc> locs;
     std::vector<IterDesc> iters;
     std::vector<IndexDesc> index_ops;

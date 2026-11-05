@@ -1,0 +1,13 @@
+let mapping = {"key": 3, "other": 5};
+
+func read(n) {
+  let total = 0;
+  let i = 0;
+  while (i < n) {
+    total = total + mapping["key"];
+    i = i + 1;
+  }
+  return total;
+}
+
+print(read(1000000));

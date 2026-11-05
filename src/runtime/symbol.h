@@ -47,6 +47,8 @@ struct symbol {
     bool is_const;
     /* True for a parameter bound without a value while evaluating defaults. */
     bool is_uninitialized;
+    /* Stable index in scope_context::global_slots, or UINT32_MAX. */
+    uint32_t global_slot = UINT32_MAX;
 };
 
 struct symlist {

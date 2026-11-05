@@ -23,6 +23,8 @@ BENCHMARKS = [
     ("pattern", ROOT / "benchmarks" / "pattern_bench.skein", 1.5),
     ("field", ROOT / "benchmarks" / "field_bench.skein", 1.5),
     ("method", ROOT / "benchmarks" / "method_bench.skein", 1.5),
+    ("global", ROOT / "benchmarks" / "global_bench.skein", 1.5),
+    ("index", ROOT / "benchmarks" / "index_bench.skein", 1.5),
 ]
 
 

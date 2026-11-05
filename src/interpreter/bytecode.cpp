@@ -15,6 +15,10 @@ const char *op_name(Op op) {
         case Op::StoreName: return "STORE_NAME";
         case Op::CompoundName: return "COMPOUND_NAME";
         case Op::IncDecName: return "INCDEC_NAME";
+        case Op::LoadGlobal: return "LOAD_GLOBAL";
+        case Op::StoreGlobal: return "STORE_GLOBAL";
+        case Op::CompoundGlobal: return "COMPOUND_GLOBAL";
+        case Op::IncDecGlobal: return "INCDEC_GLOBAL";
         case Op::DefineName: return "DEFINE_NAME";
         case Op::CheckRedefine: return "CHECK_REDEFINE";
         case Op::LoadParam: return "LOAD_PARAM";
@@ -61,6 +65,7 @@ const char *op_name(Op op) {
         case Op::NewList: return "NEW_LIST";
         case Op::NewDict: return "NEW_DICT";
         case Op::GetIndex: return "GET_INDEX";
+        case Op::GetIndexCached: return "GET_INDEX_CACHED";
         case Op::GetField: return "GET_FIELD";
         case Op::GetFieldName: return "GET_FIELD_NAME";
         case Op::IterNew: return "ITER_NEW";
@@ -155,6 +160,8 @@ std::string disassemble(const Proto &proto) {
             op == Op::LoadConst || op == Op::LoadName ||
             op == Op::StoreName || op == Op::CompoundName ||
             op == Op::IncDecName ||
+            op == Op::LoadGlobal || op == Op::StoreGlobal ||
+            op == Op::CompoundGlobal || op == Op::IncDecGlobal ||
             op == Op::GetFieldName ||
             op == Op::IsType ||
             op == Op::BindName ||
@@ -179,6 +186,8 @@ std::string disassemble(const Proto &proto) {
                 << proto.index_ops[ins.b].base_name << ","
                 << proto.index_ops[ins.b].fields.size() << ")";
         }
+        if (op == Op::GetIndexCached)
+            out << " cache=" << ins.b;
         if (op == Op::Import && ins.a < proto.imports.size())
             out << " import=" << proto.imports[ins.a].path;
         if (op == Op::DeferPush && ins.b < proto.defer_protos.size())

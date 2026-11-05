@@ -4,9 +4,9 @@
 依赖关系、里程碑和验收标准。
 
 - 更新日期：2026-11-05
-- 当前基线：`4e29575`；工作区另有未提交的 N1/N2 改动
+- 当前基线：`8dc7feb`
 - 目标：把 VM 从“实验后端”推进为默认后端，并移除运行期 AST 依赖
-- 当前阶段：M1 完成；未完成部分按 §8 的 N1–N4 重排执行
+- 当前阶段：N1 完成；N2 进行中（N2-1/2/3/4 部分完成）
 
 ## 1. 目标与非目标
 
@@ -75,12 +75,14 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 200 万次局部循环 | 0.494s | 0.407s |
-| `fib(27)` | 0.172s | 0.167s |
-| 100 万次函数调用 | 0.423s | 0.419s |
-| 20 万次参数 pattern 调用 | 0.213s | 0.249s |
-| 100 万次字段读取 | 0.373s | 0.261s |
-| 30 万次方法调用 | 0.169s | 0.152s |
+| 200 万次局部循环 | 0.502s | 0.399s |
+| `fib(27)` | 0.193s | 0.194s |
+| 100 万次函数调用 | 0.461s | 0.458s |
+| 20 万次参数 pattern 调用 | 0.226s | 0.286s |
+| 100 万次字段读取 | 0.374s | 0.257s |
+| 30 万次方法调用 | 0.180s | 0.180s |
+| 100 万次全局更新 | 0.245s | 0.204s |
+| 100 万次 dict 索引读取 | 0.297s | 0.254s |
 
 ### 2.4 基线缺口
 
@@ -89,8 +91,8 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
   async、默认参数、variadic、method、参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
 - 尾调用只覆盖无 spread 的普通调用。
-- 全局名字 IC、字段/方法 per-site IC 已完成；显式全局 slot、
-  索引读取/赋值 IC 仍待完成。
+- 全局名字 IC、全局槽位、字段/方法 per-site IC、dict 索引读取 IC
+  已完成；索引写入 IC、局部 per-site cache 仍待完成。
 - 值表示仍是堆分配 `value_t*`，尚无 tagged value / unboxed slot；
   调用参数已对小参数数量使用栈内缓冲，fast-frame 向量按深度复用。
 - 指令优化已有运算快路径、`CMP_JUMP`、常量折叠、跳转线程化和
@@ -137,7 +139,9 @@ VM 执行缓存和函数体 / 默认参数 / 参数 pattern AST 现在位于 L2 
 | 部分完成 | 4 | W3-2、W3-3、W3-4、W5-2 |
 | 进行中 | 0 | - |
 | 暂缓（按需） | 4 | W2-3、W2-4、W4-4、W5-4 |
-| TODO | 0 | - |
+| TODO | 1 | A-1 |
+
+> 共 28 项：27 项 W 任务 + A-1 VM/bytecode 分层。
 
 ## 3. 任务分解
 
@@ -564,7 +568,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-2 全局 slot 与内联缓存（P2，L）
 
-状态：**部分完成（2026-11-05，全局名字 IC + 字段/方法 per-site IC）**。
+状态：**部分完成（2026-11-05，全局名字 IC + 全局槽位 + 字段/方法 per-site IC）**。
 
 已完成：
 
@@ -595,24 +599,37 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - dict namespace / userdata / 其他成员访问保留通用路径；
    - 方法读取也使用同一 per-site IC。
 9. VM 统计新增 `member-ic hits/misses`；新增 `field` / `method` 基准。
+10. 显式全局槽位：
+    - `symbol` 增加稳定 `global_slot`；
+    - `scope_context` 维护 `global_slots`，全局符号插入时分配；
+    - 函数体内已解析全局名编译为 `LOAD_GLOBAL` / `STORE_GLOBAL` /
+      `COMPOUND_GLOBAL` / `INCDEC_GLOBAL`；
+    - 执行时槽位名称不匹配或失效则回退 `cached_symbol()`；
+    - 新增 `global` 基准。
+11. 索引读取 per-site 缓存：
+    - `GET_INDEX` 编译为 `GET_INDEX_CACHED`；
+    - `Proto::index_read_ic` 记录 `items.size()` 与命中下标；
+    - 命中时重新校验 key，写入/追加/copy-on-write 后安全失效；
+    - 新增 `index` 基准与 `index-ic` 统计。
 
 效果：
 
 - `fib(30)` 从约 0.75s 降到约 0.70s，与 AST 持平。
 - `call_bench` VM 约 0.82s，AST 约 0.85s。
 - 结构体字段 / enum variant 查找从线性扫描改为哈希查找。
-- `field_bench` VM/AST 约 0.71；`method_bench` VM/AST 约 0.94。
+- `field_bench` VM/AST 约 0.69；`method_bench` VM/AST 约 1.00；
+  `global_bench` VM/AST 约 0.83；`index_bench` VM/AST 约 0.86。
 
 剩余：
 
-1. 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位与模块级符号表。
-2. 索引读取 / 赋值的 per-call-site IC。
-3. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
+1. 索引写入 / 复合赋值的 per-call-site IC。
+2. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
 
 验收：
 
 - 调用密集基准达到或超过 AST：**已满足**。
-- 其余 IC 项仍待完成。
+- 全局 / 字段 / 方法访问基准不退化：**已满足**。
+- 索引 IC 与局部 cache 仍待完成。
 
 #### W3-3 值表示与分配（P2，XL）
 
@@ -852,6 +869,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 - fallback call 数
 - 全局名字 IC 命中/未命中
 - 字段 / 方法 per-site member IC 命中/未命中
+- dict 索引读取 per-site IC 命中/未命中
 - 最大 VM 调用深度
 - 最大操作数栈深
 - 最大 handler / defer / active iterator 深度
@@ -867,6 +885,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 [vm-stats] instructions=32 calls=4 fast=2 tail=0 fallback=2
 [vm-stats] name-ic hits=0 misses=3
 [vm-stats] member-ic hits=1998 misses=2
+[vm-stats] index-ic hits=999 misses=1
 [vm-stats] max-depth=2 max-stack=4 max-handler=1 max-defer=0 max-iterator=0
 [vm-stats] compile=0.016ms execute=0.068ms
 [vm-stats] opcodes LOAD_CONST=5 CALL=4 ...
@@ -934,6 +953,8 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
    - `pattern_bench.skein`
    - `field_bench.skein`
    - `method_bench.skein`
+   - `global_bench.skein`
+   - `index_bench.skein`
 2. 新增 `tools/bench_vm.py`：
    - 每个基准分别用 `SKEIN_VM=0` / `SKEIN_VM=1` 运行
    - 默认 3 次，报告中位数
@@ -1156,6 +1177,7 @@ W5-4 按需暂缓）。
 | W5-4 序列化/AOT | P3 | XL | 暂缓（按需） | W2-5/W4 |
 | W5-5 CI/Sanitizer | P2 | M | 完成（2026-11-05） | - |
 | W5-6 文档维护 | P2 | S | 完成（2026-11-05） | 各里程碑 |
+| A-1 VM/bytecode 分层 | P2 | L | TODO | W4-5/W3-2 |
 
 状态约定：`TODO` / `进行中` / `阻塞` / `完成` / `暂缓（按需）`。
 每个任务完成时同步更新本表和 `docs/bytecode.md`。
@@ -1164,7 +1186,8 @@ W5-4 按需暂缓）。
 
 ### 8.1 原则
 
-1. 先完成 M5（运行期 AST/元数据）与 M6（产品化）的收口工作。
+1. N1（运行期 AST / 元数据 / CI 收口）已完成；剩余工作按 N2 性能、
+   N3 架构、N4 产品化推进。
 2. 不再无界扩展后端能力；只做能被差分、基准或统计验证的任务。
 3. 大任务拆成可独立验收的小步，每步保持：
    - 标准测试集零 fallback
@@ -1172,6 +1195,7 @@ W5-4 按需暂缓）。
    - verifier 通过
    - benchmark 不退化
 4. 动态 handler/defer 栈和原生 fiber 已能通过全部测试，相关重写暂缓。
+5. VM / bytecode 分层先做逻辑边界，N2 稳定后再物理拆 target。
 
 ### 8.2 N1：收口阶段（P0）
 
@@ -1227,25 +1251,64 @@ W5-4 按需暂缓）。
 - 已记录当前支持范围、已知限制、基准数据。
 - 已给出 VM-only / 默认构建 / `--no-vm` 的明确说明。
 
-### 8.3 N2：性能阶段（P1）
+### 8.3 剩余任务重排（2026-11-05）
 
-#### N2-1 W3-2 全局 slot 与 per-site IC
+N1 已完成。剩余工作按“性能 → 架构 → 产品化”重排，每个任务都必须
+能被测试、差分、基准或统计验证，不再无界扩展后端能力。
+
+### 8.4 N2：性能与执行器收尾（P1）
+
+目标：在不改变语义、错误文本和字节码可验证性的前提下，把剩余性能
+热点做透，并补齐可观测性。
+
+N2 退出条件：
+
+- `vm_bench_test` / `container_bench_test` 通过；
+- `SKEIN_VM_DEBUG=1` 下标准测试零 fallback；
+- opcode 覆盖统计可生成；
+- 所有优化可通过开关关闭并保持语义一致。
+
+#### N2-1 W3-2 全局访问与 IC 收尾
 
 状态：**部分完成（2026-11-05）**。
 
 已完成：
 
-- `obj.field`（常量字段名）使用 `GET_FIELD_NAME` 与 per-site
-  `MemberCacheEntry`，覆盖 struct/enum 字段与方法读取；
-- IC 命中/未命中统计；
-- 新增 `field` / `method` 基准。
+- 全局名字 IC；
+- 显式全局槽位 `LOAD_GLOBAL` / `STORE_GLOBAL` / `COMPOUND_GLOBAL` /
+  `INCDEC_GLOBAL`；
+- struct/enum 字段索引表；
+- `GET_FIELD_NAME` per-site member IC（字段 / 方法）；
+- `GET_INDEX_CACHED` per-site dict 索引读取缓存；
+- member / index IC 命中/未命中统计；
+- `field` / `method` / `global` / `index` 基准。
 
-仍未完成：
+已完成子任务：
 
-- 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位；
-- 索引读取 / 赋值的 per-call-site IC。
+1. **N2-1.1 显式全局槽位**
+   - 全局符号表维护稳定 `global_slot`；
+   - 函数体内已解析的全局名直接访问槽位；
+   - 槽位失效或名称不一致时回退名字查找；
+   - 验收：`global_bench` VM/AST 约 0.83，差分通过。
 
-验收：调用密集、字段访问密集基准不退化；`vm_bench_test` 通过。
+2. **N2-1.2 索引读取 IC**
+   - `GET_INDEX` 编译为 `GET_INDEX_CACHED`；
+   - 缓存 dict 的 `items.size()` 与命中下标；
+   - 命中时重新校验该下标的 key，兼容 copy-on-write、追加和值替换；
+   - 验收：`index_bench` VM/AST 约 0.86，差分通过。
+
+剩余子任务：
+
+2. **N2-1.3 索引写入 / 复合赋值 IC**
+   - `ASSIGN_INDEX` / `COMPOUND_INDEX` / `INCDEC_INDEX` 的
+     per-site 描述符缓存；
+   - 覆盖 struct 字段、dict 键、list 下标；
+   - 验收：写密集基准不退化，错误文本不变。
+
+3. **N2-1.4 局部 name cache per-site 化**
+   - 减少 `PopScope` / 同名声明后的整表失效；
+   - 保留动态绑定（match / on error / import）的正确性；
+   - 验收：局部作用域密集基准提升。
 
 #### N2-2 W3-3 值表示与分配
 
@@ -1253,18 +1316,32 @@ W5-4 按需暂缓）。
 
 已完成：
 
-- `CALL` / `TAIL_CALL` 小参数数量走栈内数组；
+- `CALL` / `TAIL_CALL` 小参数数量使用栈内数组；
 - fast call 的 name/slot/param 向量按深度复用；
-- 参数绑定不再构造临时 `std::vector`。
+- fast call 参数绑定使用指针 + 数量。
 
-仍未完成：
+剩余子任务：
 
-- tagged value 或等价的小值内联方案；
-- 非捕获局部 slot 尽量不经过 `symbol*` cell；
-- 减少每帧 `value_t` / `symbol` 分配；
-- 对象分配器/arena。
+1. **N2-2.1 参数 symbol 与帧值复用**
+   - 分析哪些参数/局部变量不会被闭包或 defer 捕获；
+   - 未被捕获时复用 `symbol` 或直接使用帧 slot；
+   - 保持 upvalue、defer、method、for-in 语义；
+   - 验收：`fib` / `call` / `slot` 基准提升。
 
-验收：`fib`、slot、call 基准提升；内存不显著上升。
+2. **N2-2.2 非捕获局部去 `symbol*` cell**
+   - 局部 slot 在无捕获时直接存 `value_t*`；
+   - 需要捕获时再提升为 symbol cell；
+   - 验收：slot 基准提升，闭包差分通过。
+
+3. **N2-2.3 tagged value / unboxed slot（决策点）**
+   - 先评估 2.1 / 2.2 后的剩余分配热点；
+   - 若仍以 `value_t` 堆分配为主，再引入 tagged value 或等价方案；
+   - 不在没有基准依据时直接重写值模型；
+   - 验收：内存不显著上升，容器/闭包/defer 语义不变。
+
+4. **N2-2.4 分配器 / arena（可选）**
+   - 仅在 profile 显示 malloc 占比明显时启用；
+   - 必须保留循环引用检查和现有释放路径。
 
 #### N2-3 W3-4 指令优化收尾
 
@@ -1272,95 +1349,167 @@ W5-4 按需暂缓）。
 
 已完成：
 
+- `CMP_JUMP` 比较跳转融合；
+- 安全常量折叠；
 - 跳转线程化；
-- 不可达指令消除（含跳转目标/源码位置重映射）；
+- 不可达指令消除；
 - `SKEIN_VM_OPT=0` 优化开关。
 
-仍未完成：
+剩余子任务：
 
-- 更多超指令；
-- computed goto / table dispatch；
-- 宽指令格式，解决 16 位操作数上限。
+1. **N2-3.1 超指令**
+   - 优先组合 `LOAD_SLOT` / `LOAD_PARAM` + 常用运算 + `STORE_*`；
+   - 只融合可验证、可反汇编、可关闭的组合；
+   - 验收：slot / call / fib 基准有可量化收益。
 
-验收：优化可开关，关闭时语义一致；基准有可量化收益。
+2. **N2-3.2 computed goto / table dispatch**
+   - 在支持的编译器上提供直接线程化 dispatch；
+   - 保留可移植 switch 回退；
+   - 验收：执行循环基准提升，ASan/UBSan 通过。
 
-#### N2-4 W5-2 差分与模糊测试扩展
+3. **N2-3.3 宽指令格式**
+   - 解决 16 位操作数与描述符上限；
+   - 保持现有 8 字节指令的紧凑路径；
+   - 验收：大常量/大描述符 Proto 可编译并通过 verifier。
+
+4. **N2-3.4 常量分支折叠**
+   - 对编译期确定的 `if` / 条件表达式删除不可达分支；
+   - 与 DCE、跳转线程化协同；
+   - 验收：生成代码缩小，差分通过。
+
+#### N2-4 W5-2 测试与观测收尾
 
 状态：**部分完成（2026-11-05）**。
 
 已完成：
 
-- 错误路径、空容器、边界溢出、generator / async 生成；
-- VM fallback 原因断言；
-- 可选长时间 fuzz 与失败最小化；
-- 3 个额外 seed 各 400 例通过。
+- 错误路径、空容器、边界溢出、struct/enum、generator/async 生成；
+- VM fallback 断言；
+- `--fuzz-seconds` 与失败最小化；
+- 多 seed 差分通过。
 
-仍未完成：
+剩余子任务：
 
-- 每个 opcode 至少一个直接或间接用例；
-- opcode 覆盖统计。
+1. **N2-4.1 opcode 覆盖统计**
+   - 从 `SKEIN_VM_STATS` 或独立工具生成 opcode 覆盖表；
+   - 每个 opcode 至少一个直接或间接用例；
+   - 未覆盖 opcode 输出清单。
 
-验收：随机差分稳定，失败时能最小化复现。
+2. **N2-4.2 复杂作用域生成器**
+   - 嵌套闭包、defer、on error、match binding、import；
+   - 参数 pattern + 默认参数 + variadic 组合；
+   - 验收：差分稳定，失败可最小化。
 
-### 8.4 N3：架构阶段（P2，按需）
+3. **N2-4.3 fallback 原因回归**
+   - 对标准测试集断言 fallback 原因为空；
+   - 新增结构若暂时回退，必须有显式白名单和原因。
+
+4. **N2-4.4 长时 fuzz（可选）**
+   - 作为独立目标，不阻塞普通 CTest；
+   - 记录 seed、耗时和最小复现。
+
+### 8.5 N3：架构与可维护性（P2，按需）
 
 #### N3-1 W2-3 handler/defer 编译期表
 
-仅在统计显示 handler/defer 开销明显时执行：
+触发条件：统计显示 handler/defer 开销明显。
 
-- 编译期 handler table / defer table。
-- 统一 unwind 路径。
+- 编译期 handler table / defer table；
+- 统一 unwind 路径；
 - 保留现有 defer / recover / pass 语义。
 
 #### N3-2 W2-4 generator/async 显式帧
 
-仅在需要轻量协程或序列化挂起状态时执行：
+触发条件：需要轻量协程或可序列化挂起状态。
 
-- 显式保存 pc、帧、handler/defer。
-- 减少原生 fiber 栈依赖。
-- generator 创建/挂起/关闭压力测试。
+- 显式保存 pc、帧、handler/defer；
+- 减少原生 fiber 栈依赖；
+- generator 创建 / 挂起 / 关闭压力测试。
 
 #### N3-3 W4-4 调试信息
 
-- 压缩 `Proto::locs`。
-- 调试用的 slot / 参数名。
+触发条件：需要调试器或更完整栈回溯。
+
+- 压缩 `Proto::locs`；
+- 调试用 slot / 参数名；
 - VM 栈回溯统一格式。
 
-### 8.5 N4：产品化阶段（P3）
+#### N3-4 A-1 VM / bytecode 分层
+
+状态：**TODO**。
+
+目标：把“字节码表示 + verifier + 执行器”与 AST 编译/回退桥接解耦。
+
+分步：
+
+1. **逻辑分层**：把 `bytecode.*` / `verifier.*` 收敛为纯 L1 依赖的
+   `skein_bytecode` 候选；
+2. **执行器接口**：执行器接收 `Proto` + frame + `VmCallbacks`，
+   不直接 include `ast.h` / `eval.h`；
+3. **AST bridge**：`vm_bridge.*` 保留编译、fallback、默认参数和
+   pattern 接入；
+4. **物理拆分**：N2-3 稳定后，新增 `skein_vm` target；
+5. **AOT 前置**：序列化只需链接 `skein_bytecode`，不依赖 parser。
+
+验收：
+
+- executor 源文件不 include `ast.h`；
+- 新增 `vm_link_test`，只链接 `skein_bytecode` / `skein_vm`；
+- `boundary_check` 覆盖新边界；
+- 序列化/AOT 可在不启动 parser 的情况下加载 Proto。
+
+### 8.6 N4：产品化（P3）
 
 #### N4-1 W5-4 序列化 / AOT
 
 前置条件：
 
-- verifier 稳定
-- 常量表示可序列化
-- 字节码 ABI 版本化
-- IC / handler 表格式确定
+- verifier 稳定；
+- 常量表示可序列化；
+- 字节码 ABI 版本化；
+- IC / handler 表格式确定；
+- N3-4 的 bytecode / VM 分层完成。
 
-实施：
+实施顺序：
 
-- 稳定字节码格式
-- 字符串表、常量表、源码位置表
-- 源码哈希 + 编译器版本缓存键
-- 磁盘缓存与预编译 stdlib
-- 缓存损坏安全回退
+1. 冻结字节码格式与版本号；
+2. 字符串表、常量表、源码位置表；
+3. 源码哈希 + 编译器版本缓存键；
+4. 磁盘缓存与预编译 stdlib；
+5. 缓存损坏安全回退；
+6. AOT / 嵌入加载入口。
 
-### 8.6 暂缓说明
+验收：
+
+- 同一源码命中缓存后跳过解析/编译；
+- 损坏缓存回退源码编译且错误可诊断；
+- 差分、verifier、sanitizer 全部通过。
+
+### 8.7 暂缓与触发条件
 
 | 任务 | 暂缓原因 | 重新启用条件 |
 |---|---|---|
 | W2-3 handler/defer 表 | 动态 per-frame 结构已通过全部测试 | stats 显示 handler/defer 热点 |
 | W2-4 generator/async 帧 | 原生 fiber 工作稳定 | 需要轻量协程/序列化状态 |
 | W4-4 调试信息 | 不阻塞默认后端 | 需要调试器或更完整栈回溯 |
-| W5-4 序列化/AOT | 字节码格式尚未冻结 | N1/N2 完成后 |
+| W5-4 序列化/AOT | 字节码格式尚未冻结 | N2/N3-4 完成 |
+| N2-2.3 tagged value | 当前仍有更便宜的分配优化空间 | N2-2.1/2.2 后 profile 显示值分配仍是主热点 |
 
-### 8.7 建议排期
+### 8.8 建议排期
 
 ```text
-N1 收口      1–2 轮
-N2 性能      2–3 轮
-N3 架构      2–4 轮（按需）
-N4 产品化    2+ 轮
+第一批  N2-1.3 / N2-1.4       索引写入 IC / 局部 cache
+第二批  N2-2.1 / N2-2.2       参数与局部值复用
+第三批  N2-3.1 / N2-3.2       超指令与 dispatch
+第四批  N2-4.1..4             覆盖统计与长时 fuzz
+第五批  N3-4                  VM / bytecode 分层
+按需    N3-1 / N3-2 / N3-3
+最后    N4-1                 序列化 / AOT
 ```
 
-每轮结束必须更新本计划的任务表和测试/基准数据。
+每轮结束必须更新：
+
+- `docs/bytecode-plan.md` 的任务状态；
+- `docs/bytecode.md` 的指令 / 限制 / 基准；
+- `tools/bench_vm.py` 的基准与阈值；
+- 差分、ASan/UBSan/LSan、`tools/check_all.sh` 结果。

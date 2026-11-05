@@ -2,6 +2,7 @@
 #define _SCOPESTACK_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string_view>
 #include <unordered_map>
@@ -46,10 +47,12 @@ struct scope_context {
     std::vector<std::weak_ptr<scope_t>> all_scopes;
     int statements_since_collect = 0;
     size_t scopes_at_last_collect = 0;
+    uint64_t global_generation = 0;
 };
 
 scope_context &active_scope_context();
 void set_active_scope_context(scope_context *context);
+uint64_t scope_global_generation();
 
 struct scope_t *topscope();
 std::shared_ptr<scope_t> current_scope();

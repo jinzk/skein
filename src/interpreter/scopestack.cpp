@@ -26,6 +26,10 @@ void set_active_scope_context(scope_context *context) {
     active_context = context;
 }
 
+uint64_t scope_global_generation() {
+    return active_scope_context().global_generation;
+}
+
 struct symbol *symbol_table::find(std::string_view name) const {
     if (indexed) {
         auto it = index.find(name);
@@ -146,6 +150,7 @@ void initscope(scope_context &context) {
     context.global_scope = s;
     context.current = s;
     context.restore_stack.clear();
+    ++context.global_generation;
 }
 
 void popscope() {
@@ -190,6 +195,7 @@ void donescope(scope_context &context) {
     context.all_scopes.clear();
     context.statements_since_collect = 0;
     context.scopes_at_last_collect = 0;
+    ++context.global_generation;
     tearing_down = previous_tearing_down;
 }
 
@@ -207,6 +213,7 @@ void save_global_symbol(const char *name, value_t *v) {
     struct symbol *sym = newsym(name);
     sym->val = v;
     context.global_scope->syms.insert(sym);
+    ++context.global_generation;
 }
 
 value_t *lookup_global_symbol(const char *name) {
@@ -239,6 +246,8 @@ void savesym(struct symbol *sp) {
     scope_context &context = active_scope_context();
     if (!context.current) return;
     context.current->syms.insert(sp);
+    if (context.current->is_global)
+        ++context.global_generation;
 }
 
 bool retval(struct value_t *r) {

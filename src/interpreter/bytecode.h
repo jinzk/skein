@@ -325,6 +325,17 @@ struct Constant {
 };
 
 /*
+ * Per-name inline cache for globals.  It is shared by every Executor that
+ * runs this Proto and is only valid while the owning global scope and its
+ * generation are unchanged.
+ */
+struct NameCacheEntry {
+    struct symbol *sym = nullptr;
+    const void *global_owner = nullptr;
+    uint64_t generation = 0;
+};
+
+/*
  * A compiled function or top-level chunk.
  *
  * `locs` is parallel to `code`: one source location per instruction.  This is
@@ -339,6 +350,7 @@ struct Proto {
 
     std::vector<Instr> code;
     std::vector<Constant> consts;
+    mutable std::vector<NameCacheEntry> name_ic;
     std::vector<SourceLoc> locs;
     std::vector<IterDesc> iters;
     std::vector<IndexDesc> index_ops;

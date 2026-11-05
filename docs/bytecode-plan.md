@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (40.47s)
+ctest: 8/8 passed (40.31s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.26s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.17s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 64.64s
-LSan:           skein_vm_lsan_tests Passed 77.69s
+skein_tests:    Passed 12.03s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.16s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 65.09s
+LSan:           skein_vm_lsan_tests Passed 78.51s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -62,10 +62,10 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 500 万次局部循环 | 1.23s | 1.02s |
-| `fib(30)` | 0.70s | 0.75s |
-| 200 万次函数调用 | 0.82s | 0.81s |
-| 参数 pattern 密集调用 | 0.51s | 0.56s |
+| 500 万次局部循环 | 1.21s | 1.02s |
+| `fib(30)` | 0.70s | 0.70s |
+| 200 万次函数调用 | 0.85s | 0.82s |
+| 参数 pattern 密集调用 | 0.52s | 0.59s |
 
 ### 2.4 基线缺口
 
@@ -287,7 +287,8 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W2-1 Frame-based VM（P1，XL）
 
-状态：**部分完成（2026-11-05）**。
+状态：**完成（fast path，2026-11-05）**。非 fast path 调用仍保留
+`call_value_args` 回退，generator/async 帧由 W2-4 继续。
 
 已完成：
 
@@ -320,22 +321,22 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 - `SKEIN_VM_MAX_DEPTH=1000` 的错误文本保持不变。
 - 全部现有 VM 测试通过。
 - handler / defer / iterator 组合测试通过。
-- `fib(30)` 仍略慢于 AST（约 0.77s vs 0.70s），尚未达到性能目标。
+- 全局名字 IC 生效后，`fib(30)` 达到约 0.70s，与 AST 持平。
 
 剩余：
 
-1. 将 generator / async 纳入显式帧挂起/恢复。
-2. 减少 fast frame 的 per-call 临时 vector、symbol 和 call-stack 分配。
-3. 让 `fib(30)` 达到不慢于 AST，目标 ≤ 0.70s。
-4. 评估完全移除 `call_value_args` 的 VM 函数递归路径。
+1. generator / async 的显式帧挂起/恢复归入 W2-4。
+2. 默认参数、variadic、method、参数 pattern 调用仍走
+   `call_value_args` / C++ 递归，后续按需统一。
+3. 继续减少 fast frame 的 per-call 临时分配。
 
-验收（未全部满足）：
+验收：
 
 - 递归深度可配置到 10000 而不爆 C++ 栈：**已满足**。
 - 所有现有 VM 测试通过：**已满足**。
 - handler / defer / iterator：**已满足**。
 - `SKEIN_VM_MAX_DEPTH` 语义和错误文本兼容：**已满足**。
-- `fib(30)` 不慢于 AST，目标 ≤ 0.70s：**未满足**。
+- `fib(30)` 不慢于 AST，目标 ≤ 0.70s：**已满足**。
 
 #### W2-2 真正的 upvalue 索引（P1，L）
 
@@ -431,6 +432,54 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 - 标准测试集零 fallback，verifier 未误拒绝合法字节码。
 - `bytecode_verifier_test` 在普通与 sanitizer 构建下通过。
 
+#### W2-6 尾调用优化（TCO）（P2，M）
+
+状态：**待实现**。
+
+目标：
+
+- 对真正的尾调用复用当前 fast frame，而不是压入新帧；
+- 支持自尾递归、相互尾递归和普通尾调用；
+- 不改变错误文本、求值顺序、defer / handler / 闭包语义；
+- 注意：当前 naive `fib(n-1) + fib(n-2)` **不是尾递归**，TCO
+  不会减少其递归树或调用次数；TCO 主要改善 accumulator 风格和
+  深尾递归。
+
+实施：
+
+1. 编译器标记尾调用：
+   - 识别 `return f(args);` 且 `f` 是普通函数值；
+   - 区分直接尾调用、自尾调用和 `CALL_SPREAD`；
+   - 记录 callee/args 的求值顺序约束。
+2. 新增帧复用路径：
+   - 参数和 callee 求值完成后，释放当前帧的局部状态；
+   - 用 callee 的 Proto / 参数重建当前帧；
+   - 不增加 `SKEIN_VM_MAX_DEPTH` 计数。
+3. 安全条件：
+   - 当前帧没有待执行的 VM defer；
+   - 当前帧没有活跃的 handler / handler body；
+   - 不存在需要保留的 `finally` 式清理；
+   - 不满足时退化为普通调用。
+4. 覆盖：
+   - 自尾调用与相互尾调用；
+   - 带闭包捕获的尾调用；
+   - `CALL` 与 `CALL_SPREAD`；
+   - generator / async / method / 默认参数 / variadic 暂不优化。
+5. 测试：
+   - accumulator `fib(30, 0, 1)` 保持常量帧；
+   - 相互尾递归；
+   - defer / on error 与尾调用组合；
+   - 尾调用错误位置和调用栈保持不变；
+   - naive `fib(30)` 行为不变，不承诺提速。
+
+验收：
+
+- 尾递归在 `SKEIN_VM_MAX_DEPTH` 很低时仍能运行；
+- 尾调用不增长 fast frame 栈；
+- 全部现有测试通过；
+- defer / handler 语义不变；
+- accumulator 风格尾递归基准有可量化提升。
+
 ### 3.3 W3：性能
 
 #### W3-1 运算与比较快路径（P2，M）
@@ -461,13 +510,34 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-2 全局 slot 与内联缓存（P2，L）
 
-- 模块级全局符号槽位表。
-- `LOAD_GLOBAL` / `STORE_GLOBAL`。
-- per-call-site 名字缓存，避免 `savesym` 后整表失效。
-- 字段/索引/方法调用 IC。
-- 增加 IC 命中率统计。
+状态：**部分完成（2026-11-05，全局名字 IC）**。
 
-验收：调用密集基准达到或超过 AST。
+已完成：
+
+1. `Proto` 增加 per-name `NameCacheEntry`，在多个 `Executor`
+   之间共享全局名字解析结果。
+2. 缓存使用 `global_scope` 指针 + `global_generation` 校验；
+   全局符号新增、重新定义、作用域销毁时递增 generation。
+3. `cached_symbol()` 优先命中 Proto 级全局 IC，未命中时再走
+   `lookupsym()`；局部符号仍使用每帧 name cache。
+4. 修复全局作用域重建时 generation 回绕导致旧缓存命中的问题。
+
+效果：
+
+- `fib(30)` 从约 0.75s 降到约 0.70s，与 AST 持平。
+- `call_bench` VM 约 0.82s，AST 约 0.85s。
+
+剩余：
+
+1. 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位与模块级符号表。
+2. 字段 / 索引 / 方法调用 inline cache。
+3. IC 命中率与失效统计。
+4. 把局部名字缓存改为 per-call-site，而不是每帧整表失效。
+
+验收：
+
+- 调用密集基准达到或超过 AST：**已满足**。
+- 其余 IC 项仍待完成。
 
 #### W3-3 值表示与分配（P2，XL）
 
@@ -681,11 +751,12 @@ std::shared_ptr<const void> vm_param_patterns;
 
 ### M4：性能
 
-任务：W3-1、W3-2、W3-3、W3-4
+任务：W3-1、W3-2、W3-3、W3-4、W2-6
 
 退出标准：
 
 - 三个基线基准均达到目标。
+- 尾调用复用当前帧，accumulator 尾递归可通过低深度限制。
 - 性能回归测试纳入 CI。
 - 关闭优化时语义一致。
 
@@ -738,6 +809,7 @@ std::shared_ptr<const void> vm_param_patterns;
 | 字节码格式未稳定就做 AOT | 缓存失效/兼容问题 | 放到 M6，先完成 verifier |
 | L1 runtime 持有 L2 执行缓存 | 嵌入/AOT 时职责混乱 | W4-5 迁移到 L2 side table |
 | side table 使用裸 `function_code*` | 释放后悬空/残留 | 统一由 `skein_vm_forget_function_code()` 清理并加断言 |
+| 尾调用跳过 defer/handler 清理 | 清理语义丢失 | 只在无活跃 defer/handler 时复用帧，否则走普通调用 |
 
 ## 7. 任务跟踪
 
@@ -749,13 +821,14 @@ std::shared_ptr<const void> vm_param_patterns;
 | W1-4 AST 生命周期 | P1 | M | 完成（2026-11-05） | - |
 | W1-5 诊断一致性 | P1 | S | 完成（2026-11-05） | - |
 | W1-6 资源泄漏审计 | P1 | M | 完成（2026-11-05） | - |
-| W2-1 Frame VM | P1 | XL | 部分完成（fast path） | W1-2 |
+| W2-1 Frame VM | P1 | XL | 完成（fast path） | W1-2 |
 | W2-2 Upvalue | P1 | L | TODO | W2-1 |
 | W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |
 | W2-4 Generator 状态 | P2 | L | TODO | W2-1 |
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
+| W2-6 尾调用优化 | P2 | M | TODO | W2-1 |
 | W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
-| W3-2 全局 slot + IC | P2 | L | TODO | W2-1 |
+| W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC） | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |
 | W3-4 指令优化 | P2 | M | TODO | W3-1 |
 | W4-1 声明常量去 AST | P1 | M | 完成（2026-11-05） | W1-2 |

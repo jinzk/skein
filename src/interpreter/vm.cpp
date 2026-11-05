@@ -38,6 +38,7 @@ namespace {
 using skein::bc::Constant;
 using skein::bc::ConstantKind;
 using skein::bc::Instr;
+using skein::bc::NameCacheEntry;
 using skein::bc::Op;
 using skein::bc::Proto;
 using skein::bc::ProtoPtr;
@@ -2297,10 +2298,33 @@ private:
     struct symbol *cached_symbol(uint32_t index) {
         if (index < name_cache_.size() && name_cache_[index])
             return name_cache_[index];
+
+        scope_context &scope_context = active_scope_context();
         const char *name = name_at(proto(), index);
+        const uint64_t generation = scope_global_generation();
+        const void *owner = scope_context.global_scope.get();
+
+        if (index < proto().name_ic.size()) {
+            const NameCacheEntry &entry = proto().name_ic[index];
+            if (entry.sym && entry.global_owner == owner &&
+                entry.generation == generation) {
+                if (index < name_cache_.size())
+                    name_cache_[index] = entry.sym;
+                return entry.sym;
+            }
+        }
+
         struct symbol *sym = lookupsym(name);
         if (sym && index < name_cache_.size())
             name_cache_[index] = sym;
+        if (sym && scope_context.global_scope &&
+            scope_context.global_scope->syms.find(name) == sym) {
+            if (proto().name_ic.size() < proto().consts.size())
+                proto().name_ic.resize(proto().consts.size());
+            if (index < proto().name_ic.size())
+                proto().name_ic[index] =
+                    NameCacheEntry{sym, owner, generation};
+        }
         return sym;
     }
 

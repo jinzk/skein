@@ -97,7 +97,8 @@ SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 - `import`
 - 块作用域（`PUSH_SCOPE` / `POP_SCOPE`）
 - 自增/自减、复合赋值（变量目标）
-- 名字查找的内联缓存（`LOAD_NAME` / `STORE_NAME` 等）
+- 名字查找的内联缓存（`LOAD_NAME` / `STORE_NAME` 等）；全局名字使用
+  Proto 级缓存，跨 `Executor` 复用，并以 global scope + generation 校验
 
 ### 3.2 回退到 AST 的结构
 
@@ -231,8 +232,8 @@ struct Instr {
 - fast frame 支持普通函数以及 handler、defer、iterator；generator、
   async、默认参数、variadic、method 和参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
-- `fib(30)` 在 fast frame 下仍略慢于 AST，per-call 临时分配和调用栈
-  开销需要继续优化。
+- 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；默认参数、variadic、
+  method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
 - 还没有真正的 upvalue 索引。
 - 尚未实现精确 GC 栈图、字节码序列化。
 
@@ -240,11 +241,13 @@ struct Instr {
 
 1. 真正的 upvalue 索引（闭包直接访问捕获 cell）；
 2. frame-based VM，去掉每帧 Executor 分配和 C++ 递归；
-3. 把默认参数、参数 pattern 等剩余 AST 元数据移出 `function_code`；
-4. 精确 GC 栈图与字节码序列化；
-5. generator/async 与 VM 状态整合；
-6. unboxed slot、内联缓存、超指令、computed goto；
-7. AST 后端降级为可选参考实现。
+3. 尾调用优化（复用当前 fast frame；仅在无活跃 defer/handler
+   时启用）；
+4. 把默认参数、参数 pattern 等剩余 AST 元数据移出 `function_code`；
+5. 精确 GC 栈图与字节码序列化；
+6. generator/async 与 VM 状态整合；
+7. unboxed slot、内联缓存、超指令、computed goto；
+8. AST 后端降级为可选参考实现。
 
 ## 8. 验收标准
 

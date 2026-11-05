@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (42.69s)
+ctest: 8/8 passed (40.57s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.44s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.50s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 65.28s
-LSan:           skein_vm_lsan_tests Passed 78.18s
+skein_tests:    Passed 12.26s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.18s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 66.70s
+LSan:           skein_vm_lsan_tests Passed 79.16s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -455,51 +455,45 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W2-6 尾调用优化（TCO）（P2，M）
 
-状态：**待实现**。
+状态：**完成（2026-11-05，fast-frame TCO）**。
 
-目标：
+实现结果：
 
-- 对真正的尾调用复用当前 fast frame，而不是压入新帧；
-- 支持自尾递归、相互尾递归和普通尾调用；
-- 不改变错误文本、求值顺序、defer / handler / 闭包语义；
-- 注意：当前 naive `fib(n-1) + fib(n-2)` **不是尾递归**，TCO
-  不会减少其递归树或调用次数；TCO 主要改善 accumulator 风格和
-  深尾递归。
-
-实施：
-
-1. 编译器标记尾调用：
-   - 识别 `return f(args);` 且 `f` 是普通函数值；
-   - 区分直接尾调用、自尾调用和 `CALL_SPREAD`；
-   - 记录 callee/args 的求值顺序约束。
-2. 新增帧复用路径：
-   - 参数和 callee 求值完成后，释放当前帧的局部状态；
-   - 用 callee 的 Proto / 参数重建当前帧；
-   - 不增加 `SKEIN_VM_MAX_DEPTH` 计数。
+1. 编译器识别 `return f(args);` 并发射 `TAIL_CALL`：
+   - 仅无 spread 的普通调用；
+   - `CALL_SPREAD` 尾返回仍走普通 `CALL_SPREAD` + `RETURN`。
+2. VM `TAIL_CALL` 优先尝试复用当前 fast frame：
+   - 参数/callee 求值顺序保持不变；
+   - 复用当前 `SavedVmState`，不再压入新 fast frame；
+   - 不增加 `SKEIN_VM_MAX_DEPTH` 计数；
+   - 重新绑定 callee 的参数、closure、Proto 和缓存。
 3. 安全条件：
-   - 当前帧没有待执行的 VM defer；
-   - 当前帧没有活跃的 handler / handler body；
-   - 不存在需要保留的 `finally` 式清理；
-   - 不满足时退化为普通调用。
-4. 覆盖：
-   - 自尾调用与相互尾调用；
-   - 带闭包捕获的尾调用；
-   - `CALL` 与 `CALL_SPREAD`；
-   - generator / async / method / 默认参数 / variadic 暂不优化。
+   - 当前帧没有非空 VM defer scope；
+   - 没有活跃 handler / handler body；
+   - 没有活跃 iterator；
+   - 不满足时回退普通 call + return。
+4. 诊断调用栈：
+   - TCO 链保留诊断帧（最多 64 层），错误仍能看到尾调用路径；
+   - 超过上限后截断，避免无限尾递归导致诊断栈无限增长。
 5. 测试：
-   - accumulator `fib(30, 0, 1)` 保持常量帧；
-   - 相互尾递归；
-   - defer / on error 与尾调用组合；
-   - 尾调用错误位置和调用栈保持不变；
-   - naive `fib(30)` 行为不变，不承诺提速。
+   - `down(500)` 在 `SKEIN_VM_MAX_DEPTH=8` 下通过；
+   - 相互尾递归 `even/odd(400)` 在深度 8 下通过；
+   - defer 阻止帧复用并保持清理顺序；
+   - 非尾递归仍触发 `maximum recursion depth`；
+   - naive `fib(30)` 行为不变。
+
+说明：
+
+- naive `fib(n-1) + fib(n-2)` 不是尾递归，TCO 不会减少其递归树。
+- 当前未优化 spread、method、默认参数、variadic、
+  generator / async 的尾调用。
 
 验收：
 
-- 尾递归在 `SKEIN_VM_MAX_DEPTH` 很低时仍能运行；
-- 尾调用不增长 fast frame 栈；
-- 全部现有测试通过；
-- defer / handler 语义不变；
-- accumulator 风格尾递归基准有可量化提升。
+- 尾递归在低 `SKEIN_VM_MAX_DEPTH` 下运行：**已满足**。
+- 尾调用不增长 fast frame 栈：**已满足**。
+- defer / handler 语义不变：**已满足**。
+- 全部现有测试通过：**已满足**。
 
 ### 3.3 W3：性能
 
@@ -685,14 +679,45 @@ std::shared_ptr<const void> vm_param_patterns;
 
 #### W5-1 VM 统计（P2，S）
 
-新增 `--vm-stats` 或 `SKEIN_VM_STATS=1`：
+状态：**完成（基础统计，2026-11-05）**。
 
-- 编译语句/函数数
-- AST fallback 次数与原因
-- opcode 直方图
-- 最大栈深/最大 handler 深度
-- 调用次数、IC 命中率
-- 编译耗时/执行耗时
+新增：
+
+```bash
+./build/skein --vm-stats script.skein
+SKEIN_VM_STATS=1 ./build/skein script.skein
+```
+
+已实现：
+
+- 编译语句数 / 语句 fallback 数
+- 编译函数数 / 函数 fallback 数
+- 指令数、调用数
+- fast frame 调用数
+- tail call 数
+- fallback call 数
+- 全局名字 IC 命中/未命中
+- 最大 VM 调用深度
+- 最大操作数栈深
+- Top 10 opcode 直方图
+
+输出示例：
+
+```text
+[vm-stats] statements compiled=2 fallback=0
+[vm-stats] functions compiled=1 fallback=0
+[vm-stats] instructions=466 calls=32 fast=1 tail=30 fallback=1
+[vm-stats] name-ic hits=29 misses=2
+[vm-stats] max-depth=1 max-stack=6
+[vm-stats] opcodes LOAD_PARAM=152 LOAD_CONST=65 ...
+```
+
+剩余：
+
+- fallback 原因聚合
+- 编译/执行耗时
+- 最大 handler / defer 深度
+- 每调用站点 IC 统计
 
 #### W5-2 差分测试与模糊测试（P2，L）
 
@@ -847,7 +872,7 @@ std::shared_ptr<const void> vm_param_patterns;
 | W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |
 | W2-4 Generator 状态 | P2 | L | TODO | W2-1 |
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
-| W2-6 尾调用优化 | P2 | M | TODO | W2-1 |
+| W2-6 尾调用优化 | P2 | M | 完成（fast-frame） | W2-1 |
 | W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
 | W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC） | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |
@@ -857,7 +882,7 @@ std::shared_ptr<const void> vm_param_patterns;
 | W4-3 参数元数据 Proto 化 | P2 | M | TODO | W1-1 |
 | W4-4 调试信息 | P3 | M | TODO | W2-1 |
 | W4-5 VM 缓存移出 runtime | P1 | M | TODO | W2-1/W4-2 |
-| W5-1 VM 统计 | P2 | S | TODO | - |
+| W5-1 VM 统计 | P2 | S | 完成（基础统计） | - |
 | W5-2 差分/模糊测试 | P2 | L | TODO | W1-2 |
 | W5-3 基准回归 | P2 | M | TODO | W2-1 |
 | W5-4 序列化/AOT | P3 | XL | TODO | W2-5/W4 |

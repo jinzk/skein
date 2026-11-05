@@ -39,6 +39,10 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 
 # 保留函数体/默认参数/参数 pattern 的 AST，便于调试或运行期切换后端
 SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
+
+# 输出 VM 统计：编译/回退数、调用数、IC、栈深、opcode 直方图
+./build/skein --vm-stats script.skein
+SKEIN_VM_STATS=1 ./build/skein script.skein
 ```
 
 ## 3. 执行模型
@@ -83,6 +87,8 @@ SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 - 函数调用（普通函数、builtin、方法值、spread 参数）
 - VM fast frame（普通函数直接压帧，支持 handler / defer / iterator；
   `RETURN` 恢复调用者帧，不再创建 `Executor`）
+- 尾调用优化（`TAIL_CALL`：无 spread 的 `return f(args)` 复用当前
+  fast frame；有 defer/handler/iterator 时回退普通调用）
 - list / dict 字面量
 - 索引与字段读取
 - 索引/字段赋值、复合赋值、自增自减（含 COW 与循环引用检查）
@@ -237,14 +243,15 @@ struct Instr {
   method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
 - 顶层块内函数、方法闭包仍使用名字查找；默认参数 / defer 子 Proto
   暂未使用 upvalue 索引。
+- TCO 当前只覆盖无 spread 的普通尾调用；有 defer / handler / iterator
+  时回退普通调用。诊断调用栈最多保留 64 层尾调用帧。
 - 尚未实现精确 GC 栈图、字节码序列化。
 
 ## 7. 后续阶段
 
 1. 将 symbol-cell upvalue 进一步改为 open/closed frame slot；
 2. frame-based VM，去掉每帧 Executor 分配和 C++ 递归；
-3. 尾调用优化（复用当前 fast frame；仅在无活跃 defer/handler
-   时启用）；
+3. 扩展尾调用优化到 spread / method / 默认参数 / variadic；
 4. 把默认参数、参数 pattern 等剩余 AST 元数据移出 `function_code`；
 5. 精确 GC 栈图与字节码序列化；
 6. generator/async 与 VM 状态整合；

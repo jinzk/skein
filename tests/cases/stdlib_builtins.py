@@ -2123,8 +2123,8 @@ def run_cases():
     )
 
     check("call non-function", "let x = 1;\nx(2)\n", stderr="cannot call int")
-    check("recursion depth limit",
-          "func f(n) { return f(n + 1); }\nf(0)\n",
+    check("non-tail recursion depth limit",
+          "func f(n) { return 1 + f(n + 1); }\nf(0)\n",
           stderr="maximum recursion depth")
     check("function without return yields null",
           "func noret() { }\nprint(noret())\n", stdout="null")

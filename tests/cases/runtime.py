@@ -20,6 +20,13 @@ def run_cases():
         env=default_env,
     )
     check(
+        "VM stats report",
+        "print(1 + 2);\n",
+        stdout="3",
+        stderr="[vm-stats] instructions=",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_STATS="1"),
+    )
+    check(
         "frame VM deep recursion",
         "func down(n) {\n"
         "  if (n <= 0) { return 0; }\n"
@@ -47,6 +54,41 @@ def run_cases():
         stdout_all=["1", "2", "2"],
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_TRACE="1"),
         stderr="LOAD_UPVALUE",
+    )
+    check(
+        "tail call reuses the current frame",
+        "func down(n) {\n"
+        "  if (n <= 0) { return 0; }\n"
+        "  return down(n - 1);\n"
+        "}\n"
+        "print(down(500));\n",
+        stdout="0",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_MAX_DEPTH="8"),
+    )
+    check(
+        "mutual tail calls reuse the current frame",
+        "func even(n) {\n"
+        "  if (n == 0) { return true; }\n"
+        "  return odd(n - 1);\n"
+        "}\n"
+        "func odd(n) {\n"
+        "  if (n == 0) { return false; }\n"
+        "  return even(n - 1);\n"
+        "}\n"
+        "print(even(400));\n",
+        stdout="true",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_MAX_DEPTH="8"),
+    )
+    check(
+        "defer prevents tail frame reuse",
+        "func down(n) {\n"
+        "  defer print(n);\n"
+        "  if (n == 0) { return 0; }\n"
+        "  return down(n - 1);\n"
+        "}\n"
+        "print(down(3));\n",
+        stdout="0\n1\n2\n3\n0\n",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_MAX_DEPTH="8"),
     )
     check(
         "unicode identifier NFC struct",

@@ -23,6 +23,7 @@
 #include "valuetype.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -46,8 +47,29 @@ using skein::bc::SourceLoc;
 
 int vm_enabled_state = -1;
 int vm_max_depth_state = -1;
+int vm_stats_state = -1;
 bool vm_trace_state = false;
 bool vm_trace_initialized = false;
+
+struct vm_stats_data {
+    bool enabled = false;
+    uint64_t statements_compiled = 0;
+    uint64_t statements_fallback = 0;
+    uint64_t functions_compiled = 0;
+    uint64_t functions_fallback = 0;
+    uint64_t instructions = 0;
+    uint64_t calls = 0;
+    uint64_t fast_calls = 0;
+    uint64_t tail_calls = 0;
+    uint64_t fallback_calls = 0;
+    uint64_t name_ic_hits = 0;
+    uint64_t name_ic_misses = 0;
+    uint64_t max_depth = 0;
+    uint64_t max_stack = 0;
+    std::array<uint64_t, static_cast<size_t>(Op::Count)> opcodes{};
+};
+
+vm_stats_data vm_stats;
 
 int vm_max_depth() {
     if (vm_max_depth_state < 0) {
@@ -80,7 +102,14 @@ bool keep_function_ast() {
     return read_bool_env("SKEIN_KEEP_AST", false);
 }
 
+void ensure_stats_flags() {
+    if (vm_stats_state < 0)
+        vm_stats_state = read_bool_env("SKEIN_VM_STATS", false) ? 1 : 0;
+    vm_stats.enabled = vm_stats_state != 0;
+}
+
 void ensure_runtime_flags() {
+    ensure_stats_flags();
     if (vm_enabled_state < 0)
         vm_enabled_state = read_bool_env("SKEIN_VM", true) ? 1 : 0;
     if (!vm_trace_initialized) {
@@ -104,9 +133,12 @@ ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
     if (code->vm_proto)
         return std::static_pointer_cast<const Proto>(code->vm_proto);
 
+    ensure_stats_flags();
     std::string error;
     ProtoPtr proto = skein_compile_function_body(code, code->module, error);
     if (!proto) {
+        if (vm_stats.enabled)
+            ++vm_stats.functions_fallback;
         code->vm_compile_failed = true;
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback function %s: %s\n",
@@ -114,6 +146,8 @@ ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
         return nullptr;
     }
     code->vm_proto = proto;
+    if (vm_stats.enabled)
+        ++vm_stats.functions_compiled;
     if (code->ast && !keep_function_ast()) {
         treefree(code->ast);
         code->ast = NULL;
@@ -227,6 +261,7 @@ struct SavedVmState {
     int caller_handler_depth = 0;
     int handler_body_depth = 0;
     bool allow_await = false;
+    size_t diag_frames = 0;
     std::shared_ptr<function_def> def;
     std::vector<struct symbol *> name_cache;
     std::vector<struct symbol *> param_symbols;
@@ -301,6 +336,11 @@ public:
 
             try {
             const Instr ins = proto().code[pc_];
+            if (vm_stats.enabled) {
+                ++vm_stats.instructions;
+                if (ins.op < vm_stats.opcodes.size())
+                    ++vm_stats.opcodes[ins.op];
+            }
             const SourceLoc loc =
                 pc_ < proto().locs.size() ? proto().locs[pc_] : SourceLoc();
             ++pc_;
@@ -1995,6 +2035,8 @@ public:
                 }
 
                 case Op::Call: {
+                    if (vm_stats.enabled)
+                        ++vm_stats.calls;
                     uint32_t argc = ins.b;
                     std::vector<value_t *> args;
                     args.resize(argc);
@@ -2013,6 +2055,13 @@ public:
                     }
                     FastCallResult fast = try_fast_call(callee, args);
                     if (fast == FastCallResult::Pushed) {
+                        if (vm_stats.enabled) {
+                            ++vm_stats.fast_calls;
+                            if ((uint64_t)context_.vm_call_depth >
+                                vm_stats.max_depth)
+                                vm_stats.max_depth =
+                                    context_.vm_call_depth;
+                        }
                         freeval(callee);
                         break;
                     }
@@ -2021,6 +2070,8 @@ public:
                         free_args(args);
                         return abort_error();
                     }
+                    if (vm_stats.enabled)
+                        ++vm_stats.fallback_calls;
                     value_t *result =
                         call_value_args(callee, std::move(args));
                     freeval(callee);
@@ -2036,6 +2087,62 @@ public:
                         return abort_control(result);
                     push(result ? result : newnull());
                     break;
+                }
+
+                case Op::TailCall: {
+                    if (vm_stats.enabled)
+                        ++vm_stats.calls;
+                    uint32_t argc = ins.b;
+                    std::vector<value_t *> args;
+                    args.resize(argc);
+                    for (uint32_t i = argc; i > 0; --i) {
+                        value_t *arg = pop_checked();
+                        if (!arg) {
+                            free_args(args);
+                            return abort_error();
+                        }
+                        args[i - 1] = arg;
+                    }
+                    value_t *callee = pop_checked();
+                    if (!callee) {
+                        free_args(args);
+                        return abort_error();
+                    }
+                    if (try_tail_call(callee, args)) {
+                        if (vm_stats.enabled)
+                            ++vm_stats.tail_calls;
+                        freeval(callee);
+                        break;
+                    }
+                    if (vm_stats.enabled)
+                        ++vm_stats.fallback_calls;
+                    value_t *result =
+                        call_value_args(callee, std::move(args));
+                    freeval(callee);
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (result && is_control(result))
+                        return abort_control(result);
+                    if (!saved_states_.empty()) {
+                        bool completed = false;
+                        value_t *abort =
+                            fast_frame_return(result, completed);
+                        if (!completed)
+                            return abort;
+                        break;
+                    }
+                    if (!retval(result)) {
+                        yyerror("return outside function");
+                        freeval(result);
+                        return abort_error();
+                    }
+                    return abort_control(newreturn());
                 }
 
                 case Op::Return: {
@@ -2145,6 +2252,7 @@ private:
     int handler_body_depth_ = 0;
     size_t pc_ = 0;
     size_t frame_stack_base_ = 0;
+    size_t diag_frames_ = 0;
     std::vector<SavedVmState> saved_states_;
     std::shared_ptr<function_def> current_def_;
     unsigned instruction_count_ = 0;
@@ -2162,6 +2270,7 @@ private:
         state.caller_handler_depth = context_.handler_depth;
         state.handler_body_depth = handler_body_depth_;
         state.allow_await = context_.allow_await;
+        state.diag_frames = diag_frames_;
         state.def = std::move(current_def_);
         state.name_cache = std::move(name_cache_);
         state.param_symbols = std::move(param_symbols_);
@@ -2182,6 +2291,7 @@ private:
         handler_body_depth_ = state.handler_body_depth;
         context_.handler_depth = state.caller_handler_depth;
         context_.allow_await = state.allow_await;
+        diag_frames_ = state.diag_frames;
         current_def_ = std::move(state.def);
         name_cache_ = std::move(state.name_cache);
         param_symbols_ = std::move(state.param_symbols);
@@ -2202,7 +2312,10 @@ private:
             stack_.pop_back();
         }
         pop_scopes_to(scope_mark_);
-        diag_pop_call();
+        while (diag_frames_ > 0) {
+            diag_pop_call();
+            --diag_frames_;
+        }
         if (context_.vm_call_depth > 0)
             --context_.vm_call_depth;
         SavedVmState state = std::move(saved_states_.back());
@@ -2236,31 +2349,58 @@ private:
         Failed
     };
 
-    FastCallResult try_fast_call(value_t *callee,
-                                 std::vector<value_t *> &args) {
+    bool fast_call_target(value_t *callee,
+                          std::vector<value_t *> &args,
+                          std::shared_ptr<function_def> &def,
+                          ProtoPtr &proto) {
         if (!callee || callee->type != T_func)
-            return FastCallResult::Fallback;
+            return false;
         struct func_value_t *fv = (struct func_value_t *)callee;
-        std::shared_ptr<function_def> def = fv->def;
+        def = fv->def;
         if (!def || !def->code)
-            return FastCallResult::Fallback;
+            return false;
         function_code *code = def->code.get();
         if (code->is_generator || code->is_async || code->is_method ||
             code->variadic || code->required_params != code->nparams ||
             (int)args.size() != code->nparams)
-            return FastCallResult::Fallback;
+            return false;
 
         int index = 0;
         for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
             if (sl->has_pattern || sl->variadic)
-                return FastCallResult::Fallback;
+                return false;
             if (!type_constraint_matches(sl->type, args[(size_t)index]))
-                return FastCallResult::Fallback;
+                return false;
         }
 
-        ProtoPtr proto = prepare_function_body(def);
-        if (!proto || !proto_can_frame(*proto))
+        proto = prepare_function_body(def);
+        return proto && proto_can_frame(*proto);
+    }
+
+    void bind_fast_arguments(function_code *code,
+                             std::vector<value_t *> &args) {
+        int index = 0;
+        for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
+            struct symbol *sym = newsym(sl->sym->name);
+            sym->val = args[(size_t)index];
+            args[(size_t)index] = NULL;
+            if (sl->type) {
+                sym->type.kind = sl->type->kind;
+                sym->type.name = sl->type->name;
+            }
+            savesym(sym);
+            param_symbols_.push_back(sym);
+        }
+        args.clear();
+    }
+
+    FastCallResult try_fast_call(value_t *callee,
+                                 std::vector<value_t *> &args) {
+        std::shared_ptr<function_def> def;
+        ProtoPtr proto;
+        if (!fast_call_target(callee, args, def, proto))
             return FastCallResult::Fallback;
+        function_code *code = def->code.get();
 
         int limit = vm_max_depth();
         if (context_.vm_call_depth >= limit) {
@@ -2295,22 +2435,62 @@ private:
             defer_scopes_.emplace_back();
 
         eval_push_closure_scope(current_def_->closure);
-        index = 0;
-        for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
-            struct symbol *sym = newsym(sl->sym->name);
-            sym->val = args[(size_t)index];
-            args[(size_t)index] = NULL;
-            if (sl->type) {
-                sym->type.kind = sl->type->kind;
-                sym->type.name = sl->type->name;
-            }
-            savesym(sym);
-            param_symbols_.push_back(sym);
-        }
-        args.clear();
+        bind_fast_arguments(code, args);
         ++context_.vm_call_depth;
+        diag_frames_ = 1;
         diag_push_call(name, line, column);
         return FastCallResult::Pushed;
+    }
+
+    bool try_tail_call(value_t *callee, std::vector<value_t *> &args) {
+        if (saved_states_.empty())
+            return false;
+        for (const std::vector<defer_record> &scope : defer_scopes_)
+            if (!scope.empty())
+                return false;
+        if (!handlers_.empty() || !iterators_.empty() ||
+            handler_body_depth_ != 0)
+            return false;
+
+        std::shared_ptr<function_def> def;
+        ProtoPtr proto;
+        if (!fast_call_target(callee, args, def, proto))
+            return false;
+        if (stack_.size() != frame_stack_base_)
+            return false;
+
+        function_code *code = def->code.get();
+        const char *name = code->name.empty() ? "<anonymous>"
+                                              : code->name.c_str();
+        int line = g_error_line > 0 ? g_error_line : code->def_line;
+        int column = g_error_line > 0 ? g_error_column : code->def_column;
+
+        pop_scopes_to(scope_mark_);
+
+        current_def_ = std::move(def);
+        proto_ptr_ = proto.get();
+        pc_ = 0;
+        errors_before_ = context_.runtime_error_count;
+        handler_body_depth_ = 0;
+        context_.handler_depth = 0;
+        context_.allow_await = false;
+        name_cache_.assign(proto->consts.size(), NULL);
+        param_symbols_.clear();
+        param_symbols_.reserve((size_t)code->nparams);
+        slot_symbols_.assign(proto->slots.size(), NULL);
+        handlers_.clear();
+        iterators_.clear();
+        defer_scopes_.clear();
+        if (proto->uses_defers)
+            defer_scopes_.emplace_back();
+
+        eval_push_closure_scope(current_def_->closure);
+        bind_fast_arguments(code, args);
+        if (diag_frames_ < 64) {
+            diag_push_call(name, line, column);
+            ++diag_frames_;
+        }
+        return true;
     }
 
     void free_iterators() {
@@ -2349,7 +2529,10 @@ private:
             stack_.pop_back();
         }
         pop_scopes_to(scope_mark_);
-        diag_pop_call();
+        while (diag_frames_ > 0) {
+            diag_pop_call();
+            --diag_frames_;
+        }
         if (context_.vm_call_depth > 0)
             --context_.vm_call_depth;
         if (context_.runtime_error_count != errors_before_ ||
@@ -2365,7 +2548,11 @@ private:
         return NULL;
     }
 
-    void push(value_t *value) { stack_.push_back(value); }
+    void push(value_t *value) {
+        stack_.push_back(value);
+        if (vm_stats.enabled && stack_.size() > vm_stats.max_stack)
+            vm_stats.max_stack = stack_.size();
+    }
 
     value_t *pop_checked() {
         if (stack_.size() <= frame_stack_base_) {
@@ -2390,12 +2577,16 @@ private:
             const NameCacheEntry &entry = proto().name_ic[index];
             if (entry.sym && entry.global_owner == owner &&
                 entry.generation == generation) {
+                if (vm_stats.enabled)
+                    ++vm_stats.name_ic_hits;
                 if (index < name_cache_.size())
                     name_cache_[index] = entry.sym;
                 return entry.sym;
             }
         }
 
+        if (vm_stats.enabled)
+            ++vm_stats.name_ic_misses;
         struct symbol *sym = lookupsym(name);
         if (sym && index < name_cache_.size())
             name_cache_[index] = sym;
@@ -3320,6 +3511,59 @@ void skein_vm_set_enabled(bool enabled) {
     vm_enabled_state = enabled ? 1 : 0;
 }
 
+void skein_vm_set_stats(bool enabled) {
+    ensure_runtime_flags();
+    vm_stats_state = enabled ? 1 : 0;
+    vm_stats.enabled = enabled;
+}
+
+void skein_vm_stats_report() {
+    ensure_stats_flags();
+    if (!vm_stats.enabled)
+        return;
+    std::fprintf(stderr,
+                 "[vm-stats] statements compiled=%llu fallback=%llu\n",
+                 (unsigned long long)vm_stats.statements_compiled,
+                 (unsigned long long)vm_stats.statements_fallback);
+    std::fprintf(stderr,
+                 "[vm-stats] functions compiled=%llu fallback=%llu\n",
+                 (unsigned long long)vm_stats.functions_compiled,
+                 (unsigned long long)vm_stats.functions_fallback);
+    std::fprintf(stderr,
+                 "[vm-stats] instructions=%llu calls=%llu fast=%llu "
+                 "tail=%llu fallback=%llu\n",
+                 (unsigned long long)vm_stats.instructions,
+                 (unsigned long long)vm_stats.calls,
+                 (unsigned long long)vm_stats.fast_calls,
+                 (unsigned long long)vm_stats.tail_calls,
+                 (unsigned long long)vm_stats.fallback_calls);
+    std::fprintf(stderr,
+                 "[vm-stats] name-ic hits=%llu misses=%llu\n",
+                 (unsigned long long)vm_stats.name_ic_hits,
+                 (unsigned long long)vm_stats.name_ic_misses);
+    std::fprintf(stderr,
+                 "[vm-stats] max-depth=%llu max-stack=%llu\n",
+                 (unsigned long long)vm_stats.max_depth,
+                 (unsigned long long)vm_stats.max_stack);
+
+    std::vector<std::pair<uint64_t, const char *>> top;
+    for (size_t i = 0; i < vm_stats.opcodes.size(); ++i) {
+        if (vm_stats.opcodes[i] != 0)
+            top.emplace_back(vm_stats.opcodes[i],
+                             skein::bc::op_name(static_cast<Op>(i)));
+    }
+    std::sort(top.begin(), top.end(),
+              [](const auto &a, const auto &b) {
+                  return a.first > b.first;
+              });
+    std::fprintf(stderr, "[vm-stats] opcodes");
+    size_t shown = top.size() < 10 ? top.size() : 10;
+    for (size_t i = 0; i < shown; ++i)
+        std::fprintf(stderr, " %s=%llu", top[i].second,
+                     (unsigned long long)top[i].first);
+    std::fprintf(stderr, "\n");
+}
+
 void skein_vm_forget_function_code(function_code *code) {
     if (!code)
         return;
@@ -3330,15 +3574,20 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     if (!skein_vm_enabled())
         return eval(statement);
 
+    ensure_stats_flags();
     std::string error;
     ProtoPtr proto = skein_compile_statement(
         statement, diag_current_module_name(), error);
     if (!proto) {
+        if (vm_stats.enabled)
+            ++vm_stats.statements_fallback;
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback statement: %s\n",
                          error.c_str());
         return eval(statement);
     }
+    if (vm_stats.enabled)
+        ++vm_stats.statements_compiled;
     value_t *result = execute_proto(*proto);
     /*
      * The AST evaluator restores the source location when a control value
@@ -3481,6 +3730,9 @@ bool skein_vm_try_execute_function_body(
     }
 
     vm_depth_guard guard(context);
+    if (vm_stats.enabled &&
+        (uint64_t)context.vm_call_depth > vm_stats.max_depth)
+        vm_stats.max_depth = context.vm_call_depth;
     out = execute_proto(*proto, def);
     return true;
 }

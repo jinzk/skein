@@ -442,6 +442,14 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             need(static_cast<int>(ins.b) + 1);
             stack(static_cast<int>(ins.b) + 1, 1);
             break;
+        case Op::TailCall:
+            if (!check_count(static_cast<uint64_t>(ins.b) + 1, pc,
+                             "call argument count too large", error))
+                return false;
+            need(static_cast<int>(ins.b) + 1);
+            stack(static_cast<int>(ins.b) + 1, 0);
+            terminal();
+            break;
         case Op::CallSpread: {
             if (ins.b >= proto.call_descs.size())
                 return fail(error, at_pc("call descriptor out of range", pc));

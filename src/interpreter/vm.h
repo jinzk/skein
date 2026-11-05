@@ -25,6 +25,10 @@ bool skein_vm_enabled();
  */
 void skein_vm_set_enabled(bool enabled);
 
+/* Enable/disable VM statistics and print the final report. */
+void skein_vm_set_stats(bool enabled);
+void skein_vm_stats_report();
+
 /*
  * Execute a top-level statement through the VM.  Falls back to eval() when
  * the VM is disabled or the statement cannot be compiled safely.

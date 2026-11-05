@@ -1509,11 +1509,6 @@ struct Compiler {
 
             case 'R': {
                 struct fnret *ret = (struct fnret *)node;
-                if (ret->v)
-                    compile(ret->v);
-                else
-                    emit_null(here);
-                if (!ok) return;
                 if (handler_body_depth > 0) {
                     const char *text =
                         inside_function
@@ -1524,6 +1519,15 @@ struct Compiler {
                     emit(Op::RuntimeError, 0, 0, message, here);
                     return;
                 }
+                if (ret->v && ret->v->nodetype == 'C') {
+                    compile_call(ret->v, true);
+                    return;
+                }
+                if (ret->v)
+                    compile(ret->v);
+                else
+                    emit_null(here);
+                if (!ok) return;
                 emit(Op::Return, 0, 0, 0, here);
                 return;
             }
@@ -2536,7 +2540,7 @@ struct Compiler {
              static_cast<uint32_t>(keys.size()), loc_of(node));
     }
 
-    void compile_call(ast *node) {
+    void compile_call(ast *node, bool tail = false) {
         struct ufncall *call = (struct ufncall *)node;
         std::vector<ast *> args;
         collect_chain(call->args, args);
@@ -2558,7 +2562,8 @@ struct Compiler {
                 if (!ok) return;
             }
             if (!ok) return;
-            emit(Op::Call, 0, static_cast<uint16_t>(args.size()),
+            emit(tail ? Op::TailCall : Op::Call, 0,
+                 static_cast<uint16_t>(args.size()),
                  static_cast<uint32_t>(args.size()), loc_of(node));
             return;
         }
@@ -2577,6 +2582,8 @@ struct Compiler {
         }
         uint32_t descriptor = add_call_desc(std::move(spread));
         emit(Op::CallSpread, 0, 0, descriptor, loc_of(node));
+        if (tail)
+            emit(Op::Return, 0, 0, 0, loc_of(node));
     }
 };
 

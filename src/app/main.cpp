@@ -48,7 +48,7 @@ static struct value_t *runtime_call_builtin(
 
 static void print_usage(const char *program) {
     std::fprintf(stderr,
-                 "usage: %s [-i] [--vm|--no-vm] [-I dir] "
+                 "usage: %s [-i] [--vm|--no-vm] [--vm-stats] [-I dir] "
                  "[--package-path dir] [--encoding name] "
                  "[-k|--keep-going] [script|-]\n"
                  "       the bytecode VM is enabled by default; "
@@ -141,6 +141,8 @@ int main(int argc, char **argv) {
             skein_vm_set_enabled(true);
         } else if (arg == "--no-vm") {
             skein_vm_set_enabled(false);
+        } else if (arg == "--vm-stats") {
+            skein_vm_set_stats(true);
         } else if (arg == "-k" || arg == "--keep-going") {
             g_keep_going = true;
         } else if (arg == "-" || (!arg.empty() && arg[0] != '-')) {
@@ -230,6 +232,8 @@ int main(int argc, char **argv) {
     set_active_eval_context(NULL);
     if (script)
         std::fclose(script);
+
+    skein_vm_stats_report();
 
     if (g_interactive) {
         status = 0;

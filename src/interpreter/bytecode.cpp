@@ -96,6 +96,7 @@ const char *op_name(Op op) {
         case Op::DeclarePackage: return "DECLARE_PACKAGE";
         case Op::Import: return "IMPORT";
         case Op::Call: return "CALL";
+        case Op::TailCall: return "TAIL_CALL";
         case Op::Return: return "RETURN";
         case Op::PushScope: return "PUSH_SCOPE";
         case Op::PopScope: return "POP_SCOPE";

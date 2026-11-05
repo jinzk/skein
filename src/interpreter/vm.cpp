@@ -2106,37 +2106,35 @@ private:
         handlers_ = std::move(state.handlers);
     }
 
-    void unwind_fast_frames() {
-        while (!saved_states_.empty()) {
-            pop_scopes_to(scope_mark_);
-            diag_pop_call();
-            if (context_.vm_call_depth > 0)
-                --context_.vm_call_depth;
-            SavedVmState state = std::move(saved_states_.back());
-            saved_states_.pop_back();
-            restore_state(std::move(state));
+    void unwind_one_fast_frame() {
+        if (saved_states_.empty())
+            return;
+        discard_handlers();
+        run_all_defers();
+        free_iterators();
+        while (stack_.size() > frame_stack_base_) {
+            freeval(stack_.back());
+            stack_.pop_back();
         }
+        pop_scopes_to(scope_mark_);
+        diag_pop_call();
+        if (context_.vm_call_depth > 0)
+            --context_.vm_call_depth;
+        SavedVmState state = std::move(saved_states_.back());
+        saved_states_.pop_back();
+        restore_state(std::move(state));
+    }
+
+    void unwind_fast_frames() {
+        while (!saved_states_.empty())
+            unwind_one_fast_frame();
     }
 
     static bool proto_can_frame(const Proto &proto) {
         for (const Instr &ins : proto.code) {
             switch (static_cast<Op>(ins.op)) {
-                case Op::PushFailHandler:
-                case Op::PushRecoverHandler:
-                case Op::PopHandler:
-                case Op::EnterHandlerBody:
-                case Op::LeaveHandlerBody:
-                case Op::CheckResult:
-                case Op::BindName:
-                case Op::DeferPush:
-                case Op::IterNew:
-                case Op::IterNext:
-                case Op::IterEnd:
                 case Op::Await:
                 case Op::Yield:
-                case Op::Fail:
-                case Op::Pass:
-                case Op::Recover:
                 case Op::ControlBreak:
                 case Op::ControlContinue:
                     return false;
@@ -2144,7 +2142,7 @@ private:
                     break;
             }
         }
-        return !proto.uses_defers;
+        return true;
     }
 
     enum class FastCallResult {
@@ -2208,6 +2206,8 @@ private:
         iterators_.clear();
         handlers_.clear();
         defer_scopes_.clear();
+        if (proto->uses_defers)
+            defer_scopes_.emplace_back();
 
         eval_push_closure_scope(current_def_->closure);
         index = 0;
@@ -2228,6 +2228,14 @@ private:
         return FastCallResult::Pushed;
     }
 
+    void free_iterators() {
+        for (iterator_state &state : iterators_) {
+            freeval(state.iterable);
+            state.iterable = NULL;
+        }
+        iterators_.clear();
+    }
+
     /*
      * Complete the current fast frame.  Returns NULL on success; otherwise
      * returns the control/error result that run() must propagate.
@@ -2238,6 +2246,14 @@ private:
             freeval(value);
             return abort_control(value);
         }
+        if (context_.runtime_error_count != errors_before_ ||
+            context_.control != EVAL_CONTROL_NONE) {
+            freeval(value);
+            return abort_error();
+        }
+        discard_handlers();
+        run_all_defers();
+        free_iterators();
         if (context_.runtime_error_count != errors_before_ ||
             context_.control != EVAL_CONTROL_NONE) {
             freeval(value);
@@ -2876,28 +2892,35 @@ private:
     }
 
     value_t *abort_error() {
-        unwind_fast_frames();
-        if (context_.control != EVAL_CONTROL_CLOSE) {
-            if (context_.control == EVAL_CONTROL_FAIL &&
-                has_handler(UnwindKind::Fail)) {
-                value_t *error = take_eval_control(EVAL_CONTROL_FAIL);
-                if (!error)
-                    error = newerrorval("fail", "");
-                throw_unwind(UnwindKind::Fail, error);
+        while (true) {
+            if (context_.control != EVAL_CONTROL_CLOSE) {
+                if (context_.control == EVAL_CONTROL_FAIL &&
+                    has_handler(UnwindKind::Fail)) {
+                    value_t *error =
+                        take_eval_control(EVAL_CONTROL_FAIL);
+                    if (!error)
+                        error = newerrorval("fail", "");
+                    throw_unwind(UnwindKind::Fail, error);
+                }
+                if (context_.control == EVAL_CONTROL_RECOVER &&
+                    has_handler(UnwindKind::Recover)) {
+                    value_t *value =
+                        take_eval_control(EVAL_CONTROL_RECOVER);
+                    throw_unwind(UnwindKind::Recover, value);
+                }
+                if (context_.control == EVAL_CONTROL_NONE &&
+                    has_handler(UnwindKind::Fail)) {
+                    std::string message =
+                        context_.has_captured_error
+                            ? context_.captured_error
+                            : "runtime error";
+                    throw_unwind(UnwindKind::Fail,
+                                 newerrorval("runtime", message));
+                }
             }
-            if (context_.control == EVAL_CONTROL_RECOVER &&
-                has_handler(UnwindKind::Recover)) {
-                value_t *value = take_eval_control(EVAL_CONTROL_RECOVER);
-                throw_unwind(UnwindKind::Recover, value);
-            }
-            if (context_.control == EVAL_CONTROL_NONE &&
-                has_handler(UnwindKind::Fail)) {
-                std::string message = context_.has_captured_error
-                                          ? context_.captured_error
-                                          : "runtime error";
-                throw_unwind(UnwindKind::Fail,
-                             newerrorval("runtime", message));
-            }
+            if (saved_states_.empty())
+                break;
+            unwind_one_fast_frame();
         }
 
         discard_handlers();

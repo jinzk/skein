@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (40.76s)
+ctest: 8/8 passed (42.40s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.26s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.23s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 65.21s
-LSan:           skein_vm_lsan_tests Passed 77.82s
+skein_tests:    Passed 12.32s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.63s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 66.55s
+LSan:           skein_vm_lsan_tests Passed 78.22s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -62,10 +62,10 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 500 万次局部循环 | 1.22s | 1.10s |
-| `fib(30)` | 0.70s | 0.77s |
-| 200 万次函数调用 | 0.83s | 0.85s |
-| 参数 pattern 密集调用 | 0.51s | 0.59s |
+| 500 万次局部循环 | 1.21s | 1.08s |
+| `fib(30)` | 0.70s | 0.78s |
+| 200 万次函数调用 | 0.86s | 0.85s |
+| 参数 pattern 密集调用 | 0.53s | 0.58s |
 
 ### 2.4 基线缺口
 
@@ -304,11 +304,14 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - 参数个数精确匹配；
    - 无默认参数、variadic、method、generator、async；
    - 无参数 destructuring pattern；
-   - 函数体不含 handler、defer、iterator、await、yield、
-     break/continue 控制指令。
-3. 不满足条件时回退现有 `call_value_args` 路径，保持语义。
-4. 显式帧深度使用 `SKEIN_VM_MAX_DEPTH`，错误文本保持兼容。
-5. 新增递归测试：`down(5000)` 在 `SKEIN_VM_MAX_DEPTH=10000` 下通过，
+   - 函数体不含 `await` / `yield` / break/continue 控制指令。
+3. fast frame 现在支持 handler、defer、iterator：
+   - 每帧保存独立的 handler/defer/iterator 状态；
+   - 帧返回时运行 defer、释放 handler capture 和 iterator；
+   - 错误 unwinding 会逐帧恢复，遇到调用者帧中的 handler 时停止。
+4. 不满足条件时回退现有 `call_value_args` 路径，保持语义。
+5. 显式帧深度使用 `SKEIN_VM_MAX_DEPTH`，错误文本保持兼容。
+6. 新增递归测试：`down(5000)` 在 `SKEIN_VM_MAX_DEPTH=10000` 下通过，
    不再受 1000 层 C++ 递归限制。
 
 当前结果：
@@ -316,11 +319,12 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 - 递归深度 5000 正常；AST 后端在相同输入下栈溢出。
 - `SKEIN_VM_MAX_DEPTH=1000` 的错误文本保持不变。
 - 全部现有 VM 测试通过。
+- handler / defer / iterator 组合测试通过。
 - `fib(30)` 仍略慢于 AST（约 0.77s vs 0.70s），尚未达到性能目标。
 
 剩余：
 
-1. 将 handler / defer / iterator / generator / async 纳入显式帧。
+1. 将 generator / async 纳入显式帧挂起/恢复。
 2. 减少 fast frame 的 per-call 临时 vector、symbol 和 call-stack 分配。
 3. 让 `fib(30)` 达到不慢于 AST，目标 ≤ 0.70s。
 4. 评估完全移除 `call_value_args` 的 VM 函数递归路径。
@@ -329,6 +333,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 - 递归深度可配置到 10000 而不爆 C++ 栈：**已满足**。
 - 所有现有 VM 测试通过：**已满足**。
+- handler / defer / iterator：**已满足**。
 - `SKEIN_VM_MAX_DEPTH` 语义和错误文本兼容：**已满足**。
 - `fib(30)` 不慢于 AST，目标 ≤ 0.70s：**未满足**。
 

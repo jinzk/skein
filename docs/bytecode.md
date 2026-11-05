@@ -79,7 +79,7 @@ SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 - 参数 destructuring pattern（编译为 `PatternDesc`，调用绑定时原生匹配）
 - 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
-- VM fast frame（无 handler/defer/iterator/await/yield 的普通函数直接压帧，
+- VM fast frame（普通函数直接压帧，支持 handler / defer / iterator；
   `RETURN` 恢复调用者帧，不再创建 `Executor`）
 - list / dict 字面量
 - 索引与字段读取
@@ -226,7 +226,7 @@ struct Instr {
 - 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
   成功编译后也会释放对应 AST。`function_code->sl` 仍保留参数/默认值/trait
   签名元数据，以及编译失败时用于回退的默认值 AST 和 pattern AST。
-- fast frame 目前只覆盖普通函数；handler、defer、iterator、generator、
+- fast frame 支持普通函数以及 handler、defer、iterator；generator、
   async、默认参数、variadic、method 和参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
 - `fib(30)` 在 fast frame 下仍略慢于 AST，per-call 临时分配和调用栈

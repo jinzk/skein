@@ -90,7 +90,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 - 尾调用优化（`TAIL_CALL`：无 spread 的 `return f(args)` 复用当前
   fast frame；有 defer/handler/iterator 时回退普通调用）
 - list / dict 字面量
-- 索引与字段读取
+- 索引与字段读取（struct / enum variant 字段名通过索引表查找）
 - 索引/字段赋值、复合赋值、自增自减（含 COW 与循环引用检查）
 - `is` 类型检查
 - struct / enum 字面量构造

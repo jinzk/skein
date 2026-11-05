@@ -230,6 +230,10 @@ bool structtype_finalize_struct(struct_def *def,
         }
     }
     def->fields = std::move(fields);
+    def->field_index.clear();
+    def->field_index.reserve(def->fields.size());
+    for (size_t i = 0; i < def->fields.size(); ++i)
+        def->field_index.emplace(def->fields[i].name, (int)i);
     return true;
 }
 
@@ -373,6 +377,16 @@ bool structtype_finalize_enum(enum_def *def, std::vector<variant_def> variants,
         }
     }
     def->variants = std::move(variants);
+    def->variant_index.clear();
+    def->variant_index.reserve(def->variants.size());
+    for (size_t i = 0; i < def->variants.size(); ++i) {
+        variant_def &variant = def->variants[i];
+        def->variant_index.emplace(variant.name, (int)i);
+        variant.field_index.clear();
+        variant.field_index.reserve(variant.fields.size());
+        for (size_t j = 0; j < variant.fields.size(); ++j)
+            variant.field_index.emplace(variant.fields[j].name, (int)j);
+    }
     return true;
 }
 
@@ -451,6 +465,10 @@ bool structtype_has_trait(const struct_def *def, const trait_def *trait) {
 
 int structtype_field_index(const struct_def *def, const std::string &name) {
     if (!def) return -1;
+    if (def->field_index.size() == def->fields.size()) {
+        auto it = def->field_index.find(name);
+        return it == def->field_index.end() ? -1 : it->second;
+    }
     for (size_t i = 0; i < def->fields.size(); ++i)
         if (def->fields[i].name == name)
             return (int)i;
@@ -459,6 +477,10 @@ int structtype_field_index(const struct_def *def, const std::string &name) {
 
 int structtype_variant_index(const enum_def *def, const std::string &name) {
     if (!def) return -1;
+    if (def->variant_index.size() == def->variants.size()) {
+        auto it = def->variant_index.find(name);
+        return it == def->variant_index.end() ? -1 : it->second;
+    }
     for (size_t i = 0; i < def->variants.size(); ++i)
         if (def->variants[i].name == name)
             return (int)i;
@@ -468,6 +490,10 @@ int structtype_variant_index(const enum_def *def, const std::string &name) {
 int structtype_variant_field_index(const variant_def *variant,
                                    const std::string &name) {
     if (!variant) return -1;
+    if (variant->field_index.size() == variant->fields.size()) {
+        auto it = variant->field_index.find(name);
+        return it == variant->field_index.end() ? -1 : it->second;
+    }
     for (size_t i = 0; i < variant->fields.size(); ++i)
         if (variant->fields[i].name == name)
             return (int)i;

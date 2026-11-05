@@ -31,6 +31,7 @@ struct trait_def {
 struct variant_def {
     std::string name;
     std::vector<field_def> fields;
+    std::unordered_map<std::string, int> field_index;
 };
 
 struct enum_def {
@@ -39,6 +40,7 @@ struct enum_def {
     std::string module_name;
     bool exported;
     std::vector<variant_def> variants;
+    std::unordered_map<std::string, int> variant_index;
 };
 
 struct struct_def {
@@ -47,6 +49,7 @@ struct struct_def {
     std::string module_name;
     bool exported;
     std::vector<field_def> fields;
+    std::unordered_map<std::string, int> field_index;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
     std::vector<const trait_def *> traits;
 };

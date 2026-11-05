@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (42.76s)
+ctest: 8/8 passed (42.50s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.42s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.38s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 66.10s
-LSan:           skein_vm_lsan_tests Passed 79.11s
+skein_tests:    Passed 12.31s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.52s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 66.37s
+LSan:           skein_vm_lsan_tests Passed 79.37s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -536,18 +536,25 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 3. `cached_symbol()` 优先命中 Proto 级全局 IC，未命中时再走
    `lookupsym()`；局部符号仍使用每帧 name cache。
 4. 修复全局作用域重建时 generation 回绕导致旧缓存命中的问题。
+5. 结构体 / enum variant 字段增加名称到索引的 `unordered_map`：
+   - `struct_def::field_index`
+   - `variant_def::field_index`
+   - `enum_def::variant_index`
+   - `structtype_field_index()` / `variant_field_index()` /
+     `variant_index()` 优先查表，并在 map 不完整时回退线性扫描。
+6. VM 统计已覆盖全局名字 IC 命中/未命中。
 
 效果：
 
 - `fib(30)` 从约 0.75s 降到约 0.70s，与 AST 持平。
 - `call_bench` VM 约 0.82s，AST 约 0.85s。
+- 结构体字段 / enum variant 查找从线性扫描改为哈希查找。
 
 剩余：
 
 1. 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位与模块级符号表。
-2. 字段 / 索引 / 方法调用 inline cache。
-3. IC 命中率与失效统计。
-4. 把局部名字缓存改为 per-call-site，而不是每帧整表失效。
+2. per-call-site 字段 / 索引 / 方法调用 inline cache。
+3. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
 
 验收：
 

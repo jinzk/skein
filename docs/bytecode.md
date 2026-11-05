@@ -68,6 +68,7 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 - `return`
 - 函数定义 / 闭包（`CLOSURE` / `BIND_FUNC`，函数体首次调用时编译并缓存在 `function_code`）
 - 参数 fast path（`LOAD_PARAM` / `STORE_PARAM` / `COMPOUND_PARAM` / `INCDEC_PARAM`；参数未被本函数局部声明遮蔽时）
+- 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；通过 `symbol*` cell 兼容闭包/defer/方法/for-in/match/destructuring/on-error/import）
 - 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
 - list / dict 字面量
@@ -121,6 +122,7 @@ NOP
 LOAD_NULL / LOAD_CONST / LOAD_NAME
 STORE_NAME / COMPOUND_NAME / INCDEC_NAME / DEFINE_NAME
 LOAD_PARAM / STORE_PARAM / COMPOUND_PARAM / INCDEC_PARAM
+DEFINE_SLOT / LOAD_SLOT / STORE_SLOT / COMPOUND_SLOT / INCDEC_SLOT / CLEAR_SLOT
 POP / DUP / SWAP
 ADD / SUB / MUL / DIV / MOD / NEG
 BIT_AND / BIT_OR / BIT_XOR / SHL / SHR / BIT_NOT / NOT
@@ -173,10 +175,12 @@ struct Instr {
 
 ## 6. 已知限制
 
-- 局部变量仍是**按名字查找 + per-constant cache**；函数参数在未被局部
-  声明遮蔽时使用参数 fast path，但还没有通用 slot/upvalue。小整数/
-  `true`/`false`/`null` 已单例化，简单循环基准略快于 AST 后端，但函数
-  调用密集的基准仍受 C++ 递归和每帧分配的拖累。
+- 局部变量使用 slot fast path；函数参数在未被局部声明遮蔽时使用参数 fast
+  path。slot 通过 `symbol*` cell 与闭包、defer、方法、for-in 循环变量、
+  match binding、destructuring、on-error 绑定和 import 绑定共享。还没有
+  真正的 upvalue 索引，闭包内部对捕获变量的访问仍走名字查找。
+- 小整数/`true`/`false`/`null` 已单例化；局部变量密集的循环基准已明显
+  快于 AST，但函数调用密集的基准仍受 C++ 递归和每帧分配的拖累。
 - 常规语法结构已经全部有字节码路径，`EVAL_AST` 只作为兜底。
 - `function_code` 仍保留 AST 元数据（默认参数、trait 签名等）；最终目标
   是把默认参数等编译进 Proto，并移除 runtime 中的 `ast*`。

@@ -20,6 +20,12 @@ const char *op_name(Op op) {
         case Op::StoreParam: return "STORE_PARAM";
         case Op::CompoundParam: return "COMPOUND_PARAM";
         case Op::IncDecParam: return "INCDEC_PARAM";
+        case Op::DefineSlot: return "DEFINE_SLOT";
+        case Op::LoadSlot: return "LOAD_SLOT";
+        case Op::StoreSlot: return "STORE_SLOT";
+        case Op::CompoundSlot: return "COMPOUND_SLOT";
+        case Op::IncDecSlot: return "INCDEC_SLOT";
+        case Op::ClearSlot: return "CLEAR_SLOT";
         case Op::Pop: return "POP";
         case Op::Dup: return "DUP";
         case Op::Swap: return "SWAP";
@@ -184,6 +190,12 @@ std::string disassemble(const Proto &proto) {
             out << " impl=" << proto.impl_decls[ins.b].type_name;
         if (op == Op::DeclarePackage && ins.b < proto.packages.size())
             out << " package=" << proto.packages[ins.b].name;
+        if ((op == Op::DefineSlot || op == Op::LoadSlot ||
+             op == Op::StoreSlot || op == Op::CompoundSlot ||
+             op == Op::IncDecSlot || op == Op::ClearSlot) &&
+            ins.b < proto.slots.size())
+            out << " slot=" << ins.b << "("
+                << proto.slots[ins.b].name << ")";
         if (op == Op::CallSpread && ins.b < proto.call_descs.size())
             out << " args=" << proto.call_descs[ins.b].spread.size();
         if (loc.line > 0)

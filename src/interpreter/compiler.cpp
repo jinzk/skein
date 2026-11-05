@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -48,9 +49,16 @@ struct Compiler {
     std::string error;
     std::vector<LoopContext> loops;
     std::vector<int> iter_stack;
+    struct SlotScope {
+        std::unordered_map<std::string, int> names;
+        std::vector<int> declared;
+    };
+
     std::string pending_label;
     std::vector<std::string> param_names;
+    std::vector<SlotScope> slot_scopes;
     int scope_depth = 0;
+    bool slot_fast_path = false;
     int handler_body_depth = 0;
     bool inside_function = false;
     bool param_fast_path = false;
@@ -86,6 +94,14 @@ struct Compiler {
                 break;
             case Op::DeferPush:
                 proto.uses_defers = true;
+                break;
+            case Op::DefineSlot:
+            case Op::LoadSlot:
+            case Op::StoreSlot:
+            case Op::CompoundSlot:
+            case Op::IncDecSlot:
+            case Op::ClearSlot:
+                proto.uses_slots = true;
                 break;
             default:
                 break;
@@ -150,11 +166,14 @@ struct Compiler {
         return static_cast<uint32_t>(proto.consts.size() - 1);
     }
 
-    uint32_t add_iter(const char *key_name, const char *value_name) {
+    uint32_t add_iter(const char *key_name, const char *value_name,
+                      uint32_t key_slot, uint32_t value_slot) {
         skein::bc::IterDesc desc;
         desc.key_name = key_name ? key_name : "";
         desc.value_name = value_name ? value_name : "";
         desc.two_vars = value_name != NULL;
+        desc.key_slot = key_slot;
+        desc.value_slot = value_slot;
         proto.iters.push_back(std::move(desc));
         return static_cast<uint32_t>(proto.iters.size() - 1);
     }
@@ -773,6 +792,281 @@ struct Compiler {
         return -1;
     }
 
+    static bool can_use_slots(const ast *node) {
+        if (!node)
+            return true;
+        switch (node->nodetype) {
+            case 'Z': // nested function body is compiled separately
+            case 'Y': // struct methods are compiled separately
+            case 'H': // impl methods are compiled separately
+            case 't': // trait declaration has no body
+            case '<': // enum declaration has no body
+            case 'n': // defer expression is compiled separately
+                return true;
+            case 'o': {
+                struct on_error_node *handler =
+                    (struct on_error_node *)node;
+                return can_use_slots(handler->call) &&
+                       can_use_slots(handler->body);
+            }
+            case '7': {
+                struct match_node *match = (struct match_node *)node;
+                if (!can_use_slots(match->expr))
+                    return false;
+                for (struct match_arm *arm =
+                         (struct match_arm *)match->arms;
+                     arm; arm = (struct match_arm *)arm->next) {
+                    if (!can_use_slots(arm->guard) ||
+                        !can_use_slots(arm->body))
+                        return false;
+                }
+                return true;
+            }
+            case NODE_DESTRUCTURE:
+                return can_use_slots(
+                    ((struct destructure_node *)node)->value);
+            case 'J': // import binding
+            case 'K': // package body is a separate compilation unit
+                return true;
+            case 'F':
+                return true;
+            case 'D':
+                return can_use_slots(((struct symdef *)node)->v);
+            case 'X':
+                return can_use_slots(((struct nscope *)node)->ast);
+            case 'L':
+                return can_use_slots(node->l) &&
+                       can_use_slots(node->r);
+            case 'I':
+            case 'T': {
+                struct flow *f = (struct flow *)node;
+                return can_use_slots(f->cond) &&
+                       can_use_slots(f->tl) &&
+                       can_use_slots(f->el);
+            }
+            case 'W': {
+                struct flow *f = (struct flow *)node;
+                return can_use_slots(f->cond) &&
+                       can_use_slots(f->tl);
+            }
+            case 'E': {
+                struct flow *f = (struct flow *)node;
+                return can_use_slots(f->tl) &&
+                       can_use_slots(f->cond);
+            }
+            case 'P': {
+                struct forloop *f = (struct forloop *)node;
+                return can_use_slots(f->init) &&
+                       can_use_slots(f->cond) &&
+                       can_use_slots(f->step) &&
+                       can_use_slots(f->body);
+            }
+            case 'S': {
+                struct switch_node *s = (struct switch_node *)node;
+                if (!can_use_slots(s->expr))
+                    return false;
+                for (struct case_node *c = (struct case_node *)s->cases; c;
+                     c = (struct case_node *)c->next) {
+                    if (!can_use_slots(c->values) ||
+                        !can_use_slots(c->body))
+                        return false;
+                }
+                return true;
+            }
+            case 'R':
+                return can_use_slots(((struct fnret *)node)->v);
+            case 'C': {
+                struct ufncall *call = (struct ufncall *)node;
+                return can_use_slots(call->callee) &&
+                       can_use_slots(call->args);
+            }
+            case '=': {
+                struct symasgn *asgn = (struct symasgn *)node;
+                return can_use_slots(asgn->target) &&
+                       can_use_slots(asgn->v);
+            }
+            case 'a': {
+                struct compound_asgn *asgn = (struct compound_asgn *)node;
+                return can_use_slots(asgn->target) &&
+                       can_use_slots(asgn->v);
+            }
+            case 'U':
+                return can_use_slots(
+                    ((struct incdec_node *)node)->target);
+            case 'u':
+            case 'v':
+            case 'p':
+                return can_use_slots(
+                    ((struct control_stmt *)node)->value);
+            case 'b':
+            case 'w':
+                return can_use_slots(node->l);
+            case 'g':
+                return can_use_slots(
+                    ((struct label_node *)node)->stmt);
+            case 'l': {
+                for (struct list_node *item = (struct list_node *)node; item;
+                     item = (struct list_node *)item->next) {
+                    if (!can_use_slots(item->value))
+                        return false;
+                }
+                return true;
+            }
+            case 'd': {
+                for (struct dict_node *entry = (struct dict_node *)node;
+                     entry; entry = (struct dict_node *)entry->next) {
+                    if (!can_use_slots(entry->key) ||
+                        !can_use_slots(entry->value))
+                        return false;
+                }
+                return true;
+            }
+            case 'k':
+                return can_use_slots(
+                    ((struct is_node *)node)->value);
+            case 'x':
+                return can_use_slots(
+                    ((struct spread_node *)node)->value);
+            case 'y':
+            case '?': {
+                struct struct_init *init =
+                    node->nodetype == 'y'
+                        ? ((struct struct_lit_node *)node)->fields
+                        : ((struct enum_lit_node *)node)->fields;
+                for (; init; init = init->next) {
+                    if (!can_use_slots(init->value))
+                        return false;
+                }
+                return true;
+            }
+            case 'V':
+            case 'N':
+            case 'B':
+            case 'O':
+            case '#':
+            case '>':
+                return true;
+            default:
+                return can_use_slots(node->l) &&
+                       can_use_slots(node->r);
+        }
+    }
+
+    int find_slot(const char *name) const {
+        if (!name)
+            return -1;
+        for (size_t i = slot_scopes.size(); i > 0; --i) {
+            auto it = slot_scopes[i - 1].names.find(name);
+            if (it != slot_scopes[i - 1].names.end())
+                return it->second;
+        }
+        return -1;
+    }
+
+    void push_slot_scope() {
+        if (slot_fast_path)
+            slot_scopes.emplace_back();
+    }
+
+    void emit_clear_current_slots() {
+        if (!slot_fast_path || slot_scopes.empty())
+            return;
+        for (int index : slot_scopes.back().declared) {
+            emit(Op::ClearSlot, 0, 0,
+                 static_cast<uint32_t>(index), SourceLoc());
+        }
+    }
+
+    void pop_slot_scope(bool clear) {
+        if (!slot_fast_path || slot_scopes.empty())
+            return;
+        if (clear)
+            emit_clear_current_slots();
+        slot_scopes.pop_back();
+    }
+
+    static void add_pattern_binding_name(
+        std::vector<std::string> &names, const char *name) {
+        if (!name || !*name || std::strcmp(name, "_") == 0)
+            return;
+        for (const std::string &existing : names) {
+            if (existing == name)
+                return;
+        }
+        names.push_back(name);
+    }
+
+    static void collect_pattern_bindings(
+        const struct ast *node, std::vector<std::string> &names) {
+        if (!node)
+            return;
+        const struct pattern_node *pattern =
+            (const struct pattern_node *)node;
+        switch (pattern->nodetype) {
+            case NODE_PATTERN_BINDING:
+                add_pattern_binding_name(names, pattern->name);
+                return;
+            case NODE_PATTERN_REST:
+                add_pattern_binding_name(names, pattern->name);
+                return;
+            case NODE_PATTERN_AS:
+                collect_pattern_bindings(pattern->items, names);
+                add_pattern_binding_name(names, pattern->name);
+                return;
+            case NODE_PATTERN_OR:
+            case NODE_PATTERN_LIST:
+                for (struct pattern_node *item =
+                         (struct pattern_node *)pattern->items;
+                     item; item = (struct pattern_node *)item->next) {
+                    collect_pattern_bindings((const struct ast *)item,
+                                             names);
+                }
+                return;
+            case NODE_PATTERN_CONTAINER:
+                for (struct pattern_field *field = pattern->fields; field;
+                     field = field->next) {
+                    if (field->pattern)
+                        collect_pattern_bindings(field->pattern, names);
+                    else
+                        add_pattern_binding_name(names, field->rest_name);
+                }
+                return;
+            default:
+                return;
+        }
+    }
+
+    void attach_pattern_slots(uint32_t pattern_index,
+                              const std::vector<std::string> &names,
+                              bool is_const) {
+        if (!slot_fast_path || slot_scopes.empty() ||
+            pattern_index >= proto.patterns.size())
+            return;
+        for (const std::string &name : names) {
+            uint32_t slot = add_slot(name.c_str(), NULL, is_const);
+            slot_scopes.back().names[name] = static_cast<int>(slot);
+            slot_scopes.back().declared.push_back(
+                static_cast<int>(slot));
+            skein::bc::PatternSlotDesc binding;
+            binding.name = name;
+            binding.slot = slot;
+            proto.patterns[pattern_index].binding_slots.push_back(
+                std::move(binding));
+        }
+    }
+
+    uint32_t add_slot(const char *name,
+                      const struct type_constraint *type, bool is_const) {
+        skein::bc::SlotDesc slot;
+        slot.name = name ? name : "";
+        slot.type = type ? copy_type_constraint(type)
+                         : any_type_constraint();
+        slot.is_const = is_const;
+        proto.slots.push_back(std::move(slot));
+        proto.uses_slots = true;
+        return static_cast<uint32_t>(proto.slots.size() - 1);
+    }
+
     void compile_fallback(ast *node) {
         if (!fallback_safe(node)) {
             fail("unsupported control flow in fallback expression");
@@ -810,19 +1104,46 @@ struct Compiler {
 
             case 'N': {
                 struct symref *ref = (struct symref *)node;
-                int slot = param_fast_path ? param_index(ref->name) : -1;
+                int slot = slot_fast_path ? find_slot(ref->name) : -1;
                 if (slot >= 0) {
-                    emit(Op::LoadParam, 0, 0,
+                    emit(Op::LoadSlot, 0, 0,
                          static_cast<uint32_t>(slot), here);
                 } else {
-                    uint32_t index = add_name(ref->name ? ref->name : "");
-                    emit(Op::LoadName, 0, 0, index, here);
+                    slot = param_fast_path ? param_index(ref->name) : -1;
+                    if (slot >= 0) {
+                        emit(Op::LoadParam, 0, 0,
+                             static_cast<uint32_t>(slot), here);
+                    } else {
+                        uint32_t index =
+                            add_name(ref->name ? ref->name : "");
+                        emit(Op::LoadName, 0, 0, index, here);
+                    }
                 }
                 return;
             }
 
             case 'D': {
                 struct symdef *def = (struct symdef *)node;
+                if (slot_fast_path && !slot_scopes.empty() &&
+                    def->name) {
+                    SlotScope &scope = slot_scopes.back();
+                    if (scope.names.count(def->name) != 0) {
+                        uint32_t message = add_name(
+                            std::string("symbol repeated ") + def->name);
+                        emit(Op::RuntimeError, 0, 0, message, here);
+                        return;
+                    }
+                    uint32_t slot = add_slot(
+                        def->name, def->type, def->is_const != 0);
+                    scope.names[def->name] = static_cast<int>(slot);
+                    scope.declared.push_back(static_cast<int>(slot));
+                    if (def->v) {
+                        compile(def->v);
+                        if (!ok) return;
+                    }
+                    emit(Op::DefineSlot, def->v ? 1 : 0, 0, slot, here);
+                    return;
+                }
                 if (def->v) {
                     compile(def->v);
                     if (!ok) return;
@@ -838,13 +1159,20 @@ struct Compiler {
                     struct symref *ref = (struct symref *)asgn->target;
                     compile(asgn->v);
                     if (!ok) return;
-                    int slot = param_fast_path ? param_index(ref->name) : -1;
+                    int slot = slot_fast_path ? find_slot(ref->name) : -1;
                     if (slot >= 0) {
-                        emit(Op::StoreParam, 0, 0,
+                        emit(Op::StoreSlot, 0, 0,
                              static_cast<uint32_t>(slot), here);
                     } else {
-                        uint32_t index = add_name(ref->name ? ref->name : "");
-                        emit(Op::StoreName, 0, 0, index, here);
+                        slot = param_fast_path ? param_index(ref->name) : -1;
+                        if (slot >= 0) {
+                            emit(Op::StoreParam, 0, 0,
+                                 static_cast<uint32_t>(slot), here);
+                        } else {
+                            uint32_t index =
+                                add_name(ref->name ? ref->name : "");
+                            emit(Op::StoreName, 0, 0, index, here);
+                        }
                     }
                     return;
                 }
@@ -881,16 +1209,24 @@ struct Compiler {
                     struct symref *ref = (struct symref *)asgn->target;
                     compile(asgn->v);
                     if (!ok) return;
-                    int slot = param_fast_path ? param_index(ref->name) : -1;
+                    int slot = slot_fast_path ? find_slot(ref->name) : -1;
                     if (slot >= 0) {
-                        emit(Op::CompoundParam,
+                        emit(Op::CompoundSlot,
                              static_cast<uint8_t>(asgn->op), 0,
                              static_cast<uint32_t>(slot), here);
                     } else {
-                        uint32_t index = add_name(ref->name ? ref->name : "");
-                        emit(Op::CompoundName,
-                             static_cast<uint8_t>(asgn->op), 0, index,
-                             here);
+                        slot = param_fast_path ? param_index(ref->name) : -1;
+                        if (slot >= 0) {
+                            emit(Op::CompoundParam,
+                                 static_cast<uint8_t>(asgn->op), 0,
+                                 static_cast<uint32_t>(slot), here);
+                        } else {
+                            uint32_t index =
+                                add_name(ref->name ? ref->name : "");
+                            emit(Op::CompoundName,
+                                 static_cast<uint8_t>(asgn->op), 0, index,
+                                 here);
+                        }
                     }
                     return;
                 }
@@ -926,15 +1262,23 @@ struct Compiler {
                 struct incdec_node *inc = (struct incdec_node *)node;
                 if (inc->target && inc->target->nodetype == 'N') {
                     struct symref *ref = (struct symref *)inc->target;
-                    int slot = param_fast_path ? param_index(ref->name) : -1;
+                    int slot = slot_fast_path ? find_slot(ref->name) : -1;
                     if (slot >= 0) {
-                        emit(Op::IncDecParam, inc->prefix ? 1 : 0,
+                        emit(Op::IncDecSlot, inc->prefix ? 1 : 0,
                              inc->delta > 0 ? 1 : 0,
                              static_cast<uint32_t>(slot), here);
                     } else {
-                        uint32_t index = add_name(ref->name ? ref->name : "");
-                        emit(Op::IncDecName, inc->prefix ? 1 : 0,
-                             inc->delta > 0 ? 1 : 0, index, here);
+                        slot = param_fast_path ? param_index(ref->name) : -1;
+                        if (slot >= 0) {
+                            emit(Op::IncDecParam, inc->prefix ? 1 : 0,
+                                 inc->delta > 0 ? 1 : 0,
+                                 static_cast<uint32_t>(slot), here);
+                        } else {
+                            uint32_t index =
+                                add_name(ref->name ? ref->name : "");
+                            emit(Op::IncDecName, inc->prefix ? 1 : 0,
+                                 inc->delta > 0 ? 1 : 0, index, here);
+                        }
                     }
                     return;
                 }
@@ -1166,8 +1510,10 @@ struct Compiler {
                 struct nscope *scope = (struct nscope *)node;
                 emit(Op::PushScope, 0, 0, 0, here);
                 ++scope_depth;
+                push_slot_scope();
                 compile(scope->ast);
                 if (!ok) return;
+                pop_slot_scope(true);
                 emit(Op::PopScope, 0, 0, 0, here);
                 --scope_depth;
                 return;
@@ -1183,6 +1529,10 @@ struct Compiler {
                 if (!ok) return;
                 uint32_t pattern = add_pattern(d->pattern);
                 if (!ok) return;
+                std::vector<std::string> bindings;
+                collect_pattern_bindings(d->pattern, bindings);
+                attach_pattern_slots(pattern, bindings,
+                                     d->is_const != 0);
                 emit(Op::MatchBind, d->is_const ? 1 : 0, 0, pattern, here);
                 return;
             }
@@ -1308,8 +1658,24 @@ struct Compiler {
             }
 
             case 'J': {
-                uint32_t desc = add_import((struct import_node *)node);
-                emit(Op::Import, 0, static_cast<uint16_t>(desc), 0, here);
+                struct import_node *imp = (struct import_node *)node;
+                uint32_t name_slot = UINT32_MAX;
+                if (slot_fast_path && !slot_scopes.empty()) {
+                    const char *binding =
+                        imp->alias ? imp->alias
+                                   : import_binding_name(imp->path);
+                    if (binding && *binding) {
+                        uint32_t slot = add_slot(binding, NULL, false);
+                        slot_scopes.back().names[binding] =
+                            static_cast<int>(slot);
+                        slot_scopes.back().declared.push_back(
+                            static_cast<int>(slot));
+                        name_slot = slot;
+                    }
+                }
+                uint32_t desc = add_import(imp);
+                emit(Op::Import, 0, static_cast<uint16_t>(desc),
+                     name_slot, here);
                 return;
             }
 
@@ -1496,6 +1862,7 @@ struct Compiler {
 
         emit(Op::PushScope, 0, 0, 0, here);
         ++scope_depth;
+        push_slot_scope();
         if (f->init) {
             compile(f->init);
             if (!ok) return;
@@ -1541,6 +1908,7 @@ struct Compiler {
         if (jf != static_cast<size_t>(-1))
             patch(jf, end);
 
+        pop_slot_scope(true);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
         emit(Op::LoadNull, 0, 0, 0, here);
@@ -1555,8 +1923,28 @@ struct Compiler {
 
         emit(Op::PushScope, 0, 0, 0, here);
         ++scope_depth;
+        push_slot_scope();
 
-        uint32_t desc = add_iter(f->name, f->value_name);
+        uint32_t key_slot = UINT32_MAX;
+        uint32_t value_slot = UINT32_MAX;
+        if (slot_fast_path && !slot_scopes.empty()) {
+            key_slot = add_slot(f->name, NULL, false);
+            slot_scopes.back().names[f->name] =
+                static_cast<int>(key_slot);
+            slot_scopes.back().declared.push_back(
+                static_cast<int>(key_slot));
+            if (f->value_name &&
+                std::strcmp(f->name, f->value_name) != 0) {
+                value_slot = add_slot(f->value_name, NULL, false);
+                slot_scopes.back().names[f->value_name] =
+                    static_cast<int>(value_slot);
+                slot_scopes.back().declared.push_back(
+                    static_cast<int>(value_slot));
+            }
+        }
+
+        uint32_t desc = add_iter(f->name, f->value_name, key_slot,
+                                 value_slot);
         emit(Op::IterNew, 0, static_cast<uint16_t>(desc), 0, here);
 
         size_t next_pc = proto.code.size();
@@ -1588,6 +1976,7 @@ struct Compiler {
         iter_stack.pop_back();
 
         emit(Op::IterEnd, 0, static_cast<uint16_t>(desc), 0, here);
+        pop_slot_scope(true);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
         emit(Op::LoadNull, 0, 0, 0, here);
@@ -1633,8 +2022,10 @@ struct Compiler {
 
             emit(Op::PushScope, 0, 0, 0, case_loc);
             ++scope_depth;
+            push_slot_scope();
             compile(c->body);
             if (!ok) return;
+            pop_slot_scope(true);
             emit(Op::PopScope, 0, 0, 0, case_loc);
             --scope_depth;
             emit(Op::Pop, 0, 0, 0, case_loc);
@@ -1646,8 +2037,10 @@ struct Compiler {
             SourceLoc case_loc = loc_of((struct ast *)default_case);
             emit(Op::PushScope, 0, 0, 0, case_loc);
             ++scope_depth;
+            push_slot_scope();
             compile(default_case->body);
             if (!ok) return;
+            pop_slot_scope(true);
             emit(Op::PopScope, 0, 0, 0, case_loc);
             --scope_depth;
             emit(Op::Pop, 0, 0, 0, case_loc);
@@ -1795,16 +2188,20 @@ struct Compiler {
         if (!ok) return;
 
         std::vector<uint32_t> pattern_indices;
+        std::vector<std::vector<std::string>> arm_bindings;
         std::vector<skein::bc::MatchArmDesc> arm_descs;
         for (struct match_arm *arm = (struct match_arm *)m->arms; arm;
              arm = (struct match_arm *)arm->next) {
             skein::bc::MatchArmDesc desc;
+            std::vector<std::string> bindings;
             if (arm->pattern) {
+                collect_pattern_bindings(arm->pattern, bindings);
                 desc.pattern = add_pattern(arm->pattern);
                 if (!ok) return;
             }
             desc.has_guard = arm->guard != NULL;
             pattern_indices.push_back(desc.pattern);
+            arm_bindings.push_back(std::move(bindings));
             arm_descs.push_back(desc);
         }
         uint32_t arms = static_cast<uint32_t>(proto.match_arms.size());
@@ -1831,11 +2228,14 @@ struct Compiler {
 
             emit(Op::PushScope, 0, 0, 0, arm_loc);
             ++scope_depth;
+            push_slot_scope();
 
             size_t fail_jump = static_cast<size_t>(-1);
             size_t guard_jump = static_cast<size_t>(-1);
 
             if (!is_default) {
+                attach_pattern_slots(pattern_indices[arm_index],
+                                     arm_bindings[arm_index], true);
                 emit(Op::Dup, 0, 0, 0, arm_loc);
                 emit(Op::MatchTest, 0, 0, pattern_indices[arm_index],
                      here);
@@ -1851,6 +2251,7 @@ struct Compiler {
             compile(arm->body);
             if (!ok) return;
 
+            emit_clear_current_slots();
             emit(Op::PopScope, 0, 0, 0, arm_loc);
             --scope_depth;
             emit(Op::Swap, 0, 0, 0, arm_loc);
@@ -1859,6 +2260,7 @@ struct Compiler {
 
             if (is_default) {
                 // A default arm always matches; later arms are unreachable.
+                pop_slot_scope(false);
                 break;
             }
 
@@ -1869,7 +2271,9 @@ struct Compiler {
                 patch(guard_jump, fail_target);
 
             // Failure path: discard the arm scope, then try the next arm.
+            emit_clear_current_slots();
             emit(Op::PopScope, 0, 0, 0, arm_loc);
+            pop_slot_scope(false);
         }
 
         uint32_t message = add_name("match: no arm matched");
@@ -1899,9 +2303,19 @@ struct Compiler {
 
         emit(Op::PushScope, 0, 0, 0, here);
         ++scope_depth;
+        push_slot_scope();
+        uint16_t error_slot = UINT16_MAX;
+        if (slot_fast_path && !slot_scopes.empty() && handler->name) {
+            uint32_t slot = add_slot(handler->name, NULL, true);
+            slot_scopes.back().names[handler->name] =
+                static_cast<int>(slot);
+            slot_scopes.back().declared.push_back(
+                static_cast<int>(slot));
+            error_slot = static_cast<uint16_t>(slot);
+        }
         uint32_t error_name =
             add_name(handler->name ? handler->name : "");
-        emit(Op::BindName, 1, 0, error_name, here);
+        emit(Op::BindName, 1, error_slot, error_name, here);
 
         /*
          * The recover handler is pushed inside the handler scope but must
@@ -1919,6 +2333,7 @@ struct Compiler {
         emit(Op::LeaveHandlerBody, 0, 0, 0, here);
         --handler_body_depth;
         emit(Op::PopHandler, 0, 0, 0, here);
+        pop_slot_scope(true);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
 
@@ -2164,6 +2579,9 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     }
     compiler.param_fast_path =
         !Compiler::has_local_declarations(code->ast);
+    compiler.slot_fast_path = Compiler::can_use_slots(code->ast);
+    if (compiler.slot_fast_path)
+        compiler.slot_scopes.emplace_back();
     compiler.proto.nparams = static_cast<uint32_t>(code->nparams);
     compiler.proto.required_params =
         static_cast<uint32_t>(code->required_params);

@@ -48,6 +48,12 @@ enum class Op : uint8_t {
     StoreParam,
     CompoundParam,
     IncDecParam,
+    DefineSlot,
+    LoadSlot,
+    StoreSlot,
+    CompoundSlot,
+    IncDecSlot,
+    ClearSlot,
 
     Pop,
     Dup,
@@ -163,6 +169,8 @@ struct IterDesc {
     std::string key_name;
     std::string value_name;
     bool two_vars = false;
+    uint32_t key_slot = UINT32_MAX;
+    uint32_t value_slot = UINT32_MAX;
 };
 
 struct IndexDesc {
@@ -194,6 +202,11 @@ struct PatternFieldDesc {
     bool rest = false;
 };
 
+struct PatternSlotDesc {
+    std::string name;
+    uint32_t slot = UINT32_MAX;
+};
+
 struct PatternDesc {
     enum class Kind {
         Literal,
@@ -221,12 +234,19 @@ struct PatternDesc {
     std::vector<uint32_t> items;
     uint32_t child = UINT32_MAX;
     std::vector<PatternFieldDesc> fields;
+    std::vector<PatternSlotDesc> binding_slots;
     bool is_dict = false;
 };
 
 struct MatchArmDesc {
     uint32_t pattern = UINT32_MAX;
     bool has_guard = false;
+};
+
+struct SlotDesc {
+    std::string name;
+    type_constraint type;
+    bool is_const = false;
 };
 
 struct DeclFieldMeta {
@@ -341,9 +361,11 @@ struct Proto {
     std::vector<std::shared_ptr<const Proto>> defer_protos;
 
     std::vector<std::string> param_names;
+    std::vector<SlotDesc> slots;
     bool uses_names = false;
     bool uses_params = false;
     bool uses_defers = false;
+    bool uses_slots = false;
 
     uint32_t nparams = 0;
     uint32_t required_params = 0;

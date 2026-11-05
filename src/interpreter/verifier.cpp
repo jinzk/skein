@@ -218,6 +218,11 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             if (!check_slot(proto, ins.b, pc, error))
                 return false;
             break;
+        case Op::CheckRedefine:
+            if (!check_constant(proto, ins.b, pc, error, true,
+                                ConstantKind::Name))
+                return false;
+            break;
         case Op::DefineName:
             if (!check_decl(proto, ins.b, pc, error))
                 return false;
@@ -263,6 +268,12 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
         case Op::CmpGe:
             need(2);
             stack(2, 1);
+            break;
+        case Op::CmpJump:
+            if (!jump(ins.b, true))
+                return false;
+            need(2);
+            stack(2, 0);
             break;
         case Op::IsType:
             if (!check_constant(proto, ins.b, pc, error, true,

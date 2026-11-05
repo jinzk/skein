@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -66,10 +67,32 @@ struct vm_stats_data {
     uint64_t name_ic_misses = 0;
     uint64_t max_depth = 0;
     uint64_t max_stack = 0;
+    uint64_t max_handler_depth = 0;
+    uint64_t max_defer_depth = 0;
+    uint64_t max_iterator_depth = 0;
+    uint64_t compile_ns = 0;
+    uint64_t execute_ns = 0;
+    std::unordered_map<std::string, uint64_t> fallback_reasons;
     std::array<uint64_t, static_cast<size_t>(Op::Count)> opcodes{};
 };
 
 vm_stats_data vm_stats;
+
+void record_fallback_reason(const std::string &reason) {
+    if (!vm_stats.enabled)
+        return;
+    std::string key = reason.empty() ? "unknown" : reason;
+    if (key.size() > 120)
+        key.resize(120);
+    ++vm_stats.fallback_reasons[key];
+}
+
+uint64_t elapsed_ns(std::chrono::steady_clock::time_point start) {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - start)
+            .count());
+}
 
 int vm_max_depth() {
     if (vm_max_depth_state < 0) {
@@ -142,11 +165,15 @@ ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
         return cache.proto;
 
     ensure_stats_flags();
+    const auto compile_start = std::chrono::steady_clock::now();
     std::string error;
     ProtoPtr proto = skein_compile_function_body(code, code->module, error);
+    if (vm_stats.enabled)
+        vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
         if (vm_stats.enabled)
             ++vm_stats.functions_fallback;
+        record_fallback_reason(error);
         cache.compile_failed = true;
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback function %s: %s\n",
@@ -587,7 +614,7 @@ public:
                     sym->is_const = slot.is_const;
                     savesym(sym);
                     slot_symbols_[ins.b] = sym;
-                    invalidate_name_cache();
+                    invalidate_name_cache(slot.name.c_str());
                     push(newnull());
                     break;
                 }
@@ -760,6 +787,16 @@ public:
                     break;
                 }
 
+                case Op::CheckRedefine: {
+                    const char *name = name_at(proto(), ins.b);
+                    if (isrepeated(name)) {
+                        yyerror("symbol repeated %s",
+                                name ? name : "");
+                        return abort_error();
+                    }
+                    break;
+                }
+
                 case Op::DefineName: {
                     if (ins.b >= proto().decls.size()) {
                         yyerror("invalid bytecode declaration");
@@ -811,7 +848,7 @@ public:
                     sym->exported = def.exported;
                     sym->is_const = def.is_const;
                     savesym(sym);
-                    invalidate_name_cache();
+                    invalidate_name_cache(def.name.c_str());
                     push(newnull());
                     break;
                 }
@@ -916,6 +953,28 @@ public:
                     if (!compare_op(ins.op))
                         return abort_error();
                     break;
+
+                case Op::CmpJump: {
+                    value_t *right = pop_checked();
+                    value_t *left = pop_checked();
+                    if (!left || !right) {
+                        freeval(left);
+                        freeval(right);
+                        return abort_error();
+                    }
+                    const int op = ins.flags & 0x7f;
+                    const bool jump_true = (ins.flags & 0x80) != 0;
+                    bool value = false;
+                    const bool valid =
+                        compare_values(op, left, right, value);
+                    freeval(left);
+                    freeval(right);
+                    if (!valid)
+                        return abort_error();
+                    if (jump_true ? value : !value)
+                        pc_ = ins.b;
+                    break;
+                }
 
                 case Op::IsType: {
                     const Constant *c = constant_at(proto(), ins.b);
@@ -1211,7 +1270,12 @@ public:
                             slot_symbols_[desc.value_slot] = value_sym;
                     }
                     state.active = true;
-                    invalidate_name_cache();
+                    if (vm_stats.enabled &&
+                        iterators_.size() > vm_stats.max_iterator_depth)
+                        vm_stats.max_iterator_depth = iterators_.size();
+                    invalidate_name_cache(desc.key_name.c_str());
+                    if (desc.two_vars)
+                        invalidate_name_cache(desc.value_name.c_str());
                     break;
                 }
 
@@ -1353,8 +1417,9 @@ public:
                         savesym(sym);
                         assign_pattern_slot(ins.b, binding.name, sym);
                     }
+                    for (const pattern_binding &binding : bindings)
+                        invalidate_name_cache(binding.name.c_str());
                     bindings.clear();
-                    invalidate_name_cache();
                     push(newboolval(true));
                     break;
                 }
@@ -1395,9 +1460,10 @@ public:
                         savesym(sym);
                         assign_pattern_slot(ins.b, binding.name, sym);
                     }
+                    for (const pattern_binding &binding : bindings)
+                        invalidate_name_cache(binding.name.c_str());
                     bindings.clear();
                     freeval(value);
-                    invalidate_name_cache();
                     push(newnull());
                     break;
                 }
@@ -1448,7 +1514,7 @@ public:
                     sym->val = value;
                     sym->exported = (ins.flags & 1) != 0;
                     savesym(sym);
-                    invalidate_name_cache();
+                    invalidate_name_cache(name);
                     push(newnull());
                     break;
                 }
@@ -1769,6 +1835,9 @@ public:
                     if (handler.capture)
                         eval_capture_begin(handler.snapshot);
                     handlers_.push_back(handler);
+                    if (vm_stats.enabled &&
+                        handlers_.size() > vm_stats.max_handler_depth)
+                        vm_stats.max_handler_depth = handlers_.size();
                     break;
                 }
 
@@ -1822,7 +1891,7 @@ public:
                     if (ins.a != UINT16_MAX &&
                         ins.a < slot_symbols_.size())
                         slot_symbols_[ins.a] = sym;
-                    invalidate_name_cache();
+                    invalidate_name_cache(name);
                     break;
                 }
 
@@ -1849,6 +1918,11 @@ public:
                     record.scope = current_scope();
                     defer_scopes_.back().push_back(std::move(record));
                     ++context_.vm_defer_count;
+                    if (vm_stats.enabled &&
+                        (uint64_t)context_.vm_defer_count >
+                            vm_stats.max_defer_depth)
+                        vm_stats.max_defer_depth =
+                            context_.vm_defer_count;
                     break;
                 }
 
@@ -1952,7 +2026,7 @@ public:
                     if (ins.b != UINT32_MAX &&
                         ins.b < slot_symbols_.size())
                         slot_symbols_[ins.b] = sym;
-                    invalidate_name_cache();
+                    invalidate_name_cache(name);
 
                     const std::string &path = desc.path;
                     if (!path.empty() && path[0] != '.' && path[0] != '@') {
@@ -2627,6 +2701,21 @@ private:
 
     void invalidate_name_cache() {
         std::fill(name_cache_.begin(), name_cache_.end(), nullptr);
+    }
+
+    void invalidate_name_cache(const char *name) {
+        if (!name || !*name) {
+            invalidate_name_cache();
+            return;
+        }
+        for (size_t i = 0; i < name_cache_.size(); ++i) {
+            if (!name_cache_[i])
+                continue;
+            if (i < proto().consts.size() &&
+                proto().consts[i].kind == ConstantKind::Name &&
+                proto().consts[i].name == name)
+                name_cache_[i] = nullptr;
+        }
     }
 
     static void free_items(std::vector<value_t *> &items, size_t start = 0) {
@@ -3429,6 +3518,44 @@ private:
         return true;
     }
 
+    bool compare_values(int op, value_t *left, value_t *right,
+                        bool &value) {
+        if (left->type == T_int && right->type == T_int) {
+            const long long x = ((struct int_value_t *)left)->value;
+            const long long y = ((struct int_value_t *)right)->value;
+            const int cmp = x < y ? -1 : (x > y ? 1 : 0);
+            value = compare_result(op, cmp);
+            return true;
+        }
+
+        if (left->type == T_float && right->type == T_float) {
+            const double x = ((struct float_value_t *)left)->value;
+            const double y = ((struct float_value_t *)right)->value;
+            if (std::isnan(x) || std::isnan(y))
+                value = (op == 3);
+            else {
+                const int cmp = x < y ? -1 : (x > y ? 1 : 0);
+                value = compare_result(op, cmp);
+            }
+            return true;
+        }
+
+        if ((left->type == T_int || left->type == T_float) &&
+            (right->type == T_int || right->type == T_float)) {
+            bool unordered = false;
+            const int cmp = compare_numeric(left, right, unordered);
+            value = unordered ? (op == 3) : compare_result(op, cmp);
+            return true;
+        }
+
+        value_t *result = do_compare(op, left, right);
+        if (!result)
+            return false;
+        value = truthy(result);
+        freeval(result);
+        return true;
+    }
+
     bool compare_op(uint8_t opcode) {
         value_t *right = pop_checked();
         value_t *left = pop_checked();
@@ -3448,53 +3575,13 @@ private:
             default: break;
         }
 
-        if (left->type == T_int && right->type == T_int) {
-            const long long x = ((struct int_value_t *)left)->value;
-            const long long y = ((struct int_value_t *)right)->value;
-            const int cmp = x < y ? -1 : (x > y ? 1 : 0);
-            value_t *result = newboolval(compare_result(op, cmp));
-            freeval(left);
-            freeval(right);
-            push(result);
-            return true;
-        }
-
-        if (left->type == T_float && right->type == T_float) {
-            const double x = ((struct float_value_t *)left)->value;
-            const double y = ((struct float_value_t *)right)->value;
-            bool value = false;
-            if (std::isnan(x) || std::isnan(y))
-                value = (op == 3);
-            else {
-                const int cmp = x < y ? -1 : (x > y ? 1 : 0);
-                value = compare_result(op, cmp);
-            }
-            value_t *result = newboolval(value);
-            freeval(left);
-            freeval(right);
-            push(result);
-            return true;
-        }
-
-        if ((left->type == T_int || left->type == T_float) &&
-            (right->type == T_int || right->type == T_float)) {
-            bool unordered = false;
-            const int cmp = compare_numeric(left, right, unordered);
-            const bool value =
-                unordered ? (op == 3) : compare_result(op, cmp);
-            value_t *result = newboolval(value);
-            freeval(left);
-            freeval(right);
-            push(result);
-            return true;
-        }
-
-        value_t *result = do_compare(op, left, right);
+        bool value = false;
+        const bool ok = compare_values(op, left, right, value);
         freeval(left);
         freeval(right);
-        if (!result)
+        if (!ok)
             return false;
-        push(result);
+        push(newboolval(value));
         return true;
     }
 };
@@ -3550,9 +3637,34 @@ void skein_vm_stats_report() {
                  (unsigned long long)vm_stats.name_ic_hits,
                  (unsigned long long)vm_stats.name_ic_misses);
     std::fprintf(stderr,
-                 "[vm-stats] max-depth=%llu max-stack=%llu\n",
+                 "[vm-stats] max-depth=%llu max-stack=%llu "
+                 "max-handler=%llu max-defer=%llu max-iterator=%llu\n",
                  (unsigned long long)vm_stats.max_depth,
-                 (unsigned long long)vm_stats.max_stack);
+                 (unsigned long long)vm_stats.max_stack,
+                 (unsigned long long)vm_stats.max_handler_depth,
+                 (unsigned long long)vm_stats.max_defer_depth,
+                 (unsigned long long)vm_stats.max_iterator_depth);
+    std::fprintf(stderr,
+                 "[vm-stats] compile=%.3fms execute=%.3fms\n",
+                 (double)vm_stats.compile_ns / 1000000.0,
+                 (double)vm_stats.execute_ns / 1000000.0);
+
+    if (!vm_stats.fallback_reasons.empty()) {
+        std::vector<std::pair<std::string, uint64_t>> reasons;
+        reasons.reserve(vm_stats.fallback_reasons.size());
+        for (const auto &entry : vm_stats.fallback_reasons)
+            reasons.push_back(entry);
+        std::sort(reasons.begin(), reasons.end(),
+                  [](const auto &a, const auto &b) {
+                      if (a.second != b.second)
+                          return a.second > b.second;
+                      return a.first < b.first;
+                  });
+        for (const auto &entry : reasons)
+            std::fprintf(stderr, "[vm-stats] fallback: %s=%llu\n",
+                         entry.first.c_str(),
+                         (unsigned long long)entry.second);
+    }
 
     std::vector<std::pair<uint64_t, const char *>> top;
     for (size_t i = 0; i < vm_stats.opcodes.size(); ++i) {
@@ -3584,12 +3696,16 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
         return eval(statement);
 
     ensure_stats_flags();
+    const auto compile_start = std::chrono::steady_clock::now();
     std::string error;
     ProtoPtr proto = skein_compile_statement(
         statement, diag_current_module_name(), error);
+    if (vm_stats.enabled)
+        vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
         if (vm_stats.enabled)
             ++vm_stats.statements_fallback;
+        record_fallback_reason(error);
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback statement: %s\n",
                          error.c_str());
@@ -3597,7 +3713,10 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     }
     if (vm_stats.enabled)
         ++vm_stats.statements_compiled;
+    const auto execute_start = std::chrono::steady_clock::now();
     value_t *result = execute_proto(*proto);
+    if (vm_stats.enabled)
+        vm_stats.execute_ns += elapsed_ns(execute_start);
     /*
      * The AST evaluator restores the source location when a control value
      * escapes a statement.  Uncaught fail/recover is therefore reported at

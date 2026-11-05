@@ -44,6 +44,7 @@ enum class Op : uint8_t {
     CompoundName,
     IncDecName,
     DefineName,
+    CheckRedefine,
     LoadParam,
     StoreParam,
     CompoundParam,
@@ -83,6 +84,7 @@ enum class Op : uint8_t {
     CmpLe,
     CmpGt,
     CmpGe,
+    CmpJump,
 
     IsType,
 

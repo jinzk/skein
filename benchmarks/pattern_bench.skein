@@ -1,0 +1,14 @@
+func add([a, b]) {
+  return a + b;
+}
+func pair({x, y}) {
+  return x + y;
+}
+let total = 0;
+let i = 0;
+while (i < 200000) {
+  total = total + add([i, 1]);
+  total = total + pair({"x": i, "y": 2});
+  i = i + 1;
+}
+print(total);

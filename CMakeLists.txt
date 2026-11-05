@@ -532,6 +532,29 @@ if(BUILD_TESTING)
       RUN_SERIAL TRUE
       TIMEOUT 600
     )
+    if(NOT SKEIN_SANITIZE)
+      add_test(
+        NAME vm_differential_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/vm_differential.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(vm_differential_test PROPERTIES
+        RUN_SERIAL TRUE
+        TIMEOUT 300
+      )
+      add_test(
+        NAME vm_bench_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_vm.py
+                --bin $<TARGET_FILE:${PROJECT_NAME}>
+                --check
+      )
+      set_tests_properties(vm_bench_test PROPERTIES
+        RUN_SERIAL TRUE
+        TIMEOUT 300
+      )
+    endif()
     if(SKEIN_SANITIZE)
       # LeakSanitizer run.  Known non-VM leaks are excluded:
       # - deep recursive struct print relies on freeval's depth guard;

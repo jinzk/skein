@@ -49,12 +49,14 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (42.50s)
+ctest: 10/10 passed (51.68s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.31s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.52s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 66.37s
-LSan:           skein_vm_lsan_tests Passed 79.37s
+skein_tests:    Passed 12.36s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.53s (SKEIN_VM=1)
+vm_differential_test: Passed 0.85s (160 cases)
+vm_bench_test:  Passed 8.46s
+ASan/UBSan:     skein_vm_tests 68.26s
+LSan:           skein_vm_lsan_tests Passed 79.65s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -543,6 +545,12 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - `structtype_field_index()` / `variant_field_index()` /
      `variant_index()` 优先查表，并在 map 不完整时回退线性扫描。
 6. VM 统计已覆盖全局名字 IC 命中/未命中。
+7. 局部 name cache 从“任意声明后整表失效”改为“只失效同名条目”：
+   - `DefineSlot` / `DefineName`
+   - `BindFunc` / `BindName` / `Import`
+   - for-in 变量
+   - match / destructuring binding
+   - `PopScope` 仍保留整表失效，保证作用域退出安全
 
 效果：
 
@@ -573,14 +581,46 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-4 指令优化（P2，M）
 
-- 常量折叠。
-- 死代码消除。
-- 跳转线程化。
-- `INC_SLOT`、`CMP_LT_JUMP` 等超指令。
-- computed goto 或 table dispatch。
-- 评估宽指令格式，解决 16 位操作数上限。
+状态：**部分完成（2026-11-05，比较跳转融合）**。
 
-验收：优化可开关，关闭时语义一致；基准有可量化收益。
+已完成：
+
+1. 新增 `CMP_JUMP` 超指令：
+   - flags 低 7 位保存比较操作
+   - bit 7 表示 jump-if-true / jump-if-false
+   - `b` 为目标地址
+2. 编译器条件编译改为 `compile_condition()`：
+   - `if` / `while` / `for` / `do while` / 三元表达式
+   - match arm guard
+   - 条件为比较表达式时直接发射 `CMP_JUMP`
+   - 其他条件仍使用 `JumpIfFalse` / `JumpIfTrue`
+3. VM 比较逻辑提取为 `compare_values()`，`CMP_JUMP` 与
+   `CMP_*` 共用 int / float / 混合数值 / 通用比较语义。
+4. verifier 支持 `CMP_JUMP` 的双后继 CFG。
+5. 编译器增加安全常量折叠：
+   - int / float 的 `+` / `-` / `*` / `/` / `%`
+   - 位运算和移位
+   - 数值比较
+   - 一元负号和按位取反
+   - 溢出、除零、非法移位时不折叠，保留运行时错误路径
+   - 字符串、容器和混合数值比较不折叠
+
+效果：
+
+```text
+slot ratio  0.78
+fib ratio   1.03
+call ratio  1.00
+pattern     1.18
+```
+
+剩余：
+
+- 死代码消除
+- 跳转线程化
+- 更多超指令
+- computed goto / table dispatch
+- 宽指令格式与 16 位操作数上限
 
 ### 3.4 W4：运行期 AST、元数据与分层清理
 
@@ -688,7 +728,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W5-1 VM 统计（P2，S）
 
-状态：**完成（基础统计，2026-11-05）**。
+状态：**完成（2026-11-05）**。
 
 新增：
 
@@ -708,39 +748,100 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 - 全局名字 IC 命中/未命中
 - 最大 VM 调用深度
 - 最大操作数栈深
+- 最大 handler / defer / active iterator 深度
+- 编译耗时 / 执行耗时
+- fallback 原因聚合
 - Top 10 opcode 直方图
 
 输出示例：
 
 ```text
-[vm-stats] statements compiled=2 fallback=0
-[vm-stats] functions compiled=1 fallback=0
-[vm-stats] instructions=466 calls=32 fast=1 tail=30 fallback=1
-[vm-stats] name-ic hits=29 misses=2
-[vm-stats] max-depth=1 max-stack=6
-[vm-stats] opcodes LOAD_PARAM=152 LOAD_CONST=65 ...
+[vm-stats] statements compiled=3 fallback=0
+[vm-stats] functions compiled=2 fallback=0
+[vm-stats] instructions=32 calls=4 fast=2 tail=0 fallback=2
+[vm-stats] name-ic hits=0 misses=3
+[vm-stats] max-depth=2 max-stack=4 max-handler=1 max-defer=0 max-iterator=0
+[vm-stats] compile=0.016ms execute=0.068ms
+[vm-stats] opcodes LOAD_CONST=5 CALL=4 ...
 ```
 
 剩余：
 
-- fallback 原因聚合
-- 编译/执行耗时
-- 最大 handler / defer 深度
 - 每调用站点 IC 统计
+- 更细的编译/执行阶段拆分
 
 #### W5-2 差分测试与模糊测试（P2，L）
 
-- 随机生成表达式/语句，比较 AST 与 VM 输出。
-- 覆盖错误路径、边界溢出、空容器、generator。
-- 每个 opcode 至少一个直接或间接用例。
-- 增加 fallback 原因断言，防止覆盖回退。
+状态：**部分完成（2026-11-05，基础差分测试）**。
+
+已完成：
+
+1. 新增 `tests/vm_differential.py`：
+   - 固定随机种子
+   - 生成表达式、赋值、if/while、for-in、match、函数、闭包
+   - 同一程序分别用 `SKEIN_VM=0` / `SKEIN_VM=1` 执行
+   - 逐字节比较 stdout / stderr / exit code
+   - 失败时打印 case 编号、源码和两后端结果
+2. 新增普通构建 CTest：
+
+   ```text
+   vm_differential_test
+   ```
+
+   默认 160 个生成程序，约 0.8s。
+3. 差分测试发现并修复了重复声明初始化顺序差异：
+   - AST 在求值 initializer 前检查重复符号
+   - VM 原先在 initializer 求值后检查
+   - 新增 `CHECK_REDEFINE` 指令，在 initializer 前执行检查
+   - AST / VM 现在的错误位置和文本一致
+
+剩余：
+
+- 生成器和错误路径覆盖继续扩展
+- opcode 级覆盖统计
+- fallback 原因断言
+- 可选的长时间 fuzz 模式
 
 #### W5-3 基准回归（P2，M）
 
-- 把 `slot_bench`、`fib_bench`、`call_bench` 纳入仓库。
-- 使用多次运行中位数，记录方差。
-- 设置性能回归阈值（例如不超过基线 10%）。
-- 区分冷启动、首次编译、稳态执行。
+状态：**完成（基础回归，2026-11-05）**。
+
+已完成：
+
+1. 仓库新增 `benchmarks/`：
+   - `slot_bench.skein`
+   - `fib_bench.skein`
+   - `call_bench.skein`
+   - `pattern_bench.skein`
+2. 新增 `tools/bench_vm.py`：
+   - 每个基准分别用 `SKEIN_VM=0` / `SKEIN_VM=1` 运行
+   - 默认 3 次，报告中位数
+   - 输出 AST / VM 耗时和 VM/AST ratio
+   - `--check` 模式检查 ratio 和绝对时间上限
+3. 新增普通构建 CTest：
+
+   ```text
+   vm_bench_test
+   ```
+
+   使用 `--check`，阈值默认 VM/AST ≤ 1.5，绝对上限 10s。
+
+当前结果：
+
+```text
+benchmark         AST       VM    ratio
+slot            0.495    0.419     0.85
+fib             0.168    0.181     1.08
+call            0.417    0.433     1.04
+pattern         0.208    0.249     1.20
+vm benchmark regression check passed
+```
+
+剩余：
+
+- 冷启动 / 首次编译 / 稳态拆分
+- 方差和更细的 CI 阈值
+- 历史基线持久化
 
 #### W5-4 序列化与 AOT 缓存（P3，XL）
 
@@ -885,15 +986,15 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 | W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
 | W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC） | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |
-| W3-4 指令优化 | P2 | M | TODO | W3-1 |
+| W3-4 指令优化 | P2 | M | 部分完成（CMP_JUMP） | W3-1 |
 | W4-1 声明常量去 AST | P1 | M | 完成（2026-11-05） | W1-2 |
 | W4-2 移除 function AST | P1 | M | TODO | W4-1/W2-2 |
 | W4-3 参数元数据 Proto 化 | P2 | M | TODO | W1-1 |
 | W4-4 调试信息 | P3 | M | TODO | W2-1 |
 | W4-5 VM 缓存移出 runtime | P1 | M | 完成（2026-11-05） | W2-1/W4-2 |
 | W5-1 VM 统计 | P2 | S | 完成（基础统计） | - |
-| W5-2 差分/模糊测试 | P2 | L | TODO | W1-2 |
-| W5-3 基准回归 | P2 | M | TODO | W2-1 |
+| W5-2 差分/模糊测试 | P2 | L | 部分完成（基础差分） | W1-2 |
+| W5-3 基准回归 | P2 | M | 完成（基础回归） | W2-1 |
 | W5-4 序列化/AOT | P3 | XL | TODO | W2-5/W4 |
 | W5-5 CI/Sanitizer | P2 | M | TODO | - |
 | W5-6 文档维护 | P2 | S | 进行中 | 各里程碑 |

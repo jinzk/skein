@@ -72,6 +72,8 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 - 算术、位运算、比较、`&&` / `||` / `!`
 - int/int 与 int/float 混合的运算/比较快路径（溢出、除零、NaN、
   int64 精确比较语义保持不变）
+- 条件比较融合（`CMP_JUMP`：比较后直接跳转，用于 if/while/for/guard）
+- 安全常量折叠（数值运算、位运算、数值比较；溢出/除零时不折叠）
 - 三元表达式
 - `if` / `while` / `do while` / C 风格 `for`
 - `for ... in`（list/dict/string/bytes/deque/heap/set/generator）
@@ -266,6 +268,8 @@ struct Instr {
 - `ctest` 中 `skein_tests` 与 `skein_vm_tests` 均通过；
 - `tools/check_boundaries.py` 通过；
 - `SKEIN_VM=1` 下所有现有用例的 stdout/stderr/exit code 与 AST 后端一致；
+- `vm_differential_test` 的随机生成程序在 AST / VM 下输出一致；
+- `tools/bench_vm.py --check` 的 VM/AST 基准回归通过；
 - ASan/UBSan 下 VM 路径无新增问题；
 - sanitizer 构建中 `skein_vm_lsan_tests` 通过；已知的非 VM 泄漏
   （`freeval` 深度保护、可选 FFI 内存块）在测试环境中显式排除。

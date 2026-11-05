@@ -16,6 +16,7 @@ const char *op_name(Op op) {
         case Op::CompoundName: return "COMPOUND_NAME";
         case Op::IncDecName: return "INCDEC_NAME";
         case Op::DefineName: return "DEFINE_NAME";
+        case Op::CheckRedefine: return "CHECK_REDEFINE";
         case Op::LoadParam: return "LOAD_PARAM";
         case Op::StoreParam: return "STORE_PARAM";
         case Op::CompoundParam: return "COMPOUND_PARAM";
@@ -52,6 +53,7 @@ const char *op_name(Op op) {
         case Op::CmpLe: return "CMP_LE";
         case Op::CmpGt: return "CMP_GT";
         case Op::CmpGe: return "CMP_GE";
+        case Op::CmpJump: return "CMP_JUMP";
         case Op::IsType: return "IS_TYPE";
         case Op::Jump: return "JUMP";
         case Op::JumpIfFalse: return "JUMP_IF_FALSE";

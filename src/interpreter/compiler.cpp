@@ -7,9 +7,11 @@
 #include "structeval.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -131,6 +133,27 @@ struct Compiler {
 
     size_t emit_jump(Op op, SourceLoc loc) {
         return emit(op, 0, 0, 0, loc);
+    }
+
+    size_t compile_condition(ast *condition, bool jump_if_true,
+                             SourceLoc loc) {
+        if (condition && condition->nodetype >= '1' &&
+            condition->nodetype <= '6') {
+            compile(condition->l);
+            if (!ok) return static_cast<size_t>(-1);
+            compile(condition->r);
+            if (!ok) return static_cast<size_t>(-1);
+            uint8_t flags = static_cast<uint8_t>(
+                condition->nodetype - '0');
+            if (jump_if_true)
+                flags |= 0x80;
+            return emit(Op::CmpJump, flags, 0, 0, loc);
+        }
+        compile(condition);
+        if (!ok) return static_cast<size_t>(-1);
+        return emit_jump(jump_if_true ? Op::JumpIfTrue
+                                      : Op::JumpIfFalse,
+                         loc);
     }
 
     void patch(size_t at, size_t target) {
@@ -1109,6 +1132,172 @@ struct Compiler {
         emit(Op::LoadNull, 0, 0, 0, loc);
     }
 
+    static bool is_numeric_value(const value_t *value) {
+        return value && (value->type == T_int || value->type == T_float);
+    }
+
+    static double numeric_value(const value_t *value) {
+        if (value->type == T_int)
+            return (double)((const struct int_value_t *)value)->value;
+        return ((const struct float_value_t *)value)->value;
+    }
+
+    static bool ll_in_range(__int128 value) {
+        return value >= (__int128)std::numeric_limits<long long>::min() &&
+               value <= (__int128)std::numeric_limits<long long>::max();
+    }
+
+    static value_t *fold_binary(char op, value_t *left, value_t *right) {
+        if (!left || !right)
+            return NULL;
+        if (left->type == T_int && right->type == T_int) {
+            const long long x = ((struct int_value_t *)left)->value;
+            const long long y = ((struct int_value_t *)right)->value;
+            switch (op) {
+                case '+':
+                case '-':
+                case '*': {
+                    __int128 n = op == '+' ? (__int128)x + y
+                                : op == '-' ? (__int128)x - y
+                                            : (__int128)x * y;
+                    return ll_in_range(n) ? newintval((long long)n) : NULL;
+                }
+                case '/':
+                    if (y == 0 ||
+                        (x == std::numeric_limits<long long>::min() &&
+                         y == -1))
+                        return NULL;
+                    return newintval(x / y);
+                case '%':
+                    if (y == 0)
+                        return NULL;
+                    return newintval(y == -1 ? 0 : x % y);
+                case '&': return newintval(x & y);
+                case '|': return newintval(x | y);
+                case '^': return newintval(x ^ y);
+                case 's':
+                    if (y < 0 || y >= 64)
+                        return NULL;
+                    return newintval(
+                        (long long)((unsigned long long)x << y));
+                case 'r':
+                    if (y < 0 || y >= 64)
+                        return NULL;
+                    return newintval(x >> y);
+                default:
+                    return NULL;
+            }
+        }
+
+        if (is_numeric_value(left) && is_numeric_value(right)) {
+            const double x = numeric_value(left);
+            const double y = numeric_value(right);
+            switch (op) {
+                case '+': return newfloatval(x + y);
+                case '-': return newfloatval(x - y);
+                case '*': return newfloatval(x * y);
+                case '/':
+                    return y == 0.0 ? NULL : newfloatval(x / y);
+                case '%':
+                    return y == 0.0 ? NULL
+                                    : newfloatval(std::fmod(x, y));
+                default:
+                    return NULL;
+            }
+        }
+        return NULL;
+    }
+
+    static value_t *fold_compare(char op, value_t *left, value_t *right) {
+        int cmp = 0;
+        if (left->type == T_int && right->type == T_int) {
+            const long long x = ((struct int_value_t *)left)->value;
+            const long long y = ((struct int_value_t *)right)->value;
+            cmp = x < y ? -1 : (x > y ? 1 : 0);
+        } else if (left->type == T_float && right->type == T_float) {
+            const double x = ((struct float_value_t *)left)->value;
+            const double y = ((struct float_value_t *)right)->value;
+            if (std::isnan(x) || std::isnan(y))
+                return newboolval(op == '3');
+            cmp = x < y ? -1 : (x > y ? 1 : 0);
+        } else {
+            return NULL;
+        }
+        switch (op) {
+            case '1': return newboolval(cmp > 0);
+            case '2': return newboolval(cmp < 0);
+            case '3': return newboolval(cmp != 0);
+            case '4': return newboolval(cmp == 0);
+            case '5': return newboolval(cmp >= 0);
+            case '6': return newboolval(cmp <= 0);
+            default: return NULL;
+        }
+    }
+
+    static value_t *fold_node(ast *node) {
+        if (!node)
+            return NULL;
+        if (node->nodetype == 'V') {
+            struct val *literal = (struct val *)node;
+            return literal->val ? dupval(literal->val) : NULL;
+        }
+        if (node->nodetype == 'M' || node->nodetype == '~') {
+            value_t *value = fold_node(node->l);
+            if (!value)
+                return NULL;
+            value_t *result = NULL;
+            if (node->nodetype == 'M') {
+                if (value->type == T_int) {
+                    long long n = ((struct int_value_t *)value)->value;
+                    if (n != std::numeric_limits<long long>::min())
+                        result = newintval(-n);
+                } else if (value->type == T_float) {
+                    result = newfloatval(
+                        -((struct float_value_t *)value)->value);
+                }
+            } else if (value->type == T_int) {
+                result = newintval(
+                    ~((struct int_value_t *)value)->value);
+            }
+            freeval(value);
+            return result;
+        }
+        if (node->nodetype >= '1' && node->nodetype <= '6') {
+            value_t *left = fold_node(node->l);
+            value_t *right = fold_node(node->r);
+            value_t *result =
+                left && right ? fold_compare(node->nodetype, left, right)
+                              : NULL;
+            freeval(left);
+            freeval(right);
+            return result;
+        }
+        switch (node->nodetype) {
+            case '+':
+            case '-':
+            case '*':
+            case '/':
+            case '%':
+            case '&':
+            case '|':
+            case '^':
+            case 's':
+            case 'r': {
+                value_t *left = fold_node(node->l);
+                value_t *right = fold_node(node->r);
+                value_t *result =
+                    left && right
+                        ? fold_binary(node->nodetype, left, right)
+                        : NULL;
+                freeval(left);
+                freeval(right);
+                return result;
+            }
+            default:
+                return NULL;
+        }
+    }
+
     void compile(ast *node) {
         if (!ok)
             return;
@@ -1118,6 +1307,12 @@ struct Compiler {
         }
 
         SourceLoc here = loc_of(node);
+        if (value_t *folded = fold_node(node)) {
+            uint32_t index = add_value(folded);
+            freeval(folded);
+            emit(Op::LoadConst, 0, 0, index, here);
+            return;
+        }
         switch (node->nodetype) {
             case 'V': {
                 struct val *literal = (struct val *)node;
@@ -1179,6 +1374,8 @@ struct Compiler {
                     return;
                 }
                 if (def->v) {
+                    uint32_t name = add_name(def->name ? def->name : "");
+                    emit(Op::CheckRedefine, 0, 0, name, here);
                     compile(def->v);
                     if (!ok) return;
                 }
@@ -1452,9 +1649,8 @@ struct Compiler {
 
             case 'T': {
                 struct flow *f = (struct flow *)node;
-                compile(f->cond);
+                size_t jf = compile_condition(f->cond, false, here);
                 if (!ok) return;
-                size_t jf = emit_jump(Op::JumpIfFalse, here);
                 compile(f->tl);
                 if (!ok) return;
                 size_t jend = emit_jump(Op::Jump, here);
@@ -1467,9 +1663,8 @@ struct Compiler {
 
             case 'I': {
                 struct flow *f = (struct flow *)node;
-                compile(f->cond);
+                size_t jf = compile_condition(f->cond, false, here);
                 if (!ok) return;
-                size_t jf = emit_jump(Op::JumpIfFalse, here);
                 compile(f->tl);
                 if (!ok) return;
                 size_t jend = emit_jump(Op::Jump, here);
@@ -1867,9 +2062,8 @@ struct Compiler {
 
         size_t jf = static_cast<size_t>(-1);
         if (f->cond) {
-            compile(f->cond);
+            jf = compile_condition(f->cond, false, here);
             if (!ok) return;
-            jf = emit_jump(Op::JumpIfFalse, here);
         }
 
         compile(f->tl);
@@ -1911,9 +2105,8 @@ struct Compiler {
         for (size_t p : loops[ctx_index].continue_patches)
             patch(p, cond_start);
 
-        compile(f->cond);
+        size_t jt = compile_condition(f->cond, true, here);
         if (!ok) return;
-        size_t jt = emit_jump(Op::JumpIfTrue, here);
         patch(jt, start);
 
         size_t end = proto.code.size();
@@ -1939,9 +2132,8 @@ struct Compiler {
         size_t start = proto.code.size();
         size_t jf = static_cast<size_t>(-1);
         if (f->cond) {
-            compile(f->cond);
+            jf = compile_condition(f->cond, false, here);
             if (!ok) return;
-            jf = emit_jump(Op::JumpIfFalse, here);
         }
 
         LoopContext ctx;
@@ -2310,9 +2502,9 @@ struct Compiler {
             }
 
             if (arm->guard) {
-                compile(arm->guard);
+                guard_jump = compile_condition(arm->guard, false,
+                                               arm_loc);
                 if (!ok) return;
-                guard_jump = emit_jump(Op::JumpIfFalse, arm_loc);
             }
 
             compile(arm->body);

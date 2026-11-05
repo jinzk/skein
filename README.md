@@ -4255,11 +4255,13 @@ src/
                  encoding_gbk_validity.inc、unicode_ident_data.inc
   interpreter/   L2  词法/语法/AST/求值/执行模型：
                  tokens.l、parser.y、ast.*、diagnostics.*、error_report.*、eval.*、
+                 eval_control.*、eval_ops.*、eval_call.*、eval_assign.*、
                  eval_context.*、eval_helpers.h、gc.*、package.*、std_namespace.*、
                  pattern.*、scopestack.*、structeval.*、fiber.*、generator.*、
                  async_support.*、task.*、event_loop.*、repl.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
-                 builtins.*、*_builtin.*、compression.*、cookie.*、error.*、
+                 builtins.*、builtins_*.cpp（math/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
+                 *_builtin.*、compression.*、cookie.*、error.*、
                  filetype.*、fs_extra.*、http.*、http1_parser.*、http2.*、io.*、
                  net.*、process_*.*、result.*、tls.*、websocket.*、worker_pool.*、
                  example_binding.*

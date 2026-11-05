@@ -183,6 +183,10 @@ add_library(skein_interpreter STATIC
   src/interpreter/diagnostics.cpp
   src/interpreter/error_report.cpp
   src/interpreter/eval.cpp
+  src/interpreter/eval_control.cpp
+  src/interpreter/eval_ops.cpp
+  src/interpreter/eval_call.cpp
+  src/interpreter/eval_assign.cpp
   src/interpreter/eval_context.cpp
   src/interpreter/gc.cpp
   src/interpreter/package.cpp
@@ -215,6 +219,18 @@ add_dependencies(skein_interpreter skein_embedded_sources)
 
 add_library(skein_builtins STATIC
   src/builtins/builtins.cpp
+  src/builtins/builtins_math.cpp
+  src/builtins/builtins_list.cpp
+  src/builtins/builtins_dict.cpp
+  src/builtins/builtins_string.cpp
+  src/builtins/builtins_convert.cpp
+  src/builtins/builtins_file.cpp
+  src/builtins/builtins_text.cpp
+  src/builtins/builtins_bytes.cpp
+  src/builtins/builtins_lru.cpp
+  src/builtins/builtins_deque.cpp
+  src/builtins/builtins_heap.cpp
+  src/builtins/builtins_set.cpp
   src/builtins/compress_builtin.cpp
   src/builtins/compression.cpp
   src/builtins/cookie.cpp

@@ -60,8 +60,8 @@ L0  platform          src/platform/：OS 原语（文件/时间/线程/进程/so
 |---|---|---|
 | L1 runtime | `src/runtime/` | `valuetype.*`、`value_ops.*`、`dict.*`、`structtype.*`、`symbol.*`、`cycle.*`、`serialization.*`、`json.*`、`format.*`、`encoding.*`、`unicode.*`、`unicode_ident.*`、`stdio_stream.*`、`runtime_context.*`、`runtime_error.*`、`skein_module.h`、`binding_registry.*`、`builtin_ids.h` |
 | L1 生成数据 | `src/runtime/data/` | `encoding_gb18030_data.inc`、`encoding_gbk_validity.inc`、`unicode_ident_data.inc` |
-| L2 interpreter | `src/interpreter/` | `tokens.l`、`parser.y`、`ast.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_context.*`、`eval_helpers.h`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
-| L3 builtins | `src/builtins/` | `builtins.cpp`、`compress_builtin.*`、`compression.*`、`cookie.*`、`crypto_builtin.*`、`env_builtin.*`、`error.*`、`filetype.*`、`fs_extra.*`、`http.*`、`http1_parser.*`、`io.*`、`net.*`、`process_builtin.*`、`process_spawn.*`、`random_builtin.*`、`regex_builtin.*`、`result.*`、`time_builtin.*`、`websocket.*`、`worker_pool.*`、`tls.*`、`http2.*`、`example_binding.*` |
+| L2 interpreter | `src/interpreter/` | `tokens.l`、`parser.y`、`ast.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_control.*`、`eval_ops.*`、`eval_call.*`、`eval_assign.*`、`eval_context.*`、`eval_helpers.h`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
+| L3 builtins | `src/builtins/` | `builtins.cpp`、`builtins_*.cpp`（math/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、`compress_builtin.*`、`compression.*`、`cookie.*`、`crypto_builtin.*`、`env_builtin.*`、`error.*`、`filetype.*`、`fs_extra.*`、`http.*`、`http1_parser.*`、`io.*`、`net.*`、`process_builtin.*`、`process_spawn.*`、`random_builtin.*`、`regex_builtin.*`、`result.*`、`time_builtin.*`、`websocket.*`、`worker_pool.*`、`tls.*`、`http2.*`、`example_binding.*` |
 | L3 可选 FFI | `src/builtins/ffi/` | `ffi.cpp`、`ffi_types.*`、`ffi_value.*`、`ffi_marshal.*`、`ffi_callbacks.*`、`ffi_manifest.*`、`ffi_check.*`、`ffi_bindgen.*` |
 | L0 platform | `src/platform/` | `platform.h`、`platform_posix.cpp`、`platform_win.cpp`、`dynamic_library.*`、`runtime_state.*` |
 | L4 CLI | `src/app/` | `main.cpp` |
@@ -136,6 +136,7 @@ typedef struct {
 - P5 易用性、P6 基准；
 - 静态库拆分：`skein_platform` / `skein_runtime` / `skein_interpreter` / `skein_builtins` / `skein`；
 - 源码按层落到 `src/platform` / `src/runtime` / `src/interpreter` / `src/builtins` / `src/app`，include 目录按层收敛；
+- `builtins.cpp` 按内置域拆为 `builtins_*.cpp`，`eval.cpp` 拆出 `eval_control/ops/call/assign`；
 - `skein_context` 的 `call` / `call_builtin` / `error` hook；
 - `builtin_ids.h`、`runtime_state.*`、`runtime_error.*`、`value_ops.*`；
 - FFI Beta：类型/布局/marshal/回调/manifest/bindgen/原生模块，见 `docs/ffi.md`；

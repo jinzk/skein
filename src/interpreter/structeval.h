@@ -43,9 +43,7 @@ bool declare_struct_meta(
     bool exported,
     const std::vector<std::pair<std::string, struct type_constraint>>
         &fields,
-    const std::vector<std::pair<
-        std::string, std::shared_ptr<struct function_code>>> &methods,
-    const std::shared_ptr<struct scope_t> &closure, std::string &error);
+    std::string &error);
 
 bool declare_enum_meta(
     const char *module, const char *module_name, const char *name,

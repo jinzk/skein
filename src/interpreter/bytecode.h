@@ -268,7 +268,6 @@ struct StructDeclMeta {
     std::string name;
     bool exported = false;
     std::vector<DeclFieldMeta> fields;
-    std::vector<DeclMethodMeta> methods;
 };
 
 struct EnumVariantMeta {

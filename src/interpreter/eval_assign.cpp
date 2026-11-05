@@ -137,6 +137,14 @@ static struct value_t *apply_increment(struct value_t *v, int delta) {
     return NULL;
 }
 
+static bool reject_enum_payload_write(struct value_t *container) {
+    if (container && container->type == T_enum) {
+        yyerror("enum payload fields are read-only");
+        return true;
+    }
+    return false;
+}
+
 /*
  * Resolve the container that owns the final index of a write path.  Every
  * intermediate container is made unique before its child is inspected, so a
@@ -148,6 +156,8 @@ static bool resolve_write_container(
     std::vector<const void *> *path_payloads = NULL,
     std::vector<struct value_t *> *holds = NULL) {
     container = s ? s->val : NULL;
+    if (reject_enum_payload_write(container))
+        return false;
     if (path_payloads)
         path_payloads->push_back(value_payload(container));
     for (size_t k = 0; k + 1 < indices.size(); ++k) {
@@ -201,6 +211,9 @@ static struct value_t *write_member_value(struct value_t *container,
                                           struct value_t *val,
                                           bool field_access) {
     struct value_t *ret = NULL;
+
+    if (reject_enum_payload_write(container))
+        return NULL;
 
     if (container->type == T_list) {
         if (field_access) {
@@ -317,6 +330,9 @@ static struct value_t *increment_member_value(struct value_t *container,
                                               struct value_t *idx, int delta,
                                               bool prefix, bool field_access) {
     struct value_t *ret = NULL;
+
+    if (reject_enum_payload_write(container))
+        return NULL;
 
     if (container->type == T_list) {
         if (field_access) {
@@ -463,13 +479,6 @@ struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
         free_args(indices);
         return NULL;
     }
-    if (s->is_self) {
-        yyerror("cannot modify self in a read-only method");
-        freeval(val);
-        free_args(indices);
-        return NULL;
-    }
-
     struct value_t *container = NULL;
     std::vector<const void *> path_payloads;
     std::vector<struct value_t *> holds;
@@ -525,12 +534,6 @@ struct value_t *increment_index(struct ast *target, int delta,
         free_args(indices);
         return NULL;
     }
-    if (s->is_self) {
-        yyerror("cannot modify self in a read-only method");
-        free_args(indices);
-        return NULL;
-    }
-
     struct value_t *container = NULL;
     std::vector<struct value_t *> holds;
     if (!resolve_write_container(s, indices, fields, container, NULL,
@@ -587,13 +590,6 @@ value_t *assign_index_values(const char *base_name,
         free_args(indices);
         return NULL;
     }
-    if (s->is_self) {
-        yyerror("cannot modify self in a read-only method");
-        freeval(value);
-        free_args(indices);
-        return NULL;
-    }
-
     struct value_t *container = NULL;
     std::vector<const void *> path_payloads;
     std::vector<struct value_t *> holds;
@@ -630,13 +626,6 @@ value_t *compound_index_values(const char *base_name, int op,
         free_args(indices);
         return NULL;
     }
-    if (s->is_self) {
-        yyerror("cannot modify self in a read-only method");
-        freeval(value);
-        free_args(indices);
-        return NULL;
-    }
-
     struct value_t *container = NULL;
     std::vector<struct value_t *> holds;
     if (!resolve_write_container(s, indices, fields, container, NULL,
@@ -681,12 +670,6 @@ value_t *increment_index_values(const char *base_name, int delta,
         free_args(indices);
         return NULL;
     }
-    if (s->is_self) {
-        yyerror("cannot modify self in a read-only method");
-        free_args(indices);
-        return NULL;
-    }
-
     struct value_t *container = NULL;
     std::vector<struct value_t *> holds;
     if (!resolve_write_container(s, indices, fields, container, NULL,
@@ -738,13 +721,6 @@ struct value_t *compound_index(struct ast *target, int op,
         free_args(indices);
         return NULL;
     }
-    if (s->is_self) {
-        yyerror("cannot modify self in a read-only method");
-        freeval(rhs);
-        free_args(indices);
-        return NULL;
-    }
-
     struct value_t *container = NULL;
     std::vector<struct value_t *> holds;
     if (!resolve_write_container(s, indices, fields, container, NULL,
@@ -1272,7 +1248,7 @@ struct value_t *read_member_value(struct value_t *container,
             return dupval(sv->payload->fields[(size_t)field]);
         auto method = sv->def->methods.find(name);
         if (method != sv->def->methods.end())
-            return newmethodval(sv->def, sv->payload, method->second);
+            return newmethodval(dupval(container), method->second);
         yyerror("field %s not found in %s", name, sv->def->name.c_str());
         return NULL;
     }
@@ -1296,6 +1272,9 @@ struct value_t *read_member_value(struct value_t *container,
         if (field >= 0 && ev->payload &&
             (size_t)field < ev->payload->fields.size())
             return dupval(ev->payload->fields[(size_t)field]);
+        auto method = ev->def->methods.find(name);
+        if (method != ev->def->methods.end())
+            return newmethodval(dupval(container), method->second);
         yyerror("field %s not found in %s::%s", name,
                 ev->def->name.c_str(), variant.name.c_str());
         return NULL;

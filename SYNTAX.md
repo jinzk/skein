@@ -1290,8 +1290,8 @@ bad()                    // parameter b is used before it is initialized
 方法中的默认值可以引用 `self`：
 
 ```text
-struct Box {
-  v: int;
+struct Box { v: int; }
+impl Box {
   func add(self, x: int = self.v + 1) => self.v + x;
 }
 
@@ -1310,7 +1310,8 @@ async func fetch_value(x) => await fetch(x);
 结构体 / impl 方法也支持表达式体：
 
 ```text
-struct Box { v: int; func twice(self) => self.v * 2; }
+struct Box { v: int; }
+impl Box { func twice(self) => self.v * 2; }
 ```
 
 类型不匹配会报告运行时错误，例如：
@@ -1374,13 +1375,13 @@ let add = func(a, b) { return a + b; };
 struct Point {
   x: int;
   y: int;
-
-  func length(self) {
-    return sqrt(self.x * self.x + self.y * self.y);
-  }
 }
 
 impl Point {
+  func length(self) {
+    return sqrt(self.x * self.x + self.y * self.y);
+  }
+
   func moved(self, dx: int, dy: int) {
     return Point { x: self.x + dx, y: self.y + dy };
   }
@@ -1402,15 +1403,15 @@ p.length()
 - 字段必须全部初始化；
 - 未知字段、重复字段、字段类型不匹配都会报错；
 - 字段顺序不影响构造；
-- `struct` 内可以声明字段和方法；
-- `impl Type` 用于在结构体外部补充该类型的固有方法；
+- `struct` 只声明字段；所有方法必须写在 `impl Type` 中；
+- `impl Type` 用于声明该类型的固有方法；
 - 方法第一个参数必须是显式 `self`；
 - `self` 的类型隐式为当前结构体；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
 - 方法通过实例调用：`p.length()`，调用时不传 `self`；
 - 方法值可以提取：`let f = p.length; f()`；
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响它；
-- 第一版方法是只读的，不允许 `self.x = ...`；
+- 方法可以修改 `self` 的字段和下标，修改的是接收者副本，调用方原值不变；需要保留修改时返回新结构体；
 - 结构体使用 copy-on-write 值语义；
 - 所有成员都是公开的，`_` 前缀没有特殊含义；
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
@@ -1447,7 +1448,17 @@ let q: lib::P = lib.make();
 - 类型默认只在声明包内可见；
 - `export struct` / `export trait` 后才能通过包路径引用；
 - 限定类型名使用 `::`；
-- 未导出的类型不能通过 `aa::Hidden` 引用，但它的值仍能正常传递和调用方法。
+- 未导出的类型不能通过 `aa::Hidden` 引用，但它的值仍能正常传递和调用方法；
+- 其他包可以为自己的类型实现导入的已导出 trait：
+
+```text
+// main
+import aa;
+struct Q { y: int; }
+impl aa::D for Q {
+  func d(self) { return self.y; }
+}
+```
 
 trait 定义接口：
 
@@ -1491,10 +1502,11 @@ render(Point { x: 1, y: 2 });
 - 实现方法的参数数量和除 `self` 外的参数类型必须与 trait 一致；
 - trait 方法声明不支持默认值；实现方法可以额外提供默认值；
 - 一个类型对同一个 trait 只能实现一次；
-- trait 方法名不能与类型已有方法冲突；
-- trait 和类型必须在同一个包；
+- trait 方法名不能与类型已有方法冲突；enum 上也不能与任意变体字段重名；
+- `impl` 必须写在接收者类型所在的包中；trait 可以来自其他包，但必须是 `export trait`；
+- 导出的 trait 签名只能引用已导出的类型或内建类型；
 - 不支持 trait 继承、默认方法、泛型、静态方法；
-- 结构体和 trait 名称共享类型命名空间，不能在同一个包中重名；
+- struct、enum 和 trait 名称共享类型命名空间，不能在同一个包中重名；
 - 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 trait；
 - 类型名不会自动跨包可见；跨包返回的结构体值仍可以通过字段和方法使用。
 
@@ -1522,9 +1534,32 @@ let b = Event::Timeout;
 - 无载荷变体直接写成 `Event::Timeout`；
 - 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
 - 字段访问按当前变体校验：`Event::Timeout.text` 报错；
+- 方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
+- `impl Trait for Event` 可以让 enum 参与 trait 接口；enum 也能用于 `is` 和类型标注；
+- 方法名不能与任意变体的字段重名；
 - `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_module(e)` → 包名；
 - 类型标注：`let e: Event = Event::UserMsg { text: "hi" };`；
 - 相等按 `def + variant + payload` 比较。
+
+```text
+enum Shape {
+  Circle { r: int; };
+  Rect { w: int; h: int; };
+}
+
+impl Shape {
+  func area(self) {
+    return match (self) {
+      case Shape::Circle { r } => r * r;
+      case Shape::Rect { w, h } => w * h;
+    };
+  }
+}
+
+impl Drawable for Shape {
+  func draw(self) { return self.area(); }
+}
+```
 
 `match` 变体模式：
 
@@ -1552,7 +1587,7 @@ std.json.stringify(Event::Timeout)
 // {"$enum":"Event::Timeout","payload":{}}
 ```
 
-暂不支持：互递归 enum（自引用 enum 已支持）、enum 方法/trait、enum 作为 dict key、enum 的 JSON 自动解码。
+暂不支持：互递归 enum（自引用 enum 已支持）、enum 作为 dict key、enum 的 JSON 自动解码。
 
 ### 5.14 导出声明
 

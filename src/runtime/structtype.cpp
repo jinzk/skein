@@ -92,9 +92,27 @@ resolved_type resolve_named(const char *module, const char *name,
     }
     auto leit = logical_enums.find(type_key(target.c_str(), base.c_str()));
     if (leit != logical_enums.end() &&
-        (!require_exported || leit->second->exported))
+        (!require_exported || leit->second->exported)) {
         result.enumeration = leit->second;
+    }
     return result;
+}
+
+bool named_type_visible(const char *module, const char *name) {
+    if (!name) return false;
+    std::string key = type_key(module, name);
+    auto sit = struct_types.find(key);
+    if (sit != struct_types.end())
+        return sit->second->exported;
+    auto tit = trait_types.find(key);
+    if (tit != trait_types.end())
+        return tit->second->exported;
+    auto eit = enum_types.find(key);
+    if (eit != enum_types.end())
+        return eit->second->exported;
+    resolved_type resolved = resolve_named(module, name, true);
+    return resolved.structure != NULL || resolved.trait != NULL ||
+           resolved.enumeration != NULL;
 }
 
 } // namespace
@@ -138,10 +156,51 @@ struct_def *structtype_find_struct_by_name(const char *module_name,
     return found;
 }
 
+type_def *structtype_find_type(const char *module, const char *name) {
+    if (!name) return NULL;
+    auto sit = struct_types.find(type_key(module, name));
+    if (sit != struct_types.end())
+        return sit->second.get();
+    auto eit = enum_types.find(type_key(module, name));
+    if (eit != enum_types.end())
+        return eit->second.get();
+    return NULL;
+}
+
 trait_def *structtype_find_trait(const char *module, const char *name) {
     if (!name) return NULL;
     auto it = trait_types.find(type_key(module, name));
     return it == trait_types.end() ? NULL : it->second.get();
+}
+
+trait_def *structtype_resolve_trait(const char *module, const char *name,
+                                    bool require_exported,
+                                    std::string &error) {
+    error.clear();
+    if (!name) {
+        error = "invalid trait name";
+        return NULL;
+    }
+
+    trait_def *local = structtype_find_trait(module, name);
+    if (local)
+        return local;
+
+    resolved_type resolved = resolve_named(module, name, require_exported);
+    if (resolved.trait)
+        return resolved.trait;
+
+    resolved_type any = resolve_named(module, name, false);
+    if (any.structure || any.enumeration) {
+        error = std::string("type ") + name + " is not a trait";
+        return NULL;
+    }
+    if (any.trait && require_exported && !any.trait->exported) {
+        error = std::string("trait ") + name + " is not exported";
+        return NULL;
+    }
+    error = std::string("unknown trait ") + name;
+    return NULL;
 }
 
 enum_def *structtype_find_enum(const char *module, const char *name) {
@@ -201,6 +260,7 @@ bool structtype_prepare_struct(const char *module, const char *module_name,
     }
 
     std::unique_ptr<struct_def> def(new struct_def);
+    def->kind = TYPE_OWNER_STRUCT;
     def->name = name;
     def->module = module ? module : "";
     def->module_name = module_name ? module_name : def->module;
@@ -300,6 +360,20 @@ bool structtype_create_trait(const char *module, const char *module_name,
             error = "trait method repeated " + methods[i].name;
             return false;
         }
+        if (!exported)
+            continue;
+        for (size_t j = 0; j < methods[i].params.size(); ++j) {
+            const type_constraint &param = methods[i].params[j];
+            if (param.kind != TYPE_NAMED)
+                continue;
+            if (!named_type_visible(module, param.name)) {
+                error = "exported trait " + std::string(name) +
+                        " method " + methods[i].name +
+                        " uses non-exported type " +
+                        (param.name ? param.name : "invalid");
+                return false;
+            }
+        }
     }
 
     std::unique_ptr<trait_def> def(new trait_def);
@@ -336,6 +410,7 @@ bool structtype_prepare_enum(const char *module, const char *module_name,
     }
 
     std::unique_ptr<enum_def> def(new enum_def);
+    def->kind = TYPE_OWNER_ENUM;
     def->name = name;
     def->module = module ? module : "";
     def->module_name = module_name ? module_name : def->module;
@@ -422,15 +497,31 @@ bool structtype_create_enum(const char *module, const char *module_name,
     return true;
 }
 
-bool structtype_add_method(struct_def *def, const std::string &name,
+bool structtype_add_method(type_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,
                            std::string &error) {
     if (!def || name.empty() || !code) {
         error = "invalid method";
         return false;
     }
-    if (structtype_field_index(def, name) >= 0) {
-        error = "field and method have the same name " + name;
+    if (def->kind == TYPE_OWNER_STRUCT) {
+        struct_def *structure = static_cast<struct_def *>(def);
+        if (structtype_field_index(structure, name) >= 0) {
+            error = "field and method have the same name " + name;
+            return false;
+        }
+    } else if (def->kind == TYPE_OWNER_ENUM) {
+        enum_def *enumeration = static_cast<enum_def *>(def);
+        for (size_t i = 0; i < enumeration->variants.size(); ++i) {
+            const variant_def &variant = enumeration->variants[i];
+            if (structtype_variant_field_index(&variant, name) >= 0) {
+                error = "field and method have the same name " + name +
+                        " in " + def->name + "::" + variant.name;
+                return false;
+            }
+        }
+    } else {
+        error = "invalid type owner";
         return false;
     }
     if (def->methods.count(name) != 0) {
@@ -441,7 +532,7 @@ bool structtype_add_method(struct_def *def, const std::string &name,
     return true;
 }
 
-bool structtype_add_trait(struct_def *def, trait_def *trait,
+bool structtype_add_trait(type_def *def, trait_def *trait,
                           std::string &error) {
     if (!def || !trait) {
         error = "invalid trait implementation";
@@ -455,7 +546,7 @@ bool structtype_add_trait(struct_def *def, trait_def *trait,
     return true;
 }
 
-bool structtype_has_trait(const struct_def *def, const trait_def *trait) {
+bool structtype_has_trait(const type_def *def, const trait_def *trait) {
     if (!def || !trait) return false;
     for (size_t i = 0; i < def->traits.size(); ++i)
         if (def->traits[i] == trait)
@@ -521,13 +612,11 @@ struct value_t *newenumval(enum_def *def, int variant,
     return (struct value_t *)value;
 }
 
-struct value_t *newmethodval(struct_def *def,
-                             std::shared_ptr<struct_payload> receiver,
+struct value_t *newmethodval(value_t *receiver,
                              std::shared_ptr<function_def> method) {
     struct method_value_t *value = new method_value_t;
     value->type = T_method;
-    value->def = def;
-    value->receiver = std::move(receiver);
+    value->receiver = receiver;
     value->method = std::move(method);
     return (struct value_t *)value;
 }
@@ -567,7 +656,11 @@ bool named_type_matches(const char *module, const char *name,
         if (ev->def->module == module && ev->def->name == name)
             return true;
         resolved_type resolved = resolve_named(module, name, true);
-        return resolved.enumeration && ev->def == resolved.enumeration;
+        if (resolved.enumeration)
+            return ev->def == resolved.enumeration;
+        if (resolved.trait)
+            return structtype_has_trait(ev->def, resolved.trait);
+        return false;
     }
 
     if (value->type != T_struct)
@@ -585,5 +678,25 @@ bool named_type_matches(const char *module, const char *name,
         return sv->def == resolved.structure;
     if (resolved.trait)
         return structtype_has_trait(sv->def, resolved.trait);
+    return false;
+}
+
+bool structtype_named_types_equal(const char *module_a, const char *name_a,
+                                  const char *module_b, const char *name_b) {
+    if (!name_a || !name_b)
+        return false;
+    if (std::strcmp(name_a, name_b) == 0 &&
+        ((!module_a && !module_b) ||
+         (module_a && module_b && std::strcmp(module_a, module_b) == 0)))
+        return true;
+
+    resolved_type a = resolve_named(module_a, name_a, false);
+    resolved_type b = resolve_named(module_b, name_b, false);
+    if (a.structure || b.structure)
+        return a.structure && a.structure == b.structure;
+    if (a.trait || b.trait)
+        return a.trait && a.trait == b.trait;
+    if (a.enumeration || b.enumeration)
+        return a.enumeration && a.enumeration == b.enumeration;
     return false;
 }

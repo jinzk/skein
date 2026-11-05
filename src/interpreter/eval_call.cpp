@@ -162,7 +162,6 @@ static struct value_t *invoke_function_body(
             sym->type.name = sl->type->name;
         }
         if (i == 0 && def->code->is_method) {
-            sym->is_self = true;
             sym->is_const = true;
         }
         savesym(sym);
@@ -283,8 +282,6 @@ static bool fill_default_arguments(
         } else if (sl->type) {
             s->type = copy_type_constraint(sl->type);
         }
-        if (index == 0 && def->code->is_method)
-            s->is_self = true;
         savesym(s);
         temp_syms.push_back(s);
         if (sl->variadic)
@@ -386,7 +383,8 @@ static struct value_t *invoke_value(
         struct method_value_t *method = (struct method_value_t *)callee;
         std::vector<struct value_t *> all_args;
         all_args.reserve(args.size() + 1);
-        all_args.push_back(newstructval(method->def, method->receiver));
+        all_args.push_back(method->receiver ? dupval(method->receiver)
+                                             : newnull());
         for (size_t i = 0; i < args.size(); ++i)
             all_args.push_back(args[i]);
         args.clear();

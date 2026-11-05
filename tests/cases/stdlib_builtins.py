@@ -2029,6 +2029,8 @@ def run_cases():
     check("method fail caught",
           "struct P {\n"
           "  x: int;\n"
+          "}\n"
+          "impl P {\n"
           '  func check(self) { if (self.x < 0) { fail "negative"; } '
           "return self.x; }\n"
           "}\n"
@@ -2292,10 +2294,12 @@ def run_cases():
           "p.x\n"
           "p\n",
           stdout_all=["= 7", "= 10", "= Point { x: 10, y: 4 }"])
-    check("struct method in struct",
+    check("struct method in impl body",
           "struct Point {\n"
           "  x: int;\n"
           "  y: int;\n"
+          "}\n"
+          "impl Point {\n"
           "  func length(self) {\n"
           "    return sqrt(self.x * self.x + self.y * self.y);\n"
           "  }\n"
@@ -2312,15 +2316,38 @@ def run_cases():
           "let p = Point { x: 3, y: 4 };\n"
           "p.moved(1, 2)\n",
           stdout="= Point { x: 4, y: 6 }")
-    check("struct method read-only self",
+    check("struct method mutates self copy",
           "struct Counter {\n"
           "  n: int;\n"
-          "  func bump(self) { self.n = self.n + 1; }\n"
           "}\n"
-          "let c = Counter { n: 1 };\nc.bump();\n",
-          stderr="cannot modify self in a read-only method")
+          "impl Counter {\n"
+          "  func bump(self) {\n"
+          "    self.n = self.n + 1;\n"
+          "    return self;\n"
+          "  }\n"
+          "}\n"
+          "let c = Counter { n: 1 };\n"
+          "let d = c.bump();\n"
+          "print(c.n);\nprint(d.n);\n"
+          "c = c.bump();\n"
+          "print(c.n);\n",
+          stdout_all=["1", "2", "2"])
+    check("struct method mutates self fields",
+          "struct Box { n: int; xs: list; }\n"
+          "impl Box {\n"
+          "  func step(self) {\n"
+          "    self.n += 2;\n"
+          "    self.n++;\n"
+          "    self.xs[0] = 9;\n"
+          "    return self.n;\n"
+          "  }\n"
+          "}\n"
+          "let b = Box { n: 1, xs: [0] };\n"
+          "print(b.step());\nprint(b.n);\nprint(b.xs);\n",
+          stdout_all=["4", "1", "[0]"])
     check("struct self reassignment",
-          "struct A { func f(self) { self = null; } }\n"
+          "struct A {}\n"
+          "impl A { func f(self) { self = null; } }\n"
           "A {}.f();\n",
           stderr="cannot assign to constant self")
     check("struct missing field",
@@ -2380,6 +2407,8 @@ def run_cases():
     check("bound method value",
           "struct Point {\n"
           "  x: int;\n"
+          "}\n"
+          "impl Point {\n"
           "  func get(self) { return self.x; }\n"
           "  func add(self, n: int) { return self.x + n; }\n"
           "}\n"
@@ -2389,7 +2418,8 @@ def run_cases():
           "f()\ng(4)\n",
           stdout_all=["= 3", "= 7"])
     check("bound method snapshot",
-          "struct Point { x: int; func get(self) { return self.x; } }\n"
+          "struct Point { x: int; }\n"
+          "impl Point { func get(self) { return self.x; } }\n"
           "let p = Point { x: 1 };\n"
           "let f = p.get;\n"
           "p.x = 5;\n"
@@ -2459,12 +2489,80 @@ def run_cases():
           "impl Point { func get(self) { return 2; } }\n",
           stderr="method repeated get")
     check("field and method name conflict",
-          "struct Point { x: int; func x(self) { return 1; } }\n",
+          "struct Point { x: int; }\n"
+          "impl Point { func x(self) { return 1; } }\n",
           stderr="field and method have the same name x")
     check("method first parameter self",
           "struct Point { x: int; }\n"
           "impl Point { func get(this) { return 1; } }\n",
           stderr="method first parameter must be self")
+    check("struct methods must be in impl",
+          "struct Point { x: int; func get(self) { return self.x; } }\n",
+          stderr="methods must be declared in impl")
+
+    check("enum method in impl",
+          "enum Shape { Circle { r: int; }; Rect { w: int; h: int; }; }\n"
+          "impl Shape {\n"
+          "  func area(self) {\n"
+          "    return match (self) {\n"
+          "      case Shape::Circle { r } => r * r;\n"
+          "      case Shape::Rect { w, h } => w * h;\n"
+          "    };\n"
+          "  }\n"
+          "}\n"
+          "print(Shape::Circle { r: 2 }.area());\n"
+          "print(Shape::Rect { w: 2, h: 3 }.area());\n",
+          stdout_all=["4", "6"])
+    check("enum method value snapshot",
+          "enum E { A { n: int; }; }\n"
+          "impl E { func value(self) { return self.n; } }\n"
+          "let e = E::A { n: 4 };\n"
+          "let f = e.value;\n"
+          "print(f());\n",
+          stdout="4")
+    check("enum trait implementation",
+          "trait Drawable { func draw(self); }\n"
+          "enum Shape { Circle { r: int; }; Empty; }\n"
+          "impl Drawable for Shape {\n"
+          "  func draw(self) {\n"
+          "    return match (self) {\n"
+          "      case Shape::Circle { r } => r;\n"
+          "      case Shape::Empty => 0;\n"
+          "    };\n"
+          "  }\n"
+          "}\n"
+          "let s: Drawable = Shape::Circle { r: 7 };\n"
+          "print(s.draw());\nprint(s is Drawable);\n",
+          stdout_all=["7", "true"])
+    check("enum trait adapter",
+          "trait D { func d(self); }\n"
+          "enum E { A; }\n"
+          "impl E { func d(self) { return 1; } }\n"
+          "impl D for E;\n"
+          "let e = E::A;\n"
+          "print(e is D);\nprint(e.d());\n",
+          stdout_all=["true", "1"])
+    check("enum trait pattern",
+          "trait D { func d(self); }\n"
+          "enum E { A { n: int; }; }\n"
+          "impl D for E { func d(self) { return self.n; } }\n"
+          "func describe(x) {\n"
+          "  return match (x) {\n"
+          "    case is D as v => v.d();\n"
+          "    default => -1;\n"
+          "  };\n"
+          "}\n"
+          "print(describe(E::A { n: 3 }));\n",
+          stdout="3")
+    check("enum method field conflict",
+          "enum E { A { n: int; }; B; }\n"
+          "impl E { func n(self) { return 1; } }\n",
+          stderr="field and method have the same name n in E::A")
+    check("enum payload read-only",
+          "enum E { A { n: int; }; }\n"
+          "impl E { func set(self) { self.n = 2; } }\n"
+          "E::A { n: 1 }.set();\n",
+          stderr="enum payload fields are read-only")
     check("unknown struct type",
           "let p = Missing { x: 1 };\n", stderr="unknown struct type Missing")
     check("unknown field type",

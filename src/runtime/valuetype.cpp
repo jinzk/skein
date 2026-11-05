@@ -768,8 +768,7 @@ struct value_t *dupval(struct value_t *v) {
             struct method_value_t *src = (struct method_value_t *)v;
             struct method_value_t *dst = new method_value_t;
             dst->type = T_method;
-            dst->def = src->def;
-            dst->receiver = src->receiver;
+            dst->receiver = src->receiver ? dupval(src->receiver) : NULL;
             dst->method = src->method;
             return (struct value_t *)dst;
         }
@@ -865,9 +864,12 @@ void freeval(struct value_t *v) {
         case T_set:
             delete (struct set_value_t *)v;
             break;
-        case T_method:
-            delete (struct method_value_t *)v;
+        case T_method: {
+            struct method_value_t *method = (struct method_value_t *)v;
+            freeval(method->receiver);
+            delete method;
             break;
+        }
         case T_null:
             /* newnull returns a process-wide singleton. */
             break;

@@ -472,7 +472,8 @@ def run_cases():
           'print(describe(0));\nprint(describe(2));\n',
           stdout_all=["zero", "other"])
     check("method expression body",
-          'struct Box { v: int; func twice(self) => self.v * 2; }\n'
+          'struct Box { v: int; }\n'
+          'impl Box { func twice(self) => self.v * 2; }\n'
           'let b = Box { v: 4 };\nprint(b.twice());\n',
           stdout="8")
     check("async expression function",
@@ -498,7 +499,8 @@ def run_cases():
           'print(f());\nprint(f(5));\n',
           stdout_all=["null", "5"])
     check("default parameter method self",
-          'struct S { v: int; func add(self, x: int = self.v + 1) '
+          'struct S { v: int; }\n'
+          'impl S { func add(self, x: int = self.v + 1) '
           '=> self.v + x; }\n'
           'print(S { v: 10 }.add());\n',
           stdout="21")
@@ -538,7 +540,7 @@ def run_cases():
           'func f(a, b = 1) { return b; }\nf(1, 2, 3);\n',
           stderr="expects at most 2 argument(s)")
     check("default parameter self default rejected",
-          'struct S { func m(self = S {}, x = 1) => x; }\n',
+          'struct S {}\nimpl S { func m(self = S {}, x = 1) => x; }\n',
           stderr="method self cannot have a default value")
     check("default parameter trait rejected",
           'trait T { func m(self, x: int = 1); }\n',

@@ -3254,11 +3254,11 @@ let q = p.moved(1, 2);
 - 字段可以读写：`p.x`、`p.x = 5`；
 - 方法第一个参数必须是显式 `self`；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
-- 方法可以在 `struct` 内声明，也可以在同一个包的 `impl Type` 中补充；
+- `struct` 只声明字段；所有方法必须写在 `impl Type` 中；
 - 方法只能通过实例调用：`p.length()`；
 - 方法本身可以作为值提取，例如 `let f = p.length; f()`；
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响已绑定的方法；
-- 第一版方法是只读的：方法内不能写 `self.x = ...`，需要修改时返回新结构体；
+- 方法可以修改 `self` 的字段和下标；结构体是值类型，修改只作用于方法内的接收者副本，调用方原值不变。需要保留修改时返回新结构体，例如 `return self`；
 - 结构体是值语义，赋值和作为参数传递时使用 copy-on-write；
 - 结构体类型可以用在变量和参数类型标注中：`let p: Point = Point { x: 1, y: 2 }`、`func f(p: Point)`；结构体类型没有默认值，变量必须初始化；
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
@@ -3304,12 +3304,13 @@ render(p)
 - trait 方法声明不能有默认值；`impl` 方法可以额外提供默认值；
 - 接口是名义式的：只有显式写了 `impl Drawable for Point`，`Point` 才能传给 `Drawable`；
 - 如果方法已经存在于 `impl Point` 中，可以只写 `impl Drawable for Point;` 做接口适配；
-- trait 方法名不能与类型已有方法冲突；
-- trait 实现和类型必须在同一个包中；
+- trait 方法名不能与类型已有方法冲突；enum 上也不能与任意变体字段重名；
+- `impl` 必须写在接收者类型所在的包中；trait 可以来自其他包，但未导出的 trait 不能被外部实现；
 - 一个类型对同一个 trait 只能实现一次；
-- 结构体和 trait 名称共享类型命名空间，不能在同一个包中重名；
+- struct、enum 和 trait 名称共享类型命名空间，不能在同一个包中重名；
 - 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 trait；
 - 类型默认不跨包可见；`export struct` / `export trait` 后可以按包路径使用；
+- 导出的 trait 签名只能引用已导出的类型或内建类型，否则外部类型无法实现它；
 - 导入之后用 `aa::Point`、`lib::Drawable` 这样的限定名引用：
 
 ```text
@@ -3324,6 +3325,17 @@ p is aa::D
 
 import aa as lib;
 let q: lib::P = lib.make();
+```
+
+- 其他包可以为自己的类型实现导入的 trait：
+
+```text
+// main
+import aa;
+struct Q { y: int; }
+impl aa::D for Q {
+  func d(self) { return self.y; }
+}
 ```
 
 - 未导出的类型不能通过包路径引用，但它的值仍可作为普通值传递和方法调用。
@@ -3351,10 +3363,33 @@ match (a) {
 - 有载荷的变体必须写 `Event::Variant { field: value, ... }`；
 - 无载荷变体直接写 `Event::Variant`；
 - 载荷字段只读，字段访问按当前变体校验；
+- 方法只能写在 `impl Event` 中；enum 方法内 `self` 只读，修改状态时返回新 enum；
+- `impl Trait for Event` 可以让 enum 参与 trait 接口；`Event` 也能用于 `is` 和类型标注；
+- 方法名不能与任意变体的字段重名；
 - `kind_of(e)` 是 `"enum"`，`type_name(e)` 是枚举名；
 - `match` 支持变体模式、字段模式和守卫；
 - JSON 编码为 `{"$enum":"Event::UserMsg","payload":{...}}`；
-- 暂不支持互递归 enum（自引用 enum 已支持）、enum 方法/trait、enum 作为 dict key。
+- 暂不支持互递归 enum（自引用 enum 已支持）、enum 作为 dict key、enum 的 JSON 自动解码。
+
+```text
+enum Shape {
+  Circle { r: int; };
+  Rect { w: int; h: int; };
+}
+
+impl Shape {
+  func area(self) {
+    return match (self) {
+      case Shape::Circle { r } => r * r;
+      case Shape::Rect { w, h } => w * h;
+    };
+  }
+}
+
+impl Drawable for Shape {
+  func draw(self) { return self.area(); }
+}
+```
 
 运行时类型检查：
 

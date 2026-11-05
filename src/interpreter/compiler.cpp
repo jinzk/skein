@@ -237,13 +237,9 @@ struct Compiler {
                                  : any_type_constraint();
                 meta.fields.push_back(std::move(field));
             } else if (member->nodetype == 'm') {
-                skein::bc::DeclMethodMeta method;
-                method.name = member->name ? member->name : "";
-                uint32_t function = add_function(
-                    (struct funcdef *)member->func);
-                if (!ok) return 0;
-                method.code = proto.consts[function].function;
-                meta.methods.push_back(std::move(method));
+                yyerror("methods must be declared in impl");
+                ok = false;
+                return 0;
             }
         }
         proto.struct_decls.push_back(std::move(meta));

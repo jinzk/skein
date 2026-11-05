@@ -2,6 +2,7 @@
 #include "value_ops.h"
 #include "dict.h"
 #include "structtype.h"
+#include "cycle.h"
 
 #include <cmath>
 #include <cstddef>
@@ -338,7 +339,17 @@ bool value_equals(struct value_t *a, struct value_t *b) {
         case T_method: {
             struct method_value_t *ma = (struct method_value_t *)a;
             struct method_value_t *mb = (struct method_value_t *)b;
-            return ma->method == mb->method && ma->receiver == mb->receiver;
+            if (ma->method != mb->method)
+                return false;
+            if (ma->receiver == mb->receiver)
+                return true;
+            if (!ma->receiver || !mb->receiver)
+                return false;
+            const void *pa = value_payload(ma->receiver);
+            const void *pb = value_payload(mb->receiver);
+            if (pa || pb)
+                return pa == pb;
+            return value_equals(ma->receiver, mb->receiver);
         }
         case T_null:
             return true;

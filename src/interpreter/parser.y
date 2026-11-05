@@ -689,7 +689,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <a> struct_fields struct_field
 %type <sl> param symlist lambda_param_tail
 %type <type> type type_name
-%type <str> importref importpath fieldname
+%type <str> importref importpath fieldname impl_trait_name
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
 %destructor { treefree($$); } <a>
@@ -1129,18 +1129,27 @@ impl_decl: IMPL NAME '{' empty_body      {
                      copy_text(diag_current_source_name().c_str()),
                      (struct struct_member *)$4);
       }
-    | IMPL NAME FOR NAME '{' empty_body  {
+    | IMPL impl_trait_name FOR NAME '{' empty_body  {
         $$ = newimpl($4, $2,
                      copy_text(diag_current_source_name().c_str()), NULL);
       }
-    | IMPL NAME FOR NAME '{' impl_methods '}' {
+    | IMPL impl_trait_name FOR NAME '{' impl_methods '}' {
         $$ = newimpl($4, $2,
                      copy_text(diag_current_source_name().c_str()),
                      (struct struct_member *)$6);
       }
-    | IMPL NAME FOR NAME ';'             {
+    | IMPL impl_trait_name FOR NAME ';'  {
         $$ = newimpl($4, $2,
                      copy_text(diag_current_source_name().c_str()), NULL);
+      }
+    ;
+
+impl_trait_name: NAME                  { $$ = $1; }
+    | NAME COLONCOLON NAME            {
+        std::string qualified = std::string($1) + "::" + $3;
+        $$ = copy_text(qualified.c_str());
+        free($1);
+        free($3);
       }
     ;
 

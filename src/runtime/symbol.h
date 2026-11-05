@@ -45,8 +45,6 @@ struct symbol {
     struct type_constraint type;
     bool exported;
     bool is_const;
-    /* True for the implicit receiver binding of a read-only method. */
-    bool is_self;
     /* True for a parameter bound without a value while evaluating defaults. */
     bool is_uninitialized;
 };

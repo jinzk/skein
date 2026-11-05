@@ -1531,21 +1531,12 @@ public:
                     fields.reserve(meta.fields.size());
                     for (const auto &field : meta.fields)
                         fields.emplace_back(field.name, field.type);
-                    std::vector<std::pair<
-                        std::string, std::shared_ptr<function_code>>>
-                        methods;
-                    methods.reserve(meta.methods.size());
-                    for (const auto &method : meta.methods)
-                        methods.emplace_back(method.name, method.code);
-                    std::shared_ptr<scope_t> closure = current_scope();
-                    if (closure && closure->is_global)
-                        closure.reset();
                     std::string error;
                     if (!declare_struct_meta(
                             meta.module.c_str(),
                             diag_current_module_name().c_str(),
                             meta.name.c_str(), meta.exported, fields,
-                            methods, closure, error))
+                            error))
                         return abort_error();
                     push(newnull());
                     break;

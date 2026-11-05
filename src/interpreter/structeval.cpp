@@ -69,7 +69,7 @@ static bool method_self_ok(struct symlist *sl, const char *owner,
     return true;
 }
 
-static bool evaluate_method(struct struct_member *member, struct_def *owner,
+static bool evaluate_method(struct struct_member *member, type_def *owner,
                             std::shared_ptr<function_def> &out,
                             std::string &error) {
     out.reset();
@@ -141,6 +141,13 @@ static bool method_signature_matches(const method_sig *sig,
 }
 
 void eval_struct_decl(struct struct_node *s) {
+    for (struct struct_member *m = s->members; m; m = m->next) {
+        if (m->nodetype == 'm') {
+            yyerror("methods must be declared in impl");
+            return;
+        }
+    }
+
     std::string error;
     struct_def *def = NULL;
     if (!structtype_prepare_struct(
@@ -169,25 +176,10 @@ void eval_struct_decl(struct struct_node *s) {
         structtype_rollback_struct(def);
         return;
     }
-
-    for (struct struct_member *m = s->members; m; m = m->next) {
-        if (m->nodetype != 'm')
-            continue;
-        std::shared_ptr<function_def> code;
-        error.clear();
-        if (!evaluate_method(m, def, code, error)) {
-            if (!error.empty())
-                yyerror("%s", error.c_str());
-            continue;
-        }
-        if (!structtype_add_method(def, m->name, code, error))
-            yyerror("%s", error.c_str());
-    }
 }
 
 bool eval_impl_decl(struct impl_node *impl) {
-    struct_def *owner =
-        structtype_find_struct(impl->module, impl->type_name);
+    type_def *owner = structtype_find_type(impl->module, impl->type_name);
     if (!owner) {
         yyerror("unknown type %s", impl->type_name);
         return false;
@@ -195,9 +187,11 @@ bool eval_impl_decl(struct impl_node *impl) {
 
     trait_def *trait = NULL;
     if (impl->trait_name) {
-        trait = structtype_find_trait(impl->module, impl->trait_name);
+        std::string trait_error;
+        trait = structtype_resolve_trait(impl->module, impl->trait_name,
+                                         true, trait_error);
         if (!trait) {
-            yyerror("unknown trait %s", impl->trait_name);
+            yyerror("%s", trait_error.c_str());
             return false;
         }
     }
@@ -320,9 +314,7 @@ bool declare_struct_meta(
     const char *module, const char *module_name, const char *name,
     bool exported,
     const std::vector<std::pair<std::string, type_constraint>> &fields,
-    const std::vector<
-        std::pair<std::string, std::shared_ptr<function_code>>> &methods,
-    const std::shared_ptr<scope_t> &closure, std::string &error) {
+    std::string &error) {
     struct_def *def = NULL;
     if (!structtype_prepare_struct(module, module_name, name, exported, def,
                                    error)) {
@@ -348,30 +340,7 @@ bool declare_struct_meta(
         structtype_rollback_struct(def);
         return false;
     }
-
-    bool ok = true;
-    for (const auto &method : methods) {
-        std::shared_ptr<function_def> definition =
-            std::make_shared<function_def>();
-        definition->code = method.second;
-        definition->closure = closure;
-        std::string method_error;
-        if (!method.second ||
-            !method_self_ok(method.second->sl, def->name.c_str(),
-                            method_error)) {
-            yyerror("%s", method_error.c_str());
-            ok = false;
-            continue;
-        }
-        method.second->is_method = true;
-        method.second->name = method.first;
-        if (!structtype_add_method(def, method.first, definition,
-                                   method_error)) {
-            yyerror("%s", method_error.c_str());
-            ok = false;
-        }
-    }
-    return ok;
+    return true;
 }
 
 bool declare_enum_meta(
@@ -468,7 +437,7 @@ bool declare_impl_meta(
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     (void)module_name;
     (void)error;
-    struct_def *owner = structtype_find_struct(module, type_name);
+    type_def *owner = structtype_find_type(module, type_name);
     if (!owner) {
         yyerror("unknown type %s", type_name ? type_name : "");
         return false;
@@ -476,10 +445,11 @@ bool declare_impl_meta(
 
     trait_def *trait = NULL;
     if (has_trait) {
-        trait = structtype_find_trait(module, trait_name);
+        std::string trait_error;
+        trait = structtype_resolve_trait(module, trait_name, true,
+                                         trait_error);
         if (!trait) {
-            yyerror("unknown trait %s",
-                    trait_name ? trait_name : "");
+            yyerror("%s", trait_error.c_str());
             return false;
         }
     }

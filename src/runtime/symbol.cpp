@@ -27,7 +27,6 @@ struct symbol *newsym(const char *name) {
     s->type.nullable = false;
     s->exported = false;
     s->is_const = false;
-    s->is_self = false;
     s->is_uninitialized = false;
     return s;
 }
@@ -167,11 +166,8 @@ bool type_constraint_equal(const struct type_constraint *a,
     if (a->kind == TYPE_NAMED) {
         if (!a->name || !b->name)
             return a->name == b->name;
-        if (std::strcmp(a->name, b->name) != 0)
-            return false;
-        if (!a->module || !b->module)
-            return a->module == b->module;
-        return std::strcmp(a->module, b->module) == 0;
+        return structtype_named_types_equal(a->module, a->name, b->module,
+                                            b->name);
     }
     return true;
 }

@@ -148,10 +148,8 @@ void for_each_value_child(
         case T_method: {
             const struct method_value_t *method =
                 (const struct method_value_t *)v;
-            if (method->receiver) {
-                for (struct value_t *field : method->receiver->fields)
-                    fn(field);
-            }
+            if (method->receiver)
+                fn(method->receiver);
             break;
         }
         default:

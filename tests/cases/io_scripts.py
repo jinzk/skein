@@ -1146,6 +1146,105 @@ def run_cases():
         assert "unknown type name aa::Hidden" in proc.stderr, proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write(
+            "app/lib/lib.skein",
+            "package lib {\n"
+            "  export struct P { x: int; }\n"
+            "  export trait D { func d(self); }\n"
+            "  export trait T { func take(self, p: P); }\n"
+            "  trait Secret { func s(self); }\n"
+            "  export func make_p(x: int) { return P { x: x }; }\n"
+            "}\n",
+        )
+        main = write(
+            "app/main.skein",
+            "import lib;\n"
+            "struct Q { y: int; }\n"
+            "impl lib::D for Q { func d(self) { return self.y; } }\n"
+            "impl lib::T for Q {\n"
+            "  func take(self, p: lib::P) { return self.y + p.x; }\n"
+            "}\n"
+            "enum E { A { n: int; }; B; }\n"
+            "impl lib::D for E {\n"
+            "  func d(self) {\n"
+            "    return match (self) {\n"
+            "      case E::A { n } => n;\n"
+            "      case E::B => 0;\n"
+            "    };\n"
+            "  }\n"
+            "}\n"
+            "let q = Q { y: 3 };\n"
+            "print(q.d());\n"
+            "print(q is lib::D);\n"
+            "print(q.take(lib.make_p(4)));\n"
+            "let e = E::A { n: 5 };\n"
+            "print(e.d());\n"
+            "print(e is lib::D);\n",
+        )
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == [
+            "3", "true", "7", "5", "true",
+        ], proc.stdout
+        assert proc.stderr == "", proc.stderr
+
+        alias_main = write(
+            "app/alias.skein",
+            "import lib as l;\n"
+            "struct Q2 { y: int; }\n"
+            "impl l::D for Q2 { func d(self) { return self.y; } }\n"
+            "print(Q2 { y: 6 }.d());\n"
+            "print(Q2 { y: 1 } is l::D);\n",
+        )
+        proc = run_file(alias_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["6", "true"], proc.stdout
+
+        adapter_main = write(
+            "app/adapter.skein",
+            "import lib;\n"
+            "struct Q3 { y: int; }\n"
+            "impl Q3 { func d(self) { return self.y; } }\n"
+            "impl lib::D for Q3;\n"
+            "print(Q3 { y: 8 }.d());\n",
+        )
+        proc = run_file(adapter_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["8"], proc.stdout
+
+        secret_main = write(
+            "app/secret.skein",
+            "import lib;\n"
+            "struct Q4 { y: int; }\n"
+            "impl lib::Secret for Q4 { func s(self) { return 1; } }\n",
+        )
+        proc = run_file(secret_main)
+        assert proc.returncode == 1, proc.stdout
+        assert "trait lib::Secret is not exported" in proc.stderr, proc.stderr
+
+        write(
+            "app/badlib/badlib.skein",
+            "package badlib {\n"
+            "  struct Hidden { x: int; }\n"
+            "  export trait Bad { func b(self, h: Hidden); }\n"
+            "}\n",
+        )
+        bad_main = write(
+            "app/bad.skein",
+            "import badlib;\n",
+        )
+        proc = run_file(bad_main)
+        assert proc.returncode == 1, proc.stdout
+        assert "uses non-exported type Hidden" in proc.stderr, proc.stderr
+
+    with tempfile.TemporaryDirectory() as tmp:
         failfast = os.path.join(tmp, "failfast.skein")
         with open(failfast, "w", encoding="utf-8") as f:
             f.write('print("before");\n1/0;\nprint("after");\n')

@@ -56,6 +56,8 @@
 
 #include "builtins_internal.h"
 
+#include "iter.h"
+
 static struct value_t *module_load_builtin(
     const std::vector<struct value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_string) {
@@ -155,6 +157,10 @@ bool builtins_register_modules(std::string &error) {
 
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
+    if (functype >= B_fn_compose && functype <= B_fn_always)
+        return call_fn_builtin(functype, args);
+    if (functype >= B_iter_map && functype <= B_iter_collect)
+        return call_iter_builtin(functype, args);
     if (functype == B_ffi_bind) {
 #ifdef SKEIN_ENABLE_FFI
         return call_ffi_builtin(functype, args);

@@ -34,6 +34,7 @@ constexpr int NODE_PATTERN_LIST = 'z';
 constexpr int NODE_PATTERN_REST = ':';
 constexpr int NODE_PATTERN_AS = '@';
 constexpr int NODE_PATTERN_NEVER = '#';
+constexpr int NODE_PATTERN_TYPE = 0x100;
 constexpr int NODE_DESTRUCTURE = '`';
 constexpr int NODE_ENUM_DECL = '<';
 constexpr int NODE_ENUM_VARIANT = '>';
@@ -208,6 +209,7 @@ struct pattern_node {
     char *module;
     char *variant;
     struct ast *literal;
+    struct type_constraint *type;
     struct pattern_field *fields;
     struct ast *items;
     struct ast *next;
@@ -452,6 +454,7 @@ struct ast *newpatternname(char *name);
 struct ast *newpatternrest(char *name);
 struct ast *newpatternas(struct ast *pattern, char *name);
 struct ast *newpatternnever();
+struct ast *newpatterntype(struct type_constraint *type);
 struct ast *newpatterndict(struct pattern_field *fields);
 struct ast *newpatternlist(struct ast *items);
 struct ast *newpatternstruct(char *name, char *module,

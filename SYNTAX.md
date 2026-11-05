@@ -918,6 +918,10 @@ let next = match (state) {
 
   case n if n > 10 => n;
 
+  case is int as n => n;
+
+  case is Point as p => p.x;
+
   case Point {x, y} => x + y;
 
   default => state;
@@ -933,6 +937,8 @@ let next = match (state) {
 - 绑定只读，作用域限于该 arm；
 - `if` 守卫失败时继续尝试下一个 arm；
 - 没有 arm 命中且没有 `default` → 运行时错误 `match: no arm matched`；
+- enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive: missing Enum::Variant`；
+- `case is Type` 是类型模式，例如 `case is int`、`case is Point`；
 - 模式匹配无副作用，不能调用函数，也不能写比较表达式；
 - 不支持 float 字面量，浮点判断用 `if/else`；
 - `as` 可以把整个匹配值绑定到变量：`case Point {x} as p => ...`；
@@ -948,6 +954,7 @@ let next = match (state) {
 | 绑定 | `x` | 匹配任意值并绑定 |
 | 通配 | `_` | 匹配任意值，不绑定 |
 | 整体绑定 | `p as Point {x}` | 先匹配子模式，再把整个值绑定到 `p` |
+| 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 trait |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
 | dict rest | `{kind, ...rest}` | `rest` 收集未列出的键 |
 | list | `[a, b]` | 定长匹配 |
@@ -1601,6 +1608,8 @@ import std;
 
 ```text
 std.list
+std.fn
+std.iter
 std.dict
 std.json
 std.string
@@ -1677,6 +1686,17 @@ std.list.append([1, 2], 3)
 std.list.map([1, 2], func(x) { return x * 2; })
 std.list.filter([1, 2, 3], func(x) { return x % 2 == 1; })
 std.list.reduce([1, 2, 3], func(a, b) { return a + b; })
+
+std.fn.compose(func(x) => x + 1, func(x) => x * 2)(5)
+std.fn.pipe(func(x) => x + 1, func(x) => x * 2)(5)
+std.fn.partial(func(a, b) => a + b, 10)(5)
+std.fn.always(7)()
+
+std.iter.collect(std.iter.map([1, 2, 3], func(x) => x * 2))
+std.iter.collect(std.iter.filter(range(0, 6), func(x) => x % 2 == 0))
+std.iter.collect(std.iter.take(range(0, 100), 3))
+std.iter.collect(std.iter.enumerate(["a", "b"]))
+
 std.dict.get({"a": 1}, "b", 0)
 std.dict.keys({"a": 1, "b": 2})
 std.dict.items({"a": 1, "b": 2})

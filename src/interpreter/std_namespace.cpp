@@ -54,6 +54,21 @@ value_t *build_namespace_impl() {
         {"top_k", B_list_top_k},
         {"binary_search", B_list_binary_search},
     });
+    value_t *fn_module = builtin_module({
+        {"compose", B_fn_compose},
+        {"pipe", B_fn_pipe},
+        {"partial", B_fn_partial},
+        {"identity", B_fn_identity},
+        {"always", B_fn_always},
+    });
+    value_t *iter_module = builtin_module({
+        {"map", B_iter_map},
+        {"filter", B_iter_filter},
+        {"take", B_iter_take},
+        {"drop", B_iter_drop},
+        {"enumerate", B_iter_enumerate},
+        {"collect", B_iter_collect},
+    });
     value_t *dict_module = builtin_module({
         {"len", B_len},
         {"get", B_dict_get},
@@ -110,6 +125,10 @@ value_t *build_namespace_impl() {
         newstrval("lru"), copy_module(lru_module)));
     root->payload->items.push_back(std::make_pair(
         newstrval("list"), list_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("fn"), fn_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("iter"), iter_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("dict"), dict_module));
     root->payload->items.push_back(std::make_pair(

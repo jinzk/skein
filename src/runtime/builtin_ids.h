@@ -384,7 +384,18 @@ enum bifs {
     B_set_union,
     B_set_intersect,
     B_set_difference,
-    B_set_is_subset
+    B_set_is_subset,
+    B_fn_compose,
+    B_fn_pipe,
+    B_fn_partial,
+    B_fn_identity,
+    B_fn_always,
+    B_iter_map,
+    B_iter_filter,
+    B_iter_take,
+    B_iter_drop,
+    B_iter_enumerate,
+    B_iter_collect
 };
 
 #endif

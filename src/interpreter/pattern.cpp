@@ -70,6 +70,8 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
         }
         case NODE_PATTERN_BINDING:
             return bind_pattern_value(bindings, pattern->name, value);
+        case NODE_PATTERN_TYPE:
+            return type_constraint_matches(pattern->type, value);
         case NODE_PATTERN_REST:
             yyerror("rest pattern is only allowed at the end of a list "
                     "or dict pattern");
@@ -276,4 +278,85 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
         default:
             return false;
     }
+}
+
+static struct pattern_node *pattern_unwrap_as(struct ast *pattern_ast) {
+    struct pattern_node *pattern = (struct pattern_node *)pattern_ast;
+    while (pattern && pattern->nodetype == NODE_PATTERN_AS)
+        pattern = (struct pattern_node *)pattern->items;
+    return pattern;
+}
+
+static bool pattern_enum_variant(enum_def *def,
+                                 struct pattern_node *pattern,
+                                 int &variant) {
+    if (!def || !pattern)
+        return false;
+    if (pattern->nodetype == NODE_PATTERN_CONTAINER && pattern->variant) {
+        enum_def *pattern_def =
+            structtype_find_enum(pattern->module, pattern->name);
+        if (pattern_def != def)
+            return false;
+        variant = structtype_variant_index(def, pattern->variant);
+        return variant >= 0;
+    }
+    if (pattern->nodetype == NODE_PATTERN_LITERAL && pattern->literal &&
+        pattern->literal->nodetype == NODE_ENUM_LITERAL) {
+        struct enum_lit_node *literal =
+            (struct enum_lit_node *)pattern->literal;
+        enum_def *pattern_def =
+            structtype_find_enum(literal->module, literal->name);
+        if (pattern_def != def)
+            return false;
+        variant = structtype_variant_index(def, literal->variant);
+        return variant >= 0;
+    }
+    return false;
+}
+
+bool match_exhaustive_check(struct ast *arms, struct value_t *subject) {
+    if (!subject || subject->type != T_enum)
+        return true;
+
+    struct enum_value_t *instance = (struct enum_value_t *)subject;
+    enum_def *def = instance->def;
+    if (!def || def->variants.empty())
+        return true;
+
+    std::vector<bool> covered(def->variants.size(), false);
+    for (struct ast *arm_ast = arms; arm_ast;
+         arm_ast = ((struct match_arm *)arm_ast)->next) {
+        struct match_arm *arm = (struct match_arm *)arm_ast;
+        if (!arm->pattern)
+            return true; /* default */
+        if (arm->guard)
+            continue; /* a guarded arm is not a guarantee */
+
+        struct pattern_node *pattern = pattern_unwrap_as(arm->pattern);
+        if (!pattern)
+            continue;
+        if (pattern->nodetype == NODE_PATTERN_BINDING)
+            return true; /* binding or wildcard */
+        if (pattern->nodetype == NODE_PATTERN_TYPE &&
+            type_constraint_matches(pattern->type, subject))
+            return true;
+
+        int variant = -1;
+        if (pattern_enum_variant(def, pattern, variant))
+            covered[(size_t)variant] = true;
+    }
+
+    std::string missing;
+    for (size_t i = 0; i < def->variants.size(); ++i) {
+        if (covered[i])
+            continue;
+        if (!missing.empty())
+            missing += ", ";
+        missing += def->name + "::" + def->variants[i].name;
+    }
+    if (missing.empty())
+        return true;
+
+    yyerror("match is not exhaustive: missing %s", missing.c_str());
+    return false;
 }

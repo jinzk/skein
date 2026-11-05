@@ -614,3 +614,40 @@ def run_cases():
     check("dict enum key rejected",
           "enum E { A; }\n{E::A: 1}\n",
           stderr="dict key must be int, bool, string, char, byte, bytes, or null, got E")
+
+    check("match type pattern",
+          'print(match (5) { case is int => "int"; '
+          'case is string => "string"; default => "other"; });\n'
+          'print(match ("x") { case is int => "int"; '
+          'case is string => "string"; default => "other"; });\n',
+          stdout_all=["int", "string"])
+    check("match type pattern as",
+          'print(match (5) { case is int as n => n + 1; '
+          'default => 0; });\n',
+          stdout="6")
+    check("match type pattern struct",
+          'struct P { x: int; }\n'
+          'let p = P { x: 3 };\n'
+          'print(match (p) { case is P as value => value.x; '
+          'case is int => -1; default => 0; });\n',
+          stdout="3")
+    check("match enum exhaustive",
+          'enum E { A; B; }\n'
+          'let e = E::B;\n'
+          'print(match (e) { case E::A => 1; case E::B => 2; });\n',
+          stdout="2")
+    check("match enum exhaustive type",
+          'enum E { A; B; }\n'
+          'let e = E::A;\n'
+          'print(match (e) { case is E => 9; });\n',
+          stdout="9")
+    check("match enum missing variant",
+          'enum E { A; B; }\n'
+          'let e = E::A;\n'
+          'match (e) { case E::A => 1; }\n',
+          stderr="match is not exhaustive: missing E::B")
+    check("match enum guarded arm not exhaustive",
+          'enum E { A; B; }\n'
+          'let e = E::A;\n'
+          'match (e) { case E::A if true => 1; }\n',
+          stderr="match is not exhaustive: missing E::A, E::B")

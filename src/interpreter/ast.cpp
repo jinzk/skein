@@ -547,6 +547,7 @@ static struct pattern_node *new_pattern_node(int nodetype) {
     a->module = NULL;
     a->variant = NULL;
     a->literal = NULL;
+    a->type = NULL;
     a->fields = NULL;
     a->items = NULL;
     a->next = NULL;
@@ -585,6 +586,12 @@ struct ast *newpatternas(struct ast *pattern, char *name) {
 
 struct ast *newpatternnever() {
     struct pattern_node *a = new_pattern_node(NODE_PATTERN_NEVER);
+    return (struct ast *)a;
+}
+
+struct ast *newpatterntype(struct type_constraint *type) {
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_TYPE);
+    a->type = type;
     return (struct ast *)a;
 }
 
@@ -1330,6 +1337,12 @@ void treefree(struct ast *a) {
         }
         case NODE_PATTERN_NEVER: {
             struct pattern_node *p = (struct pattern_node *)a;
+            treefree(p->next);
+            break;
+        }
+        case NODE_PATTERN_TYPE: {
+            struct pattern_node *p = (struct pattern_node *)a;
+            free_type_constraint(p->type);
             treefree(p->next);
             break;
         }

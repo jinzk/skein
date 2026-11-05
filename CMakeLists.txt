@@ -201,6 +201,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/event_loop.cpp
   src/interpreter/repl.cpp
   src/interpreter/source_encoding.cpp
+  src/interpreter/iter.cpp
 )
 set_target_properties(skein_interpreter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_interpreter PUBLIC
@@ -227,6 +228,7 @@ add_library(skein_builtins STATIC
   src/builtins/builtins_file.cpp
   src/builtins/builtins_text.cpp
   src/builtins/builtins_bytes.cpp
+  src/builtins/builtins_fn.cpp
   src/builtins/builtins_lru.cpp
   src/builtins/builtins_deque.cpp
   src/builtins/builtins_heap.cpp

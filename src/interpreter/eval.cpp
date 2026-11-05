@@ -725,6 +725,11 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
+            if (!match_exhaustive_check(m->arms, subject)) {
+                freeval(subject);
+                break;
+            }
+
             bool matched = false;
             bool aborted = false;
 

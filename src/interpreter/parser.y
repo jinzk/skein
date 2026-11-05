@@ -1365,6 +1365,7 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
     | FALSE                               { $$ = newpatternlit(newbool(false)); }
     | NULLVAL                             { $$ = newpatternlit(newnullast()); }
     | NAME                                { $$ = newpatternname($1); }
+    | IS type                             { $$ = newpatterntype($2); }
     | NAME '{' pattern_fields '}'         {
         $$ = newpatternstruct($1,
                               copy_text(diag_current_source_name().c_str()),

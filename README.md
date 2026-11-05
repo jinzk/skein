@@ -1776,6 +1776,8 @@ skein --check-ffi ./libshape.so shape.ffi.json
 
 ```text
 std.list
+std.fn
+std.iter
 std.dict
 std.json
 std.string
@@ -1991,6 +1993,44 @@ std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 
 `std.list` / `std.dict` / `std.bytes` / `std.lru` 由内部适配层提供，原生入口保留在 `std.raw.list` / `std.raw.dict` / `std.raw.bytes` / `std.raw.lru`；当前使用语言级默认参数的有 `list.slice`、`list.sort`、`list.sort_by`、`list.is_sorted`、`list.top_k`、`list.binary_search`、`list.reduce`、`dict.get`、`lru.get`、`lru.peek` 和 `bytes.slice`，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
 
+`std.fn` 提供函数组合与部分应用：
+
+```text
+import std;
+
+let inc = func(x) => x + 1;
+let twice = func(x) => x * 2;
+
+std.fn.compose(inc, twice)(5)       // 11，先 twice 再 inc
+std.fn.pipe(inc, twice)(5)          // 12，先 inc 再 twice
+std.fn.partial(func(a, b) => a + b, 10)(5)   // 15
+std.fn.identity(7)                  // 7
+std.fn.always("ok")()               // "ok"
+```
+
+`compose` / `pipe` 接受至少两个可调用值；`partial` 固定前若干个参数；`always` 返回一个忽略参数、总是返回给定值的函数。
+
+`std.iter` 提供惰性迭代器，输入可以是 list/dict/string/bytes/deque/heap/set 或生成器：
+
+```text
+import std;
+
+std.iter.collect(
+  std.iter.map(
+    std.iter.filter(range(0, 10), func(x) => x % 2 == 0),
+    func(x) => x * x))              // [0, 4, 16, 36, 64]
+
+std.iter.collect(std.iter.take(range(0, 100), 3))  // [0, 1, 2]
+std.iter.collect(std.iter.drop([1, 2, 3, 4], 2))   // [3, 4]
+std.iter.collect(std.iter.enumerate(["a", "b"]))   // [[0, a], [1, b]]
+
+func gen() { yield 1; yield 2; yield 3; }
+std.iter.collect(std.iter.map(gen(), func(x) => x * 10))
+                                                     // [10, 20, 30]
+```
+
+`map` / `filter` / `take` / `drop` / `enumerate` 返回惰性生成器，可以继续用 `std.generator.*` 操作；`collect` 会立即消费输入并返回 list。`take` 提前结束时会在底层是生成器时调用 `close`。
+
 当前提供的函数：
 
 ```text
@@ -2015,6 +2055,19 @@ std.list.window
 std.list.zip
 std.list.top_k
 std.list.binary_search
+
+std.fn.compose
+std.fn.pipe
+std.fn.partial
+std.fn.identity
+std.fn.always
+
+std.iter.map
+std.iter.filter
+std.iter.take
+std.iter.drop
+std.iter.enumerate
+std.iter.collect
 
 std.dict.len
 std.dict.get
@@ -2882,6 +2935,8 @@ let next = match (state) {
 - `match` 是表达式，返回第一个匹配 arm 的值；
 - arm 体是单条语句或代码块，块的值是最后一条语句的值；
 - 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、struct（按字段）；
+- `case is Type` 是类型模式，例如 `case is int`、`case is Point`、`case is callable`；
+- enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive`；
 - `case pattern as name` 把整个匹配值绑定到 `name`；
 - `case == IDLE` 匹配常量、名字或无载荷枚举变体；
 - `match (a, b)` 是多值 scrutinee，等价于 `match ([a, b])`；
@@ -4257,7 +4312,7 @@ src/
                  tokens.l、parser.y、ast.*、diagnostics.*、error_report.*、eval.*、
                  eval_control.*、eval_ops.*、eval_call.*、eval_assign.*、
                  eval_context.*、eval_helpers.h、gc.*、package.*、std_namespace.*、
-                 pattern.*、scopestack.*、structeval.*、fiber.*、generator.*、
+                 pattern.*、scopestack.*、structeval.*、fiber.*、generator.*、iter.*、
                  async_support.*、task.*、event_loop.*、repl.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
                  builtins.*、builtins_*.cpp（math/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、

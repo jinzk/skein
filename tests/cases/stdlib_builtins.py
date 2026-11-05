@@ -2789,3 +2789,62 @@ def run_cases():
           stderr="write_bytes expects a string path and bytes")
     check("bytes hex roundtrip type", "bytes_hex(1)\n",
           stderr="bytes_hex expects bytes")
+
+    check("std.fn compose",
+          "import std;\n"
+          "let f = std.fn.compose(func(x) => x + 1, func(x) => x * 2);\n"
+          "print(f(5));\n"
+          "let g = std.fn.compose(func(x) => x * 10, "
+          "func(x) => x + 1, func(x) => x * 2);\n"
+          "print(g(3));\n",
+          stdout_all=["11", "70"])
+    check("std.fn pipe",
+          "import std;\n"
+          "let f = std.fn.pipe(func(x) => x + 1, func(x) => x * 2);\n"
+          "print(f(5));\n",
+          stdout="12")
+    check("std.fn partial",
+          "import std;\n"
+          "let add = std.fn.partial(func(a, b, c) => a + b + c, 1, 2);\n"
+          "print(add(3));\n"
+          "print(std.fn.partial(func(a, b) => a + b)(4, 5));\n",
+          stdout_all=["6", "9"])
+    check("std.fn identity and always",
+          "import std;\n"
+          "print(std.fn.identity(7));\n"
+          "let k = std.fn.always([1, 2]);\n"
+          "print(k(9, 10));\n",
+          stdout_all=["7", "[1, 2]"])
+    check("std.fn errors",
+          "import std;\nstd.fn.compose(1, 2);\n",
+          stderr="std.fn.compose expects callables, got int")
+    check("std.iter list pipeline",
+          "import std;\n"
+          "let xs = std.iter.collect(\n"
+          "  std.iter.map(\n"
+          "    std.iter.filter(range(0, 10), func(x) => x % 2 == 0),\n"
+          "    func(x) => x * x));\n"
+          "print(xs);\n"
+          "print(std.iter.collect(std.iter.take(range(0, 100), 3)));\n"
+          "print(std.iter.collect(std.iter.drop([1, 2, 3, 4], 2)));\n"
+          "print(std.iter.collect(std.iter.enumerate([\"a\", \"b\"])));\n",
+          stdout_all=["[0, 4, 16, 36, 64]", "[0, 1, 2]", "[3, 4]",
+                      "[[0, a], [1, b]]"])
+    check("std.iter generator",
+          "import std;\n"
+          "func gen() { yield 1; yield 2; yield 3; }\n"
+          "print(std.iter.collect(std.iter.map(gen(), func(x) => x * 10)));\n"
+          "let out = [];\n"
+          "for (let x in std.iter.filter(gen(), func(x) => x > 1)) {\n"
+          "  out = std.list.append(out, x);\n"
+          "}\n"
+          "print(out);\n",
+          stdout_all=["[10, 20, 30]", "[2, 3]"])
+    check("std.iter take closes source",
+          "import std;\n"
+          "func gen() { defer print(\"closed\"); yield 1; yield 2; }\n"
+          "print(std.iter.collect(std.iter.take(gen(), 1)));\n",
+          stdout_all=["closed", "[1]"])
+    check("std.iter argument errors",
+          "import std;\nstd.iter.take([1, 2], -1);\n",
+          stderr="std.iter.take expects a non-negative int")

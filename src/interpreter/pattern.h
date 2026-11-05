@@ -18,4 +18,8 @@ bool bind_pattern_value(std::vector<pattern_binding> &bindings,
 bool match_pattern(struct ast *pattern, struct value_t *value,
                    std::vector<pattern_binding> &bindings);
 
+/* Returns false after reporting a missing enum variant (or another
+ * exhaustiveness error).  Non-enum subjects are always considered fine. */
+bool match_exhaustive_check(struct ast *arms, struct value_t *subject);
+
 #endif

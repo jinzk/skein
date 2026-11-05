@@ -12,6 +12,8 @@
 struct field_def {
     std::string name;
     struct type_constraint type;
+    bool has_default = false;
+    std::shared_ptr<function_def> default_value;
 };
 
 struct method_sig {

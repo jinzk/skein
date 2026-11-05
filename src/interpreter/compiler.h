@@ -44,6 +44,16 @@ skein::bc::ProtoPtr skein_compile_default_expression(
     struct function_code *code, struct ast *expression, int index,
     const std::string &module, std::string &error);
 
+/*
+ * Best-effort declaration check for field defaults: compile the expression
+ * and reject free-name loads that refer to the receiver or a sibling field.
+ * Expressions the compiler cannot handle are left to run-time checking.
+ */
+bool skein_check_default_references(
+    struct function_code *code, struct ast *expression,
+    const std::vector<std::string> &forbidden,
+    const std::string &module, std::string &error);
+
 /* Compile every destructuring parameter pattern for `code`. */
 std::shared_ptr<const compiled_pattern_set>
 skein_compile_parameter_patterns(struct function_code *code,

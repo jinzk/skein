@@ -490,6 +490,10 @@ def run_cases():
           'func f(a, b = a + 1, c = b + 1) { return c; }\n'
           'print(f(1));\n',
           stdout="3")
+    check("default parameter multiple literals",
+          'func f(a = 1, b = 2, c = 3) { return a + b + c; }\n'
+          'print(f());\nprint(f(10));\n',
+          stdout_all=["6", "15"])
     check("default parameter typed",
           'func f(a: int, b: int = a + 1) { return b; }\n'
           'print(f(2));\n',

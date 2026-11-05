@@ -227,6 +227,13 @@ struct Compiler {
         meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
+        std::vector<std::string> forbidden;
+        forbidden.push_back("self");
+        for (struct struct_member *member = node->members; member;
+             member = member->next) {
+            if (member->nodetype == 'f' && member->name)
+                forbidden.push_back(member->name);
+        }
         for (struct struct_member *member = node->members; member;
              member = member->next) {
             if (member->nodetype == 'f') {
@@ -235,6 +242,14 @@ struct Compiler {
                 field.type = member->type
                                  ? copy_type_constraint(member->type)
                                  : any_type_constraint();
+                if (member->default_value) {
+                    if (!check_field_default(member->default_value,
+                                             member->name, forbidden))
+                        return 0;
+                    field.default_code = add_field_default(
+                        member->default_value, node->name, member->name);
+                    member->default_value = NULL;
+                }
                 meta.fields.push_back(std::move(field));
             } else if (member->nodetype == 'm') {
                 yyerror("methods must be declared in impl");
@@ -251,6 +266,16 @@ struct Compiler {
         meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
+        std::vector<std::string> forbidden;
+        forbidden.push_back("self");
+        for (struct enum_variant *variant = node->variants; variant;
+             variant = variant->next) {
+            for (struct struct_member *member = variant->fields; member;
+                 member = member->next) {
+                if (member->nodetype == 'f' && member->name)
+                    forbidden.push_back(member->name);
+            }
+        }
         for (struct enum_variant *variant = node->variants; variant;
              variant = variant->next) {
             skein::bc::EnumVariantMeta variant_meta;
@@ -264,6 +289,14 @@ struct Compiler {
                 field.type = member->type
                                  ? copy_type_constraint(member->type)
                                  : any_type_constraint();
+                if (member->default_value) {
+                    if (!check_field_default(member->default_value,
+                                             member->name, forbidden))
+                        return 0;
+                    field.default_code = add_field_default(
+                        member->default_value, node->name, member->name);
+                    member->default_value = NULL;
+                }
                 variant_meta.fields.push_back(std::move(field));
             }
             meta.variants.push_back(std::move(variant_meta));
@@ -344,6 +377,52 @@ struct Compiler {
         return static_cast<uint32_t>(proto.impl_decls.size() - 1);
     }
 
+    bool check_field_default(
+        struct ast *expr, const char *field,
+        const std::vector<std::string> &forbidden) {
+        if (!expr)
+            return true;
+        struct function_code code {};
+        code.sl = NULL;
+        code.nparams = 0;
+        code.required_params = 0;
+        code.name = std::string("<default ") + (field ? field : "?") + ">";
+        code.module = proto.module;
+        std::string error;
+        if (!skein_check_default_references(&code, expr, forbidden,
+                                            proto.module, error)) {
+            std::string message = "field ";
+            message += field ? field : "?";
+            message += " default: ";
+            message += error;
+            fail(message.c_str());
+            return false;
+        }
+        return true;
+    }
+
+    std::shared_ptr<function_code> add_field_default(
+        struct ast *expr, const char *owner, const char *field) {        if (!expr)
+            return NULL;
+        std::shared_ptr<function_code> code(
+            new function_code(), free_function_code);
+        code->sl = NULL;
+        code->nparams = 0;
+        code->required_params = 0;
+        code->name = std::string("<default ") +
+                     (owner ? owner : "?") + "." +
+                     (field ? field : "?") + ">";
+        code->is_method = false;
+        code->variadic = false;
+        code->is_async = false;
+        code->is_generator = false;
+        code->def_line = expr->line;
+        code->def_column = expr->column;
+        code->module = proto.module;
+        set_function_body_ast(code.get(), newret(expr));
+        return code;
+    }
+
     uint32_t add_function(struct funcdef *node) {
         std::shared_ptr<function_code> code = get_function_code(node);
         if (code) {
@@ -383,12 +462,14 @@ struct Compiler {
 
     uint32_t add_construct(const char *module, const char *name,
                            const char *variant,
-                           std::vector<std::string> fields) {
+                           std::vector<std::string> fields,
+                           std::vector<bool> spread) {
         skein::bc::ConstructDesc desc;
         desc.module = module ? module : "";
         desc.name = name ? name : "";
         desc.variant = variant ? variant : "";
         desc.fields = std::move(fields);
+        desc.spread = std::move(spread);
         proto.constructs.push_back(std::move(desc));
         return static_cast<uint32_t>(proto.constructs.size() - 1);
     }
@@ -1866,14 +1947,17 @@ struct Compiler {
             case 'y': {
                 struct struct_lit_node *lit = (struct struct_lit_node *)node;
                 std::vector<std::string> fields;
+                std::vector<bool> spread;
                 for (struct struct_init *init = lit->fields; init;
                      init = init->next) {
                     compile(init->value);
                     if (!ok) return;
                     fields.push_back(init->name ? init->name : "");
+                    spread.push_back(init->name == NULL);
                 }
                 uint32_t descriptor = add_construct(
-                    lit->module, lit->name, "", std::move(fields));
+                    lit->module, lit->name, "", std::move(fields),
+                    std::move(spread));
                 emit(Op::NewStruct, 0, 0, descriptor, here);
                 return;
             }
@@ -1881,15 +1965,21 @@ struct Compiler {
             case '?': {
                 struct enum_lit_node *lit = (struct enum_lit_node *)node;
                 std::vector<std::string> fields;
+                std::vector<bool> spread;
                 for (struct struct_init *init = lit->fields; init;
                      init = init->next) {
+                    if (init->name == NULL) {
+                        yyerror("copy-with is only supported for structs");
+                        return;
+                    }
                     compile(init->value);
                     if (!ok) return;
-                    fields.push_back(init->name ? init->name : "");
+                    fields.push_back(init->name);
+                    spread.push_back(false);
                 }
                 uint32_t descriptor = add_construct(
                     lit->module, lit->name, lit->variant,
-                    std::move(fields));
+                    std::move(fields), std::move(spread));
                 emit(Op::NewEnum, 0, 0, descriptor, here);
                 return;
             }
@@ -2823,6 +2913,79 @@ ProtoPtr skein_compile_default_expression(
     return std::make_shared<const Proto>(std::move(compiler.proto));
 }
 
+static bool check_proto_default_references(
+    const skein::bc::Proto &proto,
+    const std::vector<std::string> &forbidden,
+    std::unordered_set<const struct function_code *> &visited,
+    std::string &error) {
+    for (const skein::bc::Instr &ins : proto.code) {
+        if (static_cast<skein::bc::Op>(ins.op) !=
+            skein::bc::Op::LoadName)
+            continue;
+        if (ins.b >= proto.consts.size())
+            continue;
+        const skein::bc::Constant &constant = proto.consts[ins.b];
+        if (constant.kind != skein::bc::ConstantKind::Name)
+            continue;
+        for (const std::string &name : forbidden) {
+            if (constant.name == name) {
+                error = "default value cannot reference " + name;
+                return false;
+            }
+        }
+    }
+
+    for (const skein::bc::Constant &constant : proto.consts) {
+        if (constant.kind != skein::bc::ConstantKind::Function ||
+            !constant.function)
+            continue;
+        const struct function_code *code = constant.function.get();
+        if (!visited.insert(code).second)
+            continue;
+        std::string compile_error;
+        skein::bc::ProtoPtr nested = skein_compile_function_body(
+            const_cast<struct function_code *>(code), code->module,
+            compile_error);
+        if (!nested)
+            continue;
+        if (!check_proto_default_references(*nested, forbidden, visited,
+                                            error))
+            return false;
+    }
+    return true;
+}
+
+bool skein_check_default_references(
+    struct function_code *code, struct ast *expression,
+    const std::vector<std::string> &forbidden,
+    const std::string &module, std::string &error) {
+    if (!code || !expression || forbidden.empty())
+        return true;
+
+    Compiler compiler(module);
+    compiler.proto.name =
+        (code->name.empty() ? std::string("<anonymous>") : code->name) +
+        "$defaultcheck";
+    for (struct symlist *param = code->sl; param; param = param->next) {
+        compiler.param_names.push_back(
+            param->sym && param->sym->name ? param->sym->name : "");
+    }
+    compiler.param_fast_path =
+        !Compiler::has_local_declarations(expression);
+    compiler.proto.param_names = compiler.param_names;
+    compiler.inside_function = true;
+    compiler.slot_fast_path = Compiler::can_use_slots(expression);
+    if (compiler.slot_fast_path)
+        compiler.slot_scopes.emplace_back();
+    compiler.compile(expression);
+    if (!compiler.ok)
+        return true;
+
+    std::unordered_set<const struct function_code *> visited;
+    return check_proto_default_references(compiler.proto, forbidden, visited,
+                                          error);
+}
+
 std::shared_ptr<const compiled_pattern_set>
 skein_compile_parameter_patterns(struct function_code *code,
                                  const std::string &module,
@@ -2841,11 +3004,12 @@ skein_compile_parameter_patterns(struct function_code *code,
     std::shared_ptr<compiled_pattern_set> compiled =
         std::make_shared<compiled_pattern_set>();
     for (struct symlist *param = code->sl; param; param = param->next) {
-        if (!param->pattern) {
+        struct ast *pattern = symlist_pattern_ast(param);
+        if (!pattern) {
             compiled->roots.push_back(UINT32_MAX);
             continue;
         }
-        uint32_t index = compiler.add_pattern(param->pattern);
+        uint32_t index = compiler.add_pattern(pattern);
         if (!compiler.ok || index == UINT32_MAX) {
             error = compiler.error.empty() ? "cannot compile parameter pattern"
                                            : compiler.error;
@@ -2864,7 +3028,8 @@ skein_compile_parameter_patterns(struct function_code *code,
 ProtoPtr skein_compile_function_body(struct function_code *code,
                                      const std::string &module,
                                      std::string &error) {
-    if (!code || !code->ast) {
+    struct ast *body = function_body_ast(code);
+    if (!code || !body) {
         error = "function has no body";
         return nullptr;
     }
@@ -2878,10 +3043,10 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     }
     compiler.upvalue_names = code->upvalues;
     compiler.proto.upvalues = code->upvalues;
-    Compiler::collect_local_declared_names(code->ast,
+    Compiler::collect_local_declared_names(body,
                                             compiler.declared_names);
     compiler.param_fast_path = true;
-    compiler.slot_fast_path = Compiler::can_use_slots(code->ast);
+    compiler.slot_fast_path = Compiler::can_use_slots(body);
     if (compiler.slot_fast_path)
         compiler.slot_scopes.emplace_back();
     compiler.proto.nparams = static_cast<uint32_t>(code->nparams);
@@ -2891,11 +3056,11 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     compiler.proto.is_async = code->is_async;
     compiler.proto.is_generator = code->is_generator;
     compiler.proto.is_method = code->is_method;
-    compiler.proto.def_line = code->ast->line;
-    compiler.proto.def_column = code->ast->column;
+    compiler.proto.def_line = body->line;
+    compiler.proto.def_column = body->column;
     compiler.proto.param_names = compiler.param_names;
 
-    compiler.compile(code->ast);
+    compiler.compile(body);
     if (!compiler.ok) {
         error = compiler.error.empty() ? "cannot compile function"
                                        : compiler.error;

@@ -2404,6 +2404,82 @@ def run_cases():
           stdout_all=["= true", "= false"])
     check("empty struct",
           "struct Empty {}\nlet e = Empty {};\ne\n", stdout="= Empty {}")
+    check("struct copy-with",
+          "struct Point { x: int; y: int; }\n"
+          "let p = Point { x: 1, y: 2 };\n"
+          "let q = Point { ...p, x: 9 };\n"
+          "print(q.x);\nprint(q.y);\nprint(p.x);\n",
+          stdout_all=["9", "2", "1"])
+    check("struct copy-with spread first",
+          "struct Point { x: int; y: int; }\n"
+          "let p = Point { x: 1, y: 2 };\n"
+          "Point { x: 3, ...p };\n",
+          stderr="struct spread must come first")
+    check("struct copy-with type mismatch",
+          "struct P { x: int; }\n"
+          "struct Q { x: int; }\n"
+          "P { ...Q { x: 1 } };\n",
+          stderr="struct spread expects P, got Q")
+    check("enum copy-with rejected",
+          "enum E { A { n: int; }; }\n"
+          "E::A { ...E::A { n: 1 } };\n",
+          stderr="copy-with is only supported for structs")
+    check("struct field defaults",
+          'struct Config { host: string = "localhost"; port: int = 80; }\n'
+          "let a = Config {};\n"
+          "let b = Config { port: 8080 };\n"
+          "print(a.host);\nprint(a.port);\n"
+          "print(b.host);\nprint(b.port);\n",
+          stdout_all=["localhost", "80", "localhost", "8080"])
+    check("struct field default fresh value",
+          "struct S { xs: list = [0]; }\n"
+          "let a = S {};\n"
+          "let b = S {};\n"
+          "a.xs[0] = 9;\n"
+          "print(b.xs[0]);\n",
+          stdout="0")
+    check("struct field default type mismatch",
+          'struct S { x: int = "bad"; }\nS {}\n',
+          stderr="field x of S expects int, got string")
+    check("struct field default required field",
+          "struct S { x: int; y: int = 2; }\nS {}\n",
+          stderr="field x of S is required")
+    check("struct field default cannot reference self",
+          "let self = 5;\n"
+          "struct S { x: int = self; }\n",
+          stderr="field x default: default value cannot reference self")
+    check("struct field default cannot reference field",
+          "let x = 5;\n"
+          "struct S { x: int = x; }\n",
+          stderr="field x default: default value cannot reference x")
+    check("struct field default allows pattern binding shadowing",
+          "struct S { x: int; y: int = match (1) { case x => x; }; }\n"
+          "print(S { x: 2 }.y);\n",
+          stdout="1")
+    check("struct field default allows local function shadowing",
+          "struct S { x: int; f: callable = func() { let x = 1; "
+          "return x; }; }\n"
+          "print(S { x: 2 }.f());\n",
+          stdout="1")
+    check("struct field default nested closure cannot reference field",
+          "let x = 5;\n"
+          "struct S { x: int; y: int = (func() { return x; })(); }\n",
+          stderr="field y default: default value cannot reference x")
+    check("enum field default cannot reference field",
+          "let n = 5;\n"
+          "enum E { A { n: int = n; }; }\n",
+          stderr="field n default: default value cannot reference n")
+    check("struct copy-with and defaults",
+          "struct S { x: int = 1; y: int = 2; }\n"
+          "let q = S { ...S {}, x: 9 };\n"
+          "print(q.x);\nprint(q.y);\n",
+          stdout_all=["9", "2"])
+    check("enum field defaults",
+          "enum E { A { n: int = 0; s: string = \"x\"; }; B; }\n"
+          "print(E::A {}.n);\n"
+          'print(E::A { s: "y" }.s);\n'
+          "print(E::B is E);\n",
+          stdout_all=["0", "y", "true"])
     check("bound method value",
           "struct Point {\n"
           "  x: int;\n"

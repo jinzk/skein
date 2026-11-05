@@ -140,7 +140,14 @@ int main(int argc, char **argv) {
         } else if (arg == "--vm") {
             skein_vm_set_enabled(true);
         } else if (arg == "--no-vm") {
+#ifdef SKEIN_VM_ONLY
+            std::fprintf(stderr,
+                         "%s: --no-vm is unavailable in VM-only builds\n",
+                         program);
+            return 2;
+#else
             skein_vm_set_enabled(false);
+#endif
         } else if (arg == "--vm-stats") {
             skein_vm_set_stats(true);
         } else if (arg == "-k" || arg == "--keep-going") {

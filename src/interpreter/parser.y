@@ -513,8 +513,7 @@ static struct symlist *new_destructure_param(struct ast *pattern) {
     std::snprintf(name, sizeof(name), "#%d", ++destructure_param_id);
     struct symbol *symbol = newsym(name);
     struct symlist *params = newsymlist(symbol, NULL, NULL);
-    params->has_pattern = true;
-    params->pattern = pattern;
+    set_symlist_pattern_ast(params, pattern);
     return params;
 }
 
@@ -1102,6 +1101,10 @@ variant_fields: variant_field            { $$ = $1; }
     ;
 
 variant_field: NAME ':' type ';'         { $$ = newstructfield($1, $3); }
+    | NAME ':' type '=' exp ';'           {
+        $$ = newstructfield($1, $3);
+        ((struct struct_member *)$$)->default_value = $5;
+      }
     ;
 
 struct_members: struct_member            { $$ = $1; }
@@ -1109,6 +1112,10 @@ struct_members: struct_member            { $$ = $1; }
     ;
 
 struct_member: NAME ':' type ';'         { $$ = newstructfield($1, $3); }
+    | NAME ':' type '=' exp ';'           {
+        $$ = newstructfield($1, $3);
+        ((struct struct_member *)$$)->default_value = $5;
+      }
     | method_member                       { $$ = $1; }
     ;
 
@@ -1181,6 +1188,7 @@ struct_fields: struct_field              { $$ = $1; }
     ;
 
 struct_field: NAME ':' exp               { $$ = newstructinit($1, $3); }
+    | ELLIPSIS exp                       { $$ = newstructinit(NULL, $2); }
     ;
 
 importref: importpath                     { $$ = $1; }
@@ -1629,12 +1637,14 @@ param: NAME {
     | NAME '=' exp {
         struct symbol *s = newsym($1);
         free($1);
-        $$ = newsymlist(s, NULL, NULL, false, $3);
+        $$ = newsymlist(s, NULL, NULL);
+        set_symlist_default_ast($$, $3);
       }
     | NAME ':' type '=' exp {
         struct symbol *s = newsym($1);
         free($1);
-        $$ = newsymlist(s, $3, NULL, false, $5);
+        $$ = newsymlist(s, $3, NULL);
+        set_symlist_default_ast($$, $5);
       }
     | ELLIPSIS NAME {
         struct symbol *s = newsym($2);

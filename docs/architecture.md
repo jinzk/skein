@@ -144,6 +144,11 @@ typedef struct {
 - 字节码 VM：`src/interpreter/bytecode.*`、`compiler.*`、`vm.*`，
   默认启用，`--no-vm` / `SKEIN_VM=0` 可切回 AST；编译失败时整条语句或
   函数回退 AST，并由 CTest `skein_vm_tests` 做差分验证；
+- 运行期执行状态与 AST 解耦：`function_code` 不持有 AST / VM 缓存，
+  函数体、默认参数和参数 pattern AST 位于 L2 side table；
+- `runtime_link_test` 只链接 `skein_runtime`，守住 L1 边界；
+- `tools/check_all.sh` 统一覆盖 Debug/Release、sanitizer、VM-only 与
+  runtime-only 链接检查；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
 
 未开始：

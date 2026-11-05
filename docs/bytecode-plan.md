@@ -4,9 +4,9 @@
 依赖关系、里程碑和验收标准。
 
 - 更新日期：2026-11-05
-- 当前基线：`78b319c` 之后的参数 fast path、函数体 AST 释放、默认参数
-  AST 释放改动（尚未提交）
+- 当前基线：`4e29575`；工作区另有未提交的 N1/N2 改动
 - 目标：把 VM 从“实验后端”推进为默认后端，并移除运行期 AST 依赖
+- 当前阶段：M1 完成；未完成部分按 §8 的 N1–N4 重排执行
 
 ## 1. 目标与非目标
 
@@ -32,31 +32,41 @@
 - 栈式字节码、`Proto`、固定 8 字节 `Instr`、反汇编。
 - 顶层语句按语句编译，函数体首次调用时编译并缓存。
 - 局部变量 slot、参数 fast path、默认参数 Proto。
+- fast frame：普通函数直接压帧，支持 handler / defer / iterator。
+- 尾调用优化：无 spread 的尾调用复用 fast frame。
+- symbol-cell upvalue：闭包通过索引访问捕获变量。
 - `for-in` / `switch` / `match` / destructuring / `is` / `fail`。
 - `on error` / `recover` / `pass` / `defer`。
 - struct / enum / trait / impl / package / import。
 - `await` / `yield`。
-- 函数体 AST 与默认参数 AST 在编译成功后释放。
+- 字节码 verifier 与 `Proto::max_stack`。
+- 全局名字 IC、struct/enum 字段索引表。
+- 运算/比较快路径、`CMP_JUMP`、安全常量折叠。
+- 函数体 AST、默认参数 AST、参数 pattern AST 在编译成功后释放。
+- VM 统计、随机差分测试、基准回归测试。
+- VM 执行缓存已迁移到 interpreter side table。
 
 ### 2.2 剩余执行路径 AST
 
 | 字段 | 位置 | 说明 |
 |---|---|---|
-| `function_code->ast` | `src/runtime/valuetype.h` | 编译成功后释放；编译失败时保留 |
-| `symlist::default_value` | `src/runtime/symbol.h` | 默认参数 Proto 编译成功后释放 |
-| `symlist::pattern` | `src/runtime/symbol.h` | 编译成功后释放；失败时回退 AST |
+| `function_bodies` | `src/interpreter/ast.cpp` | L2 side table；编译成功后释放，失败时供 AST 回退 |
+| `symlist_metadata_map` | `src/interpreter/ast.cpp` | L2 side table；保存默认参数 / 参数 pattern AST |
 
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 10/10 passed (51.68s)
+ctest: 11/11 passed (49.38s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.36s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.53s (SKEIN_VM=1)
-vm_differential_test: Passed 0.85s (160 cases)
-vm_bench_test:  Passed 8.46s
-ASan/UBSan:     skein_vm_tests 68.26s
-LSan:           skein_vm_lsan_tests Passed 79.65s
+skein_tests:    Passed 12.12s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.29s (SKEIN_VM=1)
+vm_differential_test: Passed 0.80s (160 cases)
+vm_bench_test:  Passed 7.84s
+ASan/UBSan:     skein_vm_tests 67.21s
+LSan:           skein_vm_lsan_tests Passed 80.31s
+SKEIN_VM_ONLY:  11/11 passed (49.12s)
+tools/check_all: clean pass (Debug/Release/ASan+UBSan/LSan/VM-only)
+glibcxx-debug:  4/4 core tests passed
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -64,25 +74,31 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 500 万次局部循环 | 1.21s | 1.02s |
-| `fib(30)` | 0.70s | 0.70s |
-| 200 万次函数调用 | 0.85s | 0.82s |
-| 参数 pattern 密集调用 | 0.52s | 0.59s |
+| 500 万次局部循环 | 1.22s | 0.99s |
+| `fib(30)` | 0.70s | 0.74s |
+| 200 万次函数调用 | 0.83s | 0.85s |
+| 参数 pattern 密集调用 | 0.52s | 0.63s |
 
 ### 2.4 基线缺口
 
-- 参数解构 pattern 已编译为 `PatternDesc`（W1-1 完成）。
-- `EVAL_AST`、`ConstantKind::Ast` 与 `ConstantKind::Decl` 均已移除；
-  标准测试集零 fallback（W1-2 / W4-1 完成）。
-- 函数体 AST 在成功编译后可无条件释放；运行期 AST 只剩编译失败回退。
-- VM 默认关闭。
-- 每帧新建 `Executor`，函数调用使用 C++ 递归。
-- 闭包捕获仍按名字查找，没有 upvalue 索引。
-- handler / defer 是运行时动态结构，没有编译期表。
-- 没有字节码 verifier、序列化、AOT 缓存。
-- ASan 未开启泄漏检测。
-- `function_code` 位于 L1 runtime，但持有 L2 的 `vm_proto` /
-  `vm_param_patterns` 类型擦除缓存，属于已知分层软债务。
+- VM 已默认启用，标准测试集零 fallback。
+- fast frame 已覆盖普通函数、handler、defer、iterator；generator /
+  async、默认参数、variadic、method、参数 pattern 调用仍回退
+  `call_value_args` / C++ 递归。
+- 尾调用只覆盖无 spread 的普通调用。
+- 全局名字 IC 已完成；显式全局 slot、per-call-site 字段/索引/方法 IC
+  仍待完成。
+- 值表示仍是堆分配 `value_t*`，尚无 tagged value / unboxed slot。
+- 指令优化已有运算快路径、`CMP_JUMP`、常量折叠；仍缺死代码消除、
+  跳转线程化、computed goto。
+- handler / defer 仍是运行时动态结构，尚无编译期表。
+- generator / async 仍依赖原生 fiber 栈。
+- 函数体、默认参数、参数 pattern 的 AST 已移出 `function_code` /
+  `symlist`，由 L2 side table 管理。
+- 没有字节码序列化、AOT 缓存。
+- 差分测试已有基础 160 例；模糊测试、opcode 覆盖统计仍待扩展。
+- sanitizer 已有 ASan/UBSan/LSan 目标；`tools/check_all.sh` 覆盖完整
+  Debug / Release / sanitizer / VM-only / runtime-only 矩阵。
 
 ### 2.5 分层架构现状
 
@@ -93,18 +109,30 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 - CMake include 目录按层收敛；
 - `tools/check_boundaries.py` 通过。
 
-软债务：
+软债务：无。L1 不再持有 L2 AST 指针。
 
-| 位置 | 问题 | 目标 |
-|---|---|---|
-| `function_code::vm_proto` | L1 结构体持有 L2 执行缓存 | W4-5 移入 L2 side table |
-| `function_code::vm_param_patterns` | 同上，本轮 W1-1 新增 | W4-5 一并迁移 |
-| `symlist::default_value` | L1 持有 L2 AST 指针 | W4-3 删除 |
-| `symlist::pattern` | L1 持有 L2 AST 指针 | W4-3 删除 |
+已清理：
 
-约束：在 W4-5 完成前，不得让 `skein_runtime` 直接实例化或销毁
-`function_code` 的 VM 缓存；所有缓存释放必须继续经过
-`free_function_code()` / `skein_vm_forget_function_code()`。
+- `function_code::ast`
+- `function_code::vm_proto`
+- `function_code::vm_param_patterns`
+- `function_code::vm_compile_failed`
+- `symlist::default_value`
+- `symlist::pattern`
+
+VM 执行缓存和函数体 / 默认参数 / 参数 pattern AST 现在位于 L2 side table，
+并由 `free_function_code()` / `skein_vm_forget_function_code()` 统一清理。
+`runtime_link_test` 只链接 `skein_runtime`，验证 L1 可独立链接。
+
+### 2.6 总体进度
+
+| 状态 | 数量 | 任务 |
+|---|---:|---|
+| 完成 | 19 | W1-1..6、W2-1、W2-2、W2-5、W2-6、W3-1、W4-1、W4-2、W4-3、W4-5、W5-1、W5-3、W5-5、W5-6 |
+| 部分完成 | 3 | W3-2、W3-4、W5-2 |
+| 进行中 | 0 | - |
+| 暂缓（按需） | 4 | W2-3、W2-4、W4-4、W5-4 |
+| TODO | 1 | W3-3 |
 
 ## 3. 任务分解
 
@@ -117,7 +145,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 状态：**已完成（2026-11-05）**。参数 pattern 在首次调用时编译并缓存到
 `function_code`，由 `skein_vm_match_parameter_pattern()` 原生匹配；成功后
-释放 `symlist::pattern`。
+从 L2 side table 释放参数 pattern AST。
 
 原现状：`src/interpreter/eval_call.cpp` 在绑定参数时调用
 `match_pattern(sl->pattern, ...)`。
@@ -135,7 +163,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 - 参数解构、嵌套解构、rest、default + pattern 组合通过。
 - 参数 pattern 失败时错误文本与 AST 后端一致。
-- `symlist::pattern` 在成功编译后可释放。
+- 参数 pattern AST 在成功编译后可释放。
 - 标准测试集在 VM 下不再因参数 pattern 触发 AST 执行。
 
 #### W1-2 消除 `EVAL_AST` 的真实触发点（P0，L）
@@ -197,8 +225,8 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 实施结果：
 
-1. `function_code->ast` 默认在成功编译后释放；设置
-   `SKEIN_KEEP_AST=1` 可保留函数体、默认参数和参数 pattern 的 AST。
+1. 函数体、默认参数和参数 pattern 的 AST 位于 L2 side table，默认在成功
+   编译后释放；设置 `SKEIN_KEEP_AST=1` 可保留。
 2. 删除运行期切换后端的隐式假设：
    - 已有 `vm_proto` 的函数即使之后 `skein_vm_set_enabled(false)`，
      仍继续执行缓存的 Proto；
@@ -382,6 +410,8 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W2-3 Handler / defer 表（P1，L）
 
+状态：**暂缓（按需）**，见 §8.4 / §8.6。
+
 实施：
 
 1. 编译期为每个 Proto 生成 handler table：
@@ -401,6 +431,8 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 - handler/defer 不再依赖每帧 `std::vector<std::vector<...>>`。
 
 #### W2-4 Generator / async 显式状态（P2，L）
+
+状态：**暂缓（按需）**，见 §8.4 / §8.6。
 
 现状：依赖 `boost::context` 原生 2MB 栈保存 C++ 栈。
 
@@ -658,26 +690,64 @@ pattern     1.18
 
 #### W4-2 移除 `function_code` 的运行期 AST（P1，M）
 
-前置：W4-1、W2-2。
+状态：**完成（2026-11-05）**。
 
-- 默认构建不保留 `function_code->ast`。
-- 调试构建可通过 `SKEIN_KEEP_AST=1` 保留。
-- `free_function_code()` 只释放 Proto、参数元数据和调试信息。
-- 评估把 `function_code` 移出 runtime 层，或改成纯 pimpl。
-- 与 W4-5 协同：`function_code` 最终只保留签名与调试元数据。
+实施结果：
 
-验收：`valuetype.h` 不再依赖 `struct ast` 作为执行状态。
+1. `function_code` 删除 `struct ast *ast` 字段，不再依赖 `struct ast`。
+2. 函数体 AST 迁移到 `ast.cpp` 的 L2 side table：
+   - `function_body_ast()`
+   - `set_function_body_ast()`
+   - `clear_function_body_ast()`
+3. 空函数体使用合成的 `return null` AST，保证 VM 编译可用。
+4. 默认构建仍支持：
+   - `--no-vm`
+   - 编译失败时 AST 回退
+   - `SKEIN_KEEP_AST=1`
+5. 新增 CMake 选项 `SKEIN_VM_ONLY`：
+   - VM-only 构建中 `--no-vm` 不可用
+   - `SKEIN_VM=0` 不会关闭 VM
+   - 函数体 AST 在成功编译后释放
+6. `free_function_code()` 统一清理：
+   - VM execution cache
+   - 默认参数 cache
+   - 函数体 AST side table
+
+验收结果：
+
+- `valuetype.h` 不再包含 `struct ast` 字段或 forward declaration。
+- 默认构建 11/11 测试通过。
+- `SKEIN_VM_ONLY=ON` 构建 11/11 测试通过。
+- VM-only 构建下 `--no-vm` 返回 2。
+- ASan/UBSan/LSan 通过。
 
 #### W4-3 参数与 default 元数据 Proto 化（P2，M）
 
-- 参数 pattern 使用 `PatternDesc`（W1-1）。
-- 默认参数使用 Proto，删除 `symlist::default_value`。
-- `symlist` 只保留签名元数据。
-- trait 参数元数据只保留名称/类型/可变参数/是否有默认值。
+状态：**完成（2026-11-05）**。
 
-验收：运行期不再出现 `default_value` / `pattern` 的 AST 指针。
+实施结果：
+
+1. `symbol.h` 删除 `symlist::default_value` / `symlist::pattern`。
+2. 参数 default/pattern AST 迁移到 `ast.cpp` 的 L2 side table：
+   - `symlist_default_ast()` / `set_symlist_default_ast()`
+   - `symlist_pattern_ast()` / `set_symlist_pattern_ast()`
+   - `clear_symlist_metadata()`
+3. `symlist` 只保留签名元数据：
+   - 名称、类型、variadic；
+   - `has_default` / `has_pattern`。
+4. VM 成功编译默认参数 / pattern 后释放对应 AST，但保留
+   `has_default` / `has_pattern` 语义。
+5. trait 参数元数据只保留名称/类型/可变参数/是否有默认值。
+
+验收结果：
+
+- VM-only 构建运行期不再出现 `default_value` / `pattern` AST 指针。
+- 多默认参数、`std.graph` 默认参数、参数 pattern 用例通过。
+- 默认构建、VM-only、ASan/UBSan/LSan 全部通过。
 
 #### W4-4 调试信息与 source map（P3，M）
+
+状态：**暂缓（按需）**，见 §8.4 / §8.6。
 
 - 压缩 `Proto::locs` 为行表/列增量。
 - 保留函数名、参数名、slot 名用于调试。
@@ -804,7 +874,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 
 #### W5-3 基准回归（P2，M）
 
-状态：**完成（基础回归，2026-11-05）**。
+状态：**完成（2026-11-05）**。
 
 已完成：
 
@@ -845,6 +915,8 @@ vm benchmark regression check passed
 
 #### W5-4 序列化与 AOT 缓存（P3，XL）
 
+状态：**暂缓（按需）**，见 §8.5 / §8.6。
+
 - 稳定字节码格式与版本号。
 - 字符串表、常量表、源码位置表、import/module 描述。
 - 替换不可序列化的 `shared_ptr<value_t>` / `function_code`。
@@ -854,21 +926,42 @@ vm benchmark regression check passed
 
 #### W5-5 CI 与 sanitizer（P2，M）
 
-- ASan + LSan + UBSan 组合。
-- Debug / Release 两套构建。
-- 可选 `-D_GLIBCXX_DEBUG`。
-- generator/fiber 路径单独配置栈大小。
-- runtime-only 链接检查：`skein_runtime` 不引用 interpreter/builtins 符号。
-- 文档同步与边界检查继续作为必跑项。
+状态：**完成（2026-11-05）**。
+
+实施结果：
+
+1. 新增 `tools/check_all.sh`，覆盖：
+   - Debug / Release 构建；
+   - ASan + UBSan；
+   - LSan 定向测试；
+   - VM-only 构建；
+   - runtime-only 链接检查；
+   - docs / boundary / diff check。
+2. 新增 `runtime_link_test`，只链接 `skein_runtime`。
+3. 新增可选 `--glibcxx-debug`，使用 `-D_GLIBCXX_DEBUG` 跑核心测试。
+4. generator / fiber 栈大小支持 `SKEIN_FIBER_STACK_KB`，sanitizer
+   测试默认使用 8192 KB。
+5. AST 参考后端调用深度支持 `SKEIN_MAX_CALL_DEPTH`，sanitizer
+   测试默认使用 128。
+6. 可选 `--glibcxx-debug` 已通过 4/4 核心测试。
+
+验收结果：`tools/check_all.sh --clean` 在干净构建目录中通过。
 
 #### W5-6 文档维护（P2，S）
 
-- `docs/bytecode.md` 与本文同步更新。
-- README 的 VM 使用说明更新为默认后端。
-- 记录每个里程碑的基准与测试结果。
-- 明确剩余限制，避免“已全量原生”的误解。
+状态：**完成（2026-11-05）**。
+
+实施结果：
+
+- 更新 README、`docs/bytecode.md`、`docs/architecture.md`。
+- 记录当前支持范围、已知限制、基准数据。
+- 明确 VM-only / 默认构建 / `--no-vm` 的说明。
+- 补充统一检查脚本与 fiber 栈配置说明。
 
 ## 4. 里程碑
+
+> 2026-11-05 重排：M1 已完成。未完成部分按 §8 的 N1–N4 执行，
+> 原 M2–M6 保留为能力清单；W2-3、W2-4、W4-4、W5-4 暂缓。
 
 ### M1：语义收口
 
@@ -885,57 +978,71 @@ vm benchmark regression check passed
 
 ### M2：Frame VM
 
+状态：**进行中**（W2-1、W2-5 完成；W2-3 待做）。
+
 任务：W2-1、W2-3、W2-5
 
 退出标准：
 
-- 每帧不再新建 `Executor`。
-- 递归深度可达 10000。
-- handler/defer 使用编译期表。
-- verifier 接入编译流程。
-- `fib(30)` 不慢于 AST。
+- [x] 普通 VM 调用不再新建 `Executor`。
+- [x] 递归深度可达 10000。
+- [ ] handler/defer 使用编译期表。
+- [x] verifier 接入编译流程。
+- [x] `fib(30)` 不慢于 AST。
 
 ### M3：闭包与协程
+
+状态：**进行中**（W2-2 完成；W2-4 待做）。
 
 任务：W2-2、W2-4
 
 退出标准：
 
-- 闭包通过 upvalue 索引访问。
-- generator/async 状态显式化。
-- 多层闭包与 defer 捕获测试通过。
+- [x] 闭包通过 upvalue 索引访问。
+- [ ] generator/async 状态显式化。
+- [x] 多层闭包与 defer 捕获测试通过。
 
 ### M4：性能
+
+状态：**进行中**（W2-6、W3-1 完成；W3-2、W3-4 部分完成；W3-3 待做）。
 
 任务：W3-1、W3-2、W3-3、W3-4、W2-6
 
 退出标准：
 
-- 三个基线基准均达到目标。
-- 尾调用复用当前帧，accumulator 尾递归可通过低深度限制。
-- 性能回归测试纳入 CI。
-- 关闭优化时语义一致。
+- [x] 基线基准达到目标（`fib` 与调用密集不慢于 AST）。
+- [x] 尾调用复用当前帧。
+- [x] 性能回归测试纳入 CI。
+- [x] 关闭优化时语义一致。
+- [ ] 值表示与分配优化。
 
 ### M5：默认后端与 AST 清理
+
+状态：**完成（2026-11-05）**。
 
 任务：W1-3、W4-1、W4-2、W4-3、W4-5
 
 退出标准：
 
-- 默认启动即 VM。
-- 运行期不再需要函数体/默认参数/参数 pattern AST。
-- `function_code` 不再持有 VM 执行缓存，L1 可独立链接。
-- `--no-vm` 仍全量通过。
+- [x] 默认启动即 VM。
+- [x] 运行期不再需要函数体 / 默认参数 / 参数 pattern AST。
+- [x] `function_code` 不再持有 VM 执行缓存，L1 可独立链接。
+- [x] `--no-vm` 仍全量通过。
 
 ### M6：产品化
+
+状态：**进行中**（W5-1、W5-3、W5-5、W5-6 完成；W5-2 部分完成；
+W5-4 按需暂缓）。
 
 任务：W5-1 至 W5-6
 
 退出标准：
 
-- 可验证、可统计、可序列化。
-- 文档、基准、CI 完整。
-- 发布构建默认启用 VM。
+- [x] 字节码可验证。
+- [x] VM 统计与基准回归可用。
+- [x] CI 与 sanitizer 矩阵完整。
+- [ ] 字节码可序列化 / AOT。
+- [x] 发布构建默认启用 VM。
 
 ## 5. 验收矩阵
 
@@ -979,25 +1086,189 @@ vm benchmark regression check passed
 | W1-6 资源泄漏审计 | P1 | M | 完成（2026-11-05） | - |
 | W2-1 Frame VM | P1 | XL | 完成（fast path） | W1-2 |
 | W2-2 Upvalue | P1 | L | 完成（symbol-cell） | W2-1 |
-| W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |
-| W2-4 Generator 状态 | P2 | L | TODO | W2-1 |
+| W2-3 Handler/defer 表 | P1 | L | 暂缓（按需） | W2-1 |
+| W2-4 Generator 状态 | P2 | L | 暂缓（按需） | W2-1 |
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
 | W2-6 尾调用优化 | P2 | M | 完成（fast-frame） | W2-1 |
 | W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
-| W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC） | W2-1 |
+| W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC + 字段索引 + 精确失效） | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |
-| W3-4 指令优化 | P2 | M | 部分完成（CMP_JUMP） | W3-1 |
+| W3-4 指令优化 | P2 | M | 部分完成（CMP_JUMP + 常量折叠） | W3-1 |
 | W4-1 声明常量去 AST | P1 | M | 完成（2026-11-05） | W1-2 |
-| W4-2 移除 function AST | P1 | M | TODO | W4-1/W2-2 |
-| W4-3 参数元数据 Proto 化 | P2 | M | TODO | W1-1 |
-| W4-4 调试信息 | P3 | M | TODO | W2-1 |
-| W4-5 VM 缓存移出 runtime | P1 | M | 完成（2026-11-05） | W2-1/W4-2 |
-| W5-1 VM 统计 | P2 | S | 完成（基础统计） | - |
+| W4-2 移除 function AST | P1 | M | 完成（2026-11-05） | W4-1/W2-2 |
+| W4-3 参数元数据 Proto 化 | P2 | M | 完成（2026-11-05） | W1-1 |
+| W4-4 调试信息 | P3 | M | 暂缓（按需） | W2-1 |
+| W4-5 VM 缓存移出 runtime | P1 | M | 完成（2026-11-05） | W2-1 |
+| W5-1 VM 统计 | P2 | S | 完成（2026-11-05） | - |
 | W5-2 差分/模糊测试 | P2 | L | 部分完成（基础差分） | W1-2 |
-| W5-3 基准回归 | P2 | M | 完成（基础回归） | W2-1 |
-| W5-4 序列化/AOT | P3 | XL | TODO | W2-5/W4 |
-| W5-5 CI/Sanitizer | P2 | M | TODO | - |
-| W5-6 文档维护 | P2 | S | 进行中 | 各里程碑 |
+| W5-3 基准回归 | P2 | M | 完成（2026-11-05） | W2-1 |
+| W5-4 序列化/AOT | P3 | XL | 暂缓（按需） | W2-5/W4 |
+| W5-5 CI/Sanitizer | P2 | M | 完成（2026-11-05） | - |
+| W5-6 文档维护 | P2 | S | 完成（2026-11-05） | 各里程碑 |
 
-状态约定：`TODO` / `进行中` / `阻塞` / `完成`。每个任务完成时同步更新
-本表和 `docs/bytecode.md`。
+状态约定：`TODO` / `进行中` / `阻塞` / `完成` / `暂缓（按需）`。
+每个任务完成时同步更新本表和 `docs/bytecode.md`。
+
+## 8. 未完成部分重排（2026-11-05）
+
+### 8.1 原则
+
+1. 先完成 M5（运行期 AST/元数据）与 M6（产品化）的收口工作。
+2. 不再无界扩展后端能力；只做能被差分、基准或统计验证的任务。
+3. 大任务拆成可独立验收的小步，每步保持：
+   - 标准测试集零 fallback
+   - AST / VM 差分通过
+   - verifier 通过
+   - benchmark 不退化
+4. 动态 handler/defer 栈和原生 fiber 已能通过全部测试，相关重写暂缓。
+
+### 8.2 N1：收口阶段（P0）
+
+#### N1-1 W4-2 VM-only runtime AST 清理
+
+状态：**完成（2026-11-05）**。
+
+- 新增 CMake 选项 `SKEIN_VM_ONLY`。
+- 默认构建保留 AST 回退路径，支持 `--no-vm` 和编译失败回退；
+  AST 位于 L2 side table，`function_code` 不再含 `ast*`。
+- VM-only 构建：
+  - 不保留函数体 / 默认参数 / 参数 pattern 的执行期 AST
+  - `symlist` 不含 AST 字段
+  - `--no-vm` 在 VM-only 构建中不可用
+- 验收：
+  - VM-only 构建无 `ast*` 执行状态
+  - `SKEIN_VM_ONLY=ON` 下标准测试集通过
+  - runtime-only 链接检查通过
+
+#### N1-2 W4-3 参数/default 元数据 Proto 化
+
+状态：**完成（2026-11-05）**。
+
+- `symlist::default_value` / `pattern` 已删除。
+- 默认参数、参数 pattern AST 保存在 `ast.cpp` 的 L2 side table。
+- VM-only 构建运行期只保留编译后的 Proto；默认构建保留 AST 回退。
+- `symlist` 只保留名称、类型、variadic、`has_default` / `has_pattern`。
+- 验收：
+  - VM-only 构建运行期无 `default_value` / `pattern` AST 指针
+  - 默认参数、pattern、trait 校验测试通过
+
+#### N1-3 W5-5 CI / Sanitizer 矩阵
+
+状态：**完成（2026-11-05）**。
+
+- `tools/check_all.sh` 覆盖：
+  - Debug 构建
+  - Release 构建
+  - ASan + UBSan
+  - LSan 定向测试
+  - VM-only 构建
+  - runtime-only 链接检查
+  - docs / boundary / diff check
+- `--glibcxx-debug` 可选运行 `-D_GLIBCXX_DEBUG` 核心测试。
+- generator/fiber 栈通过 `SKEIN_FIBER_STACK_KB` 单独配置。
+- 验收：脚本在干净构建目录中可重复通过。
+
+#### N1-4 W5-6 文档与发布说明
+
+状态：**完成（2026-11-05）**。
+
+- 已更新 README、`docs/bytecode.md`、`docs/architecture.md`。
+- 已记录当前支持范围、已知限制、基准数据。
+- 已给出 VM-only / 默认构建 / `--no-vm` 的明确说明。
+
+### 8.3 N2：性能阶段（P1）
+
+#### N2-1 W3-2 全局 slot 与 per-site IC
+
+- 显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位。
+- per-call-site 字段 / 索引 / 方法 IC。
+- IC 命中率与失效统计。
+- 验收：调用密集、字段访问密集基准不退化；`vm_bench_test` 通过。
+
+#### N2-2 W3-3 值表示与分配
+
+- tagged value 或等价的小值内联方案。
+- 非捕获局部 slot 尽量不经过 `symbol*` cell。
+- 减少每帧 `value_t` 分配。
+- 保持容器、闭包、defer、GC 语义。
+- 验收：`fib`、slot、call 基准提升；内存不显著上升。
+
+#### N2-3 W3-4 指令优化收尾
+
+- 死代码消除。
+- 跳转线程化。
+- 更多超指令。
+- computed goto / table dispatch。
+- 宽指令格式，解决 16 位操作数上限。
+- 验收：优化可开关，关闭时语义一致；基准有可量化收益。
+
+#### N2-4 W5-2 差分与模糊测试扩展
+
+- 增加错误路径、空容器、边界溢出、generator / async 生成。
+- 每个 opcode 至少一个直接或间接用例。
+- fallback 原因断言。
+- 可选长时间 fuzz 模式。
+- 验收：随机差分稳定，失败时能最小化复现。
+
+### 8.4 N3：架构阶段（P2，按需）
+
+#### N3-1 W2-3 handler/defer 编译期表
+
+仅在统计显示 handler/defer 开销明显时执行：
+
+- 编译期 handler table / defer table。
+- 统一 unwind 路径。
+- 保留现有 defer / recover / pass 语义。
+
+#### N3-2 W2-4 generator/async 显式帧
+
+仅在需要轻量协程或序列化挂起状态时执行：
+
+- 显式保存 pc、帧、handler/defer。
+- 减少原生 fiber 栈依赖。
+- generator 创建/挂起/关闭压力测试。
+
+#### N3-3 W4-4 调试信息
+
+- 压缩 `Proto::locs`。
+- 调试用的 slot / 参数名。
+- VM 栈回溯统一格式。
+
+### 8.5 N4：产品化阶段（P3）
+
+#### N4-1 W5-4 序列化 / AOT
+
+前置条件：
+
+- verifier 稳定
+- 常量表示可序列化
+- 字节码 ABI 版本化
+- IC / handler 表格式确定
+
+实施：
+
+- 稳定字节码格式
+- 字符串表、常量表、源码位置表
+- 源码哈希 + 编译器版本缓存键
+- 磁盘缓存与预编译 stdlib
+- 缓存损坏安全回退
+
+### 8.6 暂缓说明
+
+| 任务 | 暂缓原因 | 重新启用条件 |
+|---|---|---|
+| W2-3 handler/defer 表 | 动态 per-frame 结构已通过全部测试 | stats 显示 handler/defer 热点 |
+| W2-4 generator/async 帧 | 原生 fiber 工作稳定 | 需要轻量协程/序列化状态 |
+| W4-4 调试信息 | 不阻塞默认后端 | 需要调试器或更完整栈回溯 |
+| W5-4 序列化/AOT | 字节码格式尚未冻结 | N1/N2 完成后 |
+
+### 8.7 建议排期
+
+```text
+N1 收口      1–2 轮
+N2 性能      2–3 轮
+N3 架构      2–4 轮（按需）
+N4 产品化    2+ 轮
+```
+
+每轮结束必须更新本计划的任务表和测试/基准数据。

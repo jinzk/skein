@@ -133,8 +133,12 @@ void ensure_stats_flags() {
 
 void ensure_runtime_flags() {
     ensure_stats_flags();
+#ifdef SKEIN_VM_ONLY
+    vm_enabled_state = 1;
+#else
     if (vm_enabled_state < 0)
         vm_enabled_state = read_bool_env("SKEIN_VM", true) ? 1 : 0;
+#endif
     if (!vm_trace_initialized) {
         vm_trace_state = read_bool_env("SKEIN_VM_TRACE", false);
         vm_trace_initialized = true;
@@ -183,10 +187,8 @@ ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
     cache.proto = proto;
     if (vm_stats.enabled)
         ++vm_stats.functions_compiled;
-    if (code->ast && !keep_function_ast()) {
-        treefree(code->ast);
-        code->ast = NULL;
-    }
+    if (!keep_function_ast())
+        clear_function_body_ast(code);
     return proto;
 }
 
@@ -1526,17 +1528,24 @@ public:
                     }
                     const skein::bc::StructDeclMeta &meta =
                         proto().struct_decls[ins.b];
-                    std::vector<std::pair<std::string, type_constraint>>
-                        fields;
+                    std::vector<field_meta> fields;
                     fields.reserve(meta.fields.size());
-                    for (const auto &field : meta.fields)
-                        fields.emplace_back(field.name, field.type);
+                    for (const auto &field : meta.fields) {
+                        field_meta declared;
+                        declared.name = field.name;
+                        declared.type = field.type;
+                        declared.default_code = field.default_code;
+                        fields.push_back(std::move(declared));
+                    }
+                    std::shared_ptr<scope_t> closure = current_scope();
+                    if (closure && closure->is_global)
+                        closure.reset();
                     std::string error;
                     if (!declare_struct_meta(
                             meta.module.c_str(),
                             diag_current_module_name().c_str(),
                             meta.name.c_str(), meta.exported, fields,
-                            error))
+                            closure, error))
                         return abort_error();
                     push(newnull());
                     break;
@@ -1549,27 +1558,32 @@ public:
                     }
                     const skein::bc::EnumDeclMeta &meta =
                         proto().enum_decls[ins.b];
-                    std::vector<std::pair<
-                        std::string,
-                        std::vector<std::pair<std::string,
-                                              type_constraint>>>>
-                        variants;
+                    std::vector<variant_meta> variants;
                     variants.reserve(meta.variants.size());
                     for (const auto &variant : meta.variants) {
-                        std::vector<std::pair<std::string, type_constraint>>
-                            fields;
-                        fields.reserve(variant.fields.size());
-                        for (const auto &field : variant.fields)
-                            fields.emplace_back(field.name, field.type);
-                        variants.emplace_back(variant.name,
-                                              std::move(fields));
+                        variant_meta declared;
+                        declared.name = variant.name;
+                        declared.fields.reserve(variant.fields.size());
+                        for (const auto &field : variant.fields) {
+                            field_meta field_meta_value;
+                            field_meta_value.name = field.name;
+                            field_meta_value.type = field.type;
+                            field_meta_value.default_code =
+                                field.default_code;
+                            declared.fields.push_back(
+                                std::move(field_meta_value));
+                        }
+                        variants.push_back(std::move(declared));
                     }
+                    std::shared_ptr<scope_t> closure = current_scope();
+                    if (closure && closure->is_global)
+                        closure.reset();
                     std::string error;
                     if (!declare_enum_meta(
                             meta.module.c_str(),
                             diag_current_module_name().c_str(),
                             meta.name.c_str(), meta.exported, variants,
-                            error))
+                            closure, error))
                         return abort_error();
                     push(newnull());
                     break;
@@ -1662,11 +1676,11 @@ public:
                         static_cast<Op>(ins.op) == Op::NewStruct
                             ? build_struct_value(desc.module.c_str(),
                                                  desc.name.c_str(),
-                                                 fields)
+                                                 fields, desc.spread)
                             : build_enum_value(desc.module.c_str(),
                                                desc.name.c_str(),
                                                desc.variant.c_str(),
-                                               fields);
+                                               fields, desc.spread);
                     if (!result)
                         return abort_error();
                     push(result);
@@ -3594,7 +3608,12 @@ bool skein_vm_enabled() {
 
 void skein_vm_set_enabled(bool enabled) {
     ensure_runtime_flags();
+#ifdef SKEIN_VM_ONLY
+    (void)enabled;
+    vm_enabled_state = 1;
+#else
     vm_enabled_state = enabled ? 1 : 0;
+#endif
 }
 
 void skein_vm_set_stats(bool enabled) {
@@ -3735,11 +3754,12 @@ bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
         int i = 0;
         for (struct symlist *param = code->sl;
              param && i < code->nparams; param = param->next, ++i) {
-            if (!param->has_default || !param->default_value)
+            struct ast *default_ast = symlist_default_ast(param);
+            if (!param->has_default || !default_ast)
                 continue;
             std::string error;
             ProtoPtr proto = skein_compile_default_expression(
-                code, param->default_value, i, code->module, error);
+                code, default_ast, i, code->module, error);
             if (!proto) {
                 if (read_bool_env("SKEIN_VM_DEBUG", false) &&
                     !error.empty()) {
@@ -3750,10 +3770,8 @@ bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
                 continue;
             }
             entry.protos[(size_t)i] = std::move(proto);
-            if (!keep_function_ast()) {
-                treefree(param->default_value);
-                param->default_value = NULL;
-            }
+            if (!keep_function_ast())
+                set_symlist_default_ast(param, NULL);
         }
         it = default_cache.emplace(code, std::move(entry)).first;
     }
@@ -3802,10 +3820,8 @@ ParamPatternResult skein_vm_match_parameter_pattern(
         if (!keep_function_ast()) {
             for (struct symlist *param = code->sl; param;
                  param = param->next) {
-                if (param->pattern) {
-                    treefree(param->pattern);
-                    param->pattern = NULL;
-                }
+                if (symlist_pattern_ast(param))
+                    set_symlist_pattern_ast(param, NULL);
             }
         }
     }

@@ -10,13 +10,11 @@
 #include <vector>
 #include <utility>
 
-struct ast;
 struct symlist;
 struct scope_t;
 struct symbol;
 
 struct function_code {
-    struct ast *ast;
     struct symlist *sl;
     int nparams;
     int required_params;

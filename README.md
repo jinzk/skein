@@ -17,6 +17,13 @@ cmake --build build
 字节码和每步执行，`SKEIN_VM_DEBUG=1` 会说明哪些结构回退到了 AST。详见
 [docs/bytecode.md](docs/bytecode.md)。
 
+只构建 VM 后端（不支持 `--no-vm`）：
+
+```bash
+cmake -S . -B build-vm-only -G Ninja -DSKEIN_VM_ONLY=ON
+cmake --build build-vm-only
+```
+
 `std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context；`std.regex` 使用 PCRE2 8-bit。例如 Debian/Ubuntu：
 
 ```bash
@@ -58,6 +65,17 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 ```
 
 `SKEIN_TEST_TIMEOUT` 只影响测试子进程的超时，默认 5 秒；sanitizer 构建需要放宽。
+generator / async 的 fiber 栈默认 2 MiB，可通过 `SKEIN_FIBER_STACK_KB`
+调整（sanitizer 构建建议 8192）。AST 参考后端的调用深度可用
+`SKEIN_MAX_CALL_DEPTH` 调整（sanitizer 测试使用 128）。
+
+统一的本地/CI 检查脚本覆盖 Debug、Release、ASan+UBSan、LSan、VM-only、
+runtime-only 链接以及 docs / boundary / diff 检查：
+
+```bash
+tools/check_all.sh --clean
+tools/check_all.sh --glibcxx-debug   # 额外运行 -D_GLIBCXX_DEBUG
+```
 
 容器基准与增长回归（不做绝对耗时断言，只检查 n 翻倍时是否出现超线性增长）：
 
@@ -3249,8 +3267,12 @@ p.length()
 let q = p.moved(1, 2);
 ```
 
-- `struct` 声明字段；所有字段都必须初始化，未知字段或重复字段会报错；
+- `struct` 声明字段；没有默认值的字段都必须初始化，未知字段或重复字段会报错；
 - 构造使用 `Point { x: 3, y: 4 }`，字段顺序不限；
+- 支持 copy-with：`Point { ...p, x: 9 }`，`...` 必须放在最前，后面的显式字段覆盖原字段；
+- 字段可以声明默认值：`struct Config { host: string = "localhost"; port: int = 80; }`；省略字段时使用默认值；
+- 默认值在定义包的作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
+- `std.struct.decode` 不自动填充默认值，缺失字段仍然报错；
 - 字段可以读写：`p.x`、`p.x = 5`；
 - 方法第一个参数必须是显式 `self`；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
@@ -3276,6 +3298,17 @@ let h = Handler {
 };
 
 h.callback(41)      // 42
+```
+
+```text
+struct Config {
+  host: string = "localhost";
+  port: int = 80;
+}
+
+let a = Config {};
+let b = Config { port: 8080 };
+let c = Config { ...a, port: 9090 };
 ```
 
 - 不支持继承、动态添加方法、静态方法、泛型或运算符重载。
@@ -3362,6 +3395,9 @@ match (a) {
 
 - 有载荷的变体必须写 `Event::Variant { field: value, ... }`；
 - 无载荷变体直接写 `Event::Variant`；
+- 变体字段可以声明默认值；所有字段都有默认值时允许 `Event::Variant {}`；
+- 字段默认值在定义包作用域求值，每次构造重新求值；不能引用 `self` 或其他字段；
+- copy-with 目前只支持 struct，不支持 enum；
 - 载荷字段只读，字段访问按当前变体校验；
 - 方法只能写在 `impl Event` 中；enum 方法内 `self` 只读，修改状态时返回新 enum；
 - `impl Trait for Event` 可以让 enum 参与 trait 接口；`Event` 也能用于 `is` 和类型标注；

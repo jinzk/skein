@@ -288,6 +288,7 @@ struct struct_member {
     char *name;
     struct type_constraint *type;
     struct ast *func;
+    struct ast *default_value;
     struct struct_member *next;
 };
 
@@ -503,6 +504,21 @@ void push_func_location(int line, int column);
 void clear_func_locations();
 std::shared_ptr<function_code> get_function_code(struct funcdef *node);
 void release_function_code(struct funcdef *node);
+
+/*
+ * Function bodies are owned by the interpreter layer rather than by
+ * function_code, so the runtime layer never has to expose an ast* field.
+ */
+struct ast *function_body_ast(struct function_code *code);
+void set_function_body_ast(struct function_code *code, struct ast *body);
+void clear_function_body_ast(struct function_code *code);
+
+/* Parameter default/pattern ASTs are interpreter-owned metadata. */
+struct ast *symlist_default_ast(struct symlist *sl);
+void set_symlist_default_ast(struct symlist *sl, struct ast *body);
+struct ast *symlist_pattern_ast(struct symlist *sl);
+void set_symlist_pattern_ast(struct symlist *sl, struct ast *pattern);
+void clear_symlist_metadata(struct symlist *sl);
 /* Free a parameter list, including any default-value expression ASTs.
  * symlistfree() itself stays runtime-only and does not inspect AST nodes. */
 void symlistfree_full(struct symlist *sl);

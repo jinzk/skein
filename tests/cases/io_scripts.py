@@ -1160,7 +1160,10 @@ def run_cases():
             "  export trait D { func d(self); }\n"
             "  export trait T { func take(self, p: P); }\n"
             "  trait Secret { func s(self); }\n"
+            "  func default_x() { return 7; }\n"
+            "  export struct C { v: int = default_x(); }\n"
             "  export func make_p(x: int) { return P { x: x }; }\n"
+            "  export func make_c() { return C {}; }\n"
             "}\n",
         )
         main = write(
@@ -1186,12 +1189,13 @@ def run_cases():
             "print(q.take(lib.make_p(4)));\n"
             "let e = E::A { n: 5 };\n"
             "print(e.d());\n"
-            "print(e is lib::D);\n",
+            "print(e is lib::D);\n"
+            "print(lib.make_c().v);\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == [
-            "3", "true", "7", "5", "true",
+            "3", "true", "7", "5", "true", "7",
         ], proc.stdout
         assert proc.stderr == "", proc.stderr
 

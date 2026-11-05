@@ -37,12 +37,26 @@ SKEIN_VM=1 SKEIN_VM_DEBUG=1 ./build/skein script.skein
 # 限制 VM 递归深度（默认 1000；sanitizer 测试使用更小的值）
 SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 
+# 限制 AST 参考后端调用深度（默认 1000；sanitizer 帧更大）
+SKEIN_VM=0 SKEIN_MAX_CALL_DEPTH=128 ./build/skein script.skein
+
 # 保留函数体/默认参数/参数 pattern 的 AST，便于调试或运行期切换后端
 SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 
 # 输出 VM 统计：编译/回退数、调用数、IC、栈深、opcode 直方图
 ./build/skein --vm-stats script.skein
 SKEIN_VM_STATS=1 ./build/skein script.skein
+
+# VM-only 构建：不编译 AST 参考后端，--no-vm 不可用
+cmake -S . -B build-vm-only -DSKEIN_VM_ONLY=ON
+cmake --build build-vm-only
+
+# generator / async fiber 栈大小（KB，默认 2048）
+SKEIN_FIBER_STACK_KB=8192 ./build/skein script.skein
+
+# 统一检查：Debug/Release、ASan+UBSan、LSan、VM-only、
+# runtime-only 链接、docs/boundary/diff
+tools/check_all.sh --clean
 ```
 
 ## 3. 执行模型
@@ -122,7 +136,7 @@ pattern AST；literal pattern 的表达式会编译为独立 Proto 执行。
 
 参数 destructuring pattern 已经编译为 `PatternDesc`，由
 `skein_vm_match_parameter_pattern()` 在参数绑定时原生匹配；匹配成功后，
-对应的 `symlist::pattern` AST 会被释放。
+对应参数的 pattern AST 会从 L2 side table 释放。
 
 仍使用 AST 的运行时代码：
 
@@ -130,10 +144,15 @@ pattern AST；literal pattern 的表达式会编译为独立 Proto 执行。
 - 默认参数 AST（默认参数 Proto 编译失败时用于回退）；
 - 参数 pattern AST（编译失败或 `SKEIN_KEEP_AST=1` 时保留）。
 
+`function_code` 与 `symlist` 本身不再包含 AST 指针。函数体、默认参数和
+参数 pattern 的 AST 分别保存在 `ast.cpp` 的 `function_bodies` 和
+`symlist_metadata_map` side table 中；VM 成功编译后释放对应 AST，
+`symlist::has_default` / `has_pattern` 仍保留签名语义。
+
 默认参数表达式已经编译为独立 Proto，由 `fill_default_arguments` 在调用时
 通过 VM 执行，并复用参数 fast path。
 
-函数体成功编译为 Proto 后会释放 `function_code->ast`（除非设置了
+函数体成功编译为 Proto 后会释放 side table 中的函数体 AST（除非设置了
 `SKEIN_KEEP_AST=1`）。`let` / `const` 的 `DEFINE_NAME` 元数据已迁移到
 `Proto::decls` 的 `DeclDesc`，不再借用 `symdef*`。
 
@@ -222,6 +241,11 @@ struct Instr {
   尝试 `skein_vm_try_execute_function_body()`；
 - `ast.cpp` 的 `free_function_code()` 调用
   `skein_vm_forget_function_code()` 清理 VM side table；
+- 函数体 AST 保存在 `ast.cpp` 的 L2 `function_bodies` side table，
+  `function_code` 不再包含 `ast*` 字段；
+- 默认参数 / 参数 pattern AST 保存在 `ast.cpp` 的
+  `symlist_metadata_map` side table，`symlist` 只保留
+  `has_default` / `has_pattern` 等签名元数据；
 - 函数体 Proto、参数 pattern 和默认参数 Proto 保存在 `vm.cpp` 的
   `execution_cache` / `default_cache` 中，`function_code` 本身不再持有
   VM 执行缓存；
@@ -239,8 +263,9 @@ struct Instr {
   但非 fast path 调用仍受 C++ 递归和每帧分配拖累。
 - 常规语法结构已经全部有字节码路径，编译失败时整条语句/函数回退 AST。
 - 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
-  成功编译后也会释放对应 AST。`function_code->sl` 仍保留参数/默认值/trait
-  签名元数据，以及编译失败时用于回退的默认值 AST 和 pattern AST。
+  成功编译后也会释放对应 AST。`function_code` / `symlist` 不再持有 AST
+  指针，回退用的 AST 保存在 L2 side table；`function_code->sl` 只保留
+  参数/trait 签名元数据。
 - fast frame 支持普通函数以及 handler、defer、iterator；generator、
   async、默认参数、variadic、method 和参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
@@ -250,6 +275,8 @@ struct Instr {
   暂未使用 upvalue 索引。
 - TCO 当前只覆盖无 spread 的普通尾调用；有 defer / handler / iterator
   时回退普通调用。诊断调用栈最多保留 64 层尾调用帧。
+- AST 参考后端调用深度默认 1000，可用 `SKEIN_MAX_CALL_DEPTH` 调整；
+  sanitizer 构建使用更小的值以适配更大的 C++ 帧。
 - 尚未实现精确 GC 栈图、字节码序列化。
 
 ## 7. 后续阶段
@@ -257,7 +284,8 @@ struct Instr {
 1. 将 symbol-cell upvalue 进一步改为 open/closed frame slot；
 2. frame-based VM，去掉每帧 Executor 分配和 C++ 递归；
 3. 扩展尾调用优化到 spread / method / 默认参数 / variadic；
-4. 把默认参数、参数 pattern 等剩余 AST 元数据移出 `function_code`；
+4. 把 VM 执行缓存、函数体/默认参数/pattern AST 全部收敛到 L2 side table
+   （已完成，后续只保留签名元数据）；
 5. 精确 GC 栈图与字节码序列化；
 6. generator/async 与 VM 状态整合；
 7. unboxed slot、内联缓存、超指令、computed goto；
@@ -266,6 +294,8 @@ struct Instr {
 ## 8. 验收标准
 
 - `ctest` 中 `skein_tests` 与 `skein_vm_tests` 均通过；
+- `tools/check_all.sh` 在干净构建目录中通过 Debug / Release /
+  ASan+UBSan / LSan / VM-only / runtime-only 链接检查；
 - `tools/check_boundaries.py` 通过；
 - `SKEIN_VM=1` 下所有现有用例的 stdout/stderr/exit code 与 AST 后端一致；
 - `vm_differential_test` 的随机生成程序在 AST / VM 下输出一致；

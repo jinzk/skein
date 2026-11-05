@@ -1398,11 +1398,29 @@ p.x = 5;
 p.length()
 ```
 
+copy-with 与字段默认值：
+
+```text
+struct Config {
+  host: string = "localhost";
+  port: int = 80;
+}
+
+let a = Config {};
+let b = Config { port: 8080 };
+let c = Config { ...a, port: 9090 };
+let d = Point { ...p, x: 9 };
+```
+
 规则：
 
-- 字段必须全部初始化；
+- 字段必须全部初始化；有默认值的字段可以省略；
 - 未知字段、重复字段、字段类型不匹配都会报错；
 - 字段顺序不影响构造；
+- 支持 copy-with：`Point { ...p, x: 9 }`，`...` 必须放在最前，后面的显式字段覆盖原字段；
+- 字段可以声明默认值：`struct Config { host: string = "localhost"; port: int = 80; }`；
+- 默认值在定义包作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
+- `std.struct.decode` 不自动填充默认值，缺失字段仍然报错；
 - `struct` 只声明字段；所有方法必须写在 `impl Type` 中；
 - `impl Type` 用于声明该类型的固有方法；
 - 方法第一个参数必须是显式 `self`；
@@ -1529,9 +1547,12 @@ let b = Event::Timeout;
 
 规则：
 
-- 变体字段必须全部初始化；
+- 变体字段必须全部初始化；有默认值的字段可以省略；
 - 未知字段、重复字段、字段类型不匹配都会报错；
 - 无载荷变体直接写成 `Event::Timeout`；
+- 变体字段支持默认值；所有字段都有默认值时允许 `Event::Variant {}`；
+- 默认值在定义包作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
+- copy-with 目前只支持 struct，不支持 enum；
 - 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
 - 字段访问按当前变体校验：`Event::Timeout.text` 报错；
 - 方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；

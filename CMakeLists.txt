@@ -7,6 +7,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
+option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
+if(SKEIN_VM_ONLY)
+  add_compile_definitions(SKEIN_VM_ONLY=1)
+endif()
 if(SKEIN_SANITIZE)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set(SKEIN_SANITIZE_FLAGS "-fsanitize=address,undefined -fno-omit-frame-pointer")
@@ -484,6 +488,20 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME bytecode_verifier_test COMMAND bytecode_verifier_test)
 
+  add_executable(runtime_link_test
+    tests/test_runtime_link.cpp
+  )
+  target_link_libraries(runtime_link_test PRIVATE skein_runtime)
+  target_include_directories(runtime_link_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(runtime_link_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME runtime_link_test COMMAND runtime_link_test)
+
+
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     if(SKEIN_ENABLE_FFI AND LIBFFI_FOUND)
@@ -511,6 +529,10 @@ if(BUILD_TESTING)
     if(SKEIN_SANITIZE)
       list(APPEND SKEIN_AST_TEST_ENV "SKEIN_TEST_TIMEOUT=120")
       list(APPEND SKEIN_AST_TEST_ENV "ASAN_OPTIONS=detect_leaks=0")
+      list(APPEND SKEIN_AST_TEST_ENV "SKEIN_FIBER_STACK_KB=8192")
+      # Sanitizer frames are much larger; keep deep recursion under the
+      # process stack limit while still exercising the error path.
+      list(APPEND SKEIN_AST_TEST_ENV "SKEIN_MAX_CALL_DEPTH=128")
     endif()
     set_tests_properties(skein_tests PROPERTIES
       ENVIRONMENT "${SKEIN_AST_TEST_ENV}"
@@ -526,6 +548,7 @@ if(BUILD_TESTING)
       # Keep the regular sanitizer run focused on ASan/UBSan; leaks are
       # covered by skein_vm_lsan_tests below.
       list(APPEND SKEIN_VM_TEST_ENV "ASAN_OPTIONS=detect_leaks=0")
+      list(APPEND SKEIN_VM_TEST_ENV "SKEIN_FIBER_STACK_KB=8192")
     endif()
     set_tests_properties(skein_vm_tests PROPERTIES
       ENVIRONMENT "${SKEIN_VM_TEST_ENV}"
@@ -568,6 +591,8 @@ if(BUILD_TESTING)
         "SKEIN_TEST_SKIP_SOURCE=std.ffi"
         "SKEIN_TEST_SKIP_MODULES=ffi_real"
         "ASAN_OPTIONS=detect_leaks=1"
+        "SKEIN_FIBER_STACK_KB=8192"
+        "SKEIN_MAX_CALL_DEPTH=128"
       )
       set_tests_properties(skein_vm_lsan_tests PROPERTIES
         ENVIRONMENT "${SKEIN_VM_LSAN_ENV}"

@@ -14,6 +14,18 @@ struct impl_node;
 struct trait_node;
 struct struct_lit_node;
 struct value_t;
+struct function_code;
+
+struct field_meta {
+    std::string name;
+    type_constraint type;
+    std::shared_ptr<function_code> default_code;
+};
+
+struct variant_meta {
+    std::string name;
+    std::vector<field_meta> fields;
+};
 
 bool validate_type_constraint(const struct type_constraint *type);
 struct type_constraint any_type_constraint();
@@ -33,26 +45,22 @@ struct value_t *eval_enum_lit(struct enum_lit_node *lit);
  */
 struct value_t *build_struct_value(
     const char *module, const char *name,
-    std::vector<std::pair<std::string, struct value_t *>> &fields);
+    std::vector<std::pair<std::string, struct value_t *>> &fields,
+    const std::vector<bool> &spread);
 struct value_t *build_enum_value(
     const char *module, const char *name, const char *variant,
-    std::vector<std::pair<std::string, struct value_t *>> &fields);
+    std::vector<std::pair<std::string, struct value_t *>> &fields,
+    const std::vector<bool> &spread);
 
 bool declare_struct_meta(
     const char *module, const char *module_name, const char *name,
-    bool exported,
-    const std::vector<std::pair<std::string, struct type_constraint>>
-        &fields,
-    std::string &error);
+    bool exported, const std::vector<field_meta> &fields,
+    const std::shared_ptr<struct scope_t> &closure, std::string &error);
 
 bool declare_enum_meta(
     const char *module, const char *module_name, const char *name,
-    bool exported,
-    const std::vector<std::pair<
-        std::string,
-        std::vector<std::pair<std::string, struct type_constraint>>>>
-        &variants,
-    std::string &error);
+    bool exported, const std::vector<variant_meta> &variants,
+    const std::shared_ptr<struct scope_t> &closure, std::string &error);
 
 struct trait_param_meta {
     std::string name;

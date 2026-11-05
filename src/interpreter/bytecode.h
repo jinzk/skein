@@ -186,6 +186,7 @@ struct ConstructDesc {
     std::string name;
     std::string variant;
     std::vector<std::string> fields;
+    std::vector<bool> spread;
 };
 
 struct CallDesc {
@@ -256,6 +257,7 @@ struct DeclDesc {
 struct DeclFieldMeta {
     std::string name;
     type_constraint type;
+    std::shared_ptr<function_code> default_code;
 };
 
 struct DeclMethodMeta {

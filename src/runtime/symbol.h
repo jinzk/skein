@@ -56,18 +56,13 @@ struct symlist {
     bool variadic;
     /* True when this parameter has a default expression. */
     bool has_default;
-    /* Default value expression evaluated when the argument is omitted. */
-    struct ast *default_value;
     /* True when this parameter has a destructuring pattern. */
     bool has_pattern;
-    /* Optional destructuring pattern for this parameter. */
-    struct ast *pattern;
 };
 
 struct symbol *newsym(const char *name);
 struct symlist *newsymlist(struct symbol *sym, struct type_constraint *type,
-                           struct symlist *next, bool variadic = false,
-                           struct ast *default_value = NULL);
+                           struct symlist *next, bool variadic = false);
 void symlistfree(struct symlist *sl);
 
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);

@@ -15,6 +15,7 @@
 #include <boost/context/fixedsize_stack.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -23,6 +24,19 @@
 #include <vector>
 
 namespace {
+
+constexpr size_t kDefaultFiberStackBytes = 2 * 1024 * 1024;
+
+size_t fiber_stack_bytes() {
+    const char *configured = std::getenv("SKEIN_FIBER_STACK_KB");
+    if (!configured || !*configured)
+        return kDefaultFiberStackBytes;
+    char *end = NULL;
+    unsigned long kb = std::strtoul(configured, &end, 10);
+    if (end == configured || *end != '\0' || kb < 64 || kb > 1024 * 1024)
+        return kDefaultFiberStackBytes;
+    return static_cast<size_t>(kb) * 1024;
+}
 
 enum fiber_state {
     FIBER_READY,
@@ -60,7 +74,7 @@ struct fiber {
         : body(std::move(fn)), kind(fiber_type) {
         context = boost::context::fiber(
             std::allocator_arg,
-            boost::context::fixedsize_stack(2 * 1024 * 1024),
+            boost::context::fixedsize_stack(fiber_stack_bytes()),
             [this](boost::context::fiber &&sink) {
                 caller = std::move(sink);
                 fiber_main();

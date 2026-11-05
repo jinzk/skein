@@ -770,18 +770,107 @@ struct ast *newimport(char *path, char *alias) {
     return (struct ast *)a;
 }
 
-void symlistfree_full(struct symlist *sl) {
+struct symlist_metadata {
+    struct ast *default_value = NULL;
+    struct ast *pattern = NULL;
+};
+
+static std::unordered_map<struct symlist *, struct symlist_metadata>
+    symlist_metadata_map;
+
+struct ast *symlist_default_ast(struct symlist *sl) {
+    if (!sl)
+        return NULL;
+    auto it = symlist_metadata_map.find(sl);
+    return it == symlist_metadata_map.end() ? NULL : it->second.default_value;
+}
+
+void set_symlist_default_ast(struct symlist *sl, struct ast *body) {
+    if (!sl)
+        return;
+    symlist_metadata &meta = symlist_metadata_map[sl];
+    if (meta.default_value && meta.default_value != body)
+        treefree(meta.default_value);
+    meta.default_value = body;
+    /*
+     * has_default records the syntactic presence of a default expression.
+     * The VM may release the AST after compiling it, but the parameter still
+     * has a default and must keep taking the default-value path.
+     */
+    if (body)
+        sl->has_default = true;
+    if (!meta.default_value && !meta.pattern)
+        symlist_metadata_map.erase(sl);
+}
+
+struct ast *symlist_pattern_ast(struct symlist *sl) {
+    if (!sl)
+        return NULL;
+    auto it = symlist_metadata_map.find(sl);
+    return it == symlist_metadata_map.end() ? NULL : it->second.pattern;
+}
+
+void set_symlist_pattern_ast(struct symlist *sl, struct ast *pattern) {
+    if (!sl)
+        return;
+    symlist_metadata &meta = symlist_metadata_map[sl];
+    if (meta.pattern && meta.pattern != pattern)
+        treefree(meta.pattern);
+    meta.pattern = pattern;
+    if (pattern)
+        sl->has_pattern = true;
+    if (!meta.default_value && !meta.pattern)
+        symlist_metadata_map.erase(sl);
+}
+
+void clear_symlist_metadata(struct symlist *sl) {
     for (struct symlist *p = sl; p; p = p->next) {
-        treefree(p->default_value);
-        treefree(p->pattern);
+        auto it = symlist_metadata_map.find(p);
+        if (it == symlist_metadata_map.end())
+            continue;
+        treefree(it->second.default_value);
+        treefree(it->second.pattern);
+        symlist_metadata_map.erase(it);
     }
+}
+
+void symlistfree_full(struct symlist *sl) {
+    clear_symlist_metadata(sl);
     symlistfree(sl);
+}
+
+static std::unordered_map<function_code *, struct ast *> function_bodies;
+
+struct ast *function_body_ast(struct function_code *code) {
+    if (!code)
+        return NULL;
+    auto it = function_bodies.find(code);
+    return it == function_bodies.end() ? NULL : it->second;
+}
+
+void set_function_body_ast(struct function_code *code, struct ast *body) {
+    if (!code)
+        return;
+    if (body)
+        function_bodies[code] = body;
+    else
+        function_bodies.erase(code);
+}
+
+void clear_function_body_ast(struct function_code *code) {
+    if (!code)
+        return;
+    auto it = function_bodies.find(code);
+    if (it == function_bodies.end())
+        return;
+    treefree(it->second);
+    function_bodies.erase(it);
 }
 
 void free_function_code(struct function_code *code) {
     if (!code) return;
     skein_vm_forget_function_code(code);
-    if (code->ast) treefree(code->ast);
+    clear_function_body_ast(code);
     if (code->sl) symlistfree_full(code->sl);
     delete code;
 }
@@ -813,13 +902,17 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
         }
     }
     std::shared_ptr<function_code> code(
-        new function_code{node->ast, node->sl, nparams, required_params,
+        new function_code{node->sl, nparams, required_params,
                           node->name ? node->name : "", false, variadic,
                           node->is_async != 0, node->is_generator != 0,
                           node->ast ? node->ast->line : 0,
                           node->ast ? node->ast->column : 0,
                           diag_current_module_name(), {}},
         free_function_code);
+    struct ast *body = node->ast;
+    if (!body)
+        body = newret(newnullast());
+    set_function_body_ast(code.get(), body);
     function_codes[node] = code;
     return code;
 }
@@ -884,6 +977,7 @@ struct ast *newstructfield(char *name, struct type_constraint *type) {
     a->name = name;
     a->type = type;
     a->func = NULL;
+    a->default_value = NULL;
     a->next = NULL;
     return (struct ast *)a;
 }
@@ -900,6 +994,7 @@ struct ast *newstructmethod(char *name, struct ast *func) {
     a->name = name;
     a->type = NULL;
     a->func = func;
+    a->default_value = NULL;
     a->next = NULL;
     return (struct ast *)a;
 }
@@ -1293,6 +1388,7 @@ void treefree(struct ast *a) {
         case 'f': {
             struct struct_member *m = (struct struct_member *)a;
             treefree((struct ast *)m->next);
+            treefree(m->default_value);
             free_type_constraint(m->type);
             std::free(m->name);
             break;

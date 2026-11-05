@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "ast.h"
 #include "diagnostics.h"
 #include "dict.h"
 #include "eval_context.h"
@@ -18,6 +19,7 @@
 #include "valuetype.h"
 #include "unicode.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <unordered_set>
 
@@ -115,7 +117,23 @@ static struct value_t *invoke_value(
 struct value_t *call_value_args(
     struct value_t *callee, std::vector<struct value_t *> args);
 
-static constexpr int MAX_CALL_DEPTH = 1000;
+static constexpr int DEFAULT_MAX_CALL_DEPTH = 1000;
+
+static int max_call_depth() {
+    static const int limit = []() {
+        const char *configured = std::getenv("SKEIN_MAX_CALL_DEPTH");
+        if (!configured || !*configured)
+            return DEFAULT_MAX_CALL_DEPTH;
+        char *end = NULL;
+        long value = std::strtol(configured, &end, 10);
+        if (end == configured || *end != '\0' || value < 1 ||
+            value > 1000000)
+            return DEFAULT_MAX_CALL_DEPTH;
+        return static_cast<int>(value);
+    }();
+    return limit;
+}
+
 static int call_depth = 0;
 
 namespace {
@@ -172,7 +190,8 @@ static struct value_t *invoke_function_body(
                 def, i, sym->val, bindings);
             bool matched = false;
             if (native == ParamPatternResult::Unsupported) {
-                matched = match_pattern(sl->pattern, sym->val, bindings);
+                matched = match_pattern(symlist_pattern_ast(sl), sym->val,
+                                        bindings);
             } else {
                 matched = native == ParamPatternResult::Matched;
             }
@@ -216,8 +235,15 @@ static struct value_t *invoke_function_body(
     int saved_handler_depth = eval_ctx().handler_depth;
     eval_ctx().handler_depth = 0;
     struct value_t *body_ret = NULL;
-    if (!skein_vm_try_execute_function_body(def, body_ret))
-        body_ret = eval(def->code->ast);
+    if (!skein_vm_try_execute_function_body(def, body_ret)) {
+        struct ast *body_ast = function_body_ast(def->code.get());
+        if (!body_ast) {
+            yyerror("function body is unavailable");
+            body_ret = NULL;
+        } else {
+            body_ret = eval(body_ast);
+        }
+    }
     eval_ctx().handler_depth = saved_handler_depth;
     struct value_t *result = topscope()->ret;
     topscope()->ret = NULL;
@@ -305,14 +331,15 @@ static bool fill_default_arguments(
                 return false;
             }
             if (!skein_vm_try_eval_default(def, i, v)) {
-                if (!sl->default_value) {
+                struct ast *default_ast = symlist_default_ast(sl);
+                if (!default_ast) {
                     yyerror("function %s cannot evaluate default "
                             "parameter %s", frame_name.c_str(),
                             sl->sym->name);
                     free_args(args);
                     return false;
                 }
-                v = eval(sl->default_value);
+                v = eval(default_ast);
             }
             if (!v) {
                 free_args(args);
@@ -503,8 +530,8 @@ struct value_t *call_value_args(
         free_args(args);
         return NULL;
     }
-    if (call_depth >= MAX_CALL_DEPTH) {
-        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+    if (call_depth >= max_call_depth()) {
+        yyerror("maximum recursion depth (%d) exceeded", max_call_depth());
         free_args(args);
         return NULL;
     }
@@ -529,8 +556,8 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
      * Keep the call-depth guard before argument evaluation so deeply nested
      * call expressions cannot exhaust the C++ stack.
      */
-    if (call_depth >= MAX_CALL_DEPTH) {
-        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+    if (call_depth >= max_call_depth()) {
+        yyerror("maximum recursion depth (%d) exceeded", max_call_depth());
         return NULL;
     }
     call_depth_guard depth_guard;
@@ -548,8 +575,8 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
 struct value_t *call_method_value(struct value_t *receiver,
                                          std::shared_ptr<function_def> def,
                                          struct ast *args_ast) {
-    if (call_depth >= MAX_CALL_DEPTH) {
-        yyerror("maximum recursion depth (%d) exceeded", MAX_CALL_DEPTH);
+    if (call_depth >= max_call_depth()) {
+        yyerror("maximum recursion depth (%d) exceeded", max_call_depth());
         return NULL;
     }
     call_depth_guard depth_guard;

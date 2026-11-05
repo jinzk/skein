@@ -266,7 +266,8 @@ struct Instr {
 - 普通嵌套函数使用 `LOAD_UPVALUE` / `STORE_UPVALUE` 等索引访问捕获
   变量；upvalue 指向 `symbol*` cell，而不是显式 open/closed frame slot。
 - 小整数/`true`/`false`/`null` 已单例化；普通调用走 fast frame，
-  但非 fast path 调用仍受 C++ 递归和每帧分配拖累。
+  `CALL` / `TAIL_CALL` 的小参数数量使用栈内缓冲，非 fast path 调用
+  仍受 C++ 递归和每帧分配拖累。
 - 常规语法结构已经全部有字节码路径，编译失败时整条语句/函数回退 AST。
 - 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
   成功编译后也会释放对应 AST。`function_code` / `symlist` 不再持有 AST

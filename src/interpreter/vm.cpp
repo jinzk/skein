@@ -2141,22 +2141,27 @@ public:
                     if (vm_stats.enabled)
                         ++vm_stats.calls;
                     uint32_t argc = ins.b;
-                    std::vector<value_t *> args;
-                    args.resize(argc);
+                    std::array<value_t *, 8> inline_args;
+                    std::vector<value_t *> heap_args;
+                    value_t **args = inline_args.data();
+                    if (argc > inline_args.size()) {
+                        heap_args.resize(argc);
+                        args = heap_args.data();
+                    }
                     for (uint32_t i = argc; i > 0; --i) {
                         value_t *arg = pop_checked();
                         if (!arg) {
-                            free_args(args);
+                            free_args(args, argc);
                             return abort_error();
                         }
                         args[i - 1] = arg;
                     }
                     value_t *callee = pop_checked();
                     if (!callee) {
-                        free_args(args);
+                        free_args(args, argc);
                         return abort_error();
                     }
-                    FastCallResult fast = try_fast_call(callee, args);
+                    FastCallResult fast = try_fast_call(callee, args, argc);
                     if (fast == FastCallResult::Pushed) {
                         if (vm_stats.enabled) {
                             ++vm_stats.fast_calls;
@@ -2170,13 +2175,14 @@ public:
                     }
                     if (fast == FastCallResult::Failed) {
                         freeval(callee);
-                        free_args(args);
+                        free_args(args, argc);
                         return abort_error();
                     }
                     if (vm_stats.enabled)
                         ++vm_stats.fallback_calls;
+                    std::vector<value_t *> fallback(args, args + argc);
                     value_t *result =
-                        call_value_args(callee, std::move(args));
+                        call_value_args(callee, std::move(fallback));
                     freeval(callee);
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
@@ -2196,22 +2202,27 @@ public:
                     if (vm_stats.enabled)
                         ++vm_stats.calls;
                     uint32_t argc = ins.b;
-                    std::vector<value_t *> args;
-                    args.resize(argc);
+                    std::array<value_t *, 8> inline_args;
+                    std::vector<value_t *> heap_args;
+                    value_t **args = inline_args.data();
+                    if (argc > inline_args.size()) {
+                        heap_args.resize(argc);
+                        args = heap_args.data();
+                    }
                     for (uint32_t i = argc; i > 0; --i) {
                         value_t *arg = pop_checked();
                         if (!arg) {
-                            free_args(args);
+                            free_args(args, argc);
                             return abort_error();
                         }
                         args[i - 1] = arg;
                     }
                     value_t *callee = pop_checked();
                     if (!callee) {
-                        free_args(args);
+                        free_args(args, argc);
                         return abort_error();
                     }
-                    if (try_tail_call(callee, args)) {
+                    if (try_tail_call(callee, args, argc)) {
                         if (vm_stats.enabled)
                             ++vm_stats.tail_calls;
                         freeval(callee);
@@ -2219,8 +2230,9 @@ public:
                     }
                     if (vm_stats.enabled)
                         ++vm_stats.fallback_calls;
+                    std::vector<value_t *> fallback(args, args + argc);
                     value_t *result =
-                        call_value_args(callee, std::move(args));
+                        call_value_args(callee, std::move(fallback));
                     freeval(callee);
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
@@ -2360,6 +2372,34 @@ private:
     std::shared_ptr<function_def> current_def_;
     unsigned instruction_count_ = 0;
 
+    /*
+     * Fast calls move the caller's bookkeeping vectors into saved_states_.
+     * Recycle the callee vectors so repeated calls at the same depth do not
+     * allocate name/slot caches from scratch.
+     */
+    std::vector<std::vector<struct symbol *>> name_cache_pool_;
+    std::vector<std::vector<struct symbol *>> param_symbols_pool_;
+    std::vector<std::vector<struct symbol *>> slot_symbols_pool_;
+
+    static std::vector<struct symbol *> take_pool(
+        std::vector<std::vector<struct symbol *>> &pool) {
+        if (pool.empty())
+            return std::vector<struct symbol *>();
+        std::vector<struct symbol *> value = std::move(pool.back());
+        pool.pop_back();
+        value.clear();
+        return value;
+    }
+
+    void recycle_frame_vectors() {
+        if (name_cache_.capacity() != 0)
+            name_cache_pool_.push_back(std::move(name_cache_));
+        if (param_symbols_.capacity() != 0)
+            param_symbols_pool_.push_back(std::move(param_symbols_));
+        if (slot_symbols_.capacity() != 0)
+            slot_symbols_pool_.push_back(std::move(slot_symbols_));
+    }
+
     const Proto &proto() const { return *proto_ptr_; }
 
     void save_current_state() {
@@ -2382,9 +2422,14 @@ private:
         state.defer_scopes = std::move(defer_scopes_);
         state.handlers = std::move(handlers_);
         saved_states_.push_back(std::move(state));
+
+        name_cache_ = take_pool(name_cache_pool_);
+        param_symbols_ = take_pool(param_symbols_pool_);
+        slot_symbols_ = take_pool(slot_symbols_pool_);
     }
 
     void restore_state(SavedVmState state) {
+        recycle_frame_vectors();
         proto_ptr_ = state.proto;
         pc_ = state.pc;
         scope_mark_ = state.scope_mark;
@@ -2453,7 +2498,7 @@ private:
     };
 
     bool fast_call_target(value_t *callee,
-                          std::vector<value_t *> &args,
+                          value_t **args, size_t argc,
                           std::shared_ptr<function_def> &def,
                           ProtoPtr &proto) {
         if (!callee || callee->type != T_func)
@@ -2465,7 +2510,7 @@ private:
         function_code *code = def->code.get();
         if (code->is_generator || code->is_async || code->is_method ||
             code->variadic || code->required_params != code->nparams ||
-            (int)args.size() != code->nparams)
+            (int)argc != code->nparams)
             return false;
 
         int index = 0;
@@ -2481,7 +2526,8 @@ private:
     }
 
     void bind_fast_arguments(function_code *code,
-                             std::vector<value_t *> &args) {
+                             value_t **args, size_t argc) {
+        (void)argc;
         int index = 0;
         for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
             struct symbol *sym = newsym(sl->sym->name);
@@ -2494,14 +2540,13 @@ private:
             savesym(sym);
             param_symbols_.push_back(sym);
         }
-        args.clear();
     }
 
     FastCallResult try_fast_call(value_t *callee,
-                                 std::vector<value_t *> &args) {
+                                 value_t **args, size_t argc) {
         std::shared_ptr<function_def> def;
         ProtoPtr proto;
-        if (!fast_call_target(callee, args, def, proto))
+        if (!fast_call_target(callee, args, argc, def, proto))
             return FastCallResult::Fallback;
         function_code *code = def->code.get();
 
@@ -2538,14 +2583,14 @@ private:
             defer_scopes_.emplace_back();
 
         eval_push_closure_scope(current_def_->closure);
-        bind_fast_arguments(code, args);
+        bind_fast_arguments(code, args, argc);
         ++context_.vm_call_depth;
         diag_frames_ = 1;
         diag_push_call(name, line, column);
         return FastCallResult::Pushed;
     }
 
-    bool try_tail_call(value_t *callee, std::vector<value_t *> &args) {
+    bool try_tail_call(value_t *callee, value_t **args, size_t argc) {
         if (saved_states_.empty())
             return false;
         for (const std::vector<defer_record> &scope : defer_scopes_)
@@ -2557,7 +2602,7 @@ private:
 
         std::shared_ptr<function_def> def;
         ProtoPtr proto;
-        if (!fast_call_target(callee, args, def, proto))
+        if (!fast_call_target(callee, args, argc, def, proto))
             return false;
         if (stack_.size() != frame_stack_base_)
             return false;
@@ -2588,7 +2633,7 @@ private:
             defer_scopes_.emplace_back();
 
         eval_push_closure_scope(current_def_->closure);
-        bind_fast_arguments(code, args);
+        bind_fast_arguments(code, args, argc);
         if (diag_frames_ < 64) {
             diag_push_call(name, line, column);
             ++diag_frames_;
@@ -2787,7 +2832,8 @@ private:
         return &proto().member_ic[index];
     }
 
-    struct symbol *cached_symbol(uint32_t index) {        if (index < name_cache_.size() && name_cache_[index])
+    struct symbol *cached_symbol(uint32_t index) {
+        if (index < name_cache_.size() && name_cache_[index])
             return name_cache_[index];
 
         scope_context &scope_context = active_scope_context();
@@ -2869,6 +2915,11 @@ private:
         for (value_t *arg : args)
             freeval(arg);
         args.clear();
+    }
+
+    static void free_args(value_t **args, size_t argc) {
+        for (size_t i = 0; i < argc; ++i)
+            freeval(args[i]);
     }
 
     static bool is_control(const value_t *value) {

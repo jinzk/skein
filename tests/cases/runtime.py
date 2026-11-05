@@ -52,6 +52,35 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
     )
     check(
+        "fast call argument buffers",
+        "func zero() { return 0; }\n"
+        "func add(a, b, c, d, e, f, g, h) {\n"
+        "  return a + b + c + d + e + f + g + h;\n"
+        "}\n"
+        "func add9(a, b, c, d, e, f, g, h, i) {\n"
+        "  return add(a, b, c, d, e, f, g, h) + i;\n"
+        "}\n"
+        "func tail(n, acc) {\n"
+        "  if (n <= 0) { return acc; }\n"
+        "  return tail(n - 1, acc + 1);\n"
+        "}\n"
+        "func dflt(a, b = 2) { return a + b; }\n"
+        "func vadd(...xs) {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < len(xs)) { total = total + xs[i]; i = i + 1; }\n"
+        "  return total;\n"
+        "}\n"
+        "print(zero());\n"
+        "print(add(1, 2, 3, 4, 5, 6, 7, 8));\n"
+        "print(add9(1, 2, 3, 4, 5, 6, 7, 8, 9));\n"
+        "print(tail(1000, 0));\n"
+        "print(dflt(1));\n"
+        "print(vadd(1, 2, 3, 4, 5, 6, 7, 8, 9, 10));\n",
+        stdout_all=["0", "36", "45", "1000", "3", "55"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
         "closure captures through upvalues",
         "func counter() {\n"
         "  let n = 0;\n"

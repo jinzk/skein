@@ -518,7 +518,7 @@ static struct symlist *new_destructure_param(struct ast *pattern) {
 
 static bool is_placeholder_arg(struct ast *arg) {
     return arg && arg->nodetype == 'N' &&
-           std::strcmp(((struct symref *)arg)->name, "_") == 0;
+           std::strcmp(((struct symref *)arg)->name, "$") == 0;
 }
 
 static struct ast *replace_single_placeholder(
@@ -645,6 +645,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token DOTDOT ".."
 %token PIPE "|>"
 %token PIPE_APPLY "|>>"
+%token PLACEHOLDER "$"
 %token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
@@ -1599,6 +1600,7 @@ explist: %empty                            { $$ = NULL; }
 
 arg: exp                                   { $$ = $1; }
     | ELLIPSIS exp                         { $$ = newspread($2); }
+    | PLACEHOLDER                          { $$ = newref(copy_text("$")); }
     ;
 
 param: NAME {

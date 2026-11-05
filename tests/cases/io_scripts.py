@@ -449,8 +449,10 @@ def run_cases():
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")
-    check("mystery character", "1 $ 2\n",
-          stderr="lexical error: unexpected character '$' (0x24)")
+    check("mystery character", "1 ` 2\n",
+          stderr="lexical error: unexpected character '`' (0x60)")
+    check("placeholder outside call", "1 $ 2\n",
+          stderr="syntax error: unexpected $")
 
     # Unterminated strings must never hang or crash.
     check("unterminated string newline", 'print("unterminated)\n',
@@ -617,8 +619,8 @@ def run_cases():
           stderr="syntax error: unexpected ';', expecting")
     check("syntax error snippet", "let x = ;\n",
           stderr="  let x = ;\n          ^")
-    check("lexical error position", "1 $ 2\n",
-          stderr="1:3: lexical error: unexpected character '$' (0x24)")
+    check("lexical error position", "1 ` 2\n",
+          stderr="1:3: lexical error: unexpected character '`' (0x60)")
     check("unterminated string position", 'print("unterminated)\n',
           stderr="1:7: lexical error: unterminated string literal")
     check("definition error location", "func f(a, a) {\n  return a;\n}\n",
@@ -1183,7 +1185,7 @@ def run_cases():
 
         lexical_script = os.path.join(tmp, "lexical.skein")
         with open(lexical_script, "w", encoding="utf-8") as f:
-            f.write('1 $ 2;\nprint("after");\n')
+            f.write('1 ` 2;\nprint("after");\n')
         proc = run_file(lexical_script)
         assert proc.returncode == 1, proc.stderr
         assert "lexical error" in proc.stderr, proc.stderr

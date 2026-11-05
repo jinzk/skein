@@ -474,6 +474,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "@" |
 "?" { YYRET(yytext[0]); }
 
+"$" { YYRET(PLACEHOLDER); }
+
 "..." { YYRET(ELLIPSIS); }
 
 ".." { YYRET(DOTDOT); }

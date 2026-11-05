@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (42.40s)
+ctest: 8/8 passed (40.47s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.32s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.63s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 66.55s
-LSan:           skein_vm_lsan_tests Passed 78.22s
+skein_tests:    Passed 12.26s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.17s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 64.64s
+LSan:           skein_vm_lsan_tests Passed 77.69s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -62,10 +62,10 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 500 万次局部循环 | 1.21s | 1.08s |
-| `fib(30)` | 0.70s | 0.78s |
-| 200 万次函数调用 | 0.86s | 0.85s |
-| 参数 pattern 密集调用 | 0.53s | 0.58s |
+| 500 万次局部循环 | 1.23s | 1.02s |
+| `fib(30)` | 0.70s | 0.75s |
+| 200 万次函数调用 | 0.82s | 0.81s |
+| 参数 pattern 密集调用 | 0.51s | 0.56s |
 
 ### 2.4 基线缺口
 
@@ -435,11 +435,29 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-1 运算与比较快路径（P2，M）
 
-- `Add` / `Sub` / `Mul` / `Div` / `Mod` 对 int/float 直接内联。
-- `CmpLt` / `CmpLe` / `CmpGt` / `CmpGe` 对 int/float/string 快路径。
-- 避免所有二元运算都走 `apply_binary_value()` 字符分派。
+状态：**已完成（2026-11-05）**。
 
-验收：局部循环与 `fib` 基准均不退化。
+实施结果：
+
+1. `binary_op()` 增加 int/int 快路径：
+   - `Add` / `Sub` / `Mul` 使用 `new_int_checked`
+   - `Div` / `Mod` 处理除零、`INT64_MIN / -1` 溢出
+   - 位运算、左右移位直接内联，保留原有错误文本
+2. 增加 int/float 混合数值浮点快路径：
+   - `Add` / `Sub` / `Mul` / `Div` / `Mod`
+   - 除零与 `fmod` 语义保持一致
+3. `compare_op()` 增加：
+   - int/int 直接比较
+   - float/float 直接比较，保留 NaN unordered 语义
+   - int/float 混合使用 `compare_numeric`，保持 int64 精确比较
+4. 非数值类型继续回退 `apply_binary_value()` / `do_compare()`。
+
+验收结果：
+
+- 全部现有测试通过，错误文本与边界行为不变。
+- 局部循环、调用和 `fib` 基准均未退化。
+- `fib(30)` 从约 0.78s 降到约 0.75s，但仍略慢于 AST 的 0.70s。
+- `call_bench` 改为 VM 约 0.81s，AST 约 0.82s。
 
 #### W3-2 全局 slot 与内联缓存（P2，L）
 
@@ -736,7 +754,7 @@ std::shared_ptr<const void> vm_param_patterns;
 | W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |
 | W2-4 Generator 状态 | P2 | L | TODO | W2-1 |
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
-| W3-1 运算快路径 | P2 | M | TODO | W2-1 |
+| W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
 | W3-2 全局 slot + IC | P2 | L | TODO | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |
 | W3-4 指令优化 | P2 | M | TODO | W3-1 |

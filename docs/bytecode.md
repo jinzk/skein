@@ -66,6 +66,8 @@ SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 - 变量读取与赋值（按名字查找，复用现有 `scope_t`）
 - `let` / `const` 声明（`DEFINE_NAME`）
 - 算术、位运算、比较、`&&` / `||` / `!`
+- int/int 与 int/float 混合的运算/比较快路径（溢出、除零、NaN、
+  int64 精确比较语义保持不变）
 - 三元表达式
 - `if` / `while` / `do while` / C 风格 `for`
 - `for ... in`（list/dict/string/bytes/deque/heap/set/generator）

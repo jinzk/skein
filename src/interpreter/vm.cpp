@@ -23,9 +23,11 @@
 #include "valuetype.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -2953,6 +2955,18 @@ private:
         return result ? result : newnull();
     }
 
+    static bool compare_result(int op, int cmp) {
+        switch (op) {
+            case 1: return cmp > 0;
+            case 2: return cmp < 0;
+            case 3: return cmp != 0;
+            case 4: return cmp == 0;
+            case 5: return cmp >= 0;
+            case 6: return cmp <= 0;
+            default: return false;
+        }
+    }
+
     bool binary_op(uint8_t opcode) {
         value_t *right = pop_checked();
         value_t *left = pop_checked();
@@ -2961,21 +2975,131 @@ private:
             freeval(right);
             return false;
         }
-        char op = '+';
-        switch (static_cast<Op>(opcode)) {
-            case Op::Add: op = '+'; break;
-            case Op::Sub: op = '-'; break;
-            case Op::Mul: op = '*'; break;
-            case Op::Div: op = '/'; break;
-            case Op::Mod: op = '%'; break;
-            case Op::BitAnd: op = '&'; break;
-            case Op::BitOr: op = '|'; break;
-            case Op::BitXor: op = '^'; break;
-            case Op::Shl: op = 's'; break;
-            case Op::Shr: op = 'r'; break;
+
+        const Op op = static_cast<Op>(opcode);
+        if (left->type == T_int && right->type == T_int) {
+            const long long x = ((struct int_value_t *)left)->value;
+            const long long y = ((struct int_value_t *)right)->value;
+            value_t *result = NULL;
+            bool handled = true;
+            switch (op) {
+                case Op::Add:
+                    result = new_int_checked((__int128)x + y);
+                    break;
+                case Op::Sub:
+                    result = new_int_checked((__int128)x - y);
+                    break;
+                case Op::Mul:
+                    result = new_int_checked((__int128)x * y);
+                    break;
+                case Op::Div:
+                    if (y == 0) {
+                        yyerror("division by zero");
+                    } else if (x == std::numeric_limits<long long>::min() &&
+                               y == -1) {
+                        result = new_int_checked((__int128)x / y);
+                    } else {
+                        result = newintval(x / y);
+                    }
+                    break;
+                case Op::Mod:
+                    if (y == 0) {
+                        yyerror("modulo by zero");
+                    } else if (y == -1) {
+                        result = newintval(0);
+                    } else {
+                        result = newintval(x % y);
+                    }
+                    break;
+                case Op::BitAnd:
+                    result = newintval(x & y);
+                    break;
+                case Op::BitOr:
+                    result = newintval(x | y);
+                    break;
+                case Op::BitXor:
+                    result = newintval(x ^ y);
+                    break;
+                case Op::Shl:
+                    if (y < 0 || y >= 64) {
+                        yyerror("shift count %lld out of range", y);
+                    } else {
+                        result = newintval(
+                            (long long)((unsigned long long)x << y));
+                    }
+                    break;
+                case Op::Shr:
+                    if (y < 0 || y >= 64) {
+                        yyerror("shift count %lld out of range", y);
+                    } else {
+                        result = newintval(x >> y);
+                    }
+                    break;
+                default:
+                    handled = false;
+                    break;
+            }
+            if (handled) {
+                freeval(left);
+                freeval(right);
+                if (!result)
+                    return false;
+                push(result);
+                return true;
+            }
+        }
+
+        if ((left->type == T_int || left->type == T_float) &&
+            (right->type == T_int || right->type == T_float)) {
+            const double x = as_double(left);
+            const double y = as_double(right);
+            value_t *result = NULL;
+            bool handled = true;
+            switch (op) {
+                case Op::Add: result = newfloatval(x + y); break;
+                case Op::Sub: result = newfloatval(x - y); break;
+                case Op::Mul: result = newfloatval(x * y); break;
+                case Op::Div:
+                    if (y == 0.0)
+                        yyerror("division by zero");
+                    else
+                        result = newfloatval(x / y);
+                    break;
+                case Op::Mod:
+                    if (y == 0.0)
+                        yyerror("modulo by zero");
+                    else
+                        result = newfloatval(std::fmod(x, y));
+                    break;
+                default:
+                    handled = false;
+                    break;
+            }
+            if (handled) {
+                freeval(left);
+                freeval(right);
+                if (!result)
+                    return false;
+                push(result);
+                return true;
+            }
+        }
+
+        char symbol = '+';
+        switch (op) {
+            case Op::Add: symbol = '+'; break;
+            case Op::Sub: symbol = '-'; break;
+            case Op::Mul: symbol = '*'; break;
+            case Op::Div: symbol = '/'; break;
+            case Op::Mod: symbol = '%'; break;
+            case Op::BitAnd: symbol = '&'; break;
+            case Op::BitOr: symbol = '|'; break;
+            case Op::BitXor: symbol = '^'; break;
+            case Op::Shl: symbol = 's'; break;
+            case Op::Shr: symbol = 'r'; break;
             default: break;
         }
-        value_t *result = apply_binary_value(op, left, right);
+        value_t *result = apply_binary_value(symbol, left, right);
         freeval(left);
         freeval(right);
         if (!result)
@@ -3002,6 +3126,48 @@ private:
             case Op::CmpLe: op = 6; break;
             default: break;
         }
+
+        if (left->type == T_int && right->type == T_int) {
+            const long long x = ((struct int_value_t *)left)->value;
+            const long long y = ((struct int_value_t *)right)->value;
+            const int cmp = x < y ? -1 : (x > y ? 1 : 0);
+            value_t *result = newboolval(compare_result(op, cmp));
+            freeval(left);
+            freeval(right);
+            push(result);
+            return true;
+        }
+
+        if (left->type == T_float && right->type == T_float) {
+            const double x = ((struct float_value_t *)left)->value;
+            const double y = ((struct float_value_t *)right)->value;
+            bool value = false;
+            if (std::isnan(x) || std::isnan(y))
+                value = (op == 3);
+            else {
+                const int cmp = x < y ? -1 : (x > y ? 1 : 0);
+                value = compare_result(op, cmp);
+            }
+            value_t *result = newboolval(value);
+            freeval(left);
+            freeval(right);
+            push(result);
+            return true;
+        }
+
+        if ((left->type == T_int || left->type == T_float) &&
+            (right->type == T_int || right->type == T_float)) {
+            bool unordered = false;
+            const int cmp = compare_numeric(left, right, unordered);
+            const bool value =
+                unordered ? (op == 3) : compare_result(op, cmp);
+            value_t *result = newboolval(value);
+            freeval(left);
+            freeval(right);
+            push(result);
+            return true;
+        }
+
         value_t *result = do_compare(op, left, right);
         freeval(left);
         freeval(right);

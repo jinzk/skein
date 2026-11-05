@@ -1294,6 +1294,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | NAME RARROW lambda_start exp         {
         $$ = newfunc(NULL, newsymlist(newsym($1), NULL, NULL),
                      newret($4), false, false, finish_function());
+        free($1);
       }
     | '(' ')' RARROW lambda_start exp      {
         $$ = newfunc(NULL, NULL, newret($5), false, false,
@@ -1303,6 +1304,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newfunc(NULL,
                      newsymlist(newsym($2), NULL, $4),
                      newret($8), false, false, finish_function());
+        free($2);
       }
     | '(' exp ')'                         { $$ = $2; }
     | MATCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE

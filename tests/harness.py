@@ -68,8 +68,27 @@ def run_file(path, timeout=None):
     )
 
 
+TEST_SKIP = {
+    item.strip()
+    for item in os.environ.get("SKEIN_TEST_SKIP", "").split(",")
+    if item.strip()
+}
+TEST_SKIP_PREFIXES = tuple(
+    item.strip()
+    for item in os.environ.get("SKEIN_TEST_SKIP_PREFIX", "").split(",")
+    if item.strip()
+)
+TEST_SKIP_SOURCE = os.environ.get("SKEIN_TEST_SKIP_SOURCE", "")
+
+
 def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
           not_stderr=None, code=0, env=None):
+    if name in TEST_SKIP:
+        return
+    if TEST_SKIP_PREFIXES and name.startswith(TEST_SKIP_PREFIXES):
+        return
+    if TEST_SKIP_SOURCE and TEST_SKIP_SOURCE in source:
+        return
     proc = run(source, env=env)
     combined = proc.stdout + proc.stderr
     assert "Segmentation fault" not in combined, f"{name}: crashed"

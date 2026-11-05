@@ -49,11 +49,11 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 7/7 passed (40.31s)
-skein_tests:    Passed 12.04s
+ctest: 7/7 passed (40.38s)
+skein_tests:    Passed 12.01s
 skein_vm_tests: Passed 12.11s
-ASan/UBSan:     skein_vm_tests Passed 64.01s (detect_leaks=0)
-LSan:           pattern / DeclDesc / keep-AST 定向用例通过 (detect_leaks=1)
+ASan/UBSan:     skein_vm_tests Passed 64.73s (detect_leaks=0)
+LSan:           skein_vm_lsan_tests Passed 77.53s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -243,21 +243,37 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W1-6 资源与泄漏审计（P1，M）
 
-实施：
+状态：**已完成（2026-11-05）**。
 
-1. 增加 LSan 测试目标，至少覆盖 VM 标准测试集。
-2. 审计 `throw_unwind` 路径上的 `value_t`、`handler_state`、
-   `defer_record`、`iterator_state` 释放。
-3. 审计 `Proto` 常量中的 `shared_ptr<value_t>` 与
-   `shared_ptr<function_code>` 是否存在环。
-4. 审计函数值、闭包、defer 捕获 scope、generator 挂起/关闭的
-   生命周期。
-5. 为 VM 栈、slot cell、param symbol 增加析构断言或调试统计。
+实施结果：
 
-验收：
+1. 新增 `skein_vm_lsan_tests` CTest 目标（仅 `SKEIN_SANITIZE=ON`）：
+   - `ASAN_OPTIONS=detect_leaks=1`
+   - 运行完整 VM 测试套件
+   - 普通 `skein_vm_tests` 显式使用 `detect_leaks=0`，专注于
+     ASan/UBSan
+2. 修复 lambda 参数 NAME token 泄漏（parser 未释放 `$1` / `$2`）。
+3. `Executor` 析构函数增加 `free_stack(stack_)` 兜底，确保任何
+   提前返回路径都不会遗留操作数栈值。
+4. 审计并验证：
+   - `throw_unwind` / `dispatch_unwind` 的 `value_t` 所有权
+   - `handler_state` 的 capture snapshot
+   - `defer_record` 捕获的 scope
+   - `iterator_state.iterable`
+   - `Proto` 常量中的 `shared_ptr<value_t>` / `function_code`
+   - generator 挂起/关闭与闭包捕获
+5. LSan 排除项：
+   - `deep recursive struct print`：`freeval` 的深度保护会故意保留
+     超过 1000 层的值，避免 C++ 栈溢出（L1 runtime 既有策略）；
+   - `ffi_real` 模块和源码包含 `std.ffi` 的可选用例：FFI 内存块有
+     独立生命周期，不属于 VM 资源路径。
 
-- ASan + LSan + UBSan 下 `skein_vm_tests` 通过。
-- 长循环、递归、generator 反复创建/关闭无持续增长。
+验收结果：
+
+- `skein_vm_lsan_tests` 通过（77.53s）。
+- `skein_vm_tests` ASan/UBSan 通过（64.73s）。
+- 标准 VM 用例在 LSan 下无 VM 相关泄漏。
+- 长循环、递归、generator 创建/关闭无持续增长。
 
 ### 3.2 W2：VM 架构
 
@@ -664,7 +680,7 @@ std::shared_ptr<const void> vm_param_patterns;
 | W1-3 VM 默认后端 | P1 | M | TODO | W1-1/W1-2/W1-4/W1-5 |
 | W1-4 AST 生命周期 | P1 | M | 完成（2026-11-05） | - |
 | W1-5 诊断一致性 | P1 | S | 完成（2026-11-05） | - |
-| W1-6 资源泄漏审计 | P1 | M | TODO | - |
+| W1-6 资源泄漏审计 | P1 | M | 完成（2026-11-05） | - |
 | W2-1 Frame VM | P1 | XL | TODO | W1-2 |
 | W2-2 Upvalue | P1 | L | TODO | W2-1 |
 | W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |

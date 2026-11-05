@@ -498,12 +498,35 @@ if(BUILD_TESTING)
       # process stack limit while still exercising the VM error path.
       list(APPEND SKEIN_VM_TEST_ENV "SKEIN_VM_MAX_DEPTH=128")
       list(APPEND SKEIN_VM_TEST_ENV "SKEIN_TEST_TIMEOUT=120")
+      # Keep the regular sanitizer run focused on ASan/UBSan; leaks are
+      # covered by skein_vm_lsan_tests below.
+      list(APPEND SKEIN_VM_TEST_ENV "ASAN_OPTIONS=detect_leaks=0")
     endif()
     set_tests_properties(skein_vm_tests PROPERTIES
       ENVIRONMENT "${SKEIN_VM_TEST_ENV}"
       RUN_SERIAL TRUE
       TIMEOUT 600
     )
+    if(SKEIN_SANITIZE)
+      # LeakSanitizer run.  Known non-VM leaks are excluded:
+      # - deep recursive struct print relies on freeval's depth guard;
+      # - the optional FFI module has its own memory-block lifecycle.
+      add_test(NAME skein_vm_lsan_tests COMMAND ${SKEIN_TEST_COMMAND})
+      set(SKEIN_VM_LSAN_ENV
+        "SKEIN_VM=1"
+        "SKEIN_VM_MAX_DEPTH=128"
+        "SKEIN_TEST_TIMEOUT=120"
+        "SKEIN_TEST_SKIP=deep recursive struct print"
+        "SKEIN_TEST_SKIP_SOURCE=std.ffi"
+        "SKEIN_TEST_SKIP_MODULES=ffi_real"
+        "ASAN_OPTIONS=detect_leaks=1"
+      )
+      set_tests_properties(skein_vm_lsan_tests PROPERTIES
+        ENVIRONMENT "${SKEIN_VM_LSAN_ENV}"
+        RUN_SERIAL TRUE
+        TIMEOUT 900
+      )
+    endif()
     add_test(
       NAME encoding_tables_test
       COMMAND ${Python3_EXECUTABLE}

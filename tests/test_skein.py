@@ -4,6 +4,8 @@
 The individual feature groups live in tests/cases/ and share tests/harness.py.
 """
 
+import os
+
 import harness
 
 from cases import (
@@ -33,8 +35,17 @@ MODULES = [
 ]
 
 
+SKIP_MODULES = {
+    item.strip()
+    for item in os.environ.get("SKEIN_TEST_SKIP_MODULES", "").split(",")
+    if item.strip()
+}
+
+
 def main():
     for module in MODULES:
+        if module.__name__.rsplit(".", 1)[-1] in SKIP_MODULES:
+            continue
         module.run_cases()
     print(f"all tests passed for {harness.BIN}")
 

@@ -204,6 +204,7 @@ public:
     }
 
     ~Executor() {
+        free_stack(stack_);
         for (iterator_state &state : iterators_) {
             freeval(state.iterable);
             state.iterable = NULL;

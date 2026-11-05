@@ -227,4 +227,6 @@ struct Instr {
 - `ctest` 中 `skein_tests` 与 `skein_vm_tests` 均通过；
 - `tools/check_boundaries.py` 通过；
 - `SKEIN_VM=1` 下所有现有用例的 stdout/stderr/exit code 与 AST 后端一致；
-- ASan/UBSan 下 VM 路径无新增问题。
+- ASan/UBSan 下 VM 路径无新增问题；
+- sanitizer 构建中 `skein_vm_lsan_tests` 通过；已知的非 VM 泄漏
+  （`freeval` 深度保护、可选 FFI 内存块）在测试环境中显式排除。

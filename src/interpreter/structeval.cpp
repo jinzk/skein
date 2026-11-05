@@ -316,6 +316,247 @@ void eval_trait_decl(struct trait_node *t) {
         yyerror("%s", error.c_str());
 }
 
+bool declare_struct_meta(
+    const char *module, const char *module_name, const char *name,
+    bool exported,
+    const std::vector<std::pair<std::string, type_constraint>> &fields,
+    const std::vector<
+        std::pair<std::string, std::shared_ptr<function_code>>> &methods,
+    const std::shared_ptr<scope_t> &closure, std::string &error) {
+    struct_def *def = NULL;
+    if (!structtype_prepare_struct(module, module_name, name, exported, def,
+                                   error)) {
+        yyerror("%s", error.c_str());
+        return false;
+    }
+
+    std::vector<field_def> declared_fields;
+    for (const auto &field : fields) {
+        if (!validate_type_constraint(&field.second)) {
+            structtype_rollback_struct(def);
+            return false;
+        }
+        field_def declared;
+        declared.name = field.first;
+        declared.type = copy_type_constraint(&field.second);
+        declared_fields.push_back(std::move(declared));
+    }
+
+    if (!structtype_finalize_struct(def, std::move(declared_fields),
+                                    error)) {
+        yyerror("%s", error.c_str());
+        structtype_rollback_struct(def);
+        return false;
+    }
+
+    bool ok = true;
+    for (const auto &method : methods) {
+        std::shared_ptr<function_def> definition =
+            std::make_shared<function_def>();
+        definition->code = method.second;
+        definition->closure = closure;
+        std::string method_error;
+        if (!method.second ||
+            !method_self_ok(method.second->sl, def->name.c_str(),
+                            method_error)) {
+            yyerror("%s", method_error.c_str());
+            ok = false;
+            continue;
+        }
+        method.second->is_method = true;
+        method.second->name = method.first;
+        if (!structtype_add_method(def, method.first, definition,
+                                   method_error)) {
+            yyerror("%s", method_error.c_str());
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+bool declare_enum_meta(
+    const char *module, const char *module_name, const char *name,
+    bool exported,
+    const std::vector<std::pair<
+        std::string,
+        std::vector<std::pair<std::string, type_constraint>>>> &variants,
+    std::string &error) {
+    enum_def *def = NULL;
+    if (!structtype_prepare_enum(module, module_name, name, exported, def,
+                                 error)) {
+        yyerror("%s", error.c_str());
+        return false;
+    }
+
+    std::vector<variant_def> declared_variants;
+    for (const auto &variant : variants) {
+        variant_def declared;
+        declared.name = variant.first;
+        for (const auto &field : variant.second) {
+            if (!validate_type_constraint(&field.second)) {
+                structtype_rollback_enum(def);
+                return false;
+            }
+            field_def declared_field;
+            declared_field.name = field.first;
+            declared_field.type = copy_type_constraint(&field.second);
+            declared.fields.push_back(std::move(declared_field));
+        }
+        declared_variants.push_back(std::move(declared));
+    }
+
+    if (!structtype_finalize_enum(def, std::move(declared_variants),
+                                  error)) {
+        yyerror("%s", error.c_str());
+        structtype_rollback_enum(def);
+        return false;
+    }
+    return true;
+}
+
+bool declare_trait_meta(
+    const char *module, const char *module_name, const char *name,
+    bool exported, const std::vector<trait_method_meta> &methods,
+    std::string &error) {
+    std::vector<method_sig> signatures;
+    for (const trait_method_meta &method : methods) {
+        if (method.params.empty() ||
+            method.params.front().name != "self") {
+            yyerror("trait method %s must start with self",
+                    method.name.c_str());
+            return false;
+        }
+        if (method.params.front().type.kind != TYPE_ANY) {
+            yyerror("trait method %s self must be untyped",
+                    method.name.c_str());
+            return false;
+        }
+        method_sig signature;
+        signature.name = method.name;
+        for (const trait_param_meta &param : method.params) {
+            if (param.variadic) {
+                yyerror("trait methods cannot be variadic");
+                return false;
+            }
+            if (param.has_default) {
+                yyerror("trait method %s cannot have default parameter "
+                        "values", method.name.c_str());
+                return false;
+            }
+            if (!validate_type_constraint(&param.type))
+                return false;
+            signature.params.push_back(
+                copy_type_constraint(&param.type));
+        }
+        signatures.push_back(std::move(signature));
+    }
+
+    trait_def *def = NULL;
+    if (!structtype_create_trait(module, module_name, name, exported,
+                                 std::move(signatures), def, error)) {
+        yyerror("%s", error.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool declare_impl_meta(
+    const char *module, const char *module_name, const char *type_name,
+    bool has_trait, const char *trait_name,
+    const std::vector<
+        std::pair<std::string, std::shared_ptr<function_code>>> &methods,
+    const std::shared_ptr<scope_t> &closure, std::string &error) {
+    (void)module_name;
+    (void)error;
+    struct_def *owner = structtype_find_struct(module, type_name);
+    if (!owner) {
+        yyerror("unknown type %s", type_name ? type_name : "");
+        return false;
+    }
+
+    trait_def *trait = NULL;
+    if (has_trait) {
+        trait = structtype_find_trait(module, trait_name);
+        if (!trait) {
+            yyerror("unknown trait %s",
+                    trait_name ? trait_name : "");
+            return false;
+        }
+    }
+
+    bool ok = true;
+    for (const auto &method : methods) {
+        std::shared_ptr<function_def> definition =
+            std::make_shared<function_def>();
+        definition->code = method.second;
+        definition->closure = closure;
+        std::string method_error;
+        if (!method.second ||
+            !method_self_ok(method.second->sl, owner->name.c_str(),
+                            method_error)) {
+            yyerror("%s", method_error.c_str());
+            ok = false;
+            continue;
+        }
+        method.second->is_method = true;
+        method.second->name = method.first;
+
+        if (trait) {
+            const method_sig *sig =
+                find_trait_method(trait, method.first.c_str());
+            if (!sig) {
+                yyerror("method %s is not declared by trait %s",
+                        method.first.c_str(), trait->name.c_str());
+                ok = false;
+                continue;
+            }
+            if (!method_signature_matches(sig, method.second.get(),
+                                          method_error)) {
+                yyerror("%s", method_error.c_str());
+                ok = false;
+                continue;
+            }
+        }
+        if (!structtype_add_method(owner, method.first, definition,
+                                   method_error)) {
+            yyerror("%s", method_error.c_str());
+            ok = false;
+        }
+    }
+
+    if (!trait)
+        return ok;
+
+    for (size_t i = 0; i < trait->methods.size(); ++i) {
+        auto method = owner->methods.find(trait->methods[i].name);
+        if (method == owner->methods.end()) {
+            yyerror("type %s does not implement method %s required by "
+                    "trait %s", owner->name.c_str(),
+                    trait->methods[i].name.c_str(),
+                    trait->name.c_str());
+            ok = false;
+            continue;
+        }
+        std::string signature_error;
+        if (method->second && method->second->code &&
+            !method_signature_matches(&trait->methods[i],
+                                      method->second->code.get(),
+                                      signature_error)) {
+            yyerror("%s", signature_error.c_str());
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        std::string trait_error;
+        if (!structtype_add_trait(owner, trait, trait_error)) {
+            yyerror("%s", trait_error.c_str());
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
     struct_def *def = structtype_find_struct(lit->module, lit->name);
     if (!def) {
@@ -371,6 +612,161 @@ struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
     if (!ok)
         return NULL;
     return newstructval(def, payload);
+}
+
+static void free_constructed_fields(
+    std::vector<std::pair<std::string, value_t *>> &fields) {
+    for (auto &field : fields)
+        freeval(field.second);
+    fields.clear();
+}
+
+value_t *build_struct_value(
+    const char *module, const char *name,
+    std::vector<std::pair<std::string, value_t *>> &fields) {
+    struct_def *def = structtype_find_struct(module, name);
+    if (!def) {
+        yyerror("unknown struct type %s", name ? name : "");
+        free_constructed_fields(fields);
+        return NULL;
+    }
+
+    std::shared_ptr<struct_payload> payload =
+        std::make_shared<struct_payload>();
+    payload->fields.resize(def->fields.size(), NULL);
+    std::vector<bool> seen(def->fields.size(), false);
+    bool ok = true;
+
+    for (auto &field : fields) {
+        int index = structtype_field_index(def, field.first.c_str());
+        if (index < 0) {
+            yyerror("unknown field %s in %s", field.first.c_str(),
+                    def->name.c_str());
+            freeval(field.second);
+            field.second = NULL;
+            ok = false;
+            continue;
+        }
+        if (seen[(size_t)index]) {
+            yyerror("field %s repeated in %s", field.first.c_str(),
+                    def->name.c_str());
+            freeval(field.second);
+            field.second = NULL;
+            ok = false;
+            continue;
+        }
+        if (!type_constraint_matches(&def->fields[(size_t)index].type,
+                                     field.second)) {
+            yyerror("field %s of %s expects %s, got %s",
+                    field.first.c_str(), def->name.c_str(),
+                    type_constraint_name(
+                        &def->fields[(size_t)index].type),
+                    typename_of(field.second));
+            freeval(field.second);
+            field.second = NULL;
+            ok = false;
+            continue;
+        }
+        payload->fields[(size_t)index] = field.second;
+        field.second = NULL;
+        seen[(size_t)index] = true;
+    }
+
+    for (size_t i = 0; i < seen.size(); ++i) {
+        if (!seen[i]) {
+            yyerror("field %s of %s is required",
+                    def->fields[i].name.c_str(), def->name.c_str());
+            ok = false;
+        }
+    }
+
+    if (!ok) {
+        free_constructed_fields(fields);
+        return NULL;
+    }
+    fields.clear();
+    return newstructval(def, payload);
+}
+
+value_t *build_enum_value(
+    const char *module, const char *name, const char *variant_name,
+    std::vector<std::pair<std::string, value_t *>> &fields) {
+    enum_def *def = structtype_find_enum(module, name);
+    if (!def) {
+        yyerror("unknown enum type %s", name ? name : "");
+        free_constructed_fields(fields);
+        return NULL;
+    }
+
+    int variant_index =
+        structtype_variant_index(def, variant_name ? variant_name : "");
+    if (variant_index < 0) {
+        yyerror("unknown enum variant %s::%s", def->name.c_str(),
+                variant_name ? variant_name : "");
+        free_constructed_fields(fields);
+        return NULL;
+    }
+    const variant_def &variant =
+        def->variants[(size_t)variant_index];
+
+    std::shared_ptr<struct_payload> payload =
+        std::make_shared<struct_payload>();
+    payload->fields.resize(variant.fields.size(), NULL);
+    std::vector<bool> seen(variant.fields.size(), false);
+    bool ok = true;
+
+    for (auto &field : fields) {
+        int index =
+            structtype_variant_field_index(&variant, field.first.c_str());
+        if (index < 0) {
+            yyerror("unknown field %s in %s::%s", field.first.c_str(),
+                    def->name.c_str(), variant.name.c_str());
+            freeval(field.second);
+            field.second = NULL;
+            ok = false;
+            continue;
+        }
+        if (seen[(size_t)index]) {
+            yyerror("field %s repeated in %s::%s", field.first.c_str(),
+                    def->name.c_str(), variant.name.c_str());
+            freeval(field.second);
+            field.second = NULL;
+            ok = false;
+            continue;
+        }
+        if (!type_constraint_matches(&variant.fields[(size_t)index].type,
+                                     field.second)) {
+            yyerror("field %s of %s::%s expects %s, got %s",
+                    field.first.c_str(), def->name.c_str(),
+                    variant.name.c_str(),
+                    type_constraint_name(
+                        &variant.fields[(size_t)index].type),
+                    typename_of(field.second));
+            freeval(field.second);
+            field.second = NULL;
+            ok = false;
+            continue;
+        }
+        payload->fields[(size_t)index] = field.second;
+        field.second = NULL;
+        seen[(size_t)index] = true;
+    }
+
+    for (size_t i = 0; i < seen.size(); ++i) {
+        if (!seen[i]) {
+            yyerror("field %s of %s::%s is required",
+                    variant.fields[i].name.c_str(), def->name.c_str(),
+                    variant.name.c_str());
+            ok = false;
+        }
+    }
+
+    if (!ok) {
+        free_constructed_fields(fields);
+        return NULL;
+    }
+    fields.clear();
+    return newenumval(def, variant_index, payload);
 }
 
 void eval_enum_decl(struct enum_node *e) {

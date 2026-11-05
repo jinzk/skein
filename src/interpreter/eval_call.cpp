@@ -30,6 +30,43 @@ void free_args(std::vector<struct value_t *> &args) {
     args.clear();
 }
 
+bool validate_function_params(const char *name, struct symlist *params) {
+    const char *display_name = name && *name ? name : "<anonymous>";
+    bool bad = false;
+    for (struct symlist *p = params; p && !bad; p = p->next) {
+        for (struct symlist *q = p->next; q; q = q->next) {
+            if (!std::strcmp(p->sym->name, q->sym->name)) {
+                yyerror("duplicate parameter %s in function %s",
+                        p->sym->name, display_name);
+                bad = true;
+                break;
+            }
+        }
+    }
+    for (struct symlist *p = params; p && !bad; p = p->next) {
+        if (!validate_type_constraint(p->type))
+            bad = true;
+        if (p->variadic && p->next) {
+            yyerror("variadic parameter must be last");
+            bad = true;
+        }
+    }
+    bool seen_default = false;
+    for (struct symlist *p = params; p && !bad; p = p->next) {
+        if (p->variadic)
+            continue;
+        if (p->default_value) {
+            seen_default = true;
+        } else if (seen_default) {
+            yyerror("parameter %s without default cannot follow a "
+                    "parameter with default",
+                    p->sym->name);
+            bad = true;
+        }
+    }
+    return !bad;
+}
+
 /*
  * Function arguments are represented as a right-nested 'L' chain.  Evaluate
  * them left-to-right without using eval('L'), because eval('L') intentionally

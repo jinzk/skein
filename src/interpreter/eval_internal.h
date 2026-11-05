@@ -75,6 +75,7 @@ struct value_t *read_member_value(struct value_t *container,
                                   bool field_access = false);
 bool read_index_chain(struct ast *a, struct value_t *&out);
 struct value_t *default_value_for_type(const struct type_constraint *type);
+bool validate_function_params(const char *name, struct symlist *params);
 struct value_t *assign_name(struct symref *ref, struct ast *value_ast);
 struct value_t *increment_name(struct symref *ref, int delta, bool prefix);
 

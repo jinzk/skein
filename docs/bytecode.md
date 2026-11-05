@@ -63,14 +63,22 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 - `if` / `while` / `do while` / C 风格 `for`
 - `for ... in`（list/dict/string/bytes/deque/heap/set/generator）
 - `switch`（case 值列表、default、break/continue 传播）
+- `match` / destructuring（pattern 复用现有 matcher，arm/guard/body 为字节码）
 - `break` / `continue` / 标签（循环和 switch）
 - `return`
-- 函数调用（普通函数、builtin、方法值）
+- 函数定义 / 闭包（`CLOSURE` / `BIND_FUNC`，函数体首次调用时编译并缓存在 `function_code`）
+- 参数 fast path（`LOAD_PARAM` / `STORE_PARAM` / `COMPOUND_PARAM` / `INCDEC_PARAM`；参数未被本函数局部声明遮蔽时）
+- 函数调用（普通函数、builtin、方法值、spread 参数）
 - list / dict 字面量
 - 索引与字段读取
 - 索引/字段赋值、复合赋值、自增自减（含 COW 与循环引用检查）
 - `is` 类型检查
+- struct / enum 字面量构造
+- struct / enum / trait / impl 声明
+- package 声明
 - `fail`
+- `on error` / `recover` / `pass`（handler 栈 + 局部 unwind）
+- `defer`（独立 Proto + 捕获作用域，在 scope exit/unwind 时执行）
 - `await` / `yield`
 - `import`
 - 块作用域（`PUSH_SCOPE` / `POP_SCOPE`）
@@ -79,16 +87,14 @@ SKEIN_VM=1 SKEIN_VM_MAX_DEPTH=128 ./build/skein script.skein
 
 ### 3.2 当前回退到 AST 的结构
 
-这些结构会通过 `EVAL_AST` 在**当前运行时作用域**中执行，或让整个
-语句/函数体回退：
+常规用户语法结构已经全部有字节码路径，`EVAL_AST` 仅作为编译器兜底保留，
+用于未来新增节点或无法安全降级的子树。
 
-- `match` / destructuring
-- `on error` / `recover` / `pass`
-- `defer`
-- struct / enum / trait / impl 声明
-- package 声明
-- 带 spread 的调用/字面量
-- 函数定义本身（函数体在首次调用时编译）
+仍使用 AST 但不是 `EVAL_AST` 的运行时代码：
+
+- 函数/方法默认参数表达式（调用时由 `fill_default_arguments` 求值）
+- `match` pattern 本身（复用现有 `pattern.cpp` matcher，arm/guard/body 为字节码）
+- 类型注册表、trait 元数据等 runtime 辅助逻辑
 
 ### 3.3 回退安全规则
 
@@ -98,8 +104,8 @@ AST 回退会分析回退子树中的循环控制：
 - 会逃逸回退边界、进入外层 VM 循环的 `break` / `continue` 会导致整个
   语句/函数体回退；
 - 带标签的循环控制保守地视为逃逸；
-- 因此 `match` / `on error` 等结构只要不向外传播控制值，就可以在 VM
-  循环内部通过 `EVAL_AST` 执行。
+- 因此剩余可回退结构只要不向外传播控制值，就可以在 VM 循环内部通过
+  `EVAL_AST` 执行。
 
 无法编译时，`SKEIN_VM_DEBUG=1` 会打印原因。
 
@@ -109,6 +115,7 @@ AST 回退会分析回退子树中的循环控制：
 NOP
 LOAD_NULL / LOAD_CONST / LOAD_NAME
 STORE_NAME / COMPOUND_NAME / INCDEC_NAME / DEFINE_NAME
+LOAD_PARAM / STORE_PARAM / COMPOUND_PARAM / INCDEC_PARAM
 POP / DUP / SWAP
 ADD / SUB / MUL / DIV / MOD / NEG
 BIT_AND / BIT_OR / BIT_XOR / SHL / SHR / BIT_NOT / NOT
@@ -118,10 +125,18 @@ JUMP / JUMP_IF_FALSE / JUMP_IF_TRUE
 NEW_LIST / NEW_DICT / GET_INDEX / GET_FIELD
 ITER_NEW / ITER_NEXT / ITER_END
 SWITCH_CHECK / CASE_MATCH
+MATCH_BEGIN / MATCH_TEST / MATCH_BIND
 ASSIGN_INDEX / COMPOUND_INDEX / INCDEC_INDEX
-AWAIT / YIELD / FAIL
+AWAIT / YIELD / FAIL / PASS / RECOVER
+PUSH_FAIL_HANDLER / PUSH_RECOVER_HANDLER / POP_HANDLER
+CHECK_RESULT / BIND_NAME / ENTER_HANDLER_BODY / LEAVE_HANDLER_BODY
+DEFER_PUSH
+NEW_STRUCT / NEW_ENUM
+DECLARE_STRUCT / DECLARE_ENUM / DECLARE_TRAIT / DECLARE_IMPL
+DECLARE_PACKAGE
+CLOSURE / BIND_FUNC
 IMPORT
-CALL / RETURN
+CALL / CALL_SPREAD / RETURN
 PUSH_SCOPE / POP_SCOPE
 EVAL_AST
 CONTROL_BREAK / CONTROL_CONTINUE / RUNTIME_ERROR
@@ -153,12 +168,13 @@ struct Instr {
 
 ## 6. 已知限制
 
-- 当前仍是**按名字查找局部变量**（带 per-constant cache），没有
-  slot/upvalue；小整数/`true`/`false`/`null` 已单例化，简单循环基准已略快
-  于 AST 后端，但整体性能仍未达到最终目标。
-- 顶层语句和函数体在无法安全编译时整体回退，VM 覆盖率取决于语法结构。
-- 函数定义仍由 AST 路径创建 `function_code`；最终目标是由字节码直接创建
-  闭包并移除 runtime 中的 `ast*`。
+- 局部变量仍是**按名字查找 + per-constant cache**；函数参数在未被局部
+  声明遮蔽时使用参数 fast path，但还没有通用 slot/upvalue。小整数/
+  `true`/`false`/`null` 已单例化，简单循环基准略快于 AST 后端，但函数
+  调用密集的基准仍受 C++ 递归和每帧分配的拖累。
+- 常规语法结构已经全部有字节码路径，`EVAL_AST` 只作为兜底。
+- `function_code` 仍保留 AST 元数据（默认参数、trait 签名等）；最终目标
+  是把默认参数等编译进 Proto，并移除 runtime 中的 `ast*`。
 - 尚未实现 handler table、defer 表、精确 GC 栈图、字节码序列化。
 
 ## 7. 后续阶段

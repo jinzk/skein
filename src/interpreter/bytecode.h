@@ -2,6 +2,7 @@
 #define SKEIN_BYTECODE_H
 
 #include "valuetype.h"
+#include "symbol.h"
 
 #include <cstdint>
 #include <memory>
@@ -23,6 +24,8 @@ namespace bc {
  * The layout deliberately leaves room for wide instructions and side tables
  * (inline caches, handlers, defer tables) in later phases.
  */
+struct Proto;
+
 struct Instr {
     uint8_t op = 0;
     uint8_t flags = 0;
@@ -41,6 +44,10 @@ enum class Op : uint8_t {
     CompoundName,
     IncDecName,
     DefineName,
+    LoadParam,
+    StoreParam,
+    CompoundParam,
+    IncDecParam,
 
     Pop,
     Dup,
@@ -84,6 +91,9 @@ enum class Op : uint8_t {
 
     SwitchCheck,
     CaseMatch,
+    MatchBegin,
+    MatchTest,
+    MatchBind,
 
     AssignIndex,
     CompoundIndex,
@@ -92,6 +102,32 @@ enum class Op : uint8_t {
     Await,
     Yield,
     Fail,
+    Pass,
+    Recover,
+
+    PushFailHandler,
+    PushRecoverHandler,
+    PopHandler,
+    CheckResult,
+    BindName,
+    EnterHandlerBody,
+    LeaveHandlerBody,
+
+    DeferPush,
+
+    NewStruct,
+    NewEnum,
+    DeclareStruct,
+    DeclareEnum,
+    DeclareTrait,
+    DeclareImpl,
+
+    Closure,
+    BindFunc,
+
+    CallSpread,
+
+    DeclarePackage,
 
     Import,
 
@@ -140,12 +176,86 @@ struct ImportDesc {
     std::string base;
 };
 
+struct ConstructDesc {
+    std::string module;
+    std::string name;
+    std::string variant;
+    std::vector<std::string> fields;
+};
+
+struct CallDesc {
+    std::vector<bool> spread;
+};
+
+struct DeclFieldMeta {
+    std::string name;
+    type_constraint type;
+};
+
+struct DeclMethodMeta {
+    std::string name;
+    std::shared_ptr<function_code> code;
+};
+
+struct StructDeclMeta {
+    std::string module;
+    std::string name;
+    bool exported = false;
+    std::vector<DeclFieldMeta> fields;
+    std::vector<DeclMethodMeta> methods;
+};
+
+struct EnumVariantMeta {
+    std::string name;
+    std::vector<DeclFieldMeta> fields;
+};
+
+struct EnumDeclMeta {
+    std::string module;
+    std::string name;
+    bool exported = false;
+    std::vector<EnumVariantMeta> variants;
+};
+
+struct TraitParamMeta {
+    std::string name;
+    type_constraint type;
+    bool variadic = false;
+    bool has_default = false;
+};
+
+struct TraitMethodMeta {
+    std::string name;
+    std::vector<TraitParamMeta> params;
+};
+
+struct TraitDeclMeta {
+    std::string module;
+    std::string name;
+    bool exported = false;
+    std::vector<TraitMethodMeta> methods;
+};
+
+struct ImplDeclMeta {
+    std::string module;
+    std::string type_name;
+    std::string trait_name;
+    bool has_trait = false;
+    std::vector<DeclMethodMeta> methods;
+};
+
+struct PackageDesc {
+    std::string name;
+    std::shared_ptr<const Proto> body;
+};
+
 enum class ConstantKind {
     Value,
     Name,
     Ast,
     Decl,
-    Type
+    Type,
+    Function
 };
 
 struct Constant {
@@ -155,6 +265,7 @@ struct Constant {
     struct ast *ast = nullptr;
     struct symdef *decl = nullptr;
     const struct type_constraint *type = nullptr;
+    std::shared_ptr<function_code> function;
 };
 
 /*
@@ -176,6 +287,19 @@ struct Proto {
     std::vector<IterDesc> iters;
     std::vector<IndexDesc> index_ops;
     std::vector<ImportDesc> imports;
+    std::vector<ConstructDesc> constructs;
+    std::vector<StructDeclMeta> struct_decls;
+    std::vector<EnumDeclMeta> enum_decls;
+    std::vector<TraitDeclMeta> trait_decls;
+    std::vector<ImplDeclMeta> impl_decls;
+    std::vector<PackageDesc> packages;
+    std::vector<CallDesc> call_descs;
+    std::vector<std::shared_ptr<const Proto>> defer_protos;
+
+    std::vector<std::string> param_names;
+    bool uses_names = false;
+    bool uses_params = false;
+    bool uses_defers = false;
 
     uint32_t nparams = 0;
     uint32_t required_params = 0;

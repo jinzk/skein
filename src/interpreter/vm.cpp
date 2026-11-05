@@ -11,6 +11,7 @@
 #include "eval_internal.h"
 #include "fiber.h"
 #include "package.h"
+#include "pattern.h"
 #include "runtime_state.h"
 #include "scopestack.h"
 #include "structeval.h"
@@ -81,13 +82,6 @@ void ensure_runtime_flags() {
     }
 }
 
-struct cache_entry {
-    ProtoPtr proto;
-    bool failed = false;
-};
-
-std::unordered_map<function_code *, cache_entry> function_cache;
-
 const Constant *constant_at(const Proto &proto, uint32_t index) {
     if (index >= proto.consts.size())
         return NULL;
@@ -111,6 +105,38 @@ void free_stack(std::vector<value_t *> &stack) {
     stack.clear();
 }
 
+enum class UnwindKind {
+    Fail,
+    Recover
+};
+
+struct vm_unwind {
+    UnwindKind kind;
+    value_t *value;
+};
+
+struct handler_state {
+    UnwindKind kind = UnwindKind::Fail;
+    size_t target = 0;
+    size_t stack_depth = 0;
+    size_t scope_depth = 0;
+    int handler_body_depth = 0;
+    int eval_handler_depth = 0;
+    bool capture = false;
+    eval_capture_snapshot snapshot;
+};
+
+[[noreturn]] void throw_unwind(UnwindKind kind, value_t *value) {
+    throw vm_unwind{kind, value};
+}
+
+struct defer_record {
+    std::shared_ptr<const Proto> proto;
+    std::shared_ptr<scope_t> scope;
+};
+
+value_t *execute_proto(const Proto &proto);
+
 struct iterator_state {
     value_t *iterable = NULL;
     size_t index = 0;
@@ -128,9 +154,18 @@ public:
         : proto_(proto),
           context_(active_eval_context()),
           errors_before_(context_.runtime_error_count),
-          scope_mark_(context_.scopes.restore_stack.size()) {
+          scope_mark_(context_.scopes.restore_stack.size()),
+          saved_handler_depth_(context_.handler_depth) {
         stack_.reserve(64);
-        name_cache_.assign(proto.consts.size(), NULL);
+        if (proto.uses_names)
+            name_cache_.assign(proto.consts.size(), NULL);
+        if (proto.uses_defers)
+            defer_scopes_.emplace_back();
+        if (proto.uses_params) {
+            param_symbols_.reserve(proto.param_names.size());
+            for (const std::string &name : proto.param_names)
+                param_symbols_.push_back(lookupsym(name.c_str()));
+        }
     }
 
     ~Executor() {
@@ -138,6 +173,19 @@ public:
             freeval(state.iterable);
             state.iterable = NULL;
         }
+        while (!handlers_.empty()) {
+            value_t *error = end_handler_capture(handlers_.back());
+            freeval(error);
+            handlers_.pop_back();
+        }
+        for (std::vector<defer_record> &scope : defer_scopes_) {
+            if (context_.vm_defer_count >= (int)scope.size())
+                context_.vm_defer_count -= (int)scope.size();
+            else
+                context_.vm_defer_count = 0;
+        }
+        defer_scopes_.clear();
+        context_.handler_depth = saved_handler_depth_;
     }
 
     value_t *run() {
@@ -146,6 +194,7 @@ public:
                 return abort_error();
             }
 
+            try {
             const Instr ins = proto_.code[pc_];
             const SourceLoc loc =
                 pc_ < proto_.locs.size() ? proto_.locs[pc_] : SourceLoc();
@@ -250,6 +299,85 @@ public:
                     }
                     value_t *result = increment_symbol_direct(
                         sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::LoadParam: {
+                    if (ins.b >= param_symbols_.size()) {
+                        yyerror("invalid bytecode parameter slot");
+                        return abort_error();
+                    }
+                    struct symbol *sym = param_symbols_[ins.b];
+                    if (!sym) {
+                        yyerror("symbol not found %s",
+                                ins.b < proto_.param_names.size()
+                                    ? proto_.param_names[ins.b].c_str()
+                                    : "");
+                        return abort_error();
+                    }
+                    if (sym->is_uninitialized) {
+                        yyerror("parameter %s is used before it is "
+                                "initialized", sym->name);
+                        return abort_error();
+                    }
+                    push(dupval(sym->val));
+                    break;
+                }
+
+                case Op::StoreParam: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    if (ins.b >= param_symbols_.size() ||
+                        !param_symbols_[ins.b]) {
+                        yyerror("invalid bytecode parameter slot");
+                        freeval(value);
+                        return abort_error();
+                    }
+                    value_t *result =
+                        assign_symbol_direct(param_symbols_[ins.b], value);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::CompoundParam: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    if (ins.b >= param_symbols_.size() ||
+                        !param_symbols_[ins.b]) {
+                        yyerror("invalid bytecode parameter slot");
+                        freeval(value);
+                        return abort_error();
+                    }
+                    value_t *result = compound_symbol_direct(
+                        param_symbols_[ins.b], (int)ins.flags, value);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::IncDecParam: {
+                    if (ins.b >= param_symbols_.size() ||
+                        !param_symbols_[ins.b]) {
+                        yyerror("invalid bytecode parameter slot");
+                        return abort_error();
+                    }
+                    value_t *result = increment_symbol_direct(
+                        param_symbols_[ins.b], ins.a ? 1 : -1,
+                        (ins.flags & 1) != 0);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -814,6 +942,301 @@ public:
                     break;
                 }
 
+                case Op::MatchBegin: {
+                    const Constant *c = constant_at(proto_, ins.b);
+                    if (!c || !c->ast) {
+                        yyerror("invalid bytecode match arms");
+                        return abort_error();
+                    }
+                    if (stack_.empty()) {
+                        yyerror("internal bytecode stack underflow");
+                        return abort_error();
+                    }
+                    if (!match_exhaustive_check(c->ast, stack_.back()))
+                        return abort_error();
+                    break;
+                }
+
+                case Op::MatchTest: {
+                    const Constant *c = constant_at(proto_, ins.b);
+                    if (!c || !c->ast) {
+                        yyerror("invalid bytecode match pattern");
+                        return abort_error();
+                    }
+                    value_t *subject = pop_checked();
+                    if (!subject)
+                        return abort_error();
+                    std::vector<pattern_binding> bindings;
+                    bool matched = match_pattern(c->ast, subject, bindings);
+                    freeval(subject);
+                    if (context_.runtime_error_count != errors_before_) {
+                        free_pattern_bindings(bindings);
+                        return abort_error();
+                    }
+                    if (!matched) {
+                        free_pattern_bindings(bindings);
+                        push(newboolval(false));
+                        break;
+                    }
+                    for (pattern_binding &binding : bindings) {
+                        struct symbol *sym = newsym(binding.name.c_str());
+                        sym->val = binding.value;
+                        binding.value = NULL;
+                        sym->is_const = true;
+                        savesym(sym);
+                    }
+                    bindings.clear();
+                    invalidate_name_cache();
+                    push(newboolval(true));
+                    break;
+                }
+
+                case Op::MatchBind: {
+                    const Constant *c = constant_at(proto_, ins.b);
+                    if (!c || !c->ast) {
+                        yyerror("invalid bytecode destructuring pattern");
+                        return abort_error();
+                    }
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    std::vector<pattern_binding> bindings;
+                    bool matched = match_pattern(c->ast, value, bindings);
+                    if (context_.runtime_error_count != errors_before_) {
+                        free_pattern_bindings(bindings);
+                        freeval(value);
+                        return abort_error();
+                    }
+                    if (!matched) {
+                        free_pattern_bindings(bindings);
+                        yyerror("destructuring pattern did not match %s",
+                                typename_of(value));
+                        freeval(value);
+                        return abort_error();
+                    }
+                    for (pattern_binding &binding : bindings) {
+                        if (isrepeated(binding.name.c_str())) {
+                            yyerror("symbol repeated %s",
+                                    binding.name.c_str());
+                            free_pattern_bindings(bindings);
+                            freeval(value);
+                            return abort_error();
+                        }
+                    }
+                    for (pattern_binding &binding : bindings) {
+                        struct symbol *sym = newsym(binding.name.c_str());
+                        sym->val = binding.value;
+                        binding.value = NULL;
+                        sym->is_const = (ins.flags & 1) != 0;
+                        savesym(sym);
+                    }
+                    bindings.clear();
+                    freeval(value);
+                    invalidate_name_cache();
+                    push(newnull());
+                    break;
+                }
+
+                case Op::Closure: {
+                    const Constant *c = constant_at(proto_, ins.b);
+                    if (!c || c->kind != ConstantKind::Function ||
+                        !c->function) {
+                        yyerror("invalid bytecode function");
+                        return abort_error();
+                    }
+                    if (!validate_function_params(
+                            c->function->name.c_str(),
+                            c->function->sl))
+                        return abort_error();
+                    std::shared_ptr<scope_t> closure = current_scope();
+                    if (closure && closure->is_global)
+                        closure.reset();
+                    push(newfuncval(c->function, closure));
+                    break;
+                }
+
+                case Op::BindFunc: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    const char *name = name_at(proto_, ins.b);
+                    if (isrepeated(name)) {
+                        yyerror("symbol repeated %s", name);
+                        freeval(value);
+                        return abort_error();
+                    }
+                    struct symbol *sym = newsym(name);
+                    sym->val = value;
+                    sym->exported = (ins.flags & 1) != 0;
+                    savesym(sym);
+                    invalidate_name_cache();
+                    push(newnull());
+                    break;
+                }
+
+                case Op::DeclareStruct: {
+                    if (ins.b >= proto_.struct_decls.size()) {
+                        yyerror("invalid bytecode struct declaration");
+                        return abort_error();
+                    }
+                    const skein::bc::StructDeclMeta &meta =
+                        proto_.struct_decls[ins.b];
+                    std::vector<std::pair<std::string, type_constraint>>
+                        fields;
+                    fields.reserve(meta.fields.size());
+                    for (const auto &field : meta.fields)
+                        fields.emplace_back(field.name, field.type);
+                    std::vector<std::pair<
+                        std::string, std::shared_ptr<function_code>>>
+                        methods;
+                    methods.reserve(meta.methods.size());
+                    for (const auto &method : meta.methods)
+                        methods.emplace_back(method.name, method.code);
+                    std::shared_ptr<scope_t> closure = current_scope();
+                    if (closure && closure->is_global)
+                        closure.reset();
+                    std::string error;
+                    if (!declare_struct_meta(
+                            meta.module.c_str(),
+                            diag_current_module_name().c_str(),
+                            meta.name.c_str(), meta.exported, fields,
+                            methods, closure, error))
+                        return abort_error();
+                    push(newnull());
+                    break;
+                }
+
+                case Op::DeclareEnum: {
+                    if (ins.b >= proto_.enum_decls.size()) {
+                        yyerror("invalid bytecode enum declaration");
+                        return abort_error();
+                    }
+                    const skein::bc::EnumDeclMeta &meta =
+                        proto_.enum_decls[ins.b];
+                    std::vector<std::pair<
+                        std::string,
+                        std::vector<std::pair<std::string,
+                                              type_constraint>>>>
+                        variants;
+                    variants.reserve(meta.variants.size());
+                    for (const auto &variant : meta.variants) {
+                        std::vector<std::pair<std::string, type_constraint>>
+                            fields;
+                        fields.reserve(variant.fields.size());
+                        for (const auto &field : variant.fields)
+                            fields.emplace_back(field.name, field.type);
+                        variants.emplace_back(variant.name,
+                                              std::move(fields));
+                    }
+                    std::string error;
+                    if (!declare_enum_meta(
+                            meta.module.c_str(),
+                            diag_current_module_name().c_str(),
+                            meta.name.c_str(), meta.exported, variants,
+                            error))
+                        return abort_error();
+                    push(newnull());
+                    break;
+                }
+
+                case Op::DeclareTrait: {
+                    if (ins.b >= proto_.trait_decls.size()) {
+                        yyerror("invalid bytecode trait declaration");
+                        return abort_error();
+                    }
+                    const skein::bc::TraitDeclMeta &meta =
+                        proto_.trait_decls[ins.b];
+                    std::vector<trait_method_meta> methods;
+                    methods.reserve(meta.methods.size());
+                    for (const auto &method : meta.methods) {
+                        trait_method_meta method_meta;
+                        method_meta.name = method.name;
+                        method_meta.params.reserve(method.params.size());
+                        for (const auto &param : method.params) {
+                            trait_param_meta param_meta;
+                            param_meta.name = param.name;
+                            param_meta.type = param.type;
+                            param_meta.variadic = param.variadic;
+                            param_meta.has_default = param.has_default;
+                            method_meta.params.push_back(
+                                std::move(param_meta));
+                        }
+                        methods.push_back(std::move(method_meta));
+                    }
+                    std::string error;
+                    if (!declare_trait_meta(
+                            meta.module.c_str(),
+                            diag_current_module_name().c_str(),
+                            meta.name.c_str(), meta.exported, methods,
+                            error))
+                        return abort_error();
+                    push(newnull());
+                    break;
+                }
+
+                case Op::DeclareImpl: {
+                    if (ins.b >= proto_.impl_decls.size()) {
+                        yyerror("invalid bytecode impl declaration");
+                        return abort_error();
+                    }
+                    const skein::bc::ImplDeclMeta &meta =
+                        proto_.impl_decls[ins.b];
+                    std::vector<std::pair<
+                        std::string, std::shared_ptr<function_code>>>
+                        methods;
+                    methods.reserve(meta.methods.size());
+                    for (const auto &method : meta.methods)
+                        methods.emplace_back(method.name, method.code);
+                    std::shared_ptr<scope_t> closure = current_scope();
+                    if (closure && closure->is_global)
+                        closure.reset();
+                    std::string error;
+                    if (!declare_impl_meta(
+                            meta.module.c_str(),
+                            diag_current_module_name().c_str(),
+                            meta.type_name.c_str(), meta.has_trait,
+                            meta.trait_name.c_str(), methods, closure,
+                            error))
+                        return abort_error();
+                    push(newnull());
+                    break;
+                }
+
+                case Op::NewStruct:
+                case Op::NewEnum: {
+                    if (ins.b >= proto_.constructs.size()) {
+                        yyerror("invalid bytecode constructor");
+                        return abort_error();
+                    }
+                    const skein::bc::ConstructDesc &desc =
+                        proto_.constructs[ins.b];
+                    std::vector<std::pair<std::string, value_t *>>
+                        fields(desc.fields.size());
+                    for (size_t i = desc.fields.size(); i > 0; --i) {
+                        value_t *value = pop_checked();
+                        if (!value) {
+                            for (auto &field : fields)
+                                freeval(field.second);
+                            return abort_error();
+                        }
+                        fields[i - 1] =
+                            std::make_pair(desc.fields[i - 1], value);
+                    }
+                    value_t *result =
+                        static_cast<Op>(ins.op) == Op::NewStruct
+                            ? build_struct_value(desc.module.c_str(),
+                                                 desc.name.c_str(),
+                                                 fields)
+                            : build_enum_value(desc.module.c_str(),
+                                               desc.name.c_str(),
+                                               desc.variant.c_str(),
+                                               fields);
+                    if (!result)
+                        return abort_error();
+                    push(result);
+                    break;
+                }
+
                 case Op::AssignIndex:
                 case Op::CompoundIndex:
                 case Op::IncDecIndex: {
@@ -912,8 +1335,200 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    eval_raise(value);
+                    raise_fail_value(value, "fail");
                     return abort_error();
+                }
+
+                case Op::Pass: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    if (handler_body_depth_ <= 0) {
+                        yyerror("pass outside error handler");
+                        freeval(value);
+                        return abort_error();
+                    }
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(value);
+                        return abort_error();
+                    }
+                    raise_fail_value(value, "fail");
+                    return abort_error();
+                }
+
+                case Op::Recover: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    if (!has_handler(UnwindKind::Recover)) {
+                        yyerror("recover outside error handler");
+                        freeval(value);
+                        return abort_error();
+                    }
+                    throw_unwind(UnwindKind::Recover, value);
+                }
+
+                case Op::PushFailHandler:
+                case Op::PushRecoverHandler: {
+                    handler_state handler;
+                    handler.kind =
+                        static_cast<Op>(ins.op) == Op::PushFailHandler
+                            ? UnwindKind::Fail
+                            : UnwindKind::Recover;
+                    handler.target = ins.b;
+                    handler.stack_depth = stack_.size();
+                    handler.scope_depth =
+                        context_.scopes.restore_stack.size();
+                    if (static_cast<Op>(ins.op) == Op::PushRecoverHandler &&
+                        (ins.flags & 1) != 0 && handler.scope_depth > 0)
+                        --handler.scope_depth;
+                    handler.handler_body_depth = handler_body_depth_;
+                    handler.eval_handler_depth = context_.handler_depth;
+                    handler.capture =
+                        static_cast<Op>(ins.op) == Op::PushFailHandler &&
+                        (ins.flags & 1) != 0;
+                    if (handler.capture)
+                        eval_capture_begin(handler.snapshot);
+                    handlers_.push_back(handler);
+                    break;
+                }
+
+                case Op::PopHandler: {
+                    if (handlers_.empty()) {
+                        yyerror("internal bytecode handler underflow");
+                        return abort_error();
+                    }
+                    value_t *error =
+                        end_handler_capture(handlers_.back());
+                    freeval(error);
+                    handlers_.pop_back();
+                    break;
+                }
+
+                case Op::CheckResult: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    if (value->type != T_result) {
+                        push(value);
+                        break;
+                    }
+                    struct result_value_t *result =
+                        (struct result_value_t *)value;
+                    if (result->ok) {
+                        value_t *inner = dupval(result->value);
+                        freeval(value);
+                        push(inner ? inner : newnull());
+                        break;
+                    }
+                    value_t *error = dupval(result->error);
+                    freeval(value);
+                    if (!error)
+                        error = newerrorval("fail", "");
+                    if (has_handler(UnwindKind::Fail))
+                        throw_unwind(UnwindKind::Fail, error);
+                    eval_raise(error);
+                    return abort_error();
+                }
+
+                case Op::BindName: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    const char *name = name_at(proto_, ins.b);
+                    struct symbol *sym = newsym(name);
+                    sym->val = value;
+                    sym->is_const = (ins.flags & 1) != 0;
+                    savesym(sym);
+                    invalidate_name_cache();
+                    break;
+                }
+
+                case Op::EnterHandlerBody:
+                    ++handler_body_depth_;
+                    ++context_.handler_depth;
+                    break;
+
+                case Op::LeaveHandlerBody:
+                    if (handler_body_depth_ > 0)
+                        --handler_body_depth_;
+                    if (context_.handler_depth > saved_handler_depth_)
+                        --context_.handler_depth;
+                    break;
+
+                case Op::DeferPush: {
+                    if (ins.b >= proto_.defer_protos.size() ||
+                        defer_scopes_.empty()) {
+                        yyerror("invalid bytecode defer descriptor");
+                        return abort_error();
+                    }
+                    defer_record record;
+                    record.proto = proto_.defer_protos[ins.b];
+                    record.scope = current_scope();
+                    defer_scopes_.back().push_back(std::move(record));
+                    ++context_.vm_defer_count;
+                    break;
+                }
+
+                case Op::DeclarePackage: {
+                    if (ins.b >= proto_.packages.size()) {
+                        yyerror("invalid bytecode package descriptor");
+                        return abort_error();
+                    }
+                    const skein::bc::PackageDesc &desc =
+                        proto_.packages[ins.b];
+                    if (!desc.body) {
+                        yyerror("invalid package body");
+                        return abort_error();
+                    }
+
+                    int package_errors = context_.runtime_error_count;
+                    std::string error;
+                    if (package_is_loading())
+                        eval_pushscope();
+                    else
+                        eval_push_isolated_scope();
+
+                    std::string saved_module = diag_current_module_name();
+                    std::string package_module_name =
+                        (saved_module.empty() || saved_module == "main")
+                            ? desc.name
+                            : saved_module;
+                    diag_set_module_name(package_module_name);
+                    value_t *body_ret = execute_proto(*desc.body);
+                    bool invalid_control =
+                        body_ret && (body_ret->type == T_return ||
+                                     body_ret->type == T_break ||
+                                     body_ret->type == T_continue);
+                    if (invalid_control) {
+                        yyerror("invalid control flow in package %s",
+                                desc.name.c_str());
+                    }
+
+                    value_t *ns = NULL;
+                    if (context_.runtime_error_count == package_errors)
+                        ns = package_build_namespace(current_scope().get(),
+                                                     error);
+                    eval_popscope();
+                    diag_set_module_name(saved_module);
+                    freeval(body_ret);
+
+                    if (!ns) {
+                        if (context_.runtime_error_count == package_errors) {
+                            yyerror("package %s: %s", desc.name.c_str(),
+                                    error.empty() ? "cannot build namespace"
+                                                  : error.c_str());
+                        }
+                        return abort_error();
+                    }
+                    if (!package_publish(desc.name.c_str(), ns, error)) {
+                        yyerror("package %s: %s", desc.name.c_str(),
+                                error.c_str());
+                        freeval(ns);
+                        return abort_error();
+                    }
+                    push(newnull());
+                    break;
                 }
 
                 case Op::Import: {
@@ -973,6 +1588,75 @@ public:
                     break;
                 }
 
+                case Op::CallSpread: {
+                    if (ins.b >= proto_.call_descs.size()) {
+                        yyerror("invalid bytecode call descriptor");
+                        return abort_error();
+                    }
+                    const skein::bc::CallDesc &desc =
+                        proto_.call_descs[ins.b];
+                    size_t count = desc.spread.size();
+                    std::vector<value_t *> raw(count);
+                    for (size_t i = count; i > 0; --i) {
+                        value_t *arg = pop_checked();
+                        if (!arg) {
+                            free_args(raw);
+                            return abort_error();
+                        }
+                        raw[i - 1] = arg;
+                    }
+
+                    std::vector<value_t *> args;
+                    args.reserve(count);
+                    bool spread_failed = false;
+                    for (size_t i = 0; i < count; ++i) {
+                        value_t *value = raw[i];
+                        raw[i] = NULL;
+                        if (!desc.spread[i]) {
+                            args.push_back(value);
+                            continue;
+                        }
+                        if (!value || value->type != T_list) {
+                            yyerror("spread expects a list, got %s",
+                                    typename_of(value));
+                            freeval(value);
+                            free_args(args);
+                            free_args(raw);
+                            spread_failed = true;
+                            break;
+                        }
+                        struct list_value_t *list =
+                            (struct list_value_t *)value;
+                        for (value_t *item : list->payload->items)
+                            args.push_back(dupval(item));
+                        freeval(value);
+                    }
+                    if (spread_failed)
+                        return abort_error();
+
+                    value_t *callee = pop_checked();
+                    if (!callee) {
+                        free_args(args);
+                        free_args(raw);
+                        return abort_error();
+                    }
+                    value_t *result =
+                        call_value_args(callee, std::move(args));
+                    freeval(callee);
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (result && is_control(result))
+                        return abort_control(result);
+                    push(result ? result : newnull());
+                    break;
+                }
+
                 case Op::Call: {
                     uint32_t argc = ins.b;
                     std::vector<value_t *> args;
@@ -1028,12 +1712,18 @@ public:
                      * until a declaration in the new scope invalidates them.
                      */
                     eval_pushscope();
+                    if (proto_.uses_defers)
+                        defer_scopes_.emplace_back();
                     break;
 
                 case Op::PopScope: {
                     scope_t *scope = topscope();
                     bool had_symbols =
                         scope && !scope->syms.small.empty();
+                    if (proto_.uses_defers && !defer_scopes_.empty()) {
+                        run_defer_scope(defer_scopes_.back());
+                        defer_scopes_.pop_back();
+                    }
                     eval_popscope();
                     if (had_symbols)
                         invalidate_name_cache();
@@ -1091,6 +1781,16 @@ public:
                     yyerror("invalid bytecode opcode");
                     return abort_error();
             }
+            } catch (vm_unwind &unwind) {
+                if (!dispatch_unwind(unwind)) {
+                    discard_handlers();
+                    run_all_defers();
+                    free_stack(stack_);
+                    pop_scopes_to(scope_mark_);
+                    return NULL;
+                }
+                continue;
+            }
         }
 
         return finish();
@@ -1101,9 +1801,14 @@ private:
     eval_context &context_;
     int errors_before_;
     size_t scope_mark_;
+    int saved_handler_depth_;
     std::vector<value_t *> stack_;
     std::vector<struct symbol *> name_cache_;
+    std::vector<struct symbol *> param_symbols_;
     std::vector<iterator_state> iterators_;
+    std::vector<std::vector<defer_record>> defer_scopes_;
+    std::vector<handler_state> handlers_;
+    int handler_body_depth_ = 0;
     size_t pc_ = 0;
     unsigned instruction_count_ = 0;
 
@@ -1151,13 +1856,212 @@ private:
                          value->type == T_continue);
     }
 
+    bool has_handler(UnwindKind kind) const {
+        for (const handler_state &handler : handlers_) {
+            if (handler.kind == kind)
+                return true;
+        }
+        return false;
+    }
+
+    value_t *end_handler_capture(handler_state &handler) {
+        if (!handler.capture)
+            return NULL;
+        handler.capture = false;
+        eval_capture_result result = eval_capture_end(handler.snapshot);
+        return result.error;
+    }
+
+    void discard_handlers() {
+        while (!handlers_.empty()) {
+            value_t *error = end_handler_capture(handlers_.back());
+            freeval(error);
+            handlers_.pop_back();
+        }
+        handler_body_depth_ = 0;
+        context_.handler_depth = saved_handler_depth_;
+    }
+
+    value_t *run_defer(const defer_record &record) {
+        if (!record.proto || !record.scope) {
+            yyerror("invalid defer");
+            return NULL;
+        }
+        std::shared_ptr<scope_t> saved_scope = context_.scopes.current;
+        context_.scopes.current = record.scope;
+        Executor executor(*record.proto);
+        value_t *result = executor.run();
+        context_.scopes.current = saved_scope;
+        return result;
+    }
+
+    void run_defer_scope(std::vector<defer_record> &records) {
+        if (records.empty())
+            return;
+
+        int pending = static_cast<int>(records.size());
+        if (context_.vm_defer_count >= pending)
+            context_.vm_defer_count -= pending;
+        else
+            context_.vm_defer_count = 0;
+
+        std::vector<defer_record> defers = std::move(records);
+        records.clear();
+
+        eval_control_kind saved_control = context_.control;
+        value_t *saved_value = context_.control_value;
+        context_.control = EVAL_CONTROL_NONE;
+        context_.control_value = NULL;
+
+        bool saved_capture = context_.capture_errors;
+        if (saved_control != EVAL_CONTROL_NONE)
+            context_.capture_errors = false;
+
+        eval_control_kind pending_control = EVAL_CONTROL_NONE;
+        value_t *pending_value = NULL;
+
+        for (size_t i = defers.size(); i > 0; --i) {
+            value_t *result = run_defer(defers[i - 1]);
+            freeval(result);
+            if (context_.control == EVAL_CONTROL_NONE)
+                continue;
+
+            if (pending_control != EVAL_CONTROL_NONE ||
+                (saved_control != EVAL_CONTROL_NONE &&
+                 saved_control != EVAL_CONTROL_CLOSE)) {
+                if (context_.control == EVAL_CONTROL_FAIL) {
+                    yyerror("error in defer: %s",
+                            error_message_of(context_.control_value).c_str());
+                } else {
+                    yyerror("error in defer: recover outside error handler");
+                }
+                freeval(context_.control_value);
+                context_.control_value = NULL;
+                context_.control = EVAL_CONTROL_NONE;
+                continue;
+            }
+
+            pending_control = context_.control;
+            pending_value = context_.control_value;
+            context_.control = EVAL_CONTROL_NONE;
+            context_.control_value = NULL;
+            context_.capture_errors = false;
+        }
+
+        if (saved_control == EVAL_CONTROL_CLOSE &&
+            pending_control == EVAL_CONTROL_FAIL) {
+            freeval(saved_value);
+            context_.control = pending_control;
+            context_.control_value = pending_value;
+        } else if (saved_control != EVAL_CONTROL_NONE) {
+            freeval(pending_value);
+            context_.control = saved_control;
+            context_.control_value = saved_value;
+        } else if (pending_control != EVAL_CONTROL_NONE) {
+            context_.control = pending_control;
+            context_.control_value = pending_value;
+        }
+
+        context_.capture_errors = saved_capture;
+    }
+
+    void run_all_defers() {
+        while (!defer_scopes_.empty()) {
+            run_defer_scope(defer_scopes_.back());
+            defer_scopes_.pop_back();
+        }
+    }
+
+    void pop_scopes_with_defers(size_t mark) {
+        while (context_.scopes.restore_stack.size() > mark) {
+            if (defer_scopes_.size() > 1) {
+                run_defer_scope(defer_scopes_.back());
+                defer_scopes_.pop_back();
+            }
+            eval_popscope();
+        }
+    }
+
+    bool dispatch_unwind(vm_unwind &unwind) {
+        for (size_t i = handlers_.size(); i > 0; --i) {
+            if (handlers_[i - 1].kind != unwind.kind)
+                continue;
+
+            handler_state handler = handlers_[i - 1];
+            for (size_t j = handlers_.size(); j > i; --j) {
+                value_t *error = end_handler_capture(handlers_[j - 1]);
+                freeval(error);
+            }
+            value_t *captured = end_handler_capture(handlers_[i - 1]);
+            if (!unwind.value)
+                unwind.value = captured;
+            else
+                freeval(captured);
+            handlers_.resize(i - 1);
+
+            while (stack_.size() > handler.stack_depth) {
+                freeval(stack_.back());
+                stack_.pop_back();
+            }
+            pop_scopes_with_defers(handler.scope_depth);
+
+            handler_body_depth_ = handler.handler_body_depth;
+            context_.handler_depth = handler.eval_handler_depth;
+
+            value_t *value = unwind.value;
+            if (!value)
+                value = newerrorval("runtime", "runtime error");
+            push(value);
+            pc_ = handler.target;
+            return true;
+        }
+
+        freeval(unwind.value);
+        unwind.value = NULL;
+        return false;
+    }
+
+    void raise_fail_value(value_t *value, const char *kind) {
+        value_t *error = normalize_error(value, kind);
+        if (has_handler(UnwindKind::Fail))
+            throw_unwind(UnwindKind::Fail, error);
+        eval_raise(error);
+    }
+
     value_t *abort_control(value_t *control) {
+        discard_handlers();
+        run_all_defers();
         free_stack(stack_);
         pop_scopes_to(scope_mark_);
         return control;
     }
 
     value_t *abort_error() {
+        if (context_.control != EVAL_CONTROL_CLOSE) {
+            if (context_.control == EVAL_CONTROL_FAIL &&
+                has_handler(UnwindKind::Fail)) {
+                value_t *error = take_eval_control(EVAL_CONTROL_FAIL);
+                if (!error)
+                    error = newerrorval("fail", "");
+                throw_unwind(UnwindKind::Fail, error);
+            }
+            if (context_.control == EVAL_CONTROL_RECOVER &&
+                has_handler(UnwindKind::Recover)) {
+                value_t *value = take_eval_control(EVAL_CONTROL_RECOVER);
+                throw_unwind(UnwindKind::Recover, value);
+            }
+            if (context_.control == EVAL_CONTROL_NONE &&
+                has_handler(UnwindKind::Fail)) {
+                std::string message = context_.has_captured_error
+                                          ? context_.captured_error
+                                          : "runtime error";
+                throw_unwind(UnwindKind::Fail,
+                             newerrorval("runtime", message));
+            }
+        }
+
+        discard_handlers();
+        run_all_defers();
         free_stack(stack_);
         pop_scopes_to(scope_mark_);
         return NULL;
@@ -1169,6 +2073,8 @@ private:
             result = stack_.back();
             stack_.pop_back();
         }
+        discard_handlers();
+        run_all_defers();
         free_stack(stack_);
         pop_scopes_to(scope_mark_);
 
@@ -1262,9 +2168,7 @@ void skein_vm_set_enabled(bool enabled) {
 }
 
 void skein_vm_forget_function_code(function_code *code) {
-    if (!code)
-        return;
-    function_cache.erase(code);
+    (void)code;
 }
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {
@@ -1290,25 +2194,23 @@ bool skein_vm_try_execute_function_body(
         return false;
 
     function_code *code = def->code.get();
-    auto it = function_cache.find(code);
-    if (it == function_cache.end()) {
+    if (code->vm_compile_failed)
+        return false;
+    if (!code->vm_proto) {
         std::string error;
         ProtoPtr proto = skein_compile_function_body(
             code, diag_current_module_name(), error);
-        cache_entry entry;
         if (!proto) {
-            entry.failed = true;
+            code->vm_compile_failed = true;
             if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
                 std::fprintf(stderr, "[vm] fallback function %s: %s\n",
                              code->name.c_str(), error.c_str());
-        } else {
-            entry.proto = std::move(proto);
+            return false;
         }
-        it = function_cache.emplace(code, std::move(entry)).first;
+        code->vm_proto = proto;
     }
 
-    if (it->second.failed || !it->second.proto)
-        return false;
+    ProtoPtr proto = std::static_pointer_cast<const Proto>(code->vm_proto);
 
     eval_context &context = active_eval_context();
     int limit = vm_max_depth();
@@ -1319,6 +2221,6 @@ bool skein_vm_try_execute_function_body(
     }
 
     vm_depth_guard guard(context);
-    out = execute_proto(*it->second.proto);
+    out = execute_proto(*proto);
     return true;
 }

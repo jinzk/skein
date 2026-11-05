@@ -24,6 +24,9 @@ struct function_code {
     bool variadic;
     bool is_async;
     bool is_generator;
+    /* Opaque bytecode cache owned by the interpreter layer. */
+    std::shared_ptr<const void> vm_proto;
+    bool vm_compile_failed = false;
 };
 
 struct function_def {

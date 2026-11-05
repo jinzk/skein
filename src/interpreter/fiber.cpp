@@ -251,8 +251,9 @@ struct generator {
         if (value) {
             if (generator_warnings_enabled && !shutting_down &&
                 started && !done && value->state == FIBER_YIELDED) {
-                bool has_defers = false;
-                for (size_t i = 0; i < value->eval.defer_stack.size(); ++i) {
+                bool has_defers = value->eval.vm_defer_count > 0;
+                for (size_t i = 0;
+                     !has_defers && i < value->eval.defer_stack.size(); ++i) {
                     if (!value->eval.defer_stack[i].empty()) {
                         has_defers = true;
                         break;

@@ -16,6 +16,10 @@ const char *op_name(Op op) {
         case Op::CompoundName: return "COMPOUND_NAME";
         case Op::IncDecName: return "INCDEC_NAME";
         case Op::DefineName: return "DEFINE_NAME";
+        case Op::LoadParam: return "LOAD_PARAM";
+        case Op::StoreParam: return "STORE_PARAM";
+        case Op::CompoundParam: return "COMPOUND_PARAM";
+        case Op::IncDecParam: return "INCDEC_PARAM";
         case Op::Pop: return "POP";
         case Op::Dup: return "DUP";
         case Op::Swap: return "SWAP";
@@ -51,12 +55,35 @@ const char *op_name(Op op) {
         case Op::IterEnd: return "ITER_END";
         case Op::SwitchCheck: return "SWITCH_CHECK";
         case Op::CaseMatch: return "CASE_MATCH";
+        case Op::MatchBegin: return "MATCH_BEGIN";
+        case Op::MatchTest: return "MATCH_TEST";
+        case Op::MatchBind: return "MATCH_BIND";
         case Op::AssignIndex: return "ASSIGN_INDEX";
         case Op::CompoundIndex: return "COMPOUND_INDEX";
         case Op::IncDecIndex: return "INCDEC_INDEX";
         case Op::Await: return "AWAIT";
         case Op::Yield: return "YIELD";
         case Op::Fail: return "FAIL";
+        case Op::Pass: return "PASS";
+        case Op::Recover: return "RECOVER";
+        case Op::PushFailHandler: return "PUSH_FAIL_HANDLER";
+        case Op::PushRecoverHandler: return "PUSH_RECOVER_HANDLER";
+        case Op::PopHandler: return "POP_HANDLER";
+        case Op::CheckResult: return "CHECK_RESULT";
+        case Op::BindName: return "BIND_NAME";
+        case Op::EnterHandlerBody: return "ENTER_HANDLER_BODY";
+        case Op::LeaveHandlerBody: return "LEAVE_HANDLER_BODY";
+        case Op::DeferPush: return "DEFER_PUSH";
+        case Op::NewStruct: return "NEW_STRUCT";
+        case Op::NewEnum: return "NEW_ENUM";
+        case Op::DeclareStruct: return "DECLARE_STRUCT";
+        case Op::DeclareEnum: return "DECLARE_ENUM";
+        case Op::DeclareTrait: return "DECLARE_TRAIT";
+        case Op::DeclareImpl: return "DECLARE_IMPL";
+        case Op::Closure: return "CLOSURE";
+        case Op::BindFunc: return "BIND_FUNC";
+        case Op::CallSpread: return "CALL_SPREAD";
+        case Op::DeclarePackage: return "DECLARE_PACKAGE";
         case Op::Import: return "IMPORT";
         case Op::Call: return "CALL";
         case Op::Return: return "RETURN";
@@ -85,6 +112,8 @@ std::string constant_brief(const Constant &c) {
             return "<decl>";
         case ConstantKind::Type:
             return "<type>";
+        case ConstantKind::Function:
+            return c.function ? c.function->name : "<function>";
     }
     return "?";
 }
@@ -118,6 +147,9 @@ std::string disassemble(const Proto &proto) {
             op == Op::StoreName || op == Op::CompoundName ||
             op == Op::IncDecName || op == Op::DefineName ||
             op == Op::IsType || op == Op::EvalAst ||
+            op == Op::MatchBegin || op == Op::MatchTest ||
+            op == Op::MatchBind || op == Op::BindName ||
+            op == Op::Closure || op == Op::BindFunc ||
             op == Op::ControlBreak || op == Op::ControlContinue ||
             op == Op::RuntimeError;
         if (const_operand && ins.b < proto.consts.size())
@@ -138,6 +170,23 @@ std::string disassemble(const Proto &proto) {
         }
         if (op == Op::Import && ins.a < proto.imports.size())
             out << " import=" << proto.imports[ins.a].path;
+        if (op == Op::DeferPush && ins.b < proto.defer_protos.size())
+            out << " defer=" << ins.b;
+        if ((op == Op::NewStruct || op == Op::NewEnum) &&
+            ins.b < proto.constructs.size())
+            out << " construct=" << proto.constructs[ins.b].name;
+        if (op == Op::DeclareStruct && ins.b < proto.struct_decls.size())
+            out << " struct=" << proto.struct_decls[ins.b].name;
+        if (op == Op::DeclareEnum && ins.b < proto.enum_decls.size())
+            out << " enum=" << proto.enum_decls[ins.b].name;
+        if (op == Op::DeclareTrait && ins.b < proto.trait_decls.size())
+            out << " trait=" << proto.trait_decls[ins.b].name;
+        if (op == Op::DeclareImpl && ins.b < proto.impl_decls.size())
+            out << " impl=" << proto.impl_decls[ins.b].type_name;
+        if (op == Op::DeclarePackage && ins.b < proto.packages.size())
+            out << " package=" << proto.packages[ins.b].name;
+        if (op == Op::CallSpread && ins.b < proto.call_descs.size())
+            out << " args=" << proto.call_descs[ins.b].spread.size();
         if (loc.line > 0)
             out << "  @" << loc.line << ":" << loc.column;
         out << "\n";

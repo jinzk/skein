@@ -301,6 +301,8 @@ struct SavedVmState {
     int handler_body_depth = 0;
     bool allow_await = false;
     size_t diag_frames = 0;
+    std::string diag_module;
+    std::string diag_source;
     std::shared_ptr<function_def> def;
     std::vector<struct symbol *> name_cache;
     std::vector<struct symbol *> param_symbols;
@@ -2414,6 +2416,8 @@ private:
         state.handler_body_depth = handler_body_depth_;
         state.allow_await = context_.allow_await;
         state.diag_frames = diag_frames_;
+        state.diag_module = diag_current_module_name();
+        state.diag_source = diag_current_source_name();
         state.def = std::move(current_def_);
         state.name_cache = std::move(name_cache_);
         state.param_symbols = std::move(param_symbols_);
@@ -2440,6 +2444,8 @@ private:
         context_.handler_depth = state.caller_handler_depth;
         context_.allow_await = state.allow_await;
         diag_frames_ = state.diag_frames;
+        diag_set_module_name(state.diag_module);
+        diag_set_source_name(state.diag_source);
         current_def_ = std::move(state.def);
         name_cache_ = std::move(state.name_cache);
         param_symbols_ = std::move(state.param_symbols);
@@ -2562,6 +2568,10 @@ private:
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
         save_current_state();
+        if (!code->module.empty())
+            diag_set_module_name(code->module);
+        if (!code->source.empty())
+            diag_set_source_name(code->source);
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
         pc_ = 0;
@@ -3777,10 +3787,30 @@ private:
     }
 };
 
+struct vm_module_guard {
+    std::string previous_module;
+    std::string previous_source;
+    vm_module_guard(const std::string &module, const std::string &source)
+        : previous_module(diag_current_module_name()),
+          previous_source(diag_current_source_name()) {
+        if (!module.empty())
+            diag_set_module_name(module);
+        if (!source.empty())
+            diag_set_source_name(source);
+    }
+    ~vm_module_guard() {
+        diag_set_module_name(previous_module);
+        diag_set_source_name(previous_source);
+    }
+};
+
 value_t *execute_proto(const Proto &proto,
                        const std::shared_ptr<function_def> &def) {
     if (vm_trace_state)
         std::fputs(skein::bc::disassemble(proto).c_str(), stderr);
+    vm_module_guard module_guard(
+        def && def->code ? def->code->module : std::string(),
+        def && def->code ? def->code->source : std::string());
     Executor executor(proto, def);
     return executor.run();
 }

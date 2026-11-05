@@ -909,6 +909,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
                           node->ast ? node->ast->column : 0,
                           diag_current_module_name(), {}},
         free_function_code);
+    code->source = diag_current_source_name();
     struct ast *body = node->ast;
     if (!body)
         body = newret(newnullast());

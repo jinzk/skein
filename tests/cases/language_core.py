@@ -3,6 +3,8 @@
 
 Extracted from the original test_skein.py main() body, lines 710-1099.
 """
+import os
+
 from harness import *  # noqa: F401,F403
 
 
@@ -125,6 +127,41 @@ def run_cases():
           stderr="cannot assign to constant x")
     check("increment const container element",
           "const a = [1];\na[0]++;\na\n", stdout="= [2]")
+    check("const scalar propagation",
+          "func f() {\n"
+          "  const A = 2;\n"
+          "  const B = A * 3 + 1;\n"
+          "  return B;\n"
+          "}\n"
+          "print(f());\n",
+          stdout="7")
+    check("const propagation shadowing",
+          "func f() {\n"
+          "  const A = 1;\n"
+          "  { const A = 5; print(A); }\n"
+          "  { let A = 9; print(A); }\n"
+          "  print(A);\n"
+          "}\n"
+          "f();\n",
+          stdout_all=["5", "9", "1"])
+    check("const string concatenation",
+          'const S = "a" + "b";\nprint(S);\n',
+          stdout="ab")
+    check("const container is not propagated",
+          "func f() {\n"
+          "  const L = [1];\n"
+          "  L[0] = 2;\n"
+          "  return L[0];\n"
+          "}\nprint(f());\n",
+          stdout="2")
+    check("const propagation can be disabled",
+          "func f() {\n"
+          "  const A = 2;\n"
+          "  const B = A * 3 + 1;\n"
+          "  return B;\n"
+          "}\nprint(f());\n",
+          stdout="7",
+          env=dict(os.environ, SKEIN_VM="1", SKEIN_NO_CONST_PROP="1"))
     check("increment string", 'let s = "a";\ns++;\n',
           stderr="cannot increment string")
     check("decrement bool", "let b = true;\nb--;\n",

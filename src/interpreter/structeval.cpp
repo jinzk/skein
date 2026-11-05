@@ -82,6 +82,7 @@ static std::shared_ptr<function_def> make_field_default(
     code->def_line = expr->line;
     code->def_column = expr->column;
     code->module = diag_current_module_name();
+    code->source = diag_current_source_name();
     set_function_body_ast(code.get(), newret(expr));
     return field_default_from_code(code, closure);
 }

@@ -156,6 +156,7 @@ add_library(skein_runtime STATIC
   src/runtime/symbol.cpp
   src/runtime/cycle.cpp
   src/runtime/serialization.cpp
+  src/runtime/typeinfo.cpp
   src/runtime/json.cpp
   src/runtime/format.cpp
   src/runtime/encoding.cpp
@@ -237,6 +238,7 @@ add_library(skein_builtins STATIC
   src/builtins/builtins_text.cpp
   src/builtins/builtins_bytes.cpp
   src/builtins/builtins_fn.cpp
+  src/builtins/builtins_meta.cpp
   src/builtins/builtins_lru.cpp
   src/builtins/builtins_deque.cpp
   src/builtins/builtins_heap.cpp

@@ -89,6 +89,66 @@ struct type_constraint *new_named_type_constraint(const char *name,
     return type;
 }
 
+namespace {
+
+struct builtin_type_name {
+    const char *name;
+    const char *canonical;
+    enum type_constraint_kind kind;
+};
+
+const builtin_type_name kBuiltinTypeNames[] = {
+    {"any", "any", TYPE_ANY},
+    {"int", "int", TYPE_INT},
+    {"float", "float", TYPE_FLOAT},
+    {"number", "number", TYPE_NUMBER},
+    {"bool", "bool", TYPE_BOOL},
+    {"string", "string", TYPE_STRING},
+    {"str", "string", TYPE_STRING},
+    {"char", "char", TYPE_CHAR},
+    {"byte", "byte", TYPE_BYTE},
+    {"bytes", "bytes", TYPE_BYTES},
+    {"list", "list", TYPE_LIST},
+    {"dict", "dict", TYPE_DICT},
+    {"deque", "deque", TYPE_DEQUE},
+    {"heap", "heap", TYPE_HEAP},
+    {"set", "set", TYPE_SET},
+    {"function", "function", TYPE_FUNCTION},
+    {"func", "function", TYPE_FUNCTION},
+    {"builtin", "builtin", TYPE_BUILTIN},
+    {"callable", "callable", TYPE_CALLABLE},
+    {"null", "null", TYPE_NULL},
+    {"userdata", "userdata", TYPE_USERDATA},
+    {"result", "result", TYPE_RESULT},
+    {"error", "error", TYPE_ERROR},
+};
+
+const builtin_type_name *find_builtin_type_name(const char *name) {
+    if (!name)
+        return NULL;
+    for (const builtin_type_name &entry : kBuiltinTypeNames) {
+        if (std::strcmp(name, entry.name) == 0)
+            return &entry;
+    }
+    return NULL;
+}
+
+} // namespace
+
+bool type_constraint_kind_for_builtin_name(const char *name,
+                                           enum type_constraint_kind &kind) {
+    const builtin_type_name *entry = find_builtin_type_name(name);
+    if (!entry)
+        return false;
+    kind = entry->kind;
+    return true;
+}
+
+const char *type_constraint_canonical_builtin_name(const char *name) {
+    const builtin_type_name *entry = find_builtin_type_name(name);
+    return entry ? entry->canonical : NULL;
+}
+
 void free_type_constraint(struct type_constraint *type) {
     std::free(type);
 }

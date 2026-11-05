@@ -139,7 +139,9 @@ struct_def *structtype_find_struct(const char *module, const char *name) {
 }
 
 struct_def *structtype_find_struct_by_name(const char *module_name,
-                                           const char *name) {
+                                           const char *name,
+                                           bool *ambiguous) {
+    if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
     if (module_name && *module_name) {
         auto it = logical_structs.find(type_key(module_name, name));
@@ -149,8 +151,10 @@ struct_def *structtype_find_struct_by_name(const char *module_name,
     for (auto &entry : logical_structs) {
         if (!entry.second || entry.second->name != name)
             continue;
-        if (found && found != entry.second)
+        if (found && found != entry.second) {
+            if (ambiguous) *ambiguous = true;
             return NULL;
+        }
         found = entry.second;
     }
     return found;
@@ -171,6 +175,28 @@ trait_def *structtype_find_trait(const char *module, const char *name) {
     if (!name) return NULL;
     auto it = trait_types.find(type_key(module, name));
     return it == trait_types.end() ? NULL : it->second.get();
+}
+
+trait_def *structtype_find_trait_by_name(const char *module_name,
+                                         const char *name,
+                                         bool *ambiguous) {
+    if (ambiguous) *ambiguous = false;
+    if (!name) return NULL;
+    if (module_name && *module_name) {
+        auto it = logical_traits.find(type_key(module_name, name));
+        return it == logical_traits.end() ? NULL : it->second;
+    }
+    trait_def *found = NULL;
+    for (auto &entry : logical_traits) {
+        if (!entry.second || entry.second->name != name)
+            continue;
+        if (found && found != entry.second) {
+            if (ambiguous) *ambiguous = true;
+            return NULL;
+        }
+        found = entry.second;
+    }
+    return found;
 }
 
 trait_def *structtype_resolve_trait(const char *module, const char *name,
@@ -210,7 +236,9 @@ enum_def *structtype_find_enum(const char *module, const char *name) {
 }
 
 enum_def *structtype_find_enum_by_name(const char *module_name,
-                                       const char *name) {
+                                       const char *name,
+                                       bool *ambiguous) {
+    if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
     if (module_name && *module_name) {
         auto it = logical_enums.find(type_key(module_name, name));
@@ -220,11 +248,229 @@ enum_def *structtype_find_enum_by_name(const char *module_name,
     for (auto &entry : logical_enums) {
         if (!entry.second || entry.second->name != name)
             continue;
-        if (found && found != entry.second)
+        if (found && found != entry.second) {
+            if (ambiguous) *ambiguous = true;
             return NULL;
+        }
         found = entry.second;
     }
     return found;
+}
+
+static bool lookup_def_visible(const char *importer_source,
+                               const char *importer_module,
+                               const type_def *def) {
+    if (!def)
+        return false;
+    if (def->exported)
+        return true;
+    if (importer_source && def->module == importer_source)
+        return true;
+    if (importer_module && def->module_name == importer_module)
+        return true;
+    return false;
+}
+
+static bool lookup_trait_visible(const char *importer_source,
+                                 const char *importer_module,
+                                 const trait_def *def) {
+    if (!def)
+        return false;
+    if (def->exported)
+        return true;
+    if (importer_source && def->module == importer_source)
+        return true;
+    if (importer_module && def->module_name == importer_module)
+        return true;
+    return false;
+}
+
+enum structtype_lookup_status structtype_lookup_type(
+    const char *importer_source, const char *importer_module,
+    const char *name, struct structtype_lookup_result &out,
+    std::string &error) {
+    out = structtype_lookup_result();
+    error.clear();
+    if (!name || !*name) {
+        error = "invalid type name";
+        return STRUCTTYPE_LOOKUP_ERROR;
+    }
+
+    std::string text(name);
+    std::string prefix;
+    std::string base;
+    if (split_qualified_name(name, prefix, base)) {
+        std::string target = resolve_qualified_module(importer_source, prefix);
+        struct_def *structure = NULL;
+        enum_def *enumeration = NULL;
+        trait_def *trait = NULL;
+        auto sit = logical_structs.find(type_key(target.c_str(), base.c_str()));
+        if (sit != logical_structs.end())
+            structure = sit->second;
+        auto eit = logical_enums.find(type_key(target.c_str(), base.c_str()));
+        if (eit != logical_enums.end())
+            enumeration = eit->second;
+        auto tit = logical_traits.find(type_key(target.c_str(), base.c_str()));
+        if (tit != logical_traits.end())
+            trait = tit->second;
+
+        int found = (structure ? 1 : 0) + (enumeration ? 1 : 0) +
+                    (trait ? 1 : 0);
+        if (found > 1) {
+            error = "ambiguous type " + text +
+                    "; use a package-qualified name";
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        if (found == 0) {
+            error = "unknown type " + text;
+            return STRUCTTYPE_LOOKUP_NOT_FOUND;
+        }
+
+        bool visible =
+            structure ? lookup_def_visible(importer_source, importer_module,
+                                           structure)
+                      : enumeration
+                            ? lookup_def_visible(importer_source,
+                                                 importer_module,
+                                                 enumeration)
+                            : lookup_trait_visible(importer_source,
+                                                   importer_module, trait);
+        if (!visible) {
+            error = "type " + text + " is not visible";
+            return STRUCTTYPE_LOOKUP_NOT_VISIBLE;
+        }
+
+        if (structure) {
+            out.kind = STRUCTTYPE_LOOKUP_STRUCT;
+            out.structure = structure;
+        } else if (enumeration) {
+            out.kind = STRUCTTYPE_LOOKUP_ENUM;
+            out.enumeration = enumeration;
+        } else {
+            out.kind = STRUCTTYPE_LOOKUP_TRAIT;
+            out.trait = trait;
+        }
+        return STRUCTTYPE_LOOKUP_FOUND;
+    }
+
+    /* A type declared in the caller's own source is always visible. */
+    if (importer_source && *importer_source) {
+        struct_def *structure = structtype_find_struct(importer_source, name);
+        enum_def *enumeration = structtype_find_enum(importer_source, name);
+        trait_def *trait = structtype_find_trait(importer_source, name);
+        int found = (structure ? 1 : 0) + (enumeration ? 1 : 0) +
+                    (trait ? 1 : 0);
+        if (found > 1) {
+            error = "ambiguous type " + text;
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        if (found == 1) {
+            if (structure) {
+                out.kind = STRUCTTYPE_LOOKUP_STRUCT;
+                out.structure = structure;
+            } else if (enumeration) {
+                out.kind = STRUCTTYPE_LOOKUP_ENUM;
+                out.enumeration = enumeration;
+            } else {
+                out.kind = STRUCTTYPE_LOOKUP_TRAIT;
+                out.trait = trait;
+            }
+            return STRUCTTYPE_LOOKUP_FOUND;
+        }
+    }
+
+    /* Types in the caller's logical module are also local. */
+    if (importer_module && *importer_module) {
+        struct_def *structure =
+            structtype_find_struct_by_name(importer_module, name);
+        enum_def *enumeration =
+            structtype_find_enum_by_name(importer_module, name);
+        trait_def *trait =
+            structtype_find_trait_by_name(importer_module, name);
+        int found = (structure ? 1 : 0) + (enumeration ? 1 : 0) +
+                    (trait ? 1 : 0);
+        if (found > 1) {
+            error = "ambiguous type " + text;
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        if (found == 1) {
+            if (structure) {
+                out.kind = STRUCTTYPE_LOOKUP_STRUCT;
+                out.structure = structure;
+            } else if (enumeration) {
+                out.kind = STRUCTTYPE_LOOKUP_ENUM;
+                out.enumeration = enumeration;
+            } else {
+                out.kind = STRUCTTYPE_LOOKUP_TRAIT;
+                out.trait = trait;
+            }
+            return STRUCTTYPE_LOOKUP_FOUND;
+        }
+    }
+
+    /* Finally, an unqualified name may refer to one visible exported type. */
+    struct_def *structure = NULL;
+    enum_def *enumeration = NULL;
+    trait_def *trait = NULL;
+    int found = 0;
+    for (auto &entry : logical_structs) {
+        struct_def *candidate = entry.second;
+        if (!candidate || candidate->name != name || !candidate->exported)
+            continue;
+        if (structure && structure != candidate) {
+            error = "ambiguous type " + text +
+                    "; use a package-qualified name";
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        structure = candidate;
+        ++found;
+    }
+    for (auto &entry : logical_enums) {
+        enum_def *candidate = entry.second;
+        if (!candidate || candidate->name != name || !candidate->exported)
+            continue;
+        if (enumeration && enumeration != candidate) {
+            error = "ambiguous type " + text +
+                    "; use a package-qualified name";
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        enumeration = candidate;
+        ++found;
+    }
+    for (auto &entry : logical_traits) {
+        trait_def *candidate = entry.second;
+        if (!candidate || candidate->name != name || !candidate->exported)
+            continue;
+        if (trait && trait != candidate) {
+            error = "ambiguous type " + text +
+                    "; use a package-qualified name";
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        trait = candidate;
+        ++found;
+    }
+
+    if (found > 1) {
+        error = "ambiguous type " + text +
+                "; use a package-qualified name";
+        return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+    }
+    if (found == 0) {
+        error = "unknown type " + text;
+        return STRUCTTYPE_LOOKUP_NOT_FOUND;
+    }
+
+    if (structure) {
+        out.kind = STRUCTTYPE_LOOKUP_STRUCT;
+        out.structure = structure;
+    } else if (enumeration) {
+        out.kind = STRUCTTYPE_LOOKUP_ENUM;
+        out.enumeration = enumeration;
+    } else {
+        out.kind = STRUCTTYPE_LOOKUP_TRAIT;
+        out.trait = trait;
+    }
+    return STRUCTTYPE_LOOKUP_FOUND;
 }
 
 bool structtype_type_exists(const char *module, const char *name) {

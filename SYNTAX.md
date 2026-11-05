@@ -716,6 +716,7 @@ const limit: int = 10;
 - 嵌套作用域允许遮蔽外层变量；
 - `const` 绑定不可重新赋值；
 - `let` / `const` 都是块级作用域；
+- 不可变标量 `const` 在同一个编译单元内可参与常量折叠，不改变运行时语义；
 - 初始化失败或类型不匹配时不会创建绑定。
 
 支持的类型：
@@ -1746,6 +1747,7 @@ std.fs
 std.process
 std.worker
 std.type
+std.meta
 std.module
 std.net
 std.http
@@ -2226,6 +2228,7 @@ std.io.write_async(stream, data[, timeout_ms])
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
+- `std.meta`：只读类型反射，查询字段、变体、方法和 trait；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
 - `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/async；
 - `std.tls`：基于 OpenSSL 的同步 TLS 流包装（可选）；
@@ -3382,12 +3385,115 @@ fsm.restore(snap, decode = null)    -> Context
 
 性能提示：单步 `step` 每次都会为值语义复制历史表，O(history)/次；`run` 在单次调用内复用同一份历史，整体 O(events)，`history` 为 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。
 
+### std.meta
+
+```text
+std.meta.type_info(type)                -> dict
+std.meta.fields(type)                   -> list
+std.meta.variants(type)                 -> list
+std.meta.methods(type)                  -> list
+std.meta.traits(type)                   -> list
+std.meta.implements(type, trait_name)   -> bool
+std.meta.has_type(type)                 -> bool
+```
+
+`std.meta` 是只读类型反射。`type` 可以是 struct / enum 实例、内建类型的值，
+或类型名字符串（支持 `module::Type`）。`kind_of` 返回的 `struct` / `enum` /
+`method` 等是运行时 kind，不是类型名，不能传给 `std.meta`；应使用
+`type_name(value)` 或字符串。
+
+字符串参数始终按类型名解释：`std.meta.type_info("Hello")` 查找名为
+`Hello` 的类型；要查询 string 类型本身，请写 `std.meta.type_info("string")`。
+
+```text
+import std;
+
+struct Point { x: int; y: int = 0; }
+impl Point {
+  func moved(self, dx: int, dy: int = 0) {
+    return Point { x: self.x + dx, y: self.y + dy };
+  }
+}
+
+let info = std.meta.type_info("Point");
+info["kind"];                  // "struct"
+info["name"];                  // "Point"
+info["module"];                // "main"
+info["fields"][0]["name"];     // "x"
+info["fields"][1]["has_default"]; // true
+info["methods"][0]["name"];    // "moved"
+info["methods"][0]["params"];  // ["int", "int"]，不包含 self
+info["methods"][0]["has_defaults"]; // true
+```
+
+`type_info` 的返回结构：
+
+```text
+{
+  "kind": "struct" | "enum" | "trait" | "builtin",
+  "name": "Point",
+  "module": "main",
+  "source": "main",
+  "exported": true,
+  "fields": [ ... ],
+  "variants": [ ... ],
+  "methods": [ ... ],
+  "traits": [ ... ]
+}
+```
+
+字段描述：
+
+```text
+{
+  "name": "x",
+  "type": "int",
+  "nullable": false,
+  "readonly": false,
+  "has_default": false
+}
+```
+
+enum 变体字段的 `readonly` 为 `true`。变体描述：
+
+```text
+{
+  "name": "UserMsg",
+  "fields": [ ... 字段描述 ... ]
+}
+```
+
+方法描述中的 `params` 不包含 `self`，是调用时显式传入的参数类型。
+
+规则：
+
+- `fields` / `variants` / `methods` / `traits` 对不适用的类型返回空列表；
+- 只查询**已加载且可见**的类型：当前包/当前源文件中的类型可见；其他包的
+  类型必须 `export`。不可见类型在 `type_info` 等函数中报
+  `type X is not visible`，`has_type` 返回 `false`；
+- 值形式的参数同样受可见性约束，不能用隐藏类型的值绕过；
+- 未限定类型名跨包同名时报歧义，使用 `pkg::Type`；
+- 内建类型使用 `kind = "builtin"`，例如 `"str"` 规范化为 `"string"`，
+  `"func"` 规范化为 `"function"`；
+- 内建类型的内建类型名包括 `any` / `int` / `float` / `number` / `bool` /
+  `string` / `char` / `byte` / `bytes` / `list` / `dict` / `deque` / `heap` /
+  `set` / `function` / `builtin` / `callable` / `null` / `userdata` /
+  `result` / `error`；
+- `lru` / `method` / `native` / `class` / `struct` / `enum` 是运行时 kind，
+  不是类型名；
+- `has_type` 对未知类型返回 `false`；其他函数对未知类型报错；
+- `implements` 要求 trait 名已知，未知 trait 报错；
+- 不返回值默认值，只提供 `has_default` 标记。
+
 ### std.enum
 
 ```text
-std.enum.decode(value)                  -> enum
-std.enum.tag(value)                     -> string
-std.enum.tag(type_name, variant_name)   -> string
+std.enum.decode(value)                          -> enum
+std.enum.decode(value, type_name)               -> enum
+std.enum.decode(value, options)                 -> enum
+std.enum.decode(value, type_name, options)      -> enum
+std.enum.tag(value)                             -> string
+std.enum.tag(type_name, variant_name)           -> string
 ```
 
 `decode` 把 `std.json.parse` 得到的 `{"$enum":"Event::UserMsg","payload":{...}}` 还原成枚举值；嵌套枚举会递归还原。输入不是枚举对象时报错。
@@ -3399,6 +3505,24 @@ let e = std.enum.decode(std.json.parse(
   std.json.stringify(Event::UserMsg { text: "hi" })
 ));
 ```
+
+可选类型名用于校验 tag 并消除跨包同名歧义：
+
+```text
+std.enum.decode(value, "aa::Event")
+std.enum.decode(value, "aa::Event", {"defaults": true})
+```
+
+`options` 当前支持：
+
+```text
+{"defaults": true}
+```
+
+`defaults: true` 时，载荷中缺失且有默认值的字段会在声明包作用域中重新求值；
+可空字段缺失时填 `null`。不传 options 时保持原有行为。
+
+
 
 `tag` 返回 `module::Enum::Variant` 形式的规范字符串，丢弃载荷：
 
@@ -3418,8 +3542,9 @@ std.enum.tag("E", "A")        // "main::E::A"
 ### std.struct
 
 ```text
-std.struct.decode(value, type_name)        -> struct
-std.struct.decode(value, "aa::Point")      -> 跨包
+std.struct.decode(value, type_name)                 -> struct
+std.struct.decode(value, type_name, options)        -> struct
+std.struct.decode(value, "aa::Point")               -> 跨包
 ```
 
 schema 驱动解码：JSON 保持普通 object，类型由调用方提供。
@@ -3432,12 +3557,34 @@ let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 print(p);          // Point { x: 1, y: 2 }
 ```
 
+`options` 当前支持：
+
+```text
+{"defaults": true}
+```
+
+`defaults: true` 时，缺失且有默认值的字段会在声明包作用域中重新求值。
+默认值每次 decode 都重新计算，可能有副作用；求值失败或类型不匹配时报错。
+
+```text
+struct Config {
+  host: string = "localhost";
+  port: int = 80;
+}
+
+let c = std.struct.decode({"port": 8080}, "Config", {"defaults": true});
+print(c.host);     // localhost
+print(c.port);     // 8080
+```
+
 规则：
 
 - `value` 必须是 dict；
-- 缺字段、未知字段、类型不匹配报错；
+- 未知字段、类型不匹配报错；
+- 没有 `defaults` 时，缺字段报错；
+- 有 `defaults` 时，缺失字段优先使用声明默认值；
 - 可空字段 `T?` 缺失时填 `null`；
-- 嵌套 struct / enum 递归解码；
+- 嵌套 struct / enum 递归解码，`defaults` 同样作用于嵌套字段；
 - 递归 struct 依赖 JSON 深度限制；
 - 跨包类型写成 `module::Type`；
 - `std.json.stringify` 的输出格式不变，不引入 `$struct` 标签。

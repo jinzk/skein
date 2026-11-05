@@ -143,9 +143,31 @@ struct call_depth_guard {
 };
 }
 
+namespace {
+struct function_module_guard {
+    std::string previous_module;
+    std::string previous_source;
+    function_module_guard(const std::string &module,
+                          const std::string &source)
+        : previous_module(diag_current_module_name()),
+          previous_source(diag_current_source_name()) {
+        if (!module.empty())
+            diag_set_module_name(module);
+        if (!source.empty())
+            diag_set_source_name(source);
+    }
+    ~function_module_guard() {
+        diag_set_module_name(previous_module);
+        diag_set_source_name(previous_source);
+    }
+};
+} // namespace
+
 static struct value_t *invoke_function_body(
     const std::shared_ptr<function_def> &def,
     std::vector<struct value_t *> &args) {
+    function_module_guard module_guard(def->code->module,
+                                       def->code->source);
     int nparams = def->code->nparams;
     std::string frame_name =
         def->code->name.empty() ? "<anonymous>" : def->code->name;

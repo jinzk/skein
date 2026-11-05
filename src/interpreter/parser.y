@@ -482,26 +482,9 @@ static const char *builtin_field_name(int functype) {
 static struct type_constraint *type_constraint_from_name(const char *name) {
     if (!name)
         return new_type_constraint(TYPE_INVALID);
-    if (std::strcmp(name, "any") == 0) return new_type_constraint(TYPE_ANY);
-    if (std::strcmp(name, "int") == 0) return new_type_constraint(TYPE_INT);
-    if (std::strcmp(name, "float") == 0) return new_type_constraint(TYPE_FLOAT);
-    if (std::strcmp(name, "number") == 0) return new_type_constraint(TYPE_NUMBER);
-    if (std::strcmp(name, "bool") == 0) return new_type_constraint(TYPE_BOOL);
-    if (std::strcmp(name, "string") == 0) return new_type_constraint(TYPE_STRING);
-    if (std::strcmp(name, "char") == 0) return new_type_constraint(TYPE_CHAR);
-    if (std::strcmp(name, "byte") == 0) return new_type_constraint(TYPE_BYTE);
-    if (std::strcmp(name, "bytes") == 0) return new_type_constraint(TYPE_BYTES);
-    if (std::strcmp(name, "list") == 0) return new_type_constraint(TYPE_LIST);
-    if (std::strcmp(name, "dict") == 0) return new_type_constraint(TYPE_DICT);
-    if (std::strcmp(name, "deque") == 0) return new_type_constraint(TYPE_DEQUE);
-    if (std::strcmp(name, "heap") == 0) return new_type_constraint(TYPE_HEAP);
-    if (std::strcmp(name, "set") == 0) return new_type_constraint(TYPE_SET);
-    if (std::strcmp(name, "function") == 0) return new_type_constraint(TYPE_FUNCTION);
-    if (std::strcmp(name, "builtin") == 0) return new_type_constraint(TYPE_BUILTIN);
-    if (std::strcmp(name, "callable") == 0) return new_type_constraint(TYPE_CALLABLE);
-    if (std::strcmp(name, "null") == 0) return new_type_constraint(TYPE_NULL);
-    if (std::strcmp(name, "userdata") == 0) return new_type_constraint(TYPE_USERDATA);
-    if (std::strcmp(name, "result") == 0) return new_type_constraint(TYPE_RESULT);
+    enum type_constraint_kind kind;
+    if (type_constraint_kind_for_builtin_name(name, kind))
+        return new_type_constraint(kind);
     return new_named_type_constraint(name,
                                      diag_current_source_name().c_str());
 }

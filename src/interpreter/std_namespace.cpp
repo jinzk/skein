@@ -385,6 +385,17 @@ value_t *build_namespace_impl() {
             {"source", B_type_source},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("meta"),
+        builtin_module({
+            {"type_info", B_meta_type_info},
+            {"fields", B_meta_fields},
+            {"variants", B_meta_variants},
+            {"methods", B_meta_methods},
+            {"traits", B_meta_traits},
+            {"implements", B_meta_implements},
+            {"has_type", B_meta_has_type},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("enum"),
         builtin_module({
             {"decode", B_enum_decode},

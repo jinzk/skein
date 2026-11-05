@@ -146,6 +146,101 @@ static struct value_t *enum_tag_from_name(struct value_t *type_value,
     return newstrval(tag.c_str());
 }
 
+static bool parse_decode_options(const char *function_name,
+                                 struct value_t *options,
+                                 bool &defaults) {
+    defaults = false;
+    if (!options || options->type != T_dict) {
+        yyerror("%s expects an options dict", function_name);
+        return false;
+    }
+    struct dict_value_t *dict = (struct dict_value_t *)options;
+    for (auto &entry : dict->payload->items) {
+        if (!entry.first || entry.first->type != T_string) {
+            yyerror("%s options keys must be strings", function_name);
+            return false;
+        }
+        const char *key = ((struct string_value_t *)entry.first)->value;
+        if (std::strcmp(key, "defaults") != 0) {
+            yyerror("%s: unknown option %s", function_name, key);
+            return false;
+        }
+        if (!entry.second || entry.second->type != T_bool) {
+            yyerror("%s: option defaults expects bool", function_name);
+            return false;
+        }
+        defaults = ((struct bool_value_t *)entry.second)->value;
+    }
+    return true;
+}
+
+static enum_def *resolve_enum_type_hint(const char *text) {
+    if (!text || !*text) {
+        yyerror("std.enum.decode expects a non-empty type name");
+        return NULL;
+    }
+    std::string type_name(text);
+    std::string module_name;
+    size_t sep = type_name.find("::");
+    if (sep != std::string::npos) {
+        module_name = type_name.substr(0, sep);
+        type_name = type_name.substr(sep + 2);
+    }
+    enum_def *def = structtype_find_enum_by_name(
+        module_name.empty() ? NULL : module_name.c_str(),
+        type_name.c_str());
+    if (!def) {
+        yyerror("unknown or ambiguous enum type %s", type_name.c_str());
+        return NULL;
+    }
+    return def;
+}
+
+static struct value_t *struct_decode_builtin(
+    const std::vector<struct value_t *> &args) {
+    bool defaults = false;
+    if (args.size() == 3 &&
+        !parse_decode_options("std.struct.decode", args[2], defaults))
+        return NULL;
+    return struct_decode_value_ex(args[0], args[1], defaults);
+}
+
+static struct value_t *enum_decode_builtin(
+    const std::vector<struct value_t *> &args) {
+    enum_def *expected = NULL;
+    bool defaults = false;
+
+    if (args.size() >= 2 && args[1]->type != T_null) {
+        if (args[1]->type == T_string) {
+            expected = resolve_enum_type_hint(
+                ((struct string_value_t *)args[1])->value);
+            if (!expected)
+                return NULL;
+        } else if (args[1]->type == T_dict) {
+            if (args.size() != 2) {
+                yyerror("std.enum.decode expects a type name before options");
+                return NULL;
+            }
+            if (!parse_decode_options("std.enum.decode", args[1], defaults))
+                return NULL;
+        } else {
+            yyerror("std.enum.decode expects a type name, options dict, or null");
+            return NULL;
+        }
+    }
+
+    if (args.size() == 3) {
+        if (args[1]->type != T_string && args[1]->type != T_null) {
+            yyerror("std.enum.decode expects a type name or null");
+            return NULL;
+        }
+        if (!parse_decode_options("std.enum.decode", args[2], defaults))
+            return NULL;
+    }
+
+    return enum_decode_value_ex(args[0], expected, defaults);
+}
+
 
 bool builtins_register_modules(std::string &error) {
 #ifdef SKEIN_ENABLE_FFI
@@ -157,6 +252,8 @@ bool builtins_register_modules(std::string &error) {
 
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
+    if (functype >= B_meta_type_info && functype <= B_meta_has_type)
+        return call_meta_builtin(functype, args);
     if (functype >= B_fn_compose && functype <= B_fn_always)
         return call_fn_builtin(functype, args);
     if (functype >= B_iter_map && functype <= B_iter_collect)
@@ -485,9 +582,15 @@ struct value_t *call_builtin(int functype,
             yyerror("%s expects at least 1 argument", math_builtin_name(functype));
             return NULL;
         }
+    } else if (functype == B_enum_decode) {
+        if (args.empty() || args.size() > 3) {
+            yyerror("std.enum.decode expects 1 to 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
     } else if (functype == B_struct_decode) {
-        if (args.size() != 2) {
-            yyerror("std.struct.decode expects 2 arguments, got %d",
+        if (args.size() < 2 || args.size() > 3) {
+            yyerror("std.struct.decode expects 2 or 3 arguments, got %d",
                     (int)args.size());
             return NULL;
         }
@@ -700,7 +803,7 @@ struct value_t *call_builtin(int functype,
 
     switch (functype) {
         case B_enum_decode:
-            ret = enum_decode_value(arg);
+            ret = enum_decode_builtin(args);
             break;
         case B_enum_tag:
             if (args.size() == 1)
@@ -709,7 +812,7 @@ struct value_t *call_builtin(int functype,
                 ret = enum_tag_from_name(args[0], args[1]);
             break;
         case B_struct_decode:
-            ret = struct_decode_value(args[0], args[1]);
+            ret = struct_decode_builtin(args);
             break;
 
         case B_len:

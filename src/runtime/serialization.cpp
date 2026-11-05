@@ -1,5 +1,6 @@
 #include "serialization.h"
 
+#include "runtime_context.h"
 #include "structtype.h"
 #include "symbol.h"
 #include "unicode.h"
@@ -25,15 +26,23 @@ static struct value_t *dict_lookup_value(struct dict_value_t *dict,
 }
 
 static struct value_t *decode_nested_value(struct value_t *value, int depth,
-                                           const std::string &path);
+                                           const std::string &path,
+                                           bool defaults);
 static struct value_t *decode_enum_object(struct value_t *value, int depth,
-                                          const std::string &path);
+                                          const std::string &path,
+                                          struct enum_def *expected,
+                                          bool defaults);
 static struct value_t *decode_struct_object(struct value_t *value,
                                             struct_def *def, int depth,
-                                            const std::string &path);
+                                            const std::string &path,
+                                            bool defaults);
 static struct value_t *decode_value_for_type(
     struct value_t *value, const struct type_constraint *type, int depth,
-    const std::string &path);
+    const std::string &path, bool defaults);
+static struct value_t *eval_field_default(const field_def &field,
+                                          const char *owner,
+                                          const char *field_name,
+                                          const std::string &path);
 
 static std::string join_path(const std::string &base,
                              const std::string &name) {
@@ -44,8 +53,48 @@ static const char *decode_path_label(const std::string &path) {
     return path.empty() ? "value" : path.c_str();
 }
 
+static struct value_t *eval_field_default(const field_def &field,
+                                          const char *owner,
+                                          const char *field_name,
+                                          const std::string &path) {
+    if (!field.default_value || !field.default_value->code) {
+        yyerror("field %s of %s has no default value",
+                field_name ? field_name : "?",
+                owner ? owner : "?");
+        return NULL;
+    }
+    if (!skein_context_current() || !skein_context_current()->call) {
+        yyerror("field default evaluation requires an interpreter context");
+        return NULL;
+    }
+
+    struct func_value_t callee;
+    callee.type = T_func;
+    callee.def = field.default_value;
+    struct value_t *value =
+        skein_call_function((struct value_t *)&callee, {});
+    if (!value)
+        return NULL;
+    if (value->type == T_return || value->type == T_break ||
+        value->type == T_continue) {
+        yyerror("default value for field %s of %s cannot return control flow",
+                field_name ? field_name : "?",
+                owner ? owner : "?");
+        freeval(value);
+        return NULL;
+    }
+    if (!type_constraint_matches(&field.type, value)) {
+        yyerror("%s expects %s, got %s", decode_path_label(path),
+                type_constraint_name(&field.type), typename_of(value));
+        freeval(value);
+        return NULL;
+    }
+    return value;
+}
+
 static struct value_t *decode_nested_value(struct value_t *value, int depth,
-                                           const std::string &path) {
+                                           const std::string &path,
+                                           bool defaults) {
     if (!value)
         return NULL;
     if (depth > 512) {
@@ -56,11 +105,12 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
     if (value->type == T_dict) {
         struct dict_value_t *dict = (struct dict_value_t *)value;
         if (dict_lookup_value(dict, "$enum"))
-            return decode_enum_object(value, depth, path);
+            return decode_enum_object(value, depth, path, NULL, defaults);
         struct dict_value_t *out = newdictval();
         for (auto &entry : dict->payload->items) {
             struct value_t *key = dupval(entry.first);
-            struct value_t *item = decode_nested_value(entry.second, depth + 1, path);
+            struct value_t *item = decode_nested_value(
+                entry.second, depth + 1, path, defaults);
             if (!item) {
                 freeval(key);
                 freeval((struct value_t *)out);
@@ -75,7 +125,8 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
         struct list_value_t *list = (struct list_value_t *)value;
         struct list_value_t *out = newlistval();
         for (struct value_t *item : list->payload->items) {
-            struct value_t *decoded = decode_nested_value(item, depth + 1, path);
+            struct value_t *decoded = decode_nested_value(
+                item, depth + 1, path, defaults);
             if (!decoded) {
                 freeval((struct value_t *)out);
                 return NULL;
@@ -89,7 +140,9 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
 }
 
 static struct value_t *decode_enum_object(struct value_t *value, int depth,
-                                          const std::string &path) {
+                                          const std::string &path,
+                                          struct enum_def *expected,
+                                          bool defaults) {
     if (!value || value->type != T_dict) {
         yyerror("std.enum.decode expects an enum object");
         return NULL;
@@ -134,12 +187,23 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
         return NULL;
     }
 
-    enum_def *def = structtype_find_enum_by_name(
-        module_name.empty() ? NULL : module_name.c_str(),
-        type_name.c_str());
-    if (!def) {
-        yyerror("unknown or ambiguous enum type %s", type_name.c_str());
-        return NULL;
+    enum_def *def = expected;
+    if (def) {
+        if (type_name != def->name ||
+            (!module_name.empty() && module_name != def->module_name)) {
+            yyerror("enum tag %s does not match expected %s::%s",
+                    tag.c_str(), def->module_name.c_str(),
+                    def->name.c_str());
+            return NULL;
+        }
+    } else {
+        def = structtype_find_enum_by_name(
+            module_name.empty() ? NULL : module_name.c_str(),
+            type_name.c_str());
+        if (!def) {
+            yyerror("unknown or ambiguous enum type %s", type_name.c_str());
+            return NULL;
+        }
     }
     int variant_index = structtype_variant_index(def, variant_name);
     if (variant_index < 0) {
@@ -166,14 +230,27 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
         const struct field_def &field = variant.fields[i];
         struct value_t *field_value =
             dict_lookup_value(payload_dict, field.name.c_str());
+        const std::string field_path =
+            join_path(path.empty() ? tag : path, field.name);
         if (!field_value) {
+            if (defaults && field.has_default) {
+                payload->fields[i] = eval_field_default(
+                    field, def->name.c_str(), field.name.c_str(),
+                    field_path);
+                if (!payload->fields[i])
+                    return NULL;
+                continue;
+            }
+            if (field.type.nullable) {
+                payload->fields[i] = newnull();
+                continue;
+            }
             yyerror("missing field %s in enum %s", field.name.c_str(),
                     tag.c_str());
             return NULL;
         }
         struct value_t *decoded = decode_value_for_type(
-            field_value, &field.type, depth + 1,
-            join_path(path.empty() ? tag : path, field.name));
+            field_value, &field.type, depth + 1, field_path, defaults);
         if (!decoded)
             return NULL;
         payload->fields[i] = decoded;
@@ -212,7 +289,7 @@ static enum_def *find_named_enum(const struct type_constraint *type) {
 
 static struct value_t *decode_value_for_type(
     struct value_t *value, const struct type_constraint *type, int depth,
-    const std::string &path) {
+    const std::string &path, bool defaults) {
     if (!value)
         return NULL;
 
@@ -258,9 +335,11 @@ static struct value_t *decode_value_for_type(
         if (value->type == T_dict) {
             struct dict_value_t *dict = (struct dict_value_t *)value;
             if (!dict_lookup_value(dict, "$enum"))
-                return decode_struct_object(value, sdef, depth, path);
+                return decode_struct_object(value, sdef, depth, path,
+                                            defaults);
         }
-        struct value_t *decoded = decode_nested_value(value, depth, path);
+        struct value_t *decoded = decode_nested_value(value, depth, path,
+                                                      defaults);
         if (decoded && !type_constraint_matches(type, decoded)) {
             yyerror("%s expects %s, got %s", decode_path_label(path),
                     type_constraint_name(type), typename_of(decoded));
@@ -272,7 +351,14 @@ static struct value_t *decode_value_for_type(
 
     enum_def *edef = find_named_enum(type);
     if (edef) {
-        struct value_t *decoded = decode_nested_value(value, depth, path);
+        if (value->type == T_dict) {
+            struct dict_value_t *dict = (struct dict_value_t *)value;
+            if (dict_lookup_value(dict, "$enum"))
+                return decode_enum_object(value, depth, path, edef,
+                                          defaults);
+        }
+        struct value_t *decoded = decode_nested_value(value, depth, path,
+                                                      defaults);
         if (decoded && !type_constraint_matches(type, decoded)) {
             yyerror("%s expects %s, got %s", decode_path_label(path),
                     type_constraint_name(type), typename_of(decoded));
@@ -282,7 +368,8 @@ static struct value_t *decode_value_for_type(
         return decoded;
     }
 
-    struct value_t *decoded = decode_nested_value(value, depth, path);
+    struct value_t *decoded = decode_nested_value(value, depth, path,
+                                                  defaults);
     if (decoded && !type_constraint_matches(type, decoded)) {
         yyerror("%s expects %s, got %s", decode_path_label(path),
                 type_constraint_name(type), typename_of(decoded));
@@ -294,7 +381,8 @@ static struct value_t *decode_value_for_type(
 
 static struct value_t *decode_struct_object(struct value_t *value,
                                             struct_def *def, int depth,
-                                            const std::string &path) {
+                                            const std::string &path,
+                                            bool defaults) {
     if (!def) {
         yyerror("invalid struct type");
         return NULL;
@@ -329,7 +417,16 @@ static struct value_t *decode_struct_object(struct value_t *value,
         const struct field_def &field = def->fields[i];
         struct value_t *field_value =
             dict_lookup_value(dict, field.name.c_str());
+        const std::string field_path = join_path(path, field.name);
         if (!field_value) {
+            if (defaults && field.has_default) {
+                payload->fields[i] = eval_field_default(
+                    field, def->name.c_str(), field.name.c_str(),
+                    field_path);
+                if (!payload->fields[i])
+                    return NULL;
+                continue;
+            }
             if (field.type.nullable) {
                 payload->fields[i] = newnull();
                 continue;
@@ -339,8 +436,7 @@ static struct value_t *decode_struct_object(struct value_t *value,
             return NULL;
         }
         struct value_t *decoded = decode_value_for_type(
-            field_value, &field.type, depth + 1,
-            join_path(path, field.name));
+            field_value, &field.type, depth + 1, field_path, defaults);
         if (!decoded)
             return NULL;
         payload->fields[i] = decoded;
@@ -350,7 +446,8 @@ static struct value_t *decode_struct_object(struct value_t *value,
 }
 
 static struct value_t *struct_decode(struct value_t *value,
-                                     struct value_t *type_value) {
+                                     struct value_t *type_value,
+                                     bool defaults) {
     if (!value || value->type != T_dict) {
         yyerror("std.struct.decode expects an object");
         return NULL;
@@ -375,14 +472,26 @@ static struct value_t *struct_decode(struct value_t *value,
         yyerror("unknown or ambiguous struct type %s", type_name.c_str());
         return NULL;
     }
-    return decode_struct_object(value, def, 0, def->name);
+    return decode_struct_object(value, def, 0, def->name, defaults);
 }
 
 struct value_t *enum_decode_value(struct value_t *value) {
-    return decode_enum_object(value, 0, "");
+    return enum_decode_value_ex(value, NULL, false);
+}
+
+struct value_t *enum_decode_value_ex(struct value_t *value,
+                                     struct enum_def *expected,
+                                     bool defaults) {
+    return decode_enum_object(value, 0, "", expected, defaults);
 }
 
 struct value_t *struct_decode_value(struct value_t *value,
                                     struct value_t *type_value) {
-    return struct_decode(value, type_value);
+    return struct_decode(value, type_value, false);
+}
+
+struct value_t *struct_decode_value_ex(struct value_t *value,
+                                       struct value_t *type_value,
+                                       bool defaults) {
+    return struct_decode(value, type_value, defaults);
 }

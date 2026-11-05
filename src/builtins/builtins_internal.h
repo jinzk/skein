@@ -40,6 +40,8 @@ struct value_t *call_fn_builtin(
 
 struct value_t *call_math_builtin(
     int functype, const std::vector<struct value_t *> &args);
+struct value_t *call_meta_builtin(
+    int functype, const std::vector<struct value_t *> &args);
 struct value_t *call_lru_builtin(
     int functype, const std::vector<struct value_t *> &args);
 struct value_t *call_deque_builtin(

@@ -221,6 +221,7 @@ struct Compiler {
     struct SlotScope {
         std::unordered_map<std::string, int> names;
         std::vector<int> declared;
+        std::unordered_map<std::string, std::shared_ptr<value_t>> constants;
     };
 
     std::string pending_label;
@@ -1041,6 +1042,57 @@ struct Compiler {
         return -1;
     }
 
+    static bool const_prop_enabled() {
+        static const bool enabled = []() {
+            const char *disabled = std::getenv("SKEIN_NO_CONST_PROP");
+            return !(disabled && *disabled &&
+                     std::strcmp(disabled, "0") != 0);
+        }();
+        return enabled;
+    }
+
+    static bool is_const_scalar(const value_t *value) {
+        if (!value)
+            return false;
+        switch (value->type) {
+            case T_int:
+            case T_float:
+            case T_bool:
+            case T_string:
+            case T_char:
+            case T_byte:
+            case T_null:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    value_t *find_const(const char *name) const {
+        if (!name || !const_prop_enabled() || !slot_fast_path)
+            return NULL;
+        for (size_t i = slot_scopes.size(); i > 0; --i) {
+            const SlotScope &scope = slot_scopes[i - 1];
+            auto it = scope.names.find(name);
+            if (it == scope.names.end())
+                continue;
+            auto constant = scope.constants.find(name);
+            return constant == scope.constants.end()
+                       ? NULL
+                       : constant->second.get();
+        }
+        return NULL;
+    }
+
+    void remember_const(const char *name, value_t *value) {
+        if (!name || !value || !slot_fast_path || slot_scopes.empty() ||
+            !is_const_scalar(value)) {
+            freeval(value);
+            return;
+        }
+        slot_scopes.back().constants[name] = own_value(value);
+    }
+
     void push_slot_scope() {
         if (slot_fast_path)
             slot_scopes.emplace_back();
@@ -1422,6 +1474,13 @@ struct Compiler {
             }
         }
 
+        if (op == '+' && left->type == T_string &&
+            right->type == T_string) {
+            std::string text = ((struct string_value_t *)left)->value;
+            text += ((struct string_value_t *)right)->value;
+            return newstrval(text.c_str());
+        }
+
         if (is_numeric_value(left) && is_numeric_value(right)) {
             const double x = numeric_value(left);
             const double y = numeric_value(right);
@@ -1476,11 +1535,16 @@ struct Compiler {
         return ((struct string_value_t *)literal->val)->value;
     }
 
-    static value_t *fold_node(ast *node) {        if (!node)
+    value_t *fold_node(ast *node) {
+        if (!node)
             return NULL;
         if (node->nodetype == 'V') {
             struct val *literal = (struct val *)node;
             return literal->val ? dupval(literal->val) : NULL;
+        }
+        if (node->nodetype == 'N') {
+            value_t *constant = find_const(((struct symref *)node)->name);
+            return constant ? dupval(constant) : NULL;
         }
         if (node->nodetype == 'M' || node->nodetype == '~') {
             value_t *value = fold_node(node->l);
@@ -1568,6 +1632,11 @@ struct Compiler {
 
             case 'N': {
                 struct symref *ref = (struct symref *)node;
+                if (value_t *constant = find_const(ref->name)) {
+                    uint32_t index = add_value(dupval(constant));
+                    emit(Op::LoadConst, 0, 0, index, here);
+                    return;
+                }
                 int slot = slot_fast_path ? find_slot(ref->name) : -1;
                 if (slot >= 0) {
                     emit(Op::LoadSlot, 0, 0,
@@ -1607,10 +1676,18 @@ struct Compiler {
                         def->name, def->type, def->is_const != 0);
                     scope.names[def->name] = static_cast<int>(slot);
                     scope.declared.push_back(static_cast<int>(slot));
+                    value_t *constant = NULL;
+                    if (def->is_const && def->v && const_prop_enabled())
+                        constant = fold_node(def->v);
                     if (def->v) {
                         compile(def->v);
-                        if (!ok) return;
+                        if (!ok) {
+                            freeval(constant);
+                            return;
+                        }
                     }
+                    if (constant)
+                        remember_const(def->name, constant);
                     emit(Op::DefineSlot, def->v ? 1 : 0, 0, slot, here);
                     return;
                 }

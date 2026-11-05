@@ -16,6 +16,7 @@ from cases import (
     io_scripts,
     language_core,
     match_types,
+    meta,
     net,
     runtime,
     stdlib_builtins,
@@ -24,6 +25,7 @@ from cases import (
 MODULES = [
     language_core,
     match_types,
+    meta,
     collections,
     runtime,
     diagnostics,

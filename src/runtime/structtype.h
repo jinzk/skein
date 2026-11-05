@@ -90,16 +90,61 @@ void structtype_shutdown();
 
 struct_def *structtype_find_struct(const char *module, const char *name);
 struct_def *structtype_find_struct_by_name(const char *module_name,
-                                           const char *name);
+                                           const char *name,
+                                           bool *ambiguous = NULL);
 type_def *structtype_find_type(const char *module, const char *name);
 trait_def *structtype_find_trait(const char *module, const char *name);
+trait_def *structtype_find_trait_by_name(const char *module_name,
+                                         const char *name,
+                                         bool *ambiguous = NULL);
 trait_def *structtype_resolve_trait(const char *module, const char *name,
                                     bool require_exported,
                                     std::string &error);
 enum_def *structtype_find_enum(const char *module, const char *name);
 enum_def *structtype_find_enum_by_name(const char *module_name,
-                                       const char *name);
+                                       const char *name,
+                                       bool *ambiguous = NULL);
 bool structtype_type_exists(const char *module, const char *name);
+
+enum structtype_lookup_kind {
+    STRUCTTYPE_LOOKUP_NONE,
+    STRUCTTYPE_LOOKUP_STRUCT,
+    STRUCTTYPE_LOOKUP_ENUM,
+    STRUCTTYPE_LOOKUP_TRAIT,
+};
+
+enum structtype_lookup_status {
+    STRUCTTYPE_LOOKUP_FOUND,
+    STRUCTTYPE_LOOKUP_NOT_FOUND,
+    STRUCTTYPE_LOOKUP_AMBIGUOUS,
+    STRUCTTYPE_LOOKUP_NOT_VISIBLE,
+    STRUCTTYPE_LOOKUP_ERROR,
+};
+
+struct structtype_lookup_result {
+    enum structtype_lookup_kind kind;
+    struct_def *structure;
+    enum_def *enumeration;
+    trait_def *trait;
+
+    structtype_lookup_result()
+        : kind(STRUCTTYPE_LOOKUP_NONE),
+          structure(NULL),
+          enumeration(NULL),
+          trait(NULL) {}
+};
+
+/*
+ * Resolve a type name as seen from a source file / logical module.
+ *
+ * Types declared in importer_source or importer_module are visible even when
+ * not exported.  Other types must be exported.  Qualified names resolve
+ * import aliases registered for importer_source.
+ */
+enum structtype_lookup_status structtype_lookup_type(
+    const char *importer_source, const char *importer_module,
+    const char *name, struct structtype_lookup_result &out,
+    std::string &error);
 
 bool structtype_create_struct(const char *module, const char *module_name,
                               const char *name, bool exported,

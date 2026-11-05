@@ -1819,6 +1819,7 @@ std.fs
 std.process
 std.worker
 std.type
+std.meta
 std.module
 std.net
 std.http
@@ -1873,13 +1874,17 @@ ctx = fsm.restore(std.json.parse(json), func(v) {
 });
 ```
 
-`std.struct.decode(value, type_name)` 是 schema 驱动解码：JSON 保持普通 object，类型由调用方提供。
+`std.struct.decode(value, type_name[, options])` 是 schema 驱动解码：JSON 保持普通 object，类型由调用方提供。
 
 ```text
 import std;
 struct Point { x: int; y: int; }
 let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 ```
+
+`options` 支持 `{"defaults": true}`：缺失且有默认值的字段在声明包作用域中求值。
+`std.enum.decode(value[, type_name][, options])` 同样支持默认值；可选类型名用于
+校验 tag 或消除跨包同名歧义。
 
 `std.enum.tag(value)` 返回 `module::Enum::Variant` 规范字符串，丢弃载荷，可直接作 dict key：
 
@@ -1890,6 +1895,26 @@ std.enum.tag(E::A { n: 2 })   // "main::E::A"
 ```
 
 无实例时可用 `std.enum.tag("E", "A")`。
+
+`std.meta` 提供只读类型描述，内建类型和用户定义类型使用同一种形状：
+
+```text
+import std;
+
+struct Point { x: int; y: int = 0; }
+let info = std.meta.type_info("Point");
+print(info["kind"]);                  // struct
+print(info["fields"][0]["name"]);     // x
+print(std.meta.fields(Point { x: 1 }));
+print(std.meta.has_type("int"));      // true
+```
+
+`std.meta.type_info(type)` 接受 struct/enum 实例、内建类型值或类型名字符串；
+字符串参数始终按类型名解释，查询 string 类型请用 `"string"`。
+`std.meta` 只查询已加载且可见的类型：当前包/当前源文件的类型可见，其他包
+的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
+`fields` / `variants` / `methods` / `traits` 对不适用的类型返回空列表。
+`std.meta` 不返回值默认值，只提供 `has_default` 标记。
 
 `std.lru` 是 C++ 值类型，每次更新返回新 lru：
 
@@ -2259,6 +2284,14 @@ std.type.name
 std.type.module
 std.type.source
 
+std.meta.type_info
+std.meta.fields
+std.meta.variants
+std.meta.methods
+std.meta.traits
+std.meta.implements
+std.meta.has_type
+
 std.module.load
 std.module.unload
 
@@ -2530,6 +2563,7 @@ std.worker.stats
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
+- `std.meta` 提供只读类型反射，查询字段、变体、方法和 trait；
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
@@ -2787,6 +2821,10 @@ const a = [1, 2];
 a[0] = 9;      // 允许
 a              // [9, 2]
 ```
+
+不可变标量 `const`（`int` / `float` / `bool` / `string` / `char` / `byte` /
+`null`）在同一个编译单元内可参与编译期常量折叠；不改变运行时语义，可用
+`SKEIN_NO_CONST_PROP=1` 关闭。
 
 变量可以带类型标注：
 
@@ -4452,7 +4490,7 @@ src/
                  dynamic_library.*、runtime_state.*
   runtime/       L1  值/容器/编码/JSON/格式化：
                  valuetype.*、value_ops.*、dict.*、structtype.*、symbol.*、cycle.*、
-                 serialization.*、json.*、format.*、encoding.*、unicode.*、
+                 serialization.*、typeinfo.*、json.*、format.*、encoding.*、unicode.*、
                  unicode_ident.*、stdio_stream.*、runtime_context.*、runtime_error.*、
                  binding_registry.*、builtin_ids.h、skein_module.h
     data/        L1  提交到仓库的生成表：encoding_gb18030_data.inc、
@@ -4464,7 +4502,7 @@ src/
                  pattern.*、scopestack.*、structeval.*、fiber.*、generator.*、iter.*、
                  async_support.*、task.*、event_loop.*、repl.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
-                 builtins.*、builtins_*.cpp（math/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
+                 builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
                  *_builtin.*、compression.*、cookie.*、error.*、
                  filetype.*、fs_extra.*、http.*、http1_parser.*、http2.*、io.*、
                  net.*、process_*.*、result.*、tls.*、websocket.*、worker_pool.*、

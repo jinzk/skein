@@ -68,6 +68,12 @@ void symlistfree(struct symlist *sl);
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);
 struct type_constraint *new_named_type_constraint(const char *name,
                                                   const char *module);
+
+/* Built-in type names accepted in annotations, including aliases such as
+ * str -> string and func -> function. */
+bool type_constraint_kind_for_builtin_name(const char *name,
+                                           enum type_constraint_kind &kind);
+const char *type_constraint_canonical_builtin_name(const char *name);
 void free_type_constraint(struct type_constraint *type);
 bool type_constraint_matches(const struct type_constraint *type,
                              const struct value_t *value);

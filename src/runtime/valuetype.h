@@ -27,6 +27,8 @@ struct function_code {
     int def_column = 0;
     /* Module that defined this function, used for lazy compilation. */
     std::string module;
+    /* Source file that defined this function, used for import alias lookup. */
+    std::string source;
     /* Captured binding names, resolved to symbol cells at closure creation. */
     std::vector<std::string> upvalues;
 };

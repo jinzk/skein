@@ -4,6 +4,7 @@
 Extracted from the original test_skein.py main() body, lines 1100-1699.
 """
 import os
+import tempfile
 
 from harness import *  # noqa: F401,F403
 
@@ -306,6 +307,32 @@ def run_cases():
     check("std.enum.tag unknown variant",
           'import std;\nenum E { A; }\nstd.enum.tag("E", "Nope");\n',
           stderr="unknown enum variant E::Nope")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write("aa/aa.skein",
+              "package aa { export enum E { A { n: int; }; } }\n")
+        main = write(
+            "main.skein",
+            "import std;\n"
+            "import aa;\n"
+            "enum E { A { n: int; }; }\n"
+            'let v = {"$enum": "E::A", "payload": {"n": 1}};\n'
+            'print(std.enum.tag(std.enum.decode(v, "main::E")));\n'
+            'print(std.enum.tag(std.enum.decode(v, "aa::E")));\n')
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == [
+            "main::E::A",
+            "aa::E::A",
+        ], proc.stdout
+
     check("std.struct.decode",
           'import std;\nstruct P { x: int; y: int; }\n'
           'let p = std.struct.decode({"x": 1, "y": 2}, "P");\n'
@@ -342,6 +369,46 @@ def run_cases():
           'import std;\nstruct P { x: int; }\n'
           'std.struct.decode({"x": "s"}, "P");\n',
           stderr="P.x expects int, got string")
+    check("std.struct.decode defaults",
+          'import std;\n'
+          'struct C { host: string = "localhost"; port: int = 80; }\n'
+          'let c = std.struct.decode({"port": 8080}, "C", '
+          '{"defaults": true});\n'
+          'print(c.host);\nprint(c.port);\n',
+          stdout_all=["localhost", "8080"])
+    check("std.struct.decode nested defaults",
+          'import std;\n'
+          'struct I { n: int = 7; }\n'
+          'struct O { inner: I; label_text: string = "x"; }\n'
+          'let o = std.struct.decode({"inner": {}}, "O", '
+          '{"defaults": true});\n'
+          'print(o.inner.n);\nprint(o.label_text);\n',
+          stdout_all=["7", "x"])
+    check("std.struct.decode unknown option",
+          'import std;\nstruct C { x: int = 1; }\n'
+          'std.struct.decode({}, "C", {"default": true});\n',
+          stderr="unknown option default")
+    check("std.enum.decode defaults",
+          'import std;\nenum E { A { n: int = 3; }; }\n'
+          'let e = std.enum.decode({"$enum": "E::A", "payload": {}}, '
+          '"E", {"defaults": true});\n'
+          'print(e);\n',
+          stdout="E::A { n: 3 }")
+    check("std.enum.decode options only",
+          'import std;\nenum E { A { n: int = 3; }; }\n'
+          'let e = std.enum.decode({"$enum": "E::A", "payload": {}}, '
+          '{"defaults": true});\n'
+          'print(e);\n',
+          stdout="E::A { n: 3 }")
+    check("std.enum.decode type hint mismatch",
+          'import std;\nenum E { A { n: int; }; }\n'
+          'enum F { A { n: int; }; }\n'
+          'std.enum.decode({"$enum": "F::A", "payload": {"n": 1}}, "E");\n',
+          stderr="does not match expected main::E")
+    check("std.enum.decode unknown type hint",
+          'import std;\nenum E { A { n: int; }; }\n'
+          'std.enum.decode({"$enum": "E::A", "payload": {"n": 1}}, "Nope");\n',
+          stderr="unknown or ambiguous enum type Nope")
     check("std.fsm snapshot restore",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(s, e) { return s + e; });\n'

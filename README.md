@@ -12,9 +12,9 @@ cmake --build build
 ./build/skein
 ```
 
-实验性字节码 VM 可以通过 `--vm` 或 `SKEIN_VM=1` 启用；`--no-vm` /
-`SKEIN_VM=0` 强制使用 AST 解释器。`SKEIN_VM_TRACE=1` 会打印字节码和
-每步执行，`SKEIN_VM_DEBUG=1` 会说明哪些结构回退到了 AST。详见
+字节码 VM 默认启用；`--no-vm` / `SKEIN_VM=0` 可切回 AST 解释器。
+`--vm` / `SKEIN_VM=1` 仍可用于显式指定 VM。`SKEIN_VM_TRACE=1` 会打印
+字节码和每步执行，`SKEIN_VM_DEBUG=1` 会说明哪些结构回退到了 AST。详见
 [docs/bytecode.md](docs/bytecode.md)。
 
 `std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context；`std.regex` 使用 PCRE2 8-bit。例如 Debian/Ubuntu：

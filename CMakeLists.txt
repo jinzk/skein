@@ -492,6 +492,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME skein_tests COMMAND ${SKEIN_TEST_COMMAND})
     add_test(NAME skein_vm_tests COMMAND ${SKEIN_TEST_COMMAND})
+    set(SKEIN_AST_TEST_ENV "SKEIN_VM=0")
+    if(SKEIN_SANITIZE)
+      list(APPEND SKEIN_AST_TEST_ENV "SKEIN_TEST_TIMEOUT=120")
+      list(APPEND SKEIN_AST_TEST_ENV "ASAN_OPTIONS=detect_leaks=0")
+    endif()
+    set_tests_properties(skein_tests PROPERTIES
+      ENVIRONMENT "${SKEIN_AST_TEST_ENV}"
+      RUN_SERIAL TRUE
+      TIMEOUT 600
+    )
     set(SKEIN_VM_TEST_ENV "SKEIN_VM=1")
     if(SKEIN_SANITIZE)
       # Sanitizer frames are much larger; keep deep recursion below the

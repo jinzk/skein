@@ -79,7 +79,7 @@ bool keep_function_ast() {
 
 void ensure_runtime_flags() {
     if (vm_enabled_state < 0)
-        vm_enabled_state = read_bool_env("SKEIN_VM", false) ? 1 : 0;
+        vm_enabled_state = read_bool_env("SKEIN_VM", true) ? 1 : 0;
     if (!vm_trace_initialized) {
         vm_trace_state = read_bool_env("SKEIN_VM_TRACE", false);
         vm_trace_initialized = true;

@@ -50,7 +50,9 @@ static void print_usage(const char *program) {
     std::fprintf(stderr,
                  "usage: %s [-i] [--vm|--no-vm] [-I dir] "
                  "[--package-path dir] [--encoding name] "
-                 "[-k|--keep-going] [script|-]\n",
+                 "[-k|--keep-going] [script|-]\n"
+                 "       the bytecode VM is enabled by default; "
+                 "--no-vm selects the AST backend\n",
                  program);
 }
 

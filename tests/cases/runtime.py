@@ -9,6 +9,16 @@ from harness import *  # noqa: F401,F403
 
 
 def run_cases():
+    default_env = dict(os.environ)
+    default_env.pop("SKEIN_VM", None)
+    default_env["SKEIN_VM_TRACE"] = "1"
+    check(
+        "VM is the default backend",
+        "print(1 + 2);\n",
+        stdout="3",
+        stderr="[vm]",
+        env=default_env,
+    )
     check(
         "unicode identifier NFC struct",
         f"struct e\u0301 {{ e\u0301: int; }}\n"

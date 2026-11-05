@@ -141,9 +141,9 @@ typedef struct {
 - `builtin_ids.h`、`runtime_state.*`、`runtime_error.*`、`value_ops.*`；
 - FFI Beta：类型/布局/marshal/回调/manifest/bindgen/原生模块，见 `docs/ffi.md`；
 - `tools/check_boundaries.py` 与 CTest `boundary_check_test`；
-- 实验性字节码 VM：`src/interpreter/bytecode.*`、`compiler.*`、`vm.*`，
-  通过 `--vm` / `SKEIN_VM=1` 启用，未覆盖结构回退 AST，并由
-  CTest `skein_vm_tests` 做差分验证；
+- 字节码 VM：`src/interpreter/bytecode.*`、`compiler.*`、`vm.*`，
+  默认启用，`--no-vm` / `SKEIN_VM=0` 可切回 AST；编译失败时整条语句或
+  函数回退 AST，并由 CTest `skein_vm_tests` 做差分验证；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
 
 未开始：

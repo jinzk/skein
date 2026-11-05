@@ -13,7 +13,7 @@
 ### 1.1 目标
 
 1. 常规语法在 VM 下 **零 AST 回退**。
-2. `--vm` 成为默认执行路径，`--no-vm` 仅作为参考后端。
+2. VM 默认启用，`--no-vm` 作为参考后端保留。
 3. 函数调用密集场景不慢于 AST，局部变量密集场景明显快于 AST。
 4. 运行期不再需要 `function_code->ast`、`symlist::default_value`、
    `symlist::pattern`；`EVAL_AST` 已移除。
@@ -49,11 +49,11 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 7/7 passed (40.38s)
-skein_tests:    Passed 12.01s
-skein_vm_tests: Passed 12.11s
-ASan/UBSan:     skein_vm_tests Passed 64.73s (detect_leaks=0)
-LSan:           skein_vm_lsan_tests Passed 77.53s
+ctest: 7/7 passed (40.28s)
+skein_tests:    Passed 12.02s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.18s (SKEIN_VM=1)
+ASan/UBSan:     skein_tests 62.28s; skein_vm_tests 64.68s
+LSan:           skein_vm_lsan_tests Passed 76.86s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -166,19 +166,26 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W1-3 VM 设为默认后端（P1，M）
 
-实施：
+状态：**已完成（2026-11-05）**。
 
-1. `vm.h` 默认值改为开启；`--no-vm` / `SKEIN_VM=0` 关闭。
-2. 保留 `--vm` 为显式开启，便于脚本兼容。
-3. `skein_tests` 继续跑 AST 后端，`skein_vm_tests` 跑 VM；
-   新增默认后端测试，确保无参数启动即 VM。
-4. 更新 README、`docs/bytecode.md`、帮助文本和测试说明。
-5. 默认后端切换前必须完成 W1-1、W1-2、W1-4、W1-5。
+实施结果：
 
-验收：
+1. `ensure_runtime_flags()` 的默认值改为启用 VM；
+   `--no-vm` / `SKEIN_VM=0` 关闭。
+2. `--vm` / `SKEIN_VM=1` 仍保留为显式开启。
+3. CTest 明确分离两套后端：
+   - `skein_tests`：`SKEIN_VM=0`
+   - `skein_vm_tests`：`SKEIN_VM=1`
+   - sanitizer 构建中 `skein_tests` 同样关闭 LSan。
+4. 新增默认后端测试：移除 `SKEIN_VM` 环境变量并设置
+   `SKEIN_VM_TRACE=1`，断言输出包含 VM trace。
+5. 更新 README、`docs/bytecode.md`、`docs/architecture.md` 和帮助文本。
+
+验收结果：
 
 - `./build/skein script.skein` 默认使用 VM。
-- `--no-vm` 与 `SKEIN_VM=0` 仍能完整运行测试集。
+- `--no-vm` 与 `SKEIN_VM=0` 全量测试通过。
+- 默认后端测试通过。
 - 两后端 stdout / stderr / exit code 一致。
 
 #### W1-4 AST 生命周期与回退解耦（P1，M）
@@ -580,6 +587,8 @@ std::shared_ptr<const void> vm_param_patterns;
 
 ### M1：语义收口
 
+状态：**完成（2026-11-05）**。
+
 任务：W1-1、W1-2、W1-4、W1-5、W1-6
 
 退出标准：
@@ -587,7 +596,7 @@ std::shared_ptr<const void> vm_param_patterns;
 - 参数 pattern 原生执行。
 - 标准测试集零 `EVAL_AST`。
 - 诊断差分与泄漏审计通过。
-- 仍保留 AST 默认后端，便于对照。
+- AST 后端通过 `--no-vm` / `SKEIN_VM=0` 保留为参考实现。
 
 ### M2：Frame VM
 
@@ -677,7 +686,7 @@ std::shared_ptr<const void> vm_param_patterns;
 |---|---|---|---|---|
 | W1-1 参数 pattern | P0 | M | 完成（2026-11-05） | - |
 | W1-2 消除 EVAL_AST | P0 | L | 完成（2026-11-05） | - |
-| W1-3 VM 默认后端 | P1 | M | TODO | W1-1/W1-2/W1-4/W1-5 |
+| W1-3 VM 默认后端 | P1 | M | 完成（2026-11-05） | W1-1/W1-2/W1-4/W1-5 |
 | W1-4 AST 生命周期 | P1 | M | 完成（2026-11-05） | - |
 | W1-5 诊断一致性 | P1 | S | 完成（2026-11-05） | - |
 | W1-6 资源泄漏审计 | P1 | M | 完成（2026-11-05） | - |

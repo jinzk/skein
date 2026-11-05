@@ -16,7 +16,7 @@ enum class ParamPatternResult {
     Unsupported
 };
 
-/* Enabled by SKEIN_VM=1 or --vm; disabled by default during bring-up. */
+/* Enabled by default; --no-vm or SKEIN_VM=0 selects the AST backend. */
 bool skein_vm_enabled();
 /*
  * Turn the VM on or off.  This only affects work that has not been compiled

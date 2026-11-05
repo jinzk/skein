@@ -1,4 +1,4 @@
-# Skein 字节码与 VM（实验阶段）
+# Skein 字节码与 VM
 
 本文描述当前已经落地的字节码执行器，以及后续演进方向。具体任务拆分、
 里程碑、依赖和验收标准见 [bytecode-plan.md](bytecode-plan.md)。
@@ -9,15 +9,18 @@
   - `src/interpreter/bytecode.*`：`Instr`、`Proto`、常量池、反汇编；
   - `src/interpreter/compiler.*`：AST → 字节码；
   - `src/interpreter/vm.*`：栈式执行器、函数体接入、函数 Proto 缓存。
-- VM 默认关闭，可通过 `--vm` 或 `SKEIN_VM=1` 启用。
-- AST 解释器仍是默认后端，并作为差分测试的参考实现。
+- VM 默认启用；`--no-vm` 或 `SKEIN_VM=0` 可切换到 AST 后端。
+- AST 解释器作为差分测试的参考实现保留。
 - `ctest` 同时运行 AST 与 VM 两套用例（`skein_tests` 与
   `skein_vm_tests`）。
 
 ## 2. 使用方式
 
 ```bash
-# 命令行开关
+# 默认使用 VM
+./build/skein script.skein
+
+# 显式开关
 ./build/skein --vm script.skein
 ./build/skein --no-vm script.skein
 

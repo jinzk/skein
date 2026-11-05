@@ -585,3 +585,37 @@ def run_cases():
           'impl Box { func add(self, x) => self.v + x; }\n'
           'print(5 |> Box { v: 10 }.add());\n',
           stdout="15")
+
+    check("pipe apply operator",
+          'func f(x, y) { return x - y; }\n'
+          'let h = x -> y -> f(x, y);\n'
+          'print(4 |>> h(3));\n'
+          'print(h(4)(3));\n'
+          'print(1 |>> (x -> x + 1));\n',
+          stdout_all=["-1", "1", "2"])
+    check("call placeholders",
+          'func f(a, b, c) { return [a, b, c]; }\n'
+          'let g = f(_, _, 3);\n'
+          'print(g(1, 2));\n'
+          'print(f(_, 9, 0)(4));\n'
+          'func add(a, b) { return a + b; }\n'
+          'print(add(_, 2)(1));\n',
+          stdout_all=["[1, 2, 3]", "[4, 9, 0]", "3"])
+    check("placeholder with pipe",
+          'import std;\n'
+          'print([1, 2, 3] |> std.list.map(_, x -> x * 2));\n'
+          'print([1, 2, 3] |>> std.list.map(_, x -> x * 2));\n',
+          stdout_all=["[2, 4, 6]", "[2, 4, 6]"])
+    check("placeholder method",
+          'struct Box { v: int; }\n'
+          'impl Box { func add(self, x) => self.v + x; }\n'
+          'let b = Box { v: 10 };\n'
+          'let m = b.add(_);\n'
+          'print(m(2));\n',
+          stdout="12")
+    check("placeholder nearest call",
+          'func f(a, b, c) { return [a, b, c]; }\n'
+          'func inc(x) { return x + 1; }\n'
+          'let value = f(inc(_), 9, 0);\n'
+          'print(kind_of(value));\n',
+          stdout="list")

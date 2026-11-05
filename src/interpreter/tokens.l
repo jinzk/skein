@@ -451,6 +451,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "%=" { YYRET(MOD_ASSIGN); }
 "&=" { YYRET(AND_ASSIGN); }
 "|=" { YYRET(OR_ASSIGN); }
+"|>>" { YYRET(PIPE_APPLY); }
 "|>" { YYRET(PIPE); }
 "^=" { YYRET(XOR_ASSIGN); }
 "<<=" { YYRET(SHL_ASSIGN); }

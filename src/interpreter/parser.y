@@ -516,6 +516,74 @@ static struct symlist *new_destructure_param(struct ast *pattern) {
     return params;
 }
 
+static bool is_placeholder_arg(struct ast *arg) {
+    return arg && arg->nodetype == 'N' &&
+           std::strcmp(((struct symref *)arg)->name, "_") == 0;
+}
+
+static struct ast *replace_single_placeholder(
+    struct ast *arg, const std::vector<std::string> &names, size_t &index) {
+    if (!is_placeholder_arg(arg))
+        return arg;
+    treefree(arg);
+    return newref(copy_text(names[index++].c_str()));
+}
+
+static struct ast *replace_placeholder_args(
+    struct ast *args, const std::vector<std::string> &names,
+    size_t &index) {
+    if (!args)
+        return NULL;
+    if (args->nodetype == 'L') {
+        struct list_node *node = (struct list_node *)args;
+        node->value = replace_single_placeholder(
+            node->value, names, index);
+        node->next = replace_placeholder_args(node->next, names, index);
+        return args;
+    }
+    return replace_single_placeholder(args, names, index);
+}
+
+static struct ast *new_call_with_placeholders(
+    struct ast *callee, struct ast *args) {
+    size_t holes = 0;
+    for (struct ast *item = args; item;) {
+        if (item->nodetype == 'L') {
+            struct list_node *node = (struct list_node *)item;
+            if (is_placeholder_arg(node->value))
+                ++holes;
+            item = node->next;
+        } else {
+            if (is_placeholder_arg(item))
+                ++holes;
+            break;
+        }
+    }
+    if (holes == 0)
+        return newcall(callee, args);
+
+    std::vector<std::string> names;
+    names.reserve(holes);
+    for (size_t i = 0; i < holes; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "#%d", ++destructure_param_id);
+        names.emplace_back(name);
+    }
+
+    size_t index = 0;
+    args = replace_placeholder_args(args, names, index);
+
+    std::vector<struct symlist *> params;
+    params.reserve(holes);
+    for (const std::string &name : names)
+        params.push_back(newsymlist(newsym(name.c_str()), NULL, NULL));
+    for (size_t i = 0; i + 1 < params.size(); ++i)
+        params[i]->next = params[i + 1];
+
+    return newfunc(NULL, params.empty() ? NULL : params[0],
+                   newret(newcall(callee, args)), false, false, false);
+}
+
 static struct type_constraint *type_constraint_from_builtin(int functype) {
     switch (functype) {
         case B_int: return new_type_constraint(TYPE_INT);
@@ -576,6 +644,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %token ELLIPSIS "..."
 %token DOTDOT ".."
 %token PIPE "|>"
+%token PIPE_APPLY "|>>"
 %token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
@@ -595,7 +664,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %left SHL SHR
 %left '+' '-'
 %left '*' '/' '%'
-%left PIPE
+%left PIPE PIPE_APPLY
 %precedence UMINUS NOT BITNOT
 %right INC DEC
 %precedence '['
@@ -1216,6 +1285,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
             $$ = newcall($3, newast('L', $1, NULL));
         }
       }
+    | exp PIPE_APPLY exp                  {
+        $$ = newcall($3, newast('L', $1, NULL));
+      }
     | NAME RARROW lambda_start exp         {
         $$ = newfunc(NULL, newsymlist(newsym($1), NULL, NULL),
                      newret($4), false, false, finish_function());
@@ -1275,7 +1347,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp XOR_ASSIGN exp                  { $$ = newcompound($1, '^', $3); }
     | exp SHL_ASSIGN exp                  { $$ = newcompound($1, 's', $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
-    | exp '(' explist ')'      { $$ = newcall($1, $3); }
+    | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
     | exp '.' fieldname                   { $$ = newast('j', $1, newstr($3)); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }

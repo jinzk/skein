@@ -20,6 +20,17 @@ def run_cases():
         env=default_env,
     )
     check(
+        "frame VM deep recursion",
+        "func down(n) {\n"
+        "  if (n <= 0) { return 0; }\n"
+        "  return down(n - 1);\n"
+        "}\n"
+        "print(down(5000));\n",
+        stdout="0",
+        env=dict(os.environ, SKEIN_VM="1",
+                 SKEIN_VM_MAX_DEPTH="10000"),
+    )
+    check(
         "unicode identifier NFC struct",
         f"struct e\u0301 {{ e\u0301: int; }}\n"
         f"let p = \u00e9 {{ \u00e9: 7 }};\np.\u00e9\n",

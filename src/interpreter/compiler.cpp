@@ -1,6 +1,7 @@
 #include "compiler.h"
 
 #include "ast.h"
+#include "verifier.h"
 #include "eval_context.h"
 #include "eval_internal.h"
 #include "structeval.h"
@@ -31,6 +32,14 @@ struct value_deleter {
 
 std::shared_ptr<value_t> own_value(value_t *value) {
     return std::shared_ptr<value_t>(value, value_deleter());
+}
+
+bool finalize_proto(Proto &proto, std::string &error) {
+    uint32_t max_stack = 0;
+    if (!skein::bc::verify(proto, error, &max_stack))
+        return false;
+    proto.max_stack = max_stack;
+    return true;
 }
 
 struct LoopContext {
@@ -253,6 +262,10 @@ struct Compiler {
                                      : child.error.c_str());
             return 0;
         }
+        if (!finalize_proto(child.proto, child.error)) {
+            fail(child.error.c_str());
+            return 0;
+        }
         skein::bc::PackageDesc desc;
         desc.name = node->name ? node->name : "";
         desc.body =
@@ -354,6 +367,10 @@ struct Compiler {
         if (!child.ok) {
             fail(child.error.empty() ? "cannot compile expression"
                                      : child.error.c_str());
+            return 0;
+        }
+        if (!finalize_proto(child.proto, child.error)) {
+            fail(child.error.c_str());
             return 0;
         }
         proto.defer_protos.push_back(
@@ -2519,7 +2536,8 @@ ProtoPtr skein_compile_statement(struct ast *statement,
                                        : compiler.error;
         return nullptr;
     }
-    compiler.proto.max_stack = 0;
+    if (!finalize_proto(compiler.proto, error))
+        return nullptr;
     return std::make_shared<const Proto>(std::move(compiler.proto));
 }
 
@@ -2548,6 +2566,8 @@ ProtoPtr skein_compile_default_expression(
                                        : compiler.error;
         return nullptr;
     }
+    if (!finalize_proto(compiler.proto, error))
+        return nullptr;
     return std::make_shared<const Proto>(std::move(compiler.proto));
 }
 
@@ -2582,6 +2602,8 @@ skein_compile_parameter_patterns(struct function_code *code,
         compiled->roots.push_back(index);
     }
 
+    if (!finalize_proto(compiler.proto, error))
+        return nullptr;
     compiled->proto =
         std::make_shared<const Proto>(std::move(compiler.proto));
     return compiled;
@@ -2625,5 +2647,7 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
                                        : compiler.error;
         return nullptr;
     }
+    if (!finalize_proto(compiler.proto, error))
+        return nullptr;
     return std::make_shared<const Proto>(std::move(compiler.proto));
 }

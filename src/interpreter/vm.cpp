@@ -92,6 +92,32 @@ struct default_cache_entry {
 
 std::unordered_map<function_code *, default_cache_entry> default_cache;
 
+ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
+    if (!def || !def->code)
+        return nullptr;
+    function_code *code = def->code.get();
+    if (code->vm_compile_failed)
+        return nullptr;
+    if (code->vm_proto)
+        return std::static_pointer_cast<const Proto>(code->vm_proto);
+
+    std::string error;
+    ProtoPtr proto = skein_compile_function_body(code, code->module, error);
+    if (!proto) {
+        code->vm_compile_failed = true;
+        if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
+            std::fprintf(stderr, "[vm] fallback function %s: %s\n",
+                         code->name.c_str(), error.c_str());
+        return nullptr;
+    }
+    code->vm_proto = proto;
+    if (code->ast && !keep_function_ast()) {
+        treefree(code->ast);
+        code->ast = NULL;
+    }
+    return proto;
+}
+
 const Constant *constant_at(const Proto &proto, uint32_t index) {
     if (index >= proto.consts.size())
         return NULL;
@@ -181,10 +207,34 @@ struct iterator_state {
     struct symbol *value_sym = NULL;
 };
 
+/*
+ * Snapshot of the caller's execution state while a fast VM frame runs.
+ * Fast frames are restricted to Protos without handlers, defers, iterators
+ * or suspension points, so the saved vectors are usually empty.
+ */
+struct SavedVmState {
+    const Proto *proto = nullptr;
+    size_t pc = 0;
+    size_t scope_mark = 0;
+    size_t frame_stack_base = 0;
+    int errors_before = 0;
+    int saved_handler_depth = 0;
+    int caller_handler_depth = 0;
+    int handler_body_depth = 0;
+    bool allow_await = false;
+    std::shared_ptr<function_def> def;
+    std::vector<struct symbol *> name_cache;
+    std::vector<struct symbol *> param_symbols;
+    std::vector<struct symbol *> slot_symbols;
+    std::vector<iterator_state> iterators;
+    std::vector<std::vector<defer_record>> defer_scopes;
+    std::vector<handler_state> handlers;
+};
+
 class Executor {
 public:
     explicit Executor(const Proto &proto)
-        : proto_(proto),
+        : proto_ptr_(&proto),
           context_(active_eval_context()),
           errors_before_(context_.runtime_error_count),
           scope_mark_(context_.scopes.restore_stack.size()),
@@ -204,6 +254,8 @@ public:
     }
 
     ~Executor() {
+        if (!saved_states_.empty())
+            unwind_fast_frames();
         free_stack(stack_);
         for (iterator_state &state : iterators_) {
             freeval(state.iterable);
@@ -225,15 +277,25 @@ public:
     }
 
     value_t *run() {
-        while (pc_ < proto_.code.size()) {
+        while (true) {
+            if (pc_ >= proto().code.size()) {
+                if (saved_states_.empty())
+                    break;
+                bool completed = false;
+                value_t *abort =
+                    fast_frame_return(newnull(), completed);
+                if (!completed)
+                    return abort;
+                continue;
+            }
             if (((++instruction_count_) & 1023u) == 0 && g_interrupted) {
                 return abort_error();
             }
 
             try {
-            const Instr ins = proto_.code[pc_];
+            const Instr ins = proto().code[pc_];
             const SourceLoc loc =
-                pc_ < proto_.locs.size() ? proto_.locs[pc_] : SourceLoc();
+                pc_ < proto().locs.size() ? proto().locs[pc_] : SourceLoc();
             ++pc_;
             if (loc.line > 0)
                 diag_set_location(loc.line, loc.column);
@@ -241,8 +303,8 @@ public:
             if (vm_trace_state) {
                 std::fprintf(stderr,
                              "[vm] %s pc=%zu op=%s a=%u b=%u stack=%zu\n",
-                             proto_.name.empty() ? "<top>"
-                                                 : proto_.name.c_str(),
+                             proto().name.empty() ? "<top>"
+                                                 : proto().name.c_str(),
                              pc_ - 1, skein::bc::op_name(
                                           static_cast<Op>(ins.op)),
                              (unsigned)ins.a, ins.b, stack_.size());
@@ -257,7 +319,7 @@ public:
                     break;
 
                 case Op::LoadConst: {
-                    const Constant *c = constant_at(proto_, ins.b);
+                    const Constant *c = constant_at(proto(), ins.b);
                     if (!c) {
                         yyerror("invalid bytecode constant");
                         return abort_error();
@@ -270,7 +332,7 @@ public:
                 }
 
                 case Op::LoadName: {
-                    const char *name = name_at(proto_, ins.b);
+                    const char *name = name_at(proto(), ins.b);
                     struct symbol *sym = cached_symbol(ins.b);
                     if (!sym) {
                         yyerror("symbol not found %s", name);
@@ -292,7 +354,7 @@ public:
                     struct symbol *sym = cached_symbol(ins.b);
                     if (!sym) {
                         yyerror("symbol not found %s",
-                                name_at(proto_, ins.b));
+                                name_at(proto(), ins.b));
                         freeval(value);
                         return abort_error();
                     }
@@ -312,7 +374,7 @@ public:
                     struct symbol *sym = cached_symbol(ins.b);
                     if (!sym) {
                         yyerror("symbol not found %s",
-                                name_at(proto_, ins.b));
+                                name_at(proto(), ins.b));
                         freeval(value);
                         return abort_error();
                     }
@@ -330,7 +392,7 @@ public:
                     struct symbol *sym = cached_symbol(ins.b);
                     if (!sym) {
                         yyerror("symbol not found %s",
-                                name_at(proto_, ins.b));
+                                name_at(proto(), ins.b));
                         return abort_error();
                     }
                     value_t *result = increment_symbol_direct(
@@ -351,8 +413,8 @@ public:
                     struct symbol *sym = param_symbols_[ins.b];
                     if (!sym) {
                         yyerror("symbol not found %s",
-                                ins.b < proto_.param_names.size()
-                                    ? proto_.param_names[ins.b].c_str()
+                                ins.b < proto().param_names.size()
+                                    ? proto().param_names[ins.b].c_str()
                                     : "");
                         return abort_error();
                     }
@@ -423,12 +485,12 @@ public:
                 }
 
                 case Op::DefineSlot: {
-                    if (ins.b >= proto_.slots.size() ||
+                    if (ins.b >= proto().slots.size() ||
                         ins.b >= slot_symbols_.size()) {
                         yyerror("invalid bytecode slot");
                         return abort_error();
                     }
-                    const skein::bc::SlotDesc &slot = proto_.slots[ins.b];
+                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *value = NULL;
                     if (ins.flags & 1) {
                         value = pop_checked();
@@ -476,12 +538,12 @@ public:
                 }
 
                 case Op::LoadSlot: {
-                    if (ins.b >= proto_.slots.size() ||
+                    if (ins.b >= proto().slots.size() ||
                         ins.b >= slot_symbols_.size()) {
                         yyerror("invalid bytecode slot");
                         return abort_error();
                     }
-                    const skein::bc::SlotDesc &slot = proto_.slots[ins.b];
+                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     struct symbol *sym = slot_symbols_[ins.b];
                     if (!sym)
                         sym = lookupsym(slot.name.c_str());
@@ -502,13 +564,13 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
-                    if (ins.b >= proto_.slots.size() ||
+                    if (ins.b >= proto().slots.size() ||
                         ins.b >= slot_symbols_.size()) {
                         yyerror("invalid bytecode slot");
                         freeval(value);
                         return abort_error();
                     }
-                    const skein::bc::SlotDesc &slot = proto_.slots[ins.b];
+                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
                         result = assign_symbol_direct(
@@ -528,13 +590,13 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
-                    if (ins.b >= proto_.slots.size() ||
+                    if (ins.b >= proto().slots.size() ||
                         ins.b >= slot_symbols_.size()) {
                         yyerror("invalid bytecode slot");
                         freeval(value);
                         return abort_error();
                     }
-                    const skein::bc::SlotDesc &slot = proto_.slots[ins.b];
+                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
                         result = compound_symbol_direct(
@@ -551,12 +613,12 @@ public:
                 }
 
                 case Op::IncDecSlot: {
-                    if (ins.b >= proto_.slots.size() ||
+                    if (ins.b >= proto().slots.size() ||
                         ins.b >= slot_symbols_.size()) {
                         yyerror("invalid bytecode slot");
                         return abort_error();
                     }
-                    const skein::bc::SlotDesc &slot = proto_.slots[ins.b];
+                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
                         result = increment_symbol_direct(
@@ -580,11 +642,11 @@ public:
                     break;
 
                 case Op::DefineName: {
-                    if (ins.b >= proto_.decls.size()) {
+                    if (ins.b >= proto().decls.size()) {
                         yyerror("invalid bytecode declaration");
                         return abort_error();
                     }
-                    const skein::bc::DeclDesc &def = proto_.decls[ins.b];
+                    const skein::bc::DeclDesc &def = proto().decls[ins.b];
                     value_t *value = NULL;
                     if (ins.flags & 1) {
                         value = pop_checked();
@@ -737,7 +799,7 @@ public:
                     break;
 
                 case Op::IsType: {
-                    const Constant *c = constant_at(proto_, ins.b);
+                    const Constant *c = constant_at(proto(), ins.b);
                     if (!c || c->kind != ConstantKind::Type) {
                         yyerror("invalid bytecode type constant");
                         return abort_error();
@@ -909,12 +971,12 @@ public:
 
                 case Op::IterNew: {
                     uint32_t desc_index = ins.a;
-                    if (desc_index >= proto_.iters.size()) {
+                    if (desc_index >= proto().iters.size()) {
                         yyerror("invalid bytecode iterator");
                         return abort_error();
                     }
                     const skein::bc::IterDesc &desc =
-                        proto_.iters[desc_index];
+                        proto().iters[desc_index];
                     value_t *iterable = pop_checked();
                     if (!iterable)
                         return abort_error();
@@ -1153,7 +1215,7 @@ public:
                         return abort_error();
                     std::vector<pattern_binding> bindings;
                     bool matched =
-                        match_pattern_proto(proto_, ins.b, subject, bindings);
+                        match_pattern_proto(proto(), ins.b, subject, bindings);
                     freeval(subject);
                     if (context_.runtime_error_count != errors_before_) {
                         free_pattern_bindings(bindings);
@@ -1184,7 +1246,7 @@ public:
                         return abort_error();
                     std::vector<pattern_binding> bindings;
                     bool matched =
-                        match_pattern_proto(proto_, ins.b, value, bindings);
+                        match_pattern_proto(proto(), ins.b, value, bindings);
                     if (context_.runtime_error_count != errors_before_) {
                         free_pattern_bindings(bindings);
                         freeval(value);
@@ -1222,7 +1284,7 @@ public:
                 }
 
                 case Op::Closure: {
-                    const Constant *c = constant_at(proto_, ins.b);
+                    const Constant *c = constant_at(proto(), ins.b);
                     if (!c || c->kind != ConstantKind::Function ||
                         !c->function) {
                         yyerror("invalid bytecode function");
@@ -1243,7 +1305,7 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
-                    const char *name = name_at(proto_, ins.b);
+                    const char *name = name_at(proto(), ins.b);
                     if (isrepeated(name)) {
                         yyerror("symbol repeated %s", name);
                         freeval(value);
@@ -1259,12 +1321,12 @@ public:
                 }
 
                 case Op::DeclareStruct: {
-                    if (ins.b >= proto_.struct_decls.size()) {
+                    if (ins.b >= proto().struct_decls.size()) {
                         yyerror("invalid bytecode struct declaration");
                         return abort_error();
                     }
                     const skein::bc::StructDeclMeta &meta =
-                        proto_.struct_decls[ins.b];
+                        proto().struct_decls[ins.b];
                     std::vector<std::pair<std::string, type_constraint>>
                         fields;
                     fields.reserve(meta.fields.size());
@@ -1291,12 +1353,12 @@ public:
                 }
 
                 case Op::DeclareEnum: {
-                    if (ins.b >= proto_.enum_decls.size()) {
+                    if (ins.b >= proto().enum_decls.size()) {
                         yyerror("invalid bytecode enum declaration");
                         return abort_error();
                     }
                     const skein::bc::EnumDeclMeta &meta =
-                        proto_.enum_decls[ins.b];
+                        proto().enum_decls[ins.b];
                     std::vector<std::pair<
                         std::string,
                         std::vector<std::pair<std::string,
@@ -1324,12 +1386,12 @@ public:
                 }
 
                 case Op::DeclareTrait: {
-                    if (ins.b >= proto_.trait_decls.size()) {
+                    if (ins.b >= proto().trait_decls.size()) {
                         yyerror("invalid bytecode trait declaration");
                         return abort_error();
                     }
                     const skein::bc::TraitDeclMeta &meta =
-                        proto_.trait_decls[ins.b];
+                        proto().trait_decls[ins.b];
                     std::vector<trait_method_meta> methods;
                     methods.reserve(meta.methods.size());
                     for (const auto &method : meta.methods) {
@@ -1359,12 +1421,12 @@ public:
                 }
 
                 case Op::DeclareImpl: {
-                    if (ins.b >= proto_.impl_decls.size()) {
+                    if (ins.b >= proto().impl_decls.size()) {
                         yyerror("invalid bytecode impl declaration");
                         return abort_error();
                     }
                     const skein::bc::ImplDeclMeta &meta =
-                        proto_.impl_decls[ins.b];
+                        proto().impl_decls[ins.b];
                     std::vector<std::pair<
                         std::string, std::shared_ptr<function_code>>>
                         methods;
@@ -1388,12 +1450,12 @@ public:
 
                 case Op::NewStruct:
                 case Op::NewEnum: {
-                    if (ins.b >= proto_.constructs.size()) {
+                    if (ins.b >= proto().constructs.size()) {
                         yyerror("invalid bytecode constructor");
                         return abort_error();
                     }
                     const skein::bc::ConstructDesc &desc =
-                        proto_.constructs[ins.b];
+                        proto().constructs[ins.b];
                     std::vector<std::pair<std::string, value_t *>>
                         fields(desc.fields.size());
                     for (size_t i = desc.fields.size(); i > 0; --i) {
@@ -1424,12 +1486,12 @@ public:
                 case Op::AssignIndex:
                 case Op::CompoundIndex:
                 case Op::IncDecIndex: {
-                    if (ins.b >= proto_.index_ops.size()) {
+                    if (ins.b >= proto().index_ops.size()) {
                         yyerror("invalid bytecode index descriptor");
                         return abort_error();
                     }
                     const skein::bc::IndexDesc &desc =
-                        proto_.index_ops[ins.b];
+                        proto().index_ops[ins.b];
                     size_t count = desc.fields.size();
                     if (count == 0) {
                         yyerror("invalid bytecode index descriptor");
@@ -1619,7 +1681,7 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
-                    const char *name = name_at(proto_, ins.b);
+                    const char *name = name_at(proto(), ins.b);
                     struct symbol *sym = newsym(name);
                     sym->val = value;
                     sym->is_const = (ins.flags & 1) != 0;
@@ -1644,13 +1706,13 @@ public:
                     break;
 
                 case Op::DeferPush: {
-                    if (ins.b >= proto_.defer_protos.size() ||
+                    if (ins.b >= proto().defer_protos.size() ||
                         defer_scopes_.empty()) {
                         yyerror("invalid bytecode defer descriptor");
                         return abort_error();
                     }
                     defer_record record;
-                    record.proto = proto_.defer_protos[ins.b];
+                    record.proto = proto().defer_protos[ins.b];
                     record.scope = current_scope();
                     defer_scopes_.back().push_back(std::move(record));
                     ++context_.vm_defer_count;
@@ -1658,12 +1720,12 @@ public:
                 }
 
                 case Op::DeclarePackage: {
-                    if (ins.b >= proto_.packages.size()) {
+                    if (ins.b >= proto().packages.size()) {
                         yyerror("invalid bytecode package descriptor");
                         return abort_error();
                     }
                     const skein::bc::PackageDesc &desc =
-                        proto_.packages[ins.b];
+                        proto().packages[ins.b];
                     if (!desc.body) {
                         yyerror("invalid package body");
                         return abort_error();
@@ -1719,12 +1781,12 @@ public:
                 }
 
                 case Op::Import: {
-                    if (ins.a >= proto_.imports.size()) {
+                    if (ins.a >= proto().imports.size()) {
                         yyerror("invalid bytecode import descriptor");
                         return abort_error();
                     }
                     const skein::bc::ImportDesc &desc =
-                        proto_.imports[ins.a];
+                        proto().imports[ins.a];
                     std::string error;
                     int errors_before_import = diag_error_count();
                     value_t *ns = package_import(
@@ -1779,12 +1841,12 @@ public:
                 }
 
                 case Op::CallSpread: {
-                    if (ins.b >= proto_.call_descs.size()) {
+                    if (ins.b >= proto().call_descs.size()) {
                         yyerror("invalid bytecode call descriptor");
                         return abort_error();
                     }
                     const skein::bc::CallDesc &desc =
-                        proto_.call_descs[ins.b];
+                        proto().call_descs[ins.b];
                     size_t count = desc.spread.size();
                     std::vector<value_t *> raw(count);
                     for (size_t i = count; i > 0; --i) {
@@ -1864,6 +1926,16 @@ public:
                         free_args(args);
                         return abort_error();
                     }
+                    FastCallResult fast = try_fast_call(callee, args);
+                    if (fast == FastCallResult::Pushed) {
+                        freeval(callee);
+                        break;
+                    }
+                    if (fast == FastCallResult::Failed) {
+                        freeval(callee);
+                        free_args(args);
+                        return abort_error();
+                    }
                     value_t *result =
                         call_value_args(callee, std::move(args));
                     freeval(callee);
@@ -1885,6 +1957,14 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
+                    if (!saved_states_.empty()) {
+                        bool completed = false;
+                        value_t *abort =
+                            fast_frame_return(value, completed);
+                        if (!completed)
+                            return abort;
+                        break;
+                    }
                     if (is_control(value))
                         return abort_control(value);
                     if (!retval(value)) {
@@ -1902,7 +1982,7 @@ public:
                      * until a declaration in the new scope invalidates them.
                      */
                     eval_pushscope();
-                    if (proto_.uses_defers)
+                    if (proto().uses_defers)
                         defer_scopes_.emplace_back();
                     break;
 
@@ -1910,7 +1990,7 @@ public:
                     scope_t *scope = topscope();
                     bool had_symbols =
                         scope && !scope->syms.small.empty();
-                    if (proto_.uses_defers && !defer_scopes_.empty()) {
+                    if (proto().uses_defers && !defer_scopes_.empty()) {
                         run_defer_scope(defer_scopes_.back());
                         defer_scopes_.pop_back();
                     }
@@ -1928,7 +2008,7 @@ public:
                 case Op::ControlContinue: {
                     const char *label = NULL;
                     if (ins.b != UINT32_MAX)
-                        label = name_at(proto_, ins.b);
+                        label = name_at(proto(), ins.b);
                     diag_set_flow_location(
                         loc.line > 0 ? loc.line : 0,
                         loc.column > 0 ? loc.column : 0);
@@ -1940,7 +2020,7 @@ public:
                 }
 
                 case Op::RuntimeError: {
-                    const char *message = name_at(proto_, ins.b);
+                    const char *message = name_at(proto(), ins.b);
                     yyerror("%s", message);
                     return abort_error();
                 }
@@ -1965,7 +2045,7 @@ public:
     }
 
 private:
-    const Proto &proto_;
+    const Proto *proto_ptr_;
     eval_context &context_;
     int errors_before_;
     size_t scope_mark_;
@@ -1979,12 +2059,215 @@ private:
     std::vector<handler_state> handlers_;
     int handler_body_depth_ = 0;
     size_t pc_ = 0;
+    size_t frame_stack_base_ = 0;
+    std::vector<SavedVmState> saved_states_;
+    std::shared_ptr<function_def> current_def_;
     unsigned instruction_count_ = 0;
+
+    const Proto &proto() const { return *proto_ptr_; }
+
+    void save_current_state() {
+        SavedVmState state;
+        state.proto = proto_ptr_;
+        state.pc = pc_;
+        state.scope_mark = scope_mark_;
+        state.frame_stack_base = frame_stack_base_;
+        state.errors_before = errors_before_;
+        state.saved_handler_depth = saved_handler_depth_;
+        state.caller_handler_depth = context_.handler_depth;
+        state.handler_body_depth = handler_body_depth_;
+        state.allow_await = context_.allow_await;
+        state.def = std::move(current_def_);
+        state.name_cache = std::move(name_cache_);
+        state.param_symbols = std::move(param_symbols_);
+        state.slot_symbols = std::move(slot_symbols_);
+        state.iterators = std::move(iterators_);
+        state.defer_scopes = std::move(defer_scopes_);
+        state.handlers = std::move(handlers_);
+        saved_states_.push_back(std::move(state));
+    }
+
+    void restore_state(SavedVmState state) {
+        proto_ptr_ = state.proto;
+        pc_ = state.pc;
+        scope_mark_ = state.scope_mark;
+        frame_stack_base_ = state.frame_stack_base;
+        errors_before_ = state.errors_before;
+        saved_handler_depth_ = state.saved_handler_depth;
+        handler_body_depth_ = state.handler_body_depth;
+        context_.handler_depth = state.caller_handler_depth;
+        context_.allow_await = state.allow_await;
+        current_def_ = std::move(state.def);
+        name_cache_ = std::move(state.name_cache);
+        param_symbols_ = std::move(state.param_symbols);
+        slot_symbols_ = std::move(state.slot_symbols);
+        iterators_ = std::move(state.iterators);
+        defer_scopes_ = std::move(state.defer_scopes);
+        handlers_ = std::move(state.handlers);
+    }
+
+    void unwind_fast_frames() {
+        while (!saved_states_.empty()) {
+            pop_scopes_to(scope_mark_);
+            diag_pop_call();
+            if (context_.vm_call_depth > 0)
+                --context_.vm_call_depth;
+            SavedVmState state = std::move(saved_states_.back());
+            saved_states_.pop_back();
+            restore_state(std::move(state));
+        }
+    }
+
+    static bool proto_can_frame(const Proto &proto) {
+        for (const Instr &ins : proto.code) {
+            switch (static_cast<Op>(ins.op)) {
+                case Op::PushFailHandler:
+                case Op::PushRecoverHandler:
+                case Op::PopHandler:
+                case Op::EnterHandlerBody:
+                case Op::LeaveHandlerBody:
+                case Op::CheckResult:
+                case Op::BindName:
+                case Op::DeferPush:
+                case Op::IterNew:
+                case Op::IterNext:
+                case Op::IterEnd:
+                case Op::Await:
+                case Op::Yield:
+                case Op::Fail:
+                case Op::Pass:
+                case Op::Recover:
+                case Op::ControlBreak:
+                case Op::ControlContinue:
+                    return false;
+                default:
+                    break;
+            }
+        }
+        return !proto.uses_defers;
+    }
+
+    enum class FastCallResult {
+        Pushed,
+        Fallback,
+        Failed
+    };
+
+    FastCallResult try_fast_call(value_t *callee,
+                                 std::vector<value_t *> &args) {
+        if (!callee || callee->type != T_func)
+            return FastCallResult::Fallback;
+        struct func_value_t *fv = (struct func_value_t *)callee;
+        std::shared_ptr<function_def> def = fv->def;
+        if (!def || !def->code)
+            return FastCallResult::Fallback;
+        function_code *code = def->code.get();
+        if (code->is_generator || code->is_async || code->is_method ||
+            code->variadic || code->required_params != code->nparams ||
+            (int)args.size() != code->nparams)
+            return FastCallResult::Fallback;
+
+        int index = 0;
+        for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
+            if (sl->has_pattern || sl->variadic)
+                return FastCallResult::Fallback;
+            if (!type_constraint_matches(sl->type, args[(size_t)index]))
+                return FastCallResult::Fallback;
+        }
+
+        ProtoPtr proto = prepare_function_body(def);
+        if (!proto || !proto_can_frame(*proto))
+            return FastCallResult::Fallback;
+
+        int limit = vm_max_depth();
+        if (context_.vm_call_depth >= limit) {
+            yyerror("maximum recursion depth (%d) exceeded", limit);
+            return FastCallResult::Failed;
+        }
+
+        const char *name = code->name.empty() ? "<anonymous>"
+                                              : code->name.c_str();
+        int line = g_error_line > 0 ? g_error_line : code->def_line;
+        int column = g_error_line > 0 ? g_error_column : code->def_column;
+
+        save_current_state();
+        current_def_ = std::move(def);
+        proto_ptr_ = proto.get();
+        pc_ = 0;
+        errors_before_ = context_.runtime_error_count;
+        saved_handler_depth_ = context_.handler_depth;
+        handler_body_depth_ = 0;
+        context_.handler_depth = 0;
+        context_.allow_await = false;
+        scope_mark_ = context_.scopes.restore_stack.size();
+        frame_stack_base_ = stack_.size();
+        name_cache_.assign(proto->consts.size(), NULL);
+        param_symbols_.clear();
+        param_symbols_.reserve((size_t)code->nparams);
+        slot_symbols_.assign(proto->slots.size(), NULL);
+        iterators_.clear();
+        handlers_.clear();
+        defer_scopes_.clear();
+
+        eval_push_closure_scope(current_def_->closure);
+        index = 0;
+        for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
+            struct symbol *sym = newsym(sl->sym->name);
+            sym->val = args[(size_t)index];
+            args[(size_t)index] = NULL;
+            if (sl->type) {
+                sym->type.kind = sl->type->kind;
+                sym->type.name = sl->type->name;
+            }
+            savesym(sym);
+            param_symbols_.push_back(sym);
+        }
+        args.clear();
+        ++context_.vm_call_depth;
+        diag_push_call(name, line, column);
+        return FastCallResult::Pushed;
+    }
+
+    /*
+     * Complete the current fast frame.  Returns NULL on success; otherwise
+     * returns the control/error result that run() must propagate.
+     */
+    value_t *fast_frame_return(value_t *value, bool &completed) {
+        completed = false;
+        if (is_control(value)) {
+            freeval(value);
+            return abort_control(value);
+        }
+        if (context_.runtime_error_count != errors_before_ ||
+            context_.control != EVAL_CONTROL_NONE) {
+            freeval(value);
+            return abort_error();
+        }
+        while (stack_.size() > frame_stack_base_) {
+            freeval(stack_.back());
+            stack_.pop_back();
+        }
+        pop_scopes_to(scope_mark_);
+        diag_pop_call();
+        if (context_.vm_call_depth > 0)
+            --context_.vm_call_depth;
+        if (context_.runtime_error_count != errors_before_ ||
+            context_.control != EVAL_CONTROL_NONE) {
+            freeval(value);
+            return abort_error();
+        }
+        SavedVmState state = std::move(saved_states_.back());
+        saved_states_.pop_back();
+        restore_state(std::move(state));
+        push(value);
+        completed = true;
+        return NULL;
+    }
 
     void push(value_t *value) { stack_.push_back(value); }
 
     value_t *pop_checked() {
-        if (stack_.empty()) {
+        if (stack_.size() <= frame_stack_base_) {
             yyerror("internal bytecode stack underflow");
             return NULL;
         }
@@ -1996,7 +2279,7 @@ private:
     struct symbol *cached_symbol(uint32_t index) {
         if (index < name_cache_.size() && name_cache_[index])
             return name_cache_[index];
-        const char *name = name_at(proto_, index);
+        const char *name = name_at(proto(), index);
         struct symbol *sym = lookupsym(name);
         if (sym && index < name_cache_.size())
             name_cache_[index] = sym;
@@ -2028,10 +2311,10 @@ private:
     void assign_pattern_slot(uint32_t pattern_index,
                              const std::string &name,
                              struct symbol *sym) {
-        if (pattern_index >= proto_.patterns.size())
+        if (pattern_index >= proto().patterns.size())
             return;
         for (const auto &binding :
-             proto_.patterns[pattern_index].binding_slots) {
+             proto().patterns[pattern_index].binding_slots) {
             if (binding.name == name &&
                 binding.slot < slot_symbols_.size()) {
                 slot_symbols_[binding.slot] = sym;
@@ -2325,9 +2608,9 @@ public:
 private:
     bool pattern_covers_all_desc(enum_def *def, value_t *subject,
                                  uint32_t index) {
-        if (index >= proto_.patterns.size())
+        if (index >= proto().patterns.size())
             return false;
-        const skein::bc::PatternDesc &pattern = proto_.patterns[index];
+        const skein::bc::PatternDesc &pattern = proto().patterns[index];
         if (pattern.kind == skein::bc::PatternDesc::Kind::As)
             return pattern_covers_all_desc(def, subject, pattern.child);
         if (pattern.kind == skein::bc::PatternDesc::Kind::Binding)
@@ -2346,9 +2629,9 @@ private:
 
     void collect_enum_variants_desc(enum_def *def, uint32_t index,
                                     std::vector<bool> &covered) {
-        if (index >= proto_.patterns.size())
+        if (index >= proto().patterns.size())
             return;
-        const skein::bc::PatternDesc &pattern = proto_.patterns[index];
+        const skein::bc::PatternDesc &pattern = proto().patterns[index];
         if (pattern.kind == skein::bc::PatternDesc::Kind::As) {
             collect_enum_variants_desc(def, pattern.child, covered);
             return;
@@ -2377,7 +2660,7 @@ private:
     bool match_exhaustive_desc(uint32_t arms_index, value_t *subject) {
         if (!subject || subject->type != T_enum)
             return true;
-        if (arms_index >= proto_.match_arms.size())
+        if (arms_index >= proto().match_arms.size())
             return false;
         struct enum_value_t *instance = (struct enum_value_t *)subject;
         enum_def *def = instance->def;
@@ -2386,7 +2669,7 @@ private:
 
         std::vector<bool> covered(def->variants.size(), false);
         for (const skein::bc::MatchArmDesc &arm :
-             proto_.match_arms[arms_index]) {
+             proto().match_arms[arms_index]) {
             if (arm.pattern == UINT32_MAX)
                 return true;
             if (arm.has_guard)
@@ -2584,6 +2867,7 @@ private:
     }
 
     value_t *abort_control(value_t *control) {
+        unwind_fast_frames();
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
@@ -2592,6 +2876,7 @@ private:
     }
 
     value_t *abort_error() {
+        unwind_fast_frames();
         if (context_.control != EVAL_CONTROL_CLOSE) {
             if (context_.control == EVAL_CONTROL_FAIL &&
                 has_handler(UnwindKind::Fail)) {
@@ -2623,6 +2908,7 @@ private:
     }
 
     value_t *finish() {
+        unwind_fast_frames();
         value_t *result = NULL;
         if (!stack_.empty()) {
             result = stack_.back();
@@ -2867,29 +3153,12 @@ bool skein_vm_try_execute_function_body(
         return false;
 
     function_code *code = def->code.get();
-    if (code->vm_compile_failed)
+    if (!code->vm_proto && !skein_vm_enabled())
         return false;
-    if (!code->vm_proto) {
-        if (!skein_vm_enabled())
-            return false;
-        std::string error;
-        ProtoPtr proto = skein_compile_function_body(
-            code, code->module, error);
-        if (!proto) {
-            code->vm_compile_failed = true;
-            if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
-                std::fprintf(stderr, "[vm] fallback function %s: %s\n",
-                             code->name.c_str(), error.c_str());
-            return false;
-        }
-        code->vm_proto = proto;
-        if (code->ast && !keep_function_ast()) {
-            treefree(code->ast);
-            code->ast = NULL;
-        }
-    }
 
-    ProtoPtr proto = std::static_pointer_cast<const Proto>(code->vm_proto);
+    ProtoPtr proto = prepare_function_body(def);
+    if (!proto)
+        return false;
 
     eval_context &context = active_eval_context();
     int limit = vm_max_depth();

@@ -49,11 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 7/7 passed (40.28s)
-skein_tests:    Passed 12.02s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.18s (SKEIN_VM=1)
-ASan/UBSan:     skein_tests 62.28s; skein_vm_tests 64.68s
-LSan:           skein_vm_lsan_tests Passed 76.86s
+ctest: 8/8 passed (40.76s)
+bytecode_verifier_test: Passed 0.00s
+skein_tests:    Passed 12.26s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.23s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 65.21s
+LSan:           skein_vm_lsan_tests Passed 77.82s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -61,10 +62,10 @@ Diagnostics:     30 个 AST/VM 差分用例 0 差异
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 500 万次局部循环 | 1.20s | 1.01s |
-| `fib(30)` | 0.69s | 0.79s |
-| 200 万次函数调用 | 0.84s | 0.84s |
-| 参数 pattern 密集调用 | 0.50s | 0.53s |
+| 500 万次局部循环 | 1.22s | 1.10s |
+| `fib(30)` | 0.70s | 0.77s |
+| 200 万次函数调用 | 0.83s | 0.85s |
+| 参数 pattern 密集调用 | 0.51s | 0.59s |
 
 ### 2.4 基线缺口
 
@@ -286,30 +287,50 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W2-1 Frame-based VM（P1，XL）
 
-现状：`execute_proto()` 每次新建 `Executor`，函数调用通过 C++ 递归。
+状态：**部分完成（2026-11-05）**。
 
-实施：
+已完成：
 
-1. 定义共享 `Frame`：
-   - `Proto *`
-   - `pc`
-   - 操作数栈基址/栈顶
-   - 局部 slot 区
-   - 参数区
-   - handler / defer 记录
-   - 返回地址与调用者帧
-2. `CALL` 只压入新帧并跳转，`RETURN` 恢复调用者帧。
-3. 把 `stack_`、`handlers_`、`defer_scopes_`、`iterators_` 从
-   `Executor` 成员改为帧/执行上下文成员。
-4. 去掉 `vm_depth_guard` 的 C++ 递归限制，改为显式帧深度上限。
-5. 保留一个 `Executor` 作为整次顶层执行的调度器。
+1. 新增 fast frame 路径：
+   - `SavedVmState` 保存调用者的 `Proto*`、`pc`、scope mark、
+     operand stack base、handler/defer/iterator 状态；
+   - `Op::Call` 对符合条件的函数直接压入新帧，不再创建
+     `Executor`，也不再走 C++ 递归；
+   - `Op::Return` 和函数体自然结束都会恢复调用者帧，并把结果压回
+     调用者的操作数栈；
+   - fast frame 共用同一个操作数栈，`pop_checked()` 增加帧基址检查。
+2. fast path 条件：
+   - `T_func`；
+   - 参数个数精确匹配；
+   - 无默认参数、variadic、method、generator、async；
+   - 无参数 destructuring pattern；
+   - 函数体不含 handler、defer、iterator、await、yield、
+     break/continue 控制指令。
+3. 不满足条件时回退现有 `call_value_args` 路径，保持语义。
+4. 显式帧深度使用 `SKEIN_VM_MAX_DEPTH`，错误文本保持兼容。
+5. 新增递归测试：`down(5000)` 在 `SKEIN_VM_MAX_DEPTH=10000` 下通过，
+   不再受 1000 层 C++ 递归限制。
 
-验收：
+当前结果：
 
-- `fib(30)` 不慢于 AST，目标 ≤ 0.70s。
-- 递归深度可配置到 10000 而不爆 C++ 栈。
-- 所有现有 VM 测试通过。
-- `SKEIN_VM_MAX_DEPTH` 语义和错误文本保持兼容。
+- 递归深度 5000 正常；AST 后端在相同输入下栈溢出。
+- `SKEIN_VM_MAX_DEPTH=1000` 的错误文本保持不变。
+- 全部现有 VM 测试通过。
+- `fib(30)` 仍略慢于 AST（约 0.77s vs 0.70s），尚未达到性能目标。
+
+剩余：
+
+1. 将 handler / defer / iterator / generator / async 纳入显式帧。
+2. 减少 fast frame 的 per-call 临时 vector、symbol 和 call-stack 分配。
+3. 让 `fib(30)` 达到不慢于 AST，目标 ≤ 0.70s。
+4. 评估完全移除 `call_value_args` 的 VM 函数递归路径。
+
+验收（未全部满足）：
+
+- 递归深度可配置到 10000 而不爆 C++ 栈：**已满足**。
+- 所有现有 VM 测试通过：**已满足**。
+- `SKEIN_VM_MAX_DEPTH` 语义和错误文本兼容：**已满足**。
+- `fib(30)` 不慢于 AST，目标 ≤ 0.70s：**未满足**。
 
 #### W2-2 真正的 upvalue 索引（P1，L）
 
@@ -369,26 +390,41 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W2-5 字节码 verifier（P1，M）
 
-实施：
+状态：**已完成（2026-11-05）**。
 
-1. 新增 `verify(const Proto &)`，在编译后、执行前调用。
-2. 验证：
+实施结果：
+
+1. 新增 `src/interpreter/verifier.*`：
+   - `verify(const Proto &, std::string &, uint32_t *max_stack)`
+   - `verify_tree(const Proto &, std::string &)`
+2. 编译器在每个 Proto 完成编译后调用 verifier，并写入
+   `Proto::max_stack`：
+   - 顶层语句
+   - 函数体
+   - 默认参数表达式
+   - 参数 pattern Proto
+   - defer / package 子 Proto
+3. 验证范围：
+   - 指令 opcode 合法
    - 跳转目标在范围内
-   - 栈深度不超过 `max_stack`
-   - 不出现栈下溢
-   - slot / 常量 / descriptor 索引合法
-   - `CALL` 参数个数与 `CALL_SPREAD` 描述一致
-   - handler / defer 嵌套合法
-   - `DeclDesc` / slot / pattern descriptor 合法
-   - Proto 图无非法环
-3. 失败时输出稳定错误文本，不执行半成品字节码。
-4. 为 verifier 增加负向测试。
+   - 栈下溢、负栈深、分支汇合处栈深一致
+   - slot / 参数 / 常量 / declaration / pattern / iterator /
+     construct / import / call descriptor 索引
+   - `CALL` / `CALL_SPREAD` 参数个数与栈深
+   - handler 与 handler body 嵌套平衡
+   - `DeferPush` 标志和 descriptor
+   - package / defer / pattern 子 Proto 图无环
+4. 新增 `bytecode_verifier_test` C++ 测试，覆盖正常 Proto、
+   非法跳转、栈下溢、栈深冲突、handler 下溢、缺失常量/声明、
+   子 Proto 图验证。
+5. 运行时 `invalid bytecode ...` 检查保留，作为防御性兜底。
 
-验收：
+验收结果：
 
 - 所有正常 Proto 通过验证。
 - 手工破坏的 Proto 被拒绝且不崩溃。
-- 运行时 `invalid bytecode ...` 检查显著减少或只作为断言。
+- 标准测试集零 fallback，verifier 未误拒绝合法字节码。
+- `bytecode_verifier_test` 在普通与 sanitizer 构建下通过。
 
 ### 3.3 W3：性能
 
@@ -690,11 +726,11 @@ std::shared_ptr<const void> vm_param_patterns;
 | W1-4 AST 生命周期 | P1 | M | 完成（2026-11-05） | - |
 | W1-5 诊断一致性 | P1 | S | 完成（2026-11-05） | - |
 | W1-6 资源泄漏审计 | P1 | M | 完成（2026-11-05） | - |
-| W2-1 Frame VM | P1 | XL | TODO | W1-2 |
+| W2-1 Frame VM | P1 | XL | 部分完成（fast path） | W1-2 |
 | W2-2 Upvalue | P1 | L | TODO | W2-1 |
 | W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |
 | W2-4 Generator 状态 | P2 | L | TODO | W2-1 |
-| W2-5 Verifier | P1 | M | TODO | W1-2 |
+| W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
 | W3-1 运算快路径 | P2 | M | TODO | W2-1 |
 | W3-2 全局 slot + IC | P2 | L | TODO | W2-1 |
 | W3-3 值表示 | P2 | XL | TODO | W2-1 |

@@ -182,6 +182,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/ast.cpp
   src/interpreter/bytecode.cpp
   src/interpreter/compiler.cpp
+  src/interpreter/verifier.cpp
   src/interpreter/vm.cpp
   src/interpreter/diagnostics.cpp
   src/interpreter/error_report.cpp
@@ -468,6 +469,20 @@ if(BUILD_TESTING)
     target_compile_options(http1_parser_test PRIVATE -Wall -Wextra)
   endif()
   add_test(NAME http1_parser_test COMMAND http1_parser_test)
+
+  add_executable(bytecode_verifier_test
+    tests/test_bytecode_verifier.cpp
+  )
+  target_link_libraries(bytecode_verifier_test PRIVATE skein_interpreter)
+  target_include_directories(bytecode_verifier_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(bytecode_verifier_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME bytecode_verifier_test COMMAND bytecode_verifier_test)
 
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)

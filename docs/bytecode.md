@@ -79,6 +79,8 @@ SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 - 参数 destructuring pattern（编译为 `PatternDesc`，调用绑定时原生匹配）
 - 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
+- VM fast frame（无 handler/defer/iterator/await/yield 的普通函数直接压帧，
+  `RETURN` 恢复调用者帧，不再创建 `Executor`）
 - list / dict 字面量
 - 索引与字段读取
 - 索引/字段赋值、复合赋值、自增自减（含 COW 与循环引用检查）
@@ -190,6 +192,18 @@ struct Instr {
 `b` 用于常量索引、跳转目标或参数个数；`Proto::locs` 为每条指令保存
 源码行列，用于保持现有诊断输出。
 
+每个 Proto 编译完成后会经过 `skein::bc::verify()`：
+
+- 校验 opcode、跳转目标、栈下溢和 CFG 汇合处的栈深；
+- 校验 slot / 参数 / 常量 / declaration / pattern / iterator /
+  construct / import / call descriptor 索引；
+- 校验 handler、handler body 和 defer 标志；
+- 递归校验 package、defer 和 pattern 子 Proto，检测 Proto 图环；
+- 计算并写入 `Proto::max_stack`。
+
+验证失败时整条语句/函数回退 AST；运行时 `invalid bytecode ...`
+检查仍作为防御性兜底保留。
+
 ## 5. 运行时接入点
 
 - `parser.y` 的 `top_statement` 调用 `skein_vm_eval_statement()`；
@@ -212,7 +226,12 @@ struct Instr {
 - 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
   成功编译后也会释放对应 AST。`function_code->sl` 仍保留参数/默认值/trait
   签名元数据，以及编译失败时用于回退的默认值 AST 和 pattern AST。
-- 还没有真正的 upvalue 索引和 frame-based VM。
+- fast frame 目前只覆盖普通函数；handler、defer、iterator、generator、
+  async、默认参数、variadic、method 和参数 pattern 调用仍回退
+  `call_value_args` / C++ 递归。
+- `fib(30)` 在 fast frame 下仍略慢于 AST，per-call 临时分配和调用栈
+  开销需要继续优化。
+- 还没有真正的 upvalue 索引。
 - 尚未实现精确 GC 栈图、字节码序列化。
 
 ## 7. 后续阶段

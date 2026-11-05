@@ -54,6 +54,10 @@ enum class Op : uint8_t {
     CompoundSlot,
     IncDecSlot,
     ClearSlot,
+    LoadUpvalue,
+    StoreUpvalue,
+    CompoundUpvalue,
+    IncDecUpvalue,
 
     Pop,
     Dup,
@@ -367,6 +371,7 @@ struct Proto {
     std::vector<std::shared_ptr<const Proto>> defer_protos;
 
     std::vector<std::string> param_names;
+    std::vector<std::string> upvalues;
     std::vector<SlotDesc> slots;
     std::vector<DeclDesc> decls;
     bool uses_names = false;

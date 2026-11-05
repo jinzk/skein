@@ -26,6 +26,10 @@ const char *op_name(Op op) {
         case Op::CompoundSlot: return "COMPOUND_SLOT";
         case Op::IncDecSlot: return "INCDEC_SLOT";
         case Op::ClearSlot: return "CLEAR_SLOT";
+        case Op::LoadUpvalue: return "LOAD_UPVALUE";
+        case Op::StoreUpvalue: return "STORE_UPVALUE";
+        case Op::CompoundUpvalue: return "COMPOUND_UPVALUE";
+        case Op::IncDecUpvalue: return "INCDEC_UPVALUE";
         case Op::Pop: return "POP";
         case Op::Dup: return "DUP";
         case Op::Swap: return "SWAP";
@@ -193,6 +197,11 @@ std::string disassemble(const Proto &proto) {
             ins.b < proto.slots.size())
             out << " slot=" << ins.b << "("
                 << proto.slots[ins.b].name << ")";
+        if ((op == Op::LoadUpvalue || op == Op::StoreUpvalue ||
+             op == Op::CompoundUpvalue || op == Op::IncDecUpvalue) &&
+            ins.b < proto.upvalues.size())
+            out << " upvalue=" << ins.b << "("
+                << proto.upvalues[ins.b] << ")";
         if (op == Op::CallSpread && ins.b < proto.call_descs.size())
             out << " args=" << proto.call_descs[ins.b].spread.size();
         if (loc.line > 0)

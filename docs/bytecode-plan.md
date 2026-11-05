@@ -49,12 +49,12 @@
 ### 2.3 基线测试与基准
 
 ```text
-ctest: 8/8 passed (40.31s)
+ctest: 8/8 passed (42.69s)
 bytecode_verifier_test: Passed 0.00s
-skein_tests:    Passed 12.03s (SKEIN_VM=0)
-skein_vm_tests: Passed 12.16s (SKEIN_VM=1)
-ASan/UBSan:     skein_vm_tests 65.09s
-LSan:           skein_vm_lsan_tests Passed 78.51s
+skein_tests:    Passed 12.44s (SKEIN_VM=0)
+skein_vm_tests: Passed 12.50s (SKEIN_VM=1)
+ASan/UBSan:     skein_vm_tests 65.28s
+LSan:           skein_vm_lsan_tests Passed 78.18s
 SKEIN_VM_DEBUG: 全量测试 0 条 fallback
 KEEP_AST:       SKEIN_VM=1 SKEIN_KEEP_AST=1 全量测试通过
 Diagnostics:     30 个 AST/VM 差分用例 0 差异
@@ -340,22 +340,43 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W2-2 真正的 upvalue 索引（P1，L）
 
-实施：
+状态：**完成（symbol-cell upvalue，2026-11-05）**。
 
-1. 编译期捕获分析：标记每个函数的自由变量。
-2. `Proto` 增加 `upvalues` 描述（来自父局部 slot 或父 upvalue）。
-3. `CLOSURE` 创建捕获环境；`Proto` 增加
-   `LOAD_UPVALUE` / `STORE_UPVALUE` / `COMPOUND_UPVALUE` /
-   `INCDEC_UPVALUE`。
-4. 支持 open upvalue（指向栈/帧）与 closed upvalue（堆 cell）。
-5. 与 defer、match binding、destructuring、参数 pattern 的
-   slot 生命周期对齐。
+实施结果：
 
-验收：
+1. `function_code` 记录捕获名列表 `upvalues`；`Proto::upvalues`
+   保存索引到名字的映射。
+2. 编译器在父函数中为嵌套函数建立捕获集合：
+   - 父参数、父局部声明、父 upvalue；
+   - 使用捕获集合的保守超集，避免遗漏；
+   - 子函数局部声明/参数仍优先使用 slot/param，不会误用 upvalue。
+3. `CLOSURE` 创建时按名字解析为 `symbol*` cell，存入
+   `function_def::upvalues`。
+4. 新增指令：
+   - `LOAD_UPVALUE`
+   - `STORE_UPVALUE`
+   - `COMPOUND_UPVALUE`
+   - `INCDEC_UPVALUE`
+5. 运行时按索引访问捕获 cell，不再每次读取都走名字查找。
+6. 当 upvalue 为空（全局、方法、超出捕获范围或过度捕获）时，
+   仍可回退到名字查找，保证语义正确。
+7. 闭包继续持有创建 scope 的 `shared_ptr`，因此 symbol cell 的
+   生命周期与原有闭包语义一致。
 
-- 闭包读写捕获变量不再走名字查找。
-- 多层闭包、循环中创建闭包、defer 捕获变量语义正确。
+验收结果：
+
+- 普通嵌套函数读写捕获变量使用 upvalue 指令。
+- 多层闭包、循环中创建闭包、defer 捕获变量测试通过。
+- `LOAD_UPVALUE` / `STORE_UPVALUE` 已在 trace 中验证。
 - 现有闭包测试全部通过。
+
+剩余优化：
+
+- 当前 upvalue 指向 symbol cell，而不是 open frame slot；
+  open/closed upvalue 的显式转换可作为后续性能项。
+- 顶层块内定义的函数仍使用名字查找。
+- 方法闭包尚未携带 upvalue 向量，会回退名字查找。
+- 默认参数 / defer 子 Proto 暂未使用 upvalue 索引。
 
 #### W2-3 Handler / defer 表（P1，L）
 
@@ -822,7 +843,7 @@ std::shared_ptr<const void> vm_param_patterns;
 | W1-5 诊断一致性 | P1 | S | 完成（2026-11-05） | - |
 | W1-6 资源泄漏审计 | P1 | M | 完成（2026-11-05） | - |
 | W2-1 Frame VM | P1 | XL | 完成（fast path） | W1-2 |
-| W2-2 Upvalue | P1 | L | TODO | W2-1 |
+| W2-2 Upvalue | P1 | L | 完成（symbol-cell） | W2-1 |
 | W2-3 Handler/defer 表 | P1 | L | TODO | W2-1 |
 | W2-4 Generator 状态 | P2 | L | TODO | W2-1 |
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |

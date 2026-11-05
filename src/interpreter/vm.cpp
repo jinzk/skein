@@ -197,7 +197,9 @@ struct defer_record {
     std::shared_ptr<scope_t> scope;
 };
 
-value_t *execute_proto(const Proto &proto);
+value_t *execute_proto(
+    const Proto &proto,
+    const std::shared_ptr<function_def> &def = nullptr);
 
 struct iterator_state {
     value_t *iterable = NULL;
@@ -236,12 +238,14 @@ struct SavedVmState {
 
 class Executor {
 public:
-    explicit Executor(const Proto &proto)
+    explicit Executor(const Proto &proto,
+                      std::shared_ptr<function_def> def = nullptr)
         : proto_ptr_(&proto),
           context_(active_eval_context()),
           errors_before_(context_.runtime_error_count),
           scope_mark_(context_.scopes.restore_stack.size()),
-          saved_handler_depth_(context_.handler_depth) {
+          saved_handler_depth_(context_.handler_depth),
+          current_def_(std::move(def)) {
         stack_.reserve(64);
         if (proto.uses_names)
             name_cache_.assign(proto.consts.size(), NULL);
@@ -643,6 +647,70 @@ public:
                     if (ins.b < slot_symbols_.size())
                         slot_symbols_[ins.b] = NULL;
                     break;
+
+                case Op::LoadUpvalue: {
+                    struct symbol *sym = upvalue_symbol(ins.b);
+                    if (!sym)
+                        return abort_error();
+                    if (sym->is_uninitialized) {
+                        yyerror("parameter %s is used before it is initialized",
+                                sym->name);
+                        return abort_error();
+                    }
+                    push(dupval(sym->val));
+                    break;
+                }
+
+                case Op::StoreUpvalue: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    struct symbol *sym = upvalue_symbol(ins.b);
+                    if (!sym) {
+                        freeval(value);
+                        return abort_error();
+                    }
+                    value_t *result = assign_symbol_direct(sym, value);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::CompoundUpvalue: {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return abort_error();
+                    struct symbol *sym = upvalue_symbol(ins.b);
+                    if (!sym) {
+                        freeval(value);
+                        return abort_error();
+                    }
+                    value_t *result = compound_symbol_direct(
+                        sym, (int)ins.flags, value);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::IncDecUpvalue: {
+                    struct symbol *sym = upvalue_symbol(ins.b);
+                    if (!sym)
+                        return abort_error();
+                    value_t *result = increment_symbol_direct(
+                        sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
 
                 case Op::DefineName: {
                     if (ins.b >= proto().decls.size()) {
@@ -1300,7 +1368,21 @@ public:
                     std::shared_ptr<scope_t> closure = current_scope();
                     if (closure && closure->is_global)
                         closure.reset();
-                    push(newfuncval(c->function, closure));
+                    std::vector<struct symbol *> upvalues;
+                    upvalues.reserve(c->function->upvalues.size());
+                    scope_context &scope_context = active_scope_context();
+                    for (const std::string &name :
+                         c->function->upvalues) {
+                        struct symbol *sym =
+                            lookupsym(name.c_str());
+                        if (sym && scope_context.global_scope &&
+                            scope_context.global_scope->syms.find(
+                                name.c_str()) == sym)
+                            sym = nullptr;
+                        upvalues.push_back(sym);
+                    }
+                    push(newfuncval(c->function, closure,
+                                    std::move(upvalues)));
                     break;
                 }
 
@@ -2328,6 +2410,22 @@ private:
         return sym;
     }
 
+    struct symbol *upvalue_symbol(uint32_t index) {
+        if (index >= proto().upvalues.size()) {
+            yyerror("invalid bytecode upvalue");
+            return NULL;
+        }
+        const char *name = proto().upvalues[index].c_str();
+        struct symbol *sym = nullptr;
+        if (current_def_ && index < current_def_->upvalues.size())
+            sym = current_def_->upvalues[index];
+        if (!sym && name && *name)
+            sym = lookupsym(name);
+        if (!sym)
+            yyerror("symbol not found %s", name ? name : "");
+        return sym;
+    }
+
     void invalidate_name_cache() {
         std::fill(name_cache_.begin(), name_cache_.end(), nullptr);
     }
@@ -3202,10 +3300,11 @@ private:
     }
 };
 
-value_t *execute_proto(const Proto &proto) {
+value_t *execute_proto(const Proto &proto,
+                       const std::shared_ptr<function_def> &def) {
     if (vm_trace_state)
         std::fputs(skein::bc::disassemble(proto).c_str(), stderr);
-    Executor executor(proto);
+    Executor executor(proto, def);
     return executor.run();
 }
 
@@ -3382,6 +3481,6 @@ bool skein_vm_try_execute_function_body(
     }
 
     vm_depth_guard guard(context);
-    out = execute_proto(*proto);
+    out = execute_proto(*proto, def);
     return true;
 }

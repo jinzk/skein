@@ -31,6 +31,24 @@ def run_cases():
                  SKEIN_VM_MAX_DEPTH="10000"),
     )
     check(
+        "closure captures through upvalues",
+        "func counter() {\n"
+        "  let n = 0;\n"
+        "  return func() { n = n + 1; return n; };\n"
+        "}\n"
+        "func nested() {\n"
+        "  let x = 1;\n"
+        "  return func() { return func() { x = x + 1; return x; }; };\n"
+        "}\n"
+        "let c = counter();\n"
+        "print(c());\n"
+        "print(c());\n"
+        "print(nested()()());\n",
+        stdout_all=["1", "2", "2"],
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_TRACE="1"),
+        stderr="LOAD_UPVALUE",
+    )
+    check(
         "unicode identifier NFC struct",
         f"struct e\u0301 {{ e\u0301: int; }}\n"
         f"let p = \u00e9 {{ \u00e9: 7 }};\np.\u00e9\n",

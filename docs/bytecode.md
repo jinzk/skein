@@ -221,8 +221,9 @@ struct Instr {
 
 - 局部变量使用 slot fast path；函数参数在未被局部声明遮蔽时使用参数 fast
   path。slot 通过 `symbol*` cell 与闭包、defer、方法、for-in 循环变量、
-  match binding、destructuring、on-error 绑定和 import 绑定共享。还没有
-  真正的 upvalue 索引，闭包内部对捕获变量的访问仍走名字查找。
+  match binding、destructuring、on-error 绑定和 import 绑定共享。
+- 普通嵌套函数使用 `LOAD_UPVALUE` / `STORE_UPVALUE` 等索引访问捕获
+  变量；upvalue 指向 `symbol*` cell，而不是显式 open/closed frame slot。
 - 小整数/`true`/`false`/`null` 已单例化；局部变量密集的循环基准已明显
   快于 AST，但函数调用密集的基准仍受 C++ 递归和每帧分配的拖累。
 - 常规语法结构已经全部有字节码路径，编译失败时整条语句/函数回退 AST。
@@ -234,12 +235,13 @@ struct Instr {
   `call_value_args` / C++ 递归。
 - 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；默认参数、variadic、
   method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
-- 还没有真正的 upvalue 索引。
+- 顶层块内函数、方法闭包仍使用名字查找；默认参数 / defer 子 Proto
+  暂未使用 upvalue 索引。
 - 尚未实现精确 GC 栈图、字节码序列化。
 
 ## 7. 后续阶段
 
-1. 真正的 upvalue 索引（闭包直接访问捕获 cell）；
+1. 将 symbol-cell upvalue 进一步改为 open/closed frame slot；
 2. frame-based VM，去掉每帧 Executor 分配和 C++ 递归；
 3. 尾调用优化（复用当前 fast frame；仅在无活跃 defer/handler
    时启用）；

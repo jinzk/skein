@@ -6,6 +6,7 @@
 #include "eval_internal.h"
 #include "structeval.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -66,6 +67,7 @@ struct Compiler {
 
     std::string pending_label;
     std::vector<std::string> param_names;
+    std::vector<std::string> upvalue_names;
     std::unordered_set<std::string> declared_names;
     std::vector<SlotScope> slot_scopes;
     int scope_depth = 0;
@@ -325,8 +327,25 @@ struct Compiler {
 
     uint32_t add_function(struct funcdef *node) {
         std::shared_ptr<function_code> code = get_function_code(node);
-        if (code)
+        if (code) {
             code->module = proto.module;
+            if (inside_function && code->upvalues.empty()) {
+                std::unordered_set<std::string> seen;
+                auto add = [&](const std::string &name) {
+                    if (!name.empty() && seen.insert(name).second)
+                        code->upvalues.push_back(name);
+                };
+                for (const std::string &name : param_names)
+                    add(name);
+                std::vector<std::string> locals(declared_names.begin(),
+                                                declared_names.end());
+                std::sort(locals.begin(), locals.end());
+                for (const std::string &name : locals)
+                    add(name);
+                for (const std::string &name : upvalue_names)
+                    add(name);
+            }
+        }
         if (node)
             node->moved = 1;
         Constant c;
@@ -580,6 +599,16 @@ struct Compiler {
             return -1;
         for (size_t i = 0; i < param_names.size(); ++i) {
             if (param_names[i] == name)
+                return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    int upvalue_index(const char *name) const {
+        if (!name || declared_names.count(name) != 0)
+            return -1;
+        for (size_t i = 0; i < upvalue_names.size(); ++i) {
+            if (upvalue_names[i] == name)
                 return static_cast<int>(i);
         }
         return -1;
@@ -1113,9 +1142,15 @@ struct Compiler {
                         emit(Op::LoadParam, 0, 0,
                              static_cast<uint32_t>(slot), here);
                     } else {
-                        uint32_t index =
-                            add_name(ref->name ? ref->name : "");
-                        emit(Op::LoadName, 0, 0, index, here);
+                        int upvalue = upvalue_index(ref->name);
+                        if (upvalue >= 0) {
+                            emit(Op::LoadUpvalue, 0, 0,
+                                 static_cast<uint32_t>(upvalue), here);
+                        } else {
+                            uint32_t index =
+                                add_name(ref->name ? ref->name : "");
+                            emit(Op::LoadName, 0, 0, index, here);
+                        }
                     }
                 }
                 return;
@@ -1168,9 +1203,15 @@ struct Compiler {
                             emit(Op::StoreParam, 0, 0,
                                  static_cast<uint32_t>(slot), here);
                         } else {
-                            uint32_t index =
-                                add_name(ref->name ? ref->name : "");
-                            emit(Op::StoreName, 0, 0, index, here);
+                            int upvalue = upvalue_index(ref->name);
+                            if (upvalue >= 0) {
+                                emit(Op::StoreUpvalue, 0, 0,
+                                     static_cast<uint32_t>(upvalue), here);
+                            } else {
+                                uint32_t index =
+                                    add_name(ref->name ? ref->name : "");
+                                emit(Op::StoreName, 0, 0, index, here);
+                            }
                         }
                     }
                     return;
@@ -1222,11 +1263,18 @@ struct Compiler {
                                  static_cast<uint8_t>(asgn->op), 0,
                                  static_cast<uint32_t>(slot), here);
                         } else {
-                            uint32_t index =
-                                add_name(ref->name ? ref->name : "");
-                            emit(Op::CompoundName,
-                                 static_cast<uint8_t>(asgn->op), 0, index,
-                                 here);
+                            int upvalue = upvalue_index(ref->name);
+                            if (upvalue >= 0) {
+                                emit(Op::CompoundUpvalue,
+                                     static_cast<uint8_t>(asgn->op), 0,
+                                     static_cast<uint32_t>(upvalue), here);
+                            } else {
+                                uint32_t index =
+                                    add_name(ref->name ? ref->name : "");
+                                emit(Op::CompoundName,
+                                     static_cast<uint8_t>(asgn->op), 0,
+                                     index, here);
+                            }
                         }
                     }
                     return;
@@ -1277,10 +1325,19 @@ struct Compiler {
                                  inc->delta > 0 ? 1 : 0,
                                  static_cast<uint32_t>(slot), here);
                         } else {
-                            uint32_t index =
-                                add_name(ref->name ? ref->name : "");
-                            emit(Op::IncDecName, inc->prefix ? 1 : 0,
-                                 inc->delta > 0 ? 1 : 0, index, here);
+                            int upvalue = upvalue_index(ref->name);
+                            if (upvalue >= 0) {
+                                emit(Op::IncDecUpvalue,
+                                     inc->prefix ? 1 : 0,
+                                     inc->delta > 0 ? 1 : 0,
+                                     static_cast<uint32_t>(upvalue), here);
+                            } else {
+                                uint32_t index =
+                                    add_name(ref->name ? ref->name : "");
+                                emit(Op::IncDecName,
+                                     inc->prefix ? 1 : 0,
+                                     inc->delta > 0 ? 1 : 0, index, here);
+                            }
                         }
                     }
                     return;
@@ -2624,6 +2681,8 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
         compiler.param_names.push_back(
             param->sym && param->sym->name ? param->sym->name : "");
     }
+    compiler.upvalue_names = code->upvalues;
+    compiler.proto.upvalues = code->upvalues;
     Compiler::collect_local_declared_names(code->ast,
                                             compiler.declared_names);
     compiler.param_fast_path = true;

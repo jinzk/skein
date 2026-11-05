@@ -819,7 +819,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
                           nullptr, false,
                           node->ast ? node->ast->line : 0,
                           node->ast ? node->ast->column : 0,
-                          diag_current_module_name(), nullptr},
+                          diag_current_module_name(), nullptr, {}},
         free_function_code);
     function_codes[node] = code;
     return code;

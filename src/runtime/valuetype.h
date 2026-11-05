@@ -13,6 +13,7 @@
 struct ast;
 struct symlist;
 struct scope_t;
+struct symbol;
 
 struct function_code {
     struct ast *ast;
@@ -33,11 +34,14 @@ struct function_code {
     std::string module;
     /* Opaque compiled parameter-pattern cache owned by the VM layer. */
     std::shared_ptr<const void> vm_param_patterns;
+    /* Captured binding names, resolved to symbol cells at closure creation. */
+    std::vector<std::string> upvalues;
 };
 
 struct function_def {
     std::shared_ptr<function_code> code;
     std::shared_ptr<scope_t> closure;
+    std::vector<struct symbol *> upvalues;
 };
 
 enum val_type {
@@ -348,8 +352,10 @@ std::string error_message_of(const struct value_t *value);
 struct value_t *newuserdataval(const struct native_type *meta,
                                std::shared_ptr<void> data);
 struct value_t *newnull();
-struct value_t *newfuncval(std::shared_ptr<function_code> code,
-                           std::shared_ptr<struct scope_t> closure);
+struct value_t *newfuncval(
+    std::shared_ptr<function_code> code,
+    std::shared_ptr<struct scope_t> closure,
+    std::vector<struct symbol *> upvalues = {});
 void free_function_code(struct function_code *code);
 struct value_t *dupval(struct value_t *v);
 

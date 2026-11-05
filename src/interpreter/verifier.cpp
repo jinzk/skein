@@ -174,6 +174,23 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
                 return false;
             stack(0, 1);
             break;
+        case Op::LoadUpvalue:
+            if (ins.b >= proto.upvalues.size())
+                return fail(error, at_pc("upvalue index out of range", pc));
+            stack(0, 1);
+            break;
+        case Op::StoreUpvalue:
+        case Op::CompoundUpvalue:
+            if (ins.b >= proto.upvalues.size())
+                return fail(error, at_pc("upvalue index out of range", pc));
+            need(1);
+            stack(1, 1);
+            break;
+        case Op::IncDecUpvalue:
+            if (ins.b >= proto.upvalues.size())
+                return fail(error, at_pc("upvalue index out of range", pc));
+            stack(0, 1);
+            break;
         case Op::Closure:
             if (!check_constant(proto, ins.b, pc, error, true,
                                 ConstantKind::Function))

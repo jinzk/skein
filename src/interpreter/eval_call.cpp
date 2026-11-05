@@ -22,6 +22,7 @@
 #include <unordered_set>
 
 #include "eval_internal.h"
+#include "vm.h"
 
 void free_args(std::vector<struct value_t *> &args) {
     for (size_t i = 0; i < args.size(); ++i)
@@ -170,7 +171,9 @@ static struct value_t *invoke_function_body(
 
     int saved_handler_depth = eval_ctx().handler_depth;
     eval_ctx().handler_depth = 0;
-    struct value_t *body_ret = eval(def->code->ast);
+    struct value_t *body_ret = NULL;
+    if (!skein_vm_try_execute_function_body(def, body_ret))
+        body_ret = eval(def->code->ast);
     eval_ctx().handler_depth = saved_handler_depth;
     struct value_t *result = topscope()->ret;
     topscope()->ret = NULL;

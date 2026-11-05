@@ -15,6 +15,7 @@
 #include "scopestack.h"
 #include "gc.h"
 #include "eval.h"
+#include "vm.h"
 
 extern int yylex();
 extern int yyparse();
@@ -1704,7 +1705,7 @@ top_statement: top_expression EOL {
             if (!g_package_loading)
                 maybe_collect_cycles();
 
-            rslt = eval($1);
+            rslt = skein_vm_eval_statement($1);
             if (eval_control_pending())
                 eval_finish_statement_control();
             if (g_interactive && rslt && rslt->type != T_null &&

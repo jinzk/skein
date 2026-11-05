@@ -576,6 +576,133 @@ struct value_t *compound_name(struct symref *ref, int op,
     return dupval(value);
 }
 
+value_t *assign_index_values(const char *base_name,
+                             std::vector<value_t *> &indices,
+                             const std::vector<bool> &fields,
+                             value_t *value) {
+    struct symbol *s = lookupsym(base_name);
+    if (!s || !s->val) {
+        yyerror("symbol not found %s", base_name ? base_name : "");
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+    if (s->is_self) {
+        yyerror("cannot modify self in a read-only method");
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *container = NULL;
+    std::vector<const void *> path_payloads;
+    std::vector<struct value_t *> holds;
+    if (!resolve_write_container(s, indices, fields, container,
+                                 &path_payloads, &holds)) {
+        free_args(holds);
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+    if (value_reaches_any(value, path_payloads)) {
+        yyerror("recursive value would create a cycle");
+        free_args(holds);
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *ret =
+        write_member_value(container, indices.back(), value, fields.back());
+    free_args(holds);
+    free_args(indices);
+    return ret;
+}
+
+value_t *compound_index_values(const char *base_name, int op,
+                               std::vector<value_t *> &indices,
+                               const std::vector<bool> &fields,
+                               value_t *value) {
+    struct symbol *s = lookupsym(base_name);
+    if (!s || !s->val) {
+        yyerror("symbol not found %s", base_name ? base_name : "");
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+    if (s->is_self) {
+        yyerror("cannot modify self in a read-only method");
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *container = NULL;
+    std::vector<struct value_t *> holds;
+    if (!resolve_write_container(s, indices, fields, container, NULL,
+                                 &holds)) {
+        free_args(holds);
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *idx = indices.back();
+    struct value_t *old = read_member_value(container, idx, fields.back());
+    if (!old) {
+        free_args(holds);
+        freeval(value);
+        free_args(indices);
+        return NULL;
+    }
+    struct value_t *result = apply_binary_value(op, old, value);
+    freeval(old);
+    freeval(value);
+    if (!result) {
+        free_args(holds);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *ret =
+        write_member_value(container, idx, result, fields.back());
+    free_args(holds);
+    free_args(indices);
+    return ret;
+}
+
+value_t *increment_index_values(const char *base_name, int delta,
+                                bool prefix,
+                                std::vector<value_t *> &indices,
+                                const std::vector<bool> &fields) {
+    struct symbol *s = lookupsym(base_name);
+    if (!s || !s->val) {
+        yyerror("symbol not found %s", base_name ? base_name : "");
+        free_args(indices);
+        return NULL;
+    }
+    if (s->is_self) {
+        yyerror("cannot modify self in a read-only method");
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *container = NULL;
+    std::vector<struct value_t *> holds;
+    if (!resolve_write_container(s, indices, fields, container, NULL,
+                                 &holds)) {
+        free_args(holds);
+        free_args(indices);
+        return NULL;
+    }
+
+    struct value_t *ret = increment_member_value(
+        container, indices.back(), delta, prefix, fields.back());
+    free_args(holds);
+    free_args(indices);
+    return ret;
+}
+
 struct value_t *compound_index(struct ast *target, int op,
                                       struct ast *value_ast) {
     std::vector<struct ast *> index_asts;
@@ -938,6 +1065,118 @@ struct value_t *increment_name(struct symref *ref, int delta,
     freeval(s->val);
     s->val = newv;
     return ret;
+}
+
+struct value_t *assign_symbol_direct(struct symbol *s,
+                                     struct value_t *value) {
+    if (!s) {
+        freeval(value);
+        return NULL;
+    }
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", s->name);
+        freeval(value);
+        return NULL;
+    }
+    if (!value)
+        return NULL;
+    if (value->type == T_return || value->type == T_break ||
+        value->type == T_continue)
+        return value;
+    if (!type_constraint_matches(&s->type, value)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(value));
+        freeval(value);
+        return NULL;
+    }
+    freeval(s->val);
+    s->val = value;
+    return dupval(value);
+}
+
+struct value_t *compound_symbol_direct(struct symbol *s, int op,
+                                       struct value_t *value) {
+    if (!s) {
+        freeval(value);
+        return NULL;
+    }
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", s->name);
+        freeval(value);
+        return NULL;
+    }
+    if (!value)
+        return NULL;
+    if (value->type == T_return || value->type == T_break ||
+        value->type == T_continue)
+        return value;
+    struct value_t *result = apply_binary_value(op, s->val, value);
+    freeval(value);
+    if (!result)
+        return NULL;
+    if (!type_constraint_matches(&s->type, result)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(result));
+        freeval(result);
+        return NULL;
+    }
+    freeval(s->val);
+    s->val = result;
+    return dupval(result);
+}
+
+struct value_t *increment_symbol_direct(struct symbol *s, int delta,
+                                        bool prefix) {
+    if (!s)
+        return NULL;
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", s->name);
+        return NULL;
+    }
+    struct value_t *newv = apply_increment(s->val, delta);
+    if (!newv)
+        return NULL;
+    if (!type_constraint_matches(&s->type, newv)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(newv));
+        freeval(newv);
+        return NULL;
+    }
+    struct value_t *ret = prefix ? dupval(newv) : dupval(s->val);
+    freeval(s->val);
+    s->val = newv;
+    return ret;
+}
+
+struct value_t *assign_symbol_value(const char *name, struct value_t *value) {
+    struct symbol *s = lookupsym(name);
+    if (!s) {
+        yyerror("symbol not found %s", name ? name : "");
+        freeval(value);
+        return NULL;
+    }
+    return assign_symbol_direct(s, value);
+}
+
+struct value_t *compound_symbol_value(const char *name, int op,
+                                      struct value_t *value) {
+    struct symbol *s = lookupsym(name);
+    if (!s) {
+        yyerror("symbol not found %s", name ? name : "");
+        freeval(value);
+        return NULL;
+    }
+    return compound_symbol_direct(s, op, value);
+}
+
+struct value_t *increment_symbol_value(const char *name, int delta,
+                                       bool prefix) {
+    struct symbol *s = lookupsym(name);
+    if (!s) {
+        yyerror("symbol not found %s", name ? name : "");
+        return NULL;
+    }
+    return increment_symbol_direct(s, delta, prefix);
 }
 
 struct value_t *read_member_value(struct value_t *container,

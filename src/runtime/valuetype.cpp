@@ -57,7 +57,45 @@ struct value_t *newcontinue(const char *label) {
     return (struct value_t *)v;
 }
 
+namespace {
+
+constexpr long long SMALL_INT_MIN = -512;
+constexpr long long SMALL_INT_MAX = 4096;
+constexpr size_t SMALL_INT_COUNT =
+    (size_t)(SMALL_INT_MAX - SMALL_INT_MIN + 1);
+
+struct small_int_table {
+    int_value_t values[SMALL_INT_COUNT];
+    small_int_table() {
+        for (size_t i = 0; i < SMALL_INT_COUNT; ++i) {
+            values[i].type = T_int;
+            values[i].value = SMALL_INT_MIN + (long long)i;
+            values[i].interned = true;
+        }
+    }
+};
+
+small_int_table &small_ints() {
+    static small_int_table table;
+    return table;
+}
+
+bool_value_t &bool_singleton(bool value) {
+    static bool_value_t false_value{T_bool, false};
+    static bool_value_t true_value{T_bool, true};
+    return value ? true_value : false_value;
+}
+
+value_t &null_singleton() {
+    static value_t null_value{T_null};
+    return null_value;
+}
+
+} // namespace
+
 struct value_t *newintval(long long i) {
+    if (i >= SMALL_INT_MIN && i <= SMALL_INT_MAX)
+        return (struct value_t *)&small_ints().values[i - SMALL_INT_MIN];
     struct int_value_t *v = new int_value_t;
     v->type = T_int;
     v->value = i;
@@ -72,10 +110,7 @@ struct value_t *newfloatval(double f) {
 }
 
 struct value_t *newboolval(bool b) {
-    struct bool_value_t *v = new bool_value_t;
-    v->type = T_bool;
-    v->value = b;
-    return (struct value_t *)v;
+    return (struct value_t *)&bool_singleton(b);
 }
 
 struct value_t *newstrval(const char *s) {
@@ -192,9 +227,7 @@ std::string error_message_of(const struct value_t *value) {
 }
 
 struct value_t *newnull() {
-    struct value_t *v = new value_t;
-    v->type = T_null;
-    return v;
+    return &null_singleton();
 }
 
 struct value_t *newfuncval(std::shared_ptr<function_code> code,
@@ -757,14 +790,17 @@ void freeval(struct value_t *v) {
         return; /* avoid C++ stack overflow on very deep values */
     free_depth_guard guard;
     switch (v->type) {
-        case T_int:
-            delete (struct int_value_t *)v;
+        case T_int: {
+            struct int_value_t *integer = (struct int_value_t *)v;
+            if (!integer->interned)
+                delete integer;
             break;
+        }
         case T_float:
             delete (struct float_value_t *)v;
             break;
         case T_bool:
-            delete (struct bool_value_t *)v;
+            /* newboolval returns one of two process-wide singletons. */
             break;
         case T_string: {
             struct string_value_t *s = (struct string_value_t *)v;
@@ -831,7 +867,7 @@ void freeval(struct value_t *v) {
             delete (struct method_value_t *)v;
             break;
         case T_null:
-            delete v;
+            /* newnull returns a process-wide singleton. */
             break;
         case T_return:
             delete v;

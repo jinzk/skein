@@ -78,4 +78,40 @@ struct value_t *default_value_for_type(const struct type_constraint *type);
 struct value_t *assign_name(struct symref *ref, struct ast *value_ast);
 struct value_t *increment_name(struct symref *ref, int delta, bool prefix);
 
+/*
+ * Value-based variants used by the bytecode VM.  They consume `value` and
+ * return an owned result (or a control value, or NULL after reporting an
+ * error), matching the corresponding AST helpers.
+ */
+struct value_t *assign_symbol_value(const char *name, struct value_t *value);
+struct value_t *compound_symbol_value(const char *name, int op,
+                                      struct value_t *value);
+struct value_t *increment_symbol_value(const char *name, int delta,
+                                       bool prefix);
+
+/* Direct variants for cached symbol lookups in the VM. */
+struct value_t *assign_symbol_direct(struct symbol *sym,
+                                     struct value_t *value);
+struct value_t *compound_symbol_direct(struct symbol *sym, int op,
+                                       struct value_t *value);
+struct value_t *increment_symbol_direct(struct symbol *sym, int delta,
+                                        bool prefix);
+
+/*
+ * Value-based index helpers for the VM.  `indices` is consumed (freed) on
+ * every path; `value` is consumed for assignment/compound assignment.
+ */
+struct value_t *assign_index_values(const char *base_name,
+                                    std::vector<struct value_t *> &indices,
+                                    const std::vector<bool> &fields,
+                                    struct value_t *value);
+struct value_t *compound_index_values(const char *base_name, int op,
+                                      std::vector<struct value_t *> &indices,
+                                      const std::vector<bool> &fields,
+                                      struct value_t *value);
+struct value_t *increment_index_values(const char *base_name, int delta,
+                                       bool prefix,
+                                       std::vector<struct value_t *> &indices,
+                                       const std::vector<bool> &fields);
+
 #endif

@@ -23,6 +23,8 @@ struct eval_context {
     int handler_depth = 0;
     const char *pending_label = NULL;
     int runtime_error_count = 0;
+    /* VM frame depth; kept separate from the AST call-depth counter. */
+    int vm_call_depth = 0;
     bool allow_await = false;
     bool capture_errors = false;
     bool has_captured_error = false;

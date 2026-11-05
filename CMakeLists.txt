@@ -180,6 +180,9 @@ add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
   src/interpreter/ast.cpp
+  src/interpreter/bytecode.cpp
+  src/interpreter/compiler.cpp
+  src/interpreter/vm.cpp
   src/interpreter/diagnostics.cpp
   src/interpreter/error_report.cpp
   src/interpreter/eval.cpp
@@ -488,6 +491,19 @@ if(BUILD_TESTING)
       list(APPEND SKEIN_TEST_COMMAND $<TARGET_FILE:skein_ffi_shim>)
     endif()
     add_test(NAME skein_tests COMMAND ${SKEIN_TEST_COMMAND})
+    add_test(NAME skein_vm_tests COMMAND ${SKEIN_TEST_COMMAND})
+    set(SKEIN_VM_TEST_ENV "SKEIN_VM=1")
+    if(SKEIN_SANITIZE)
+      # Sanitizer frames are much larger; keep deep recursion below the
+      # process stack limit while still exercising the VM error path.
+      list(APPEND SKEIN_VM_TEST_ENV "SKEIN_VM_MAX_DEPTH=128")
+      list(APPEND SKEIN_VM_TEST_ENV "SKEIN_TEST_TIMEOUT=120")
+    endif()
+    set_tests_properties(skein_vm_tests PROPERTIES
+      ENVIRONMENT "${SKEIN_VM_TEST_ENV}"
+      RUN_SERIAL TRUE
+      TIMEOUT 600
+    )
     add_test(
       NAME encoding_tables_test
       COMMAND ${Python3_EXECUTABLE}

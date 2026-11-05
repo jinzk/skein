@@ -29,6 +29,7 @@
 #include "source_encoding.h"
 #include "structtype.h"
 #include "task.h"
+#include "vm.h"
 
 #include <utility>
 
@@ -47,8 +48,9 @@ static struct value_t *runtime_call_builtin(
 
 static void print_usage(const char *program) {
     std::fprintf(stderr,
-                 "usage: %s [-i] [-I dir] [--package-path dir] "
-                 "[--encoding name] [-k|--keep-going] [script|-]\n",
+                 "usage: %s [-i] [--vm|--no-vm] [-I dir] "
+                 "[--package-path dir] [--encoding name] "
+                 "[-k|--keep-going] [script|-]\n",
                  program);
 }
 
@@ -133,6 +135,10 @@ int main(int argc, char **argv) {
             }
         } else if (arg == "-i") {
             force_interactive = true;
+        } else if (arg == "--vm") {
+            skein_vm_set_enabled(true);
+        } else if (arg == "--no-vm") {
+            skein_vm_set_enabled(false);
         } else if (arg == "-k" || arg == "--keep-going") {
             g_keep_going = true;
         } else if (arg == "-" || (!arg.empty() && arg[0] != '-')) {

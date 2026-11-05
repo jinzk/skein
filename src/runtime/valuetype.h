@@ -73,6 +73,8 @@ struct control_value_t {
 struct int_value_t {
     enum val_type type;
     long long value;
+    /* True for process-wide small-int singletons; freeval must not delete. */
+    bool interned = false;
 };
 
 struct float_value_t {

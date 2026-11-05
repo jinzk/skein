@@ -2,6 +2,7 @@
 #include "diagnostics.h"
 #include "package.h"
 #include "scopestack.h"
+#include "vm.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -779,6 +780,7 @@ void symlistfree_full(struct symlist *sl) {
 
 void free_function_code(struct function_code *code) {
     if (!code) return;
+    skein_vm_forget_function_code(code);
     if (code->ast) treefree(code->ast);
     if (code->sl) symlistfree_full(code->sl);
     delete code;

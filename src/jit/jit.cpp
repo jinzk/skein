@@ -28,8 +28,27 @@ int skein_jit_compare(int op, value_t *left, value_t *right, int *valid,
 int skein_jit_truthy(value_t *value);
 value_t *skein_jit_load_global(const skein::bc::Proto *proto, uint32_t slot,
                                uint32_t name_index, int line, int column);
+value_t *skein_jit_store_global(const skein::bc::Proto *proto, uint32_t slot,
+                                uint32_t name_index, value_t *value,
+                                int line, int column);
 value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
+value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
+                               value_t *value, value_t **dest, int line,
+                               int column);
+value_t *skein_jit_load_slot(value_t *value, int line, int column);
+value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
+                              value_t *value, value_t **dest, int line,
+                              int column);
+value_t *skein_jit_slot_binary(value_t *left, value_t *right,
+                               value_t **dest,
+                               const skein::bc::SlotDesc *desc, int op,
+                               uint64_t loc);
+value_t *skein_jit_slot_binary_const(value_t *left,
+                                     const value_t *constant,
+                                     value_t **dest,
+                                     const skein::bc::SlotDesc *desc,
+                                     int op, uint64_t loc);
 int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
 void skein_jit_leave(skein::jit::thread_state *ts);
 void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
@@ -68,6 +87,47 @@ constexpr int kDefOff = 16;
 constexpr int kResultOff = 24;
 constexpr int kStatusOff = 32;
 constexpr int kHeaderSize = 40;
+
+int slot_op_char(uint8_t opcode) {
+    switch (static_cast<skein::bc::Op>(opcode)) {
+        case skein::bc::Op::Add: return '+';
+        case skein::bc::Op::Sub: return '-';
+        case skein::bc::Op::Mul: return '*';
+        case skein::bc::Op::Div: return '/';
+        case skein::bc::Op::Mod: return '%';
+        case skein::bc::Op::BitAnd: return '&';
+        case skein::bc::Op::BitOr: return '|';
+        case skein::bc::Op::BitXor: return '^';
+        case skein::bc::Op::Shl: return 's';
+        case skein::bc::Op::Shr: return 'r';
+        default: return 0;
+    }
+}
+
+uint64_t pack_loc(const skein::bc::SourceLoc &loc) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(loc.line)) << 32) |
+           static_cast<uint32_t>(loc.column);
+}
+
+void unpack_loc(uint64_t packed, int &line, int &column) {
+    line = static_cast<int>(packed >> 32);
+    column = static_cast<int>(packed & 0xffffffffu);
+}
+
+symbol *resolve_global_symbol(const skein::bc::Proto *proto, uint32_t slot,
+                              uint32_t name_index) {
+    if (!proto || name_index >= proto->consts.size())
+        return nullptr;
+    const char *name = proto->consts[name_index].name.c_str();
+    scope_context &scope = active_scope_context();
+    if (slot < scope.global_slots.size()) {
+        symbol *candidate = scope.global_slots[slot];
+        if (candidate && candidate->name &&
+            std::strcmp(candidate->name, name) == 0)
+            return candidate;
+    }
+    return lookupsym(name);
+}
 
 } // namespace
 
@@ -108,7 +168,7 @@ bool can_compile(const skein::bc::Proto &proto) {
     return false;
 #else
     if (!proto.params_direct || proto.has_closures || proto.uses_defers ||
-        proto.uses_handlers || proto.uses_names || proto.uses_slots ||
+        proto.uses_handlers || proto.uses_names ||
         proto.is_generator || proto.is_async || proto.is_method ||
         proto.variadic || !proto.upvalues.empty())
         return false;
@@ -118,7 +178,8 @@ bool can_compile(const skein::bc::Proto &proto) {
         return false;
 
     const uint64_t value_count =
-        static_cast<uint64_t>(proto.nparams) + proto.max_stack;
+        static_cast<uint64_t>(proto.nparams) + proto.slots.size() +
+        proto.max_stack;
     if (value_count > 512)
         return false;
 
@@ -128,7 +189,6 @@ bool can_compile(const skein::bc::Proto &proto) {
             case skein::bc::Op::Nop:
             case skein::bc::Op::LoadNull:
             case skein::bc::Op::LoadParam:
-            case skein::bc::Op::LoadGlobal:
             case skein::bc::Op::Add:
             case skein::bc::Op::Sub:
             case skein::bc::Op::CmpJump:
@@ -146,6 +206,43 @@ bool can_compile(const skein::bc::Proto &proto) {
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Value ||
                     !proto.consts[ins.b].value)
+                    return false;
+                break;
+            case skein::bc::Op::LoadGlobal:
+            case skein::bc::Op::StoreGlobal:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return false;
+                break;
+            case skein::bc::Op::LoadSlot:
+            case skein::bc::Op::StoreSlot:
+            case skein::bc::Op::ClearSlot:
+                if (ins.b >= proto.slots.size())
+                    return false;
+                break;
+            case skein::bc::Op::DefineSlot:
+                if (ins.b >= proto.slots.size() || (ins.flags & 1) == 0)
+                    return false;
+                break;
+            case skein::bc::Op::BinarySlots: {
+                const uint32_t left = ins.a;
+                const uint32_t right = ins.b & 0xffffu;
+                const uint32_t dest = ins.b >> 16;
+                if (left >= proto.slots.size() ||
+                    right >= proto.slots.size() ||
+                    dest >= proto.slots.size() ||
+                    slot_op_char(ins.flags) == 0)
+                    return false;
+                break;
+            }
+            case skein::bc::Op::BinarySlotConst:
+                if (ins.a >= proto.slots.size() ||
+                    ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Value ||
+                    !proto.consts[ins.b].value ||
+                    slot_op_char(ins.flags) == 0)
                     return false;
                 break;
             default:
@@ -179,7 +276,9 @@ JitCode *compile(const skein::bc::Proto &proto) {
     const asmjit::Label abort_label = a.newLabel();
     const asmjit::Label epilogue_label = a.newLabel();
 
-    const uint32_t value_count = proto.nparams + proto.max_stack;
+    const uint32_t value_count =
+        proto.nparams + static_cast<uint32_t>(proto.slots.size()) +
+        proto.max_stack;
     const int values_low =
         kHeaderSize + static_cast<int>(value_count) * 8;
     const int frame_size = (values_low + 15) & ~15;
@@ -190,8 +289,13 @@ JitCode *compile(const skein::bc::Proto &proto) {
     auto param_off = [&](uint32_t index) -> int {
         return value_off(index);
     };
+    auto slot_off = [&](uint32_t index) -> int {
+        return value_off(proto.nparams + index);
+    };
     auto stack_off = [&](int depth) -> int {
-        return value_off(proto.nparams + static_cast<uint32_t>(depth));
+        return value_off(proto.nparams +
+                         static_cast<uint32_t>(proto.slots.size()) +
+                         static_cast<uint32_t>(depth));
     };
     auto target_label = [&](uint32_t target) -> asmjit::Label {
         return target < labels.size() ? labels[target] : end_label;
@@ -297,6 +401,136 @@ JitCode *compile(const skein::bc::Proto &proto) {
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
+
+            case skein::bc::Op::StoreGlobal: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.a));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_store_global));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::LoadSlot: {
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             slot_off(ins.b)));
+                a.mov(asmjit::x86::esi, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_load_slot));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::DefineSlot: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto.slots[ins.b])));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(ins.b)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_define_slot));
+                clear_slot(value_depth);
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::StoreSlot: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto.slots[ins.b])));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(ins.b)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_store_slot));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::ClearSlot:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             slot_off(ins.b)));
+                call_addr(fn_address(&skein_jit_free));
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             slot_off(ins.b)),
+                      asmjit::imm(0));
+                break;
+
+            case skein::bc::Op::BinarySlots: {
+                const uint32_t left = ins.a;
+                const uint32_t right = ins.b & 0xffffu;
+                const uint32_t dest = ins.b >> 16;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             slot_off(left)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             slot_off(right)));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(dest)));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::imm(fn_address(&proto.slots[dest])));
+                a.mov(asmjit::x86::r8d,
+                      asmjit::imm(slot_op_char(ins.flags)));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_slot_binary));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::BinarySlotConst: {
+                const uint32_t dest = ins.a;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             slot_off(dest)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::imm(fn_address(
+                          proto.consts[ins.b].value.get())));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(dest)));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::imm(fn_address(&proto.slots[dest])));
+                a.mov(asmjit::x86::r8d,
+                      asmjit::imm(slot_op_char(ins.flags)));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_slot_binary_const));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
 
             case skein::bc::Op::Add:
             case skein::bc::Op::Sub: {
@@ -577,6 +811,151 @@ extern "C" int skein_jit_truthy(value_t *value) {
     return result;
 }
 
+extern "C" value_t *skein_jit_load_slot(value_t *value, int line,
+                                        int column) {
+    diag_set_location(line, column);
+    if (!value) {
+        yyerror("symbol not found");
+        return nullptr;
+    }
+    return dupval(value);
+}
+
+extern "C" value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
+                                          value_t *value, value_t **dest,
+                                          int line, int column) {
+    diag_set_location(line, column);
+    if (!desc || !dest || !value) {
+        freeval(value);
+        yyerror("invalid bytecode slot");
+        return nullptr;
+    }
+    if (!validate_type_constraint(&desc->type)) {
+        freeval(value);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&desc->type, value)) {
+        yyerror("variable %s expects %s, got %s", desc->name.c_str(),
+                type_constraint_name(&desc->type), typename_of(value));
+        freeval(value);
+        return nullptr;
+    }
+    freeval(*dest);
+    *dest = value;
+    return newnull();
+}
+
+extern "C" value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
+                                         value_t *value, value_t **dest,
+                                         int line, int column) {
+    diag_set_location(line, column);
+    if (!desc || !dest || !value) {
+        freeval(value);
+        yyerror("invalid bytecode slot");
+        return nullptr;
+    }
+    if (desc->is_const) {
+        yyerror("cannot assign to constant %s", desc->name.c_str());
+        freeval(value);
+        return nullptr;
+    }
+    if (!validate_type_constraint(&desc->type)) {
+        freeval(value);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&desc->type, value)) {
+        yyerror("variable %s expects %s, got %s", desc->name.c_str(),
+                type_constraint_name(&desc->type), typename_of(value));
+        freeval(value);
+        return nullptr;
+    }
+    freeval(*dest);
+    *dest = value;
+    return dupval(value);
+}
+
+extern "C" value_t *skein_jit_slot_binary(value_t *left, value_t *right,
+                                          value_t **dest,
+                                          const skein::bc::SlotDesc *desc,
+                                          int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!left || !right || !dest || !desc) {
+        yyerror("symbol not found");
+        return nullptr;
+    }
+
+    value_t *left_copy = dupval(left);
+    value_t *right_copy = dupval(right);
+    value_t *result = apply_binary_value(op, left_copy, right_copy);
+    freeval(left_copy);
+    freeval(right_copy);
+    if (!result)
+        return nullptr;
+
+    if (desc->is_const) {
+        yyerror("cannot assign to constant %s", desc->name.c_str());
+        freeval(result);
+        return nullptr;
+    }
+    if (!validate_type_constraint(&desc->type)) {
+        freeval(result);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&desc->type, result)) {
+        yyerror("variable %s expects %s, got %s", desc->name.c_str(),
+                type_constraint_name(&desc->type), typename_of(result));
+        freeval(result);
+        return nullptr;
+    }
+    freeval(*dest);
+    *dest = result;
+    return dupval(result);
+}
+
+extern "C" value_t *skein_jit_slot_binary_const(
+    value_t *left, const value_t *constant, value_t **dest,
+    const skein::bc::SlotDesc *desc, int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!left || !dest || !desc) {
+        yyerror("symbol not found");
+        return nullptr;
+    }
+
+    value_t *left_copy = dupval(left);
+    value_t *right_copy = constant ? dupval(const_cast<value_t *>(constant))
+                                   : newnull();
+    value_t *result = apply_binary_value(op, left_copy, right_copy);
+    freeval(left_copy);
+    freeval(right_copy);
+    if (!result)
+        return nullptr;
+
+    if (desc->is_const) {
+        yyerror("cannot assign to constant %s", desc->name.c_str());
+        freeval(result);
+        return nullptr;
+    }
+    if (!validate_type_constraint(&desc->type)) {
+        freeval(result);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&desc->type, result)) {
+        yyerror("variable %s expects %s, got %s", desc->name.c_str(),
+                type_constraint_name(&desc->type), typename_of(result));
+        freeval(result);
+        return nullptr;
+    }
+    freeval(*dest);
+    *dest = result;
+    return dupval(result);
+}
+
 extern "C" value_t *skein_jit_load_global(const skein::bc::Proto *proto,
                                           uint32_t slot,
                                           uint32_t name_index,
@@ -587,17 +966,7 @@ extern "C" value_t *skein_jit_load_global(const skein::bc::Proto *proto,
         return nullptr;
     }
     const char *name = proto->consts[name_index].name.c_str();
-    symbol *sym = nullptr;
-
-    scope_context &scope = active_scope_context();
-    if (slot < scope.global_slots.size()) {
-        symbol *candidate = scope.global_slots[slot];
-        if (candidate && candidate->name &&
-            std::strcmp(candidate->name, name) == 0)
-            sym = candidate;
-    }
-    if (!sym)
-        sym = lookupsym(name);
+    symbol *sym = resolve_global_symbol(proto, slot, name_index);
     if (!sym) {
         yyerror("symbol not found %s", name);
         return nullptr;
@@ -607,6 +976,27 @@ extern "C" value_t *skein_jit_load_global(const skein::bc::Proto *proto,
         return nullptr;
     }
     return dupval(sym->val);
+}
+
+extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
+                                           uint32_t slot,
+                                           uint32_t name_index,
+                                           value_t *value, int line,
+                                           int column) {
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        freeval(value);
+        return nullptr;
+    }
+    const char *name = proto->consts[name_index].name.c_str();
+    symbol *sym = resolve_global_symbol(proto, slot, name_index);
+    if (!sym) {
+        yyerror("symbol not found %s", name);
+        freeval(value);
+        return nullptr;
+    }
+    return assign_symbol_direct(sym, value);
 }
 
 extern "C" value_t *skein_jit_invoke(value_t *callee, value_t **args,

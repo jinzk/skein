@@ -55,6 +55,10 @@ def main():
 
     ok = True
     ok &= compare(binary, "fib-bench", ROOT / "benchmarks" / "fib_bench.skein")
+    ok &= compare(binary, "slot-bench", ROOT / "benchmarks" / "slot_bench.skein")
+    ok &= compare(binary, "scope-bench", ROOT / "benchmarks" / "scope_bench.skein")
+    ok &= compare(binary, "global-bench",
+                  ROOT / "benchmarks" / "global_bench.skein")
 
     with tempfile.TemporaryDirectory(prefix="skein-jit-") as tmp:
         tmp_path = Path(tmp)
@@ -84,6 +88,30 @@ def main():
             encoding="utf-8",
         )
         ok &= compare(binary, "fib-type-error", bad)
+
+        slot_error = tmp_path / "slot_error.skein"
+        slot_error.write_text(
+            "func f(n) {\n"
+            "  let x: int = n;\n"
+            '  x = "s";\n'
+            "  return x;\n"
+            "}\n"
+            "f(1);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "slot-type-error", slot_error)
+
+        const_error = tmp_path / "const_error.skein"
+        const_error.write_text(
+            "func f(n) {\n"
+            "  const x = n;\n"
+            "  x = 2;\n"
+            "  return x;\n"
+            "}\n"
+            "f(1);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "const-error", const_error)
 
     if not ok:
         return 1

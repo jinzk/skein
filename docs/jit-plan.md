@@ -36,6 +36,10 @@ Go/No-Go 标准见 §10。
 - `fib` 的 JIT 子集：`LOAD_PARAM` / `LOAD_CONST` / `LOAD_GLOBAL` /
   `ADD` / `SUB` / `CMP_JUMP` / `CALL` / `RETURN` / `LOAD_NULL` /
   `PUSH_SCOPE` / `POP`；
+- slot 子集：`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` /
+  `BINARY_SLOTS` / `BINARY_SLOT_CONST` / `CLEAR_SLOT`，覆盖
+  `slot_bench` 与 `scope_bench`；
+- global 写入：`STORE_GLOBAL`，覆盖 `global_bench`；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
@@ -43,14 +47,15 @@ Go/No-Go 标准见 §10。
 本机 `fib(27)` 实测：
 
 ```text
-SKEIN_JIT=0   ~0.21s
-SKEIN_JIT=1   ~0.05s   （约 4x）
+fib(27)      SKEIN_JIT=0 ~0.21s   SKEIN_JIT=1 ~0.05s   （约 4x）
+slot_bench   SKEIN_JIT=0 ~0.37s   SKEIN_JIT=1 ~0.20s   （约 1.8x）
+scope_bench  SKEIN_JIT=0 ~0.19s   SKEIN_JIT=1 ~0.07s   （约 2.7x）
+global_bench SKEIN_JIT=0 ~0.20s   SKEIN_JIT=1 ~0.10s   （约 2.0x）
 ```
 
 尚未落地：
 
 - params 直接 frame 化（JIT 已绕过 symbol 绑定，但解释器路径未迁移）；
-- slot opcode；
 - Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
 - OSR / deopt；
 - 更完整的 opcode 覆盖。

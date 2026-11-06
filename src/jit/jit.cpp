@@ -40,6 +40,10 @@ value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               int column);
 void skein_jit_push_scope();
 void skein_jit_pop_scope();
+value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
+                            int column);
+value_t *skein_jit_new_dict(value_t **items, uint32_t count, int line,
+                            int column);
 value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
 value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
@@ -280,6 +284,15 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level) {
                         skein::bc::ConstantKind::Value ||
                     !proto.consts[ins.b].value ||
                     slot_op_char(ins.flags) == 0)
+                    return false;
+                break;
+            case skein::bc::Op::NewList:
+                if (proto.stack_depth[pc] < static_cast<int>(ins.b))
+                    return false;
+                break;
+            case skein::bc::Op::NewDict:
+                if (proto.stack_depth[pc] <
+                    static_cast<int>(ins.b) * 2)
                     return false;
                 break;
             case skein::bc::Op::NewStruct: {
@@ -635,6 +648,42 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
                 a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_slot_binary_const));
                 push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::NewList: {
+                const int count = static_cast<int>(ins.b);
+                const int first = depth - count;
+                a.lea(asmjit::x86::rdi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(first)));
+                a.mov(asmjit::x86::esi, asmjit::imm(count));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_new_list));
+                for (int i = first; i < depth; ++i)
+                    clear_slot(i);
+                push_reg(first, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::NewDict: {
+                const int count = static_cast<int>(ins.b);
+                const int first = depth - count * 2;
+                a.lea(asmjit::x86::rdi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(first)));
+                a.mov(asmjit::x86::esi, asmjit::imm(count));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_new_dict));
+                for (int i = first; i < depth; ++i)
+                    clear_slot(i);
+                push_reg(first, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
@@ -1392,6 +1441,51 @@ extern "C" value_t *skein_jit_store_name(const skein::bc::Proto *proto,
 
 extern "C" void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
 extern "C" void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
+
+extern "C" value_t *skein_jit_new_list(value_t **items, uint32_t count,
+                                       int line, int column) {
+    diag_set_location(line, column);
+    struct list_value_t *list = newlistval();
+    for (uint32_t i = 0; i < count; ++i) {
+        list->payload->items.push_back(items[i]);
+        items[i] = nullptr;
+    }
+    return (value_t *)list;
+}
+
+extern "C" value_t *skein_jit_new_dict(value_t **items, uint32_t count,
+                                       int line, int column) {
+    diag_set_location(line, column);
+    struct dict_value_t *dict = newdictval();
+    for (uint32_t i = 0; i < count; ++i) {
+        value_t *key = items[(size_t)i * 2];
+        value_t *value = items[(size_t)i * 2 + 1];
+        items[(size_t)i * 2] = nullptr;
+        items[(size_t)i * 2 + 1] = nullptr;
+        if (!dict_key_allowed(key)) {
+            yyerror("%s, got %s", dict_key_error(), typename_of(key));
+            freeval(key);
+            freeval(value);
+            for (uint32_t j = i + 1; j < count; ++j) {
+                freeval(items[(size_t)j * 2]);
+                freeval(items[(size_t)j * 2 + 1]);
+                items[(size_t)j * 2] = nullptr;
+                items[(size_t)j * 2 + 1] = nullptr;
+            }
+            freeval((value_t *)dict);
+            return nullptr;
+        }
+        int found = dict_find_index(dict, key);
+        if (found >= 0) {
+            freeval(dict->payload->items[(size_t)found].second);
+            dict->payload->items[(size_t)found].second = value;
+            freeval(key);
+        } else {
+            dict_append_item(dict, key, value);
+        }
+    }
+    return (value_t *)dict;
+}
 
 extern "C" value_t *skein_jit_get_index_cached(
     value_t *container, value_t *index,

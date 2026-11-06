@@ -69,6 +69,8 @@ def main():
                   ROOT / "benchmarks" / "method_bench.skein")
     ok &= compare(binary, "call-bench",
                   ROOT / "benchmarks" / "call_bench.skein")
+    ok &= compare(binary, "pattern-bench",
+                  ROOT / "benchmarks" / "pattern_bench.skein")
 
     with tempfile.TemporaryDirectory(prefix="skein-jit-") as tmp:
         tmp_path = Path(tmp)
@@ -184,6 +186,16 @@ def main():
             encoding="utf-8",
         )
         ok &= compare(binary, "tail-recursion", tail)
+
+        dict_error = tmp_path / "dict_error.skein"
+        dict_error.write_text(
+            "func f() {\n"
+            "  return {[1]: 2};\n"
+            "}\n"
+            "f();\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "dict-key-error", dict_error)
 
     if not ok:
         return 1

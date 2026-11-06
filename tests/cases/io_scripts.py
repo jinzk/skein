@@ -446,6 +446,19 @@ def run_cases():
     check("print extra args ignored", 'print("x", 1)\n', stdout="x")
     check("print non-string format", 'print(1, 2)\n',
           stderr="first argument must be a string")
+    proc = run('print("a");\nprint("b");\n')
+    assert proc.stdout == "ab", repr(proc.stdout)
+    proc = run('import std;\nstd.io.print("a");\nstd.io.print("b");\n')
+    assert proc.stdout == "ab", repr(proc.stdout)
+    check("println single argument", 'println("hello")\n', stdout="hello\n")
+    check("println formatting", 'println("x = {}", 3)\n', stdout="x = 3\n")
+    check("println empty", "println()\n", stdout="\n")
+    check("println appends one newline",
+          'println("a");\nprintln("b");\n', stdout="a\nb\n")
+    check("println non-string format", "println(1, 2)\n",
+          stderr="first argument must be a string")
+    check("std.io println", 'import std;\nstd.io.println("io")\n',
+          stdout="io\n")
     check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")
@@ -490,10 +503,10 @@ def run_cases():
               "import std;\nimport aa;\n"
               "let p = std.struct.decode({\"x\": 1, \"y\": 2}, "
               "\"aa.Point\");\n"
-              "print(p);\nprint(kind_of(p));\n"
+              "println(p);\nprintln(kind_of(p));\n"
               "let q = std.struct.decode({\"x\": 3, \"y\": 4}, "
               "\"Point\");\n"
-              "print(q.x);\n")
+              "println(q.x);\n")
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == [
@@ -508,7 +521,7 @@ def run_cases():
         with open(script, "w", encoding="utf-8") as f:
             f.write(
                 "#!/usr/bin/env skein\n"
-                'print("script");\n'
+                'println("script");\n'
                 "1 + 2\n"
             )
         proc = run_file(script)
@@ -518,14 +531,14 @@ def run_cases():
 
         bom_script = os.path.join(tmp, "bom.skein")
         with open(bom_script, "w", encoding="utf-8") as f:
-            f.write("\ufeff#!/usr/bin/env skein\nprint(\"bom\");\n")
+            f.write("\ufeff#!/usr/bin/env skein\nprintln(\"bom\");\n")
         proc = run_file(bom_script)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "bom\n", repr(proc.stdout)
 
         input_script = os.path.join(tmp, "input.skein")
         with open(input_script, "w", encoding="utf-8") as f:
-            f.write('print(input("? "));\n')
+            f.write('println(input("? "));\n')
         proc = subprocess.run(
             [BIN, input_script],
             input="hello\n",
@@ -542,7 +555,7 @@ def run_cases():
             if " " not in executable:
                 shebang_script = os.path.join(tmp, "shebang.skein")
                 with open(shebang_script, "w", encoding="utf-8") as f:
-                    f.write(f"#!{executable}\nprint(\"shebang\");\n")
+                    f.write(f"#!{executable}\nprintln(\"shebang\");\n")
                 os.chmod(shebang_script, 0o755)
                 proc = subprocess.run(
                     [shebang_script],
@@ -556,7 +569,7 @@ def run_cases():
 
     proc = subprocess.run(
         [BIN, "-"],
-        input='print("stdin-script");\n',
+        input='println("stdin-script");\n',
         text=True,
         encoding="utf-8",
         capture_output=True,
@@ -568,7 +581,7 @@ def run_cases():
     with tempfile.TemporaryDirectory() as tmp:
         runtime_script = os.path.join(tmp, "runtime.skein")
         with open(runtime_script, "w", encoding="utf-8") as f:
-            f.write('print("a");\n1/0;\n')
+            f.write('println("a");\n1/0;\n')
         proc = run_file(runtime_script)
         assert proc.returncode == 1, proc.stderr
         assert "2:1: runtime error: division by zero" in proc.stderr, proc.stderr
@@ -593,7 +606,7 @@ def run_cases():
 
         clean_script = os.path.join(tmp, "clean.skein")
         with open(clean_script, "w", encoding="utf-8") as f:
-            f.write("print(\"ok\");\n")
+            f.write("println(\"ok\");\n")
         proc = run_file(clean_script)
         assert proc.returncode == 0, proc.stderr
 
@@ -656,22 +669,22 @@ def run_cases():
         app_main = write(
             "app/main.skein",
             "import aa.bb.cc;\n"
-            "print(cc.value);\n"
-            "print(cc.fixed);\n"
-            "print(cc.hello(\"x\"));\n"
+            "println(cc.value);\n"
+            "println(cc.fixed);\n"
+            "println(cc.hello(\"x\"));\n"
             "import aa.bb;\n"
-            "print(bb.name);\n"
-            "print(bb.cc.value);\n"
+            "println(bb.name);\n"
+            "println(bb.cc.value);\n"
             "import aa;\n"
-            "print(aa.root);\n"
-            "print(aa.bb.cc.value);\n"
+            "println(aa.root);\n"
+            "println(aa.bb.cc.value);\n"
             "import aa.bb.cc as c;\n"
-            "print(c.value);\n"
+            "println(c.value);\n"
             "import aa.bb as b;\n"
-            "print(b.cc.value);\n"
+            "println(b.cc.value);\n"
             "import aa as a;\n"
-            "print(a.root);\n"
-            "print(a.bb.cc.value);\n",
+            "println(a.root);\n"
+            "println(a.bb.cc.value);\n",
         )
         proc = run_file(app_main)
         assert proc.returncode == 0, proc.stderr
@@ -706,9 +719,9 @@ def run_cases():
             "  return state.inc();\n"
             "}\n"
             + "1;\n" * 70
-            + "print(state.inc());\n"
-            "print(again());\n"
-            "print(state.get());\n",
+            + "println(state.inc());\n"
+            "println(again());\n"
+            "println(state.get());\n",
         )
         proc = run_file(state_main)
         assert proc.returncode == 0, proc.stderr
@@ -720,7 +733,7 @@ def run_cases():
         )
         container_main = write(
             "container/main.skein",
-            "import aa;\nprint(aa.bb.cc.value);\n",
+            "import aa;\nprintln(aa.bb.cc.value);\n",
         )
         proc = run_file(container_main)
         assert proc.returncode == 0, proc.stderr
@@ -733,7 +746,7 @@ def run_cases():
         )
         search_main = write(
             "search/app/main.skein",
-            "import aa.bb.cc;\nprint(cc.value);\n",
+            "import aa.bb.cc;\nprintln(cc.value);\n",
         )
         write(
             "search/lib1/aa/bb/cc/cc.skein",
@@ -753,7 +766,7 @@ def run_cases():
 
         app_without_local = write(
             "search/app2/main.skein",
-            "import aa.bb.cc;\nprint(cc.value);\n",
+            "import aa.bb.cc;\nprintln(cc.value);\n",
         )
         lib1 = os.path.join(tmp, "search/lib1")
         lib2 = os.path.join(tmp, "search/lib2")
@@ -815,7 +828,7 @@ def run_cases():
 
         proc = subprocess.run(
             [BIN, "-I", lib1],
-            input="import aa.bb.cc;\nprint(cc.value);\n",
+            input="import aa.bb.cc;\nprintln(cc.value);\n",
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -857,7 +870,7 @@ def run_cases():
             "  export let x = 5;\n"
             "  func private() { return 9; }\n"
             "}\n"
-            "print(main.x);\n",
+            "println(main.x);\n",
         )
         proc = run_file(main_pkg)
         assert proc.returncode == 0, proc.stderr
@@ -869,7 +882,7 @@ def run_cases():
             "package main {\n"
             "  export let x = 7;\n"
             "}\n"
-            "print(main.x);\n",
+            "println(main.x);\n",
         )
         proc = run_file(main_anywhere)
         assert proc.returncode == 0, proc.stderr
@@ -879,7 +892,7 @@ def run_cases():
         entry_named = write(
             "entrypkg/entry/entry.skein",
             "package entry { export let x = 3; }\n"
-            "print(entry.x);\n",
+            "println(entry.x);\n",
         )
         proc = run_file(entry_named)
         assert proc.returncode == 1, proc.stderr
@@ -888,7 +901,7 @@ def run_cases():
         # stdin/REPL have no file package identity, so scratch names still work.
         proc = run(
             "package scratch { export let x = 3; }\n"
-            "print(scratch.x);\n"
+            "println(scratch.x);\n"
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "3\n", repr(proc.stdout)
@@ -960,8 +973,8 @@ def run_cases():
             "unicode/main.skein",
             "import 包;\n"
             "import 包.子包;\n"
-            "print(包.值);\n"
-            "print(包.子包.名称);\n",
+            "println(包.值);\n"
+            "println(包.子包.名称);\n",
         )
         proc = run_file(unicode_main)
         assert proc.returncode == 0, proc.stderr
@@ -1008,24 +1021,24 @@ def run_cases():
         relative_main = write(
             "src/app/main.skein",
             "import @top.pkg;\n"
-            "print(pkg.value);\n"
+            "println(pkg.value);\n"
             "import .local;\n"
-            "print(local.value);\n"
+            "println(local.value);\n"
             "import ..common;\n"
-            "print(common.value);\n"
+            "println(common.value);\n"
             "import .local as l;\n"
-            "print(l.value);\n"
+            "println(l.value);\n"
             "import ..common as c;\n"
-            "print(c.value);\n"
+            "println(c.value);\n"
             "import @top.pkg as p;\n"
-            "print(p.value);\n"
+            "println(p.value);\n"
             "import user;\n"
-            "print(user.run());\n"
+            "println(user.run());\n"
             "func later() {\n"
             "  import .local;\n"
             "  return local.value;\n"
             "}\n"
-            "print(later());\n",
+            "println(later());\n",
         )
         proc = subprocess.run(
             [BIN, "-I", os.path.join(root, "lib"), relative_main],
@@ -1054,7 +1067,7 @@ def run_cases():
             f.write('package local { export let value = "local"; }\n')
         fallback_main = os.path.join(nomarker, "main.skein")
         with open(fallback_main, "w", encoding="utf-8") as f:
-            f.write("import @local;\nprint(local.value);\n")
+            f.write("import @local;\nprintln(local.value);\n")
         proc = run_file(fallback_main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "local\n", repr(proc.stdout)
@@ -1105,18 +1118,18 @@ def run_cases():
             "let pkg = aa.make();\n"
             'let local: P = P { y: "ok" };\n'
             "let imported: aa.P = pkg;\n"
-            "print(pkg.get());\n"
-            "print(local.y);\n"
+            "println(pkg.get());\n"
+            "println(local.y);\n"
             "func local_get(p: P) { return p.y; }\n"
-            "print(local_get(local));\n"
-            "print(pkg is P);\n"
-            "print(local is P);\n"
-            "print(type_module(pkg) == type_module(local));\n"
-            "print(type_module(pkg));\n"
-            "print(type_module(local));\n"
-            "print(type_source(pkg) != \"\");\n"
-            "print(imported.x);\n"
-            "print(pkg is aa.D);\n",
+            "println(local_get(local));\n"
+            "println(pkg is P);\n"
+            "println(local is P);\n"
+            "println(type_module(pkg) == type_module(local));\n"
+            "println(type_module(pkg));\n"
+            "println(type_module(local));\n"
+            "println(type_source(pkg) != \"\");\n"
+            "println(imported.x);\n"
+            "println(pkg is aa.D);\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -1184,13 +1197,13 @@ def run_cases():
             "  }\n"
             "}\n"
             "let q = Q { y: 3 };\n"
-            "print(q.d());\n"
-            "print(q is lib.D);\n"
-            "print(q.take(lib.make_p(4)));\n"
+            "println(q.d());\n"
+            "println(q is lib.D);\n"
+            "println(q.take(lib.make_p(4)));\n"
             "let e = E.A { n: 5 };\n"
-            "print(e.d());\n"
-            "print(e is lib.D);\n"
-            "print(lib.make_c().v);\n",
+            "println(e.d());\n"
+            "println(e is lib.D);\n"
+            "println(lib.make_c().v);\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -1204,8 +1217,8 @@ def run_cases():
             "import lib as l;\n"
             "struct Q2 { y: int; }\n"
             "impl l.D for Q2 { func d(self) { return self.y; } }\n"
-            "print(Q2 { y: 6 }.d());\n"
-            "print(Q2 { y: 1 } is l.D);\n",
+            "println(Q2 { y: 6 }.d());\n"
+            "println(Q2 { y: 1 } is l.D);\n",
         )
         proc = run_file(alias_main)
         assert proc.returncode == 0, proc.stderr
@@ -1217,7 +1230,7 @@ def run_cases():
             "struct Q3 { y: int; }\n"
             "impl Q3 { func d(self) { return self.y; } }\n"
             "impl lib.D for Q3;\n"
-            "print(Q3 { y: 8 }.d());\n",
+            "println(Q3 { y: 8 }.d());\n",
         )
         proc = run_file(adapter_main)
         assert proc.returncode == 0, proc.stderr
@@ -1251,7 +1264,7 @@ def run_cases():
     with tempfile.TemporaryDirectory() as tmp:
         failfast = os.path.join(tmp, "failfast.skein")
         with open(failfast, "w", encoding="utf-8") as f:
-            f.write('print("before");\n1/0;\nprint("after");\n')
+            f.write('println("before");\n1/0;\nprintln("after");\n')
         proc = run_file(failfast)
         assert proc.returncode == 1, proc.stderr
         assert "before\n" in proc.stdout, proc.stdout
@@ -1270,7 +1283,7 @@ def run_cases():
 
         uncaught = os.path.join(tmp, "uncaught.skein")
         with open(uncaught, "w", encoding="utf-8") as f:
-            f.write('print("before");\nfail "boom";\nprint("after");\n')
+            f.write('println("before");\nfail "boom";\nprintln("after");\n')
         proc = run_file(uncaught)
         assert proc.returncode == 1, proc.stderr
         assert "before\n" in proc.stdout, proc.stdout

@@ -258,6 +258,7 @@ value_t *build_namespace_impl() {
         newstrval("math"), math_module));
     value_t *io_module = (value_t *)builtin_module({
         {"print", B_print},
+        {"println", B_println},
         {"format", B_format},
         {"input", B_input},
         {"read", B_io_read},

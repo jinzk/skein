@@ -12,7 +12,7 @@ def run_cases():
           "let d = {1: 'a', 2: 'b', 3: 'c'};\n"
           "d = std.dict.delete(d, 2);\n"
           "d[2] = 'z';\n"
-          "print(std.dict.keys(d));\n",
+          "println(std.dict.keys(d));\n",
           stdout_all=["[1, 3, 2]"])
     check("dict large indexed reads",
           "import std;\n"
@@ -27,45 +27,45 @@ def run_cases():
           "  d[k] += 1;\n"
           "  i = i + 1;\n"
           "}\n"
-          "print(s);\nprint(d[0]);\n",
+          "println(s);\nprintln(d[0]);\n",
           stdout_all=["1000150000", "5"])
     check("set basics",
           "import std;\nimport std.set;\n"
           "let s = set.from_list([1, 2, 2, 3]);\n"
-          "print(set.size(s));\nprint(set.values(s));\n"
-          "print(set.has(s, 2));\nprint(set.has(s, 9));\n"
-          "s = set.remove(s, 2);\nprint(set.values(s));\n",
+          "println(set.size(s));\nprintln(set.values(s));\n"
+          "println(set.has(s, 2));\nprintln(set.has(s, 9));\n"
+          "s = set.remove(s, 2);\nprintln(set.values(s));\n",
           stdout_all=["3", "[1, 2, 3]", "true", "false", "[1, 3]"])
     check("set operations",
           "import std;\nimport std.set;\n"
           "let a = set.from_list([1, 2]);\n"
           "let b = set.from_list([2, 3]);\n"
-          "print(set.values(set.union(a, b)));\n"
-          "print(set.values(set.intersect(a, b)));\n"
-          "print(set.values(set.difference(a, b)));\n"
-          "print(set.is_subset(set.from_list([1]), a));\n"
-          "print(set.is_subset(set.from_list([1, 9]), a));\n",
+          "println(set.values(set.union(a, b)));\n"
+          "println(set.values(set.intersect(a, b)));\n"
+          "println(set.values(set.difference(a, b)));\n"
+          "println(set.is_subset(set.from_list([1]), a));\n"
+          "println(set.is_subset(set.from_list([1, 9]), a));\n",
           stdout_all=["[1, 2, 3]", "[2]", "[1]", "true", "false"])
     check("set value semantics and order",
           "import std;\nimport std.set;\n"
           "let s = set.from_list([1, 2, 3]);\n"
           "s = set.remove(s, 2);\n"
           "s = set.add(s, 2);\n"
-          "print(set.values(s));\n"
+          "println(set.values(s));\n"
           "let t = set.add(set.from_list([1]), 2);\n"
-          "print(set.values(t));\n"
+          "println(set.values(t));\n"
           "let u = set.from_list([1]);\n"
           "let v = set.add(u, 2);\n"
-          "print(set.size(u));\nprint(set.size(v));\n",
+          "println(set.size(u));\nprintln(set.size(v));\n",
           stdout_all=["[1, 3, 2]", "[1, 2]", "1", "2"])
     check("set len json iterate type",
           "import std;\nimport std.set;\n"
           "let s: set = set.from_list([2, 1, 3]);\n"
-          "print(len(s));\n"
-          "print(std.json.stringify(s));\n"
+          "println(len(s));\n"
+          "println(std.json.stringify(s));\n"
           "let out = [];\n"
           "for (let x in s) { out = std.list.append(out, x); }\n"
-          "print(out);\n",
+          "println(out);\n",
           stdout_all=["3", "[2,1,3]", "[2, 1, 3]"])
     check("set differential",
           "import std;\nimport std.set;\n"
@@ -86,7 +86,7 @@ def run_cases():
           "  if (set.has(s, v) != (std.dict.has(ref, v) != 0)) { fail(\"has mismatch\"); }\n"
           "  i = i + 1;\n"
           "}\n"
-          "print(std.list.sort(set.values(s)) == "
+          "println(std.list.sort(set.values(s)) == "
           "std.list.sort(std.dict.keys(ref)));\n",
           stdout_all=["true"])
     check("set large add",
@@ -94,25 +94,25 @@ def run_cases():
           "let s = set.new();\n"
           "let i = 0;\n"
           "while (i < 20000) { s = set.add(s, i); i = i + 1; }\n"
-          "print(set.size(s));\nprint(set.has(s, 19999));\n",
+          "println(set.size(s));\nprintln(set.has(s, 19999));\n",
           stdout_all=["20000", "true"])
     check("deque basics",
           "import std;\nimport std.deque;\n"
           "let d = deque.from_list([2, 3]);\n"
           "d = deque.push_front(d, 1);\n"
           "d = deque.push_back(d, 4);\n"
-          "print(deque.size(d));\n"
-          "print(deque.to_list(d));\n"
-          "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n"
+          "println(deque.size(d));\n"
+          "println(deque.to_list(d));\n"
+          "println(deque.peek_front(d));\nprintln(deque.peek_back(d));\n"
           "let r = deque.pop_front(d);\n"
-          "print(r[\"value\"]);\n"
+          "println(r[\"value\"]);\n"
           "d = r[\"deque\"];\n"
-          "print(deque.to_list(d));\n",
+          "println(deque.to_list(d));\n",
           stdout_all=["4", "[1, 2, 3, 4]", "1", "4", "1", "[2, 3, 4]"])
     check("deque empty pop",
           "import std;\nimport std.deque;\n"
           "let r = deque.pop_front(deque.new());\n"
-          "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
+          "println(r[\"ok\"]);\nprintln(r[\"error\"]);\n",
           stdout_all=["false", "empty deque"])
     check("deque pops both ends",
           "import std;\nimport std.deque;\n"
@@ -123,7 +123,7 @@ def run_cases():
           "  out = std.list.append(out, r[\"value\"]);\n"
           "  d = r[\"deque\"];\n"
           "}\n"
-          "print(out);\n"
+          "println(out);\n"
           "d = deque.from_list([1, 2, 3, 4, 5]);\n"
           "out = [];\n"
           "while (deque.size(d) > 0) {\n"
@@ -131,7 +131,7 @@ def run_cases():
           "  out = std.list.append(out, r[\"value\"]);\n"
           "  d = r[\"deque\"];\n"
           "}\n"
-          "print(out);\n",
+          "println(out);\n",
           stdout_all=["[1, 2, 3, 4, 5]", "[5, 4, 3, 2, 1]"])
     check("deque interleaved ends",
           "import std;\nimport std.deque;\n"
@@ -142,87 +142,87 @@ def run_cases():
           "  else { d = deque.push_front(d, i); }\n"
           "  i = i + 1;\n"
           "}\n"
-          "print(deque.to_list(d));\n"
-          "print(deque.size(d));\n",
+          "println(deque.to_list(d));\n"
+          "println(deque.size(d));\n",
           stdout_all=["[19, 17, 15, 13, 11, 9, 7, 5, 3, 1, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18]", "20"])
     check("deque value semantics",
           "import std;\nimport std.deque;\n"
           "let d = deque.from_list([1, 2]);\n"
           "let e = deque.push_back(d, 3);\n"
-          "print(deque.size(d));\nprint(deque.size(e));\n"
-          "print(deque.to_list(d));\nprint(deque.to_list(e));\n",
+          "println(deque.size(d));\nprintln(deque.size(e));\n"
+          "println(deque.to_list(d));\nprintln(deque.to_list(e));\n",
           stdout_all=["2", "3", "[1, 2]", "[1, 2, 3]"])
     check("deque to_list is detached",
           "import std;\nimport std.deque;\n"
           "let d = deque.from_list([1, 2, 3]);\n"
           "let l = deque.to_list(d);\n"
           "l[0] = 99;\n"
-          "print(deque.to_list(d));\nprint(l);\n",
+          "println(deque.to_list(d));\nprintln(l);\n",
           stdout_all=["[1, 2, 3]", "[99, 2, 3]"])
     check("deque empty peek",
           "import std;\nimport std.deque;\n"
           "let d = deque.new();\n"
-          "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n"
-          "print(deque.size(d));\nprint(deque.to_list(d));\n",
+          "println(deque.peek_front(d));\nprintln(deque.peek_back(d));\n"
+          "println(deque.size(d));\nprintln(deque.to_list(d));\n",
           stdout_all=["null", "null", "0", "[]"])
     check("deque via std namespace",
           "import std;\n"
           "let d = std.deque.from_list([1, 2, 3]);\n"
-          "print(std.deque.to_list(d));\n"
-          "print(kind_of(d));\n"
-          "print(d == std.deque.from_list([1, 2, 3]));\n"
-          "print(d == std.deque.from_list([1, 2]));\n",
+          "println(std.deque.to_list(d));\n"
+          "println(kind_of(d));\n"
+          "println(d == std.deque.from_list([1, 2, 3]));\n"
+          "println(d == std.deque.from_list([1, 2]));\n",
           stdout_all=["[1, 2, 3]", "deque", "true", "false"])
     check("deque large",
           "import std;\nimport std.deque;\n"
           "let d = deque.new();\n"
           "let i = 0;\n"
           "while (i < 50000) { d = deque.push_back(d, i); i = i + 1; }\n"
-          "print(deque.size(d));\n"
-          "print(deque.peek_front(d));\nprint(deque.peek_back(d));\n",
+          "println(deque.size(d));\n"
+          "println(deque.peek_front(d));\nprintln(deque.peek_back(d));\n",
           stdout_all=["50000", "0", "49999"])
     check("deque and heap len json iterate",
           "import std;\nimport std.deque;\nimport std.heap;\n"
           "let d = deque.from_list([1, 2, 3]);\n"
-          "print(len(d));\nprint(std.json.stringify(d));\n"
+          "println(len(d));\nprintln(std.json.stringify(d));\n"
           "let out = [];\n"
           "for (let x in d) { out = std.list.append(out, x); }\n"
-          "print(out);\n"
+          "println(out);\n"
           "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
-          "print(len(h));\nprint(std.json.stringify(h));\n"
+          "println(len(h));\nprintln(std.json.stringify(h));\n"
           "out = [];\n"
           "for (let x in h) { out = std.list.append(out, x); }\n"
-          "print(out);\n",
+          "println(out);\n",
           stdout_all=["3", "[1,2,3]", "[1, 2, 3]", "3", "[1,3,2]",
                       "[1, 3, 2]"])
     check("deque and heap type annotations",
           "import std;\nimport std.deque;\nimport std.heap;\n"
-          "let d: deque = deque.new();\nprint(len(d));\n"
+          "let d: deque = deque.new();\nprintln(len(d));\n"
           "let h: heap = heap.from_list([1], func(a, b) { return a < b; });\n"
-          "print(len(h));\n"
+          "println(len(h));\n"
           "struct Box { items: deque; }\n"
-          "let b = Box { items: d };\nprint(len(b.items));\n",
+          "let b = Box { items: d };\nprintln(len(b.items));\n",
           stdout_all=["0", "1", "0"])
     check("heap min",
           "import std;\nimport std.heap;\n"
           "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
-          "print(heap.size(h));\nprint(heap.peek(h));\n"
-          "let r = heap.pop(h); print(r[\"value\"]); h = r[\"heap\"];\n"
-          "r = heap.pop(h); print(r[\"value\"]); h = r[\"heap\"];\n"
-          "r = heap.pop(h); print(r[\"value\"]); h = r[\"heap\"];\n"
-          "print(heap.size(h));\n",
+          "println(heap.size(h));\nprintln(heap.peek(h));\n"
+          "let r = heap.pop(h); println(r[\"value\"]); h = r[\"heap\"];\n"
+          "r = heap.pop(h); println(r[\"value\"]); h = r[\"heap\"];\n"
+          "r = heap.pop(h); println(r[\"value\"]); h = r[\"heap\"];\n"
+          "println(heap.size(h));\n",
           stdout_all=["3", "1", "1", "2", "3", "0"])
     check("heap max",
           "import std;\nimport std.heap;\n"
           "let h = heap.from_list([3, 1, 2], func(a, b) { return a > b; });\n"
-          "print(heap.peek(h));\n"
-          "let r = heap.pop(h); print(r[\"value\"]);\n",
+          "println(heap.peek(h));\n"
+          "let r = heap.pop(h); println(r[\"value\"]);\n",
           stdout_all=["3", "3"])
     check("heap empty pop",
           "import std;\nimport std.heap;\n"
           "let h = heap.new(func(a, b) { return a < b; });\n"
           "let r = heap.pop(h);\n"
-          "print(r[\"ok\"]);\nprint(r[\"error\"]);\n",
+          "println(r[\"ok\"]);\nprintln(r[\"error\"]);\n",
           stdout_all=["false", "empty heap"])
     check("heap drains sorted",
           "import std;\nimport std.heap;\n"
@@ -234,25 +234,25 @@ def run_cases():
           "  out = std.deque.push_back(out, r[\"value\"]);\n"
           "  h = r[\"heap\"];\n"
           "}\n"
-          "print(std.deque.to_list(out));\n",
+          "println(std.deque.to_list(out));\n",
           stdout_all=["[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]"])
     check("heap value semantics",
           "import std;\nimport std.heap;\n"
           "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
           "let h2 = heap.push(h, 0);\n"
-          "print(heap.size(h));\nprint(heap.size(h2));\n"
-          "print(heap.peek(h));\nprint(heap.peek(h2));\n"
+          "println(heap.size(h));\nprintln(heap.size(h2));\n"
+          "println(heap.peek(h));\nprintln(heap.peek(h2));\n"
           "let r = heap.pop(h);\n"
-          "print(r[\"value\"]);\nprint(heap.size(h));\n",
+          "println(r[\"value\"]);\nprintln(heap.size(h));\n",
           stdout_all=["3", "4", "1", "0", "1", "3"])
     check("heap via std namespace",
           "import std;\n"
           "let h = std.heap.from_list([2, 1, 3], "
           "func(a, b) { return a < b; });\n"
-          "print(std.heap.peek(h));\n"
-          "print(kind_of(h));\n"
-          "print(len(std.heap.to_list(h)));\n"
-          "print(h == std.heap.from_list([2, 1, 3], "
+          "println(std.heap.peek(h));\n"
+          "println(kind_of(h));\n"
+          "println(len(std.heap.to_list(h)));\n"
+          "println(h == std.heap.from_list([2, 1, 3], "
           "func(a, b) { return a < b; }));\n",
           stdout_all=["1", "heap", "3", "true"])
     check("heap large",
@@ -260,10 +260,10 @@ def run_cases():
           "let h = heap.new(func(a, b) { return a < b; });\n"
           "let i = 0;\n"
           "while (i < 50000) { h = heap.push(h, i); i = i + 1; }\n"
-          "print(heap.size(h));\n"
+          "println(heap.size(h));\n"
           "i = 0;\n"
           "while (i < 50000) { h = heap.pop(h)[\"heap\"]; i = i + 1; }\n"
-          "print(heap.size(h));\n",
+          "println(heap.size(h));\n",
           stdout_all=["50000", "0"])
 
     check("graph basics",
@@ -274,10 +274,10 @@ def run_cases():
           'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
           'r = graph.add_edge(g, a, b, "next"); g = r["graph"];\n'
           'r = graph.add_edge(g, b, c, "next"); g = r["graph"];\n'
-          'print(graph.node_count(g));\nprint(graph.edge_count(g));\n'
-          'print(graph.neighbors(g, a));\n'
-          'print(graph.neighbors(g, a, "next"));\n'
-          'print(graph.bfs(g, a));\nprint(graph.dfs(g, a));\n',
+          'println(graph.node_count(g));\nprintln(graph.edge_count(g));\n'
+          'println(graph.neighbors(g, a));\n'
+          'println(graph.neighbors(g, a, "next"));\n'
+          'println(graph.bfs(g, a));\nprintln(graph.dfs(g, a));\n',
           stdout_all=["3", "2", "[2]", "[2]", "[1, 2, 3]", "[1, 2, 3]"])
     check("graph topo and cycle",
           'import std;\nimport std.graph;\n'
@@ -285,9 +285,9 @@ def run_cases():
           'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
           'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
           'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'print(graph.topo_sort(g)["ok"]);\nprint(graph.has_cycle(g));\n'
+          'println(graph.topo_sort(g)["ok"]);\nprintln(graph.has_cycle(g));\n'
           'r = graph.add_edge(g, b, a); g = r["graph"];\n'
-          'print(graph.topo_sort(g)["ok"]);\nprint(graph.has_cycle(g));\n',
+          'println(graph.topo_sort(g)["ok"]);\nprintln(graph.has_cycle(g));\n',
           stdout_all=["true", "false", "false", "true"])
     check("graph path",
           'import std;\nimport std.graph;\n'
@@ -297,8 +297,8 @@ def run_cases():
           'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
           'r = graph.add_edge(g, a, b); g = r["graph"];\n'
           'r = graph.add_edge(g, b, c); g = r["graph"];\n'
-          'print(graph.path(g, a, c));\n'
-          'print(graph.path(g, c, a)["ok"]);\n',
+          'println(graph.path(g, a, c));\n'
+          'println(graph.path(g, c, a)["ok"]);\n',
           stdout_all=["{ok: true, path: [1, 2, 3]}", "false"])
     check("graph remove node cascades",
           'import std;\nimport std.graph;\n'
@@ -307,17 +307,17 @@ def run_cases():
           'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
           'r = graph.add_edge(g, a, b); g = r["graph"];\n'
           'g = graph.remove_node(g, a);\n'
-          'print(graph.node_count(g));\nprint(graph.edge_count(g));\n',
+          'println(graph.node_count(g));\nprintln(graph.edge_count(g));\n',
           stdout_all=["1", "0"])
     check("graph batch build",
           'import std;\nimport std.graph;\n'
           'let g = graph.from_edges(5, [[1, 2], [2, 3], [3, 4], [4, 5]]);\n'
-          'print(graph.node_count(g));\nprint(graph.edge_count(g));\n'
-          'print(graph.bfs(g, 1));\n'
-          'print(graph.dfs(g, 1));\n'
-          'print(graph.path(g, 1, 5)["path"]);\n'
-          'print(graph.topo_sort(g)["order"]);\n'
-          'print(graph.components(g));\n',
+          'println(graph.node_count(g));\nprintln(graph.edge_count(g));\n'
+          'println(graph.bfs(g, 1));\n'
+          'println(graph.dfs(g, 1));\n'
+          'println(graph.path(g, 1, 5)["path"]);\n'
+          'println(graph.topo_sort(g)["order"]);\n'
+          'println(graph.components(g));\n',
           stdout_all=["5", "4", "[1, 2, 3, 4, 5]", "[1, 2, 3, 4, 5]",
                       "[1, 2, 3, 4, 5]", "[1, 2, 3, 4, 5]",
                       "[[1, 2, 3, 4, 5]]"])
@@ -328,9 +328,9 @@ def run_cases():
           'g = r["graph"];\nlet ids = r["ids"];\n'
           'g = graph.add_edges(g, [[ids[0], ids[1], "x", 2], '
           '[ids[1], ids[2]]]);\n'
-          'print(ids);\nprint(graph.edge_count(g));\n'
-          'print(graph.neighbors(g, ids[0]));\n'
-          'print(graph.shortest_path(g, ids[0], ids[2])["cost"]);\n',
+          'println(ids);\nprintln(graph.edge_count(g));\n'
+          'println(graph.neighbors(g, ids[0]));\n'
+          'println(graph.shortest_path(g, ids[0], ids[2])["cost"]);\n',
           stdout_all=["[1, 2, 3]", "2", "[2]", "3"])
 
     check("lru basics",
@@ -338,35 +338,35 @@ def run_cases():
           'let l = std.lru.new(2);\n'
           'let r = std.lru.put(l, "a", 1); l = r["lru"];\n'
           'r = std.lru.put(l, "b", 2); l = r["lru"];\n'
-          'print(std.lru.keys(l));\n'
+          'println(std.lru.keys(l));\n'
           'r = std.lru.get(l, "a"); l = r["lru"];\n'
-          'print(std.lru.keys(l));\n'
+          'println(std.lru.keys(l));\n'
           'r = std.lru.put(l, "c", 3); l = r["lru"];\n'
-          'print(r["evicted"]["key"]);\n'
-          'print(std.lru.keys(l));\n'
+          'println(r["evicted"]["key"]);\n'
+          'println(std.lru.keys(l));\n'
           'let p = std.lru.peek(l, "a")["lru"];\n'
-          'print(std.lru.keys(p));\n'
+          'println(std.lru.keys(p));\n'
           'r = std.lru.delete(l, "a"); l = r["lru"];\n'
-          'print(r["removed"]);\n'
-          'print(std.lru.len(l));\n'
-          'print(std.lru.capacity(l));\n'
-          'print(std.lru.clear(l));\n',
+          'println(r["removed"]);\n'
+          'println(std.lru.len(l));\n'
+          'println(std.lru.capacity(l));\n'
+          'println(std.lru.clear(l));\n',
           stdout_all=["[a, b]", "[b, a]", "b", "[a, c]", "[a, c]",
                       "true", "1", "2", "lru(0/2, {})"])
     check("lru get default",
           'import std;\n'
           'let l = std.lru.new(2);\n'
           'let r = std.lru.get(l, "missing", 42);\n'
-          'print(r["found"]);\nprint(r["value"]);\n',
+          'println(r["found"]);\nprintln(r["value"]);\n',
           stdout_all=["false", "42"])
     check("lru value semantics",
           'import std;\n'
           'let a = std.lru.new(2);\n'
           'let r = std.lru.put(a, 1, "x");\n'
           'let b = r["lru"];\n'
-          'print(std.lru.len(a));\nprint(std.lru.len(b));\n'
+          'println(std.lru.len(a));\nprintln(std.lru.len(b));\n'
           'let r2 = std.lru.put(a, 1, "x");\n'
-          'print(b == r2["lru"]);\n',
+          'println(b == r2["lru"]);\n',
           stdout_all=["0", "1", "true"])
     check("lru capacity must be positive",
           'import std;\nstd.lru.new(0);\n',
@@ -380,65 +380,65 @@ def run_cases():
 
     check("list unique and group_by",
           'import std;\n'
-          'print(std.list.unique([1, 2, 1, 3, 2]));\n'
-          'print(std.list.unique(["a", "b", "a"]));\n'
-          'print(std.list.unique_by([{"n": 1}, {"n": 1}, {"n": 2}], '
+          'println(std.list.unique([1, 2, 1, 3, 2]));\n'
+          'println(std.list.unique(["a", "b", "a"]));\n'
+          'println(std.list.unique_by([{"n": 1}, {"n": 1}, {"n": 2}], '
           'func(p) { return p["n"]; }));\n'
-          'print(std.list.group_by([1, 2, 3, 4], '
+          'println(std.list.group_by([1, 2, 3, 4], '
           'func(x) { return x % 2; }));\n',
           stdout_all=["[1, 2, 3]", "[a, b]", "[{n: 1}, {n: 2}]",
                       "{1: [1, 3], 0: [2, 4]}"])
     check("list unique large and non-hashable",
           'import std;\n'
           'let xs = range(20000);\n'
-          'print(len(std.list.unique(xs)));\n'
+          'println(len(std.list.unique(xs)));\n'
           'let ys = std.list.map(xs, func(i) { return i % 1000; });\n'
-          'print(len(std.list.unique(ys)));\n'
-          'print(std.list.unique([[1], [1], [2]]));\n',
+          'println(len(std.list.unique(ys)));\n'
+          'println(std.list.unique([[1], [1], [2]]));\n',
           stdout_all=["20000", "1000", "[[1], [2]]"])
     check("dict equality large",
           'import std;\n'
           'let a = {};\nlet b = {};\nlet i = 0;\n'
           'while (i < 20000) { a[i] = i; b[i] = i; i = i + 1; }\n'
-          'print(a == b);\n'
+          'println(a == b);\n'
           'let c = b;\n'
           'c[19999] = -1;\n'
-          'print(a == c);\n',
+          'println(a == c);\n',
           stdout_all=["true", "false"])
     check("list chunk and window",
           'import std;\n'
-          'print(std.list.chunk([1, 2, 3, 4, 5], 2));\n'
-          'print(std.list.chunk([], 3));\n'
-          'print(std.list.window([1, 2, 3, 4, 5], 3));\n'
-          'print(std.list.window([1, 2, 3, 4, 5], 3, 2));\n'
-          'print(std.list.window([1, 2], 3));\n',
+          'println(std.list.chunk([1, 2, 3, 4, 5], 2));\n'
+          'println(std.list.chunk([], 3));\n'
+          'println(std.list.window([1, 2, 3, 4, 5], 3));\n'
+          'println(std.list.window([1, 2, 3, 4, 5], 3, 2));\n'
+          'println(std.list.window([1, 2], 3));\n',
           stdout_all=["[[1, 2], [3, 4], [5]]", "[]",
                       "[[1, 2, 3], [2, 3, 4], [3, 4, 5]]",
                       "[[1, 2, 3], [3, 4, 5]]", "[]"])
     check("list zip and top_k",
           'import std;\n'
-          'print(std.list.zip([1, 2, 3], ["a", "b"]));\n'
-          'print(std.list.zip([1, 2], ["a", "b"], [true, false]));\n'
-          'print(std.list.top_k([5, 1, 4, 2, 3], 3));\n'
-          'print(std.list.top_k([5, 1, 4, 2, 3], 2, '
+          'println(std.list.zip([1, 2, 3], ["a", "b"]));\n'
+          'println(std.list.zip([1, 2], ["a", "b"], [true, false]));\n'
+          'println(std.list.top_k([5, 1, 4, 2, 3], 3));\n'
+          'println(std.list.top_k([5, 1, 4, 2, 3], 2, '
           'func(a, b) { return b - a; }));\n'
-          'print(std.list.top_k([1], 0));\n',
+          'println(std.list.top_k([1], 0));\n',
           stdout_all=["[[1, a], [2, b]]",
                       "[[1, a, true], [2, b, false]]",
                       "[1, 2, 3]", "[5, 4]", "[]"])
     check("list top_k large and full",
           'import std;\n'
           'let xs = range(20000);\n'
-          'print(std.list.top_k(xs, 5));\n'
-          'print(std.list.top_k([3, 1, 2], 10));\n'
-          'print(std.list.top_k(["b", "a", "c"], 2));\n',
+          'println(std.list.top_k(xs, 5));\n'
+          'println(std.list.top_k([3, 1, 2], 10));\n'
+          'println(std.list.top_k(["b", "a", "c"], 2));\n',
           stdout_all=["[0, 1, 2, 3, 4]", "[1, 2, 3]", "[a, b]"])
     check("list binary_search",
           'import std;\n'
-          'print(std.list.binary_search([1, 3, 5, 7], 5));\n'
-          'print(std.list.binary_search([1, 3, 5, 7], 4));\n'
-          'print(std.list.binary_search(["a", "c", "e"], "c"));\n'
-          'print(std.list.binary_search([], 1));\n',
+          'println(std.list.binary_search([1, 3, 5, 7], 5));\n'
+          'println(std.list.binary_search([1, 3, 5, 7], 4));\n'
+          'println(std.list.binary_search(["a", "c", "e"], "c"));\n'
+          'println(std.list.binary_search([], 1));\n',
           stdout_all=["{found: true, index: 2}",
                       "{found: false, index: 2}",
                       "{found: true, index: 1}",
@@ -461,20 +461,20 @@ def run_cases():
           'let s = arena.new();\n'
           'let r = arena.add(s, "a"); s = r["arena"]; let a = r["id"];\n'
           'r = arena.add(s, "b"); s = r["arena"]; let b = r["id"];\n'
-          'print(arena.size(s));\n'
-          'print(arena.values(s));\n'
-          'print(arena.get(s, a)["value"]);\n'
+          'println(arena.size(s));\n'
+          'println(arena.values(s));\n'
+          'println(arena.get(s, a)["value"]);\n'
           'r = arena.set(s, a, "A"); s = r["arena"];\n'
-          'print(r["ok"]);\n'
+          'println(r["ok"]);\n'
           'r = arena.remove(s, b); s = r["arena"];\n'
-          'print(r["removed"]);\n'
-          'print(arena.size(s));\n'
-          'print(arena.has(s, b));\n'
+          'println(r["removed"]);\n'
+          'println(arena.size(s));\n'
+          'println(arena.has(s, b));\n'
           'r = arena.add(s, "c"); s = r["arena"]; let c = r["id"];\n'
-          'print(arena.capacity(s));\n'
-          'print(arena.values(s));\n'
-          'print(arena.has(s, c));\n'
-          'print(arena.has(s, b));\n',
+          'println(arena.capacity(s));\n'
+          'println(arena.values(s));\n'
+          'println(arena.has(s, c));\n'
+          'println(arena.has(s, b));\n',
           stdout_all=["2", "[a, b]", "a", "true", "true", "1",
                       "false", "2", "[A, c]", "true", "false"])
     check("arena stale handle after reuse",
@@ -483,33 +483,33 @@ def run_cases():
           'let r = arena.add(s, 1); s = r["arena"]; let a = r["id"];\n'
           'r = arena.remove(s, a); s = r["arena"];\n'
           'r = arena.add(s, 2); s = r["arena"];\n'
-          'print(arena.has(s, a));\n'
-          'print(arena.get(s, a)["ok"]);\n'
-          'print(arena.values(s));\n',
+          'println(arena.has(s, a));\n'
+          'println(arena.get(s, a)["ok"]);\n'
+          'println(arena.values(s));\n',
           stdout_all=["false", "false", "[2]"])
     check("arena from_list",
           'import std;\nimport std.arena;\n'
           'let s = arena.from_list(["a", "b", "c"]);\n'
-          'print(arena.size(s));\nprint(arena.capacity(s));\n'
-          'print(arena.values(s));\n'
+          'println(arena.size(s));\nprintln(arena.capacity(s));\n'
+          'println(arena.values(s));\n'
           'let ids = arena.ids(s);\n'
-          'print(arena.get(s, ids[1])["value"]);\n',
+          'println(arena.get(s, ids[1])["value"]);\n',
           stdout_all=["3", "3", "[a, b, c]", "b"])
     check("arena value semantics",
           'import std;\nimport std.arena;\n'
           'let s0 = arena.new();\n'
           'let r = arena.add(s0, 1);\n'
           'let s1 = r["arena"]; let a = r["id"];\n'
-          'print(arena.size(s0));\nprint(arena.size(s1));\n'
+          'println(arena.size(s0));\nprintln(arena.size(s1));\n'
           'let r2 = arena.remove(s1, a);\n'
-          'print(arena.size(s1));\nprint(arena.size(r2["arena"]));\n',
+          'println(arena.size(s1));\nprintln(arena.size(r2["arena"]));\n',
           stdout_all=["0", "1", "1", "0"])
     check("arena clear",
           'import std;\nimport std.arena;\n'
           'let s = arena.new();\n'
           'let r = arena.add(s, 1); s = r["arena"];\n'
           's = arena.clear(s);\n'
-          'print(arena.size(s));\nprint(arena.values(s));\n',
+          'println(arena.size(s));\nprintln(arena.values(s));\n',
           stdout_all=["0", "[]"])
     check("arena handle must be int",
           'import std;\nimport std.arena;\n'
@@ -522,31 +522,31 @@ def run_cases():
           "  let r = f(match (1) { case 1 => { return 10; } default => 0; });\n"
           "  return 99;\n"
           "}\n"
-          "print(g());\n",
+          "println(g());\n",
           stdout="10")
     check("break in function argument",
           "func f(x) { return x; }\n"
           "for (let i in [1, 2, 3]) {\n"
           "  f(match (i) { case 2 => { break; } default => i; });\n"
-          "  print(i);\n"
+          "  println(i);\n"
           "}\n",
           stdout="1\n")
     check("continue in function argument",
           "func f(x) { return x; }\n"
           "for (let i in [1, 2, 3]) {\n"
           "  f(match (i) { case 2 => { continue; } default => i; });\n"
-          "  print(i);\n"
+          "  println(i);\n"
           "}\n",
           stdout="1\n3\n")
     check("deep recursive struct print",
           "struct Node { value: int; next: Node?; }\n"
           "let n = null;\n"
           "for (let i in range(2000)) { n = Node { value: i, next: n }; }\n"
-          "print(\"built\");\n"
-          "print(n == n);\n"
-          "print(n.value);\n"
+          "println(\"built\");\n"
+          "println(n == n);\n"
+          "println(n.value);\n"
           "let s = str(n);\n"
-          "print(len(s) > 0);\n",
+          "println(len(s) > 0);\n",
           stdout_all=["built", "true", "1999", "true"])
 
     check("unary minus", "-3+5\n", stdout="= 2")
@@ -587,8 +587,8 @@ def run_cases():
     check("divide by zero int", "1/0\n", stderr="division by zero")
     check("divide by zero float", "1.0/0\n", stderr="division by zero")
 
-    check("if float truthy", 'if (1.5) { print("yes"); }\n', stdout="yes")
-    check("if else", 'if (0) { print("yes"); } else { print("no"); }\n', stdout="no")
+    check("if float truthy", 'if (1.5) { println("yes"); }\n', stdout="yes")
+    check("if else", 'if (0) { println("yes"); } else { println("no"); }\n', stdout="no")
 
     check("zero-arg function", "func f() {\n  return 42;\n}\nf()\n", stdout="= 42")
     check(
@@ -749,7 +749,7 @@ def run_cases():
         "  return f;\n"
         "}\n"
         + "{ let g = make_cycle(); }\n" * 100
-        + 'print("ok");\n',
+        + 'println("ok");\n',
         stdout="ok",
     )
     check(
@@ -832,7 +832,7 @@ def run_cases():
           '}\n'
           'let b = make();\n'
           + repeated_lets()
-          + 'print(b.f());\n',
+          + 'println(b.f());\n',
           stdout="42")
     check("lru closure survives cycle collection",
           'import std;\n'
@@ -845,7 +845,7 @@ def run_cases():
           'let l = make();\n'
           + repeated_lets()
           + 'let f = std.lru.get(l, "f")["value"];\n'
-          + 'print(f());\n',
+          + 'println(f());\n',
           stdout="42")
     check("result closure survives cycle collection",
           'import std;\n'
@@ -856,7 +856,7 @@ def run_cases():
           'let r = make();\n'
           + repeated_lets()
           + 'let f = std.result.value(r);\n'
-          + 'print(f());\n',
+          + 'println(f());\n',
           stdout="42")
 
     check("graph weighted shortest path",
@@ -870,9 +870,9 @@ def run_cases():
           'r = graph.add_edge(g, b, c, "x", 1); g = r["graph"];\n'
           'r = graph.add_edge(g, a, c, "y", 10); g = r["graph"];\n'
           'r = graph.add_edge(g, c, d, "z", 2); g = r["graph"];\n'
-          'print(graph.shortest_path(g, a, c));\n'
-          'print(graph.shortest_path(g, a, d)["cost"]);\n'
-          'print(graph.shortest_path(g, a, d, '
+          'println(graph.shortest_path(g, a, c));\n'
+          'println(graph.shortest_path(g, a, d)["cost"]);\n'
+          'println(graph.shortest_path(g, a, d, '
           'func(e) { return e["weight"] * 10; })["cost"]);\n',
           stdout_all=["{ok: true, path: [1, 2, 3], cost: 2}",
                       "4", "40"])
@@ -883,7 +883,7 @@ def run_cases():
           'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
           'r = graph.add_node(g, "c"); g = r["graph"];\n'
           'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'print(graph.components(g));\n',
+          'println(graph.components(g));\n',
           stdout="[[1, 2], [3]]")
     check("graph reverse and subgraph",
           'import std;\nimport std.graph;\n'
@@ -894,10 +894,10 @@ def run_cases():
           'r = graph.add_edge(g, a, b); g = r["graph"];\n'
           'r = graph.add_edge(g, b, c); g = r["graph"];\n'
           'let rev = graph.reverse(g);\n'
-          'print(graph.path(rev, c, a));\n'
+          'println(graph.path(rev, c, a));\n'
           'let sub = graph.subgraph(g, [a, b]);\n'
-          'print(graph.node_count(sub));\n'
-          'print(graph.edge_count(sub));\n',
+          'println(graph.node_count(sub));\n'
+          'println(graph.edge_count(sub));\n',
           stdout_all=["{ok: true, path: [3, 2, 1]}", "2", "1"])
     check("graph rejects negative edge weight",
           'import std;\nimport std.graph;\n'
@@ -908,5 +908,5 @@ def run_cases():
           stderr="graph edge weight must be non-negative")
     check("graph shortest_path missing node",
           'import std;\nimport std.graph;\n'
-          'print(graph.shortest_path(graph.new(), 1, 2));\n',
+          'println(graph.shortest_path(graph.new(), 1, 2));\n',
           stdout="{ok: false, error: node not found}")

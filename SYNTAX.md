@@ -41,7 +41,7 @@ package import export as
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
-内置函数名也会被词法器识别为函数值，因此不能用作普通变量名，例如 `sqrt`、`print`、`read_file`。
+内置函数名也会被词法器识别为函数值，因此不能用作普通变量名，例如 `sqrt`、`print`、`println`、`read_file`。
 
 ### 1.3 注释
 
@@ -168,7 +168,7 @@ byte(255)
 null
 ```
 
-`null` 是正常值，不等于“错误”。没有 `return` 的函数和 `print` 返回 `null`。
+`null` 是正常值，不等于“错误”。没有 `return` 的函数和 `print` / `println` 返回 `null`。
 
 ### 2.7 列表
 
@@ -2022,6 +2022,7 @@ std.math.sqrt(9)
 std.math.sin(0)
 std.math.min(3, 1, 2)
 std.io.print("hello")
+std.io.println("hello")
 std.io.read(stream, 4096)
 std.io.write_all(stream, data)
 std.io.read_all(stream, 16 * 1024 * 1024)
@@ -2467,7 +2468,7 @@ std.io.write_async(stream, data[, timeout_ms])
 新增模块说明：
 
 - `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
-- `std.io`：`print`、`format`、`input`，以及文件和 socket 通用的流式读写；
+- `std.io`：`print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`command_status` / `run` / `spawn`；
 - `std.worker`：JSON Lines 进程池；
@@ -4256,8 +4257,17 @@ std.math.tau    // 6.283185307179586
 ### 输出和转换
 
 ```text
-print list dict int float bool str format len range
+print println list dict int float bool str format len range
 kind_of type_name type_module type_source
+```
+
+`print` 输出后不追加换行，`println` 输出后自动追加换行符；两者都返回 `null`。
+
+```text
+print("a");
+print("b");     // 输出 ab
+println("a");
+println("b");   // 输出 a\nb\n
 ```
 
 ### 进程

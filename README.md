@@ -2333,6 +2333,7 @@ std.math.degrees
 std.math.radians
 
 std.io.print
+std.io.println
 std.io.format
 std.io.input
 
@@ -2663,7 +2664,7 @@ std.worker.stats
 - `std.string.repeat` 的次数不能为负数；
 - `std.string.trim_start` / `trim_end` 只按 ASCII 空白裁剪；
 - `std.math` 与全局数学函数使用同一套实现；
-- `std.io` 提供 `print`、`format`、`input`，以及文件和 socket 通用的流式读写；
+- `std.io` 提供 `print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
@@ -3749,7 +3750,7 @@ for (let value in values) {
 
 `is` 只接受类型名或 trait 名作为右操作数；结构体类型名按包解析。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`println`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -3791,7 +3792,7 @@ apply(sqrt, 16)
 - `bool` 类型有 `true` / `false` 两个字面量；`bool(x)` 按真值规则转换。
 - 真值规则：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典、空 deque、空 heap、空 set 为假；其余值（包括 `true`、函数和内置函数）为真。
 - `str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
-- `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `format("{}", null)` 输出。
+- `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` / `println` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `format("{}", null)` 输出。
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
 - `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
@@ -4754,10 +4755,12 @@ src/
                  encoding_gbk_validity.inc、unicode_ident_data.inc
   interpreter/   L2  词法/语法/AST/求值/执行模型：
                  tokens.l、parser.y、ast.*、diagnostics.*、error_report.*、eval.*、
-                 eval_control.*、eval_ops.*、eval_call.*、eval_assign.*、
-                 eval_context.*、eval_helpers.h、gc.*、package.*、std_namespace.*、
-                 pattern.*、scopestack.*、structeval.*、fiber.*、generator.*、iter.*、
-                 async_support.*、task.*、event_loop.*、repl.*、source_encoding.*
+                 eval_control.*、eval_call.*、eval_assign.*、
+                 eval_context.*、eval_helpers.h、value_runtime.*、bytecode.*、
+                 compiler.*、vm.*、vm_bridge.*、vm_eval.h、gc.*、package.*、
+                 std_namespace.*、pattern.*、scopestack.*、structeval.*、fiber.*、
+                 generator.*、iter.*、async_support.*、task.*、event_loop.*、
+                 repl.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
                  builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
                  *_builtin.*、compression.*、cookie.*、error.*、

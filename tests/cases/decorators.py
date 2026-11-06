@@ -9,9 +9,9 @@ from harness import *  # noqa: F401,F403
 TRACE = (
     "func trace(fn) {\n"
     "  return func(...args) {\n"
-    '    print("enter");\n'
+    '    println("enter");\n'
     "    let r = fn(...args);\n"
-    '    print("exit");\n'
+    '    println("exit");\n'
     "    return r;\n"
     "  };\n"
     "}\n"
@@ -33,10 +33,10 @@ def run_cases():
         + "  func get(self, n: int = 1) { return self.x * n; }\n"
         + "}\n"
         + "let p = P { x: 3 };\n"
-        + "print(p.get());\n"
-        + "print(p.get(2));\n"
+        + "println(p.get());\n"
+        + "println(p.get(2));\n"
         + "let f = p.get;\n"
-        + "print(f(4));\n",
+        + "println(f(4));\n",
         ["enter", "exit", "3", "enter", "exit", "6",
          "enter", "exit", "12"],
     )
@@ -45,9 +45,9 @@ def run_cases():
         "func around(name) {\n"
         "  return func(fn) {\n"
         "    return func(...args) {\n"
-        '      print("enter " + name);\n'
+        '      println("enter " + name);\n'
         "      let r = fn(...args);\n"
-        '      print("exit " + name);\n'
+        '      println("exit " + name);\n'
         "      return r;\n"
         "    };\n"
         "  };\n"
@@ -56,9 +56,9 @@ def run_cases():
         "impl P {\n"
         '  @around("outer")\n'
         '  @around("inner")\n'
-        "  func get(self) { print(\"body\"); return self.x; }\n"
+        "  func get(self) { println(\"body\"); return self.x; }\n"
         "}\n"
-        "print(P { x: 1 }.get());\n",
+        "println(P { x: 1 }.get());\n",
         ["enter outer", "enter inner", "body", "exit inner",
          "exit outer", "1"],
     )
@@ -66,8 +66,8 @@ def run_cases():
     run_case(
         "func show_args(fn) {\n"
         "  return func(...args) {\n"
-        "    print(str(args[1]));\n"
-        "    print(str(args[2]));\n"
+        "    println(str(args[1]));\n"
+        "    println(str(args[2]));\n"
         "    return fn(...args);\n"
         "  };\n"
         "}\n"
@@ -78,15 +78,15 @@ def run_cases():
         "    return a + b;\n"
         "  }\n"
         "}\n"
-        "print(P { x: 3 }.add());\n"
-        "print(P { x: 3 }.add(10));\n",
+        "println(P { x: 3 }.add());\n"
+        "println(P { x: 3 }.add(10));\n",
         ["3", "4", "7", "10", "11", "21"],
     )
 
     run_case(
         "func count_args(fn) {\n"
         "  return func(...args) {\n"
-        "    print(str(len(args)));\n"
+        "    println(str(len(args)));\n"
         "    return fn(...args);\n"
         "  };\n"
         "}\n"
@@ -99,8 +99,8 @@ def run_cases():
         "    return sum;\n"
         "  }\n"
         "}\n"
-        "print(P { x: 1 }.total());\n"
-        "print(P { x: 1 }.total(2, 3, 4));\n",
+        "println(P { x: 1 }.total());\n"
+        "println(P { x: 1 }.total(2, 3, 4));\n",
         ["1", "1", "4", "10"],
     )
 
@@ -117,7 +117,7 @@ def run_cases():
         "  @bump\n"
         "  func get(self, n: int) { return self.x + n; }\n"
         "}\n"
-        "print(P { x: 1 }.get(2));\n",
+        "println(P { x: 1 }.get(2));\n",
         ["102"],
     )
 
@@ -131,7 +131,7 @@ def run_cases():
         + "    return n * self.fact(n - 1);\n"
         + "  }\n"
         + "}\n"
-        + "print(P { x: 1 }.fact(3));\n",
+        + "println(P { x: 1 }.fact(3));\n",
         ["enter", "enter", "enter", "exit", "exit", "exit", "6"],
     )
 
@@ -146,20 +146,20 @@ def run_cases():
         "  @counted\n"
         "  func get(self) { return self.x; }\n"
         "}\n"
-        "print(calls);\n"
-        "print(P { x: 1 }.get());\n"
-        "print(P { x: 2 }.get());\n"
-        "print(calls);\n",
+        "println(calls);\n"
+        "println(P { x: 1 }.get());\n"
+        "println(P { x: 2 }.get());\n"
+        "println(calls);\n",
         ["1", "1", "2", "1"],
     )
 
     run_case(
         "struct P { x: int; }\n"
         "impl P {\n"
-        '  @(func(fn) { return func(...args) { print("anon"); return fn(...args); }; })\n'
+        '  @(func(fn) { return func(...args) { println("anon"); return fn(...args); }; })\n'
         "  func get(self) { return self.x; }\n"
         "}\n"
-        "print(P { x: 9 }.get());\n",
+        "println(P { x: 9 }.get());\n",
         ["anon", "9"],
     )
 
@@ -167,7 +167,7 @@ def run_cases():
         "func make_dec(prefix) {\n"
         "  return func(fn) {\n"
         "    return func(...args) {\n"
-        "      print(prefix);\n"
+        "      println(prefix);\n"
         "      return fn(...args);\n"
         "    };\n"
         "  };\n"
@@ -177,7 +177,7 @@ def run_cases():
         '  @make_dec("hello")\n'
         "  func get(self) { return self.x; }\n"
         "}\n"
-        "print(P { x: 2 }.get());\n",
+        "println(P { x: 2 }.get());\n",
         ["hello", "2"],
     )
 
@@ -191,7 +191,7 @@ def run_cases():
         + "  }\n"
         + "  return P { x: 4 };\n"
         + "}\n"
-        + "print(make().get());\n",
+        + "println(make().get());\n",
         ["enter", "exit", "4"],
     )
 
@@ -264,7 +264,7 @@ def run_cases():
         TRACE
         + "@trace\n"
         + "func add(a, b) { return a + b; }\n"
-        + "print(add(1, 2));\n",
+        + "println(add(1, 2));\n",
         ["enter", "exit", "3"],
     )
 
@@ -272,17 +272,17 @@ def run_cases():
         "func around(name) {\n"
         "  return func(fn) {\n"
         "    return func(...args) {\n"
-        '      print("enter " + name);\n'
+        '      println("enter " + name);\n'
         "      let r = fn(...args);\n"
-        '      print("exit " + name);\n'
+        '      println("exit " + name);\n'
         "      return r;\n"
         "    };\n"
         "  };\n"
         "}\n"
         '@around("outer")\n'
         '@around("inner")\n'
-        "func f() { print(\"body\"); return 1; }\n"
-        "print(f());\n",
+        "func f() { println(\"body\"); return 1; }\n"
+        "println(f());\n",
         ["enter outer", "enter inner", "body", "exit inner",
          "exit outer", "1"],
     )
@@ -294,14 +294,14 @@ def run_cases():
         + "  if (n <= 1) { return 1; }\n"
         + "  return n * fact(n - 1);\n"
         + "}\n"
-        + "print(fact(3));\n",
+        + "println(fact(3));\n",
         ["enter", "enter", "enter", "exit", "exit", "exit", "6"],
     )
 
     run_case(
         "func dec(fn) {\n"
         "  return func(...args) {\n"
-        '    print("outer dec");\n'
+        '    println("outer dec");\n'
         "    return fn(...args);\n"
         "  };\n"
         "}\n"
@@ -310,35 +310,35 @@ def run_cases():
         "  func dec(x) { return x; }\n"
         "  return dec(1);\n"
         "}\n"
-        "print(outer());\n",
+        "println(outer());\n",
         ["outer dec", "1"],
     )
 
     run_case(
         "func trace(fn) {\n"
         "  return async func(...args) {\n"
-        '    print("before");\n'
+        '    println("before");\n'
         "    let r = await fn(...args);\n"
-        '    print("after");\n'
+        '    println("after");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
         "@trace\n"
         "async func get() { return 7; }\n"
-        "print(await get());\n",
+        "println(await get());\n",
         ["before", "after", "7"],
     )
 
     run_case(
         "func trace(fn) {\n"
         "  return func(...args) {\n"
-        '    print("create");\n'
+        '    println("create");\n'
         "    return fn(...args);\n"
         "  };\n"
         "}\n"
         "@trace\n"
         "func nums() { yield 1; yield 2; }\n"
-        "for (let x in nums()) { print(x); }\n",
+        "for (let x in nums()) { println(x); }\n",
         ["create", "1", "2"],
     )
 
@@ -346,10 +346,10 @@ def run_cases():
         "import std;\n"
         "func timed(fn) {\n"
         "  return async func(...args) {\n"
-        '    print("before");\n'
+        '    println("before");\n'
         "    await std.task.sleep(1);\n"
         "    let r = await fn(...args);\n"
-        '    print("after");\n'
+        '    println("after");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
@@ -358,7 +358,7 @@ def run_cases():
         "  @timed\n"
         "  async func get(self) { return self.x; }\n"
         "}\n"
-        "print(await C { x: 7 }.get());\n",
+        "println(await C { x: 7 }.get());\n",
         ["before", "after", "7"],
     )
 
@@ -366,9 +366,9 @@ def run_cases():
         "import std;\n"
         "func timed(fn) {\n"
         "  return async func(...args) {\n"
-        '    print("before");\n'
+        '    println("before");\n'
         "    let r = await fn(...args);\n"
-        '    print("after");\n'
+        '    println("after");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
@@ -379,7 +379,7 @@ def run_cases():
         "  async func handle(self) { return self.x; }\n"
         "}\n"
         "async func use(s: S) { return await s.handle(); }\n"
-        "print(await use(C { x: 5 }));\n",
+        "println(await use(C { x: 5 }));\n",
         ["before", "after", "5"],
     )
 
@@ -422,7 +422,7 @@ def run_cases():
         "  @trace\n"
         "  func draw(self) { return \"P\" + str(self.x); }\n"
         "}\n"
-        "func render(x: D) { print(x.draw()); }\n"
+        "func render(x: D) { println(x.draw()); }\n"
         "render(P { x: 7 });\n",
         stdout_all=["enter", "exit", "P7"],
     )
@@ -437,7 +437,7 @@ def run_cases():
         "  func draw(self) { return \"P\" + str(self.x); }\n"
         "}\n"
         "impl D for P;\n"
-        "func render(x: D) { print(x.draw()); }\n"
+        "func render(x: D) { println(x.draw()); }\n"
         "render(P { x: 8 });\n",
         stdout_all=["enter", "exit", "P8"],
     )
@@ -449,7 +449,7 @@ def run_cases():
         + "  @trace\n"
         + "  func value(self) { return 1; }\n"
         + "}\n"
-        + "print(E.A { n: 2 }.value());\n",
+        + "println(E.A { n: 2 }.value());\n",
         ["enter", "exit", "1"],
     )
 
@@ -463,10 +463,10 @@ def run_cases():
         "  func area(self, scale: int = 1) { return self.x * scale; }\n"
         "}\n"
         "let m = std.meta.methods(\"P\")[0];\n"
-        "print(m[\"name\"]);\n"
-        "print(m[\"params\"]);\n"
-        "print(m[\"variadic\"]);\n"
-        "print(m[\"has_defaults\"]);\n",
+        "println(m[\"name\"]);\n"
+        "println(m[\"params\"]);\n"
+        "println(m[\"variadic\"]);\n"
+        "println(m[\"has_defaults\"]);\n",
         stdout_all=["area", "[int]", "false", "true"],
     )
 
@@ -485,7 +485,7 @@ def run_cases():
             "  export func make(x) { return P { x: x }; }\n"
             "  export func trace(fn) {\n"
             "    return func(...args) {\n"
-            '      print("[aa trace]");\n'
+            '      println("[aa trace]");\n'
             "      return fn(...args);\n"
             "    };\n"
             "  }\n"
@@ -499,7 +499,7 @@ def run_cases():
             "main.skein",
             "import aa;\n"
             "let p = aa.make(7);\n"
-            "print(p.get());\n",
+            "println(p.get());\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -518,7 +518,7 @@ def run_cases():
             "package aa {\n"
             "  func logged(fn) {\n"
             "    return func(...args) {\n"
-            '      print("[aa fn]");\n'
+            '      println("[aa fn]");\n'
             "      return fn(...args);\n"
             "    };\n"
             "  }\n"
@@ -529,7 +529,7 @@ def run_cases():
         main = write(
             "main.skein",
             "import aa;\n"
-            "print(aa.add(2, 3));\n",
+            "println(aa.add(2, 3));\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr

@@ -73,6 +73,7 @@ enum bifs {
     B_string_trim_start,
     B_string_trim_end,
     B_print,
+    B_println,
     B_list,
     B_dict,
     B_int,

@@ -14,14 +14,14 @@ def run_cases():
     default_env["SKEIN_VM_TRACE"] = "1"
     check(
         "VM is the default backend",
-        "print(1 + 2);\n",
+        "println(1 + 2);\n",
         stdout="3",
         stderr="[vm]",
         env=default_env,
     )
     check(
         "VM stats report",
-        "print(1 + 2);\n",
+        "println(1 + 2);\n",
         stdout="3",
         stderr="[vm-stats] instructions=",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_STATS="1",
@@ -33,7 +33,7 @@ def run_cases():
         "  if (n <= 0) { return 0; }\n"
         "  return down(n - 1);\n"
         "}\n"
-        "print(down(5000));\n",
+        "println(down(5000));\n",
         stdout="0",
         env=dict(os.environ, SKEIN_VM="1",
                  SKEIN_VM_MAX_DEPTH="10000"),
@@ -48,7 +48,7 @@ def run_cases():
         "  while (i < n) { total = total + p.x; i = i + 1; }\n"
         "  return total;\n"
         "}\n"
-        "print(sum(20));\n",
+        "println(sum(20));\n",
         stdout="40",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
     )
@@ -61,8 +61,8 @@ def run_cases():
         "  ++g;\n"
         "  return g;\n"
         "}\n"
-        "print(f());\n"
-        "print(g);\n",
+        "println(f());\n"
+        "println(g);\n",
         stdout_all=["5", "5"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -71,11 +71,11 @@ def run_cases():
         "let x = 10;\n"
         "func f() {\n"
         "  let x = 1;\n"
-        "  if (true) { let x = 2; print(x); }\n"
+        "  if (true) { let x = 2; println(x); }\n"
         "  return x;\n"
         "}\n"
-        "print(f());\n"
-        "print(x);\n",
+        "println(f());\n"
+        "println(x);\n",
         stdout_all=["2", "1", "10"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -83,18 +83,18 @@ def run_cases():
         "index cache key and mutation",
         "let d = {\"a\": 1, \"b\": 2};\n"
         "func get(k) { return d[k]; }\n"
-        "print(get(\"a\"));\n"
-        "print(get(\"b\"));\n"
-        "print(get(\"a\"));\n"
+        "println(get(\"a\"));\n"
+        "println(get(\"b\"));\n"
+        "println(get(\"a\"));\n"
         "d[\"a\"] = 9;\n"
-        "print(d[\"a\"]);\n"
+        "println(d[\"a\"]);\n"
         "d[\"c\"] = 4;\n"
-        "print(d[\"a\"]);\n"
-        "print(d[\"c\"]);\n"
+        "println(d[\"a\"]);\n"
+        "println(d[\"c\"]);\n"
         "let e = d;\n"
         "d[\"a\"] = 7;\n"
-        "print(e[\"a\"]);\n"
-        "print(d[\"a\"]);\n",
+        "println(e[\"a\"]);\n"
+        "println(d[\"a\"]);\n",
         stdout_all=["1", "2", "1", "9", "9", "4", "9", "7"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -125,9 +125,9 @@ def run_cases():
         "  return captured[\"k\"];\n"
         "}\n"
         "let p = {\"k\": 0};\n"
-        "print(mutate(p, 3));\n"
-        "print(p[\"k\"]);\n"
-        "print(outer());\n",
+        "println(mutate(p, 3));\n"
+        "println(p[\"k\"]);\n"
+        "println(outer());\n",
         stdout_all=["[3, 3, 3, 3, 3]", "3", "2"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -144,7 +144,7 @@ def run_cases():
         "  }\n"
         "  return total + g;\n"
         "}\n"
-        "print(f());\n",
+        "println(f());\n",
         stdout="43",
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -156,15 +156,15 @@ def run_cases():
         "  if (add(1, 2) != 6) { fail \"bad\"; }\n"
         "  i = i + 1;\n"
         "}\n"
-        "print(add(1, 2));\n"
+        "println(add(1, 2));\n"
         "func make(n) { return func() { n = n + 1; return n; }; }\n"
         "let c = make(0);\n"
-        "print(c());\n"
-        "print(c());\n"
-        "func withdefer(x) { defer print(x); return x + 1; }\n"
-        "print(withdefer(4));\n"
+        "println(c());\n"
+        "println(c());\n"
+        "func withdefer(x) { defer println(x); return x + 1; }\n"
+        "println(withdefer(4));\n"
         "func rec(n) { if (n <= 0) { return 0; } return rec(n - 1) + 1; }\n"
-        "print(rec(100));\n",
+        "println(rec(100));\n",
         stdout_all=["6", "1", "2", "4", "5", "100"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -176,9 +176,9 @@ def run_cases():
         "  let recovered = [][0] on error(err) { recover 5; };\n"
         "  return total + recovered;\n"
         "}\n"
-        "print(f());\n"
+        "println(f());\n"
         "func boom() { { let x = 1; fail \"x\"; } }\n"
-        "print(boom() on error(e) { recover 7; });\n"
+        "println(boom() on error(e) { recover 7; });\n"
         "func g(n) {\n"
         "  let total = 0;\n"
         "  let i = 0;\n"
@@ -188,20 +188,20 @@ def run_cases():
         "  }\n"
         "  return total;\n"
         "}\n"
-        "print(g(3));\n",
+        "println(g(3));\n",
         stdout_all=["11", "7", "6"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
         "constant branch folding",
         "func f(x) {\n"
-        "  if (1 < 2) { print(\"a\"); } else { print(\"b\"); }\n"
-        "  if (false) { print(\"bad\"); } else { print(\"c\"); }\n"
-        "  if (null) { print(\"bad\"); } else { print(\"d\"); }\n"
+        "  if (1 < 2) { println(\"a\"); } else { println(\"b\"); }\n"
+        "  if (false) { println(\"bad\"); } else { println(\"c\"); }\n"
+        "  if (null) { println(\"bad\"); } else { println(\"d\"); }\n"
         "  let y = true ? 1 : 2;\n"
-        "  print(y);\n"
-        "  while (false) { print(\"bad\"); }\n"
-        "  if (x) { print(\"x\"); } else { print(\"no\"); }\n"
+        "  println(y);\n"
+        "  while (false) { println(\"bad\"); }\n"
+        "  if (x) { println(\"x\"); } else { println(\"no\"); }\n"
         "}\n"
         "f(true);\n"
         "f(false);\n",
@@ -210,8 +210,8 @@ def run_cases():
     )
     check(
         "constant branch folding disabled",
-        "if (false) { print(\"bad\"); } else { print(\"ok\"); }\n"
-        "print(1 < 2);\n",
+        "if (false) { println(\"bad\"); } else { println(\"ok\"); }\n"
+        "println(1 < 2);\n",
         stdout_all=["ok", "true"],
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
     )
@@ -221,22 +221,22 @@ def run_cases():
         "  let a = 7;\n"
         "  let b = 3;\n"
         "  let d = 0;\n"
-        "  d = a + b; print(d);\n"
-        "  d = a - b; print(d);\n"
-        "  d = a * b; print(d);\n"
-        "  d = a / b; print(d);\n"
-        "  d = a % b; print(d);\n"
-        "  d = a & b; print(d);\n"
-        "  d = a | b; print(d);\n"
-        "  d = a ^ b; print(d);\n"
-        "  d = a << 1; print(d);\n"
-        "  d = a >> 1; print(d);\n"
+        "  d = a + b; println(d);\n"
+        "  d = a - b; println(d);\n"
+        "  d = a * b; println(d);\n"
+        "  d = a / b; println(d);\n"
+        "  d = a % b; println(d);\n"
+        "  d = a & b; println(d);\n"
+        "  d = a | b; println(d);\n"
+        "  d = a ^ b; println(d);\n"
+        "  d = a << 1; println(d);\n"
+        "  d = a >> 1; println(d);\n"
         "  let c = 0;\n"
-        "  c = c + 2; print(c);\n"
-        "  c = c * 3; print(c);\n"
+        "  c = c + 2; println(c);\n"
+        "  c = c * 3; println(c);\n"
         "  return d;\n"
         "}\n"
-        "print(calc());\n",
+        "println(calc());\n",
         stdout_all=["10", "4", "21", "2", "1", "3", "7", "4",
                     "14", "3", "2", "6", "3"],
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="1"),
@@ -256,7 +256,7 @@ def run_cases():
         "  c = c + 2;\n"
         "  return [d, c];\n"
         "}\n"
-        "print(calc());\n",
+        "println(calc());\n",
         stdout="[1, 3]",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
     )
@@ -271,11 +271,11 @@ def run_cases():
         "}\n"
         "let m = 6;\n"
         "let n = 3;\n"
-        "print(params(1));\n"
-        "print(slots());\n"
-        "print(closure());\n"
-        "print(m ^ n);\n"
-        "print(~m);\n",
+        "println(params(1));\n"
+        "println(slots());\n"
+        "println(closure());\n"
+        "println(m ^ n);\n"
+        "println(~m);\n",
         stdout_all=["5", "2", "5", "5", "-7"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -299,12 +299,12 @@ def run_cases():
         "  while (i < len(xs)) { total = total + xs[i]; i = i + 1; }\n"
         "  return total;\n"
         "}\n"
-        "print(zero());\n"
-        "print(add(1, 2, 3, 4, 5, 6, 7, 8));\n"
-        "print(add9(1, 2, 3, 4, 5, 6, 7, 8, 9));\n"
-        "print(tail(1000, 0));\n"
-        "print(dflt(1));\n"
-        "print(vadd(1, 2, 3, 4, 5, 6, 7, 8, 9, 10));\n",
+        "println(zero());\n"
+        "println(add(1, 2, 3, 4, 5, 6, 7, 8));\n"
+        "println(add9(1, 2, 3, 4, 5, 6, 7, 8, 9));\n"
+        "println(tail(1000, 0));\n"
+        "println(dflt(1));\n"
+        "println(vadd(1, 2, 3, 4, 5, 6, 7, 8, 9, 10));\n",
         stdout_all=["0", "36", "45", "1000", "3", "55"],
         env=dict(os.environ, SKEIN_VM="1"),
     )
@@ -319,9 +319,9 @@ def run_cases():
         "  return func() { return func() { x = x + 1; return x; }; };\n"
         "}\n"
         "let c = counter();\n"
-        "print(c());\n"
-        "print(c());\n"
-        "print(nested()()());\n",
+        "println(c());\n"
+        "println(c());\n"
+        "println(nested()()());\n",
         stdout_all=["1", "2", "2"],
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_TRACE="1"),
         stderr="LOAD_UPVALUE",
@@ -332,7 +332,7 @@ def run_cases():
         "  if (n <= 0) { return 0; }\n"
         "  return down(n - 1);\n"
         "}\n"
-        "print(down(500));\n",
+        "println(down(500));\n",
         stdout="0",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_MAX_DEPTH="8"),
     )
@@ -346,18 +346,18 @@ def run_cases():
         "  if (n == 0) { return false; }\n"
         "  return even(n - 1);\n"
         "}\n"
-        "print(even(400));\n",
+        "println(even(400));\n",
         stdout="true",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_MAX_DEPTH="8"),
     )
     check(
         "defer prevents tail frame reuse",
         "func down(n) {\n"
-        "  defer print(n);\n"
+        "  defer println(n);\n"
         "  if (n == 0) { return 0; }\n"
         "  return down(n - 1);\n"
         "}\n"
-        "print(down(3));\n",
+        "println(down(3));\n",
         stdout="0\n1\n2\n3\n0\n",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_MAX_DEPTH="8"),
     )
@@ -381,7 +381,7 @@ def run_cases():
             f.write("package \u00e9 { export let value = 11; }\n")
         main_path = os.path.join(tmp, "app", "main.skein")
         with open(main_path, "w", encoding="utf-8") as f:
-            f.write("import e\u0301;\nprint(\u00e9.value);\n")
+            f.write("import e\u0301;\nprintln(\u00e9.value);\n")
         proc = run_file(main_path)
         assert proc.returncode == 0, proc.stderr
         assert "11" in proc.stdout, proc.stdout
@@ -628,15 +628,15 @@ def run_cases():
     check(
         "keep AST keeps parameter metadata",
         'func f([a], b = 1) { return a + b; }\n'
-        'print(f([2]));\n'
-        'print(f([3], 4));\n',
+        'println(f([2]));\n'
+        'println(f([3], 4));\n',
         stdout_all=["3", "7"],
         env=dict(os.environ, SKEIN_VM="1", SKEIN_KEEP_AST="1"),
     )
 
     check(
         "for loop",
-        "for (let i = 0; i < 3; i = i + 1) { print(i); }\n",
+        "for (let i = 0; i < 3; i = i + 1) { println(i); }\n",
         stdout="0\n1\n2\n",
     )
     check(
@@ -649,13 +649,13 @@ def run_cases():
     check(
         "for loop break",
         "for (let i = 0; i < 5; i = i + 1) { "
-        "if (i == 2) { break; } print(i); }\n",
+        "if (i == 2) { break; } println(i); }\n",
         stdout="0\n1\n",
     )
     check(
         "for loop continue",
         "for (let i = 0; i < 4; i = i + 1) { "
-        "if (i == 1) { continue; } print(i); }\n",
+        "if (i == 1) { continue; } println(i); }\n",
         stdout="0\n2\n3\n",
     )
     check(
@@ -675,23 +675,23 @@ def run_cases():
           stderr="len expects string, bytes, list, dict, deque, heap, or set")
     check(
         "for in list",
-        "for (let x in [1, 2, 3]) { print(x); }\n",
+        "for (let x in [1, 2, 3]) { println(x); }\n",
         stdout="1\n2\n3\n",
     )
     check(
         "for in dict keys",
         'let d = {"a": 1, "b": 2};\n'
-        "for (let k in d) { print(k + \"=\" + str(d[k])); }\n",
+        "for (let k in d) { println(k + \"=\" + str(d[k])); }\n",
         stdout="a=1\nb=2\n",
     )
     check(
         "for in utf8 string",
-        'for (let ch in "你好") { print(ch); }\n',
+        'for (let ch in "你好") { println(ch); }\n',
         stdout="你\n好\n",
     )
     check(
         "for in bytes",
-        'for (let b in bytes_from_hex("00ff")) { print(b); }\n',
+        'for (let b in bytes_from_hex("00ff")) { println(b); }\n',
         stdout="0\n255\n",
     )
     check(
@@ -699,39 +699,39 @@ def run_cases():
         "for (let x in [1, 2, 3, 4]) {\n"
         "  if (x == 2) { continue; }\n"
         "  if (x == 4) { break; }\n"
-        "  print(x);\n"
+        "  println(x);\n"
         "}\n",
         stdout="1\n3\n",
     )
     check(
         "for in snapshot",
         "let a = [1, 2];\n"
-        "for (let x in a) { a[0] = 9; print(x); }\n",
+        "for (let x in a) { a[0] = 9; println(x); }\n",
         stdout="1\n2\n",
     )
-    check("for in invalid type", "for (let x in 1) { print(x); }\n",
+    check("for in invalid type", "for (let x in 1) { println(x); }\n",
           stderr="cannot iterate int")
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
           stderr="symbol not found x")
     check(
         "for in dict key value",
         'for (let k, v in {"a": 1, "b": 2}) { '
-        'print(k + "=" + str(v)); }\n',
+        'println(k + "=" + str(v)); }\n',
         stdout="a=1\nb=2\n",
     )
     check(
         "for in two variables requires dict list",
-        "for (let i, v in [10, 20]) { print(v); }\n",
+        "for (let i, v in [10, 20]) { println(v); }\n",
         stderr="two-variable for-in requires dict, got list",
     )
     check(
         "for in two variables requires dict string",
-        'for (let i, ch in "ab") { print(ch); }\n',
+        'for (let i, ch in "ab") { println(ch); }\n',
         stderr="two-variable for-in requires dict, got string",
     )
     check(
         "for in two variables requires dict bytes",
-        'for (let i, b in bytes_from_hex("00ff")) { print(b); }\n',
+        'for (let i, b in bytes_from_hex("00ff")) { println(b); }\n',
         stderr="two-variable for-in requires dict, got bytes",
     )
     check("for in duplicate loop variables",
@@ -760,7 +760,7 @@ def run_cases():
         "  i = i + 1;\n"
         "  if (i == 2) { continue; }\n"
         "  if (i == 4) { break; }\n"
-        "  print(i);\n"
+        "  println(i);\n"
         "} while (i < 10);\n",
         stdout="1\n3\n",
     )
@@ -777,7 +777,7 @@ def run_cases():
     check("range len", "len(range(0, 7, 2))\n", stdout="= 7")
     check(
         "for in range",
-        "for (let x in range(1, 3)) { print(x); }\n",
+        "for (let x in range(1, 3)) { println(x); }\n",
         stdout="1\n2\n3\n",
     )
     check("range negative length", "range(0, -1)\n",
@@ -901,7 +901,7 @@ def run_cases():
         "async defer cleanup",
         "import std;\n"
         "async func answer() {\n"
-        "  defer print(\"cleanup\");\n"
+        "  defer println(\"cleanup\");\n"
         "  return 42;\n"
         "}\n"
         "await answer()\n",
@@ -911,16 +911,16 @@ def run_cases():
         "async await concurrent",
         "import std;\n"
         "async func work(n) {\n"
-        '  print("start " + str(n));\n'
+        '  println("start " + str(n));\n'
         "  await std.task.sleep(50);\n"
-        '  print("end " + str(n));\n'
+        '  println("end " + str(n));\n'
         "  return n;\n"
         "}\n"
         "let a = work(1);\n"
         "let b = work(2);\n"
         "let ra = await a;\n"
         "let rb = await b;\n"
-        "print(ra + rb);\n",
+        "println(ra + rb);\n",
         stdout_all=["start 1", "start 2", "end 1", "end 2", "3"],
     )
     check(
@@ -977,57 +977,57 @@ def run_cases():
 
     check("std math constants and helpers",
           'import std;\n'
-          'print(std.math.pi > 3.14 && std.math.pi < 3.15);\n'
-          'print(std.math.e > 2.71 && std.math.e < 2.72);\n'
-          'print(std.math.tau > 6.28 && std.math.tau < 6.29);\n'
-          'print(std.math.sign(-3));\n'
-          'print(std.math.sign(2.5));\n'
-          'print(std.math.clamp(5, 1, 3));\n'
-          'print(std.math.clamp(1.5, 0, 2));\n'
-          'print(std.math.cbrt(-8));\n',
+          'println(std.math.pi > 3.14 && std.math.pi < 3.15);\n'
+          'println(std.math.e > 2.71 && std.math.e < 2.72);\n'
+          'println(std.math.tau > 6.28 && std.math.tau < 6.29);\n'
+          'println(std.math.sign(-3));\n'
+          'println(std.math.sign(2.5));\n'
+          'println(std.math.clamp(5, 1, 3));\n'
+          'println(std.math.clamp(1.5, 0, 2));\n'
+          'println(std.math.cbrt(-8));\n',
           stdout_all=["true", "true", "true", "-1", "1", "3", "1.5", "-2.0"])
     check("std math remainder variants",
           'import std;\n'
-          'print(std.math.fmod(7, 3));\n'
-          'print(std.math.fmod(-7, 3));\n'
-          'print(std.math.mod(7, 3));\n'
-          'print(std.math.mod(-7, 3));\n'
-          'print(std.math.mod(7, -3));\n',
+          'println(std.math.fmod(7, 3));\n'
+          'println(std.math.fmod(-7, 3));\n'
+          'println(std.math.mod(7, 3));\n'
+          'println(std.math.mod(-7, 3));\n'
+          'println(std.math.mod(7, -3));\n',
           stdout_all=["1.0", "-1.0", "1", "2", "-2"])
     check("std math float classification",
           'import std;\n'
           'let nan = float("nan");\n'
           'let inf = float("inf");\n'
-          'print(std.math.is_nan(nan));\n'
-          'print(std.math.is_inf(inf));\n'
-          'print(std.math.is_finite(1));\n'
-          'print(std.math.is_finite(inf));\n'
-          'print(std.math.sign(nan));\n',
+          'println(std.math.is_nan(nan));\n'
+          'println(std.math.is_inf(inf));\n'
+          'println(std.math.is_finite(1));\n'
+          'println(std.math.is_finite(inf));\n'
+          'println(std.math.sign(nan));\n',
           stdout_all=["true", "true", "true", "false", "nan"])
     check("std math gcd and lcm",
           'import std;\n'
-          'print(std.math.gcd(12, 18));\n'
-          'print(std.math.gcd(-12, 18));\n'
-          'print(std.math.lcm(4, 6));\n'
-          'print(std.math.lcm(0, 5));\n'
-          'print(std.math.lcm(-4, 6));\n',
+          'println(std.math.gcd(12, 18));\n'
+          'println(std.math.gcd(-12, 18));\n'
+          'println(std.math.lcm(4, 6));\n'
+          'println(std.math.lcm(0, 5));\n'
+          'println(std.math.lcm(-4, 6));\n',
           stdout_all=["6", "6", "12", "0", "12"])
     check("std math angle conversion",
           'import std;\n'
-          'print(std.math.degrees(std.math.pi));\n'
-          'print(std.math.radians(180));\n',
+          'println(std.math.degrees(std.math.pi));\n'
+          'println(std.math.radians(180));\n',
           stdout_all=["180.0", "3.141592653589793"])
     check("std math domain errors are nan",
           'import std;\n'
-          'print(std.math.is_nan(std.math.sqrt(-1)));\n'
-          'print(std.math.is_nan(std.math.log(0)));\n'
-          'print(std.math.is_nan(std.math.log2(0)));\n'
-          'print(std.math.is_nan(std.math.log10(-1)));\n',
+          'println(std.math.is_nan(std.math.sqrt(-1)));\n'
+          'println(std.math.is_nan(std.math.log(0)));\n'
+          'println(std.math.is_nan(std.math.log2(0)));\n'
+          'println(std.math.is_nan(std.math.log10(-1)));\n',
           stdout_all=["true", "true", "true", "true"])
     check("std math round negative halves down",
           'import std;\n'
-          'print(std.math.round(-1.5));\n'
-          'print(std.math.round(-1.4));\n',
+          'println(std.math.round(-1.5));\n'
+          'println(std.math.round(-1.4));\n',
           stdout_all=["-2", "-1"])
     check("std math min rejects non-numbers",
           'import std;\nstd.math.min(1, "x");\n',

@@ -15,16 +15,16 @@ def run_cases():
         '  func moved(self, dx: int, dy: int = 0) { return self; }\n'
         '}\n'
         'let info = std.meta.type_info("P");\n'
-        'print(info["kind"]);\n'
-        'print(info["name"]);\n'
-        'print(info["fields"][0]["name"]);\n'
-        'print(info["fields"][1]["type"]);\n'
-        'print(info["fields"][1]["nullable"]);\n'
-        'print(info["fields"][1]["has_default"]);\n'
-        'print(info["fields"][0]["readonly"]);\n'
-        'print(info["methods"][0]["name"]);\n'
-        'print(info["methods"][0]["params"]);\n'
-        'print(info["methods"][0]["has_defaults"]);\n',
+        'println(info["kind"]);\n'
+        'println(info["name"]);\n'
+        'println(info["fields"][0]["name"]);\n'
+        'println(info["fields"][1]["type"]);\n'
+        'println(info["fields"][1]["nullable"]);\n'
+        'println(info["fields"][1]["has_default"]);\n'
+        'println(info["fields"][0]["readonly"]);\n'
+        'println(info["methods"][0]["name"]);\n'
+        'println(info["methods"][0]["params"]);\n'
+        'println(info["methods"][0]["has_defaults"]);\n',
         stdout_all=[
             "struct", "P", "x", "int?", "true", "true", "false",
             "moved", "[int, int]", "true",
@@ -35,8 +35,8 @@ def run_cases():
         "meta struct from value",
         'import std;\n'
         'struct P { x: int; }\n'
-        'print(std.meta.type_info(P { x: 1 })["name"]);\n'
-        'print(std.meta.fields(P { x: 1 })[0]["type"]);\n',
+        'println(std.meta.type_info(P { x: 1 })["name"]);\n'
+        'println(std.meta.fields(P { x: 1 })[0]["type"]);\n',
         stdout_all=["P", "int"],
     )
 
@@ -45,12 +45,12 @@ def run_cases():
         'import std;\n'
         'enum E { A { n: int = 3; }; B; }\n'
         'let info = std.meta.type_info(E.B);\n'
-        'print(info["kind"]);\n'
-        'print(info["variants"][0]["name"]);\n'
-        'print(info["variants"][0]["fields"][0]["readonly"]);\n'
-        'print(info["variants"][0]["fields"][0]["has_default"]);\n'
-        'print(std.meta.fields(E.B));\n'
-        'print(std.meta.variants("E")[1]["name"]);\n',
+        'println(info["kind"]);\n'
+        'println(info["variants"][0]["name"]);\n'
+        'println(info["variants"][0]["fields"][0]["readonly"]);\n'
+        'println(info["variants"][0]["fields"][0]["has_default"]);\n'
+        'println(std.meta.fields(E.B));\n'
+        'println(std.meta.variants("E")[1]["name"]);\n',
         stdout_all=["enum", "A", "true", "true", "[]", "B"],
     )
 
@@ -60,31 +60,31 @@ def run_cases():
         'trait D { func draw(self); }\n'
         'struct P { x: int; }\n'
         'impl D for P { func draw(self) { return self.x; } }\n'
-        'print(std.meta.implements(P { x: 1 }, "D"));\n'
-        'print(std.meta.implements("P", "D"));\n'
-        'print(std.meta.traits("P"));\n'
-        'print(std.meta.type_info("D")["kind"]);\n'
-        'print(len(std.meta.type_info("D")["methods"][0]["params"]));\n'
-        'print(std.meta.fields("D"));\n'
-        'print(std.meta.variants("D"));\n',
+        'println(std.meta.implements(P { x: 1 }, "D"));\n'
+        'println(std.meta.implements("P", "D"));\n'
+        'println(std.meta.traits("P"));\n'
+        'println(std.meta.type_info("D")["kind"]);\n'
+        'println(len(std.meta.type_info("D")["methods"][0]["params"]));\n'
+        'println(std.meta.fields("D"));\n'
+        'println(std.meta.variants("D"));\n',
         stdout_all=["true", "[main.D]", "trait", "0", "[]"],
     )
 
     check(
         "meta builtin types",
         'import std;\n'
-        'print(std.meta.type_info("str")["name"]);\n'
-        'print(std.meta.type_info("func")["name"]);\n'
-        'print(std.meta.type_info(1)["kind"]);\n'
-        'print(std.meta.type_info([1])["name"]);\n'
-        'print(std.meta.type_info(sqrt)["name"]);\n'
-        'print(std.meta.type_info(null)["name"]);\n'
-        'print(std.meta.has_type("list"));\n'
-        'print(std.meta.has_type("nope"));\n'
-        'print(std.meta.fields("int"));\n'
-        'print(std.meta.variants("int"));\n'
-        'print(std.meta.methods("int"));\n'
-        'print(std.meta.traits("int"));\n',
+        'println(std.meta.type_info("str")["name"]);\n'
+        'println(std.meta.type_info("func")["name"]);\n'
+        'println(std.meta.type_info(1)["kind"]);\n'
+        'println(std.meta.type_info([1])["name"]);\n'
+        'println(std.meta.type_info(sqrt)["name"]);\n'
+        'println(std.meta.type_info(null)["name"]);\n'
+        'println(std.meta.has_type("list"));\n'
+        'println(std.meta.has_type("nope"));\n'
+        'println(std.meta.fields("int"));\n'
+        'println(std.meta.variants("int"));\n'
+        'println(std.meta.methods("int"));\n'
+        'println(std.meta.traits("int"));\n',
         stdout_all=[
             "string", "function", "builtin", "list", "builtin", "null",
             "true", "false", "[]",
@@ -95,13 +95,13 @@ def run_cases():
         "meta builtin descriptor fields",
         'import std;\n'
         'let info = std.meta.type_info("int");\n'
-        'print(info["module"]);\n'
-        'print(info["source"]);\n'
-        'print(info["exported"]);\n'
-        'print(info["fields"]);\n'
-        'print(info["variants"]);\n'
-        'print(info["methods"]);\n'
-        'print(info["traits"]);\n',
+        'println(info["module"]);\n'
+        'println(info["source"]);\n'
+        'println(info["exported"]);\n'
+        'println(info["fields"]);\n'
+        'println(info["variants"]);\n'
+        'println(info["methods"]);\n'
+        'println(info["traits"]);\n',
         stdout_all=["true", "[]"],
     )
 
@@ -120,7 +120,7 @@ def run_cases():
         '    missing = std.list.append(missing, name);\n'
         '  }\n'
         '}\n'
-        'print(missing);\n',
+        'println(missing);\n',
         stdout="[]",
     )
 
@@ -150,7 +150,7 @@ def run_cases():
         'struct P { x: int; }\n'
         'let fields = std.meta.fields("P");\n'
         'fields[0]["name"] = "z";\n'
-        'print(std.meta.fields("P")[0]["name"]);\n',
+        'println(std.meta.fields("P")[0]["name"]);\n',
         stdout="x",
     )
 
@@ -163,15 +163,15 @@ def run_cases():
         '  func alpha(self) { return 2; }\n'
         '}\n'
         'let methods = std.meta.methods("P");\n'
-        'print(methods[0]["name"]);\n'
-        'print(methods[1]["name"]);\n',
+        'println(methods[0]["name"]);\n'
+        'println(methods[1]["name"]);\n',
         stdout_all=["alpha", "zed"],
     )
 
     check(
         "meta import submodule",
         'import std.meta;\n'
-        'print(meta.type_info("int")["name"]);\n',
+        'println(meta.type_info("int")["name"]);\n',
         stdout="int",
     )
 
@@ -196,10 +196,10 @@ def run_cases():
         main = write("main_vis.skein",
                      "import std;\n"
                      "import aa;\n"
-                     'print(std.meta.type_info("Pub")["name"]);\n'
-                     'print(std.meta.type_info("aa.Pub")["name"]);\n'
-                     'print(std.meta.has_type("aa.Hidden"));\n'
-                     'print(aa.local_meta()["name"]);\n'
+                     'println(std.meta.type_info("Pub")["name"]);\n'
+                     'println(std.meta.type_info("aa.Pub")["name"]);\n'
+                     'println(std.meta.has_type("aa.Hidden"));\n'
+                     'println(aa.local_meta()["name"]);\n'
                      'std.meta.type_info("aa.Hidden");\n')
         proc = run_file(main)
         assert proc.returncode != 0, proc.stdout
@@ -220,8 +220,8 @@ def run_cases():
         main = write("main_alias.skein",
                      "import std;\n"
                      "import aa as lib;\n"
-                     'print(std.meta.type_info("lib.Pub")["name"]);\n'
-                     'print(std.meta.has_type("lib.Hidden"));\n')
+                     'println(std.meta.type_info("lib.Pub")["name"]);\n'
+                     'println(std.meta.has_type("lib.Hidden"));\n')
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["Pub", "false"], proc.stdout

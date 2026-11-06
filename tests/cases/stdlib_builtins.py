@@ -1926,13 +1926,13 @@ def run_cases():
     check(
         "break",
         "let i = 0;\n"
-        "while (i < 10) { i = i + 1; if (i == 3) { break; } print(i); }\n",
+        "while (i < 10) { i = i + 1; if (i == 3) { break; } println(i); }\n",
         stdout="1\n2\n",
     )
     check(
         "continue",
         "let i = 0;\n"
-        "while (i < 5) { i = i + 1; if (i == 2) { continue; } print(i); }\n",
+        "while (i < 5) { i = i + 1; if (i == 2) { continue; } println(i); }\n",
         stdout="1\n3\n",
     )
     check(
@@ -1940,10 +1940,10 @@ def run_cases():
         "label outer: for (let i in [1, 2, 3]) {\n"
         "  for (let j in [1, 2, 3]) {\n"
         "    if (i == 2 && j == 2) { break outer; }\n"
-        "    print(str(i) + \",\" + str(j));\n"
+        "    println(str(i) + \",\" + str(j));\n"
         "  }\n"
         "}\n"
-        'print("done");\n',
+        'println("done");\n',
         stdout_all=["1,1", "1,2", "1,3", "2,1", "done"],
     )
     check(
@@ -1951,19 +1951,19 @@ def run_cases():
         "label outer: for (let i in [1, 2]) {\n"
         "  for (let j in [1, 2]) {\n"
         "    if (j == 1) { continue outer; }\n"
-        "    print(\"bad\");\n"
+        "    println(\"bad\");\n"
         "  }\n"
         "}\n"
-        'print("done");\n',
+        'println("done");\n',
         stdout="done\n",
     )
     check(
         "labeled break switch",
         "label sw: switch (1) {\n"
         "  case 1 => { break sw; }\n"
-        '  default => print("bad");\n'
+        '  default => println("bad");\n'
         "}\n"
-        'print("after");\n',
+        'println("after");\n',
         stdout="after\n",
     )
     check(

@@ -447,6 +447,7 @@ static const char *builtin_field_name(int functype) {
         case B_len: return "len";
         case B_range: return "range";
         case B_print: return "print";
+        case B_println: return "println";
         case B_list: return "list";
         case B_dict: return "dict";
         case B_int: return "int";

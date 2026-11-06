@@ -527,20 +527,27 @@ struct value_t *call_builtin(int functype,
                    : (struct value_t *)newdictval();
     }
 
-    if (functype == B_format || functype == B_print) {
+    if (functype == B_format || functype == B_print ||
+        functype == B_println) {
+        bool is_print = functype == B_print || functype == B_println;
+        bool add_newline = functype == B_println;
+        const char *name = functype == B_format
+                               ? "format"
+                               : (functype == B_println ? "println" : "print");
         struct value_t *ret = NULL;
         if (functype == B_format && args.empty()) {
             yyerror("format expects at least 1 argument");
-        } else if (functype == B_print && args.empty()) {
-            std::printf("\n");
+        } else if (is_print && args.empty()) {
+            if (add_newline)
+                std::printf("\n");
             ret = newnull();
-        } else if (functype == B_print && args.size() == 1) {
+        } else if (is_print && args.size() == 1) {
             printvalue(args[0]);
-            std::printf("\n");
+            if (add_newline)
+                std::printf("\n");
             ret = newnull();
         } else if (args[0]->type != T_string) {
-            yyerror("%s first argument must be a string, got %s",
-                    functype == B_format ? "format" : "print",
+            yyerror("%s first argument must be a string, got %s", name,
                     typename_of(args[0]));
         } else {
             std::vector<struct value_t *> fmt_args(args.begin() + 1, args.end());
@@ -552,7 +559,7 @@ struct value_t *call_builtin(int functype,
             } else if (functype == B_format) {
                 ret = newstrval(out.c_str());
             } else {
-                std::printf("%s\n", out.c_str());
+                std::printf("%s%s", out.c_str(), add_newline ? "\n" : "");
                 ret = newnull();
             }
         }

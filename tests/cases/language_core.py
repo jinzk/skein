@@ -133,33 +133,33 @@ def run_cases():
           "  const B = A * 3 + 1;\n"
           "  return B;\n"
           "}\n"
-          "print(f());\n",
+          "println(f());\n",
           stdout="7")
     check("const propagation shadowing",
           "func f() {\n"
           "  const A = 1;\n"
-          "  { const A = 5; print(A); }\n"
-          "  { let A = 9; print(A); }\n"
-          "  print(A);\n"
+          "  { const A = 5; println(A); }\n"
+          "  { let A = 9; println(A); }\n"
+          "  println(A);\n"
           "}\n"
           "f();\n",
           stdout_all=["5", "9", "1"])
     check("const string concatenation",
-          'const S = "a" + "b";\nprint(S);\n',
+          'const S = "a" + "b";\nprintln(S);\n',
           stdout="ab")
     check("const container is not propagated",
           "func f() {\n"
           "  const L = [1];\n"
           "  L[0] = 2;\n"
           "  return L[0];\n"
-          "}\nprint(f());\n",
+          "}\nprintln(f());\n",
           stdout="2")
     check("const propagation can be disabled",
           "func f() {\n"
           "  const A = 2;\n"
           "  const B = A * 3 + 1;\n"
           "  return B;\n"
-          "}\nprint(f());\n",
+          "}\nprintln(f());\n",
           stdout="7",
           env=dict(os.environ, SKEIN_VM="1", SKEIN_NO_CONST_PROP="1"))
     check("increment string", 'let s = "a";\ns++;\n',
@@ -233,21 +233,21 @@ def run_cases():
           stdout_all=["= [0, 2, 4]", "= [1, 3]", "= [1, 3]", "= [4, 2]",
                       "= [4, 3, 2, 1, 0]"])
     check("string slice uses codepoints",
-          'print("你好世界"[1:3]);\n'
-          'print("你好世界"[::-1]);\n',
+          'println("你好世界"[1:3]);\n'
+          'println("你好世界"[::-1]);\n',
           stdout_all=["好世", "界世好你"])
     check("bytes slice uses byte indices",
-          'print(bytes_hex(bytes_from_string("abcd")[1:3]));\n'
-          'print(bytes_hex(bytes_from_string("abcd")[::-1]));\n',
+          'println(bytes_hex(bytes_from_string("abcd")[1:3]));\n'
+          'println(bytes_hex(bytes_from_string("abcd")[::-1]));\n',
           stdout_all=["6263", "64636261"])
     check("slice step zero",
-          "print([1, 2, 3][::0]);\n",
+          "println([1, 2, 3][::0]);\n",
           stderr="slice step cannot be zero")
     check("slice bound must be integer",
-          "print([1, 2, 3][1.0:]);\n",
+          "println([1, 2, 3][1.0:]);\n",
           stderr="slice start must be an integer")
     check("slice unsupported type",
-          "print(1[0:1]);\n",
+          "println(1[0:1]);\n",
           stderr="slice expects list, string, or bytes")
     check("logical and", "1 && 2\n", stdout="= true")
     check("logical and short-circuit", "0 && (1/0)\n", stdout="= false")
@@ -280,13 +280,13 @@ def run_cases():
           stdout="= true")
     check("bool true literal", "true\n", stdout="= true")
     check("bool false literal", "false\n", stdout="= false")
-    check("bool print", "print(true)\nprint(false)\n",
+    check("bool print", "println(true)\nprintln(false)\n",
           stdout_all=["true", "false"])
     check("bool truthiness",
-          'if (true) { print("yes"); } else { print("no"); }\n',
+          'if (true) { println("yes"); } else { println("no"); }\n',
           stdout="yes")
     check("bool false truthiness",
-          'if (false) { print("yes"); } else { print("no"); }\n',
+          'if (false) { println("yes"); } else { println("no"); }\n',
           stdout="no")
     check("bool equality",
           "true == true\ntrue == false\ntrue != false\n",
@@ -326,49 +326,49 @@ def run_cases():
           stdout="= true")
 
     check("switch int",
-          'switch (2) { case 1 => print("one"); '
-          'case 2, 3 => print("two or three"); '
-          'default => print("other"); }\n',
+          'switch (2) { case 1 => println("one"); '
+          'case 2, 3 => println("two or three"); '
+          'default => println("other"); }\n',
           stdout="two or three")
     check("switch prefixed integer",
-          'switch (0xff) { case 0b1111_1111 => print("match"); '
-          'default => print("other"); }\n',
+          'switch (0xff) { case 0b1111_1111 => println("match"); '
+          'default => println("other"); }\n',
           stdout="match")
     check("switch default",
-          'switch (9) { case 1 => print("one"); '
-          'default => print("other"); }\n',
+          'switch (9) { case 1 => println("one"); '
+          'default => println("other"); }\n',
           stdout="other")
     check("switch no match no default",
-          'switch (9) { case 1 => print("one"); }\n', code=0)
+          'switch (9) { case 1 => println("one"); }\n', code=0)
     check("switch empty body", "switch (1) {}\n", code=0)
     check("switch empty body spaced", "switch (1) { }\n", code=0)
     check("switch single statement",
           "let x = 0;\nswitch (1) { case 1 => x = 10; }\nx\n",
           stdout="= 10")
     check("switch block",
-          "switch (1) { case 1 => { print(1); print(2); } }\n",
+          "switch (1) { case 1 => { println(1); println(2); } }\n",
           stdout_all=["1", "2"])
     check("switch case scope",
           "switch (1) { case 1 => let y = 2; }\ny\n",
           stderr="symbol not found y")
     check("switch string",
-          'switch ("a") { case "b" => print("bad"); '
-          'case "a" => print("ok"); }\n', stdout="ok")
+          'switch ("a") { case "b" => println("bad"); '
+          'case "a" => println("ok"); }\n', stdout="ok")
     check("switch bool",
-          'switch (true) { case false => print("bad"); '
-          'case true => print("ok"); }\n', stdout="ok")
+          'switch (true) { case false => println("bad"); '
+          'case true => println("ok"); }\n', stdout="ok")
     check("switch null",
-          'switch (null) { case null => print("null"); }\n',
+          'switch (null) { case null => println("null"); }\n',
           stdout="null")
     check("switch bytes",
           'switch (bytes_from_hex("00ff")) { '
-          'case bytes_from_hex("00ff") => print("bytes"); }\n',
+          'case bytes_from_hex("00ff") => println("bytes"); }\n',
           stdout="bytes")
     check("switch no fallthrough",
-          'switch (1) { case 1 => print("one"); '
-          'case 2 => print("two"); }\n', stdout="one")
+          'switch (1) { case 1 => println("one"); '
+          'case 2 => println("two"); }\n', stdout="one")
     check("switch logical selector",
-          'switch (1 < 2) { case true => print("ok"); }\n', stdout="ok")
+          'switch (1 < 2) { case true => println("ok"); }\n', stdout="ok")
     check("switch break exits switch",
           "let hits = 0;\n"
           "while (true) {\n"
@@ -393,106 +393,106 @@ def run_cases():
           "f(1)\nf(2)\n",
           stdout_all=["= 10", "= 20"])
     check("switch nested",
-          'switch (1) { case 1 => switch (1) { case 1 => print("nested"); } }\n',
+          'switch (1) { case 1 => switch (1) { case 1 => println("nested"); } }\n',
           stdout="nested")
     check("switch default only",
-          'switch (1) { default => print("only"); }\n', stdout="only")
+          'switch (1) { default => println("only"); }\n', stdout="only")
     check("switch empty case block",
           "switch (1) { case 1 => {} }\n", code=0)
     check("switch empty statement case",
           "switch (1) { case 1 => ; }\n", code=0)
     check("switch float selector",
-          'switch (1.0) { case 1 => print("bad"); }\n',
+          'switch (1.0) { case 1 => println("bad"); }\n',
           stderr="switch does not support float")
     check("switch float case",
-          'switch (1) { case 1.0 => print("bad"); }\n',
+          'switch (1) { case 1.0 => println("bad"); }\n',
           stderr="switch does not support float case value")
     check("switch list case",
-          'switch (1) { case [1] => print("bad"); }\n',
+          'switch (1) { case [1] => println("bad"); }\n',
           stderr="switch does not support list case value")
     check("switch builtin case",
-          'switch (1) { case sqrt => print("bad"); }\n',
+          'switch (1) { case sqrt => println("bad"); }\n',
           stderr="switch does not support builtin case value")
     check("switch type name is not pattern",
-          'switch (1) { case int => print("bad"); }\n',
+          'switch (1) { case int => println("bad"); }\n',
           stderr="switch does not support builtin case value")
     check("switch case condition rejected",
-          'switch (true) { case 1 < 2 => print("bad"); }\n',
+          'switch (true) { case 1 < 2 => println("bad"); }\n',
           stderr="logical or comparison expressions are not allowed in case values")
     check("switch list selector",
-          'switch ([1]) { default => print("bad"); }\n',
+          'switch ([1]) { default => println("bad"); }\n',
           stderr="switch does not support list")
 
     check("match int default",
-          'print(match (2) { case 1 => "one"; case 2 => "two"; '
+          'println(match (2) { case 1 => "one"; case 2 => "two"; '
           'default => "other"; });\n',
           stdout="two")
     check("match default",
-          'print(match (9) { case 1 => "one"; default => "other"; });\n',
+          'println(match (9) { case 1 => "one"; default => "other"; });\n',
           stdout="other")
     check("match binding",
-          'print(match (42) { case n => n + 1; });\n', stdout="43")
+          'println(match (42) { case n => n + 1; });\n', stdout="43")
     check("match guard",
-          'print(match (5) { case n if n > 10 => "big"; '
+          'println(match (5) { case n if n > 10 => "big"; '
           'case n if n > 3 => "mid"; default => "small"; });\n',
           stdout="mid")
     check("match guard falls through",
-          'print(match (1) { case n if n > 3 => "big"; '
+          'println(match (1) { case n if n > 3 => "big"; '
           'default => "small"; });\n',
           stdout="small")
     check("match wildcard",
-          'print(match (1) { case _ => "wild"; });\n', stdout="wild")
+          'println(match (1) { case _ => "wild"; });\n', stdout="wild")
     check("match dict open",
           'let e = {"kind": "tool", "ok": true, "data": [1, 2]};\n'
-          'print(match (e) { case {kind: "tool", ok: true, data: d} => d; '
+          'println(match (e) { case {kind: "tool", ok: true, data: d} => d; '
           'default => null; });\n',
           stdout="[1, 2]")
     check("match dict ignores extra keys",
-          'print(match ({"a": 1, "b": 2}) { case {a} => a; default => 0; });\n',
+          'println(match ({"a": 1, "b": 2}) { case {a} => a; default => 0; });\n',
           stdout="1")
     check("match dict rest",
-          'print(match ({"a": 1, "b": 2, "c": 3}) { '
+          'println(match ({"a": 1, "b": 2, "c": 3}) { '
           'case {a, ...rest} => rest; default => null; });\n',
           stdout="{b: 2, c: 3}")
     check("match dict missing key falls through",
-          'print(match ({"a": 1}) { case {b} => "b"; default => "no b"; });\n',
+          'println(match ({"a": 1}) { case {b} => "b"; default => "no b"; });\n',
           stdout="no b")
     check("match nested dict",
-          'print(match ({"a": {"b": 2}}) { '
+          'println(match ({"a": {"b": 2}}) { '
           'case {a: {b}} => b; default => 0; });\n',
           stdout="2")
     check("match list exact",
-          'print(match ([1, 2]) { case [a] => "one"; '
+          'println(match ([1, 2]) { case [a] => "one"; '
           'case [a, b] => "two"; default => "other"; });\n',
           stdout="two")
     check("match list rest",
-          'print(match ([1, 2, 3]) { case [h, ...t] => t; default => null; });\n',
+          'println(match ([1, 2, 3]) { case [h, ...t] => t; default => null; });\n',
           stdout="[2, 3]")
     check("match list ignore rest",
-          'print(match ([1, 2, 3]) { case [h, ...] => h; default => 0; });\n',
+          'println(match ([1, 2, 3]) { case [h, ...] => h; default => 0; });\n',
           stdout="1")
     check("match empty list",
-          'print(match ([]) { case [] => "empty"; default => "no"; });\n',
+          'println(match ([]) { case [] => "empty"; default => "no"; });\n',
           stdout="empty")
     check("match struct pattern",
           'struct P { x: int; y: int; }\n'
           'let p = P { x: 1, y: 2 };\n'
-          'print(match (p) { case P {x, y} => x + y; default => 0; });\n',
+          'println(match (p) { case P {x, y} => x + y; default => 0; });\n',
           stdout="3")
     check("match struct type only",
           'struct P { x: int; }\n'
-          'print(match (P {x: 1}) { case P {} => "is P"; default => "no"; });\n',
+          'println(match (P {x: 1}) { case P {} => "is P"; default => "no"; });\n',
           stdout="is P")
     check("match dict type only",
-          'print(match ({"a": 1}) { case {...} => "dict"; default => "no"; });\n',
+          'println(match ({"a": 1}) { case {...} => "dict"; default => "no"; });\n',
           stdout="dict")
     check("match expression value",
           'let x = match (1) { case 1 => {"ok": true}; '
           'default => {"ok": false}; };\n'
-          'print(x["ok"]);\n',
+          'println(x["ok"]);\n',
           stdout="true")
     check("match nested",
-          'print(match (1) { case 1 => match (2) { case 2 => "nested"; '
+          'println(match (1) { case 1 => match (2) { case 2 => "nested"; '
           'default => "no"; }; default => "no"; });\n',
           stdout="nested")
     check("match binding scope",
@@ -512,7 +512,7 @@ def run_cases():
           'match (1) { default => "d"; case 1 => "one"; }\n',
           stderr="default must be the last match arm")
     check("match no fallthrough",
-          'print(match (1) { case 1 => "one"; case 2 => "two"; });\n',
+          'println(match (1) { case 1 => "one"; case 2 => "two"; });\n',
           stdout="one")
     check("match return",
           'func f(x) { let y = match (x) { '
@@ -522,89 +522,89 @@ def run_cases():
     check("match break outer loop",
           'for (let i in [1, 2, 3]) { '
           'let x = match (i) { case 2 => { break; } default => i; }; '
-          'print(x); }\n',
+          'println(x); }\n',
           stdout="1\n")
     check("match keeps std.regex.match",
-          'import std;\nprint(std.regex.match("a+", "aaa"));\n',
+          'import std;\nprintln(std.regex.match("a+", "aaa"));\n',
           stdout="true")
     check("match as pattern",
-          'match (1) { case 1 as x => print(x); }\n', stdout="1")
+          'match (1) { case 1 as x => println(x); }\n', stdout="1")
 
     check("expression lambda",
           'import std;\n'
-          'print(std.list.map([1, 2, 3], func(x) => x * 2));\n'
-          'print(std.list.filter([1, 2, 3], func(x) => x % 2 == 1));\n'
-          'print(std.list.reduce([1, 2, 3], func(a, b) => a + b));\n',
+          'println(std.list.map([1, 2, 3], func(x) => x * 2));\n'
+          'println(std.list.filter([1, 2, 3], func(x) => x % 2 == 1));\n'
+          'println(std.list.reduce([1, 2, 3], func(a, b) => a + b));\n',
           stdout_all=["[2, 4, 6]", "[1, 3]", "6"])
     check("expression lambda precedence",
-          'let f = func(x) => x * 2 + 1;\nprint(f(3));\n',
+          'let f = func(x) => x * 2 + 1;\nprintln(f(3));\n',
           stdout="7")
     check("nested expression lambdas",
-          'let add = func(x) => func(y) => x + y;\nprint(add(2)(3));\n',
+          'let add = func(x) => func(y) => x + y;\nprintln(add(2)(3));\n',
           stdout="5")
     check("named expression function",
-          'func double(x) => x * 2;\nprint(double(21));\n',
+          'func double(x) => x * 2;\nprintln(double(21));\n',
           stdout="42")
     check("expression lambda with match",
           'let describe = func(x) => match (x) {\n'
           '  case 0 => "zero";\n'
           '  default => "other";\n'
           '};\n'
-          'print(describe(0));\nprint(describe(2));\n',
+          'println(describe(0));\nprintln(describe(2));\n',
           stdout_all=["zero", "other"])
     check("method expression body",
           'struct Box { v: int; }\n'
           'impl Box { func twice(self) => self.v * 2; }\n'
-          'let b = Box { v: 4 };\nprint(b.twice());\n',
+          'let b = Box { v: 4 };\nprintln(b.twice());\n',
           stdout="8")
     check("async expression function",
           'import std;\n'
           'async func inc(x) => x + 1;\n'
-          'print(await inc(1));\n',
+          'println(await inc(1));\n',
           stdout="2")
 
     check("default parameter basic",
           'func f(a, b = a + 1) { return b; }\n'
-          'print(f(10));\nprint(f(10, 3));\n',
+          'println(f(10));\nprintln(f(10, 3));\n',
           stdout_all=["11", "3"])
     check("default parameter chain",
           'func f(a, b = a + 1, c = b + 1) { return c; }\n'
-          'print(f(1));\n',
+          'println(f(1));\n',
           stdout="3")
     check("default parameter multiple literals",
           'func f(a = 1, b = 2, c = 3) { return a + b + c; }\n'
-          'print(f());\nprint(f(10));\n',
+          'println(f());\nprintln(f(10));\n',
           stdout_all=["6", "15"])
     check("default parameter typed",
           'func f(a: int, b: int = a + 1) { return b; }\n'
-          'print(f(2));\n',
+          'println(f(2));\n',
           stdout="3")
     check("default parameter nullable",
           'func f(x: int? = null) { return x; }\n'
-          'print(f());\nprint(f(5));\n',
+          'println(f());\nprintln(f(5));\n',
           stdout_all=["null", "5"])
     check("default parameter method self",
           'struct S { v: int; }\n'
           'impl S { func add(self, x: int = self.v + 1) '
           '=> self.v + x; }\n'
-          'print(S { v: 10 }.add());\n',
+          'println(S { v: 10 }.add());\n',
           stdout="21")
     check("default parameter anonymous",
           'let inc = func(x = 0) => x + 1;\n'
-          'print(inc());\nprint(inc(10));\n',
+          'println(inc());\nprintln(inc(10));\n',
           stdout_all=["1", "11"])
     check("default parameter variadic",
           'func f(a, b = a + 1, ...rest) { return [a, b, rest]; }\n'
-          'print(f(1));\nprint(f(1, 3, 4, 5));\n',
+          'println(f(1));\nprintln(f(1, 3, 4, 5));\n',
           stdout_all=["[1, 2, []]", "[1, 3, [4, 5]]"])
     check("default parameter fresh per call",
           'import std;\n'
           'func f(xs = []) { xs = std.list.append(xs, 1); return xs; }\n'
-          'print(f());\nprint(f());\n',
+          'println(f());\nprintln(f());\n',
           stdout_all=["[1]", "[1]"])
     check("default parameter closure snapshot",
           'func f(a, cb = func() => a) { a = 99; return cb(); }\n'
-          'print(f(1));\n',
+          'println(f(1));\n',
           stdout="1")
     check("default parameter forward reference",
           'func f(a = b + 1, b = 2) { return a; }\nf();\n',
@@ -633,76 +633,76 @@ def run_cases():
     check("default parameter async",
           'import std;\n'
           'async func f(a, b = a + 1) => b;\n'
-          'print(await f(1));\n',
+          'println(await f(1));\n',
           stdout="2")
     check("default parameter generator",
           'func gen(a, b = a + 1) { yield b; }\n'
-          'for (let x in gen(3)) { print(x); }\n',
+          'for (let x in gen(3)) { println(x); }\n',
           stdout="4")
     check("default parameter spread",
           'func f(a, b = a + 1) { return b; }\n'
-          'let xs = [10];\nprint(f(...xs));\n',
+          'let xs = [10];\nprintln(f(...xs));\n',
           stdout="11")
 
     check("export expression function",
           'package p { export func twice(x) => x * 2; }\n'
-          'print(p.twice(21));\n',
+          'println(p.twice(21));\n',
           stdout="42")
 
     check("lambda shorthand",
           'let inc = x -> x + 1;\n'
           'let add = (a, b) -> a + b;\n'
           'let zero = () -> 7;\n'
-          'print(inc(2));\nprint(add(3, 4));\nprint(zero());\n',
+          'println(inc(2));\nprintln(add(3, 4));\nprintln(zero());\n',
           stdout_all=["3", "7", "7"])
     check("lambda shorthand expression body",
           'import std;\n'
-          'print([1, 2, 3] |> std.list.map(x -> x * 2));\n',
+          'println([1, 2, 3] |> std.list.map(x -> x * 2));\n',
           stdout="[2, 4, 6]")
     check("pipe operator",
           'import std;\n'
-          'print(range(0, 6) '
+          'println(range(0, 6) '
           '|> std.iter.filter(x -> x % 2 == 0) '
           '|> std.iter.collect());\n'
-          'print([1, 2, 3] |> std.list.len);\n'
-          'print(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len);\n',
+          'println([1, 2, 3] |> std.list.len);\n'
+          'println(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len);\n',
           stdout_all=["[0, 2, 4]", "3", "3"])
     check("pipe struct method",
           'struct Box { v: int; }\n'
           'impl Box { func add(self, x) => self.v + x; }\n'
-          'print(5 |> Box { v: 10 }.add());\n',
+          'println(5 |> Box { v: 10 }.add());\n',
           stdout="15")
 
     check("pipe apply operator",
           'func f(x, y) { return x - y; }\n'
           'let h = x -> y -> f(x, y);\n'
-          'print(4 |>> h(3));\n'
-          'print(h(4)(3));\n'
-          'print(1 |>> (x -> x + 1));\n',
+          'println(4 |>> h(3));\n'
+          'println(h(4)(3));\n'
+          'println(1 |>> (x -> x + 1));\n',
           stdout_all=["-1", "1", "2"])
     check("call placeholders",
           'func f(a, b, c) { return [a, b, c]; }\n'
           'let g = f($, $, 3);\n'
-          'print(g(1, 2));\n'
-          'print(f($, 9, 0)(4));\n'
+          'println(g(1, 2));\n'
+          'println(f($, 9, 0)(4));\n'
           'func add(a, b) { return a + b; }\n'
-          'print(add($, 2)(1));\n',
+          'println(add($, 2)(1));\n',
           stdout_all=["[1, 2, 3]", "[4, 9, 0]", "3"])
     check("placeholder with pipe",
           'import std;\n'
-          'print([1, 2, 3] |> std.list.map($, x -> x * 2));\n'
-          'print([1, 2, 3] |>> std.list.map($, x -> x * 2));\n',
+          'println([1, 2, 3] |> std.list.map($, x -> x * 2));\n'
+          'println([1, 2, 3] |>> std.list.map($, x -> x * 2));\n',
           stdout_all=["[2, 4, 6]", "[2, 4, 6]"])
     check("placeholder method",
           'struct Box { v: int; }\n'
           'impl Box { func add(self, x) => self.v + x; }\n'
           'let b = Box { v: 10 };\n'
           'let m = b.add($);\n'
-          'print(m(2));\n',
+          'println(m(2));\n',
           stdout="12")
     check("placeholder nearest call",
           'func f(a, b, c) { return [a, b, c]; }\n'
           'func inc(x) { return x + 1; }\n'
           'let value = f(inc($), 9, 0);\n'
-          'print(kind_of(value));\n',
+          'println(kind_of(value));\n',
           stdout="list")

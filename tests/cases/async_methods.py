@@ -21,7 +21,7 @@ def run_cases():
         "}\n"
         "let c = C { x: 7 };\n"
         "let t = c.get();\n"
-        "print(await t);\n",
+        "println(await t);\n",
         ["7"],
     )
 
@@ -30,13 +30,13 @@ def run_cases():
         "struct C { x: int; }\n"
         "impl C {\n"
         "  async func get(self) {\n"
-        '    print("start");\n'
+        '    println("start");\n'
         "    await std.task.sleep(1);\n"
-        '    print("end");\n'
+        '    println("end");\n'
         "    return self.x;\n"
         "  }\n"
         "}\n"
-        "print(await C { x: 8 }.get());\n",
+        "println(await C { x: 8 }.get());\n",
         ["start", "end", "8"],
     )
 
@@ -48,7 +48,7 @@ def run_cases():
         "}\n"
         "let c = C { x: 9 };\n"
         "let f = c.get;\n"
-        "print(await f());\n",
+        "println(await f());\n",
         ["9"],
     )
 
@@ -60,8 +60,8 @@ def run_cases():
         "    return a + b;\n"
         "  }\n"
         "}\n"
-        "print(await C { x: 3 }.add());\n"
-        "print(await C { x: 3 }.add(10));\n",
+        "println(await C { x: 3 }.add());\n"
+        "println(await C { x: 3 }.add(10));\n",
         ["7", "21"],
     )
 
@@ -75,7 +75,7 @@ def run_cases():
         "    return total;\n"
         "  }\n"
         "}\n"
-        "print(await C { x: 1 }.total(2, 3, 4));\n",
+        "println(await C { x: 1 }.total(2, 3, 4));\n",
         ["10"],
     )
 
@@ -84,11 +84,11 @@ def run_cases():
         "struct C { x: int; }\n"
         "impl C {\n"
         "  async func get(self) {\n"
-        '    defer print("cleanup");\n'
+        '    defer println("cleanup");\n'
         "    return self.x;\n"
         "  }\n"
         "}\n"
-        "print(await C { x: 4 }.get());\n",
+        "println(await C { x: 4 }.get());\n",
         ["cleanup", "4"],
     )
 
@@ -101,7 +101,7 @@ def run_cases():
         "    return n * await self.fact(n - 1);\n"
         "  }\n"
         "}\n"
-        "print(await C { x: 0 }.fact(4));\n",
+        "println(await C { x: 0 }.fact(4));\n",
         ["24"],
     )
 
@@ -111,7 +111,7 @@ def run_cases():
         "impl E {\n"
         "  async func value(self) { return 1; }\n"
         "}\n"
-        "print(await E.A { n: 2 }.value());\n",
+        "println(await E.A { n: 2 }.value());\n",
         ["1"],
     )
 
@@ -123,7 +123,7 @@ def run_cases():
         "  async func handle(self, x: int) { return self.base + x; }\n"
         "}\n"
         "async func use(s: S) { return await s.handle(2); }\n"
-        "print(await use(C { base: 5 }));\n",
+        "println(await use(C { base: 5 }));\n",
         ["7"],
     )
 
@@ -136,7 +136,7 @@ def run_cases():
         "}\n"
         "impl S for C;\n"
         "async func use(s: S) { return await s.handle(); }\n"
-        "print(await use(C { x: 11 }));\n",
+        "println(await use(C { x: 11 }));\n",
         ["11"],
     )
 
@@ -147,8 +147,8 @@ def run_cases():
         "  async func get(self) { return self.x; }\n"
         "}\n"
         "let m = std.meta.methods(\"C\")[0];\n"
-        "print(m[\"name\"]);\n"
-        "print(m[\"async\"]);\n",
+        "println(m[\"name\"]);\n"
+        "println(m[\"async\"]);\n",
         ["get", "true"],
     )
 
@@ -200,7 +200,7 @@ def run_cases():
             "main.skein",
             "import aa;\n"
             "let c = aa.make(12);\n"
-            "print(await c.get());\n",
+            "println(await c.get());\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr

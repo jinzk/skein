@@ -89,8 +89,8 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 - **精确 GC root 表（下一阶段 P0）**：当前 cycle collector 的 roots 基本
   只覆盖 scope；direct frame slot、operand stack、upvalue cell、defer
   capture、iterator/handler 值和 JIT frame 尚未完整登记为 roots；
-- Win64 ABI 代码路径已接入（MinGW `sysv_abi` helper + Win64 entry thunk），
-  本机无 MinGW/Windows 环境，仍需 CI 或真机验证；
+- Win64 ABI 代码路径已接入（MinGW `sysv_abi` helper + Win64 entry thunk）；
+  当前不纳入主线，由维护者在 MSYS2 环境单独验证；
 - per-pc liveness / safepoint 表；
 - 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
   但不会形成调用栈增长。该项暂按性能 backlog 处理，不阻塞当前
@@ -111,7 +111,9 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
    - cycle collector 从 scope-only roots 扩展为 scope + frame roots；
    - 第一版采用“所有 value slot 都是 root”的保守精确表，不先做 per-pc
      liveness。
-2. **P0（并行）：Win64/MinGW 真实验证**
+2. **外部验证（不计入当前主线）：Win64/MinGW**
+   - 由维护者在 MSYS2 环境单独验证；
+   - 不阻塞 Linux 上的 GC root map / frame 工作。
 3. **P1：per-pc liveness / safepoint 表**
    - 为 GC stress、frame reuse、deopt 做准备。
 4. **P2：尾调用 frame 复用 / 零帧分配**
@@ -745,6 +747,9 @@ frame 中的 value 需要显式登记，否则可达性分析不完整。
 ---
 
 ## 8. Windows / MinGW
+
+> 当前阶段不把 Windows 验证列入主线；由维护者在 MSYS2 环境独立验证。
+> Linux 侧继续按 GC root map / frame roots 推进。
 
 ### 8.1 依赖
 

@@ -21,6 +21,7 @@ from cases import (
     meta,
     net,
     paths,
+    route,
     runtime,
     stdlib_builtins,
 )
@@ -33,6 +34,7 @@ MODULES = [
     async_methods,
     collections,
     paths,
+    route,
     runtime,
     diagnostics,
     async_errors,

@@ -1,0 +1,55 @@
+import std;
+import std.route;
+
+func _id_handler(req) {
+  return {"status": 200, "body": req["params"]["id"]};
+}
+
+func _ok_handler(req) {
+  return {"status": 200, "body": "ok"};
+}
+
+// Static routes: exact table fast path.
+let static_app = route.new();
+for (let i in range(100)) {
+  static_app.get("/api/v1/resource" + str(i), _ok_handler);
+}
+let static_req = {"method": "GET", "path": "/api/v1/resource99"};
+let start = std.time.monotonic_ms();
+let checksum = 0;
+for (let i in range(20000)) {
+  checksum = checksum + static_app.dispatch(static_req)["status"];
+}
+print("static 100 routes x20000: " +
+      str(std.time.monotonic_ms() - start) + " ms (" + str(checksum) + ")");
+
+// Dynamic routes: trie lookup.
+let dynamic_app = route.new();
+for (let i in range(100)) {
+  dynamic_app.get("/api/v1/resource" + str(i) + "/:id", _id_handler);
+}
+let dynamic_req = {"method": "GET", "path": "/api/v1/resource99/42"};
+start = std.time.monotonic_ms();
+checksum = 0;
+for (let i in range(5000)) {
+  checksum = checksum + len(dynamic_app.dispatch(dynamic_req)["body"]);
+}
+print("dynamic 100 routes x5000: " +
+      str(std.time.monotonic_ms() - start) + " ms (" + str(checksum) + ")");
+
+// Larger trie: dispatch cost should stay roughly flat.
+start = std.time.monotonic_ms();
+let large_app = route.new();
+for (let i in range(1000)) {
+  large_app.get("/api/v1/resource" + str(i) + "/:id", _id_handler);
+}
+print("register 1000 routes: " + str(std.time.monotonic_ms() - start) + " ms");
+
+let large_req = {"method": "GET", "path": "/api/v1/resource999/42"};
+start = std.time.monotonic_ms();
+checksum = 0;
+for (let i in range(5000)) {
+  checksum = checksum + len(large_app.dispatch(large_req)["body"]);
+}
+print("dynamic 1000 routes x5000: " +
+      str(std.time.monotonic_ms() - start) + " ms (" + str(checksum) + ")");

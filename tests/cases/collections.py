@@ -266,50 +266,6 @@ def run_cases():
           "print(heap.size(h));\n",
           stdout_all=["50000", "0"])
 
-    check("route dispatch",
-          'import std;\nimport std.route;\n'
-          'let r = route.new();\n'
-          'r = route.get(r, "/users/:id", func(req) { '
-          'return {"status": 200, "body": req["params"]["id"]}; });\n'
-          'r = route.get(r, "/users/me", func(req) { '
-          'return {"status": 200, "body": "me"}; });\n'
-          'print(route.dispatch(r, {"method": "GET", "path": "/users/42"})["body"]);\n'
-          'print(route.dispatch(r, {"method": "GET", "path": "/users/me"})["body"]);\n'
-          'print(route.dispatch(r, {"method": "POST", "path": "/users/42"})["status"]);\n'
-          'print(route.dispatch(r, {"method": "GET", "path": "/nope"})["status"]);\n',
-          stdout_all=["42", "me", "405", "404"])
-    check("route wildcard",
-          'import std;\nimport std.route;\n'
-          'let r = route.new();\n'
-          'r = route.get(r, "/files/*path", func(req) { '
-          'return {"status": 200, "body": req["params"]["path"]}; });\n'
-          'print(route.dispatch(r, {"method": "GET", "path": "/files/a/b.txt"})["body"]);\n',
-          stdout="a/b.txt")
-    check("route middleware",
-          'import std;\nimport std.route;\n'
-          'let r = route.new();\n'
-          'r = route.get(r, "/private", func(req) { '
-          'return {"status": 200, "body": "ok"}; });\n'
-          'r = route.use(r, func(req) { '
-          'if (req["path"] == "/private") { return {"status": 401, "body": "no"}; } '
-          'return null; });\n'
-          'print(route.dispatch(r, {"method": "GET", "path": "/private"})["status"]);\n'
-          'print(route.dispatch(r, {"method": "GET", "path": "/public"})["status"]);\n',
-          stdout_all=["401", "404"])
-    check("route duplicate",
-          'import std;\nimport std.route;\n'
-          'let r = route.new();\n'
-          'r = route.get(r, "/x", func(req) { return null; });\n'
-          'route.get(r, "/x", func(req) { return null; });\n',
-          stderr="duplicate route GET /x")
-    check("route wildcard method",
-          'import std;\nimport std.route;\n'
-          'let r = route.new();\n'
-          'r = route.add(r, "*", "/any", func(req) { '
-          'return {"status": 200, "body": req["method"]}; });\n'
-          'print(route.dispatch(r, {"method": "PATCH", "path": "/any"})["body"]);\n',
-          stdout="PATCH")
-
     check("graph basics",
           'import std;\nimport std.graph;\n'
           'let g = graph.new();\n'

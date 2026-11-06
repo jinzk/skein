@@ -334,6 +334,10 @@ foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)
 endforeach()
 add_custom_target(skein_embedded_sources DEPENDS ${SKEIN_EMBEDDED_OUTPUTS})
 add_dependencies(skein_interpreter skein_embedded_sources)
+# package.cpp includes the generated .inc files directly; make sure editing a
+# lib/std/*.skein source rebuilds the object instead of reusing a stale string.
+set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter/package.cpp
+  APPEND PROPERTY OBJECT_DEPENDS "${SKEIN_EMBEDDED_OUTPUTS}")
 
 # Private embedded sources are implementation details (not public packages),
 # so they are intentionally excluded from check_docs_sync's package list.
@@ -366,6 +370,8 @@ endforeach()
 add_custom_target(skein_private_embedded_sources
   DEPENDS ${SKEIN_PRIVATE_EMBEDDED_OUTPUTS})
 add_dependencies(skein_interpreter skein_private_embedded_sources)
+set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter/std_namespace.cpp
+  APPEND PROPERTY OBJECT_DEPENDS "${SKEIN_PRIVATE_EMBEDDED_OUTPUTS}")
 
 option(SKEIN_ENABLE_TLS "Enable TLS support (requires OpenSSL)" ON)
 if(SKEIN_ENABLE_TLS)

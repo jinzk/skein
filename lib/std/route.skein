@@ -1,22 +1,202 @@
 package route {
   import std;
 
-  export struct Route {
-    method: string;
-    pattern: string;
-    handler: callable;
+  const _STATIC = 0;
+  const _PARAM = 1;
+  const _WILD = 2;
+  const _MAX_SEGMENTS = 32;
+
+  export struct Router {
+    add: callable;
+    get: callable;
+    post: callable;
+    put: callable;
+    delete: callable;
+    use: callable;
+    dispatch: callable;
+    inspect: callable;
   }
 
-  export struct Routes {
-    entries: list;
-    middlewares: list;
+  // Trie node protocol.  A node is a closure so that registration can mutate
+  // its captured dictionaries in place instead of copying them through value
+  // semantics on every insert.
+  //
+  //   0  get static child
+  //   1  set static child
+  //   2  get param child
+  //   3  set param child          (a = name, b = child)
+  //   4  get param name
+  //   5  get wildcard child
+  //   6  set wildcard child       (a = name, b = child)
+  //   7  get wildcard name
+  //   8  has method (or "*")
+  //   9  get handler (or "*")
+  //  10  set handler              (a = method, b = handler)
+  //  11  has exact method
+  //  12  has any handler
+  func _node_new() {
+    let kids = {};
+    let param = null;
+    let pname = "";
+    let wild = null;
+    let wname = "";
+    let handlers = {};
+
+    return func(op, a, b) {
+      if (op == 0) { return std.dict.get(kids, a, null); }
+      if (op == 1) { kids[a] = b; return null; }
+      if (op == 2) { return param; }
+      if (op == 3) { param = b; pname = a; return null; }
+      if (op == 4) { return pname; }
+      if (op == 5) { return wild; }
+      if (op == 6) { wild = b; wname = a; return null; }
+      if (op == 7) { return wname; }
+      if (op == 8) {
+        return std.dict.has(handlers, a) || std.dict.has(handlers, "*");
+      }
+      if (op == 9) {
+        let found = std.dict.get(handlers, a, null);
+        if (found != null) { return found; }
+        return std.dict.get(handlers, "*", null);
+      }
+      if (op == 10) { handlers[a] = b; return null; }
+      if (op == 11) { return std.dict.has(handlers, a); }
+      if (op == 12) { return len(handlers) > 0; }
+      return null;
+    };
   }
 
-  export func new() {
-    return Routes { entries: [], middlewares: [] };
+  func _parse_pattern(pattern) {
+    if (kind_of(pattern) != "string") {
+      fail("route pattern must be a string");
+    }
+
+    let segs = [];
+    let seen_wild = false;
+    for (let part in std.string.split(pattern, "/")) {
+      if (part == "") {
+        continue;
+      }
+      if (seen_wild) {
+        fail("route wildcard must be the last segment");
+      }
+      if (std.string.starts_with(part, ":")) {
+        let name = std.string.substr(part, 1);
+        if (name == "") {
+          fail("route parameter name is required");
+        }
+        segs = std.list.append(segs, [_PARAM, name]);
+      } else if (std.string.starts_with(part, "*")) {
+        segs = std.list.append(segs, [_WILD, std.string.substr(part, 1)]);
+        seen_wild = true;
+      } else {
+        segs = std.list.append(segs, [_STATIC, part]);
+      }
+    }
+
+    if (len(segs) > _MAX_SEGMENTS) {
+      fail("route pattern is too deep");
+    }
+    return segs;
   }
 
-  func _segments(path) {
+  func _static_key(pattern, segs) {
+    let parts = [];
+    for (let seg in segs) {
+      if (seg[0] != _STATIC) {
+        return null;
+      }
+      parts = std.list.append(parts, seg[1]);
+    }
+    let canonical = "/" + std.string.join(parts, "/");
+    if (canonical == pattern) {
+      return pattern;
+    }
+    return null;
+  }
+
+  func _check_route(node, segs, i, method, pattern) {
+    if (i >= len(segs)) {
+      if (node(11, method, null)) {
+        fail("duplicate route " + method + " " + pattern);
+      }
+      return;
+    }
+
+    let seg = segs[i];
+    let kind = seg[0];
+
+    if (kind == _WILD) {
+      let child = node(5, null, null);
+      if (child == null) {
+        return;
+      }
+      let existing = node(7, null, null);
+      if (existing != seg[1]) {
+        fail("conflicting route wildcard name: *" + existing + " vs *" + seg[1]);
+      }
+      _check_route(child, segs, i + 1, method, pattern);
+      return;
+    }
+
+    if (kind == _PARAM) {
+      let child = node(2, null, null);
+      if (child == null) {
+        return;
+      }
+      let existing = node(4, null, null);
+      if (existing != seg[1]) {
+        fail("conflicting route parameter name: :" + existing + " vs :" + seg[1]);
+      }
+      _check_route(child, segs, i + 1, method, pattern);
+      return;
+    }
+
+    let child = node(0, seg[1], null);
+    if (child == null) {
+      return;
+    }
+    _check_route(child, segs, i + 1, method, pattern);
+  }
+
+  func _insert_route(node, segs, i, method, handler) {
+    if (i >= len(segs)) {
+      node(10, method, handler);
+      return;
+    }
+
+    let seg = segs[i];
+    let kind = seg[0];
+
+    if (kind == _WILD) {
+      let child = node(5, null, null);
+      if (child == null) {
+        child = _node_new();
+        node(6, seg[1], child);
+      }
+      _insert_route(child, segs, i + 1, method, handler);
+      return;
+    }
+
+    if (kind == _PARAM) {
+      let child = node(2, null, null);
+      if (child == null) {
+        child = _node_new();
+        node(3, seg[1], child);
+      }
+      _insert_route(child, segs, i + 1, method, handler);
+      return;
+    }
+
+    let child = node(0, seg[1], null);
+    if (child == null) {
+      child = _node_new();
+      node(1, seg[1], child);
+    }
+    _insert_route(child, segs, i + 1, method, handler);
+  }
+
+  func _split_path(path) {
     let out = std.deque.new();
     for (let part in std.string.split(path, "/")) {
       if (part != "") {
@@ -26,57 +206,91 @@ package route {
     return std.deque.to_list(out);
   }
 
-  func _match(pattern, path) {
-    let pats = _segments(pattern);
-    let parts = _segments(path);
-    let params = {};
-    let score = 0;
-    let pi = 0;
-    let si = 0;
+  func _walk(node, parts, si, method, params) {
+    if (si >= len(parts)) {
+      if (node(8, method, null)) {
+        return {"ok": true, "node": node, "params": params};
+      }
 
-    while (pi < len(pats)) {
-      let part = pats[pi];
-
-      if (std.string.starts_with(part, "*")) {
-        let name = std.string.substr(part, 1);
-        let rest = std.deque.new();
-        while (si < len(parts)) {
-          rest = std.deque.push_back(rest, parts[si]);
-          si = si + 1;
-        }
+      // A trailing wildcard also matches zero segments.
+      let wild = node(5, null, null);
+      if (wild != null && wild(8, method, null)) {
+        let name = node(7, null, null);
         if (name != "") {
-          params[name] = std.string.join(std.deque.to_list(rest), "/");
+          let next = params;
+          next[name] = "";
+          return {"ok": true, "node": wild, "params": next};
         }
-        score = score + 1;
-        pi = pi + 1;
-        continue;
+        return {"ok": true, "node": wild, "params": params};
       }
-
-      if (si >= len(parts)) {
-        return { "ok": false };
-      }
-
-      if (std.string.starts_with(part, ":")) {
-        let name = std.string.substr(part, 1);
-        if (name != "") {
-          params[name] = parts[si];
-        }
-        score = score + 2;
-      } else {
-        if (part != parts[si]) {
-          return { "ok": false };
-        }
-        score = score + 3;
-      }
-
-      pi = pi + 1;
-      si = si + 1;
+      return {"ok": false};
     }
 
-    if (si != len(parts)) {
-      return { "ok": false };
+    let seg = parts[si];
+
+    let child = node(0, seg, null);
+    if (child != null) {
+      let found = _walk(child, parts, si + 1, method, params);
+      if (found["ok"]) {
+        return found;
+      }
     }
-    return { "ok": true, "params": params, "score": score };
+
+    let param = node(2, null, null);
+    if (param != null) {
+      let next = params;
+      next[node(4, null, null)] = seg;
+      let found = _walk(param, parts, si + 1, method, next);
+      if (found["ok"]) {
+        return found;
+      }
+    }
+
+    let wild = node(5, null, null);
+    if (wild != null) {
+      let name = node(7, null, null);
+      let next = params;
+      if (name != "") {
+        next[name] = std.string.join(std.list.slice(parts, si), "/");
+      }
+      if (wild(8, method, null)) {
+        return {"ok": true, "node": wild, "params": next};
+      }
+    }
+
+    return {"ok": false};
+  }
+
+  func _walk_any(node, parts, si) {
+    if (si >= len(parts)) {
+      if (node(12, null, null)) {
+        return true;
+      }
+      let wild = node(5, null, null);
+      if (wild != null && wild(12, null, null)) {
+        return true;
+      }
+      return false;
+    }
+
+    let seg = parts[si];
+
+    let child = node(0, seg, null);
+    if (child != null && _walk_any(child, parts, si + 1)) {
+      return true;
+    }
+
+    let param = node(2, null, null);
+    if (param != null && _walk_any(param, parts, si + 1)) {
+      return true;
+    }
+
+    let wild = node(5, null, null);
+    if (wild != null && wild(12, null, null)) {
+      return true;
+    }
+
+    return false;
   }
 
   func _response(status, body) {
@@ -87,91 +301,146 @@ package route {
     };
   }
 
-  export func add(routes, method, pattern, handler) {
-    if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
-      fail("route handler must be callable");
+  func _validate_request(req) {
+    if (kind_of(req) != "dict") {
+      fail("route.dispatch expects a request dict");
     }
+    if (!std.dict.has(req, "method") || kind_of(req["method"]) != "string") {
+      fail("route.dispatch requires a string method");
+    }
+    if (!std.dict.has(req, "path") || kind_of(req["path"]) != "string") {
+      fail("route.dispatch requires a string path");
+    }
+  }
 
-    for (let entry in routes.entries) {
-      if (entry.method == method && entry.pattern == pattern) {
-        fail("duplicate route " + method + " " + pattern);
+  export func new() {
+    let root = _node_new();
+    let exact = {};
+    let middlewares = [];
+    let entries = std.deque.new();
+
+    let add = func(method, pattern, handler) {
+      if (kind_of(method) != "string") {
+        fail("route method must be a string");
       }
-    }
-
-    routes.entries = std.list.append(routes.entries, Route {
-      method: method,
-      pattern: pattern,
-      handler: handler
-    });
-    return routes;
-  }
-
-  export func get(routes, pattern, handler) {
-    return add(routes, "GET", pattern, handler);
-  }
-
-  export func post(routes, pattern, handler) {
-    return add(routes, "POST", pattern, handler);
-  }
-
-  export func put(routes, pattern, handler) {
-    return add(routes, "PUT", pattern, handler);
-  }
-
-  export func delete(routes, pattern, handler) {
-    return add(routes, "DELETE", pattern, handler);
-  }
-
-  export func use(routes, middleware) {
-    if (kind_of(middleware) != "function" &&
-        kind_of(middleware) != "builtin") {
-      fail("route middleware must be callable");
-    }
-    routes.middlewares = std.list.append(routes.middlewares, middleware);
-    return routes;
-  }
-
-  export func dispatch(routes, req) {
-    for (let middleware in routes.middlewares) {
-      let result = middleware(req);
-      if (result != null) {
-        return result;
+      if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
+        fail("route handler must be callable");
       }
-    }
 
-    let method = req["method"];
-    let path = req["path"];
-    let best = null;
-    let best_score = -1;
-    let best_params = null;
+      let segs = _parse_pattern(pattern);
+      _check_route(root, segs, 0, method, pattern);
+      _insert_route(root, segs, 0, method, handler);
 
-    for (let entry in routes.entries) {
-      if (entry.method != method && entry.method != "*") {
-        continue;
+      let key = _static_key(pattern, segs);
+      if (key != null) {
+        let table = std.dict.get(exact, key, null);
+        if (table == null) {
+          table = {};
+        }
+        table[method] = handler;
+        exact[key] = table;
       }
-      let matched = _match(entry.pattern, path);
-      if (matched["ok"] && matched["score"] > best_score) {
-        best = entry;
-        best_score = matched["score"];
-        best_params = matched["params"];
-      }
-    }
 
-    if (best == null) {
-      let known_path = false;
-      for (let entry in routes.entries) {
-        if (_match(entry.pattern, path)["ok"]) {
-          known_path = true;
-          break;
+      entries = std.deque.push_back(entries, {
+        "method": method,
+        "pattern": pattern,
+        "handler": handler
+      });
+    };
+
+    let route_request = func(req) {
+      let method = req["method"];
+      let path = req["path"];
+
+      let table = std.dict.get(exact, path, null);
+      if (table != null) {
+        let handler = std.dict.get(table, method, null);
+        if (handler == null) {
+          handler = std.dict.get(table, "*", null);
+        }
+        if (handler != null) {
+          req["params"] = {};
+          return handler(req);
         }
       }
-      if (known_path) {
+
+      let parts = _split_path(path);
+      let found = _walk(root, parts, 0, method, {});
+      if (found["ok"]) {
+        let handler = found["node"](9, method, null);
+        req["params"] = found["params"];
+        return handler(req);
+      }
+
+      if (table != null || _walk_any(root, parts, 0)) {
         return _response(405, "method not allowed");
       }
       return _response(404, "not found");
-    }
+    };
 
-    req["params"] = best_params;
-    return best.handler(req);
+    let resume = async func(req, index, pending) {
+      let result = await pending;
+      if (result != null) {
+        return result;
+      }
+
+      let i = index;
+      while (i < len(middlewares)) {
+        let value = middlewares[i](req);
+        if (type_name(value) == "task") {
+          value = await value;
+        }
+        if (value != null) {
+          return value;
+        }
+        i = i + 1;
+      }
+
+      let response = route_request(req);
+      if (type_name(response) == "task") {
+        response = await response;
+      }
+      return response;
+    };
+
+    let dispatch = func(req) {
+      _validate_request(req);
+
+      let i = 0;
+      while (i < len(middlewares)) {
+        let value = middlewares[i](req);
+        if (type_name(value) == "task") {
+          return resume(req, i + 1, value);
+        }
+        if (value != null) {
+          return value;
+        }
+        i = i + 1;
+      }
+      return route_request(req);
+    };
+
+    let use = func(middleware) {
+      if (kind_of(middleware) != "function" &&
+          kind_of(middleware) != "builtin") {
+        fail("route middleware must be callable");
+      }
+      middlewares = std.list.append(middlewares, middleware);
+    };
+
+    let inspect = func() {
+      return std.deque.to_list(entries);
+    };
+
+    return Router {
+      add: add,
+      get: func(pattern, handler) { add("GET", pattern, handler); },
+      post: func(pattern, handler) { add("POST", pattern, handler); },
+      put: func(pattern, handler) { add("PUT", pattern, handler); },
+      delete: func(pattern, handler) { add("DELETE", pattern, handler); },
+      use: use,
+      dispatch: dispatch,
+      inspect: inspect
+    };
   }
 }

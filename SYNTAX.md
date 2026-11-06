@@ -3930,46 +3930,72 @@ let h2 = heap.from_list([3, 1, 2], func(a, b) { return a > b; });  // 大顶堆
 ```text
 import std.route;
 
-let r = route.new();
-r = route.get(r, "/users/:id", func(req) {
+let app = route.new();
+app.get("/users/:id", func(req) {
   return {"status": 200, "body": req["params"]["id"]};
 });
-r = route.get(r, "/users/me", func(req) {
+app.get("/users/me", func(req) {
   return {"status": 200, "body": "me"};
 });
-r = route.get(r, "/files/*path", func(req) {
+app.get("/files/*path", func(req) {
   return {"status": 200, "body": req["params"]["path"]};
 });
-r = route.use(r, func(req) {
+app.use(func(req) {
   if (req["path"] == "/private") {
     return {"status": 401, "body": "no"};
   }
   return null;
 });
 
-route.dispatch(r, {"method": "GET", "path": "/users/42"});
+app.dispatch({"method": "GET", "path": "/users/42"});
 ```
 
 API：
 
 ```text
-route.new()                         -> Routes
-route.add(routes, method, pattern, handler) -> Routes
-route.get/post/put/delete(routes, pattern, handler) -> Routes
-route.use(routes, middleware)       -> Routes
-route.dispatch(routes, request)     -> response
+route.new()                         -> Router
+app.add(method, pattern, handler)
+app.get/post/put/delete(pattern, handler)
+app.use(middleware)
+app.dispatch(request)               -> response | task
+app.inspect()                       -> [{method, pattern, handler}, ...]
 ```
+
+`Router` 是可变引用句柄：`let b = a;` 之后 `b` 和 `a` 共享同一个路由表；注册方法原地更新，不返回新 Router。
 
 规则：
 
 - `:name` 匹配单段并写入 `req["params"][name]`；
-- `*name` 匹配剩余路径；
-- 优先级：静态段 > `:name` > `*name`；
-- 方法不匹配但路径存在 → 405；完全不存在 → 404；
+- `*name` 匹配剩余路径，必须是最后一段，并且可以匹配 0 段；
+- 优先级逐段比较：静态段 > `:name` > `*name`；靠前的段优先；
+- 同一个路径形状的 param / wildcard 名必须一致，否则注册时 `fail`；
 - 同一个 `(method, pattern)` 重复注册会 `fail`；
+- 方法不匹配但路径存在 → 405；完全不存在 → 404；
 - middleware 签名是 `func(req) -> response|null`，返回 `null` 继续，否则短路；
 - handler 返回 response dict；`req["params"]` 已填好；
-- async handler 返回的 task 会原样从 `dispatch` 返回，可交给 `std.http.serve` 或外层 `await`。
+- handler 可以是 `async func`；`dispatch` 会原样返回 task，可交给 `std.http.serve` 或外层 `await`；
+- middleware 也可以是 `async func`。任一 middleware 返回 task 时，`dispatch` 返回 task；调用方 `await` 后得到 response；
+- 静态路由使用精确表，dispatch 为 O(1)；动态路由使用段级 trie，dispatch 与路由总数基本无关；注册为 O(pattern 深度)；
+- pattern 深度上限为 32 段；
+- 注册应在开始服务前完成，运行期修改 Router 不是线程安全的。
+
+`std.http.serve` 会等待 handler 返回的 task，因此可以直接注册：
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+std.http.serve(s, app.dispatch);
+```
+
+装饰器可用于包装 handler，路由本身不要求装饰器：
+
+```text
+@logged
+func user(req) {
+  return {"status": 200, "body": req["params"]["id"]};
+}
+
+app.get("/users/:id", user);
+```
 
 ### std.graph
 

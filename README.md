@@ -1961,14 +1961,21 @@ heap.peek(h)         // 1
 ```text
 import std.route;
 
-let r = route.new();
-r = route.get(r, "/users/:id", func(req) {
+let app = route.new();
+app.get("/users/:id", func(req) {
   return {"status": 200, "body": req["params"]["id"]};
 });
-route.dispatch(r, {"method": "GET", "path": "/users/42"});
+app.use(func(req) {
+  if (req["path"] == "/private") {
+    return {"status": 401, "body": "no"};
+  }
+  return null;
+});
+
+app.dispatch({"method": "GET", "path": "/users/42"});
 ```
 
-支持 `:name` 参数、`*name` 通配、404/405、`route.use` 中间件；不做反射或装饰器。路由数量通常很小，`route.add` 每次 O(路由数)。
+`Router` 是可变引用句柄，复制后共享路由表；注册方法原地更新，不返回新 Router。支持 `:name` 参数、`*name` 通配、404/405、全局 middleware 和 async middleware。静态路由走精确表，动态路由走段级 trie：静态 dispatch 为 O(1)，动态 dispatch 与路由总数基本无关。`*name` 必须是最后一段，并且可以匹配 0 段。装饰器可用于包装 handler，例如 `@logged func user(req) {...}` 后再 `app.get("/users/:id", user)`。
 
 `std.graph` 提供有向图和常用算法：
 

@@ -64,14 +64,6 @@ bool control_matches_label(struct value_t *value, const char *label) {
 
 
 
-struct value_t *new_int_checked(__int128 n) {
-    if (n < LLONG_MIN || n > LLONG_MAX) {
-        yyerror("integer overflow");
-        return NULL;
-    }
-    return newintval((long long)n);
-}
-
 
 static void clear_eval_control() {
     freeval(eval_ctx().control_value);

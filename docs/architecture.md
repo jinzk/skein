@@ -60,7 +60,7 @@ L0  platform          src/platform/：OS 原语（文件/时间/线程/进程/so
 |---|---|---|
 | L1 runtime | `src/runtime/` | `valuetype.*`、`value_ops.*`、`dict.*`、`structtype.*`、`symbol.*`、`cycle.*`、`serialization.*`、`typeinfo.*`、`json.*`、`format.*`、`encoding.*`、`unicode.*`、`unicode_ident.*`、`stdio_stream.*`、`runtime_context.*`、`runtime_error.*`、`skein_module.h`、`binding_registry.*`、`builtin_ids.h` |
 | L1 生成数据 | `src/runtime/data/` | `encoding_gb18030_data.inc`、`encoding_gbk_validity.inc`、`unicode_ident_data.inc` |
-| L2 interpreter | `src/interpreter/` | `tokens.l`、`parser.y`、`ast.*`、`decorators.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_control.*`、`eval_ops.*`、`eval_call.*`、`eval_assign.*`、`eval_context.*`、`eval_helpers.h`、`bytecode.*`、`compiler.*`、`vm.*`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`iter.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
+| L2 interpreter | `src/interpreter/` | `tokens.l`、`parser.y`、`ast.*`、`decorators.*`、`diagnostics.*`、`error_report.*`、`eval.*`、`eval_control.*`、`eval_call.*`、`eval_assign.*`、`eval_context.*`、`eval_helpers.h`、`value_runtime.*`、`bytecode.*`、`compiler.*`、`vm.*`、`vm_bridge.*`、`vm_eval.h`、`gc.*`、`package.*`、`std_namespace.*`、`pattern.*`、`scopestack.*`、`structeval.*`、`fiber.*`、`generator.*`、`iter.*`、`async_support.*`、`task.*`、`event_loop.*`、`repl.*`、`source_encoding.*` |
 | L3 builtins | `src/builtins/` | `builtins.cpp`、`builtins_*.cpp`（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、`compress_builtin.*`、`compression.*`、`cookie.*`、`crypto_builtin.*`、`env_builtin.*`、`error.*`、`filetype.*`、`fs_extra.*`、`http.*`、`http1_parser.*`、`io.*`、`net.*`、`process_builtin.*`、`process_spawn.*`、`random_builtin.*`、`regex_builtin.*`、`result.*`、`time_builtin.*`、`websocket.*`、`worker_pool.*`、`tls.*`、`http2.*`、`example_binding.*` |
 | L3 可选 FFI | `src/builtins/ffi/` | `ffi.cpp`、`ffi_types.*`、`ffi_value.*`、`ffi_marshal.*`、`ffi_callbacks.*`、`ffi_manifest.*`、`ffi_check.*`、`ffi_bindgen.*` |
 | L0 platform | `src/platform/` | `platform.h`、`platform_posix.cpp`、`platform_win.cpp`、`dynamic_library.*`、`runtime_state.*` |
@@ -134,7 +134,7 @@ typedef struct {
 - graph 邻接表与批量构造；
 - fsm 内部表示与批量 run；
 - P5 易用性、P6 基准；
-- 静态库拆分：`skein_platform` / `skein_runtime` / `skein_bytecode` / `skein_interpreter` / `skein_builtins` / `skein`；
+- 静态库拆分：`skein_platform` / `skein_runtime` / `skein_bytecode` / `skein_value_runtime` / `skein_interpreter` / `skein_builtins` / `skein`；
 - 源码按层落到 `src/platform` / `src/runtime` / `src/interpreter` / `src/builtins` / `src/app`，include 目录按层收敛；
 - `builtins.cpp` 按内置域拆为 `builtins_*.cpp`，`eval.cpp` 拆出 `eval_control/ops/call/assign`；
 - `skein_context` 的 `call` / `call_builtin` / `error` hook；
@@ -149,8 +149,11 @@ typedef struct {
 - `runtime_link_test` 只链接 `skein_runtime`，守住 L1 边界；
 - `skein_bytecode` 只依赖 `skein_runtime`，`bytecode_verifier_test`
   只链接该 target；
-- `vm.cpp` 不再 include `ast.h` / `compiler.h`；编译与 fallback 由
-  `vm_bridge.cpp` 负责；
+- `skein_value_runtime` 承载 value/symbol/index helper 与 scope/symbol
+  表，不依赖 AST/evaluator；
+- `vm.cpp` 不再 include `ast.h` / `compiler.h` / `eval.h` /
+  `eval_internal.h`；执行器通过 `vm_eval.h` 的 wrapper 调用 evaluator，
+  编译与 fallback 由 `vm_bridge.cpp` 负责；
 - `tools/check_all.sh` 统一覆盖 Debug/Release、sanitizer、VM-only 与
   runtime-only 链接检查；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
@@ -168,7 +171,8 @@ typedef struct {
 
 - `skein_runtime` 可单独链接（依赖 `skein_platform` / `utf8proc`），不依赖 `eval.o` / `parser.o` / `main.o`；
 - `skein_bytecode` 只依赖 runtime，不依赖 interpreter/builtins；
-- `skein_interpreter` 只依赖 runtime + bytecode + platform + libuv/Boost；
+- `skein_value_runtime` 只依赖 runtime，不依赖 AST/evaluator；
+- `skein_interpreter` 只依赖 runtime + bytecode + value runtime + platform + libuv/Boost；
 - `skein_builtins` 依赖 interpreter，但 interpreter 不反向依赖 builtins；
 - 关闭所有可选模块后，core + interpreter + CLI 仍可构建并通过核心测试；
 - L1 源文件不 include `eval.h` / `eval_context.h` / `eval_helpers.h` / `ast.h` / `parser.hpp` / `package.h` / `repl.h` / `builtins.h` / `diagnostics.h`；

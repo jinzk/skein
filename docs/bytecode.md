@@ -274,8 +274,12 @@ struct Instr {
 
 - `bytecode.*` / `verifier.*` 已拆为 `skein_bytecode` target，
   只依赖 `skein_runtime`；
+- value/symbol/index helper 与 scope/symbol 表位于
+  `skein_value_runtime`，不依赖 AST/evaluator；
 - `vm.cpp` 现在是执行器；编译、fallback、默认参数和 pattern 接入位于
-  `vm_bridge.cpp`，执行器不 include `ast.h` / `compiler.h`；
+  `vm_bridge.cpp`，执行器不 include `ast.h` / `compiler.h` /
+  `eval.h` / `eval_internal.h`，通过 `vm_eval.h` 的 wrapper 访问
+  evaluator 辅助函数；
 - `parser.y` 的 `top_statement` 调用 `skein_vm_eval_statement()`；
 - `eval_call.cpp` 的 `invoke_function_body()` 在函数作用域和参数绑定完成后
   尝试 `skein_vm_try_execute_function_body()`；

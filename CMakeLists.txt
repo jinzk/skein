@@ -197,6 +197,23 @@ target_include_directories(skein_bytecode PUBLIC
 )
 target_link_libraries(skein_bytecode PUBLIC skein_runtime)
 
+# Value/symbol/index mutation helpers and the scope/symbol tables.  These
+# operate on runtime values only and must stay free of AST/evaluator
+# dependencies so the VM executor can link them independently.
+add_library(skein_value_runtime STATIC
+  src/interpreter/value_runtime.cpp
+  src/interpreter/scopestack.cpp
+)
+set_target_properties(skein_value_runtime PROPERTIES
+  POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_value_runtime PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(skein_value_runtime PUBLIC skein_runtime)
+
 add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
@@ -209,7 +226,6 @@ add_library(skein_interpreter STATIC
   src/interpreter/error_report.cpp
   src/interpreter/eval.cpp
   src/interpreter/eval_control.cpp
-  src/interpreter/eval_ops.cpp
   src/interpreter/eval_call.cpp
   src/interpreter/eval_assign.cpp
   src/interpreter/eval_context.cpp
@@ -217,7 +233,6 @@ add_library(skein_interpreter STATIC
   src/interpreter/package.cpp
   src/interpreter/std_namespace.cpp
   src/interpreter/pattern.cpp
-  src/interpreter/scopestack.cpp
   src/interpreter/structeval.cpp
   src/interpreter/fiber.cpp
   src/interpreter/generator.cpp
@@ -238,6 +253,7 @@ target_include_directories(skein_interpreter PUBLIC
 )
 target_link_libraries(skein_interpreter PUBLIC
   skein_bytecode
+  skein_value_runtime
   skein_runtime
   ${SKEIN_LIBUV_TARGET}
   Boost::context
@@ -470,7 +486,8 @@ endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   foreach(skein_target skein_platform skein_runtime skein_bytecode
-                       skein_interpreter skein_builtins ${PROJECT_NAME})
+                       skein_value_runtime skein_interpreter skein_builtins
+                       ${PROJECT_NAME})
     target_compile_options(${skein_target} PRIVATE -Wall -Wextra)
   endforeach()
 endif()

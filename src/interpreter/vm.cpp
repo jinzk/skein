@@ -4,10 +4,8 @@
 #include "bytecode.h"
 #include "diagnostics.h"
 #include "dict.h"
-#include "eval.h"
 #include "eval_context.h"
 #include "eval_helpers.h"
-#include "eval_internal.h"
 #include "fiber.h"
 #include "package.h"
 #include "pattern.h"
@@ -20,6 +18,7 @@
 #include "unicode.h"
 #include "value_ops.h"
 #include "valuetype.h"
+#include "vm_eval.h"
 
 #include <algorithm>
 #include <array>
@@ -137,7 +136,7 @@ bool pattern_fields_have_key(
 void pop_scopes_to(size_t mark) {
     eval_context &context = active_eval_context();
     while (context.scopes.restore_stack.size() > mark)
-        eval_popscope();
+        skein_vm_eval_popscope();
 }
 
 void free_stack(std::vector<value_t *> &stack) {
@@ -382,7 +381,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = assign_symbol_direct(sym, value);
+                    value_t *result = skein_vm_assign_symbol_direct(sym, value);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -402,7 +401,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = compound_symbol_direct(
+                    value_t *result = skein_vm_compound_symbol_direct(
                         sym, (int)ins.flags, value);
                     if (!result)
                         return abort_error();
@@ -419,7 +418,7 @@ public:
                                 name_at(proto(), ins.b));
                         return abort_error();
                     }
-                    value_t *result = increment_symbol_direct(
+                    value_t *result = skein_vm_increment_symbol_direct(
                         sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
                     if (!result)
                         return abort_error();
@@ -440,7 +439,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = assign_symbol_direct(sym, value);
+                    value_t *result = skein_vm_assign_symbol_direct(sym, value);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -460,7 +459,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = compound_symbol_direct(
+                    value_t *result = skein_vm_compound_symbol_direct(
                         sym, (int)ins.flags, value);
                     if (!result)
                         return abort_error();
@@ -477,7 +476,7 @@ public:
                                 name_at(proto(), ins.b));
                         return abort_error();
                     }
-                    value_t *result = increment_symbol_direct(
+                    value_t *result = skein_vm_increment_symbol_direct(
                         sym, (ins.flags & 2) ? 1 : -1,
                         (ins.flags & 1) != 0);
                     if (!result)
@@ -521,7 +520,7 @@ public:
                         return abort_error();
                     }
                     value_t *result =
-                        assign_symbol_direct(param_symbols_[ins.b], value);
+                        skein_vm_assign_symbol_direct(param_symbols_[ins.b], value);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -540,7 +539,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = compound_symbol_direct(
+                    value_t *result = skein_vm_compound_symbol_direct(
                         param_symbols_[ins.b], (int)ins.flags, value);
                     if (!result)
                         return abort_error();
@@ -556,7 +555,7 @@ public:
                         yyerror("invalid bytecode parameter slot");
                         return abort_error();
                     }
-                    value_t *result = increment_symbol_direct(
+                    value_t *result = skein_vm_increment_symbol_direct(
                         param_symbols_[ins.b], ins.a ? 1 : -1,
                         (ins.flags & 1) != 0);
                     if (!result)
@@ -580,7 +579,7 @@ public:
                         if (!value)
                             return abort_error();
                     } else {
-                        value = default_value_for_type(&slot.type);
+                        value = skein_vm_default_value_for_type(&slot.type);
                         if (!value) {
                             yyerror(
                                 "variable %s of type %s requires an "
@@ -665,10 +664,10 @@ public:
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
-                        result = assign_symbol_direct(
+                        result = skein_vm_assign_symbol_direct(
                             slot_symbols_[ins.b], value);
                     else
-                        result = assign_symbol_value(slot.name.c_str(),
+                        result = skein_vm_assign_symbol_value(slot.name.c_str(),
                                                      value);
                     if (!result)
                         return abort_error();
@@ -691,10 +690,10 @@ public:
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
-                        result = compound_symbol_direct(
+                        result = skein_vm_compound_symbol_direct(
                             slot_symbols_[ins.b], (int)ins.flags, value);
                     else
-                        result = compound_symbol_value(
+                        result = skein_vm_compound_symbol_value(
                             slot.name.c_str(), (int)ins.flags, value);
                     if (!result)
                         return abort_error();
@@ -713,11 +712,11 @@ public:
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
-                        result = increment_symbol_direct(
+                        result = skein_vm_increment_symbol_direct(
                             slot_symbols_[ins.b], ins.a ? 1 : -1,
                             (ins.flags & 1) != 0);
                     else
-                        result = increment_symbol_value(
+                        result = skein_vm_increment_symbol_value(
                             slot.name.c_str(), ins.a ? 1 : -1,
                             (ins.flags & 1) != 0);
                     if (!result)
@@ -779,7 +778,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = assign_symbol_direct(sym, value);
+                    value_t *result = skein_vm_assign_symbol_direct(sym, value);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -797,7 +796,7 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    value_t *result = compound_symbol_direct(
+                    value_t *result = skein_vm_compound_symbol_direct(
                         sym, (int)ins.flags, value);
                     if (!result)
                         return abort_error();
@@ -811,7 +810,7 @@ public:
                     struct symbol *sym = upvalue_symbol(ins.b);
                     if (!sym)
                         return abort_error();
-                    value_t *result = increment_symbol_direct(
+                    value_t *result = skein_vm_increment_symbol_direct(
                         sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
                     if (!result)
                         return abort_error();
@@ -843,7 +842,7 @@ public:
                         if (!value)
                             return abort_error();
                     } else {
-                        value = default_value_for_type(&def.type);
+                        value = skein_vm_default_value_for_type(&def.type);
                         if (!value) {
                             yyerror(
                                 "variable %s of type %s requires an "
@@ -1036,7 +1035,7 @@ public:
                         return abort_error();
                     }
                     value_t *subject = stack_.back();
-                    if (!switch_value_supported(subject)) {
+                    if (!skein_vm_switch_value_supported(subject)) {
                         yyerror("switch does not support %s",
                                 typename_of(subject));
                         return abort_error();
@@ -1062,7 +1061,7 @@ public:
                     struct list_value_t *list =
                         (struct list_value_t *)values;
                     for (value_t *item : list->payload->items) {
-                        if (!switch_value_supported(item)) {
+                        if (!skein_vm_switch_value_supported(item)) {
                             yyerror("switch does not support %s case value",
                                     typename_of(item));
                             freeval(values);
@@ -1171,7 +1170,7 @@ public:
                         freeval(container);
                         return abort_error();
                     }
-                    value_t *result = read_member_value(
+                    value_t *result = skein_vm_read_member_value(
                         container, index, static_cast<Op>(ins.op) == Op::GetField);
                     freeval(container);
                     freeval(index);
@@ -1599,7 +1598,7 @@ public:
                         yyerror("invalid bytecode function");
                         return abort_error();
                     }
-                    if (!validate_function_params(
+                    if (!skein_vm_validate_function_params(
                             c->function->name.c_str(),
                             c->function->sl))
                         return abort_error();
@@ -1837,7 +1836,7 @@ public:
                     value_t *result = NULL;
                     struct symbol *base = index_base_symbol(desc);
                     if (static_cast<Op>(ins.op) == Op::IncDecIndex) {
-                        result = increment_index_symbol(
+                        result = skein_vm_increment_index_symbol(
                             base, desc.base_name.c_str(),
                             ins.a ? 1 : -1, (ins.flags & 1) != 0,
                             indices, desc.fields);
@@ -1848,11 +1847,11 @@ public:
                             return abort_error();
                         }
                         if (static_cast<Op>(ins.op) == Op::AssignIndex) {
-                            result = assign_index_symbol(
+                            result = skein_vm_assign_index_symbol(
                                 base, desc.base_name.c_str(), indices,
                                 desc.fields, value);
                         } else {
-                            result = compound_index_symbol(
+                            result = skein_vm_compound_index_symbol(
                                 base, desc.base_name.c_str(),
                                 (int)ins.flags, indices, desc.fields, value);
                         }
@@ -1966,7 +1965,7 @@ public:
                         static_cast<Op>(ins.op) == Op::PushFailHandler &&
                         (ins.flags & 1) != 0;
                     if (handler.capture)
-                        eval_capture_begin(handler.snapshot);
+                        skein_vm_eval_capture_begin(handler.snapshot);
                     handlers_.push_back(handler);
                     if (vm_stats.enabled &&
                         handlers_.size() > vm_stats.max_handler_depth)
@@ -2008,7 +2007,7 @@ public:
                         error = newerrorval("fail", "");
                     if (has_handler(UnwindKind::Fail))
                         throw_unwind(UnwindKind::Fail, error);
-                    eval_raise(error);
+                    skein_vm_eval_raise(error);
                     return abort_error();
                 }
 
@@ -2074,9 +2073,9 @@ public:
                     int package_errors = context_.runtime_error_count;
                     std::string error;
                     if (package_is_loading())
-                        eval_pushscope();
+                        skein_vm_eval_pushscope();
                     else
-                        eval_push_isolated_scope();
+                        skein_vm_eval_push_isolated_scope();
 
                     std::string saved_module = diag_current_module_name();
                     std::string package_module_name =
@@ -2098,7 +2097,7 @@ public:
                     if (context_.runtime_error_count == package_errors)
                         ns = package_build_namespace(current_scope().get(),
                                                      error);
-                    eval_popscope();
+                    skein_vm_eval_popscope();
                     diag_set_module_name(saved_module);
                     freeval(body_ret);
 
@@ -2145,7 +2144,7 @@ public:
 
                     const char *name =
                         desc.alias.empty()
-                            ? import_binding_name(desc.path.c_str())
+                            ? skein_vm_import_binding_name(desc.path.c_str())
                             : desc.alias.c_str();
                     if (isrepeated(name)) {
                         yyerror("import name already exists: %s", name);
@@ -2233,7 +2232,7 @@ public:
                         return abort_error();
                     }
                     value_t *result =
-                        call_value_args(callee, std::move(args));
+                        skein_vm_call_value_args(callee, std::move(args));
                     freeval(callee);
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
@@ -2294,7 +2293,7 @@ public:
                         ++vm_stats.fallback_calls;
                     std::vector<value_t *> fallback(args, args + argc);
                     value_t *result =
-                        call_value_args(callee, std::move(fallback));
+                        skein_vm_call_value_args(callee, std::move(fallback));
                     freeval(callee);
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
@@ -2344,7 +2343,7 @@ public:
                         ++vm_stats.fallback_calls;
                     std::vector<value_t *> fallback(args, args + argc);
                     value_t *result =
-                        call_value_args(callee, std::move(fallback));
+                        skein_vm_call_value_args(callee, std::move(fallback));
                     freeval(callee);
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
@@ -2400,7 +2399,7 @@ public:
                      * anything.  Cached outer-symbol pointers remain valid
                      * until a declaration in the new scope invalidates them.
                      */
-                    eval_pushscope();
+                    skein_vm_eval_pushscope();
                     if (proto().uses_defers)
                         defer_scopes_.emplace_back();
                     break;
@@ -2413,7 +2412,7 @@ public:
                         run_defer_scope(defer_scopes_.back());
                         defer_scopes_.pop_back();
                     }
-                    eval_popscope();
+                    skein_vm_eval_popscope();
                     if (had_symbols)
                         invalidate_name_cache();
                     if (context_.control != EVAL_CONTROL_NONE)
@@ -2831,7 +2830,7 @@ private:
         if (proto->uses_defers)
             defer_scopes_.emplace_back();
 
-        eval_push_closure_scope(current_def_->closure);
+        skein_vm_eval_push_closure_scope(current_def_->closure);
         bind_fast_arguments(code, args, argc);
         ++context_.vm_call_depth;
         diag_frames_ = 1;
@@ -2891,7 +2890,7 @@ private:
         if (proto->uses_defers)
             defer_scopes_.emplace_back();
 
-        eval_push_closure_scope(current_def_->closure);
+        skein_vm_eval_push_closure_scope(current_def_->closure);
         bind_fast_arguments(code, args, argc);
         if (diag_frames_ < 64) {
             diag_push_call(name, line, column);
@@ -3003,7 +3002,7 @@ private:
             }
             return dupval(items[(size_t)found].second);
         }
-        return read_member_value(container, index, false);
+        return skein_vm_read_member_value(container, index, false);
     }
 
     value_t *read_field_cached(value_t *container, const char *name,
@@ -3115,7 +3114,7 @@ private:
         struct string_value_t key;
         key.type = T_string;
         key.value = const_cast<char *>(name);
-        return read_member_value(container, (struct value_t *)&key, true);
+        return skein_vm_read_member_value(container, (struct value_t *)&key, true);
     }
 
     skein::bc::MemberCacheEntry *member_cache(uint32_t index) {
@@ -3675,7 +3674,7 @@ private:
         if (!handler.capture)
             return NULL;
         handler.capture = false;
-        eval_capture_result result = eval_capture_end(handler.snapshot);
+        eval_capture_result result = skein_vm_eval_capture_end(handler.snapshot);
         return result.error;
     }
 
@@ -3785,7 +3784,7 @@ private:
                 run_defer_scope(defer_scopes_.back());
                 defer_scopes_.pop_back();
             }
-            eval_popscope();
+            skein_vm_eval_popscope();
         }
     }
 
@@ -3832,7 +3831,7 @@ private:
         value_t *error = normalize_error(value, kind);
         if (has_handler(UnwindKind::Fail))
             throw_unwind(UnwindKind::Fail, error);
-        eval_raise(error);
+        skein_vm_eval_raise(error);
     }
 
     value_t *abort_control(value_t *control) {
@@ -3852,7 +3851,7 @@ private:
                 if (context_.control == EVAL_CONTROL_FAIL &&
                     has_handler(UnwindKind::Fail)) {
                     value_t *error =
-                        take_eval_control(EVAL_CONTROL_FAIL);
+                        skein_vm_take_eval_control(EVAL_CONTROL_FAIL);
                     if (!error)
                         error = newerrorval("fail", "");
                     throw_unwind(UnwindKind::Fail, error);
@@ -3860,7 +3859,7 @@ private:
                 if (context_.control == EVAL_CONTROL_RECOVER &&
                     has_handler(UnwindKind::Recover)) {
                     value_t *value =
-                        take_eval_control(EVAL_CONTROL_RECOVER);
+                        skein_vm_take_eval_control(EVAL_CONTROL_RECOVER);
                     throw_unwind(UnwindKind::Recover, value);
                 }
                 if (context_.control == EVAL_CONTROL_NONE &&
@@ -3980,8 +3979,8 @@ private:
         if (!result)
             return NULL;
         if (slot_symbols_[dest_index])
-            return assign_symbol_direct(dest, result);
-        return assign_symbol_value(dest->name, result);
+            return skein_vm_assign_symbol_direct(dest, result);
+        return skein_vm_assign_symbol_value(dest->name, result);
     }
 
     bool binary_op(uint8_t opcode) {
@@ -4116,7 +4115,7 @@ private:
             case Op::Shr: symbol = 'r'; break;
             default: break;
         }
-        value_t *result = apply_binary_value(symbol, left, right);
+        value_t *result = skein_vm_apply_binary_value(symbol, left, right);
         freeval(left);
         freeval(right);
         if (!result)
@@ -4155,7 +4154,7 @@ private:
             return true;
         }
 
-        value_t *result = do_compare(op, left, right);
+        value_t *result = skein_vm_do_compare(op, left, right);
         if (!result)
             return false;
         value = truthy(result);

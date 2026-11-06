@@ -1,6 +1,7 @@
 #ifndef _EVAL_H_
 #define _EVAL_H_
 #include "ast.h"
+#include "vm_eval.h"
 
 #include <memory>
 #include <string>
@@ -11,18 +12,6 @@ struct scope_t;
 struct value_t *eval(struct ast *);
 struct value_t *call_value_args(
     struct value_t *callee, std::vector<struct value_t *> args);
-
-struct eval_capture_snapshot {
-    bool capture_errors = false;
-    bool has_captured_error = false;
-    std::string captured_error;
-    int runtime_error_count = 0;
-};
-
-struct eval_capture_result {
-    bool failed = false;
-    struct value_t *error = NULL;
-};
 
 /* Suppress and record runtime errors until eval_capture_end. */
 void eval_capture_begin(struct eval_capture_snapshot &snapshot);

@@ -122,6 +122,15 @@ def check_link_boundary(build_dir, errors, warnings):
             errors.append(
                 f"skein_bytecode depends on upper-layer symbol: {symbol}")
 
+    value_archive = build_dir / "libskein_value_runtime.a"
+    if value_archive.exists():
+        value_undefined = nm_symbols(value_archive, False, errors)
+        leaked = (value_undefined & (interp_defined | builtins_defined))
+        leaked -= runtime_defined
+        for symbol in sorted(leaked):
+            errors.append(
+                f"skein_value_runtime depends on upper-layer symbol: {symbol}")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -160,10 +169,20 @@ def main():
     vm_executor = source_dir / "src" / "interpreter" / "vm.cpp"
     if vm_executor.exists():
         text = vm_executor.read_text(encoding="utf-8")
-        for forbidden in ('#include "ast.h"', '#include "compiler.h"'):
+        for forbidden in ('#include "ast.h"', '#include "compiler.h"',
+                          '#include "eval.h"', '#include "eval_internal.h"'):
             if forbidden in text:
                 errors.append(
                     f"{vm_executor}: VM executor includes {forbidden}")
+
+    value_runtime = source_dir / "src" / "interpreter" / "value_runtime.cpp"
+    if value_runtime.exists():
+        text = value_runtime.read_text(encoding="utf-8")
+        for forbidden in ('#include "ast.h"', '#include "compiler.h"',
+                          '#include "eval.h"', '#include "eval_internal.h"'):
+            if forbidden in text:
+                errors.append(
+                    f"{value_runtime}: value runtime includes {forbidden}")
 
     check_link_boundary(build_dir, errors, warnings)
 

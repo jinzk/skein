@@ -49,6 +49,8 @@ Go/No-Go 标准见 §10。
   顶层表达式结果语义，覆盖 `call_bench` 的顶层循环；
 - list / dict 字面量：`NEW_LIST` / `NEW_DICT`，覆盖 `pattern_bench`
   的顶层循环；
+- 算术/位运算：`MUL` / `DIV` / `MOD` / 位运算 / 移位；
+- slot 复合赋值与自增自减：`COMPOUND_SLOT` / `INCDEC_SLOT`；
 - `TAIL_CALL`：跳过 JIT 深度计数，保持尾递归测试语义；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；

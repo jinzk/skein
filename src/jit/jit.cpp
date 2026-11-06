@@ -55,6 +55,12 @@ value_t *skein_jit_load_slot(value_t *value, int line, int column);
 value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
                               value_t *value, value_t **dest, int line,
                               int column);
+value_t *skein_jit_compound_slot(const skein::bc::SlotDesc *desc,
+                                 value_t *value, value_t **dest, int op,
+                                 uint64_t loc);
+value_t *skein_jit_incdec_slot(const skein::bc::SlotDesc *desc,
+                               value_t **dest, int delta, int prefix,
+                               uint64_t loc);
 value_t *skein_jit_slot_binary(value_t *left, value_t *right,
                                value_t **dest,
                                const skein::bc::SlotDesc *desc, int op,
@@ -126,6 +132,16 @@ int slot_op_char(uint8_t opcode) {
         case skein::bc::Op::Shl: return 's';
         case skein::bc::Op::Shr: return 'r';
         default: return 0;
+    }
+}
+
+bool is_binary_op_char(int op) {
+    switch (op) {
+        case '+': case '-': case '*': case '/': case '%':
+        case '&': case '|': case '^': case 's': case 'r':
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -231,6 +247,14 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level) {
             case skein::bc::Op::LoadParam:
             case skein::bc::Op::Add:
             case skein::bc::Op::Sub:
+            case skein::bc::Op::Mul:
+            case skein::bc::Op::Div:
+            case skein::bc::Op::Mod:
+            case skein::bc::Op::BitAnd:
+            case skein::bc::Op::BitOr:
+            case skein::bc::Op::BitXor:
+            case skein::bc::Op::Shl:
+            case skein::bc::Op::Shr:
             case skein::bc::Op::CmpJump:
             case skein::bc::Op::Jump:
             case skein::bc::Op::JumpIfFalse:
@@ -259,6 +283,15 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level) {
             case skein::bc::Op::LoadSlot:
             case skein::bc::Op::StoreSlot:
             case skein::bc::Op::ClearSlot:
+                if (ins.b >= proto.slots.size())
+                    return false;
+                break;
+            case skein::bc::Op::CompoundSlot:
+                if (ins.b >= proto.slots.size() ||
+                    !is_binary_op_char(ins.flags))
+                    return false;
+                break;
+            case skein::bc::Op::IncDecSlot:
                 if (ins.b >= proto.slots.size())
                     return false;
                 break;
@@ -595,6 +628,43 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
                 break;
             }
 
+            case skein::bc::Op::CompoundSlot: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto.slots[ins.b])));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(ins.b)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_compound_slot));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IncDecSlot:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto.slots[ins.b])));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(ins.b)));
+                a.mov(asmjit::x86::edx,
+                      asmjit::imm(ins.a ? 1 : -1));
+                a.mov(asmjit::x86::ecx,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_incdec_slot));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
             case skein::bc::Op::ClearSlot:
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -780,7 +850,15 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
             }
 
             case skein::bc::Op::Add:
-            case skein::bc::Op::Sub: {
+            case skein::bc::Op::Sub:
+            case skein::bc::Op::Mul:
+            case skein::bc::Op::Div:
+            case skein::bc::Op::Mod:
+            case skein::bc::Op::BitAnd:
+            case skein::bc::Op::BitOr:
+            case skein::bc::Op::BitXor:
+            case skein::bc::Op::Shl:
+            case skein::bc::Op::Shr: {
                 const int left_depth = depth - 2;
                 const int right_depth = depth - 1;
                 a.mov(asmjit::x86::rdi,
@@ -789,10 +867,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
                 a.mov(asmjit::x86::rsi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(right_depth)));
-                const int op = static_cast<skein::bc::Op>(ins.op) ==
-                                       skein::bc::Op::Add
-                                   ? '+'
-                                   : '-';
+                const int op = slot_op_char(ins.op);
                 a.mov(asmjit::x86::edx, asmjit::imm(op));
                 a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
                 a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
@@ -1173,6 +1248,78 @@ extern "C" value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
     freeval(*dest);
     *dest = value;
     return dupval(value);
+}
+
+extern "C" value_t *skein_jit_compound_slot(
+    const skein::bc::SlotDesc *desc, value_t *value, value_t **dest,
+    int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!desc || !dest || !value || !*dest) {
+        freeval(value);
+        yyerror("invalid bytecode slot");
+        return nullptr;
+    }
+    if (desc->is_const) {
+        yyerror("cannot assign to constant %s", desc->name.c_str());
+        freeval(value);
+        return nullptr;
+    }
+    value_t *result = apply_binary_value(op, *dest, value);
+    freeval(value);
+    if (!result)
+        return nullptr;
+    if (!validate_type_constraint(&desc->type)) {
+        freeval(result);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&desc->type, result)) {
+        yyerror("variable %s expects %s, got %s", desc->name.c_str(),
+                type_constraint_name(&desc->type), typename_of(result));
+        freeval(result);
+        return nullptr;
+    }
+    freeval(*dest);
+    *dest = result;
+    return dupval(result);
+}
+
+extern "C" value_t *skein_jit_incdec_slot(
+    const skein::bc::SlotDesc *desc, value_t **dest, int delta, int prefix,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!desc || !dest || !*dest) {
+        yyerror("invalid bytecode slot");
+        return nullptr;
+    }
+    if (desc->is_const) {
+        yyerror("cannot assign to constant %s", desc->name.c_str());
+        return nullptr;
+    }
+    value_t *delta_value = newintval(delta);
+    value_t *result = apply_binary_value('+', *dest, delta_value);
+    freeval(delta_value);
+    if (!result)
+        return nullptr;
+    if (!validate_type_constraint(&desc->type)) {
+        freeval(result);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&desc->type, result)) {
+        yyerror("variable %s expects %s, got %s", desc->name.c_str(),
+                type_constraint_name(&desc->type), typename_of(result));
+        freeval(result);
+        return nullptr;
+    }
+    value_t *ret = prefix ? dupval(result) : dupval(*dest);
+    freeval(*dest);
+    *dest = result;
+    return ret;
 }
 
 extern "C" value_t *skein_jit_slot_binary(value_t *left, value_t *right,

@@ -197,6 +197,32 @@ def main():
         )
         ok &= compare(binary, "dict-key-error", dict_error)
 
+        ops = tmp_path / "ops.skein"
+        ops.write_text(
+            "func calc(n) {\n"
+            "  let x = n; x *= 3; x += 4; x -= 2; x /= 2;\n"
+            "  let y = x % 5;\n"
+            "  let z = n << 2; z = z | 1; z = z ^ 3; z = z & 7;\n"
+            "  let a = n; a++; ++a;\n"
+            "  return x + y + z + a;\n"
+            "}\n"
+            "println(calc(7));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "compound-and-bitops", ops)
+
+        compound_const = tmp_path / "compound_const.skein"
+        compound_const.write_text(
+            "func f(n) {\n"
+            "  const x = n;\n"
+            "  x += 1;\n"
+            "  return x;\n"
+            "}\n"
+            "f(1);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "compound-const-error", compound_const)
+
     if not ok:
         return 1
     print("jit smoke passed")

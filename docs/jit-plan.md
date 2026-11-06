@@ -45,6 +45,9 @@ Go/No-Go 标准见 §10。
 - dict 索引读写：`GET_INDEX_CACHED` / `ASSIGN_INDEX`，覆盖
   `index_bench` / `index_write_bench`；
 - method 调用：`T_method` 直接进入 JIT，覆盖 `method_bench`；
+- 顶层语句：`LOAD_NAME` / `STORE_NAME`、真实 scope push/pop、
+  顶层表达式结果语义，覆盖 `call_bench` 的顶层循环；
+- `TAIL_CALL`：跳过 JIT 深度计数，保持尾递归测试语义；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
@@ -60,6 +63,7 @@ field_bench  SKEIN_JIT=0 ~0.25s   SKEIN_JIT=1 ~0.16s   （约 1.6x）
 index_bench  SKEIN_JIT=0 ~0.24s   SKEIN_JIT=1 ~0.15s   （约 1.6x）
 index_write  SKEIN_JIT=0 ~0.16s   SKEIN_JIT=1 ~0.10s   （约 1.6x）
 method_bench SKEIN_JIT=0 ~0.18s   SKEIN_JIT=1 ~0.06s   （约 3.0x）
+call_bench   SKEIN_JIT=0 ~0.49s   SKEIN_JIT=1 ~0.25s   （约 2.0x）
 ```
 
 尚未落地：
@@ -67,6 +71,7 @@ method_bench SKEIN_JIT=0 ~0.18s   SKEIN_JIT=1 ~0.06s   （约 3.0x）
 - params 直接 frame 化（JIT 已绕过 symbol 绑定，但解释器路径未迁移）；
 - Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
 - OSR / deopt；
+- JIT 尾调用尚未复用机器帧，超深尾递归仍受 C++ 栈限制；
 - 更完整的 opcode 覆盖。
 
 ---

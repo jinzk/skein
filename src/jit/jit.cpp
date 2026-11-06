@@ -33,8 +33,17 @@ value_t *skein_jit_load_global(const skein::bc::Proto *proto, uint32_t slot,
 value_t *skein_jit_store_global(const skein::bc::Proto *proto, uint32_t slot,
                                 uint32_t name_index, value_t *value,
                                 int line, int column);
+value_t *skein_jit_load_name(const skein::bc::Proto *proto,
+                             uint32_t name_index, int line, int column);
+value_t *skein_jit_store_name(const skein::bc::Proto *proto,
+                              uint32_t name_index, value_t *value, int line,
+                              int column);
+void skein_jit_push_scope();
+void skein_jit_pop_scope();
 value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
+value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
+                               uint32_t argc, int line, int column);
 value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
                                value_t *value, value_t **dest, int line,
                                int column);
@@ -156,17 +165,21 @@ struct JitCode {
     asmjit::JitRuntime *runtime = nullptr;
     void (*entry)() = nullptr;
     size_t size = 0;
+    bool top_level = false;
 };
 
 namespace {
 
 invoke_fn g_invoke = nullptr;
+invoke_fn g_tail_invoke = nullptr;
 construct_fn g_build_struct = nullptr;
 
 } // namespace
 
 void set_invoke(invoke_fn fn) { g_invoke = fn; }
 invoke_fn invoke() { return g_invoke; }
+void set_tail_invoke(invoke_fn fn) { g_tail_invoke = fn; }
+invoke_fn tail_invoke() { return g_tail_invoke; }
 void set_construct(construct_fn fn) { g_build_struct = fn; }
 construct_fn construct() { return g_build_struct; }
 
@@ -182,15 +195,18 @@ bool available() {
 #endif
 }
 
-bool can_compile(const skein::bc::Proto &proto) {
+bool can_compile(const skein::bc::Proto &proto, bool top_level) {
 #ifdef _WIN32
     (void)proto;
+    (void)top_level;
     return false;
 #else
-    if (!proto.params_direct || proto.has_closures || proto.uses_defers ||
-        proto.uses_handlers || proto.uses_names ||
-        proto.is_generator || proto.is_async ||
-        proto.variadic || !proto.upvalues.empty())
+    const bool name_mode =
+        top_level && proto.uses_names && proto.nparams == 0;
+    if ((!proto.params_direct && !name_mode) ||
+        (proto.uses_names && !name_mode) || proto.has_closures ||
+        proto.uses_defers || proto.uses_handlers || proto.is_generator ||
+        proto.is_async || proto.variadic || !proto.upvalues.empty())
         return false;
     if (proto.nparams != proto.required_params)
         return false;
@@ -216,6 +232,7 @@ bool can_compile(const skein::bc::Proto &proto) {
             case skein::bc::Op::JumpIfFalse:
             case skein::bc::Op::JumpIfTrue:
             case skein::bc::Op::Call:
+            case skein::bc::Op::TailCall:
             case skein::bc::Op::Return:
             case skein::bc::Op::PushScope:
             case skein::bc::Op::PopScope:
@@ -299,6 +316,13 @@ bool can_compile(const skein::bc::Proto &proto) {
                     return false;
                 break;
             }
+            case skein::bc::Op::LoadName:
+            case skein::bc::Op::StoreName:
+                if (!name_mode || ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return false;
+                break;
             default:
                 return false;
         }
@@ -307,8 +331,8 @@ bool can_compile(const skein::bc::Proto &proto) {
 #endif
 }
 
-JitCode *compile(const skein::bc::Proto &proto) {
-    if (!available() || !can_compile(proto))
+JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
+    if (!available() || !can_compile(proto, top_level))
         return nullptr;
 
     asmjit::JitRuntime &rt = runtime_state().runtime;
@@ -455,6 +479,36 @@ JitCode *compile(const skein::bc::Proto &proto) {
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
+
+            case skein::bc::Op::LoadName:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_load_name));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
+            case skein::bc::Op::StoreName: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_store_name));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
 
             case skein::bc::Op::StoreGlobal: {
                 const int value_depth = depth - 1;
@@ -787,6 +841,30 @@ JitCode *compile(const skein::bc::Proto &proto) {
                 break;
             }
 
+            case skein::bc::Op::TailCall: {
+                const int argc = static_cast<int>(ins.b);
+                const int callee_depth = depth - argc - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::edx, asmjit::imm(argc));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_tail_invoke));
+                for (int i = callee_depth; i < depth; ++i)
+                    clear_slot(i);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kResultOff),
+                      asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                a.jmp(epilogue_label);
+                break;
+            }
+
             case skein::bc::Op::Return: {
                 const int value_depth = depth - 1;
                 a.mov(asmjit::x86::rax,
@@ -801,7 +879,13 @@ JitCode *compile(const skein::bc::Proto &proto) {
             }
 
             case skein::bc::Op::PushScope:
+                if (proto.uses_names)
+                    call_addr(fn_address(&skein_jit_push_scope));
+                break;
+
             case skein::bc::Op::PopScope:
+                if (proto.uses_names)
+                    call_addr(fn_address(&skein_jit_pop_scope));
                 break;
 
             default:
@@ -811,8 +895,31 @@ JitCode *compile(const skein::bc::Proto &proto) {
     }
 
     a.bind(end_label);
-    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kResultOff),
-          asmjit::imm(0));
+    if (top_level) {
+        const int final_depth =
+            proto.stack_depth.size() > proto.code.size()
+                ? proto.stack_depth[proto.code.size()]
+                : -1;
+        if (final_depth > 0) {
+            const int value_depth = final_depth - 1;
+            a.mov(asmjit::x86::rax,
+                  asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                         stack_off(value_depth)));
+            a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                         -kResultOff),
+                  asmjit::x86::rax);
+            clear_slot(value_depth);
+        } else {
+            call_addr(fn_address(&skein_jit_null));
+            a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                         -kResultOff),
+                  asmjit::x86::rax);
+        }
+    } else {
+        call_addr(fn_address(&skein_jit_null));
+        a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kResultOff),
+              asmjit::x86::rax);
+    }
     a.jmp(epilogue_label);
 
     a.bind(abort_label);
@@ -855,6 +962,7 @@ JitCode *compile(const skein::bc::Proto &proto) {
     result->runtime = &rt;
     result->entry = entry;
     result->size = code.codeSize();
+    result->top_level = top_level;
     return result;
 }
 
@@ -1143,6 +1251,21 @@ extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
     return assign_symbol_direct(sym, value);
 }
 
+extern "C" value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
+                                          uint32_t argc, int line,
+                                          int column) {
+    diag_set_location(line, column);
+    skein::jit::invoke_fn fn = skein::jit::tail_invoke();
+    if (!fn) {
+        for (uint32_t i = 0; i < argc; ++i)
+            freeval(args[i]);
+        freeval(callee);
+        yyerror("JIT tail call target is not installed");
+        return nullptr;
+    }
+    return fn(callee, args, argc);
+}
+
 extern "C" value_t *skein_jit_new_struct(
     const skein::bc::ConstructDesc *desc, value_t **fields) {
     if (!desc || !fields) {
@@ -1232,6 +1355,43 @@ extern "C" value_t *skein_jit_get_field(value_t *container,
     freeval(container);
     return result;
 }
+
+extern "C" value_t *skein_jit_load_name(const skein::bc::Proto *proto,
+                                        uint32_t name_index, int line,
+                                        int column) {
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        return nullptr;
+    }
+    const char *name = proto->consts[name_index].name.c_str();
+    symbol *sym = lookupsym(name);
+    if (!sym) {
+        yyerror("symbol not found %s", name);
+        return nullptr;
+    }
+    if (sym->is_uninitialized) {
+        yyerror("parameter %s is used before it is initialized", name);
+        return nullptr;
+    }
+    return dupval(sym->val);
+}
+
+extern "C" value_t *skein_jit_store_name(const skein::bc::Proto *proto,
+                                         uint32_t name_index,
+                                         value_t *value, int line,
+                                         int column) {
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        freeval(value);
+        return nullptr;
+    }
+    return assign_symbol_value(proto->consts[name_index].name.c_str(), value);
+}
+
+extern "C" void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
+extern "C" void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
 
 extern "C" value_t *skein_jit_get_index_cached(
     value_t *container, value_t *index,
@@ -1326,28 +1486,44 @@ extern "C" int skein_jit_enter(skein::jit::thread_state *ts,
     if (!ts || !ts->ctx)
         return 0;
     eval_context &context = *ts->ctx;
-    if (context.vm_call_depth >= ts->max_depth) {
+    if (!ts->tail_call && context.vm_call_depth >= ts->max_depth) {
         yyerror("maximum recursion depth (%d) exceeded", ts->max_depth);
         return 0;
     }
 
     ts->saved_handler_depth = context.handler_depth;
+    ts->scope_mark = context.scopes.restore_stack.size();
+    ts->saved_module = diag_current_module_name();
+    ts->saved_source = diag_current_source_name();
     ts->entered = true;
-    ++context.vm_call_depth;
+    if (!ts->tail_call) {
+        ++context.vm_call_depth;
+        ts->depth_counted = true;
+    } else {
+        ts->depth_counted = false;
+    }
     context.handler_depth = 0;
 
-    const char *name = "<anonymous>";
-    int line = g_error_line;
-    int column = g_error_column;
-    if (def && def->code) {
-        if (!def->code->name.empty())
-            name = def->code->name.c_str();
-        if (line <= 0)
-            line = def->code->def_line;
-        if (column <= 0)
-            column = def->code->def_column;
+    if (!ts->top_level) {
+        if (def && def->code) {
+            if (!def->code->module.empty())
+                diag_set_module_name(def->code->module);
+            if (!def->code->source.empty())
+                diag_set_source_name(def->code->source);
+        }
+        const char *name = "<anonymous>";
+        int line = g_error_line;
+        int column = g_error_column;
+        if (def && def->code) {
+            if (!def->code->name.empty())
+                name = def->code->name.c_str();
+            if (line <= 0)
+                line = def->code->def_line;
+            if (column <= 0)
+                column = def->code->def_column;
+        }
+        diag_push_call(name, line, column);
     }
-    diag_push_call(name, line, column);
     return 1;
 }
 
@@ -1355,10 +1531,15 @@ extern "C" void skein_jit_leave(skein::jit::thread_state *ts) {
     if (!ts || !ts->entered || !ts->ctx)
         return;
     eval_context &context = *ts->ctx;
+    while (context.scopes.restore_stack.size() > ts->scope_mark)
+        skein_vm_eval_popscope();
     context.handler_depth = ts->saved_handler_depth;
-    if (context.vm_call_depth > 0)
+    diag_set_module_name(ts->saved_module);
+    diag_set_source_name(ts->saved_source);
+    if (ts->depth_counted && context.vm_call_depth > 0)
         --context.vm_call_depth;
-    diag_pop_call();
+    if (!ts->top_level)
+        diag_pop_call();
     ts->entered = false;
 }
 

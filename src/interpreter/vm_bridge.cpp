@@ -182,6 +182,23 @@ struct bridge_depth_guard {
 };
 
 #ifdef SKEIN_ENABLE_JIT
+void jit_debug_proto(const char *what, const skein::bc::Proto &proto) {
+    if (!read_bool_env("SKEIN_JIT_DEBUG", false))
+        return;
+    std::fprintf(stderr,
+                 "[jit] %s %s params_direct=%d names=%d slots=%zu "
+                 "closures=%d defers=%d handlers=%d method=%d gen=%d "
+                 "async=%d variadic=%d nparams=%u required=%u stack_depth=%zu\n",
+                 what, proto.name.empty() ? "<anonymous>" : proto.name.c_str(),
+                 proto.params_direct ? 1 : 0, proto.uses_names ? 1 : 0,
+                 proto.slots.size(), proto.has_closures ? 1 : 0,
+                 proto.uses_defers ? 1 : 0, proto.uses_handlers ? 1 : 0,
+                 proto.is_method ? 1 : 0, proto.is_generator ? 1 : 0,
+                 proto.is_async ? 1 : 0, proto.variadic ? 1 : 0,
+                 proto.nparams, proto.required_params,
+                 proto.stack_depth.size());
+}
+
 bool jit_function_eligible(function_code *code) {
     return code && !code->is_generator && !code->is_async &&
            !code->variadic && code->required_params == code->nparams;
@@ -214,8 +231,9 @@ uint32_t jit_threshold() {
  * fast-call path; arguments are untouched in that case.  The callee value is
  * always borrowed.
  */
-bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
-                           value_t **out) {
+bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
+                                uint32_t argc, value_t **out,
+                                bool tail_call) {
     *out = nullptr;
     if (!skein::jit::available() || !callee)
         return false;
@@ -274,7 +292,13 @@ bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
         if (cache->jit_hits++ < jit_threshold())
             return false;
         skein::bc::ProtoPtr proto = prepare_function_body(def);
-        if (!proto || !skein::jit::can_compile(*proto)) {
+        if (proto)
+            jit_debug_proto("try", *proto);
+        if (!proto || !skein::jit::can_compile(*proto, false)) {
+            if (read_bool_env("SKEIN_JIT_DEBUG", false))
+                std::fprintf(stderr, "[jit] cannot compile %s\n",
+                             code->name.empty() ? "<anonymous>"
+                                                 : code->name.c_str());
             cache->jit_failed = true;
             return false;
         }
@@ -288,6 +312,7 @@ bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
     skein::jit::thread_state ts;
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
+    ts.tail_call = tail_call;
     if (method)
         method->receiver = nullptr;
     *out = skein::jit::enter(cache->jit, &ts, def.get(), call_args,
@@ -316,7 +341,26 @@ value_t *skein_vm_build_struct(const skein::bc::ConstructDesc &desc,
 /* CALL helper used by generated code.  Always consumes callee and args. */
 value_t *skein_vm_jit_invoke(value_t *callee, value_t **args, uint32_t argc) {
     value_t *out = nullptr;
-    if (skein_vm_try_jit_call(callee, args, argc, &out)) {
+    if (skein_vm_try_jit_call_impl(callee, args, argc, &out, false)) {
+        freeval(callee);
+        return out;
+    }
+
+    std::vector<value_t *> fallback(args, args + argc);
+    value_t *result = skein_vm_call_value_args(callee, std::move(fallback));
+    freeval(callee);
+    return result;
+}
+
+bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
+                           value_t **out) {
+    return skein_vm_try_jit_call_impl(callee, args, argc, out, false);
+}
+
+value_t *skein_vm_jit_tail_invoke(value_t *callee, value_t **args,
+                                  uint32_t argc) {
+    value_t *out = nullptr;
+    if (skein_vm_try_jit_call_impl(callee, args, argc, &out, true)) {
         freeval(callee);
         return out;
     }
@@ -358,6 +402,7 @@ static void ensure_vm_host() {
         host.fn_skein_vm_try_jit_call = &skein_vm_try_jit_call;
         host.fn_skein_vm_jit_invoke = &skein_vm_jit_invoke;
         skein::jit::set_invoke(&skein_vm_jit_invoke);
+        skein::jit::set_tail_invoke(&skein_vm_jit_tail_invoke);
         skein::jit::set_construct(&skein_vm_build_struct);
 #endif
         return true;
@@ -427,6 +472,26 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     }
     if (vm_stats.enabled)
         ++vm_stats.statements_compiled;
+#ifdef SKEIN_ENABLE_JIT
+    if (skein::jit::available() && skein::jit::can_compile(*proto, true)) {
+        skein::jit::JitCode *code = skein::jit::compile(*proto, true);
+        if (code) {
+            const auto jit_start = std::chrono::steady_clock::now();
+            skein::jit::thread_state ts;
+            ts.ctx = &active_eval_context();
+            ts.max_depth = skein_vm_max_depth();
+            ts.top_level = true;
+            value_t *result =
+                skein::jit::enter(code, &ts, nullptr, nullptr, 0);
+            skein::jit::release(code);
+            if (vm_stats.enabled)
+                vm_stats.execute_ns += elapsed_ns(jit_start);
+            if (active_eval_context().control != EVAL_CONTROL_NONE)
+                diag_set_location(0, 0);
+            return result;
+        }
+    }
+#endif
     const auto execute_start = std::chrono::steady_clock::now();
     value_t *result = skein_vm_execute_proto(*proto);
     if (vm_stats.enabled)

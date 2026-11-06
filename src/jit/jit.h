@@ -4,7 +4,9 @@
 #include "bytecode.h"
 #include "valuetype.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <string>
 
 struct eval_context;
 struct function_def;
@@ -27,6 +29,12 @@ struct thread_state {
     eval_context *ctx = nullptr;
     int max_depth = 0;
     int saved_handler_depth = 0;
+    size_t scope_mark = 0;
+    std::string saved_module;
+    std::string saved_source;
+    bool top_level = false;
+    bool tail_call = false;
+    bool depth_counted = false;
     bool entered = false;
 };
 
@@ -49,6 +57,8 @@ using construct_fn = value_t *(*)(const skein::bc::ConstructDesc &desc,
 
 void set_invoke(invoke_fn fn);
 invoke_fn invoke();
+void set_tail_invoke(invoke_fn fn);
+invoke_fn tail_invoke();
 void set_construct(construct_fn fn);
 construct_fn construct();
 
@@ -56,10 +66,14 @@ construct_fn construct();
 bool available();
 
 /* Compile-time and Proto-level eligibility check. */
-bool can_compile(const skein::bc::Proto &proto);
+bool can_compile(const skein::bc::Proto &proto, bool top_level = false);
 
-/* Compile one Proto.  Returns null when unsupported or when asmjit fails. */
-JitCode *compile(const skein::bc::Proto &proto);
+/*
+ * Compile one Proto.  `top_level` selects statement semantics for the
+ * implicit end-of-code result (the VM returns the top operand for statements,
+ * while a function fallthrough returns null).
+ */
+JitCode *compile(const skein::bc::Proto &proto, bool top_level = false);
 
 /* Execute a compiled Proto.  Takes ownership of the argument pointers. */
 value_t *enter(JitCode *code, thread_state *ts, function_def *def,

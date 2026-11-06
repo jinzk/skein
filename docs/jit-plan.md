@@ -55,6 +55,7 @@ Go/No-Go 标准见 §10。
 - 一元运算：`NEG` / `NOT` / `BIT_NOT`；
 - pattern 参数：JIT 前绑定函数 scope 与 destructuring 名字，覆盖
   `pattern_bench`；
+- params 直接 frame 化：eligible fast frame 不再创建参数 symbol；
 - `TAIL_CALL`：跳过 JIT 深度计数，保持尾递归测试语义；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
@@ -77,7 +78,6 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 
 尚未落地：
 
-- params 直接 frame 化（JIT 已绕过 symbol 绑定，但解释器路径未迁移）；
 - Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
 - OSR / deopt；
 - JIT 尾调用尚未复用机器帧，超深尾递归仍受 C++ 栈限制；
@@ -395,8 +395,8 @@ bool frame_eligible =
     !is_method;
 ```
 
-- 第一版只迁移 params 到 `value_t*` 数组；
-- slots 迁移到 Phase 2；
+- params 已迁移到 `value_t*` 数组；
+- slots 仍使用 symbol cell（JIT 使用自己的 frame slots）；
 - 其余 Proto 继续使用 `symbol*` cell。
 
 ### 7.3 Verifier 元数据

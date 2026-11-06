@@ -17,6 +17,7 @@
 #include "task.h"
 #include "unicode.h"
 #include "value_ops.h"
+#include "value_runtime.h"
 #include "valuetype.h"
 #include "vm_eval.h"
 #include "vm_host.h"
@@ -218,9 +219,11 @@ struct SavedVmState {
     uint64_t name_scope_generation = 0;
     bool param_pool_safe = false;
     bool slot_pool_safe = false;
+    bool direct_params = false;
     std::shared_ptr<function_def> def;
     std::vector<NameCacheSlot> name_cache;
     std::vector<struct symbol *> param_symbols;
+    std::vector<value_t *> param_values;
     std::vector<struct symbol *> slot_symbols;
     std::vector<iterator_state> iterators;
     std::vector<std::vector<defer_record>> defer_scopes;
@@ -255,6 +258,9 @@ public:
         if (!saved_states_.empty())
             unwind_fast_frames();
         free_stack(stack_);
+        for (value_t *value : param_values_)
+            freeval(value);
+        param_values_.clear();
         for (iterator_state &state : iterators_) {
             freeval(state.iterable);
             state.iterable = NULL;
@@ -490,6 +496,19 @@ public:
                 }
 
                 case Op::LoadParam: {
+                    if (direct_params_) {
+                        if (ins.b >= param_values_.size()) {
+                            yyerror("invalid bytecode parameter slot");
+                            return abort_error();
+                        }
+                        if (!param_values_[ins.b]) {
+                            yyerror("parameter %s is used before it is "
+                                    "initialized", param_name(ins.b));
+                            return abort_error();
+                        }
+                        push(dupval(param_values_[ins.b]));
+                        break;
+                    }
                     if (ins.b >= param_symbols_.size()) {
                         yyerror("invalid bytecode parameter slot");
                         return abort_error();
@@ -512,6 +531,18 @@ public:
                 }
 
                 case Op::StoreParam: {
+                    if (direct_params_) {
+                        value_t *value = pop_checked();
+                        if (!value)
+                            return abort_error();
+                        value_t *result = assign_direct_param(ins.b, value);
+                        if (!result)
+                            return abort_error();
+                        if (is_control(result))
+                            return abort_control(result);
+                        push(result);
+                        break;
+                    }
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
@@ -532,6 +563,19 @@ public:
                 }
 
                 case Op::CompoundParam: {
+                    if (direct_params_) {
+                        value_t *value = pop_checked();
+                        if (!value)
+                            return abort_error();
+                        value_t *result = compound_direct_param(
+                            ins.b, (int)ins.flags, value);
+                        if (!result)
+                            return abort_error();
+                        if (is_control(result))
+                            return abort_control(result);
+                        push(result);
+                        break;
+                    }
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
@@ -552,6 +596,17 @@ public:
                 }
 
                 case Op::IncDecParam: {
+                    if (direct_params_) {
+                        value_t *result = incdec_direct_param(
+                            ins.b, ins.a ? 1 : -1,
+                            (ins.flags & 1) != 0);
+                        if (!result)
+                            return abort_error();
+                        if (is_control(result))
+                            return abort_control(result);
+                        push(result);
+                        break;
+                    }
                     if (ins.b >= param_symbols_.size() ||
                         !param_symbols_[ins.b]) {
                         yyerror("invalid bytecode parameter slot");
@@ -2459,8 +2514,8 @@ public:
                     discard_handlers();
                     run_all_defers();
                     free_stack(stack_);
-                    recycle_param_symbols();
-        recycle_slot_symbols();
+                    recycle_params();
+                    recycle_slot_symbols();
                     pop_scopes_to(scope_mark_);
                     return NULL;
                 }
@@ -2480,6 +2535,8 @@ private:
     std::vector<value_t *> stack_;
     std::vector<NameCacheSlot> name_cache_;
     std::vector<struct symbol *> param_symbols_;
+    std::vector<value_t *> param_values_;
+    std::vector<struct symbol> param_symbol_views_;
     std::vector<struct symbol *> slot_symbols_;
     std::vector<iterator_state> iterators_;
     std::vector<std::vector<defer_record>> defer_scopes_;
@@ -2493,6 +2550,7 @@ private:
     std::shared_ptr<function_def> current_def_;
     bool param_pool_safe_ = false;
     bool slot_pool_safe_ = false;
+    bool direct_params_ = false;
     std::vector<struct symbol *> param_symbol_pool_;
     std::vector<struct symbol *> slot_symbol_pool_;
     unsigned instruction_count_ = 0;
@@ -2504,6 +2562,7 @@ private:
      */
     std::vector<std::vector<NameCacheSlot>> name_cache_pool_;
     std::vector<std::vector<struct symbol *>> param_symbols_pool_;
+    std::vector<std::vector<value_t *>> param_values_pool_;
     std::vector<std::vector<struct symbol *>> slot_symbols_pool_;
 
     template <typename T>
@@ -2521,6 +2580,8 @@ private:
             name_cache_pool_.push_back(std::move(name_cache_));
         if (param_symbols_.capacity() != 0)
             param_symbols_pool_.push_back(std::move(param_symbols_));
+        if (param_values_.capacity() != 0)
+            param_values_pool_.push_back(std::move(param_values_));
         if (slot_symbols_.capacity() != 0)
             slot_symbols_pool_.push_back(std::move(slot_symbols_));
     }
@@ -2544,9 +2605,11 @@ private:
         state.name_scope_generation = name_scope_generation_;
         state.param_pool_safe = param_pool_safe_;
         state.slot_pool_safe = slot_pool_safe_;
+        state.direct_params = direct_params_;
         state.def = std::move(current_def_);
         state.name_cache = std::move(name_cache_);
         state.param_symbols = std::move(param_symbols_);
+        state.param_values = std::move(param_values_);
         state.slot_symbols = std::move(slot_symbols_);
         state.iterators = std::move(iterators_);
         state.defer_scopes = std::move(defer_scopes_);
@@ -2555,9 +2618,11 @@ private:
 
         name_cache_ = take_pool(name_cache_pool_);
         param_symbols_ = take_pool(param_symbols_pool_);
+        param_values_ = take_pool(param_values_pool_);
         slot_symbols_ = take_pool(slot_symbols_pool_);
         name_scope_generation_ = 0;
         param_pool_safe_ = false;
+        direct_params_ = false;
         slot_pool_safe_ = false;
     }
 
@@ -2577,10 +2642,12 @@ private:
         diag_set_source_name(state.diag_source);
         name_scope_generation_ = state.name_scope_generation;
         param_pool_safe_ = state.param_pool_safe;
+        direct_params_ = state.direct_params;
         slot_pool_safe_ = state.slot_pool_safe;
         current_def_ = std::move(state.def);
         name_cache_ = std::move(state.name_cache);
         param_symbols_ = std::move(state.param_symbols);
+        param_values_ = std::move(state.param_values);
         slot_symbols_ = std::move(state.slot_symbols);
         iterators_ = std::move(state.iterators);
         defer_scopes_ = std::move(state.defer_scopes);
@@ -2597,7 +2664,7 @@ private:
             freeval(stack_.back());
             stack_.pop_back();
         }
-        recycle_param_symbols();
+        recycle_params();
         recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
@@ -2722,6 +2789,130 @@ private:
         sym->global_slot = UINT32_MAX;
     }
 
+    struct symlist *param_meta(uint32_t index) {
+        if (!current_def_ || !current_def_->code)
+            return NULL;
+        int i = 0;
+        for (struct symlist *sl = current_def_->code->sl; sl;
+             sl = sl->next, ++i) {
+            if ((uint32_t)i == index)
+                return sl;
+        }
+        return NULL;
+    }
+
+    const char *param_name(uint32_t index) {
+        if (index < proto().param_names.size())
+            return proto().param_names[index].c_str();
+        struct symlist *sl = param_meta(index);
+        return sl && sl->sym && sl->sym->name ? sl->sym->name : "parameter";
+    }
+
+    bool check_direct_param(uint32_t index, value_t *value) {
+        struct symlist *sl = param_meta(index);
+        if (!sl || !sl->type)
+            return true;
+        if (type_constraint_matches(sl->type, value))
+            return true;
+        yyerror("variable %s expects %s, got %s", param_name(index),
+                type_constraint_name(sl->type), typename_of(value));
+        return false;
+    }
+
+    struct symbol *direct_param_symbol(uint32_t index) {
+        if (index >= param_values_.size() ||
+            index >= proto().param_names.size())
+            return NULL;
+        if (param_symbol_views_.size() <= index)
+            param_symbol_views_.resize(index + 1);
+        struct symbol &sym = param_symbol_views_[index];
+        const std::string &name = proto().param_names[index];
+        sym.name = const_cast<char *>(name.c_str());
+        sym.name_len = name.size();
+        sym.val = param_values_[index];
+        sym.type.kind = TYPE_ANY;
+        sym.type.name = NULL;
+        sym.type.module = NULL;
+        sym.type.nullable = false;
+        sym.exported = false;
+        sym.is_const = false;
+        sym.is_uninitialized = false;
+        sym.scope_owned = false;
+        sym.global_slot = UINT32_MAX;
+        return &sym;
+    }
+
+    value_t *assign_direct_param(uint32_t index, value_t *value) {
+        if (!value || index >= param_values_.size())
+            return value;
+        if (value->type == T_return || value->type == T_break ||
+            value->type == T_continue)
+            return value;
+        if (!check_direct_param(index, value)) {
+            freeval(value);
+            return NULL;
+        }
+        freeval(param_values_[index]);
+        param_values_[index] = value;
+        return dupval(value);
+    }
+
+    value_t *compound_direct_param(uint32_t index, int op, value_t *value) {
+        if (!value || index >= param_values_.size() || !param_values_[index]) {
+            freeval(value);
+            yyerror("invalid bytecode parameter slot");
+            return NULL;
+        }
+        value_t *result =
+            apply_binary_value(op, param_values_[index], value);
+        freeval(value);
+        if (!result)
+            return NULL;
+        if (!check_direct_param(index, result)) {
+            freeval(result);
+            return NULL;
+        }
+        freeval(param_values_[index]);
+        param_values_[index] = result;
+        return dupval(result);
+    }
+
+    value_t *incdec_direct_param(uint32_t index, int delta, bool prefix) {
+        if (index >= param_values_.size() || !param_values_[index]) {
+            yyerror("invalid bytecode parameter slot");
+            return NULL;
+        }
+        value_t *old = param_values_[index];
+        value_t *delta_value = newintval(delta);
+        value_t *result = apply_binary_value('+', old, delta_value);
+        freeval(delta_value);
+        if (!result)
+            return NULL;
+        if (!check_direct_param(index, result)) {
+            freeval(result);
+            return NULL;
+        }
+        value_t *ret = prefix ? dupval(result) : dupval(old);
+        freeval(old);
+        param_values_[index] = result;
+        return ret;
+    }
+
+    void recycle_param_values() {
+        for (value_t *value : param_values_)
+            freeval(value);
+        param_values_.clear();
+    }
+
+    void recycle_params() {
+        if (direct_params_) {
+            recycle_param_values();
+            param_symbols_.clear();
+        } else {
+            recycle_param_symbols();
+        }
+    }
+
     void recycle_param_symbols() {
         if (!param_pool_safe_)
             return;
@@ -2766,6 +2957,15 @@ private:
     void bind_fast_arguments(function_code *code,
                              value_t **args, size_t argc) {
         (void)argc;
+        if (direct_params_) {
+            param_values_.clear();
+            param_values_.reserve((size_t)code->nparams);
+            for (int i = 0; i < code->nparams; ++i) {
+                param_values_.push_back(args[(size_t)i]);
+                args[(size_t)i] = NULL;
+            }
+            return;
+        }
         int index = 0;
         for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
             struct symbol *sym =
@@ -2828,6 +3028,9 @@ private:
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
+        direct_params_ = proto->params_direct && !proto->has_closures &&
+                         !proto->uses_defers && !proto->uses_handlers &&
+                         read_bool_env("SKEIN_VM_PARAM_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
                           !proto->uses_handlers &&
@@ -2882,7 +3085,7 @@ private:
         int line = g_error_line > 0 ? g_error_line : code->def_line;
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
-        recycle_param_symbols();
+        recycle_params();
         recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
 
@@ -2891,6 +3094,9 @@ private:
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
+        direct_params_ = proto->params_direct && !proto->has_closures &&
+                         !proto->uses_defers && !proto->uses_handlers &&
+                         read_bool_env("SKEIN_VM_PARAM_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
                           !proto->uses_handlers &&
@@ -2955,7 +3161,7 @@ private:
             freeval(stack_.back());
             stack_.pop_back();
         }
-        recycle_param_symbols();
+        recycle_params();
         recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
@@ -3176,6 +3382,8 @@ private:
                     return slot_symbols_[desc.base_index];
                 break;
             case IndexBaseKind::Param:
+                if (direct_params_)
+                    return direct_param_symbol(desc.base_index);
                 if (desc.base_index < param_symbols_.size())
                     return param_symbols_[desc.base_index];
                 break;
@@ -3860,7 +4068,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
-        recycle_param_symbols();
+        recycle_params();
         recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         return control;
@@ -3901,7 +4109,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
-        recycle_param_symbols();
+        recycle_params();
         recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         return NULL;
@@ -3917,7 +4125,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
-        recycle_param_symbols();
+        recycle_params();
         recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
 

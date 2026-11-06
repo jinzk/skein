@@ -144,6 +144,15 @@ def check_link_boundary(build_dir, errors, warnings):
             errors.append(
                 f"skein_vm depends on upper-layer symbol: {symbol}")
 
+    jit_archive = build_dir / "libskein_jit.a"
+    if jit_archive.exists():
+        jit_undefined = nm_symbols(jit_archive, False, errors)
+        leaked = (jit_undefined & (interp_defined | builtins_defined))
+        leaked -= runtime_defined | value_defined | bytecode_defined
+        for symbol in sorted(leaked):
+            errors.append(
+                f"skein_jit depends on upper-layer symbol: {symbol}")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -209,6 +218,29 @@ def main():
             if forbidden in text:
                 errors.append(
                     f"{value_runtime}: value runtime includes {forbidden}")
+
+    jit_files = list((source_dir / "src" / "jit").glob("*"))
+    for jit_file in jit_files:
+        if not jit_file.is_file():
+            continue
+        text = jit_file.read_text(encoding="utf-8")
+        for forbidden in ('#include "ast.h"', '#include "compiler.h"',
+                          '#include "eval.h"', '#include "eval_internal.h"'):
+            if forbidden in text:
+                errors.append(f"{jit_file}: JIT includes {forbidden}")
+
+    # asmjit is an implementation detail of the optional JIT target.
+    for source in (source_dir / "src").rglob("*"):
+        if not source.is_file() or source.suffix not in (".h", ".hpp", ".cpp"):
+            continue
+        try:
+            text = source.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "#include <asmjit" in text or '#include "asmjit' in text:
+            if "src/jit" not in source.as_posix():
+                errors.append(
+                    f"{source}: asmjit include outside src/jit")
 
     check_link_boundary(build_dir, errors, warnings)
 

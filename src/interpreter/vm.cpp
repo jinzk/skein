@@ -2286,6 +2286,11 @@ public:
                         freeval(callee);
                         break;
                     }
+                    if (fast == FastCallResult::JitFailed) {
+                        /* The JIT consumed the args before reporting. */
+                        freeval(callee);
+                        return abort_error();
+                    }
                     if (fast == FastCallResult::Failed) {
                         freeval(callee);
                         free_args(args, argc);
@@ -2629,7 +2634,9 @@ private:
     enum class FastCallResult {
         Pushed,
         Fallback,
-        Failed
+        Failed,
+        /* The JIT ran the call and already consumed the argument pointers. */
+        JitFailed
     };
 
     bool fast_call_target(value_t *callee,
@@ -2782,6 +2789,18 @@ private:
 
     FastCallResult try_fast_call(value_t *callee,
                                  value_t **args, size_t argc) {
+#ifdef SKEIN_ENABLE_JIT
+        if (skein_vm_host().fn_skein_vm_try_jit_call) {
+            value_t *jit_result = NULL;
+            if (skein_vm_try_jit_call(callee, args, (uint32_t)argc,
+                                      &jit_result)) {
+                if (!jit_result)
+                    return FastCallResult::JitFailed;
+                push(jit_result);
+                return FastCallResult::Pushed;
+            }
+        }
+#endif
         std::shared_ptr<function_def> def;
         ProtoPtr proto;
         if (!fast_call_target(callee, args, argc, def, proto))

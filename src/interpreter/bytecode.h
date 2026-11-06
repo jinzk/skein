@@ -445,6 +445,13 @@ struct Proto {
     uint32_t required_params = 0;
     uint32_t nlocals = 0;
     uint32_t max_stack = 0;
+    /*
+     * Operand-stack depth before each instruction, computed by the verifier.
+     * -1 marks an unreachable instruction.  The JIT uses this to address
+     * operands at fixed frame offsets instead of maintaining a runtime stack
+     * pointer.
+     */
+    mutable std::vector<int> stack_depth;
 
     bool variadic = false;
     bool is_async = false;

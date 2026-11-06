@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
+option(SKEIN_ENABLE_JIT "Enable the experimental asmjit-backed JIT" OFF)
 if(SKEIN_VM_ONLY)
   add_compile_definitions(SKEIN_VM_ONLY=1)
 endif()
@@ -218,6 +219,32 @@ target_include_directories(skein_value_runtime PUBLIC
 )
 target_link_libraries(skein_value_runtime PUBLIC skein_runtime)
 
+# Optional JIT backend.  asmjit is a system dependency; see docs/jit-plan.md.
+if(SKEIN_ENABLE_JIT)
+  find_package(asmjit CONFIG REQUIRED)
+  if(NOT TARGET asmjit::asmjit)
+    message(FATAL_ERROR "asmjit found but asmjit::asmjit is missing")
+  endif()
+
+  add_library(skein_jit STATIC
+    src/jit/jit.cpp
+  )
+  set_target_properties(skein_jit PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(skein_jit PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/jit
+  )
+  target_link_libraries(skein_jit
+    PUBLIC
+      skein_bytecode
+      skein_value_runtime
+      skein_runtime
+      skein_platform
+    PRIVATE
+      asmjit::asmjit
+  )
+  message(STATUS "JIT enabled (asmjit)")
+endif()
+
 # Bytecode executor.  Fiber/package/struct/pattern services and the evaluator
 # call path are installed through vm_host.h by the interpreter, so this target
 # links only bytecode/value runtime.
@@ -237,6 +264,10 @@ target_link_libraries(skein_vm PUBLIC
   skein_value_runtime
   skein_runtime
 )
+if(SKEIN_ENABLE_JIT)
+  target_link_libraries(skein_vm PUBLIC skein_jit)
+  target_compile_definitions(skein_vm PRIVATE SKEIN_ENABLE_JIT=1)
+endif()
 
 add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
@@ -280,6 +311,9 @@ target_link_libraries(skein_interpreter PUBLIC
   ${SKEIN_LIBUV_TARGET}
   Boost::context
 )
+if(SKEIN_ENABLE_JIT)
+  target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_JIT=1)
+endif()
 add_dependencies(skein_interpreter skein_embedded_sources)
 
 add_library(skein_builtins STATIC
@@ -652,6 +686,19 @@ if(BUILD_TESTING)
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
+      if(SKEIN_ENABLE_JIT)
+        add_test(
+          NAME jit_smoke_test
+          COMMAND ${Python3_EXECUTABLE}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/jit_smoke.py
+                  --bin $<TARGET_FILE:${PROJECT_NAME}>
+        )
+        set_tests_properties(jit_smoke_test PROPERTIES
+          LABELS "core;jit"
+          RUN_SERIAL TRUE
+          TIMEOUT 300
+        )
+      endif()
       add_test(
         NAME vm_bench_test
         COMMAND ${Python3_EXECUTABLE}

@@ -18,6 +18,17 @@ cmake --build build
 [docs/bytecode.md](docs/bytecode.md)。JIT spike 的路线、依赖和验收标准见
 [docs/jit-plan.md](docs/jit-plan.md)。
 
+可选 JIT 构建需要 asmjit（Debian/Ubuntu 安装 `libasmjit-dev`）：
+
+```bash
+cmake -S . -B build -G Ninja -DSKEIN_ENABLE_JIT=ON
+cmake --build build
+SKEIN_JIT=1 ./build/skein benchmarks/fib_bench.skein
+```
+
+`SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数，`SKEIN_JIT_DUMP=1`
+会输出生成的汇编。
+
 只构建 VM 后端（不支持 `--no-vm`）：
 
 ```bash

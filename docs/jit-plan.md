@@ -1,6 +1,6 @@
 # Skein JIT 开发计划（Spike 与后续路线）
 
-- 状态：草案 / Spike 准备
+- 状态：Spike 进行中（Linux x86-64 `fib` JIT 已落地）
 - 更新日期：2026-11-06
 - 关联文档：
   - [bytecode.md](bytecode.md)
@@ -24,6 +24,36 @@
 6. **spike 的目标是验证收益和 ABI/所有权模型**，不是交付完整 JIT。
 
 Go/No-Go 标准见 §10。
+
+### 当前进展（2026-11-06）
+
+已落地：
+
+- `SKEIN_ENABLE_JIT` + `find_package(asmjit CONFIG REQUIRED)`；
+- `skein_jit` target，使用系统 asmjit 1.11；
+- `function_code::vm_cache` 直接指针，替代 per-call 哈希查找；
+- `Proto::stack_depth`，由 verifier 写入；
+- `fib` 的 JIT 子集：`LOAD_PARAM` / `LOAD_CONST` / `LOAD_GLOBAL` /
+  `ADD` / `SUB` / `CMP_JUMP` / `CALL` / `RETURN` / `LOAD_NULL` /
+  `PUSH_SCOPE` / `POP`；
+- JIT `CALL` 直接调用已编译函数，未命中回退 VM；
+- `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
+- `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
+
+本机 `fib(27)` 实测：
+
+```text
+SKEIN_JIT=0   ~0.21s
+SKEIN_JIT=1   ~0.05s   （约 4x）
+```
+
+尚未落地：
+
+- params 直接 frame 化（JIT 已绕过 symbol 绑定，但解释器路径未迁移）；
+- slot opcode；
+- Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
+- OSR / deopt；
+- 更完整的 opcode 覆盖。
 
 ---
 

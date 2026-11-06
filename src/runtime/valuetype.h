@@ -31,6 +31,11 @@ struct function_code {
     std::string source;
     /* Captured binding names, resolved to symbol cells at closure creation. */
     std::vector<std::string> upvalues;
+    /*
+     * Opaque per-function execution cache owned by the VM bridge.  Kept as
+     * void* so the runtime layer does not depend on interpreter/JIT types.
+     */
+    void *vm_cache = nullptr;
 };
 
 struct function_def {

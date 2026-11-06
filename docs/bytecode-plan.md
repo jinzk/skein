@@ -105,7 +105,8 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
 - generator / async 仍依赖原生 fiber 栈。
 - 函数体、默认参数、参数 pattern 的 AST 已移出 `function_code` /
   `symlist`，由 L2 side table 管理。
-- JIT/AOT、字节码序列化与磁盘缓存待决策，不进入默认交付范围。
+- JIT spike 见 [jit-plan.md](jit-plan.md)；AOT、字节码序列化与磁盘缓存
+  待决策，不进入默认交付范围。
 - 差分测试已有随机生成、错误/边界/协程覆盖、fallback 断言和 fuzz
   最小化；opcode 覆盖统计仍待扩展。
 - sanitizer 已有 ASan/UBSan/LSan 目标；`tools/check_all.sh` 覆盖完整

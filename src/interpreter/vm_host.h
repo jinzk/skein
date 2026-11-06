@@ -41,6 +41,17 @@ struct vm_host {
     decltype(&skein_vm_call_value_args) fn_skein_vm_call_value_args = nullptr;
     decltype(&skein_vm_prepare_function_body)
         fn_skein_vm_prepare_function_body = nullptr;
+
+    /*
+     * Optional JIT hooks.  They stay null when SKEIN_ENABLE_JIT is off.
+     * try_jit_call borrows the callee and takes ownership of the args when it
+     * returns true; jit_invoke always consumes the callee and args.
+     */
+    bool (*fn_skein_vm_try_jit_call)(struct value_t *, struct value_t **,
+                                     uint32_t, struct value_t **) = nullptr;
+    struct value_t *(*fn_skein_vm_jit_invoke)(struct value_t *,
+                                              struct value_t **,
+                                              uint32_t) = nullptr;
 };
 
 /* Returns the process-wide host table.  Fields are null until installed. */

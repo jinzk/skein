@@ -33,5 +33,7 @@
 #define skein_vm_call_value_args (skein_vm_host().fn_skein_vm_call_value_args)
 #define skein_vm_prepare_function_body \
     (skein_vm_host().fn_skein_vm_prepare_function_body)
+#define skein_vm_try_jit_call (skein_vm_host().fn_skein_vm_try_jit_call)
+#define skein_vm_jit_invoke (skein_vm_host().fn_skein_vm_jit_invoke)
 
 #endif

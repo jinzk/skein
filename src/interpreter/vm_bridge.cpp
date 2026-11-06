@@ -12,6 +12,10 @@
 #include "valuetype.h"
 #include "vm_host.h"
 
+#ifdef SKEIN_ENABLE_JIT
+#include "jit.h"
+#endif
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -28,14 +32,55 @@ struct default_cache_entry {
     std::vector<skein::bc::ProtoPtr> protos;
 };
 
-struct function_execution_cache {
+struct function_vm_cache {
+    function_code *code = nullptr;
     skein::bc::ProtoPtr proto;
     std::shared_ptr<const compiled_pattern_set> param_patterns;
+#ifdef SKEIN_ENABLE_JIT
+    skein::jit::JitCode *jit = nullptr;
+    uint32_t jit_hits = 0;
+    bool jit_failed = false;
+#endif
     bool compile_failed = false;
 };
 
 std::unordered_map<function_code *, default_cache_entry> default_cache;
-std::unordered_map<function_code *, function_execution_cache> execution_cache;
+/*
+ * Registry used only for lifecycle management.  The hot path reaches the
+ * cache through function_code::vm_cache, so no hash lookup happens per call.
+ */
+std::unordered_map<function_code *, std::unique_ptr<function_vm_cache>>
+    vm_caches;
+
+void release_jit_code(function_vm_cache *cache) {
+#ifdef SKEIN_ENABLE_JIT
+    if (cache && cache->jit) {
+        skein::jit::release(cache->jit);
+        cache->jit = nullptr;
+    }
+#else
+    (void)cache;
+#endif
+}
+
+function_vm_cache *cache_for(function_code *code) {
+    if (code->vm_cache)
+        return static_cast<function_vm_cache *>(code->vm_cache);
+    std::unique_ptr<function_vm_cache> entry(new function_vm_cache());
+    entry->code = code;
+    function_vm_cache *raw = entry.get();
+    vm_caches.emplace(code, std::move(entry));
+    code->vm_cache = raw;
+    return raw;
+}
+
+void release_vm_cache(function_vm_cache *cache) {
+    if (!cache)
+        return;
+    release_jit_code(cache);
+    if (cache->code)
+        cache->code->vm_cache = nullptr;
+}
 
 bool read_bool_env(const char *name, bool fallback) {
     const char *value = std::getenv(name);
@@ -49,6 +94,14 @@ bool read_bool_env(const char *name, bool fallback) {
 
 bool keep_function_ast() {
     return read_bool_env("SKEIN_KEEP_AST", false);
+}
+
+int read_int_env(const char *name, int fallback) {
+    const char *value = std::getenv(name);
+    if (!value || !*value)
+        return fallback;
+    int parsed = std::atoi(value);
+    return parsed >= 0 ? parsed : fallback;
 }
 
 uint64_t elapsed_ns(std::chrono::steady_clock::time_point start) {
@@ -83,7 +136,7 @@ skein::bc::ProtoPtr prepare_function_body(
     if (!def || !def->code)
         return nullptr;
     function_code *code = def->code.get();
-    function_execution_cache &cache = execution_cache[code];
+    function_vm_cache &cache = *cache_for(code);
     if (cache.compile_failed)
         return nullptr;
     if (cache.proto)
@@ -125,6 +178,95 @@ struct bridge_depth_guard {
     ~bridge_depth_guard() { --context.vm_call_depth; }
 };
 
+#ifdef SKEIN_ENABLE_JIT
+bool jit_call_eligible(function_code *code, value_t **args, uint32_t argc) {
+    if (!code || code->is_generator || code->is_async || code->is_method ||
+        code->variadic || code->required_params != code->nparams ||
+        (int)argc != code->nparams)
+        return false;
+
+    int index = 0;
+    for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
+        if (sl->has_pattern || sl->variadic)
+            return false;
+        if (!type_constraint_matches(sl->type, args[(size_t)index]))
+            return false;
+    }
+    return true;
+}
+
+uint32_t jit_threshold() {
+    static int threshold = -1;
+    if (threshold < 0)
+        threshold = read_int_env("SKEIN_JIT_THRESHOLD", 100);
+    return (uint32_t)threshold;
+}
+
+/*
+ * Try a direct JIT call.  Returns true when the JIT handled the call and
+ * consumed the argument pointers; `out` is then the result (or null on
+ * error).  Returns false when the caller should continue with the normal VM
+ * fast-call path; arguments are untouched in that case.  The callee value is
+ * always borrowed.
+ */
+bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
+                           value_t **out) {
+    *out = nullptr;
+    if (!skein::jit::available())
+        return false;
+    if (!callee || callee->type != T_func)
+        return false;
+
+    struct func_value_t *fv = (struct func_value_t *)callee;
+    if (!fv->def || !fv->def->code)
+        return false;
+    function_code *code = fv->def->code.get();
+    if (!jit_call_eligible(code, args, argc))
+        return false;
+
+    function_vm_cache *cache = cache_for(code);
+    if (cache->jit_failed)
+        return false;
+    if (!cache->jit) {
+        if (!skein_vm_enabled())
+            return false;
+        if (cache->jit_hits++ < jit_threshold())
+            return false;
+        skein::bc::ProtoPtr proto = prepare_function_body(fv->def);
+        if (!proto || !skein::jit::can_compile(*proto)) {
+            cache->jit_failed = true;
+            return false;
+        }
+        cache->jit = skein::jit::compile(*proto);
+        if (!cache->jit) {
+            cache->jit_failed = true;
+            return false;
+        }
+    }
+
+    skein::jit::thread_state ts;
+    ts.ctx = &active_eval_context();
+    ts.max_depth = skein_vm_max_depth();
+    *out = skein::jit::enter(cache->jit, &ts, fv->def.get(), args,
+                             (uint32_t)argc);
+    return true;
+}
+
+/* CALL helper used by generated code.  Always consumes callee and args. */
+value_t *skein_vm_jit_invoke(value_t *callee, value_t **args, uint32_t argc) {
+    value_t *out = nullptr;
+    if (skein_vm_try_jit_call(callee, args, argc, &out)) {
+        freeval(callee);
+        return out;
+    }
+
+    std::vector<value_t *> fallback(args, args + argc);
+    value_t *result = skein_vm_call_value_args(callee, std::move(fallback));
+    freeval(callee);
+    return result;
+}
+#endif
+
 } // namespace
 
 static void ensure_vm_host() {
@@ -151,6 +293,11 @@ static void ensure_vm_host() {
         host.fn_skein_vm_call_value_args = &skein_vm_call_value_args;
         host.fn_skein_vm_prepare_function_body =
             &skein_vm_prepare_function_body;
+#ifdef SKEIN_ENABLE_JIT
+        host.fn_skein_vm_try_jit_call = &skein_vm_try_jit_call;
+        host.fn_skein_vm_jit_invoke = &skein_vm_jit_invoke;
+        skein::jit::set_invoke(&skein_vm_jit_invoke);
+#endif
         return true;
     }();
     (void)installed;
@@ -173,7 +320,11 @@ void skein_vm_forget_function_code(function_code *code) {
     if (!code || cache_clearing)
         return;
     default_cache.erase(code);
-    execution_cache.erase(code);
+    auto it = vm_caches.find(code);
+    if (it != vm_caches.end()) {
+        release_vm_cache(it->second.get());
+        vm_caches.erase(it);
+    }
 }
 
 void skein_vm_shutdown() {
@@ -181,7 +332,10 @@ void skein_vm_shutdown() {
         return;
     cache_clearing = true;
     default_cache.clear();
-    execution_cache.clear();
+    for (auto &entry : vm_caches) {
+        release_vm_cache(entry.second.get());
+    }
+    vm_caches.clear();
     cache_clearing = false;
 }
 
@@ -275,7 +429,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
         return ParamPatternResult::Unsupported;
 
     function_code *code = def->code.get();
-    function_execution_cache &cache = execution_cache[code];
+    function_vm_cache &cache = *cache_for(code);
     if (!cache.param_patterns) {
         if (!skein_vm_enabled())
             return ParamPatternResult::Unsupported;
@@ -334,9 +488,8 @@ bool skein_vm_try_execute_function_body(
         return false;
 
     function_code *code = def->code.get();
-    auto cached = execution_cache.find(code);
-    if ((cached == execution_cache.end() || !cached->second.proto) &&
-        !skein_vm_enabled())
+    function_vm_cache *cached = cache_for(code);
+    if (!cached->proto && !skein_vm_enabled())
         return false;
 
     skein::bc::ProtoPtr proto = prepare_function_body(def);

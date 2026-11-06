@@ -14,6 +14,7 @@
 #   tools/check_fast.sh --docs          # docs / data checks
 #   tools/check_fast.sh --coverage      # opcode coverage check
 #   tools/check_fast.sh --fallback      # VM fallback regression check
+#   tools/check_fast.sh --jit           # JIT smoke + VM differential
 #   tools/check_fast.sh --no-build      # skip the build step
 #   tools/check_fast.sh --build-dir DIR --jobs N
 #
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --fallback)
             MODE="fallback"
+            shift
+            ;;
+        --jit)
+            MODE="jit"
             shift
             ;;
         --vm-only)
@@ -107,6 +112,12 @@ case "$MODE" in
         printf '==> VM fallback regression\n'
         python3 "$ROOT/tools/check_vm_fallback.py" \
             --bin "$BUILD_DIR/skein" --check
+        ;;
+    jit)
+        printf '==> JIT smoke + VM differential\n'
+        SKEIN_JIT=1 SKEIN_JIT_THRESHOLD=0 \
+            ctest --test-dir "$BUILD_DIR" -j "$JOBS" --output-on-failure \
+            -R '^(skein_vm_tests|vm_differential_test|jit_smoke_test)$'
         ;;
     vm)
         printf '==> VM tests + differential\n'

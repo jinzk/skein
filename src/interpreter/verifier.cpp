@@ -580,6 +580,7 @@ bool verify_single(const Proto &proto, std::string &error,
                    uint32_t *max_stack) {
     if (error.empty())
         error.clear();
+    proto.stack_depth.clear();
 
     int handler_depth = 0;
     int handler_body_depth = 0;
@@ -666,6 +667,7 @@ bool verify_single(const Proto &proto, std::string &error,
         }
     }
 
+    proto.stack_depth.assign(depth.begin(), depth.end());
     if (max_stack)
         *max_stack = maximum;
     return true;

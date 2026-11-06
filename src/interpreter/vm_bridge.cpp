@@ -96,6 +96,7 @@ bool keep_function_ast() {
     return read_bool_env("SKEIN_KEEP_AST", false);
 }
 
+#ifdef SKEIN_ENABLE_JIT
 int read_int_env(const char *name, int fallback) {
     const char *value = std::getenv(name);
     if (!value || !*value)
@@ -103,6 +104,7 @@ int read_int_env(const char *name, int fallback) {
     int parsed = std::atoi(value);
     return parsed >= 0 ? parsed : fallback;
 }
+#endif
 
 uint64_t elapsed_ns(std::chrono::steady_clock::time_point start) {
     return static_cast<uint64_t>(

@@ -15,7 +15,8 @@ cmake --build build
 字节码 VM 默认启用；`--no-vm` / `SKEIN_VM=0` 可切回 AST 解释器。
 `--vm` / `SKEIN_VM=1` 仍可用于显式指定 VM。`SKEIN_VM_TRACE=1` 会打印
 字节码和每步执行，`SKEIN_VM_DEBUG=1` 会说明哪些结构回退到了 AST。详见
-[docs/bytecode.md](docs/bytecode.md)。
+[docs/bytecode.md](docs/bytecode.md)。JIT spike 的路线、依赖和验收标准见
+[docs/jit-plan.md](docs/jit-plan.md)。
 
 只构建 VM 后端（不支持 `--no-vm`）：
 
@@ -4771,7 +4772,7 @@ src/
     ffi/         L3  可选的 std.ffi：ffi.*、ffi_types.*、ffi_value.*、ffi_marshal.*、
                  ffi_callbacks.*、ffi_manifest.*、ffi_check.*、ffi_bindgen.*
   app/           L4  main.cpp（参数、入口、hook 装配）
-docs/            架构、编码、FFI、Unicode 文档
+docs/            架构、编码、FFI、Unicode、字节码与 JIT 计划文档
 lib/std/         以 Skein 编写的标准库包（构建时嵌入）
 tests/           自动化回归测试（test_skein.py + cases/）
 tools/           生成器与一致性检查脚本

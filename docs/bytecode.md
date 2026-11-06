@@ -124,7 +124,7 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
   直接存 `value_t*`；`SKEIN_VM_PARAM_POOL=0` 可关闭）
 - 局部 slot direct frame（`slots_direct_safe` 时直接存 `value_t*`，
   跳过 symbol 分配/`savesym`；`SKEIN_VM_SLOT_POOL=0` 可关闭）
-- 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；闭包/defer/方法/for-in/match/destructuring/on-error/import 等仍使用 `symbol*` cell）
+- 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；for-in/match/bind/import/声明等已支持 direct frame slot；defer/handler 帧仍保留 `symbol*` 兼容路径）
 - 参数 destructuring pattern（编译为 `PatternDesc`，调用绑定时原生匹配）
 - 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
@@ -300,8 +300,9 @@ struct Instr {
 
 - 局部变量使用 slot fast path；函数参数在未被局部声明遮蔽时使用参数 fast
   path。满足 `slots_direct_safe` 的 fast frame 直接把 slot 存为 `value_t*`；
-  闭包、defer、方法、for-in 循环变量、match binding、destructuring、
-  on-error 绑定和 import 绑定仍使用 `symbol*` cell。
+  for-in 循环变量、match binding、destructuring、BindName 和 import 绑定
+  也走 frame slot。defer/handler 帧仍保留 `symbol*` 兼容路径，等待后续
+  将 defer 捕获改为显式 upvalue cell。
 - 普通嵌套函数使用 `LOAD_UPVALUE` / `STORE_UPVALUE` 等索引访问捕获
   变量；upvalue 使用显式 `upvalue_cell`：帧存活时处于 open 状态，指向
   frame slot 或 symbol cell；帧退出时 close，cell 持有值并脱离原存储。

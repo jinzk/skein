@@ -189,6 +189,9 @@ struct iterator_state {
     bool generator = false;
     bool two_vars = false;
     bool active = false;
+    bool direct = false;
+    uint32_t key_slot = UINT32_MAX;
+    uint32_t value_slot = UINT32_MAX;
     struct symbol *key_sym = NULL;
     struct symbol *value_sym = NULL;
 };
@@ -227,6 +230,7 @@ struct SavedVmState {
     std::vector<value_t *> param_values;
     std::vector<struct symbol *> slot_symbols;
     std::vector<value_t *> slot_values;
+    std::vector<uint8_t> slot_const;
     std::vector<std::shared_ptr<struct upvalue_cell>> open_upvalues;
     std::vector<iterator_state> iterators;
     std::vector<std::vector<defer_record>> defer_scopes;
@@ -253,8 +257,15 @@ public:
             for (const std::string &name : proto.param_names)
                 param_symbols_.push_back(lookupsym(name.c_str()));
         }
-        if (proto.uses_slots)
+        direct_slots_ = !proto.slots.empty() && proto.slots_direct_safe &&
+                        !proto.uses_defers && !proto.uses_handlers &&
+                        read_bool_env("SKEIN_VM_SLOT_POOL", true);
+        if (direct_slots_) {
+            slot_values_.assign(proto.slots.size(), NULL);
+            slot_const_.assign(proto.slots.size(), 0);
+        } else if (proto.uses_slots) {
             slot_symbols_.assign(proto.slots.size(), NULL);
+        }
     }
 
     ~Executor() {
@@ -679,6 +690,8 @@ public:
                         }
                         freeval(slot_values_[ins.b]);
                         slot_values_[ins.b] = value;
+                        if (ins.b < slot_const_.size())
+                            slot_const_[ins.b] = slot.is_const ? 1 : 0;
                         push(newnull());
                         break;
                     }
@@ -864,6 +877,8 @@ public:
                             }
                             freeval(slot_values_[ins.b]);
                             slot_values_[ins.b] = NULL;
+                            if (ins.b < slot_const_.size())
+                                slot_const_[ins.b] = 0;
                         }
                         break;
                     }
@@ -1449,6 +1464,9 @@ public:
                     }
                     state.key_sym = NULL;
                     state.value_sym = NULL;
+                    state.direct = false;
+                    state.key_slot = UINT32_MAX;
+                    state.value_slot = UINT32_MAX;
                     state.index = 0;
                     state.count = 0;
                     state.generator = false;
@@ -1531,23 +1549,38 @@ public:
                         state.iterable = iterable;
                     }
 
-                    struct symbol *key_sym =
-                        newsym(desc.key_name.c_str());
-                    key_sym->val = NULL;
-                    savesym(key_sym);
-                    state.key_sym = key_sym;
-                    if (desc.key_slot != UINT32_MAX &&
-                        desc.key_slot < slot_symbols_.size())
-                        slot_symbols_[desc.key_slot] = key_sym;
-                    if (desc.two_vars) {
-                        struct symbol *value_sym =
-                            newsym(desc.value_name.c_str());
-                        value_sym->val = NULL;
-                        savesym(value_sym);
-                        state.value_sym = value_sym;
-                        if (desc.value_slot != UINT32_MAX &&
-                            desc.value_slot < slot_symbols_.size())
-                            slot_symbols_[desc.value_slot] = value_sym;
+                    state.direct = direct_slots_;
+                    if (direct_slots_) {
+                        state.key_slot = desc.key_slot;
+                        state.value_slot = desc.value_slot;
+                        if (state.key_slot < slot_values_.size()) {
+                            freeval(slot_values_[state.key_slot]);
+                            slot_values_[state.key_slot] = NULL;
+                        }
+                        if (desc.two_vars &&
+                            state.value_slot < slot_values_.size()) {
+                            freeval(slot_values_[state.value_slot]);
+                            slot_values_[state.value_slot] = NULL;
+                        }
+                    } else {
+                        struct symbol *key_sym =
+                            newsym(desc.key_name.c_str());
+                        key_sym->val = NULL;
+                        savesym(key_sym);
+                        state.key_sym = key_sym;
+                        if (desc.key_slot != UINT32_MAX &&
+                            desc.key_slot < slot_symbols_.size())
+                            slot_symbols_[desc.key_slot] = key_sym;
+                        if (desc.two_vars) {
+                            struct symbol *value_sym =
+                                newsym(desc.value_name.c_str());
+                            value_sym->val = NULL;
+                            savesym(value_sym);
+                            state.value_sym = value_sym;
+                            if (desc.value_slot != UINT32_MAX &&
+                                desc.value_slot < slot_symbols_.size())
+                                slot_symbols_[desc.value_slot] = value_sym;
+                        }
                     }
                     state.active = true;
                     if (vm_stats.enabled &&
@@ -1566,7 +1599,8 @@ public:
                         return abort_error();
                     }
                     iterator_state &state = iterators_[desc_index];
-                    if (!state.active || !state.key_sym) {
+                    if (!state.active ||
+                        (!state.direct && !state.key_sym)) {
                         pc_ = ins.b;
                         break;
                     }
@@ -1588,8 +1622,17 @@ public:
                             pc_ = ins.b;
                             break;
                         }
-                        freeval(state.key_sym->val);
-                        state.key_sym->val = item;
+                        if (state.direct) {
+                            if (state.key_slot < slot_values_.size()) {
+                                freeval(slot_values_[state.key_slot]);
+                                slot_values_[state.key_slot] = item;
+                            } else {
+                                freeval(item);
+                            }
+                        } else {
+                            freeval(state.key_sym->val);
+                            state.key_sym->val = item;
+                        }
                         ++state.index;
                         break;
                     }
@@ -1637,13 +1680,29 @@ public:
                                 ->value[index]);
                     }
 
-                    freeval(state.key_sym->val);
-                    state.key_sym->val = item;
-                    if (state.two_vars && state.value_sym) {
-                        freeval(state.value_sym->val);
-                        state.value_sym->val = second;
+                    if (state.direct) {
+                        if (state.key_slot < slot_values_.size()) {
+                            freeval(slot_values_[state.key_slot]);
+                            slot_values_[state.key_slot] = item;
+                        } else {
+                            freeval(item);
+                        }
+                        if (state.two_vars &&
+                            state.value_slot < slot_values_.size()) {
+                            freeval(slot_values_[state.value_slot]);
+                            slot_values_[state.value_slot] = second;
+                        } else {
+                            freeval(second);
+                        }
                     } else {
-                        freeval(second);
+                        freeval(state.key_sym->val);
+                        state.key_sym->val = item;
+                        if (state.two_vars && state.value_sym) {
+                            freeval(state.value_sym->val);
+                            state.value_sym->val = second;
+                        } else {
+                            freeval(second);
+                        }
                     }
                     ++state.index;
                     break;
@@ -1656,6 +1715,9 @@ public:
                         freeval(state.iterable);
                         state.iterable = NULL;
                         state.active = false;
+                        state.direct = false;
+                        state.key_slot = UINT32_MAX;
+                        state.value_slot = UINT32_MAX;
                         state.key_sym = NULL;
                         state.value_sym = NULL;
                     }
@@ -1690,6 +1752,17 @@ public:
                         break;
                     }
                     for (pattern_binding &binding : bindings) {
+                        if (direct_slots_) {
+                            value_t *value = binding.value;
+                            binding.value = NULL;
+                            if (!assign_pattern_slot_direct(
+                                    ins.b, binding.name, value, true)) {
+                                freeval(value);
+                                free_pattern_bindings(bindings);
+                                return abort_error();
+                            }
+                            continue;
+                        }
                         struct symbol *sym = newsym(binding.name.c_str());
                         sym->val = binding.value;
                         binding.value = NULL;
@@ -1697,8 +1770,10 @@ public:
                         savesym(sym);
                         assign_pattern_slot(ins.b, binding.name, sym);
                     }
-                    for (const pattern_binding &binding : bindings)
-                        invalidate_name_cache(binding.name.c_str());
+                    if (!direct_slots_) {
+                        for (const pattern_binding &binding : bindings)
+                            invalidate_name_cache(binding.name.c_str());
+                    }
                     bindings.clear();
                     push(newboolval(true));
                     break;
@@ -1733,6 +1808,19 @@ public:
                         }
                     }
                     for (pattern_binding &binding : bindings) {
+                        if (direct_slots_) {
+                            value_t *bound = binding.value;
+                            binding.value = NULL;
+                            if (!assign_pattern_slot_direct(
+                                    ins.b, binding.name, bound,
+                                    (ins.flags & 1) != 0)) {
+                                freeval(bound);
+                                free_pattern_bindings(bindings);
+                                freeval(value);
+                                return abort_error();
+                            }
+                            continue;
+                        }
                         struct symbol *sym = newsym(binding.name.c_str());
                         sym->val = binding.value;
                         binding.value = NULL;
@@ -1740,8 +1828,10 @@ public:
                         savesym(sym);
                         assign_pattern_slot(ins.b, binding.name, sym);
                     }
-                    for (const pattern_binding &binding : bindings)
-                        invalidate_name_cache(binding.name.c_str());
+                    if (!direct_slots_) {
+                        for (const pattern_binding &binding : bindings)
+                            invalidate_name_cache(binding.name.c_str());
+                    }
                     bindings.clear();
                     freeval(value);
                     push(newnull());
@@ -2167,6 +2257,15 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
+                    if (direct_slots_ && ins.a != UINT16_MAX &&
+                        ins.a < slot_values_.size()) {
+                        freeval(slot_values_[ins.a]);
+                        slot_values_[ins.a] = value;
+                        if (ins.a < slot_const_.size())
+                            slot_const_[ins.a] =
+                                (ins.flags & 1) != 0 ? 1 : 0;
+                        break;
+                    }
                     const char *name = name_at(proto(), ins.b);
                     struct symbol *sym = newsym(name);
                     sym->val = value;
@@ -2298,19 +2397,27 @@ public:
                         desc.alias.empty()
                             ? skein_vm_import_binding_name(desc.path.c_str())
                             : desc.alias.c_str();
-                    if (isrepeated(name)) {
-                        yyerror("import name already exists: %s", name);
-                        freeval(ns);
-                        return abort_error();
-                    }
+                    if (direct_slots_ && ins.b != UINT32_MAX &&
+                        ins.b < slot_values_.size()) {
+                        freeval(slot_values_[ins.b]);
+                        slot_values_[ins.b] = ns;
+                        if (ins.b < slot_const_.size())
+                            slot_const_[ins.b] = 0;
+                    } else {
+                        if (isrepeated(name)) {
+                            yyerror("import name already exists: %s", name);
+                            freeval(ns);
+                            return abort_error();
+                        }
 
-                    struct symbol *sym = newsym(name);
-                    sym->val = ns;
-                    savesym(sym);
-                    if (ins.b != UINT32_MAX &&
-                        ins.b < slot_symbols_.size())
-                        slot_symbols_[ins.b] = sym;
-                    invalidate_name_cache(name);
+                        struct symbol *sym = newsym(name);
+                        sym->val = ns;
+                        savesym(sym);
+                        if (ins.b != UINT32_MAX &&
+                            ins.b < slot_symbols_.size())
+                            slot_symbols_[ins.b] = sym;
+                        invalidate_name_cache(name);
+                    }
 
                     const std::string &path = desc.path;
                     if (!path.empty() && path[0] != '.' && path[0] != '@') {
@@ -2634,6 +2741,7 @@ private:
     std::vector<struct symbol> param_symbol_views_;
     std::vector<struct symbol *> slot_symbols_;
     std::vector<value_t *> slot_values_;
+    std::vector<uint8_t> slot_const_;
     std::vector<struct symbol> slot_symbol_views_;
     std::vector<struct symbol> upvalue_symbol_views_;
     std::vector<std::shared_ptr<struct upvalue_cell>> open_upvalues_;
@@ -2716,6 +2824,7 @@ private:
         state.param_values = std::move(param_values_);
         state.slot_symbols = std::move(slot_symbols_);
         state.slot_values = std::move(slot_values_);
+        state.slot_const = std::move(slot_const_);
         state.open_upvalues = std::move(open_upvalues_);
         open_upvalues_.clear();
         state.iterators = std::move(iterators_);
@@ -2760,6 +2869,7 @@ private:
         param_values_ = std::move(state.param_values);
         slot_symbols_ = std::move(state.slot_symbols);
         slot_values_ = std::move(state.slot_values);
+        slot_const_ = std::move(state.slot_const);
         open_upvalues_ = std::move(state.open_upvalues);
         iterators_ = std::move(state.iterators);
         defer_scopes_ = std::move(state.defer_scopes);
@@ -3048,7 +3158,9 @@ private:
         if (index >= proto().slots.size())
             return false;
         const skein::bc::SlotDesc &slot = proto().slots[index];
-        if (check_const && slot.is_const) {
+        if (check_const &&
+            (slot.is_const ||
+             (index < slot_const_.size() && slot_const_[index]))) {
             yyerror("cannot assign to constant %s", slot.name.c_str());
             return false;
         }
@@ -3078,7 +3190,8 @@ private:
         sym.type.module = NULL;
         sym.type.nullable = false;
         sym.exported = false;
-        sym.is_const = proto().slots[index].is_const;
+        sym.is_const = proto().slots[index].is_const ||
+                       (index < slot_const_.size() && slot_const_[index]);
         sym.is_uninitialized = false;
         sym.scope_owned = false;
         sym.global_slot = UINT32_MAX;
@@ -3316,7 +3429,8 @@ private:
         direct_params_ = proto->params_direct &&
                          !proto->uses_defers && !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
-        direct_slots_ = proto->slots_direct_safe &&
+        direct_slots_ = !proto->slots.empty() &&
+                        proto->slots_direct_safe &&
                         !proto->uses_defers && !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
@@ -3336,9 +3450,10 @@ private:
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
         slot_symbols_.clear();
-        if (direct_slots_)
+        if (direct_slots_) {
             slot_values_.assign(proto->slots.size(), NULL);
-        else
+            slot_const_.assign(proto->slots.size(), 0);
+        } else
             slot_symbols_.assign(proto->slots.size(), NULL);
         iterators_.clear();
         handlers_.clear();
@@ -3390,7 +3505,8 @@ private:
         direct_params_ = proto->params_direct &&
                          !proto->uses_defers && !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
-        direct_slots_ = proto->slots_direct_safe &&
+        direct_slots_ = !proto->slots.empty() &&
+                        proto->slots_direct_safe &&
                         !proto->uses_defers && !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
@@ -3407,9 +3523,10 @@ private:
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
         slot_symbols_.clear();
-        if (direct_slots_)
+        if (direct_slots_) {
             slot_values_.assign(proto->slots.size(), NULL);
-        else
+            slot_const_.assign(proto->slots.size(), 0);
+        } else
             slot_symbols_.assign(proto->slots.size(), NULL);
         handlers_.clear();
         iterators_.clear();
@@ -3807,18 +3924,22 @@ private:
                 const skein::bc::SlotDesc &slot = proto().slots[i];
                 if (slot.name != name)
                     continue;
-                return open_cell(&slot_values_[i], &slot.type, name,
-                                 slot.is_const);
+                return open_cell(
+                    &slot_values_[i], &slot.type, name,
+                    slot.is_const ||
+                        (i < slot_const_.size() && slot_const_[i]));
             }
         }
         struct symbol *sym = lookupsym(name.c_str());
         scope_context &scopes = active_scope_context();
-        if (sym && scopes.global_scope &&
-            scopes.global_scope->syms.find(name.c_str()) == sym)
-            sym = NULL;
-        if (!sym)
+        if (!sym || (scopes.global_scope &&
+                     scopes.global_scope->syms.find(name.c_str()) == sym))
             return NULL;
-        return open_cell(&sym->val, &sym->type, name, sym->is_const);
+        if (proto().uses_defers || proto().uses_handlers)
+            return open_cell(&sym->val, &sym->type, name, sym->is_const);
+        yyerror("local %s is not captured by a frame slot",
+                name.c_str());
+        return NULL;
     }
 
     struct upvalue_cell *upvalue_cell_at(uint32_t index) {
@@ -3840,8 +3961,18 @@ private:
         if (!cell) {
             const char *name = proto().upvalues[index].c_str();
             struct symbol *sym = name && *name ? lookupsym(name) : NULL;
-            if (!sym)
+            scope_context &scopes = active_scope_context();
+            if (!sym) {
                 yyerror("symbol not found %s", name ? name : "");
+                return NULL;
+            }
+            if (!scopes.global_scope ||
+                scopes.global_scope->syms.find(name) != sym) {
+                if (proto().uses_defers || proto().uses_handlers)
+                    return sym;
+                yyerror("upvalue %s is not captured by a frame slot", name);
+                return NULL;
+            }
             return sym;
         }
         if (upvalue_symbol_views_.size() <= index)
@@ -3873,8 +4004,18 @@ private:
         }
         const char *name = proto().upvalues[index].c_str();
         struct symbol *sym = name && *name ? lookupsym(name) : NULL;
-        if (!sym)
+        scope_context &scopes = active_scope_context();
+        if (!sym) {
             yyerror("symbol not found %s", name ? name : "");
+            return NULL;
+        }
+        if (!scopes.global_scope ||
+            scopes.global_scope->syms.find(name) != sym) {
+            if (proto().uses_defers || proto().uses_handlers)
+                return sym;
+            yyerror("upvalue %s is not captured by a frame slot", name);
+            return NULL;
+        }
         return sym;
     }
 
@@ -4026,6 +4167,25 @@ private:
     static bool is_control(const value_t *value) {
         return value && (value->type == T_return || value->type == T_break ||
                          value->type == T_continue);
+    }
+
+    bool assign_pattern_slot_direct(uint32_t pattern_index,
+                                    const std::string &name,
+                                    value_t *value, bool is_const) {
+        if (pattern_index >= proto().patterns.size())
+            return false;
+        for (const auto &binding :
+             proto().patterns[pattern_index].binding_slots) {
+            if (binding.name == name &&
+                binding.slot < slot_values_.size()) {
+                freeval(slot_values_[binding.slot]);
+                slot_values_[binding.slot] = value;
+                if (binding.slot < slot_const_.size())
+                    slot_const_[binding.slot] = is_const ? 1 : 0;
+                return true;
+            }
+        }
+        return false;
     }
 
     void assign_pattern_slot(uint32_t pattern_index,

@@ -369,36 +369,7 @@ bool finalize_proto(Proto &proto, std::string &error) {
     proto.max_stack = max_stack;
 
     proto.slots_direct_safe =
-        proto.params_direct && !proto.uses_defers && !proto.uses_handlers &&
-        !proto.uses_names;
-    if (proto.slots_direct_safe) {
-        for (const skein::bc::Instr &ins : proto.code) {
-            switch (static_cast<skein::bc::Op>(ins.op)) {
-                case skein::bc::Op::IterNew:
-                case skein::bc::Op::IterNext:
-                case skein::bc::Op::IterEnd:
-                case skein::bc::Op::MatchBegin:
-                case skein::bc::Op::MatchTest:
-                case skein::bc::Op::MatchBind:
-                case skein::bc::Op::BindName:
-                case skein::bc::Op::Import:
-                    proto.slots_direct_safe = false;
-                    break;
-                default:
-                    break;
-            }
-            if (!proto.slots_direct_safe)
-                break;
-        }
-    }
-    if (proto.slots_direct_safe) {
-        for (const skein::bc::IndexDesc &desc : proto.index_ops) {
-            if (desc.base_kind == skein::bc::IndexBaseKind::Slot) {
-                proto.slots_direct_safe = false;
-                break;
-            }
-        }
-    }
+        !proto.uses_defers && !proto.uses_handlers;
     return true;
 }
 struct LoopContext {
@@ -845,7 +816,8 @@ struct Compiler {
         std::shared_ptr<function_code> code = get_function_code(node);
         if (code) {
             code->module = proto.module;
-            if (inside_function && code->upvalues.empty()) {
+            if ((inside_function || !slot_scopes.empty()) &&
+                code->upvalues.empty()) {
                 std::unordered_set<std::string> seen;
                 auto add = [&](const std::string &name) {
                     if (!name.empty() && seen.insert(name).second)
@@ -860,6 +832,10 @@ struct Compiler {
                     add(name);
                 for (const std::string &name : upvalue_names)
                     add(name);
+                for (const SlotScope &scope : slot_scopes) {
+                    for (const auto &entry : scope.names)
+                        add(entry.first);
+                }
             }
         }
         if (node)
@@ -2482,9 +2458,24 @@ struct Compiler {
                 uint32_t descriptor = add_function(def);
                 emit(Op::Closure, 0, 0, descriptor, here);
                 if (def->name) {
-                    uint32_t name = add_name(def->name);
-                    emit(Op::BindFunc, def->exported ? 1 : 0, 0, name,
-                         here);
+                    if (slot_fast_path && !def->exported &&
+                        !slot_scopes.empty()) {
+                        SlotScope &scope = slot_scopes.back();
+                        if (scope.names.count(def->name) != 0) {
+                            uint32_t message = add_name(
+                                std::string("symbol repeated ") + def->name);
+                            emit(Op::RuntimeError, 0, 0, message, here);
+                            return;
+                        }
+                        uint32_t slot = add_slot(def->name, nullptr, false);
+                        scope.names[def->name] = static_cast<int>(slot);
+                        scope.declared.push_back(static_cast<int>(slot));
+                        emit(Op::DefineSlot, 1, 0, slot, here);
+                    } else {
+                        uint32_t name = add_name(def->name);
+                        emit(Op::BindFunc, def->exported ? 1 : 0, 0, name,
+                             here);
+                    }
                 }
                 return;
             }
@@ -3462,6 +3453,7 @@ ProtoPtr skein_compile_statement(struct ast *statement,
                                  std::string &error) {
     Compiler compiler(module);
     compiler.proto.name = "<top>";
+    compiler.slot_fast_path = Compiler::can_use_slots(statement);
     compiler.compile(statement);
     if (!compiler.ok) {
         error = compiler.error.empty() ? "cannot compile statement"

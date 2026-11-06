@@ -187,6 +187,32 @@ def main():
         )
         ok &= compare(binary, "tail-recursion", tail)
 
+        tail_deep = tmp_path / "tail_deep.skein"
+        tail_deep.write_text(
+            "func tail(n, acc) {\n"
+            "  if (n <= 0) { return acc; }\n"
+            "  return tail(n - 1, acc + 1);\n"
+            "}\n"
+            "println(tail(100000, 0));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "tail-deep-recursion", tail_deep)
+
+        mutual_tail = tmp_path / "mutual_tail.skein"
+        mutual_tail.write_text(
+            "func even(n) {\n"
+            "  if (n == 0) { return true; }\n"
+            "  return odd(n - 1);\n"
+            "}\n"
+            "func odd(n) {\n"
+            "  if (n == 0) { return false; }\n"
+            "  return even(n - 1);\n"
+            "}\n"
+            "println(even(10000));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "mutual-tail-recursion", mutual_tail)
+
         dict_error = tmp_path / "dict_error.skein"
         dict_error.write_text(
             "func f() {\n"

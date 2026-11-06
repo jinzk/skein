@@ -59,6 +59,9 @@ value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
 value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                uint32_t argc, int line, int column);
+int skein_jit_tail_self(skein::jit::thread_state *ts,
+                        function_def *current_def, value_t *callee,
+                        value_t **params, value_t **args, uint32_t argc);
 value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
                                value_t *value, value_t **dest, int line,
                                int column);
@@ -1070,6 +1073,30 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::TailCall: {
                 const int argc = static_cast<int>(ins.b);
                 const int callee_depth = depth - argc - 1;
+                const asmjit::Label slow_tail = a.newLabel();
+
+                /* Reuse the current frame when tail-calling this same code. */
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)));
+                a.lea(asmjit::x86::rcx,
+                      asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
+                a.lea(asmjit::x86::r8,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::r9d, asmjit::imm(argc));
+                call_addr(fn_address(&skein_jit_tail_self));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jz(slow_tail);
+                for (int i = callee_depth; i < depth; ++i)
+                    clear_slot(i);
+                a.jmp(proto.code.empty() ? end_label : labels[0]);
+
+                a.bind(slow_tail);
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(callee_depth)));
@@ -1547,6 +1574,41 @@ extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
         return nullptr;
     }
     return assign_symbol_direct(sym, value);
+}
+
+extern "C" int skein_jit_tail_self(skein::jit::thread_state *ts,
+                                   function_def *current_def,
+                                   value_t *callee, value_t **params,
+                                   value_t **args, uint32_t argc) {
+    if (!ts || !ts->ctx || !current_def || !current_def->code ||
+        !callee || callee->type != T_func || !params || !args)
+        return 0;
+    struct func_value_t *fv = (struct func_value_t *)callee;
+    if (!fv->def || !fv->def->code ||
+        fv->def->code.get() != current_def->code.get())
+        return 0;
+    if (current_def->code->is_method ||
+        argc != (uint32_t)current_def->code->nparams)
+        return 0;
+
+    int index = 0;
+    for (struct symlist *sl = current_def->code->sl; sl;
+         sl = sl->next, ++index) {
+        if (sl->has_pattern || sl->variadic)
+            return 0;
+        if (!type_constraint_matches(sl->type, args[(size_t)index]))
+            return 0;
+    }
+
+    while (ts->ctx->scopes.restore_stack.size() > ts->scope_mark)
+        skein_vm_eval_popscope();
+    for (uint32_t i = 0; i < argc; ++i) {
+        freeval(params[i]);
+        params[i] = args[i];
+        args[i] = nullptr;
+    }
+    freeval(callee);
+    return 1;
 }
 
 extern "C" value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,

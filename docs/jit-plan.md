@@ -56,7 +56,10 @@ Go/No-Go 标准见 §10。
 - pattern 参数：JIT 前绑定函数 scope 与 destructuring 名字，覆盖
   `pattern_bench`；
 - params 直接 frame 化：eligible fast frame 不再创建参数 symbol；
-- `TAIL_CALL`：跳过 JIT 深度计数，保持尾递归测试语义；
+- `TAIL_CALL`：
+  - 自递归尾调用直接复用当前 JIT 机器帧，重绑参数并跳回 body；
+  - 非自递归尾调用跳过深度计数，当前仍走 tail invoke 回退；
+  - 覆盖 100k 自尾递归和 10k 互尾递归；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
@@ -80,7 +83,7 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 
 - Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
 - OSR / deopt；
-- JIT 尾调用尚未复用机器帧，超深尾递归仍受 C++ 栈限制；
+- 非自递归尾调用尚未复用机器帧，超深互递归仍受 C++ 栈限制；
 - pattern 参数必须能编译为原生 PatternDesc，否则回退 VM；
 - 更完整的 opcode 覆盖。
 
@@ -583,6 +586,31 @@ push rax
 4. 否则 → `skein_vm_call_value_args()`。
 
 Phase 2 改为单态 inline cache。
+
+#### 7.6.1 尾调用与字节码 TCO 的结合
+
+字节码编译器已经把 `return f(args)` 编译成 `TAIL_CALL`，所以 JIT 不需要修改
+前端或字节码格式，只需要把 `TAIL_CALL` 当成独立的终止指令处理：
+
+1. 计算 callee 和参数，和普通 `CALL` 一样放在固定 frame 偏移；
+2. 先尝试 **自尾递归 frame 复用**：
+   - callee 是 `T_func`；
+   - callee 的 `function_code` 与当前 `function_code` 相同；
+   - `argc == nparams`；
+   - 无 pattern 参数、非 method；
+   - 类型约束匹配。
+3. 命中时：
+   - 释放当前帧的旧参数值；
+   - 把参数指针移动到参数 slot；
+   - pop 到函数入口的 scope mark；
+   - 直接 `jmp` 到 body 起点，不再次执行 `skein_jit_enter`；
+   - 不增加 `vm_call_depth`，不重复 `diag_push_call`。
+4. 未命中时走通用 `tail invoke`：
+   - 跳过 JIT 深度计数，避免尾递归触发深度错误；
+   - 当前仍是 C++ 递归调用，后续可改成通用 trampoline。
+
+这样 JIT 与字节码 TCO 的语义一致：都是复用当前逻辑帧，只是 VM 复用
+`Executor` 的 fast-frame，JIT 复用机器栈上的 JIT frame。
 
 ### 7.7 所有权与错误
 

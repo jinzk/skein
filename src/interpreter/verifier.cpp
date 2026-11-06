@@ -35,6 +35,24 @@ bool check_slot(const Proto &proto, uint32_t index, size_t pc,
     return true;
 }
 
+bool is_binary_arith(Op op) {
+    switch (op) {
+        case Op::Add:
+        case Op::Sub:
+        case Op::Mul:
+        case Op::Div:
+        case Op::Mod:
+        case Op::BitAnd:
+        case Op::BitOr:
+        case Op::BitXor:
+        case Op::Shl:
+        case Op::Shr:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool check_param(const Proto &proto, uint32_t index, size_t pc,
                  std::string &error) {
     if (index >= proto.param_names.size())
@@ -191,6 +209,25 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             break;
         case Op::IncDecSlot:
             if (!check_slot(proto, ins.b, pc, error))
+                return false;
+            stack(0, 1);
+            break;
+        case Op::BinarySlots: {
+            if (!is_binary_arith(static_cast<Op>(ins.flags)))
+                return fail(error, at_pc("invalid binary superinstruction", pc));
+            if (!check_slot(proto, ins.a, pc, error) ||
+                !check_slot(proto, ins.b & 0xffffu, pc, error) ||
+                !check_slot(proto, ins.b >> 16, pc, error))
+                return false;
+            stack(0, 1);
+            break;
+        }
+        case Op::BinarySlotConst:
+            if (!is_binary_arith(static_cast<Op>(ins.flags)))
+                return fail(error, at_pc("invalid binary superinstruction", pc));
+            if (!check_slot(proto, ins.a, pc, error))
+                return false;
+            if (!check_constant(proto, ins.b, pc, error))
                 return false;
             stack(0, 1);
             break;

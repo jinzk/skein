@@ -824,6 +824,19 @@ public:
                     break;
                 }
 
+                case Op::BinarySlots:
+                case Op::BinarySlotConst: {
+                    value_t *result = binary_slot_fused(
+                        ins, static_cast<Op>(ins.op) ==
+                                 Op::BinarySlotConst);
+                    if (!result)
+                        return abort_error();
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
                 case Op::ClearSlot:
                     if (ins.b < slot_symbols_.size()) {
                         struct symbol *sym = slot_symbols_[ins.b];
@@ -4005,6 +4018,66 @@ private:
             case 6: return cmp <= 0;
             default: return false;
         }
+    }
+
+    value_t *binary_slot_fused(const Instr &ins, bool constant_rhs) {
+        const uint16_t left_index = ins.a;
+        const uint16_t right_index =
+            constant_rhs ? 0 : static_cast<uint16_t>(ins.b & 0xffffu);
+        const uint16_t dest_index =
+            constant_rhs ? ins.a : static_cast<uint16_t>(ins.b >> 16);
+        if (left_index >= slot_symbols_.size() ||
+            dest_index >= slot_symbols_.size() ||
+            (!constant_rhs && right_index >= slot_symbols_.size())) {
+            yyerror("invalid bytecode slot");
+            return NULL;
+        }
+        auto resolve = [&](uint16_t index) -> struct symbol * {
+            struct symbol *sym = slot_symbols_[index];
+            if (!sym)
+                sym = lookupsym(proto().slots[index].name.c_str());
+            return sym;
+        };
+        struct symbol *left = resolve(left_index);
+        struct symbol *right = constant_rhs ? NULL : resolve(right_index);
+        struct symbol *dest = resolve(dest_index);
+        if (!left || (!constant_rhs && !right) || !dest) {
+            yyerror("symbol not found %s",
+                    !left ? proto().slots[left_index].name.c_str()
+                          : (!constant_rhs && !right)
+                                ? proto().slots[right_index].name.c_str()
+                                : proto().slots[dest_index].name.c_str());
+            return NULL;
+        }
+        if (left->is_uninitialized || (!constant_rhs && right->is_uninitialized)) {
+            struct symbol *bad = left->is_uninitialized ? left : right;
+            yyerror("parameter %s is used before it is initialized",
+                    bad->name);
+            return NULL;
+        }
+
+        value_t *right_value = NULL;
+        if (constant_rhs) {
+            const Constant *constant = constant_at(proto(), ins.b);
+            if (!constant || constant->kind != ConstantKind::Value) {
+                yyerror("invalid bytecode constant");
+                return NULL;
+            }
+            right_value = constant->value ? dupval(constant->value.get())
+                                          : newnull();
+        } else {
+            right_value = dupval(right->val);
+        }
+        push(dupval(left->val));
+        push(right_value);
+        if (!binary_op(ins.flags))
+            return NULL;
+        value_t *result = pop_checked();
+        if (!result)
+            return NULL;
+        if (slot_symbols_[dest_index])
+            return assign_symbol_direct(dest, result);
+        return assign_symbol_value(dest->name, result);
     }
 
     bool binary_op(uint8_t opcode) {

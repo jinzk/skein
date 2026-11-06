@@ -1,19 +1,19 @@
 # Skein 运行时与解释器边界
 
-本文定义 Skein 的运行时、解释器、宿主模块之间的职责与依赖方向，作为后续嵌入、插件和 AOT 的架构基础。
+本文定义 Skein 的运行时、解释器、宿主模块之间的职责与依赖方向，作为后续嵌入、插件和潜在 AOT 的架构基础（JIT/AOT 是否实施待决策）。
 
 ## 1. 目标与非目标
 
 目标：
 
 - 明确运行时（值、容器、核心 builtins）与解释器（parser/eval/package）的边界；
-- 允许解释器和未来的 AOT 生成代码共享同一套运行时；
+- 允许解释器和潜在的 AOT 生成代码共享同一套运行时（若批准）；
 - 允许可选原生模块（TLS/HTTP2/FFI/压缩等）按需链接或加载；
 - 保持当前单文件 CLI 的默认体验不变。
 
 非目标（当前阶段）：
 
-- 不实现 AOT 代码生成；
+- 不实现 AOT/JIT 代码生成（待决策）；
 - 不默认把 builtins 或运行时做成 `.so`；
 - 不承诺外部 ABI 的长期二进制兼容；
 - 不把全部 builtins 拆成独立插件。
@@ -50,7 +50,7 @@ L0  platform          src/platform/：OS 原语（文件/时间/线程/进程/so
 | 边界 | 使用者 | 类型 | 稳定性 |
 |---|---|---|---|
 | 内部 ABI | interpreter、核心 builtins、静态模块 | C++（`value_t*`、`std::vector`） | 与源码版本强绑定 |
-| 外部 ABI | 插件、嵌入、未来 AOT | 纯 C、opaque handle、固定宽度整数 | v1 只追加字段，使用前检查 `size` |
+| 外部 ABI | 插件、嵌入、潜在 AOT | 纯 C、opaque handle、固定宽度整数 | v1 只追加字段，使用前检查 `size` |
 
 内部 ABI 保留 `value_t*` 和 `dupval/freeval` 的性能；外部 ABI 使用 `skein_value*` 不透明句柄，不暴露 C++ 类型。
 
@@ -88,7 +88,7 @@ skein_context *skein_context_current();
 void skein_context_set(skein_context *ctx);
 ```
 
-- `call`：调用用户函数/闭包；由 interpreter 或 AOT dispatcher 提供。
+- `call`：调用用户函数/闭包；由 interpreter 或潜在 AOT dispatcher 提供。
 - `call_builtin`：按 builtin id 调用 builtins；由 L3 提供。
 - context 每线程一个；L1 不持有可变的进程全局状态。
 
@@ -151,9 +151,13 @@ typedef struct {
   runtime-only 链接检查；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
 
+待决策：
+
+- JIT/AOT 代码生成与字节码缓存。
+
 未开始：
 
-- AOT 代码生成与 GC 栈图；
+- 精确 GC 栈图；
 - FFI 的 Windows/32 位/ARM CI 与 fuzz。
 
 ## 7. 验收标准

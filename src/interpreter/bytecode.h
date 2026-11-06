@@ -58,6 +58,8 @@ enum class Op : uint8_t {
     StoreSlot,
     CompoundSlot,
     IncDecSlot,
+    BinarySlots,
+    BinarySlotConst,
     ClearSlot,
     LoadUpvalue,
     StoreUpvalue,

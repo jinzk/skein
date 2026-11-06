@@ -187,11 +187,129 @@ void eliminate_unreachable(Proto &proto) {
     proto.locs = std::move(locs);
 }
 
+bool op_is_binary_arith(Op op) {
+    switch (op) {
+        case Op::Add:
+        case Op::Sub:
+        case Op::Mul:
+        case Op::Div:
+        case Op::Mod:
+        case Op::BitAnd:
+        case Op::BitOr:
+        case Op::BitXor:
+        case Op::Shl:
+        case Op::Shr:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void fuse_slot_operations(Proto &proto) {
+    const size_t count = proto.code.size();
+    if (count < 4)
+        return;
+
+    std::vector<uint8_t> target(count, 0);
+    for (const Instr &ins : proto.code) {
+        const Op op = static_cast<Op>(ins.op);
+        if (op_has_jump_target(op) && ins.b < count)
+            target[ins.b] = 1;
+    }
+
+    for (size_t i = 0; i + 3 < count; ++i) {
+        if (target[i + 1] || target[i + 2] || target[i + 3])
+            continue;
+        auto fusable_dest = [&](uint32_t dest) {
+            return dest < proto.slots.size() &&
+                   !proto.slots[dest].is_const &&
+                   proto.slots[dest].type.kind == TYPE_ANY;
+        };
+        const Op first = static_cast<Op>(proto.code[i].op);
+        const Op second = static_cast<Op>(proto.code[i + 1].op);
+        const Op operation = static_cast<Op>(proto.code[i + 2].op);
+        const Op store = static_cast<Op>(proto.code[i + 3].op);
+        if (store != Op::StoreSlot || !op_is_binary_arith(operation))
+            continue;
+
+        if (first == Op::LoadSlot && second == Op::LoadSlot) {
+            const uint32_t left = proto.code[i].b;
+            const uint32_t right = proto.code[i + 1].b;
+            const uint32_t dest = proto.code[i + 3].b;
+            if (left > UINT16_MAX || right > UINT16_MAX ||
+                dest > UINT16_MAX || !fusable_dest(dest))
+                continue;
+            Instr fused;
+            fused.op = static_cast<uint8_t>(Op::BinarySlots);
+            fused.flags = proto.code[i + 2].op;
+            fused.a = static_cast<uint16_t>(left);
+            fused.b = right | (dest << 16);
+            proto.code[i] = fused;
+            for (size_t j = i + 1; j <= i + 3; ++j)
+                proto.code[j].op = static_cast<uint8_t>(Op::Nop);
+            i += 3;
+            continue;
+        }
+
+        if (first == Op::LoadSlot && second == Op::LoadConst) {
+            const uint32_t slot = proto.code[i].b;
+            const uint32_t dest = proto.code[i + 3].b;
+            if (slot > UINT16_MAX || dest != slot || !fusable_dest(dest))
+                continue;
+            Instr fused;
+            fused.op = static_cast<uint8_t>(Op::BinarySlotConst);
+            fused.flags = proto.code[i + 2].op;
+            fused.a = static_cast<uint16_t>(slot);
+            fused.b = proto.code[i + 1].b;
+            proto.code[i] = fused;
+            for (size_t j = i + 1; j <= i + 3; ++j)
+                proto.code[j].op = static_cast<uint8_t>(Op::Nop);
+            i += 3;
+        }
+    }
+}
+
+void remove_nops(Proto &proto) {
+    const size_t count = proto.code.size();
+    std::vector<uint32_t> new_pc(count + 1, 0);
+    uint32_t kept = 0;
+    for (size_t pc = 0; pc < count; ++pc) {
+        new_pc[pc] = kept;
+        if (static_cast<Op>(proto.code[pc].op) != Op::Nop)
+            ++kept;
+    }
+    new_pc[count] = kept;
+    if (kept == count)
+        return;
+
+    std::vector<Instr> code;
+    std::vector<SourceLoc> locs;
+    code.reserve(kept);
+    locs.reserve(kept);
+    for (size_t pc = 0; pc < count; ++pc) {
+        const Op op = static_cast<Op>(proto.code[pc].op);
+        if (op == Op::Nop)
+            continue;
+        Instr ins = proto.code[pc];
+        if (op_has_jump_target(op))
+            ins.b = new_pc[ins.b < count ? ins.b : count];
+        code.push_back(ins);
+        if (pc < proto.locs.size())
+            locs.push_back(proto.locs[pc]);
+        else
+            locs.push_back(SourceLoc());
+    }
+    proto.code = std::move(code);
+    proto.locs = std::move(locs);
+}
+
 void optimize_proto(Proto &proto) {
     if (!bytecode_optimization_enabled())
         return;
     thread_jumps(proto);
     eliminate_unreachable(proto);
+    fuse_slot_operations(proto);
+    remove_nops(proto);
 }
 
 bool finalize_proto(Proto &proto, std::string &error) {

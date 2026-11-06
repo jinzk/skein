@@ -192,6 +192,51 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
+        "slot superinstructions",
+        "func calc() {\n"
+        "  let a = 7;\n"
+        "  let b = 3;\n"
+        "  let d = 0;\n"
+        "  d = a + b; print(d);\n"
+        "  d = a - b; print(d);\n"
+        "  d = a * b; print(d);\n"
+        "  d = a / b; print(d);\n"
+        "  d = a % b; print(d);\n"
+        "  d = a & b; print(d);\n"
+        "  d = a | b; print(d);\n"
+        "  d = a ^ b; print(d);\n"
+        "  d = a << 1; print(d);\n"
+        "  d = a >> 1; print(d);\n"
+        "  let c = 0;\n"
+        "  c = c + 2; print(c);\n"
+        "  c = c * 3; print(c);\n"
+        "  return d;\n"
+        "}\n"
+        "print(calc());\n",
+        stdout_all=["10", "4", "21", "2", "1", "3", "7", "4",
+                    "14", "3", "2", "6", "3"],
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="1"),
+    )
+    check(
+        "slot superinstructions disabled",
+        "func calc() {\n"
+        "  let a = 7;\n"
+        "  let b = 3;\n"
+        "  let d = 0;\n"
+        "  d = a + b;\n"
+        "  d = a - b;\n"
+        "  d = a * b;\n"
+        "  d = a / b;\n"
+        "  d = a % b;\n"
+        "  let c = 1;\n"
+        "  c = c + 2;\n"
+        "  return [d, c];\n"
+        "}\n"
+        "print(calc());\n",
+        stdout="[1, 3]",
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
+    )
+    check(
         "fast call argument buffers",
         "func zero() { return 0; }\n"
         "func add(a, b, c, d, e, f, g, h) {\n"

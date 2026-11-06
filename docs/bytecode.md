@@ -98,6 +98,8 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
   int64 精确比较语义保持不变）
 - 条件比较融合（`CMP_JUMP`：比较后直接跳转，用于 if/while/for/guard）
 - 安全常量折叠（数值运算、位运算、数值比较；溢出/除零时不折叠）
+- slot 算术超指令（`BINARY_SLOTS` / `BINARY_SLOT_CONST`：
+  `LOAD_SLOT/LOAD_CONST + 算术 + STORE_SLOT` 融合）
 - 三元表达式
 - `if` / `while` / `do while` / C 风格 `for`
 - `for ... in`（list/dict/string/bytes/deque/heap/set/generator）
@@ -205,13 +207,14 @@ STORE_NAME / COMPOUND_NAME / INCDEC_NAME / DEFINE_NAME
 LOAD_GLOBAL / STORE_GLOBAL / COMPOUND_GLOBAL / INCDEC_GLOBAL
 LOAD_PARAM / STORE_PARAM / COMPOUND_PARAM / INCDEC_PARAM
 DEFINE_SLOT / LOAD_SLOT / STORE_SLOT / COMPOUND_SLOT / INCDEC_SLOT / CLEAR_SLOT
+BINARY_SLOTS / BINARY_SLOT_CONST
 POP / DUP / SWAP
 ADD / SUB / MUL / DIV / MOD / NEG
 BIT_AND / BIT_OR / BIT_XOR / SHL / SHR / BIT_NOT / NOT
 CMP_EQ / CMP_NE / CMP_LT / CMP_LE / CMP_GT / CMP_GE
 IS_TYPE
 JUMP / JUMP_IF_FALSE / JUMP_IF_TRUE
-NEW_LIST / NEW_DICT / GET_INDEX / GET_INDEX_CACHED / GET_FIELD / GET_FIELD_NAME
+NEW_LIST / NEW_DICT / GET_INDEX / GET_INDEX_CACHED / GET_FIELD / GET_FIELD_NAME / GET_FIELD_OR_ENUM
 ITER_NEW / ITER_NEXT / ITER_END
 SWITCH_CHECK / CASE_MATCH
 MATCH_BEGIN / MATCH_TEST / MATCH_BIND
@@ -304,7 +307,7 @@ struct Instr {
   时回退普通调用。诊断调用栈最多保留 64 层尾调用帧。
 - AST 参考后端调用深度默认 1000，可用 `SKEIN_MAX_CALL_DEPTH` 调整；
   sanitizer 构建使用更小的值以适配更大的 C++ 帧。
-- 尚未实现精确 GC 栈图、字节码序列化。
+- 尚未实现精确 GC 栈图；JIT/AOT、字节码序列化与磁盘缓存待决策。
 
 ## 7. 后续阶段
 
@@ -313,7 +316,7 @@ struct Instr {
 3. 扩展尾调用优化到 spread / method / 默认参数 / variadic；
 4. 把 VM 执行缓存、函数体/默认参数/pattern AST 全部收敛到 L2 side table
    （已完成，后续只保留签名元数据）；
-5. 精确 GC 栈图与字节码序列化；
+5. 精确 GC 栈图；JIT/AOT、字节码序列化待决策；
 6. generator/async 与 VM 状态整合；
 7. unboxed slot、内联缓存、超指令、computed goto；
 8. AST 后端降级为可选参考实现。

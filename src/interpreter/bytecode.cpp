@@ -30,6 +30,8 @@ const char *op_name(Op op) {
         case Op::StoreSlot: return "STORE_SLOT";
         case Op::CompoundSlot: return "COMPOUND_SLOT";
         case Op::IncDecSlot: return "INCDEC_SLOT";
+        case Op::BinarySlots: return "BINARY_SLOTS";
+        case Op::BinarySlotConst: return "BINARY_SLOT_CONST";
         case Op::ClearSlot: return "CLEAR_SLOT";
         case Op::LoadUpvalue: return "LOAD_UPVALUE";
         case Op::StoreUpvalue: return "STORE_UPVALUE";
@@ -164,6 +166,7 @@ std::string disassemble(const Proto &proto) {
             op == Op::LoadGlobal || op == Op::StoreGlobal ||
             op == Op::CompoundGlobal || op == Op::IncDecGlobal ||
             op == Op::GetFieldName ||
+            op == Op::BinarySlotConst ||
             op == Op::IsType ||
             op == Op::BindName ||
             op == Op::Closure || op == Op::BindFunc ||
@@ -189,6 +192,12 @@ std::string disassemble(const Proto &proto) {
         }
         if (op == Op::GetIndexCached)
             out << " cache=" << ins.b;
+        if (op == Op::BinarySlots) {
+            out << " slots=" << ins.a << "," << (ins.b & 0xffffu)
+                << "->" << (ins.b >> 16);
+        }
+        if (op == Op::BinarySlotConst)
+            out << " slot=" << ins.a;
         if (op == Op::Import && ins.a < proto.imports.size())
             out << " import=" << proto.imports[ins.a].path;
         if (op == Op::DeferPush && ins.b < proto.defer_protos.size())

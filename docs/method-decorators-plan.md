@@ -1,7 +1,8 @@
-# Skein 方法装饰器实施计划（方案 A：AST 脱糖）
+# Skein 函数与方法装饰器实施计划（方案 A：AST 脱糖）
 
 - 更新日期：2026-11-06
-- 状态：M1-1 ~ M1-5 已实现（2026-11-06）
+- 状态：M1 方法装饰器、M2 命名函数装饰器、M3 async 方法、
+  M4 async 方法装饰器已实现（2026-11-06）
 - 方案：A（AST lowering / 编译器生成包装方法）
 - 关联文档：[README.md](../README.md)、[SYNTAX.md](../SYNTAX.md)、
   [architecture.md](architecture.md)、[metaprogramming-plan.md](metaprogramming-plan.md)、
@@ -34,21 +35,23 @@ impl Point {
 ### 1.2 目标
 
 1. 支持 `impl` 固有方法和 trait 实现方法上的 `@expr` 装饰器。
-2. 调用点保持 `p.area()` / `x.draw()` 不变。
-3. 装饰器在包加载（或包含 `impl` 的语句执行）时应用一次，不是每次调用。
-4. 支持多个装饰器、带参装饰器、默认参数、可变参数。
-5. `std.meta.methods` / `std.meta.traits` 看到的签名不变。
-6. AST 与 VM 两个后端行为一致，VM-only 构建可用。
-7. 不引入用户自定义宏，不做编译期任意代码执行。
+2. 支持命名自由函数（含 `async func`、generator 函数、`export func`）上的
+   `@expr` 装饰器。
+3. 调用点保持 `p.area()` / `x.draw()` 不变。
+4. 装饰器在包加载（或包含声明的语句执行）时应用一次，不是每次调用。
+5. 支持多个装饰器、带参装饰器、默认参数、可变参数。
+6. `std.meta.methods` / `std.meta.traits` 看到的签名不变。
+7. AST 与 VM 两个后端行为一致，VM-only 构建可用。
+8. 不引入用户自定义宏，不做编译期任意代码执行。
 
 ### 1.3 非目标
 
 - 不新增 `decorator` 关键字或专用“装饰器定义语法”。
-- 不支持顶层自由函数的 `@decorator` 语法（继续手写 `f = dec(f)`）。
+- 不支持匿名函数/`let f = func(...)` 前的 `@` 语法（继续手写 `f = dec(f)`）。
 - 不支持 `struct` / `enum` / `trait` 声明的装饰器。
 - 不支持解构参数方法上的装饰器（v1 明确报错）。
 - 不支持 generator 方法上的装饰器（v1 明确报错）。
-- 不支持 async 方法装饰器（当前方法语法本身不支持 `async`）。
+- 不支持 async generator 方法。
 - 不支持装饰器改变方法签名、返回值类型约束或方法名。
 - 不支持 VM 级方法分派钩子或运行时可变方法表。
 - 不实现 `@derive` 或任何编译期代码生成属性。
@@ -224,6 +227,65 @@ decorated method parameters cannot use destructuring patterns
 - 枚举方法支持装饰器，规则同 struct 方法；枚举 `self` 仍保持只读语义。
 - `std.meta.methods(type)` 返回 wrapper 的参数列表和 `has_defaults`，
   与原方法一致；装饰器本身不出现在元数据中。
+
+### 2.7 命名函数装饰器
+
+命名函数使用同一套 `@expr` 语法：
+
+```skein
+@logged
+@cached({"ttl": 100})
+func load(path) { ... }
+```
+
+lower 成：
+
+```skein
+let $d$func$load$10$1$1: callable = logged;
+let $d$func$load$10$1$2: callable = cached({"ttl": 100});
+func load(path) { ... }
+let $dec$func$load$10$1: callable =
+  $d$func$load$10$1$1($d$func$load$10$1$2(load));
+load = $dec$func$load$10$1;
+```
+
+规则：
+
+- 装饰器表达式在函数绑定前按源码顺序求值，避免同名函数遮蔽装饰器；
+- 装饰器应用在函数创建后，从下往上；
+- 函数名最终绑定到装饰后的 callable；
+- 递归调用会走装饰后的函数；
+- 支持 `export func`；隐藏绑定不导出，导出命名空间看到装饰后的值；
+- 支持 `async func` 和 generator 函数；装饰器最终必须返回 callable，可以
+  返回普通函数、async 函数或 generator 函数；
+- 与 Python 的 `@dec def f` 语义一致：`f = dec(f)`；
+- 匿名函数、`let f = func(...)`、`const f = func(...)` 仍手动包装。
+
+### 2.8 async 方法
+
+- `impl Type { async func m(self, ...) ... }` 和 enum 方法支持 `async`；
+- `p.m()` 返回 task，`await p.m()` 等待；
+- async trait 方法使用 `trait T { async func m(self); }`；
+- trait 与实现的 async 标记必须一致；
+- `impl T for Type;` 可适配已有 async 方法；
+- 默认值在 task 开始前求值；
+- `self` 是接收者副本，userdata 句柄共享；
+- `std.meta.methods` 增加 `async` 字段；
+- 取消外层 task 不自动取消被 await 的内层 task。
+
+### 2.9 async 方法装饰器
+
+- 去掉对 async 方法的拒绝；
+- 隐藏 `$body` 保持 `is_async`；
+- 生成 async wrapper：
+  ```text
+  async func m(self, ...) {
+    return await $dec(self, ...);
+  }
+  ```
+- 装饰器是普通函数，返回 async callable；
+- `async func` 直接作为装饰器会返回 task，不是 callable；
+- generator 方法装饰器仍不支持。
 
 ## 3. Lowering 设计
 
@@ -445,7 +507,11 @@ retry(3)($body)
   - 空 body；
   - `{ list }` body；
   - `=> exp;` body。
+- 把命名函数声明集中到 `func_decl`，覆盖普通/async/export/export async；
+- `stmt` 增加 `decorators func_decl`，在动作中调用
+  `lower_function_decorators`；
 - 在 `impl_decl` 动作中调用 `lower_impl_decorators`。
+- `decorator` 规则带可选 `eols`：顶层有 EOL，`impl` 花括号内没有 EOL。
 - `@` 已经是现有字符 token，无需修改 lexer。
 - 确认 `import @pkg` 的语法不受影响。
 
@@ -455,6 +521,8 @@ retry(3)($body)
 
 ```cpp
 struct ast *lower_impl_decorators(struct impl_node *impl);
+struct ast *lower_function_decorators(struct ast *decorators,
+                                      struct funcdef *func);
 ```
 
 职责：
@@ -468,7 +536,7 @@ struct ast *lower_impl_decorators(struct impl_node *impl);
 
 内部辅助（实际实现名）：
 
-- `hidden_name(...)`；
+- `hidden_name(...)` / `function_hidden_name(...)`；
 - `copy_symlist(...)`；
 - `move_defaults(...)`；
 - `build_decorator_chain(...)`；
@@ -596,12 +664,82 @@ src/interpreter/decorators.cpp
 - 非装饰器方法性能无明显回退；
 - 记录设计偏差和未完成项。
 
+### M2-1：命名函数装饰器 lowering（S/M，P0）
+
+状态：**已完成（2026-11-06）**。
+
+- 把命名函数规则集中到 `func_decl`，覆盖普通/async/export/export async；
+- `stmt` 支持 `decorators func_decl`；
+- 新增 `lower_function_decorators`；
+- 装饰器表达式在函数绑定前求值，应用在函数创建后；
+- 最终函数名绑定装饰后的 callable；
+- 递归、导出、async、generator 函数可用。
+
+验收：
+
+- `@dec func f` 等价于 `func f; f = dec(f);`
+- 多个装饰器顺序正确；
+- 同名局部函数不会遮蔽装饰器表达式；
+- `export func` 在包外看到装饰后的值；
+- async/generator 函数可被普通装饰器包装。
+
+### M2-2：命名函数测试（S/M，P0）
+
+状态：**已完成（2026-11-06）**。
+
+- 新增自由函数装饰器用例；
+- 覆盖多装饰器、带参装饰器、递归、同名遮蔽；
+- 覆盖 `export func` 跨包；
+- 覆盖 async 函数和 generator 函数；
+- 覆盖非 callable 结果错误；
+- VM/AST 差分。
+
+### M2-3：文档更新（S，P0）
+
+状态：**已完成（2026-11-06）**。
+
+- `SYNTAX.md` 增加 5.11.1 命名函数装饰器；
+- `README.md` 增加自由函数装饰器示例；
+- 更新方法装饰器的限制说明；
+- `docs_sync_test` 通过。
+
+### M3：async 方法与 async trait 方法（M，P0）
+
+状态：**已完成（2026-11-06）**。
+
+- `method_decl` 支持 `ASYNC funcstart`；
+- `trait_method` 支持 `async func`；
+- `method_sig` / trait 元数据增加 `is_async`；
+- `method_signature_matches` 比较 async 标记；
+- `std.meta.methods` 增加 `async`；
+- `await` 非 task 明确报错；
+- 修正 VM 函数缓存在退出时的重入释放问题；
+- 覆盖固有方法、enum、trait、适配、默认值、variadic、方法值、defer、递归。
+
+### M4：async 方法装饰器（S/M，P0）
+
+状态：**已完成（2026-11-06）**。
+
+- 移除 async 方法装饰器拒绝；
+- 隐藏 `$body` 保持 async；
+- 生成 async wrapper 并 await `$dec`；
+- trait async 签名匹配；
+- 覆盖 before/after、默认值、variadic、错误、取消语义。
+
 ## 7. 测试计划
 
 ### 7.1 功能用例
 
 | 场景 | 重点 |
 |---|---|
+| 命名函数 | `@dec func f` 等价于 `f = dec(f)` |
+| 命名函数多装饰器 | 表达式顺序、应用顺序、递归 |
+| 命名函数遮蔽 | 局部同名函数不遮蔽装饰器表达式 |
+| 命名函数导出 | `export func` 跨包看到装饰后的值 |
+| 命名函数 async/generator | 普通装饰器可返回 async/generator 函数 |
+| async 方法 | 返回 task、await、默认值、variadic、defer、递归 |
+| async trait 方法 | 声明/实现/适配/跨包、async 标记匹配 |
+| async 方法装饰器 | async wrapper 包围真实 await、错误、取消 |
 | 固有方法 | `p.m()` 经过装饰器，调用点不变 |
 | trait 方法 | `impl Trait for Type { @dec func ... }`；`render(x: Trait)` 不变 |
 | trait 适配 | `impl Type { @dec func ... }` + `impl Trait for Type;` |
@@ -619,8 +757,8 @@ src/interpreter/decorators.cpp
 
 ### 7.2 错误用例
 
-- `@dec` 后不是方法声明；
-- `@dec` 用在 `trait` / `struct` / 顶层 `func`；
+- `@dec` 后不是函数/方法声明；
+- `@dec` 用在 `trait` / `struct` / `let` / `const`；
 - 装饰器表达式未定义或求值失败；
 - 装饰器返回非 callable；
 - 解构参数方法；
@@ -651,11 +789,19 @@ src/interpreter/decorators.cpp
 ## 8. 验收标准
 
 - [x] `impl` 固有方法和 trait 实现方法支持 `@expr`。
+- [x] 命名函数（含 async/generator/export）支持 `@expr`。
+- [x] 命名函数装饰器表达式在函数绑定前求值，应用从下往上。
+- [x] 命名函数递归、导出和同名遮蔽语义正确。
 - [x] 多个装饰器按 Python 语义从下往上应用。
 - [x] 带参装饰器、默认值、可变参数可用。
 - [x] 装饰器在定义时执行一次，不随调用重复执行。
 - [x] 方法调用点、方法值提取、trait 分派保持透明。
-- [x] `std.meta.methods` / `std.meta.traits` 签名不变。
+- [x] `std.meta.methods` / `std.meta.traits` 参数签名不变，新增 `async` 字段。
+- [x] async 方法返回 task，`await`、默认值、variadic、defer、递归可用。
+- [x] async trait 方法可声明、实现、适配，async 标记不匹配时报错。
+- [x] async 方法装饰器生成 async wrapper 并包围真实 await。
+- [x] `await` 非 task 报错。
+- [x] VM 函数缓存退出释放问题已修复。
 - [x] 隐藏 `$body` 保持 `self` const 语义。
 - [x] 装饰器结果非 callable 时在安装时报错。
 - [x] 解构参数和 generator 方法在 v1 有明确错误。
@@ -677,6 +823,8 @@ src/interpreter/decorators.cpp
 | 解构参数转发改变语义 | 值身份 / rest 内容变化 | v1 直接拒绝；文档明确 |
 | generator 方法语义复杂 | 装饰器无法正确驱动 yield | v1 直接拒绝 |
 | 装饰器表达式引用同 impl 方法 | 求值时机不确定 | 规定 impl 安装前求值；文档和测试 |
+| 命名函数遮蔽装饰器表达式 | 装饰到错误对象 | 表达式在函数绑定前求值；测试同名局部函数 |
+| 导出函数赋值时机 | 导入方看到旧值 | 在包内、导出命名空间构建前赋值；跨包测试 |
 | 隐藏命名冲突 | `symbol repeated` | 非源码可写前缀 + 行列 + 方法名 |
 | 错误位置指向 wrapper | 调试体验差 | wrapper 使用原方法行列；后续可标记透明帧 |
 | parser `@` 与 import 冲突 | 语法回归 | 现有 import 测试；上下文限定 |
@@ -686,17 +834,15 @@ src/interpreter/decorators.cpp
 
 以下不在本计划范围，但设计上保留空间：
 
-1. **顶层自由函数装饰器**
-   可 lower 为 `f = dec(f);`，但需要处理导出符号和递归引用。
-2. **async 方法装饰器**
-   需要方法语法先支持 `async`，并定义 `await` 转发规则。
-3. **generator 方法装饰器**
+1. **匿名函数 / `let f = func` 装饰器**
+   需要决定 `@` 与 `let`/`const` 的语法位置；当前继续手写 `f = dec(f)`。
+2. **generator 方法装饰器**
    需要定义 `yield` / `next` 协议如何被装饰器包装。
-4. **解构参数方法**
+3. **解构参数方法**
    需要无损参数重建规则，可能只支持部分模式。
-5. **`--expand` 调试输出**
+4. **`--expand` 调试输出**
    展示 lowering 后的隐藏绑定和 wrapper；不影响运行时。
-6. **装饰器元数据**
+5. **装饰器元数据**
    如果未来需要 `std.meta` 暴露“方法被哪些装饰器修饰”，需要额外的只读
    元数据，不在 v1。
 
@@ -707,9 +853,14 @@ src/interpreter/decorators.cpp
 3. M1-3（VM 集成与所有权）
 4. M1-4（测试与边界）
 5. M1-5（文档与全量验收）
+6. M2-1（命名函数 lowering）
+7. M2-2（命名函数测试）
+8. M2-3（命名函数文档）
+9. M3（async 方法与 async trait 方法）
+10. M4（async 方法装饰器）
 
 先完成单装饰器、无默认值、固有方法的垂直切片，再扩展多装饰器、默认值、
-variadic、trait 和跨包场景。
+variadic、trait、跨包、命名函数和 async 场景。
 
 ## 12. 实施结果（2026-11-06）
 
@@ -718,24 +869,30 @@ variadic、trait 和跨包场景。
 - `src/interpreter/decorators.h` / `decorators.cpp`；
 - `struct_member.decorators`、`funcdef.is_method`；
 - `take_symlist_default_ast`；
-- parser 的 `@` 方法装饰器语法和 `decorator_expr`；
+- parser 的 `@` 方法/命名函数装饰器语法和 `decorator_expr`；
 - `impl_decl` 的 AST lowering；
-- `tests/cases/decorators.py` 及测试注册；
+- `func_decl` + `lower_function_decorators` 的命名函数 lowering；
+- async 方法、async trait 方法、async 方法装饰器；
+- `std.meta.methods` 的 `async` 字段；
+- VM 函数缓存退出释放修复；
+- `tests/cases/decorators.py`、`tests/cases/async_methods.py` 及注册；
 - README / SYNTAX / architecture 文档更新。
 
 验证结果：
 
 ```text
 ctest (build):            11/11 passed
-tools/check_all.sh --clean --jobs 2: all checks passed
-ASan/UBSan VM + AST:      decorators cases passed
-LSan:                     decorator success/failure paths passed
-VM-only:                  decorators cases passed
+tools/check_all.sh:         all checks passed（LSan 单测曾因网络用例超时
+                           失败，单独重跑通过）
+ASan/UBSan VM + AST:      decorators / async methods passed
+LSan:                     decorator / async success and failure paths passed
+VM-only:                  decorators / async methods passed
 vm_differential_test:     passed
 docs_sync_test:           passed
 boundary_check_test:      passed
 ```
 
-已知限制与计划一致：只支持 `impl` 方法；装饰器表达式支持名称、成员访问、
-调用、下标和括号表达式；不支持解构参数、generator 方法、顶层函数装饰器和
-类型声明装饰器。
+已知限制与计划一致：支持 `impl` 方法、命名自由函数、async 方法、
+async trait 方法和 async 方法装饰器；匿名函数 / `let f = func(...)` 仍需
+手动包装；装饰器表达式支持名称、成员访问、调用、下标和括号表达式；
+不支持解构参数方法、generator 方法、async generator 方法和类型声明装饰器。

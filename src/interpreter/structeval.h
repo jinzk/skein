@@ -72,6 +72,7 @@ struct trait_param_meta {
 struct trait_method_meta {
     std::string name;
     std::vector<trait_param_meta> params;
+    bool is_async = false;
 };
 
 bool declare_trait_meta(

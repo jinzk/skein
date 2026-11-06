@@ -212,6 +212,11 @@ static bool method_signature_matches(const method_sig *sig,
         error = "trait methods cannot be variadic";
         return false;
     }
+    if (sig->is_async != code->is_async) {
+        error = "method " + sig->name + " async marker does not match " +
+                "the trait signature";
+        return false;
+    }
     if ((int)sig->params.size() != code->nparams) {
         error = "method " + sig->name + " has the wrong number of parameters";
         return false;
@@ -396,6 +401,7 @@ void eval_trait_decl(struct trait_node *t) {
         }
         method_sig sig;
         sig.name = m->name;
+        sig.is_async = m->is_async != 0;
         for (struct symlist *p = m->params; p; p = p->next) {
             if (p->variadic) {
                 yyerror("trait methods cannot be variadic");
@@ -519,6 +525,7 @@ bool declare_trait_meta(
         }
         method_sig signature;
         signature.name = method.name;
+        signature.is_async = method.is_async;
         for (const trait_param_meta &param : method.params) {
             if (param.variadic) {
                 yyerror("trait methods cannot be variadic");

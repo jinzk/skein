@@ -1062,7 +1062,8 @@ struct ast *newtraitdecl(char *name, char *module,
     return (struct ast *)a;
 }
 
-struct ast *newtraitmethod(char *name, struct symlist *params) {
+struct ast *newtraitmethod(char *name, struct symlist *params,
+                           bool is_async) {
     struct trait_method *a =
         (struct trait_method *)std::malloc(sizeof(struct trait_method));
     if (!a) {
@@ -1073,6 +1074,7 @@ struct ast *newtraitmethod(char *name, struct symlist *params) {
     set_loc(a, 0, 0);
     a->name = name;
     a->params = params;
+    a->is_async = is_async ? 1 : 0;
     a->next = NULL;
     return (struct ast *)a;
 }

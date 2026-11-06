@@ -2,6 +2,7 @@
 #define SKEIN_DECORATORS_H
 
 struct ast;
+struct funcdef;
 struct impl_node;
 
 /*
@@ -19,5 +20,21 @@ struct impl_node;
  * impl is returned unchanged.
  */
 struct ast *lower_impl_decorators(struct impl_node *impl);
+
+/*
+ * Lower decorators on a named function declaration:
+ *
+ *   let $d0: callable = <decorator expression 0>;
+ *   let $d1: callable = <decorator expression 1>;
+ *   func f(...) { ... }
+ *   let $dec: callable = $d0($d1(f));
+ *   f = $dec;
+ *
+ * Decorator expressions are evaluated before the function binding, and
+ * applied from the inside out afterwards.  Returns the original funcdef when
+ * there are no decorators.
+ */
+struct ast *lower_function_decorators(struct ast *decorators,
+                                      struct funcdef *func);
 
 #endif

@@ -63,5 +63,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
 
 /* Drop cached bytecode before a function_code is freed. */
 void skein_vm_forget_function_code(struct function_code *code);
+/* Clear VM-side function caches before runtime/type teardown. */
+void skein_vm_shutdown();
 
 #endif

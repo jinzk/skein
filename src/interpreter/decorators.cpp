@@ -57,6 +57,23 @@ void free_decorator_wrappers(struct ast *node) {
     std::free(node);
 }
 
+std::string function_hidden_name(const char *kind,
+                                 const struct funcdef *func, int index) {
+    std::string name = "$";
+    name += kind ? kind : "hidden";
+    name += "$func$";
+    name += func && func->name ? func->name : "?";
+    name += "$";
+    name += std::to_string(func ? func->line : 0);
+    name += "$";
+    name += std::to_string(func ? func->column : 0);
+    if (index > 0) {
+        name += "$";
+        name += std::to_string(index);
+    }
+    return name;
+}
+
 std::string hidden_name(const char *kind, const struct impl_node *impl,
                         const struct struct_member *member, int index) {
     std::string name = "$";
@@ -138,11 +155,6 @@ bool validate_decorated_method(const struct struct_member *member) {
                 member_name(member));
         return false;
     }
-    if (func->is_async) {
-        set_method_location(member);
-        yyerror("decorated method %s cannot be async", member_name(member));
-        return false;
-    }
     for (const struct symlist *param = func->sl; param; param = param->next) {
         if (param->has_pattern || symlist_pattern_ast(
                                       const_cast<struct symlist *>(param))) {
@@ -189,7 +201,7 @@ struct ast *build_decorator_chain(
 
 struct ast *build_wrapper_body(const std::string &decorator_name,
                                const struct symlist *params,
-                               int line, int column) {
+                               int line, int column, bool is_async) {
     std::vector<struct ast *> arguments;
     for (const struct symlist *param = params; param; param = param->next) {
         const char *name =
@@ -206,6 +218,12 @@ struct ast *build_wrapper_body(const std::string &decorator_name,
     struct ast *call = newcall(make_ref(decorator_name), argument_list);
     call->line = line;
     call->column = column;
+    if (is_async) {
+        struct ast *awaited = newawait(call);
+        awaited->line = line;
+        awaited->column = column;
+        call = awaited;
+    }
     struct ast *body = newret(call);
     body->line = line;
     body->column = column;
@@ -249,9 +267,10 @@ struct ast *lower_impl_decorators(struct impl_node *impl) {
         body->is_method = 1;
 
         struct ast *wrapper_body = build_wrapper_body(
-            decorator_name, body->sl, method->line, method->column);
+            decorator_name, body->sl, method->line, method->column,
+            body->is_async != 0);
         struct ast *wrapper = newfunc(NULL, wrapper_params, wrapper_body,
-                                      false, false, false);
+                                      false, body->is_async != 0, false);
         wrapper->line = method->line;
         wrapper->column = method->column;
 
@@ -278,5 +297,62 @@ struct ast *lower_impl_decorators(struct impl_node *impl) {
     struct ast *result = (struct ast *)impl;
     for (size_t i = prelude.size(); i > 0; --i)
         result = newast('L', prelude[i - 1], result);
+    return result;
+}
+
+struct ast *lower_function_decorators(struct ast *decorators,
+                                      struct funcdef *func) {
+    if (!decorators || !func || !func->name)
+        return (struct ast *)func;
+
+    std::vector<struct ast *> expressions;
+    collect_decorator_expressions(decorators, expressions);
+    if (expressions.empty())
+        return (struct ast *)func;
+
+    /*
+     * Evaluate decorator expressions before binding the function name.
+     * This matches Python's evaluation order and avoids a function named
+     * like the decorator shadowing the decorator expression.
+     */
+    std::vector<struct ast *> prelude;
+    std::vector<std::string> decorator_names;
+    for (size_t i = 0; i < expressions.size(); ++i) {
+        std::string name =
+            function_hidden_name("d", func, static_cast<int>(i) + 1);
+        decorator_names.push_back(name);
+        struct ast *binding =
+            newvar(copy_text(name), expressions[i], false, false,
+                   new_type_constraint(TYPE_CALLABLE));
+        binding->line = func->line;
+        binding->column = func->column;
+        prelude.push_back(binding);
+    }
+
+    std::string decorated_name = function_hidden_name("dec", func, 0);
+    struct ast *current = make_ref(func->name);
+    for (size_t i = decorator_names.size(); i > 0; --i) {
+        current = call_with_argument(make_ref(decorator_names[i - 1]),
+                                     current);
+    }
+
+    struct ast *decorated_binding =
+        newvar(copy_text(decorated_name), current, false, false,
+               new_type_constraint(TYPE_CALLABLE));
+    decorated_binding->line = func->line;
+    decorated_binding->column = func->column;
+
+    struct ast *assign = newasgn(newref(copy_text(func->name)),
+                                 make_ref(decorated_name));
+    assign->line = func->line;
+    assign->column = func->column;
+
+    struct ast *result = newast('L', assign, newnullast());
+    result = newast('L', decorated_binding, result);
+    result = newast('L', (struct ast *)func, result);
+    for (size_t i = prelude.size(); i > 0; --i)
+        result = newast('L', prelude[i - 1], result);
+
+    free_decorator_wrappers(decorators);
     return result;
 }

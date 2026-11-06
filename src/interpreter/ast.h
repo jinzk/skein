@@ -323,6 +323,7 @@ struct trait_method {
     int column;
     char *name;
     struct symlist *params;
+    int is_async;
     struct trait_method *next;
 };
 
@@ -545,7 +546,8 @@ struct ast *newimpl(char *type_name, char *trait_name, char *module,
 struct ast *newtraitdecl(char *name, char *module,
                          struct trait_method *methods,
                          bool exported = false);
-struct ast *newtraitmethod(char *name, struct symlist *params);
+struct ast *newtraitmethod(char *name, struct symlist *params,
+                           bool is_async = false);
 struct ast *append_trait_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *module,
                          struct struct_init *fields);

@@ -311,6 +311,7 @@ struct TraitParamMeta {
 struct TraitMethodMeta {
     std::string name;
     std::vector<TraitParamMeta> params;
+    bool is_async = false;
 };
 
 struct TraitDeclMeta {

@@ -3489,6 +3489,33 @@ impl aa::D for Q {
 
 - 未导出的类型不能通过包路径引用，但它的值仍可作为普通值传递和方法调用。
 
+命名函数装饰器：
+
+```text
+func trace(fn) {
+  return func(...args) {
+    print("enter");
+    let result = fn(...args);
+    print("exit");
+    return result;
+  };
+}
+
+@trace
+func add(a, b) {
+  return a + b;
+}
+
+add(1, 2)      // enter / exit / 3
+```
+
+- `@expr` 写在命名 `func` 前，可以连续写多个；多个装饰器从下往上应用；
+- 支持普通函数、`async func`、generator 函数和 `export func`；
+- 装饰器表达式在函数绑定前求值，应用在函数创建后完成；
+- 装饰器是普通高阶函数，最终结果必须 callable；
+- 函数名绑定到装饰后的值，递归调用会经过装饰器；
+- 匿名函数和 `let f = func(...)` 仍然手动包装：`f = dec(f)`。
+
 方法装饰器：
 
 ```text
@@ -3519,7 +3546,79 @@ Point { x: 3, y: 4 }.area()      // enter / exit / 12
 - 装饰器收到 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
 - 支持固有方法和 `impl Trait for Type` 方法；调用点、方法值提取和 trait 分派不变；
 - 默认值由生成的 wrapper 解析，装饰器看到的是补全后的参数；
-- 装饰器必须返回 callable；不支持顶层函数/类型声明装饰器、解构参数方法和 generator 方法。
+- 装饰器必须返回 callable；不支持类型声明装饰器、解构参数方法和 generator 方法。
+
+async 方法：
+
+```text
+import std;
+
+struct Client { host: string; }
+
+impl Client {
+  async func get(self, path: string) {
+    return await std.http.get_async(self.host + path);
+  }
+}
+
+let c = Client { host: "http://127.0.0.1:8080" };
+let result = await c.get("/api");
+```
+
+- `p.m()` 返回 task，`await p.m()` 等待结果；
+- 方法值 `let f = p.m; await f()` 同样返回 task；
+- async 方法支持默认参数、可变参数、`defer` 和递归；
+- `self` 是接收者副本；共享 userdata 句柄正常共享，普通字段修改不会回写调用方；
+- enum 方法也支持 `async func`；
+- generator 方法仍然不支持 async generator。
+
+async trait 方法：
+
+```text
+trait Service {
+  async func handle(self, request);
+}
+
+impl Service for Client {
+  async func handle(self, request) {
+    return await self.get(request["path"]);
+  }
+}
+
+async func dispatch(service: Service, request) {
+  return await service.handle(request);
+}
+```
+
+- trait 声明 `async func`，实现也必须是 async；反之亦然；
+- `impl Service for Client;` 可以适配已有的 async 方法；
+- async trait 方法不能有默认值或可变参数；
+- `std.meta.methods` 的方法描述包含 `async` 字段。
+
+async 方法装饰器：
+
+```text
+func timed(fn) {
+  return async func(...args) {
+    print("before");
+    let result = await fn(...args);
+    print("after");
+    return result;
+  };
+}
+
+impl Client {
+  @timed
+  async func get(self, path) {
+    return await std.http.get_async(self.host + path);
+  }
+}
+```
+
+- 装饰器是普通函数，返回 async callable；
+- 生成的 wrapper 是 async，并 `await` 装饰后的方法；
+- 直接把 `async func` 当装饰器会返回 task，不是 callable；
+- 取消外层 task 不会自动取消被 await 的内层 task。
 
 枚举（带载荷变体）：
 

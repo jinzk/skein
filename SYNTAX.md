@@ -1368,6 +1368,69 @@ let add = func(a, b) { return a + b; };
 
 匿名函数的参数同样支持类型约束、默认值和可变参数。默认值规则与命名函数一致，例如 `let inc = func(x = 0) => x + 1;`。
 
+#### 5.11.1 命名函数装饰器
+
+命名函数支持 `@expr` 装饰器：
+
+```text
+func trace(fn) {
+  return func(...args) {
+    print("enter");
+    let result = fn(...args);
+    print("exit");
+    return result;
+  };
+}
+
+@trace
+func add(a, b) {
+  return a + b;
+}
+
+add(1, 2)      // enter / exit / 3
+```
+
+规则：
+
+- `@expr` 放在命名 `func` 声明前，可以连续写多个；
+- 支持普通函数、`async func`、generator 函数和 `export func`；
+- `@` 写在声明最前面，例如 `@dec export async func f`，而不是
+  `export @dec func f`；
+- 多个装饰器从下往上应用，`@a @b func f` 等价于 `a(b(f))`；
+- 装饰器表达式在函数绑定前求值，因此不会被同名函数遮蔽；应用在函数创建后完成；
+- 装饰器是普通高阶函数，不需要专用定义语法；
+- 装饰器收到 unbound function；对 async/generator 函数，装饰器可以返回普通函数、async 函数或 generator 函数，最终结果必须是 callable；
+- 装饰器在声明执行时应用一次，不随函数调用重复执行；
+- 函数名最终绑定到装饰后的值，递归调用会经过装饰器；
+- 装饰器表达式支持名称、成员访问、调用、下标和括号表达式；任意表达式请加括号，例如 `@(make_decorator(x))`；
+- 装饰器结果非 callable 时在声明执行时报 `expects callable`。
+
+带参数的装饰器：
+
+```text
+func retry(times: int) {
+  return func(fn) {
+    return func(...args) {
+      let result = null;
+      for (let i in range(times)) {
+        result = fn(...args);
+      }
+      return result;
+    };
+  };
+}
+
+@retry(3)
+func fetch(x) { return x; }
+```
+
+当前限制：
+
+- 匿名函数和 `let f = func(...)` 仍然手动包装：`f = dec(f)`；
+- 不支持 `struct` / `enum` / `trait` 声明装饰器；
+- 不支持在 `let` / `const` 声明前写 `@`；
+- 方法装饰器见 5.12.1。
+
 ### 5.12 结构体、impl 与 trait
 
 结构体：
@@ -1483,11 +1546,11 @@ p.area()      // enter / exit / 12
 
 当前限制：
 
-- 不支持顶层自由函数装饰器（继续手写 `f = dec(f)`）；
+- 自由函数装饰器见 5.11.1；
 - 不支持 `struct` / `enum` / `trait` 声明装饰器；
 - 被装饰方法不能使用解构参数；
 - 被装饰方法不能是 generator；
-- 方法语法本身不支持 `async`，因此也没有 async 方法装饰器；
+- async 方法装饰器要求装饰器返回 async callable，见 5.12.2；
 - 装饰器不能改变方法名或声明签名。
 
 带参数的装饰器就是返回装饰器的普通函数：
@@ -1510,6 +1573,86 @@ impl Point {
   func area(self) { return self.x * self.y; }
 }
 ```
+
+#### 5.12.2 async 方法
+
+方法可以声明为 `async`：
+
+```text
+struct Client {
+  host: string;
+}
+
+impl Client {
+  async func get(self, path: string) {
+    return await std.http.get_async(self.host + path);
+  }
+}
+
+let c = Client { host: "http://127.0.0.1:8080" };
+let result = await c.get("/api");
+```
+
+规则：
+
+- `p.m()` 返回 task，`await p.m()` 或 `std.task.wait(p.m())` 等待结果；
+- 方法值 `let f = p.m; await f()` 同样返回 task；
+- async 方法内部可以 `await`、`defer`、使用默认参数和可变参数；
+- 默认值在 task 开始前求值；
+- `self` 是接收者副本；字段中的 userdata 等共享句柄正常共享，普通字段修改不会自动回写调用方；
+- enum 方法也可以声明为 `async func`；
+- generator 方法仍然不支持 async generator。
+
+async trait 方法：
+
+```text
+trait Service {
+  async func handle(self, request);
+}
+
+impl Service for Client {
+  async func handle(self, request) {
+    return await self.get(request["path"]);
+  }
+}
+
+async func dispatch(service: Service, request) {
+  return await service.handle(request);
+}
+```
+
+规则：
+
+- trait 声明 `async func` 时，实现也必须是 `async func`；
+- trait 声明普通 `func` 时，实现不能是 `async func`；
+- `impl Service for Client;` 可以适配已有的 async 方法；
+- async trait 方法仍然不能有默认值或可变参数。
+
+async 方法装饰器：
+
+```text
+func timed(fn) {
+  return async func(...args) {
+    print("before");
+    let result = await fn(...args);
+    print("after");
+    return result;
+  };
+}
+
+impl Client {
+  @timed
+  async func get(self, path) {
+    return await std.http.get_async(self.host + path);
+  }
+}
+```
+
+- 装饰器本身仍是普通函数，返回 async callable；
+- 直接把 `async func` 当装饰器会返回 task，不是 callable，会报错；
+- 生成的 wrapper 是 async，并 `await` 装饰后的方法，因此 before/after 能包围真实异步工作；
+- 当前取消语义：取消外层 task 不会自动取消被 `await` 的内层 task；
+- `std.meta.methods` 的方法描述包含 `async` 字段。
 
 结构体类型可用于类型标注：
 
@@ -3498,6 +3641,7 @@ info["fields"][1]["has_default"]; // true
 info["methods"][0]["name"];    // "moved"
 info["methods"][0]["params"];  // ["int", "int"]，不包含 self
 info["methods"][0]["has_defaults"]; // true
+info["methods"][0]["async"];   // false
 ```
 
 `type_info` 的返回结构：
@@ -3537,7 +3681,8 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
 }
 ```
 
-方法描述中的 `params` 不包含 `self`，是调用时显式传入的参数类型。
+方法描述中的 `params` 不包含 `self`，是调用时显式传入的参数类型；
+`async` 表示该方法是否为 `async func`。
 
 规则：
 
@@ -4227,7 +4372,7 @@ try/catch
 通配导入
 命名参数
 静态方法 / 关联函数
-顶层函数 / 类型声明装饰器
+类型声明装饰器
 可变 self
 私有成员
 struct 继承

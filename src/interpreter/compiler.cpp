@@ -540,6 +540,7 @@ struct Compiler {
              method = method->next) {
             skein::bc::TraitMethodMeta method_meta;
             method_meta.name = method->name ? method->name : "";
+            method_meta.is_async = method->is_async != 0;
             for (struct symlist *param = method->params; param;
                  param = param->next) {
                 skein::bc::TraitParamMeta param_meta;

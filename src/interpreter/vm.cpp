@@ -1727,6 +1727,7 @@ public:
                     for (const auto &method : meta.methods) {
                         trait_method_meta method_meta;
                         method_meta.name = method.name;
+                        method_meta.is_async = method.is_async;
                         method_meta.params.reserve(method.params.size());
                         for (const auto &param : method.params) {
                             trait_param_meta param_meta;
@@ -1879,8 +1880,11 @@ public:
                     }
                     task_ptr task;
                     value_t *result = NULL;
-                    if (get_task_value(value, task))
-                        result = fiber_await_task(task);
+                    if (!get_task_value(value, task)) {
+                        freeval(value);
+                        return abort_error();
+                    }
+                    result = fiber_await_task(task);
                     freeval(value);
                     if (context_.control != EVAL_CONTROL_NONE ||
                         context_.runtime_error_count != errors_before_) {
@@ -4199,11 +4203,22 @@ void skein_vm_stats_report() {
     std::fprintf(stderr, "\n");
 }
 
+static bool cache_clearing = false;
+
 void skein_vm_forget_function_code(function_code *code) {
-    if (!code)
+    if (!code || cache_clearing)
         return;
     default_cache.erase(code);
     execution_cache.erase(code);
+}
+
+void skein_vm_shutdown() {
+    if (cache_clearing)
+        return;
+    cache_clearing = true;
+    default_cache.clear();
+    execution_cache.clear();
+    cache_clearing = false;
 }
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {

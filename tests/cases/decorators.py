@@ -260,10 +260,157 @@ def run_cases():
         stderr="symbol not found not_defined",
     )
 
+    run_case(
+        TRACE
+        + "@trace\n"
+        + "func add(a, b) { return a + b; }\n"
+        + "print(add(1, 2));\n",
+        ["enter", "exit", "3"],
+    )
+
+    run_case(
+        "func around(name) {\n"
+        "  return func(fn) {\n"
+        "    return func(...args) {\n"
+        '      print("enter " + name);\n'
+        "      let r = fn(...args);\n"
+        '      print("exit " + name);\n'
+        "      return r;\n"
+        "    };\n"
+        "  };\n"
+        "}\n"
+        '@around("outer")\n'
+        '@around("inner")\n'
+        "func f() { print(\"body\"); return 1; }\n"
+        "print(f());\n",
+        ["enter outer", "enter inner", "body", "exit inner",
+         "exit outer", "1"],
+    )
+
+    run_case(
+        TRACE
+        + "@trace\n"
+        + "func fact(n) {\n"
+        + "  if (n <= 1) { return 1; }\n"
+        + "  return n * fact(n - 1);\n"
+        + "}\n"
+        + "print(fact(3));\n",
+        ["enter", "enter", "enter", "exit", "exit", "exit", "6"],
+    )
+
+    run_case(
+        "func dec(fn) {\n"
+        "  return func(...args) {\n"
+        '    print("outer dec");\n'
+        "    return fn(...args);\n"
+        "  };\n"
+        "}\n"
+        "func outer() {\n"
+        "  @dec\n"
+        "  func dec(x) { return x; }\n"
+        "  return dec(1);\n"
+        "}\n"
+        "print(outer());\n",
+        ["outer dec", "1"],
+    )
+
+    run_case(
+        "func trace(fn) {\n"
+        "  return async func(...args) {\n"
+        '    print("before");\n'
+        "    let r = await fn(...args);\n"
+        '    print("after");\n'
+        "    return r;\n"
+        "  };\n"
+        "}\n"
+        "@trace\n"
+        "async func get() { return 7; }\n"
+        "print(await get());\n",
+        ["before", "after", "7"],
+    )
+
+    run_case(
+        "func trace(fn) {\n"
+        "  return func(...args) {\n"
+        '    print("create");\n'
+        "    return fn(...args);\n"
+        "  };\n"
+        "}\n"
+        "@trace\n"
+        "func nums() { yield 1; yield 2; }\n"
+        "for (let x in nums()) { print(x); }\n",
+        ["create", "1", "2"],
+    )
+
+    run_case(
+        "import std;\n"
+        "func timed(fn) {\n"
+        "  return async func(...args) {\n"
+        '    print("before");\n'
+        "    await std.task.sleep(1);\n"
+        "    let r = await fn(...args);\n"
+        '    print("after");\n'
+        "    return r;\n"
+        "  };\n"
+        "}\n"
+        "struct C { x: int; }\n"
+        "impl C {\n"
+        "  @timed\n"
+        "  async func get(self) { return self.x; }\n"
+        "}\n"
+        "print(await C { x: 7 }.get());\n",
+        ["before", "after", "7"],
+    )
+
+    run_case(
+        "import std;\n"
+        "func timed(fn) {\n"
+        "  return async func(...args) {\n"
+        '    print("before");\n'
+        "    let r = await fn(...args);\n"
+        '    print("after");\n'
+        "    return r;\n"
+        "  };\n"
+        "}\n"
+        "trait S { async func handle(self); }\n"
+        "struct C { x: int; }\n"
+        "impl S for C {\n"
+        "  @timed\n"
+        "  async func handle(self) { return self.x; }\n"
+        "}\n"
+        "async func use(s: S) { return await s.handle(); }\n"
+        "print(await use(C { x: 5 }));\n",
+        ["before", "after", "5"],
+    )
+
     check(
-        "decorator top-level function unsupported",
-        "@trace\nfunc f(x) { return x; }\n",
-        stderr="unexpected '@'",
+        "async decorator non-callable result",
+        "func bad(fn) { return 42; }\n"
+        "struct C { x: int; }\n"
+        "impl C {\n"
+        "  @bad\n"
+        "  async func get(self) { return self.x; }\n"
+        "}\n",
+        stderr="expects callable, got int",
+    )
+
+    check(
+        "async decorator itself",
+        "async func adec(fn) { return fn; }\n"
+        "struct C { x: int; }\n"
+        "impl C {\n"
+        "  @adec\n"
+        "  async func get(self) { return self.x; }\n"
+        "}\n",
+        stderr="expects callable, got task",
+    )
+
+    check(
+        "decorator non-callable function result",
+        "func bad(fn) { return 42; }\n"
+        "@bad\n"
+        "func f() { return 1; }\n",
+        stderr="expects callable, got int",
     )
 
     check(
@@ -357,3 +504,33 @@ def run_cases():
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["[aa trace]", "7"], proc.stdout
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write(
+            "aa/aa.skein",
+            "package aa {\n"
+            "  func logged(fn) {\n"
+            "    return func(...args) {\n"
+            '      print("[aa fn]");\n'
+            "      return fn(...args);\n"
+            "    };\n"
+            "  }\n"
+            "  @logged\n"
+            "  export func add(a, b) { return a + b; }\n"
+            "}\n",
+        )
+        main = write(
+            "main.skein",
+            "import aa;\n"
+            "print(aa.add(2, 3));\n",
+        )
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["[aa fn]", "5"], proc.stdout

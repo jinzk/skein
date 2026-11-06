@@ -519,8 +519,8 @@ struct Point { x: int; y: int; }
 只有出现“函数无法表达的新绑定形式/控制流”时，才讨论受限宏；届时仍应
 坚持 AST 级、卫生、可展开调试和编译期无 I/O。
 
-方法装饰器（固定 `@expr` 应用语法、AST 脱糖生成包装方法，不引入装饰器
-定义语法）的独立实施计划见
+函数与方法装饰器（固定 `@expr` 应用语法、AST 脱糖，不引入装饰器定义
+语法）的独立实施计划见
 [method-decorators-plan.md](method-decorators-plan.md)。
 
 ## 9. 建议执行顺序

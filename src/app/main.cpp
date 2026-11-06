@@ -233,6 +233,7 @@ int main(int argc, char **argv) {
     net_shutdown();
     donescope();
     process_spawn_shutdown();
+    skein_vm_shutdown();
     structtype_shutdown();
     event_loop_shutdown();
     process_spawn_finish();

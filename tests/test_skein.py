@@ -10,6 +10,7 @@ import harness
 
 from cases import (
     async_errors,
+    async_methods,
     collections,
     decorators,
     diagnostics,
@@ -29,6 +30,7 @@ MODULES = [
     match_types,
     meta,
     decorators,
+    async_methods,
     collections,
     paths,
     runtime,

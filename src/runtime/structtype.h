@@ -20,6 +20,7 @@ struct method_sig {
     std::string name;
     /* Includes the receiver as the first parameter. */
     std::vector<struct type_constraint> params;
+    bool is_async = false;
 };
 
 struct trait_def {

@@ -123,13 +123,26 @@ def check_link_boundary(build_dir, errors, warnings):
                 f"skein_bytecode depends on upper-layer symbol: {symbol}")
 
     value_archive = build_dir / "libskein_value_runtime.a"
+    value_defined = set()
     if value_archive.exists():
+        value_defined = nm_symbols(value_archive, True, errors)
         value_undefined = nm_symbols(value_archive, False, errors)
         leaked = (value_undefined & (interp_defined | builtins_defined))
         leaked -= runtime_defined
         for symbol in sorted(leaked):
             errors.append(
                 f"skein_value_runtime depends on upper-layer symbol: {symbol}")
+
+    bytecode_defined = nm_symbols(
+        build_dir / "libskein_bytecode.a", True, errors)
+    vm_archive = build_dir / "libskein_vm.a"
+    if vm_archive.exists():
+        vm_undefined = nm_symbols(vm_archive, False, errors)
+        leaked = (vm_undefined & (interp_defined | builtins_defined))
+        leaked -= runtime_defined | value_defined | bytecode_defined
+        for symbol in sorted(leaked):
+            errors.append(
+                f"skein_vm depends on upper-layer symbol: {symbol}")
 
 
 def main():
@@ -166,8 +179,13 @@ def main():
             continue
         scan_includes(path, errors)
 
-    vm_executor = source_dir / "src" / "interpreter" / "vm.cpp"
-    if vm_executor.exists():
+    vm_executor_files = [
+        source_dir / "src" / "interpreter" / "vm.cpp",
+        source_dir / "src" / "interpreter" / "vm_host.cpp",
+    ]
+    for vm_executor in vm_executor_files:
+        if not vm_executor.exists():
+            continue
         text = vm_executor.read_text(encoding="utf-8")
         for forbidden in ('#include "ast.h"', '#include "compiler.h"',
                           '#include "eval.h"', '#include "eval_internal.h"'):
@@ -180,6 +198,7 @@ def main():
         source_dir / "src" / "interpreter" / "eval_context.cpp",
         source_dir / "src" / "interpreter" / "control_runtime.cpp",
         source_dir / "src" / "interpreter" / "vm_eval_runtime.cpp",
+        source_dir / "src" / "interpreter" / "diagnostics.cpp",
     ]
     for value_runtime in value_runtime_files:
         if not value_runtime.exists():

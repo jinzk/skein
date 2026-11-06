@@ -1,5 +1,5 @@
 #include "diagnostics.h"
-#include "repl.h"
+#include "runtime_state.h"
 #include "unicode_ident.h"
 
 #include <cstdarg>

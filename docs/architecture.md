@@ -134,7 +134,7 @@ typedef struct {
 - graph 邻接表与批量构造；
 - fsm 内部表示与批量 run；
 - P5 易用性、P6 基准；
-- 静态库拆分：`skein_platform` / `skein_runtime` / `skein_bytecode` / `skein_value_runtime` / `skein_interpreter` / `skein_builtins` / `skein`；
+- 静态库拆分：`skein_platform` / `skein_runtime` / `skein_bytecode` / `skein_value_runtime` / `skein_vm` / `skein_interpreter` / `skein_builtins` / `skein`；
 - 源码按层落到 `src/platform` / `src/runtime` / `src/interpreter` / `src/builtins` / `src/app`，include 目录按层收敛；
 - `builtins.cpp` 按内置域拆为 `builtins_*.cpp`，`eval.cpp` 拆出 `eval_control/ops/call/assign`；
 - `skein_context` 的 `call` / `call_builtin` / `error` hook；
@@ -151,9 +151,11 @@ typedef struct {
   只链接该 target；
 - `skein_value_runtime` 承载 value/symbol/index helper、control
   原语、eval_context 与 scope/symbol 表，不依赖 AST/evaluator；
+- `skein_vm` 只依赖 `skein_bytecode` / `skein_value_runtime`，执行器通过
+  `vm_host.h` 注入 fiber/package/struct/pattern 与求值调用，编译和
+  fallback 仍由 `vm_bridge.cpp` 负责；
 - `vm.cpp` 不再 include `ast.h` / `compiler.h` / `eval.h` /
-  `eval_internal.h`；执行器通过 `vm_eval.h` 的 wrapper 调用 evaluator，
-  编译与 fallback 由 `vm_bridge.cpp` 负责；
+  `eval_internal.h`；`diagnostics.cpp` 位于 value runtime；
 - `tools/check_all.sh` 统一覆盖 Debug/Release、sanitizer、VM-only 与
   runtime-only 链接检查；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
@@ -172,6 +174,8 @@ typedef struct {
 - `skein_runtime` 可单独链接（依赖 `skein_platform` / `utf8proc`），不依赖 `eval.o` / `parser.o` / `main.o`；
 - `skein_bytecode` 只依赖 runtime，不依赖 interpreter/builtins；
 - `skein_value_runtime` 只依赖 runtime，不依赖 AST/evaluator；
+- `skein_vm` 只依赖 bytecode + value runtime，不依赖 interpreter/builtins；
+- `vm_link_test` 只链接 VM 执行器依赖并执行最小 Proto；
 - `skein_interpreter` 只依赖 runtime + bytecode + value runtime + platform + libuv/Boost；
 - `skein_builtins` 依赖 interpreter，但 interpreter 不反向依赖 builtins；
 - 关闭所有可选模块后，core + interpreter + CLI 仍可构建并通过核心测试；

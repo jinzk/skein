@@ -4757,7 +4757,8 @@ src/
                  tokens.l、parser.y、ast.*、diagnostics.*、error_report.*、eval.*、
                  eval_control.*、eval_call.*、eval_assign.*、
                  eval_context.*、eval_helpers.h、value_runtime.*、bytecode.*、
-                 compiler.*、vm.*、vm_bridge.*、vm_eval.h、gc.*、package.*、
+                 compiler.*、vm.*、vm_bridge.*、vm_eval.h、vm_host.*、
+                 vm_host_calls.h、gc.*、package.*、
                  std_namespace.*、pattern.*、scopestack.*、structeval.*、fiber.*、
                  generator.*、iter.*、async_support.*、task.*、event_loop.*、
                  repl.*、source_encoding.*

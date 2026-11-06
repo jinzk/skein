@@ -19,6 +19,8 @@
 #include "value_ops.h"
 #include "valuetype.h"
 #include "vm_eval.h"
+#include "vm_host.h"
+#include "vm_host_calls.h"
 
 #include <algorithm>
 #include <array>

@@ -206,6 +206,7 @@ add_library(skein_value_runtime STATIC
   src/interpreter/eval_context.cpp
   src/interpreter/control_runtime.cpp
   src/interpreter/vm_eval_runtime.cpp
+  src/interpreter/diagnostics.cpp
 )
 set_target_properties(skein_value_runtime PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
@@ -217,15 +218,33 @@ target_include_directories(skein_value_runtime PUBLIC
 )
 target_link_libraries(skein_value_runtime PUBLIC skein_runtime)
 
+# Bytecode executor.  Fiber/package/struct/pattern services and the evaluator
+# call path are installed through vm_host.h by the interpreter, so this target
+# links only bytecode/value runtime.
+add_library(skein_vm STATIC
+  src/interpreter/vm.cpp
+  src/interpreter/vm_host.cpp
+)
+set_target_properties(skein_vm PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_vm PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(skein_vm PUBLIC
+  skein_bytecode
+  skein_value_runtime
+  skein_runtime
+)
+
 add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
   src/interpreter/ast.cpp
   src/interpreter/decorators.cpp
   src/interpreter/compiler.cpp
-  src/interpreter/vm.cpp
   src/interpreter/vm_bridge.cpp
-  src/interpreter/diagnostics.cpp
   src/interpreter/error_report.cpp
   src/interpreter/eval.cpp
   src/interpreter/eval_control.cpp
@@ -254,6 +273,7 @@ target_include_directories(skein_interpreter PUBLIC
   ${SKEIN_EMBEDDED_DIR}
 )
 target_link_libraries(skein_interpreter PUBLIC
+  skein_vm
   skein_bytecode
   skein_value_runtime
   skein_runtime
@@ -548,6 +568,21 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME runtime_link_test COMMAND runtime_link_test)
   set_tests_properties(runtime_link_test PROPERTIES LABELS "core")
+
+  add_executable(vm_link_test
+    tests/test_vm_link.cpp
+  )
+  target_link_libraries(vm_link_test PRIVATE skein_vm)
+  target_include_directories(vm_link_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(vm_link_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME vm_link_test COMMAND vm_link_test)
+  set_tests_properties(vm_link_test PROPERTIES LABELS "core")
 
 
   find_package(Python3 COMPONENTS Interpreter)

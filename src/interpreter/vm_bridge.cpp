@@ -10,6 +10,7 @@
 #include "pattern.h"
 #include "symbol.h"
 #include "valuetype.h"
+#include "vm_host.h"
 
 #include <chrono>
 #include <cstdio>
@@ -126,6 +127,35 @@ struct bridge_depth_guard {
 
 } // namespace
 
+static void ensure_vm_host() {
+    static const bool installed = []() {
+        vm_host &host = skein_vm_host();
+        host.fn_bind_pattern_value = &bind_pattern_value;
+        host.fn_free_pattern_bindings = &free_pattern_bindings;
+        host.fn_build_struct_value = &build_struct_value;
+        host.fn_build_enum_value = &build_enum_value;
+        host.fn_declare_struct_meta = &declare_struct_meta;
+        host.fn_declare_enum_meta = &declare_enum_meta;
+        host.fn_declare_trait_meta = &declare_trait_meta;
+        host.fn_declare_impl_meta = &declare_impl_meta;
+        host.fn_fiber_await_task = &fiber_await_task;
+        host.fn_fiber_is_generator = &fiber_is_generator;
+        host.fn_fiber_yield_value = &fiber_yield_value;
+        host.fn_generator_next_value = &generator_next_value;
+        host.fn_get_generator_value = &get_generator_value;
+        host.fn_get_task_value = &get_task_value;
+        host.fn_package_build_namespace = &package_build_namespace;
+        host.fn_package_import = &package_import;
+        host.fn_package_is_loading = &package_is_loading;
+        host.fn_package_publish = &package_publish;
+        host.fn_skein_vm_call_value_args = &skein_vm_call_value_args;
+        host.fn_skein_vm_prepare_function_body =
+            &skein_vm_prepare_function_body;
+        return true;
+    }();
+    (void)installed;
+}
+
 struct value_t *skein_vm_call_value_args(
     struct value_t *callee, std::vector<struct value_t *> args) {
     return call_value_args(callee, std::move(args));
@@ -133,6 +163,7 @@ struct value_t *skein_vm_call_value_args(
 
 skein::bc::ProtoPtr skein_vm_prepare_function_body(
     const std::shared_ptr<function_def> &def) {
+    ensure_vm_host();
     return prepare_function_body(def);
 }
 
@@ -155,6 +186,7 @@ void skein_vm_shutdown() {
 }
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {
+    ensure_vm_host();
     if (!skein_vm_enabled())
         return eval(statement);
 
@@ -190,6 +222,7 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
 
 bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
                                int index, struct value_t *&out) {
+    ensure_vm_host();
     out = NULL;
     if (!def || !def->code || index < 0)
         return false;
@@ -237,6 +270,7 @@ bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
 ParamPatternResult skein_vm_match_parameter_pattern(
     const std::shared_ptr<function_def> &def, int index,
     struct value_t *value, std::vector<pattern_binding> &bindings) {
+    ensure_vm_host();
     if (!def || !def->code || index < 0 || !value)
         return ParamPatternResult::Unsupported;
 
@@ -294,6 +328,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
 
 bool skein_vm_try_execute_function_body(
     const std::shared_ptr<function_def> &def, struct value_t *&out) {
+    ensure_vm_host();
     out = NULL;
     if (!def || !def->code)
         return false;

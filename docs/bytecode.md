@@ -141,7 +141,8 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - package 声明
 - `fail`
 - `on error` / `recover` / `pass`（handler 栈 + 局部 unwind）
-- `defer`（独立 Proto + 显式 upvalue cell，在 scope exit/unwind 时执行）
+- `defer`（独立 Proto + 显式 upvalue cell，在 scope exit/unwind 时执行；
+  引用后续声明的局部会在编译期被拒绝）
 - `await` / `yield`
 - `import`
 - 块作用域（`PUSH_SCOPE` / `POP_SCOPE`）

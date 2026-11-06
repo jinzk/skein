@@ -579,6 +579,16 @@ void skein_vm_shutdown() {
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {
     ensure_vm_host();
+    std::string defer_error;
+    int defer_line = 0;
+    int defer_column = 0;
+    if (!skein_validate_defer_references(statement, defer_error,
+                                         &defer_line, &defer_column)) {
+        if (defer_line > 0)
+            diag_set_location(defer_line, defer_column);
+        yyerror("%s", defer_error.c_str());
+        return NULL;
+    }
     if (!skein_vm_enabled())
         return eval(statement);
 

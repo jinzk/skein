@@ -517,6 +517,27 @@ def run_cases():
         stdout_all=["in", "block", "after"],
     )
     check(
+        "defer rejects later declaration",
+        "import std;\n"
+        "let x = 100;\n"
+        "func f() {\n"
+        "  defer print(str(x));\n"
+        "  let x = 5;\n"
+        "}\n"
+        "f();\n",
+        stderr="references x before its declaration",
+    )
+    check(
+        "defer rejects later shadow declaration",
+        "import std;\n"
+        "func f() {\n"
+        "  let x = 1;\n"
+        "  { defer print(str(x)); let x = 2; }\n"
+        "}\n"
+        "f();\n",
+        stderr="references x before its declaration",
+    )
+    check(
         "defer captures local closure",
         "import std;\n"
         "func f() {\n"

@@ -3459,6 +3459,8 @@ func work() {
 - 支持 return / break / continue / 运行时错误；
 - 没有其他错误时，defer 内的错误会继续向外传播；
 - 已有错误正在展开时，原错误优先，defer 错误以 `error in defer: ...` 报告；
+- defer 表达式只能引用在 defer 之前已经声明的局部变量、参数或 upvalue；
+  引用同一函数/代码块中后续才声明的同名局部会报编译错误；
 - 顶层 `defer` 不允许；
 - 生成器正常结束会执行 defer；
 - `std.generator.close(g)` 会执行生成器的 defer；

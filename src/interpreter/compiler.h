@@ -35,6 +35,16 @@ skein::bc::ProtoPtr skein_compile_statement(struct ast *statement,
                                             const std::string &module,
                                             std::string &error);
 
+/*
+ * Reject defers that reference a local declaration that appears later in
+ * the same function/block.  This is a source-level check so both the AST
+ * and bytecode backends enforce the same declaration-before-use rule.
+ */
+bool skein_validate_defer_references(struct ast *statement,
+                                     std::string &error,
+                                     int *error_line = nullptr,
+                                     int *error_column = nullptr);
+
 skein::bc::ProtoPtr skein_compile_function_body(struct function_code *code,
                                                  const std::string &module,
                                                  std::string &error);

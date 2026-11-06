@@ -14,24 +14,6 @@
 #include <utility>
 #include <vector>
 
-bool validate_type_constraint(const struct type_constraint *type) {
-    if (!type) return true;
-    if (type->kind == TYPE_NAMED) {
-        if (!type->name ||
-            !structtype_type_exists(type->module, type->name)) {
-            yyerror("unknown type name %s",
-                    type->name ? type->name : "invalid");
-            return false;
-        }
-        return true;
-    }
-    if (type->kind == TYPE_INVALID) {
-        yyerror("invalid type");
-        return false;
-    }
-    return true;
-}
-
 struct type_constraint any_type_constraint() {
     struct type_constraint type;
     type.kind = TYPE_ANY;

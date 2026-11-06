@@ -175,8 +175,15 @@ def main():
                 errors.append(
                     f"{vm_executor}: VM executor includes {forbidden}")
 
-    value_runtime = source_dir / "src" / "interpreter" / "value_runtime.cpp"
-    if value_runtime.exists():
+    value_runtime_files = [
+        source_dir / "src" / "interpreter" / "value_runtime.cpp",
+        source_dir / "src" / "interpreter" / "eval_context.cpp",
+        source_dir / "src" / "interpreter" / "control_runtime.cpp",
+        source_dir / "src" / "interpreter" / "vm_eval_runtime.cpp",
+    ]
+    for value_runtime in value_runtime_files:
+        if not value_runtime.exists():
+            continue
         text = value_runtime.read_text(encoding="utf-8")
         for forbidden in ('#include "ast.h"', '#include "compiler.h"',
                           '#include "eval.h"', '#include "eval_internal.h"'):

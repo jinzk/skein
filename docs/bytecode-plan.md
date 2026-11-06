@@ -1321,7 +1321,7 @@ N1 已完成。剩余工作按“性能 → 架构 → 产品化”重排，每�
 - N2-3.2：待决策；
 - N2-3.3：暂不实现（待真实大 Proto 需求）；
 - N2-4.4（可选）待做；
-- A-1：部分完成（skein_bytecode + skein_value_runtime + vm_bridge + evaluator 接口）；
+- A-1：部分完成（skein_bytecode + skein_value_runtime + vm_bridge + evaluator 接口；A-1.5 已完成）；
 - JIT/AOT/序列化：待决策。
 
 ### 8.4 N2：性能与执行器收尾（P1）
@@ -1516,7 +1516,7 @@ N2 退出条件：
 
 #### N3-4 A-1 VM / bytecode 分层
 
-状态：**部分完成（2026-11-06，bytecode / value runtime / bridge 已拆出）**。
+状态：**部分完成（2026-11-06，A-1.5 value-only 控制/调用路径已拆出）**。
 
 目标：把“字节码表示 + verifier + 执行器”与 AST 编译/回退桥接解耦。
 
@@ -1536,23 +1536,36 @@ N2 退出条件：
    - `vm.cpp` 不再 include `eval.h` / `eval_internal.h`；
    - `boundary_check` 检查上述 include。
 4. **Value runtime target（已完成）**：
-   - 新增 `skein_value_runtime`，包含 `value_runtime.cpp` 与
-     `scopestack.cpp`；
+   - 新增 `skein_value_runtime`，包含 `value_runtime.cpp`、
+     `scopestack.cpp`、`eval_context.cpp`、`control_runtime.cpp` 与
+     `vm_eval_runtime.cpp`；
    - value/symbol/index helper 从 `eval_assign.cpp` 移出，且不 include
      AST/evaluator 头；
    - `apply_binary_value` / `do_compare` / `new_int_checked` 也移入
      value runtime；
-   - `value_runtime.cpp` include 检查加入 `boundary_check`。
-5. **物理拆分（下一步）**：新增 `skein_vm` target；
-   - 仍需拆分 `eval_control.cpp` / `eval_call.cpp` 中的 value-only 路径，
-     避免链接时拉入 AST；
-5. **序列化前置**：序列化只需链接 `skein_bytecode`，不依赖 parser。
+   - `validate_type_constraint` 从 `structeval.cpp` 移入 value runtime。
+5. **Value-only 控制/调用路径拆分（A-1.5，已完成）**：
+   - `eval_capture_*` / `eval_raise` / `eval_request_close` /
+     `eval_control_pending` / `eval_finish_statement_control` 及
+     `set_eval_control` / `take_eval_control` 移入 `control_runtime.cpp`；
+   - `skein_vm_eval_*`、`skein_vm_*_symbol_*`、`skein_vm_*_index_symbol`
+     与 value/symbol/index wrapper 移入 `vm_eval_runtime.cpp`；
+   - `switch_value_supported` / `validate_function_params` /
+     `import_binding_name` 移入 value runtime；
+   - `vm_bridge.cpp` 仅保留 `skein_vm_call_value_args` 与编译、fallback、
+     默认参数、pattern 接入；
+   - `boundary_check` 覆盖四个 no-AST 运行时源文件。
+6. **物理拆分（下一步）**：新增 `skein_vm` target；
+   - 剩余依赖集中在 `vm_bridge.cpp` 的求值调用、编译与 pattern 接入；
+   - 需要评估 `package` / `fiber` / `structeval` 等链接闭包，必要时改为
+     callback 注入。
+7. **序列化前置**：序列化只需链接 `skein_bytecode`，不依赖 parser。
 
 验收：
 
 - executor 源文件不 include `ast.h` / `compiler.h` / `eval.h` /
   `eval_internal.h`：**已满足**；
-- 新增 `vm_link_test`，只链接 `skein_bytecode` / `skein_vm`：待物理拆分；
+- 新增 `vm_link_test`，只链接 `skein_bytecode` / `skein_vm`：待 A-1.6；
 - `boundary_check` 覆盖新边界：**已满足**；
 - 若后续批准序列化/JIT/AOT，可直接复用该边界，不依赖 parser。
 

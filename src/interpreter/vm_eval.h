@@ -12,9 +12,10 @@ struct scope_t;
 struct symlist;
 
 /*
- * Narrow evaluator interface used by the bytecode executor.  These wrappers
- * are implemented by vm_bridge.cpp, which is the only VM file that directly
- * include the AST/evaluator headers.
+ * Narrow evaluator interface used by the bytecode executor.  The
+ * value/control wrappers are implemented by vm_eval_runtime.cpp, which sits
+ * below the AST layer; only skein_vm_call_value_args remains in
+ * vm_bridge.cpp because it needs the evaluator call path.
  */
 
 struct eval_capture_snapshot {
@@ -38,6 +39,8 @@ void skein_vm_eval_push_isolated_scope();
 void skein_vm_eval_push_closure_scope(
     const std::shared_ptr<struct scope_t> &parent);
 void skein_vm_eval_popscope();
+void set_eval_control(enum eval_control_kind kind, struct value_t *value);
+struct value_t *take_eval_control(enum eval_control_kind kind);
 
 struct value_t *skein_vm_call_value_args(
     struct value_t *callee, std::vector<struct value_t *> args);

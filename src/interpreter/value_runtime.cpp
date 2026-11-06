@@ -7,6 +7,7 @@
 #include "unicode.h"
 #include "valuetype.h"
 #include "value_ops.h"
+#include "value_runtime.h"
 
 #include <climits>
 #include <cmath>
@@ -14,10 +15,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-struct value_t *read_member_value(struct value_t *container,
-                                  struct value_t *index,
-                                  bool field_access = false);
 
 struct value_t *new_int_checked(__int128 n) {
     if (n < LLONG_MIN || n > LLONG_MAX) {
@@ -1057,4 +1054,84 @@ struct value_t *read_member_value(struct value_t *container,
 
     yyerror("cannot index %s", typename_of(container));
     return NULL;
+}
+
+bool validate_type_constraint(const struct type_constraint *type) {
+    if (!type) return true;
+    if (type->kind == TYPE_NAMED) {
+        if (!type->name ||
+            !structtype_type_exists(type->module, type->name)) {
+            yyerror("unknown type name %s",
+                    type->name ? type->name : "invalid");
+            return false;
+        }
+        return true;
+    }
+    if (type->kind == TYPE_INVALID) {
+        yyerror("invalid type");
+        return false;
+    }
+    return true;
+}
+
+bool switch_value_supported(const struct value_t *v) {
+    if (!v) return false;
+    switch (v->type) {
+        case T_int:
+        case T_bool:
+        case T_string:
+        case T_char:
+        case T_byte:
+        case T_bytes:
+        case T_null:
+            return true;
+        default:
+            return false;
+    }
+}
+
+const char *import_binding_name(const char *path) {
+    while (path && (*path == '.' || *path == '@'))
+        ++path;
+    if (!path || !*path)
+        return "";
+    const char *dot = std::strrchr(path, '.');
+    return dot ? dot + 1 : path;
+}
+
+bool validate_function_params(const char *name, struct symlist *params) {
+    const char *display_name = name && *name ? name : "<anonymous>";
+    bool bad = false;
+    for (struct symlist *p = params; p && !bad; p = p->next) {
+        for (struct symlist *q = p->next; q; q = q->next) {
+            if (!std::strcmp(p->sym->name, q->sym->name)) {
+                yyerror("duplicate parameter %s in function %s",
+                        p->sym->name, display_name);
+                bad = true;
+                break;
+            }
+        }
+    }
+    for (struct symlist *p = params; p && !bad; p = p->next) {
+        if (!validate_type_constraint(p->type))
+            bad = true;
+        if (p->variadic && p->next) {
+            yyerror("variadic parameter must be last");
+            bad = true;
+        }
+    }
+    bool seen_default = false;
+    for (struct symlist *p = params; p && !bad; p = p->next) {
+        if (p->variadic)
+            continue;
+        if (p->has_default) {
+            seen_default = true;
+        } else if (seen_default) {
+            yyerror("parameter %s without default cannot follow a "
+                    "parameter with default",
+                    p->sym->name);
+            bad = true;
+        }
+    }
+    return !bad;
 }

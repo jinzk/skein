@@ -149,8 +149,8 @@ typedef struct {
 - `runtime_link_test` 只链接 `skein_runtime`，守住 L1 边界；
 - `skein_bytecode` 只依赖 `skein_runtime`，`bytecode_verifier_test`
   只链接该 target；
-- `skein_value_runtime` 承载 value/symbol/index helper 与 scope/symbol
-  表，不依赖 AST/evaluator；
+- `skein_value_runtime` 承载 value/symbol/index helper、control
+  原语、eval_context 与 scope/symbol 表，不依赖 AST/evaluator；
 - `vm.cpp` 不再 include `ast.h` / `compiler.h` / `eval.h` /
   `eval_internal.h`；执行器通过 `vm_eval.h` 的 wrapper 调用 evaluator，
   编译与 fallback 由 `vm_bridge.cpp` 负责；

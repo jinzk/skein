@@ -65,94 +65,6 @@ bool control_matches_label(struct value_t *value, const char *label) {
 
 
 
-static void clear_eval_control() {
-    freeval(eval_ctx().control_value);
-    eval_ctx().control_value = NULL;
-    eval_ctx().control = EVAL_CONTROL_NONE;
-}
-
-void set_eval_control(enum eval_control_kind kind,
-                             struct value_t *value) {
-    clear_eval_control();
-    eval_ctx().control = kind;
-    eval_ctx().control_value = value;
-}
-
-struct value_t *take_eval_control(enum eval_control_kind kind) {
-    if (eval_ctx().control != kind)
-        return NULL;
-    struct value_t *value = eval_ctx().control_value;
-    eval_ctx().control_value = NULL;
-    eval_ctx().control = EVAL_CONTROL_NONE;
-    return value;
-}
-
-bool eval_control_pending() {
-    return eval_ctx().control != EVAL_CONTROL_NONE;
-}
-
-void eval_finish_statement_control() {
-    if (eval_ctx().control == EVAL_CONTROL_NONE)
-        return;
-    if (eval_ctx().control == EVAL_CONTROL_CLOSE) {
-        clear_eval_control();
-        return;
-    }
-    if (eval_ctx().control == EVAL_CONTROL_FAIL) {
-        if (eval_ctx().control_value)
-            yyerror("uncaught fail: %s",
-                    error_message_of(eval_ctx().control_value).c_str());
-        else
-            yyerror("uncaught fail");
-    } else {
-        yyerror("recover outside error handler");
-    }
-    clear_eval_control();
-}
-
-void eval_capture_begin(struct eval_capture_snapshot &snapshot) {
-    eval_context &context = eval_ctx();
-    snapshot.capture_errors = context.capture_errors;
-    snapshot.has_captured_error = context.has_captured_error;
-    snapshot.captured_error = context.captured_error;
-    snapshot.runtime_error_count = context.runtime_error_count;
-    context.capture_errors = true;
-    context.has_captured_error = false;
-    context.captured_error.clear();
-}
-
-struct eval_capture_result eval_capture_end(
-    const struct eval_capture_snapshot &snapshot) {
-    eval_context &context = eval_ctx();
-    bool has_error = context.has_captured_error;
-    std::string message = context.captured_error;
-
-    context.capture_errors = snapshot.capture_errors;
-    context.has_captured_error = snapshot.has_captured_error;
-    context.captured_error = snapshot.captured_error;
-    context.runtime_error_count = snapshot.runtime_error_count;
-
-    struct eval_capture_result result;
-    if (context.control == EVAL_CONTROL_FAIL) {
-        result.failed = true;
-        result.error = normalize_error(take_eval_control(EVAL_CONTROL_FAIL),
-                                       "fail");
-    } else if (has_error) {
-        result.failed = true;
-        result.error = newerrorval(
-            "runtime", message.empty() ? "runtime error" : message);
-    }
-    return result;
-}
-
-void eval_raise(struct value_t *error) {
-    set_eval_control(EVAL_CONTROL_FAIL, normalize_error(error, "fail"));
-}
-
-void eval_request_close() {
-    clear_eval_control();
-    eval_ctx().control = EVAL_CONTROL_CLOSE;
-}
 
 static void push_defer_scope() {
     eval_ctx().defer_stack.emplace_back();
@@ -197,7 +109,7 @@ static void run_current_defers() {
                         error_message_of(context.control_value).c_str());
             else
                 yyerror("error in defer: recover outside error handler");
-            clear_eval_control();
+            set_eval_control(EVAL_CONTROL_NONE, NULL);
             continue;
         }
 
@@ -259,21 +171,6 @@ void eval_run_root_defers() {
 
 
 
-bool switch_value_supported(const struct value_t *v) {
-    if (!v) return false;
-    switch (v->type) {
-        case T_int:
-        case T_bool:
-        case T_string:
-        case T_char:
-        case T_byte:
-        case T_bytes:
-        case T_null:
-            return true;
-        default:
-            return false;
-    }
-}
 
 static bool case_value_is_condition(struct ast *a) {
     if (!a) return false;

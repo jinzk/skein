@@ -203,6 +203,9 @@ target_link_libraries(skein_bytecode PUBLIC skein_runtime)
 add_library(skein_value_runtime STATIC
   src/interpreter/value_runtime.cpp
   src/interpreter/scopestack.cpp
+  src/interpreter/eval_context.cpp
+  src/interpreter/control_runtime.cpp
+  src/interpreter/vm_eval_runtime.cpp
 )
 set_target_properties(skein_value_runtime PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
@@ -228,7 +231,6 @@ add_library(skein_interpreter STATIC
   src/interpreter/eval_control.cpp
   src/interpreter/eval_call.cpp
   src/interpreter/eval_assign.cpp
-  src/interpreter/eval_context.cpp
   src/interpreter/gc.cpp
   src/interpreter/package.cpp
   src/interpreter/std_namespace.cpp

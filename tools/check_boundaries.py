@@ -157,6 +157,14 @@ def main():
             continue
         scan_includes(path, errors)
 
+    vm_executor = source_dir / "src" / "interpreter" / "vm.cpp"
+    if vm_executor.exists():
+        text = vm_executor.read_text(encoding="utf-8")
+        for forbidden in ('#include "ast.h"', '#include "compiler.h"'):
+            if forbidden in text:
+                errors.append(
+                    f"{vm_executor}: VM executor includes {forbidden}")
+
     check_link_boundary(build_dir, errors, warnings)
 
     for message in warnings:

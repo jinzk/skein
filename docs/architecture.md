@@ -149,6 +149,8 @@ typedef struct {
 - `runtime_link_test` 只链接 `skein_runtime`，守住 L1 边界；
 - `skein_bytecode` 只依赖 `skein_runtime`，`bytecode_verifier_test`
   只链接该 target；
+- `vm.cpp` 不再 include `ast.h` / `compiler.h`；编译与 fallback 由
+  `vm_bridge.cpp` 负责；
 - `tools/check_all.sh` 统一覆盖 Debug/Release、sanitizer、VM-only 与
   runtime-only 链接检查；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。

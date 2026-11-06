@@ -1321,7 +1321,7 @@ N1 已完成。剩余工作按“性能 → 架构 → 产品化”重排，每�
 - N2-3.2：待决策；
 - N2-3.3：暂不实现（待真实大 Proto 需求）；
 - N2-4.4（可选）待做；
-- A-1：部分完成（skein_bytecode target 已拆出）；
+- A-1：部分完成（skein_bytecode target + vm_bridge 已拆出）；
 - JIT/AOT/序列化：待决策。
 
 ### 8.4 N2：性能与执行器收尾（P1）
@@ -1516,7 +1516,7 @@ N2 退出条件：
 
 #### N3-4 A-1 VM / bytecode 分层
 
-状态：**部分完成（2026-11-06，bytecode target 已拆出）**。
+状态：**部分完成（2026-11-06，bytecode target + VM bridge 已拆出）**。
 
 目标：把“字节码表示 + verifier + 执行器”与 AST 编译/回退桥接解耦。
 
@@ -1526,11 +1526,15 @@ N2 退出条件：
    `skein_bytecode` target，只依赖 `skein_runtime`；
    `bytecode_verifier_test` 只链接 `skein_bytecode`；
    `check_boundaries.py` 增加 `skein_bytecode` 反向依赖检查。
-2. **执行器接口（下一步）**：执行器接收 `Proto` + frame +
-   `VmCallbacks`，不直接 include `ast.h` / `eval.h`；
-3. **AST bridge**：`vm_bridge.*` 保留编译、fallback、默认参数和
-   pattern 接入；
-4. **物理拆分**：新增 `skein_vm` target；
+2. **执行器 / 桥接分离（部分完成）**：
+   - 新增 `vm_bridge.cpp`，承载编译、fallback、默认参数和 pattern 接入；
+   - `vm.cpp` 不再 include `ast.h` / `compiler.h`；
+   - `boundary_check` 增加 VM executor include 检查；
+   - 剩余：执行器仍直接使用 `eval.h` / `eval_internal.h` 的运行时函数，
+     尚未收敛为 `VmCallbacks`。
+3. **VmCallbacks / AST bridge 收尾**：执行器只依赖
+   `Proto` + frame + callback 接口；AST 编译与 evaluator 调用留在 bridge。
+4. **物理拆分**：新增 `skein_vm` target。
 5. **序列化前置**：序列化只需链接 `skein_bytecode`，不依赖 parser。
 
 验收：
@@ -1600,7 +1604,7 @@ N2 退出条件：
 ### 8.8 建议排期
 
 ```text
-第一批  A-1.2 / A-1.3          VM 执行器接口与 AST bridge
+第一批  A-1.3                  VmCallbacks / evaluator 接口
 第二批  A-1.4                  skein_vm target
 第三批  N3-1 / N3-2 / N3-3     按需
 可选    N2-4.4                长时 fuzz

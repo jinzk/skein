@@ -204,6 +204,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/decorators.cpp
   src/interpreter/compiler.cpp
   src/interpreter/vm.cpp
+  src/interpreter/vm_bridge.cpp
   src/interpreter/diagnostics.cpp
   src/interpreter/error_report.cpp
   src/interpreter/eval.cpp

@@ -723,6 +723,7 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->exported = exported;
     a->is_async = is_async;
     a->is_generator = is_generator;
+    a->is_method = 0;
     return (struct ast *)a;
 }
 
@@ -783,6 +784,22 @@ struct ast *symlist_default_ast(struct symlist *sl) {
         return NULL;
     auto it = symlist_metadata_map.find(sl);
     return it == symlist_metadata_map.end() ? NULL : it->second.default_value;
+}
+
+struct ast *take_symlist_default_ast(struct symlist *sl) {
+    if (!sl)
+        return NULL;
+    auto it = symlist_metadata_map.find(sl);
+    if (it == symlist_metadata_map.end()) {
+        sl->has_default = false;
+        return NULL;
+    }
+    struct ast *value = it->second.default_value;
+    it->second.default_value = NULL;
+    sl->has_default = false;
+    if (!it->second.pattern)
+        symlist_metadata_map.erase(it);
+    return value;
 }
 
 void set_symlist_default_ast(struct symlist *sl, struct ast *body) {
@@ -903,7 +920,8 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     }
     std::shared_ptr<function_code> code(
         new function_code{node->sl, nparams, required_params,
-                          node->name ? node->name : "", false, variadic,
+                          node->name ? node->name : "",
+                          node->is_method != 0, variadic,
                           node->is_async != 0, node->is_generator != 0,
                           node->ast ? node->ast->line : 0,
                           node->ast ? node->ast->column : 0,
@@ -979,6 +997,7 @@ struct ast *newstructfield(char *name, struct type_constraint *type) {
     a->type = type;
     a->func = NULL;
     a->default_value = NULL;
+    a->decorators = NULL;
     a->next = NULL;
     return (struct ast *)a;
 }
@@ -996,6 +1015,7 @@ struct ast *newstructmethod(char *name, struct ast *func) {
     a->type = NULL;
     a->func = func;
     a->default_value = NULL;
+    a->decorators = NULL;
     a->next = NULL;
     return (struct ast *)a;
 }
@@ -1398,6 +1418,7 @@ void treefree(struct ast *a) {
             struct struct_member *m = (struct struct_member *)a;
             treefree((struct ast *)m->next);
             treefree(m->func);
+            treefree(m->decorators);
             std::free(m->name);
             break;
         }

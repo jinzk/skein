@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ast.h"
+#include "decorators.h"
 #include "dict.h"
 #include "diagnostics.h"
 #include "eval_context.h"
@@ -78,6 +79,13 @@ static char *copy_text(const char *text) {
     }
     std::memcpy(copy, text, len);
     return copy;
+}
+
+static struct ast *with_decorators(struct ast *method,
+                                   struct ast *decorators) {
+    if (method)
+        ((struct struct_member *)method)->decorators = decorators;
+    return method;
 }
 
 /* -------------------------------------------------------------------------
@@ -668,6 +676,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %type <a> struct_decl impl_decl trait_decl struct_members struct_member
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> impl_methods trait_methods trait_method method_member
+%type <a> decorators decorator decorator_expr
 %type <a> struct_fields struct_field
 %type <sl> param symlist lambda_param_tail
 %type <type> type type_name
@@ -1102,35 +1111,62 @@ struct_member: NAME ':' type ';'         { $$ = newstructfield($1, $3); }
     | method_member                       { $$ = $1; }
     ;
 
+decorators: decorator                    { $$ = $1; }
+    | decorators decorator               { $$ = newast('L', $1, $2); }
+    ;
+
+decorator: '@' decorator_expr            { $$ = $2; }
+    ;
+
+/*
+ * Decorator expressions deliberately support the common callable forms
+ * (name, member access, call, index) instead of the full expression grammar.
+ * This avoids a shift/reduce conflict with prefix operators such as `yield`.
+ * Arbitrary expressions can be parenthesized: @(make_decorator(x)).
+ */
+decorator_expr: NAME                     { $$ = newref($1); }
+    | BUILTIN                            { $$ = newbuiltin($1); }
+    | decorator_expr '(' explist ')'     { $$ = newcall($1, $3); }
+    | decorator_expr '[' exp ']'         { $$ = newast('G', $1, $3); }
+    | decorator_expr '.' fieldname       { $$ = newast('j', $1, newstr($3)); free($3); }
+    | '(' exp ')'                        { $$ = $2; }
+    ;
+
 method_member: funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newstructmethod($2, newfunc(NULL, $4, NULL, false, false, finish_function())); }
     | funcstart NAME '(' symlist ')' '{' list '}'
                                            { $$ = newstructmethod($2, newfunc(NULL, $4, $7, false, false, finish_function())); }
     | funcstart NAME '(' symlist ')' ARROW exp ';'
                                            { $$ = newstructmethod($2, newfunc(NULL, $4, newret($7), false, false, finish_function())); }
+    | decorators funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = with_decorators(newstructmethod($3, newfunc(NULL, $5, NULL, false, false, finish_function())), $1); }
+    | decorators funcstart NAME '(' symlist ')' '{' list '}'
+                                           { $$ = with_decorators(newstructmethod($3, newfunc(NULL, $5, $8, false, false, finish_function())), $1); }
+    | decorators funcstart NAME '(' symlist ')' ARROW exp ';'
+                                           { $$ = with_decorators(newstructmethod($3, newfunc(NULL, $5, newret($8), false, false, finish_function())), $1); }
     ;
 
 impl_decl: IMPL NAME '{' empty_body      {
-        $$ = newimpl($2, NULL,
-                     copy_text(diag_current_source_name().c_str()), NULL);
+        $$ = lower_impl_decorators((struct impl_node *)newimpl(
+            $2, NULL, copy_text(diag_current_source_name().c_str()), NULL));
       }
     | IMPL NAME '{' impl_methods '}'     {
-        $$ = newimpl($2, NULL,
-                     copy_text(diag_current_source_name().c_str()),
-                     (struct struct_member *)$4);
+        $$ = lower_impl_decorators((struct impl_node *)newimpl(
+            $2, NULL, copy_text(diag_current_source_name().c_str()),
+            (struct struct_member *)$4));
       }
     | IMPL impl_trait_name FOR NAME '{' empty_body  {
-        $$ = newimpl($4, $2,
-                     copy_text(diag_current_source_name().c_str()), NULL);
+        $$ = lower_impl_decorators((struct impl_node *)newimpl(
+            $4, $2, copy_text(diag_current_source_name().c_str()), NULL));
       }
     | IMPL impl_trait_name FOR NAME '{' impl_methods '}' {
-        $$ = newimpl($4, $2,
-                     copy_text(diag_current_source_name().c_str()),
-                     (struct struct_member *)$6);
+        $$ = lower_impl_decorators((struct impl_node *)newimpl(
+            $4, $2, copy_text(diag_current_source_name().c_str()),
+            (struct struct_member *)$6));
       }
     | IMPL impl_trait_name FOR NAME ';'  {
-        $$ = newimpl($4, $2,
-                     copy_text(diag_current_source_name().c_str()), NULL);
+        $$ = lower_impl_decorators((struct impl_node *)newimpl(
+            $4, $2, copy_text(diag_current_source_name().c_str()), NULL));
       }
     ;
 

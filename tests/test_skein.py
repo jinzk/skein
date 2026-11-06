@@ -11,6 +11,7 @@ import harness
 from cases import (
     async_errors,
     collections,
+    decorators,
     diagnostics,
     ffi_real,
     io_scripts,
@@ -27,6 +28,7 @@ MODULES = [
     language_core,
     match_types,
     meta,
+    decorators,
     collections,
     paths,
     runtime,

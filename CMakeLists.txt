@@ -185,6 +185,7 @@ add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
   src/interpreter/ast.cpp
+  src/interpreter/decorators.cpp
   src/interpreter/bytecode.cpp
   src/interpreter/compiler.cpp
   src/interpreter/verifier.cpp

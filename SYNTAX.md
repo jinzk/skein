@@ -1438,6 +1438,79 @@ let d = Point { ...p, x: 9 };
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
 - 不支持继承、静态方法、泛型、动态添加方法或运算符重载。
 
+#### 5.12.1 方法装饰器
+
+`impl` 方法支持 `@expr` 装饰器：
+
+```text
+func trace(fn) {
+  return func(...args) {
+    print("enter");
+    let result = fn(...args);
+    print("exit");
+    return result;
+  };
+}
+
+struct Point { x: int; y: int; }
+
+impl Point {
+  @trace
+  func area(self, scale: int = 1) {
+    return self.x * self.y * scale;
+  }
+}
+
+let p = Point { x: 3, y: 4 };
+p.area()      // enter / exit / 12
+```
+
+规则：
+
+- `@expr` 放在 `impl` 方法声明前，可以连续写多个；
+- 支持固有方法和 `impl Trait for Type` 方法；
+- 多个装饰器从下往上应用，`@a @b func m` 等价于 `a(b(m))`；
+- 装饰器在 `impl` 声明执行时应用一次，不随方法调用重复执行；
+- 装饰器就是普通高阶函数，不新增 `decorator` 关键字；
+- 装饰器表达式支持名称、成员访问、调用和下标；任意表达式请加括号，例如 `@(make_decorator(x))`；
+- 装饰器必须返回 callable，否则在 `impl` 安装时报告 `expects callable`；
+- 方法装饰器收到的是 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
+- 装饰器可以修改参数，包括 `args[0]`（`self`），再调用原方法；
+- 调用点不变：`p.area()`、`let f = p.area; f()`、trait 分派都经过装饰器；
+- `std.meta.methods` / `std.meta.traits` 看到的方法签名不变。
+
+方法装饰器的默认值由生成的 wrapper 解析，因此装饰器看到的是已经补全默认值的参数；默认值仍可引用 `self` 和更早的参数，并在每次调用时重新求值。
+
+当前限制：
+
+- 不支持顶层自由函数装饰器（继续手写 `f = dec(f)`）；
+- 不支持 `struct` / `enum` / `trait` 声明装饰器；
+- 被装饰方法不能使用解构参数；
+- 被装饰方法不能是 generator；
+- 方法语法本身不支持 `async`，因此也没有 async 方法装饰器；
+- 装饰器不能改变方法名或声明签名。
+
+带参数的装饰器就是返回装饰器的普通函数：
+
+```text
+func retry(times: int) {
+  return func(fn) {
+    return func(...args) {
+      let result = null;
+      for (let i in range(times)) {
+        result = fn(...args);
+      }
+      return result;
+    };
+  };
+}
+
+impl Point {
+  @retry(3)
+  func area(self) { return self.x * self.y; }
+}
+```
+
 结构体类型可用于类型标注：
 
 ```text
@@ -4154,6 +4227,7 @@ try/catch
 通配导入
 命名参数
 静态方法 / 关联函数
+顶层函数 / 类型声明装饰器
 可变 self
 私有成员
 struct 继承

@@ -129,6 +129,9 @@ struct funcdef {
     int exported;
     int is_async;
     int is_generator;
+    /* Set for hidden method bodies so the first parameter keeps method
+     * semantics (self is const) when called as an ordinary function. */
+    int is_method;
 };
 
 struct ufncall {
@@ -289,6 +292,8 @@ struct struct_member {
     struct type_constraint *type;
     struct ast *func;
     struct ast *default_value;
+    /* Method decorators, stored as an 'L' chain of expressions. */
+    struct ast *decorators;
     struct struct_member *next;
 };
 
@@ -515,6 +520,8 @@ void clear_function_body_ast(struct function_code *code);
 
 /* Parameter default/pattern ASTs are interpreter-owned metadata. */
 struct ast *symlist_default_ast(struct symlist *sl);
+/* Detach and return the default AST without freeing it. */
+struct ast *take_symlist_default_ast(struct symlist *sl);
 void set_symlist_default_ast(struct symlist *sl, struct ast *body);
 struct ast *symlist_pattern_ast(struct symlist *sl);
 void set_symlist_pattern_ast(struct symlist *sl, struct ast *pattern);

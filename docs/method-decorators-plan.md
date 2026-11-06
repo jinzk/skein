@@ -1,7 +1,7 @@
 # Skein 方法装饰器实施计划（方案 A：AST 脱糖）
 
 - 更新日期：2026-11-06
-- 状态：设计已确认，尚未实现
+- 状态：M1-1 ~ M1-5 已实现（2026-11-06）
 - 方案：A（AST lowering / 编译器生成包装方法）
 - 关联文档：[README.md](../README.md)、[SYNTAX.md](../SYNTAX.md)、
   [architecture.md](architecture.md)、[metaprogramming-plan.md](metaprogramming-plan.md)、
@@ -58,15 +58,24 @@ impl Point {
 ### 2.1 应用语法
 
 ```text
-decorator      := '@' expression end_of_line
+decorator      := '@' decorator_expr
 decorated_method := decorator+ method
+
+decorator_expr := NAME
+                | BUILTIN
+                | decorator_expr '(' explist ')'
+                | decorator_expr '[' exp ']'
+                | decorator_expr '.' fieldname
+                | '(' exp ')'
 ```
 
 规则：
 
-- `@expr` 每行一个，放在 `impl` 方法声明前；
-- 允许空行；
+- `@expr` 放在 `impl` 方法声明前，习惯上每行一个；lexer 在 `impl` 花括号内
+  不产生 `EOL`，因此语法本身不依赖换行；
 - 只允许出现在 `impl` 的方法上；
+- 装饰器表达式支持名称、成员访问、调用和下标；任意表达式用括号包起来，
+  例如 `@(make_decorator(x))`；
 - `@` 已经是 lexer 的字符 token，不需要新增词法规则；
 - `import @pkg` 的路径语法不受影响。
 
@@ -407,7 +416,7 @@ retry(3)($body)
   struct ast *decorators;
   ```
 - `newstructfield` / `newstructmethod` 初始化 `decorators = NULL`。
-- 新增 `newstructmethod_decorated(...)` 或在 parser 中直接设置字段。
+- parser 使用 `with_decorators(...)` 把表达式链挂到方法节点。
 - `treefree` 的 `'m'` 分支释放 `decorators`。
 - `struct funcdef` 增加：
   ```cpp
@@ -420,7 +429,7 @@ retry(3)($body)
 
 ### 4.2 `src/interpreter/parser.y`
 
-- 新增 `%type <a> decorators decorator`。
+- 新增 `%type <a> decorators decorator decorator_expr`。
 - 新增规则：
   ```text
   decorators:
@@ -428,8 +437,10 @@ retry(3)($body)
     | decorators decorator
 
   decorator:
-      '@' exp EOL
+      '@' decorator_expr
   ```
+- `decorator_expr` 只覆盖名称、成员访问、调用、下标和括号表达式，
+  避免与 `yield` 等前缀运算符产生 shift/reduce 冲突。
 - `method_member` 增加三种带装饰器的形式：
   - 空 body；
   - `{ list }` body；
@@ -455,14 +466,14 @@ struct ast *lower_impl_decorators(struct impl_node *impl);
 - 维护 AST 所有权；
 - 通过 `yyerror` 报告错误。
 
-内部辅助：
+内部辅助（实际实现名）：
 
-- `mangle_hidden_name(...)`；
-- `copy_symlist_without_defaults(...)`；
-- `take_defaults(...)`；
+- `hidden_name(...)`；
+- `copy_symlist(...)`；
+- `move_defaults(...)`；
 - `build_decorator_chain(...)`；
 - `build_wrapper_body(...)`；
-- `build_wrapper_method(...)`。
+- `validate_decorated_method(...)`。
 
 ### 4.4 `CMakeLists.txt`
 
@@ -500,11 +511,13 @@ src/interpreter/decorators.cpp
 
 ### M1-1：AST 与 parser 基础设施（S/M，P0）
 
+状态：**已完成（2026-11-06）**。
+
 - `struct_member.decorators`、`funcdef.is_method`；
 - `take_symlist_default_ast`；
 - `treefree` / `newfunc` / `get_function_code` 更新；
 - `parser.y` 的 `decorators` 规则和 `method_member` 变体；
-- `impl_decl` 调用 lowering 的入口（先返回原 impl 的 stub）。
+- `impl_decl` 调用 lowering 入口。
 
 验收：
 
@@ -514,6 +527,8 @@ src/interpreter/decorators.cpp
 - `git diff` 限于 parser/AST/CMake。
 
 ### M1-2：lowering 核心（M，P0）
+
+状态：**已完成（2026-11-06）**。
 
 - 隐藏 `$body` / `$dec` 绑定；
 - 装饰器链；
@@ -532,6 +547,8 @@ src/interpreter/decorators.cpp
 
 ### M1-3：VM 集成与所有权（M，P0）
 
+状态：**已完成（2026-11-06）**。
+
 - 确认 `'L'` 序列在 VM 下编译；
 - 确认 `$body` / `$dec` 在 VM 下按定义包作用域解析；
 - 确认 `is_method` 对 VM fast-call 和 `self` const 的影响；
@@ -547,6 +564,8 @@ src/interpreter/decorators.cpp
 
 ### M1-4：测试与边界（M，P0）
 
+状态：**已完成（2026-11-06）**。
+
 - 新增 `tests/cases/decorators.py`；
 - 注册到 `tests/test_skein.py`；
 - 覆盖第 7 节全部功能与错误用例；
@@ -560,6 +579,8 @@ src/interpreter/decorators.cpp
 - ASan/UBSan/LSan 通过。
 
 ### M1-5：文档与全量验收（S，P0）
+
+状态：**已完成（2026-11-06）**。
 
 - `SYNTAX.md` 增加方法装饰器章节；
 - `README.md` 增加特性说明和示例；
@@ -629,22 +650,22 @@ src/interpreter/decorators.cpp
 
 ## 8. 验收标准
 
-- [ ] `impl` 固有方法和 trait 实现方法支持 `@expr`。
-- [ ] 多个装饰器按 Python 语义从下往上应用。
-- [ ] 带参装饰器、默认值、可变参数可用。
-- [ ] 装饰器在定义时执行一次，不随调用重复执行。
-- [ ] 方法调用点、方法值提取、trait 分派保持透明。
-- [ ] `std.meta.methods` / `std.meta.traits` 签名不变。
-- [ ] 隐藏 `$body` 保持 `self` const 语义。
-- [ ] 装饰器结果非 callable 时在安装时报错。
-- [ ] 解构参数和 generator 方法在 v1 有明确错误。
-- [ ] 嵌套 `impl` 和跨包方法可用。
-- [ ] AST / VM 行为一致，VM-only 通过。
-- [ ] ASan/UBSan/LSan 通过。
-- [ ] `tools/check_all.sh --clean` 通过。
-- [ ] 文档同步检查通过。
-- [ ] 没有新增宏、`decorator` 关键字或编译期任意代码执行。
-- [ ] 非装饰器路径性能无明显回退。
+- [x] `impl` 固有方法和 trait 实现方法支持 `@expr`。
+- [x] 多个装饰器按 Python 语义从下往上应用。
+- [x] 带参装饰器、默认值、可变参数可用。
+- [x] 装饰器在定义时执行一次，不随调用重复执行。
+- [x] 方法调用点、方法值提取、trait 分派保持透明。
+- [x] `std.meta.methods` / `std.meta.traits` 签名不变。
+- [x] 隐藏 `$body` 保持 `self` const 语义。
+- [x] 装饰器结果非 callable 时在安装时报错。
+- [x] 解构参数和 generator 方法在 v1 有明确错误。
+- [x] 嵌套 `impl` 和跨包方法可用。
+- [x] AST / VM 行为一致，VM-only 通过。
+- [x] ASan/UBSan/LSan 通过。
+- [x] `tools/check_all.sh --clean` 通过。
+- [x] 文档同步检查通过。
+- [x] 没有新增宏、`decorator` 关键字或编译期任意代码执行。
+- [x] 非装饰器路径性能无明显回退（完整 ctest / vm_bench_test 通过）。
 
 ## 9. 风险与缓解
 
@@ -689,3 +710,32 @@ src/interpreter/decorators.cpp
 
 先完成单装饰器、无默认值、固有方法的垂直切片，再扩展多装饰器、默认值、
 variadic、trait 和跨包场景。
+
+## 12. 实施结果（2026-11-06）
+
+已实现：
+
+- `src/interpreter/decorators.h` / `decorators.cpp`；
+- `struct_member.decorators`、`funcdef.is_method`；
+- `take_symlist_default_ast`；
+- parser 的 `@` 方法装饰器语法和 `decorator_expr`；
+- `impl_decl` 的 AST lowering；
+- `tests/cases/decorators.py` 及测试注册；
+- README / SYNTAX / architecture 文档更新。
+
+验证结果：
+
+```text
+ctest (build):            11/11 passed
+tools/check_all.sh --clean --jobs 2: all checks passed
+ASan/UBSan VM + AST:      decorators cases passed
+LSan:                     decorator success/failure paths passed
+VM-only:                  decorators cases passed
+vm_differential_test:     passed
+docs_sync_test:           passed
+boundary_check_test:      passed
+```
+
+已知限制与计划一致：只支持 `impl` 方法；装饰器表达式支持名称、成员访问、
+调用、下标和括号表达式；不支持解构参数、generator 方法、顶层函数装饰器和
+类型声明装饰器。

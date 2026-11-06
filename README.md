@@ -3489,6 +3489,38 @@ impl aa::D for Q {
 
 - 未导出的类型不能通过包路径引用，但它的值仍可作为普通值传递和方法调用。
 
+方法装饰器：
+
+```text
+func trace(fn) {
+  return func(...args) {
+    print("enter");
+    let result = fn(...args);
+    print("exit");
+    return result;
+  };
+}
+
+struct Point { x: int; y: int; }
+
+impl Point {
+  @trace
+  func area(self, scale: int = 1) {
+    return self.x * self.y * scale;
+  }
+}
+
+Point { x: 3, y: 4 }.area()      // enter / exit / 12
+```
+
+- `@expr` 写在 `impl` 方法前，可以连续写多个；多个装饰器从下往上应用；
+- 装饰器在 `impl` 声明执行时应用一次，不随方法调用重复执行；
+- 装饰器是普通高阶函数，不需要专门的定义语法；
+- 装饰器收到 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
+- 支持固有方法和 `impl Trait for Type` 方法；调用点、方法值提取和 trait 分派不变；
+- 默认值由生成的 wrapper 解析，装饰器看到的是补全后的参数；
+- 装饰器必须返回 callable；不支持顶层函数/类型声明装饰器、解构参数方法和 generator 方法。
+
 枚举（带载荷变体）：
 
 ```text

@@ -1,11 +1,14 @@
 #include "gc.h"
 
 #include "cycle.h"
+#include "gc_roots.h"
 #include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
 
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <unordered_set>
 #include <vector>
@@ -34,6 +37,24 @@ struct cycle_collector {
     void mark_value(value_t *v) {
         if (v)
             value_work.push_back(v);
+    }
+
+    void mark_cell(const std::shared_ptr<struct upvalue_cell> &cell) {
+        if (!cell)
+            return;
+        if (cell->slot)
+            mark_value(*cell->slot);
+        else
+            mark_value(cell->value);
+    }
+
+    void mark_function(const std::shared_ptr<function_def> &def) {
+        if (!def)
+            return;
+        if (def->closure)
+            mark_scope(def->closure.get());
+        for (const auto &cell : def->upvalues)
+            mark_cell(cell);
     }
 
     void drain() {
@@ -65,15 +86,13 @@ struct cycle_collector {
                 switch (v->type) {
                     case T_func: {
                         struct func_value_t *fv = (struct func_value_t *)v;
-                        if (fv->def && fv->def->closure)
-                            mark_scope(fv->def->closure.get());
+                        mark_function(fv->def);
                         break;
                     }
                     case T_method: {
                         struct method_value_t *method =
                             (struct method_value_t *)v;
-                        if (method->method && method->method->closure)
-                            mark_scope(method->method->closure.get());
+                        mark_function(method->method);
                         break;
                     }
                     default:
@@ -87,6 +106,10 @@ struct cycle_collector {
         }
     }
 };
+
+void mark_root_value(void *ctx, value_t *value) {
+    static_cast<cycle_collector *>(ctx)->mark_value(value);
+}
 
 } // namespace
 
@@ -105,6 +128,7 @@ void collect_cycles(scope_context &context) {
     collector.mark_scope(context.current.get());
     for (auto &s : context.restore_stack)
         collector.mark_scope(s.get());
+    gc_roots_visit(context, mark_root_value, &collector);
     collector.drain();
 
     for (auto &s : scopes) {
@@ -140,4 +164,19 @@ void maybe_collect_cycles() {
     collect_cycles(context);
     prune_scopes(context);
     context.scopes_at_last_collect = context.all_scopes.size();
+}
+
+bool gc_stress_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *value = std::getenv("SKEIN_GC_STRESS");
+        enabled = 0;
+        if (value && *value) {
+            enabled = !(std::strcmp(value, "0") == 0 ||
+                        std::strcmp(value, "false") == 0 ||
+                        std::strcmp(value, "off") == 0 ||
+                        std::strcmp(value, "no") == 0);
+        }
+    }
+    return enabled != 0;
 }

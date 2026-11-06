@@ -164,11 +164,14 @@ typedef struct {
 
 - JIT/AOT 代码生成与字节码缓存。
 
+已落地：
+
+- GC root 表第一版：VM/JIT frame slots、operand stack、upvalue cell、
+  defer/iterator 显式登记，cycle collector 纳入 frame roots。
+
 下一阶段：
 
-- 精确 GC root 表：VM/JIT frame slots、operand stack、upvalue cell、
-  defer/iterator/handler 值与 JIT safepoint；
-- 随后再做 per-pc liveness / moving GC 准备。
+- per-pc liveness / moving GC 准备。
 
 未开始：
 

@@ -3,6 +3,8 @@
 #include "diagnostics.h"
 #include "dict.h"
 #include "eval_context.h"
+#include "gc.h"
+#include "gc_roots.h"
 #include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
@@ -77,6 +79,11 @@ SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
 SKEIN_JIT_SYSV value_t *skein_jit_tail_request(skein::jit::thread_state *ts,
                                 value_t *callee, value_t **args,
                                 uint32_t argc);
+SKEIN_JIT_SYSV size_t skein_jit_push_roots(skein::jit::thread_state *ts,
+                                           value_t **values,
+                                           uint32_t count);
+SKEIN_JIT_SYSV void skein_jit_pop_roots(skein::jit::thread_state *ts,
+                                        size_t mark);
 SKEIN_JIT_SYSV value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
                                value_t *value, value_t **dest, int line,
                                int column);
@@ -149,9 +156,11 @@ constexpr int kStatusOff = 32;
 #if defined(_WIN32)
 constexpr int kSavedRdiOff = 40;
 constexpr int kSavedRsiOff = 48;
-constexpr int kHeaderSize = 56;
+constexpr int kRootMarkOff = 56;
+constexpr int kHeaderSize = 64;
 #else
-constexpr int kHeaderSize = 40;
+constexpr int kRootMarkOff = 40;
+constexpr int kHeaderSize = 48;
 #endif
 
 int slot_op_char(uint8_t opcode) {
@@ -513,6 +522,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
           asmjit::imm(0));
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kStatusOff),
           asmjit::imm(0));
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kRootMarkOff),
+          asmjit::imm(static_cast<int64_t>(-1)));
     a.xor_(asmjit::x86::eax, asmjit::x86::eax);
     for (uint32_t i = 0; i < value_count; ++i)
         a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -548,6 +559,14 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         a.test(asmjit::x86::eax, asmjit::x86::eax);
         a.jz(abort_label);
     }
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+    a.lea(asmjit::x86::rsi,
+          asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
+    a.mov(asmjit::x86::edx, asmjit::imm(value_count));
+    call_addr(fn_address(&skein_jit_push_roots));
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kRootMarkOff),
+          asmjit::x86::rax);
     a.jmp(proto.code.empty() ? end_label : labels[0]);
 
     for (size_t pc = 0; pc < proto.code.size(); ++pc) {
@@ -1211,6 +1230,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     a.bind(epilogue_label);
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+    a.mov(asmjit::x86::rsi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kRootMarkOff));
+    call_addr(fn_address(&skein_jit_pop_roots));
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     a.lea(asmjit::x86::rsi,
           asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
     a.mov(asmjit::x86::edx, asmjit::imm(value_count));
@@ -1628,6 +1652,24 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_tail_request(
     ts->tail_argc = argc;
     ts->tail_pending = true;
     return nullptr;
+}
+
+extern "C" SKEIN_JIT_SYSV size_t skein_jit_push_roots(
+    skein::jit::thread_state *ts, value_t **values, uint32_t count) {
+    if (!ts || !ts->ctx || !values)
+        return SIZE_MAX;
+    const size_t mark = gc_roots_push_array(
+        ts->ctx->scopes, values, static_cast<size_t>(count));
+    if (gc_stress_enabled())
+        collect_cycles(ts->ctx->scopes);
+    return mark;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_pop_roots(
+    skein::jit::thread_state *ts, size_t mark) {
+    if (!ts || !ts->ctx || mark == SIZE_MAX)
+        return;
+    gc_roots_pop(ts->ctx->scopes, mark);
 }
 
 extern "C" SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,

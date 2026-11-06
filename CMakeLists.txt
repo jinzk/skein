@@ -207,6 +207,8 @@ add_library(skein_value_runtime STATIC
   src/interpreter/eval_context.cpp
   src/interpreter/control_runtime.cpp
   src/interpreter/vm_eval_runtime.cpp
+  src/interpreter/gc.cpp
+  src/interpreter/gc_roots.cpp
   src/interpreter/diagnostics.cpp
 )
 set_target_properties(skein_value_runtime PROPERTIES
@@ -281,7 +283,6 @@ add_library(skein_interpreter STATIC
   src/interpreter/eval_control.cpp
   src/interpreter/eval_call.cpp
   src/interpreter/eval_assign.cpp
-  src/interpreter/gc.cpp
   src/interpreter/package.cpp
   src/interpreter/std_namespace.cpp
   src/interpreter/pattern.cpp
@@ -603,6 +604,21 @@ if(BUILD_TESTING)
   add_test(NAME runtime_link_test COMMAND runtime_link_test)
   set_tests_properties(runtime_link_test PROPERTIES LABELS "core")
 
+  add_executable(gc_roots_test
+    tests/test_gc_roots.cpp
+  )
+  target_link_libraries(gc_roots_test PRIVATE skein_value_runtime)
+  target_include_directories(gc_roots_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(gc_roots_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME gc_roots_test COMMAND gc_roots_test)
+  set_tests_properties(gc_roots_test PROPERTIES LABELS "core")
+
   add_executable(vm_link_test
     tests/test_vm_link.cpp
   )
@@ -699,6 +715,16 @@ if(BUILD_TESTING)
           TIMEOUT 300
         )
       endif()
+      add_test(
+        NAME gc_stress_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/gc_stress.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(gc_stress_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 300
+      )
       add_test(
         NAME vm_bench_test
         COMMAND ${Python3_EXECUTABLE}

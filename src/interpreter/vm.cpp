@@ -7,6 +7,8 @@
 #include "eval_context.h"
 #include "eval_helpers.h"
 #include "fiber.h"
+#include "gc.h"
+#include "gc_roots.h"
 #include "package.h"
 #include "pattern.h"
 #include "runtime_state.h"
@@ -265,9 +267,14 @@ public:
         } else if (proto.uses_slots) {
             slot_symbols_.assign(proto.slots.size(), NULL);
         }
+        gc_root_mark_ = gc_roots_push_visitor(
+            context_.scopes, this, &Executor::gc_root_visit);
+        gc_roots_registered_ = true;
     }
 
     ~Executor() {
+        if (gc_roots_registered_)
+            gc_roots_pop(context_.scopes, gc_root_mark_);
         if (!saved_states_.empty())
             unwind_fast_frames();
         free_stack(stack_);
@@ -317,6 +324,10 @@ public:
             }
             if (((++instruction_count_) & 1023u) == 0 && g_interrupted) {
                 return abort_error();
+            }
+            if (gc_stress_enabled() &&
+                ((++gc_stress_ticks_) & 4095u) == 0) {
+                collect_cycles(context_.scopes);
             }
 
             try {
@@ -2778,9 +2789,12 @@ private:
     bool slot_pool_safe_ = false;
     bool direct_params_ = false;
     bool direct_slots_ = false;
+    bool gc_roots_registered_ = false;
+    size_t gc_root_mark_ = 0;
     std::vector<struct symbol *> param_symbol_pool_;
     std::vector<struct symbol *> slot_symbol_pool_;
     unsigned instruction_count_ = 0;
+    unsigned gc_stress_ticks_ = 0;
 
     /*
      * Fast calls move the caller's bookkeeping vectors into saved_states_.
@@ -3895,6 +3909,93 @@ private:
         for (auto &cell : open_upvalues_)
             close_upvalue(*cell);
         open_upvalues_.clear();
+    }
+
+    static void gc_mark_value(gc_mark_fn mark, void *ctx,
+                              value_t *value) {
+        if (value)
+            mark(ctx, value);
+    }
+
+    static void gc_mark_symbols(
+        const std::vector<struct symbol *> &symbols,
+        gc_mark_fn mark, void *ctx) {
+        for (struct symbol *sym : symbols) {
+            if (sym)
+                gc_mark_value(mark, ctx, sym->val);
+        }
+    }
+
+    static void gc_mark_cells(
+        const std::vector<std::shared_ptr<struct upvalue_cell>> &cells,
+        gc_mark_fn mark, void *ctx) {
+        for (const auto &cell : cells) {
+            if (!cell)
+                continue;
+            if (cell->slot)
+                gc_mark_value(mark, ctx, *cell->slot);
+            else
+                gc_mark_value(mark, ctx, cell->value);
+        }
+    }
+
+    static void gc_mark_iterators(
+        const std::vector<iterator_state> &iterators,
+        gc_mark_fn mark, void *ctx) {
+        for (const iterator_state &state : iterators) {
+            gc_mark_value(mark, ctx, state.iterable);
+            if (state.key_sym)
+                gc_mark_value(mark, ctx, state.key_sym->val);
+            if (state.value_sym)
+                gc_mark_value(mark, ctx, state.value_sym->val);
+        }
+    }
+
+    static void gc_mark_defers(
+        const std::vector<std::vector<defer_record>> &scopes,
+        gc_mark_fn mark, void *ctx) {
+        for (const std::vector<defer_record> &scope : scopes) {
+            for (const defer_record &record : scope)
+                gc_mark_cells(record.upvalues, mark, ctx);
+        }
+    }
+
+    static void gc_mark_state(
+        const SavedVmState &state, gc_mark_fn mark, void *ctx) {
+        gc_mark_symbols(state.param_symbols, mark, ctx);
+        for (value_t *value : state.param_values)
+            gc_mark_value(mark, ctx, value);
+        gc_mark_symbols(state.slot_symbols, mark, ctx);
+        for (value_t *value : state.slot_values)
+            gc_mark_value(mark, ctx, value);
+        gc_mark_cells(state.open_upvalues, mark, ctx);
+        if (state.def)
+            gc_mark_cells(state.def->upvalues, mark, ctx);
+        gc_mark_iterators(state.iterators, mark, ctx);
+        gc_mark_defers(state.defer_scopes, mark, ctx);
+    }
+
+    void mark_gc_roots(gc_mark_fn mark, void *ctx) {
+        for (value_t *value : stack_)
+            gc_mark_value(mark, ctx, value);
+        gc_mark_symbols(param_symbols_, mark, ctx);
+        for (value_t *value : param_values_)
+            gc_mark_value(mark, ctx, value);
+        gc_mark_symbols(slot_symbols_, mark, ctx);
+        for (value_t *value : slot_values_)
+            gc_mark_value(mark, ctx, value);
+        gc_mark_cells(open_upvalues_, mark, ctx);
+        if (current_def_)
+            gc_mark_cells(current_def_->upvalues, mark, ctx);
+        gc_mark_iterators(iterators_, mark, ctx);
+        gc_mark_defers(defer_scopes_, mark, ctx);
+        for (const SavedVmState &state : saved_states_)
+            gc_mark_state(state, mark, ctx);
+    }
+
+    static void gc_root_visit(void *ctx, gc_mark_fn mark,
+                              void *mark_ctx) {
+        static_cast<Executor *>(ctx)->mark_gc_roots(mark, mark_ctx);
     }
 
     /*

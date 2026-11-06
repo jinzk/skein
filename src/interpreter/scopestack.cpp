@@ -173,6 +173,7 @@ void adopt_scopes(scope_context &from, scope_context &to) {
     from.all_scopes.clear();
     from.restore_stack.clear();
     from.global_slots.clear();
+    from.gc_roots.clear();
     from.current.reset();
     from.global_scope.reset();
 }
@@ -196,6 +197,7 @@ void donescope(scope_context &context) {
     context.global_scope.reset();
     context.all_scopes.clear();
     context.global_slots.clear();
+    context.gc_roots.clear();
     context.statements_since_collect = 0;
     context.scopes_at_last_collect = 0;
     ++context.global_generation;

@@ -207,6 +207,8 @@ def main():
         source_dir / "src" / "interpreter" / "eval_context.cpp",
         source_dir / "src" / "interpreter" / "control_runtime.cpp",
         source_dir / "src" / "interpreter" / "vm_eval_runtime.cpp",
+        source_dir / "src" / "interpreter" / "gc.cpp",
+        source_dir / "src" / "interpreter" / "gc_roots.cpp",
         source_dir / "src" / "interpreter" / "diagnostics.cpp",
     ]
     for value_runtime in value_runtime_files:

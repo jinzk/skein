@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "valuetype.h"
+#include "gc_roots.h"
 
 struct symbol;
 
@@ -50,6 +51,8 @@ struct scope_context {
     int statements_since_collect = 0;
     size_t scopes_at_last_collect = 0;
     uint64_t global_generation = 0;
+    /* Explicit VM/JIT frame roots, in push order. */
+    std::vector<gc_root_frame> gc_roots;
 };
 
 scope_context &active_scope_context();

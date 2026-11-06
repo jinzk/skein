@@ -4,11 +4,15 @@
 struct scope_context;
 
 /*
- * Scope-granularity cycle collection.  Values are reference counted; the
- * collector clears scopes that are no longer reachable from the active roots,
- * which breaks closure cycles.  Values must not contain cycles themselves.
+ * Reference counting plus cycle collection over scopes and explicit frame
+ * roots.  Values are reference counted; the collector clears scopes that are
+ * no longer reachable from the active roots, which breaks closure cycles.
+ * Frame roots cover VM/JIT value slots, upvalue cells, defers and iterators.
  */
 void collect_cycles(struct scope_context &context);
 void maybe_collect_cycles();
+
+/* True when SKEIN_GC_STRESS requests collection at VM safepoints. */
+bool gc_stress_enabled();
 
 #endif

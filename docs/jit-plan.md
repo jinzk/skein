@@ -60,6 +60,10 @@ Go/No-Go 标准见 §10。
   param/slot 捕获，帧退出时 close；
 - handler frame：`on error(e)` 绑定、handler 局部变量和闭包捕获均使用
   direct frame slot，不再强制走 `symbol*`；
+- GC root 表第一版：`scope_context` 增加显式 root 栈，VM 注册
+  param/slot/operand stack/upvalue/defer/iterator roots，JIT frame 注册
+  value slots；cycle collector 从 scope roots 扩展为 scope + frame roots，
+  并遍历 `upvalue_cell`；新增 `SKEIN_GC_STRESS`；
 - `TAIL_CALL`：
   - 自递归尾调用直接复用当前 JIT 机器帧，重绑参数并跳回 body；
   - 非自递归尾调用通过 tail request + driver loop 做通用 trampoline，
@@ -86,12 +90,10 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 
 尚未落地：
 
-- **精确 GC root 表（下一阶段 P0）**：当前 cycle collector 的 roots 基本
-  只覆盖 scope；direct frame slot、operand stack、upvalue cell、defer
-  capture、iterator/handler 值和 JIT frame 尚未完整登记为 roots；
+- **per-pc liveness / safepoint 表**：root 表第一版对所有 value slot
+  保守标记，尚未做按 pc 的精确 liveness；
 - Win64 ABI 代码路径已接入（MinGW `sysv_abi` helper + Win64 entry thunk）；
   当前不纳入主线，由维护者在 MSYS2 环境单独验证；
-- per-pc liveness / safepoint 表；
 - 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
   但不会形成调用栈增长。该项暂按性能 backlog 处理，不阻塞当前
   frame slot / GC / Win64 工作；待 GC root 表与 safepoint 稳定后再评估
@@ -913,9 +915,11 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 - 单态 inline cache；
 - 覆盖 `slot` / `field` / `index` / `global` 基准。
 
-### Phase 3：GC root map 与 frame roots（当前下一阶段，3–4 周）
+### Phase 3：GC root map 与 frame roots（第一版已落地，继续收尾）
 
 目标是先保证 GC 能“看见”所有 live value，不追求立即移动对象。
+第一版已覆盖 VM/JIT frame roots、upvalue cell、defer/iterator 和
+`SKEIN_GC_STRESS`；剩余工作是审计边界情况并补 per-pc liveness。
 
 - 定义统一的 `frame root map` 元数据：
   - param / slot / operand stack；

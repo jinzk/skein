@@ -223,6 +223,32 @@ def main():
         )
         ok &= compare(binary, "compound-const-error", compound_const)
 
+        global_ops = tmp_path / "global_ops.skein"
+        global_ops.write_text(
+            "let g = 1;\n"
+            "func f(n) {\n"
+            "  g += n; g++; ++g;\n"
+            "  let x = -n;\n"
+            "  let y = !false;\n"
+            "  let z = ~n;\n"
+            "  if (y) { return g + x + z; }\n"
+            "  return 0;\n"
+            "}\n"
+            "println(f(3));\n"
+            "println(g);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "global-compound-unary", global_ops)
+
+        global_const = tmp_path / "global_const.skein"
+        global_const.write_text(
+            "const g = 1;\n"
+            "func f() { g += 1; return g; }\n"
+            "f();\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "global-const-error", global_const)
+
     if not ok:
         return 1
     print("jit smoke passed")

@@ -33,6 +33,15 @@ value_t *skein_jit_load_global(const skein::bc::Proto *proto, uint32_t slot,
 value_t *skein_jit_store_global(const skein::bc::Proto *proto, uint32_t slot,
                                 uint32_t name_index, value_t *value,
                                 int line, int column);
+value_t *skein_jit_compound_global(const skein::bc::Proto *proto,
+                                   uint32_t slot, uint32_t name_index,
+                                   value_t *value, int op, uint64_t loc);
+value_t *skein_jit_incdec_global(const skein::bc::Proto *proto,
+                                 uint32_t slot, uint32_t name_index,
+                                 int delta, int prefix, uint64_t loc);
+value_t *skein_jit_neg(value_t *value, int line, int column);
+value_t *skein_jit_not(value_t *value, int line, int column);
+value_t *skein_jit_bitnot(value_t *value, int line, int column);
 value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                              uint32_t name_index, int line, int column);
 value_t *skein_jit_store_name(const skein::bc::Proto *proto,
@@ -256,6 +265,9 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level) {
             case skein::bc::Op::Shl:
             case skein::bc::Op::Shr:
             case skein::bc::Op::CmpJump:
+            case skein::bc::Op::Neg:
+            case skein::bc::Op::Not:
+            case skein::bc::Op::BitNot:
             case skein::bc::Op::Jump:
             case skein::bc::Op::JumpIfFalse:
             case skein::bc::Op::JumpIfTrue:
@@ -275,6 +287,19 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level) {
                 break;
             case skein::bc::Op::LoadGlobal:
             case skein::bc::Op::StoreGlobal:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return false;
+                break;
+            case skein::bc::Op::CompoundGlobal:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name ||
+                    !is_binary_op_char(ins.flags))
+                    return false;
+                break;
+            case skein::bc::Op::IncDecGlobal:
                 if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
@@ -575,6 +600,41 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
                 break;
             }
 
+            case skein::bc::Op::CompoundGlobal: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.a));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::r8d, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_compound_global));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IncDecGlobal:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.a));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::ecx,
+                      asmjit::imm((ins.flags & 2) ? 1 : -1));
+                a.mov(asmjit::x86::r8d,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_incdec_global));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
             case skein::bc::Op::LoadSlot: {
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -844,6 +904,30 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
                 a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(value_depth)),
                       asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::Neg:
+            case skein::bc::Op::Not:
+            case skein::bc::Op::BitNot: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::esi, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.column));
+                const skein::bc::Op unary =
+                    static_cast<skein::bc::Op>(ins.op);
+                uint64_t fn = unary == skein::bc::Op::Neg
+                                  ? fn_address(&skein_jit_neg)
+                                  : unary == skein::bc::Op::Not
+                                        ? fn_address(&skein_jit_not)
+                                        : fn_address(&skein_jit_bitnot);
+                call_addr(fn);
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
@@ -1550,6 +1634,88 @@ extern "C" value_t *skein_jit_get_field(value_t *container,
         container, (value_t *)&key, true);
     freeval(container);
     return result;
+}
+
+extern "C" value_t *skein_jit_neg(value_t *value, int line, int column) {
+    diag_set_location(line, column);
+    if (!value)
+        return nullptr;
+    value_t *result = nullptr;
+    if (value->type == T_int) {
+        result = new_int_checked(
+            -(__int128)((struct int_value_t *)value)->value);
+    } else if (value->type == T_float) {
+        result = newfloatval(-((struct float_value_t *)value)->value);
+    } else {
+        yyerror("cannot negate %s", typename_of(value));
+    }
+    freeval(value);
+    return result;
+}
+
+extern "C" value_t *skein_jit_not(value_t *value, int line, int column) {
+    diag_set_location(line, column);
+    if (!value)
+        return nullptr;
+    value_t *result = newboolval(!truthy(value));
+    freeval(value);
+    return result;
+}
+
+extern "C" value_t *skein_jit_bitnot(value_t *value, int line, int column) {
+    diag_set_location(line, column);
+    if (!value)
+        return nullptr;
+    value_t *result = nullptr;
+    if (value->type != T_int) {
+        yyerror("bitwise not expects an int, got %s", typename_of(value));
+    } else {
+        result = newintval(~((struct int_value_t *)value)->value);
+    }
+    freeval(value);
+    return result;
+}
+
+extern "C" value_t *skein_jit_compound_global(
+    const skein::bc::Proto *proto, uint32_t slot, uint32_t name_index,
+    value_t *value, int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        freeval(value);
+        return nullptr;
+    }
+    symbol *sym = resolve_global_symbol(proto, slot, name_index);
+    if (!sym) {
+        yyerror("symbol not found %s",
+                proto->consts[name_index].name.c_str());
+        freeval(value);
+        return nullptr;
+    }
+    return compound_symbol_direct(sym, op, value);
+}
+
+extern "C" value_t *skein_jit_incdec_global(
+    const skein::bc::Proto *proto, uint32_t slot, uint32_t name_index,
+    int delta, int prefix, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        return nullptr;
+    }
+    symbol *sym = resolve_global_symbol(proto, slot, name_index);
+    if (!sym) {
+        yyerror("symbol not found %s",
+                proto->consts[name_index].name.c_str());
+        return nullptr;
+    }
+    return increment_symbol_direct(sym, delta, prefix != 0);
 }
 
 extern "C" value_t *skein_jit_load_name(const skein::bc::Proto *proto,

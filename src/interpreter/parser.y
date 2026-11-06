@@ -1819,6 +1819,7 @@ top_statement: top_expression EOL {
                             printf("= ");
                             printvalue(rslt);
                             printf("\n");
+                            fflush(stdout);
                         }
                         break;
                 }

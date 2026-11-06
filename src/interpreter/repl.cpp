@@ -114,6 +114,7 @@ size_t next_utf8(const std::string &text, size_t pos) {
 }
 
 void write_stdout(const std::string &text) {
+    std::fflush(stdout);
     const char *data = text.data();
     size_t remaining = text.size();
     while (remaining > 0) {

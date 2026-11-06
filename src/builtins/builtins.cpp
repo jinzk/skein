@@ -3,6 +3,7 @@
 #include "binding_registry.h"
 
 #include "runtime_context.h"
+#include "runtime_state.h"
 #include "symbol.h"
 #include "builtin_ids.h"
 #include "compress_builtin.h"
@@ -563,6 +564,8 @@ struct value_t *call_builtin(int functype,
                 ret = newnull();
             }
         }
+        if (is_print && g_interactive)
+            std::fflush(stdout);
         return ret;
     }
 

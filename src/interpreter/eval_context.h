@@ -32,8 +32,9 @@ struct eval_context {
     bool has_captured_error = false;
     std::string captured_error;
     std::vector<std::vector<struct ast *>> defer_stack;
+    size_t gc_root_mark = 0;
 
-    eval_context() = default;
+    eval_context();
     eval_context(const eval_context &) = delete;
     eval_context &operator=(const eval_context &) = delete;
     ~eval_context();

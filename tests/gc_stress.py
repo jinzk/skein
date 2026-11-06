@@ -19,12 +19,12 @@ while (i < 2000) {
   let f = make(i);
   total = total + f();
   let v = boom() on error(e) {
-    let y = i;
-    func g() { return y; }
+    let y = make(i);
+    func g() { return y(); }
     total = total + g();
-    recover y;
+    recover g;
   };
-  total = total + v;
+  total = total + v();
   i = i + 1;
 }
 println(total);

@@ -5,6 +5,7 @@
  */
 #include "gc.h"
 #include "gc_roots.h"
+#include "eval_context.h"
 #include "scopestack.h"
 #include "symbol.h"
 #include "valuetype.h"
@@ -62,5 +63,21 @@ int main() {
     freeval(captured_fn);
     donescope(context);
 
-    return outer_live && captured_live && outer_cleared ? 0 : 1;
+    eval_context eval;
+    std::shared_ptr<scope_t> control_scope = make_scope(nullptr);
+    add_symbol(eval.scopes, control_scope, "control", newintval(3));
+    eval.control_value = newfuncval(nullptr, control_scope, {});
+
+    collect_cycles(eval.scopes);
+    const bool control_live = !control_scope->syms.small.empty();
+
+    freeval(eval.control_value);
+    eval.control_value = NULL;
+    collect_cycles(eval.scopes);
+    const bool control_cleared = control_scope->syms.small.empty();
+
+    return outer_live && captured_live && outer_cleared &&
+                   control_live && control_cleared
+               ? 0
+               : 1;
 }

@@ -333,8 +333,9 @@ struct Instr {
 - AST 参考后端调用深度默认 1000，可用 `SKEIN_MAX_CALL_DEPTH` 调整；
   sanitizer 构建使用更小的值以适配更大的 C++ 帧。
 - 已实现第一版 GC root 表：VM/JIT frame 的 param/slot/operand stack、
-  upvalue cell、defer/iterator 会显式登记为 roots，cycle collector 会把
-  它们纳入可达性分析；`SKEIN_GC_STRESS` 可在 VM/JIT safepoint 强制收集。
+  upvalue cell、defer/iterator 以及 `eval_context.control_value` 会显式
+  登记为 roots，cycle collector 会把它们纳入可达性分析；
+  `SKEIN_GC_STRESS` 可在 VM/JIT safepoint 强制收集。
   尚未实现 per-pc liveness / moving GC，见
   [jit-plan.md](jit-plan.md)；AOT、字节码序列化与磁盘缓存待决策。
 

@@ -62,8 +62,9 @@ Go/No-Go 标准见 §10。
   direct frame slot，不再强制走 `symbol*`；
 - GC root 表第一版：`scope_context` 增加显式 root 栈，VM 注册
   param/slot/operand stack/upvalue/defer/iterator roots，JIT frame 注册
-  value slots；cycle collector 从 scope roots 扩展为 scope + frame roots，
-  并遍历 `upvalue_cell`；新增 `SKEIN_GC_STRESS`；
+  value slots；`eval_context.control_value` 也注册为 root，覆盖
+  handler capture / `recover` 值；cycle collector 从 scope roots 扩展为
+  scope + frame roots，并遍历 `upvalue_cell`；新增 `SKEIN_GC_STRESS`；
 - `TAIL_CALL`：
   - 自递归尾调用直接复用当前 JIT 机器帧，重绑参数并跳回 body；
   - 非自递归尾调用通过 tail request + driver loop 做通用 trampoline，

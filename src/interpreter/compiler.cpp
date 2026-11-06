@@ -369,8 +369,8 @@ bool finalize_proto(Proto &proto, std::string &error) {
     proto.max_stack = max_stack;
 
     proto.slots_direct_safe =
-        proto.params_direct && !proto.has_closures && !proto.uses_defers &&
-        !proto.uses_handlers && !proto.uses_names && proto.upvalues.empty();
+        proto.params_direct && !proto.uses_defers && !proto.uses_handlers &&
+        !proto.uses_names;
     if (proto.slots_direct_safe) {
         for (const skein::bc::Instr &ins : proto.code) {
             switch (static_cast<skein::bc::Op>(ins.op)) {
@@ -382,6 +382,11 @@ bool finalize_proto(Proto &proto, std::string &error) {
                 case skein::bc::Op::MatchBind:
                 case skein::bc::Op::BindName:
                 case skein::bc::Op::Import:
+                case skein::bc::Op::DeclareStruct:
+                case skein::bc::Op::DeclareEnum:
+                case skein::bc::Op::DeclareTrait:
+                case skein::bc::Op::DeclareImpl:
+                case skein::bc::Op::DeclarePackage:
                     proto.slots_direct_safe = false;
                     break;
                 default:

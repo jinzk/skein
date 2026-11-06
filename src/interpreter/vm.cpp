@@ -227,6 +227,7 @@ struct SavedVmState {
     std::vector<value_t *> param_values;
     std::vector<struct symbol *> slot_symbols;
     std::vector<value_t *> slot_values;
+    std::vector<std::shared_ptr<struct upvalue_cell>> open_upvalues;
     std::vector<iterator_state> iterators;
     std::vector<std::vector<defer_record>> defer_scopes;
     std::vector<handler_state> handlers;
@@ -260,6 +261,7 @@ public:
         if (!saved_states_.empty())
             unwind_fast_frames();
         free_stack(stack_);
+        close_upvalues();
         for (value_t *value : param_values_)
             freeval(value);
         param_values_.clear();
@@ -856,6 +858,10 @@ public:
                 case Op::ClearSlot:
                     if (direct_slots_) {
                         if (ins.b < slot_values_.size()) {
+                            for (auto &cell : open_upvalues_) {
+                                if (cell->slot == &slot_values_[ins.b])
+                                    close_upvalue(*cell);
+                            }
                             freeval(slot_values_[ins.b]);
                             slot_values_[ins.b] = NULL;
                         }
@@ -877,7 +883,17 @@ public:
                     break;
 
                 case Op::LoadUpvalue: {
-                    struct symbol *sym = upvalue_symbol(ins.b);
+                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                    if (cell) {
+                        value_t *value = cell_value(cell);
+                        if (!value) {
+                            yyerror("invalid bytecode upvalue");
+                            return abort_error();
+                        }
+                        push(dupval(value));
+                        break;
+                    }
+                    struct symbol *sym = upvalue_fallback_symbol(ins.b);
                     if (!sym)
                         return abort_error();
                     if (sym->is_uninitialized) {
@@ -893,12 +909,18 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
-                    struct symbol *sym = upvalue_symbol(ins.b);
-                    if (!sym) {
-                        freeval(value);
-                        return abort_error();
+                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                    value_t *result = NULL;
+                    if (cell) {
+                        result = assign_upvalue_cell(cell, value);
+                    } else {
+                        struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                        if (!sym) {
+                            freeval(value);
+                            return abort_error();
+                        }
+                        result = skein_vm_assign_symbol_direct(sym, value);
                     }
-                    value_t *result = skein_vm_assign_symbol_direct(sym, value);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -911,13 +933,20 @@ public:
                     value_t *value = pop_checked();
                     if (!value)
                         return abort_error();
-                    struct symbol *sym = upvalue_symbol(ins.b);
-                    if (!sym) {
-                        freeval(value);
-                        return abort_error();
+                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                    value_t *result = NULL;
+                    if (cell) {
+                        result = compound_upvalue_cell(
+                            cell, (int)ins.flags, value);
+                    } else {
+                        struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                        if (!sym) {
+                            freeval(value);
+                            return abort_error();
+                        }
+                        result = skein_vm_compound_symbol_direct(
+                            sym, (int)ins.flags, value);
                     }
-                    value_t *result = skein_vm_compound_symbol_direct(
-                        sym, (int)ins.flags, value);
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -927,11 +956,19 @@ public:
                 }
 
                 case Op::IncDecUpvalue: {
-                    struct symbol *sym = upvalue_symbol(ins.b);
-                    if (!sym)
-                        return abort_error();
-                    value_t *result = skein_vm_increment_symbol_direct(
-                        sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                    value_t *result = NULL;
+                    if (cell) {
+                        result = incdec_upvalue_cell(
+                            cell, ins.a ? 1 : -1,
+                            (ins.flags & 1) != 0);
+                    } else {
+                        struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                        if (!sym)
+                            return abort_error();
+                        result = skein_vm_increment_symbol_direct(
+                            sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    }
                     if (!result)
                         return abort_error();
                     if (is_control(result))
@@ -1725,18 +1762,11 @@ public:
                     std::shared_ptr<scope_t> closure = current_scope();
                     if (closure && closure->is_global)
                         closure.reset();
-                    std::vector<struct symbol *> upvalues;
+                    std::vector<std::shared_ptr<struct upvalue_cell>> upvalues;
                     upvalues.reserve(c->function->upvalues.size());
-                    scope_context &scope_context = active_scope_context();
                     for (const std::string &name :
                          c->function->upvalues) {
-                        struct symbol *sym =
-                            lookupsym(name.c_str());
-                        if (sym && scope_context.global_scope &&
-                            scope_context.global_scope->syms.find(
-                                name.c_str()) == sym)
-                            sym = nullptr;
-                        upvalues.push_back(sym);
+                        upvalues.push_back(capture_upvalue(name));
                     }
                     push(newfuncval(c->function, closure,
                                     std::move(upvalues)));
@@ -2603,6 +2633,8 @@ private:
     std::vector<struct symbol *> slot_symbols_;
     std::vector<value_t *> slot_values_;
     std::vector<struct symbol> slot_symbol_views_;
+    std::vector<struct symbol> upvalue_symbol_views_;
+    std::vector<std::shared_ptr<struct upvalue_cell>> open_upvalues_;
     std::vector<iterator_state> iterators_;
     std::vector<std::vector<defer_record>> defer_scopes_;
     std::vector<handler_state> handlers_;
@@ -2682,6 +2714,8 @@ private:
         state.param_values = std::move(param_values_);
         state.slot_symbols = std::move(slot_symbols_);
         state.slot_values = std::move(slot_values_);
+        state.open_upvalues = std::move(open_upvalues_);
+        open_upvalues_.clear();
         state.iterators = std::move(iterators_);
         state.defer_scopes = std::move(defer_scopes_);
         state.handlers = std::move(handlers_);
@@ -2724,6 +2758,7 @@ private:
         param_values_ = std::move(state.param_values);
         slot_symbols_ = std::move(state.slot_symbols);
         slot_values_ = std::move(state.slot_values);
+        open_upvalues_ = std::move(state.open_upvalues);
         iterators_ = std::move(state.iterators);
         defer_scopes_ = std::move(state.defer_scopes);
         handlers_ = std::move(state.handlers);
@@ -2735,6 +2770,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_iterators();
+        close_upvalues();
         while (stack_.size() > frame_stack_base_) {
             freeval(stack_.back());
             stack_.pop_back();
@@ -3275,12 +3311,11 @@ private:
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
-        direct_params_ = proto->params_direct && !proto->has_closures &&
+        direct_params_ = proto->params_direct &&
                          !proto->uses_defers && !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_slots_ = proto->slots_direct_safe &&
-                        !proto->has_closures && !proto->uses_defers &&
-                        !proto->uses_handlers &&
+                        !proto->uses_defers && !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
@@ -3340,6 +3375,7 @@ private:
         int line = g_error_line > 0 ? g_error_line : code->def_line;
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
+        close_upvalues();
         recycle_params();
         recycle_slots();
         pop_scopes_to(scope_mark_);
@@ -3349,12 +3385,11 @@ private:
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
-        direct_params_ = proto->params_direct && !proto->has_closures &&
+        direct_params_ = proto->params_direct &&
                          !proto->uses_defers && !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_slots_ = proto->slots_direct_safe &&
-                        !proto->has_closures && !proto->uses_defers &&
-                        !proto->uses_handlers &&
+                        !proto->uses_defers && !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
@@ -3420,6 +3455,7 @@ private:
             freeval(value);
             return abort_error();
         }
+        close_upvalues();
         while (stack_.size() > frame_stack_base_) {
             freeval(stack_.back());
             stack_.pop_back();
@@ -3653,7 +3689,7 @@ private:
                     return param_symbols_[desc.base_index];
                 break;
             case IndexBaseKind::Upvalue:
-                return upvalue_symbol(desc.base_index);
+                return upvalue_symbol_view(desc.base_index);
             case IndexBaseKind::Global:
                 if (desc.base_index <= UINT16_MAX)
                     return global_symbol(
@@ -3707,20 +3743,240 @@ private:
         return sym;
     }
 
-    struct symbol *upvalue_symbol(uint32_t index) {
+    static value_t *cell_value(const struct upvalue_cell *cell) {
+        if (!cell)
+            return NULL;
+        return cell->slot ? *cell->slot : cell->value;
+    }
+
+    static void close_upvalue(struct upvalue_cell &cell) {
+        if (!cell.slot)
+            return;
+        cell.value = *cell.slot;
+        *cell.slot = NULL;
+        cell.slot = NULL;
+    }
+
+    void close_upvalues() {
+        for (auto &cell : open_upvalues_)
+            close_upvalue(*cell);
+        open_upvalues_.clear();
+    }
+
+    std::shared_ptr<struct upvalue_cell> open_cell(
+        value_t **storage, const struct type_constraint *type,
+        const std::string &name, bool is_const) {
+        for (auto &cell : open_upvalues_) {
+            if (cell->slot == storage)
+                return cell;
+        }
+        std::shared_ptr<struct upvalue_cell> cell =
+            std::make_shared<struct upvalue_cell>();
+        cell->slot = storage;
+        cell->type = type;
+        cell->name = name;
+        cell->is_const = is_const;
+        open_upvalues_.push_back(cell);
+        return cell;
+    }
+
+    std::shared_ptr<struct upvalue_cell> capture_upvalue(
+        const std::string &name) {
+        if (current_def_) {
+            for (size_t i = 0; i < proto().upvalues.size() &&
+                               i < current_def_->upvalues.size();
+                 ++i) {
+                if (proto().upvalues[i] == name &&
+                    current_def_->upvalues[i])
+                    return current_def_->upvalues[i];
+            }
+        }
+        if (direct_params_) {
+            for (size_t i = 0; i < proto().param_names.size(); ++i) {
+                if (proto().param_names[i] != name)
+                    continue;
+                struct symlist *sl = param_meta((uint32_t)i);
+                return open_cell(&param_values_[i],
+                                 sl ? sl->type : NULL, name, false);
+            }
+        }
+        if (direct_slots_) {
+            for (size_t i = 0; i < proto().slots.size(); ++i) {
+                const skein::bc::SlotDesc &slot = proto().slots[i];
+                if (slot.name != name)
+                    continue;
+                return open_cell(&slot_values_[i], &slot.type, name,
+                                 slot.is_const);
+            }
+        }
+        struct symbol *sym = lookupsym(name.c_str());
+        scope_context &scopes = active_scope_context();
+        if (sym && scopes.global_scope &&
+            scopes.global_scope->syms.find(name.c_str()) == sym)
+            sym = NULL;
+        if (!sym)
+            return NULL;
+        return open_cell(&sym->val, &sym->type, name, sym->is_const);
+    }
+
+    struct upvalue_cell *upvalue_cell_at(uint32_t index) {
+        if (index >= proto().upvalues.size()) {
+            yyerror("invalid bytecode upvalue");
+            return NULL;
+        }
+        if (!current_def_ || index >= current_def_->upvalues.size())
+            return NULL;
+        return current_def_->upvalues[index].get();
+    }
+
+    struct symbol *upvalue_symbol_view(uint32_t index) {
+        if (index >= proto().upvalues.size()) {
+            yyerror("invalid bytecode upvalue");
+            return NULL;
+        }
+        struct upvalue_cell *cell = upvalue_cell_at(index);
+        if (!cell) {
+            const char *name = proto().upvalues[index].c_str();
+            struct symbol *sym = name && *name ? lookupsym(name) : NULL;
+            if (!sym)
+                yyerror("symbol not found %s", name ? name : "");
+            return sym;
+        }
+        if (upvalue_symbol_views_.size() <= index)
+            upvalue_symbol_views_.resize(index + 1);
+        struct symbol &sym = upvalue_symbol_views_[index];
+        sym.name = const_cast<char *>(proto().upvalues[index].c_str());
+        sym.name_len = proto().upvalues[index].size();
+        sym.val = cell_value(cell);
+        if (cell->type) {
+            sym.type = *cell->type;
+        } else {
+            sym.type.kind = TYPE_ANY;
+            sym.type.name = NULL;
+            sym.type.module = NULL;
+            sym.type.nullable = false;
+        }
+        sym.exported = false;
+        sym.is_const = cell->is_const;
+        sym.is_uninitialized = false;
+        sym.scope_owned = false;
+        sym.global_slot = UINT32_MAX;
+        return &sym;
+    }
+
+    struct symbol *upvalue_fallback_symbol(uint32_t index) {
         if (index >= proto().upvalues.size()) {
             yyerror("invalid bytecode upvalue");
             return NULL;
         }
         const char *name = proto().upvalues[index].c_str();
-        struct symbol *sym = nullptr;
-        if (current_def_ && index < current_def_->upvalues.size())
-            sym = current_def_->upvalues[index];
-        if (!sym && name && *name)
-            sym = lookupsym(name);
+        struct symbol *sym = name && *name ? lookupsym(name) : NULL;
         if (!sym)
             yyerror("symbol not found %s", name ? name : "");
         return sym;
+    }
+
+    value_t *assign_upvalue_cell(struct upvalue_cell *cell,
+                                 value_t *value) {
+        if (!cell || !value)
+            return NULL;
+        if (value->type == T_return || value->type == T_break ||
+            value->type == T_continue)
+            return value;
+        if (cell->is_const) {
+            yyerror("cannot assign to constant %s", cell->name.c_str());
+            freeval(value);
+            return NULL;
+        }
+        if (cell->type && !validate_type_constraint(cell->type)) {
+            freeval(value);
+            return NULL;
+        }
+        if (cell->type && !type_constraint_matches(cell->type, value)) {
+            yyerror("variable %s expects %s, got %s", cell->name.c_str(),
+                    type_constraint_name(cell->type), typename_of(value));
+            freeval(value);
+            return NULL;
+        }
+        freeval(cell_value(cell));
+        if (cell->slot)
+            *cell->slot = value;
+        else
+            cell->value = value;
+        return dupval(value);
+    }
+
+    value_t *compound_upvalue_cell(struct upvalue_cell *cell, int op,
+                                   value_t *value) {
+        if (!cell || !value) {
+            freeval(value);
+            return NULL;
+        }
+        value_t *result = apply_binary_value(op, cell_value(cell), value);
+        freeval(value);
+        if (!result)
+            return NULL;
+        if (cell->is_const) {
+            yyerror("cannot assign to constant %s", cell->name.c_str());
+            freeval(result);
+            return NULL;
+        }
+        if (cell->type && !validate_type_constraint(cell->type)) {
+            freeval(result);
+            return NULL;
+        }
+        if (cell->type && !type_constraint_matches(cell->type, result)) {
+            yyerror("variable %s expects %s, got %s", cell->name.c_str(),
+                    type_constraint_name(cell->type), typename_of(result));
+            freeval(result);
+            return NULL;
+        }
+        freeval(cell_value(cell));
+        if (cell->slot)
+            *cell->slot = result;
+        else
+            cell->value = result;
+        return dupval(result);
+    }
+
+    value_t *incdec_upvalue_cell(struct upvalue_cell *cell, int delta,
+                                 bool prefix) {
+        if (!cell) {
+            yyerror("invalid bytecode upvalue");
+            return NULL;
+        }
+        value_t *old = cell_value(cell);
+        if (!old) {
+            yyerror("invalid bytecode upvalue");
+            return NULL;
+        }
+        value_t *delta_value = newintval(delta);
+        value_t *result = apply_binary_value('+', old, delta_value);
+        freeval(delta_value);
+        if (!result)
+            return NULL;
+        if (cell->is_const) {
+            yyerror("cannot assign to constant %s", cell->name.c_str());
+            freeval(result);
+            return NULL;
+        }
+        if (cell->type && !validate_type_constraint(cell->type)) {
+            freeval(result);
+            return NULL;
+        }
+        if (cell->type && !type_constraint_matches(cell->type, result)) {
+            yyerror("variable %s expects %s, got %s", cell->name.c_str(),
+                    type_constraint_name(cell->type), typename_of(result));
+            freeval(result);
+            return NULL;
+        }
+        value_t *ret = prefix ? dupval(result) : dupval(old);
+        freeval(old);
+        if (cell->slot)
+            *cell->slot = result;
+        else
+            cell->value = result;
+        return ret;
     }
 
     void invalidate_name_cache() {
@@ -4373,6 +4629,7 @@ private:
 
         discard_handlers();
         run_all_defers();
+        close_upvalues();
         free_stack(stack_);
         recycle_params();
         recycle_slots();
@@ -4389,6 +4646,7 @@ private:
         }
         discard_handlers();
         run_all_defers();
+        close_upvalues();
         free_stack(stack_);
         recycle_params();
         recycle_slots();

@@ -230,9 +230,10 @@ struct value_t *newnull() {
     return &null_singleton();
 }
 
-struct value_t *newfuncval(std::shared_ptr<function_code> code,
-                           std::shared_ptr<struct scope_t> closure,
-                           std::vector<struct symbol *> upvalues) {
+struct value_t *newfuncval(
+    std::shared_ptr<function_code> code,
+    std::shared_ptr<struct scope_t> closure,
+    std::vector<std::shared_ptr<struct upvalue_cell>> upvalues) {
     struct func_value_t *v = new func_value_t;
     v->type = T_func;
     v->def = std::make_shared<function_def>();

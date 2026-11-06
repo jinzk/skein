@@ -13,6 +13,8 @@
 struct symlist;
 struct scope_t;
 struct symbol;
+struct value_t;
+struct type_constraint;
 
 struct function_code {
     struct symlist *sl;
@@ -38,10 +40,24 @@ struct function_code {
     void *vm_cache = nullptr;
 };
 
+/*
+ * Explicit upvalue storage.  While a frame is alive the cell is open and
+ * points at the frame slot (or symbol cell); when the frame exits the cell is
+ * closed and takes ownership of the value.  Closures only hold cells, never
+ * raw frame/symbol pointers.
+ */
+struct upvalue_cell {
+    struct value_t **slot = nullptr;
+    struct value_t *value = nullptr;
+    const struct type_constraint *type = nullptr;
+    std::string name;
+    bool is_const = false;
+};
+
 struct function_def {
     std::shared_ptr<function_code> code;
     std::shared_ptr<scope_t> closure;
-    std::vector<struct symbol *> upvalues;
+    std::vector<std::shared_ptr<upvalue_cell>> upvalues;
 };
 
 enum val_type {
@@ -355,7 +371,7 @@ struct value_t *newnull();
 struct value_t *newfuncval(
     std::shared_ptr<function_code> code,
     std::shared_ptr<struct scope_t> closure,
-    std::vector<struct symbol *> upvalues = {});
+    std::vector<std::shared_ptr<struct upvalue_cell>> upvalues = {});
 void free_function_code(struct function_code *code);
 struct value_t *dupval(struct value_t *v);
 

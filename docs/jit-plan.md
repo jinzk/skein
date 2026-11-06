@@ -56,6 +56,8 @@ Go/No-Go 标准见 §10。
 - pattern 参数：JIT 前绑定函数 scope 与 destructuring 名字，覆盖
   `pattern_bench`；
 - params 直接 frame 化：eligible fast frame 不再创建参数 symbol；
+- upvalue cell：captures 使用显式 open/closed `upvalue_cell`，支持直接
+  param/slot 捕获，帧退出时 close；
 - `TAIL_CALL`：
   - 自递归尾调用直接复用当前 JIT 机器帧，重绑参数并跳回 body；
   - 非自递归尾调用通过 tail request + driver loop 做通用 trampoline，

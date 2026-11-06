@@ -303,7 +303,8 @@ struct Instr {
   闭包、defer、方法、for-in 循环变量、match binding、destructuring、
   on-error 绑定和 import 绑定仍使用 `symbol*` cell。
 - 普通嵌套函数使用 `LOAD_UPVALUE` / `STORE_UPVALUE` 等索引访问捕获
-  变量；upvalue 指向 `symbol*` cell，而不是显式 open/closed frame slot。
+  变量；upvalue 使用显式 `upvalue_cell`：帧存活时处于 open 状态，指向
+  frame slot 或 symbol cell；帧退出时 close，cell 持有值并脱离原存储。
 - 小整数/`true`/`false`/`null` 已单例化；普通调用走 fast frame，
   `CALL` / `TAIL_CALL` 的小参数数量使用栈内缓冲，非 fast path 调用
   仍受 C++ 递归和每帧分配拖累。
@@ -332,7 +333,7 @@ struct Instr {
 
 ## 7. 后续阶段
 
-1. 将 symbol-cell upvalue 进一步改为 open/closed frame slot；
+1. 将 upvalue_cell 进一步收敛到统一的 open/closed frame slot 布局；
 2. frame-based VM，去掉每帧 Executor 分配和 C++ 递归；
 3. 扩展尾调用优化到 spread / method / 默认参数 / variadic；
 4. 把 VM 执行缓存、函数体/默认参数/pattern AST 全部收敛到 L2 side table

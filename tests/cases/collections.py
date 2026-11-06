@@ -828,7 +828,7 @@ def run_cases():
           'enum Box { B { f: callable; }; }\n'
           'func make() {\n'
           '  let n = 41;\n'
-          '  return Box::B { f: func() { return n + 1; } };\n'
+          '  return Box.B { f: func() { return n + 1; } };\n'
           '}\n'
           'let b = make();\n'
           + repeated_lets()

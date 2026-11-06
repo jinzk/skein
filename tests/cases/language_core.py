@@ -205,6 +205,50 @@ def run_cases():
     check("compound const error",
           "const x = 1;\nx += 1;\n",
           stderr="cannot assign to constant x")
+    check("list slice",
+          "let xs = [0, 1, 2, 3, 4];\n"
+          "xs[1:4]\n"
+          "xs[:2]\n"
+          "xs[2:]\n"
+          "xs[:]\n",
+          stdout_all=["= [1, 2, 3]", "= [0, 1]", "= [2, 3, 4]",
+                      "= [0, 1, 2, 3, 4]"])
+    check("list slice negative indices",
+          "let xs = [0, 1, 2, 3, 4];\n"
+          "xs[-2:]\n"
+          "xs[:-1]\n"
+          "xs[-100:100]\n"
+          "xs[100:-100]\n",
+          stdout_all=["= [3, 4]", "= [0, 1, 2, 3]", "= [0, 1, 2, 3, 4]",
+                      "= []"])
+    check("list slice step",
+          "let xs = [0, 1, 2, 3, 4];\n"
+          "let i = 1;\n"
+          "let j = 2;\n"
+          "xs[::2]\n"
+          "xs[1::2]\n"
+          "xs[i::j]\n"
+          "xs[4:0:-2]\n"
+          "xs[::-1]\n",
+          stdout_all=["= [0, 2, 4]", "= [1, 3]", "= [1, 3]", "= [4, 2]",
+                      "= [4, 3, 2, 1, 0]"])
+    check("string slice uses codepoints",
+          'print("你好世界"[1:3]);\n'
+          'print("你好世界"[::-1]);\n',
+          stdout_all=["好世", "界世好你"])
+    check("bytes slice uses byte indices",
+          'print(bytes_hex(bytes_from_string("abcd")[1:3]));\n'
+          'print(bytes_hex(bytes_from_string("abcd")[::-1]));\n',
+          stdout_all=["6263", "64636261"])
+    check("slice step zero",
+          "print([1, 2, 3][::0]);\n",
+          stderr="slice step cannot be zero")
+    check("slice bound must be integer",
+          "print([1, 2, 3][1.0:]);\n",
+          stderr="slice start must be an integer")
+    check("slice unsupported type",
+          "print(1[0:1]);\n",
+          stderr="slice expects list, string, or bytes")
     check("logical and", "1 && 2\n", stdout="= true")
     check("logical and short-circuit", "0 && (1/0)\n", stdout="= false")
     check("logical or", "0 || 2\n", stdout="= true")

@@ -92,13 +92,13 @@ resolve_status resolve_type_arg(const char *importer_source,
             return RESOLVE_ERROR;
         }
         if (!type_def_visible(importer_source, importer_module, sv->def)) {
-            error = "type " + sv->def->module_name + "::" + sv->def->name +
+            error = "type " + sv->def->module_name + "." + sv->def->name +
                     " is not visible";
             return RESOLVE_NOT_VISIBLE;
         }
         out.kind = RESOLVED_STRUCT;
         out.structure = sv->def;
-        out.input_name = sv->def->module_name + "::" + sv->def->name;
+        out.input_name = sv->def->module_name + "." + sv->def->name;
         return RESOLVE_FOUND;
     }
 
@@ -109,13 +109,13 @@ resolve_status resolve_type_arg(const char *importer_source,
             return RESOLVE_ERROR;
         }
         if (!type_def_visible(importer_source, importer_module, ev->def)) {
-            error = "type " + ev->def->module_name + "::" + ev->def->name +
+            error = "type " + ev->def->module_name + "." + ev->def->name +
                     " is not visible";
             return RESOLVE_NOT_VISIBLE;
         }
         out.kind = RESOLVED_ENUM;
         out.enumeration = ev->def;
-        out.input_name = ev->def->module_name + "::" + ev->def->name;
+        out.input_name = ev->def->module_name + "." + ev->def->name;
         return RESOLVE_FOUND;
     }
 
@@ -241,7 +241,7 @@ std::string trait_name(const trait_def *trait) {
         return std::string();
     if (trait->module_name.empty())
         return trait->name;
-    return trait->module_name + "::" + trait->name;
+    return trait->module_name + "." + trait->name;
 }
 
 struct value_t *field_info(const field_def &field, bool readonly) {

@@ -102,9 +102,27 @@ static struct value_t *enum_tag_from_value(struct value_t *value) {
     }
     const struct variant_def &variant =
         ev->def->variants[(size_t)ev->variant];
-    std::string tag = ev->def->module_name + "::" + ev->def->name + "::" +
+    std::string tag = ev->def->module_name + "." + ev->def->name + "." +
                       variant.name;
     return newstrval(tag.c_str());
+}
+
+/* Type hints accept both the source syntax (`module.Type`) and the
+ * historical internal form (`module::Type`). */
+static void split_type_hint_name(std::string &type_name,
+                                 std::string &module_name) {
+    size_t sep = type_name.rfind("::");
+    size_t sep_len = 2;
+    size_t dot = type_name.rfind('.');
+    if (dot != std::string::npos &&
+        (sep == std::string::npos || dot > sep)) {
+        sep = dot;
+        sep_len = 1;
+    }
+    if (sep == std::string::npos)
+        return;
+    module_name = type_name.substr(0, sep);
+    type_name = type_name.substr(sep + sep_len);
 }
 
 static struct value_t *enum_tag_from_name(struct value_t *type_value,
@@ -122,11 +140,7 @@ static struct value_t *enum_tag_from_name(struct value_t *type_value,
     std::string variant_name =
         ((struct string_value_t *)variant_value)->value;
     std::string module_name;
-    size_t sep = type_name.find("::");
-    if (sep != std::string::npos) {
-        module_name = type_name.substr(0, sep);
-        type_name = type_name.substr(sep + 2);
-    }
+    split_type_hint_name(type_name, module_name);
 
     enum_def *def = structtype_find_enum_by_name(
         module_name.empty() ? NULL : module_name.c_str(),
@@ -136,13 +150,13 @@ static struct value_t *enum_tag_from_name(struct value_t *type_value,
         return NULL;
     }
     if (structtype_variant_index(def, variant_name) < 0) {
-        yyerror("unknown enum variant %s::%s", def->name.c_str(),
+        yyerror("unknown enum variant %s.%s", def->name.c_str(),
                 variant_name.c_str());
         return NULL;
     }
 
     std::string tag =
-        def->module_name + "::" + def->name + "::" + variant_name;
+        def->module_name + "." + def->name + "." + variant_name;
     return newstrval(tag.c_str());
 }
 
@@ -181,11 +195,7 @@ static enum_def *resolve_enum_type_hint(const char *text) {
     }
     std::string type_name(text);
     std::string module_name;
-    size_t sep = type_name.find("::");
-    if (sep != std::string::npos) {
-        module_name = type_name.substr(0, sep);
-        type_name = type_name.substr(sep + 2);
-    }
+    split_type_hint_name(type_name, module_name);
     enum_def *def = structtype_find_enum_by_name(
         module_name.empty() ? NULL : module_name.c_str(),
         type_name.c_str());
@@ -250,8 +260,186 @@ bool builtins_register_modules(std::string &error) {
     return skein::register_module(skein_example_module(), nullptr, error);
 }
 
+namespace {
+
+struct slice_indices {
+    long long start;
+    long long stop;
+    long long step;
+};
+
+bool slice_int_argument(const struct value_t *value, const char *name,
+                        bool &present, long long &out) {
+    present = false;
+    out = 0;
+    if (!value || value->type == T_null)
+        return true;
+    if (value->type != T_int) {
+        yyerror("slice %s must be an integer or null, got %s", name,
+                typename_of(value));
+        return false;
+    }
+    present = true;
+    out = ((const struct int_value_t *)value)->value;
+    return true;
+}
+
+bool normalize_slice(long long length, bool start_present, long long start,
+                     bool stop_present, long long stop, bool step_present,
+                     long long step, slice_indices &out) {
+    if (step_present && step == 0) {
+        yyerror("slice step cannot be zero");
+        return false;
+    }
+    if (!step_present)
+        step = 1;
+
+    const __int128 n = length;
+    const __int128 lower = step > 0 ? 0 : -1;
+    const __int128 upper = step > 0 ? n : n - 1;
+
+    __int128 first;
+    if (!start_present) {
+        first = step > 0 ? lower : upper;
+    } else {
+        first = start;
+        if (first < 0)
+            first += n;
+        if (first < lower)
+            first = lower;
+        else if (first > upper)
+            first = upper;
+    }
+
+    __int128 last;
+    if (!stop_present) {
+        last = step > 0 ? upper : lower;
+    } else {
+        last = stop;
+        if (last < 0)
+            last += n;
+        if (last < lower)
+            last = lower;
+        else if (last > upper)
+            last = upper;
+    }
+
+    out.start = (long long)first;
+    out.stop = (long long)last;
+    out.step = step;
+    return true;
+}
+
+template <typename Append>
+void for_each_slice_index(const slice_indices &indices, Append append) {
+    /* Use a wider accumulator so extreme step values cannot overflow the
+     * loop index. */
+    if (indices.step > 0) {
+        for (__int128 i = indices.start; i < indices.stop; i += indices.step)
+            append((long long)i);
+    } else {
+        for (__int128 i = indices.start; i > indices.stop; i += indices.step)
+            append((long long)i);
+    }
+}
+
+void utf8_slice_offsets(const std::string &text,
+                        std::vector<size_t> &offsets) {
+    offsets.clear();
+    const size_t length = text.size();
+    size_t pos = 0;
+    while (pos < length) {
+        offsets.push_back(pos);
+        pos += utf8_valid_sequence_length(text.data() + pos, length - pos);
+    }
+    offsets.push_back(length);
+}
+
+struct value_t *call_slice_builtin(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() != 4) {
+        yyerror("slice expects 4 arguments, got %d", (int)args.size());
+        return NULL;
+    }
+
+    bool start_present = false;
+    bool stop_present = false;
+    bool step_present = false;
+    long long start = 0;
+    long long stop = 0;
+    long long step = 1;
+    if (!slice_int_argument(args[1], "start", start_present, start) ||
+        !slice_int_argument(args[2], "stop", stop_present, stop) ||
+        !slice_int_argument(args[3], "step", step_present, step))
+        return NULL;
+
+    struct value_t *container = args[0];
+
+    if (container->type == T_list) {
+        const struct list_value_t *source =
+            (const struct list_value_t *)container;
+        const long long length =
+            (long long)source->payload->items.size();
+        slice_indices indices;
+        if (!normalize_slice(length, start_present, start, stop_present,
+                             stop, step_present, step, indices))
+            return NULL;
+
+        struct list_value_t *result = newlistval();
+        for_each_slice_index(indices, [&](long long index) {
+            result->payload->items.push_back(
+                dupval(source->payload->items[(size_t)index]));
+        });
+        return (struct value_t *)result;
+    }
+
+    if (container->type == T_string) {
+        const std::string &text =
+            ((const struct string_value_t *)container)->value;
+        std::vector<size_t> offsets;
+        utf8_slice_offsets(text, offsets);
+        const long long length = (long long)(offsets.size() - 1);
+        slice_indices indices;
+        if (!normalize_slice(length, start_present, start, stop_present,
+                             stop, step_present, step, indices))
+            return NULL;
+
+        std::string result;
+        for_each_slice_index(indices, [&](long long index) {
+            const size_t begin = offsets[(size_t)index];
+            const size_t end = offsets[(size_t)index + 1];
+            result.append(text.data() + begin, end - begin);
+        });
+        return newstrval(result.c_str());
+    }
+
+    if (container->type == T_bytes) {
+        const std::string &data =
+            ((const struct bytes_value_t *)container)->value;
+        const long long length = (long long)data.size();
+        slice_indices indices;
+        if (!normalize_slice(length, start_present, start, stop_present,
+                             stop, step_present, step, indices))
+            return NULL;
+
+        std::string result;
+        for_each_slice_index(indices, [&](long long index) {
+            result.push_back(data[(size_t)index]);
+        });
+        return newbytesval(std::move(result));
+    }
+
+    yyerror("slice expects list, string, or bytes, got %s",
+            typename_of(container));
+    return NULL;
+}
+
+} // namespace
+
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
+    if (functype == B_slice)
+        return call_slice_builtin(args);
     if (functype >= B_meta_type_info && functype <= B_meta_has_type)
         return call_meta_builtin(functype, args);
     if (functype >= B_fn_compose && functype <= B_fn_always)

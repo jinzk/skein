@@ -36,10 +36,18 @@ bool split_qualified_name(const char *name, std::string &prefix,
     if (!name) return false;
     std::string text(name);
     size_t sep = text.rfind("::");
-    if (sep == std::string::npos || sep == 0 || sep + 2 >= text.size())
+    size_t sep_len = 2;
+    size_t dot = text.rfind('.');
+    if (dot != std::string::npos &&
+        (sep == std::string::npos || dot > sep)) {
+        sep = dot;
+        sep_len = 1;
+    }
+    if (sep == std::string::npos || sep == 0 ||
+        sep + sep_len >= text.size())
         return false;
     prefix = text.substr(0, sep);
-    base = text.substr(sep + 2);
+    base = text.substr(sep + sep_len);
     return true;
 }
 
@@ -762,7 +770,7 @@ bool structtype_add_method(type_def *def, const std::string &name,
             const variant_def &variant = enumeration->variants[i];
             if (structtype_variant_field_index(&variant, name) >= 0) {
                 error = "field and method have the same name " + name +
-                        " in " + def->name + "::" + variant.name;
+                        " in " + def->name + "." + variant.name;
                 return false;
             }
         }

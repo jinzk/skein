@@ -1322,7 +1322,7 @@ struct value_t *read_member_value(struct value_t *container,
         auto method = ev->def->methods.find(name);
         if (method != ev->def->methods.end())
             return newmethodval(dupval(container), method->second);
-        yyerror("field %s not found in %s::%s", name,
+        yyerror("field %s not found in %s.%s", name,
                 ev->def->name.c_str(), variant.name.c_str());
         return NULL;
     }

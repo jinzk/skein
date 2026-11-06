@@ -111,7 +111,7 @@ def run_cases():
         "impl E {\n"
         "  async func value(self) { return 1; }\n"
         "}\n"
-        "print(await E::A { n: 2 }.value());\n",
+        "print(await E.A { n: 2 }.value());\n",
         ["1"],
     )
 

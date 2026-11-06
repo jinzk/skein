@@ -102,6 +102,7 @@ enum class Op : uint8_t {
     GetIndexCached,
     GetField,
     GetFieldName,
+    GetFieldOrEnum,
 
     IterNew,
     IterNext,
@@ -204,6 +205,12 @@ struct ConstructDesc {
     std::string variant;
     std::vector<std::string> fields;
     std::vector<bool> spread;
+};
+
+struct FieldOrEnumDesc {
+    std::string module;
+    std::string base;
+    std::string field;
 };
 
 struct CallDesc {
@@ -406,6 +413,7 @@ struct Proto {
     std::vector<IndexDesc> index_ops;
     std::vector<ImportDesc> imports;
     std::vector<ConstructDesc> constructs;
+    std::vector<FieldOrEnumDesc> field_or_enum;
     std::vector<StructDeclMeta> struct_decls;
     std::vector<EnumDeclMeta> enum_decls;
     std::vector<TraitDeclMeta> trait_decls;

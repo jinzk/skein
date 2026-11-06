@@ -1887,12 +1887,12 @@ let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 `std.enum.decode(value[, type_name][, options])` 同样支持默认值；可选类型名用于
 校验 tag 或消除跨包同名歧义。
 
-`std.enum.tag(value)` 返回 `module::Enum::Variant` 规范字符串，丢弃载荷，可直接作 dict key：
+`std.enum.tag(value)` 返回 `module.Enum.Variant` 规范字符串，丢弃载荷，可直接作 dict key：
 
 ```text
 enum E { A { n: int; }; }
-std.enum.tag(E::A { n: 1 })   // "main::E::A"
-std.enum.tag(E::A { n: 2 })   // "main::E::A"
+std.enum.tag(E.A { n: 1 })   // "main.E.A"
+std.enum.tag(E.A { n: 2 })   // "main.E.A"
 ```
 
 无实例时可用 `std.enum.tag("E", "A")`。
@@ -2111,7 +2111,7 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 `std.list` 新增常用算法：
 
 ```text
-std.list.slice(xs, start, end = len(xs))  // end 省略时到末尾
+std.list.slice(xs, start, length)         // length 省略时到末尾
 std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
 std.list.unique_by(xs, key)             // 按 key 保序去重
 std.list.group_by(xs, key)              // {key: [items]}
@@ -2637,7 +2637,7 @@ std.worker.stats
 - `std.json.stringify` 只接受 JSON 子集，dict key 必须是 `string`；
 - JSON 整数在 int64 范围内映射为 `int`，否则映射为 `float`；重复 key 以最后一个为准；
 - `std.json.stringify` 拒绝 `bytes`、`function`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
-- `struct` 编码为普通 object，`enum` 编码为 `{"$enum":"Type::Variant","payload":{...}}`，`char` 编码为单字符字符串，`byte` 编码为整数；
+- `struct` 编码为普通 object，`enum` 编码为 `{"$enum":"Type.Variant","payload":{...}}`，`char` 编码为单字符字符串，`byte` 编码为整数；
 - `std.string.join` 只接受字符串元素；
 - `std.string.replace` 替换全部匹配，空查找串会报错；
 - `std.string.contains` 返回 `1` / `0`；
@@ -3001,7 +3001,29 @@ let empty_dict_alt = dict();
 
 支持链式下标赋值：`a[0][1] = 9`、`d["a"]["b"] = 1`。
 
-字典键一律使用下标访问：`p["x"]`。点号只用于 struct 字段以及 `std`/包命名空间，普通 dict 写 `p.x` 会报错。
+切片使用 Python 风格的 `start:stop:step`，支持 list、string 和 bytes：
+
+```text
+let xs = [0, 1, 2, 3, 4];
+xs[1:4]        // [1, 2, 3]
+xs[:3]         // [0, 1, 2]
+xs[2:]         // [2, 3, 4]
+xs[:]          // [0, 1, 2, 3, 4]
+xs[-2:]        // [3, 4]
+xs[::2]        // [0, 2, 4]
+xs[::-1]       // [4, 3, 2, 1, 0]
+xs[4:0:-2]     // [4, 2]
+"你好世界"[1:3] // "好世"
+bytes_from_string("abcd")[1:3] // 两个字节 "bc"
+```
+
+- `stop` 不包含在结果中；`step` 省略时为 `1`，不能为 `0`；
+- string 按 UTF-8 码点、bytes 按字节、list 按元素切片；
+- 边界和 step 必须是整数；边界可省略，负数下标从末尾计数，越界会截断；
+- 切片返回新值，不修改原值；暂不支持切片赋值；
+- 省略 `stop` 时可直接写 `xs[start::step]`，例如 `xs[i::j]`、`xs[2::2]`。
+
+字典键一律使用下标访问：`p["x"]`。点号用于 struct 字段、enum 变体以及 `std`/包命名空间，普通 dict 写 `p.x` 会报错。
 
 ```text
 let p = {"x": 1, "y": 2};
@@ -3126,7 +3148,7 @@ let next = match (state) {
 - `match` 是表达式，返回第一个匹配 arm 的值；
 - arm 体是单条语句或代码块，块的值是最后一条语句的值；
 - 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、struct（按字段）；
-- 支持 or-pattern：`case 1 | 2 | 3`、`case E::A | E::B`；
+- 支持 or-pattern：`case 1 | 2 | 3`、`case E.A | E.B`；
 - 支持整数范围模式：`case 1..9`（包含两端）；
 - `case is Type` 是类型模式，例如 `case is int`、`case is Point`、`case is callable`；
 - enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive`；
@@ -3467,7 +3489,7 @@ render(p)
 - 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 trait；
 - 类型默认不跨包可见；`export struct` / `export trait` 后可以按包路径使用；
 - 导出的 trait 签名只能引用已导出的类型或内建类型，否则外部类型无法实现它；
-- 导入之后用 `aa::Point`、`lib::Drawable` 这样的限定名引用：
+- 导入之后用 `aa.Point`、`lib.Drawable` 这样的限定名引用：
 
 ```text
 // package aa
@@ -3476,11 +3498,11 @@ export trait D { func d(self); }
 
 // main
 import aa;
-let p: aa::P = aa.make();
-p is aa::D
+let p: aa.P = aa.make();
+p is aa.D
 
 import aa as lib;
-let q: lib::P = lib.make();
+let q: lib.P = lib.make();
 ```
 
 - 其他包可以为自己的类型实现导入的 trait：
@@ -3489,7 +3511,7 @@ let q: lib::P = lib.make();
 // main
 import aa;
 struct Q { y: int; }
-impl aa::D for Q {
+impl aa.D for Q {
   func d(self) { return self.y; }
 }
 ```
@@ -3636,20 +3658,20 @@ enum Event {
   Timeout;
 }
 
-let a = Event::UserMsg { text: "hi" };
-let b = Event::Timeout;
+let a = Event.UserMsg { text: "hi" };
+let b = Event.Timeout;
 
 match (a) {
-  case Event::UserMsg { text } => text;
-  case Event::ToolResult { ok: true, data: d } => d;
-  case Event::Timeout => "timeout";
+  case Event.UserMsg { text } => text;
+  case Event.ToolResult { ok: true, data: d } => d;
+  case Event.Timeout => "timeout";
   default => "other";
 }
 ```
 
-- 有载荷的变体必须写 `Event::Variant { field: value, ... }`；
-- 无载荷变体直接写 `Event::Variant`；
-- 变体字段可以声明默认值；所有字段都有默认值时允许 `Event::Variant {}`；
+- 有载荷的变体必须写 `Event.Variant { field: value, ... }`；
+- 无载荷变体直接写 `Event.Variant`；
+- 变体字段可以声明默认值；所有字段都有默认值时允许 `Event.Variant {}`；
 - 字段默认值在定义包作用域求值，每次构造重新求值；不能引用 `self` 或其他字段；
 - copy-with 目前只支持 struct，不支持 enum；
 - 载荷字段只读，字段访问按当前变体校验；
@@ -3658,7 +3680,7 @@ match (a) {
 - 方法名不能与任意变体的字段重名；
 - `kind_of(e)` 是 `"enum"`，`type_name(e)` 是枚举名；
 - `match` 支持变体模式、字段模式和守卫；
-- JSON 编码为 `{"$enum":"Event::UserMsg","payload":{...}}`；
+- JSON 编码为 `{"$enum":"Event.UserMsg","payload":{...}}`；
 - 暂不支持互递归 enum（自引用 enum 已支持）、enum 作为 dict key、enum 的 JSON 自动解码。
 
 ```text
@@ -3670,8 +3692,8 @@ enum Shape {
 impl Shape {
   func area(self) {
     return match (self) {
-      case Shape::Circle { r } => r * r;
-      case Shape::Rect { w, h } => w * h;
+      case Shape.Circle { r } => r * r;
+      case Shape.Rect { w, h } => w * h;
     };
   }
 }

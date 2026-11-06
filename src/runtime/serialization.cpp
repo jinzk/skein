@@ -160,16 +160,35 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
     }
 
     std::string tag = ((struct string_value_t *)tag_value)->value;
+
+    /*
+     * Current tags use `module.Type.Variant`; module names may themselves
+     * contain dots, so split the suffix first.  The old `module::Type::Variant`
+     * form is still accepted for data written by earlier versions.
+     */
     std::vector<std::string> parts;
-    size_t start = 0;
-    for (;;) {
-        size_t sep = tag.find("::", start);
-        if (sep == std::string::npos) {
-            parts.push_back(tag.substr(start));
-            break;
+    if (tag.find("::") != std::string::npos) {
+        size_t start = 0;
+        for (;;) {
+            size_t sep = tag.find("::", start);
+            if (sep == std::string::npos) {
+                parts.push_back(tag.substr(start));
+                break;
+            }
+            parts.push_back(tag.substr(start, sep - start));
+            start = sep + 2;
         }
-        parts.push_back(tag.substr(start, sep - start));
-        start = sep + 2;
+    } else {
+        size_t start = 0;
+        for (;;) {
+            size_t sep = tag.find('.', start);
+            if (sep == std::string::npos) {
+                parts.push_back(tag.substr(start));
+                break;
+            }
+            parts.push_back(tag.substr(start, sep - start));
+            start = sep + 1;
+        }
     }
 
     std::string module_name;
@@ -178,10 +197,14 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
     if (parts.size() == 2) {
         type_name = parts[0];
         variant_name = parts[1];
-    } else if (parts.size() == 3) {
-        module_name = parts[0];
-        type_name = parts[1];
-        variant_name = parts[2];
+    } else if (parts.size() >= 3) {
+        variant_name = parts.back();
+        type_name = parts[parts.size() - 2];
+        for (size_t i = 0; i + 2 < parts.size(); ++i) {
+            if (!module_name.empty())
+                module_name += ".";
+            module_name += parts[i];
+        }
     } else {
         yyerror("invalid enum tag %s", tag.c_str());
         return NULL;
@@ -191,7 +214,7 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
     if (def) {
         if (type_name != def->name ||
             (!module_name.empty() && module_name != def->module_name)) {
-            yyerror("enum tag %s does not match expected %s::%s",
+            yyerror("enum tag %s does not match expected %s.%s",
                     tag.c_str(), def->module_name.c_str(),
                     def->name.c_str());
             return NULL;
@@ -207,7 +230,7 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
     }
     int variant_index = structtype_variant_index(def, variant_name);
     if (variant_index < 0) {
-        yyerror("unknown enum variant %s::%s", type_name.c_str(),
+        yyerror("unknown enum variant %s.%s", type_name.c_str(),
                 variant_name.c_str());
         return NULL;
     }
@@ -259,6 +282,24 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
     return newenumval(def, variant_index, payload);
 }
 
+static bool split_type_name(const std::string &text, std::string &prefix,
+                            std::string &base) {
+    size_t sep = text.rfind("::");
+    size_t sep_len = 2;
+    size_t dot = text.rfind('.');
+    if (dot != std::string::npos &&
+        (sep == std::string::npos || dot > sep)) {
+        sep = dot;
+        sep_len = 1;
+    }
+    if (sep == std::string::npos || sep == 0 ||
+        sep + sep_len >= text.size())
+        return false;
+    prefix = text.substr(0, sep);
+    base = text.substr(sep + sep_len);
+    return true;
+}
+
 static struct_def *find_named_struct(const struct type_constraint *type) {
     if (!type || type->kind != TYPE_NAMED || !type->name)
         return NULL;
@@ -266,11 +307,11 @@ static struct_def *find_named_struct(const struct type_constraint *type) {
     if (def)
         return def;
     std::string name(type->name);
-    size_t sep = name.find("::");
-    if (sep == std::string::npos || sep == 0 || sep + 2 >= name.size())
+    std::string prefix;
+    std::string base;
+    if (!split_type_name(name, prefix, base))
         return NULL;
-    return structtype_find_struct_by_name(
-        name.substr(0, sep).c_str(), name.substr(sep + 2).c_str());
+    return structtype_find_struct_by_name(prefix.c_str(), base.c_str());
 }
 
 static enum_def *find_named_enum(const struct type_constraint *type) {
@@ -280,11 +321,11 @@ static enum_def *find_named_enum(const struct type_constraint *type) {
     if (def)
         return def;
     std::string name(type->name);
-    size_t sep = name.find("::");
-    if (sep == std::string::npos || sep == 0 || sep + 2 >= name.size())
+    std::string prefix;
+    std::string base;
+    if (!split_type_name(name, prefix, base))
         return NULL;
-    return structtype_find_enum_by_name(
-        name.substr(0, sep).c_str(), name.substr(sep + 2).c_str());
+    return structtype_find_enum_by_name(prefix.c_str(), base.c_str());
 }
 
 static struct value_t *decode_value_for_type(
@@ -459,10 +500,11 @@ static struct value_t *struct_decode(struct value_t *value,
 
     std::string type_name = ((struct string_value_t *)type_value)->value;
     std::string module_name;
-    size_t sep = type_name.find("::");
-    if (sep != std::string::npos) {
-        module_name = type_name.substr(0, sep);
-        type_name = type_name.substr(sep + 2);
+    std::string base_name;
+    if (split_type_name(type_name, module_name, base_name)) {
+        type_name = std::move(base_name);
+    } else {
+        module_name.clear();
     }
 
     struct_def *def = structtype_find_struct_by_name(

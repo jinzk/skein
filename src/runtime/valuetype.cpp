@@ -1047,7 +1047,7 @@ std::string value_to_string(const struct value_t *v) {
                 return "<enum>";
             const struct variant_def &variant =
                 e->def->variants[(size_t)e->variant];
-            std::string out = e->def->name + "::" + variant.name;
+            std::string out = e->def->name + "." + variant.name;
             if (variant.fields.empty())
                 return out;
             out += " { ";

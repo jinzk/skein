@@ -1299,6 +1299,61 @@ public:
                     break;
                 }
 
+                case Op::GetFieldOrEnum: {
+                    if (ins.b >= proto().field_or_enum.size()) {
+                        yyerror("invalid field-or-enum descriptor");
+                        return abort_error();
+                    }
+                    const skein::bc::FieldOrEnumDesc &desc =
+                        proto().field_or_enum[ins.b];
+                    value_t *result = NULL;
+                    struct symbol *base =
+                        lookupsym(desc.base.c_str());
+                    if (base) {
+                        if (base->is_uninitialized) {
+                            yyerror("parameter %s is used before it is "
+                                    "initialized",
+                                    desc.base.c_str());
+                            return abort_error();
+                        }
+                        value_t *container = dupval(base->val);
+                        if (!container)
+                            return abort_error();
+                        result = read_field_cached(
+                            container, desc.field.c_str(), NULL);
+                        freeval(container);
+                    } else {
+                        structtype_lookup_result lookup;
+                        std::string error;
+                        structtype_lookup_status status =
+                            structtype_lookup_type(
+                                nullptr, desc.module.c_str(),
+                                desc.base.c_str(), lookup, error);
+                        if (status == STRUCTTYPE_LOOKUP_FOUND &&
+                            lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
+                            std::vector<std::pair<std::string, value_t *>>
+                                fields;
+                            std::vector<bool> spread;
+                            result = build_enum_value(
+                                lookup.enumeration->module.c_str(),
+                                lookup.enumeration->name.c_str(),
+                                desc.field.c_str(), fields, spread);
+                        } else if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
+                                   status ==
+                                       STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
+                                   status == STRUCTTYPE_LOOKUP_ERROR) {
+                            yyerror("%s", error.c_str());
+                        } else {
+                            yyerror("symbol not found %s",
+                                    desc.base.c_str());
+                        }
+                    }
+                    if (!result)
+                        return abort_error();
+                    push(result);
+                    break;
+                }
+
                 case Op::IterNew: {
                     uint32_t desc_index = ins.a;
                     if (desc_index >= proto().iters.size()) {
@@ -3131,7 +3186,7 @@ private:
                 }
                 return newmethodval(dupval(container), method->second);
             }
-            yyerror("field %s not found in %s::%s", name,
+            yyerror("field %s not found in %s.%s", name,
                     ev->def->name.c_str(), variant.name.c_str());
             return NULL;
         }
@@ -3427,7 +3482,7 @@ public:
                     int variant_index = structtype_variant_index(
                         def, pattern.variant.c_str());
                     if (variant_index < 0) {
-                        yyerror("unknown enum variant %s::%s",
+                        yyerror("unknown enum variant %s.%s",
                                 def->name.c_str(),
                                 pattern.variant.c_str());
                         return false;
@@ -3444,7 +3499,7 @@ public:
                             structtype_variant_field_index(
                                 &variant, field.key.c_str());
                         if (field_index < 0) {
-                            yyerror("unknown field %s in %s::%s",
+                            yyerror("unknown field %s in %s.%s",
                                     field.key.c_str(), def->name.c_str(),
                                     variant.name.c_str());
                             return false;
@@ -3682,7 +3737,7 @@ private:
                 continue;
             if (!missing.empty())
                 missing += ", ";
-            missing += def->name + "::" + def->variants[i].name;
+            missing += def->name + "." + def->variants[i].name;
         }
         if (missing.empty())
             return true;

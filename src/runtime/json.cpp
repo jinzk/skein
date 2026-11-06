@@ -677,7 +677,7 @@ private:
                 const struct variant_def &variant =
                     ev->def->variants[(size_t)ev->variant];
                 out += "{\"$enum\":";
-                std::string tag = ev->def->name + "::" + variant.name;
+                std::string tag = ev->def->name + "." + variant.name;
                 if (!encode_string(tag.c_str()))
                     return false;
                 out += ",\"payload\":{";

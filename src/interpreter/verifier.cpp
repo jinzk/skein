@@ -347,6 +347,12 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             need(1);
             stack(1, 1);
             break;
+        case Op::GetFieldOrEnum:
+            if (ins.b >= proto.field_or_enum.size())
+                return fail(error,
+                            at_pc("field-or-enum descriptor out of range", pc));
+            stack(0, 1);
+            break;
         case Op::IterNew:
             if (!check_iter(proto, ins.a, pc, error))
                 return false;

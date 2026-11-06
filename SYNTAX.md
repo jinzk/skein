@@ -386,7 +386,36 @@ d["x"].field
 - string 下标按 UTF-8 码点计数，返回 `char`，字符串索引不能赋值；
 - dict 键按值相等判断；
 - bytes 下标是字节下标，返回 `0..255`，索引赋值接受 `0..255`；
-- 字段访问只用于 struct 字段和 `std`/包命名空间；普通 dict 的键必须用下标。
+- 字段访问用于 struct 字段、enum 变体和 `std`/包命名空间；普通 dict 的键必须用下标。
+
+切片使用 Python 风格的 `start:stop:step`：
+
+```text
+a[1:4]        // 从下标 1 到 3，不含 4
+a[:3]         // 从开头到下标 2
+a[2:]         // 从下标 2 到末尾
+a[:]          // 完整副本
+a[-2:]        // 最后两个元素
+a[::2]        // 每隔一个取一个
+a[::-1]       // 反向
+a[4:0:-2]     // 反向且步长为 -2
+```
+
+- 支持 list、string 和 bytes，结果类型与输入相同；
+- list 按元素、string 按 UTF-8 码点、bytes 按字节切片；
+- `stop` 不包含在结果中；`step` 省略时为 `1`，不能为 `0`；
+- 边界和 step 必须是整数；边界可以省略，负数下标从末尾计数；
+- 越界下标会被截断到合法范围，不会报错；
+- 切片表达式返回新值，不修改原值；暂不支持切片赋值；
+- 省略 `stop` 时可直接写 `a[start::step]`，例如 `a[i::j]`、`a[2::2]`。
+
+```text
+let xs = [0, 1, 2, 3, 4];
+xs[1:4]       // [1, 2, 3]
+xs[::-1]      // [4, 3, 2, 1, 0]
+"你好世界"[1:3] // "好世"
+bytes_from_string("abcd")[1:3] // 两个字节 "bc"
+```
 
 ### 4.7 函数调用
 
@@ -998,7 +1027,7 @@ let next = match (state) {
 - 绑定只读，作用域限于该 arm；
 - `if` 守卫失败时继续尝试下一个 arm；
 - 没有 arm 命中且没有 `default` → 运行时错误 `match: no arm matched`；
-- enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive: missing Enum::Variant`；
+- enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive: missing Enum.Variant`；
 - `case is Type` 是类型模式，例如 `case is int`、`case is Point`；
 - 模式匹配无副作用，不能调用函数，也不能写比较表达式；
 - 不支持 float 字面量，浮点判断用 `if/else`；
@@ -1011,12 +1040,12 @@ let next = match (state) {
 | 模式 | 示例 | 说明 |
 |---|---|---|
 | 字面量 | `1`、`"idle"`、`'a'`、`true`、`null` | 按 `==` 比较 |
-| 值模式 | `case == IDLE`、`case == E::A` | 匹配常量、名字或无载荷枚举变体 |
+| 值模式 | `case == IDLE`、`case == E.A` | 匹配常量、名字或无载荷枚举变体 |
 | 绑定 | `x` | 匹配任意值并绑定 |
 | 通配 | `_` | 匹配任意值，不绑定 |
 | 整体绑定 | `p as Point {x}` | 先匹配子模式，再把整个值绑定到 `p` |
 | 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 trait |
-| or | `case 1 \| 2`、`case E::A \| E::B` | 任一子模式匹配即可 |
+| or | `case 1 \| 2`、`case E.A \| E.B` | 任一子模式匹配即可 |
 | 整数范围 | `case 1..9` | 包含两端，按 int 比较 |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
 | dict rest | `{kind, ...rest}` | `rest` 收集未列出的键 |
@@ -1031,8 +1060,8 @@ let next = match (state) {
 
 ```text
 match (state, event) {
-  case [State::Idle, Event::UserMsg { text }] =>
-    State::Planning { goal: text };
+  case [State.Idle, Event.UserMsg { text }] =>
+    State.Planning { goal: text };
   default => state;
 }
 ```
@@ -1673,24 +1702,24 @@ export trait D { func d(self); }
 
 // main
 import aa;
-let p: aa::P = aa.make();
-p is aa::D
+let p: aa.P = aa.make();
+p is aa.D
 
 import aa as lib;
-let q: lib::P = lib.make();
+let q: lib.P = lib.make();
 ```
 
 - 类型默认只在声明包内可见；
 - `export struct` / `export trait` 后才能通过包路径引用；
-- 限定类型名使用 `::`；
-- 未导出的类型不能通过 `aa::Hidden` 引用，但它的值仍能正常传递和调用方法；
+- 限定类型名使用 `.`；
+- 未导出的类型不能通过 `aa.Hidden` 引用，但它的值仍能正常传递和调用方法；
 - 其他包可以为自己的类型实现导入的已导出 trait：
 
 ```text
 // main
 import aa;
 struct Q { y: int; }
-impl aa::D for Q {
+impl aa.D for Q {
   func d(self) { return self.y; }
 }
 ```
@@ -1758,25 +1787,25 @@ enum Event {
 构造：
 
 ```text
-let a = Event::UserMsg { text: "hi" };
-let b = Event::Timeout;
+let a = Event.UserMsg { text: "hi" };
+let b = Event.Timeout;
 ```
 
 规则：
 
 - 变体字段必须全部初始化；有默认值的字段可以省略；
 - 未知字段、重复字段、字段类型不匹配都会报错；
-- 无载荷变体直接写成 `Event::Timeout`；
-- 变体字段支持默认值；所有字段都有默认值时允许 `Event::Variant {}`；
+- 无载荷变体直接写成 `Event.Timeout`；
+- 变体字段支持默认值；所有字段都有默认值时允许 `Event.Variant {}`；
 - 默认值在定义包作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
 - copy-with 目前只支持 struct，不支持 enum；
 - 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
-- 字段访问按当前变体校验：`Event::Timeout.text` 报错；
+- 字段访问按当前变体校验：`Event.Timeout.text` 报错；
 - 方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
 - `impl Trait for Event` 可以让 enum 参与 trait 接口；enum 也能用于 `is` 和类型标注；
 - 方法名不能与任意变体的字段重名；
 - `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_module(e)` → 包名；
-- 类型标注：`let e: Event = Event::UserMsg { text: "hi" };`；
+- 类型标注：`let e: Event = Event.UserMsg { text: "hi" };`；
 - 相等按 `def + variant + payload` 比较。
 
 ```text
@@ -1788,8 +1817,8 @@ enum Shape {
 impl Shape {
   func area(self) {
     return match (self) {
-      case Shape::Circle { r } => r * r;
-      case Shape::Rect { w, h } => w * h;
+      case Shape.Circle { r } => r * r;
+      case Shape.Rect { w, h } => w * h;
     };
   }
 }
@@ -1803,26 +1832,26 @@ impl Drawable for Shape {
 
 ```text
 match (e) {
-  case Event::UserMsg { text } => text;
-  case Event::ToolResult { ok: true, data: d } => d;
-  case Event::Timeout => "timeout";
+  case Event.UserMsg { text } => text;
+  case Event.ToolResult { ok: true, data: d } => d;
+  case Event.Timeout => "timeout";
   default => "other";
 }
 ```
 
 - 同一变体可以出现多个 arm，靠字段模式或守卫分流；
 - 未列出的载荷字段忽略，写错字段名报错；
-- `case Event::Timeout` 只匹配该变体；
-- `case Event::ToolResult { ... }` 匹配该变体的任意载荷。
+- `case Event.Timeout` 只匹配该变体；
+- `case Event.ToolResult { ... }` 匹配该变体的任意载荷。
 
 JSON：
 
 ```text
-std.json.stringify(Event::UserMsg { text: "hi" })
-// {"$enum":"Event::UserMsg","payload":{"text":"hi"}}
+std.json.stringify(Event.UserMsg { text: "hi" })
+// {"$enum":"Event.UserMsg","payload":{"text":"hi"}}
 
-std.json.stringify(Event::Timeout)
-// {"$enum":"Event::Timeout","payload":{}}
+std.json.stringify(Event.Timeout)
+// {"$enum":"Event.Timeout","payload":{}}
 ```
 
 暂不支持：互递归 enum（自引用 enum 已支持）、enum 作为 dict key、enum 的 JSON 自动解码。
@@ -1853,7 +1882,7 @@ export NAME = expr;
 ```
 
 `export NAME = expr` 等价于导出可变的 `let` 绑定。
-导出类型后，其他包可以用 `包名::类型名` 作为类型标注或 `is` 的右操作数。
+导出类型后，其他包可以用 `包名.类型名` 作为类型标注或 `is` 的右操作数。
 
 ## 6. 包和导入
 
@@ -2339,7 +2368,7 @@ std.http.respond(req, 200, {"Content-Type": "application/json"},
 - 重复 key 以最后一个为准；
 - `stringify` 只接受 JSON 子集；object key 必须是 `string`，否则报错；
 - `stringify` 拒绝 `bytes`、`function`、`userdata`、`result`、`error` 和 `NaN` / `Inf`；
-- `struct` 编码为普通 object，`enum` 编码为 `{"$enum":"Type::Variant","payload":{...}}`，`char` 编码为单字符字符串，`byte` 编码为整数；
+- `struct` 编码为普通 object，`enum` 编码为 `{"$enum":"Type.Variant","payload":{...}}`，`char` 编码为单字符字符串，`byte` 编码为整数；
 - 字符串按 UTF-8 校验并转义控制字符；JSON 的 `\u0000` 不支持；
 - 嵌套深度上限为 512；
 - 默认输出紧凑 JSON，并保持 dict 的插入序。
@@ -3615,7 +3644,7 @@ std.meta.has_type(type)                 -> bool
 ```
 
 `std.meta` 是只读类型反射。`type` 可以是 struct / enum 实例、内建类型的值，
-或类型名字符串（支持 `module::Type`）。`kind_of` 返回的 `struct` / `enum` /
+或类型名字符串（支持 `module.Type`）。`kind_of` 返回的 `struct` / `enum` /
 `method` 等是运行时 kind，不是类型名，不能传给 `std.meta`；应使用
 `type_name(value)` 或字符串。
 
@@ -3691,7 +3720,7 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
   类型必须 `export`。不可见类型在 `type_info` 等函数中报
   `type X is not visible`，`has_type` 返回 `false`；
 - 值形式的参数同样受可见性约束，不能用隐藏类型的值绕过；
-- 未限定类型名跨包同名时报歧义，使用 `pkg::Type`；
+- 未限定类型名跨包同名时报歧义，使用 `pkg.Type`；
 - 内建类型使用 `kind = "builtin"`，例如 `"str"` 规范化为 `"string"`，
   `"func"` 规范化为 `"function"`；
 - 内建类型的内建类型名包括 `any` / `int` / `float` / `number` / `bool` /
@@ -3715,21 +3744,21 @@ std.enum.tag(value)                             -> string
 std.enum.tag(type_name, variant_name)           -> string
 ```
 
-`decode` 把 `std.json.parse` 得到的 `{"$enum":"Event::UserMsg","payload":{...}}` 还原成枚举值；嵌套枚举会递归还原。输入不是枚举对象时报错。
+`decode` 把 `std.json.parse` 得到的 `{"$enum":"Event.UserMsg","payload":{...}}` 还原成枚举值；嵌套枚举会递归还原。输入不是枚举对象时报错。
 
 ```text
 import std;
 enum Event { UserMsg { text: string; }; }
 let e = std.enum.decode(std.json.parse(
-  std.json.stringify(Event::UserMsg { text: "hi" })
+  std.json.stringify(Event.UserMsg { text: "hi" })
 ));
 ```
 
 可选类型名用于校验 tag 并消除跨包同名歧义：
 
 ```text
-std.enum.decode(value, "aa::Event")
-std.enum.decode(value, "aa::Event", {"defaults": true})
+std.enum.decode(value, "aa.Event")
+std.enum.decode(value, "aa.Event", {"defaults": true})
 ```
 
 `options` 当前支持：
@@ -3743,19 +3772,19 @@ std.enum.decode(value, "aa::Event", {"defaults": true})
 
 
 
-`tag` 返回 `module::Enum::Variant` 形式的规范字符串，丢弃载荷：
+`tag` 返回 `module.Enum.Variant` 形式的规范字符串，丢弃载荷：
 
 - 同一变体的不同载荷得到同一个 tag；
 - 不同 enum 类型即使变体名相同，tag 也不同；
 - tag 是普通字符串，可直接作 dict key、写进 JSON；
-- 无实例时可用 `std.enum.tag("Event", "UserMsg")` 或跨包 `std.enum.tag("aa::Event", "UserMsg")`。
+- 无实例时可用 `std.enum.tag("Event", "UserMsg")` 或跨包 `std.enum.tag("aa.Event", "UserMsg")`。
 
 ```text
 enum E { A { n: int; }; B; }
-std.enum.tag(E::A { n: 1 })   // "main::E::A"
-std.enum.tag(E::A { n: 2 })   // "main::E::A"
-std.enum.tag(E::B)            // "main::E::B"
-std.enum.tag("E", "A")        // "main::E::A"
+std.enum.tag(E.A { n: 1 })   // "main.E.A"
+std.enum.tag(E.A { n: 2 })   // "main.E.A"
+std.enum.tag(E.B)            // "main.E.B"
+std.enum.tag("E", "A")        // "main.E.A"
 ```
 
 ### std.struct
@@ -3763,7 +3792,7 @@ std.enum.tag("E", "A")        // "main::E::A"
 ```text
 std.struct.decode(value, type_name)                 -> struct
 std.struct.decode(value, type_name, options)        -> struct
-std.struct.decode(value, "aa::Point")               -> 跨包
+std.struct.decode(value, "aa.Point")               -> 跨包
 ```
 
 schema 驱动解码：JSON 保持普通 object，类型由调用方提供。
@@ -3805,7 +3834,7 @@ print(c.port);     // 8080
 - 可空字段 `T?` 缺失时填 `null`；
 - 嵌套 struct / enum 递归解码，`defaults` 同样作用于嵌套字段；
 - 递归 struct 依赖 JSON 深度限制；
-- 跨包类型写成 `module::Type`；
+- 跨包类型写成 `module.Type`；
 - `std.json.stringify` 的输出格式不变，不引入 `$struct` 标签。
 
 ### std.lru

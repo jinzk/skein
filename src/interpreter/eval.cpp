@@ -23,6 +23,15 @@
 
 #include "eval_internal.h"
 
+static const char *literal_field_name(const struct ast *node) {
+    if (!node || node->nodetype != 'V')
+        return NULL;
+    const struct val *value = (const struct val *)node;
+    if (!value->val || value->val->type != T_string)
+        return NULL;
+    return ((const struct string_value_t *)value->val)->value;
+}
+
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
     if (g_interrupted) return NULL;
@@ -1433,6 +1442,35 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'j': {
+            const char *field = literal_field_name(a->r);
+            if (field && a->l && a->l->nodetype == 'N') {
+                const char *base = ((struct symref *)a->l)->name;
+                if (base && !lookupsym(base)) {
+                    structtype_lookup_result lookup;
+                    std::string error;
+                    structtype_lookup_status status =
+                        structtype_lookup_type(
+                            nullptr, diag_current_module_name().c_str(),
+                            base, lookup, error);
+                    if (status == STRUCTTYPE_LOOKUP_FOUND &&
+                        lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
+                        std::vector<std::pair<std::string, value_t *>>
+                            fields;
+                        std::vector<bool> spread;
+                        ret = build_enum_value(
+                            lookup.enumeration->module.c_str(),
+                            lookup.enumeration->name.c_str(), field,
+                            fields, spread);
+                        break;
+                    }
+                    if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
+                        status == STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
+                        status == STRUCTTYPE_LOOKUP_ERROR) {
+                        yyerror("%s", error.c_str());
+                        break;
+                    }
+                }
+            }
             struct value_t *container = eval(a->l);
             if (!container)
                 break;

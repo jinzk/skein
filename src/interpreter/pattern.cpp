@@ -141,7 +141,7 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                 int variant_index =
                     structtype_variant_index(def, pattern->variant);
                 if (variant_index < 0) {
-                    yyerror("unknown enum variant %s::%s", def->name.c_str(),
+                    yyerror("unknown enum variant %s.%s", def->name.c_str(),
                             pattern->variant);
                     return false;
                 }
@@ -157,7 +157,7 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                     int index =
                         structtype_variant_field_index(&variant, field->key);
                     if (index < 0) {
-                        yyerror("unknown field %s in %s::%s", field->key,
+                        yyerror("unknown field %s in %s.%s", field->key,
                                 def->name.c_str(), variant.name.c_str());
                         return false;
                     }
@@ -403,7 +403,7 @@ bool match_exhaustive_check(struct ast *arms, struct value_t *subject) {
             continue;
         if (!missing.empty())
             missing += ", ";
-        missing += def->name + "::" + def->variants[i].name;
+        missing += def->name + "." + def->variants[i].name;
     }
     if (missing.empty())
         return true;

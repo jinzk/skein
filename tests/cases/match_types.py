@@ -29,7 +29,7 @@ def run_cases():
           stdout="one")
     check("match value pattern enum",
           'enum E { A; B; }\n'
-          'match (E::A) { case == E::A => print("a"); default => print("no"); }\n',
+          'match (E.A) { case == E.A => print("a"); default => print("no"); }\n',
           stdout="a")
     check("match value pattern rejects comparison",
           'match (1) { case < 1 => print("bad"); default => print("no"); }\n',
@@ -44,8 +44,8 @@ def run_cases():
     check("match multi scrutinee enum",
           'enum S { Idle; }\n'
           'enum E { Msg { text: string; }; }\n'
-          'match (S::Idle, E::Msg { text: "hi" }) {\n'
-          '  case [S::Idle, E::Msg {text}] => print(text);\n'
+          'match (S.Idle, E.Msg { text: "hi" }) {\n'
+          '  case [S.Idle, E.Msg {text}] => print(text);\n'
           '  default => print("no");\n'
           '}\n',
           stdout="hi")
@@ -54,57 +54,57 @@ def run_cases():
           stdout="no")
 
     check("enum no payload",
-          'enum E { A; B; }\nprint(E::A);\nprint(E::A == E::A);\n'
-          'print(E::A == E::B);\n',
-          stdout_all=["E::A", "true", "false"])
+          'enum E { A; B; }\nprint(E.A);\nprint(E.A == E.A);\n'
+          'print(E.A == E.B);\n',
+          stdout_all=["E.A", "true", "false"])
     check("enum payload",
           'enum E { A { n: int; s: string; }; B; }\n'
-          'let e = E::A { n: 1, s: "x" };\n'
+          'let e = E.A { n: 1, s: "x" };\n'
           'print(e.n);\nprint(e.s);\nprint(e);\n',
-          stdout_all=["1", "x", "E::A { n: 1, s: x }"])
+          stdout_all=["1", "x", "E.A { n: 1, s: x }"])
     check("enum type info",
-          'enum E { A; }\nprint(kind_of(E::A));\nprint(type_name(E::A));\n'
-          'print(type_module(E::A));\n',
+          'enum E { A; }\nprint(kind_of(E.A));\nprint(type_name(E.A));\n'
+          'print(type_module(E.A));\n',
           stdout_all=["enum", "E", "main"])
     check("enum type annotation",
-          'enum E { A { n: int; }; }\nlet e: E = E::A { n: 1 };\nprint(e.n);\n',
+          'enum E { A { n: int; }; }\nlet e: E = E.A { n: 1 };\nprint(e.n);\n',
           stdout="1")
     check("enum variant pattern",
           'enum E { A { n: int; }; B; }\n'
-          'print(match (E::A { n: 2 }) { '
-          'case E::A {n} if n > 1 => "big"; case E::A {n} => "small"; '
-          'case E::B => "b"; });\n',
+          'print(match (E.A { n: 2 }) { '
+          'case E.A {n} if n > 1 => "big"; case E.A {n} => "small"; '
+          'case E.B => "b"; });\n',
           stdout="big")
     check("enum variant pattern rest",
           'enum E { A { n: int; s: string; }; }\n'
-          'print(match (E::A { n: 1, s: "x" }) { '
-          'case E::A {n, ...rest} => rest; });\n',
+          'print(match (E.A { n: 1, s: "x" }) { '
+          'case E.A {n, ...rest} => rest; });\n',
           stdout="{s: x}")
     check("enum field wrong variant",
-          'enum E { A { n: int; }; B; }\nprint(E::B.n);\n',
-          stderr="field n not found in E::B")
+          'enum E { A { n: int; }; B; }\nprint(E.B.n);\n',
+          stderr="field n not found in E.B")
     check("enum unknown variant",
-          'enum E { A; }\nE::B\n', stderr="unknown enum variant E::B")
+          'enum E { A; }\nE.B\n', stderr="unknown enum variant E.B")
     check("enum unknown field in construction",
-          'enum E { A { n: int; }; }\nE::A { m: 1 }\n',
-          stderr="unknown field m in E::A")
+          'enum E { A { n: int; }; }\nE.A { m: 1 }\n',
+          stderr="unknown field m in E.A")
     check("enum missing field",
-          'enum E { A { n: int; }; }\nE::A {}\n',
-          stderr="field n of E::A is required")
+          'enum E { A { n: int; }; }\nE.A {}\n',
+          stderr="field n of E.A is required")
     check("enum field type mismatch",
-          'enum E { A { n: int; }; }\nE::A { n: "x" }\n',
-          stderr="field n of E::A expects int, got string")
+          'enum E { A { n: int; }; }\nE.A { n: "x" }\n',
+          stderr="field n of E.A expects int, got string")
     check("enum variant repeated",
           'enum E { A; A; }\n', stderr="enum variant repeated A")
     check("enum empty payload rejected",
           'enum E { A {}; }\n', stderr="empty payload")
     check("enum json",
           'import std;\nenum E { A { n: int; }; B; }\n'
-          'print(std.json.stringify(E::A { n: 1 }));\n'
-          'print(std.json.stringify(E::B));\n',
+          'print(std.json.stringify(E.A { n: 1 }));\n'
+          'print(std.json.stringify(E.B));\n',
           stdout_all=[
-              '{"$enum":"E::A","payload":{"n":1}}',
-              '{"$enum":"E::B","payload":{}}',
+              '{"$enum":"E.A","payload":{"n":1}}',
+              '{"$enum":"E.B","payload":{}}',
           ])
     check("struct json",
           'import std;\nstruct P { x: int; y: string; }\n'
@@ -116,14 +116,14 @@ def run_cases():
           stdout='{"value":1,"next":null}')
     check("enum nested in match",
           'enum E { A { n: int; }; }\n'
-          'print(match (E::A { n: 3 }) { '
-          'case E::A {n} => match (n) { case 3 => "three"; default => "no"; }; '
+          'print(match (E.A { n: 3 }) { '
+          'case E.A {n} => match (n) { case 3 => "three"; default => "no"; }; '
           'default => "no"; });\n',
           stdout="three")
     check("enum self reference",
           'enum Expr { Add { l: Expr; r: Expr; }; Num { n: int; }; }\n'
-          'let e = Expr::Add { l: Expr::Num { n: 1 }, r: Expr::Num { n: 2 } };\n'
-          'print(match (e) { case Expr::Add {l, r} => "add"; '
+          'let e = Expr.Add { l: Expr.Num { n: 1 }, r: Expr.Num { n: 2 } };\n'
+          'print(match (e) { case Expr.Add {l, r} => "add"; '
           'default => "other"; });\n',
           stdout="add")
     check("struct self reference",
@@ -262,18 +262,18 @@ def run_cases():
           stdout_all=["true", "5"])
     check("std.enum.decode",
           'import std;\nenum E { A { n: int; }; B; }\n'
-          'let s = std.json.stringify(E::A { n: 1 });\n'
+          'let s = std.json.stringify(E.A { n: 1 });\n'
           'let e = std.enum.decode(std.json.parse(s));\n'
           'print(e);\nprint(kind_of(e));\n'
-          'print(match (e) { case E::A {n} => n; default => 0; });\n',
-          stdout_all=["E::A { n: 1 }", "enum", "1"])
+          'print(match (e) { case E.A {n} => n; default => 0; });\n',
+          stdout_all=["E.A { n: 1 }", "enum", "1"])
     check("std.enum.decode nested",
           'import std;\nenum Inner { A { n: int; }; }\n'
           'enum Outer { X { inner: Inner; }; }\n'
-          'let o = Outer::X { inner: Inner::A { n: 2 } };\n'
+          'let o = Outer.X { inner: Inner.A { n: 2 } };\n'
           'let o2 = std.enum.decode(std.json.parse(std.json.stringify(o)));\n'
-          'print(match (o2) { case Outer::X {inner} => '
-          'match (inner) { case Inner::A {n} => n; default => 0; }; '
+          'print(match (o2) { case Outer.X {inner} => '
+          'match (inner) { case Inner.A {n} => n; default => 0; }; '
           'default => 0; });\n',
           stdout="2")
     check("std.enum.decode rejects non-enum",
@@ -281,32 +281,32 @@ def run_cases():
           stderr="std.enum.decode expects an enum object")
     check("std.enum.tag",
           'import std;\nenum E { A { n: int; }; B; }\n'
-          'print(std.enum.tag(E::A { n: 1 }));\n'
-          'print(std.enum.tag(E::A { n: 2 }));\n'
-          'print(std.enum.tag(E::B));\n',
-          stdout_all=["main::E::A", "main::E::A", "main::E::B"])
+          'print(std.enum.tag(E.A { n: 1 }));\n'
+          'print(std.enum.tag(E.A { n: 2 }));\n'
+          'print(std.enum.tag(E.B));\n',
+          stdout_all=["main.E.A", "main.E.A", "main.E.B"])
     check("std.enum.tag cross enum",
           'import std;\nenum E1 { A; }\nenum E2 { A; }\n'
-          'print(std.enum.tag(E1::A) == std.enum.tag(E2::A));\n'
-          'print(std.enum.tag(E1::A));\n',
-          stdout_all=["false", "main::E1::A"])
+          'print(std.enum.tag(E1.A) == std.enum.tag(E2.A));\n'
+          'print(std.enum.tag(E1.A));\n',
+          stdout_all=["false", "main.E1.A"])
     check("std.enum.tag by name",
           'import std;\nenum E { A; }\n'
           'print(std.enum.tag("E", "A"));\n',
-          stdout="main::E::A")
+          stdout="main.E.A")
     check("std.enum.tag as dict key",
           'import std;\nenum E { A { n: int; }; }\n'
           'let counts = {};\n'
-          'counts[std.enum.tag(E::A { n: 1 })] = 1;\n'
-          'counts[std.enum.tag(E::A { n: 2 })] = 2;\n'
-          'print(counts[std.enum.tag(E::A { n: 3 })]);\n',
+          'counts[std.enum.tag(E.A { n: 1 })] = 1;\n'
+          'counts[std.enum.tag(E.A { n: 2 })] = 2;\n'
+          'print(counts[std.enum.tag(E.A { n: 3 })]);\n',
           stdout="2")
     check("std.enum.tag errors",
           'import std;\nenum E { A; }\nstd.enum.tag(1);\n',
           stderr="std.enum.tag expects an enum value")
     check("std.enum.tag unknown variant",
           'import std;\nenum E { A; }\nstd.enum.tag("E", "Nope");\n',
-          stderr="unknown enum variant E::Nope")
+          stderr="unknown enum variant E.Nope")
 
     with tempfile.TemporaryDirectory() as tmp:
         def write(rel, text):
@@ -323,14 +323,14 @@ def run_cases():
             "import std;\n"
             "import aa;\n"
             "enum E { A { n: int; }; }\n"
-            'let v = {"$enum": "E::A", "payload": {"n": 1}};\n'
-            'print(std.enum.tag(std.enum.decode(v, "main::E")));\n'
-            'print(std.enum.tag(std.enum.decode(v, "aa::E")));\n')
+            'let v = {"$enum": "E.A", "payload": {"n": 1}};\n'
+            'print(std.enum.tag(std.enum.decode(v, "main.E")));\n'
+            'print(std.enum.tag(std.enum.decode(v, "aa.E")));\n')
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == [
-            "main::E::A",
-            "aa::E::A",
+            "main.E.A",
+            "aa.E.A",
         ], proc.stdout
 
     check("std.struct.decode",
@@ -348,8 +348,8 @@ def run_cases():
           'import std;\nenum E { A { n: int; }; }\n'
           'struct S { e: E; }\n'
           'let s = std.struct.decode('
-          '{"e": {"$enum": "E::A", "payload": {"n": 7}}}, "S");\n'
-          'print(match (s.e) { case E::A {n} => n; default => 0; });\n',
+          '{"e": {"$enum": "E.A", "payload": {"n": 7}}}, "S");\n'
+          'print(match (s.e) { case E.A {n} => n; default => 0; });\n',
           stdout="7")
     check("std.struct.decode recursive",
           'import std;\nstruct Node { value: int; next: Node?; }\n'
@@ -390,24 +390,24 @@ def run_cases():
           stderr="unknown option default")
     check("std.enum.decode defaults",
           'import std;\nenum E { A { n: int = 3; }; }\n'
-          'let e = std.enum.decode({"$enum": "E::A", "payload": {}}, '
+          'let e = std.enum.decode({"$enum": "E.A", "payload": {}}, '
           '"E", {"defaults": true});\n'
           'print(e);\n',
-          stdout="E::A { n: 3 }")
+          stdout="E.A { n: 3 }")
     check("std.enum.decode options only",
           'import std;\nenum E { A { n: int = 3; }; }\n'
-          'let e = std.enum.decode({"$enum": "E::A", "payload": {}}, '
+          'let e = std.enum.decode({"$enum": "E.A", "payload": {}}, '
           '{"defaults": true});\n'
           'print(e);\n',
-          stdout="E::A { n: 3 }")
+          stdout="E.A { n: 3 }")
     check("std.enum.decode type hint mismatch",
           'import std;\nenum E { A { n: int; }; }\n'
           'enum F { A { n: int; }; }\n'
-          'std.enum.decode({"$enum": "F::A", "payload": {"n": 1}}, "E");\n',
-          stderr="does not match expected main::E")
+          'std.enum.decode({"$enum": "F.A", "payload": {"n": 1}}, "E");\n',
+          stderr="does not match expected main.E")
     check("std.enum.decode unknown type hint",
           'import std;\nenum E { A { n: int; }; }\n'
-          'std.enum.decode({"$enum": "E::A", "payload": {"n": 1}}, "Nope");\n',
+          'std.enum.decode({"$enum": "E.A", "payload": {"n": 1}}, "Nope");\n',
           stderr="unknown or ambiguous enum type Nope")
     check("std.fsm snapshot restore",
           'import std.fsm;\n'
@@ -432,7 +432,7 @@ def run_cases():
     check("std.fsm enum step type check",
           "import std;\nimport std.fsm;\n"
           "enum S { A; B; }\n"
-          "let m = fsm.define(S::A, func(s, e) { return \"x\"; });\n"
+          "let m = fsm.define(S.A, func(s, e) { return \"x\"; });\n"
           "fsm.step(m, fsm.start(m), 1);\n",
           stderr="step must return S, got string string")
     check("std.fsm struct step type check",
@@ -445,11 +445,11 @@ def run_cases():
     check("std.fsm json snapshot",
           'import std;\nimport std.fsm;\n'
           'enum S { Idle; Count { n: int; }; Done; }\n'
-          'let m = fsm.define(S::Idle, func(state, ev) {\n'
+          'let m = fsm.define(S.Idle, func(state, ev) {\n'
           '  return match ([state, ev]) {\n'
-          '    case [S::Idle, "inc"] => S::Count { n: 1 };\n'
-          '    case [S::Count {n}, "inc"] => S::Count { n: n + 1 };\n'
-          '    case [S::Count {n}, "done"] => S::Done;\n'
+          '    case [S.Idle, "inc"] => S.Count { n: 1 };\n'
+          '    case [S.Count {n}, "inc"] => S.Count { n: n + 1 };\n'
+          '    case [S.Count {n}, "done"] => S.Done;\n'
           '    default => state;\n'
           '  };\n'
           '});\n'
@@ -457,7 +457,7 @@ def run_cases():
           'let json = std.json.stringify(fsm.snapshot(ctx));\n'
           'let ctx2 = fsm.restore(std.json.parse(json));\n'
           'print(ctx2.state);\nprint(fsm.history(ctx2));\n',
-          stdout_all=["S::Done", "[S::Idle, S::Count { n: 1 }, S::Count { n: 2 }, S::Done]"])
+          stdout_all=["S.Done", "[S.Idle, S.Count { n: 1 }, S.Count { n: 2 }, S.Done]"])
     check("std.fsm struct snapshot with decoder",
           'import std;\nimport std.fsm;\n'
           'struct S { n: int; }\n'
@@ -610,9 +610,9 @@ def run_cases():
     check("char enum json",
           "import std;\nenum E { A { ch: char; }; }\n"
           "let e = std.enum.decode(std.json.parse("
-          "std.json.stringify(E::A { ch: '你' })));\n"
+          "std.json.stringify(E.A { ch: '你' })));\n"
           "print(e);\nprint(kind_of(e.ch));\n",
-          stdout_all=["E::A { ch: 你 }", "char"])
+          stdout_all=["E.A { ch: 你 }", "char"])
     check("char sort",
           "import std;\nprint(std.list.sort(['c', 'a', 'b']));\n"
           "print(std.list.sort_desc(['c', 'a', 'b']));\n"
@@ -681,7 +681,7 @@ def run_cases():
           "struct P { x: int; }\n{P { x: 1 }: 1}\n",
           stderr="dict key must be int, bool, string, char, byte, bytes, or null, got P")
     check("dict enum key rejected",
-          "enum E { A; }\n{E::A: 1}\n",
+          "enum E { A; }\n{E.A: 1}\n",
           stderr="dict key must be int, bool, string, char, byte, bytes, or null, got E")
 
     check("match type pattern",
@@ -702,24 +702,24 @@ def run_cases():
           stdout="3")
     check("match enum exhaustive",
           'enum E { A; B; }\n'
-          'let e = E::B;\n'
-          'print(match (e) { case E::A => 1; case E::B => 2; });\n',
+          'let e = E.B;\n'
+          'print(match (e) { case E.A => 1; case E.B => 2; });\n',
           stdout="2")
     check("match enum exhaustive type",
           'enum E { A; B; }\n'
-          'let e = E::A;\n'
+          'let e = E.A;\n'
           'print(match (e) { case is E => 9; });\n',
           stdout="9")
     check("match enum missing variant",
           'enum E { A; B; }\n'
-          'let e = E::A;\n'
-          'match (e) { case E::A => 1; }\n',
-          stderr="match is not exhaustive: missing E::B")
+          'let e = E.A;\n'
+          'match (e) { case E.A => 1; }\n',
+          stderr="match is not exhaustive: missing E.B")
     check("match enum guarded arm not exhaustive",
           'enum E { A; B; }\n'
-          'let e = E::A;\n'
-          'match (e) { case E::A if true => 1; }\n',
-          stderr="match is not exhaustive: missing E::A, E::B")
+          'let e = E.A;\n'
+          'match (e) { case E.A if true => 1; }\n',
+          stderr="match is not exhaustive: missing E.A, E.B")
 
     check("match or pattern",
           'print(match (2) { case 1 | 2 | 3 => "small"; default => "other"; });\n'
@@ -733,14 +733,14 @@ def run_cases():
           stdout_all=["low", "high"])
     check("match enum or exhaustive",
           'enum E { A; B; C; }\n'
-          'let e = E::B;\n'
-          'print(match (e) { case E::A | E::B | E::C => "all"; });\n',
+          'let e = E.B;\n'
+          'print(match (e) { case E.A | E.B | E.C => "all"; });\n',
           stdout="all")
     check("match enum or missing variant",
           'enum E { A; B; C; }\n'
-          'let e = E::A;\n'
-          'match (e) { case E::A | E::B => 1; }\n',
-          stderr="match is not exhaustive: missing E::C")
+          'let e = E.A;\n'
+          'match (e) { case E.A | E.B => 1; }\n',
+          stderr="match is not exhaustive: missing E.C")
     check("function parameter destructuring",
           'func sum([a, b]) { return a + b; }\n'
           'func pair({x, y}) { return x * y; }\n'

@@ -68,6 +68,7 @@ const char *op_name(Op op) {
         case Op::GetIndexCached: return "GET_INDEX_CACHED";
         case Op::GetField: return "GET_FIELD";
         case Op::GetFieldName: return "GET_FIELD_NAME";
+        case Op::GetFieldOrEnum: return "GET_FIELD_OR_ENUM";
         case Op::IterNew: return "ITER_NEW";
         case Op::IterNext: return "ITER_NEXT";
         case Op::IterEnd: return "ITER_END";

@@ -449,7 +449,7 @@ def run_cases():
         + "  @trace\n"
         + "  func value(self) { return 1; }\n"
         + "}\n"
-        + "print(E::A { n: 2 }.value());\n",
+        + "print(E.A { n: 2 }.value());\n",
         ["enter", "exit", "1"],
     )
 

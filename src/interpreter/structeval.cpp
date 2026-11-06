@@ -898,7 +898,7 @@ static value_t *build_enum_from_entries(
         int index =
             structtype_variant_field_index(&variant, entry.name.c_str());
         if (index < 0) {
-            yyerror("unknown field %s in %s::%s", entry.name.c_str(),
+            yyerror("unknown field %s in %s.%s", entry.name.c_str(),
                     def->name.c_str(), variant.name.c_str());
             freeval(entry.value);
             entry.value = NULL;
@@ -906,7 +906,7 @@ static value_t *build_enum_from_entries(
             continue;
         }
         if (explicit_seen[(size_t)index]) {
-            yyerror("field %s repeated in %s::%s", entry.name.c_str(),
+            yyerror("field %s repeated in %s.%s", entry.name.c_str(),
                     def->name.c_str(), variant.name.c_str());
             freeval(entry.value);
             entry.value = NULL;
@@ -918,7 +918,7 @@ static value_t *build_enum_from_entries(
             !type_constraint_matches(&variant.fields[(size_t)index].type,
                                      entry.value)) {
             if (entry.value) {
-                yyerror("field %s of %s::%s expects %s, got %s",
+                yyerror("field %s of %s.%s expects %s, got %s",
                         entry.name.c_str(), def->name.c_str(),
                         variant.name.c_str(),
                         type_constraint_name(
@@ -941,7 +941,7 @@ static value_t *build_enum_from_entries(
                 continue;
             const field_def &field = variant.fields[i];
             if (!field.has_default) {
-                yyerror("field %s of %s::%s is required",
+                yyerror("field %s of %s.%s is required",
                         field.name.c_str(), def->name.c_str(),
                         variant.name.c_str());
                 ok = false;
@@ -954,7 +954,7 @@ static value_t *build_enum_from_entries(
                 break;
             }
             if (!type_constraint_matches(&field.type, value)) {
-                yyerror("field %s of %s::%s expects %s, got %s",
+                yyerror("field %s of %s.%s expects %s, got %s",
                         field.name.c_str(), def->name.c_str(),
                         variant.name.c_str(),
                         type_constraint_name(&field.type),
@@ -990,7 +990,7 @@ value_t *build_enum_value(
     int variant_index =
         structtype_variant_index(def, variant_name ? variant_name : "");
     if (variant_index < 0) {
-        yyerror("unknown enum variant %s::%s", def->name.c_str(),
+        yyerror("unknown enum variant %s.%s", def->name.c_str(),
                 variant_name ? variant_name : "");
         free_constructed_fields(fields);
         return NULL;
@@ -1080,7 +1080,7 @@ struct value_t *eval_enum_lit(struct enum_lit_node *lit) {
 
     int variant_index = structtype_variant_index(def, lit->variant);
     if (variant_index < 0) {
-        yyerror("unknown enum variant %s::%s", def->name.c_str(),
+        yyerror("unknown enum variant %s.%s", def->name.c_str(),
                 lit->variant);
         return NULL;
     }

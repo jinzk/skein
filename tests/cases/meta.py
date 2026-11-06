@@ -44,12 +44,12 @@ def run_cases():
         "meta enum info",
         'import std;\n'
         'enum E { A { n: int = 3; }; B; }\n'
-        'let info = std.meta.type_info(E::B);\n'
+        'let info = std.meta.type_info(E.B);\n'
         'print(info["kind"]);\n'
         'print(info["variants"][0]["name"]);\n'
         'print(info["variants"][0]["fields"][0]["readonly"]);\n'
         'print(info["variants"][0]["fields"][0]["has_default"]);\n'
-        'print(std.meta.fields(E::B));\n'
+        'print(std.meta.fields(E.B));\n'
         'print(std.meta.variants("E")[1]["name"]);\n',
         stdout_all=["enum", "A", "true", "true", "[]", "B"],
     )
@@ -67,7 +67,7 @@ def run_cases():
         'print(len(std.meta.type_info("D")["methods"][0]["params"]));\n'
         'print(std.meta.fields("D"));\n'
         'print(std.meta.variants("D"));\n',
-        stdout_all=["true", "[main::D]", "trait", "0", "[]"],
+        stdout_all=["true", "[main.D]", "trait", "0", "[]"],
     )
 
     check(
@@ -197,16 +197,16 @@ def run_cases():
                      "import std;\n"
                      "import aa;\n"
                      'print(std.meta.type_info("Pub")["name"]);\n'
-                     'print(std.meta.type_info("aa::Pub")["name"]);\n'
-                     'print(std.meta.has_type("aa::Hidden"));\n'
+                     'print(std.meta.type_info("aa.Pub")["name"]);\n'
+                     'print(std.meta.has_type("aa.Hidden"));\n'
                      'print(aa.local_meta()["name"]);\n'
-                     'std.meta.type_info("aa::Hidden");\n')
+                     'std.meta.type_info("aa.Hidden");\n')
         proc = run_file(main)
         assert proc.returncode != 0, proc.stdout
         assert "Pub" in proc.stdout, proc.stdout
         assert "false" in proc.stdout, proc.stdout
         assert "Hidden" in proc.stdout, proc.stdout
-        assert "type aa::Hidden is not visible" in proc.stderr, proc.stderr
+        assert "type aa.Hidden is not visible" in proc.stderr, proc.stderr
 
         main = write("main_value.skein",
                      "import std;\n"
@@ -215,13 +215,13 @@ def run_cases():
                      "std.meta.type_info(hidden);\n")
         proc = run_file(main)
         assert proc.returncode != 0, proc.stdout
-        assert "type aa::Hidden is not visible" in proc.stderr, proc.stderr
+        assert "type aa.Hidden is not visible" in proc.stderr, proc.stderr
 
         main = write("main_alias.skein",
                      "import std;\n"
                      "import aa as lib;\n"
-                     'print(std.meta.type_info("lib::Pub")["name"]);\n'
-                     'print(std.meta.has_type("lib::Hidden"));\n')
+                     'print(std.meta.type_info("lib.Pub")["name"]);\n'
+                     'print(std.meta.has_type("lib.Hidden"));\n')
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["Pub", "false"], proc.stdout

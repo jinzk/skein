@@ -81,6 +81,18 @@ static char *copy_text(const char *text) {
     return copy;
 }
 
+/* Python-style slicing is lowered to a hidden builtin call so both the AST
+ * interpreter and the bytecode VM share one implementation.  Omitted bounds
+ * are passed as null values. */
+static struct ast *newslice(struct ast *container, struct ast *start,
+                            struct ast *stop, struct ast *step) {
+    struct ast *args = newast('L', step ? step : newnullast(), NULL);
+    args = newast('L', stop ? stop : newnullast(), args);
+    args = newast('L', start ? start : newnullast(), args);
+    args = newast('L', container, args);
+    return newcall(newbuiltin(B_slice), args);
+}
+
 static struct ast *with_decorators(struct ast *method,
                                    struct ast *decorators) {
     if (method)
@@ -668,6 +680,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %precedence ELSE
 
 %type <a> exp value stmt list scope explist arg top_expression top_statement line valuelist pairlist
+%type <a> slice_bound
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> match_arms match_arm pattern pattern_list pattern_items value_pattern match_values
@@ -688,6 +701,11 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 %destructor { free($$); } <str>
 %destructor { symlistfree_full($$); } <sl>
 %destructor { free_type_constraint($$); } <type>
+
+/* `NAME '.' NAME` is deliberately shifted for field/enum dot access instead
+ * of reducing `NAME` to `exp` first.  The conflicts are resolved as shifts
+ * and this count keeps future grammar changes visible. */
+%expect 3
 
 %start program
 %%
@@ -1021,17 +1039,17 @@ let_pattern: NAME '{' pattern_fields '}'  {
                               copy_text(diag_current_source_name().c_str()),
                               NULL);
       }
-    | NAME COLONCOLON NAME                {
+    | NAME '.' NAME                {
         $$ = newpatternvariant($1,
                                copy_text(diag_current_source_name().c_str()),
                                $3, NULL);
       }
-    | NAME COLONCOLON NAME '{' pattern_fields '}' {
+    | NAME '.' NAME '{' pattern_fields '}' {
         $$ = newpatternvariant($1,
                                copy_text(diag_current_source_name().c_str()),
                                $3, $5);
       }
-    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+    | NAME '.' NAME '{' EMPTY_DICT_CLOSE {
         $$ = newpatternvariant($1,
                                copy_text(diag_current_source_name().c_str()),
                                $3, NULL);
@@ -1180,8 +1198,8 @@ impl_decl: IMPL NAME '{' empty_body      {
     ;
 
 impl_trait_name: NAME                  { $$ = $1; }
-    | NAME COLONCOLON NAME            {
-        std::string qualified = std::string($1) + "::" + $3;
+    | NAME '.' NAME            {
+        std::string qualified = std::string($1) + "." + $3;
         $$ = copy_text(qualified.c_str());
         free($1);
         free($3);
@@ -1400,6 +1418,21 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
     | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
+    | exp '[' slice_bound ':' slice_bound ']' {
+        $$ = newslice($1, $3, $5, NULL);
+      }
+    | exp '[' slice_bound ':' slice_bound ':' slice_bound ']' {
+        $$ = newslice($1, $3, $5, $7);
+      }
+    | exp '[' exp COLONCOLON exp ']' {
+        $$ = newslice($1, $3, NULL, $5);
+      }
+    | exp '[' exp COLONCOLON ']' {
+        $$ = newslice($1, $3, NULL, NULL);
+      }
+    | exp '[' COLONCOLON slice_bound ']' {
+        $$ = newslice($1, NULL, NULL, $4);
+      }
     | exp '.' fieldname                   { $$ = newast('j', $1, newstr($3)); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' EMPTY_DICT_CLOSE                { $$ = newdict(NULL, NULL, NULL); }
@@ -1414,17 +1447,16 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           copy_text(diag_current_source_name().c_str()),
                           (struct struct_init *)$3);
       }
-    | NAME COLONCOLON NAME                {
-        $$ = newenumlit($1,
-                        copy_text(diag_current_source_name().c_str()),
-                        $3, NULL);
+    | NAME '.' fieldname {
+        $$ = newast('j', newref($1), newstr($3));
+        free($3);
       }
-    | NAME COLONCOLON NAME '{' struct_fields '}' {
+    | NAME '.' NAME '{' struct_fields '}' {
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
                         $3, (struct struct_init *)$5);
       }
-    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+    | NAME '.' NAME '{' EMPTY_DICT_CLOSE {
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
                         $3, NULL);
@@ -1448,6 +1480,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                                           false, true,
                                                           finish_function()); }
     | value
+    ;
+
+slice_bound: %empty                       { $$ = NULL; }
+    | exp                                 { $$ = $1; }
     ;
 
 funcstart: FUNC {
@@ -1554,17 +1590,17 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
                               copy_text(diag_current_source_name().c_str()),
                               NULL);
       }
-    | NAME COLONCOLON NAME                {
+    | NAME '.' NAME                {
         $$ = newpatternvariant($1,
                                copy_text(diag_current_source_name().c_str()),
                                $3, NULL);
       }
-    | NAME COLONCOLON NAME '{' pattern_fields '}' {
+    | NAME '.' NAME '{' pattern_fields '}' {
         $$ = newpatternvariant($1,
                                copy_text(diag_current_source_name().c_str()),
                                $3, $5);
       }
-    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+    | NAME '.' NAME '{' EMPTY_DICT_CLOSE {
         $$ = newpatternvariant($1,
                                copy_text(diag_current_source_name().c_str()),
                                $3, NULL);
@@ -1591,7 +1627,7 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
 
 value_pattern: value                      { $$ = $1; }
     | NAME                                { $$ = newref($1); }
-    | NAME COLONCOLON NAME                {
+    | NAME '.' NAME                       {
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
                         $3, NULL);
@@ -1699,11 +1735,11 @@ param: NAME {
         $$ = new_destructure_param(newpatternstruct(
             $1, copy_text(diag_current_source_name().c_str()), NULL));
       }
-    | NAME COLONCOLON NAME '{' pattern_fields '}' {
+    | NAME '.' NAME '{' pattern_fields '}' {
         $$ = new_destructure_param(newpatternvariant(
             $1, copy_text(diag_current_source_name().c_str()), $3, $5));
       }
-    | NAME COLONCOLON NAME '{' EMPTY_DICT_CLOSE {
+    | NAME '.' NAME '{' EMPTY_DICT_CLOSE {
         $$ = new_destructure_param(newpatternvariant(
             $1, copy_text(diag_current_source_name().c_str()), $3, NULL));
       }
@@ -1725,8 +1761,8 @@ type_name: NAME                           {
         $$ = type_constraint_from_name($1);
         free($1);
       }
-    | NAME COLONCOLON NAME                {
-        std::string qualified = std::string($1) + "::" + $3;
+    | NAME '.' NAME                {
+        std::string qualified = std::string($1) + "." + $3;
         $$ = new_named_type_constraint(
             qualified.c_str(), diag_current_source_name().c_str());
         free($1);

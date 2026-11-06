@@ -2422,7 +2422,7 @@ def run_cases():
           stderr="struct spread expects P, got Q")
     check("enum copy-with rejected",
           "enum E { A { n: int; }; }\n"
-          "E::A { ...E::A { n: 1 } };\n",
+          "E.A { ...E.A { n: 1 } };\n",
           stderr="copy-with is only supported for structs")
     check("struct field defaults",
           'struct Config { host: string = "localhost"; port: int = 80; }\n'
@@ -2476,9 +2476,9 @@ def run_cases():
           stdout_all=["9", "2"])
     check("enum field defaults",
           "enum E { A { n: int = 0; s: string = \"x\"; }; B; }\n"
-          "print(E::A {}.n);\n"
-          'print(E::A { s: "y" }.s);\n'
-          "print(E::B is E);\n",
+          "print(E.A {}.n);\n"
+          'print(E.A { s: "y" }.s);\n'
+          "print(E.B is E);\n",
           stdout_all=["0", "y", "true"])
     check("bound method value",
           "struct Point {\n"
@@ -2581,18 +2581,18 @@ def run_cases():
           "impl Shape {\n"
           "  func area(self) {\n"
           "    return match (self) {\n"
-          "      case Shape::Circle { r } => r * r;\n"
-          "      case Shape::Rect { w, h } => w * h;\n"
+          "      case Shape.Circle { r } => r * r;\n"
+          "      case Shape.Rect { w, h } => w * h;\n"
           "    };\n"
           "  }\n"
           "}\n"
-          "print(Shape::Circle { r: 2 }.area());\n"
-          "print(Shape::Rect { w: 2, h: 3 }.area());\n",
+          "print(Shape.Circle { r: 2 }.area());\n"
+          "print(Shape.Rect { w: 2, h: 3 }.area());\n",
           stdout_all=["4", "6"])
     check("enum method value snapshot",
           "enum E { A { n: int; }; }\n"
           "impl E { func value(self) { return self.n; } }\n"
-          "let e = E::A { n: 4 };\n"
+          "let e = E.A { n: 4 };\n"
           "let f = e.value;\n"
           "print(f());\n",
           stdout="4")
@@ -2602,12 +2602,12 @@ def run_cases():
           "impl Drawable for Shape {\n"
           "  func draw(self) {\n"
           "    return match (self) {\n"
-          "      case Shape::Circle { r } => r;\n"
-          "      case Shape::Empty => 0;\n"
+          "      case Shape.Circle { r } => r;\n"
+          "      case Shape.Empty => 0;\n"
           "    };\n"
           "  }\n"
           "}\n"
-          "let s: Drawable = Shape::Circle { r: 7 };\n"
+          "let s: Drawable = Shape.Circle { r: 7 };\n"
           "print(s.draw());\nprint(s is Drawable);\n",
           stdout_all=["7", "true"])
     check("enum trait adapter",
@@ -2615,7 +2615,7 @@ def run_cases():
           "enum E { A; }\n"
           "impl E { func d(self) { return 1; } }\n"
           "impl D for E;\n"
-          "let e = E::A;\n"
+          "let e = E.A;\n"
           "print(e is D);\nprint(e.d());\n",
           stdout_all=["true", "1"])
     check("enum trait pattern",
@@ -2628,16 +2628,16 @@ def run_cases():
           "    default => -1;\n"
           "  };\n"
           "}\n"
-          "print(describe(E::A { n: 3 }));\n",
+          "print(describe(E.A { n: 3 }));\n",
           stdout="3")
     check("enum method field conflict",
           "enum E { A { n: int; }; B; }\n"
           "impl E { func n(self) { return 1; } }\n",
-          stderr="field and method have the same name n in E::A")
+          stderr="field and method have the same name n in E.A")
     check("enum payload read-only",
           "enum E { A { n: int; }; }\n"
           "impl E { func set(self) { self.n = 2; } }\n"
-          "E::A { n: 1 }.set();\n",
+          "E.A { n: 1 }.set();\n",
           stderr="enum payload fields are read-only")
     check("unknown struct type",
           "let p = Missing { x: 1 };\n", stderr="unknown struct type Missing")

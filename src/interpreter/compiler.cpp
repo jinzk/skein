@@ -682,6 +682,16 @@ struct Compiler {
         return static_cast<uint32_t>(proto.constructs.size() - 1);
     }
 
+    uint32_t add_field_or_enum(const char *module, const char *base,
+                               const char *field) {
+        skein::bc::FieldOrEnumDesc desc;
+        desc.module = module ? module : "";
+        desc.base = base ? base : "";
+        desc.field = field ? field : "";
+        proto.field_or_enum.push_back(std::move(desc));
+        return static_cast<uint32_t>(proto.field_or_enum.size() - 1);
+    }
+
     uint32_t add_expression_proto(struct ast *expression,
                                   const std::string &suffix) {
         Compiler child(proto.module);
@@ -1101,6 +1111,23 @@ struct Compiler {
                 return it->second;
         }
         return -1;
+    }
+
+    /* Names resolved by the compiler can use the normal field-access path.
+     * Unresolved simple names may be enum types in dot syntax (Enum.Variant),
+     * so those use GetFieldOrEnum and decide at runtime. */
+    bool name_is_resolved(const char *name) const {
+        if (!name)
+            return false;
+        if (find_slot(name) >= 0)
+            return true;
+        if (param_index(name) >= 0)
+            return true;
+        if (upvalue_index(name) >= 0)
+            return true;
+        if (global_index(name) >= 0)
+            return true;
+        return lookupsym(name) != NULL;
     }
 
     static bool const_prop_enabled() {
@@ -2173,9 +2200,18 @@ struct Compiler {
                 return;
 
             case 'j': {
+                const char *field = literal_string(node->r);
+                if (field && node->l && node->l->nodetype == 'N') {
+                    const char *base = ((struct symref *)node->l)->name;
+                    if (base && !name_is_resolved(base)) {
+                        uint32_t desc = add_field_or_enum(
+                            proto.module.c_str(), base, field);
+                        emit(Op::GetFieldOrEnum, 0, 0, desc, here);
+                        return;
+                    }
+                }
                 compile(node->l);
                 if (!ok) return;
-                const char *field = literal_string(node->r);
                 if (field) {
                     uint32_t name = add_name(field);
                     emit(Op::GetFieldName, 0, 0, name, here);

@@ -489,7 +489,7 @@ def run_cases():
         main = write("app/main.skein",
               "import std;\nimport aa;\n"
               "let p = std.struct.decode({\"x\": 1, \"y\": 2}, "
-              "\"aa::Point\");\n"
+              "\"aa.Point\");\n"
               "print(p);\nprint(kind_of(p));\n"
               "let q = std.struct.decode({\"x\": 3, \"y\": 4}, "
               "\"Point\");\n"
@@ -1104,7 +1104,7 @@ def run_cases():
             "struct P { y: string; }\n"
             "let pkg = aa.make();\n"
             'let local: P = P { y: "ok" };\n'
-            "let imported: aa::P = pkg;\n"
+            "let imported: aa.P = pkg;\n"
             "print(pkg.get());\n"
             "print(local.y);\n"
             "func local_get(p: P) { return p.y; }\n"
@@ -1116,7 +1116,7 @@ def run_cases():
             "print(type_module(local));\n"
             "print(type_source(pkg) != \"\");\n"
             "print(imported.x);\n"
-            "print(pkg is aa::D);\n",
+            "print(pkg is aa.D);\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -1139,11 +1139,11 @@ def run_cases():
         main3 = write(
             "app/main3.skein",
             "import aa;\n"
-            'let h: aa::Hidden = aa.hidden();\n',
+            'let h: aa.Hidden = aa.hidden();\n',
         )
         proc = run_file(main3)
         assert proc.returncode == 1, proc.stdout
-        assert "unknown type name aa::Hidden" in proc.stderr, proc.stderr
+        assert "unknown type name aa.Hidden" in proc.stderr, proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
         def write(rel, text):
@@ -1170,26 +1170,26 @@ def run_cases():
             "app/main.skein",
             "import lib;\n"
             "struct Q { y: int; }\n"
-            "impl lib::D for Q { func d(self) { return self.y; } }\n"
-            "impl lib::T for Q {\n"
-            "  func take(self, p: lib::P) { return self.y + p.x; }\n"
+            "impl lib.D for Q { func d(self) { return self.y; } }\n"
+            "impl lib.T for Q {\n"
+            "  func take(self, p: lib.P) { return self.y + p.x; }\n"
             "}\n"
             "enum E { A { n: int; }; B; }\n"
-            "impl lib::D for E {\n"
+            "impl lib.D for E {\n"
             "  func d(self) {\n"
             "    return match (self) {\n"
-            "      case E::A { n } => n;\n"
-            "      case E::B => 0;\n"
+            "      case E.A { n } => n;\n"
+            "      case E.B => 0;\n"
             "    };\n"
             "  }\n"
             "}\n"
             "let q = Q { y: 3 };\n"
             "print(q.d());\n"
-            "print(q is lib::D);\n"
+            "print(q is lib.D);\n"
             "print(q.take(lib.make_p(4)));\n"
-            "let e = E::A { n: 5 };\n"
+            "let e = E.A { n: 5 };\n"
             "print(e.d());\n"
-            "print(e is lib::D);\n"
+            "print(e is lib.D);\n"
             "print(lib.make_c().v);\n",
         )
         proc = run_file(main)
@@ -1203,9 +1203,9 @@ def run_cases():
             "app/alias.skein",
             "import lib as l;\n"
             "struct Q2 { y: int; }\n"
-            "impl l::D for Q2 { func d(self) { return self.y; } }\n"
+            "impl l.D for Q2 { func d(self) { return self.y; } }\n"
             "print(Q2 { y: 6 }.d());\n"
-            "print(Q2 { y: 1 } is l::D);\n",
+            "print(Q2 { y: 1 } is l.D);\n",
         )
         proc = run_file(alias_main)
         assert proc.returncode == 0, proc.stderr
@@ -1216,7 +1216,7 @@ def run_cases():
             "import lib;\n"
             "struct Q3 { y: int; }\n"
             "impl Q3 { func d(self) { return self.y; } }\n"
-            "impl lib::D for Q3;\n"
+            "impl lib.D for Q3;\n"
             "print(Q3 { y: 8 }.d());\n",
         )
         proc = run_file(adapter_main)
@@ -1227,11 +1227,11 @@ def run_cases():
             "app/secret.skein",
             "import lib;\n"
             "struct Q4 { y: int; }\n"
-            "impl lib::Secret for Q4 { func s(self) { return 1; } }\n",
+            "impl lib.Secret for Q4 { func s(self) { return 1; } }\n",
         )
         proc = run_file(secret_main)
         assert proc.returncode == 1, proc.stdout
-        assert "trait lib::Secret is not exported" in proc.stderr, proc.stderr
+        assert "trait lib.Secret is not exported" in proc.stderr, proc.stderr
 
         write(
             "app/badlib/badlib.skein",

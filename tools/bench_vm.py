@@ -26,6 +26,7 @@ BENCHMARKS = [
     ("global", ROOT / "benchmarks" / "global_bench.skein", 1.5),
     ("index", ROOT / "benchmarks" / "index_bench.skein", 1.5),
     ("index_write", ROOT / "benchmarks" / "index_write_bench.skein", 1.5),
+    ("scope", ROOT / "benchmarks" / "scope_bench.skein", 1.5),
 ]
 
 

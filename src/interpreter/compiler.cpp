@@ -268,6 +268,9 @@ struct Compiler {
             case Op::DeferPush:
                 proto.uses_defers = true;
                 break;
+            case Op::Closure:
+                proto.has_closures = true;
+                break;
             case Op::DefineSlot:
             case Op::LoadSlot:
             case Op::StoreSlot:
@@ -3386,6 +3389,13 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     compiler.slot_fast_path = Compiler::can_use_slots(body);
     if (compiler.slot_fast_path)
         compiler.slot_scopes.emplace_back();
+    compiler.proto.params_direct = compiler.slot_fast_path;
+    for (const std::string &name : compiler.param_names) {
+        if (compiler.declared_names.count(name) != 0) {
+            compiler.proto.params_direct = false;
+            break;
+        }
+    }
     compiler.proto.nparams = static_cast<uint32_t>(code->nparams);
     compiler.proto.required_params =
         static_cast<uint32_t>(code->required_params);

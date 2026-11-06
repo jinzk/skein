@@ -131,6 +131,43 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
+        "scope name cache invalidation",
+        "let g = 7;\n"
+        "func f() {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < 3) {\n"
+        "    { let g = i; total = total + g; }\n"
+        "    { let g = i + 10; total = total + g; }\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return total + g;\n"
+        "}\n"
+        "print(f());\n",
+        stdout="43",
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
+        "parameter symbol reuse",
+        "func add(a, b) { a = a + 1; b = b + 2; return a + b; }\n"
+        "let i = 0;\n"
+        "while (i < 100) {\n"
+        "  if (add(1, 2) != 6) { fail \"bad\"; }\n"
+        "  i = i + 1;\n"
+        "}\n"
+        "print(add(1, 2));\n"
+        "func make(n) { return func() { n = n + 1; return n; }; }\n"
+        "let c = make(0);\n"
+        "print(c());\n"
+        "print(c());\n"
+        "func withdefer(x) { defer print(x); return x + 1; }\n"
+        "print(withdefer(4));\n"
+        "func rec(n) { if (n <= 0) { return 0; } return rec(n - 1) + 1; }\n"
+        "print(rec(100));\n",
+        stdout_all=["6", "1", "2", "4", "5", "100"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
         "fast call argument buffers",
         "func zero() { return 0; }\n"
         "func add(a, b, c, d, e, f, g, h) {\n"

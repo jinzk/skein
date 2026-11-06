@@ -75,15 +75,16 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 200 万次局部循环 | 0.502s | 0.399s |
-| `fib(27)` | 0.193s | 0.194s |
-| 100 万次函数调用 | 0.461s | 0.458s |
-| 20 万次参数 pattern 调用 | 0.226s | 0.286s |
-| 100 万次字段读取 | 0.374s | 0.257s |
-| 30 万次方法调用 | 0.180s | 0.180s |
-| 100 万次全局更新 | 0.245s | 0.204s |
-| 100 万次 dict 索引读取 | 0.298s | 0.254s |
-| 50 万次 dict 索引写入 | 0.197s | 0.164s |
+| 200 万次局部循环 | 0.553s | 0.443s |
+| `fib(27)` | 0.201s | 0.211s |
+| 100 万次函数调用 | 0.523s | 0.494s |
+| 20 万次参数 pattern 调用 | 0.251s | 0.323s |
+| 100 万次字段读取 | 0.397s | 0.288s |
+| 30 万次方法调用 | 0.196s | 0.200s |
+| 100 万次全局更新 | 0.260s | 0.229s |
+| 100 万次 dict 索引读取 | 0.313s | 0.286s |
+| 50 万次 dict 索引写入 | 0.222s | 0.170s |
+| 50 万次块作用域循环 | 0.231s | 0.204s |
 
 ### 2.4 基线缺口
 
@@ -93,9 +94,10 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
   `call_value_args` / C++ 递归。
 - 尾调用只覆盖无 spread 的普通调用。
 - 全局名字 IC、全局槽位、字段/方法 per-site IC、dict 索引读取 IC、
-  索引写入基址解析已完成；局部 per-site cache 仍待完成。
+  索引写入基址解析、局部 name cache epoch 惰性失效已完成。
 - 值表示仍是堆分配 `value_t*`，尚无 tagged value / unboxed slot；
-  调用参数已对小参数数量使用栈内缓冲，fast-frame 向量按深度复用。
+  调用参数已对小参数数量使用栈内缓冲，fast-frame 向量按深度复用，
+  无捕获参数 symbol 已按名字复用。
 - 指令优化已有运算快路径、`CMP_JUMP`、常量折叠、跳转线程化和
   不可达指令消除；仍缺更多超指令、computed goto、宽指令格式。
 - handler / defer 仍是运行时动态结构，尚无编译期表。
@@ -136,8 +138,8 @@ VM 执行缓存和函数体 / 默认参数 / 参数 pattern AST 现在位于 L2 
 
 | 状态 | 数量 | 任务 |
 |---|---:|---|
-| 完成 | 19 | W1-1..6、W2-1、W2-2、W2-5、W2-6、W3-1、W4-1、W4-2、W4-3、W4-5、W5-1、W5-3、W5-5、W5-6 |
-| 部分完成 | 4 | W3-2、W3-3、W3-4、W5-2 |
+| 完成 | 20 | W1-1..6、W2-1、W2-2、W2-5、W2-6、W3-1、W3-2、W4-1、W4-2、W4-3、W4-5、W5-1、W5-3、W5-5、W5-6 |
+| 部分完成 | 3 | W3-3、W3-4、W5-2 |
 | 进行中 | 0 | - |
 | 暂缓（按需） | 4 | W2-3、W2-4、W4-4、W5-4 |
 | TODO | 1 | A-1 |
@@ -569,7 +571,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-2 全局 slot 与内联缓存（P2，L）
 
-状态：**部分完成（2026-11-05，全局名字 IC + 全局槽位 + 字段/方法 per-site IC）**。
+状态：**完成（2026-11-06，全局名字 IC + 全局槽位 + 字段/方法/索引 IC + 局部 cache）**。
 
 已完成：
 
@@ -592,7 +594,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - `BindFunc` / `BindName` / `Import`
    - for-in 变量
    - match / destructuring binding
-   - `PopScope` 仍保留整表失效，保证作用域退出安全
+   - `PopScope` 改为递增 scope epoch，条目惰性 miss
 8. `obj.field` 常量字段名编译为 `GET_FIELD_NAME`：
    - 新增 `Proto::member_ic` per-site `MemberCacheEntry`；
    - 缓存 `struct_def` / `enum_def` 指针、variant、字段索引或方法；
@@ -617,28 +619,29 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
     - `ASSIGN_INDEX` / `COMPOUND_INDEX` / `INCDEC_INDEX` 直接解析 base；
     - 已知 slot / param / upvalue / global 不再执行 `lookupsym()`；
     - 新增 `index_write` 基准。
+13. 局部 name cache epoch 惰性失效：
+    - `NameCacheSlot` 保存 symbol + scope epoch；
+    - `invalidate_name_cache()` 只递增 epoch；
+    - `PopScope` 不再 O(n) 清空整表；
+    - 同名声明仍只失效同名条目；
+    - 新增 `scope` 基准。
 
 效果：
 
 - `fib(30)` 从约 0.75s 降到约 0.70s，与 AST 持平。
 - `call_bench` VM 约 0.82s，AST 约 0.85s。
 - 结构体字段 / enum variant 查找从线性扫描改为哈希查找。
-- `field` 约 0.69；`method` 约 1.00；`global` 约 0.84；
-  `index` 约 0.85；`index_write` 约 0.84。
-
-剩余：
-
-1. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
+- `field` 约 0.68；`method` 约 1.00；`global` 约 0.88；
+  `index` 约 0.93；`index_write` 约 0.82；`scope` 约 0.86。
 
 验收：
 
 - 调用密集基准达到或超过 AST：**已满足**。
-- 全局 / 字段 / 方法 / 索引访问基准不退化：**已满足**。
-- 局部 per-site cache 仍待完成。
+- 全局 / 字段 / 方法 / 索引 / 作用域访问基准不退化：**已满足**。
 
 #### W3-3 值表示与分配（P2，XL）
 
-状态：**部分完成（2026-11-05，调用参数与帧缓存复用）**。
+状态：**部分完成（2026-11-06，调用参数、帧缓存与参数 symbol 复用）**。
 
 已完成：
 
@@ -651,7 +654,12 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - `assign` 仍负责清空有效槽位，保证语义不变。
 3. 参数绑定直接使用 `value_t **` + count，避免为 fast call
    构造临时参数向量。
-4. `call` / `fib` 基准接近或持平 AST。
+4. 参数 symbol 复用：
+   - `Proto::params_direct` 表示参数无需运行时名字查找；
+   - `Proto::has_closures` / `uses_defers` 判断参数是否可能逃逸；
+   - 安全场景下复用 `symbol` 对象，并跳过参数 `savesym()`；
+   - `SKEIN_VM_PARAM_POOL=0` 可关闭。
+5. `call` VM/AST 从约 1.11 降到约 1.00，`fib` 约 1.05。
 
 仍未完成：
 
@@ -659,7 +667,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 - 帧内值栈不强制堆分配；
 - 小整数/布尔内联；
 - 对象分配器/arena；
-- 参数 symbol 分配复用。
+- 非捕获局部 slot 去 `symbol*` cell。
 
 验收：基准提升且内存占用不显著上升。
 
@@ -961,6 +969,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
    - `global_bench.skein`
    - `index_bench.skein`
    - `index_write_bench.skein`
+   - `scope_bench.skein`
 2. 新增 `tools/bench_vm.py`：
    - 每个基准分别用 `SKEIN_VM=0` / `SKEIN_VM=1` 运行
    - 默认 3 次，报告中位数
@@ -1169,7 +1178,7 @@ W5-4 按需暂缓）。
 | W2-5 Verifier | P1 | M | 完成（2026-11-05） | W1-2 |
 | W2-6 尾调用优化 | P2 | M | 完成（fast-frame） | W2-1 |
 | W3-1 运算快路径 | P2 | M | 完成（2026-11-05） | W2-1 |
-| W3-2 全局 slot + IC | P2 | L | 部分完成（全局名字 IC + 字段/方法 per-site IC + 精确失效） | W2-1 |
+| W3-2 全局 slot + IC | P2 | L | 完成（2026-11-06，全局槽位 + 字段/方法/索引 IC + 局部 cache） | W2-1 |
 | W3-3 值表示 | P2 | XL | 部分完成（调用参数与帧缓存复用） | W2-1 |
 | W3-4 指令优化 | P2 | M | 部分完成（CMP_JUMP + 常量折叠 + 跳转线程化/DCE） | W3-1 |
 | W4-1 声明常量去 AST | P1 | M | 完成（2026-11-05） | W1-2 |
@@ -1276,7 +1285,7 @@ N2 退出条件：
 
 #### N2-1 W3-2 全局访问与 IC 收尾
 
-状态：**部分完成（2026-11-06）**。
+状态：**完成（2026-11-06）**。
 
 已完成：
 
@@ -1287,8 +1296,9 @@ N2 退出条件：
 - `GET_FIELD_NAME` per-site member IC（字段 / 方法）；
 - `GET_INDEX_CACHED` per-site dict 索引读取缓存；
 - 索引写入 per-site 基址解析；
+- 局部 name cache epoch 惰性失效；
 - member / index IC 命中/未命中统计；
-- `field` / `method` / `global` / `index` / `index_write` 基准。
+- `field` / `method` / `global` / `index` / `index_write` / `scope` 基准。
 
 已完成子任务：
 
@@ -1296,7 +1306,7 @@ N2 退出条件：
    - 全局符号表维护稳定 `global_slot`；
    - 函数体内已解析的全局名直接访问槽位；
    - 槽位失效或名称不一致时回退名字查找；
-   - 验收：`global_bench` VM/AST 约 0.83。
+   - 验收：`global_bench` VM/AST 约 0.84。
 
 2. **N2-1.2 索引读取 IC**
    - `GET_INDEX` 编译为 `GET_INDEX_CACHED`；
@@ -1308,45 +1318,46 @@ N2 退出条件：
    - `IndexDesc` 记录 base kind：slot / param / upvalue / global / name；
    - `ASSIGN_INDEX` / `COMPOUND_INDEX` / `INCDEC_INDEX` 直接解析 base；
    - 不再对已知 slot / param / upvalue / global 做 `lookupsym()`；
-   - 验收：`index_write_bench` VM/AST 约 0.84，差分通过。
+   - 验收：`index_write_bench` VM/AST 约 0.84。
 
-剩余子任务：
-
-1. **N2-1.4 局部 name cache per-site 化**
-   - 减少 `PopScope` / 同名声明后的整表失效；
-   - 保留动态绑定（match / on error / import）的正确性；
-   - 验收：局部作用域密集基准提升。
+4. **N2-1.4 局部 name cache per-site 化**
+   - `name_cache_` 条目记录 scope epoch；
+   - `PopScope` 只递增 epoch，不再 O(n) 清空整表；
+   - 旧条目在下次访问时惰性 miss 并重新解析；
+   - 同名声明仍只失效同名条目；
+   - 验收：`scope_bench` VM/AST 约 0.86，差分通过。
 
 #### N2-2 W3-3 值表示与分配
 
-状态：**部分完成（2026-11-05）**。
+状态：**部分完成（2026-11-06）**。
 
 已完成：
 
 - `CALL` / `TAIL_CALL` 小参数数量使用栈内数组；
 - fast call 的 name/slot/param 向量按深度复用；
 - fast call 参数绑定使用指针 + 数量。
+- **N2-2.1 参数 symbol 复用**：
+  - `Proto::params_direct` 标记参数无需运行时名字查找；
+  - `Proto::has_closures` / `uses_defers` 决定参数 symbol 是否会逃逸；
+  - 无闭包、无 defer 且参数直接访问时，参数 symbol 按名字复用；
+  - 参数不再插入 scope，由 `LoadParam` / `IndexDesc` 直接访问；
+  - `SKEIN_VM_PARAM_POOL=0` 可关闭；
+  - 验收：`call` VM/AST 从约 1.11 降到约 1.00，`fib` 约 1.05。
 
 剩余子任务：
 
-1. **N2-2.1 参数 symbol 与帧值复用**
-   - 分析哪些参数/局部变量不会被闭包或 defer 捕获；
-   - 未被捕获时复用 `symbol` 或直接使用帧 slot；
-   - 保持 upvalue、defer、method、for-in 语义；
-   - 验收：`fib` / `call` / `slot` 基准提升。
-
-2. **N2-2.2 非捕获局部去 `symbol*` cell**
+1. **N2-2.2 非捕获局部去 `symbol*` cell**
    - 局部 slot 在无捕获时直接存 `value_t*`；
    - 需要捕获时再提升为 symbol cell；
    - 验收：slot 基准提升，闭包差分通过。
 
-3. **N2-2.3 tagged value / unboxed slot（决策点）**
+2. **N2-2.3 tagged value / unboxed slot（决策点）**
    - 先评估 2.1 / 2.2 后的剩余分配热点；
    - 若仍以 `value_t` 堆分配为主，再引入 tagged value 或等价方案；
    - 不在没有基准依据时直接重写值模型；
    - 验收：内存不显著上升，容器/闭包/defer 语义不变。
 
-4. **N2-2.4 分配器 / arena（可选）**
+3. **N2-2.4 分配器 / arena（可选）**
    - 仅在 profile 显示 malloc 占比明显时启用；
    - 必须保留循环引用检查和现有释放路径。
 
@@ -1505,11 +1516,10 @@ N2 退出条件：
 ### 8.8 建议排期
 
 ```text
-第一批  N2-1.4                  局部 per-site cache
-第二批  N2-2.1 / N2-2.2       参数与局部值复用
-第三批  N2-3.1 / N2-3.2       超指令与 dispatch
-第四批  N2-4.1..4             覆盖统计与长时 fuzz
-第五批  N3-4                  VM / bytecode 分层
+第一批  N2-2.2                  非捕获局部去 symbol cell
+第二批  N2-3.1 / N2-3.2       超指令与 dispatch
+第三批  N2-4.1..4             覆盖统计与长时 fuzz
+第四批  N3-4                  VM / bytecode 分层
 按需    N3-1 / N3-2 / N3-3
 最后    N4-1                 序列化 / AOT
 ```

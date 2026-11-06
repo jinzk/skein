@@ -423,6 +423,10 @@ struct Proto {
     bool uses_params = false;
     bool uses_defers = false;
     bool uses_slots = false;
+    /* True when no parameter name needs a runtime scope lookup. */
+    bool params_direct = false;
+    /* True when the body creates a closure that can capture parameters. */
+    bool has_closures = false;
 
     uint32_t nparams = 0;
     uint32_t required_params = 0;

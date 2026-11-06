@@ -287,6 +287,11 @@ struct iterator_state {
     struct symbol *value_sym = NULL;
 };
 
+struct NameCacheSlot {
+    struct symbol *sym = nullptr;
+    uint64_t generation = 0;
+};
+
 /*
  * Snapshot of the caller's execution state while a fast VM frame runs.
  * Fast frames are restricted to Protos without handlers, defers, iterators
@@ -305,8 +310,10 @@ struct SavedVmState {
     size_t diag_frames = 0;
     std::string diag_module;
     std::string diag_source;
+    uint64_t name_scope_generation = 0;
+    bool param_pool_safe = false;
     std::shared_ptr<function_def> def;
-    std::vector<struct symbol *> name_cache;
+    std::vector<NameCacheSlot> name_cache;
     std::vector<struct symbol *> param_symbols;
     std::vector<struct symbol *> slot_symbols;
     std::vector<iterator_state> iterators;
@@ -326,7 +333,7 @@ public:
           current_def_(std::move(def)) {
         stack_.reserve(64);
         if (proto.uses_names)
-            name_cache_.assign(proto.consts.size(), NULL);
+            name_cache_.assign(proto.consts.size(), NameCacheSlot{});
         if (proto.uses_defers)
             defer_scopes_.emplace_back();
         if (proto.uses_params) {
@@ -358,6 +365,9 @@ public:
                 context_.vm_defer_count = 0;
         }
         defer_scopes_.clear();
+        for (struct symbol *sym : param_symbol_pool_)
+            std::free(sym);
+        param_symbol_pool_.clear();
         context_.handler_depth = saved_handler_depth_;
     }
 
@@ -2443,6 +2453,7 @@ public:
                     discard_handlers();
                     run_all_defers();
                     free_stack(stack_);
+                    recycle_param_symbols();
                     pop_scopes_to(scope_mark_);
                     return NULL;
                 }
@@ -2460,7 +2471,7 @@ private:
     size_t scope_mark_;
     int saved_handler_depth_;
     std::vector<value_t *> stack_;
-    std::vector<struct symbol *> name_cache_;
+    std::vector<NameCacheSlot> name_cache_;
     std::vector<struct symbol *> param_symbols_;
     std::vector<struct symbol *> slot_symbols_;
     std::vector<iterator_state> iterators_;
@@ -2470,8 +2481,11 @@ private:
     size_t pc_ = 0;
     size_t frame_stack_base_ = 0;
     size_t diag_frames_ = 0;
+    uint64_t name_scope_generation_ = 0;
     std::vector<SavedVmState> saved_states_;
     std::shared_ptr<function_def> current_def_;
+    bool param_pool_safe_ = false;
+    std::vector<struct symbol *> param_symbol_pool_;
     unsigned instruction_count_ = 0;
 
     /*
@@ -2479,15 +2493,15 @@ private:
      * Recycle the callee vectors so repeated calls at the same depth do not
      * allocate name/slot caches from scratch.
      */
-    std::vector<std::vector<struct symbol *>> name_cache_pool_;
+    std::vector<std::vector<NameCacheSlot>> name_cache_pool_;
     std::vector<std::vector<struct symbol *>> param_symbols_pool_;
     std::vector<std::vector<struct symbol *>> slot_symbols_pool_;
 
-    static std::vector<struct symbol *> take_pool(
-        std::vector<std::vector<struct symbol *>> &pool) {
+    template <typename T>
+    static std::vector<T> take_pool(std::vector<std::vector<T>> &pool) {
         if (pool.empty())
-            return std::vector<struct symbol *>();
-        std::vector<struct symbol *> value = std::move(pool.back());
+            return std::vector<T>();
+        std::vector<T> value = std::move(pool.back());
         pool.pop_back();
         value.clear();
         return value;
@@ -2518,6 +2532,8 @@ private:
         state.diag_frames = diag_frames_;
         state.diag_module = diag_current_module_name();
         state.diag_source = diag_current_source_name();
+        state.name_scope_generation = name_scope_generation_;
+        state.param_pool_safe = param_pool_safe_;
         state.def = std::move(current_def_);
         state.name_cache = std::move(name_cache_);
         state.param_symbols = std::move(param_symbols_);
@@ -2530,6 +2546,8 @@ private:
         name_cache_ = take_pool(name_cache_pool_);
         param_symbols_ = take_pool(param_symbols_pool_);
         slot_symbols_ = take_pool(slot_symbols_pool_);
+        name_scope_generation_ = 0;
+        param_pool_safe_ = false;
     }
 
     void restore_state(SavedVmState state) {
@@ -2546,6 +2564,8 @@ private:
         diag_frames_ = state.diag_frames;
         diag_set_module_name(state.diag_module);
         diag_set_source_name(state.diag_source);
+        name_scope_generation_ = state.name_scope_generation;
+        param_pool_safe_ = state.param_pool_safe;
         current_def_ = std::move(state.def);
         name_cache_ = std::move(state.name_cache);
         param_symbols_ = std::move(state.param_symbols);
@@ -2565,6 +2585,7 @@ private:
             freeval(stack_.back());
             stack_.pop_back();
         }
+        recycle_param_symbols();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
             diag_pop_call();
@@ -2631,19 +2652,77 @@ private:
         return proto && proto_can_frame(*proto);
     }
 
+    struct symbol *take_param_symbol(const char *name) {
+        if (!name)
+            return NULL;
+        const size_t len = std::strlen(name);
+        for (size_t i = param_symbol_pool_.size(); i > 0; --i) {
+            struct symbol *sym = param_symbol_pool_[i - 1];
+            if (!sym || sym->name_len != len ||
+                std::memcmp(sym->name, name, len) != 0)
+                continue;
+            param_symbol_pool_[i - 1] = param_symbol_pool_.back();
+            param_symbol_pool_.pop_back();
+            return sym;
+        }
+        return NULL;
+    }
+
+    static void reset_param_symbol(struct symbol *sym,
+                                   struct symlist *sl,
+                                   value_t *value) {
+        sym->val = value;
+        sym->type.kind = TYPE_ANY;
+        sym->type.name = NULL;
+        sym->type.module = NULL;
+        sym->type.nullable = false;
+        sym->exported = false;
+        sym->is_const = false;
+        sym->is_uninitialized = false;
+        sym->global_slot = UINT32_MAX;
+        if (sl->type) {
+            sym->type.kind = sl->type->kind;
+            sym->type.name = sl->type->name;
+        }
+    }
+
+    void recycle_param_symbols() {
+        if (!param_pool_safe_)
+            return;
+        for (struct symbol *sym : param_symbols_) {
+            if (!sym)
+                continue;
+            freeval(sym->val);
+            sym->val = NULL;
+            sym->is_uninitialized = false;
+            if (param_symbol_pool_.size() < 128)
+                param_symbol_pool_.push_back(sym);
+            else
+                std::free(sym);
+        }
+        param_symbols_.clear();
+    }
+
     void bind_fast_arguments(function_code *code,
                              value_t **args, size_t argc) {
         (void)argc;
         int index = 0;
         for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
-            struct symbol *sym = newsym(sl->sym->name);
-            sym->val = args[(size_t)index];
-            args[(size_t)index] = NULL;
-            if (sl->type) {
-                sym->type.kind = sl->type->kind;
-                sym->type.name = sl->type->name;
+            struct symbol *sym =
+                param_pool_safe_ ? take_param_symbol(sl->sym->name) : NULL;
+            if (sym) {
+                reset_param_symbol(sym, sl, args[(size_t)index]);
+            } else {
+                sym = newsym(sl->sym->name);
+                sym->val = args[(size_t)index];
+                if (sl->type) {
+                    sym->type.kind = sl->type->kind;
+                    sym->type.name = sl->type->name;
+                }
             }
-            savesym(sym);
+            args[(size_t)index] = NULL;
+            if (!param_pool_safe_)
+                savesym(sym);
             param_symbols_.push_back(sym);
         }
     }
@@ -2674,6 +2753,9 @@ private:
             diag_set_source_name(code->source);
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
+        param_pool_safe_ = proto->params_direct &&
+                           !proto->has_closures && !proto->uses_defers &&
+                           read_bool_env("SKEIN_VM_PARAM_POOL", true);
         pc_ = 0;
         errors_before_ = context_.runtime_error_count;
         saved_handler_depth_ = context_.handler_depth;
@@ -2682,7 +2764,8 @@ private:
         context_.allow_await = false;
         scope_mark_ = context_.scopes.restore_stack.size();
         frame_stack_base_ = stack_.size();
-        name_cache_.assign(proto->consts.size(), NULL);
+        name_cache_.assign(proto->consts.size(), NameCacheSlot{});
+        name_scope_generation_ = 0;
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
         slot_symbols_.assign(proto->slots.size(), NULL);
@@ -2723,16 +2806,21 @@ private:
         int line = g_error_line > 0 ? g_error_line : code->def_line;
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
+        recycle_param_symbols();
         pop_scopes_to(scope_mark_);
 
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
+        param_pool_safe_ = proto->params_direct &&
+                           !proto->has_closures && !proto->uses_defers &&
+                           read_bool_env("SKEIN_VM_PARAM_POOL", true);
         pc_ = 0;
         errors_before_ = context_.runtime_error_count;
         handler_body_depth_ = 0;
         context_.handler_depth = 0;
         context_.allow_await = false;
-        name_cache_.assign(proto->consts.size(), NULL);
+        name_cache_.assign(proto->consts.size(), NameCacheSlot{});
+        name_scope_generation_ = 0;
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
         slot_symbols_.assign(proto->slots.size(), NULL);
@@ -2786,6 +2874,7 @@ private:
             freeval(stack_.back());
             stack_.pop_back();
         }
+        recycle_param_symbols();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
             diag_pop_call();
@@ -3024,8 +3113,9 @@ private:
     }
 
     struct symbol *cached_symbol(uint32_t index) {
-        if (index < name_cache_.size() && name_cache_[index])
-            return name_cache_[index];
+        if (index < name_cache_.size() && name_cache_[index].sym &&
+            name_cache_[index].generation == name_scope_generation_)
+            return name_cache_[index].sym;
 
         scope_context &scope_context = active_scope_context();
         const char *name = name_at(proto(), index);
@@ -3039,7 +3129,8 @@ private:
                 if (vm_stats.enabled)
                     ++vm_stats.name_ic_hits;
                 if (index < name_cache_.size())
-                    name_cache_[index] = entry.sym;
+                    name_cache_[index] =
+                        NameCacheSlot{entry.sym, name_scope_generation_};
                 return entry.sym;
             }
         }
@@ -3048,7 +3139,8 @@ private:
             ++vm_stats.name_ic_misses;
         struct symbol *sym = lookupsym(name);
         if (sym && index < name_cache_.size())
-            name_cache_[index] = sym;
+            name_cache_[index] =
+                NameCacheSlot{sym, name_scope_generation_};
         if (sym && scope_context.global_scope &&
             scope_context.global_scope->syms.find(name) == sym) {
             if (proto().name_ic.size() < proto().consts.size())
@@ -3077,7 +3169,12 @@ private:
     }
 
     void invalidate_name_cache() {
-        std::fill(name_cache_.begin(), name_cache_.end(), nullptr);
+        /*
+         * PopScope invalidates every symbol from the popped scope.  Bumping
+         * the epoch makes those entries miss lazily instead of walking the
+         * whole cache on every scope exit.
+         */
+        ++name_scope_generation_;
     }
 
     void invalidate_name_cache(const char *name) {
@@ -3086,12 +3183,12 @@ private:
             return;
         }
         for (size_t i = 0; i < name_cache_.size(); ++i) {
-            if (!name_cache_[i])
+            if (!name_cache_[i].sym)
                 continue;
             if (i < proto().consts.size() &&
                 proto().consts[i].kind == ConstantKind::Name &&
                 proto().consts[i].name == name)
-                name_cache_[i] = nullptr;
+                name_cache_[i].sym = nullptr;
         }
     }
 
@@ -3681,6 +3778,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
+        recycle_param_symbols();
         pop_scopes_to(scope_mark_);
         return control;
     }
@@ -3720,6 +3818,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
+        recycle_param_symbols();
         pop_scopes_to(scope_mark_);
         return NULL;
     }
@@ -3734,6 +3833,7 @@ private:
         discard_handlers();
         run_all_defers();
         free_stack(stack_);
+        recycle_param_symbols();
         pop_scopes_to(scope_mark_);
 
         if (context_.control != EVAL_CONTROL_NONE) {

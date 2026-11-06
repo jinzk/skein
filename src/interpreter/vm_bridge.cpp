@@ -263,11 +263,11 @@ uint32_t jit_threshold() {
  * fast-call path; arguments are untouched in that case.  The callee value is
  * always borrowed.
  */
-bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
-                                uint32_t argc, value_t **out,
-                                bool tail_call) {
+bool jit_resolve_and_enter(value_t *callee, value_t **args,
+                           uint32_t argc, skein::jit::thread_state *ts,
+                           value_t **out) {
     *out = nullptr;
-    if (!skein::jit::available() || !callee)
+    if (!callee || !ts)
         return false;
 
     std::shared_ptr<function_def> def;
@@ -348,14 +348,60 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
         }
     }
 
+    if (method)
+        method->receiver = nullptr;
+    *out = skein::jit::enter(cache->jit, ts, def.get(), call_args,
+                             call_argc);
+    return true;
+}
+
+bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
+                                uint32_t argc, value_t **out,
+                                bool tail_call) {
+    *out = nullptr;
+    if (!skein::jit::available() || !callee)
+        return false;
+
     skein::jit::thread_state ts;
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
     ts.tail_call = tail_call;
-    if (method)
-        method->receiver = nullptr;
-    *out = skein::jit::enter(cache->jit, &ts, def.get(), call_args,
-                             call_argc);
+    ts.root_module = diag_current_module_name();
+    ts.root_source = diag_current_source_name();
+
+    value_t *result = nullptr;
+    if (!jit_resolve_and_enter(callee, args, argc, &ts, &result))
+        return false;
+
+    while (ts.tail_pending) {
+        value_t *next_callee = ts.tail_callee;
+        std::vector<value_t *> next_args = std::move(ts.tail_args);
+        uint32_t next_argc = ts.tail_argc;
+        ts.tail_pending = false;
+        ts.tail_callee = nullptr;
+        ts.tail_argc = 0;
+        ts.tail_call = false;
+
+        value_t *next_out = nullptr;
+        if (!jit_resolve_and_enter(next_callee, next_args.data(), next_argc,
+                                   &ts, &next_out)) {
+            value_t *vm_result = skein_vm_call_value_args(
+                next_callee, std::move(next_args));
+            freeval(next_callee);
+            result = vm_result;
+            break;
+        }
+        freeval(next_callee);
+        result = next_out;
+        if (!ts.tail_pending)
+            break;
+    }
+
+    *out = result;
+    diag_set_module_name(ts.root_module);
+    diag_set_source_name(ts.root_source);
+    for (int i = 0; i < ts.retained_diag_frames; ++i)
+        diag_pop_call();
     return true;
 }
 

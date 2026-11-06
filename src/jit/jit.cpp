@@ -62,6 +62,9 @@ value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
 int skein_jit_tail_self(skein::jit::thread_state *ts,
                         function_def *current_def, value_t *callee,
                         value_t **params, value_t **args, uint32_t argc);
+value_t *skein_jit_tail_request(skein::jit::thread_state *ts,
+                                value_t *callee, value_t **args,
+                                uint32_t argc);
 value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
                                value_t *value, value_t **dest, int line,
                                int column);
@@ -1098,22 +1101,20 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
                 a.bind(slow_tail);
                 a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(callee_depth)));
-                a.lea(asmjit::x86::rsi,
+                a.lea(asmjit::x86::rdx,
                       asmjit::x86::ptr(asmjit::x86::rbp,
                                        stack_off(depth - argc)));
-                a.mov(asmjit::x86::edx, asmjit::imm(argc));
-                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
-                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
-                call_addr(fn_address(&skein_jit_tail_invoke));
+                a.mov(asmjit::x86::ecx, asmjit::imm(argc));
+                call_addr(fn_address(&skein_jit_tail_request));
                 for (int i = callee_depth; i < depth; ++i)
                     clear_slot(i);
                 a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              -kResultOff),
-                      asmjit::x86::rax);
-                a.test(asmjit::x86::rax, asmjit::x86::rax);
-                a.jz(abort_label);
+                      asmjit::imm(0));
                 a.jmp(epilogue_label);
                 break;
             }
@@ -1576,6 +1577,25 @@ extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
     return assign_symbol_direct(sym, value);
 }
 
+extern "C" value_t *skein_jit_tail_request(
+    skein::jit::thread_state *ts, value_t *callee, value_t **args,
+    uint32_t argc) {
+    if (!ts) {
+        for (uint32_t i = 0; i < argc; ++i)
+            freeval(args[i]);
+        freeval(callee);
+        yyerror("JIT tail request without state");
+        return nullptr;
+    }
+    ts->tail_callee = callee;
+    ts->tail_args.assign(args, args + argc);
+    for (uint32_t i = 0; i < argc; ++i)
+        args[i] = nullptr;
+    ts->tail_argc = argc;
+    ts->tail_pending = true;
+    return nullptr;
+}
+
 extern "C" int skein_jit_tail_self(skein::jit::thread_state *ts,
                                    function_def *current_def,
                                    value_t *callee, value_t **params,
@@ -1983,6 +2003,7 @@ extern "C" int skein_jit_enter(skein::jit::thread_state *ts,
     if (!ts || !ts->ctx)
         return 0;
     eval_context &context = *ts->ctx;
+    ts->tail_pending = false;
     if (!ts->tail_call && context.vm_call_depth >= ts->max_depth) {
         yyerror("maximum recursion depth (%d) exceeded", ts->max_depth);
         return 0;
@@ -2019,7 +2040,13 @@ extern "C" int skein_jit_enter(skein::jit::thread_state *ts,
             if (column <= 0)
                 column = def->code->def_column;
         }
-        diag_push_call(name, line, column);
+        if (diag_call_depth() < 64) {
+            if (read_bool_env("SKEIN_JIT_DEBUG", false))
+                std::fprintf(stderr, "[jit] enter %s depth=%d\n", name,
+                             diag_call_depth());
+            diag_push_call(name, line, column);
+            ts->diag_pushed = true;
+        }
     }
     return 1;
 }
@@ -2031,12 +2058,22 @@ extern "C" void skein_jit_leave(skein::jit::thread_state *ts) {
     while (context.scopes.restore_stack.size() > ts->scope_mark)
         skein_vm_eval_popscope();
     context.handler_depth = ts->saved_handler_depth;
-    diag_set_module_name(ts->saved_module);
-    diag_set_source_name(ts->saved_source);
+    if (!ts->tail_pending) {
+        diag_set_module_name(ts->saved_module);
+        diag_set_source_name(ts->saved_source);
+    }
     if (ts->depth_counted && context.vm_call_depth > 0)
         --context.vm_call_depth;
-    if (!ts->top_level)
-        diag_pop_call();
+    if (!ts->top_level && ts->diag_pushed) {
+        if (read_bool_env("SKEIN_JIT_DEBUG", false))
+            std::fprintf(stderr, "[jit] leave depth=%d tail=%d\n",
+                         diag_call_depth(), ts->tail_pending ? 1 : 0);
+        if (ts->tail_pending)
+            ++ts->retained_diag_frames;
+        else
+            diag_pop_call();
+    }
+    ts->diag_pushed = false;
     ts->entered = false;
 }
 

@@ -208,10 +208,27 @@ def main():
             "  if (n == 0) { return false; }\n"
             "  return even(n - 1);\n"
             "}\n"
-            "println(even(10000));\n",
+            "println(even(100000));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "mutual-tail-recursion", mutual_tail)
+
+        tail_nonjit = tmp_path / "tail_nonjit.skein"
+        tail_nonjit.write_text(
+            "func target(x) {\n"
+            "  let l = [1, 2, 3];\n"
+            "  let s = 0;\n"
+            "  for (let v in l) { s = s + v; }\n"
+            "  return s + x;\n"
+            "}\n"
+            "func tail(n) {\n"
+            "  if (n <= 0) { return 0; }\n"
+            "  return target(n);\n"
+            "}\n"
+            "println(tail(10));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "tail-call-non-jit-target", tail_nonjit)
 
         dict_error = tmp_path / "dict_error.skein"
         dict_error.write_text(

@@ -265,6 +265,8 @@ void diag_pop_call() {
         call_stack.pop_back();
 }
 
+int diag_call_depth() { return (int)call_stack.size(); }
+
 int diag_error_count() {
     return error_count;
 }

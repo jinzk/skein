@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct eval_context;
 struct function_def;
@@ -32,10 +33,20 @@ struct thread_state {
     size_t scope_mark = 0;
     std::string saved_module;
     std::string saved_source;
+    std::string root_module;
+    std::string root_source;
     bool top_level = false;
     bool tail_call = false;
     bool depth_counted = false;
+    bool diag_pushed = false;
+    int retained_diag_frames = 0;
     bool entered = false;
+
+    /* Pending trampoline request produced by a non-self TAIL_CALL. */
+    value_t *tail_callee = nullptr;
+    std::vector<value_t *> tail_args;
+    uint32_t tail_argc = 0;
+    bool tail_pending = false;
 };
 
 /*

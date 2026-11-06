@@ -58,8 +58,9 @@ Go/No-Go 标准见 §10。
 - params 直接 frame 化：eligible fast frame 不再创建参数 symbol；
 - `TAIL_CALL`：
   - 自递归尾调用直接复用当前 JIT 机器帧，重绑参数并跳回 body；
-  - 非自递归尾调用跳过深度计数，当前仍走 tail invoke 回退；
-  - 覆盖 100k 自尾递归和 10k 互尾递归；
+  - 非自递归尾调用通过 tail request + driver loop 做通用 trampoline，
+    不再增加 C++/JIT 调用栈；
+  - 覆盖 100k 自尾递归、100k 互尾递归，以及尾调用非 JIT 函数；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
@@ -83,7 +84,8 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 
 - Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
 - OSR / deopt；
-- 非自递归尾调用尚未复用机器帧，超深互递归仍受 C++ 栈限制；
+- 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
+  但不会形成调用栈增长；
 - pattern 参数必须能编译为原生 PatternDesc，否则回退 VM；
 - 更完整的 opcode 覆盖。
 
@@ -605,9 +607,15 @@ Phase 2 改为单态 inline cache。
    - pop 到函数入口的 scope mark；
    - 直接 `jmp` 到 body 起点，不再次执行 `skein_jit_enter`；
    - 不增加 `vm_call_depth`，不重复 `diag_push_call`。
-4. 未命中时走通用 `tail invoke`：
-   - 跳过 JIT 深度计数，避免尾递归触发深度错误；
-   - 当前仍是 C++ 递归调用，后续可改成通用 trampoline。
+4. 未命中时走通用 trampoline：
+   - JIT 生成 `skein_jit_tail_request`，把 callee/args 所有权交给
+     `thread_state`；
+   - 当前 JIT entry 返回后，`skein_vm_try_jit_call_impl` 的 driver loop
+     解析下一个 callee：
+     - 若仍是 JIT 函数，直接进入下一个 JIT entry；
+     - 否则回退 VM；
+   - driver 在循环中保留 tail 链的模块上下文和诊断帧，结束时恢复根上下文；
+   - 因此互尾递归和任意 JIT 函数之间的尾调用都不会增长 C++ 调用栈。
 
 这样 JIT 与字节码 TCO 的语义一致：都是复用当前逻辑帧，只是 VM 复用
 `Executor` 的 fast-frame，JIT 复用机器栈上的 JIT frame。

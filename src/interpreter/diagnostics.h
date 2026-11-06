@@ -53,6 +53,7 @@ void diag_report_lexical(int line, int column, const char *fmt, ...);
 /* Runtime call stack. */
 void diag_push_call(const std::string &name, int line, int column);
 void diag_pop_call();
+int diag_call_depth();
 
 /* Total number of reported errors. */
 int diag_error_count();

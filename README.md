@@ -62,9 +62,16 @@ tools/check_fast.sh --vm-only       # 约 15s，VM 改动
 tools/check_fast.sh --ast-only      # 约 15s，AST 改动
 tools/check_fast.sh --bench         # 额外跑基准
 tools/check_fast.sh --docs          # docs / data 检查
+tools/check_fast.sh --coverage      # opcode 覆盖
+tools/check_fast.sh --fallback      # VM fallback 回归
 ```
 
-提交前再跑完整矩阵即可。
+提交前再跑完整矩阵即可。opcode 覆盖检查：
+
+```bash
+python3 tools/check_opcode_coverage.py --bin ./build/skein --check
+python3 tools/check_vm_fallback.py --bin ./build/skein --check
+```
 
 ASan/UBSan 构建：
 

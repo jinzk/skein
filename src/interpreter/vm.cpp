@@ -82,7 +82,18 @@ struct vm_stats_data {
 
 vm_stats_data vm_stats;
 
-void record_fallback_reason(const std::string &reason) {
+void record_fallback_reason(const std::string &reason,
+                            const std::string &context = std::string()) {
+    const char *path = std::getenv("SKEIN_VM_FALLBACK_FILE");
+    if (path && *path) {
+        FILE *out = std::fopen(path, "a");
+        if (out) {
+            std::fprintf(out, "%s\t%s\n",
+                         reason.empty() ? "unknown" : reason.c_str(),
+                         context.c_str());
+            std::fclose(out);
+        }
+    }
     if (!vm_stats.enabled)
         return;
     std::string key = reason.empty() ? "unknown" : reason;
@@ -181,7 +192,10 @@ ProtoPtr prepare_function_body(const std::shared_ptr<function_def> &def) {
     if (!proto) {
         if (vm_stats.enabled)
             ++vm_stats.functions_fallback;
-        record_fallback_reason(error);
+        record_fallback_reason(
+            error, "function " + code->name + " @" +
+                       std::to_string(code->def_line) + ":" +
+                       std::to_string(code->def_column));
         cache.compile_failed = true;
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback function %s: %s\n",
@@ -4342,7 +4356,24 @@ void skein_vm_set_stats(bool enabled) {
 
 void skein_vm_stats_report() {
     ensure_stats_flags();
+    const char *coverage_path = std::getenv("SKEIN_VM_COVERAGE_FILE");
+    if (coverage_path && *coverage_path) {
+        FILE *out = std::fopen(coverage_path, "a");
+        if (out) {
+            for (size_t i = 0; i < vm_stats.opcodes.size(); ++i) {
+                if (vm_stats.opcodes[i] == 0)
+                    continue;
+                std::fprintf(
+                    out, "%zu %s %llu\n", i,
+                    skein::bc::op_name(static_cast<Op>(i)),
+                    (unsigned long long)vm_stats.opcodes[i]);
+            }
+            std::fclose(out);
+        }
+    }
     if (!vm_stats.enabled)
+        return;
+    if (read_bool_env("SKEIN_VM_STATS_QUIET", false))
         return;
     std::fprintf(stderr,
                  "[vm-stats] statements compiled=%llu fallback=%llu\n",
@@ -4452,7 +4483,10 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     if (!proto) {
         if (vm_stats.enabled)
             ++vm_stats.statements_fallback;
-        record_fallback_reason(error);
+        record_fallback_reason(
+            error, "statement @" +
+                       std::to_string(statement ? statement->line : 0) + ":" +
+                       std::to_string(statement ? statement->column : 0));
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback statement: %s\n",
                          error.c_str());

@@ -51,10 +51,19 @@ SKIP_MODULES = {
     if item.strip()
 }
 
+ONLY_MODULES = {
+    item.strip()
+    for item in os.environ.get("SKEIN_TEST_ONLY_MODULES", "").split(",")
+    if item.strip()
+}
+
 
 def main():
     for module in MODULES:
-        if module.__name__.rsplit(".", 1)[-1] in SKIP_MODULES:
+        name = module.__name__.rsplit(".", 1)[-1]
+        if name in SKIP_MODULES:
+            continue
+        if ONLY_MODULES and name not in ONLY_MODULES:
             continue
         module.run_cases()
     print(f"all tests passed for {harness.BIN}")

@@ -6,6 +6,7 @@
 #include "eval_internal.h"
 #include "scopestack.h"
 #include "structeval.h"
+#include "value_ops.h"
 
 #include <algorithm>
 #include <cmath>
@@ -269,6 +270,53 @@ void fuse_slot_operations(Proto &proto) {
     }
 }
 
+void fold_constant_jumps(Proto &proto) {
+    const size_t count = proto.code.size();
+    if (count < 2)
+        return;
+
+    std::vector<uint8_t> target(count, 0);
+    for (const Instr &ins : proto.code) {
+        const Op op = static_cast<Op>(ins.op);
+        if (op_has_jump_target(op) && ins.b < count)
+            target[ins.b] = 1;
+    }
+
+    for (size_t i = 0; i + 1 < count; ++i) {
+        const Op value_op = static_cast<Op>(proto.code[i].op);
+        if (target[i + 1] ||
+            (value_op != Op::LoadConst && value_op != Op::LoadNull))
+            continue;
+        const Op jump = static_cast<Op>(proto.code[i + 1].op);
+        if (jump != Op::JumpIfFalse && jump != Op::JumpIfTrue)
+            continue;
+        bool truth = false;
+        if (value_op == Op::LoadConst) {
+            if (proto.code[i].b >= proto.consts.size())
+                continue;
+            const Constant &constant = proto.consts[proto.code[i].b];
+            if (constant.kind != ConstantKind::Value)
+                continue;
+            truth = constant.value ? truthy(constant.value.get()) : false;
+        }
+        const bool jump_true = jump == Op::JumpIfTrue;
+        const bool taken = jump_true ? truth : !truth;
+        if (taken) {
+            Instr branch = proto.code[i + 1];
+            branch.op = static_cast<uint8_t>(Op::Jump);
+            branch.flags = 0;
+            branch.a = 0;
+            proto.code[i] = branch;
+            if (i < proto.locs.size() && i + 1 < proto.locs.size())
+                proto.locs[i] = proto.locs[i + 1];
+        } else {
+            proto.code[i].op = static_cast<uint8_t>(Op::Nop);
+        }
+        proto.code[i + 1].op = static_cast<uint8_t>(Op::Nop);
+        ++i;
+    }
+}
+
 void remove_nops(Proto &proto) {
     const size_t count = proto.code.size();
     std::vector<uint32_t> new_pc(count + 1, 0);
@@ -307,6 +355,7 @@ void optimize_proto(Proto &proto) {
     if (!bytecode_optimization_enabled())
         return;
     thread_jumps(proto);
+    fold_constant_jumps(proto);
     eliminate_unreachable(proto);
     fuse_slot_operations(proto);
     remove_nops(proto);
@@ -420,6 +469,17 @@ struct Compiler {
 
     size_t compile_condition(ast *condition, bool jump_if_true,
                              SourceLoc loc) {
+        if (value_t *folded = fold_node(condition)) {
+            const bool truth = truthy(folded);
+            freeval(folded);
+            value_t *constant = newboolval(truth);
+            uint32_t index = add_value(constant);
+            freeval(constant);
+            emit(Op::LoadConst, 0, 0, index, loc);
+            return emit_jump(jump_if_true ? Op::JumpIfTrue
+                                          : Op::JumpIfFalse,
+                             loc);
+        }
         if (condition && condition->nodetype >= '1' &&
             condition->nodetype <= '6') {
             compile(condition->l);

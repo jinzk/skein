@@ -188,6 +188,59 @@ def async_program():
     )
 
 
+def closure_scope_program():
+    return (
+        "func make(n) {\n"
+        "  let total = n;\n"
+        "  return func(x) {\n"
+        "    total = total + x;\n"
+        "    return func() { return total; };\n"
+        "  };\n"
+        "}\n"
+        "let f = make(1);\n"
+        "let g = f(2);\n"
+        "let h = f(3);\n"
+        "print(g());\n"
+        "print(h());\n"
+    )
+
+
+def defer_error_program():
+    return (
+        "func run(n) {\n"
+        "  defer print(\"done\");\n"
+        "  let i = 0;\n"
+        "  let total = 0;\n"
+        "  while (i < n) {\n"
+        "    total = total + ([][0] on error(e) { recover i; });\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return total;\n"
+        "}\n"
+        "print(run(3));\n"
+    )
+
+
+def pattern_default_program():
+    return (
+        "func pat([a, b], c = 1, ...rest) {\n"
+        "  return [a, b, c, rest];\n"
+        "}\n"
+        "print(pat([2, 3]));\n"
+        "print(pat([4, 5], 6, 7, 8));\n"
+    )
+
+
+def match_binding_program():
+    return (
+        "let r = match ({\"a\": 1, \"b\": 2, \"c\": 3}) {\n"
+        "  case {a, ...rest} => [a, rest];\n"
+        "  default => [];\n"
+        "};\n"
+        "print(r);\n"
+    )
+
+
 FEATURES = [
     basic_program,
     struct_program,
@@ -197,6 +250,10 @@ FEATURES = [
     error_program,
     generator_program,
     async_program,
+    closure_scope_program,
+    defer_error_program,
+    pattern_default_program,
+    match_binding_program,
 ]
 
 

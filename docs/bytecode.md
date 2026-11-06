@@ -64,6 +64,16 @@ SKEIN_FIBER_STACK_KB=8192 ./build/skein script.skein
 # runtime-only 链接、docs/boundary/diff
 tools/check_all.sh --clean
 
+# 日常快速回归：增量构建 + core 测试（不含基准/sanitizer）
+tools/check_fast.sh
+tools/check_fast.sh --vm-only
+
+# opcode 覆盖：运行标准测试集并输出未覆盖清单
+python3 tools/check_opcode_coverage.py --bin ./build/skein --check
+
+# VM fallback 回归：已知回退白名单，意外回退失败
+python3 tools/check_vm_fallback.py --bin ./build/skein --check
+
 # 差分 / 长时间 fuzz；失败时自动逐行最小化
 python3 tests/vm_differential.py ./build/skein 400 --seed 1
 python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
@@ -98,6 +108,7 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
   int64 精确比较语义保持不变）
 - 条件比较融合（`CMP_JUMP`：比较后直接跳转，用于 if/while/for/guard）
 - 安全常量折叠（数值运算、位运算、数值比较；溢出/除零时不折叠）
+- 常量条件折叠（删除编译期确定的 `if` / 条件分支）
 - slot 算术超指令（`BINARY_SLOTS` / `BINARY_SLOT_CONST`：
   `LOAD_SLOT/LOAD_CONST + 算术 + STORE_SLOT` 融合）
 - 三元表达式

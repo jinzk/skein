@@ -12,6 +12,8 @@
 #   tools/check_fast.sh --ast-only      # AST/reference suite only
 #   tools/check_fast.sh --bench         # core + benchmarks
 #   tools/check_fast.sh --docs          # docs / data checks
+#   tools/check_fast.sh --coverage      # opcode coverage check
+#   tools/check_fast.sh --fallback      # VM fallback regression check
 #   tools/check_fast.sh --no-build      # skip the build step
 #   tools/check_fast.sh --build-dir DIR --jobs N
 #
@@ -45,6 +47,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --docs)
             MODE="docs"
+            shift
+            ;;
+        --coverage)
+            MODE="coverage"
+            shift
+            ;;
+        --fallback)
+            MODE="fallback"
             shift
             ;;
         --vm-only)
@@ -87,6 +97,16 @@ case "$MODE" in
         printf '==> docs / data checks\n'
         ctest --test-dir "$BUILD_DIR" -L 'docs|data' -j "$JOBS" \
             --output-on-failure
+        ;;
+    coverage)
+        printf '==> opcode coverage\n'
+        python3 "$ROOT/tools/check_opcode_coverage.py" \
+            --bin "$BUILD_DIR/skein" --check
+        ;;
+    fallback)
+        printf '==> VM fallback regression\n'
+        python3 "$ROOT/tools/check_vm_fallback.py" \
+            --bin "$BUILD_DIR/skein" --check
         ;;
     vm)
         printf '==> VM tests + differential\n'

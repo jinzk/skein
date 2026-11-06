@@ -24,7 +24,8 @@ def run_cases():
         "print(1 + 2);\n",
         stdout="3",
         stderr="[vm-stats] instructions=",
-        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_STATS="1"),
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_STATS="1",
+                 SKEIN_VM_STATS_QUIET="0"),
     )
     check(
         "frame VM deep recursion",
@@ -192,6 +193,29 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
+        "constant branch folding",
+        "func f(x) {\n"
+        "  if (1 < 2) { print(\"a\"); } else { print(\"b\"); }\n"
+        "  if (false) { print(\"bad\"); } else { print(\"c\"); }\n"
+        "  if (null) { print(\"bad\"); } else { print(\"d\"); }\n"
+        "  let y = true ? 1 : 2;\n"
+        "  print(y);\n"
+        "  while (false) { print(\"bad\"); }\n"
+        "  if (x) { print(\"x\"); } else { print(\"no\"); }\n"
+        "}\n"
+        "f(true);\n"
+        "f(false);\n",
+        stdout_all=["a", "c", "d", "1", "x", "a", "c", "d", "1", "no"],
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="1"),
+    )
+    check(
+        "constant branch folding disabled",
+        "if (false) { print(\"bad\"); } else { print(\"ok\"); }\n"
+        "print(1 < 2);\n",
+        stdout_all=["ok", "true"],
+        env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
+    )
+    check(
         "slot superinstructions",
         "func calc() {\n"
         "  let a = 7;\n"
@@ -235,6 +259,25 @@ def run_cases():
         "print(calc());\n",
         stdout="[1, 3]",
         env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_OPT="0"),
+    )
+    check(
+        "opcode coverage extras",
+        "func params(a) { a += 2; a++; ++a; return a; }\n"
+        "func slots() { let i = 0; i++; ++i; return i; }\n"
+        "func closure() {\n"
+        "  let x = 1;\n"
+        "  let f = func() { x += 2; x++; ++x; return x; };\n"
+        "  return f();\n"
+        "}\n"
+        "let m = 6;\n"
+        "let n = 3;\n"
+        "print(params(1));\n"
+        "print(slots());\n"
+        "print(closure());\n"
+        "print(m ^ n);\n"
+        "print(~m);\n",
+        stdout_all=["5", "2", "5", "5", "-7"],
+        env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
         "fast call argument buffers",

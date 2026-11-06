@@ -716,6 +716,11 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - 目标 slot 限制为非 const、无类型约束，保持诊断稳定；
    - verifier / 反汇编 / 跳转重映射同步支持；
    - 新增 opt-on / opt-off 回归测试。
+8. 常量分支折叠：
+   - `compile_condition` 对可折叠条件生成布尔 `LOAD_CONST` + 条件跳转；
+   - peephole 删除常量 `LOAD_CONST` / `LOAD_NULL` + `JUMP_IF_*`；
+   - 生成无条件跳转或直接落空，由 DCE 删除死分支；
+   - 保留 opt-on / opt-off 语义与诊断一致。
 
 效果：
 
@@ -734,9 +739,8 @@ scope       0.78
 
 剩余：
 
-- computed goto / table dispatch
-- 宽指令格式与 16 位操作数上限
-- 常量分支折叠
+- computed goto / table dispatch（待决策）
+- 宽指令格式与 16 位操作数上限（暂不实现，待真实需求）
 
 ### 3.4 W4：运行期 AST、元数据与分层清理
 
@@ -930,7 +934,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 
 #### W5-2 差分测试与模糊测试（P2，L）
 
-状态：**部分完成（2026-11-05，基础差分测试）**。
+状态：**部分完成（2026-11-06，基础差分测试 + opcode 覆盖）**。
 
 已完成：
 
@@ -959,18 +963,28 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
    - struct 字段默认值、copy-with、方法读取；
    - enum variant 字段默认值；
    - generator 的 next / return / close；
-   - async / await。
+   - async / await；
+   - 嵌套闭包、defer + on error、参数 pattern + 默认参数 + variadic、
+     match dict binding + rest。
 5. VM 默认运行增加 fallback 断言：生成程序在 `SKEIN_VM_DEBUG=1`
    下不得出现 `[vm] fallback`。
 6. 新增 `--seed`、`--skip-fallback-check` 和 `--fuzz-seconds`：
    - 长时间 fuzz 按时间循环生成；
    - 失败时逐行删除语句做最小化，再打印最小复现源码。
 7. 额外以 seed 1/2/3 各跑 400 个用例，全部一致。
+8. opcode 覆盖统计：
+   - VM 支持 `SKEIN_VM_COVERAGE_FILE` 输出完整 opcode 计数；
+   - `tools/check_opcode_coverage.py` 运行标准测试集并聚合；
+   - 当前覆盖 106/106，legacy/不可达 opcode 显式豁免；
+   - 未覆盖清单可直接输出。
+9. fallback 原因回归：
+   - VM 支持 `SKEIN_VM_FALLBACK_FILE` 记录原因与上下文；
+   - `tools/check_vm_fallback.py` 运行标准测试集；
+   - 已知回退使用显式白名单，意外回退失败。
 
 剩余：
 
-- opcode 级覆盖统计
-- 更复杂的作用域 / 闭包 / 错误嵌套生成器
+- N2-4.4 长时 fuzz（可选）
 
 #### W5-3 基准回归（P2，M）
 
@@ -1300,7 +1314,13 @@ N1 已完成。剩余工作按“性能 → 架构 → 产品化”重排，每�
 - N2-2.1 / N2-2.2：完成（参数和局部 slot symbol 复用）；
 - N2-2.3 / N2-2.4：决策点 / 可选；
 - N2-3.1：完成（slot 算术超指令）；
-- N2-3.2 / N2-3.3 / N2-3.4、N2-4、N3 仍待推进；
+- N2-3.4：完成（常量分支折叠）；
+- N2-4.1：完成（opcode 覆盖统计，106/106）；
+- N2-4.2：完成（复杂作用域差分生成）；
+- N2-4.3：完成（fallback 原因白名单回归）；
+- N2-3.2：待决策；
+- N2-3.3：暂不实现（待真实大 Proto 需求）；
+- N2-4.4（可选）、N3 仍待推进；
 - JIT/AOT/序列化：待决策。
 
 ### 8.4 N2：性能与执行器收尾（P1）
@@ -1412,18 +1432,14 @@ N2 退出条件：
   - 只融合非 const、无类型约束的目标 slot，避免诊断位置变化；
   - 跳转目标、源码位置与 verifier 同步更新；
   - 验收：`slot` 约 0.73，`scope` 约 0.78，`global` / `index` 约 0.79。
+- **N2-3.4 常量分支折叠**：
+  - 条件表达式可折叠时先转成 `LOAD_CONST` + 条件跳转；
+  - peephole 删除常量 `LOAD_CONST` / `LOAD_NULL` + `JUMP_IF_*`；
+  - 生成无条件 `JUMP` 或直接落空，再由 DCE 删除死分支；
+  - `SKEIN_VM_OPT=0` 可关闭；
+  - 验收：opt-on 指令数下降，输出与 opt-off 一致。
 
-剩余子任务：
-
-1. **N2-3.3 宽指令格式**
-   - 解决 16 位操作数与描述符上限；
-   - 保持现有 8 字节指令的紧凑路径；
-   - 验收：大常量/大描述符 Proto 可编译并通过 verifier。
-
-2. **N2-3.4 常量分支折叠**
-   - 对编译期确定的 `if` / 条件表达式删除不可达分支；
-   - 与 DCE、跳转线程化协同；
-   - 验收：生成代码缩小，差分通过。
+剩余子任务：无（N2-3.3 已转为待决策）。
 
 待决策子任务：
 
@@ -1433,9 +1449,14 @@ N2 退出条件：
     且其它基准不退化后实施；
   - 若实施，保留可移植 switch 回退，并通过差分、ASan、UBSan、LSan。
 
+- **N2-3.3 宽指令格式**
+  - 暂不实现；
+  - 当前 16 位上限只影响极端 descriptor / slot 数量；
+  - 需要真实大 Proto 需求时再启用。
+
 #### N2-4 W5-2 测试与观测收尾
 
-状态：**部分完成（2026-11-05）**。
+状态：**部分完成（2026-11-06，仅 N2-4.4 长时 fuzz 可选）**。
 
 已完成：
 
@@ -1443,24 +1464,26 @@ N2 退出条件：
 - VM fallback 断言；
 - `--fuzz-seconds` 与失败最小化；
 - 多 seed 差分通过。
+- **N2-4.1 opcode 覆盖统计**：
+  - VM 支持 `SKEIN_VM_COVERAGE_FILE` 输出完整 opcode 计数；
+  - `tools/check_opcode_coverage.py` 运行标准测试集并聚合；
+  - 当前覆盖 106/106（`Nop` 与当前不再发射的 legacy opcode 标记豁免）；
+  - 未覆盖清单可直接输出。
+- **N2-4.2 复杂作用域生成器**：
+  - 嵌套闭包捕获与更新；
+  - defer + on error + recover；
+  - 参数 pattern + 默认参数 + variadic；
+  - match dict binding + rest；
+  - 多 seed 差分通过。
+- **N2-4.3 fallback 原因回归**：
+  - VM 支持 `SKEIN_VM_FALLBACK_FILE` 记录原因与上下文；
+  - `tools/check_vm_fallback.py` 运行标准测试集；
+  - 已知回退使用显式白名单，并记录原因；
+  - 意外回退会使 `--check` 失败。
 
 剩余子任务：
 
-1. **N2-4.1 opcode 覆盖统计**
-   - 从 `SKEIN_VM_STATS` 或独立工具生成 opcode 覆盖表；
-   - 每个 opcode 至少一个直接或间接用例；
-   - 未覆盖 opcode 输出清单。
-
-2. **N2-4.2 复杂作用域生成器**
-   - 嵌套闭包、defer、on error、match binding、import；
-   - 参数 pattern + 默认参数 + variadic 组合；
-   - 验收：差分稳定，失败可最小化。
-
-3. **N2-4.3 fallback 原因回归**
-   - 对标准测试集断言 fallback 原因为空；
-   - 新增结构若暂时回退，必须有显式白名单和原因。
-
-4. **N2-4.4 长时 fuzz（可选）**
+1. **N2-4.4 长时 fuzz（可选）**
    - 作为独立目标，不阻塞普通 CTest；
    - 记录 seed、耗时和最小复现。
 
@@ -1574,11 +1597,11 @@ N2 退出条件：
 ### 8.8 建议排期
 
 ```text
-第一批  N2-3.3 / N2-3.4        宽指令、常量分支折叠
-第二批  N2-4.1..4              覆盖统计与长时 fuzz
-第三批  N3-4                   VM / bytecode 分层
-按需    N3-1 / N3-2 / N3-3
-待决策  N2-3.2 computed goto / JIT / AOT / 序列化
+第一批  N3-4                   VM / bytecode 分层
+第二批  N3-1 / N3-2 / N3-3     按需
+可选    N2-4.4                长时 fuzz
+待决策  N2-3.2 computed goto / N2-3.3 宽指令 /
+        JIT / AOT / 序列化
 ```
 
 每轮结束必须更新：

@@ -54,6 +54,18 @@ cmake -S . -B build -G Ninja -DSKEIN_ENABLE_FFI=OFF
 ctest --test-dir build --output-on-failure
 ```
 
+日常开发使用快速回归循环（增量构建 + core 标签，不跑基准和 sanitizer）：
+
+```bash
+tools/check_fast.sh                 # 约 30s
+tools/check_fast.sh --vm-only       # 约 15s，VM 改动
+tools/check_fast.sh --ast-only      # 约 15s，AST 改动
+tools/check_fast.sh --bench         # 额外跑基准
+tools/check_fast.sh --docs          # docs / data 检查
+```
+
+提交前再跑完整矩阵即可。
+
 ASan/UBSan 构建：
 
 ```bash

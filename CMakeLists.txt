@@ -483,6 +483,7 @@ if(BUILD_TESTING)
     target_compile_options(http1_parser_test PRIVATE -Wall -Wextra)
   endif()
   add_test(NAME http1_parser_test COMMAND http1_parser_test)
+  set_tests_properties(http1_parser_test PROPERTIES LABELS "core")
 
   add_executable(bytecode_verifier_test
     tests/test_bytecode_verifier.cpp
@@ -497,6 +498,7 @@ if(BUILD_TESTING)
     target_compile_options(bytecode_verifier_test PRIVATE -Wall -Wextra)
   endif()
   add_test(NAME bytecode_verifier_test COMMAND bytecode_verifier_test)
+  set_tests_properties(bytecode_verifier_test PROPERTIES LABELS "core")
 
   add_executable(runtime_link_test
     tests/test_runtime_link.cpp
@@ -510,6 +512,7 @@ if(BUILD_TESTING)
     target_compile_options(runtime_link_test PRIVATE -Wall -Wextra)
   endif()
   add_test(NAME runtime_link_test COMMAND runtime_link_test)
+  set_tests_properties(runtime_link_test PROPERTIES LABELS "core")
 
 
   find_package(Python3 COMPONENTS Interpreter)
@@ -546,6 +549,7 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(skein_tests PROPERTIES
       ENVIRONMENT "${SKEIN_AST_TEST_ENV}"
+      LABELS "core"
       RUN_SERIAL TRUE
       TIMEOUT 600
     )
@@ -562,6 +566,7 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(skein_vm_tests PROPERTIES
       ENVIRONMENT "${SKEIN_VM_TEST_ENV}"
+      LABELS "core"
       RUN_SERIAL TRUE
       TIMEOUT 600
     )
@@ -573,6 +578,7 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:${PROJECT_NAME}>
       )
       set_tests_properties(vm_differential_test PROPERTIES
+        LABELS "core;differential"
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
@@ -584,6 +590,7 @@ if(BUILD_TESTING)
                 --check
       )
       set_tests_properties(vm_bench_test PROPERTIES
+        LABELS "bench"
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
@@ -606,6 +613,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(skein_vm_lsan_tests PROPERTIES
         ENVIRONMENT "${SKEIN_VM_LSAN_ENV}"
+        LABELS "sanitize;lsan"
         RUN_SERIAL TRUE
         TIMEOUT 900
       )
@@ -616,11 +624,13 @@ if(BUILD_TESTING)
               ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_encoding_tables.py
               --check
     )
+    set_tests_properties(encoding_tables_test PROPERTIES LABELS "data")
     add_test(
       NAME docs_sync_test
       COMMAND ${Python3_EXECUTABLE}
               ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_docs_sync.py
     )
+    set_tests_properties(docs_sync_test PROPERTIES LABELS "docs")
     add_test(
       NAME boundary_check_test
       COMMAND ${Python3_EXECUTABLE}
@@ -628,6 +638,7 @@ if(BUILD_TESTING)
               --source-dir ${CMAKE_CURRENT_SOURCE_DIR}
               --build-dir ${CMAKE_CURRENT_BINARY_DIR}
     )
+    set_tests_properties(boundary_check_test PROPERTIES LABELS "docs")
     add_test(
       NAME container_bench_test
       COMMAND ${Python3_EXECUTABLE}
@@ -636,6 +647,7 @@ if(BUILD_TESTING)
               --check
     )
     set_tests_properties(container_bench_test PROPERTIES
+      LABELS "bench"
       TIMEOUT 180
       RUN_SERIAL TRUE
     )

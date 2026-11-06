@@ -29,6 +29,7 @@ struct symbol *newsym(const char *name) {
     s->is_const = false;
     s->is_uninitialized = false;
     s->global_slot = UINT32_MAX;
+    s->scope_owned = false;
     return s;
 }
 

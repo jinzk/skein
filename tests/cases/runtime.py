@@ -168,6 +168,30 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
+        "slot symbol reuse",
+        "func f() {\n"
+        "  let total = 0;\n"
+        "  for (let x in [1, 2, 3]) { total = total + x; }\n"
+        "  let recovered = [][0] on error(err) { recover 5; };\n"
+        "  return total + recovered;\n"
+        "}\n"
+        "print(f());\n"
+        "func boom() { { let x = 1; fail \"x\"; } }\n"
+        "print(boom() on error(e) { recover 7; });\n"
+        "func g(n) {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < n) {\n"
+        "    { let a = i; let b = a + 1; total = total + b; }\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return total;\n"
+        "}\n"
+        "print(g(3));\n",
+        stdout_all=["11", "7", "6"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
         "fast call argument buffers",
         "func zero() { return 0; }\n"
         "func add(a, b, c, d, e, f, g, h) {\n"

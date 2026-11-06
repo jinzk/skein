@@ -215,6 +215,7 @@ void save_global_symbol(const char *name, value_t *v) {
     }
     struct symbol *sym = newsym(name);
     sym->val = v;
+    sym->scope_owned = true;
     context.global_scope->syms.insert(sym);
     if (sym->global_slot == UINT32_MAX) {
         sym->global_slot = static_cast<uint32_t>(context.global_slots.size());
@@ -264,6 +265,8 @@ void savesym(struct symbol *sp) {
     scope_context &context = active_scope_context();
     if (!context.current) return;
     context.current->syms.insert(sp);
+    if (sp)
+        sp->scope_owned = true;
     if (context.current->is_global) {
         if (sp && sp->global_slot == UINT32_MAX) {
             sp->global_slot =

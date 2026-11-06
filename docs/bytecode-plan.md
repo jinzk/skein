@@ -75,16 +75,16 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
 
 | 基准 | AST | VM |
 |---|---:|---:|
-| 200 万次局部循环 | 0.553s | 0.443s |
-| `fib(27)` | 0.201s | 0.211s |
-| 100 万次函数调用 | 0.523s | 0.494s |
-| 20 万次参数 pattern 调用 | 0.251s | 0.323s |
-| 100 万次字段读取 | 0.397s | 0.288s |
-| 30 万次方法调用 | 0.196s | 0.200s |
-| 100 万次全局更新 | 0.260s | 0.229s |
-| 100 万次 dict 索引读取 | 0.313s | 0.286s |
-| 50 万次 dict 索引写入 | 0.222s | 0.170s |
-| 50 万次块作用域循环 | 0.231s | 0.204s |
+| 200 万次局部循环 | 0.494s | 0.408s |
+| `fib(27)` | 0.194s | 0.214s |
+| 100 万次函数调用 | 0.461s | 0.508s |
+| 20 万次参数 pattern 调用 | 0.232s | 0.287s |
+| 100 万次字段读取 | 0.370s | 0.263s |
+| 30 万次方法调用 | 0.179s | 0.185s |
+| 100 万次全局更新 | 0.241s | 0.211s |
+| 100 万次 dict 索引读取 | 0.296s | 0.260s |
+| 50 万次 dict 索引写入 | 0.198s | 0.168s |
+| 50 万次块作用域循环 | 0.224s | 0.188s |
 
 ### 2.4 基线缺口
 
@@ -97,7 +97,7 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
   索引写入基址解析、局部 name cache epoch 惰性失效已完成。
 - 值表示仍是堆分配 `value_t*`，尚无 tagged value / unboxed slot；
   调用参数已对小参数数量使用栈内缓冲，fast-frame 向量按深度复用，
-  无捕获参数 symbol 已按名字复用。
+  无捕获参数 / 局部 slot symbol 已复用。
 - 指令优化已有运算快路径、`CMP_JUMP`、常量折叠、跳转线程化和
   不可达指令消除；仍缺更多超指令、computed goto、宽指令格式。
 - handler / defer 仍是运行时动态结构，尚无编译期表。
@@ -641,7 +641,7 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
 
 #### W3-3 值表示与分配（P2，XL）
 
-状态：**部分完成（2026-11-06，调用参数、帧缓存与参数 symbol 复用）**。
+状态：**部分完成（2026-11-06，调用参数、帧缓存、参数与局部 symbol 复用）**。
 
 已完成：
 
@@ -659,15 +659,21 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
    - `Proto::has_closures` / `uses_defers` 判断参数是否可能逃逸；
    - 安全场景下复用 `symbol` 对象，并跳过参数 `savesym()`；
    - `SKEIN_VM_PARAM_POOL=0` 可关闭。
-5. `call` VM/AST 从约 1.11 降到约 1.00，`fib` 约 1.05。
+5. 局部 slot symbol 复用：
+   - `symbol::scope_owned` 区分 scope 管理与帧池管理；
+   - 无捕获、无 defer、无 handler 时复用 slot symbol；
+   - `DEFINE_SLOT` 跳过 `savesym()`；
+   - `CLEAR_SLOT` / 帧清理回收 symbol；
+   - `SKEIN_VM_SLOT_POOL=0` 可关闭。
+6. `call` VM/AST 从约 1.11 降到约 1.00；`slot` 约 0.82，
+   `scope` 约 0.84。
 
 仍未完成：
 
 - tagged value 或 NaN boxing；
 - 帧内值栈不强制堆分配；
 - 小整数/布尔内联；
-- 对象分配器/arena；
-- 非捕获局部 slot 去 `symbol*` cell。
+- 对象分配器/arena。
 
 验收：基准提升且内存占用不显著上升。
 
@@ -1343,21 +1349,23 @@ N2 退出条件：
   - 参数不再插入 scope，由 `LoadParam` / `IndexDesc` 直接访问；
   - `SKEIN_VM_PARAM_POOL=0` 可关闭；
   - 验收：`call` VM/AST 从约 1.11 降到约 1.00，`fib` 约 1.05。
+- **N2-2.2 无捕获局部 slot symbol 复用**：
+  - `symbol::scope_owned` 区分 scope 管理与帧池管理；
+  - 无闭包、无 defer、无 handler 且 `params_direct` 时启用 slot symbol 池；
+  - `DEFINE_SLOT` 跳过 `savesym()`，`CLEAR_SLOT` / 帧清理回收 symbol；
+  - for-in / handler / name binding 创建的 scope-owned symbol 不被池化；
+  - `SKEIN_VM_SLOT_POOL=0` 可关闭；
+  - 验收：`slot` 约 0.82，`scope` 约 0.84，差分通过。
 
 剩余子任务：
 
-1. **N2-2.2 非捕获局部去 `symbol*` cell**
-   - 局部 slot 在无捕获时直接存 `value_t*`；
-   - 需要捕获时再提升为 symbol cell；
-   - 验收：slot 基准提升，闭包差分通过。
-
-2. **N2-2.3 tagged value / unboxed slot（决策点）**
+1. **N2-2.3 tagged value / unboxed slot（决策点）**
    - 先评估 2.1 / 2.2 后的剩余分配热点；
    - 若仍以 `value_t` 堆分配为主，再引入 tagged value 或等价方案；
    - 不在没有基准依据时直接重写值模型；
    - 验收：内存不显著上升，容器/闭包/defer 语义不变。
 
-3. **N2-2.4 分配器 / arena（可选）**
+2. **N2-2.4 分配器 / arena（可选）**
    - 仅在 profile 显示 malloc 占比明显时启用；
    - 必须保留循环引用检查和现有释放路径。
 
@@ -1516,10 +1524,9 @@ N2 退出条件：
 ### 8.8 建议排期
 
 ```text
-第一批  N2-2.2                  非捕获局部去 symbol cell
-第二批  N2-3.1 / N2-3.2       超指令与 dispatch
-第三批  N2-4.1..4             覆盖统计与长时 fuzz
-第四批  N3-4                  VM / bytecode 分层
+第一批  N2-3.1 / N2-3.2       超指令与 dispatch（同步评估 N2-2.3）
+第二批  N2-4.1..4             覆盖统计与长时 fuzz
+第三批  N3-4                  VM / bytecode 分层
 按需    N3-1 / N3-2 / N3-3
 最后    N4-1                 序列化 / AOT
 ```

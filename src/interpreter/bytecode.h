@@ -428,6 +428,8 @@ struct Proto {
     bool params_direct = false;
     /* True when the body creates a closure that can capture parameters. */
     bool has_closures = false;
+    /* True when the body installs fail/recover handlers. */
+    bool uses_handlers = false;
 
     uint32_t nparams = 0;
     uint32_t required_params = 0;

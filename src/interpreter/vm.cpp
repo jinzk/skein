@@ -312,6 +312,7 @@ struct SavedVmState {
     std::string diag_source;
     uint64_t name_scope_generation = 0;
     bool param_pool_safe = false;
+    bool slot_pool_safe = false;
     std::shared_ptr<function_def> def;
     std::vector<NameCacheSlot> name_cache;
     std::vector<struct symbol *> param_symbols;
@@ -368,6 +369,9 @@ public:
         for (struct symbol *sym : param_symbol_pool_)
             std::free(sym);
         param_symbol_pool_.clear();
+        for (struct symbol *sym : slot_symbol_pool_)
+            std::free(sym);
+        slot_symbol_pool_.clear();
         context_.handler_depth = saved_handler_depth_;
     }
 
@@ -700,12 +704,21 @@ public:
                         freeval(value);
                         return abort_error();
                     }
-                    struct symbol *sym = newsym(slot.name.c_str());
-                    sym->val = value;
-                    sym->type.kind = slot.type.kind;
-                    sym->type.name = slot.type.name;
-                    sym->is_const = slot.is_const;
-                    savesym(sym);
+                    struct symbol *sym = NULL;
+                    if (slot_pool_safe_)
+                        sym = take_pooled_symbol(slot_symbol_pool_,
+                                                 slot.name.c_str());
+                    if (sym) {
+                        reset_slot_symbol(sym, slot, value);
+                    } else {
+                        sym = newsym(slot.name.c_str());
+                        sym->val = value;
+                        sym->type.kind = slot.type.kind;
+                        sym->type.name = slot.type.name;
+                        sym->is_const = slot.is_const;
+                    }
+                    if (!slot_pool_safe_)
+                        savesym(sym);
                     slot_symbols_[ins.b] = sym;
                     invalidate_name_cache(slot.name.c_str());
                     push(newnull());
@@ -812,8 +825,19 @@ public:
                 }
 
                 case Op::ClearSlot:
-                    if (ins.b < slot_symbols_.size())
+                    if (ins.b < slot_symbols_.size()) {
+                        struct symbol *sym = slot_symbols_[ins.b];
+                        if (sym && slot_pool_safe_ && !sym->scope_owned) {
+                            freeval(sym->val);
+                            sym->val = NULL;
+                            sym->is_uninitialized = false;
+                            if (slot_symbol_pool_.size() < 256)
+                                slot_symbol_pool_.push_back(sym);
+                            else
+                                std::free(sym);
+                        }
                         slot_symbols_[ins.b] = NULL;
+                    }
                     break;
 
                 case Op::LoadUpvalue: {
@@ -2458,6 +2482,7 @@ public:
                     run_all_defers();
                     free_stack(stack_);
                     recycle_param_symbols();
+        recycle_slot_symbols();
                     pop_scopes_to(scope_mark_);
                     return NULL;
                 }
@@ -2489,7 +2514,9 @@ private:
     std::vector<SavedVmState> saved_states_;
     std::shared_ptr<function_def> current_def_;
     bool param_pool_safe_ = false;
+    bool slot_pool_safe_ = false;
     std::vector<struct symbol *> param_symbol_pool_;
+    std::vector<struct symbol *> slot_symbol_pool_;
     unsigned instruction_count_ = 0;
 
     /*
@@ -2538,6 +2565,7 @@ private:
         state.diag_source = diag_current_source_name();
         state.name_scope_generation = name_scope_generation_;
         state.param_pool_safe = param_pool_safe_;
+        state.slot_pool_safe = slot_pool_safe_;
         state.def = std::move(current_def_);
         state.name_cache = std::move(name_cache_);
         state.param_symbols = std::move(param_symbols_);
@@ -2552,6 +2580,7 @@ private:
         slot_symbols_ = take_pool(slot_symbols_pool_);
         name_scope_generation_ = 0;
         param_pool_safe_ = false;
+        slot_pool_safe_ = false;
     }
 
     void restore_state(SavedVmState state) {
@@ -2570,6 +2599,7 @@ private:
         diag_set_source_name(state.diag_source);
         name_scope_generation_ = state.name_scope_generation;
         param_pool_safe_ = state.param_pool_safe;
+        slot_pool_safe_ = state.slot_pool_safe;
         current_def_ = std::move(state.def);
         name_cache_ = std::move(state.name_cache);
         param_symbols_ = std::move(state.param_symbols);
@@ -2590,6 +2620,7 @@ private:
             stack_.pop_back();
         }
         recycle_param_symbols();
+        recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
             diag_pop_call();
@@ -2656,20 +2687,25 @@ private:
         return proto && proto_can_frame(*proto);
     }
 
-    struct symbol *take_param_symbol(const char *name) {
+    static struct symbol *take_pooled_symbol(
+        std::vector<struct symbol *> &pool, const char *name) {
         if (!name)
             return NULL;
         const size_t len = std::strlen(name);
-        for (size_t i = param_symbol_pool_.size(); i > 0; --i) {
-            struct symbol *sym = param_symbol_pool_[i - 1];
+        for (size_t i = pool.size(); i > 0; --i) {
+            struct symbol *sym = pool[i - 1];
             if (!sym || sym->name_len != len ||
                 std::memcmp(sym->name, name, len) != 0)
                 continue;
-            param_symbol_pool_[i - 1] = param_symbol_pool_.back();
-            param_symbol_pool_.pop_back();
+            pool[i - 1] = pool.back();
+            pool.pop_back();
             return sym;
         }
         return NULL;
+    }
+
+    struct symbol *take_param_symbol(const char *name) {
+        return take_pooled_symbol(param_symbol_pool_, name);
     }
 
     static void reset_param_symbol(struct symbol *sym,
@@ -2683,11 +2719,27 @@ private:
         sym->exported = false;
         sym->is_const = false;
         sym->is_uninitialized = false;
+        sym->scope_owned = false;
         sym->global_slot = UINT32_MAX;
         if (sl->type) {
             sym->type.kind = sl->type->kind;
             sym->type.name = sl->type->name;
         }
+    }
+
+    static void reset_slot_symbol(struct symbol *sym,
+                                  const skein::bc::SlotDesc &slot,
+                                  value_t *value) {
+        sym->val = value;
+        sym->type.kind = slot.type.kind;
+        sym->type.name = slot.type.name;
+        sym->type.module = NULL;
+        sym->type.nullable = false;
+        sym->exported = false;
+        sym->is_const = slot.is_const;
+        sym->is_uninitialized = false;
+        sym->scope_owned = false;
+        sym->global_slot = UINT32_MAX;
     }
 
     void recycle_param_symbols() {
@@ -2705,6 +2757,30 @@ private:
                 std::free(sym);
         }
         param_symbols_.clear();
+    }
+
+    void recycle_slot_symbols() {
+        if (!slot_pool_safe_) {
+            slot_symbols_.clear();
+            return;
+        }
+        for (struct symbol *&sym : slot_symbols_) {
+            if (!sym)
+                continue;
+            if (sym->scope_owned) {
+                sym = NULL;
+                continue;
+            }
+            freeval(sym->val);
+            sym->val = NULL;
+            sym->is_uninitialized = false;
+            if (slot_symbol_pool_.size() < 256)
+                slot_symbol_pool_.push_back(sym);
+            else
+                std::free(sym);
+            sym = NULL;
+        }
+        slot_symbols_.clear();
     }
 
     void bind_fast_arguments(function_code *code,
@@ -2760,6 +2836,10 @@ private:
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
+        slot_pool_safe_ = proto->params_direct &&
+                          !proto->has_closures && !proto->uses_defers &&
+                          !proto->uses_handlers &&
+                          read_bool_env("SKEIN_VM_SLOT_POOL", true);
         pc_ = 0;
         errors_before_ = context_.runtime_error_count;
         saved_handler_depth_ = context_.handler_depth;
@@ -2811,6 +2891,7 @@ private:
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
         recycle_param_symbols();
+        recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
 
         current_def_ = std::move(def);
@@ -2818,6 +2899,10 @@ private:
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
+        slot_pool_safe_ = proto->params_direct &&
+                          !proto->has_closures && !proto->uses_defers &&
+                          !proto->uses_handlers &&
+                          read_bool_env("SKEIN_VM_SLOT_POOL", true);
         pc_ = 0;
         errors_before_ = context_.runtime_error_count;
         handler_body_depth_ = 0;
@@ -2879,6 +2964,7 @@ private:
             stack_.pop_back();
         }
         recycle_param_symbols();
+        recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
             diag_pop_call();
@@ -3783,6 +3869,7 @@ private:
         run_all_defers();
         free_stack(stack_);
         recycle_param_symbols();
+        recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         return control;
     }
@@ -3823,6 +3910,7 @@ private:
         run_all_defers();
         free_stack(stack_);
         recycle_param_symbols();
+        recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
         return NULL;
     }
@@ -3838,6 +3926,7 @@ private:
         run_all_defers();
         free_stack(stack_);
         recycle_param_symbols();
+        recycle_slot_symbols();
         pop_scopes_to(scope_mark_);
 
         if (context_.control != EVAL_CONTROL_NONE) {

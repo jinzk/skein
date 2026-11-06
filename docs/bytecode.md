@@ -43,6 +43,9 @@ SKEIN_VM=0 SKEIN_MAX_CALL_DEPTH=128 ./build/skein script.skein
 # 对比 / 调试：关闭参数 symbol 复用
 SKEIN_VM=1 SKEIN_VM_PARAM_POOL=0 ./build/skein script.skein
 
+# 对比 / 调试：关闭局部 slot symbol 复用
+SKEIN_VM=1 SKEIN_VM_SLOT_POOL=0 ./build/skein script.skein
+
 # 保留函数体/默认参数/参数 pattern 的 AST，便于调试或运行期切换后端
 SKEIN_VM=1 SKEIN_KEEP_AST=1 ./build/skein script.skein
 
@@ -106,6 +109,8 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - 参数 fast path（`LOAD_PARAM` / `STORE_PARAM` / `COMPOUND_PARAM` / `INCDEC_PARAM`；参数未被本函数局部声明遮蔽时）
 - 参数 symbol 复用（无闭包/defer 且 `params_direct` 时按名字复用；
   `SKEIN_VM_PARAM_POOL=0` 可关闭）
+- 局部 slot symbol 复用（无闭包/defer/handler 时跳过 `savesym()`，
+  `CLEAR_SLOT` / 帧清理回收；`SKEIN_VM_SLOT_POOL=0` 可关闭）
 - 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；通过 `symbol*` cell 兼容闭包/defer/方法/for-in/match/destructuring/on-error/import）
 - 参数 destructuring pattern（编译为 `PatternDesc`，调用绑定时原生匹配）
 - 默认参数表达式（编译为独立 Proto，调用时执行）

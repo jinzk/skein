@@ -271,6 +271,10 @@ struct Compiler {
             case Op::Closure:
                 proto.has_closures = true;
                 break;
+            case Op::PushFailHandler:
+            case Op::PushRecoverHandler:
+                proto.uses_handlers = true;
+                break;
             case Op::DefineSlot:
             case Op::LoadSlot:
             case Op::StoreSlot:

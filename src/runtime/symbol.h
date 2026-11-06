@@ -49,6 +49,8 @@ struct symbol {
     bool is_uninitialized;
     /* Stable index in scope_context::global_slots, or UINT32_MAX. */
     uint32_t global_slot = UINT32_MAX;
+    /* True when a scope owns this symbol and will free it on pop. */
+    bool scope_owned = false;
 };
 
 struct symlist {

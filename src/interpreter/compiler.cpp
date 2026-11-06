@@ -382,11 +382,6 @@ bool finalize_proto(Proto &proto, std::string &error) {
                 case skein::bc::Op::MatchBind:
                 case skein::bc::Op::BindName:
                 case skein::bc::Op::Import:
-                case skein::bc::Op::DeclareStruct:
-                case skein::bc::Op::DeclareEnum:
-                case skein::bc::Op::DeclareTrait:
-                case skein::bc::Op::DeclareImpl:
-                case skein::bc::Op::DeclarePackage:
                     proto.slots_direct_safe = false;
                     break;
                 default:

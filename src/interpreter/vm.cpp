@@ -1918,7 +1918,9 @@ public:
                             diag_current_module_name().c_str(),
                             meta.type_name.c_str(), meta.has_trait,
                             meta.trait_name.c_str(), methods, closure,
-                            error))
+                            error, [this](const std::string &name) {
+                                return capture_upvalue(name);
+                            }))
                         return abort_error();
                     push(newnull());
                     break;

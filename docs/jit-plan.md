@@ -84,7 +84,8 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 
 尚未落地：
 
-- Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
+- Win64 ABI 代码路径已接入（MinGW `sysv_abi` helper + Win64 entry thunk），
+  本机无 MinGW/Windows 环境，仍需 CI 或真机验证；
 - OSR / deopt；
 - 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
   但不会形成调用栈增长；
@@ -403,7 +404,8 @@ bool frame_eligible =
 ```
 
 - params 和 `slots_direct_safe` 的 fast frame slots 已迁移到 `value_t*` 数组；
-- 闭包/defer/for-in/match/import 等仍使用 `symbol*` cell；
+- 声明/impl 方法的捕获已走 frame slot；
+- 名字型局部、for-in/match/import 等仍可能回退 `symbol*` cell；
 - JIT 始终使用自己的 frame slots。
 
 ### 7.3 Verifier 元数据
@@ -498,6 +500,8 @@ sub  rsp, frame_size
 
 - `frame_size` 编译期计算，向上对齐到 16 字节；
 - Win64 需要预留 32 字节 shadow space；
+- JIT helper 调用统一使用 SysV ABI（MinGW `sysv_abi`），只有 JIT entry
+  本身遵循 Win64 ABI；
 - 不使用 red zone；
 - frame > 4KB 时回退 VM，避免 Windows stack probe。
 

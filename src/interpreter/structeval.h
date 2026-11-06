@@ -3,12 +3,14 @@
 
 #include "symbol.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 struct scope_t;
+struct upvalue_cell;
 struct struct_node;
 struct impl_node;
 struct trait_node;
@@ -85,6 +87,8 @@ bool declare_impl_meta(
     bool has_trait, const char *trait_name,
     const std::vector<std::pair<
         std::string, std::shared_ptr<struct function_code>>> &methods,
-    const std::shared_ptr<struct scope_t> &closure, std::string &error);
+    const std::shared_ptr<struct scope_t> &closure, std::string &error,
+    const std::function<std::shared_ptr<struct upvalue_cell>(
+        const std::string &)> &capture_upvalue = {});
 
 #endif

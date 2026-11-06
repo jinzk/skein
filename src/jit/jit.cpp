@@ -19,87 +19,99 @@
 #include <string>
 #include <vector>
 
+/*
+ * JIT helpers use the SysV register convention even on Windows.  The JIT
+ * entry thunk itself follows the native ABI (Win64 on MinGW); using SysV for
+ * the small helper calls keeps the emitted call sequences identical across
+ * platforms.  MinGW GCC/Clang support this attribute.
+ */
+#if defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
+#define SKEIN_JIT_SYSV __attribute__((sysv_abi))
+#else
+#define SKEIN_JIT_SYSV
+#endif
+
 extern "C" {
-value_t *skein_jit_null();
-value_t *skein_jit_dup(value_t *value);
-void skein_jit_free(value_t *value);
-value_t *skein_jit_binary(value_t *left, value_t *right, int op, int line,
+SKEIN_JIT_SYSV value_t *skein_jit_null();
+SKEIN_JIT_SYSV value_t *skein_jit_dup(value_t *value);
+SKEIN_JIT_SYSV void skein_jit_free(value_t *value);
+SKEIN_JIT_SYSV value_t *skein_jit_binary(value_t *left, value_t *right, int op, int line,
                           int column);
-int skein_jit_compare(int op, value_t *left, value_t *right, int *valid,
+SKEIN_JIT_SYSV int skein_jit_compare(int op, value_t *left, value_t *right, int *valid,
                       int line, int column);
-int skein_jit_truthy(value_t *value);
-value_t *skein_jit_load_global(const skein::bc::Proto *proto, uint32_t slot,
+SKEIN_JIT_SYSV int skein_jit_truthy(value_t *value);
+SKEIN_JIT_SYSV value_t *skein_jit_load_global(const skein::bc::Proto *proto, uint32_t slot,
                                uint32_t name_index, int line, int column);
-value_t *skein_jit_store_global(const skein::bc::Proto *proto, uint32_t slot,
+SKEIN_JIT_SYSV value_t *skein_jit_store_global(const skein::bc::Proto *proto, uint32_t slot,
                                 uint32_t name_index, value_t *value,
                                 int line, int column);
-value_t *skein_jit_compound_global(const skein::bc::Proto *proto,
+SKEIN_JIT_SYSV value_t *skein_jit_compound_global(const skein::bc::Proto *proto,
                                    uint32_t slot, uint32_t name_index,
                                    value_t *value, int op, uint64_t loc);
-value_t *skein_jit_incdec_global(const skein::bc::Proto *proto,
+SKEIN_JIT_SYSV value_t *skein_jit_incdec_global(const skein::bc::Proto *proto,
                                  uint32_t slot, uint32_t name_index,
                                  int delta, int prefix, uint64_t loc);
-value_t *skein_jit_neg(value_t *value, int line, int column);
-value_t *skein_jit_not(value_t *value, int line, int column);
-value_t *skein_jit_bitnot(value_t *value, int line, int column);
-value_t *skein_jit_load_name(const skein::bc::Proto *proto,
+SKEIN_JIT_SYSV value_t *skein_jit_neg(value_t *value, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_not(value_t *value, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_bitnot(value_t *value, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                              uint32_t name_index, int line, int column);
-value_t *skein_jit_store_name(const skein::bc::Proto *proto,
+SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               uint32_t name_index, value_t *value, int line,
                               int column);
-void skein_jit_push_scope();
-void skein_jit_pop_scope();
-value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
+SKEIN_JIT_SYSV void skein_jit_push_scope();
+SKEIN_JIT_SYSV void skein_jit_pop_scope();
+SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
                             int column);
-value_t *skein_jit_new_dict(value_t **items, uint32_t count, int line,
+SKEIN_JIT_SYSV value_t *skein_jit_new_dict(value_t **items, uint32_t count, int line,
                             int column);
-int skein_jit_bind_patterns(function_def *def, value_t **values,
+SKEIN_JIT_SYSV int skein_jit_bind_patterns(function_def *def, value_t **values,
                             uint32_t argc);
-value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
+SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
-value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
+SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                uint32_t argc, int line, int column);
-int skein_jit_tail_self(skein::jit::thread_state *ts,
+SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
                         function_def *current_def, value_t *callee,
                         value_t **params, value_t **args, uint32_t argc);
-value_t *skein_jit_tail_request(skein::jit::thread_state *ts,
+SKEIN_JIT_SYSV value_t *skein_jit_tail_request(skein::jit::thread_state *ts,
                                 value_t *callee, value_t **args,
                                 uint32_t argc);
-value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
+SKEIN_JIT_SYSV value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
                                value_t *value, value_t **dest, int line,
                                int column);
-value_t *skein_jit_load_slot(value_t *value, int line, int column);
-value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
+SKEIN_JIT_SYSV value_t *skein_jit_load_slot(value_t *value, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
                               value_t *value, value_t **dest, int line,
                               int column);
-value_t *skein_jit_compound_slot(const skein::bc::SlotDesc *desc,
+SKEIN_JIT_SYSV value_t *skein_jit_compound_slot(const skein::bc::SlotDesc *desc,
                                  value_t *value, value_t **dest, int op,
                                  uint64_t loc);
-value_t *skein_jit_incdec_slot(const skein::bc::SlotDesc *desc,
+SKEIN_JIT_SYSV value_t *skein_jit_incdec_slot(const skein::bc::SlotDesc *desc,
                                value_t **dest, int delta, int prefix,
                                uint64_t loc);
-value_t *skein_jit_slot_binary(value_t *left, value_t *right,
+SKEIN_JIT_SYSV value_t *skein_jit_slot_binary(value_t *left, value_t *right,
                                value_t **dest,
                                const skein::bc::SlotDesc *desc, int op,
                                uint64_t loc);
-value_t *skein_jit_slot_binary_const(value_t *left,
+SKEIN_JIT_SYSV value_t *skein_jit_slot_binary_const(value_t *left,
                                      const value_t *constant,
                                      value_t **dest,
                                      const skein::bc::SlotDesc *desc,
                                      int op, uint64_t loc);
-value_t *skein_jit_new_struct(const skein::bc::ConstructDesc *desc,
+SKEIN_JIT_SYSV value_t *skein_jit_new_struct(const skein::bc::ConstructDesc *desc,
                               value_t **fields);
-value_t *skein_jit_get_field(value_t *container, const char *name, int line,
+SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container, const char *name, int line,
                              int column);
-value_t *skein_jit_get_index_cached(
+SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
     value_t *container, value_t *index,
     skein::bc::IndexReadCacheEntry *cache, int line, int column);
-value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
+SKEIN_JIT_SYSV value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
                                 value_t **indices, uint32_t count,
                                 value_t *value, int line, int column);
-int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
-void skein_jit_leave(skein::jit::thread_state *ts);
-void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
+SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
+SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
                        uint32_t count);
 }
 
@@ -134,7 +146,13 @@ constexpr int kTsOff = 8;
 constexpr int kDefOff = 16;
 constexpr int kResultOff = 24;
 constexpr int kStatusOff = 32;
+#if defined(_WIN32)
+constexpr int kSavedRdiOff = 40;
+constexpr int kSavedRsiOff = 48;
+constexpr int kHeaderSize = 56;
+#else
 constexpr int kHeaderSize = 40;
+#endif
 
 int slot_op_char(uint8_t opcode) {
     switch (static_cast<skein::bc::Op>(opcode)) {
@@ -224,24 +242,14 @@ void set_bind_frame(bind_frame_fn fn) { g_bind_frame = fn; }
 bind_frame_fn bind_frame() { return g_bind_frame; }
 
 bool available() {
-#ifdef _WIN32
-    /* Win64 ABI lowering is not implemented yet; keep the JIT off. */
-    return false;
-#else
     static int state = -1;
     if (state < 0)
         state = read_bool_env("SKEIN_JIT", false) ? 1 : 0;
     return state != 0;
-#endif
 }
 
 bool can_compile(const skein::bc::Proto &proto, bool top_level,
                  bool pattern_frame) {
-#ifdef _WIN32
-    (void)proto;
-    (void)top_level;
-    return false;
-#else
     const bool name_mode =
         (top_level && proto.uses_names && proto.nparams == 0) ||
         (pattern_frame && proto.uses_names);
@@ -412,7 +420,6 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         }
     }
     return true;
-#endif
 }
 
 JitCode *compile(const skein::bc::Proto &proto, bool top_level,
@@ -445,6 +452,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     const int values_low =
         kHeaderSize + static_cast<int>(value_count) * 8;
     const int frame_size = (values_low + 15) & ~15;
+#if defined(_WIN32)
+    /* Windows stack probing is only needed for large frames; fall back to VM. */
+    if (frame_size > 3072)
+        return nullptr;
+#endif
 
     auto value_off = [&](uint32_t index) -> int {
         return -values_low + static_cast<int>(index) * 8;
@@ -482,10 +494,21 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     a.push(asmjit::x86::rbp);
     a.mov(asmjit::x86::rbp, asmjit::x86::rsp);
     a.sub(asmjit::x86::rsp, frame_size);
+#if defined(_WIN32)
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kSavedRdiOff),
+          asmjit::x86::rdi);
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kSavedRsiOff),
+          asmjit::x86::rsi);
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff),
+          asmjit::x86::rcx);
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff),
+          asmjit::x86::rdx);
+#else
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff),
           asmjit::x86::rdi);
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff),
           asmjit::x86::rsi);
+#endif
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kResultOff),
           asmjit::imm(0));
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kStatusOff),
@@ -496,8 +519,13 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                                      value_off(i)),
               asmjit::x86::rax);
     for (uint32_t i = 0; i < proto.nparams; ++i) {
+#if defined(_WIN32)
+        a.mov(asmjit::x86::rax,
+              asmjit::x86::ptr(asmjit::x86::r8, i * 8));
+#else
         a.mov(asmjit::x86::rax,
               asmjit::x86::ptr(asmjit::x86::rdx, i * 8));
+#endif
         a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                      param_off(i)),
               asmjit::x86::rax);
@@ -1189,6 +1217,12 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     call_addr(fn_address(&skein_jit_cleanup));
     a.mov(asmjit::x86::rax,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kResultOff));
+#if defined(_WIN32)
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kSavedRdiOff));
+    a.mov(asmjit::x86::rsi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kSavedRsiOff));
+#endif
     a.mov(asmjit::x86::rsp, asmjit::x86::rbp);
     a.pop(asmjit::x86::rbp);
     a.ret();
@@ -1249,13 +1283,13 @@ void release(JitCode *code) {
  * across the JIT frame.
  */
 
-extern "C" value_t *skein_jit_null() { return newnull(); }
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_null() { return newnull(); }
 
-extern "C" value_t *skein_jit_dup(value_t *value) { return dupval(value); }
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_dup(value_t *value) { return dupval(value); }
 
-extern "C" void skein_jit_free(value_t *value) { freeval(value); }
+extern "C" SKEIN_JIT_SYSV void skein_jit_free(value_t *value) { freeval(value); }
 
-extern "C" value_t *skein_jit_binary(value_t *left, value_t *right, int op,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_binary(value_t *left, value_t *right, int op,
                                     int line, int column) {
     diag_set_location(line, column);
     if (!left || !right) {
@@ -1269,7 +1303,7 @@ extern "C" value_t *skein_jit_binary(value_t *left, value_t *right, int op,
     return result;
 }
 
-extern "C" int skein_jit_compare(int op, value_t *left, value_t *right,
+extern "C" SKEIN_JIT_SYSV int skein_jit_compare(int op, value_t *left, value_t *right,
                                  int *valid, int line, int column) {
     diag_set_location(line, column);
     if (valid)
@@ -1311,13 +1345,13 @@ extern "C" int skein_jit_compare(int op, value_t *left, value_t *right,
     return result ? 1 : 0;
 }
 
-extern "C" int skein_jit_truthy(value_t *value) {
+extern "C" SKEIN_JIT_SYSV int skein_jit_truthy(value_t *value) {
     int result = truthy(value) ? 1 : 0;
     freeval(value);
     return result;
 }
 
-extern "C" value_t *skein_jit_load_slot(value_t *value, int line,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_slot(value_t *value, int line,
                                         int column) {
     diag_set_location(line, column);
     if (!value) {
@@ -1327,7 +1361,7 @@ extern "C" value_t *skein_jit_load_slot(value_t *value, int line,
     return dupval(value);
 }
 
-extern "C" value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
                                           value_t *value, value_t **dest,
                                           int line, int column) {
     diag_set_location(line, column);
@@ -1351,7 +1385,7 @@ extern "C" value_t *skein_jit_define_slot(const skein::bc::SlotDesc *desc,
     return newnull();
 }
 
-extern "C" value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
                                          value_t *value, value_t **dest,
                                          int line, int column) {
     diag_set_location(line, column);
@@ -1380,7 +1414,7 @@ extern "C" value_t *skein_jit_store_slot(const skein::bc::SlotDesc *desc,
     return dupval(value);
 }
 
-extern "C" value_t *skein_jit_compound_slot(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compound_slot(
     const skein::bc::SlotDesc *desc, value_t *value, value_t **dest,
     int op, uint64_t packed_loc) {
     int line = 0;
@@ -1416,7 +1450,7 @@ extern "C" value_t *skein_jit_compound_slot(
     return dupval(result);
 }
 
-extern "C" value_t *skein_jit_incdec_slot(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_slot(
     const skein::bc::SlotDesc *desc, value_t **dest, int delta, int prefix,
     uint64_t packed_loc) {
     int line = 0;
@@ -1452,7 +1486,7 @@ extern "C" value_t *skein_jit_incdec_slot(
     return ret;
 }
 
-extern "C" value_t *skein_jit_slot_binary(value_t *left, value_t *right,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_slot_binary(value_t *left, value_t *right,
                                           value_t **dest,
                                           const skein::bc::SlotDesc *desc,
                                           int op, uint64_t packed_loc) {
@@ -1493,7 +1527,7 @@ extern "C" value_t *skein_jit_slot_binary(value_t *left, value_t *right,
     return dupval(result);
 }
 
-extern "C" value_t *skein_jit_slot_binary_const(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_slot_binary_const(
     value_t *left, const value_t *constant, value_t **dest,
     const skein::bc::SlotDesc *desc, int op, uint64_t packed_loc) {
     int line = 0;
@@ -1534,7 +1568,7 @@ extern "C" value_t *skein_jit_slot_binary_const(
     return dupval(result);
 }
 
-extern "C" value_t *skein_jit_load_global(const skein::bc::Proto *proto,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_global(const skein::bc::Proto *proto,
                                           uint32_t slot,
                                           uint32_t name_index,
                                           int line, int column) {
@@ -1556,7 +1590,7 @@ extern "C" value_t *skein_jit_load_global(const skein::bc::Proto *proto,
     return dupval(sym->val);
 }
 
-extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_global(const skein::bc::Proto *proto,
                                            uint32_t slot,
                                            uint32_t name_index,
                                            value_t *value, int line,
@@ -1577,7 +1611,7 @@ extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
     return assign_symbol_direct(sym, value);
 }
 
-extern "C" value_t *skein_jit_tail_request(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_tail_request(
     skein::jit::thread_state *ts, value_t *callee, value_t **args,
     uint32_t argc) {
     if (!ts) {
@@ -1596,7 +1630,7 @@ extern "C" value_t *skein_jit_tail_request(
     return nullptr;
 }
 
-extern "C" int skein_jit_tail_self(skein::jit::thread_state *ts,
+extern "C" SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
                                    function_def *current_def,
                                    value_t *callee, value_t **params,
                                    value_t **args, uint32_t argc) {
@@ -1631,7 +1665,7 @@ extern "C" int skein_jit_tail_self(skein::jit::thread_state *ts,
     return 1;
 }
 
-extern "C" value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                           uint32_t argc, int line,
                                           int column) {
     diag_set_location(line, column);
@@ -1646,7 +1680,7 @@ extern "C" value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
     return fn(callee, args, argc);
 }
 
-extern "C" value_t *skein_jit_new_struct(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_struct(
     const skein::bc::ConstructDesc *desc, value_t **fields) {
     if (!desc || !fields) {
         yyerror("invalid bytecode constructor");
@@ -1662,7 +1696,7 @@ extern "C" value_t *skein_jit_new_struct(
     return fn(*desc, fields);
 }
 
-extern "C" value_t *skein_jit_get_field(value_t *container,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
                                         const char *name, int line,
                                         int column) {
     diag_set_location(line, column);
@@ -1736,7 +1770,7 @@ extern "C" value_t *skein_jit_get_field(value_t *container,
     return result;
 }
 
-extern "C" value_t *skein_jit_neg(value_t *value, int line, int column) {
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_neg(value_t *value, int line, int column) {
     diag_set_location(line, column);
     if (!value)
         return nullptr;
@@ -1753,7 +1787,7 @@ extern "C" value_t *skein_jit_neg(value_t *value, int line, int column) {
     return result;
 }
 
-extern "C" value_t *skein_jit_not(value_t *value, int line, int column) {
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_not(value_t *value, int line, int column) {
     diag_set_location(line, column);
     if (!value)
         return nullptr;
@@ -1762,7 +1796,7 @@ extern "C" value_t *skein_jit_not(value_t *value, int line, int column) {
     return result;
 }
 
-extern "C" value_t *skein_jit_bitnot(value_t *value, int line, int column) {
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_bitnot(value_t *value, int line, int column) {
     diag_set_location(line, column);
     if (!value)
         return nullptr;
@@ -1776,7 +1810,7 @@ extern "C" value_t *skein_jit_bitnot(value_t *value, int line, int column) {
     return result;
 }
 
-extern "C" value_t *skein_jit_compound_global(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compound_global(
     const skein::bc::Proto *proto, uint32_t slot, uint32_t name_index,
     value_t *value, int op, uint64_t packed_loc) {
     int line = 0;
@@ -1798,7 +1832,7 @@ extern "C" value_t *skein_jit_compound_global(
     return compound_symbol_direct(sym, op, value);
 }
 
-extern "C" value_t *skein_jit_incdec_global(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_global(
     const skein::bc::Proto *proto, uint32_t slot, uint32_t name_index,
     int delta, int prefix, uint64_t packed_loc) {
     int line = 0;
@@ -1818,7 +1852,7 @@ extern "C" value_t *skein_jit_incdec_global(
     return increment_symbol_direct(sym, delta, prefix != 0);
 }
 
-extern "C" value_t *skein_jit_load_name(const skein::bc::Proto *proto,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                                         uint32_t name_index, int line,
                                         int column) {
     diag_set_location(line, column);
@@ -1839,7 +1873,7 @@ extern "C" value_t *skein_jit_load_name(const skein::bc::Proto *proto,
     return dupval(sym->val);
 }
 
-extern "C" value_t *skein_jit_store_name(const skein::bc::Proto *proto,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                                          uint32_t name_index,
                                          value_t *value, int line,
                                          int column) {
@@ -1852,10 +1886,10 @@ extern "C" value_t *skein_jit_store_name(const skein::bc::Proto *proto,
     return assign_symbol_value(proto->consts[name_index].name.c_str(), value);
 }
 
-extern "C" void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
-extern "C" void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
+extern "C" SKEIN_JIT_SYSV void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
+extern "C" SKEIN_JIT_SYSV void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
 
-extern "C" int skein_jit_bind_patterns(function_def *def, value_t **values,
+extern "C" SKEIN_JIT_SYSV int skein_jit_bind_patterns(function_def *def, value_t **values,
                                        uint32_t argc) {
     skein::jit::bind_frame_fn fn = skein::jit::bind_frame();
     if (!fn) {
@@ -1865,7 +1899,7 @@ extern "C" int skein_jit_bind_patterns(function_def *def, value_t **values,
     return fn(def, values, argc);
 }
 
-extern "C" value_t *skein_jit_new_list(value_t **items, uint32_t count,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count,
                                        int line, int column) {
     diag_set_location(line, column);
     struct list_value_t *list = newlistval();
@@ -1876,7 +1910,7 @@ extern "C" value_t *skein_jit_new_list(value_t **items, uint32_t count,
     return (value_t *)list;
 }
 
-extern "C" value_t *skein_jit_new_dict(value_t **items, uint32_t count,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_dict(value_t **items, uint32_t count,
                                        int line, int column) {
     diag_set_location(line, column);
     struct dict_value_t *dict = newdictval();
@@ -1910,7 +1944,7 @@ extern "C" value_t *skein_jit_new_dict(value_t **items, uint32_t count,
     return (value_t *)dict;
 }
 
-extern "C" value_t *skein_jit_get_index_cached(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
     value_t *container, value_t *index,
     skein::bc::IndexReadCacheEntry *cache, int line, int column) {
     diag_set_location(line, column);
@@ -1960,7 +1994,7 @@ extern "C" value_t *skein_jit_get_index_cached(
     return result;
 }
 
-extern "C" value_t *skein_jit_assign_index(
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     const skein::bc::IndexDesc *desc, value_t **indices, uint32_t count,
     value_t *value, int line, int column) {
     diag_set_location(line, column);
@@ -1984,7 +2018,7 @@ extern "C" value_t *skein_jit_assign_index(
                                desc->fields, value);
 }
 
-extern "C" value_t *skein_jit_invoke(value_t *callee, value_t **args,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **args,
                                      uint32_t argc, int line, int column) {
     diag_set_location(line, column);
     skein::jit::invoke_fn fn = skein::jit::invoke();
@@ -1998,7 +2032,7 @@ extern "C" value_t *skein_jit_invoke(value_t *callee, value_t **args,
     return fn(callee, args, argc);
 }
 
-extern "C" int skein_jit_enter(skein::jit::thread_state *ts,
+extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
                                function_def *def) {
     if (!ts || !ts->ctx)
         return 0;
@@ -2051,7 +2085,7 @@ extern "C" int skein_jit_enter(skein::jit::thread_state *ts,
     return 1;
 }
 
-extern "C" void skein_jit_leave(skein::jit::thread_state *ts) {
+extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
     if (!ts || !ts->entered || !ts->ctx)
         return;
     eval_context &context = *ts->ctx;
@@ -2077,7 +2111,7 @@ extern "C" void skein_jit_leave(skein::jit::thread_state *ts) {
     ts->entered = false;
 }
 
-extern "C" void skein_jit_cleanup(skein::jit::thread_state *ts,
+extern "C" SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts,
                                   value_t **values, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
         freeval(values[i]);

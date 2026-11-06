@@ -540,7 +540,9 @@ bool declare_impl_meta(
     bool has_trait, const char *trait_name,
     const std::vector<
         std::pair<std::string, std::shared_ptr<function_code>>> &methods,
-    const std::shared_ptr<scope_t> &closure, std::string &error) {
+    const std::shared_ptr<scope_t> &closure, std::string &error,
+    const std::function<std::shared_ptr<struct upvalue_cell>(
+        const std::string &)> &capture_upvalue) {
     (void)module_name;
     (void)error;
     type_def *owner = structtype_find_type(module, type_name);
@@ -566,6 +568,12 @@ bool declare_impl_meta(
             std::make_shared<function_def>();
         definition->code = method.second;
         definition->closure = closure;
+        if (capture_upvalue && method.second) {
+            definition->upvalues.reserve(
+                method.second->upvalues.size());
+            for (const std::string &name : method.second->upvalues)
+                definition->upvalues.push_back(capture_upvalue(name));
+        }
         std::string method_error;
         if (!method.second ||
             !method_self_ok(method.second->sl, owner->name.c_str(),

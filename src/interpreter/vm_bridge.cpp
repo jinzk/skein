@@ -252,6 +252,24 @@ bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
     return true;
 }
 
+value_t *skein_vm_build_struct(const skein::bc::ConstructDesc &desc,
+                               value_t **fields) {
+    std::vector<std::pair<std::string, value_t *>> entries;
+    entries.reserve(desc.fields.size());
+    for (size_t i = 0; i < desc.fields.size(); ++i) {
+        entries.emplace_back(desc.fields[i], fields[i]);
+        fields[i] = nullptr;
+    }
+    auto fn = skein_vm_host().fn_build_struct_value;
+    if (!fn) {
+        for (auto &entry : entries)
+            freeval(entry.second);
+        yyerror("JIT struct service is not installed");
+        return nullptr;
+    }
+    return fn(desc.module.c_str(), desc.name.c_str(), entries, desc.spread);
+}
+
 /* CALL helper used by generated code.  Always consumes callee and args. */
 value_t *skein_vm_jit_invoke(value_t *callee, value_t **args, uint32_t argc) {
     value_t *out = nullptr;
@@ -297,6 +315,7 @@ static void ensure_vm_host() {
         host.fn_skein_vm_try_jit_call = &skein_vm_try_jit_call;
         host.fn_skein_vm_jit_invoke = &skein_vm_jit_invoke;
         skein::jit::set_invoke(&skein_vm_jit_invoke);
+        skein::jit::set_construct(&skein_vm_build_struct);
 #endif
         return true;
     }();

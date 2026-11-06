@@ -40,6 +40,8 @@ Go/No-Go 标准见 §10。
   `BINARY_SLOTS` / `BINARY_SLOT_CONST` / `CLEAR_SLOT`，覆盖
   `slot_bench` 与 `scope_bench`；
 - global 写入：`STORE_GLOBAL`，覆盖 `global_bench`；
+- struct 构造与字段读取：`NEW_STRUCT` / `GET_FIELD_NAME`，覆盖
+  `field_bench`；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
@@ -51,6 +53,7 @@ fib(27)      SKEIN_JIT=0 ~0.21s   SKEIN_JIT=1 ~0.05s   （约 4x）
 slot_bench   SKEIN_JIT=0 ~0.37s   SKEIN_JIT=1 ~0.20s   （约 1.8x）
 scope_bench  SKEIN_JIT=0 ~0.19s   SKEIN_JIT=1 ~0.07s   （约 2.7x）
 global_bench SKEIN_JIT=0 ~0.20s   SKEIN_JIT=1 ~0.10s   （约 2.0x）
+field_bench  SKEIN_JIT=0 ~0.25s   SKEIN_JIT=1 ~0.16s   （约 1.6x）
 ```
 
 尚未落地：

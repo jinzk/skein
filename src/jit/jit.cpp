@@ -3,6 +3,7 @@
 #include "diagnostics.h"
 #include "eval_context.h"
 #include "scopestack.h"
+#include "structtype.h"
 #include "symbol.h"
 #include "value_ops.h"
 #include "value_runtime.h"
@@ -49,6 +50,10 @@ value_t *skein_jit_slot_binary_const(value_t *left,
                                      value_t **dest,
                                      const skein::bc::SlotDesc *desc,
                                      int op, uint64_t loc);
+value_t *skein_jit_new_struct(const skein::bc::ConstructDesc *desc,
+                              value_t **fields);
+value_t *skein_jit_get_field(value_t *container, const char *name, int line,
+                             int column);
 int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
 void skein_jit_leave(skein::jit::thread_state *ts);
 void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
@@ -144,11 +149,14 @@ struct JitCode {
 namespace {
 
 invoke_fn g_invoke = nullptr;
+construct_fn g_build_struct = nullptr;
 
 } // namespace
 
 void set_invoke(invoke_fn fn) { g_invoke = fn; }
 invoke_fn invoke() { return g_invoke; }
+void set_construct(construct_fn fn) { g_build_struct = fn; }
+construct_fn construct() { return g_build_struct; }
 
 bool available() {
 #ifdef _WIN32
@@ -243,6 +251,25 @@ bool can_compile(const skein::bc::Proto &proto) {
                         skein::bc::ConstantKind::Value ||
                     !proto.consts[ins.b].value ||
                     slot_op_char(ins.flags) == 0)
+                    return false;
+                break;
+            case skein::bc::Op::NewStruct: {
+                if (ins.b >= proto.constructs.size())
+                    return false;
+                const skein::bc::ConstructDesc &desc =
+                    proto.constructs[ins.b];
+                const int depth = proto.stack_depth[pc];
+                if (depth < static_cast<int>(desc.fields.size()))
+                    return false;
+                for (bool spread : desc.spread)
+                    if (spread)
+                        return false;
+                break;
+            }
+            case skein::bc::Op::GetFieldName:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
                     return false;
                 break;
             default:
@@ -527,6 +554,43 @@ JitCode *compile(const skein::bc::Proto &proto) {
                 a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_slot_binary_const));
                 push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::NewStruct: {
+                const skein::bc::ConstructDesc &desc =
+                    proto.constructs[ins.b];
+                const int count = static_cast<int>(desc.fields.size());
+                const int first = depth - count;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&desc)));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(first)));
+                call_addr(fn_address(&skein_jit_new_struct));
+                for (int i = first; i < depth; ++i)
+                    clear_slot(i);
+                push_reg(first, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::GetFieldName: {
+                const int value_depth = depth - 1;
+                const std::string &name = proto.consts[ins.b].name;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::imm(fn_address(name.c_str())));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_get_field));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
@@ -997,6 +1061,96 @@ extern "C" value_t *skein_jit_store_global(const skein::bc::Proto *proto,
         return nullptr;
     }
     return assign_symbol_direct(sym, value);
+}
+
+extern "C" value_t *skein_jit_new_struct(
+    const skein::bc::ConstructDesc *desc, value_t **fields) {
+    if (!desc || !fields) {
+        yyerror("invalid bytecode constructor");
+        return nullptr;
+    }
+    skein::jit::construct_fn fn = skein::jit::construct();
+    if (!fn) {
+        for (size_t i = 0; i < desc->fields.size(); ++i)
+            freeval(fields[i]);
+        yyerror("JIT struct construction is not installed");
+        return nullptr;
+    }
+    return fn(*desc, fields);
+}
+
+extern "C" value_t *skein_jit_get_field(value_t *container,
+                                        const char *name, int line,
+                                        int column) {
+    diag_set_location(line, column);
+    if (!container || !name) {
+        freeval(container);
+        return nullptr;
+    }
+
+    if (container->type == T_struct) {
+        struct struct_value_t *sv = (struct struct_value_t *)container;
+        if (!sv->def) {
+            yyerror("invalid struct value");
+            freeval(container);
+            return nullptr;
+        }
+        const int field = structtype_field_index(sv->def, name);
+        if (field >= 0 && sv->payload &&
+            (size_t)field < sv->payload->fields.size()) {
+            value_t *result = dupval(sv->payload->fields[(size_t)field]);
+            freeval(container);
+            return result;
+        }
+        auto method = sv->def->methods.find(name);
+        if (method != sv->def->methods.end()) {
+            value_t *result =
+                newmethodval(dupval(container), method->second);
+            freeval(container);
+            return result;
+        }
+        yyerror("field %s not found in %s", name, sv->def->name.c_str());
+        freeval(container);
+        return nullptr;
+    }
+
+    if (container->type == T_enum) {
+        struct enum_value_t *ev = (struct enum_value_t *)container;
+        if (!ev->def || ev->variant < 0 ||
+            (size_t)ev->variant >= ev->def->variants.size()) {
+            yyerror("invalid enum value");
+            freeval(container);
+            return nullptr;
+        }
+        const struct variant_def &variant =
+            ev->def->variants[(size_t)ev->variant];
+        const int field = structtype_variant_field_index(&variant, name);
+        if (field >= 0 && ev->payload &&
+            (size_t)field < ev->payload->fields.size()) {
+            value_t *result = dupval(ev->payload->fields[(size_t)field]);
+            freeval(container);
+            return result;
+        }
+        auto method = ev->def->methods.find(name);
+        if (method != ev->def->methods.end()) {
+            value_t *result =
+                newmethodval(dupval(container), method->second);
+            freeval(container);
+            return result;
+        }
+        yyerror("field %s not found in %s.%s", name,
+                ev->def->name.c_str(), variant.name.c_str());
+        freeval(container);
+        return nullptr;
+    }
+
+    struct string_value_t key;
+    key.type = T_string;
+    key.value = const_cast<char *>(name);
+    value_t *result = skein_vm_read_member_value(
+        container, (value_t *)&key, true);
+    freeval(container);
+    return result;
 }
 
 extern "C" value_t *skein_jit_invoke(value_t *callee, value_t **args,

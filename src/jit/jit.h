@@ -39,8 +39,18 @@ struct thread_state {
 using invoke_fn = value_t *(*)(value_t *callee, value_t **args,
                                uint32_t argc);
 
+/*
+ * Struct constructor callback.  The VM bridge implements this on top of the
+ * interpreter's struct metadata; the JIT only passes the descriptor and the
+ * field values (ownership transfers to the callback).
+ */
+using construct_fn = value_t *(*)(const skein::bc::ConstructDesc &desc,
+                                  value_t **fields);
+
 void set_invoke(invoke_fn fn);
 invoke_fn invoke();
+void set_construct(construct_fn fn);
+construct_fn construct();
 
 /* True when the runtime switch (SKEIN_JIT=1) enables the JIT. */
 bool available();

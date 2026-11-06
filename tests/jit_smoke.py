@@ -59,6 +59,8 @@ def main():
     ok &= compare(binary, "scope-bench", ROOT / "benchmarks" / "scope_bench.skein")
     ok &= compare(binary, "global-bench",
                   ROOT / "benchmarks" / "global_bench.skein")
+    ok &= compare(binary, "field-bench",
+                  ROOT / "benchmarks" / "field_bench.skein")
 
     with tempfile.TemporaryDirectory(prefix="skein-jit-") as tmp:
         tmp_path = Path(tmp)
@@ -112,6 +114,18 @@ def main():
             encoding="utf-8",
         )
         ok &= compare(binary, "const-error", const_error)
+
+        field_error = tmp_path / "field_error.skein"
+        field_error.write_text(
+            "struct Point { x: int; y: int; }\n"
+            "func f(n) {\n"
+            "  let p = Point { x: n, y: 2 };\n"
+            "  return p.z;\n"
+            "}\n"
+            "f(1);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "field-error", field_error)
 
     if not ok:
         return 1

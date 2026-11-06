@@ -61,6 +61,10 @@ def main():
                   ROOT / "benchmarks" / "global_bench.skein")
     ok &= compare(binary, "field-bench",
                   ROOT / "benchmarks" / "field_bench.skein")
+    ok &= compare(binary, "index-bench",
+                  ROOT / "benchmarks" / "index_bench.skein")
+    ok &= compare(binary, "index-write-bench",
+                  ROOT / "benchmarks" / "index_write_bench.skein")
 
     with tempfile.TemporaryDirectory(prefix="skein-jit-") as tmp:
         tmp_path = Path(tmp)
@@ -126,6 +130,17 @@ def main():
             encoding="utf-8",
         )
         ok &= compare(binary, "field-error", field_error)
+
+        index_error = tmp_path / "index_error.skein"
+        index_error.write_text(
+            'let mapping = {"key": 1};\n'
+            "func f(n) {\n"
+            '  return mapping["missing"];\n'
+            "}\n"
+            "f(1);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "index-error", index_error)
 
     if not ok:
         return 1

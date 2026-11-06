@@ -1,6 +1,7 @@
 #include "jit.h"
 
 #include "diagnostics.h"
+#include "dict.h"
 #include "eval_context.h"
 #include "scopestack.h"
 #include "structtype.h"
@@ -54,6 +55,12 @@ value_t *skein_jit_new_struct(const skein::bc::ConstructDesc *desc,
                               value_t **fields);
 value_t *skein_jit_get_field(value_t *container, const char *name, int line,
                              int column);
+value_t *skein_jit_get_index_cached(
+    value_t *container, value_t *index,
+    skein::bc::IndexReadCacheEntry *cache, int line, int column);
+value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
+                                value_t **indices, uint32_t count,
+                                value_t *value, int line, int column);
 int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
 void skein_jit_leave(skein::jit::thread_state *ts);
 void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
@@ -119,11 +126,9 @@ void unpack_loc(uint64_t packed, int &line, int &column) {
     column = static_cast<int>(packed & 0xffffffffu);
 }
 
-symbol *resolve_global_symbol(const skein::bc::Proto *proto, uint32_t slot,
-                              uint32_t name_index) {
-    if (!proto || name_index >= proto->consts.size())
+symbol *resolve_global_symbol(uint32_t slot, const char *name) {
+    if (!name)
         return nullptr;
-    const char *name = proto->consts[name_index].name.c_str();
     scope_context &scope = active_scope_context();
     if (slot < scope.global_slots.size()) {
         symbol *candidate = scope.global_slots[slot];
@@ -132,6 +137,13 @@ symbol *resolve_global_symbol(const skein::bc::Proto *proto, uint32_t slot,
             return candidate;
     }
     return lookupsym(name);
+}
+
+symbol *resolve_global_symbol(const skein::bc::Proto *proto, uint32_t slot,
+                              uint32_t name_index) {
+    if (!proto || name_index >= proto->consts.size())
+        return nullptr;
+    return resolve_global_symbol(slot, proto->consts[name_index].name.c_str());
 }
 
 } // namespace
@@ -272,6 +284,21 @@ bool can_compile(const skein::bc::Proto &proto) {
                         skein::bc::ConstantKind::Name)
                     return false;
                 break;
+            case skein::bc::Op::GetIndexCached:
+                if (ins.b >= proto.index_read_ic.size())
+                    return false;
+                break;
+            case skein::bc::Op::AssignIndex: {
+                if (ins.b >= proto.index_ops.size())
+                    return false;
+                const skein::bc::IndexDesc &desc =
+                    proto.index_ops[ins.b];
+                if (desc.fields.empty() ||
+                    (desc.base_kind != skein::bc::IndexBaseKind::Global &&
+                     desc.base_kind != skein::bc::IndexBaseKind::Name))
+                    return false;
+                break;
+            }
             default:
                 return false;
         }
@@ -591,6 +618,59 @@ JitCode *compile(const skein::bc::Proto &proto) {
                 call_addr(fn_address(&skein_jit_get_field));
                 clear_slot(value_depth);
                 push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::GetIndexCached: {
+                const int container_depth = depth - 2;
+                const int index_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(container_depth)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(index_depth)));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::imm(fn_address(
+                          &proto.index_read_ic[ins.b])));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_get_index_cached));
+                clear_slot(container_depth);
+                clear_slot(index_depth);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(container_depth)),
+                      asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::AssignIndex: {
+                const skein::bc::IndexDesc &desc =
+                    proto.index_ops[ins.b];
+                const int count = static_cast<int>(desc.fields.size());
+                const int value_depth = depth - count - 1;
+                const int indices_start = depth - count;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&desc)));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(indices_start)));
+                a.mov(asmjit::x86::edx, asmjit::imm(count));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_assign_index));
+                for (int i = value_depth; i < depth; ++i)
+                    clear_slot(i);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)),
+                      asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
@@ -1151,6 +1231,80 @@ extern "C" value_t *skein_jit_get_field(value_t *container,
         container, (value_t *)&key, true);
     freeval(container);
     return result;
+}
+
+extern "C" value_t *skein_jit_get_index_cached(
+    value_t *container, value_t *index,
+    skein::bc::IndexReadCacheEntry *cache, int line, int column) {
+    diag_set_location(line, column);
+    if (!container || !index) {
+        freeval(container);
+        freeval(index);
+        return nullptr;
+    }
+
+    if (container->type == T_dict && ((dict_value_t *)container)->payload) {
+        struct dict_value_t *dict = (struct dict_value_t *)container;
+        if (!dict_key_allowed(index)) {
+            yyerror("%s, got %s", dict_key_error(), typename_of(index));
+            freeval(container);
+            freeval(index);
+            return nullptr;
+        }
+        const auto &items = dict->payload->items;
+        int found = -1;
+        if (cache && cache->index >= 0 && cache->size == items.size() &&
+            (size_t)cache->index < items.size() &&
+            value_equals(items[(size_t)cache->index].first, index)) {
+            found = cache->index;
+        } else {
+            found = dict_find_index(dict, index);
+            if (found < 0) {
+                yyerror("key not found");
+                freeval(container);
+                freeval(index);
+                return nullptr;
+            }
+            if (cache) {
+                cache->size = items.size();
+                cache->index = found;
+            }
+        }
+        value_t *result = dupval(items[(size_t)found].second);
+        freeval(container);
+        freeval(index);
+        return result;
+    }
+
+    value_t *result =
+        skein_vm_read_member_value(container, index, false);
+    freeval(container);
+    freeval(index);
+    return result;
+}
+
+extern "C" value_t *skein_jit_assign_index(
+    const skein::bc::IndexDesc *desc, value_t **indices, uint32_t count,
+    value_t *value, int line, int column) {
+    diag_set_location(line, column);
+    if (!desc || !indices || !value || desc->fields.empty() ||
+        count != desc->fields.size()) {
+        freeval(value);
+        for (uint32_t i = 0; i < count; ++i)
+            freeval(indices[i]);
+        return nullptr;
+    }
+
+    symbol *base = nullptr;
+    if (desc->base_kind == skein::bc::IndexBaseKind::Global)
+        base = resolve_global_symbol(desc->base_index,
+                                     desc->base_name.c_str());
+    else if (desc->base_kind == skein::bc::IndexBaseKind::Name)
+        base = lookupsym(desc->base_name.c_str());
+
+    std::vector<value_t *> args(indices, indices + count);
+    return assign_index_symbol(base, desc->base_name.c_str(), args,
+                               desc->fields, value);
 }
 
 extern "C" value_t *skein_jit_invoke(value_t *callee, value_t **args,

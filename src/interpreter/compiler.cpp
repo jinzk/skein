@@ -368,7 +368,7 @@ bool finalize_proto(Proto &proto, std::string &error) {
         return false;
     proto.max_stack = max_stack;
 
-    proto.slots_direct_safe = !proto.uses_handlers;
+    proto.slots_direct_safe = true;
     return true;
 }
 struct LoopContext {

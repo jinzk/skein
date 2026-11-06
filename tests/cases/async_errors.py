@@ -577,6 +577,24 @@ def run_cases():
         stdout="251",
     )
     check(
+        "handler captures local closure",
+        "import std;\n"
+        "func boom() { fail \"boom\"; }\n"
+        "func f() {\n"
+        "  let g = func() { return 0; };\n"
+        "  let v = boom() on error(e) {\n"
+        "    let y = 4;\n"
+        "    func h() { return y; }\n"
+        "    g = h;\n"
+        "    recover y;\n"
+        "  };\n"
+        "  print(str(v));\n"
+        "  print(str(g()));\n"
+        "}\n"
+        "f();\n",
+        stdout="44",
+    )
+    check(
         "defer return",
         "import std;\n"
         "func f() {\n"

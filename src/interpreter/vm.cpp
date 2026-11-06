@@ -258,7 +258,6 @@ public:
                 param_symbols_.push_back(lookupsym(name.c_str()));
         }
         direct_slots_ = !proto.slots.empty() && proto.slots_direct_safe &&
-                        !proto.uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         if (direct_slots_) {
             slot_values_.assign(proto.slots.size(), NULL);
@@ -3447,11 +3446,9 @@ private:
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_params_ = proto->params_direct &&
-                         !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_slots_ = !proto->slots.empty() &&
                         proto->slots_direct_safe &&
-                        !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
@@ -3523,11 +3520,9 @@ private:
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_params_ = proto->params_direct &&
-                         !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_slots_ = !proto->slots.empty() &&
                         proto->slots_direct_safe &&
-                        !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
@@ -4004,7 +3999,7 @@ private:
     }
 
     bool frame_uses_symbol_cells() const {
-        return proto().uses_handlers || !direct_slots_ || !direct_params_;
+        return !direct_slots_ || !direct_params_;
     }
 
     std::shared_ptr<struct upvalue_cell> capture_upvalue(

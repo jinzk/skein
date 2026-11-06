@@ -408,7 +408,8 @@ bool frame_eligible =
   frame slot；
 - defer 表达式在 `DEFER_PUSH` 时把引用到的局部/参数/upvalue 捕获为
   显式 `upvalue_cell`，defer 捕获不再依赖 push 时的 scope 快照；
-- handler 帧仍保留 `symbol*` 兼容路径；
+- handler 帧也已切换到 direct frame slot；仅在关闭参数/slot pool 的调试
+  模式下保留 `symbol*` 兼容路径；
 - JIT 始终使用自己的 frame slots。
 
 ### 7.3 Verifier 元数据

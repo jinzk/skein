@@ -175,7 +175,7 @@ struct handler_state {
 
 struct defer_record {
     std::shared_ptr<const Proto> proto;
-    std::shared_ptr<scope_t> scope;
+    std::vector<std::shared_ptr<struct upvalue_cell>> upvalues;
 };
 
 value_t *execute_proto(
@@ -258,7 +258,7 @@ public:
                 param_symbols_.push_back(lookupsym(name.c_str()));
         }
         direct_slots_ = !proto.slots.empty() && proto.slots_direct_safe &&
-                        !proto.uses_defers && !proto.uses_handlers &&
+                        !proto.uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         if (direct_slots_) {
             slot_values_.assign(proto.slots.size(), NULL);
@@ -884,6 +884,12 @@ public:
                     }
                     if (ins.b < slot_symbols_.size()) {
                         struct symbol *sym = slot_symbols_[ins.b];
+                        if (sym) {
+                            for (auto &cell : open_upvalues_) {
+                                if (cell->slot == &sym->val)
+                                    close_upvalue(*cell);
+                            }
+                        }
                         if (sym && slot_pool_safe_ && !sym->scope_owned) {
                             freeval(sym->val);
                             sym->val = NULL;
@@ -2298,7 +2304,19 @@ public:
                     }
                     defer_record record;
                     record.proto = proto().defer_protos[ins.b];
-                    record.scope = current_scope();
+                    if (ins.b < proto().defer_captures.size()) {
+                        const std::vector<skein::bc::DeferCapture>
+                            &captures = proto().defer_captures[ins.b];
+                        record.upvalues.reserve(captures.size());
+                        for (const skein::bc::DeferCapture &capture :
+                             captures) {
+                            std::shared_ptr<struct upvalue_cell> cell =
+                                capture_defer_cell(capture);
+                            if (!cell)
+                                return abort_error();
+                            record.upvalues.push_back(std::move(cell));
+                        }
+                    }
                     defer_scopes_.back().push_back(std::move(record));
                     ++context_.vm_defer_count;
                     if (vm_stats.enabled &&
@@ -2676,6 +2694,7 @@ public:
                         run_defer_scope(defer_scopes_.back());
                         defer_scopes_.pop_back();
                     }
+                    close_scope_upvalues(scope);
                     skein_vm_eval_popscope();
                     if (had_symbols)
                         invalidate_name_cache();
@@ -2715,6 +2734,7 @@ public:
                 if (!dispatch_unwind(unwind)) {
                     discard_handlers();
                     run_all_defers();
+                    close_upvalues();
                     free_stack(stack_);
                     recycle_params();
                     recycle_slots();
@@ -3427,11 +3447,11 @@ private:
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_params_ = proto->params_direct &&
-                         !proto->uses_defers && !proto->uses_handlers &&
+                         !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_slots_ = !proto->slots.empty() &&
                         proto->slots_direct_safe &&
-                        !proto->uses_defers && !proto->uses_handlers &&
+                        !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
@@ -3503,11 +3523,11 @@ private:
                            !proto->has_closures && !proto->uses_defers &&
                            read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_params_ = proto->params_direct &&
-                         !proto->uses_defers && !proto->uses_handlers &&
+                         !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
         direct_slots_ = !proto->slots.empty() &&
                         proto->slots_direct_safe &&
-                        !proto->uses_defers && !proto->uses_handlers &&
+                        !proto->uses_handlers &&
                         read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
@@ -3882,6 +3902,25 @@ private:
         open_upvalues_.clear();
     }
 
+    /*
+     * Symbols owned by a scope are freed when that scope pops.  Open
+     * upvalue cells may still point at their storage (for example a defer
+     * capture in a handler body), so detach them before the symbols go
+     * away.
+     */
+    void close_scope_upvalues(scope_t *scope) {
+        if (!scope)
+            return;
+        for (struct symbol *sym : scope->syms.small) {
+            if (!sym)
+                continue;
+            for (auto &cell : open_upvalues_) {
+                if (cell->slot == &sym->val)
+                    close_upvalue(*cell);
+            }
+        }
+    }
+
     std::shared_ptr<struct upvalue_cell> open_cell(
         value_t **storage, const struct type_constraint *type,
         const std::string &name, bool is_const) {
@@ -3897,6 +3936,75 @@ private:
         cell->is_const = is_const;
         open_upvalues_.push_back(cell);
         return cell;
+    }
+
+    std::shared_ptr<struct upvalue_cell> capture_defer_cell(
+        const skein::bc::DeferCapture &capture) {
+        switch (capture.kind) {
+            case skein::bc::DeferCaptureKind::Slot: {
+                if (capture.index >= proto().slots.size()) {
+                    yyerror("invalid defer slot capture %s",
+                            capture.name.c_str());
+                    return NULL;
+                }
+                const skein::bc::SlotDesc &slot =
+                    proto().slots[capture.index];
+                bool is_const =
+                    slot.is_const ||
+                    (capture.index < slot_const_.size() &&
+                     slot_const_[capture.index]);
+                if (direct_slots_)
+                    return open_cell(&slot_values_[capture.index],
+                                     &slot.type, capture.name, is_const);
+                if (capture.index >= slot_symbols_.size() ||
+                    !slot_symbols_[capture.index]) {
+                    yyerror("local %s is not captured by a frame slot",
+                            capture.name.c_str());
+                    return NULL;
+                }
+                struct symbol *sym = slot_symbols_[capture.index];
+                return open_cell(&sym->val, &sym->type, capture.name,
+                                 sym->is_const);
+            }
+            case skein::bc::DeferCaptureKind::Param: {
+                if (capture.index >= proto().param_names.size()) {
+                    yyerror("invalid defer parameter capture %s",
+                            capture.name.c_str());
+                    return NULL;
+                }
+                if (direct_params_ &&
+                    capture.index < param_values_.size()) {
+                    struct symlist *sl = param_meta(capture.index);
+                    return open_cell(&param_values_[capture.index],
+                                     sl ? sl->type : NULL,
+                                     capture.name, false);
+                }
+                if (capture.index >= param_symbols_.size() ||
+                    !param_symbols_[capture.index]) {
+                    yyerror("parameter %s is not captured by a frame slot",
+                            capture.name.c_str());
+                    return NULL;
+                }
+                struct symbol *sym = param_symbols_[capture.index];
+                return open_cell(&sym->val, &sym->type, capture.name,
+                                 sym->is_const);
+            }
+            case skein::bc::DeferCaptureKind::Upvalue:
+                if (!current_def_ ||
+                    capture.index >= current_def_->upvalues.size() ||
+                    !current_def_->upvalues[capture.index]) {
+                    yyerror("upvalue %s is not captured by a frame slot",
+                            capture.name.c_str());
+                    return NULL;
+                }
+                return current_def_->upvalues[capture.index];
+        }
+        yyerror("invalid defer capture %s", capture.name.c_str());
+        return NULL;
+    }
+
+    bool frame_uses_symbol_cells() const {
+        return proto().uses_handlers || !direct_slots_ || !direct_params_;
     }
 
     std::shared_ptr<struct upvalue_cell> capture_upvalue(
@@ -3935,7 +4043,7 @@ private:
         if (!sym || (scopes.global_scope &&
                      scopes.global_scope->syms.find(name.c_str()) == sym))
             return NULL;
-        if (proto().uses_defers || proto().uses_handlers)
+        if (frame_uses_symbol_cells())
             return open_cell(&sym->val, &sym->type, name, sym->is_const);
         yyerror("local %s is not captured by a frame slot",
                 name.c_str());
@@ -3968,7 +4076,7 @@ private:
             }
             if (!scopes.global_scope ||
                 scopes.global_scope->syms.find(name) != sym) {
-                if (proto().uses_defers || proto().uses_handlers)
+                if (frame_uses_symbol_cells())
                     return sym;
                 yyerror("upvalue %s is not captured by a frame slot", name);
                 return NULL;
@@ -4011,7 +4119,7 @@ private:
         }
         if (!scopes.global_scope ||
             scopes.global_scope->syms.find(name) != sym) {
-            if (proto().uses_defers || proto().uses_handlers)
+            if (frame_uses_symbol_cells())
                 return sym;
             yyerror("upvalue %s is not captured by a frame slot", name);
             return NULL;
@@ -4601,16 +4709,15 @@ private:
     }
 
     value_t *run_defer(const defer_record &record) {
-        if (!record.proto || !record.scope) {
+        if (!record.proto) {
             yyerror("invalid defer");
             return NULL;
         }
-        std::shared_ptr<scope_t> saved_scope = context_.scopes.current;
-        context_.scopes.current = record.scope;
-        Executor executor(*record.proto);
-        value_t *result = executor.run();
-        context_.scopes.current = saved_scope;
-        return result;
+        std::shared_ptr<function_def> def =
+            std::make_shared<function_def>();
+        def->upvalues = record.upvalues;
+        Executor executor(*record.proto, std::move(def));
+        return executor.run();
     }
 
     void run_defer_scope(std::vector<defer_record> &records) {
@@ -4696,6 +4803,7 @@ private:
                 run_defer_scope(defer_scopes_.back());
                 defer_scopes_.pop_back();
             }
+            close_scope_upvalues(topscope());
             skein_vm_eval_popscope();
         }
     }
@@ -4750,6 +4858,7 @@ private:
         unwind_fast_frames();
         discard_handlers();
         run_all_defers();
+        close_upvalues();
         free_stack(stack_);
         recycle_params();
         recycle_slots();

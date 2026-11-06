@@ -406,7 +406,9 @@ bool frame_eligible =
 - params 和 `slots_direct_safe` 的 fast frame slots 已迁移到 `value_t*` 数组；
 - 声明/impl 方法、嵌套函数声明、for-in/match/bind/import 的捕获已走
   frame slot；
-- defer/handler 帧仍保留 `symbol*` 兼容路径；
+- defer 表达式在 `DEFER_PUSH` 时把引用到的局部/参数/upvalue 捕获为
+  显式 `upvalue_cell`，defer 捕获不再依赖 push 时的 scope 快照；
+- handler 帧仍保留 `symbol*` 兼容路径；
 - JIT 始终使用自己的 frame slots。
 
 ### 7.3 Verifier 元数据

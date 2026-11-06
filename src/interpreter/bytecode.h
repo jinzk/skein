@@ -267,6 +267,19 @@ struct MatchArmDesc {
     bool has_guard = false;
 };
 
+/* Storage backing one captured local of a deferred expression. */
+enum class DeferCaptureKind : uint8_t {
+    Slot,
+    Param,
+    Upvalue,
+};
+
+struct DeferCapture {
+    std::string name;
+    DeferCaptureKind kind = DeferCaptureKind::Slot;
+    uint32_t index = 0;
+};
+
 struct SlotDesc {
     std::string name;
     type_constraint type;
@@ -425,6 +438,8 @@ struct Proto {
     std::vector<std::vector<MatchArmDesc>> match_arms;
     std::vector<CallDesc> call_descs;
     std::vector<std::shared_ptr<const Proto>> defer_protos;
+    /* Parallel to defer_protos: locals captured by each deferred expression. */
+    std::vector<std::vector<DeferCapture>> defer_captures;
 
     std::vector<std::string> param_names;
     std::vector<std::string> upvalues;

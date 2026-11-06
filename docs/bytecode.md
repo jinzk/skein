@@ -120,11 +120,11 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - `return`
 - 函数定义 / 闭包（`CLOSURE` / `BIND_FUNC`，函数体首次调用时编译并缓存在 `function_code`）
 - 参数 fast path（`LOAD_PARAM` / `STORE_PARAM` / `COMPOUND_PARAM` / `INCDEC_PARAM`；参数未被本函数局部声明遮蔽时）
-- 参数直接 frame 化（`params_direct` 且无闭包/defer/handler 时
-  直接存 `value_t*`；`SKEIN_VM_PARAM_POOL=0` 可关闭）
+- 参数直接 frame 化（`params_direct` 且无 handler 时直接存
+  `value_t*`；defer 帧也支持；`SKEIN_VM_PARAM_POOL=0` 可关闭）
 - 局部 slot direct frame（`slots_direct_safe` 时直接存 `value_t*`，
   跳过 symbol 分配/`savesym`；`SKEIN_VM_SLOT_POOL=0` 可关闭）
-- 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；for-in/match/bind/import/声明等已支持 direct frame slot；defer/handler 帧仍保留 `symbol*` 兼容路径）
+- 局部变量 slot fast path（`DEFINE_SLOT` / `LOAD_SLOT` / `STORE_SLOT` / `COMPOUND_SLOT` / `INCDEC_SLOT` / `CLEAR_SLOT`；for-in/match/bind/import/声明等已支持 direct frame slot；defer 帧也使用 direct frame slot 并通过显式 upvalue cell 捕获；handler 帧仍保留 `symbol*` 兼容路径）
 - 参数 destructuring pattern（编译为 `PatternDesc`，调用绑定时原生匹配）
 - 默认参数表达式（编译为独立 Proto，调用时执行）
 - 函数调用（普通函数、builtin、方法值、spread 参数）
@@ -141,7 +141,7 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - package 声明
 - `fail`
 - `on error` / `recover` / `pass`（handler 栈 + 局部 unwind）
-- `defer`（独立 Proto + 捕获作用域，在 scope exit/unwind 时执行）
+- `defer`（独立 Proto + 显式 upvalue cell，在 scope exit/unwind 时执行）
 - `await` / `yield`
 - `import`
 - 块作用域（`PUSH_SCOPE` / `POP_SCOPE`）
@@ -301,8 +301,9 @@ struct Instr {
 - 局部变量使用 slot fast path；函数参数在未被局部声明遮蔽时使用参数 fast
   path。满足 `slots_direct_safe` 的 fast frame 直接把 slot 存为 `value_t*`；
   for-in 循环变量、match binding、destructuring、BindName 和 import 绑定
-  也走 frame slot。defer/handler 帧仍保留 `symbol*` 兼容路径，等待后续
-  将 defer 捕获改为显式 upvalue cell。
+  也走 frame slot。defer 帧同样使用 direct frame slot，defer 表达式在
+  `DEFER_PUSH` 时把引用到的局部/参数/upvalue 捕获为显式 `upvalue_cell`；
+  handler 帧仍保留 `symbol*` 兼容路径。
 - 普通嵌套函数使用 `LOAD_UPVALUE` / `STORE_UPVALUE` 等索引访问捕获
   变量；upvalue 使用显式 `upvalue_cell`：帧存活时处于 open 状态，指向
   frame slot 或 symbol cell；帧退出时 close，cell 持有值并脱离原存储。
@@ -323,8 +324,8 @@ struct Instr {
   `GET_INDEX_CACHED` per-site 缓存；索引写入使用 `IndexDesc` 中已解析的
   slot / param / upvalue / global 基址；默认参数、variadic、
   method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
-- 顶层块内函数、方法闭包仍使用名字查找；默认参数 / defer 子 Proto
-  暂未使用 upvalue 索引。
+- 顶层块内函数、方法闭包仍使用名字查找；默认参数子 Proto 暂未使用
+  upvalue 索引；defer 子 Proto 已改为显式 upvalue 索引。
 - TCO 当前只覆盖无 spread 的普通尾调用；有 defer / handler / iterator
   时回退普通调用。诊断调用栈最多保留 64 层尾调用帧。
 - AST 参考后端调用深度默认 1000，可用 `SKEIN_MAX_CALL_DEPTH` 调整；

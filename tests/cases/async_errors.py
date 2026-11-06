@@ -517,6 +517,45 @@ def run_cases():
         stdout_all=["in", "block", "after"],
     )
     check(
+        "defer captures local closure",
+        "import std;\n"
+        "func f() {\n"
+        "  let x = 5;\n"
+        "  defer print(str(func() { return x; }()));\n"
+        "  x = 7;\n"
+        "}\n"
+        "f();\n",
+        stdout="7",
+    )
+    check(
+        "defer captures shadowed local",
+        "import std;\n"
+        "func f() {\n"
+        "  let x = 1;\n"
+        "  { let x = 2; defer print(str(x)); }\n"
+        "  defer print(str(x));\n"
+        "}\n"
+        "f();\n",
+        stdout="21",
+    )
+    check(
+        "defer inside error handler captures local",
+        "import std;\n"
+        "func boom() { fail \"boom\"; }\n"
+        "func f() {\n"
+        "  let x = 1;\n"
+        "  defer print(str(x));\n"
+        "  let v = boom() on error(e) {\n"
+        "    let y = 2;\n"
+        "    defer print(str(y));\n"
+        "    recover 5;\n"
+        "  };\n"
+        "  print(str(v));\n"
+        "}\n"
+        "f();\n",
+        stdout="251",
+    )
+    check(
         "defer return",
         "import std;\n"
         "func f() {\n"

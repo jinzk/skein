@@ -477,6 +477,40 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
                 return fail(error, at_pc("defer descriptor out of range", pc));
             if (!proto.uses_defers)
                 return fail(error, at_pc("defer flag missing", pc));
+            if (ins.b < proto.defer_captures.size()) {
+                const std::vector<DeferCapture> &captures =
+                    proto.defer_captures[ins.b];
+                const ProtoPtr &child = proto.defer_protos[ins.b];
+                if (!child || child->upvalues.size() != captures.size())
+                    return fail(error,
+                                at_pc("defer capture count mismatch", pc));
+                for (size_t i = 0; i < captures.size(); ++i) {
+                    const DeferCapture &capture = captures[i];
+                    if (child->upvalues[i] != capture.name)
+                        return fail(error,
+                                    at_pc("defer capture name mismatch", pc));
+                    switch (capture.kind) {
+                        case DeferCaptureKind::Slot:
+                            if (!check_slot(proto, capture.index, pc, error))
+                                return false;
+                            break;
+                        case DeferCaptureKind::Param:
+                            if (capture.index >= proto.param_names.size())
+                                return fail(
+                                    error,
+                                    at_pc("defer parameter capture out of "
+                                          "range", pc));
+                            break;
+                        case DeferCaptureKind::Upvalue:
+                            if (capture.index >= proto.upvalues.size())
+                                return fail(
+                                    error,
+                                    at_pc("defer upvalue capture out of "
+                                          "range", pc));
+                            break;
+                    }
+                }
+            }
             break;
         case Op::NewStruct:
         case Op::NewEnum: {

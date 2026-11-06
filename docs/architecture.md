@@ -164,9 +164,14 @@ typedef struct {
 
 - JIT/AOT 代码生成与字节码缓存。
 
+下一阶段：
+
+- 精确 GC root 表：VM/JIT frame slots、operand stack、upvalue cell、
+  defer/iterator/handler 值与 JIT safepoint；
+- 随后再做 per-pc liveness / moving GC 准备。
+
 未开始：
 
-- 精确 GC 栈图；
 - FFI 的 Windows/32 位/ARM CI 与 fuzz。
 
 ## 7. 验收标准

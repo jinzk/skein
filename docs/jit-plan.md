@@ -1,6 +1,6 @@
 # Skein JIT 开发计划（Spike 与后续路线）
 
-- 状态：Spike 进行中（Linux x86-64 `fib` JIT 已落地）
+- 状态：JIT spike 已完成；当前下一阶段为 GC root map（Phase 3）
 - 更新日期：2026-11-06
 - 关联文档：
   - [bytecode.md](bytecode.md)
@@ -8,7 +8,7 @@
   - [architecture.md](architecture.md)
 
 本文把 `bytecode-plan.md` 中“JIT/AOT 待决策”的部分收敛为可执行的 JIT 路线。
-当前只批准 **4 周 spike**，不直接承诺完整 JIT 交付。
+Spike 已完成；后续工作按 §12 的阶段推进，GC root map 是当前主线。
 
 ---
 
@@ -58,6 +58,8 @@ Go/No-Go 标准见 §10。
 - params 直接 frame 化：eligible fast frame 不再创建参数 symbol；
 - upvalue cell：captures 使用显式 open/closed `upvalue_cell`，支持直接
   param/slot 捕获，帧退出时 close；
+- handler frame：`on error(e)` 绑定、handler 局部变量和闭包捕获均使用
+  direct frame slot，不再强制走 `symbol*`；
 - `TAIL_CALL`：
   - 自递归尾调用直接复用当前 JIT 机器帧，重绑参数并跳回 body；
   - 非自递归尾调用通过 tail request + driver loop 做通用 trampoline，
@@ -84,15 +86,41 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 
 尚未落地：
 
+- **精确 GC root 表（下一阶段 P0）**：当前 cycle collector 的 roots 基本
+  只覆盖 scope；direct frame slot、operand stack、upvalue cell、defer
+  capture、iterator/handler 值和 JIT frame 尚未完整登记为 roots；
 - Win64 ABI 代码路径已接入（MinGW `sysv_abi` helper + Win64 entry thunk），
   本机无 MinGW/Windows 环境，仍需 CI 或真机验证；
-- OSR / deopt；
+- per-pc liveness / safepoint 表；
 - 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
   但不会形成调用栈增长。该项暂按性能 backlog 处理，不阻塞当前
-  frame slot / GC / Win64 工作；待精确 GC 栈图稳定后再评估 frame
-  复用或零帧分配。
+  frame slot / GC / Win64 工作；待 GC root 表与 safepoint 稳定后再评估
+  frame 复用或零帧分配；
+- Handler JIT：故意 deferred，等 GC roots / landing pad 基础设施稳定后
+  再作为独立阶段处理；
+- OSR / deopt；
 - pattern 参数必须能编译为原生 PatternDesc，否则回退 VM；
 - 更完整的 opcode 覆盖。
+
+### 下一阶段优先级（2026-11-06 决策）
+
+1. **P0：精确 GC root 表（frame roots）**
+   - 覆盖 VM/JIT frame 的 param/slot/operand stack；
+   - 覆盖 open/closed `upvalue_cell`、defer captures、iterator/handler
+     持有的值；
+   - cycle collector 从 scope-only roots 扩展为 scope + frame roots；
+   - 第一版采用“所有 value slot 都是 root”的保守精确表，不先做 per-pc
+     liveness。
+2. **P0（并行）：Win64/MinGW 真实验证**
+3. **P1：per-pc liveness / safepoint 表**
+   - 为 GC stress、frame reuse、deopt 做准备。
+4. **P2：尾调用 frame 复用 / 零帧分配**
+   - 依赖 root map 与 safepoint，避免 frame 布局反复返工。
+5. **P3：Handler JIT、OSR/deopt**
+   - 独立且高复杂度，暂不进入当前主线。
+
+**决策：在 GC root map 完成前，不启动 Handler JIT、尾调用 frame reuse、
+OSR/deopt。** 这些工作都会直接改动 frame 布局或 root 位置。
 
 ---
 
@@ -685,6 +713,35 @@ hits++
 - `skein_vm_shutdown()` 统一清理所有 JIT 代码；
 - `JitRuntime` 使用函数局部静态对象，避免静态析构顺序问题。
 
+### 7.11 GC roots 与 frame 生命周期
+
+当前 GC 是“引用计数 + scope 粒度 cycle collector”，其 roots 只覆盖
+scope。direct frame slot、upvalue cell、defer/iterator/handler 和 JIT
+frame 中的 value 需要显式登记，否则可达性分析不完整。
+
+第一版设计：
+
+- 每个 frame 在建立时把 value 槽位注册到当前 fiber 的 root 列表；
+- root 槽位包括：
+  - param slots；
+  - local slots；
+  - operand stack；
+  - `function_def::upvalues` 和 open `upvalue_cell`；
+  - defer record 捕获；
+  - iterator 当前值；
+  - handler 捕获的错误值；
+- JIT frame 使用编译期生成的 slot 偏移表登记 roots；
+- cycle collector 遍历 roots 以及 `upvalue_cell` / defer / iterator /
+  handler 的可达值；
+- 第一版保守地把所有 value slot 当 root，仅排除 raw 字段；
+- per-pc liveness 和 safepoint 表放到后续 Phase 4。
+
+约束：
+
+- frame 销毁前必须先注销 roots，避免 GC 访问已释放的 frame；
+- tail frame 复用、OSR、deopt 必须在 root 切换点更新 safepoint；
+- moving/compacting GC 需要 per-pc liveness，第一版不承诺。
+
 ---
 
 ## 8. Windows / MinGW
@@ -842,7 +899,7 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 
 ## 12. 后续阶段（Go 之后）
 
-### Phase 2：baseline JIT（3–4 周）
+### Phase 2：baseline JIT（已完成）
 
 - slot / param / global / 常量；
 - int/float/bool 运算与比较；
@@ -851,26 +908,54 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 - 单态 inline cache；
 - 覆盖 `slot` / `field` / `index` / `global` 基准。
 
-### Phase 3：OSR + 完整 frame VM（3–4 周）
+### Phase 3：GC root map 与 frame roots（当前下一阶段，3–4 周）
 
-- 移除每帧 `Executor` 分配和 C++ 递归；
-- frame slot 统一；
-- loop header / back-edge 元数据；
+目标是先保证 GC 能“看见”所有 live value，不追求立即移动对象。
+
+- 定义统一的 `frame root map` 元数据：
+  - param / slot / operand stack；
+  - open/closed upvalue cells；
+  - defer capture；
+  - iterator / handler 持有的 value；
+  - JIT frame 的 safepoint 偏移表；
+- VM `Executor` 和 JIT entry 在 frame 建立/销毁时登记 roots；
+- cycle collector 从 scope-only 扩展为 scope + frame roots；
+- 扩展 `for_each_value_child` / collector 遍历 `upvalue_cell`、defer、
+  iterator 和 handler state；
+- 增加 `SKEIN_GC_STRESS`：每个语句/分配后强制收集；
+- 测试：
+  - direct slot 中的容器 ↔ closure 环；
+  - closed upvalue cell 中的环；
+  - defer/iterator/handler 捕获形成的环；
+  - JIT frame 持有容器/闭包时的回收与可达性；
+  - 现有 reachable-closure 集合在 stress 模式下不回归。
+
+验收：GC roots 完整；可达 closure/scope 不被误清；cell/JIT frame
+相关环可被识别或明确记录为待处理。
+
+### Phase 4：per-pc liveness / moving GC 准备（3–4 周）
+
+- 每个调用点、分配点、循环回边记录 live value slots；
+- JIT 生成 safepoint + liveness 表；
+- 只把真正 live 的 slot 作为 root；
+- 为 frame reuse、deopt、moving/compacting GC 做准备。
+
+### Phase 5：JIT 能力扩展（4–6 周）
+
+- Handler JIT：handler table + landing pad / runtime unwind helper；
+- 尾调用 frame reuse / 零帧分配：依赖 Phase 4 safepoint；
 - OSR 进入 JIT；
-- deopt 基础。
-
-### Phase 4：类型特化 / tracing（4–6 周）
-
-- unboxed int 寄存器运算；
-- 小整数表 inline；
-- 单态字段/调用缓存内联；
+- deopt 基础；
+- 类型特化 / unboxed int / 单态字段与调用缓存内联；
 - 如仍有收益，再评估 tracing。
 
 ### 独立决策
 
 - AOT / 字节码序列化；
 - 预编译 stdlib；
-- 字节码 ABI 冻结。
+- 字节码 ABI 冻结；
+- 是否引入 moving/compacting GC（若引入，Phase 4 的 per-pc liveness
+  变为强制项）。
 
 ---
 
@@ -881,4 +966,8 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 3. Phase 2 是否继续使用 asmjit，还是先评估 `x86::Compiler` 的 prologue/regalloc 能力？
 4. 是否把本文链接加入 `README.md` 的文档列表？
 5. 是否需要在 Phase 1 就加入 `SKEIN_JIT_DUMP` 的生产开关，还是只保留 debug 构建？
+6. GC root map 第一版采用“所有 value slot 都是 root”的保守方案，还是
+   直接做 per-pc liveness？
+7. 是否计划 moving/compacting GC？若暂时不计划，root map 先服务
+   cycle collector 正确性；若计划，per-pc liveness 必须提前。
 

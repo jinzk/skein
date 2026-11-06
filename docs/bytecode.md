@@ -332,7 +332,9 @@ struct Instr {
   时回退普通调用。诊断调用栈最多保留 64 层尾调用帧。
 - AST 参考后端调用深度默认 1000，可用 `SKEIN_MAX_CALL_DEPTH` 调整；
   sanitizer 构建使用更小的值以适配更大的 C++ 帧。
-- 尚未实现精确 GC 栈图；JIT spike 见
+- 尚未实现精确 GC root 表；当前 cycle collector 的 roots 基本只覆盖
+  scope，direct frame slot、upvalue cell、defer/iterator/handler 和
+  JIT frame 还需要显式登记。该项是下一阶段 P0，见
   [jit-plan.md](jit-plan.md)；AOT、字节码序列化与磁盘缓存待决策。
 
 ## 7. 后续阶段
@@ -342,8 +344,9 @@ struct Instr {
 3. 扩展尾调用优化到 spread / method / 默认参数 / variadic；
 4. 把 VM 执行缓存、函数体/默认参数/pattern AST 全部收敛到 L2 side table
    （已完成，后续只保留签名元数据）；
-5. 精确 GC 栈图；JIT spike（见 [jit-plan.md](jit-plan.md)）；
-   AOT、字节码序列化待决策；
+5. 精确 GC root 表，随后是 per-pc liveness / moving GC 准备；
+   Handler JIT、尾调用 frame reuse、OSR/deopt 依赖这一步（见
+   [jit-plan.md](jit-plan.md)）；AOT、字节码序列化待决策；
 6. generator/async 与 VM 状态整合；
 7. unboxed slot、内联缓存、超指令、computed goto；
 8. AST 后端降级为可选参考实现。

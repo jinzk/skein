@@ -400,9 +400,9 @@ bool frame_eligible =
     !is_method;
 ```
 
-- params 已迁移到 `value_t*` 数组；
-- slots 仍使用 symbol cell（JIT 使用自己的 frame slots）；
-- 其余 Proto 继续使用 `symbol*` cell。
+- params 和 `slots_direct_safe` 的 fast frame slots 已迁移到 `value_t*` 数组；
+- 闭包/defer/for-in/match/import 等仍使用 `symbol*` cell；
+- JIT 始终使用自己的 frame slots。
 
 ### 7.3 Verifier 元数据
 

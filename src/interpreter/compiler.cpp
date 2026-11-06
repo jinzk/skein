@@ -367,6 +367,38 @@ bool finalize_proto(Proto &proto, std::string &error) {
     if (!skein::bc::verify(proto, error, &max_stack))
         return false;
     proto.max_stack = max_stack;
+
+    proto.slots_direct_safe =
+        proto.params_direct && !proto.has_closures && !proto.uses_defers &&
+        !proto.uses_handlers && !proto.uses_names && proto.upvalues.empty();
+    if (proto.slots_direct_safe) {
+        for (const skein::bc::Instr &ins : proto.code) {
+            switch (static_cast<skein::bc::Op>(ins.op)) {
+                case skein::bc::Op::IterNew:
+                case skein::bc::Op::IterNext:
+                case skein::bc::Op::IterEnd:
+                case skein::bc::Op::MatchBegin:
+                case skein::bc::Op::MatchTest:
+                case skein::bc::Op::MatchBind:
+                case skein::bc::Op::BindName:
+                case skein::bc::Op::Import:
+                    proto.slots_direct_safe = false;
+                    break;
+                default:
+                    break;
+            }
+            if (!proto.slots_direct_safe)
+                break;
+        }
+    }
+    if (proto.slots_direct_safe) {
+        for (const skein::bc::IndexDesc &desc : proto.index_ops) {
+            if (desc.base_kind == skein::bc::IndexBaseKind::Slot) {
+                proto.slots_direct_safe = false;
+                break;
+            }
+        }
+    }
     return true;
 }
 struct LoopContext {

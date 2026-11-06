@@ -220,11 +220,13 @@ struct SavedVmState {
     bool param_pool_safe = false;
     bool slot_pool_safe = false;
     bool direct_params = false;
+    bool direct_slots = false;
     std::shared_ptr<function_def> def;
     std::vector<NameCacheSlot> name_cache;
     std::vector<struct symbol *> param_symbols;
     std::vector<value_t *> param_values;
     std::vector<struct symbol *> slot_symbols;
+    std::vector<value_t *> slot_values;
     std::vector<iterator_state> iterators;
     std::vector<std::vector<defer_record>> defer_scopes;
     std::vector<handler_state> handlers;
@@ -261,6 +263,9 @@ public:
         for (value_t *value : param_values_)
             freeval(value);
         param_values_.clear();
+        for (value_t *value : slot_values_)
+            freeval(value);
+        slot_values_.clear();
         for (iterator_state &state : iterators_) {
             freeval(state.iterable);
             state.iterable = NULL;
@@ -625,7 +630,7 @@ public:
 
                 case Op::DefineSlot: {
                     if (ins.b >= proto().slots.size() ||
-                        ins.b >= slot_symbols_.size()) {
+                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
                         yyerror("invalid bytecode slot");
                         return abort_error();
                     }
@@ -664,6 +669,17 @@ public:
                         freeval(value);
                         return abort_error();
                     }
+                    if (direct_slots_) {
+                        if (ins.b >= slot_values_.size()) {
+                            yyerror("invalid bytecode slot");
+                            freeval(value);
+                            return abort_error();
+                        }
+                        freeval(slot_values_[ins.b]);
+                        slot_values_[ins.b] = value;
+                        push(newnull());
+                        break;
+                    }
                     struct symbol *sym = NULL;
                     if (slot_pool_safe_)
                         sym = take_pooled_symbol(slot_symbol_pool_,
@@ -687,11 +703,21 @@ public:
 
                 case Op::LoadSlot: {
                     if (ins.b >= proto().slots.size() ||
-                        ins.b >= slot_symbols_.size()) {
+                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
                         yyerror("invalid bytecode slot");
                         return abort_error();
                     }
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                    if (direct_slots_) {
+                        if (ins.b >= slot_values_.size() ||
+                            !slot_values_[ins.b]) {
+                            yyerror("symbol not found %s",
+                                    slot.name.c_str());
+                            return abort_error();
+                        }
+                        push(dupval(slot_values_[ins.b]));
+                        break;
+                    }
                     struct symbol *sym = slot_symbols_[ins.b];
                     if (!sym)
                         sym = lookupsym(slot.name.c_str());
@@ -713,12 +739,21 @@ public:
                     if (!value)
                         return abort_error();
                     if (ins.b >= proto().slots.size() ||
-                        ins.b >= slot_symbols_.size()) {
+                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
                         yyerror("invalid bytecode slot");
                         freeval(value);
                         return abort_error();
                     }
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                    if (direct_slots_) {
+                        value_t *result = assign_direct_slot(ins.b, value);
+                        if (!result)
+                            return abort_error();
+                        if (is_control(result))
+                            return abort_control(result);
+                        push(result);
+                        break;
+                    }
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
                         result = skein_vm_assign_symbol_direct(
@@ -739,12 +774,22 @@ public:
                     if (!value)
                         return abort_error();
                     if (ins.b >= proto().slots.size() ||
-                        ins.b >= slot_symbols_.size()) {
+                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
                         yyerror("invalid bytecode slot");
                         freeval(value);
                         return abort_error();
                     }
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                    if (direct_slots_) {
+                        value_t *result = compound_direct_slot(
+                            ins.b, (int)ins.flags, value);
+                        if (!result)
+                            return abort_error();
+                        if (is_control(result))
+                            return abort_control(result);
+                        push(result);
+                        break;
+                    }
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
                         result = skein_vm_compound_symbol_direct(
@@ -762,11 +807,22 @@ public:
 
                 case Op::IncDecSlot: {
                     if (ins.b >= proto().slots.size() ||
-                        ins.b >= slot_symbols_.size()) {
+                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
                         yyerror("invalid bytecode slot");
                         return abort_error();
                     }
                     const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                    if (direct_slots_) {
+                        value_t *result = incdec_direct_slot(
+                            ins.b, ins.a ? 1 : -1,
+                            (ins.flags & 1) != 0);
+                        if (!result)
+                            return abort_error();
+                        if (is_control(result))
+                            return abort_control(result);
+                        push(result);
+                        break;
+                    }
                     value_t *result = NULL;
                     if (slot_symbols_[ins.b])
                         result = skein_vm_increment_symbol_direct(
@@ -798,6 +854,13 @@ public:
                 }
 
                 case Op::ClearSlot:
+                    if (direct_slots_) {
+                        if (ins.b < slot_values_.size()) {
+                            freeval(slot_values_[ins.b]);
+                            slot_values_[ins.b] = NULL;
+                        }
+                        break;
+                    }
                     if (ins.b < slot_symbols_.size()) {
                         struct symbol *sym = slot_symbols_[ins.b];
                         if (sym && slot_pool_safe_ && !sym->scope_owned) {
@@ -2515,7 +2578,7 @@ public:
                     run_all_defers();
                     free_stack(stack_);
                     recycle_params();
-                    recycle_slot_symbols();
+                    recycle_slots();
                     pop_scopes_to(scope_mark_);
                     return NULL;
                 }
@@ -2538,6 +2601,8 @@ private:
     std::vector<value_t *> param_values_;
     std::vector<struct symbol> param_symbol_views_;
     std::vector<struct symbol *> slot_symbols_;
+    std::vector<value_t *> slot_values_;
+    std::vector<struct symbol> slot_symbol_views_;
     std::vector<iterator_state> iterators_;
     std::vector<std::vector<defer_record>> defer_scopes_;
     std::vector<handler_state> handlers_;
@@ -2551,6 +2616,7 @@ private:
     bool param_pool_safe_ = false;
     bool slot_pool_safe_ = false;
     bool direct_params_ = false;
+    bool direct_slots_ = false;
     std::vector<struct symbol *> param_symbol_pool_;
     std::vector<struct symbol *> slot_symbol_pool_;
     unsigned instruction_count_ = 0;
@@ -2564,6 +2630,7 @@ private:
     std::vector<std::vector<struct symbol *>> param_symbols_pool_;
     std::vector<std::vector<value_t *>> param_values_pool_;
     std::vector<std::vector<struct symbol *>> slot_symbols_pool_;
+    std::vector<std::vector<value_t *>> slot_values_pool_;
 
     template <typename T>
     static std::vector<T> take_pool(std::vector<std::vector<T>> &pool) {
@@ -2584,6 +2651,8 @@ private:
             param_values_pool_.push_back(std::move(param_values_));
         if (slot_symbols_.capacity() != 0)
             slot_symbols_pool_.push_back(std::move(slot_symbols_));
+        if (slot_values_.capacity() != 0)
+            slot_values_pool_.push_back(std::move(slot_values_));
     }
 
     const Proto &proto() const { return *proto_ptr_; }
@@ -2606,11 +2675,13 @@ private:
         state.param_pool_safe = param_pool_safe_;
         state.slot_pool_safe = slot_pool_safe_;
         state.direct_params = direct_params_;
+        state.direct_slots = direct_slots_;
         state.def = std::move(current_def_);
         state.name_cache = std::move(name_cache_);
         state.param_symbols = std::move(param_symbols_);
         state.param_values = std::move(param_values_);
         state.slot_symbols = std::move(slot_symbols_);
+        state.slot_values = std::move(slot_values_);
         state.iterators = std::move(iterators_);
         state.defer_scopes = std::move(defer_scopes_);
         state.handlers = std::move(handlers_);
@@ -2620,9 +2691,11 @@ private:
         param_symbols_ = take_pool(param_symbols_pool_);
         param_values_ = take_pool(param_values_pool_);
         slot_symbols_ = take_pool(slot_symbols_pool_);
+        slot_values_ = take_pool(slot_values_pool_);
         name_scope_generation_ = 0;
         param_pool_safe_ = false;
         direct_params_ = false;
+        direct_slots_ = false;
         slot_pool_safe_ = false;
     }
 
@@ -2643,12 +2716,14 @@ private:
         name_scope_generation_ = state.name_scope_generation;
         param_pool_safe_ = state.param_pool_safe;
         direct_params_ = state.direct_params;
+        direct_slots_ = state.direct_slots;
         slot_pool_safe_ = state.slot_pool_safe;
         current_def_ = std::move(state.def);
         name_cache_ = std::move(state.name_cache);
         param_symbols_ = std::move(state.param_symbols);
         param_values_ = std::move(state.param_values);
         slot_symbols_ = std::move(state.slot_symbols);
+        slot_values_ = std::move(state.slot_values);
         iterators_ = std::move(state.iterators);
         defer_scopes_ = std::move(state.defer_scopes);
         handlers_ = std::move(state.handlers);
@@ -2665,7 +2740,7 @@ private:
             stack_.pop_back();
         }
         recycle_params();
-        recycle_slot_symbols();
+        recycle_slots();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
             diag_pop_call();
@@ -2930,6 +3005,178 @@ private:
         param_symbols_.clear();
     }
 
+    bool check_direct_slot(uint32_t index, value_t *value,
+                           bool check_const) {
+        if (index >= proto().slots.size())
+            return false;
+        const skein::bc::SlotDesc &slot = proto().slots[index];
+        if (check_const && slot.is_const) {
+            yyerror("cannot assign to constant %s", slot.name.c_str());
+            return false;
+        }
+        if (!validate_type_constraint(&slot.type)) {
+            return false;
+        }
+        if (!type_constraint_matches(&slot.type, value)) {
+            yyerror("variable %s expects %s, got %s", slot.name.c_str(),
+                    type_constraint_name(&slot.type), typename_of(value));
+            return false;
+        }
+        return true;
+    }
+
+    struct symbol *direct_slot_symbol(uint32_t index) {
+        if (index >= slot_values_.size() || index >= proto().slots.size())
+            return NULL;
+        if (slot_symbol_views_.size() <= index)
+            slot_symbol_views_.resize(index + 1);
+        struct symbol &sym = slot_symbol_views_[index];
+        const std::string &name = proto().slots[index].name;
+        sym.name = const_cast<char *>(name.c_str());
+        sym.name_len = name.size();
+        sym.val = slot_values_[index];
+        sym.type.kind = TYPE_ANY;
+        sym.type.name = NULL;
+        sym.type.module = NULL;
+        sym.type.nullable = false;
+        sym.exported = false;
+        sym.is_const = proto().slots[index].is_const;
+        sym.is_uninitialized = false;
+        sym.scope_owned = false;
+        sym.global_slot = UINT32_MAX;
+        return &sym;
+    }
+
+    value_t *assign_direct_slot(uint32_t index, value_t *value) {
+        if (!value || index >= slot_values_.size())
+            return value;
+        if (value->type == T_return || value->type == T_break ||
+            value->type == T_continue)
+            return value;
+        if (!check_direct_slot(index, value, true)) {
+            freeval(value);
+            return NULL;
+        }
+        freeval(slot_values_[index]);
+        slot_values_[index] = value;
+        return dupval(value);
+    }
+
+    value_t *compound_direct_slot(uint32_t index, int op, value_t *value) {
+        if (!value || index >= slot_values_.size() || !slot_values_[index]) {
+            freeval(value);
+            yyerror("invalid bytecode slot");
+            return NULL;
+        }
+        value_t *result = apply_binary_value(op, slot_values_[index], value);
+        freeval(value);
+        if (!result)
+            return NULL;
+        if (!check_direct_slot(index, result, true)) {
+            freeval(result);
+            return NULL;
+        }
+        freeval(slot_values_[index]);
+        slot_values_[index] = result;
+        return dupval(result);
+    }
+
+    value_t *incdec_direct_slot(uint32_t index, int delta, bool prefix) {
+        if (index >= slot_values_.size() || !slot_values_[index]) {
+            yyerror("invalid bytecode slot");
+            return NULL;
+        }
+        value_t *old = slot_values_[index];
+        value_t *delta_value = newintval(delta);
+        value_t *result = apply_binary_value('+', old, delta_value);
+        freeval(delta_value);
+        if (!result)
+            return NULL;
+        if (!check_direct_slot(index, result, true)) {
+            freeval(result);
+            return NULL;
+        }
+        value_t *ret = prefix ? dupval(result) : dupval(old);
+        freeval(old);
+        slot_values_[index] = result;
+        return ret;
+    }
+
+    static int slot_binary_char(uint8_t opcode) {
+        switch (static_cast<Op>(opcode)) {
+            case Op::Add: return '+';
+            case Op::Sub: return '-';
+            case Op::Mul: return '*';
+            case Op::Div: return '/';
+            case Op::Mod: return '%';
+            case Op::BitAnd: return '&';
+            case Op::BitOr: return '|';
+            case Op::BitXor: return '^';
+            case Op::Shl: return 's';
+            case Op::Shr: return 'r';
+            default: return 0;
+        }
+    }
+
+    value_t *binary_slot_fused_direct(const Instr &ins,
+                                      bool constant_rhs) {
+        const uint16_t left_index = ins.a;
+        const uint16_t right_index =
+            constant_rhs ? 0 : static_cast<uint16_t>(ins.b & 0xffffu);
+        const uint16_t dest_index =
+            constant_rhs ? ins.a : static_cast<uint16_t>(ins.b >> 16);
+        if (left_index >= slot_values_.size() ||
+            dest_index >= slot_values_.size() ||
+            (!constant_rhs && right_index >= slot_values_.size()) ||
+            !slot_values_[left_index] ||
+            (!constant_rhs && !slot_values_[right_index])) {
+            yyerror("invalid bytecode slot");
+            return NULL;
+        }
+        value_t *left = dupval(slot_values_[left_index]);
+        value_t *right = NULL;
+        if (constant_rhs) {
+            const Constant *constant = constant_at(proto(), ins.b);
+            if (!constant || constant->kind != ConstantKind::Value) {
+                freeval(left);
+                yyerror("invalid bytecode constant");
+                return NULL;
+            }
+            right = constant->value ? dupval(constant->value.get())
+                                    : newnull();
+        } else {
+            right = dupval(slot_values_[right_index]);
+        }
+        value_t *result =
+            apply_binary_value(slot_binary_char(ins.flags), left, right);
+        freeval(left);
+        freeval(right);
+        if (!result)
+            return NULL;
+        if (!check_direct_slot(dest_index, result, true)) {
+            freeval(result);
+            return NULL;
+        }
+        freeval(slot_values_[dest_index]);
+        slot_values_[dest_index] = result;
+        return dupval(result);
+    }
+
+    void recycle_slot_values() {
+        for (value_t *value : slot_values_)
+            freeval(value);
+        slot_values_.clear();
+    }
+
+    void recycle_slots() {
+        if (direct_slots_) {
+            recycle_slot_values();
+            slot_symbols_.clear();
+        } else {
+            recycle_slot_symbols();
+        }
+    }
+
     void recycle_slot_symbols() {
         if (!slot_pool_safe_) {
             slot_symbols_.clear();
@@ -3031,6 +3278,10 @@ private:
         direct_params_ = proto->params_direct && !proto->has_closures &&
                          !proto->uses_defers && !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
+        direct_slots_ = proto->slots_direct_safe &&
+                        !proto->has_closures && !proto->uses_defers &&
+                        !proto->uses_handlers &&
+                        read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
                           !proto->uses_handlers &&
@@ -3047,7 +3298,11 @@ private:
         name_scope_generation_ = 0;
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
-        slot_symbols_.assign(proto->slots.size(), NULL);
+        slot_symbols_.clear();
+        if (direct_slots_)
+            slot_values_.assign(proto->slots.size(), NULL);
+        else
+            slot_symbols_.assign(proto->slots.size(), NULL);
         iterators_.clear();
         handlers_.clear();
         defer_scopes_.clear();
@@ -3086,7 +3341,7 @@ private:
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
         recycle_params();
-        recycle_slot_symbols();
+        recycle_slots();
         pop_scopes_to(scope_mark_);
 
         current_def_ = std::move(def);
@@ -3097,6 +3352,10 @@ private:
         direct_params_ = proto->params_direct && !proto->has_closures &&
                          !proto->uses_defers && !proto->uses_handlers &&
                          read_bool_env("SKEIN_VM_PARAM_POOL", true);
+        direct_slots_ = proto->slots_direct_safe &&
+                        !proto->has_closures && !proto->uses_defers &&
+                        !proto->uses_handlers &&
+                        read_bool_env("SKEIN_VM_SLOT_POOL", true);
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
                           !proto->uses_handlers &&
@@ -3110,7 +3369,11 @@ private:
         name_scope_generation_ = 0;
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
-        slot_symbols_.assign(proto->slots.size(), NULL);
+        slot_symbols_.clear();
+        if (direct_slots_)
+            slot_values_.assign(proto->slots.size(), NULL);
+        else
+            slot_symbols_.assign(proto->slots.size(), NULL);
         handlers_.clear();
         iterators_.clear();
         defer_scopes_.clear();
@@ -3162,7 +3425,7 @@ private:
             stack_.pop_back();
         }
         recycle_params();
-        recycle_slot_symbols();
+        recycle_slots();
         pop_scopes_to(scope_mark_);
         while (diag_frames_ > 0) {
             diag_pop_call();
@@ -3378,6 +3641,8 @@ private:
         using skein::bc::IndexBaseKind;
         switch (desc.base_kind) {
             case IndexBaseKind::Slot:
+                if (direct_slots_)
+                    return direct_slot_symbol(desc.base_index);
                 if (desc.base_index < slot_symbols_.size())
                     return slot_symbols_[desc.base_index];
                 break;
@@ -4069,7 +4334,7 @@ private:
         run_all_defers();
         free_stack(stack_);
         recycle_params();
-        recycle_slot_symbols();
+        recycle_slots();
         pop_scopes_to(scope_mark_);
         return control;
     }
@@ -4110,7 +4375,7 @@ private:
         run_all_defers();
         free_stack(stack_);
         recycle_params();
-        recycle_slot_symbols();
+        recycle_slots();
         pop_scopes_to(scope_mark_);
         return NULL;
     }
@@ -4126,7 +4391,7 @@ private:
         run_all_defers();
         free_stack(stack_);
         recycle_params();
-        recycle_slot_symbols();
+        recycle_slots();
         pop_scopes_to(scope_mark_);
 
         if (context_.control != EVAL_CONTROL_NONE) {
@@ -4153,6 +4418,8 @@ private:
     }
 
     value_t *binary_slot_fused(const Instr &ins, bool constant_rhs) {
+        if (direct_slots_)
+            return binary_slot_fused_direct(ins, constant_rhs);
         const uint16_t left_index = ins.a;
         const uint16_t right_index =
             constant_rhs ? 0 : static_cast<uint16_t>(ins.b & 0xffffu);

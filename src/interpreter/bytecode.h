@@ -434,6 +434,11 @@ struct Proto {
     bool uses_params = false;
     bool uses_defers = false;
     bool uses_slots = false;
+    /*
+     * True when a fast frame can keep slot values directly instead of
+     * allocating symbol cells.  Set by the compiler after the final code pass.
+     */
+    bool slots_direct_safe = false;
     /* True when no parameter name needs a runtime scope lookup. */
     bool params_direct = false;
     /* True when the body creates a closure that can capture parameters. */

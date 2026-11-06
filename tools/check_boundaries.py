@@ -113,6 +113,15 @@ def check_link_boundary(build_dir, errors, warnings):
         errors.append(
             "interpreter must call builtins through skein_context, not call_builtin")
 
+    bytecode_archive = build_dir / "libskein_bytecode.a"
+    if bytecode_archive.exists():
+        bytecode_undefined = nm_symbols(bytecode_archive, False, errors)
+        leaked = (bytecode_undefined & (interp_defined | builtins_defined))
+        leaked -= runtime_defined
+        for symbol in sorted(leaked):
+            errors.append(
+                f"skein_bytecode depends on upper-layer symbol: {symbol}")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

@@ -140,11 +140,11 @@ VM 执行缓存和函数体 / 默认参数 / 参数 pattern AST 现在位于 L2 
 | 状态 | 数量 | 任务 |
 |---|---:|---|
 | 完成 | 20 | W1-1..6、W2-1、W2-2、W2-5、W2-6、W3-1、W3-2、W4-1、W4-2、W4-3、W4-5、W5-1、W5-3、W5-5、W5-6 |
-| 部分完成 | 3 | W3-3、W3-4、W5-2 |
+| 部分完成 | 4 | W3-3、W3-4、W5-2、A-1 |
 | 进行中 | 0 | - |
 | 暂缓（按需） | 3 | W2-3、W2-4、W4-4 |
 | 待决策 | 1 | W5-4（JIT/AOT/序列化） |
-| TODO | 1 | A-1 |
+| TODO | 0 | - |
 
 > 共 28 项：27 项 W 任务 + A-1 VM/bytecode 分层。
 
@@ -1228,7 +1228,7 @@ W5-4 JIT/AOT 待决策）。
 | W5-4 JIT/AOT/序列化 | P3 | XL | 待决策 | W2-5/W4 |
 | W5-5 CI/Sanitizer | P2 | M | 完成（2026-11-05） | - |
 | W5-6 文档维护 | P2 | S | 完成（2026-11-05） | 各里程碑 |
-| A-1 VM/bytecode 分层 | P2 | L | TODO | W4-5/W3-2 |
+| A-1 VM/bytecode 分层 | P2 | L | 部分完成（skein_bytecode target） | W4-5/W3-2 |
 
 状态约定：`TODO` / `进行中` / `阻塞` / `完成` / `暂缓（按需）`。
 每个任务完成时同步更新本表和 `docs/bytecode.md`。
@@ -1246,7 +1246,7 @@ W5-4 JIT/AOT 待决策）。
    - verifier 通过
    - benchmark 不退化
 4. 动态 handler/defer 栈和原生 fiber 已能通过全部测试，相关重写暂缓。
-5. VM / bytecode 分层先做逻辑边界，N2 稳定后再物理拆 target。
+5. VM / bytecode 分层先做逻辑边界，再逐步物理拆分 target。
 
 ### 8.2 N1：收口阶段（P0）
 
@@ -1320,7 +1320,8 @@ N1 已完成。剩余工作按“性能 → 架构 → 产品化”重排，每�
 - N2-4.3：完成（fallback 原因白名单回归）；
 - N2-3.2：待决策；
 - N2-3.3：暂不实现（待真实大 Proto 需求）；
-- N2-4.4（可选）、N3 仍待推进；
+- N2-4.4（可选）待做；
+- A-1：部分完成（skein_bytecode target 已拆出）；
 - JIT/AOT/序列化：待决策。
 
 ### 8.4 N2：性能与执行器收尾（P1）
@@ -1515,19 +1516,21 @@ N2 退出条件：
 
 #### N3-4 A-1 VM / bytecode 分层
 
-状态：**TODO**。
+状态：**部分完成（2026-11-06，bytecode target 已拆出）**。
 
 目标：把“字节码表示 + verifier + 执行器”与 AST 编译/回退桥接解耦。
 
 分步：
 
-1. **逻辑分层**：把 `bytecode.*` / `verifier.*` 收敛为纯 L1 依赖的
-   `skein_bytecode` 候选；
-2. **执行器接口**：执行器接收 `Proto` + frame + `VmCallbacks`，
-   不直接 include `ast.h` / `eval.h`；
+1. **逻辑分层（已完成）**：`bytecode.*` / `verifier.*` 已拆为
+   `skein_bytecode` target，只依赖 `skein_runtime`；
+   `bytecode_verifier_test` 只链接 `skein_bytecode`；
+   `check_boundaries.py` 增加 `skein_bytecode` 反向依赖检查。
+2. **执行器接口（下一步）**：执行器接收 `Proto` + frame +
+   `VmCallbacks`，不直接 include `ast.h` / `eval.h`；
 3. **AST bridge**：`vm_bridge.*` 保留编译、fallback、默认参数和
    pattern 接入；
-4. **物理拆分**：N2-3 稳定后，新增 `skein_vm` target；
+4. **物理拆分**：新增 `skein_vm` target；
 5. **序列化前置**：序列化只需链接 `skein_bytecode`，不依赖 parser。
 
 验收：
@@ -1597,8 +1600,9 @@ N2 退出条件：
 ### 8.8 建议排期
 
 ```text
-第一批  N3-4                   VM / bytecode 分层
-第二批  N3-1 / N3-2 / N3-3     按需
+第一批  A-1.2 / A-1.3          VM 执行器接口与 AST bridge
+第二批  A-1.4                  skein_vm target
+第三批  N3-1 / N3-2 / N3-3     按需
 可选    N2-4.4                长时 fuzz
 待决策  N2-3.2 computed goto / N2-3.3 宽指令 /
         JIT / AOT / 序列化

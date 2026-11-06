@@ -181,14 +181,28 @@ target_link_libraries(skein_runtime PUBLIC
   skein_utf8proc
 )
 
+# Bytecode representation, disassembly and verification.  This target must
+# stay free of AST/evaluator dependencies so serialization or a future AOT
+# tool can link it without the interpreter.
+add_library(skein_bytecode STATIC
+  src/interpreter/bytecode.cpp
+  src/interpreter/verifier.cpp
+)
+set_target_properties(skein_bytecode PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(skein_bytecode PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(skein_bytecode PUBLIC skein_runtime)
+
 add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
   src/interpreter/ast.cpp
   src/interpreter/decorators.cpp
-  src/interpreter/bytecode.cpp
   src/interpreter/compiler.cpp
-  src/interpreter/verifier.cpp
   src/interpreter/vm.cpp
   src/interpreter/diagnostics.cpp
   src/interpreter/error_report.cpp
@@ -222,6 +236,7 @@ target_include_directories(skein_interpreter PUBLIC
   ${SKEIN_EMBEDDED_DIR}
 )
 target_link_libraries(skein_interpreter PUBLIC
+  skein_bytecode
   skein_runtime
   ${SKEIN_LIBUV_TARGET}
   Boost::context
@@ -453,8 +468,8 @@ if(SKEIN_ENABLE_FFI)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  foreach(skein_target skein_platform skein_runtime skein_interpreter
-                       skein_builtins ${PROJECT_NAME})
+  foreach(skein_target skein_platform skein_runtime skein_bytecode
+                       skein_interpreter skein_builtins ${PROJECT_NAME})
     target_compile_options(${skein_target} PRIVATE -Wall -Wextra)
   endforeach()
 endif()
@@ -488,7 +503,7 @@ if(BUILD_TESTING)
   add_executable(bytecode_verifier_test
     tests/test_bytecode_verifier.cpp
   )
-  target_link_libraries(bytecode_verifier_test PRIVATE skein_interpreter)
+  target_link_libraries(bytecode_verifier_test PRIVATE skein_bytecode)
   target_include_directories(bytecode_verifier_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
     ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime

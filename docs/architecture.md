@@ -134,7 +134,7 @@ typedef struct {
 - graph 邻接表与批量构造；
 - fsm 内部表示与批量 run；
 - P5 易用性、P6 基准；
-- 静态库拆分：`skein_platform` / `skein_runtime` / `skein_interpreter` / `skein_builtins` / `skein`；
+- 静态库拆分：`skein_platform` / `skein_runtime` / `skein_bytecode` / `skein_interpreter` / `skein_builtins` / `skein`；
 - 源码按层落到 `src/platform` / `src/runtime` / `src/interpreter` / `src/builtins` / `src/app`，include 目录按层收敛；
 - `builtins.cpp` 按内置域拆为 `builtins_*.cpp`，`eval.cpp` 拆出 `eval_control/ops/call/assign`；
 - `skein_context` 的 `call` / `call_builtin` / `error` hook；
@@ -147,6 +147,8 @@ typedef struct {
 - 运行期执行状态与 AST 解耦：`function_code` 不持有 AST / VM 缓存，
   函数体、默认参数和参数 pattern AST 位于 L2 side table；
 - `runtime_link_test` 只链接 `skein_runtime`，守住 L1 边界；
+- `skein_bytecode` 只依赖 `skein_runtime`，`bytecode_verifier_test`
+  只链接该 target；
 - `tools/check_all.sh` 统一覆盖 Debug/Release、sanitizer、VM-only 与
   runtime-only 链接检查；
 - 关闭 TLS/HTTP2/FFI/压缩后核心仍可构建。
@@ -163,7 +165,8 @@ typedef struct {
 ## 7. 验收标准
 
 - `skein_runtime` 可单独链接（依赖 `skein_platform` / `utf8proc`），不依赖 `eval.o` / `parser.o` / `main.o`；
-- `skein_interpreter` 只依赖 runtime + platform + libuv/Boost；
+- `skein_bytecode` 只依赖 runtime，不依赖 interpreter/builtins；
+- `skein_interpreter` 只依赖 runtime + bytecode + platform + libuv/Boost；
 - `skein_builtins` 依赖 interpreter，但 interpreter 不反向依赖 builtins；
 - 关闭所有可选模块后，core + interpreter + CLI 仍可构建并通过核心测试；
 - L1 源文件不 include `eval.h` / `eval_context.h` / `eval_helpers.h` / `ast.h` / `parser.hpp` / `package.h` / `repl.h` / `builtins.h` / `diagnostics.h`；

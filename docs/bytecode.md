@@ -272,6 +272,8 @@ struct Instr {
 
 ## 5. 运行时接入点
 
+- `bytecode.*` / `verifier.*` 已拆为 `skein_bytecode` target，
+  只依赖 `skein_runtime`；
 - `parser.y` 的 `top_statement` 调用 `skein_vm_eval_statement()`；
 - `eval_call.cpp` 的 `invoke_function_body()` 在函数作用域和参数绑定完成后
   尝试 `skein_vm_try_execute_function_body()`；

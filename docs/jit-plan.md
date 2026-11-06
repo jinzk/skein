@@ -53,6 +53,8 @@ Go/No-Go 标准见 §10。
 - slot 复合赋值与自增自减：`COMPOUND_SLOT` / `INCDEC_SLOT`；
 - global 复合赋值与自增自减：`COMPOUND_GLOBAL` / `INCDEC_GLOBAL`；
 - 一元运算：`NEG` / `NOT` / `BIT_NOT`；
+- pattern 参数：JIT 前绑定函数 scope 与 destructuring 名字，覆盖
+  `pattern_bench`；
 - `TAIL_CALL`：跳过 JIT 深度计数，保持尾递归测试语义；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
@@ -70,7 +72,7 @@ index_bench  SKEIN_JIT=0 ~0.24s   SKEIN_JIT=1 ~0.15s   （约 1.6x）
 index_write  SKEIN_JIT=0 ~0.16s   SKEIN_JIT=1 ~0.10s   （约 1.6x）
 method_bench SKEIN_JIT=0 ~0.18s   SKEIN_JIT=1 ~0.06s   （约 3.0x）
 call_bench   SKEIN_JIT=0 ~0.49s   SKEIN_JIT=1 ~0.25s   （约 2.0x）
-pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.28s   （约 1.1x）
+pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 ```
 
 尚未落地：
@@ -79,7 +81,7 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.28s   （约 1.1x）
 - Win64 ABI（当前 `_WIN32` 下 JIT 主动关闭）；
 - OSR / deopt；
 - JIT 尾调用尚未复用机器帧，超深尾递归仍受 C++ 栈限制；
-- pattern 参数函数仍回退 VM，`pattern_bench` 收益有限；
+- pattern 参数必须能编译为原生 PatternDesc，否则回退 VM；
 - 更完整的 opcode 覆盖。
 
 ---

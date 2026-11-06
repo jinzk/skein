@@ -55,25 +55,38 @@ using invoke_fn = value_t *(*)(value_t *callee, value_t **args,
 using construct_fn = value_t *(*)(const skein::bc::ConstructDesc &desc,
                                   value_t **fields);
 
+/*
+ * Pattern-parameter binder.  Called from the JIT prologue for functions
+ * whose parameters use destructuring; it must push the function scope and
+ * bind names before the body runs.  Values are borrowed and may be consumed
+ * by setting entries to null.
+ */
+using bind_frame_fn = int (*)(function_def *def, value_t **values,
+                              uint32_t argc);
+
 void set_invoke(invoke_fn fn);
 invoke_fn invoke();
 void set_tail_invoke(invoke_fn fn);
 invoke_fn tail_invoke();
 void set_construct(construct_fn fn);
 construct_fn construct();
+void set_bind_frame(bind_frame_fn fn);
+bind_frame_fn bind_frame();
 
 /* True when the runtime switch (SKEIN_JIT=1) enables the JIT. */
 bool available();
 
 /* Compile-time and Proto-level eligibility check. */
-bool can_compile(const skein::bc::Proto &proto, bool top_level = false);
+bool can_compile(const skein::bc::Proto &proto, bool top_level = false,
+                 bool pattern_frame = false);
 
 /*
  * Compile one Proto.  `top_level` selects statement semantics for the
  * implicit end-of-code result (the VM returns the top operand for statements,
  * while a function fallthrough returns null).
  */
-JitCode *compile(const skein::bc::Proto &proto, bool top_level = false);
+JitCode *compile(const skein::bc::Proto &proto, bool top_level = false,
+                 bool pattern_frame = false);
 
 /* Execute a compiled Proto.  Takes ownership of the argument pointers. */
 value_t *enter(JitCode *code, thread_state *ts, function_def *def,

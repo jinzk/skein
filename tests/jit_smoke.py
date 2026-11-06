@@ -249,6 +249,24 @@ def main():
         )
         ok &= compare(binary, "global-const-error", global_const)
 
+        pattern_error = tmp_path / "pattern_error.skein"
+        pattern_error.write_text(
+            "func add([a, b]) { return a + b; }\n"
+            "println(add([1, 2]));\n"
+            "add([1]);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "pattern-list-error", pattern_error)
+
+        pattern_dict_error = tmp_path / "pattern_dict_error.skein"
+        pattern_dict_error.write_text(
+            "func pair({x, y}) { return x + y; }\n"
+            'println(pair({"x": 1, "y": 2}));\n'
+            'pair({"x": 1});\n',
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "pattern-dict-error", pattern_dict_error)
+
     if not ok:
         return 1
     print("jit smoke passed")

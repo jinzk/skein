@@ -53,6 +53,8 @@ value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
                             int column);
 value_t *skein_jit_new_dict(value_t **items, uint32_t count, int line,
                             int column);
+int skein_jit_bind_patterns(function_def *def, value_t **values,
+                            uint32_t argc);
 value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
 value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
@@ -202,6 +204,7 @@ namespace {
 invoke_fn g_invoke = nullptr;
 invoke_fn g_tail_invoke = nullptr;
 construct_fn g_build_struct = nullptr;
+bind_frame_fn g_bind_frame = nullptr;
 
 } // namespace
 
@@ -211,6 +214,8 @@ void set_tail_invoke(invoke_fn fn) { g_tail_invoke = fn; }
 invoke_fn tail_invoke() { return g_tail_invoke; }
 void set_construct(construct_fn fn) { g_build_struct = fn; }
 construct_fn construct() { return g_build_struct; }
+void set_bind_frame(bind_frame_fn fn) { g_bind_frame = fn; }
+bind_frame_fn bind_frame() { return g_bind_frame; }
 
 bool available() {
 #ifdef _WIN32
@@ -224,14 +229,16 @@ bool available() {
 #endif
 }
 
-bool can_compile(const skein::bc::Proto &proto, bool top_level) {
+bool can_compile(const skein::bc::Proto &proto, bool top_level,
+                 bool pattern_frame) {
 #ifdef _WIN32
     (void)proto;
     (void)top_level;
     return false;
 #else
     const bool name_mode =
-        top_level && proto.uses_names && proto.nparams == 0;
+        (top_level && proto.uses_names && proto.nparams == 0) ||
+        (pattern_frame && proto.uses_names);
     if ((!proto.params_direct && !name_mode) ||
         (proto.uses_names && !name_mode) || proto.has_closures ||
         proto.uses_defers || proto.uses_handlers || proto.is_generator ||
@@ -402,8 +409,9 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level) {
 #endif
 }
 
-JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
-    if (!available() || !can_compile(proto, top_level))
+JitCode *compile(const skein::bc::Proto &proto, bool top_level,
+                 bool pattern_frame) {
+    if (!available() || !can_compile(proto, top_level, pattern_frame))
         return nullptr;
 
     asmjit::JitRuntime &rt = runtime_state().runtime;
@@ -496,6 +504,16 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level) {
     call_addr(fn_address(&skein_jit_enter));
     a.test(asmjit::x86::eax, asmjit::x86::eax);
     a.jz(abort_label);
+    if (pattern_frame) {
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+        a.lea(asmjit::x86::rsi,
+              asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
+        a.mov(asmjit::x86::edx, asmjit::imm(proto.nparams));
+        call_addr(fn_address(&skein_jit_bind_patterns));
+        a.test(asmjit::x86::eax, asmjit::x86::eax);
+        a.jz(abort_label);
+    }
     a.jmp(proto.code.empty() ? end_label : labels[0]);
 
     for (size_t pc = 0; pc < proto.code.size(); ++pc) {
@@ -1754,6 +1772,16 @@ extern "C" value_t *skein_jit_store_name(const skein::bc::Proto *proto,
 
 extern "C" void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
 extern "C" void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
+
+extern "C" int skein_jit_bind_patterns(function_def *def, value_t **values,
+                                       uint32_t argc) {
+    skein::jit::bind_frame_fn fn = skein::jit::bind_frame();
+    if (!fn) {
+        yyerror("JIT pattern binder is not installed");
+        return 0;
+    }
+    return fn(def, values, argc);
+}
 
 extern "C" value_t *skein_jit_new_list(value_t **items, uint32_t count,
                                        int line, int column) {

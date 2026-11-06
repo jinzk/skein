@@ -204,15 +204,47 @@ bool jit_function_eligible(function_code *code) {
            !code->variadic && code->required_params == code->nparams;
 }
 
-bool jit_args_match(function_code *code, value_t **args, uint32_t argc) {
+bool jit_args_match(function_code *code, value_t **args, uint32_t argc,
+                    bool pattern_frame) {
     if ((int)argc != code->nparams)
         return false;
     int index = 0;
     for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
-        if (sl->has_pattern || sl->variadic)
+        if (sl->variadic || (sl->has_pattern && !pattern_frame))
             return false;
         if (!type_constraint_matches(sl->type, args[(size_t)index]))
             return false;
+    }
+    return true;
+}
+
+bool jit_params_have_patterns(function_code *code) {
+    for (struct symlist *sl = code->sl; sl; sl = sl->next)
+        if (sl->has_pattern)
+            return true;
+    return false;
+}
+
+bool jit_patterns_ready(function_code *code) {
+    function_vm_cache *cache = cache_for(code);
+    if (cache->param_patterns)
+        return !cache->param_patterns->failed;
+    std::string error;
+    std::shared_ptr<const compiled_pattern_set> compiled =
+        skein_compile_parameter_patterns(code, code->module, error);
+    if (!compiled) {
+        std::shared_ptr<compiled_pattern_set> failed =
+            std::make_shared<compiled_pattern_set>();
+        failed->failed = true;
+        cache->param_patterns = failed;
+        return false;
+    }
+    cache->param_patterns = compiled;
+    if (!keep_function_ast()) {
+        for (struct symlist *sl = code->sl; sl; sl = sl->next) {
+            if (symlist_pattern_ast(sl))
+                set_symlist_pattern_ast(sl, NULL);
+        }
     }
     return true;
 }
@@ -245,6 +277,7 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     std::vector<value_t *> heap_args;
     value_t **call_args = args;
     uint32_t call_argc = argc;
+    bool pattern_frame = false;
 
     if (callee->type == T_func) {
         struct func_value_t *fv = (struct func_value_t *)callee;
@@ -254,8 +287,9 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
             return false;
         def = fv->def;
         code = def->code.get();
+        pattern_frame = jit_params_have_patterns(code);
         if (!jit_function_eligible(code) ||
-            !jit_args_match(code, call_args, call_argc))
+            !jit_args_match(code, call_args, call_argc, pattern_frame))
             return false;
     } else if (callee->type == T_method) {
         method = (struct method_value_t *)callee;
@@ -263,7 +297,8 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
             return false;
         def = method->method;
         code = def->code.get();
-        if (!code->is_method || !jit_function_eligible(code))
+        if (!code->is_method || !jit_function_eligible(code) ||
+            jit_params_have_patterns(code))
             return false;
         call_argc = argc + 1;
         if ((int)call_argc != code->nparams)
@@ -277,11 +312,14 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
         call_args[0] = method->receiver ? method->receiver : newnull();
         for (uint32_t i = 0; i < argc; ++i)
             call_args[i + 1] = args[i];
-        if (!jit_args_match(code, call_args, call_argc))
+        if (!jit_args_match(code, call_args, call_argc, false))
             return false;
     } else {
         return false;
     }
+
+    if (pattern_frame && !jit_patterns_ready(code))
+        return false;
 
     function_vm_cache *cache = cache_for(code);
     if (cache->jit_failed)
@@ -294,7 +332,8 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
         skein::bc::ProtoPtr proto = prepare_function_body(def);
         if (proto)
             jit_debug_proto("try", *proto);
-        if (!proto || !skein::jit::can_compile(*proto, false)) {
+        if (!proto ||
+            !skein::jit::can_compile(*proto, false, pattern_frame)) {
             if (read_bool_env("SKEIN_JIT_DEBUG", false))
                 std::fprintf(stderr, "[jit] cannot compile %s\n",
                              code->name.empty() ? "<anonymous>"
@@ -302,7 +341,7 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
             cache->jit_failed = true;
             return false;
         }
-        cache->jit = skein::jit::compile(*proto);
+        cache->jit = skein::jit::compile(*proto, false, pattern_frame);
         if (!cache->jit) {
             cache->jit_failed = true;
             return false;
@@ -318,6 +357,51 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     *out = skein::jit::enter(cache->jit, &ts, def.get(), call_args,
                              call_argc);
     return true;
+}
+
+int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
+                                uint32_t argc) {
+    if (!def || !def->code)
+        return 0;
+    skein_vm_eval_push_closure_scope(def->closure);
+
+    int index = 0;
+    for (struct symlist *sl = def->code->sl;
+         sl && !sl->variadic; sl = sl->next, ++index) {
+        if (index >= (int)argc)
+            break;
+        if (sl->has_pattern) {
+            std::vector<pattern_binding> bindings;
+            std::shared_ptr<function_def> def_ref(def,
+                                                  [](function_def *) {});
+            ParamPatternResult native = skein_vm_match_parameter_pattern(
+                def_ref, index, values[(size_t)index], bindings);
+            if (native != ParamPatternResult::Matched) {
+                free_pattern_bindings(bindings);
+                yyerror("function parameter does not match its pattern");
+                return 0;
+            }
+            for (auto &binding : bindings) {
+                struct symbol *target = newsym(binding.name.c_str());
+                target->val = binding.value;
+                binding.value = NULL;
+                savesym(target);
+            }
+            bindings.clear();
+            freeval(values[(size_t)index]);
+            values[(size_t)index] = NULL;
+        } else {
+            struct symbol *sym = newsym(sl->sym->name);
+            sym->val = values[(size_t)index];
+            values[(size_t)index] = NULL;
+            if (sl->type) {
+                sym->type.kind = sl->type->kind;
+                sym->type.name = sl->type->name;
+            }
+            savesym(sym);
+        }
+    }
+    return 1;
 }
 
 value_t *skein_vm_build_struct(const skein::bc::ConstructDesc &desc,
@@ -404,6 +488,7 @@ static void ensure_vm_host() {
         skein::jit::set_invoke(&skein_vm_jit_invoke);
         skein::jit::set_tail_invoke(&skein_vm_jit_tail_invoke);
         skein::jit::set_construct(&skein_vm_build_struct);
+        skein::jit::set_bind_frame(&skein_vm_bind_pattern_frame);
 #endif
         return true;
     }();

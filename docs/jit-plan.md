@@ -88,7 +88,9 @@ pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
   本机无 MinGW/Windows 环境，仍需 CI 或真机验证；
 - OSR / deopt；
 - 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
-  但不会形成调用栈增长；
+  但不会形成调用栈增长。该项暂按性能 backlog 处理，不阻塞当前
+  frame slot / GC / Win64 工作；待精确 GC 栈图稳定后再评估 frame
+  复用或零帧分配。
 - pattern 参数必须能编译为原生 PatternDesc，否则回退 VM；
 - 更完整的 opcode 覆盖。
 

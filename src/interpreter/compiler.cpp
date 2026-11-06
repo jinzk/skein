@@ -372,12 +372,49 @@ struct Compiler {
     }
 
     uint32_t add_index(const char *base_name,
-                       const std::vector<bool> &fields) {
+                       const std::vector<bool> &fields,
+                       skein::bc::IndexBaseKind base_kind,
+                       uint32_t base_index) {
         skein::bc::IndexDesc desc;
         desc.base_name = base_name ? base_name : "";
         desc.fields = fields;
+        desc.base_kind = base_kind;
+        desc.base_index = base_index;
         proto.index_ops.push_back(std::move(desc));
         return static_cast<uint32_t>(proto.index_ops.size() - 1);
+    }
+
+    uint32_t add_index_for_base(const char *base_name,
+                                const std::vector<bool> &fields) {
+        using skein::bc::IndexBaseKind;
+        IndexBaseKind kind = IndexBaseKind::Name;
+        uint32_t index = UINT32_MAX;
+        int slot = slot_fast_path ? find_slot(base_name) : -1;
+        if (slot >= 0) {
+            kind = IndexBaseKind::Slot;
+            index = static_cast<uint32_t>(slot);
+            proto.uses_slots = true;
+        } else {
+            slot = param_fast_path ? param_index(base_name) : -1;
+            if (slot >= 0) {
+                kind = IndexBaseKind::Param;
+                index = static_cast<uint32_t>(slot);
+                proto.uses_params = true;
+            } else {
+                int upvalue = upvalue_index(base_name);
+                if (upvalue >= 0) {
+                    kind = IndexBaseKind::Upvalue;
+                    index = static_cast<uint32_t>(upvalue);
+                } else {
+                    int global = global_index(base_name);
+                    if (global >= 0) {
+                        kind = IndexBaseKind::Global;
+                        index = static_cast<uint32_t>(global);
+                    }
+                }
+            }
+        }
+        return add_index(base_name, fields, kind, index);
     }
 
     uint32_t add_index_read_cache() {
@@ -1780,7 +1817,7 @@ struct Compiler {
                         compile(idx_ast);
                         if (!ok) return;
                     }
-                    uint32_t desc = add_index(
+                    uint32_t desc = add_index_for_base(
                         ((struct symref *)base)->name, fields);
                     emit(Op::AssignIndex, 0, 0, desc, here);
                     return;
@@ -1851,7 +1888,7 @@ struct Compiler {
                         compile(idx_ast);
                         if (!ok) return;
                     }
-                    uint32_t desc = add_index(
+                    uint32_t desc = add_index_for_base(
                         ((struct symref *)base)->name, fields);
                     emit(Op::CompoundIndex,
                          static_cast<uint8_t>(asgn->op), 0, desc, here);
@@ -1923,7 +1960,7 @@ struct Compiler {
                         compile(idx_ast);
                         if (!ok) return;
                     }
-                    uint32_t desc = add_index(
+                    uint32_t desc = add_index_for_base(
                         ((struct symref *)base)->name, fields);
                     emit(Op::IncDecIndex, inc->prefix ? 1 : 0,
                          inc->delta > 0 ? 1 : 0, desc, here);

@@ -1828,10 +1828,12 @@ public:
                     }
 
                     value_t *result = NULL;
+                    struct symbol *base = index_base_symbol(desc);
                     if (static_cast<Op>(ins.op) == Op::IncDecIndex) {
-                        result = increment_index_values(
-                            desc.base_name.c_str(), ins.a ? 1 : -1,
-                            (ins.flags & 1) != 0, indices, desc.fields);
+                        result = increment_index_symbol(
+                            base, desc.base_name.c_str(),
+                            ins.a ? 1 : -1, (ins.flags & 1) != 0,
+                            indices, desc.fields);
                     } else {
                         value_t *value = pop_checked();
                         if (!value) {
@@ -1839,13 +1841,13 @@ public:
                             return abort_error();
                         }
                         if (static_cast<Op>(ins.op) == Op::AssignIndex) {
-                            result = assign_index_values(
-                                desc.base_name.c_str(), indices,
+                            result = assign_index_symbol(
+                                base, desc.base_name.c_str(), indices,
                                 desc.fields, value);
                         } else {
-                            result = compound_index_values(
-                                desc.base_name.c_str(), (int)ins.flags,
-                                indices, desc.fields, value);
+                            result = compound_index_symbol(
+                                base, desc.base_name.c_str(),
+                                (int)ins.flags, indices, desc.fields, value);
                         }
                     }
                     if (!result)
@@ -2982,6 +2984,43 @@ private:
                 return sym;
         }
         return cached_symbol(name_index);
+    }
+
+    struct symbol *global_symbol(uint16_t slot, const char *name) {
+        scope_context &scope = active_scope_context();
+        if (slot < scope.global_slots.size()) {
+            struct symbol *sym = scope.global_slots[slot];
+            if (sym && sym->name && name &&
+                std::strcmp(sym->name, name) == 0)
+                return sym;
+        }
+        return lookupsym(name);
+    }
+
+    struct symbol *index_base_symbol(const skein::bc::IndexDesc &desc) {
+        using skein::bc::IndexBaseKind;
+        switch (desc.base_kind) {
+            case IndexBaseKind::Slot:
+                if (desc.base_index < slot_symbols_.size())
+                    return slot_symbols_[desc.base_index];
+                break;
+            case IndexBaseKind::Param:
+                if (desc.base_index < param_symbols_.size())
+                    return param_symbols_[desc.base_index];
+                break;
+            case IndexBaseKind::Upvalue:
+                return upvalue_symbol(desc.base_index);
+            case IndexBaseKind::Global:
+                if (desc.base_index <= UINT16_MAX)
+                    return global_symbol(
+                        static_cast<uint16_t>(desc.base_index),
+                        desc.base_name.c_str());
+                break;
+            case IndexBaseKind::Name:
+            default:
+                return lookupsym(desc.base_name.c_str());
+        }
+        return NULL;
     }
 
     struct symbol *cached_symbol(uint32_t index) {

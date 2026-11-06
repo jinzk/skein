@@ -1,0 +1,12 @@
+let mapping = {"key": 0};
+
+func bump(n) {
+  let i = 0;
+  while (i < n) {
+    mapping["key"] = mapping["key"] + 1;
+    i = i + 1;
+  }
+  return mapping["key"];
+}
+
+print(bump(500000));

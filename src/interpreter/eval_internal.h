@@ -114,5 +114,20 @@ struct value_t *increment_index_values(const char *base_name, int delta,
                                        bool prefix,
                                        std::vector<struct value_t *> &indices,
                                        const std::vector<bool> &fields);
+struct value_t *assign_index_symbol(struct symbol *base,
+                                    const char *base_name,
+                                    std::vector<struct value_t *> &indices,
+                                    const std::vector<bool> &fields,
+                                    struct value_t *value);
+struct value_t *compound_index_symbol(struct symbol *base,
+                                      const char *base_name, int op,
+                                      std::vector<struct value_t *> &indices,
+                                      const std::vector<bool> &fields,
+                                      struct value_t *value);
+struct value_t *increment_index_symbol(struct symbol *base,
+                                       const char *base_name, int delta,
+                                       bool prefix,
+                                       std::vector<struct value_t *> &indices,
+                                       const std::vector<bool> &fields);
 
 #endif

@@ -579,11 +579,11 @@ struct value_t *compound_name(struct symref *ref, int op,
     return dupval(value);
 }
 
-value_t *assign_index_values(const char *base_name,
-                             std::vector<value_t *> &indices,
-                             const std::vector<bool> &fields,
-                             value_t *value) {
-    struct symbol *s = lookupsym(base_name);
+static value_t *assign_index_resolved(struct symbol *s,
+                                      const char *base_name,
+                                      std::vector<value_t *> &indices,
+                                      const std::vector<bool> &fields,
+                                      value_t *value) {
     if (!s || !s->val) {
         yyerror("symbol not found %s", base_name ? base_name : "");
         freeval(value);
@@ -615,11 +615,26 @@ value_t *assign_index_values(const char *base_name,
     return ret;
 }
 
-value_t *compound_index_values(const char *base_name, int op,
-                               std::vector<value_t *> &indices,
-                               const std::vector<bool> &fields,
-                               value_t *value) {
-    struct symbol *s = lookupsym(base_name);
+value_t *assign_index_values(const char *base_name,
+                             std::vector<value_t *> &indices,
+                             const std::vector<bool> &fields,
+                             value_t *value) {
+    return assign_index_resolved(lookupsym(base_name), base_name,
+                                 indices, fields, value);
+}
+
+value_t *assign_index_symbol(struct symbol *base, const char *base_name,
+                             std::vector<value_t *> &indices,
+                             const std::vector<bool> &fields,
+                             value_t *value) {
+    return assign_index_resolved(base, base_name, indices, fields, value);
+}
+
+static value_t *compound_index_resolved(struct symbol *s,
+                                        const char *base_name, int op,
+                                        std::vector<value_t *> &indices,
+                                        const std::vector<bool> &fields,
+                                        value_t *value) {
     if (!s || !s->val) {
         yyerror("symbol not found %s", base_name ? base_name : "");
         freeval(value);
@@ -660,11 +675,27 @@ value_t *compound_index_values(const char *base_name, int op,
     return ret;
 }
 
-value_t *increment_index_values(const char *base_name, int delta,
-                                bool prefix,
-                                std::vector<value_t *> &indices,
-                                const std::vector<bool> &fields) {
-    struct symbol *s = lookupsym(base_name);
+value_t *compound_index_values(const char *base_name, int op,
+                               std::vector<value_t *> &indices,
+                               const std::vector<bool> &fields,
+                               value_t *value) {
+    return compound_index_resolved(lookupsym(base_name), base_name, op,
+                                   indices, fields, value);
+}
+
+value_t *compound_index_symbol(struct symbol *base, const char *base_name,
+                               int op, std::vector<value_t *> &indices,
+                               const std::vector<bool> &fields,
+                               value_t *value) {
+    return compound_index_resolved(base, base_name, op, indices, fields,
+                                   value);
+}
+
+static value_t *increment_index_resolved(struct symbol *s,
+                                         const char *base_name, int delta,
+                                         bool prefix,
+                                         std::vector<value_t *> &indices,
+                                         const std::vector<bool> &fields) {
     if (!s || !s->val) {
         yyerror("symbol not found %s", base_name ? base_name : "");
         free_args(indices);
@@ -684,6 +715,22 @@ value_t *increment_index_values(const char *base_name, int delta,
     free_args(holds);
     free_args(indices);
     return ret;
+}
+
+value_t *increment_index_values(const char *base_name, int delta,
+                                bool prefix,
+                                std::vector<value_t *> &indices,
+                                const std::vector<bool> &fields) {
+    return increment_index_resolved(lookupsym(base_name), base_name, delta,
+                                    prefix, indices, fields);
+}
+
+value_t *increment_index_symbol(struct symbol *base, const char *base_name,
+                                int delta, bool prefix,
+                                std::vector<value_t *> &indices,
+                                const std::vector<bool> &fields) {
+    return increment_index_resolved(base, base_name, delta, prefix,
+                                    indices, fields);
 }
 
 struct value_t *compound_index(struct ast *target, int op,

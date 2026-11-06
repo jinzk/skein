@@ -98,6 +98,39 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
+        "index write base kinds",
+        "struct S { x: int; }\n"
+        "let shared = {\"k\": 0};\n"
+        "func mutate(p, n) {\n"
+        "  let local = {\"k\": 0};\n"
+        "  let items = [0, 0];\n"
+        "  let s = S { x: 0 };\n"
+        "  let i = 0;\n"
+        "  while (i < n) {\n"
+        "    local[\"k\"] += 1;\n"
+        "    p[\"k\"] += 1;\n"
+        "    shared[\"k\"] += 1;\n"
+        "    items[0] += 1;\n"
+        "    s.x += 1;\n"
+        "    i += 1;\n"
+        "  }\n"
+        "  return [local[\"k\"], p[\"k\"], shared[\"k\"], items[0], s.x];\n"
+        "}\n"
+        "func outer() {\n"
+        "  let captured = {\"k\": 0};\n"
+        "  let f = func() { captured[\"k\"] += 1; return captured[\"k\"]; };\n"
+        "  f();\n"
+        "  f();\n"
+        "  return captured[\"k\"];\n"
+        "}\n"
+        "let p = {\"k\": 0};\n"
+        "print(mutate(p, 3));\n"
+        "print(p[\"k\"]);\n"
+        "print(outer());\n",
+        stdout_all=["[3, 3, 3, 3, 3]", "3", "2"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
         "fast call argument buffers",
         "func zero() { return 0; }\n"
         "func add(a, b, c, d, e, f, g, h) {\n"

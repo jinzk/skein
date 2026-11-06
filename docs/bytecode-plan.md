@@ -82,7 +82,8 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
 | 100 万次字段读取 | 0.374s | 0.257s |
 | 30 万次方法调用 | 0.180s | 0.180s |
 | 100 万次全局更新 | 0.245s | 0.204s |
-| 100 万次 dict 索引读取 | 0.297s | 0.254s |
+| 100 万次 dict 索引读取 | 0.298s | 0.254s |
+| 50 万次 dict 索引写入 | 0.197s | 0.164s |
 
 ### 2.4 基线缺口
 
@@ -91,8 +92,8 @@ Fuzz:          seed 1/2/3 各 400 例 + 5s fuzz 745 例通过
   async、默认参数、variadic、method、参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
 - 尾调用只覆盖无 spread 的普通调用。
-- 全局名字 IC、全局槽位、字段/方法 per-site IC、dict 索引读取 IC
-  已完成；索引写入 IC、局部 per-site cache 仍待完成。
+- 全局名字 IC、全局槽位、字段/方法 per-site IC、dict 索引读取 IC、
+  索引写入基址解析已完成；局部 per-site cache 仍待完成。
 - 值表示仍是堆分配 `value_t*`，尚无 tagged value / unboxed slot；
   调用参数已对小参数数量使用栈内缓冲，fast-frame 向量按深度复用。
 - 指令优化已有运算快路径、`CMP_JUMP`、常量折叠、跳转线程化和
@@ -611,25 +612,29 @@ P3 为工具链完善。规模为相对估算：S / M / L / XL。
     - `Proto::index_read_ic` 记录 `items.size()` 与命中下标；
     - 命中时重新校验 key，写入/追加/copy-on-write 后安全失效；
     - 新增 `index` 基准与 `index-ic` 统计。
+12. 索引写入 per-site 基址解析：
+    - `IndexDesc` 记录 base kind：slot / param / upvalue / global / name；
+    - `ASSIGN_INDEX` / `COMPOUND_INDEX` / `INCDEC_INDEX` 直接解析 base；
+    - 已知 slot / param / upvalue / global 不再执行 `lookupsym()`；
+    - 新增 `index_write` 基准。
 
 效果：
 
 - `fib(30)` 从约 0.75s 降到约 0.70s，与 AST 持平。
 - `call_bench` VM 约 0.82s，AST 约 0.85s。
 - 结构体字段 / enum variant 查找从线性扫描改为哈希查找。
-- `field_bench` VM/AST 约 0.69；`method_bench` VM/AST 约 1.00；
-  `global_bench` VM/AST 约 0.83；`index_bench` VM/AST 约 0.86。
+- `field` 约 0.69；`method` 约 1.00；`global` 约 0.84；
+  `index` 约 0.85；`index_write` 约 0.84。
 
 剩余：
 
-1. 索引写入 / 复合赋值的 per-call-site IC。
-2. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
+1. 局部名字缓存改为 per-call-site，而不是每帧整表失效。
 
 验收：
 
 - 调用密集基准达到或超过 AST：**已满足**。
-- 全局 / 字段 / 方法访问基准不退化：**已满足**。
-- 索引 IC 与局部 cache 仍待完成。
+- 全局 / 字段 / 方法 / 索引访问基准不退化：**已满足**。
+- 局部 per-site cache 仍待完成。
 
 #### W3-3 值表示与分配（P2，XL）
 
@@ -955,6 +960,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
    - `method_bench.skein`
    - `global_bench.skein`
    - `index_bench.skein`
+   - `index_write_bench.skein`
 2. 新增 `tools/bench_vm.py`：
    - 每个基准分别用 `SKEIN_VM=0` / `SKEIN_VM=1` 运行
    - 默认 3 次，报告中位数
@@ -1270,7 +1276,7 @@ N2 退出条件：
 
 #### N2-1 W3-2 全局访问与 IC 收尾
 
-状态：**部分完成（2026-11-05）**。
+状态：**部分完成（2026-11-06）**。
 
 已完成：
 
@@ -1280,8 +1286,9 @@ N2 退出条件：
 - struct/enum 字段索引表；
 - `GET_FIELD_NAME` per-site member IC（字段 / 方法）；
 - `GET_INDEX_CACHED` per-site dict 索引读取缓存；
+- 索引写入 per-site 基址解析；
 - member / index IC 命中/未命中统计；
-- `field` / `method` / `global` / `index` 基准。
+- `field` / `method` / `global` / `index` / `index_write` 基准。
 
 已完成子任务：
 
@@ -1289,23 +1296,23 @@ N2 退出条件：
    - 全局符号表维护稳定 `global_slot`；
    - 函数体内已解析的全局名直接访问槽位；
    - 槽位失效或名称不一致时回退名字查找；
-   - 验收：`global_bench` VM/AST 约 0.83，差分通过。
+   - 验收：`global_bench` VM/AST 约 0.83。
 
 2. **N2-1.2 索引读取 IC**
    - `GET_INDEX` 编译为 `GET_INDEX_CACHED`；
    - 缓存 dict 的 `items.size()` 与命中下标；
    - 命中时重新校验该下标的 key，兼容 copy-on-write、追加和值替换；
-   - 验收：`index_bench` VM/AST 约 0.86，差分通过。
+   - 验收：`index_bench` VM/AST 约 0.85。
+
+3. **N2-1.3 索引写入 / 复合赋值 IC**
+   - `IndexDesc` 记录 base kind：slot / param / upvalue / global / name；
+   - `ASSIGN_INDEX` / `COMPOUND_INDEX` / `INCDEC_INDEX` 直接解析 base；
+   - 不再对已知 slot / param / upvalue / global 做 `lookupsym()`；
+   - 验收：`index_write_bench` VM/AST 约 0.84，差分通过。
 
 剩余子任务：
 
-2. **N2-1.3 索引写入 / 复合赋值 IC**
-   - `ASSIGN_INDEX` / `COMPOUND_INDEX` / `INCDEC_INDEX` 的
-     per-site 描述符缓存；
-   - 覆盖 struct 字段、dict 键、list 下标；
-   - 验收：写密集基准不退化，错误文本不变。
-
-3. **N2-1.4 局部 name cache per-site 化**
+1. **N2-1.4 局部 name cache per-site 化**
    - 减少 `PopScope` / 同名声明后的整表失效；
    - 保留动态绑定（match / on error / import）的正确性；
    - 验收：局部作用域密集基准提升。
@@ -1498,7 +1505,7 @@ N2 退出条件：
 ### 8.8 建议排期
 
 ```text
-第一批  N2-1.3 / N2-1.4       索引写入 IC / 局部 cache
+第一批  N2-1.4                  局部 per-site cache
 第二批  N2-2.1 / N2-2.2       参数与局部值复用
 第三批  N2-3.1 / N2-3.2       超指令与 dispatch
 第四批  N2-4.1..4             覆盖统计与长时 fuzz

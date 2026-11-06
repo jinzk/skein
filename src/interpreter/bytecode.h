@@ -176,9 +176,20 @@ struct IterDesc {
     uint32_t value_slot = UINT32_MAX;
 };
 
+enum class IndexBaseKind : uint8_t {
+    Name,
+    Slot,
+    Param,
+    Upvalue,
+    Global
+};
+
 struct IndexDesc {
     std::string base_name;
     std::vector<bool> fields;
+    /* Resolved base used to avoid a name lookup on every write. */
+    IndexBaseKind base_kind = IndexBaseKind::Name;
+    uint32_t base_index = UINT32_MAX;
 };
 
 struct ImportDesc {

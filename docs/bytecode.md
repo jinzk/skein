@@ -283,7 +283,8 @@ struct Instr {
 - 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；已解析的全局访问使用
   显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位；`obj.field` 的
   per-site 字段/方法 IC 已覆盖 struct/enum；dict 索引读取使用
-  `GET_INDEX_CACHED` per-site 缓存；默认参数、variadic、
+  `GET_INDEX_CACHED` per-site 缓存；索引写入使用 `IndexDesc` 中已解析的
+  slot / param / upvalue / global 基址；默认参数、variadic、
   method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
 - 顶层块内函数、方法闭包仍使用名字查找；默认参数 / defer 子 Proto
   暂未使用 upvalue 索引。

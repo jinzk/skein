@@ -189,7 +189,7 @@ bool can_compile(const skein::bc::Proto &proto) {
 #else
     if (!proto.params_direct || proto.has_closures || proto.uses_defers ||
         proto.uses_handlers || proto.uses_names ||
-        proto.is_generator || proto.is_async || proto.is_method ||
+        proto.is_generator || proto.is_async ||
         proto.variadic || !proto.upvalues.empty())
         return false;
     if (proto.nparams != proto.required_params)

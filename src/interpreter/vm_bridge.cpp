@@ -8,6 +8,7 @@
 #include "eval_context.h"
 #include "eval_internal.h"
 #include "pattern.h"
+#include "structtype.h"
 #include "symbol.h"
 #include "valuetype.h"
 #include "vm_host.h"
@@ -181,12 +182,14 @@ struct bridge_depth_guard {
 };
 
 #ifdef SKEIN_ENABLE_JIT
-bool jit_call_eligible(function_code *code, value_t **args, uint32_t argc) {
-    if (!code || code->is_generator || code->is_async || code->is_method ||
-        code->variadic || code->required_params != code->nparams ||
-        (int)argc != code->nparams)
-        return false;
+bool jit_function_eligible(function_code *code) {
+    return code && !code->is_generator && !code->is_async &&
+           !code->variadic && code->required_params == code->nparams;
+}
 
+bool jit_args_match(function_code *code, value_t **args, uint32_t argc) {
+    if ((int)argc != code->nparams)
+        return false;
     int index = 0;
     for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
         if (sl->has_pattern || sl->variadic)
@@ -214,17 +217,53 @@ uint32_t jit_threshold() {
 bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
                            value_t **out) {
     *out = nullptr;
-    if (!skein::jit::available())
-        return false;
-    if (!callee || callee->type != T_func)
+    if (!skein::jit::available() || !callee)
         return false;
 
-    struct func_value_t *fv = (struct func_value_t *)callee;
-    if (!fv->def || !fv->def->code)
+    std::shared_ptr<function_def> def;
+    function_code *code = nullptr;
+    struct method_value_t *method = nullptr;
+    std::array<value_t *, 8> inline_args;
+    std::vector<value_t *> heap_args;
+    value_t **call_args = args;
+    uint32_t call_argc = argc;
+
+    if (callee->type == T_func) {
+        struct func_value_t *fv = (struct func_value_t *)callee;
+        if (!fv->def || !fv->def->code)
+            return false;
+        if (fv->def->code->is_method)
+            return false;
+        def = fv->def;
+        code = def->code.get();
+        if (!jit_function_eligible(code) ||
+            !jit_args_match(code, call_args, call_argc))
+            return false;
+    } else if (callee->type == T_method) {
+        method = (struct method_value_t *)callee;
+        if (!method->method || !method->method->code)
+            return false;
+        def = method->method;
+        code = def->code.get();
+        if (!code->is_method || !jit_function_eligible(code))
+            return false;
+        call_argc = argc + 1;
+        if ((int)call_argc != code->nparams)
+            return false;
+        if (call_argc <= inline_args.size()) {
+            call_args = inline_args.data();
+        } else {
+            heap_args.resize(call_argc);
+            call_args = heap_args.data();
+        }
+        call_args[0] = method->receiver ? method->receiver : newnull();
+        for (uint32_t i = 0; i < argc; ++i)
+            call_args[i + 1] = args[i];
+        if (!jit_args_match(code, call_args, call_argc))
+            return false;
+    } else {
         return false;
-    function_code *code = fv->def->code.get();
-    if (!jit_call_eligible(code, args, argc))
-        return false;
+    }
 
     function_vm_cache *cache = cache_for(code);
     if (cache->jit_failed)
@@ -234,7 +273,7 @@ bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
             return false;
         if (cache->jit_hits++ < jit_threshold())
             return false;
-        skein::bc::ProtoPtr proto = prepare_function_body(fv->def);
+        skein::bc::ProtoPtr proto = prepare_function_body(def);
         if (!proto || !skein::jit::can_compile(*proto)) {
             cache->jit_failed = true;
             return false;
@@ -249,8 +288,10 @@ bool skein_vm_try_jit_call(value_t *callee, value_t **args, uint32_t argc,
     skein::jit::thread_state ts;
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
-    *out = skein::jit::enter(cache->jit, &ts, fv->def.get(), args,
-                             (uint32_t)argc);
+    if (method)
+        method->receiver = nullptr;
+    *out = skein::jit::enter(cache->jit, &ts, def.get(), call_args,
+                             call_argc);
     return true;
 }
 

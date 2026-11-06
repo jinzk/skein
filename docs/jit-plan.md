@@ -44,6 +44,7 @@ Go/No-Go 标准见 §10。
   `field_bench`；
 - dict 索引读写：`GET_INDEX_CACHED` / `ASSIGN_INDEX`，覆盖
   `index_bench` / `index_write_bench`；
+- method 调用：`T_method` 直接进入 JIT，覆盖 `method_bench`；
 - JIT `CALL` 直接调用已编译函数，未命中回退 VM；
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
@@ -58,6 +59,7 @@ global_bench SKEIN_JIT=0 ~0.20s   SKEIN_JIT=1 ~0.10s   （约 2.0x）
 field_bench  SKEIN_JIT=0 ~0.25s   SKEIN_JIT=1 ~0.16s   （约 1.6x）
 index_bench  SKEIN_JIT=0 ~0.24s   SKEIN_JIT=1 ~0.15s   （约 1.6x）
 index_write  SKEIN_JIT=0 ~0.16s   SKEIN_JIT=1 ~0.10s   （约 1.6x）
+method_bench SKEIN_JIT=0 ~0.18s   SKEIN_JIT=1 ~0.06s   （约 3.0x）
 ```
 
 尚未落地：

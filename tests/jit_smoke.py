@@ -65,6 +65,8 @@ def main():
                   ROOT / "benchmarks" / "index_bench.skein")
     ok &= compare(binary, "index-write-bench",
                   ROOT / "benchmarks" / "index_write_bench.skein")
+    ok &= compare(binary, "method-bench",
+                  ROOT / "benchmarks" / "method_bench.skein")
 
     with tempfile.TemporaryDirectory(prefix="skein-jit-") as tmp:
         tmp_path = Path(tmp)
@@ -141,6 +143,21 @@ def main():
             encoding="utf-8",
         )
         ok &= compare(binary, "index-error", index_error)
+
+        method_error = tmp_path / "method_error.skein"
+        method_error.write_text(
+            "struct Counter { n: int; }\n"
+            "impl Counter {\n"
+            "  func add(self, d) { return self.n + d; }\n"
+            "}\n"
+            "func f(n) {\n"
+            "  let c = Counter { n: n };\n"
+            '  return c.add("x");\n'
+            "}\n"
+            "f(1);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "method-error", method_error)
 
     if not ok:
         return 1

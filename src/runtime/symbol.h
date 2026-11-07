@@ -37,7 +37,10 @@ enum type_constraint_kind {
     TYPE_SOCKET,
     TYPE_LISTENER,
     TYPE_WEBSOCKET,
-    TYPE_STREAM
+    TYPE_STREAM,
+    /* Static-only pair and union types. */
+    TYPE_PAIR,
+    TYPE_UNION
 };
 
 struct type_constraint {

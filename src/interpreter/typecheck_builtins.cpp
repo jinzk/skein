@@ -103,9 +103,15 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
     }
 
     if (path == "std.iter.enumerate") {
+        const TypeNode *element = args.empty()
+                                      ? type_any()
+                                      : context.infer_iterable_element(
+                                            args[0], false, env);
         result = type_container(
             TYPE_GENERATOR,
-            {type_container(TYPE_LIST, {type_any()}), type_any()});
+            {type_container(TYPE_PAIR,
+                            {type_builtin(TYPE_INT), element}),
+             type_any()});
         return true;
     }
 
@@ -177,8 +183,8 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             expected_element(expected, TYPE_LIST, 0);
         if (element->kind == TYPE_ANY)
             element = input_element;
-        /* map's input element type is independent from its result type. */
-        if (name == "map")
+        /* map/zip input element types are independent from result types. */
+        if (name == "map" || name == "zip")
             element = input_element;
         const TypeNode *target_list =
             type_container(TYPE_LIST, {element});
@@ -320,13 +326,20 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             return true;
         }
         if (name == "zip") {
-            if (!require_kind(1, TYPE_LIST) ||
-                !check_arg(1, type_container(TYPE_LIST, {type_any()}),
-                           false))
+            if (!require_kind(1, TYPE_LIST))
+                return true;
+            const TypeNode *second_list =
+                container_type(arg_type(1), TYPE_LIST, 1);
+            const TypeNode *second_element =
+                second_list->args.empty() ? type_any()
+                                          : second_list->args[0];
+            if (!check_arg(
+                    1, type_container(TYPE_LIST, {second_element}),
+                    false))
                 return true;
             result = type_container(
                 TYPE_LIST,
-                {type_container(TYPE_LIST, {type_any()})});
+                {type_container(TYPE_PAIR, {element, second_element})});
             return true;
         }
         if (name == "binary_search") {
@@ -372,7 +385,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         if (name == "items") {
             result = type_container(
                 TYPE_LIST,
-                {type_container(TYPE_LIST, {type_any()})});
+                {type_container(TYPE_PAIR, {key, value})});
             return true;
         }
         if (name == "get") {
@@ -719,7 +732,7 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.list.zip")
         return poly_builtin(
             {list_t, poly_list(U)},
-            poly_list(poly_list(any_type())), 0, true);
+            poly_list(type_container(TYPE_PAIR, {T, U})), 0, true);
     if (path == "std.list.binary_search")
         return poly_builtin(
             {list_t, T, any_type()},
@@ -903,8 +916,9 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.dict.values")
         return poly_builtin({dict_kv}, poly_list(V));
     if (path == "std.dict.items")
-        return poly_builtin({dict_kv},
-                            poly_list(poly_list(any_type())));
+        return poly_builtin(
+            {dict_kv},
+            poly_list(type_container(TYPE_PAIR, {K, V})));
     if (path == "std.dict.delete")
         return poly_builtin({dict_kv, K}, dict_kv);
     if (path == "std.dict.merge")

@@ -752,7 +752,7 @@ const limit: int = 10;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream
+list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair union
 ```
 
 任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`：
@@ -783,7 +783,7 @@ let c: char?;       // 默认 null
 | `any` / `null` | `null` |
 | `T?` | `null` |
 
-`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream` 没有默认值，必须提供初始值。
+`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`union` 没有默认值，必须提供初始值。
 
 已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
@@ -815,7 +815,7 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
-- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`union[A, B]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
 - 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
@@ -988,6 +988,36 @@ struct Handler {
   std.generator.next(echo(), "hi");
   std.generator.next(echo(), 1);   // 错误：期望 string
   ```
+
+- `pair[A, B]` 表示二元异构结构：
+
+  ```text
+  let p: pair[int, string] = [1, "a"];
+  let n: int = p[0];
+  let s: string = p[1];
+  let [n2, s2] = p;
+  ```
+
+  `zip`、`dict.items`、`iter.enumerate` 会返回 pair：
+
+  ```text
+  let pairs: list[pair[int, string]] = std.list.zip([1], ["a"]);
+  let items: list[pair[string, int]] = std.dict.items({"a": 1});
+  let e: generator[pair[int, int]] = std.iter.enumerate([10]);
+  ```
+
+- `union[A, B]` 表示两个类型之一：
+
+  ```text
+  let x: union[int, string] = 1;
+  x = "a";
+
+  let xs = [1, "a"];   // list[union[int, string]]
+  let ys: list[union[int, string]] = xs;
+  ```
+
+  union 按成员进行赋值/参数检查；暂不自动控制流收窄，分支内需要时可用 `as`。
+- `pair` / `union` 是静态类型：`pair` 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证。
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 
   ```text
@@ -1478,7 +1508,7 @@ func double(x) -> x * 2;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream
+list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair union
 ```
 
 示例：

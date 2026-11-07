@@ -202,6 +202,8 @@ const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
         return a;
     if (a->kind == TYPE_ANY || b->kind == TYPE_ANY)
         return type_any();
+    if (a->kind == TYPE_INVALID || b->kind == TYPE_INVALID)
+        return type_any();
     if ((a->kind == TYPE_INT || a->kind == TYPE_FLOAT ||
          a->kind == TYPE_NUMBER) &&
         (b->kind == TYPE_INT || b->kind == TYPE_FLOAT ||
@@ -210,6 +212,46 @@ const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
     if (a->kind == TYPE_NAMED && b->kind == TYPE_NAMED &&
         a->name == b->name && a->module == b->module)
         return a;
+
+    if (a->kind == TYPE_UNION || b->kind == TYPE_UNION) {
+        auto contains = [](const TypeNode *type, const TypeNode *item) {
+            for (const TypeNode *arg : type->args) {
+                if (arg == item)
+                    return true;
+            }
+            return false;
+        };
+        if (a->kind == TYPE_UNION && contains(a, b))
+            return a;
+        if (b->kind == TYPE_UNION && contains(b, a))
+            return b;
+        std::vector<const TypeNode *> args;
+        auto add_unique = [&](const TypeNode *type) {
+            if (type->kind == TYPE_UNION) {
+                for (const TypeNode *arg : type->args) {
+                    bool found = false;
+                    for (const TypeNode *existing : args) {
+                        if (existing == arg) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                        args.push_back(arg);
+                }
+                return;
+            }
+            for (const TypeNode *existing : args) {
+                if (existing == type)
+                    return;
+            }
+            args.push_back(type);
+        };
+        add_unique(a);
+        add_unique(b);
+        return type_container(TYPE_UNION, args);
+    }
+
     if (a->kind == b->kind && type_container_arity(a->kind) > 0 &&
         a->args.size() == b->args.size()) {
         std::vector<const TypeNode *> args;
@@ -218,7 +260,7 @@ const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
             args.push_back(join_types(a->args[i], b->args[i]));
         return type_container(a->kind, args, a->nullable || b->nullable);
     }
-    return type_any();
+    return type_container(TYPE_UNION, {a, b});
 }
 
 bool flatten_path(const struct ast *node, std::string &out) {
@@ -441,6 +483,28 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
         if (instantiated != actual)
             return match_type(instantiated, expected);
         return MatchResult::Unknown;
+    }
+
+    if (actual->kind == TYPE_UNION) {
+        MatchResult result = MatchResult::Ok;
+        for (const TypeNode *member : actual->args) {
+            result = combine_result(result,
+                                    match_type(member, expected));
+            if (result == MatchResult::Mismatch)
+                return MatchResult::Mismatch;
+        }
+        return result;
+    }
+    if (expected->kind == TYPE_UNION) {
+        bool unknown = false;
+        for (const TypeNode *member : expected->args) {
+            MatchResult result = match_type(actual, member);
+            if (result == MatchResult::Ok)
+                return MatchResult::Ok;
+            if (result == MatchResult::Unknown)
+                unknown = true;
+        }
+        return unknown ? MatchResult::Unknown : MatchResult::Mismatch;
     }
 
     if (expected->nullable) {

@@ -837,6 +837,66 @@ def run_cases():
           "}\n",
           stderr="type error: expected int, got string")
 
+    check("pair indexing and destructuring",
+          "import std;\n"
+          "let p: pair[int, string] = [1, \"a\"];\n"
+          "let xs: list[int] = [p[0]];\n"
+          "let ys: list[string] = [p[1]];\n"
+          "let [n, s] = p;\n"
+          "let zs: list[int] = [n];\n"
+          "let ws: list[string] = [s];\n"
+          "println(xs); println(ys); println(zs); println(ws);\n",
+          stdout_all=["[1]", "[a]", "[1]", "[a]"], not_stderr="type warning")
+
+    check("pair literal mismatch",
+          "let p: pair[int, string] = [\"a\", 1];\n",
+          stderr="type error: expected int, got string")
+
+    check("pair length mismatch",
+          "let p: pair[int, string] = [1];\n",
+          stderr="type error: pair expects 2 element(s), got 1")
+
+    check("zip pair type",
+          "import std;\n"
+          "let pairs: list[pair[int, string]] = "
+          "std.list.zip([1, 2], [\"a\", \"b\"]);\n"
+          "let first = pairs[0];\n"
+          "let xs: list[int] = [first[0]];\n"
+          "let ys: list[string] = [first[1]];\n"
+          "println(xs); println(ys);\n",
+          stdout_all=["[1]", "[a]"], not_stderr="type warning")
+
+    check("items and enumerate pair types",
+          "import std;\n"
+          "let items: list[pair[string, int]] = "
+          "std.dict.items({\"a\": 1});\n"
+          "let e: generator[pair[int, int]] = "
+          "std.iter.enumerate([10, 20]);\n"
+          "println(items); println(std.iter.collect(e));\n",
+          stdout_all=["[[a, 1]]", "[[0, 10], [1, 20]]"],
+          not_stderr="type warning")
+
+    check("union values",
+          "import std;\n"
+          "let x: union[int, string] = 1;\n"
+          "x = \"a\";\n"
+          "let xs = [1, \"a\"];\n"
+          "let ys: list[union[int, string]] = xs;\n"
+          "println(ys);\n",
+          stdout="[1, a]", not_stderr="type warning")
+
+    check("union mismatch",
+          "import std;\n"
+          "let x: union[int, string] = true;\n",
+          stderr="type error: expected union[int, string], got bool")
+
+    check("union function parameter",
+          "func f(x: union[int, string]) { }\n"
+          "f(1);\n"
+          "f(\"a\");\n"
+          "f(true);\n",
+          stderr="type error: expected union[int, string], got bool")
+
     check("opaque userdata types",
           "import std;\n"
           "func check() {\n"

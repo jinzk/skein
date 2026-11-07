@@ -242,6 +242,30 @@ struct Checker : public BuiltinContext {
                                  force_element);
         }
 
+        if (expected && expected->kind == TYPE_PAIR &&
+            expr->nodetype == 'l') {
+            std::size_t index = 0;
+            for (struct list_node *item = (struct list_node *)expr; item;
+                 item = (struct list_node *)item->next, ++index) {
+                const TypeNode *element =
+                    index < expected->args.size()
+                        ? expected->args[index]
+                        : type_any();
+                if (!check_expr(item->value, element, env,
+                                explicit_cast, true))
+                    return false;
+            }
+            if (index != expected->args.size()) {
+                char message[128];
+                std::snprintf(message, sizeof(message),
+                              "pair expects %zu element(s), got %zu",
+                              expected->args.size(), index);
+                report_error(expr->line, expr->column, message);
+                return false;
+            }
+            return true;
+        }
+
         if (expected && expected->kind == TYPE_LIST &&
             expr->nodetype == 'l') {
             const TypeNode *element =
@@ -1384,6 +1408,31 @@ struct Checker : public BuiltinContext {
                 return;
             }
             case NODE_PATTERN_LIST: {
+                if (value && value->kind == TYPE_PAIR) {
+                    std::size_t index = 0;
+                    const TypeNode *rest =
+                        type_container(TYPE_LIST,
+                                       {join_types(type_element(value, 0),
+                                                   type_element(value, 1))});
+                    for (const struct pattern_node *item =
+                             (const struct pattern_node *)pattern->items;
+                         item;
+                         item = (const struct pattern_node *)item->next) {
+                        if (item->nodetype == NODE_PATTERN_REST) {
+                            bind_pattern_types((const struct ast *)item,
+                                               rest, env, fixed);
+                        } else {
+                            const TypeNode *element =
+                                index < value->args.size()
+                                    ? value->args[index]
+                                    : type_any();
+                            bind_pattern_types((const struct ast *)item,
+                                               element, env, fixed);
+                            ++index;
+                        }
+                    }
+                    return;
+                }
                 const TypeNode *element = type_any();
                 const TypeNode *rest = value ? value : type_any();
                 if (value && value->kind == TYPE_LIST) {
@@ -2103,6 +2152,24 @@ struct Checker : public BuiltinContext {
             case 'G': {
                 const TypeNode *base = infer(expr->l, env);
                 infer(expr->r, env);
+                if (base->kind == TYPE_PAIR) {
+                    const struct ast *index_node = expr->r;
+                    if (index_node && index_node->nodetype == 'V') {
+                        const struct value_t *value =
+                            ((const struct val *)index_node)->val;
+                        if (value && value->type == T_int) {
+                            long long index =
+                                ((const struct int_value_t *)value)->value;
+                            if (index >= 0 &&
+                                static_cast<std::size_t>(index) <
+                                    base->args.size())
+                                return base->args[(std::size_t)index];
+                            return type_any();
+                        }
+                    }
+                    return join_types(type_element(base, 0),
+                                      type_element(base, 1));
+                }
                 if (base->kind == TYPE_LIST || base->kind == TYPE_DEQUE)
                     return base->args.empty() ? type_any() : base->args[0];
                 if (base->kind == TYPE_DICT)

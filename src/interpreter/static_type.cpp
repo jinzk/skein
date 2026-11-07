@@ -43,6 +43,8 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_LISTENER: return "listener";
         case TYPE_WEBSOCKET: return "websocket";
         case TYPE_STREAM: return "stream";
+        case TYPE_PAIR: return "pair";
+        case TYPE_UNION: return "union";
         case TYPE_INVALID:
         default: return "invalid";
     }
@@ -254,6 +256,8 @@ int type_container_arity(enum type_constraint_kind kind) {
         case TYPE_RESULT:
             return 2;
         case TYPE_GENERATOR:
+        case TYPE_PAIR:
+        case TYPE_UNION:
             return 2;
         default:
             return -1;

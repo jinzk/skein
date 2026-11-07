@@ -1108,7 +1108,8 @@ struct Compiler {
             case 'g':
                 return has_local_declarations(
                     ((struct label_node *)node)->stmt);
-            case 'l': {
+            case 'l':
+        case NODE_TUPLE: {
                 for (struct list_node *item = (struct list_node *)node; item;
                      item = (struct list_node *)item->next) {
                     if (has_local_declarations(item->value))
@@ -1294,7 +1295,8 @@ struct Compiler {
             case 'g':
                 return can_use_slots(
                     ((struct label_node *)node)->stmt);
-            case 'l': {
+            case 'l':
+        case NODE_TUPLE: {
                 for (struct list_node *item = (struct list_node *)node; item;
                      item = (struct list_node *)item->next) {
                     if (!can_use_slots(item->value))
@@ -1619,7 +1621,8 @@ struct Compiler {
                 collect_local_declared_names(
                     ((struct label_node *)node)->stmt, names);
                 return;
-            case 'l': {
+            case 'l':
+        case NODE_TUPLE: {
                 for (struct list_node *item = (struct list_node *)node; item;
                      item = (struct list_node *)item->next)
                     collect_local_declared_names(item->value, names);
@@ -2391,6 +2394,7 @@ struct Compiler {
             }
 
             case 'l':
+        case NODE_TUPLE:
                 compile_list(node);
                 return;
 

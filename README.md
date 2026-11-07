@@ -2954,7 +2954,7 @@ count = "three";    // 错误：variable count expects int, got string
 ```
 
 - 类型在运行时的初始化和重新赋值时检查，不做隐式转换；
-- 支持 `any int float number bool string char byte bytes list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair union`；
+- 支持 `any int float number bool string char byte bytes list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair tuple union`；
 - 带类型标注的 `let` 可以省略初始值，使用默认值：
 
 ```text
@@ -2970,7 +2970,7 @@ dict          → {}
 any / null    → null
 ```
 
-- `function`、`builtin`、`callable`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`union` 必须提供初始值；
+- `function`、`builtin`、`callable`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`、`union` 必须提供初始值；
 - `const` 也可以带类型，例如 `const x: int = 1;`；
 - 普通类型标注只约束变量绑定，不约束容器内部元素，例如 `let a: list = [0]; a[0] = "x";` 仍允许；
 - `for` 的初始化部分也支持类型标注：`for (let i: int = 0; i < 3; i++)`。
@@ -2989,7 +2989,7 @@ let ys = raw as list[int];          // 显式信任边界
 let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 ```
 
-- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `union[A, B, ...]`，支持嵌套和可空形式；
+- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `tuple[A, B, ...]` / `union[A, B, ...]`，支持嵌套和可空形式；
 - 只支持内建容器的类型参数，不支持 `struct Box<T>`、`func f<T>`、泛型 trait 或类型别名；
 - 用户类型可以作为参数，例如 `list[Point]`；`list` 仍然表示无元素约束；
 - 检查初始化（字面量、`from_list`、构造字段、函数参数、默认值）和插入（下标赋值、`append`、`+=`、`set.add`、`push`、`merge`）；
@@ -3040,13 +3040,15 @@ struct Handler {
 - 发送类型 `S` 可由返回注解 `generator[T, S]` 指定，也可以由 `let x: S = yield ...` 推断；`std.generator.next(g, value)` 会检查 `value` 是否符合 `S`；
 - `for ... in generator[T]` 的元素类型为 `T`；
 - `std.iter.collect` 对 `generator[T]` 返回 `list[T]`，`std.iter.map` / `std.iter.filter` 对 generator 返回新的 generator；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
-- `pair[A, B]` 表示二元异构结构，`p[0]` / `p[1]` 分别得到 `A` / `B`；`zip`、`dict.items`、`iter.enumerate` 使用 pair；
+- `pair[A, B]` 表示二元异构结构，可用 `(a, b)` 初始化；`p[0]` / `p[1]` 分别得到 `A` / `B`；`zip`、`dict.items`、`iter.enumerate` 使用 pair；
+- `tuple[A, B, C, ...]` 表示三元及以上异构结构，可用 `(a, b, c, ...)` 初始化；索引和解构按位置得到类型；
 - `union[A, B]` 表示成员之一，支持平铺多个成员，例如 `union[int, string, bool]`；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；
 - union 支持常见控制流收窄：`if (x is T)` 的 then/else、`!`、`&&`、`match` 的 `case is T` 以及后续 `default` 分支；
 - 支持稳定字段路径收窄，例如 `if (b.value is int) { b.value + 1; }`，包括嵌套字段；
 - 对字段/变量的写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄；
 - 收窄绑定在发生赋值后回退到声明类型，避免在分支中继续使用过期的窄化类型；
-- `pair` / `union` 是静态类型：`pair` 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；
+- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；
+- `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。
 
@@ -3261,7 +3263,7 @@ let next = match (state) {
 - enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive`；
 - `case pattern as name` 把整个匹配值绑定到 `name`；
 - `case == IDLE` 匹配常量、名字或无载荷枚举变体；
-- `match (a, b)` 是多值 scrutinee，等价于 `match ([a, b])`；
+- `match (a, b)` 是 tuple/pair subject，模式 `[x, y]` 按位置解构；
 - 守卫写成 `case pattern if expr => ...`；
 - 绑定只读，作用域限于该 arm；
 - 无 arm 命中且无 `default` 时运行时报错；
@@ -3343,7 +3345,7 @@ apply(sqrt, 16)
 ```
 
 - 语法为 `参数名: 类型`，不写类型表示 `any`；
-- 支持 `any`、`int`、`float`、`number`、`bool`、`string`、`bytes`、`list`、`dict`、`function`、`builtin`、`callable`、`null`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`union`；
+- 支持 `any`、`int`、`float`、`number`、`bool`、`string`、`bytes`、`list`、`dict`、`function`、`builtin`、`callable`、`null`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`、`union`；
 - 调用时做运行时检查，不做隐式转换；
 - 类型错误不会进入函数体；
 - 逻辑运算和比较运算都返回 `bool`。

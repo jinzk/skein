@@ -40,7 +40,8 @@ enum type_constraint_kind {
     TYPE_STREAM,
     /* Static-only pair and union types. */
     TYPE_PAIR,
-    TYPE_UNION
+    TYPE_UNION,
+    TYPE_TUPLE
 };
 
 struct type_constraint {

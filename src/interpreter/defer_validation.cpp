@@ -204,7 +204,8 @@ static void collect_defer_declaration_sites(
             collect_defer_declaration_sites(
                 ((struct label_node *)node)->stmt, sites);
             return;
-        case 'l': {
+        case 'l':
+        case NODE_TUPLE: {
             for (struct list_node *item = (struct list_node *)node; item;
                  item = (struct list_node *)item->next)
                 collect_defer_declaration_sites(item->value, sites);
@@ -443,7 +444,8 @@ static bool validate_defer_walk(
         case 'g':
             return validate_defer_walk(
                 ((struct label_node *)node)->stmt, sites, error);
-        case 'l': {
+        case 'l':
+        case NODE_TUPLE: {
             for (struct list_node *item = (struct list_node *)node; item;
                  item = (struct list_node *)item->next) {
                 if (!validate_defer_walk(item->value, sites, error))

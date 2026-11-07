@@ -561,6 +561,21 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
         return MatchResult::Ok;
     if (expected->kind == TYPE_SOCKET && actual->kind == TYPE_LISTENER)
         return MatchResult::Ok;
+    if ((expected->kind == TYPE_PAIR &&
+         actual->kind == TYPE_TUPLE) ||
+        (expected->kind == TYPE_TUPLE &&
+         actual->kind == TYPE_PAIR)) {
+        if (actual->args.size() != expected->args.size())
+            return MatchResult::Mismatch;
+        MatchResult result = MatchResult::Ok;
+        for (std::size_t i = 0; i < expected->args.size(); ++i) {
+            result = combine_result(
+                result, match_type(actual->args[i], expected->args[i]));
+            if (result == MatchResult::Mismatch)
+                return result;
+        }
+        return result;
+    }
     if (actual->kind != expected->kind)
         return MatchResult::Mismatch;
 

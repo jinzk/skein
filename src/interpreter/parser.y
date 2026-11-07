@@ -664,6 +664,51 @@ static struct type_constraint *make_generic_type_list(
     return type;
 }
 
+static struct ast *append_tuple_explist(struct ast *chain,
+                                        struct ast *items) {
+    if (!items)
+        return chain;
+    if (items->nodetype == 'L') {
+        chain = append_tuple_explist(chain, items->l);
+        chain = append_tuple_explist(chain, items->r);
+        std::free(items);
+        return chain;
+    }
+    struct ast *node = newlist(items, NULL);
+    if (!chain)
+        return node;
+    struct list_node *tail = (struct list_node *)chain;
+    while (tail->next)
+        tail = (struct list_node *)tail->next;
+    tail->next = node;
+    return chain;
+}
+
+static struct ast *make_tuple_lambda(struct ast *tuple, struct ast *body) {
+    struct symlist *head = NULL;
+    struct symlist *tail = NULL;
+    for (struct list_node *item = (struct list_node *)tuple; item;
+         item = (struct list_node *)item->next) {
+        if (!item->value || item->value->nodetype != 'N') {
+            yyerror("lambda parameter must be a name");
+            treefree(tuple);
+            treefree(body);
+            return newnullast();
+        }
+        const char *name = ((struct symref *)item->value)->name;
+        struct symlist *param =
+            newsymlist(newsym(name ? name : ""), NULL, NULL);
+        if (tail)
+            tail->next = param;
+        else
+            head = param;
+        tail = param;
+    }
+    treefree(tuple);
+    return newfunc(NULL, head, newret(body), false, false,
+                   finish_function());
+}
+
 static struct type_constraint *make_function_type(
     struct parsed_type_list *params, struct type_constraint *result) {
     std::vector<struct type_constraint *> types;
@@ -780,6 +825,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> match_arms match_arm pattern pattern_list pattern_items value_pattern match_values
+%type <a> tuple_body
 %type <pf> pattern_fields pattern_field_items pattern_field
 %type <a> let_pattern
 %type <a> struct_decl impl_decl trait_decl struct_members struct_member
@@ -788,7 +834,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> impl_methods trait_methods trait_method method_decl method_member
 %type <a> decorators decorator decorator_expr
 %type <a> struct_fields struct_field
-%type <sl> param symlist lambda_param_tail
+%type <sl> param symlist
 %type <type> type type_name func_ret_opt
 %type <tl> type_list
 %type <str> importref importpath fieldname impl_trait_name
@@ -803,7 +849,7 @@ static struct type_constraint *runtime_type_or_error(
 /* `NAME '.' NAME` is deliberately shifted for field/enum dot access instead
  * of reducing `NAME` to `exp` first.  The conflicts are resolved as shifts
  * and this count keeps future grammar changes visible. */
-%expect 3
+%expect 2
 
 %start program
 %%
@@ -1462,11 +1508,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newfunc(NULL, NULL, newret($5), false, false,
                      finish_function());
       }
-    | '(' NAME ',' lambda_param_tail ')' RARROW lambda_start exp {
-        $$ = newfunc(NULL,
-                     newsymlist(newsym($2), NULL, $4),
-                     newret($8), false, false, finish_function());
-        free($2);
+    | '(' tuple_body ')'                 { $$ = $2; }
+    | '(' tuple_body ')' RARROW lambda_start exp {
+        $$ = make_tuple_lambda($2, $6);
       }
     | '(' exp ')'                         { $$ = $2; }
     | MATCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
@@ -1479,10 +1523,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | MATCH '(' exp ',' match_values ')' '{' EMPTY_BLOCK_CLOSE
                                            {
         yyerror("match requires at least one arm");
-        $$ = newmatch(newlist($3, $5), NULL);
+        $$ = newmatch(newtuple($3, $5), NULL);
       }
     | MATCH '(' exp ',' match_values ')' '{' match_arms '}'
-                                           { $$ = newmatch(newlist($3, $5), $8); }
+                                           { $$ = newmatch(newtuple($3, $5), $8); }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
@@ -1603,15 +1647,6 @@ lambda_start: %empty {
     }
     ;
 
-lambda_param_tail: NAME                   {
-        $$ = newsymlist(newsym($1), NULL, NULL);
-        free($1);
-      }
-    | NAME ',' lambda_param_tail           {
-        $$ = newsymlist(newsym($1), NULL, $3);
-        free($1);
-      }
-    ;
 
 value: INT                                { $$ = newint($1); }
     | FLOAT                               { $$ = newfloat($1); }
@@ -1784,6 +1819,16 @@ pattern_list: %empty                      { $$ = NULL; }
 
 pattern_items: pattern                    { $$ = $1; }
     | pattern_items ',' pattern           { $$ = append_patternitem($1, $3); }
+    ;
+
+tuple_body: exp ',' exp                   {
+        $$ = newtuple($1, newlist($3, NULL));
+      }
+    | exp ',' exp ',' explist              {
+        struct ast *tail = append_tuple_explist(
+            newlist($3, NULL), $5);
+        $$ = newtuple($1, tail);
+      }
     ;
 
 explist: %empty                            { $$ = NULL; }

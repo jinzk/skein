@@ -207,7 +207,8 @@ void collect_referenced_names(const struct ast *node,
             collect_referenced_names(
                 ((struct label_node *)node)->stmt, names);
             return;
-        case 'l': {
+        case 'l':
+        case NODE_TUPLE: {
             for (struct list_node *item = (struct list_node *)node; item;
                  item = (struct list_node *)item->next)
                 collect_referenced_names(item->value, names);

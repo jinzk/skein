@@ -46,6 +46,7 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_STREAM: return "stream";
         case TYPE_PAIR: return "pair";
         case TYPE_UNION: return "union";
+        case TYPE_TUPLE: return "tuple";
         case TYPE_INVALID:
         default: return "invalid";
     }
@@ -259,6 +260,7 @@ int type_container_arity(enum type_constraint_kind kind) {
         case TYPE_GENERATOR:
         case TYPE_PAIR:
         case TYPE_UNION:
+        case TYPE_TUPLE:
             return 2;
         default:
             return -1;
@@ -416,6 +418,30 @@ struct type_constraint *type_apply_generic_list(
         for (struct type_constraint *arg : args)
             free_type_constraint(arg);
         return NULL;
+    }
+
+    if (base->kind == TYPE_TUPLE) {
+        if (args.size() < 2) {
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "type tuple expects at least 2 type argument(s)");
+            diag_report(g_token_line, g_token_column, "type error", message);
+            g_statement_invalid = true;
+            for (struct type_constraint *arg : args)
+                free_type_constraint(arg);
+            return base;
+        }
+        std::vector<const TypeNode *> members;
+        members.reserve(args.size());
+        for (struct type_constraint *arg : args)
+            members.push_back(type_from_constraint(arg));
+        for (struct type_constraint *arg : args)
+            free_type_constraint(arg);
+        const TypeNode *node =
+            type_container(TYPE_TUPLE, members, base->nullable);
+        base->display = node->display.c_str();
+        base->detail = node;
+        return base;
     }
 
     if (base->kind == TYPE_UNION) {

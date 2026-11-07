@@ -540,8 +540,10 @@ struct Checker : public BuiltinContext {
                                  force_element);
         }
 
-        if (expected && expected->kind == TYPE_PAIR &&
-            expr->nodetype == 'l') {
+        if (expected &&
+            (expected->kind == TYPE_PAIR ||
+             expected->kind == TYPE_TUPLE) &&
+            (expr->nodetype == 'l' || expr->nodetype == NODE_TUPLE)) {
             std::size_t index = 0;
             for (struct list_node *item = (struct list_node *)expr; item;
                  item = (struct list_node *)item->next, ++index) {
@@ -556,7 +558,9 @@ struct Checker : public BuiltinContext {
             if (index != expected->args.size()) {
                 char message[128];
                 std::snprintf(message, sizeof(message),
-                              "pair expects %zu element(s), got %zu",
+                              "%s expects %zu element(s), got %zu",
+                              expected->kind == TYPE_PAIR ? "pair"
+                                                          : "tuple",
                               expected->args.size(), index);
                 report_error(expr->line, expr->column, message);
                 return false;
@@ -1719,12 +1723,16 @@ struct Checker : public BuiltinContext {
                 return;
             }
             case NODE_PATTERN_LIST: {
-                if (value && value->kind == TYPE_PAIR) {
+                if (value && (value->kind == TYPE_PAIR ||
+                              value->kind == TYPE_TUPLE)) {
                     std::size_t index = 0;
+                    const TypeNode *rest_element =
+                        type_element(value, 0);
+                    for (std::size_t i = 1; i < value->args.size(); ++i)
+                        rest_element =
+                            join_types(rest_element, value->args[i]);
                     const TypeNode *rest =
-                        type_container(TYPE_LIST,
-                                       {join_types(type_element(value, 0),
-                                                   type_element(value, 1))});
+                        type_container(TYPE_LIST, {rest_element});
                     for (const struct pattern_node *item =
                              (const struct pattern_node *)pattern->items;
                          item;
@@ -2515,6 +2523,17 @@ struct Checker : public BuiltinContext {
                 }
                 return info.type ? info.type : type_any();
             }
+            case NODE_TUPLE: {
+                std::vector<const TypeNode *> args;
+                for (struct list_node *item = (struct list_node *)expr;
+                     item; item = (struct list_node *)item->next)
+                    args.push_back(infer(item->value, env));
+                if (args.size() == 2)
+                    return type_container(TYPE_PAIR, args);
+                if (args.size() > 2)
+                    return type_container(TYPE_TUPLE, args);
+                return type_any();
+            }
             case 'l': {
                 const TypeNode *element = nullptr;
                 for (struct list_node *item = (struct list_node *)expr;
@@ -2539,7 +2558,8 @@ struct Checker : public BuiltinContext {
             case 'G': {
                 const TypeNode *base = infer(expr->l, env);
                 infer(expr->r, env);
-                if (base->kind == TYPE_PAIR) {
+                if (base->kind == TYPE_PAIR ||
+                    base->kind == TYPE_TUPLE) {
                     const struct ast *index_node = expr->r;
                     if (index_node && index_node->nodetype == 'V') {
                         const struct value_t *value =
@@ -2554,8 +2574,10 @@ struct Checker : public BuiltinContext {
                             return type_any();
                         }
                     }
-                    return join_types(type_element(base, 0),
-                                      type_element(base, 1));
+                    const TypeNode *joined = type_element(base, 0);
+                    for (std::size_t i = 1; i < base->args.size(); ++i)
+                        joined = join_types(joined, base->args[i]);
+                    return joined;
                 }
                 if (base->kind == TYPE_LIST || base->kind == TYPE_DEQUE)
                     return base->args.empty() ? type_any() : base->args[0];

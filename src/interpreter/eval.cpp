@@ -494,7 +494,8 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
-        case 'l': {
+        case 'l':
+        case NODE_TUPLE: {
             struct list_node *p = (struct list_node *)a;
             struct list_value_t *v = newlistval();
             while (p != NULL) {

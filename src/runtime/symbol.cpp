@@ -162,6 +162,7 @@ const builtin_type_name kBuiltinTypeNames[] = {
     {"stream", "stream", TYPE_STREAM},
     {"pair", "pair", TYPE_PAIR},
     {"union", "union", TYPE_UNION},
+    {"tuple", "tuple", TYPE_TUPLE},
 };
 
 const builtin_type_name *find_builtin_type_name(const char *name) {
@@ -274,6 +275,8 @@ bool type_constraint_matches(const struct type_constraint *type,
                    ((const struct userdata_value_t *)value)->meta->stream;
         case TYPE_PAIR:
             return value->type == T_list;
+        case TYPE_TUPLE:
+            return value->type == T_list;
         case TYPE_UNION:
             /* Union membership is enforced by the static checker. */
             return true;
@@ -340,6 +343,7 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_STREAM: base = "stream"; break;
         case TYPE_PAIR: base = "pair"; break;
         case TYPE_UNION: base = "union"; break;
+        case TYPE_TUPLE: base = "tuple"; break;
         case TYPE_NAMED:
             base = type->name ? type->name : "invalid";
             break;

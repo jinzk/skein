@@ -1021,6 +1021,49 @@ def run_cases():
           "let p: pair[int, string, bool] = [1, \"a\", true];\n",
           stderr="type error: type pair expects 2 type argument(s)")
 
+    check("tuple literal inference",
+          "let p = (1, \"a\");\n"
+          "let t = (1, \"a\", true);\n"
+          "let xs: list[int] = [p[0]];\n"
+          "let ys: list[string] = [p[1]];\n"
+          "let zs: list[bool] = [t[2]];\n"
+          "let [a, b] = p;\n"
+          "let [c, d, e] = t;\n"
+          "println(xs); println(ys); println(zs); println(a); println(e);\n",
+          stdout_all=["[1]", "[a]", "[true]", "1", "true"],
+          not_stderr="type warning")
+
+    check("tuple type annotations",
+          "let p: pair[int, string] = (1, \"a\");\n"
+          "let t: tuple[int, string, bool] = (1, \"a\", true);\n"
+          "println(p); println(t);\n",
+          stdout_all=["[1, a]", "[1, a, true]"], not_stderr="type warning")
+
+    check("tuple length mismatch",
+          "let t: tuple[int, string] = (1, \"a\", true);\n",
+          stderr="type error: tuple expects 2 element(s), got 3")
+
+    check("tuple function argument",
+          "func use(p: pair[int, string]) { }\n"
+          "use((1, \"a\"));\n"
+          "use((1, 2));\n",
+          stderr="type error: expected string, got int")
+
+    check("tuple call boundary",
+          "func id(v: pair[int, string]): pair[int, string] {\n"
+          "  return v;\n"
+          "}\n"
+          "let p: pair[int, string] = id((1, \"a\"));\n"
+          "println(p);\n",
+          stdout="[1, a]", not_stderr="type warning")
+
+    check("tuple match subject",
+          "match (1, \"a\") {\n"
+          "  case [n, s] => println(n);\n"
+          "  default => println(\"no\");\n"
+          "};\n",
+          stdout="1")
+
     check("opaque userdata types",
           "import std;\n"
           "func check() {\n"

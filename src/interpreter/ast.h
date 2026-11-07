@@ -38,6 +38,7 @@ constexpr int NODE_PATTERN_TYPE = 0x100;
 constexpr int NODE_PATTERN_OR = 0x101;
 constexpr int NODE_PATTERN_RANGE = 0x102;
 constexpr int NODE_CAST = 0x110;
+constexpr int NODE_TUPLE = 0x120;
 constexpr int NODE_DESTRUCTURE = '`';
 constexpr int NODE_ENUM_DECL = '<';
 constexpr int NODE_ENUM_VARIANT = '>';
@@ -549,6 +550,7 @@ void symlistfree_full(struct symlist *sl);
 
 
 struct ast *newlist(struct ast *v, struct ast *l);
+struct ast *newtuple(struct ast *v, struct ast *l);
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l);
 
 struct ast *newstructdecl(char *name, char *module,

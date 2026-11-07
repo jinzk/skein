@@ -969,6 +969,12 @@ struct ast *newlist(struct ast *v, struct ast *l) {
     return (struct ast *)p;
 }
 
+struct ast *newtuple(struct ast *v, struct ast *l) {
+    struct ast *tuple = newlist(v, l);
+    tuple->nodetype = NODE_TUPLE;
+    return tuple;
+}
+
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
     struct dict_node *p = (struct dict_node *)std::malloc(sizeof(struct dict_node));
     if (!p) {
@@ -1396,7 +1402,8 @@ void treefree(struct ast *a) {
         case 'X':
             treefree(((struct nscope *)a)->ast);
             break;
-        case 'l': {
+        case 'l':
+        case NODE_TUPLE: {
             struct list_node *p = (struct list_node *)a;
             treefree(p->value);
             treefree(p->next);

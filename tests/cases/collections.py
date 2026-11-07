@@ -570,7 +570,7 @@ def run_cases():
           "min(3, 1, 2)\nmax(2.5, 1)\nmin(1)\nmax(1, 2.0)\n",
           stdout_all=["= 1", "= 2.5", "= 1", "= 2.0"])
     check("math type error",
-          'sin("x")\n', stderr="sin expects a number, got string")
+          'sin("x")\n', stderr="type error: expected number, got string")
     check("math arity error",
           "atan2(1)\n", stderr="atan2 expects 2 arguments, got 1")
     check("math variadic arity",

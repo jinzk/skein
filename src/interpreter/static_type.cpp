@@ -69,7 +69,7 @@ std::string node_key(enum type_constraint_kind kind, const std::string &name,
 std::string function_arg_display(const TypeNode *type) {
     if (!type)
         return "any";
-    if (type->kind == TYPE_CALLABLE && !type->args.empty())
+    if (type_is_function_signature(type))
         return "(" + type->display + ")";
     return type->display;
 }
@@ -81,9 +81,10 @@ std::string node_display(enum type_constraint_kind kind,
     std::string text;
     if (kind == TYPE_NAMED) {
         text = name.empty() ? "invalid" : name;
-    } else if (kind == TYPE_CALLABLE && !args.empty()) {
+    } else if ((kind == TYPE_CALLABLE || kind == TYPE_FUNCTION ||
+                kind == TYPE_BUILTIN) && !args.empty()) {
         if (args.size() == 2 && args[0] &&
-            args[0]->kind == TYPE_CALLABLE && !args[0]->args.empty()) {
+            type_is_function_signature(args[0])) {
             text = function_arg_display(args[0]);
         } else {
             text = "(";
@@ -205,7 +206,10 @@ bool type_is_container(const TypeNode *type) {
 }
 
 bool type_is_function_signature(const TypeNode *type) {
-    return type && type->kind == TYPE_CALLABLE && !type->args.empty();
+    return type && (type->kind == TYPE_CALLABLE ||
+                    type->kind == TYPE_FUNCTION ||
+                    type->kind == TYPE_BUILTIN) &&
+           !type->args.empty();
 }
 
 int type_function_param_count(const TypeNode *type) {

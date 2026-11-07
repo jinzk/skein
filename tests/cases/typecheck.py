@@ -321,7 +321,89 @@ def run_cases():
     check("function type accepts builtin",
           "let f: (number) -> number = sqrt;\n"
           "println(f(9));\n",
+          not_stderr="type warning",
           stdout_all=["3"])
+
+    check("builtin function signatures",
+          "import std;\n"
+          "let f: (number) -> int = floor;\n"
+          "let g: (int, int) -> int = std.math.gcd;\n"
+          "let h: (string) -> string = trim;\n"
+          "println(f(2.9));\n"
+          "println(g(12, 18));\n"
+          "println(h(\"  x  \"));\n",
+          stdout_all=["2", "6", "x"])
+
+    check("builtin signature argument check",
+          'sqrt("x");\n',
+          stderr="type error: expected number, got string")
+
+    check("function type assignment and call",
+          "let f: (int) -> int = func(x: int): int -> x * 2;\n"
+          "println(f(3));\n",
+          stdout_all=["6"])
+
+    check("function type return mismatch",
+          'let f: (int) -> int = func(x: int): string -> "a";\n',
+          stderr="type error: expected (int) -> int, got (int) -> string")
+
+    check("function type parameter mismatch",
+          "let f: (int) -> int = func(x: string): int -> 1;\n",
+          stderr="type error: expected (int) -> int, got (string) -> int")
+
+    check("function type guides short lambda parameters",
+          "let f: (int) -> int = x -> x * 2;\n"
+          "println(f(3));\n"
+          'f("a");\n',
+          stderr="type error: expected int, got string")
+
+    check("function type parameter variance",
+          "let f: (int) -> int = func(x: number): int -> 1;\n"
+          "println(f(2));\n",
+          stdout_all=["1"])
+
+    check("function type return covariance",
+          "let f: (int) -> number = func(x: int): int -> x;\n"
+          "println(f(2));\n",
+          stdout_all=["2"])
+
+    check("function type narrow return rejected",
+          "let f: (int) -> int = func(x: int): number -> x;\n",
+          stderr="type error: expected (int) -> int, got (int) -> number")
+
+    check("function type call argument check",
+          "let f: (int) -> int = func(x: int): int -> x;\n"
+          'f("a");\n',
+          stderr="type error: expected int, got string")
+
+    check("function type field and container calls",
+          "struct S { cb: (int) -> int; }\n"
+          "let s: S = S { cb: func(x: int): int -> x + 1 };\n"
+          "let fs: list[(int) -> int] = [func(x: int): int -> x];\n"
+          "println(s.cb(2));\n"
+          "println(fs[0](2));\n"
+          'fs[0]("a");\n',
+          stderr="type error: expected int, got string")
+
+    check("function type any warning",
+          "func raw() { return func(x: int): int -> x; }\n"
+          "let f: (int) -> int = raw();\n"
+          "println(f(2));\n",
+          stderr="type warning: implicit any assigned to (int) -> int",
+          env=WARN_ENV)
+
+    check("function type as suppresses warning",
+          "func raw() { return func(x: int): int -> x; }\n"
+          "let f: (int) -> int = raw() as (int) -> int;\n"
+          "println(f(2));\n",
+          not_stderr="type warning",
+          env=WARN_ENV)
+
+    check("function type strict rejects any",
+          "func raw() { return func(x: int): int -> x; }\n"
+          "let f: (int) -> int = raw();\n",
+          stderr="type error: implicit any assigned to (int) -> int",
+          env=STRICT_ENV)
 
     check("function type is rejected in is",
           "let f = func(x) { return x; };\n"

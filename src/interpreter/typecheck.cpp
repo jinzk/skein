@@ -159,6 +159,17 @@ struct Checker : public BuiltinContext {
                                  needs_static_check(target), force_element);
         }
 
+        if (expected && type_is_function_signature(expected) &&
+            expr->nodetype == 'Z') {
+            struct funcdef *def = (struct funcdef *)expr;
+            check_funcdef(def, env);
+            const TypeNode *actual =
+                function_type_from_def(def, env, expected);
+            return warn_or_error(actual, expected, expr->line,
+                                 expr->column, explicit_cast,
+                                 force_element);
+        }
+
         if (expected && expected->kind == TYPE_LIST &&
             expr->nodetype == 'l') {
             const TypeNode *element =
@@ -455,7 +466,9 @@ struct Checker : public BuiltinContext {
         if (!function->def || !function->def->code)
             return false;
         FunctionSig sig = signature_from_symlist(function->def->code->sl);
-        sig.result = function->def->code->ret_type
+        sig.result = (function->def->code->ret_type &&
+                      !function->def->code->is_async &&
+                      !function->def->code->is_generator)
                          ? type_from_constraint(
                                function->def->code->ret_type.get())
                          : type_any();
@@ -471,6 +484,22 @@ struct Checker : public BuiltinContext {
         result = type_any();
         std::vector<struct ast *> args;
         collect_call_args(call->args, args);
+
+        if (call->callee) {
+            const TypeNode *callee_type = infer(call->callee, env);
+            if (type_is_function_signature(callee_type)) {
+                FunctionSig sig;
+                int count = type_function_param_count(callee_type);
+                for (int i = 0; i < count; ++i)
+                    sig.params.push_back(
+                        type_function_param(callee_type, (std::size_t)i));
+                sig.result = type_function_result(callee_type);
+                if (!check_call_args(sig, args, env, true))
+                    return false;
+                result = sig.result ? sig.result : type_any();
+                return true;
+            }
+        }
 
         std::string path;
         bool has_path = flatten_path(call->callee, path);
@@ -760,6 +789,79 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    const TypeNode *function_type_from_sig(const FunctionSig &sig) {
+        if (sig.variadic)
+            return type_builtin(TYPE_CALLABLE);
+        std::vector<const TypeNode *> args = sig.params;
+        args.push_back(sig.result ? sig.result : type_any());
+        return type_container(TYPE_FUNCTION, args);
+    }
+
+    const TypeNode *function_type_from_code(
+        const struct function_code *code) {
+        if (!code)
+            return type_builtin(TYPE_FUNCTION);
+        FunctionSig sig = signature_from_symlist(code->sl);
+        sig.result = (code->ret_type && !code->is_async &&
+                      !code->is_generator)
+                         ? type_from_constraint(code->ret_type.get())
+                         : type_any();
+        return function_type_from_sig(sig);
+    }
+
+    const TypeNode *function_type_from_def(
+        struct funcdef *def, Env &env,
+        const TypeNode *expected = nullptr) {
+        if (!def)
+            return type_builtin(TYPE_FUNCTION);
+        FunctionSig sig = signature_from_symlist(def->sl);
+        if (sig.variadic)
+            return type_builtin(TYPE_CALLABLE);
+        if (def->is_async || def->is_generator) {
+            sig.result = type_any();
+            return function_type_from_sig(sig);
+        }
+
+        bool use_expected =
+            expected && type_is_function_signature(expected) &&
+            (std::size_t)type_function_param_count(expected) ==
+                sig.params.size();
+        std::vector<const TypeNode *> params;
+        std::size_t index = 0;
+        for (struct symlist *item = def->sl; item; item = item->next) {
+            const TypeNode *type = type_from_constraint(item->type);
+            if (type->kind == TYPE_ANY && use_expected)
+                type = type_function_param(expected, index);
+            params.push_back(type);
+            ++index;
+        }
+        sig.params = params;
+
+        if (def->ret_type) {
+            sig.result = type_from_constraint(def->ret_type);
+            return function_type_from_sig(sig);
+        }
+
+        int return_count = 0;
+        struct ast *return_expr =
+            find_single_return(def->ast, return_count);
+        if (!return_expr || return_count != 1) {
+            sig.result = type_any();
+            return function_type_from_sig(sig);
+        }
+
+        Env local;
+        local.parent = &env;
+        index = 0;
+        for (struct symlist *item = def->sl; item; item = item->next) {
+            const char *name =
+                item->sym && item->sym->name ? item->sym->name : "";
+            local.define(name, params[index++]);
+        }
+        sig.result = infer(return_expr, local);
+        return function_type_from_sig(sig);
+    }
+
     const TypeNode *named_function_result(const char *name) {
         std::string key = name ? name : "";
         auto it = functions.find(key);
@@ -768,7 +870,10 @@ struct Checker : public BuiltinContext {
         struct symbol *sym = lookupsym(key.c_str());
         if (sym && sym->val && sym->val->type == T_func) {
             struct func_value_t *fn = (struct func_value_t *)sym->val;
-            if (fn->def && fn->def->code && fn->def->code->ret_type)
+            if (fn->def && fn->def->code &&
+                fn->def->code->ret_type &&
+                !fn->def->code->is_async &&
+                !fn->def->code->is_generator)
                 return type_from_constraint(
                     fn->def->code->ret_type.get());
         }
@@ -782,6 +887,8 @@ struct Checker : public BuiltinContext {
             return type_any();
         struct funcdef *def = (struct funcdef *)function;
         check_funcdef(def, env);
+        if (def->is_async || def->is_generator)
+            return type_any();
         if (def->ret_type)
             return type_from_constraint(def->ret_type);
         if (!def->ast)
@@ -1066,8 +1173,10 @@ struct Checker : public BuiltinContext {
         FunctionSig sig;
         if (def->sl)
             sig = signature_from_symlist(def->sl);
-        sig.result = def->ret_type ? type_from_constraint(def->ret_type)
-                                   : type_any();
+        sig.result = (def->ret_type && !def->is_async &&
+                      !def->is_generator)
+                         ? type_from_constraint(def->ret_type)
+                         : type_any();
         if (def->name)
             functions[def->name] = sig;
 
@@ -1430,11 +1539,44 @@ struct Checker : public BuiltinContext {
         if (!expr)
             return type_any();
         switch (expr->nodetype) {
-            case 'V':
-                return value_static_type(((struct val *)expr)->val);
+            case 'V': {
+                struct value_t *value = ((struct val *)expr)->val;
+                if (value && value->type == T_builtin) {
+                    struct builtin_value_t *builtin =
+                        (struct builtin_value_t *)value;
+                    if (const TypeNode *signature =
+                            builtin_function_type(builtin->functype))
+                        return signature;
+                }
+                return value_static_type(value);
+            }
             case 'N': {
                 const char *name = ((struct symref *)expr)->name;
-                return lookup_name(name ? name : "", env);
+                std::string key = name ? name : "";
+                VarInfo info = lookup_var(key, env);
+                if (info.type &&
+                    (info.type->kind != TYPE_ANY || info.fixed))
+                    return info.type;
+                auto it = functions.find(key);
+                if (it != functions.end())
+                    return function_type_from_sig(it->second);
+                struct symbol *sym = lookupsym(key.c_str());
+                if (sym && sym->val && sym->val->type == T_func) {
+                    struct func_value_t *fn =
+                        (struct func_value_t *)sym->val;
+                    if (fn->def && fn->def->code)
+                        return function_type_from_code(
+                            fn->def->code.get());
+                }
+                if (sym && sym->val && sym->val->type == T_builtin) {
+                    struct builtin_value_t *builtin =
+                        (struct builtin_value_t *)sym->val;
+                    if (const TypeNode *signature =
+                            builtin_function_type(builtin->functype))
+                        return signature;
+                    return type_builtin(TYPE_BUILTIN);
+                }
+                return info.type ? info.type : type_any();
             }
             case 'l': {
                 const TypeNode *element = nullptr;
@@ -1481,8 +1623,24 @@ struct Checker : public BuiltinContext {
                         resolve_namespace_type(path, exported))
                         return exported;
                     if (flatten_path(expr, path) &&
-                        resolve_namespace_value(path, value))
+                        resolve_namespace_value(path, value)) {
+                        if (value->type == T_func) {
+                            struct func_value_t *fn =
+                                (struct func_value_t *)value;
+                            if (fn->def && fn->def->code)
+                                return function_type_from_code(
+                                    fn->def->code.get());
+                        }
+                        if (value->type == T_builtin) {
+                            struct builtin_value_t *builtin =
+                                (struct builtin_value_t *)value;
+                            if (const TypeNode *signature =
+                                    builtin_function_type(
+                                        builtin->functype))
+                                return signature;
+                        }
                         return value_static_type(value);
+                    }
                 }
                 return field_type(base, expr, env);
             }
@@ -1498,9 +1656,11 @@ struct Checker : public BuiltinContext {
                            needs_static_check(target));
                 return target;
             }
-            case 'Z':
-                check_funcdef((struct funcdef *)expr, env);
-                return type_builtin(TYPE_FUNCTION);
+            case 'Z': {
+                struct funcdef *def = (struct funcdef *)expr;
+                check_funcdef(def, env);
+                return function_type_from_def(def, env);
+            }
             case 'k':
                 return type_builtin(TYPE_BOOL);
             case 'x':

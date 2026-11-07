@@ -33,6 +33,10 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                    const TypeNode *expected, Env &env,
                    const TypeNode *&result);
 
+/* Static signature for a simple (non-container) builtin, or NULL when the
+ * builtin is variadic/optional and has no precise first-class type yet. */
+const TypeNode *builtin_function_type(int functype);
+
 } // namespace detail
 } // namespace typecheck
 } // namespace skein

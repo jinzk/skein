@@ -2204,11 +2204,11 @@ def run_cases():
           stderr="type error: expected callable, got int")
     check("typed function rejects builtin",
           "func apply(fn: function) { return fn; }\napply(sqrt)\n",
-          stderr="type error: expected function, got builtin")
+          stderr="type error: expected function, got (number) -> number")
     check("typed builtin rejects function",
           "func apply(fn: builtin) { return fn; }\n"
           "let f = func() { return 1; };\napply(f)\n",
-          stderr="type error: expected builtin, got function")
+          stderr="type error: expected builtin, got () -> int")
     check("typed any",
           "func f(x: any) { return x; }\nf(true)\n", stdout="= true")
     check("typed null",
@@ -2806,15 +2806,15 @@ def run_cases():
     check("input as value", 'let f = input;\nf("> ")\nvalue\n',
           stdout_all=["> ", "= value"])
     check("read_file type error", "read_file(1)\n",
-          stderr="read_file expects a string path")
+          stderr="type error: expected string, got int")
     check("write_file type error", 'write_file("x", 1)\n',
-          stderr="write_file expects a string path and data")
+          stderr="type error: expected string, got int")
     check("write_file arity error", 'write_file("x")\n',
           stderr="write_file expects 2 arguments")
     check("append_file arity error", 'append_file("x")\n',
           stderr="append_file expects 2 arguments")
     check("file_exists type error", "file_exists(1)\n",
-          stderr="file_exists expects a string path")
+          stderr="type error: expected string, got int")
     check("bytes_from_string display", 'bytes_from_string("abc")\n',
           stdout="= <bytes: 3>")
     check("bytes_len", 'bytes_len(bytes_from_string("abc"))\n', stdout="= 3")
@@ -2824,7 +2824,7 @@ def run_cases():
           'bytes_get(bytes_from_string("a"), 5)\n',
           stderr="bytes_get index 5 out of range")
     check("bytes_get type", 'bytes_get("x", 0)\n',
-          stderr="bytes_get expects bytes")
+          stderr="type error: expected bytes, got string")
     check("bytes_slice", 'bytes_hex(bytes_slice('
           'bytes_from_string("abcdef"), 1, 3))\n', stdout="= 626364")
     check("bytes_slice past end",
@@ -2843,7 +2843,7 @@ def run_cases():
     check("bytes_from_hex invalid", 'bytes_from_hex("zz")\n',
           stderr="invalid hex digit")
     check("bytes_from_hex type", "bytes_from_hex(1)\n",
-          stderr="bytes_from_hex expects a string")
+          stderr="type error: expected string, got int")
     check("bytes_to_string", 'bytes_to_string(bytes_from_hex("68656c6c6f"))\n',
           stdout="= hello")
     check("bytes_to_string NUL", 'bytes_to_string(bytes_from_hex("00"))\n',
@@ -2930,7 +2930,7 @@ def run_cases():
           'int_to_bytes(1, 4, "middle")\n',
           stderr='byteorder must be "little" or "big"')
     check("int_to_bytes type", 'int_to_bytes("x", 4, "little")\n',
-          stderr="int_to_bytes expects an integer value")
+          stderr="type error: expected int, got string")
     check("int_to_bytes arity", 'int_to_bytes(1, 4)\n',
           stderr="int_to_bytes expects 3 arguments")
     check("bytes/int roundtrip",
@@ -2958,11 +2958,11 @@ def run_cases():
     check("bytes_slice arity", "bytes_slice(bytes_from_string(\"a\"))\n",
           stderr="bytes_slice expects 2 or 3 arguments")
     check("read_bytes type", "read_bytes(1)\n",
-          stderr="read_bytes expects a string path")
+          stderr="type error: expected string, got int")
     check("write_bytes type", 'write_bytes("x", "text")\n',
-          stderr="write_bytes expects a string path and bytes")
+          stderr="type error: expected bytes, got string")
     check("bytes hex roundtrip type", "bytes_hex(1)\n",
-          stderr="bytes_hex expects bytes")
+          stderr="type error: expected bytes, got int")
 
     check("std.fn compose",
           "import std;\n"

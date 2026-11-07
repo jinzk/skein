@@ -910,7 +910,17 @@ struct Handler {
 - 支持嵌套函数类型：`((int) -> int) -> int`；
 - 函数类型可以作为容器参数，例如 `list[(int) -> int]`；
 - 运行时只检查值是否可调用（`function` / `builtin` / `method` / `native`），不检查参数和返回值；
-- 当前阶段只实现了函数类型语法及其静态表示；完整的参数/返回值签名匹配会在后续启用；
+- 静态检查会校验函数值赋值、参数/返回类型和通过函数类型发起的调用：
+
+  ```text
+  let f: (int) -> int = func(x: int): int -> x * 2;
+  f(3);              // OK
+  f("a");            // 错误
+  ```
+
+- 参数按逆变、返回值按协变比较；`any` 仍然作为渐进边界；
+- 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名，例如 `let f: (number) -> number = sqrt;` 可以直接通过；
+- 可变参数或可选参数 builtin 仍退化为 `callable`；
 - `is` 和模式类型不接受函数类型签名：`f is (int) -> int` 会报错。
 
 `is` 和模式类型只接受不带类型参数的类型：

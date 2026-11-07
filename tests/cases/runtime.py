@@ -464,7 +464,7 @@ def run_cases():
     check("string substr negative length", 'substr("hello", 1, -1)\n',
           stderr="substr length must be a non-negative integer")
     check("string split type", 'split(1, ",")\n',
-          stderr="split expects string text and separator")
+          stderr="type error: expected string, got int")
     check("string split arity", 'split("a")\n',
           stderr="split expects 2 arguments")
     check("string find arity", 'find("a")\n',
@@ -1034,4 +1034,4 @@ def run_cases():
           stderr="min expects numbers")
     check("std math gcd rejects floats",
           'import std;\nstd.math.gcd(1.5, 2);\n',
-          stderr="std.math.gcd expects integers")
+          stderr="type error: expected int, got float")

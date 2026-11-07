@@ -104,11 +104,41 @@ MatchResult combine_result(MatchResult a, MatchResult b) {
     return MatchResult::Ok;
 }
 
+MatchResult match_function_signature(const TypeNode *actual,
+                                     const TypeNode *expected) {
+    std::size_t actual_params = actual->args.size() - 1;
+    std::size_t expected_params = expected->args.size() - 1;
+    if (actual_params != expected_params)
+        return MatchResult::Mismatch;
+
+    MatchResult result = MatchResult::Ok;
+    for (std::size_t i = 0; i < expected_params; ++i) {
+        /* Parameters are contravariant: every expected input must be
+         * accepted by the actual function. */
+        result = combine_result(
+            result, match_type(expected->args[i], actual->args[i]));
+        if (result == MatchResult::Mismatch)
+            return result;
+    }
+    result = combine_result(
+        result, match_type(actual->args.back(), expected->args.back()));
+    return result;
+}
+
 } // namespace
 
 bool needs_static_check(const TypeNode *type) {
-    return type && type->kind != TYPE_ANY &&
-           has_concrete_container_arg(type);
+    if (!type || type->kind == TYPE_ANY)
+        return false;
+    if (has_concrete_container_arg(type))
+        return true;
+    if (type_is_function_signature(type)) {
+        for (const TypeNode *arg : type->args) {
+            if (arg && arg->kind != TYPE_ANY)
+                return true;
+        }
+    }
+    return false;
 }
 
 const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
@@ -251,7 +281,8 @@ FunctionSig method_signature_from_code(const struct function_code *code) {
     if (!code)
         return sig;
     sig = signature_from_symlist(code->sl, true);
-    sig.result = code->ret_type
+    sig.result = (code->ret_type && !code->is_async &&
+                  !code->is_generator)
                      ? type_from_constraint(code->ret_type.get())
                      : type_any();
     return sig;
@@ -262,8 +293,9 @@ FunctionSig method_signature_from_def(const struct funcdef *def) {
     if (!def)
         return sig;
     sig = signature_from_symlist(def->sl, true);
-    sig.result = def->ret_type ? type_from_constraint(def->ret_type)
-                               : type_any();
+    sig.result = (def->ret_type && !def->is_async && !def->is_generator)
+                     ? type_from_constraint(def->ret_type)
+                     : type_any();
     return sig;
 }
 
@@ -342,10 +374,32 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
         return MatchResult::Mismatch;
     }
     if (expected->kind == TYPE_CALLABLE) {
+        if (expected->args.empty()) {
+            if (actual->kind == TYPE_FUNCTION ||
+                actual->kind == TYPE_BUILTIN ||
+                actual->kind == TYPE_CALLABLE)
+                return MatchResult::Ok;
+            return MatchResult::Mismatch;
+        }
+        if (type_is_function_signature(actual))
+            return match_function_signature(actual, expected);
         if (actual->kind == TYPE_FUNCTION ||
             actual->kind == TYPE_BUILTIN ||
             actual->kind == TYPE_CALLABLE)
+            return MatchResult::Unknown;
+        return MatchResult::Mismatch;
+    }
+    if (expected->kind == TYPE_FUNCTION) {
+        if (actual->kind == TYPE_FUNCTION ||
+            actual->kind == TYPE_CALLABLE)
             return MatchResult::Ok;
+        return MatchResult::Mismatch;
+    }
+    if (expected->kind == TYPE_BUILTIN) {
+        if (actual->kind == TYPE_BUILTIN)
+            return MatchResult::Ok;
+        if (actual->kind == TYPE_CALLABLE)
+            return MatchResult::Unknown;
         return MatchResult::Mismatch;
     }
     if (actual->kind != expected->kind)

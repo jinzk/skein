@@ -277,6 +277,8 @@ add_library(skein_interpreter STATIC
   src/interpreter/ast.cpp
   src/interpreter/decorators.cpp
   src/interpreter/compiler.cpp
+  src/interpreter/ast_analysis.cpp
+  src/interpreter/defer_validation.cpp
   src/interpreter/vm_bridge.cpp
   src/interpreter/error_report.cpp
   src/interpreter/eval.cpp

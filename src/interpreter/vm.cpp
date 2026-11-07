@@ -22,6 +22,7 @@
 #include "value_runtime.h"
 #include "valuetype.h"
 #include "vm_eval.h"
+#include "vm_frame.h"
 #include "vm_gc_roots.h"
 #include "vm_state.h"
 #include "vm_host.h"
@@ -2733,106 +2734,50 @@ private:
     std::vector<std::vector<struct symbol *>> slot_symbols_pool_;
     std::vector<std::vector<value_t *>> slot_values_pool_;
 
-    template <typename T>
-    static std::vector<T> take_pool(std::vector<std::vector<T>> &pool) {
-        if (pool.empty())
-            return std::vector<T>();
-        std::vector<T> value = std::move(pool.back());
-        pool.pop_back();
-        value.clear();
-        return value;
-    }
-
-    void recycle_frame_vectors() {
-        if (name_cache_.capacity() != 0)
-            name_cache_pool_.push_back(std::move(name_cache_));
-        if (param_symbols_.capacity() != 0)
-            param_symbols_pool_.push_back(std::move(param_symbols_));
-        if (param_values_.capacity() != 0)
-            param_values_pool_.push_back(std::move(param_values_));
-        if (slot_symbols_.capacity() != 0)
-            slot_symbols_pool_.push_back(std::move(slot_symbols_));
-        if (slot_values_.capacity() != 0)
-            slot_values_pool_.push_back(std::move(slot_values_));
-    }
-
     const Proto &proto() const { return *proto_ptr_; }
 
-    void save_current_state() {
-        SavedVmState state;
-        state.proto = proto_ptr_;
-        state.pc = pc_;
-        state.scope_mark = scope_mark_;
-        state.frame_stack_base = frame_stack_base_;
-        state.errors_before = errors_before_;
-        state.saved_handler_depth = saved_handler_depth_;
-        state.caller_handler_depth = context_.handler_depth;
-        state.handler_body_depth = handler_body_depth_;
-        state.allow_await = context_.allow_await;
-        state.diag_frames = diag_frames_;
-        state.diag_module = diag_current_module_name();
-        state.diag_source = diag_current_source_name();
-        state.name_scope_generation = name_scope_generation_;
-        state.param_pool_safe = param_pool_safe_;
-        state.slot_pool_safe = slot_pool_safe_;
-        state.direct_params = direct_params_;
-        state.direct_slots = direct_slots_;
-        state.def = std::move(current_def_);
-        state.name_cache = std::move(name_cache_);
-        state.param_symbols = std::move(param_symbols_);
-        state.param_values = std::move(param_values_);
-        state.slot_symbols = std::move(slot_symbols_);
-        state.slot_values = std::move(slot_values_);
-        state.slot_const = std::move(slot_const_);
-        state.open_upvalues = std::move(open_upvalues_);
-        open_upvalues_.clear();
-        state.iterators = std::move(iterators_);
-        state.defer_scopes = std::move(defer_scopes_);
-        state.handlers = std::move(handlers_);
-        saved_states_.push_back(std::move(state));
+    VmFrameView make_frame_view() {
+        VmFrameView view;
+        view.proto = &proto_ptr_;
+        view.pc = &pc_;
+        view.scope_mark = &scope_mark_;
+        view.frame_stack_base = &frame_stack_base_;
+        view.errors_before = &errors_before_;
+        view.saved_handler_depth = &saved_handler_depth_;
+        view.handler_body_depth = &handler_body_depth_;
+        view.context = &context_;
+        view.diag_frames = &diag_frames_;
+        view.name_scope_generation = &name_scope_generation_;
+        view.param_pool_safe = &param_pool_safe_;
+        view.slot_pool_safe = &slot_pool_safe_;
+        view.direct_params = &direct_params_;
+        view.direct_slots = &direct_slots_;
+        view.current_def = &current_def_;
+        view.name_cache = &name_cache_;
+        view.param_symbols = &param_symbols_;
+        view.param_values = &param_values_;
+        view.slot_symbols = &slot_symbols_;
+        view.slot_values = &slot_values_;
+        view.slot_const = &slot_const_;
+        view.open_upvalues = &open_upvalues_;
+        view.iterators = &iterators_;
+        view.defer_scopes = &defer_scopes_;
+        view.handlers = &handlers_;
+        view.saved_states = &saved_states_;
+        view.name_cache_pool = &name_cache_pool_;
+        view.param_symbols_pool = &param_symbols_pool_;
+        view.param_values_pool = &param_values_pool_;
+        view.slot_symbols_pool = &slot_symbols_pool_;
+        view.slot_values_pool = &slot_values_pool_;
+        return view;
+    }
 
-        name_cache_ = take_pool(name_cache_pool_);
-        param_symbols_ = take_pool(param_symbols_pool_);
-        param_values_ = take_pool(param_values_pool_);
-        slot_symbols_ = take_pool(slot_symbols_pool_);
-        slot_values_ = take_pool(slot_values_pool_);
-        name_scope_generation_ = 0;
-        param_pool_safe_ = false;
-        direct_params_ = false;
-        direct_slots_ = false;
-        slot_pool_safe_ = false;
+    void save_current_state() {
+        save_vm_frame(make_frame_view());
     }
 
     void restore_state(SavedVmState state) {
-        recycle_frame_vectors();
-        proto_ptr_ = state.proto;
-        pc_ = state.pc;
-        scope_mark_ = state.scope_mark;
-        frame_stack_base_ = state.frame_stack_base;
-        errors_before_ = state.errors_before;
-        saved_handler_depth_ = state.saved_handler_depth;
-        handler_body_depth_ = state.handler_body_depth;
-        context_.handler_depth = state.caller_handler_depth;
-        context_.allow_await = state.allow_await;
-        diag_frames_ = state.diag_frames;
-        diag_set_module_name(state.diag_module);
-        diag_set_source_name(state.diag_source);
-        name_scope_generation_ = state.name_scope_generation;
-        param_pool_safe_ = state.param_pool_safe;
-        direct_params_ = state.direct_params;
-        direct_slots_ = state.direct_slots;
-        slot_pool_safe_ = state.slot_pool_safe;
-        current_def_ = std::move(state.def);
-        name_cache_ = std::move(state.name_cache);
-        param_symbols_ = std::move(state.param_symbols);
-        param_values_ = std::move(state.param_values);
-        slot_symbols_ = std::move(state.slot_symbols);
-        slot_values_ = std::move(state.slot_values);
-        slot_const_ = std::move(state.slot_const);
-        open_upvalues_ = std::move(state.open_upvalues);
-        iterators_ = std::move(state.iterators);
-        defer_scopes_ = std::move(state.defer_scopes);
-        handlers_ = std::move(state.handlers);
+        restore_vm_frame(make_frame_view(), std::move(state));
     }
 
     void unwind_one_fast_frame() {

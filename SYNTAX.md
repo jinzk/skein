@@ -1861,7 +1861,42 @@ p.area()      // enter / exit / 12
 - 方法装饰器收到的是 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
 - 装饰器可以修改参数，包括 `args[0]`（`self`），再调用原方法；
 - 调用点不变：`p.area()`、`let f = p.area; f()`、trait 分派都经过装饰器；
-- `std.meta.methods` / `std.meta.traits` 看到的方法签名不变。
+- `std.meta.methods` / `std.meta.traits` 看到的方法签名不变；
+- generator 方法和 async generator 方法也支持装饰器：生成的 wrapper 是普通
+  函数，直接返回装饰器链产生的 generator；是否惰性由装饰器决定，与自由函数
+  的 generator 装饰器一致。async generator 方法的 wrapper 不 `await`，
+  `next` / `for` 仍按 generator 协议驱动。迭代、发送值和 `close` / `defer`
+  语义保持。
+
+generator 方法装饰器示例：
+
+```text
+func trace(fn) {
+  return func(...args) {
+    print("enter");
+    return fn(...args);
+  };
+}
+
+struct Counter { n: int; }
+
+impl Counter {
+  @trace
+  func items(self) {
+    for (let i in range(self.n)) {
+      yield i;
+    }
+  }
+}
+
+for (let x in Counter { n: 3 }.items()) {
+  print(x);
+}
+// enter / 0 / 1 / 2
+```
+
+装饰器也可以返回 generator 函数，在 yield 之间做过滤或限流；此时只有装饰器
+自身的逐元素逻辑有额外开销，不会为每个元素多生成一层 wrapper。
 
 方法装饰器的默认值由生成的 wrapper 解析，因此装饰器看到的是已经补全默认值的参数；默认值仍可引用 `self` 和更早的参数，并在每次调用时重新求值。
 
@@ -1870,7 +1905,6 @@ p.area()      // enter / exit / 12
 - 自由函数装饰器见 5.11.1；
 - 不支持 `struct` / `enum` / `trait` 声明装饰器；
 - 被装饰方法不能使用解构参数；
-- 被装饰方法不能是 generator；
 - async 方法装饰器要求装饰器返回 async callable，见 5.12.2；
 - 装饰器不能改变方法名或声明签名。
 

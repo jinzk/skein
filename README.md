@@ -3705,7 +3705,10 @@ Point { x: 3, y: 4 }.area()      // enter / exit / 12
 - 装饰器收到 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
 - 支持固有方法和 `impl Trait for Type` 方法；调用点、方法值提取和 trait 分派不变；
 - 默认值由生成的 wrapper 解析，装饰器看到的是补全后的参数；
-- 装饰器必须返回 callable；不支持类型声明装饰器、解构参数方法和 generator 方法。
+- 装饰器必须返回 callable；不支持类型声明装饰器和解构参数方法；
+- generator 方法和 async generator 方法也支持装饰器；生成的 wrapper 是普通函数，
+  直接返回装饰器链产生的 generator，是否惰性由装饰器决定；async generator 的
+  wrapper 不 `await`，迭代、发送值和 `close` / `defer` 语义保持。
 
 async 方法：
 

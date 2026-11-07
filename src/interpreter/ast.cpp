@@ -736,6 +736,9 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->is_async = is_async;
     a->is_generator = is_generator;
     a->is_method = 0;
+    a->decorated_generator_source = NULL;
+    a->decorated_generator_async = 0;
+    a->method_self_type = NULL;
     return (struct ast *)a;
 }
 
@@ -940,6 +943,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
                           diag_current_module_name(), {}},
         free_function_code);
     code->source = diag_current_source_name();
+    code->decorated_generator_async = node->decorated_generator_async != 0;
     if (node->ret_type) {
         code->ret_type =
             std::make_shared<type_constraint>(*node->ret_type);
@@ -1336,10 +1340,24 @@ void treefree(struct ast *a) {
             if (f->moved) {
                 release_function_code(f);
             } else {
-                treefree(f->ast);
-                if (f->sl) symlistfree_full(f->sl);
+                /*
+                 * Static checking can materialize a function_code before
+                 * evaluation (for example while inferring generator types).
+                 * That code owns the body and parameter list, so release it
+                 * instead of freeing the same storage twice.
+                 */
+                auto code = function_codes.find(f);
+                if (code != function_codes.end()) {
+                    function_codes.erase(code);
+                    f->ast = NULL;
+                    f->sl = NULL;
+                } else {
+                    treefree(f->ast);
+                    if (f->sl) symlistfree_full(f->sl);
+                }
             }
             free_type_constraint(f->ret_type);
+            free_type_constraint(f->method_self_type);
             std::free(f->name);
             break;
         }

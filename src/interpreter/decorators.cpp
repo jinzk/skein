@@ -151,12 +151,6 @@ bool validate_decorated_method(const struct struct_member *member) {
                 member_name(member));
         return false;
     }
-    if (func->is_generator) {
-        set_method_location(member);
-        yyerror("decorated method %s cannot be a generator",
-                member_name(member));
-        return false;
-    }
     for (const struct symlist *param = func->sl; param; param = param->next) {
         if (param->has_pattern || symlist_pattern_ast(
                                       const_cast<struct symlist *>(param))) {
@@ -267,14 +261,43 @@ struct ast *lower_impl_decorators(struct impl_node *impl) {
         move_defaults(body->sl, wrapper_params);
 
         body->is_method = 1;
+        /*
+         * The hidden body is bound as an ordinary function, so remember the
+         * impl type for static checking.  This keeps body type inference
+         * (including yield/send types) equivalent to the original method
+         * without adding a runtime parameter check.
+         */
+        if (body->sl && body->sl->sym && body->sl->sym->name &&
+            std::strcmp(body->sl->sym->name, "self") == 0 &&
+            !body->sl->type)
+            body->method_self_type =
+                new_named_type_constraint(impl->type_name, impl->module);
+
+        /*
+         * A generator method's forwarder is an ordinary function that returns
+         * the generator produced by the decorator chain.  It must not be
+         * marked async: for async generators the decorator result is a
+         * generator, not a task, so awaiting it would be wrong.
+         */
+        bool body_is_generator = body->is_generator != 0;
+        bool wrapper_is_async = body->is_async != 0 && !body_is_generator;
 
         struct ast *wrapper_body = build_wrapper_body(
             decorator_name, body->sl, method->line, method->column,
-            body->is_async != 0);
-        struct ast *wrapper = newfunc(NULL, wrapper_params, wrapper_body,
-                                      false, body->is_async != 0, false);
+            wrapper_is_async);
+        struct funcdef *wrapper = (struct funcdef *)newfunc(
+            NULL, wrapper_params, wrapper_body, false, wrapper_is_async,
+            false);
         wrapper->line = method->line;
         wrapper->column = method->column;
+        if (body_is_generator) {
+            wrapper->decorated_generator_source = body;
+            wrapper->decorated_generator_async = body->is_async != 0;
+            if (body->ret_type &&
+                body->ret_type->kind == TYPE_GENERATOR)
+                wrapper->ret_type =
+                    copy_type_constraint(body->ret_type);
+        }
 
         struct ast *decorator_chain =
             build_decorator_chain(decorators, body_name);
@@ -292,7 +315,7 @@ struct ast *lower_impl_decorators(struct impl_node *impl) {
 
         struct ast *old_decorators = method->decorators;
         method->decorators = NULL;
-        method->func = wrapper;
+        method->func = (struct ast *)wrapper;
         free_decorator_wrappers(old_decorators);
     }
 

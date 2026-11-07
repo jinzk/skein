@@ -1486,6 +1486,57 @@ struct Checker : public BuiltinContext {
                                   sig.variadic ? sig.rest : nullptr);
     }
 
+    const TypeNode *inferred_generator_type(const struct funcdef *def,
+                                            bool send) {
+        if (!def)
+            return NULL;
+        if (send) {
+            auto it = generator_sends.find(def);
+            if (it != generator_sends.end())
+                return it->second;
+        } else {
+            auto it = generator_elements.find(def);
+            if (it != generator_elements.end())
+                return it->second;
+        }
+        std::string key = generator_identity(def);
+        std::string location = generator_location_identity(def);
+        if (send) {
+            auto it = g_generator_send_type_map.find(key);
+            if (it == g_generator_send_type_map.end())
+                it = g_generator_send_type_map.find(location);
+            return it == g_generator_send_type_map.end() ? NULL
+                                                         : it->second;
+        }
+        auto it = g_generator_element_types.find(key);
+        if (it == g_generator_element_types.end())
+            it = g_generator_element_types.find(location);
+        return it == g_generator_element_types.end() ? NULL : it->second;
+    }
+
+    /*
+     * The forwarder for a decorated generator method is an ordinary function
+     * returning a generator.  Recover the yield/send types from the hidden
+     * method body and store them as the forwarder's static return annotation
+     * so later statements in the same module see generator[T, S].
+     */
+    void annotate_decorated_generator(struct funcdef *def) {
+        if (!def || !def->decorated_generator_source || def->ret_type)
+            return;
+        const struct funcdef *source = def->decorated_generator_source;
+        const TypeNode *element =
+            inferred_generator_type(source, false);
+        const TypeNode *send = inferred_generator_type(source, true);
+        struct type_constraint *annotation =
+            new_type_constraint(TYPE_GENERATOR);
+        const TypeNode *node = type_container(
+            TYPE_GENERATOR, {element ? element : type_any(),
+                             send ? send : type_any()});
+        annotation->display = node->display.c_str();
+        annotation->detail = node;
+        def->ret_type = annotation;
+    }
+
     void adjust_generator_result(FunctionSig &sig,
                                  const struct funcdef *def,
                                  const struct function_code *code) {
@@ -1964,6 +2015,7 @@ struct Checker : public BuiltinContext {
                        const TypeNode *self_type = nullptr) {
         if (!def)
             return true;
+        annotate_decorated_generator(def);
         FunctionSig sig;
         if (def->sl)
             sig = signature_from_symlist(def->sl);
@@ -1987,6 +2039,10 @@ struct Checker : public BuiltinContext {
                 return false;
         }
 
+        const TypeNode *effective_self = self_type;
+        if (!effective_self && def->method_self_type)
+            effective_self =
+                type_from_constraint(def->method_self_type);
         Env local;
         local.parent = &env;
         for (struct symlist *item = def->sl; item; item = item->next) {
@@ -1996,8 +2052,8 @@ struct Checker : public BuiltinContext {
             if (item->variadic)
                 type = type_container(TYPE_LIST, {type});
             bool fixed = item->type != NULL;
-            if (self_type && std::string(name) == "self") {
-                type = self_type;
+            if (effective_self && std::string(name) == "self") {
+                type = effective_self;
                 fixed = true;
             }
             invalidate_root_facts(local, name);
@@ -2007,8 +2063,16 @@ struct Checker : public BuiltinContext {
                 bind_pattern_types(pattern, type, local, fixed);
         }
 
+        /*
+         * A decorated generator method forwarder returns whatever the
+         * decorator chain produced.  Its signature is the original
+         * generator[T, S], but the forwarding call itself is dynamically
+         * typed, so do not type-check the return expression against it.
+         */
         const TypeNode *return_expected =
-            def->ret_type ? type_from_constraint(def->ret_type) : NULL;
+            (!def->decorated_generator_source && def->ret_type)
+                ? type_from_constraint(def->ret_type)
+                : NULL;
         bool is_generator = def->is_generator != 0;
         const TypeNode *declared_generator = NULL;
         if (is_generator && return_expected &&

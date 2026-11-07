@@ -147,6 +147,20 @@ struct funcdef {
     /* Set for hidden method bodies so the first parameter keeps method
      * semantics (self is const) when called as an ordinary function. */
     int is_method;
+    /*
+     * Generated forwarder for a decorated generator method.  The forwarder is
+     * a normal function whose result is the generator produced by the
+     * decorator chain; the source is only used for static yield/send
+     * inference.
+     */
+    struct funcdef *decorated_generator_source;
+    /* Original async flag of a decorated async generator method, preserved
+     * for std.meta.methods even though the forwarder is a normal function. */
+    int decorated_generator_async;
+    /* Static-only self type for a hidden decorated method body.  The hidden
+     * body is bound as an ordinary function, so type checking needs the impl
+     * type to infer field and yield/send types. */
+    struct type_constraint *method_self_type;
 };
 
 struct ufncall {

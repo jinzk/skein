@@ -40,6 +40,9 @@ struct function_code {
      * void* so the runtime layer does not depend on interpreter/JIT types.
      */
     void *vm_cache = nullptr;
+    /* Set on generated forwarders for decorated async generator methods so
+     * reflection can keep reporting the original async flag. */
+    bool decorated_generator_async = false;
 };
 
 /*

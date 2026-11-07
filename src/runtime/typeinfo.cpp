@@ -287,7 +287,10 @@ struct value_t *method_info_from_code(const std::string &name,
     dict_add(dict, "params", (struct value_t *)params);
     dict_add(dict, "variadic", newboolval(code ? code->variadic : false));
     dict_add(dict, "has_defaults", newboolval(has_defaults));
-    dict_add(dict, "async", newboolval(code ? code->is_async : false));
+    dict_add(dict, "async",
+             newboolval(code ? (code->is_async ||
+                                code->decorated_generator_async)
+                             : false));
     return (struct value_t *)dict;
 }
 

@@ -14,6 +14,11 @@ struct impl_node;
  *     func method(self, ...) { return $dec(self, ...); }
  *   }
  *
+ * Generator methods use the same ordinary forwarder: it returns the generator
+ * produced by the decorator chain.  The forwarder is never marked async or
+ * generator, so async generator methods are not awaited and iteration uses the
+ * decorator result directly.
+ *
  * Returns the original impl when nothing needs lowering, otherwise an 'L'
  * chain that evaluates the hidden bindings before the impl declaration.
  * Validation errors are reported through yyerror; in that case the original

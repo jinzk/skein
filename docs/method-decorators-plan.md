@@ -1,8 +1,8 @@
 # Skein 函数与方法装饰器实施计划（方案 A：AST 脱糖）
 
-- 更新日期：2026-11-06
+- 更新日期：2026-11-07
 - 状态：M1 方法装饰器、M2 命名函数装饰器、M3 async 方法、
-  M4 async 方法装饰器已实现（2026-11-06）
+  M4 async 方法装饰器、M5 generator 方法装饰器已实现（2026-11-07）
 - 方案：A（AST lowering / 编译器生成包装方法）
 - 关联文档：[README.md](../README.md)、[SYNTAX.md](../SYNTAX.md)、
   [architecture.md](architecture.md)、[metaprogramming-plan.md](metaprogramming-plan.md)、
@@ -50,8 +50,7 @@ impl Point {
 - 不支持匿名函数/`let f = func(...)` 前的 `@` 语法（继续手写 `f = dec(f)`）。
 - 不支持 `struct` / `enum` / `trait` 声明的装饰器。
 - 不支持解构参数方法上的装饰器（v1 明确报错）。
-- 不支持 generator 方法上的装饰器（v1 明确报错）。
-- 不支持 async generator 方法。
+- generator 方法和 async generator 方法装饰器由 M5 支持（见 §2.10、§12）。
 - 不支持装饰器改变方法签名、返回值类型约束或方法名。
 - 不支持 VM 级方法分派钩子或运行时可变方法表。
 - 不实现 `@derive` 或任何编译期代码生成属性。
@@ -284,8 +283,24 @@ load = $dec$func$load$10$1;
   }
   ```
 - 装饰器是普通函数，返回 async callable；
-- `async func` 直接作为装饰器会返回 task，不是 callable；
-- generator 方法装饰器仍不支持。
+- `async func` 直接作为装饰器会返回 task，不是 callable。
+
+### 2.10 generator 方法装饰器（M5）
+
+- 去掉对 generator 方法的拒绝；
+- generator 方法的 wrapper 是普通函数，不标记 `is_generator`，也不标记
+  `is_async`（async generator 同理）；
+- wrapper 直接返回装饰器链产生的 generator：
+  ```text
+  func m(self, ...) {
+    return $dec(self, ...);
+  }
+  ```
+- 是否惰性由装饰器决定，与自由函数 generator 装饰器一致；
+- 迭代、发送值、`close` / `defer` 由装饰器返回的 generator 原样驱动；
+- 不增加逐元素转发层；每个元素只有装饰器自身的逻辑开销；
+- 静态类型从隐藏方法体恢复为 `generator[T, S]`；
+- async generator 方法的 `std.meta.methods.async` 仍保持为 `true`。
 
 ## 3. Lowering 设计
 
@@ -726,6 +741,17 @@ src/interpreter/decorators.cpp
 - trait async 签名匹配；
 - 覆盖 before/after、默认值、variadic、错误、取消语义。
 
+### M5：generator 方法装饰器（S/M，P0）
+
+状态：**已完成（2026-11-07）**。
+
+- 移除 generator 方法装饰器拒绝；
+- wrapper 保持普通函数，async generator 不生成 `await`；
+- hidden body 记录 `method_self_type`，恢复 `generator[T, S]` 静态类型；
+- 保持 `std.meta.methods.async` 对 async generator 为 `true`；
+- 修复类型检查提前物化 `function_code` 时的 AST 双重释放；
+- 覆盖同步/async generator、send、close/defer、trait、递归、跨包和类型检查。
+
 ## 7. 测试计划
 
 ### 7.1 功能用例
@@ -743,6 +769,9 @@ src/interpreter/decorators.cpp
 | 固有方法 | `p.m()` 经过装饰器，调用点不变 |
 | trait 方法 | `impl Trait for Type { @dec func ... }`；`render(x: Trait)` 不变 |
 | trait 适配 | `impl Type { @dec func ... }` + `impl Trait for Type;` |
+| generator 方法 | 普通/生成器装饰器、`for`、方法值、send、close/defer |
+| async generator 方法 | 内部 `await`、迭代、`std.meta.methods.async` |
+| generator 方法类型 | `generator[T, S]` 推断、send 类型检查 |
 | 多装饰器 | `a(b(fn))` 顺序，外层/内层输出顺序 |
 | 带参装饰器 | `@retry(3)`、`@cache({"ttl": 100})` |
 | 默认值 | 省略参数、引用 `self`、引用更早参数、每次调用重新求值 |
@@ -762,7 +791,6 @@ src/interpreter/decorators.cpp
 - 装饰器表达式未定义或求值失败；
 - 装饰器返回非 callable；
 - 解构参数方法；
-- generator 方法；
 - 方法没有 `self`；
 - `self` 带默认值；
 - 同一方法重复声明；
@@ -804,7 +832,7 @@ src/interpreter/decorators.cpp
 - [x] VM 函数缓存退出释放问题已修复。
 - [x] 隐藏 `$body` 保持 `self` const 语义。
 - [x] 装饰器结果非 callable 时在安装时报错。
-- [x] 解构参数和 generator 方法在 v1 有明确错误。
+- [x] 解构参数方法在 v1 有明确错误；generator 方法装饰器已支持。
 - [x] 嵌套 `impl` 和跨包方法可用。
 - [x] AST / VM 行为一致，VM-only 通过。
 - [x] ASan/UBSan/LSan 通过。
@@ -821,7 +849,7 @@ src/interpreter/decorators.cpp
 | 隐藏绑定跨包解析错误 | 导入方调用方法失败 | 隐藏绑定放在定义包作用域；跨包测试 |
 | `self` const 语义丢失 | 方法可重新绑定 `self` | `funcdef.is_method`；AST/VM 双端测试 |
 | 解构参数转发改变语义 | 值身份 / rest 内容变化 | v1 直接拒绝；文档明确 |
-| generator 方法语义复杂 | 装饰器无法正确驱动 yield | v1 直接拒绝 |
+| generator 方法语义复杂 | 装饰器无法正确驱动 yield | wrapper 用普通转发器，装饰器返回的 generator 原样驱动；无逐元素转发 |
 | 装饰器表达式引用同 impl 方法 | 求值时机不确定 | 规定 impl 安装前求值；文档和测试 |
 | 命名函数遮蔽装饰器表达式 | 装饰到错误对象 | 表达式在函数绑定前求值；测试同名局部函数 |
 | 导出函数赋值时机 | 导入方看到旧值 | 在包内、导出命名空间构建前赋值；跨包测试 |
@@ -836,8 +864,11 @@ src/interpreter/decorators.cpp
 
 1. **匿名函数 / `let f = func` 装饰器**
    需要决定 `@` 与 `let`/`const` 的语法位置；当前继续手写 `f = dec(f)`。
-2. **generator 方法装饰器**
-   需要定义 `yield` / `next` 协议如何被装饰器包装。
+2. **真正的 generator wrapper（可选增强）**
+   当前 wrapper 是普通函数，惰性由装饰器决定；如果未来要求即使装饰器返回
+   普通函数也保持完全惰性，就需要 wrapper 自身标记 `is_generator` 并手动
+   转发 `next` / `send` / `close`。这会带来逐元素转发成本和更复杂的协议
+   语义，暂不做。
 3. **解构参数方法**
    需要无损参数重建规则，可能只支持部分模式。
 4. **`--expand` 调试输出**
@@ -858,11 +889,12 @@ src/interpreter/decorators.cpp
 8. M2-3（命名函数文档）
 9. M3（async 方法与 async trait 方法）
 10. M4（async 方法装饰器）
+11. M5（generator 方法装饰器）
 
 先完成单装饰器、无默认值、固有方法的垂直切片，再扩展多装饰器、默认值、
 variadic、trait、跨包、命名函数和 async 场景。
 
-## 12. 实施结果（2026-11-06）
+## 12. 实施结果（2026-11-07）
 
 已实现：
 
@@ -873,6 +905,11 @@ variadic、trait、跨包、命名函数和 async 场景。
 - `impl_decl` 的 AST lowering；
 - `func_decl` + `lower_function_decorators` 的命名函数 lowering；
 - async 方法、async trait 方法、async 方法装饰器；
+- generator 方法和 async generator 方法装饰器（M5）：
+  - wrapper 是普通函数，直接返回装饰器产生的 generator；
+  - hidden body 记录 `method_self_type`，用于恢复 `generator[T, S]` 静态类型；
+  - async generator 的 `std.meta.methods.async` 保持为 `true`；
+  - 修复类型检查提前物化 `function_code` 时的 AST 双重释放；
 - `std.meta.methods` 的 `async` 字段；
 - VM 函数缓存退出释放修复；
 - `tests/cases/decorators.py`、`tests/cases/async_methods.py` 及注册；
@@ -893,6 +930,10 @@ boundary_check_test:      passed
 ```
 
 已知限制与计划一致：支持 `impl` 方法、命名自由函数、async 方法、
-async trait 方法和 async 方法装饰器；匿名函数 / `let f = func(...)` 仍需
-手动包装；装饰器表达式支持名称、成员访问、调用、下标和括号表达式；
-不支持解构参数方法、generator 方法、async generator 方法和类型声明装饰器。
+async trait 方法、generator 方法、async generator 方法和 async 方法装饰器；
+匿名函数 / `let f = func(...)` 仍需手动包装；装饰器表达式支持名称、成员访问、
+调用、下标和括号表达式；不支持解构参数方法和类型声明装饰器。
+
+generator 方法装饰器采用“普通转发器”语义：wrapper 不标记 `is_generator`，
+也不为 async generator 生成 `await`；装饰器返回的 generator 直接驱动迭代、
+发送值和关闭。装饰器是普通函数时惰性由该装饰器决定，与自由函数行为一致。

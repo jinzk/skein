@@ -2,6 +2,7 @@
 """Static container generics: list[int], dict[K,V], set[T], deque[T], heap[T]."""
 
 import os
+import tempfile
 
 from harness import *  # noqa: F401,F403
 
@@ -259,3 +260,120 @@ def run_cases():
           "func get_fn(): callable { return sqrt; }\n"
           "println(get_fn()(9));\n",
           stdout_all=["3"])
+
+    check("method call argument check",
+          "struct Box { xs: list[int]; }\n"
+          "impl Box {\n"
+          "  func add(self, x: int): list[int] {\n"
+          "    return self.xs + [x];\n"
+          "  }\n"
+          "}\n"
+          "let b: Box = Box { xs: [1] };\n"
+          'b.add("a");\n',
+          stderr="type error: expected int, got string")
+
+    check("method return type propagates",
+          "struct Box { xs: list[int]; }\n"
+          "impl Box {\n"
+          "  func add(self, x: int): list[int] {\n"
+          "    return self.xs + [x];\n"
+          "  }\n"
+          "}\n"
+          "let b: Box = Box { xs: [1] };\n"
+          "let ys: list[int] = b.add(2);\n"
+          'ys[0] = "a";\n',
+          stderr="type error: expected int, got string")
+
+    check("destructure list element inference",
+          "let xs: list[list[int]] = [[1], [2]];\n"
+          "let [a, b] = xs;\n"
+          'a[0] = "x";\n',
+          stderr="type error: expected int, got string")
+
+    check("destructure struct pattern inference",
+          "struct P { xs: list[int]; }\n"
+          "let p: P = P { xs: [1] };\n"
+          "let P { xs } = p;\n"
+          'xs[0] = "a";\n',
+          stderr="type error: expected int, got string")
+
+    check("destructure dict pattern inference",
+          'let d: dict[string, list[int]] = {"a": [1]};\n'
+          "let {a: xs} = d;\n"
+          'xs[0] = "a";\n',
+          stderr="type error: expected int, got string")
+
+    check("match pattern inference",
+          "let xs: list[list[int]] = [[1]];\n"
+          'match (xs) { case [a] => { a[0] = "x"; } }\n',
+          stderr="type error: expected int, got string")
+
+    check("for binding inference",
+          "let xs: list[list[int]] = [[1]];\n"
+          'for (let a in xs) { a[0] = "x"; }\n',
+          stderr="type error: expected int, got string")
+
+    check("map infers expression lambda result",
+          "import std;\n"
+          "let xs: list[int] = [1];\n"
+          "let ys: list[int] = std.list.map(xs, x -> x * 2);\n"
+          'ys[0] = "a";\n',
+          stderr="type error: expected int, got string")
+
+    check("map result type mismatch",
+          "import std;\n"
+          "let xs: list[int] = [1];\n"
+          'let ys: list[int] = std.list.map(xs, func(x: int) -> "a");\n',
+          stderr="type error: expected list[int], got list[string]")
+
+    check("zip second argument must be list",
+          "import std;\n"
+          "let xs: list[int] = [1];\n"
+          "let ys = std.list.zip(xs, 1);\n",
+          stderr="type error: expected list, got int")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pkg_dir = os.path.join(tmp, "app", "aa")
+        os.makedirs(pkg_dir)
+        with open(os.path.join(pkg_dir, "aa.skein"), "w",
+                  encoding="utf-8") as f:
+            f.write(
+                "package aa {\n"
+                "  export func make(n: int): list[int] {\n"
+                "    return [n, n + 1];\n"
+                "  }\n"
+                "  export func bad(n: int): int { return n; }\n"
+                "  export struct P { xs: list[int]; }\n"
+                "  impl P {\n"
+                "    func add(self, x: int): list[int] {\n"
+                "      return self.xs + [x];\n"
+                "    }\n"
+                "  }\n"
+                "  export func make_p(): P { return P { xs: [1] }; }\n"
+                "}\n")
+        main = os.path.join(tmp, "app", "main.skein")
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                "let xs: list[int] = aa.make(1);\n"
+                'xs[0] = "a";\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                'aa.bad("x");\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                "let p: aa.P = aa.make_p();\n"
+                'p.add("x");\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr

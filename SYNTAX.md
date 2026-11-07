@@ -868,6 +868,28 @@ let ys: list[int] = raw as list[int];
 - 对 `as` 结果取下标或字段需要加括号：`(raw as list[int])[0]`、`(raw as Point).x`；
 - `as` 不能作为赋值目标。
 
+静态检查还覆盖：
+
+- 方法调用：接收者有静态类型时，检查参数和返回类型；
+- 跨包：导入包的导出函数使用其签名，导出结构体的字段和方法可解析；
+- 解构声明、`match` 模式和 `for` 绑定：从值的静态类型推断元素/字段类型；
+- `std.list.map` 对简单表达式 lambda 推断返回类型；`std.list.zip` 检查第二个参数是 list；
+- 未注解的 `let` 仍然视为 `any`，需要参与检查时请写类型标注或使用 `as`。
+
+```text
+struct Box { xs: list[int]; }
+impl Box {
+  func add(self, x: int): list[int] {
+    return self.xs + [x];
+  }
+}
+
+let b: Box = Box { xs: [1] };
+b.add("a");                         // 错误：expected int, got string
+let ys: list[int] = b.add(2);       // 返回类型传播
+ys[0] = "a";                        // 错误
+```
+
 `is` 和模式类型只接受不带类型参数的类型：
 
 ```text

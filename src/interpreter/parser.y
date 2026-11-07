@@ -17,6 +17,8 @@
 #include "gc.h"
 #include "eval.h"
 #include "vm.h"
+#include "static_type.h"
+#include "typecheck.h"
 
 extern int yylex();
 extern int yyparse();
@@ -605,6 +607,29 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
             return new_type_constraint(TYPE_INVALID);
         }
     }
+}
+
+static struct type_constraint *make_generic_type(struct type_constraint *base,
+                                                 struct type_constraint *arg1,
+                                                 struct type_constraint *arg2) {
+    return skein::typecheck::type_apply_generic(base, arg1, arg2);
+}
+
+static struct type_constraint *make_nullable_type(
+    struct type_constraint *base) {
+    return skein::typecheck::type_apply_nullable(base);
+}
+
+static struct type_constraint *runtime_type_or_error(
+    struct type_constraint *type, const char *where) {
+    if (skein::typecheck::type_constraint_has_arguments(type)) {
+        char message[128];
+        std::snprintf(message, sizeof(message),
+                      "generic type arguments are not allowed in %s", where);
+        diag_report(g_token_line, g_token_column, "type error", message);
+        g_statement_invalid = true;
+    }
+    return type;
 }
 %}
 
@@ -1397,7 +1422,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp INC                             { $$ = newincdec($1, 1, false); }
     | exp DEC                             { $$ = newincdec($1, -1, false); }
     | exp CMP exp                         { $$ = newcmp($2, $1, $3); }
-    | exp IS type %prec IS                { $$ = newis($1, $3); }
+    | exp IS type %prec IS                {
+        $$ = newis($1, runtime_type_or_error($3, "'is'"));
+      }
+    | exp AS type %prec AS                { $$ = newcast($1, $3); }
     | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
     | exp ON ERROR '(' NAME ')' '{' empty_body %prec ON {
         $$ = newonerror($1, $5, NULL);
@@ -1580,7 +1608,9 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
     | FALSE                               { $$ = newpatternlit(newbool(false)); }
     | NULLVAL                             { $$ = newpatternlit(newnullast()); }
     | NAME                                { $$ = newpatternname($1); }
-    | IS type                             { $$ = newpatterntype($2); }
+    | IS type                             {
+        $$ = newpatterntype(runtime_type_or_error($2, "patterns"));
+      }
     | NAME '{' pattern_fields '}'         {
         $$ = newpatternstruct($1,
                               copy_text(diag_current_source_name().c_str()),
@@ -1754,8 +1784,20 @@ symlist: %empty                           { $$ = NULL; }
       }
     ;
 
-type: type_name                           { $$ = $1; }
-    | type '?'                            { $$ = $1; $$->nullable = true; }
+/*
+ * The `%prec AS` on the bare type_name rule makes a following '[' prefer the
+ * generic-argument path.  Without it, `x as Foo[0]` is ambiguous between a
+ * generic argument list and indexing the cast result.  The chosen convention
+ * is `(x as Foo)[0]` for postfix access on a cast, so generic arguments win.
+ */
+type: type_name %prec AS                  { $$ = $1; }
+    | type '?'                            { $$ = make_nullable_type($1); }
+    | type_name '[' type ']'              {
+        $$ = make_generic_type($1, $3, NULL);
+      }
+    | type_name '[' type ',' type ']'     {
+        $$ = make_generic_type($1, $3, $5);
+      }
     ;
 
 type_name: NAME                           {
@@ -1783,6 +1825,10 @@ top_statement: top_expression EOL {
         func_yield_counts.clear();
         active_eval_context().runtime_error_count = 0;
         diag_set_location(0, 0);
+
+        if (!g_statement_invalid && $1 &&
+            !skein::typecheck::check_statement($1))
+            g_statement_invalid = true;
 
         bool invalid = g_statement_invalid;
         g_statement_invalid = false;

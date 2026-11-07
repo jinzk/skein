@@ -213,10 +213,8 @@ struct value_t *eval(struct ast *a) {
                 }
                 struct symbol *s = newsym(name);
                 s->val = v;
-                if (def->type) {
-                    s->type.kind = def->type->kind;
-                    s->type.name = def->type->name;
-                }
+                if (def->type)
+                    type_constraint_assign(&s->type, def->type);
                 s->exported = def->exported;
                 s->is_const = def->is_const;
                 savesym(s);
@@ -1418,6 +1416,12 @@ struct value_t *eval(struct ast *a) {
             bool matched = type_constraint_matches(node->type, value);
             freeval(value);
             ret = newboolval(matched);
+            break;
+        }
+
+        case NODE_CAST: {
+            struct cast_node *node = (struct cast_node *)a;
+            ret = eval(node->value);
             break;
         }
 

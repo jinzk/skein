@@ -236,6 +236,34 @@ void diag_warning(const char *message) {
     std::fflush(stderr);
 }
 
+void diag_report_warning(int line, int column, const char *category,
+                         const char *message) {
+    if (g_interrupted)
+        return;
+
+    if (line <= 0)
+        line = g_token_line;
+    if (column <= 0)
+        column = g_token_column;
+
+    std::fflush(stdout);
+    const char *kind = category && *category ? category : "warning";
+    if (!source_name.empty()) {
+        if (column > 0)
+            std::fprintf(stderr, "%s:%d:%d: %s: %s\n", source_name.c_str(),
+                         line, column, kind, message);
+        else
+            std::fprintf(stderr, "%s:%d: %s: %s\n", source_name.c_str(),
+                         line, kind, message);
+    } else if (column > 0) {
+        std::fprintf(stderr, "%d:%d: %s: %s\n", line, column, kind,
+                     message);
+    } else {
+        std::fprintf(stderr, "%d: %s: %s\n", line, kind, message);
+    }
+    std::fflush(stderr);
+}
+
 void diag_report_lexical(int line, int column, const char *fmt, ...) {
     if (line <= 0)
         line = g_token_line;

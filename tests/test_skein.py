@@ -24,6 +24,7 @@ from cases import (
     route,
     runtime,
     stdlib_builtins,
+    typecheck,
 )
 
 MODULES = [
@@ -42,6 +43,7 @@ MODULES = [
     stdlib_builtins,
     ffi_real,
     io_scripts,
+    typecheck,
 ]
 
 

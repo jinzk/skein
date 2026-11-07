@@ -37,6 +37,7 @@ constexpr int NODE_PATTERN_NEVER = '#';
 constexpr int NODE_PATTERN_TYPE = 0x100;
 constexpr int NODE_PATTERN_OR = 0x101;
 constexpr int NODE_PATTERN_RANGE = 0x102;
+constexpr int NODE_CAST = 0x110;
 constexpr int NODE_DESTRUCTURE = '`';
 constexpr int NODE_ENUM_DECL = '<';
 constexpr int NODE_ENUM_VARIANT = '>';
@@ -97,6 +98,17 @@ struct on_error_node {
 };
 
 struct is_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *value;
+    struct type_constraint *type;
+};
+
+/* `expr as Type` is a static-only type assertion.  Evaluation and bytecode
+ * compilation both treat it as the identity on `value`; the type constraint
+ * is consumed by the static checker. */
+struct cast_node {
     int nodetype;
     int line;
     int column;
@@ -496,6 +508,7 @@ struct ast *newrecover(struct ast *v);
 struct ast *newpass(struct ast *v);
 struct ast *newonerror(struct ast *call, char *name, struct ast *body);
 struct ast *newis(struct ast *value, struct type_constraint *type);
+struct ast *newcast(struct ast *value, struct type_constraint *type);
 struct ast *newspread(struct ast *value);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,

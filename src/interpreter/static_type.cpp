@@ -1,0 +1,262 @@
+#include "static_type.h"
+
+#include "diagnostics.h"
+#include "runtime_state.h"
+
+#include <cstdio>
+#include <memory>
+#include <unordered_map>
+
+namespace skein {
+namespace typecheck {
+
+namespace {
+
+const char *builtin_kind_name(enum type_constraint_kind kind) {
+    switch (kind) {
+        case TYPE_ANY: return "any";
+        case TYPE_INT: return "int";
+        case TYPE_FLOAT: return "float";
+        case TYPE_NUMBER: return "number";
+        case TYPE_BOOL: return "bool";
+        case TYPE_STRING: return "string";
+        case TYPE_CHAR: return "char";
+        case TYPE_BYTE: return "byte";
+        case TYPE_BYTES: return "bytes";
+        case TYPE_LIST: return "list";
+        case TYPE_DICT: return "dict";
+        case TYPE_DEQUE: return "deque";
+        case TYPE_HEAP: return "heap";
+        case TYPE_SET: return "set";
+        case TYPE_FUNCTION: return "function";
+        case TYPE_BUILTIN: return "builtin";
+        case TYPE_CALLABLE: return "callable";
+        case TYPE_NULL: return "null";
+        case TYPE_USERDATA: return "userdata";
+        case TYPE_RESULT: return "result";
+        case TYPE_ERROR: return "error";
+        case TYPE_NAMED: return "invalid";
+        case TYPE_INVALID:
+        default: return "invalid";
+    }
+}
+
+std::unordered_map<std::string, std::unique_ptr<TypeNode>> &type_pool() {
+    static std::unordered_map<std::string, std::unique_ptr<TypeNode>> pool;
+    return pool;
+}
+
+std::string node_key(enum type_constraint_kind kind, const std::string &name,
+                     const std::string &module, bool nullable,
+                     const std::vector<const TypeNode *> &args) {
+    std::string key;
+    key.reserve(32);
+    key += std::to_string(static_cast<int>(kind));
+    key += '|';
+    key += module;
+    key += '|';
+    key += name;
+    key += nullable ? "|1" : "|0";
+    for (const TypeNode *arg : args) {
+        key += '|';
+        key += arg ? node_key(arg->kind, arg->name, arg->module,
+                              arg->nullable, arg->args)
+                   : std::string("any");
+    }
+    return key;
+}
+
+std::string node_display(enum type_constraint_kind kind,
+                         const std::string &name,
+                         const std::vector<const TypeNode *> &args,
+                         bool nullable) {
+    std::string text;
+    if (kind == TYPE_NAMED) {
+        text = name.empty() ? "invalid" : name;
+    } else if (type_container_arity(kind) > 0 && !args.empty()) {
+        text = builtin_kind_name(kind);
+        text += '[';
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            if (i != 0) text += ", ";
+            text += args[i] ? args[i]->display : "any";
+        }
+        text += ']';
+    } else {
+        text = builtin_kind_name(kind);
+    }
+    if (nullable)
+        text += '?';
+    return text;
+}
+
+const TypeNode *intern_type(enum type_constraint_kind kind,
+                            const std::string &name,
+                            const std::string &module, bool nullable,
+                            const std::vector<const TypeNode *> &args) {
+    std::string key = node_key(kind, name, module, nullable, args);
+    auto &pool = type_pool();
+    auto it = pool.find(key);
+    if (it != pool.end())
+        return it->second.get();
+
+    std::unique_ptr<TypeNode> node(new TypeNode());
+    node->kind = kind;
+    node->name = name;
+    node->module = module;
+    node->nullable = nullable;
+    node->args = args;
+    node->display = node_display(kind, name, args, nullable);
+    const TypeNode *raw = node.get();
+    pool.emplace(std::move(key), std::move(node));
+    return raw;
+}
+
+} // namespace
+
+const TypeNode *type_any() {
+    return type_builtin(TYPE_ANY);
+}
+
+const TypeNode *type_builtin(enum type_constraint_kind kind, bool nullable) {
+    return intern_type(kind, std::string(), std::string(), nullable,
+                       std::vector<const TypeNode *>());
+}
+
+const TypeNode *type_named(const char *module, const char *name,
+                           bool nullable) {
+    return intern_type(TYPE_NAMED, name ? name : "",
+                       module ? module : "", nullable,
+                       std::vector<const TypeNode *>());
+}
+
+const TypeNode *type_container(enum type_constraint_kind kind,
+                               const std::vector<const TypeNode *> &args,
+                               bool nullable) {
+    return intern_type(kind, std::string(), std::string(), nullable, args);
+}
+
+const TypeNode *type_nullable(const TypeNode *type) {
+    if (!type || type->nullable)
+        return type ? type : type_any();
+    return intern_type(type->kind, type->name, type->module, true,
+                       type->args);
+}
+
+const TypeNode *type_from_constraint(const struct type_constraint *type) {
+    if (!type)
+        return type_any();
+    if (type->detail) {
+        const TypeNode *node = static_cast<const TypeNode *>(type->detail);
+        if (type->nullable && !node->nullable)
+            return type_nullable(node);
+        return node;
+    }
+    return intern_type(type->kind, type->name ? type->name : "",
+                       type->module ? type->module : "", type->nullable,
+                       std::vector<const TypeNode *>());
+}
+
+bool type_is_any(const TypeNode *type) {
+    return !type || type->kind == TYPE_ANY;
+}
+
+int type_container_arity(enum type_constraint_kind kind) {
+    switch (kind) {
+        case TYPE_LIST:
+        case TYPE_SET:
+        case TYPE_DEQUE:
+        case TYPE_HEAP:
+            return 1;
+        case TYPE_DICT:
+        case TYPE_RESULT:
+            return 2;
+        default:
+            return -1;
+    }
+}
+
+bool type_is_container(const TypeNode *type) {
+    return type && type_container_arity(type->kind) > 0;
+}
+
+bool type_constraint_has_arguments(const struct type_constraint *type) {
+    if (!type || !type->detail)
+        return false;
+    const TypeNode *node = static_cast<const TypeNode *>(type->detail);
+    return !node->args.empty();
+}
+
+const TypeNode *type_element(const TypeNode *type, std::size_t index) {
+    if (!type || index >= type->args.size())
+        return type_any();
+    return type->args[index] ? type->args[index] : type_any();
+}
+
+const char *type_display(const TypeNode *type) {
+    return type ? type->display.c_str() : "any";
+}
+
+bool type_equal(const TypeNode *a, const TypeNode *b) {
+    return a == b;
+}
+
+struct type_constraint *type_apply_generic(struct type_constraint *base,
+                                           struct type_constraint *arg1,
+                                           struct type_constraint *arg2) {
+    if (!base) {
+        free_type_constraint(arg1);
+        free_type_constraint(arg2);
+        return NULL;
+    }
+
+    int arity = type_container_arity(base->kind);
+    if (arity < 0) {
+        char message[256];
+        std::snprintf(message, sizeof(message),
+                      "type %s does not accept type arguments",
+                      type_constraint_name(base));
+        diag_report(g_token_line, g_token_column, "type error", message);
+        g_statement_invalid = true;
+        free_type_constraint(arg1);
+        free_type_constraint(arg2);
+        return base;
+    }
+    if ((arity == 1 && (!arg1 || arg2)) ||
+        (arity == 2 && (!arg1 || !arg2))) {
+        char message[256];
+        std::snprintf(message, sizeof(message),
+                      "type %s expects %d type argument(s)",
+                      type_constraint_name(base), arity);
+        diag_report(g_token_line, g_token_column, "type error", message);
+        g_statement_invalid = true;
+        free_type_constraint(arg1);
+        free_type_constraint(arg2);
+        return base;
+    }
+
+    std::vector<const TypeNode *> args;
+    args.push_back(type_from_constraint(arg1));
+    if (arity == 2)
+        args.push_back(type_from_constraint(arg2));
+    free_type_constraint(arg1);
+    free_type_constraint(arg2);
+
+    const TypeNode *node = type_container(base->kind, args, base->nullable);
+    base->display = node->display.c_str();
+    base->detail = node;
+    return base;
+}
+
+struct type_constraint *type_apply_nullable(struct type_constraint *base) {
+    if (!base)
+        return NULL;
+    const TypeNode *node = type_from_constraint(base);
+    const TypeNode *nullable = type_nullable(node);
+    base->nullable = true;
+    base->display = nullable->display.c_str();
+    base->detail = nullable;
+    return base;
+}
+
+} // namespace typecheck
+} // namespace skein

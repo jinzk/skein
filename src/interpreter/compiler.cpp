@@ -1128,6 +1128,9 @@ struct Compiler {
             case 'k':
                 return has_local_declarations(
                     ((struct is_node *)node)->value);
+            case NODE_CAST:
+                return has_local_declarations(
+                    ((struct cast_node *)node)->value);
             case 'x':
                 return has_local_declarations(
                     ((struct spread_node *)node)->value);
@@ -1311,6 +1314,9 @@ struct Compiler {
             case 'k':
                 return can_use_slots(
                     ((struct is_node *)node)->value);
+            case NODE_CAST:
+                return can_use_slots(
+                    ((struct cast_node *)node)->value);
             case 'x':
                 return can_use_slots(
                     ((struct spread_node *)node)->value);
@@ -1630,6 +1636,10 @@ struct Compiler {
             case 'k':
                 collect_local_declared_names(
                     ((struct is_node *)node)->value, names);
+                return;
+            case NODE_CAST:
+                collect_local_declared_names(
+                    ((struct cast_node *)node)->value, names);
                 return;
             case 'x':
                 collect_local_declared_names(
@@ -2461,6 +2471,12 @@ struct Compiler {
                 if (!ok) return;
                 uint32_t index = add_type(is->type);
                 emit(Op::IsType, 0, 0, index, here);
+                return;
+            }
+
+            case NODE_CAST: {
+                struct cast_node *cast = (struct cast_node *)node;
+                compile(cast->value);
                 return;
             }
 

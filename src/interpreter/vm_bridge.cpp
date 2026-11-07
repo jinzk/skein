@@ -440,10 +440,8 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
             struct symbol *sym = newsym(sl->sym->name);
             sym->val = values[(size_t)index];
             values[(size_t)index] = NULL;
-            if (sl->type) {
-                sym->type.kind = sl->type->kind;
-                sym->type.name = sl->type->name;
-            }
+            if (sl->type)
+                type_constraint_assign(&sym->type, sl->type);
             savesym(sym);
         }
     }

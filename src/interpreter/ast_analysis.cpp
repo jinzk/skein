@@ -75,6 +75,10 @@ void collect_referenced_names(const struct ast *node,
         case 'D':
             collect_referenced_names(((struct symdef *)node)->v, names);
             return;
+        case NODE_CAST:
+            collect_referenced_names(
+                ((struct cast_node *)node)->value, names);
+            return;
         case 'Z': {
             struct funcdef *def = (struct funcdef *)node;
             for (struct symlist *sl = def->sl; sl; sl = sl->next) {

@@ -387,6 +387,20 @@ struct ast *newis(struct ast *value, struct type_constraint *type) {
     return (struct ast *)a;
 }
 
+struct ast *newcast(struct ast *value, struct type_constraint *type) {
+    struct cast_node *a =
+        (struct cast_node *)std::malloc(sizeof(struct cast_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_CAST;
+    set_loc_from(a, value);
+    a->value = value;
+    a->type = type;
+    return (struct ast *)a;
+}
+
 struct ast *newspread(struct ast *value) {
     struct spread_node *a =
         (struct spread_node *)std::malloc(sizeof(struct spread_node));
@@ -1264,6 +1278,12 @@ void treefree(struct ast *a) {
         }
         case 'k': {
             struct is_node *n = (struct is_node *)a;
+            treefree(n->value);
+            free_type_constraint(n->type);
+            break;
+        }
+        case NODE_CAST: {
+            struct cast_node *n = (struct cast_node *)a;
             treefree(n->value);
             free_type_constraint(n->type);
             break;

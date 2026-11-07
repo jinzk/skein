@@ -161,10 +161,8 @@ static struct value_t *invoke_function_body(
          sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
         sym->val = args[i];
-        if (sl->type) {
-            sym->type.kind = sl->type->kind;
-            sym->type.name = sl->type->name;
-        }
+        if (sl->type)
+            type_constraint_assign(&sym->type, sl->type);
         if (i == 0 && def->code->is_method) {
             sym->is_const = true;
         }
@@ -212,8 +210,8 @@ static struct value_t *invoke_function_body(
         }
         struct symbol *sym = newsym(rest->sym->name);
         sym->val = (struct value_t *)list;
+        type_constraint_set_any(&sym->type);
         sym->type.kind = TYPE_LIST;
-        sym->type.name = NULL;
         savesym(sym);
     }
     args.clear(); /* ownership transferred to the function scope */
@@ -289,10 +287,10 @@ static bool fill_default_arguments(
         s->is_uninitialized = true;
         s->is_const = true;
         if (sl->variadic) {
+            type_constraint_set_any(&s->type);
             s->type.kind = TYPE_LIST;
-            s->type.name = NULL;
         } else if (sl->type) {
-            s->type = copy_type_constraint(sl->type);
+            type_constraint_assign(&s->type, sl->type);
         }
         savesym(s);
         temp_syms.push_back(s);

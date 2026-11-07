@@ -240,6 +240,10 @@ static void collect_defer_declaration_sites(
         case 'n':
             collect_defer_declaration_sites(node->l, sites);
             return;
+        case NODE_CAST:
+            collect_defer_declaration_sites(
+                ((struct cast_node *)node)->value, sites);
+            return;
         case 'N':
         case 'V':
         case 'B':
@@ -475,6 +479,9 @@ static bool validate_defer_walk(
             }
             return true;
         }
+        case NODE_CAST:
+            return validate_defer_walk(
+                ((struct cast_node *)node)->value, sites, error);
         case 'N':
         case 'V':
         case 'B':

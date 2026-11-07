@@ -29,6 +29,7 @@
 #include "source_encoding.h"
 #include "structtype.h"
 #include "task.h"
+#include "typecheck.h"
 #include "vm.h"
 
 #include <utility>
@@ -50,6 +51,7 @@ static void print_usage(const char *program) {
     std::fprintf(stderr,
                  "usage: %s [-i] [--vm|--no-vm] [--vm-stats] [-I dir] "
                  "[--package-path dir] [--encoding name] "
+                 "[--typecheck=off|loose|warn|strict] "
                  "[-k|--keep-going] [script|-]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
@@ -59,6 +61,19 @@ static void print_usage(const char *program) {
 int main(int argc, char **argv) {
     platform_init();
     platform_install_interrupt_handler();
+
+    skein::typecheck::Mode typecheck_mode = skein::typecheck::Mode::Warn;
+    if (const char *env_mode = std::getenv("SKEIN_TYPECHECK")) {
+        skein::typecheck::Mode parsed;
+        if (skein::typecheck::parse_mode(env_mode, parsed))
+            typecheck_mode = parsed;
+        else
+            std::fprintf(stderr,
+                         "skein: invalid SKEIN_TYPECHECK value '%s'; "
+                         "using warn\n",
+                         env_mode);
+    }
+    skein::typecheck::set_mode(typecheck_mode);
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--check-ffi") == 0) {
@@ -137,6 +152,31 @@ int main(int argc, char **argv) {
             }
         } else if (arg == "-i") {
             force_interactive = true;
+        } else if (arg == "--typecheck") {
+            if (i + 1 >= args.size()) {
+                print_usage(program);
+                return 2;
+            }
+            skein::typecheck::Mode parsed;
+            if (!skein::typecheck::parse_mode(args[++i].c_str(), parsed)) {
+                std::fprintf(stderr,
+                             "%s: invalid --typecheck value '%s'\n",
+                             program, args[i].c_str());
+                return 2;
+            }
+            typecheck_mode = parsed;
+            skein::typecheck::set_mode(typecheck_mode);
+        } else if (arg.rfind("--typecheck=", 0) == 0) {
+            std::string value = arg.substr(12);
+            skein::typecheck::Mode parsed;
+            if (!skein::typecheck::parse_mode(value.c_str(), parsed)) {
+                std::fprintf(stderr,
+                             "%s: invalid --typecheck value '%s'\n",
+                             program, value.c_str());
+                return 2;
+            }
+            typecheck_mode = parsed;
+            skein::typecheck::set_mode(typecheck_mode);
         } else if (arg == "--vm") {
             skein_vm_set_enabled(true);
         } else if (arg == "--no-vm") {

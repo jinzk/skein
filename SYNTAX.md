@@ -796,11 +796,83 @@ let s: string;
 s == ""             // true
 ```
 
-类型标注只约束绑定，不约束容器内部元素：
+普通类型标注只约束绑定，不约束容器内部元素：
 
 ```text
 let a: list = [0];
 a[0] = "x";         // 允许
+```
+
+#### 容器泛型约束
+
+内建容器可以写类型参数，泛型参数只用于静态检查，运行时会擦除：
+
+```text
+let xs: list[int] = [1, 2];
+let d: dict[string, list[int]] = {"a": [1]};
+let s: set[int] = std.set.from_list([1, 2]);
+let q: deque[int] = std.deque.from_list([1, 2]);
+let h: heap[int] = std.heap.from_list([1, 2], less);
+```
+
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
+- 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
+- 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
+- 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
+
+静态检查覆盖初始化与插入操作：
+
+```text
+let xs: list[int] = [1, "a"];          // 错误：元素类型不匹配
+xs[0] = "a";                           // 错误
+xs = std.list.append(xs, "a");         // 错误
+xs += ["a"];                           // 错误
+
+let d: dict[int, int] = {1: "a"};      // 错误
+d["a"] = 1;                            // 错误：key 类型不匹配
+d[1] = "a";                            // 错误：value 类型不匹配
+
+let s: set[int] = std.set.from_list([1, "a"]);  // 错误
+s = std.set.add(s, "a");                         // 错误
+let q: deque[int] = std.deque.from_list([1, "a"]); // 错误
+q = std.deque.push_back(q, "a");                   // 错误
+let h: heap[int] = std.heap.from_list([1, "a"], less); // 错误
+h = std.heap.push(h, "a");                            // 错误
+```
+
+运行时只检查外层容器类型，不扫描元素：`list[int]` 在运行时就是 `list`。
+因此通过未注解代码、`any`、FFI 或 JSON 解码进入的元素不会被运行时检查。
+
+静态检查模式：
+
+```text
+SKEIN_TYPECHECK=off|loose|warn|strict
+--typecheck=off|loose|warn|strict
+```
+
+- `off`：关闭静态检查，只保留运行时外层检查；
+- `loose`：确定冲突报错，不产生 `any` 警告；
+- `warn`（默认）：确定冲突报错，隐式 `any -> 容器[T]` 发 warning；
+- `strict`：隐式 `any -> 容器[T]` 也报错。
+
+对动态边界使用 `as` 显式断言：
+
+```text
+let raw = std.json.parse(text);
+let xs = raw as list[int];            // 显式信任边界
+let ys: list[int] = raw as list[int];
+```
+
+- `as` 只影响静态类型，运行时是恒等操作，不做类型转换；
+- `as` 不会掩盖确定冲突：`[1, "a"] as list[int]` 仍然报错；
+- 对 `as` 结果取下标或字段需要加括号：`(raw as list[int])[0]`、`(raw as Point).x`；
+- `as` 不能作为赋值目标。
+
+`is` 和模式类型只接受不带类型参数的类型：
+
+```text
+x is list              // 允许
+x is list[int]         // 错误：generic type arguments are not allowed in 'is'
 ```
 
 `for` 初始化部分也支持类型标注：
@@ -1528,7 +1600,7 @@ let d = Point { ...p, x: 9 };
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
 - 不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
-- 不支持继承、静态方法、泛型、动态添加方法或运算符重载。
+- 不支持继承、静态方法、用户自定义泛型、动态添加方法或运算符重载；内建容器的类型参数见变量类型标注章节。
 
 #### 5.12.1 方法装饰器
 
@@ -4444,7 +4516,7 @@ try/catch
 私有成员
 struct 继承
 trait 继承 / 默认方法
-泛型 / Option / 匿名联合类型
+用户自定义泛型（仅内建容器支持 `[...]` 类型参数）/ Option / 匿名联合类型
 ```
 
 动态链接库加载目前是设计方向，尚未作为语言语法实现。

@@ -36,6 +36,13 @@ struct type_constraint {
     const char *name;
     const char *module;
     bool nullable;
+    /*
+     * Static-checker metadata.  Both pointers are interned and non-owning;
+     * the runtime never interprets detail and only uses display for
+     * diagnostics/meta output.  Plain annotations leave them NULL.
+     */
+    const char *display = NULL;
+    const void *detail = NULL;
 };
 
 struct symbol {
@@ -72,6 +79,9 @@ void symlistfree(struct symlist *sl);
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);
 struct type_constraint *new_named_type_constraint(const char *name,
                                                   const char *module);
+void type_constraint_assign(struct type_constraint *dst,
+                            const struct type_constraint *src);
+void type_constraint_set_any(struct type_constraint *dst);
 
 /* Built-in type names accepted in annotations, including aliases such as
  * str -> string and func -> function. */

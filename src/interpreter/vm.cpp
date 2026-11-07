@@ -642,8 +642,7 @@ public:
                     } else {
                         sym = newsym(slot.name.c_str());
                         sym->val = value;
-                        sym->type.kind = slot.type.kind;
-                        sym->type.name = slot.type.name;
+                        type_constraint_assign(&sym->type, &slot.type);
                         sym->is_const = slot.is_const;
                     }
                     if (!slot_pool_safe_)
@@ -992,8 +991,7 @@ public:
 
                     struct symbol *sym = newsym(def.name.c_str());
                     sym->val = value;
-                    sym->type.kind = def.type.kind;
-                    sym->type.name = def.type.name;
+                    type_constraint_assign(&sym->type, &def.type);
                     sym->exported = def.exported;
                     sym->is_const = def.is_const;
                     savesym(sym);
@@ -2887,29 +2885,21 @@ private:
                                    struct symlist *sl,
                                    value_t *value) {
         sym->val = value;
-        sym->type.kind = TYPE_ANY;
-        sym->type.name = NULL;
-        sym->type.module = NULL;
-        sym->type.nullable = false;
+        type_constraint_set_any(&sym->type);
         sym->exported = false;
         sym->is_const = false;
         sym->is_uninitialized = false;
         sym->scope_owned = false;
         sym->global_slot = UINT32_MAX;
-        if (sl->type) {
-            sym->type.kind = sl->type->kind;
-            sym->type.name = sl->type->name;
-        }
+        if (sl->type)
+            type_constraint_assign(&sym->type, sl->type);
     }
 
     static void reset_slot_symbol(struct symbol *sym,
                                   const skein::bc::SlotDesc &slot,
                                   value_t *value) {
         sym->val = value;
-        sym->type.kind = slot.type.kind;
-        sym->type.name = slot.type.name;
-        sym->type.module = NULL;
-        sym->type.nullable = false;
+        type_constraint_assign(&sym->type, &slot.type);
         sym->exported = false;
         sym->is_const = slot.is_const;
         sym->is_uninitialized = false;
@@ -2969,10 +2959,7 @@ private:
         sym.name = const_cast<char *>(name.c_str());
         sym.name_len = name.size();
         sym.val = param_values_[index];
-        sym.type.kind = TYPE_ANY;
-        sym.type.name = NULL;
-        sym.type.module = NULL;
-        sym.type.nullable = false;
+        type_constraint_set_any(&sym.type);
         sym.exported = false;
         sym.is_const = false;
         sym.is_uninitialized = false;
@@ -3023,10 +3010,7 @@ private:
         sym.name = const_cast<char *>(name.c_str());
         sym.name_len = name.size();
         sym.val = slot_values_[index];
-        sym.type.kind = TYPE_ANY;
-        sym.type.name = NULL;
-        sym.type.module = NULL;
-        sym.type.nullable = false;
+        type_constraint_set_any(&sym.type);
         sym.exported = false;
         sym.is_const = proto().slots[index].is_const ||
                        (index < slot_const_.size() && slot_const_[index]);
@@ -3114,10 +3098,8 @@ private:
             } else {
                 sym = newsym(sl->sym->name);
                 sym->val = args[(size_t)index];
-                if (sl->type) {
-                    sym->type.kind = sl->type->kind;
-                    sym->type.name = sl->type->name;
-                }
+                if (sl->type)
+                    type_constraint_assign(&sym->type, sl->type);
             }
             args[(size_t)index] = NULL;
             if (!param_pool_safe_)
@@ -3826,14 +3808,10 @@ private:
         sym.name = const_cast<char *>(proto().upvalues[index].c_str());
         sym.name_len = proto().upvalues[index].size();
         sym.val = cell_value(cell);
-        if (cell->type) {
-            sym.type = *cell->type;
-        } else {
-            sym.type.kind = TYPE_ANY;
-            sym.type.name = NULL;
-            sym.type.module = NULL;
-            sym.type.nullable = false;
-        }
+        if (cell->type)
+            type_constraint_assign(&sym.type, cell->type);
+        else
+            type_constraint_set_any(&sym.type);
         sym.exported = false;
         sym.is_const = cell->is_const;
         sym.is_uninitialized = false;

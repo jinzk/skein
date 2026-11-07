@@ -40,6 +40,9 @@ void diag_report(int line, int column, const char *category,
 
 /* Print a warning without counting it as an error or stopping the script. */
 void diag_warning(const char *message);
+/* Location-aware warning used by the static type checker. */
+void diag_report_warning(int line, int column, const char *category,
+                         const char *message);
 void diag_set_source_name(const std::string &name);
 const std::string &diag_current_source_name();
 void diag_set_module_name(const std::string &name);

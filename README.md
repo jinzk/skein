@@ -2972,8 +2972,34 @@ any / null    → null
 
 - `function`、`builtin`、`callable`、`userdata` 必须提供初始值；
 - `const` 也可以带类型，例如 `const x: int = 1;`；
-- 类型标注只约束变量绑定，不约束容器内部元素，例如 `let a: list = [0]; a[0] = "x";` 仍允许；
+- 普通类型标注只约束变量绑定，不约束容器内部元素，例如 `let a: list = [0]; a[0] = "x";` 仍允许；
 - `for` 的初始化部分也支持类型标注：`for (let i: int = 0; i < 3; i++)`。
+
+容器可以写泛型参数，参数只参与静态检查，运行时擦除：
+
+```text
+let xs: list[int] = [1, 2];
+let d: dict[int, list[int]] = {1: [2]};
+let s: set[int] = std.set.from_list([1, 2]);
+let q: deque[int] = std.deque.from_list([1, 2]);
+let h: heap[int] = std.heap.from_list([1, 2], less);
+
+let raw = std.json.parse(text);
+let ys = raw as list[int];          // 显式信任边界
+let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
+```
+
+- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]`，支持嵌套和可空形式；
+- 只支持内建容器的类型参数，不支持 `struct Box<T>`、`func f<T>`、泛型 trait 或类型别名；
+- 用户类型可以作为参数，例如 `list[Point]`；`list` 仍然表示无元素约束；
+- 检查初始化（字面量、`from_list`、构造字段、函数参数、默认值）和插入（下标赋值、`append`、`+=`、`set.add`、`push`、`merge`）；
+- 运行时只检查外层容器类型，不扫描元素；动态路径仍可通过 `any` 绕过；
+- 模式：`SKEIN_TYPECHECK=off|loose|warn|strict` 或 `--typecheck=...`，默认 `warn`；
+  - `loose` 只报确定冲突；
+  - `warn` 额外对隐式 `any -> 容器[T]` 发 warning；
+  - `strict` 把该 warning 提升为 error；
+- `as` 只改变静态类型，运行时是恒等操作，不做转换；确定的元素冲突仍然报错；
+- `as` 不能作为赋值目标；`x is list[int]` 和模式中的泛型参数会被拒绝。
 
 自增和自减：
 
@@ -3488,7 +3514,7 @@ let b = Config { port: 8080 };
 let c = Config { ...a, port: 9090 };
 ```
 
-- 不支持继承、动态添加方法、静态方法、泛型或运算符重载。
+- 不支持继承、动态添加方法、静态方法、用户自定义泛型或运算符重载；内建容器的类型参数见变量类型标注章节。
 
 `trait` 定义接口，`impl Trait for Type` 显式实现：
 

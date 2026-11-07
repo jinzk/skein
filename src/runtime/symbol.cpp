@@ -25,6 +25,8 @@ struct symbol *newsym(const char *name) {
     s->type.name = NULL;
     s->type.module = NULL;
     s->type.nullable = false;
+    s->type.display = NULL;
+    s->type.detail = NULL;
     s->exported = false;
     s->is_const = false;
     s->is_uninitialized = false;
@@ -80,6 +82,8 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
     type->name = NULL;
     type->module = NULL;
     type->nullable = false;
+    type->display = NULL;
+    type->detail = NULL;
     return type;
 }
 
@@ -89,6 +93,33 @@ struct type_constraint *new_named_type_constraint(const char *name,
     type->name = intern_type_name(name);
     type->module = intern_type_name(module);
     return type;
+}
+
+void type_constraint_assign(struct type_constraint *dst,
+                            const struct type_constraint *src) {
+    if (!dst)
+        return;
+    if (!src) {
+        type_constraint_set_any(dst);
+        return;
+    }
+    dst->kind = src->kind;
+    dst->name = src->name;
+    dst->module = src->module;
+    dst->nullable = src->nullable;
+    dst->display = src->display;
+    dst->detail = src->detail;
+}
+
+void type_constraint_set_any(struct type_constraint *dst) {
+    if (!dst)
+        return;
+    dst->kind = TYPE_ANY;
+    dst->name = NULL;
+    dst->module = NULL;
+    dst->nullable = false;
+    dst->display = NULL;
+    dst->detail = NULL;
 }
 
 namespace {
@@ -234,6 +265,8 @@ bool type_constraint_equal(const struct type_constraint *a,
 const char *type_constraint_name(const struct type_constraint *type) {
     if (!type)
         return "any";
+    if (type->display)
+        return type->display;
     const char *base = "invalid";
     switch (type->kind) {
         case TYPE_ANY: base = "any"; break;

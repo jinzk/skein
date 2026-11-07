@@ -743,6 +743,37 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.task.yield")
         return poly_builtin({}, poly_task(type_builtin(TYPE_NULL)));
 
+    const TypeNode *error_type = type_builtin(TYPE_ERROR);
+    const TypeNode *result_t =
+        type_container(TYPE_RESULT, {T, error_type});
+    if (path == "std.task.catch")
+        return poly_builtin({poly_task(T)}, poly_task(result_t));
+    if (path == "std.task.try_wait")
+        return poly_builtin({poly_task(T), integer_type}, result_t, 1);
+    if (path == "std.task.try_wait_all")
+        return poly_builtin(
+            {poly_list(poly_task(T)), integer_type},
+            type_container(TYPE_RESULT, {poly_list(T), error_type}), 1);
+    if (path == "std.task.timeout")
+        return poly_builtin({poly_task(T), integer_type}, result_t);
+    if (path == "std.task.retry")
+        return poly_builtin(
+            {poly_callback({}, any_type()),
+             poly_dict(text(), any_type())},
+            poly_task(any_type()), 1);
+    if (path == "std.task.rate_limit")
+        return poly_builtin({type_builtin(TYPE_NUMBER),
+                             type_builtin(TYPE_NUMBER)},
+                            type_builtin(TYPE_USERDATA));
+    if (path == "std.task.acquire")
+        return poly_builtin({type_builtin(TYPE_USERDATA), integer_type},
+                            bool_type, 1);
+    if (path == "std.task.bounded_parallel_map")
+        return poly_builtin(
+            {poly_list(T), integer_type, poly_callback({T}, any_type())},
+            poly_list(type_container(TYPE_RESULT,
+                                     {any_type(), error_type})));
+
     if (path == "std.generator.next")
         return poly_builtin(
             {poly_generator(T), any_type()},

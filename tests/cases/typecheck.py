@@ -797,6 +797,30 @@ def run_cases():
           stderr="type error: expected task[int], "
                  "got task[dict[string, any]]")
 
+    check("task control builtins",
+          "import std;\n"
+          "func check() {\n"
+          "  let t = std.task.sleep(1);\n"
+          "  let c = std.task.catch(t);\n"
+          "  let r: result[null, error] = await c;\n"
+          "  let tw: result[null, error] = std.task.try_wait(t);\n"
+          "  let ta: result[list[null], error] =\n"
+          "    std.task.try_wait_all([t]);\n"
+          "  let to: result[null, error] = std.task.timeout(t, 10);\n"
+          "  let rl = std.task.rate_limit(10, 2);\n"
+          "  let ok: bool = std.task.acquire(rl);\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("task try_wait mismatch",
+          "import std;\n"
+          "func check() {\n"
+          "  let t = std.task.sleep(1);\n"
+          "  let r: result[string, error] = std.task.try_wait(t);\n"
+          "}\n",
+          stderr="type error: expected result[string, error], "
+                 "got result[null, error]")
+
     check("local variable shadows function name",
           "import std;\n"
           "func path(g, from, to) { return 1; }\n"

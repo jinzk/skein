@@ -230,6 +230,7 @@ if(SKEIN_ENABLE_JIT)
 
   add_library(skein_jit STATIC
     src/jit/jit.cpp
+    src/jit/jit_helpers.cpp
   )
   set_target_properties(skein_jit PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_include_directories(skein_jit PUBLIC

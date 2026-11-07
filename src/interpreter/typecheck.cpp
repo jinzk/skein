@@ -1,5 +1,9 @@
 #include "typecheck.h"
 
+#include "typecheck_builtins.h"
+#include "typecheck_state.h"
+#include "typecheck_types.h"
+
 #include "ast.h"
 #include "ast_analysis.h"
 #include "diagnostics.h"
@@ -12,494 +16,46 @@
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace skein {
 namespace typecheck {
 
+using namespace detail;
+
 namespace {
 
 Mode g_mode = Mode::Warn;
 
-struct VarInfo {
-    const TypeNode *type = nullptr;
-    bool fixed = false;
-    bool exported = false;
-};
-
-std::unordered_map<std::string,
-                   std::unordered_map<std::string, std::string>>
-    g_import_aliases;
-
-std::unordered_map<std::string,
-                   std::unordered_map<std::string, VarInfo>>
-    g_persistent_bindings;
-
-std::unordered_map<std::string,
-                   std::unordered_map<std::string, VarInfo>>
-    g_exported_types;
-
-const TypeNode *value_static_type(const struct value_t *value) {
-    if (!value)
-        return type_any();
-    switch (value->type) {
-        case T_int: return type_builtin(TYPE_INT);
-        case T_float: return type_builtin(TYPE_FLOAT);
-        case T_bool: return type_builtin(TYPE_BOOL);
-        case T_string: return type_builtin(TYPE_STRING);
-        case T_char: return type_builtin(TYPE_CHAR);
-        case T_byte: return type_builtin(TYPE_BYTE);
-        case T_bytes: return type_builtin(TYPE_BYTES);
-        case T_null: return type_builtin(TYPE_NULL);
-        case T_list: return type_container(TYPE_LIST, {type_any()});
-        case T_dict: {
-            const struct dict_value_t *dict =
-                (const struct dict_value_t *)value;
-            if (dict->payload && dict->payload->is_namespace)
-                return type_any();
-            return type_container(TYPE_DICT,
-                                  {type_any(), type_any()});
-        }
-        case T_struct: {
-            const struct struct_value_t *structure =
-                (const struct struct_value_t *)value;
-            if (structure->def)
-                return type_named(structure->def->module.c_str(),
-                                  structure->def->name.c_str());
-            return type_any();
-        }
-        case T_enum: {
-            const struct enum_value_t *enumeration =
-                (const struct enum_value_t *)value;
-            if (enumeration->def)
-                return type_named(enumeration->def->module.c_str(),
-                                  enumeration->def->name.c_str());
-            return type_any();
-        }
-        case T_set: return type_container(TYPE_SET, {type_any()});
-        case T_deque: return type_container(TYPE_DEQUE, {type_any()});
-        case T_heap: return type_container(TYPE_HEAP, {type_any()});
-        case T_result:
-            return type_container(TYPE_RESULT,
-                                  {type_any(), type_any()});
-        case T_error: return type_builtin(TYPE_ERROR);
-        case T_func: return type_builtin(TYPE_FUNCTION);
-        case T_builtin: return type_builtin(TYPE_BUILTIN);
-        case T_method:
-        case T_native: return type_builtin(TYPE_CALLABLE);
-        case T_userdata: return type_builtin(TYPE_USERDATA);
-        default: return type_any();
-    }
-}
-
-const TypeNode *strip_nullable(const TypeNode *type) {
-    if (!type || !type->nullable)
-        return type;
-    if (type_container_arity(type->kind) > 0)
-        return type_container(type->kind, type->args, false);
-    if (type->kind == TYPE_NAMED)
-        return type_named(type->module.c_str(), type->name.c_str(), false);
-    return type_builtin(type->kind, false);
-}
-
-bool has_concrete_container_arg(const TypeNode *type) {
-    if (!type)
-        return false;
-    int arity = type_container_arity(type->kind);
-    if (arity <= 0)
-        return false;
-    for (const TypeNode *arg : type->args) {
-        if (!arg || arg->kind == TYPE_ANY)
-            continue;
-        if (type_container_arity(arg->kind) > 0) {
-            if (has_concrete_container_arg(arg))
-                return true;
-            continue;
-        }
-        return true;
-    }
-    return false;
-}
-
-bool needs_static_check(const TypeNode *type) {
-    return type && type->kind != TYPE_ANY &&
-           has_concrete_container_arg(type);
-}
-
-const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
-    if (!a)
-        return b ? b : type_any();
-    if (!b)
-        return a;
-    if (a == b)
-        return a;
-    if (a->kind == TYPE_ANY || b->kind == TYPE_ANY)
-        return type_any();
-    if ((a->kind == TYPE_INT || a->kind == TYPE_FLOAT ||
-         a->kind == TYPE_NUMBER) &&
-        (b->kind == TYPE_INT || b->kind == TYPE_FLOAT ||
-         b->kind == TYPE_NUMBER))
-        return type_builtin(TYPE_NUMBER);
-    if (a->kind == TYPE_NAMED && b->kind == TYPE_NAMED &&
-        a->name == b->name && a->module == b->module)
-        return a;
-    if (a->kind == b->kind && type_container_arity(a->kind) > 0 &&
-        a->args.size() == b->args.size()) {
-        std::vector<const TypeNode *> args;
-        args.reserve(a->args.size());
-        for (std::size_t i = 0; i < a->args.size(); ++i)
-            args.push_back(join_types(a->args[i], b->args[i]));
-        return type_container(a->kind, args, a->nullable || b->nullable);
-    }
-    return type_any();
-}
-
-bool flatten_path(const struct ast *node, std::string &out) {
-    if (!node)
-        return false;
-    if (node->nodetype == 'N') {
-        out = ((const struct symref *)node)->name
-                  ? ((const struct symref *)node)->name
-                  : "";
-        return true;
-    }
-    if (node->nodetype == 'j') {
-        const struct ast *right = node->r;
-        if (!right || right->nodetype != 'V')
-            return false;
-        const struct value_t *value = ((const struct val *)right)->val;
-        if (!value || value->type != T_string)
-            return false;
-        std::string base;
-        if (!flatten_path(node->l, base))
-            return false;
-        out = base;
-        out += '.';
-        out += ((const struct string_value_t *)value)->value;
-        return true;
-    }
-    return false;
-}
-
-void collect_call_args(struct ast *args, std::vector<struct ast *> &out) {
-    if (!args)
-        return;
-    if (args->nodetype == 'L') {
-        collect_call_args(args->l, out);
-        collect_call_args(args->r, out);
-        return;
-    }
-    out.push_back(args);
-}
-
-std::string last_path_component(const std::string &path) {
-    std::size_t dot = path.rfind('.');
-    if (dot == std::string::npos)
-        return path;
-    return path.substr(dot + 1);
-}
-
-std::string canonical_builtin_path(const std::string &path,
-                                   const std::string &source) {
-    if (path.empty())
-        return path;
-    std::size_t dot = path.find('.');
-    std::string first =
-        dot == std::string::npos ? path : path.substr(0, dot);
-    std::string rest =
-        dot == std::string::npos ? std::string() : path.substr(dot);
-
-    if (first == "std")
-        return path;
-
-    auto source_it = g_import_aliases.find(source);
-    if (source_it != g_import_aliases.end()) {
-        auto alias_it = source_it->second.find(first);
-        if (alias_it != source_it->second.end())
-            return alias_it->second + rest;
-    }
-
-    if (first == "list" || first == "dict" || first == "set" ||
-        first == "deque" || first == "heap")
-        return "std." + path;
-    return path;
-}
-
-struct FunctionSig {
-    std::vector<const TypeNode *> params;
-    bool variadic = false;
-    const TypeNode *rest = nullptr;
-    const TypeNode *result = nullptr;
-};
-
-FunctionSig signature_from_symlist(struct symlist *sl,
-                                   bool skip_self = false) {
-    FunctionSig sig;
-    bool skipped = false;
-    for (struct symlist *item = sl; item; item = item->next) {
-        if (skip_self && !skipped) {
-            skipped = true;
-            continue;
-        }
-        const TypeNode *type = type_from_constraint(item->type);
-        if (item->variadic) {
-            sig.variadic = true;
-            sig.rest = type;
-        } else {
-            sig.params.push_back(type);
-        }
-    }
-    return sig;
-}
-
-struct ast *find_single_return(struct ast *node, int &count) {
-    if (!node)
-        return NULL;
-    if (node->nodetype == 'R') {
-        ++count;
-        return count == 1 ? ((struct fnret *)node)->v : NULL;
-    }
-    if (node->nodetype == 'L') {
-        struct ast *left = find_single_return(node->l, count);
-        struct ast *right = find_single_return(node->r, count);
-        return count == 1 ? (left ? left : right) : NULL;
-    }
-    if (node->nodetype == 'X')
-        return find_single_return(((struct nscope *)node)->ast, count);
-    return NULL;
-}
-
-FunctionSig method_signature_from_code(const struct function_code *code) {
-    FunctionSig sig;
-    if (!code)
-        return sig;
-    sig = signature_from_symlist(code->sl, true);
-    sig.result = code->ret_type
-                     ? type_from_constraint(code->ret_type.get())
-                     : type_any();
-    return sig;
-}
-
-FunctionSig method_signature_from_def(const struct funcdef *def) {
-    FunctionSig sig;
-    if (!def)
-        return sig;
-    sig = signature_from_symlist(def->sl, true);
-    sig.result = def->ret_type ? type_from_constraint(def->ret_type)
-                               : type_any();
-    return sig;
-}
-
-using ConstTypeMap = std::unordered_map<std::string, const TypeNode *>;
-
-struct StaticTypeInfo {
-    bool is_enum = false;
-    ConstTypeMap fields;
-    std::unordered_map<
-        std::string,
-        std::unordered_map<std::string, const TypeNode *>>
-        variants;
-    std::unordered_map<std::string, struct funcdef *> methods;
-};
-
-struct Env {
-    Env *parent = nullptr;
-    std::unordered_map<std::string, VarInfo> vars;
-
-    VarInfo *lookup(const std::string &name) {
-        for (Env *env = this; env; env = env->parent) {
-            auto it = env->vars.find(name);
-            if (it != env->vars.end())
-                return &it->second;
-        }
-        return nullptr;
-    }
-
-    const VarInfo *lookup(const std::string &name) const {
-        for (const Env *env = this; env; env = env->parent) {
-            auto it = env->vars.find(name);
-            if (it != env->vars.end())
-                return &it->second;
-        }
-        return nullptr;
-    }
-
-    Env *owner_of(const std::string &name) {
-        for (Env *env = this; env; env = env->parent) {
-            if (env->vars.find(name) != env->vars.end())
-                return env;
-        }
-        return nullptr;
-    }
-
-    void define(const std::string &name, const TypeNode *type,
-                bool fixed = false) {
-        VarInfo info;
-        info.type = type ? type : type_any();
-        info.fixed = fixed;
-        vars[name] = info;
-    }
-};
-
-enum class MatchResult {
-    Ok,
-    Unknown,
-    Mismatch,
-};
-
-MatchResult combine_result(MatchResult a, MatchResult b) {
-    if (a == MatchResult::Mismatch || b == MatchResult::Mismatch)
-        return MatchResult::Mismatch;
-    if (a == MatchResult::Unknown || b == MatchResult::Unknown)
-        return MatchResult::Unknown;
-    return MatchResult::Ok;
-}
-
-bool lookup_named_type(const TypeNode *type,
-                       structtype_lookup_result &out) {
-    if (!type || type->kind != TYPE_NAMED)
-        return false;
-    out = structtype_lookup_result();
-
-    const char *logical_module = diag_current_module_name().c_str();
-    struct_def *structure =
-        structtype_find_struct(type->module.c_str(), type->name.c_str());
-    if (!structure)
-        structure = structtype_find_struct_by_name(
-            logical_module, type->name.c_str(), NULL);
-    if (structure) {
-        out.kind = STRUCTTYPE_LOOKUP_STRUCT;
-        out.structure = structure;
-        return true;
-    }
-    enum_def *enumeration =
-        structtype_find_enum(type->module.c_str(), type->name.c_str());
-    if (!enumeration)
-        enumeration = structtype_find_enum_by_name(
-            logical_module, type->name.c_str(), NULL);
-    if (enumeration) {
-        out.kind = STRUCTTYPE_LOOKUP_ENUM;
-        out.enumeration = enumeration;
-        return true;
-    }
-    trait_def *trait =
-        structtype_find_trait(type->module.c_str(), type->name.c_str());
-    if (!trait)
-        trait = structtype_find_trait_by_name(
-            logical_module, type->name.c_str(), NULL);
-    if (trait) {
-        out.kind = STRUCTTYPE_LOOKUP_TRAIT;
-        out.trait = trait;
-        return true;
-    }
-
-    std::string error;
-    return structtype_lookup_type(
-               type->module.c_str(), diag_current_module_name().c_str(),
-               type->name.c_str(), out, error) ==
-           STRUCTTYPE_LOOKUP_FOUND;
-}
-
-MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
-    if (!expected || expected->kind == TYPE_ANY)
-        return MatchResult::Ok;
-    if (!actual)
-        actual = type_any();
-    if (actual->kind == TYPE_ANY || actual->kind == TYPE_INVALID)
-        return MatchResult::Unknown;
-
-    if (expected->nullable) {
-        if (actual->kind == TYPE_NULL)
-            return MatchResult::Ok;
-        const TypeNode *a = actual->nullable ? strip_nullable(actual)
-                                             : actual;
-        const TypeNode *e = strip_nullable(expected);
-        return match_type(a, e);
-    }
-    if (actual->nullable)
-        return MatchResult::Mismatch;
-    if (actual->kind == TYPE_NULL) {
-        return expected->kind == TYPE_NULL ? MatchResult::Ok
-                                           : MatchResult::Mismatch;
-    }
-
-    if (expected->kind == TYPE_NUMBER) {
-        if (actual->kind == TYPE_INT || actual->kind == TYPE_FLOAT ||
-            actual->kind == TYPE_NUMBER)
-            return MatchResult::Ok;
-        return MatchResult::Mismatch;
-    }
-    if (expected->kind == TYPE_CALLABLE) {
-        if (actual->kind == TYPE_FUNCTION ||
-            actual->kind == TYPE_BUILTIN ||
-            actual->kind == TYPE_CALLABLE)
-            return MatchResult::Ok;
-        return MatchResult::Mismatch;
-    }
-    if (actual->kind != expected->kind)
-        return MatchResult::Mismatch;
-
-    if (actual->kind == TYPE_NAMED) {
-        if (structtype_named_types_equal(actual->module.c_str(),
-                                         actual->name.c_str(),
-                                         expected->module.c_str(),
-                                         expected->name.c_str()))
-            return MatchResult::Ok;
-        structtype_lookup_result expected_lookup;
-        if (lookup_named_type(expected, expected_lookup) &&
-            expected_lookup.trait) {
-            structtype_lookup_result actual_lookup;
-            if (!lookup_named_type(actual, actual_lookup))
-                return MatchResult::Unknown;
-            const type_def *actual_type =
-                actual_lookup.structure
-                    ? static_cast<const type_def *>(actual_lookup.structure)
-                    : static_cast<const type_def *>(actual_lookup.enumeration);
-            if (!actual_type)
-                return MatchResult::Unknown;
-            for (const trait_def *trait : actual_type->traits) {
-                if (trait == expected_lookup.trait)
-                    return MatchResult::Ok;
-            }
-            return MatchResult::Mismatch;
-        }
-        return MatchResult::Mismatch;
-    }
-
-    int arity = type_container_arity(expected->kind);
-    if (arity > 0) {
-        if (expected->args.empty())
-            return MatchResult::Ok;
-        if (actual->args.empty()) {
-            MatchResult result = MatchResult::Ok;
-            for (const TypeNode *arg : expected->args) {
-                if (arg && arg->kind != TYPE_ANY)
-                    result = combine_result(result, MatchResult::Unknown);
-            }
-            return result;
-        }
-        if (actual->args.size() != expected->args.size())
-            return MatchResult::Mismatch;
-        MatchResult result = MatchResult::Ok;
-        for (std::size_t i = 0; i < expected->args.size(); ++i) {
-            result = combine_result(
-                result, match_type(actual->args[i], expected->args[i]));
-            if (result == MatchResult::Mismatch)
-                return result;
-        }
-        return result;
-    }
-
-    return MatchResult::Ok;
-}
-
-struct Checker {
+struct Checker : public BuiltinContext {
     std::string source;
     std::string module;
     std::unordered_map<std::string, FunctionSig> functions;
     std::unordered_map<std::string, StaticTypeInfo> static_types;
     std::vector<const TypeNode *> return_types;
+    std::unordered_set<std::string> warnings;
     bool error_ = false;
+
+    void report_error(int line, int column, const char *message) {
+        if (error_)
+            return;
+        diag_report(line, column, "type error", message);
+        error_ = true;
+    }
+
+    void report_warning(int line, int column, const char *message) {
+        if (error_)
+            return;
+        std::string key = std::to_string(line);
+        key += ':';
+        key += std::to_string(column);
+        key += ':';
+        key += message ? message : "";
+        if (!warnings.insert(key).second)
+            return;
+        diag_report_warning(line, column, "type warning", message);
+    }
 
     explicit Checker(const std::string &source_name,
                      const std::string &module_name)
@@ -542,8 +98,7 @@ struct Checker {
             std::snprintf(message, sizeof(message),
                           "expected %s, got %s", expected_text.c_str(),
                           actual_text.c_str());
-            diag_report(line, column, "type error", message);
-            error_ = true;
+            report_error(line, column, message);
             return false;
         }
 
@@ -555,11 +110,10 @@ struct Checker {
                       actual_text.c_str(), expected_text.c_str(),
                       expected_text.c_str());
         if (g_mode == Mode::Strict) {
-            diag_report(line, column, "type error", message);
-            error_ = true;
+            report_error(line, column, message);
             return false;
         }
-        diag_report_warning(line, column, "type warning", message);
+        report_warning(line, column, message);
         return true;
     }
 
@@ -582,8 +136,7 @@ struct Checker {
         char message[512];
         std::snprintf(message, sizeof(message), "expected %s, got %s",
                       type_display(expected), type_display(actual));
-        diag_report(line, column, "type error", message);
-        error_ = true;
+        report_error(line, column, message);
         return false;
     }
 
@@ -683,9 +236,8 @@ struct Checker {
             return true;
         }
         if (node->nodetype == NODE_CAST) {
-            diag_report(node->line, node->column, "type error",
-                        "cannot assign through 'as'");
-            error_ = true;
+            report_error(node->line, node->column,
+                         "cannot assign through 'as'");
             out_type = type_any();
             return false;
         }
@@ -806,8 +358,7 @@ struct Checker {
         char message[512];
         std::snprintf(message, sizeof(message), "expected %s, got %s",
                       type_display(expected), type_display(actual));
-        diag_report(line, column, "type error", message);
-        error_ = true;
+        report_error(line, column, message);
         return false;
     }
 
@@ -965,12 +516,19 @@ struct Checker {
         }
 
         if (has_path) {
-            std::string canonical = canonical_builtin_path(path, source);
-            const TypeNode *builtin_result = type_any();
-            if (check_builtin(canonical, args, expected, env,
-                              builtin_result)) {
-                result = builtin_result;
-                return true;
+            bool allow_check =
+                needs_static_check(expected) ||
+                (!args.empty() &&
+                 expr_has_declared_container(args[0], env));
+            if (allow_check) {
+                std::string canonical =
+                    canonical_builtin_path(path, source);
+                const TypeNode *builtin_result = type_any();
+                if (check_builtin(*this, canonical, args, expected, env,
+                                  builtin_result)) {
+                    result = builtin_result;
+                    return true;
+                }
             }
         }
 
@@ -980,24 +538,6 @@ struct Checker {
             infer(arg, env);
         result = type_any();
         return true;
-    }
-
-    const TypeNode *container_type(const TypeNode *type,
-                                   enum type_constraint_kind kind,
-                                   std::size_t arity) {
-        if (type && type->kind == kind)
-            return type;
-        std::vector<const TypeNode *> args(arity, type_any());
-        return type_container(kind, args);
-    }
-
-    const TypeNode *expected_element(const TypeNode *expected,
-                                     enum type_constraint_kind kind,
-                                     std::size_t index) {
-        if (expected && expected->kind == kind &&
-            index < expected->args.size())
-            return expected->args[index];
-        return type_any();
     }
 
     static struct value_t *namespace_field(struct value_t *value,
@@ -1220,6 +760,21 @@ struct Checker {
         return true;
     }
 
+    const TypeNode *named_function_result(const char *name) {
+        std::string key = name ? name : "";
+        auto it = functions.find(key);
+        if (it != functions.end())
+            return it->second.result ? it->second.result : type_any();
+        struct symbol *sym = lookupsym(key.c_str());
+        if (sym && sym->val && sym->val->type == T_func) {
+            struct func_value_t *fn = (struct func_value_t *)sym->val;
+            if (fn->def && fn->def->code && fn->def->code->ret_type)
+                return type_from_constraint(
+                    fn->def->code->ret_type.get());
+        }
+        return type_any();
+    }
+
     const TypeNode *infer_lambda_result(struct ast *function,
                                         const TypeNode *element,
                                         Env &env) {
@@ -1255,427 +810,6 @@ struct Checker {
                 first = false;
         }
         return infer(return_expr, local);
-    }
-
-    bool check_builtin(const std::string &path,
-                       const std::vector<struct ast *> &args,
-                       const TypeNode *expected, Env &env,
-                       const TypeNode *&result) {
-        /*
-         * Only run builtin signature checks when a generic annotation is
-         * involved.  Unannotated code keeps the pre-existing runtime
-         * behaviour and error text.
-         */
-        if (!needs_static_check(expected) &&
-            (args.empty() ||
-             !expr_has_declared_container(args[0], env)))
-            return false;
-        auto arg_type = [&](std::size_t i) -> const TypeNode * {
-            return i < args.size() ? infer(args[i], env) : type_any();
-        };
-        auto check_arg = [&](std::size_t i, const TypeNode *type,
-                             bool force) -> bool {
-            return i >= args.size() ||
-                   check_expr(args[i], type, env, false, force);
-        };
-        auto require_kind = [&](std::size_t i,
-                                enum type_constraint_kind kind) -> bool {
-            if (i >= args.size())
-                return true;
-            const TypeNode *actual = infer(args[i], env);
-            if (actual->kind == TYPE_ANY || actual->kind == kind)
-                return true;
-            const TypeNode *wanted = type_builtin(kind);
-            char message[256];
-            std::snprintf(message, sizeof(message), "expected %s, got %s",
-                          type_display(wanted), type_display(actual));
-            diag_report(args[i]->line, args[i]->column, "type error",
-                        message);
-            error_ = true;
-            return false;
-        };
-
-        if (path == "std.set.new" || path == "std.deque.new" ||
-            path == "std.heap.new") {
-            enum type_constraint_kind kind =
-                path == "std.set.new"
-                    ? TYPE_SET
-                    : (path == "std.deque.new" ? TYPE_DEQUE : TYPE_HEAP);
-            if (expected && expected->kind == kind) {
-                result = expected;
-            } else {
-                result = type_container(kind, {type_any()});
-            }
-            return true;
-        }
-
-        if (path.rfind("std.list.", 0) == 0) {
-            std::string name = path.substr(9);
-            if (!require_kind(0, TYPE_LIST))
-                return true;
-            const TypeNode *list_type = container_type(arg_type(0),
-                                                       TYPE_LIST, 1);
-            const TypeNode *element =
-                expected_element(expected, TYPE_LIST, 0);
-            if (element->kind == TYPE_ANY && !list_type->args.empty())
-                element = list_type->args[0];
-            const TypeNode *target_list =
-                type_container(TYPE_LIST, {element});
-            if (!check_arg(0, target_list, false))
-                return true;
-
-            if (name == "len") {
-                result = type_builtin(TYPE_INT);
-                return true;
-            }
-            if (name == "append") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = target_list;
-                return true;
-            }
-            if (name == "slice") {
-                if (!check_arg(1, type_builtin(TYPE_INT), false) ||
-                    !check_arg(2, type_builtin(TYPE_INT), false))
-                    return true;
-                result = target_list;
-                return true;
-            }
-            if (name == "contains" || name == "index") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = type_builtin(name == "contains" ? TYPE_BOOL
-                                                          : TYPE_INT);
-                return true;
-            }
-            if (name == "reverse" || name == "sort" ||
-                name == "sort_desc" || name == "sort_by" ||
-                name == "filter" || name == "unique" ||
-                name == "unique_by" || name == "top_k") {
-                if (name == "top_k" && !check_arg(1, type_builtin(TYPE_INT),
-                                                  false))
-                    return true;
-                result = target_list;
-                return true;
-            }
-            if (name == "is_sorted") {
-                result = type_builtin(TYPE_BOOL);
-                return true;
-            }
-            if (name == "map") {
-                const TypeNode *mapped = type_any();
-                if (args.size() > 1) {
-                    struct ast *mapper = args[1];
-                    if (mapper->nodetype == 'Z') {
-                        mapped = infer_lambda_result(mapper, element, env);
-                    } else if (mapper->nodetype == 'N') {
-                        const char *mapper_name =
-                            ((struct symref *)mapper)->name;
-                        auto fit = functions.find(
-                            mapper_name ? mapper_name : "");
-                        if (fit != functions.end()) {
-                            mapped = fit->second.result
-                                         ? fit->second.result
-                                         : type_any();
-                        } else {
-                            struct symbol *sym =
-                                lookupsym(mapper_name
-                                              ? mapper_name
-                                              : "");
-                            if (sym && sym->val &&
-                                sym->val->type == T_func) {
-                                struct func_value_t *fn =
-                                    (struct func_value_t *)sym->val;
-                                if (fn->def && fn->def->code &&
-                                    fn->def->code->ret_type)
-                                    mapped = type_from_constraint(
-                                        fn->def->code->ret_type.get());
-                            }
-                        }
-                    }
-                }
-                result = type_container(TYPE_LIST, {mapped});
-                return true;
-            }
-            if (name == "reduce") {
-                result = type_any();
-                return true;
-            }
-            if (name == "group_by") {
-                result = type_container(
-                    TYPE_DICT, {type_any(), target_list});
-                return true;
-            }
-            if (name == "chunk" || name == "window") {
-                if (!check_arg(1, type_builtin(TYPE_INT), false))
-                    return true;
-                result = type_container(
-                    TYPE_LIST,
-                    {type_container(TYPE_LIST, {element})});
-                return true;
-            }
-            if (name == "zip") {
-                if (!require_kind(1, TYPE_LIST) ||
-                    !check_arg(1, type_container(TYPE_LIST, {type_any()}),
-                               false))
-                    return true;
-                result = type_container(
-                    TYPE_LIST,
-                    {type_container(TYPE_LIST, {type_any()})});
-                return true;
-            }
-            if (name == "binary_search") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = type_container(
-                    TYPE_DICT, {type_builtin(TYPE_STRING), type_any()});
-                return true;
-            }
-            result = type_any();
-            return true;
-        }
-
-        if (path.rfind("std.dict.", 0) == 0) {
-            std::string name = path.substr(9);
-            if (!require_kind(0, TYPE_DICT))
-                return true;
-            const TypeNode *dict_type = container_type(arg_type(0),
-                                                       TYPE_DICT, 2);
-            const TypeNode *key = expected_element(expected, TYPE_DICT, 0);
-            const TypeNode *value = expected_element(expected, TYPE_DICT, 1);
-            if (key->kind == TYPE_ANY && dict_type->args.size() > 0)
-                key = dict_type->args[0];
-            if (value->kind == TYPE_ANY && dict_type->args.size() > 1)
-                value = dict_type->args[1];
-            const TypeNode *target_dict =
-                type_container(TYPE_DICT, {key, value});
-            if (!check_arg(0, target_dict, false))
-                return true;
-
-            if (name == "len") {
-                result = type_builtin(TYPE_INT);
-                return true;
-            }
-            if (name == "keys") {
-                result = type_container(TYPE_LIST, {key});
-                return true;
-            }
-            if (name == "values") {
-                result = type_container(TYPE_LIST, {value});
-                return true;
-            }
-            if (name == "items") {
-                result = type_container(
-                    TYPE_LIST,
-                    {type_container(TYPE_LIST, {type_any()})});
-                return true;
-            }
-            if (name == "get") {
-                if (!check_arg(1, key, true))
-                    return true;
-                if (args.size() > 2) {
-                    if (!check_arg(2, value, true))
-                        return true;
-                    result = value;
-                } else {
-                    result = type_nullable(value);
-                }
-                return true;
-            }
-            if (name == "has") {
-                if (!check_arg(1, key, true))
-                    return true;
-                result = type_builtin(TYPE_BOOL);
-                return true;
-            }
-            if (name == "delete") {
-                if (!check_arg(1, key, true))
-                    return true;
-                result = target_dict;
-                return true;
-            }
-            if (name == "merge") {
-                if (!require_kind(1, TYPE_DICT) ||
-                    !check_arg(1, target_dict, false))
-                    return true;
-                result = target_dict;
-                return true;
-            }
-            result = type_any();
-            return true;
-        }
-
-        if (path.rfind("std.set.", 0) == 0) {
-            std::string name = path.substr(8);
-            if (name == "from_list") {
-                if (!require_kind(0, TYPE_LIST))
-                    return true;
-                const TypeNode *element =
-                    expected_element(expected, TYPE_SET, 0);
-                const TypeNode *list_type = container_type(arg_type(0),
-                                                           TYPE_LIST, 1);
-                if (element->kind == TYPE_ANY && list_type->args.size() > 0)
-                    element = list_type->args[0];
-                if (!check_arg(0,
-                               type_container(TYPE_LIST, {element}), false))
-                    return true;
-                result = type_container(TYPE_SET, {element});
-                return true;
-            }
-            if (!require_kind(0, TYPE_SET))
-                return true;
-            const TypeNode *set_type = container_type(arg_type(0), TYPE_SET,
-                                                      1);
-            const TypeNode *element =
-                expected_element(expected, TYPE_SET, 0);
-            if (element->kind == TYPE_ANY && set_type->args.size() > 0)
-                element = set_type->args[0];
-            const TypeNode *target_set =
-                type_container(TYPE_SET, {element});
-            if (!check_arg(0, target_set, false))
-                return true;
-            if (name == "add" || name == "remove") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = target_set;
-                return true;
-            }
-            if (name == "has") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = type_builtin(TYPE_BOOL);
-                return true;
-            }
-            if (name == "values") {
-                result = type_container(TYPE_LIST, {element});
-                return true;
-            }
-            if (name == "size") {
-                result = type_builtin(TYPE_INT);
-                return true;
-            }
-            if (name == "union" || name == "intersect" ||
-                name == "difference") {
-                if (!require_kind(1, TYPE_SET) ||
-                    !check_arg(1, target_set, false))
-                    return true;
-                result = target_set;
-                return true;
-            }
-            if (name == "is_subset") {
-                if (!require_kind(1, TYPE_SET) ||
-                    !check_arg(1, target_set, false))
-                    return true;
-                result = type_builtin(TYPE_BOOL);
-                return true;
-            }
-            result = type_any();
-            return true;
-        }
-
-        if (path.rfind("std.deque.", 0) == 0) {
-            std::string name = path.substr(10);
-            if (name == "from_list") {
-                if (!require_kind(0, TYPE_LIST))
-                    return true;
-                const TypeNode *element =
-                    expected_element(expected, TYPE_DEQUE, 0);
-                const TypeNode *list_type = container_type(arg_type(0),
-                                                           TYPE_LIST, 1);
-                if (element->kind == TYPE_ANY && list_type->args.size() > 0)
-                    element = list_type->args[0];
-                if (!check_arg(0,
-                               type_container(TYPE_LIST, {element}), false))
-                    return true;
-                result = type_container(TYPE_DEQUE, {element});
-                return true;
-            }
-            if (!require_kind(0, TYPE_DEQUE))
-                return true;
-            const TypeNode *deque_type =
-                container_type(arg_type(0), TYPE_DEQUE, 1);
-            const TypeNode *element =
-                expected_element(expected, TYPE_DEQUE, 0);
-            if (element->kind == TYPE_ANY && deque_type->args.size() > 0)
-                element = deque_type->args[0];
-            const TypeNode *target_deque =
-                type_container(TYPE_DEQUE, {element});
-            if (!check_arg(0, target_deque, false))
-                return true;
-            if (name == "push_front" || name == "push_back") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = target_deque;
-                return true;
-            }
-            if (name == "to_list") {
-                result = type_container(TYPE_LIST, {element});
-                return true;
-            }
-            if (name == "size") {
-                result = type_builtin(TYPE_INT);
-                return true;
-            }
-            if (name == "peek_front" || name == "peek_back") {
-                result = type_nullable(element);
-                return true;
-            }
-            result = type_any();
-            return true;
-        }
-
-        if (path.rfind("std.heap.", 0) == 0) {
-            std::string name = path.substr(9);
-            if (name == "from_list") {
-                if (!require_kind(0, TYPE_LIST))
-                    return true;
-                const TypeNode *element =
-                    expected_element(expected, TYPE_HEAP, 0);
-                const TypeNode *list_type = container_type(arg_type(0),
-                                                           TYPE_LIST, 1);
-                if (element->kind == TYPE_ANY && list_type->args.size() > 0)
-                    element = list_type->args[0];
-                if (!check_arg(0,
-                               type_container(TYPE_LIST, {element}), false))
-                    return true;
-                result = type_container(TYPE_HEAP, {element});
-                return true;
-            }
-            if (!require_kind(0, TYPE_HEAP))
-                return true;
-            const TypeNode *heap_type = container_type(arg_type(0),
-                                                       TYPE_HEAP, 1);
-            const TypeNode *element =
-                expected_element(expected, TYPE_HEAP, 0);
-            if (element->kind == TYPE_ANY && heap_type->args.size() > 0)
-                element = heap_type->args[0];
-            const TypeNode *target_heap =
-                type_container(TYPE_HEAP, {element});
-            if (!check_arg(0, target_heap, false))
-                return true;
-            if (name == "push") {
-                if (!check_arg(1, element, true))
-                    return true;
-                result = target_heap;
-                return true;
-            }
-            if (name == "to_list") {
-                result = type_container(TYPE_LIST, {element});
-                return true;
-            }
-            if (name == "size") {
-                result = type_builtin(TYPE_INT);
-                return true;
-            }
-            if (name == "peek") {
-                result = type_nullable(element);
-                return true;
-            }
-            result = type_any();
-            return true;
-        }
-
-        return false;
     }
 
     void bind_pattern_types(const struct ast *node,

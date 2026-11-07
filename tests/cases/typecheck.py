@@ -391,6 +391,8 @@ def run_cases():
                 "  export func make_p(): P { return P { xs: [1] }; }\n"
                 "  export let nums: list[int] = [1, 2];\n"
                 "  export let nums2 = [3, 4];\n"
+                "  export let changed = [1];\n"
+                "  changed = [\"x\"];\n"
                 "}\n")
         main = os.path.join(tmp, "app", "main.skein")
         with open(main, "w", encoding="utf-8") as f:
@@ -445,3 +447,25 @@ def run_cases():
         proc = run_file(main)
         assert proc.returncode == 1, proc.stderr
         assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa as lib;\n"
+                "let xs: list[int] = lib.make(1);\n"
+                'xs[0] = "a";\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                "let ys: list[int] = aa.changed;\n")
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "expected list[int], got list[string]" in proc.stderr, proc.stderr
+
+    proc = run(
+        "func f(a: int, b: string) { return a; }\n"
+        'f("x", 1);\n')
+    assert proc.stderr.count("type error:") == 1, proc.stderr

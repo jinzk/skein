@@ -283,6 +283,9 @@ add_library(skein_interpreter STATIC
   src/interpreter/compiler.cpp
   src/interpreter/ast_analysis.cpp
   src/interpreter/static_type.cpp
+  src/interpreter/typecheck_state.cpp
+  src/interpreter/typecheck_types.cpp
+  src/interpreter/typecheck_builtins.cpp
   src/interpreter/typecheck.cpp
   src/interpreter/defer_validation.cpp
   src/interpreter/vm_bridge.cpp

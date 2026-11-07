@@ -1,5 +1,7 @@
 #include "jit.h"
 
+#include "jit_internal.h"
+
 #include "diagnostics.h"
 #include "dict.h"
 #include "eval_context.h"
@@ -124,15 +126,7 @@ SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **va
 
 namespace {
 
-bool read_bool_env(const char *name, bool fallback) {
-    const char *value = std::getenv(name);
-    if (!value || !*value)
-        return fallback;
-    if (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
-        std::strcmp(value, "off") == 0 || std::strcmp(value, "no") == 0)
-        return false;
-    return true;
-}
+using skein::jit::internal::read_bool_env;
 
 struct JitRuntimeState {
     asmjit::JitRuntime runtime;
@@ -192,11 +186,6 @@ bool is_binary_op_char(int op) {
 uint64_t pack_loc(const skein::bc::SourceLoc &loc) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(loc.line)) << 32) |
            static_cast<uint32_t>(loc.column);
-}
-
-void unpack_loc(uint64_t packed, int &line, int &column) {
-    line = static_cast<int>(packed >> 32);
-    column = static_cast<int>(packed & 0xffffffffu);
 }
 
 } // namespace

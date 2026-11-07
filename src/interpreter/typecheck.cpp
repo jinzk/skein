@@ -50,6 +50,9 @@ const TypeNode *value_static_type(const struct value_t *value) {
         case T_error: return type_builtin(TYPE_ERROR);
         case T_func: return type_builtin(TYPE_FUNCTION);
         case T_builtin: return type_builtin(TYPE_BUILTIN);
+        case T_method:
+        case T_native: return type_builtin(TYPE_CALLABLE);
+        case T_userdata: return type_builtin(TYPE_USERDATA);
         default: return type_any();
     }
 }
@@ -191,6 +194,7 @@ struct FunctionSig {
     std::vector<const TypeNode *> params;
     bool variadic = false;
     const TypeNode *rest = nullptr;
+    const TypeNode *result = nullptr;
 };
 
 FunctionSig signature_from_symlist(struct symlist *sl) {
@@ -266,6 +270,13 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
             return MatchResult::Ok;
         return MatchResult::Mismatch;
     }
+    if (expected->kind == TYPE_CALLABLE) {
+        if (actual->kind == TYPE_FUNCTION ||
+            actual->kind == TYPE_BUILTIN ||
+            actual->kind == TYPE_CALLABLE)
+            return MatchResult::Ok;
+        return MatchResult::Mismatch;
+    }
     if (actual->kind != expected->kind)
         return MatchResult::Mismatch;
 
@@ -273,6 +284,21 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
         if (actual->name == expected->name &&
             actual->module == expected->module)
             return MatchResult::Ok;
+        trait_def *expected_trait =
+            structtype_find_trait(expected->module.c_str(),
+                                  expected->name.c_str());
+        if (expected_trait) {
+            type_def *actual_type =
+                structtype_find_type(actual->module.c_str(),
+                                     actual->name.c_str());
+            if (!actual_type)
+                return MatchResult::Unknown;
+            for (const trait_def *trait : actual_type->traits) {
+                if (trait == expected_trait)
+                    return MatchResult::Ok;
+            }
+            return MatchResult::Mismatch;
+        }
         return MatchResult::Mismatch;
     }
 
@@ -307,6 +333,7 @@ struct Checker {
     std::string source;
     std::string module;
     std::unordered_map<std::string, FunctionSig> functions;
+    std::vector<const TypeNode *> return_types;
     bool error_ = false;
 
     explicit Checker(const std::string &source_name,
@@ -360,6 +387,30 @@ struct Checker {
         }
         diag_report_warning(line, column, "type warning", message);
         return true;
+    }
+
+    bool check_return_expr(struct ast *expr, const TypeNode *expected,
+                           Env &env, int line, int column) {
+        if (!expected || expected->kind == TYPE_ANY) {
+            if (expr)
+                infer(expr, env);
+            return true;
+        }
+        if (needs_static_check(expected))
+            return check_expr(expr, expected, env, false, true);
+
+        const TypeNode *actual =
+            expr ? infer(expr, env) : type_builtin(TYPE_NULL);
+        MatchResult result = match_type(actual, expected);
+        if (result != MatchResult::Mismatch)
+            return true;
+
+        char message[512];
+        std::snprintf(message, sizeof(message), "expected %s, got %s",
+                      type_display(expected), type_display(actual));
+        diag_report(line, column, "type error", message);
+        error_ = true;
+        return false;
     }
 
     bool check_expr(struct ast *expr, const TypeNode *expected, Env &env,
@@ -551,6 +602,11 @@ struct Checker {
                         (struct func_value_t *)sym->val;
                     if (fn->def && fn->def->code) {
                         sig = signature_from_symlist(fn->def->code->sl);
+                        sig.result =
+                            fn->def->code->ret_type
+                                ? type_from_constraint(
+                                      fn->def->code->ret_type.get())
+                                : type_any();
                         found = true;
                     }
                 }
@@ -576,7 +632,7 @@ struct Checker {
                     for (struct ast *arg : args)
                         infer(arg, env);
                 }
-                result = type_any();
+                result = sig.result ? sig.result : type_any();
                 return true;
             }
         }
@@ -1079,6 +1135,8 @@ struct Checker {
         FunctionSig sig;
         if (def->sl)
             sig = signature_from_symlist(def->sl);
+        sig.result = def->ret_type ? type_from_constraint(def->ret_type)
+                                   : type_any();
         if (def->name)
             functions[def->name] = sig;
 
@@ -1108,7 +1166,12 @@ struct Checker {
             local.define(name, type);
         }
 
-        return check_stmt(def->ast, local);
+        return_types.push_back(def->ret_type
+                                   ? type_from_constraint(def->ret_type)
+                                   : NULL);
+        bool ok = check_stmt(def->ast, local);
+        return_types.pop_back();
+        return ok;
     }
 
     bool check_struct_decl(struct struct_node *decl, Env &env) {
@@ -1336,9 +1399,15 @@ struct Checker {
             }
             case 'R': {
                 struct fnret *ret = (struct fnret *)stmt;
-                if (ret->v)
-                    infer(ret->v, env);
-                return true;
+                const TypeNode *expected =
+                    return_types.empty() ? NULL : return_types.back();
+                if (!expected) {
+                    if (ret->v)
+                        infer(ret->v, env);
+                    return true;
+                }
+                return check_return_expr(ret->v, expected, env, stmt->line,
+                                         stmt->column);
             }
             case 'Z':
                 return check_funcdef((struct funcdef *)stmt, env);

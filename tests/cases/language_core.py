@@ -532,21 +532,21 @@ def run_cases():
 
     check("expression lambda",
           'import std;\n'
-          'println(std.list.map([1, 2, 3], func(x) => x * 2));\n'
-          'println(std.list.filter([1, 2, 3], func(x) => x % 2 == 1));\n'
-          'println(std.list.reduce([1, 2, 3], func(a, b) => a + b));\n',
+          'println(std.list.map([1, 2, 3], func(x) -> x * 2));\n'
+          'println(std.list.filter([1, 2, 3], func(x) -> x % 2 == 1));\n'
+          'println(std.list.reduce([1, 2, 3], func(a, b) -> a + b));\n',
           stdout_all=["[2, 4, 6]", "[1, 3]", "6"])
     check("expression lambda precedence",
-          'let f = func(x) => x * 2 + 1;\nprintln(f(3));\n',
+          'let f = func(x) -> x * 2 + 1;\nprintln(f(3));\n',
           stdout="7")
     check("nested expression lambdas",
-          'let add = func(x) => func(y) => x + y;\nprintln(add(2)(3));\n',
+          'let add = func(x) -> func(y) -> x + y;\nprintln(add(2)(3));\n',
           stdout="5")
     check("named expression function",
-          'func double(x) => x * 2;\nprintln(double(21));\n',
+          'func double(x) -> x * 2;\nprintln(double(21));\n',
           stdout="42")
     check("expression lambda with match",
-          'let describe = func(x) => match (x) {\n'
+          'let describe = func(x) -> match (x) {\n'
           '  case 0 => "zero";\n'
           '  default => "other";\n'
           '};\n'
@@ -554,12 +554,12 @@ def run_cases():
           stdout_all=["zero", "other"])
     check("method expression body",
           'struct Box { v: int; }\n'
-          'impl Box { func twice(self) => self.v * 2; }\n'
+          'impl Box { func twice(self) -> self.v * 2; }\n'
           'let b = Box { v: 4 };\nprintln(b.twice());\n',
           stdout="8")
     check("async expression function",
           'import std;\n'
-          'async func inc(x) => x + 1;\n'
+          'async func inc(x) -> x + 1;\n'
           'println(await inc(1));\n',
           stdout="2")
 
@@ -586,11 +586,11 @@ def run_cases():
     check("default parameter method self",
           'struct S { v: int; }\n'
           'impl S { func add(self, x: int = self.v + 1) '
-          '=> self.v + x; }\n'
+          '-> self.v + x; }\n'
           'println(S { v: 10 }.add());\n',
           stdout="21")
     check("default parameter anonymous",
-          'let inc = func(x = 0) => x + 1;\n'
+          'let inc = func(x = 0) -> x + 1;\n'
           'println(inc());\nprintln(inc(10));\n',
           stdout_all=["1", "11"])
     check("default parameter variadic",
@@ -603,7 +603,7 @@ def run_cases():
           'println(f());\nprintln(f());\n',
           stdout_all=["[1]", "[1]"])
     check("default parameter closure snapshot",
-          'func f(a, cb = func() => a) { a = 99; return cb(); }\n'
+          'func f(a, cb = func() -> a) { a = 99; return cb(); }\n'
           'println(f(1));\n',
           stdout="1")
     check("default parameter forward reference",
@@ -625,14 +625,14 @@ def run_cases():
           'func f(a, b = 1) { return b; }\nf(1, 2, 3);\n',
           stderr="expects at most 2 argument(s)")
     check("default parameter self default rejected",
-          'struct S {}\nimpl S { func m(self = S {}, x = 1) => x; }\n',
+          'struct S {}\nimpl S { func m(self = S {}, x = 1) -> x; }\n',
           stderr="method self cannot have a default value")
     check("default parameter trait rejected",
           'trait T { func m(self, x: int = 1); }\n',
           stderr="trait method m cannot have default parameter values")
     check("default parameter async",
           'import std;\n'
-          'async func f(a, b = a + 1) => b;\n'
+          'async func f(a, b = a + 1) -> b;\n'
           'println(await f(1));\n',
           stdout="2")
     check("default parameter generator",
@@ -645,7 +645,7 @@ def run_cases():
           stdout="11")
 
     check("export expression function",
-          'package p { export func twice(x) => x * 2; }\n'
+          'package p { export func twice(x) -> x * 2; }\n'
           'println(p.twice(21));\n',
           stdout="42")
 
@@ -669,7 +669,7 @@ def run_cases():
           stdout_all=["[0, 2, 4]", "3", "3"])
     check("pipe struct method",
           'struct Box { v: int; }\n'
-          'impl Box { func add(self, x) => self.v + x; }\n'
+          'impl Box { func add(self, x) -> self.v + x; }\n'
           'println(5 |> Box { v: 10 }.add());\n',
           stdout="15")
 
@@ -695,7 +695,7 @@ def run_cases():
           stdout_all=["[2, 4, 6]", "[2, 4, 6]"])
     check("placeholder method",
           'struct Box { v: int; }\n'
-          'impl Box { func add(self, x) => self.v + x; }\n'
+          'impl Box { func add(self, x) -> self.v + x; }\n'
           'let b = Box { v: 10 };\n'
           'let m = b.add($);\n'
           'println(m(2));\n',

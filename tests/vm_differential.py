@@ -182,7 +182,7 @@ def generator_program():
 def async_program():
     return (
         "import std;\n"
-        "async func inc(x) => x + 1;\n"
+        "async func inc(x) -> x + 1;\n"
         "print(await inc(3));\n"
         "print(await inc(await inc(4)));\n"
     )

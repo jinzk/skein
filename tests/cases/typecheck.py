@@ -192,3 +192,70 @@ def run_cases():
           'let x: int = "a";\n',
           stderr="runtime error",
           not_stderr="type error")
+
+    check("return annotation propagates container type",
+          "func numbers(): list[int] { return [1, 2]; }\n"
+          "let xs: list[int] = numbers();\n"
+          "xs[0] = 3;\n"
+          "println(xs);\n",
+          stdout_all=["[3, 2]"])
+
+    check("return annotation checks container literal",
+          'func numbers(): list[int] { return [1, "a"]; }\n',
+          stderr="type error: expected int, got string")
+
+    check("return annotation propagates insert checks",
+          "func numbers(): list[int] { return [1, 2]; }\n"
+          "let xs: list[int] = numbers();\n"
+          'xs[0] = "a";\n',
+          stderr="type error: expected int, got string")
+
+    check("return annotation checks plain scalar",
+          'func bad(): int { return "a"; }\n',
+          stderr="type error: expected int, got string")
+
+    check("return annotation rejects missing value",
+          "func bad(): int { return; }\n",
+          stderr="type error: expected int, got null")
+
+    check("nullable return annotation accepts missing value",
+          "func maybe(): int? { return; }\n"
+          "println(maybe());\n",
+          stdout_all=["null"])
+
+    check("expression body return annotation",
+          "func numbers(): list[int] -> [1, 2];\n"
+          "let xs: list[int] = numbers();\n"
+          "println(xs);\n",
+          stdout_all=["[1, 2]"])
+
+    check("method return annotation checks body",
+          "struct S { x: int; }\n"
+          'impl S { func get(self): int { return "a"; } }\n',
+          stderr="type error: expected int, got string")
+
+    check("return annotation any warning",
+          "let raw = [1];\n"
+          "func numbers(): list[int] { return raw; }\n"
+          "println(numbers());\n",
+          stderr="type warning: implicit any assigned to list[int]",
+          env=WARN_ENV)
+
+    check("return annotation as suppresses warning",
+          "let raw = [1];\n"
+          "func numbers(): list[int] { return raw as list[int]; }\n"
+          "println(numbers());\n",
+          not_stderr="type warning",
+          env=WARN_ENV)
+
+    check("function without return annotation stays any",
+          "func numbers() { return [1, 2]; }\n"
+          "let xs: list[int] = numbers();\n"
+          "println(xs);\n",
+          stderr="type warning: implicit any assigned to list[int]",
+          env=WARN_ENV)
+
+    check("return annotation callable accepts builtin",
+          "func get_fn(): callable { return sqrt; }\n"
+          "println(get_fn()(9));\n",
+          stdout_all=["3"])

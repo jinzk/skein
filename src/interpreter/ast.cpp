@@ -713,7 +713,8 @@ struct ast *append_patternitem(struct ast *head, struct ast *node) {
 }
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported, bool is_async, bool is_generator) {
+                    bool exported, bool is_async, bool is_generator,
+                    struct type_constraint *ret_type) {
     struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
     if (!a) {
         yyerror("out of space");
@@ -729,6 +730,7 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->name = s;
     a->sl = sl;
     a->ast = ast;
+    a->ret_type = ret_type;
     a->moved = 0;
     if (is_async && is_generator) {
         yyerror("async generators are not supported");
@@ -942,6 +944,10 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
                           diag_current_module_name(), {}},
         free_function_code);
     code->source = diag_current_source_name();
+    if (node->ret_type) {
+        code->ret_type =
+            std::make_shared<type_constraint>(*node->ret_type);
+    }
     struct ast *body = node->ast;
     if (!body)
         body = newret(newnullast());
@@ -1331,6 +1337,7 @@ void treefree(struct ast *a) {
                 treefree(f->ast);
                 if (f->sl) symlistfree_full(f->sl);
             }
+            free_type_constraint(f->ret_type);
             std::free(f->name);
             break;
         }

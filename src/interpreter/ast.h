@@ -137,6 +137,8 @@ struct funcdef {
     char *name;
     struct symlist *sl;
     struct ast *ast;
+    /* Optional `: type` return annotation, owned by the AST node. */
+    struct type_constraint *ret_type;
     int moved; /* body/params transferred to a runtime function value */
     int exported;
     int is_async;
@@ -513,7 +515,8 @@ struct ast *newspread(struct ast *value);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported = false, bool is_async = false,
-                    bool is_generator = false);
+                    bool is_generator = false,
+                    struct type_constraint *ret_type = NULL);
 struct ast *newawait(struct ast *value);
 struct ast *newyield(struct ast *value);
 struct ast *newdefer(struct ast *value);

@@ -719,7 +719,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> decorators decorator decorator_expr
 %type <a> struct_fields struct_field
 %type <sl> param symlist lambda_param_tail
-%type <type> type type_name
+%type <type> type type_name func_ret_opt
 %type <str> importref importpath fieldname impl_trait_name
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
@@ -736,43 +736,43 @@ static struct type_constraint *runtime_type_or_error(
 %start program
 %%
 
-func_decl: funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc($2, $4, NULL, false, false, finish_function()); }
-    | funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($2, $4, $7, false, false, finish_function()); }
-    | funcstart NAME '(' symlist ')' ARROW exp ';'
-                                           { $$ = newfunc($2, $4, newret($7), false, false, finish_function()); }
-    | ASYNC funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
+func_decl: funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newfunc($2, $4, NULL, false, false, finish_function(), $6); }
+    | funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newfunc($2, $4, $8, false, false, finish_function(), $6); }
+    | funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           { $$ = newfunc($2, $4, newret($8), false, false, finish_function(), $6); }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($3, $5, NULL,
                                                           false, true,
-                                                          finish_function()); }
-    | ASYNC funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($3, $5, $8,
+                                                          finish_function(), $7); }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newfunc($3, $5, $9,
                                                           false, true,
-                                                          finish_function()); }
-    | ASYNC funcstart NAME '(' symlist ')' ARROW exp ';'
-                                           { $$ = newfunc($3, $5, newret($8),
+                                                          finish_function(), $7); }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           { $$ = newfunc($3, $5, newret($9),
                                                           false, true,
-                                                          finish_function()); }
-    | EXPORT funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc($3, $5, NULL, true, false, finish_function()); }
-    | EXPORT funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($3, $5, $8, true, false, finish_function()); }
-    | EXPORT funcstart NAME '(' symlist ')' ARROW exp ';'
-                                           { $$ = newfunc($3, $5, newret($8), true, false, finish_function()); }
-    | EXPORT ASYNC funcstart NAME '(' symlist ')' '{'
+                                                          finish_function(), $7); }
+    | EXPORT funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newfunc($3, $5, NULL, true, false, finish_function(), $7); }
+    | EXPORT funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newfunc($3, $5, $9, true, false, finish_function(), $7); }
+    | EXPORT funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           { $$ = newfunc($3, $5, newret($9), true, false, finish_function(), $7); }
+    | EXPORT ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{'
       EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc($4, $6, NULL,
                                                           true, true,
-                                                          finish_function()); }
-    | EXPORT ASYNC funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc($4, $6, $9,
+                                                          finish_function(), $8); }
+    | EXPORT ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newfunc($4, $6, $10,
                                                           true, true,
-                                                          finish_function()); }
-    | EXPORT ASYNC funcstart NAME '(' symlist ')' ARROW exp ';'
-                                           { $$ = newfunc($4, $6, newret($9),
+                                                          finish_function(), $8); }
+    | EXPORT ASYNC funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           { $$ = newfunc($4, $6, newret($10),
                                                           true, true,
-                                                          finish_function()); }
+                                                          finish_function(), $8); }
     ;
 
 stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
@@ -1181,18 +1181,18 @@ decorator_expr: NAME                     { $$ = newref($1); }
     | '(' exp ')'                        { $$ = $2; }
     ;
 
-method_decl: funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newstructmethod($2, newfunc(NULL, $4, NULL, false, false, finish_function())); }
-    | funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newstructmethod($2, newfunc(NULL, $4, $7, false, false, finish_function())); }
-    | funcstart NAME '(' symlist ')' ARROW exp ';'
-                                           { $$ = newstructmethod($2, newfunc(NULL, $4, newret($7), false, false, finish_function())); }
-    | ASYNC funcstart NAME '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newstructmethod($3, newfunc(NULL, $5, NULL, false, true, finish_function())); }
-    | ASYNC funcstart NAME '(' symlist ')' '{' list '}'
-                                           { $$ = newstructmethod($3, newfunc(NULL, $5, $8, false, true, finish_function())); }
-    | ASYNC funcstart NAME '(' symlist ')' ARROW exp ';'
-                                           { $$ = newstructmethod($3, newfunc(NULL, $5, newret($8), false, true, finish_function())); }
+method_decl: funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, NULL, false, false, finish_function(), $6)); }
+    | funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, $8, false, false, finish_function(), $6)); }
+    | funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           { $$ = newstructmethod($2, newfunc(NULL, $4, newret($8), false, false, finish_function(), $6)); }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newstructmethod($3, newfunc(NULL, $5, NULL, false, true, finish_function(), $7)); }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newstructmethod($3, newfunc(NULL, $5, $9, false, true, finish_function(), $7)); }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           { $$ = newstructmethod($3, newfunc(NULL, $5, newret($9), false, true, finish_function(), $7)); }
     ;
 
 method_member: method_decl               { $$ = $1; }
@@ -1494,7 +1494,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                            { $$ = newfunc(NULL, $3, NULL, false, false, finish_function()); }
     | funcstart '(' symlist ')' '{' list '}'
                                            { $$ = newfunc(NULL, $3, $6, false, false, finish_function()); }
-    | funcstart '(' symlist ')' ARROW exp
+    | funcstart '(' symlist ')' RARROW exp
                                            { $$ = newfunc(NULL, $3, newret($6), false, false, finish_function()); }
     | ASYNC funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $4, NULL,
@@ -1504,7 +1504,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                            { $$ = newfunc(NULL, $4, $7,
                                                           false, true,
                                                           finish_function()); }
-    | ASYNC funcstart '(' symlist ')' ARROW exp
+    | ASYNC funcstart '(' symlist ')' RARROW exp
                                            { $$ = newfunc(NULL, $4, newret($7),
                                                           false, true,
                                                           finish_function()); }
@@ -1519,6 +1519,10 @@ funcstart: FUNC {
         push_func_location(g_token_line, g_token_column);
         start_function();
     }
+    ;
+
+func_ret_opt: %empty                          { $$ = NULL; }
+    | ':' type                                { $$ = $2; }
     ;
 
 lambda_start: %empty {

@@ -2966,22 +2966,22 @@ def run_cases():
 
     check("std.fn compose",
           "import std;\n"
-          "let f = std.fn.compose(func(x) => x + 1, func(x) => x * 2);\n"
+          "let f = std.fn.compose(func(x) -> x + 1, func(x) -> x * 2);\n"
           "print(f(5));\n"
-          "let g = std.fn.compose(func(x) => x * 10, "
-          "func(x) => x + 1, func(x) => x * 2);\n"
+          "let g = std.fn.compose(func(x) -> x * 10, "
+          "func(x) -> x + 1, func(x) -> x * 2);\n"
           "print(g(3));\n",
           stdout_all=["11", "70"])
     check("std.fn pipe",
           "import std;\n"
-          "let f = std.fn.pipe(func(x) => x + 1, func(x) => x * 2);\n"
+          "let f = std.fn.pipe(func(x) -> x + 1, func(x) -> x * 2);\n"
           "print(f(5));\n",
           stdout="12")
     check("std.fn partial",
           "import std;\n"
-          "let add = std.fn.partial(func(a, b, c) => a + b + c, 1, 2);\n"
+          "let add = std.fn.partial(func(a, b, c) -> a + b + c, 1, 2);\n"
           "print(add(3));\n"
-          "print(std.fn.partial(func(a, b) => a + b)(4, 5));\n",
+          "print(std.fn.partial(func(a, b) -> a + b)(4, 5));\n",
           stdout_all=["6", "9"])
     check("std.fn identity and always",
           "import std;\n"
@@ -2996,8 +2996,8 @@ def run_cases():
           "import std;\n"
           "let xs = std.iter.collect(\n"
           "  std.iter.map(\n"
-          "    std.iter.filter(range(0, 10), func(x) => x % 2 == 0),\n"
-          "    func(x) => x * x));\n"
+          "    std.iter.filter(range(0, 10), func(x) -> x % 2 == 0),\n"
+          "    func(x) -> x * x));\n"
           "print(xs);\n"
           "print(std.iter.collect(std.iter.take(range(0, 100), 3)));\n"
           "print(std.iter.collect(std.iter.drop([1, 2, 3, 4], 2)));\n"
@@ -3007,9 +3007,9 @@ def run_cases():
     check("std.iter generator",
           "import std;\n"
           "func gen() { yield 1; yield 2; yield 3; }\n"
-          "print(std.iter.collect(std.iter.map(gen(), func(x) => x * 10)));\n"
+          "print(std.iter.collect(std.iter.map(gen(), func(x) -> x * 10)));\n"
           "let out = [];\n"
-          "for (let x in std.iter.filter(gen(), func(x) => x > 1)) {\n"
+          "for (let x in std.iter.filter(gen(), func(x) -> x > 1)) {\n"
           "  out = std.list.append(out, x);\n"
           "}\n"
           "print(out);\n",

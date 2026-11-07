@@ -1735,7 +1735,7 @@ shape.POINT_MAX;
 
 - 块内声明会 lowering 到 manifest，运行时走 `ffi.open`，不新增 FFI 语义；
 - `type` 支持 struct、别名、指针和定长数组；`callback` 声明回调签名；
-- 块内条目用 `;` 结束，返回类型箭头是 `=>`（与 `func` 一致）；
+- 块内条目用 `;` 结束，返回类型箭头是 `=>`；语言函数的表达式体使用 `->`；
 - 所有权注解：
   - `func make() => *Point owns "point_free";`：返回值由 C++ 自动释放；
   - `func destroy(p: *Point) consumes p;`：参数所有权转移给 C；
@@ -2162,12 +2162,12 @@ std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 ```text
 import std;
 
-let inc = func(x) => x + 1;
-let twice = func(x) => x * 2;
+let inc = func(x) -> x + 1;
+let twice = func(x) -> x * 2;
 
 std.fn.compose(inc, twice)(5)       // 11，先 twice 再 inc
 std.fn.pipe(inc, twice)(5)          // 12，先 inc 再 twice
-std.fn.partial(func(a, b) => a + b, 10)(5)   // 15
+std.fn.partial(func(a, b) -> a + b, 10)(5)   // 15
 std.fn.identity(7)                  // 7
 std.fn.always("ok")()               // "ok"
 ```
@@ -2181,15 +2181,15 @@ import std;
 
 std.iter.collect(
   std.iter.map(
-    std.iter.filter(range(0, 10), func(x) => x % 2 == 0),
-    func(x) => x * x))              // [0, 4, 16, 36, 64]
+    std.iter.filter(range(0, 10), func(x) -> x % 2 == 0),
+    func(x) -> x * x))              // [0, 4, 16, 36, 64]
 
 std.iter.collect(std.iter.take(range(0, 100), 3))  // [0, 1, 2]
 std.iter.collect(std.iter.drop([1, 2, 3, 4], 2))   // [3, 4]
 std.iter.collect(std.iter.enumerate(["a", "b"]))   // [[0, a], [1, b]]
 
 func gen() { yield 1; yield 2; yield 3; }
-std.iter.collect(std.iter.map(gen(), func(x) => x * 10))
+std.iter.collect(std.iter.map(gen(), func(x) -> x * 10))
                                                      // [10, 20, 30]
 ```
 
@@ -2871,7 +2871,7 @@ POSIX 使用 `:` 分隔环境变量路径，Windows 使用 `;`。
 ```text
 xs |> f              // f(xs)
 xs |> f(a)           // f(xs, a)
-range(0, 10) |> std.iter.filter(func(x) => x % 2 == 0) |> std.iter.collect()
+range(0, 10) |> std.iter.filter(func(x) -> x % 2 == 0) |> std.iter.collect()
 ```
 
 - `|>` 左结合，优先级高于算术和比较运算，低于一元运算和后缀调用；
@@ -3262,7 +3262,7 @@ func typed_add(a: int, b: int) {
   return a + b;
 }
 
-func double(x) => x * 2;
+func double(x) -> x * 2;
 
 func fib(n) {
   if (n < 2) { return n; }
@@ -3299,6 +3299,27 @@ apply(sqrt, 16)
 - 类型错误不会进入函数体；
 - 逻辑运算和比较运算都返回 `bool`。
 
+函数可以带返回类型标注：
+
+```text
+func numbers(): list[int] {
+  return [1, 2];
+}
+
+func numbers_fast(): list[int] -> [1, 2];
+
+let xs: list[int] = numbers();
+xs[0] = "a";   // 错误：expected int, got string
+```
+
+- 返回类型只用于静态检查，运行时不做转换；
+- 检查器检查每个 `return` 表达式；
+- `return;` 对非可空返回类型报错；
+- 返回类型会传播给调用方，减少 `any` warning；
+- 方法也支持返回类型标注；
+- 匿名函数和 lambda 暂不支持返回类型标注；
+- 函数/lambda 的表达式体统一使用 `->`；`=>` 只用于 match/switch arm 和 FFI 返回类型。
+
 参数可以使用默认值：
 
 ```text
@@ -3306,7 +3327,7 @@ func greet(name: string, greeting: string = "hello") {
   return greeting + ", " + name;
 }
 
-func offset(a: int, b: int = a + 1) => b;
+func offset(a: int, b: int = a + 1) -> b;
 
 greet("alice");          // "hello, alice"
 greet("alice", "hi");    // "hi, alice"
@@ -3340,7 +3361,7 @@ let zero = () -> 7;
 [1, 2, 3] |> std.list.map(x -> x * 2)
 ```
 
-`->` 的函数体只支持表达式；需要多语句或显式 `return` 时用 `func(x) => { ... }` 或 `func(x) { ... }`。
+`->` 的函数体只支持表达式；需要多语句或显式 `return` 时用 `func(x) { ... }`。
 
 匿名函数使用同一个 `func` 关键字，省略函数名：
 
@@ -3348,14 +3369,14 @@ let zero = () -> 7;
 let double = func(x) { return x * 2; };
 double(21)
 
-let inc = func(x) => x + 1;
+let inc = func(x) -> x + 1;
 inc(41)
 
 (func(x) { return x + 1; })(41)
-(func(x) => x + 1)(41)
+(func(x) -> x + 1)(41)
 ```
 
-单表达式可以用 `=>` 简写，表达式结果自动成为返回值。`=>` 优先级最低，因此 `func(x) => x * 2 + 1` 的函数体是 `x * 2 + 1`。
+单表达式可以用 `->` 简写，表达式结果自动成为返回值。`->` 优先级最低，因此 `func(x) -> x * 2 + 1` 的函数体是 `x * 2 + 1`。
 
 匿名函数同样可以捕获定义处的作用域，并作为参数或返回值：
 
@@ -3384,7 +3405,7 @@ fact(5)                 → 120
 - 没有名字，诊断和调用栈中显示为 `<anonymous>`；
 - 每次求值都会创建新的闭包；
 - `{ ... }` 函数体使用显式 `return`；
-- `=> exp` 函数体隐含 `return exp`；
+- `-> exp` 函数体隐含 `return exp`；
 - 支持空参数和空函数体；
 - 参数支持类型约束、默认值和可变参数，规则与命名函数一致；
 - 立即调用时建议给匿名函数加括号，例如 `(func(x) { ... })(1)`。

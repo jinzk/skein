@@ -31,6 +31,8 @@ struct function_code {
     std::string module;
     /* Source file that defined this function, used for import alias lookup. */
     std::string source;
+    /* Optional static return type annotation; shared by function values. */
+    std::shared_ptr<const struct type_constraint> ret_type;
     /* Captured binding names, resolved to symbol cells at closure creation. */
     std::vector<std::string> upvalues;
     /*

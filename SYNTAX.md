@@ -475,10 +475,10 @@ g()    // 10
 
 ```text
 let add = func(a, b) { return a + b; };
-let inc = func(x) => x + 1;
+let inc = func(x) -> x + 1;
 
 (func(x) { return x + 1; })(41)
-(func(x) => x + 1)(41)
+(func(x) -> x + 1)(41)
 ```
 
 也可以使用 `->` 简写，函数体是单个表达式：
@@ -508,14 +508,14 @@ func first([head, ...tail]) { return head; }
 
 匿名函数体使用 `list` 语法，支持多语句和显式 `return`。
 
-单表达式可以使用 `=>` 简写，表达式结果就是返回值：
+单表达式可以使用 `->` 简写，表达式结果就是返回值：
 
 ```text
-std.list.map([1, 2, 3], func(x) => x * 2)
-std.list.filter([1, 2, 3], func(x) => x % 2 == 1)
+std.list.map([1, 2, 3], func(x) -> x * 2)
+std.list.filter([1, 2, 3], func(x) -> x % 2 == 1)
 ```
 
-- `=>` 的优先级最低，`func(x) => x * 2 + 1` 的函数体是 `x * 2 + 1`；
+- `->` 的优先级最低，`func(x) -> x * 2 + 1` 的函数体是 `x * 2 + 1`；
 - 匿名表达式函数不需要分号；
 - 多语句仍然使用 `{ ... }` 和显式 `return`。
 
@@ -1325,7 +1325,7 @@ func hello() {
   print("hello");
 }
 
-func double(x) => x * 2;
+func double(x) -> x * 2;
 ```
 
 - 参数用逗号分隔；
@@ -1337,7 +1337,9 @@ func double(x) => x * 2;
 - 默认值每次调用重新求值；
 - 支持最后一个参数为可变参数；
 - 函数体使用 `{ list }`；
-- 单表达式可以写成 `=> exp`，隐含 `return`；
+- 单表达式可以写成 `-> exp`，隐含 `return`；
+- 函数可以带返回类型标注：`func f(...): T { ... }` 或 `func f(...): T -> exp;`；
+- 函数/lambda 的表达式体统一使用 `->`；`=>` 只用于 match/switch arm 和 FFI 返回类型；
 - 表达式函数需要以 `;` 结束；
 - 函数调用深度上限为 1000。
 
@@ -1365,7 +1367,7 @@ func greet(name: string, greeting: string = "hello") {
   return greeting + ", " + name;
 }
 
-func offset(a: int, b: int = a + 1) => b;
+func offset(a: int, b: int = a + 1) -> b;
 
 greet("alice");          // "hello, alice"
 greet("alice", "hi");    // "hi, alice"
@@ -1394,7 +1396,7 @@ bad()                    // parameter b is used before it is initialized
 ```text
 struct Box { v: int; }
 impl Box {
-  func add(self, x: int = self.v + 1) => self.v + x;
+  func add(self, x: int = self.v + 1) -> self.v + x;
 }
 
 Box { v: 10 }.add()      // 21
@@ -1405,15 +1407,47 @@ Box { v: 10 }.add()      // 21
 表达式函数同样支持类型约束和 `async`：
 
 ```text
-func typed_double(x: int) => x * 2;
-async func fetch_value(x) => await fetch(x);
+func typed_double(x: int) -> x * 2;
+async func fetch_value(x) -> await fetch(x);
+```
+
+返回类型标注：
+
+```text
+func numbers(): list[int] {
+  return [1, 2];
+}
+
+func numbers_fast(): list[int] -> [1, 2];
+
+func maybe(): int? {
+  return;
+}
+```
+
+- `: type` 是可选的静态返回类型；运行时不做转换或逐元素检查；
+- 检查器会检查每个 `return` 表达式；`return;` 对非可空返回类型报错；
+- 返回类型会传播到调用方，例如 `let xs: list[int] = numbers();` 后 `xs[0] = "a";` 会报错；
+- 表达式体函数把 `-> exp` 当作隐式 `return exp` 检查；
+- 方法也支持返回类型标注；
+- 匿名函数 / lambda 暂不支持返回类型标注；
+- 没有返回类型标注时，函数结果对检查器仍是 `any`。
+
+```text
+func numbers(): list[int] {
+  return [1, "a"];   // 错误：expected int, got string
+}
+
+func bad(): int {
+  return;            // 错误：expected int, got null
+}
 ```
 
 结构体 / impl 方法也支持表达式体：
 
 ```text
 struct Box { v: int; }
-impl Box { func twice(self) => self.v * 2; }
+impl Box { func twice(self) -> self.v * 2; }
 ```
 
 类型不匹配会报告运行时错误，例如：
@@ -1467,7 +1501,7 @@ sum(0, ...xs)    // 6
 let add = func(a, b) { return a + b; };
 ```
 
-匿名函数的参数同样支持类型约束、默认值和可变参数。默认值规则与命名函数一致，例如 `let inc = func(x = 0) => x + 1;`。
+匿名函数的参数同样支持类型约束、默认值和可变参数。默认值规则与命名函数一致，例如 `let inc = func(x = 0) -> x + 1;`。
 
 #### 5.11.1 命名函数装饰器
 
@@ -2126,13 +2160,13 @@ std.list.map([1, 2], func(x) { return x * 2; })
 std.list.filter([1, 2, 3], func(x) { return x % 2 == 1; })
 std.list.reduce([1, 2, 3], func(a, b) { return a + b; })
 
-std.fn.compose(func(x) => x + 1, func(x) => x * 2)(5)
-std.fn.pipe(func(x) => x + 1, func(x) => x * 2)(5)
-std.fn.partial(func(a, b) => a + b, 10)(5)
+std.fn.compose(func(x) -> x + 1, func(x) -> x * 2)(5)
+std.fn.pipe(func(x) -> x + 1, func(x) -> x * 2)(5)
+std.fn.partial(func(a, b) -> a + b, 10)(5)
 std.fn.always(7)()
 
-std.iter.collect(std.iter.map([1, 2, 3], func(x) => x * 2))
-std.iter.collect(std.iter.filter(range(0, 6), func(x) => x % 2 == 0))
+std.iter.collect(std.iter.map([1, 2, 3], func(x) -> x * 2))
+std.iter.collect(std.iter.filter(range(0, 6), func(x) -> x % 2 == 0))
 std.iter.collect(std.iter.take(range(0, 100), 3))
 std.iter.collect(std.iter.enumerate(["a", "b"]))
 

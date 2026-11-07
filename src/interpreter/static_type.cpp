@@ -50,7 +50,8 @@ std::unordered_map<std::string, std::unique_ptr<TypeNode>> &type_pool() {
 std::string node_key(enum type_constraint_kind kind, const std::string &name,
                      const std::string &module, bool nullable,
                      const std::vector<const TypeNode *> &args,
-                     int optional_params, bool variadic) {
+                     int optional_params, bool variadic,
+                     const TypeNode *rest) {
     std::string key;
     key.reserve(32);
     key += std::to_string(static_cast<int>(kind));
@@ -62,11 +63,18 @@ std::string node_key(enum type_constraint_kind kind, const std::string &name,
     key += '|';
     key += std::to_string(optional_params);
     key += variadic ? "|v1" : "|v0";
+    key += '|';
+    key += rest ? node_key(rest->kind, rest->name, rest->module,
+                           rest->nullable, rest->args,
+                           rest->optional_params, rest->variadic,
+                           rest->rest)
+                : std::string("-");
     for (const TypeNode *arg : args) {
         key += '|';
         key += arg ? node_key(arg->kind, arg->name, arg->module,
                               arg->nullable, arg->args,
-                              arg->optional_params, arg->variadic)
+                              arg->optional_params, arg->variadic,
+                              arg->rest)
                    : std::string("any");
     }
     return key;
@@ -83,7 +91,8 @@ std::string function_arg_display(const TypeNode *type) {
 std::string node_display(enum type_constraint_kind kind,
                          const std::string &name,
                          const std::vector<const TypeNode *> &args,
-                         bool nullable) {
+                         bool nullable, bool variadic,
+                         const TypeNode *rest) {
     std::string text;
     if (kind == TYPE_VAR) {
         text = name.empty() ? "T" : name;
@@ -91,14 +100,21 @@ std::string node_display(enum type_constraint_kind kind,
         text = name.empty() ? "invalid" : name;
     } else if ((kind == TYPE_CALLABLE || kind == TYPE_FUNCTION ||
                 kind == TYPE_BUILTIN) && !args.empty()) {
-        if (args.size() == 2 && args[0] &&
+        if (!variadic && args.size() == 2 && args[0] &&
             type_is_function_signature(args[0])) {
             text = function_arg_display(args[0]);
         } else {
             text = "(";
-            for (std::size_t i = 0; i + 1 < args.size(); ++i) {
+            std::size_t fixed = args.size() - 1;
+            for (std::size_t i = 0; i < fixed; ++i) {
                 if (i != 0) text += ", ";
                 text += function_arg_display(args[i]);
+            }
+            if (variadic) {
+                if (fixed != 0) text += ", ";
+                text += "...";
+                if (rest)
+                    text += function_arg_display(rest);
             }
             text += ")";
         }
@@ -128,9 +144,10 @@ const TypeNode *intern_type(enum type_constraint_kind kind,
                             const std::string &module, bool nullable,
                             const std::vector<const TypeNode *> &args,
                             int optional_params = 0,
-                            bool variadic = false) {
+                            bool variadic = false,
+                            const TypeNode *rest = nullptr) {
     std::string key = node_key(kind, name, module, nullable, args,
-                               optional_params, variadic);
+                               optional_params, variadic, rest);
     auto &pool = type_pool();
     auto it = pool.find(key);
     if (it != pool.end())
@@ -144,7 +161,8 @@ const TypeNode *intern_type(enum type_constraint_kind kind,
     node->args = args;
     node->optional_params = optional_params;
     node->variadic = variadic;
-    node->display = node_display(kind, name, args, nullable);
+    node->rest = rest;
+    node->display = node_display(kind, name, args, nullable, variadic, rest);
     const TypeNode *raw = node.get();
     pool.emplace(std::move(key), std::move(node));
     return raw;
@@ -182,16 +200,17 @@ const TypeNode *type_container(enum type_constraint_kind kind,
 const TypeNode *make_function_type(
     enum type_constraint_kind kind,
     const std::vector<const TypeNode *> &args, int optional_params,
-    bool variadic, bool nullable) {
+    bool variadic, bool nullable, const TypeNode *rest) {
     return intern_type(kind, std::string(), std::string(), nullable, args,
-                       optional_params, variadic);
+                       optional_params, variadic, rest);
 }
 
 const TypeNode *type_nullable(const TypeNode *type) {
     if (!type || type->nullable)
         return type ? type : type_any();
     return intern_type(type->kind, type->name, type->module, true,
-                       type->args, type->optional_params, type->variadic);
+                       type->args, type->optional_params, type->variadic,
+                       type->rest);
 }
 
 const TypeNode *type_from_constraint(const struct type_constraint *type) {
@@ -252,6 +271,12 @@ int type_function_optional_params(const TypeNode *type) {
 
 bool type_function_is_variadic(const TypeNode *type) {
     return type_is_function_signature(type) && type->variadic;
+}
+
+const TypeNode *type_function_rest(const TypeNode *type) {
+    if (!type_is_function_signature(type) || !type->variadic)
+        return type_any();
+    return type->rest ? type->rest : type_any();
 }
 
 const TypeNode *type_function_param(const TypeNode *type,

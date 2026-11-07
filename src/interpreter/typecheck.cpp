@@ -741,6 +741,8 @@ struct Checker : public BuiltinContext {
                     sig.variadic = type_function_is_variadic(callee_type);
                     sig.optional_params =
                         type_function_optional_params(callee_type);
+                    if (sig.variadic)
+                        sig.rest = type_function_rest(callee_type);
                     if (!check_call_args(sig, args, env, true))
                         return false;
                     result = sig.result ? sig.result : type_any();
@@ -1020,11 +1022,11 @@ struct Checker : public BuiltinContext {
     }
 
     const TypeNode *function_type_from_sig(const FunctionSig &sig) {
-        if (sig.variadic)
-            return type_builtin(TYPE_CALLABLE);
         std::vector<const TypeNode *> args = sig.params;
         args.push_back(sig.result ? sig.result : type_any());
-        return make_function_type(TYPE_FUNCTION, args, sig.optional_params);
+        return make_function_type(TYPE_FUNCTION, args, sig.optional_params,
+                                  sig.variadic, false,
+                                  sig.variadic ? sig.rest : nullptr);
     }
 
     const TypeNode *function_type_from_code(
@@ -1045,8 +1047,6 @@ struct Checker : public BuiltinContext {
         if (!def)
             return type_builtin(TYPE_FUNCTION);
         FunctionSig sig = signature_from_symlist(def->sl);
-        if (sig.variadic)
-            return type_builtin(TYPE_CALLABLE);
         if (def->is_async || def->is_generator) {
             sig.result = type_any();
             return function_type_from_sig(sig);
@@ -1060,6 +1060,13 @@ struct Checker : public BuiltinContext {
         std::size_t index = 0;
         for (struct symlist *item = def->sl; item; item = item->next) {
             const TypeNode *type = type_from_constraint(item->type);
+            if (item->variadic) {
+                if (type->kind == TYPE_ANY && use_expected &&
+                    type_function_is_variadic(expected))
+                    type = type_function_rest(expected);
+                sig.rest = type;
+                continue;
+            }
             if (type->kind == TYPE_ANY && use_expected)
                 type = type_function_param(expected, index);
             params.push_back(type);
@@ -1086,7 +1093,13 @@ struct Checker : public BuiltinContext {
         for (struct symlist *item = def->sl; item; item = item->next) {
             const char *name =
                 item->sym && item->sym->name ? item->sym->name : "";
-            local.define(name, params[index++]);
+            if (item->variadic) {
+                local.define(name, type_container(
+                                       TYPE_LIST,
+                                       {sig.rest ? sig.rest : type_any()}));
+            } else {
+                local.define(name, params[index++]);
+            }
         }
         sig.result = infer(return_expr, local);
         return function_type_from_sig(sig);

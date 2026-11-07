@@ -79,7 +79,7 @@ const TypeNode *strip_nullable(const TypeNode *type) {
     if (type_is_function_signature(type))
         return make_function_type(type->kind, type->args,
                                   type->optional_params, type->variadic,
-                                  false);
+                                  false, type->rest);
     return type_builtin(type->kind, false);
 }
 
@@ -114,26 +114,40 @@ MatchResult match_function_signature(const TypeNode *actual,
                                      const TypeNode *expected) {
     std::size_t actual_params = actual->args.size() - 1;
     std::size_t expected_params = expected->args.size() - 1;
-    if (expected_params > actual_params)
-        return MatchResult::Mismatch;
-    /*
-     * Optional trailing parameters are static-only metadata: a template can
-     * be assigned to a shorter function type when the extra parameters may
-     * be omitted.  Required parameter counts must still agree.
-     */
-    std::size_t optional =
-        static_cast<std::size_t>(type_function_optional_params(actual));
-    if (actual_params - expected_params > optional)
-        return MatchResult::Mismatch;
+    if (actual_params > expected_params) {
+        /*
+         * Optional trailing parameters are static-only metadata: a template
+         * can be assigned to a shorter function type when the extra
+         * parameters may be omitted.  Required parameter counts must still
+         * agree.
+         */
+        std::size_t optional =
+            static_cast<std::size_t>(type_function_optional_params(actual));
+        if (actual_params - expected_params > optional)
+            return MatchResult::Mismatch;
+    }
 
     MatchResult result = MatchResult::Ok;
-    for (std::size_t i = 0; i < expected_params; ++i) {
+    std::size_t common =
+        actual_params < expected_params ? actual_params : expected_params;
+    for (std::size_t i = 0; i < common; ++i) {
         /* Parameters are contravariant: every expected input must be
          * accepted by the actual function. */
         result = combine_result(
             result, match_type(expected->args[i], actual->args[i]));
         if (result == MatchResult::Mismatch)
             return result;
+    }
+    if (expected_params > actual_params) {
+        if (!actual->variadic)
+            return MatchResult::Mismatch;
+        const TypeNode *rest = type_function_rest(actual);
+        for (std::size_t i = actual_params; i < expected_params; ++i) {
+            result = combine_result(
+                result, match_type(expected->args[i], rest));
+            if (result == MatchResult::Mismatch)
+                return result;
+        }
     }
     result = combine_result(
         result, match_type(actual->args.back(), expected->args.back()));
@@ -533,12 +547,16 @@ const TypeNode *instantiate_type(const TypeNode *type,
         if (instantiated != arg)
             changed = true;
     }
+    const TypeNode *rest =
+        type->rest ? instantiate_type(type->rest, bindings) : nullptr;
+    if (rest != type->rest)
+        changed = true;
     if (!changed)
         return type;
     if (type->kind == TYPE_CALLABLE || type->kind == TYPE_FUNCTION ||
         type->kind == TYPE_BUILTIN) {
         return make_function_type(type->kind, args, type->optional_params,
-                                  type->variadic, type->nullable);
+                                  type->variadic, type->nullable, rest);
     }
     return type_container(type->kind, args, type->nullable);
 }
@@ -601,16 +619,35 @@ bool bind_type(const TypeNode *actual, const TypeNode *pattern,
                     return false;
             }
         } else {
-            if (actual_params > pattern_params)
-                return false;
-            std::size_t optional = static_cast<std::size_t>(
-                pattern->optional_params);
-            if (pattern_params - actual_params > optional)
-                return false;
-            for (std::size_t i = 0; i < actual_params; ++i) {
+            if (actual_params > pattern_params) {
+                std::size_t actual_optional =
+                    static_cast<std::size_t>(actual->optional_params);
+                if (actual_params - pattern_params > actual_optional)
+                    return false;
+            }
+            std::size_t common =
+                actual_params < pattern_params ? actual_params
+                                               : pattern_params;
+            for (std::size_t i = 0; i < common; ++i) {
                 if (!bind_type(actual->args[i], pattern->args[i],
                                bindings))
                     return false;
+            }
+            if (actual_params < pattern_params) {
+                std::size_t pattern_optional = static_cast<std::size_t>(
+                    pattern->optional_params);
+                if (actual->variadic) {
+                    const TypeNode *rest = type_function_rest(actual);
+                    for (std::size_t i = actual_params;
+                         i < pattern_params; ++i) {
+                        if (!bind_type(rest, pattern->args[i],
+                                       bindings))
+                            return false;
+                    }
+                } else if (pattern_params - actual_params >
+                           pattern_optional) {
+                    return false;
+                }
             }
         }
         return bind_type(actual->args.back(), pattern->args.back(),

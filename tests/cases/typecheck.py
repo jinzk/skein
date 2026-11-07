@@ -587,6 +587,33 @@ def run_cases():
           "println(g(3));\n",
           stdout="4", not_stderr="type warning")
 
+    check("default parameter as callback",
+          "func add(a: int, b: int = 1): int { return a + b; }\n"
+          "func apply(f: (int) -> int): int { return f(3); }\n"
+          "println(apply(add));\n",
+          stdout="4", not_stderr="type warning")
+
+    check("variadic function as callback",
+          "func count(...xs: int): int { return len(xs); }\n"
+          "func apply(f: (int, int) -> int): int { return f(1, 2); }\n"
+          "println(apply(count));\n",
+          stdout="2", not_stderr="type warning")
+
+    check("variadic callback rest type",
+          "func count(...xs: int): int { return len(xs); }\n"
+          "func apply(f: (string) -> int): int { return f(\"x\"); }\n"
+          "apply(count);\n",
+          stderr="type error: expected (string) -> int, "
+                 "got (...int) -> int")
+
+    check("variadic function value rest check",
+          "func count(...xs: int): int { return len(xs); }\n"
+          "let f = count;\n"
+          "let g: (int, int) -> int = f;\n"
+          "println(g(1, 2));\n"
+          'f(1, "a");\n',
+          stdout="2", stderr="type error: expected int, got string")
+
     check("iter callback checks",
           "import std;\n"
           "std.iter.filter([1], func(x: int): int -> x);\n",

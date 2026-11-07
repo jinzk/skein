@@ -3024,6 +3024,9 @@ struct Handler {
 - 静态检查会校验函数赋值、参数/返回类型，以及通过函数类型发起的调用；
 - 参数按逆变、返回值按协变比较；`any` 仍然作为渐进边界；
 - 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名；可变参数 builtin 仍退化为 `callable`，部分带可选参数的容器 builtin 保留末尾可选参数信息；
+- 不提供 `(int, int = 1) -> int` 或 `(...int) -> int` 显式语法；
+- 默认参数函数可以作为参数传递，并可赋给更短的兼容函数类型；
+- 变参函数保留 rest 类型，可以赋给能接受相应参数的函数类型；例如 `(...int) -> int` 可赋给 `(int, int) -> int`；
 - 静态检查会拒绝多传参数；少传参数仍交给默认值或运行时处理；
 - `obj.method` 会生成去掉 `self` 的函数类型；
 - `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；

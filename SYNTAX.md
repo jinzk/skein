@@ -929,6 +929,22 @@ struct Handler {
   ```
 
   少传参数仍交给默认值或运行时处理；
+- 不为函数类型提供显式默认参数或 rest 参数语法，`(int, int = 1) -> int`、`(...int) -> int` 均不可写；
+- 默认参数函数和变参函数仍然可以作为参数传递：
+
+  ```text
+  func add(a: int, b: int = 1): int { return a + b; }
+  func apply(f: (int) -> int): int { return f(3); }
+  apply(add);       // OK
+
+  func count(...xs: int): int { return len(xs); }
+  func pair(f: (int, int) -> int): int { return f(1, 2); }
+  pair(count);      // OK，rest 类型是 int
+  ```
+
+  - 默认参数函数可以赋给更短的兼容函数类型；
+  - 变参函数值显示为 `(...int) -> int`，rest 类型会在通过函数值调用时检查；
+  - 不匹配的 rest 类型仍会报错，例如 `(...int) -> int` 不能赋给 `(string) -> int`；
 - `obj.method` 会生成去掉 `self` 的函数类型；
 - `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 会推导两段函数组合的类型，并允许继续传入更多函数；

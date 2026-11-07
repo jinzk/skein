@@ -22,10 +22,12 @@ struct TypeNode {
     std::string module;
     bool nullable;
     std::vector<const TypeNode *> args;
-    /* Function types only: trailing parameters that may be omitted and a
-     * variadic call shape.  They are static-only and never affect runtime. */
+    /* Function types only: trailing parameters that may be omitted, a
+     * variadic call shape, and the accepted type of extra arguments.  They
+     * are static-only and never affect runtime. */
     int optional_params = 0;
     bool variadic = false;
+    const TypeNode *rest = nullptr;
     std::string display;
 };
 
@@ -42,7 +44,8 @@ const TypeNode *type_container(enum type_constraint_kind kind,
 const TypeNode *make_function_type(
     enum type_constraint_kind kind,
     const std::vector<const TypeNode *> &args, int optional_params = 0,
-    bool variadic = false, bool nullable = false);
+    bool variadic = false, bool nullable = false,
+    const TypeNode *rest = nullptr);
 const TypeNode *type_nullable(const TypeNode *type);
 
 bool type_is_any(const TypeNode *type);
@@ -51,6 +54,7 @@ bool type_is_function_signature(const TypeNode *type);
 int type_function_param_count(const TypeNode *type);
 int type_function_optional_params(const TypeNode *type);
 bool type_function_is_variadic(const TypeNode *type);
+const TypeNode *type_function_rest(const TypeNode *type);
 const TypeNode *type_function_param(const TypeNode *type,
                                      std::size_t index);
 const TypeNode *type_function_result(const TypeNode *type);

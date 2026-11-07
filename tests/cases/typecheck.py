@@ -777,6 +777,26 @@ def run_cases():
           "let g: generator[int] = parts();\n",
           stderr="type error: expected generator[int], got generator[string]")
 
+    check("async builtin task types",
+          "import std;\n"
+          "func check() {\n"
+          "  let t = std.http.get_async(\"http://x\");\n"
+          "  let d: dict[string, any] = await t;\n"
+          "  let c = std.net.tcp_connect_async(\"127.0.0.1\", 1);\n"
+          "  let sock: userdata = await c;\n"
+          "  let u = std.net.recv_async(sock, 10);\n"
+          "  let b: bytes = await u;\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("async builtin task mismatch",
+          "import std;\n"
+          "func check() {\n"
+          "  let t: task[int] = std.http.get_async(\"http://x\");\n"
+          "}\n",
+          stderr="type error: expected task[int], "
+                 "got task[dict[string, any]]")
+
     check("local variable shadows function name",
           "import std;\n"
           "func path(g, from, to) { return 1; }\n"

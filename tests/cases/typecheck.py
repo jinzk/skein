@@ -508,6 +508,76 @@ def run_cases():
           "std.list.map(xs, func(x: string): int -> 1);\n",
           stderr="type error: expected (int) -> any, got (string) -> int")
 
+    check("polymorphic builtin value append",
+          "import std;\n"
+          "let f = std.list.append;\n"
+          "let ys: list[int] = f([1], 2);\n"
+          "println(ys);\n",
+          stdout="[1, 2]", not_stderr="type warning")
+
+    check("polymorphic builtin value element mismatch",
+          "import std;\n"
+          "let f = std.list.append;\n"
+          'f([1], "a");\n',
+          stderr="type error: expected int, got string")
+
+    check("polymorphic builtin value assignment",
+          "import std;\n"
+          "let f: (list[int], int) -> list[int] = std.list.append;\n"
+          "let ys: list[int] = f([2], 3);\n"
+          "println(ys);\n",
+          stdout="[2, 3]", not_stderr="type warning")
+
+    check("polymorphic builtin value bad signature",
+          "import std;\n"
+          "let f: (list[int], int) -> list[string] = std.list.append;\n",
+          stderr="expected (list[int], int) -> list[string], "
+                 "got (list[int], int) -> list[int]")
+
+    check("polymorphic map value",
+          "import std;\n"
+          "let f = std.list.map;\n"
+          "let ys: list[int] = f([1, 2], x -> x * 2);\n"
+          "println(ys);\n",
+          stdout="[2, 4]", not_stderr="type warning")
+
+    check("polymorphic map callback mismatch",
+          "import std;\n"
+          "let f = std.list.map;\n"
+          "f([1], func(x: string): int -> 1);\n",
+          stderr="type error: expected (int) -> any, got (string) -> int")
+
+    check("polymorphic dict keys value",
+          "import std;\n"
+          "let f = std.dict.keys;\n"
+          'let ks: list[string] = f({"a": 1});\n'
+          "println(ks);\n",
+          stdout="[a]", not_stderr="type warning")
+
+    check("polymorphic set from_list value",
+          "import std;\n"
+          "let f = std.set.from_list;\n"
+          "let s: set[int] = f([1, 2]);\n"
+          "println(std.set.values(s));\n",
+          stdout="[1, 2]", not_stderr="type warning")
+
+    check("local variable shadows function name",
+          "import std;\n"
+          "func path(g, from, to) { return 1; }\n"
+          "func walk(from: int, to: int) {\n"
+          "  let path = [to];\n"
+          "  let i = 0;\n"
+          "  while (i < 1) {\n"
+          "    path = path + [from];\n"
+          "    i = i + 1;\n"
+          "  }\n"
+          "  let out: list[int] = std.list.append(\n"
+          "    path as list[int], to);\n"
+          "  return out;\n"
+          "}\n"
+          "println(walk(1, 2));\n",
+          stdout="[2, 1, 2]")
+
     check("map infers expression lambda result",
           "import std;\n"
           "let xs: list[int] = [1];\n"

@@ -4,6 +4,7 @@
 #include "static_type.h"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct ast;
@@ -49,6 +50,19 @@ struct ast *find_single_return(struct ast *node, int &count);
 bool lookup_named_type(const TypeNode *type,
                        struct structtype_lookup_result &out);
 MatchResult match_type(const TypeNode *actual, const TypeNode *expected);
+
+/*
+ * Builtin polymorphic values use static-only type variables (for example
+ * list.append has type (list[T], T) -> list[T]).  bind_type unifies an
+ * inferred concrete type with a template, and instantiate_type replaces
+ * variables with the bound types.
+ */
+using TypeBindings = std::unordered_map<std::string, const TypeNode *>;
+bool type_contains_vars(const TypeNode *type);
+bool bind_type(const TypeNode *actual, const TypeNode *pattern,
+               TypeBindings &bindings);
+const TypeNode *instantiate_type(const TypeNode *type,
+                                 const TypeBindings &bindings);
 
 } // namespace detail
 } // namespace typecheck

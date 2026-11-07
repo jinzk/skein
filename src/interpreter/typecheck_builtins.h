@@ -37,6 +37,13 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
  * builtin is variadic/optional and has no precise first-class type yet. */
 const TypeNode *builtin_function_type(int functype);
 
+/*
+ * Polymorphic first-class signature for a container builtin path such as
+ * "std.list.append".  Returns NULL when the path is not a known container
+ * builtin.
+ */
+const TypeNode *builtin_polymorphic_type(const std::string &canonical_path);
+
 } // namespace detail
 } // namespace typecheck
 } // namespace skein

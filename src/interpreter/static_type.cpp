@@ -36,6 +36,7 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_RESULT: return "result";
         case TYPE_ERROR: return "error";
         case TYPE_NAMED: return "invalid";
+        case TYPE_VAR: return "T";
         case TYPE_INVALID:
         default: return "invalid";
     }
@@ -79,7 +80,9 @@ std::string node_display(enum type_constraint_kind kind,
                          const std::vector<const TypeNode *> &args,
                          bool nullable) {
     std::string text;
-    if (kind == TYPE_NAMED) {
+    if (kind == TYPE_VAR) {
+        text = name.empty() ? "T" : name;
+    } else if (kind == TYPE_NAMED) {
         text = name.empty() ? "invalid" : name;
     } else if ((kind == TYPE_CALLABLE || kind == TYPE_FUNCTION ||
                 kind == TYPE_BUILTIN) && !args.empty()) {
@@ -152,6 +155,11 @@ const TypeNode *type_named(const char *module, const char *name,
                            bool nullable) {
     return intern_type(TYPE_NAMED, name ? name : "",
                        module ? module : "", nullable,
+                       std::vector<const TypeNode *>());
+}
+
+const TypeNode *type_variable(const char *name) {
+    return intern_type(TYPE_VAR, name ? name : "", std::string(), false,
                        std::vector<const TypeNode *>());
 }
 

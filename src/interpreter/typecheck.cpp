@@ -93,6 +93,15 @@ struct Checker : public BuiltinContext {
 
         std::string actual_text = type_display(actual);
         std::string expected_text = type_display(expected);
+        if (type_contains_vars(actual) && expected &&
+            !type_contains_vars(expected)) {
+            TypeBindings bindings;
+            bind_type(expected, actual, bindings);
+            const TypeNode *instantiated =
+                instantiate_type(actual, bindings);
+            if (instantiated != actual)
+                actual_text = type_display(instantiated);
+        }
         char message[512];
         if (result == MatchResult::Mismatch) {
             std::snprintf(message, sizeof(message),
@@ -506,6 +515,74 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool check_polymorphic_call(const TypeNode *callee_type,
+                                const std::vector<struct ast *> &args,
+                                Env &env, const TypeNode *&result) {
+        TypeBindings bindings;
+        int count = type_function_param_count(callee_type);
+        bool has_spread = false;
+        for (struct ast *arg : args) {
+            if (arg && arg->nodetype == 'x') {
+                has_spread = true;
+                break;
+            }
+        }
+        if (has_spread) {
+            for (struct ast *arg : args)
+                infer(arg, env);
+            result = instantiate_type(type_function_result(callee_type),
+                                      bindings);
+            return true;
+        }
+
+        std::vector<const TypeNode *> actual_types(args.size(), NULL);
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            struct ast *arg = args[i];
+            const TypeNode *pattern =
+                i < static_cast<std::size_t>(count)
+                    ? type_function_param(callee_type, i)
+                    : NULL;
+            if (arg->nodetype == 'Z' && pattern &&
+                type_is_function_signature(pattern)) {
+                const TypeNode *expected_pattern =
+                    instantiate_type(pattern, bindings);
+                struct funcdef *def = (struct funcdef *)arg;
+                check_funcdef(def, env);
+                actual_types[i] = function_type_from_def(
+                    def, env, expected_pattern);
+            } else {
+                actual_types[i] = infer(arg, env);
+            }
+            if (pattern &&
+                !bind_type(actual_types[i], pattern, bindings)) {
+                const TypeNode *expected_pattern =
+                    instantiate_type(pattern, bindings);
+                char message[512];
+                std::snprintf(message, sizeof(message),
+                              "expected %s, got %s",
+                              type_display(expected_pattern),
+                              type_display(actual_types[i]));
+                report_error(arg->line, arg->column, message);
+                return false;
+            }
+        }
+
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            const TypeNode *pattern =
+                i < static_cast<std::size_t>(count)
+                    ? type_function_param(callee_type, i)
+                    : NULL;
+            const TypeNode *expected_pattern =
+                pattern ? instantiate_type(pattern, bindings) : type_any();
+            if (!check_expr(args[i], expected_pattern, env, false,
+                            needs_static_check(expected_pattern)))
+                return false;
+        }
+        result = instantiate_type(type_function_result(callee_type),
+                                  bindings);
+        return true;
+    }
+
     bool check_call(struct ast *expr, const TypeNode *expected, Env &env,
                     const TypeNode *&result) {
         struct ufncall *call = (struct ufncall *)expr;
@@ -522,36 +599,53 @@ struct Checker : public BuiltinContext {
          * values, so try the builtin table before using a function value's
          * own signature.
          */
-        if (has_path) {
-            bool allow_check =
-                needs_static_check(expected) ||
-                (!args.empty() &&
-                 expr_has_declared_container(args[0], env));
-            if (allow_check) {
-                std::string canonical =
-                    canonical_builtin_path(path, source);
-                const TypeNode *builtin_result = type_any();
-                if (check_builtin(*this, canonical, args, expected, env,
-                                  builtin_result)) {
-                    result = builtin_result;
-                    return true;
-                }
+        bool allow_builtin_check =
+            has_path &&
+            (needs_static_check(expected) ||
+             (!args.empty() &&
+              expr_has_declared_container(args[0], env)));
+        if (allow_builtin_check) {
+            std::string canonical =
+                canonical_builtin_path(path, source);
+            const TypeNode *builtin_result = type_any();
+            if (check_builtin(*this, canonical, args, expected, env,
+                              builtin_result)) {
+                result = builtin_result;
+                return true;
             }
         }
 
         if (call->callee) {
             const TypeNode *callee_type = infer(call->callee, env);
             if (type_is_function_signature(callee_type)) {
-                FunctionSig sig;
-                int count = type_function_param_count(callee_type);
-                for (int i = 0; i < count; ++i)
-                    sig.params.push_back(
-                        type_function_param(callee_type, (std::size_t)i));
-                sig.result = type_function_result(callee_type);
-                if (!check_call_args(sig, args, env, true))
-                    return false;
-                result = sig.result ? sig.result : type_any();
-                return true;
+                if (type_contains_vars(callee_type)) {
+                    /*
+                     * For a direct std.list/std.dict/... call without enough
+                     * annotation context, keep the historical behaviour:
+                     * defer invalid base types to the runtime builtin.
+                     */
+                    bool direct_builtin_path =
+                        has_path &&
+                        path.find('.') != std::string::npos;
+                    if (!direct_builtin_path || allow_builtin_check) {
+                        if (!check_polymorphic_call(callee_type, args, env,
+                                                    result))
+                            return false;
+                        return true;
+                    }
+                } else {
+                    FunctionSig sig;
+                    int count = type_function_param_count(callee_type);
+                    for (int i = 0; i < count; ++i)
+                        sig.params.push_back(
+                            type_function_param(callee_type,
+                                                (std::size_t)i));
+                    sig.result = type_function_result(callee_type);
+                    if (!check_call_args(sig, args, env, true))
+                        return false;
+                    result = sig.result ? sig.result : type_any();
+                    return true;
+                }
             }
         }
 
@@ -1589,6 +1683,10 @@ struct Checker : public BuiltinContext {
             case 'N': {
                 const char *name = ((struct symref *)expr)->name;
                 std::string key = name ? name : "";
+                /* A scoped variable shadows any same-named function, even
+                 * when its inferred type has degraded to any. */
+                if (const VarInfo *scoped = env.lookup(key))
+                    return scoped->type ? scoped->type : type_any();
                 VarInfo info = lookup_var(key, env);
                 if (info.type &&
                     (info.type->kind != TYPE_ANY || info.fixed))
@@ -1651,14 +1749,22 @@ struct Checker : public BuiltinContext {
             }
             case 'j': {
                 const TypeNode *base = infer(expr->l, env);
+                std::string path;
+                bool has_path = flatten_path(expr, path);
+                if (base->kind == TYPE_ANY && has_path) {
+                    const TypeNode *polymorphic =
+                        builtin_polymorphic_type(
+                            canonical_builtin_path(path, source));
+                    if (polymorphic)
+                        return polymorphic;
+                }
                 if (base->kind == TYPE_ANY) {
-                    std::string path;
                     const TypeNode *exported = NULL;
                     struct value_t *value = NULL;
-                    if (flatten_path(expr, path) &&
+                    if (has_path &&
                         resolve_namespace_type(path, exported))
                         return exported;
-                    if (flatten_path(expr, path) &&
+                    if (has_path &&
                         resolve_namespace_value(path, value)) {
                         if (value->type == T_func) {
                             struct func_value_t *fn =

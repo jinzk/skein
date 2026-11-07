@@ -517,7 +517,164 @@ const TypeNode *boolean() { return type_builtin(TYPE_BOOL); }
 const TypeNode *text() { return type_builtin(TYPE_STRING); }
 const TypeNode *any_type() { return type_any(); }
 
+const TypeNode *poly_var(const char *name) { return type_variable(name); }
+
+const TypeNode *poly_list(const TypeNode *element) {
+    return type_container(TYPE_LIST, {element});
+}
+
+const TypeNode *poly_dict(const TypeNode *key, const TypeNode *value) {
+    return type_container(TYPE_DICT, {key, value});
+}
+
+const TypeNode *poly_set(const TypeNode *element) {
+    return type_container(TYPE_SET, {element});
+}
+
+const TypeNode *poly_deque(const TypeNode *element) {
+    return type_container(TYPE_DEQUE, {element});
+}
+
+const TypeNode *poly_heap(const TypeNode *element) {
+    return type_container(TYPE_HEAP, {element});
+}
+
+const TypeNode *poly_builtin(
+    std::initializer_list<const TypeNode *> params,
+    const TypeNode *result) {
+    std::vector<const TypeNode *> args(params);
+    args.push_back(result);
+    return type_container(TYPE_BUILTIN, args);
+}
+
+const TypeNode *poly_callback(
+    std::initializer_list<const TypeNode *> params,
+    const TypeNode *result) {
+    std::vector<const TypeNode *> args(params);
+    args.push_back(result);
+    return type_container(TYPE_CALLABLE, args);
+}
+
 } // namespace
+
+const TypeNode *builtin_polymorphic_type(const std::string &path) {
+    const TypeNode *T = poly_var("T");
+    const TypeNode *U = poly_var("U");
+    const TypeNode *K = poly_var("K");
+    const TypeNode *V = poly_var("V");
+    const TypeNode *A = poly_var("A");
+
+    const TypeNode *list_t = poly_list(T);
+    const TypeNode *dict_kv = poly_dict(K, V);
+    const TypeNode *set_t = poly_set(T);
+    const TypeNode *deque_t = poly_deque(T);
+    const TypeNode *heap_t = poly_heap(T);
+    const TypeNode *integer_type = integer();
+    const TypeNode *bool_type = boolean();
+
+    if (path == "std.list.len")
+        return poly_builtin({list_t}, integer_type);
+    if (path == "std.list.slice")
+        return poly_builtin({list_t, integer_type, integer_type}, list_t);
+    if (path == "std.list.contains")
+        return poly_builtin({list_t, T}, bool_type);
+    if (path == "std.list.index")
+        return poly_builtin({list_t, T}, integer_type);
+    if (path == "std.list.reverse")
+        return poly_builtin({list_t}, list_t);
+    if (path == "std.list.sort" || path == "std.list.sort_desc" ||
+        path == "std.list.unique")
+        return poly_builtin({list_t}, list_t);
+    if (path == "std.list.is_sorted")
+        return poly_builtin({list_t}, bool_type);
+    if (path == "std.list.append")
+        return poly_builtin({list_t, T}, list_t);
+    if (path == "std.list.top_k")
+        return poly_builtin({list_t, integer_type}, list_t);
+    if (path == "std.list.map")
+        return poly_builtin({list_t, poly_callback({T}, U)},
+                            poly_list(U));
+    if (path == "std.list.filter")
+        return poly_builtin({list_t, poly_callback({T}, bool_type)},
+                            list_t);
+    if (path == "std.list.reduce")
+        return poly_builtin(
+            {list_t, poly_callback({A, T}, A), A}, A);
+    if (path == "std.list.sort_by" || path == "std.list.unique_by")
+        return poly_builtin({list_t, poly_callback({T}, U)}, list_t);
+    if (path == "std.list.group_by")
+        return poly_builtin({list_t, poly_callback({T}, K)},
+                            poly_dict(K, list_t));
+    if (path == "std.list.chunk" || path == "std.list.window")
+        return poly_builtin({list_t, integer_type},
+                            poly_list(poly_list(T)));
+    if (path == "std.list.zip")
+        return poly_builtin(
+            {list_t, poly_list(U)},
+            poly_list(poly_list(any_type())));
+    if (path == "std.list.binary_search")
+        return poly_builtin(
+            {list_t, T}, poly_dict(text(), any_type()));
+
+    if (path == "std.dict.len")
+        return poly_builtin({dict_kv}, integer_type);
+    if (path == "std.dict.has")
+        return poly_builtin({dict_kv, K}, bool_type);
+    if (path == "std.dict.keys")
+        return poly_builtin({dict_kv}, poly_list(K));
+    if (path == "std.dict.values")
+        return poly_builtin({dict_kv}, poly_list(V));
+    if (path == "std.dict.items")
+        return poly_builtin({dict_kv},
+                            poly_list(poly_list(any_type())));
+    if (path == "std.dict.delete")
+        return poly_builtin({dict_kv, K}, dict_kv);
+    if (path == "std.dict.merge")
+        return poly_builtin({dict_kv, dict_kv}, dict_kv);
+
+    if (path == "std.set.from_list")
+        return poly_builtin({list_t}, set_t);
+    if (path == "std.set.add" || path == "std.set.remove")
+        return poly_builtin({set_t, T}, set_t);
+    if (path == "std.set.has")
+        return poly_builtin({set_t, T}, bool_type);
+    if (path == "std.set.size")
+        return poly_builtin({set_t}, integer_type);
+    if (path == "std.set.values")
+        return poly_builtin({set_t}, poly_list(T));
+    if (path == "std.set.union" || path == "std.set.intersect" ||
+        path == "std.set.difference")
+        return poly_builtin({set_t, set_t}, set_t);
+    if (path == "std.set.is_subset")
+        return poly_builtin({set_t, set_t}, bool_type);
+
+    if (path == "std.deque.from_list")
+        return poly_builtin({list_t}, deque_t);
+    if (path == "std.deque.size")
+        return poly_builtin({deque_t}, integer_type);
+    if (path == "std.deque.push_front" || path == "std.deque.push_back")
+        return poly_builtin({deque_t, T}, deque_t);
+    if (path == "std.deque.peek_front" ||
+        path == "std.deque.peek_back" ||
+        path == "std.deque.pop_front" ||
+        path == "std.deque.pop_back")
+        return poly_builtin({deque_t}, type_nullable(T));
+    if (path == "std.deque.to_list")
+        return poly_builtin({deque_t}, poly_list(T));
+
+    if (path == "std.heap.from_list")
+        return poly_builtin({list_t}, heap_t);
+    if (path == "std.heap.size")
+        return poly_builtin({heap_t}, integer_type);
+    if (path == "std.heap.push")
+        return poly_builtin({heap_t, T}, heap_t);
+    if (path == "std.heap.peek" || path == "std.heap.pop")
+        return poly_builtin({heap_t}, type_nullable(T));
+    if (path == "std.heap.to_list")
+        return poly_builtin({heap_t}, poly_list(T));
+
+    return NULL;
+}
 
 const TypeNode *builtin_function_type(int functype) {
     switch (functype) {

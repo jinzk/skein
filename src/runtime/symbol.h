@@ -27,7 +27,9 @@ enum type_constraint_kind {
     TYPE_RESULT,
     TYPE_ERROR,
     TYPE_NAMED,
-    TYPE_INVALID
+    TYPE_INVALID,
+    /* Static-only type variable used by builtin polymorphic signatures. */
+    TYPE_VAR
 };
 
 struct type_constraint {

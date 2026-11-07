@@ -239,6 +239,8 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_error;
         case TYPE_NAMED:
             return named_type_matches(type->module, type->name, value);
+        case TYPE_VAR:
+            return false;
         case TYPE_INVALID:
         default:
             return false;
@@ -259,6 +261,8 @@ bool type_constraint_equal(const struct type_constraint *a,
         return structtype_named_types_equal(a->module, a->name, b->module,
                                             b->name);
     }
+    if (a->kind == TYPE_VAR)
+        return a->name && b->name && std::strcmp(a->name, b->name) == 0;
     return true;
 }
 
@@ -292,6 +296,9 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_ERROR: base = "error"; break;
         case TYPE_NAMED:
             base = type->name ? type->name : "invalid";
+            break;
+        case TYPE_VAR:
+            base = type->name ? type->name : "T";
             break;
         case TYPE_INVALID:
         default:

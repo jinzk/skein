@@ -74,6 +74,8 @@ const TypeNode *strip_nullable(const TypeNode *type) {
         return type_container(type->kind, type->args, false);
     if (type->kind == TYPE_NAMED)
         return type_named(type->module.c_str(), type->name.c_str(), false);
+    if (type->kind == TYPE_VAR)
+        return type_variable(type->name.c_str());
     return type_builtin(type->kind, false);
 }
 
@@ -352,6 +354,27 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
     if (actual->kind == TYPE_ANY || actual->kind == TYPE_INVALID)
         return MatchResult::Unknown;
 
+    if (type_contains_vars(expected) || type_contains_vars(actual)) {
+        if (type_contains_vars(expected) && type_contains_vars(actual))
+            return MatchResult::Unknown;
+        TypeBindings bindings;
+        if (type_contains_vars(expected)) {
+            if (!bind_type(actual, expected, bindings))
+                return MatchResult::Mismatch;
+            const TypeNode *instantiated =
+                instantiate_type(expected, bindings);
+            if (instantiated != expected)
+                return match_type(actual, instantiated);
+            return MatchResult::Ok;
+        }
+        if (!bind_type(expected, actual, bindings))
+            return MatchResult::Mismatch;
+        const TypeNode *instantiated = instantiate_type(actual, bindings);
+        if (instantiated != actual)
+            return match_type(instantiated, expected);
+        return MatchResult::Unknown;
+    }
+
     if (expected->nullable) {
         if (actual->kind == TYPE_NULL)
             return MatchResult::Ok;
@@ -457,6 +480,120 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
     }
 
     return MatchResult::Ok;
+}
+
+bool type_contains_vars(const TypeNode *type) {
+    if (!type)
+        return false;
+    if (type->kind == TYPE_VAR)
+        return true;
+    for (const TypeNode *arg : type->args) {
+        if (type_contains_vars(arg))
+            return true;
+    }
+    return false;
+}
+
+const TypeNode *instantiate_type(const TypeNode *type,
+                                 const TypeBindings &bindings) {
+    if (!type)
+        return type_any();
+    if (type->kind == TYPE_VAR) {
+        auto it = bindings.find(type->name);
+        const TypeNode *bound =
+            it == bindings.end() || !it->second ? type_any() : it->second;
+        if (type->nullable && !bound->nullable)
+            return type_nullable(bound);
+        return bound;
+    }
+    if (type->args.empty())
+        return type;
+
+    std::vector<const TypeNode *> args;
+    args.reserve(type->args.size());
+    bool changed = false;
+    for (const TypeNode *arg : type->args) {
+        const TypeNode *instantiated = instantiate_type(arg, bindings);
+        args.push_back(instantiated);
+        if (instantiated != arg)
+            changed = true;
+    }
+    if (!changed)
+        return type;
+    return type_container(type->kind, args, type->nullable);
+}
+
+bool bind_type(const TypeNode *actual, const TypeNode *pattern,
+               TypeBindings &bindings) {
+    if (!pattern)
+        return true;
+    if (!actual)
+        actual = type_any();
+
+    if (pattern->kind == TYPE_VAR) {
+        if (pattern->name.empty())
+            return true;
+        auto it = bindings.find(pattern->name);
+        if (it == bindings.end()) {
+            bindings[pattern->name] = actual;
+            return true;
+        }
+        const TypeNode *bound = it->second;
+        if (type_is_any(bound)) {
+            if (!type_is_any(actual))
+                bindings[pattern->name] = actual;
+            return true;
+        }
+        if (type_is_any(actual))
+            return true;
+        return match_type(actual, bound) != MatchResult::Mismatch;
+    }
+
+    if (pattern->kind == TYPE_ANY || actual->kind == TYPE_ANY)
+        return true;
+
+    if (pattern->nullable) {
+        if (actual->kind == TYPE_NULL)
+            return true;
+        const TypeNode *a = actual->nullable ? strip_nullable(actual) : actual;
+        return bind_type(a, strip_nullable(pattern), bindings);
+    }
+    if (actual->nullable || actual->kind == TYPE_NULL)
+        return false;
+
+    if (type_is_function_signature(pattern)) {
+        if (!type_is_function_signature(actual)) {
+            if (actual->kind == TYPE_FUNCTION ||
+                actual->kind == TYPE_BUILTIN ||
+                actual->kind == TYPE_CALLABLE)
+                return true;
+            return false;
+        }
+        if (actual->args.size() != pattern->args.size())
+            return false;
+        for (std::size_t i = 0; i < pattern->args.size(); ++i) {
+            if (!bind_type(actual->args[i], pattern->args[i], bindings))
+                return false;
+        }
+        return true;
+    }
+
+    int arity = type_container_arity(pattern->kind);
+    if (arity > 0) {
+        if (actual->kind != pattern->kind)
+            return false;
+        if (pattern->args.empty() || actual->args.empty())
+            return true;
+        if (actual->args.size() != pattern->args.size())
+            return false;
+        for (std::size_t i = 0; i < pattern->args.size(); ++i) {
+            if (!bind_type(actual->args[i], pattern->args[i], bindings))
+                return false;
+        }
+        return true;
+    }
+
+    return match_type(actual, pattern) != MatchResult::Mismatch;
 }
 
 } // namespace detail

@@ -551,6 +551,29 @@ struct Checker : public BuiltinContext {
                                       bindings);
             return true;
         }
+        const TypeNode *compose_type =
+            builtin_polymorphic_type("std.fn.compose");
+        const TypeNode *pipe_type =
+            builtin_polymorphic_type("std.fn.pipe");
+        const char *binary_name = callee_type == compose_type
+                                      ? "std.fn.compose"
+                                      : (callee_type == pipe_type
+                                             ? "std.fn.pipe"
+                                             : nullptr);
+        if (binary_name && args.size() != 2) {
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "%s expects exactly 2 argument(s), got %zu",
+                          binary_name, args.size());
+            int line = args.size() > 2
+                           ? args[2]->line
+                           : (args.empty() ? 0 : args[0]->line);
+            int column = args.size() > 2
+                             ? args[2]->column
+                             : (args.empty() ? 0 : args[0]->column);
+            report_error(line, column, message);
+            return false;
+        }
         if (!type_function_is_variadic(callee_type) &&
             args.size() > static_cast<std::size_t>(count)) {
             std::size_t extra = static_cast<std::size_t>(count);
@@ -630,6 +653,31 @@ struct Checker : public BuiltinContext {
         std::string canonical =
             has_path ? canonical_builtin_path(path, source)
                      : std::string();
+        bool spread = false;
+        for (struct ast *arg : args) {
+            if (arg && arg->nodetype == 'x') {
+                spread = true;
+                break;
+            }
+        }
+
+        if (!spread &&
+            (canonical == "std.fn.compose" ||
+             canonical == "std.fn.pipe") &&
+            args.size() != 2) {
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "%s expects exactly 2 argument(s), got %zu",
+                          canonical.c_str(), args.size());
+            int line = args.size() > 2 ? args[2]->line
+                                       : (call->callee ? call->callee->line
+                                                       : 0);
+            int column = args.size() > 2
+                             ? args[2]->column
+                             : (call->callee ? call->callee->column : 0);
+            report_error(line, column, message);
+            return false;
+        }
 
         /*
          * Enforce the maximum arity of known builtin templates even when the
@@ -640,13 +688,6 @@ struct Checker : public BuiltinContext {
         if (!canonical.empty()) {
             const TypeNode *polymorphic =
                 builtin_polymorphic_type(canonical);
-            bool spread = false;
-            for (struct ast *arg : args) {
-                if (arg && arg->nodetype == 'x') {
-                    spread = true;
-                    break;
-                }
-            }
             int maximum = type_function_param_count(polymorphic);
             if (!spread && maximum >= 0 && !type_function_is_variadic(
                                               polymorphic) &&

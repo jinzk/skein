@@ -947,7 +947,7 @@ struct Handler {
   - 不匹配的 rest 类型仍会报错，例如 `(...int) -> int` 不能赋给 `(string) -> int`；
 - `obj.method` 会生成去掉 `self` 的函数类型；
 - `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
-- `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 会推导两段函数组合的类型，并允许继续传入更多函数；
+- `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 
   ```text

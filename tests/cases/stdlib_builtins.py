@@ -2972,8 +2972,9 @@ def run_cases():
           "import std;\n"
           "let f = std.fn.compose(func(x) -> x + 1, func(x) -> x * 2);\n"
           "print(f(5));\n"
-          "let g = std.fn.compose(func(x) -> x * 10, "
-          "func(x) -> x + 1, func(x) -> x * 2);\n"
+          "let g = std.fn.compose("
+          "func(x) -> x * 10, "
+          "std.fn.compose(func(x) -> x + 1, func(x) -> x * 2));\n"
           "print(g(3));\n",
           stdout_all=["11", "70"])
     check("std.fn pipe",
@@ -2996,6 +2997,16 @@ def run_cases():
     check("std.fn errors",
           "import std;\nstd.fn.compose(1, 2);\n",
           stderr="std.fn.compose expects callables, got int")
+    check("std.fn compose runtime arity",
+          "import std;\n"
+          "std.fn.compose(func(x) -> x, func(x) -> x, "
+          "func(x) -> x);\n",
+          stderr="std.fn.compose expects exactly 2 functions",
+          env=OFF_ENV)
+    check("std.fn pipe runtime arity",
+          "import std;\nstd.fn.pipe(func(x) -> x);\n",
+          stderr="std.fn.pipe expects exactly 2 functions",
+          env=OFF_ENV)
     check("std.iter list pipeline",
           "import std;\n"
           "let xs = std.iter.collect(\n"

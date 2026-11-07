@@ -100,8 +100,8 @@ struct value_t *pipe_call(
 }
 
 struct value_t *fn_compose_builtin(const std::vector<struct value_t *> &args) {
-    if (args.size() < 2) {
-        yyerror("std.fn.compose expects at least 2 functions");
+    if (args.size() != 2) {
+        yyerror("std.fn.compose expects exactly 2 functions");
         return NULL;
     }
     for (struct value_t *value : args) {
@@ -115,8 +115,8 @@ struct value_t *fn_compose_builtin(const std::vector<struct value_t *> &args) {
 }
 
 struct value_t *fn_pipe_builtin(const std::vector<struct value_t *> &args) {
-    if (args.size() < 2) {
-        yyerror("std.fn.pipe expects at least 2 functions");
+    if (args.size() != 2) {
+        yyerror("std.fn.pipe expects exactly 2 functions");
         return NULL;
     }
     for (struct value_t *value : args) {

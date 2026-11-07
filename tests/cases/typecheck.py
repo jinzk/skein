@@ -652,14 +652,30 @@ def run_cases():
           "func(x: int): int -> x);\n",
           stderr="type error: expected (int) -> string, got (int) -> int")
 
-    check("fn compose variadic extras",
+    check("fn compose exactly two arguments",
           "import std;\n"
           "let c = std.fn.compose;\n"
-          "let f = c(func(x: int): int -> x + 1, "
+          "c(func(x: int): int -> x + 1, "
           "func(x: int): int -> x * 2,\n"
-          "          func(x: int): int -> x - 3);\n"
-          "println(f(10));\n",
-          stdout="15")
+          "  func(x: int): int -> x - 3);\n",
+          stderr="std.fn.compose expects exactly 2 argument(s), got 3")
+
+    check("fn compose first-class arity",
+          "import std;\n"
+          "let c = std.fn.compose;\n"
+          "c(func(x: int): int -> x + 1);\n",
+          stderr="std.fn.compose expects exactly 2 argument(s), got 1")
+
+    check("fn compose nested",
+          "import std;\n"
+          "let inner = std.fn.compose("
+          "func(x: bool): int -> 1, "
+          "func(x: string): bool -> len(x) > 0);\n"
+          "let outer = std.fn.compose("
+          "func(x: int): string -> str(x), inner);\n"
+          "let f: (string) -> string = outer;\n"
+          "println(f(\"a\"));\n",
+          stdout="1", not_stderr="type warning")
 
     check("local variable shadows function name",
           "import std;\n"

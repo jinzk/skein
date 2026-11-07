@@ -655,11 +655,11 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.fn.compose")
         return poly_builtin(
             {poly_callback({B}, C), poly_callback({A}, B)},
-            poly_callback({A}, C), 0, true);
+            poly_callback({A}, C));
     if (path == "std.fn.pipe")
         return poly_builtin(
             {poly_callback({A}, B), poly_callback({B}, C)},
-            poly_callback({A}, C), 0, true);
+            poly_callback({A}, C));
 
     if (path == "std.dict.len")
         return poly_builtin({dict_kv}, integer_type);

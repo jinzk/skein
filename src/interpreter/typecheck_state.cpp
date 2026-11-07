@@ -16,6 +16,9 @@ std::unordered_map<std::string,
                    std::unordered_map<std::string, VarInfo>>
     g_exported_types;
 
+std::unordered_map<const struct function_code *, const TypeNode *>
+    g_generator_elements;
+
 } // namespace detail
 } // namespace typecheck
 } // namespace skein

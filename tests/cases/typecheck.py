@@ -720,6 +720,63 @@ def run_cases():
           "println(rs); println(s);\n",
           stdout_all=["[ok, ok]", "ok"], not_stderr="type warning")
 
+    check("generator element type",
+          "import std;\n"
+          "func parts() { yield \"hello\"; yield \"world\"; }\n"
+          "let g: generator[string] = parts();\n"
+          "let xs: list[string] = std.iter.collect(g);\n"
+          "println(xs);\n",
+          stdout="[hello, world]", not_stderr="type warning")
+
+    check("generator element mismatch",
+          "import std;\n"
+          "func nums() { yield 1; yield 2; }\n"
+          "let xs: list[string] = std.iter.collect(nums());\n",
+          stderr="type error: expected list[string], got list[int]")
+
+    check("generator for element type",
+          "func parts() { yield \"a\"; }\n"
+          "for (let x in parts()) {\n"
+          "  let xs: list[int] = [x];\n"
+          "}\n",
+          stderr="type error: expected int, got string")
+
+    check("generator next value type",
+          "import std;\n"
+          "func parts() { yield \"a\"; }\n"
+          "let r = std.generator.next(parts());\n"
+          "let xs: list[int] = [r[\"value\"]];\n",
+          stderr="type error: expected int, got string")
+
+    check("generator lambda and method",
+          "import std;\n"
+          "let make = func() { yield 1; yield 2; };\n"
+          "let g: generator[int] = make();\n"
+          "println(std.iter.collect(g));\n"
+          "struct Box { n: int; }\n"
+          "impl Box {\n"
+          "  func nums(self) { yield self.n; yield self.n + 1; }\n"
+          "}\n"
+          "let b: Box = Box { n: 5 };\n"
+          "let h: generator[int] = b.nums();\n"
+          "println(std.iter.collect(h));\n",
+          stdout_all=["[1, 2]", "[5, 6]"], not_stderr="type warning")
+
+    check("iter generators",
+          "import std;\n"
+          "func nums() { yield 1; yield 2; yield 3; }\n"
+          "let mapped: list[string] = std.iter.collect(\n"
+          "  std.iter.map(nums(), func(x: int): string -> str(x)));\n"
+          "let filtered: list[int] = std.iter.collect(\n"
+          "  std.iter.filter(nums(), func(x: int): bool -> x > 1));\n"
+          "println(mapped); println(filtered);\n",
+          stdout_all=["[1, 2, 3]", "[2, 3]"], not_stderr="type warning")
+
+    check("generator annotation mismatch",
+          "func parts() { yield \"a\"; }\n"
+          "let g: generator[int] = parts();\n",
+          stderr="type error: expected generator[int], got generator[string]")
+
     check("local variable shadows function name",
           "import std;\n"
           "func path(g, from, to) { return 1; }\n"

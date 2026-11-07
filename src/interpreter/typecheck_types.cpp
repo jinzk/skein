@@ -67,6 +67,9 @@ const TypeNode *value_static_type(const struct value_t *value) {
             if (userdata->meta && userdata->meta->name &&
                 std::strcmp(userdata->meta->name, "task") == 0)
                 return type_container(TYPE_TASK, {type_any()});
+            if (userdata->meta && userdata->meta->name &&
+                std::strcmp(userdata->meta->name, "generator") == 0)
+                return type_container(TYPE_GENERATOR, {type_any()});
             return type_builtin(TYPE_USERDATA);
         }
         default: return type_any();
@@ -300,9 +303,8 @@ FunctionSig signature_from_symlist(struct symlist *sl, bool skip_self) {
 
 const TypeNode *signature_result_type(const FunctionSig &sig) {
     const TypeNode *result = sig.result ? sig.result : type_any();
-    /* Generator streams are not represented statically yet. */
     if (sig.is_generator)
-        return type_any();
+        return type_container(TYPE_GENERATOR, {result});
     if (sig.is_async)
         return type_container(TYPE_TASK, {result});
     return result;

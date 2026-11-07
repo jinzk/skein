@@ -34,6 +34,9 @@ struct Checker : public BuiltinContext {
     std::unordered_map<std::string, FunctionSig> functions;
     std::unordered_map<std::string, StaticTypeInfo> static_types;
     std::vector<const TypeNode *> return_types;
+    std::vector<std::vector<const TypeNode *>> yield_types;
+    std::unordered_map<const struct funcdef *, const TypeNode *>
+        generator_elements;
     std::unordered_set<std::string> warnings;
     bool error_ = false;
 
@@ -354,17 +357,22 @@ struct Checker : public BuiltinContext {
             if (def) {
                 auto it = def->methods.find(name);
                 if (it != def->methods.end() && it->second &&
-                    it->second->code)
-                    return function_type_from_sig(
-                        method_signature_from_code(
-                            it->second->code.get()));
+                    it->second->code) {
+                    FunctionSig sig = method_signature_from_code(
+                        it->second->code.get());
+                    adjust_generator_result(sig, NULL,
+                                            it->second->code.get());
+                    return function_type_from_sig(sig);
+                }
             }
         }
 
         struct funcdef *method = static_method(base_type, name);
-        if (method)
-            return function_type_from_sig(
-                method_signature_from_def(method));
+        if (method) {
+            FunctionSig sig = method_signature_from_def(method);
+            adjust_generator_result(sig, method, NULL);
+            return function_type_from_sig(sig);
+        }
         return NULL;
     }
 
@@ -476,6 +484,8 @@ struct Checker : public BuiltinContext {
         const TypeNode *receiver = infer(callee->l, env);
         FunctionSig sig;
         bool found = false;
+        const struct funcdef *method_def = NULL;
+        const struct function_code *method_code = NULL;
         structtype_lookup_result lookup;
         if (lookup_type_node(receiver, lookup)) {
             const type_def *def =
@@ -488,6 +498,7 @@ struct Checker : public BuiltinContext {
                     it->second->code) {
                     sig = method_signature_from_code(
                         it->second->code.get());
+                    method_code = it->second->code.get();
                     found = true;
                 }
             }
@@ -496,12 +507,14 @@ struct Checker : public BuiltinContext {
             struct funcdef *method = static_method(receiver, method_name);
             if (method) {
                 sig = method_signature_from_def(method);
+                method_def = method;
                 found = true;
             }
         }
         if (!found)
             return false;
 
+        adjust_generator_result(sig, method_def, method_code);
         if (!check_call_args(sig, args, env, true))
             return false;
         result = signature_result_type(sig);
@@ -526,6 +539,7 @@ struct Checker : public BuiltinContext {
                          : type_any();
         sig.is_async = function->def->code->is_async;
         sig.is_generator = function->def->code->is_generator;
+        adjust_generator_result(sig, NULL, function->def->code.get());
         if (!check_call_args(sig, args, env, true))
             return false;
         result = signature_result_type(sig);
@@ -721,6 +735,7 @@ struct Checker : public BuiltinContext {
         bool allow_builtin_check =
             has_path &&
             (canonical.rfind("std.iter.", 0) == 0 ||
+             canonical.rfind("std.generator.", 0) == 0 ||
              needs_static_check(expected) ||
              (!args.empty() &&
               expr_has_declared_container(args[0], env)));
@@ -1072,6 +1087,26 @@ struct Checker : public BuiltinContext {
                                   sig.variadic ? sig.rest : nullptr);
     }
 
+    void adjust_generator_result(FunctionSig &sig,
+                                 const struct funcdef *def,
+                                 const struct function_code *code) {
+        if (!sig.is_generator)
+            return;
+        const TypeNode *element = NULL;
+        if (def) {
+            auto it = generator_elements.find(def);
+            if (it != generator_elements.end())
+                element = it->second;
+        }
+        if (!element && code) {
+            auto it = g_generator_elements.find(code);
+            if (it != g_generator_elements.end())
+                element = it->second;
+        }
+        if (element)
+            sig.result = element;
+    }
+
     const TypeNode *function_type_from_code(
         const struct function_code *code) {
         if (!code)
@@ -1081,6 +1116,7 @@ struct Checker : public BuiltinContext {
                                     : type_any();
         sig.is_async = code->is_async;
         sig.is_generator = code->is_generator;
+        adjust_generator_result(sig, NULL, code);
         return function_type_from_sig(sig);
     }
 
@@ -1093,7 +1129,10 @@ struct Checker : public BuiltinContext {
         sig.is_async = def->is_async;
         sig.is_generator = def->is_generator;
         if (def->is_generator) {
-            sig.result = type_any();
+            auto it = generator_elements.find(def);
+            sig.result = it == generator_elements.end()
+                             ? type_any()
+                             : it->second;
             return function_type_from_sig(sig);
         }
 
@@ -1173,6 +1212,7 @@ struct Checker : public BuiltinContext {
                                  : type_any();
                 sig.is_async = fn->def->code->is_async;
                 sig.is_generator = fn->def->code->is_generator;
+                adjust_generator_result(sig, NULL, fn->def->code.get());
                 return signature_result_type(sig);
             }
         }
@@ -1518,7 +1558,31 @@ struct Checker : public BuiltinContext {
         return_types.push_back(def->ret_type
                                    ? type_from_constraint(def->ret_type)
                                    : NULL);
+        bool is_generator = def->is_generator != 0;
+        FunctionSig *sig_entry = NULL;
+        if (def->name) {
+            auto it = functions.find(def->name);
+            if (it != functions.end())
+                sig_entry = &it->second;
+        }
+        if (is_generator)
+            yield_types.emplace_back();
         bool ok = check_stmt(def->ast, local);
+        if (is_generator) {
+            const TypeNode *element = type_any();
+            bool first = true;
+            for (const TypeNode *type : yield_types.back()) {
+                element = first ? type : join_types(element, type);
+                first = false;
+            }
+            yield_types.pop_back();
+            generator_elements[def] = element;
+            std::shared_ptr<function_code> code = get_function_code(def);
+            if (code)
+                g_generator_elements[code.get()] = element;
+            if (sig_entry)
+                sig_entry->result = element;
+        }
         return_types.pop_back();
         return ok;
     }
@@ -1628,6 +1692,9 @@ struct Checker : public BuiltinContext {
                 return type_builtin(TYPE_CHAR);
             case TYPE_BYTES:
                 return type_builtin(TYPE_BYTE);
+            case TYPE_GENERATOR:
+                return iterable->args.empty() ? type_any()
+                                              : iterable->args[0];
             default:
                 return type_any();
         }
@@ -2113,10 +2180,14 @@ struct Checker : public BuiltinContext {
                     return type_element(value, 0);
                 return type_any();
             }
-            case 'w':
-                if (expr->l)
-                    infer(expr->l, env);
+            case 'w': {
+                const TypeNode *value =
+                    expr->l ? infer(expr->l, env)
+                            : type_builtin(TYPE_NULL);
+                if (!yield_types.empty())
+                    yield_types.back().push_back(value);
                 return type_any();
+            }
             case 'n':
                 if (expr->l)
                     infer(expr->l, env);

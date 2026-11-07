@@ -66,19 +66,80 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return false;
     };
 
+    if (path == "std.generator.next" ||
+        path == "std.generator.done" ||
+        path == "std.generator.close") {
+        const TypeNode *actual =
+            args.empty() ? type_any() : context.infer(args[0], env);
+        if (actual->kind == TYPE_GENERATOR) {
+            const TypeNode *element = type_element(actual, 0);
+            if (path == "std.generator.next")
+                result = type_container(
+                    TYPE_DICT, {type_builtin(TYPE_STRING), element});
+            else
+                result = type_builtin(TYPE_BOOL);
+        } else {
+            /* Keep unknown/null generator values gradual. */
+            result = type_any();
+        }
+        return true;
+    }
+
+    if (path == "std.iter.take" || path == "std.iter.drop") {
+        const TypeNode *element = args.empty()
+                                      ? type_any()
+                                      : context.infer_iterable_element(
+                                            args[0], false, env);
+        result = type_container(TYPE_GENERATOR, {element});
+        return true;
+    }
+
+    if (path == "std.iter.enumerate") {
+        result = type_container(
+            TYPE_GENERATOR,
+            {type_container(TYPE_LIST, {type_any()})});
+        return true;
+    }
+
+    if (path == "std.iter.collect") {
+        const TypeNode *element = type_any();
+        if (!args.empty())
+            element = context.infer_iterable_element(args[0], false, env);
+        result = type_container(TYPE_LIST, {element});
+        return true;
+    }
+
     if (path == "std.iter.map" || path == "std.iter.filter") {
         bool is_map = path == "std.iter.map";
         const TypeNode *element = type_any();
         if (!args.empty())
             element = context.infer_iterable_element(args[0], false, env);
+        const TypeNode *mapped = element;
         if (args.size() > 1) {
+            struct ast *mapper = args[1];
             const TypeNode *expected = function_type(
                 {element}, is_map ? type_any() : type_builtin(TYPE_BOOL));
-            if (!context.check_expr(args[1], expected, env, false, false))
+            if (!context.check_expr(mapper, expected, env, false, false))
                 return true;
+            if (is_map) {
+                if (mapper->nodetype == 'Z') {
+                    mapped = context.infer_lambda_result(mapper, element,
+                                                         env);
+                } else {
+                    const TypeNode *mapper_type =
+                        context.infer(mapper, env);
+                    if (type_is_function_signature(mapper_type)) {
+                        mapped = type_function_result(mapper_type);
+                    } else if (mapper->nodetype == 'N') {
+                        const char *mapper_name =
+                            ((struct symref *)mapper)->name;
+                        mapped = context.named_function_result(
+                            mapper_name ? mapper_name : "");
+                    }
+                }
+            }
         }
-        /* Generators are not represented statically yet. */
-        result = type_any();
+        result = type_container(TYPE_GENERATOR, {mapped});
         return true;
     }
 
@@ -559,6 +620,10 @@ const TypeNode *poly_task(const TypeNode *result) {
     return type_container(TYPE_TASK, {result});
 }
 
+const TypeNode *poly_generator(const TypeNode *element) {
+    return type_container(TYPE_GENERATOR, {element});
+}
+
 const TypeNode *poly_builtin(
     std::initializer_list<const TypeNode *> params,
     const TypeNode *result, int optional_params = 0,
@@ -677,6 +742,14 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
                             poly_task(type_builtin(TYPE_NULL)));
     if (path == "std.task.yield")
         return poly_builtin({}, poly_task(type_builtin(TYPE_NULL)));
+
+    if (path == "std.generator.next")
+        return poly_builtin(
+            {poly_generator(T), any_type()},
+            poly_dict(text(), T), 1);
+    if (path == "std.generator.done" ||
+        path == "std.generator.close")
+        return poly_builtin({poly_generator(T)}, bool_type);
 
     if (path == "std.dict.len")
         return poly_builtin({dict_kv}, integer_type);

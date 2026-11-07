@@ -155,6 +155,7 @@ const builtin_type_name kBuiltinTypeNames[] = {
     {"result", "result", TYPE_RESULT},
     {"error", "error", TYPE_ERROR},
     {"task", "task", TYPE_TASK},
+    {"generator", "generator", TYPE_GENERATOR},
 };
 
 const builtin_type_name *find_builtin_type_name(const char *name) {
@@ -246,6 +247,12 @@ bool type_constraint_matches(const struct type_constraint *type,
                    std::strcmp(
                        ((const struct userdata_value_t *)value)->meta->name,
                        "task") == 0;
+        case TYPE_GENERATOR:
+            return value->type == T_userdata &&
+                   ((const struct userdata_value_t *)value)->meta &&
+                   std::strcmp(
+                       ((const struct userdata_value_t *)value)->meta->name,
+                       "generator") == 0;
         case TYPE_VAR:
             return false;
         case TYPE_INVALID:
@@ -302,6 +309,7 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_RESULT: base = "result"; break;
         case TYPE_ERROR: base = "error"; break;
         case TYPE_TASK: base = "task"; break;
+        case TYPE_GENERATOR: base = "generator"; break;
         case TYPE_NAMED:
             base = type->name ? type->name : "invalid";
             break;

@@ -38,6 +38,7 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_NAMED: return "invalid";
         case TYPE_VAR: return "T";
         case TYPE_TASK: return "task";
+        case TYPE_GENERATOR: return "generator";
         case TYPE_INVALID:
         default: return "invalid";
     }
@@ -239,6 +240,7 @@ int type_container_arity(enum type_constraint_kind kind) {
         case TYPE_DEQUE:
         case TYPE_HEAP:
         case TYPE_TASK:
+        case TYPE_GENERATOR:
             return 1;
         case TYPE_DICT:
         case TYPE_RESULT:

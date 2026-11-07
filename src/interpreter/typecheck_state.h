@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 struct funcdef;
+struct function_code;
 
 namespace skein {
 namespace typecheck {
@@ -83,6 +84,10 @@ extern std::unordered_map<
 extern std::unordered_map<
     std::string, std::unordered_map<std::string, VarInfo>>
     g_exported_types;
+
+/* Inferred generator element types, keyed by function code. */
+extern std::unordered_map<const struct function_code *, const TypeNode *>
+    g_generator_elements;
 
 } // namespace detail
 } // namespace typecheck

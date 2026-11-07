@@ -295,6 +295,39 @@ def run_cases():
           "println(get_fn()(9));\n",
           stdout_all=["3"])
 
+    check("function type syntax",
+          "let f: (int) -> int = func(x: int): int -> x * 2;\n"
+          "let g: () -> int = func(): int -> 7;\n"
+          "println(f(3));\n"
+          "println(g());\n",
+          stdout_all=["6", "7"])
+
+    check("nested function type syntax",
+          "import std;\n"
+          "struct S { f: ((int) -> int) -> int; }\n"
+          "let s = S { f: func(x: (int) -> int): int -> x(2) };\n"
+          "let n = s.f(func(y: int): int -> y * 3);\n"
+          "println(n);\n"
+          "println(std.meta.fields(s));\n",
+          stdout_all=["6", "((int) -> int) -> int"])
+
+    check("function type in container and parameter",
+          "let fs: list[(int) -> int] = [func(x: int): int -> x];\n"
+          "func apply(f: (int) -> int, x: int): int { return f(x); }\n"
+          "println(fs[0](4));\n"
+          "println(apply(func(x: int): int -> x + 1, 4));\n",
+          stdout_all=["4", "5"])
+
+    check("function type accepts builtin",
+          "let f: (number) -> number = sqrt;\n"
+          "println(f(9));\n",
+          stdout_all=["3"])
+
+    check("function type is rejected in is",
+          "let f = func(x) { return x; };\n"
+          "println(f is (int) -> int);\n",
+          stderr="function type signatures are not allowed in 'is'")
+
     check("function call scalar argument check",
           "func f(x: int) { return x; }\n"
           'f("a");\n',

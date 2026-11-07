@@ -3006,6 +3006,24 @@ let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 - `std.list.map` 会推断简单表达式 lambda 或单 return lambda 的返回类型，`std.list.zip` 会检查第二个参数是 list；
 - 未注解的 `let` 会从初始化表达式推断类型；它不是固定标注，重新赋值为其他类型时会更新推断。
 
+函数值可以写函数类型：
+
+```text
+let f: (int) -> int;
+let g: () -> bool;
+let nested: ((int) -> int) -> int;
+let callbacks: list[(int) -> int];
+
+struct Handler {
+  callback: (Event) -> result;
+}
+```
+
+- 支持空参数、嵌套函数类型和容器内的函数类型；
+- 运行时只检查值是否可调用，不检查参数/返回值；
+- 当前阶段只实现函数类型语法和静态表示，完整签名匹配会在后续启用；
+- `is` 和模式类型不接受函数类型签名。
+
 自增和自减：
 
 ```text

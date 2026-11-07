@@ -890,6 +890,29 @@ let ys: list[int] = b.add(2);       // 返回类型传播
 ys[0] = "a";                        // 错误
 ```
 
+#### 函数类型语法
+
+函数值可以写函数类型：
+
+```text
+let f: (int) -> int;
+let g: () -> bool;
+let h: (int, string) -> result;
+let nested: ((int) -> int) -> int;
+let callbacks: list[(int) -> int];
+
+struct Handler {
+  callback: (Event) -> result;
+}
+```
+
+- 参数列表可以为空：`() -> int`；
+- 支持嵌套函数类型：`((int) -> int) -> int`；
+- 函数类型可以作为容器参数，例如 `list[(int) -> int]`；
+- 运行时只检查值是否可调用（`function` / `builtin` / `method` / `native`），不检查参数和返回值；
+- 当前阶段只实现了函数类型语法及其静态表示；完整的参数/返回值签名匹配会在后续启用；
+- `is` 和模式类型不接受函数类型签名：`f is (int) -> int` 会报错。
+
 `is` 和模式类型只接受不带类型参数的类型：
 
 ```text

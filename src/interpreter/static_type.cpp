@@ -66,6 +66,14 @@ std::string node_key(enum type_constraint_kind kind, const std::string &name,
     return key;
 }
 
+std::string function_arg_display(const TypeNode *type) {
+    if (!type)
+        return "any";
+    if (type->kind == TYPE_CALLABLE && !type->args.empty())
+        return "(" + type->display + ")";
+    return type->display;
+}
+
 std::string node_display(enum type_constraint_kind kind,
                          const std::string &name,
                          const std::vector<const TypeNode *> &args,
@@ -73,6 +81,23 @@ std::string node_display(enum type_constraint_kind kind,
     std::string text;
     if (kind == TYPE_NAMED) {
         text = name.empty() ? "invalid" : name;
+    } else if (kind == TYPE_CALLABLE && !args.empty()) {
+        if (args.size() == 2 && args[0] &&
+            args[0]->kind == TYPE_CALLABLE && !args[0]->args.empty()) {
+            text = function_arg_display(args[0]);
+        } else {
+            text = "(";
+            for (std::size_t i = 0; i + 1 < args.size(); ++i) {
+                if (i != 0) text += ", ";
+                text += function_arg_display(args[i]);
+            }
+            text += ")";
+        }
+        text += " -> ";
+        text += function_arg_display(args.back());
+        if (nullable)
+            text = "(" + text + ")?";
+        return text;
     } else if (type_container_arity(kind) > 0 && !args.empty()) {
         text = builtin_kind_name(kind);
         text += '[';
@@ -179,11 +204,41 @@ bool type_is_container(const TypeNode *type) {
     return type && type_container_arity(type->kind) > 0;
 }
 
+bool type_is_function_signature(const TypeNode *type) {
+    return type && type->kind == TYPE_CALLABLE && !type->args.empty();
+}
+
+int type_function_param_count(const TypeNode *type) {
+    if (!type_is_function_signature(type))
+        return -1;
+    return static_cast<int>(type->args.size() - 1);
+}
+
+const TypeNode *type_function_param(const TypeNode *type,
+                                     std::size_t index) {
+    if (!type_is_function_signature(type) || index + 1 >= type->args.size())
+        return type_any();
+    return type->args[index];
+}
+
+const TypeNode *type_function_result(const TypeNode *type) {
+    if (!type_is_function_signature(type))
+        return type_any();
+    return type->args.back();
+}
+
 bool type_constraint_has_arguments(const struct type_constraint *type) {
     if (!type || !type->detail)
         return false;
     const TypeNode *node = static_cast<const TypeNode *>(type->detail);
     return !node->args.empty();
+}
+
+bool type_constraint_is_function_type(const struct type_constraint *type) {
+    if (!type || !type->detail)
+        return false;
+    const TypeNode *node = static_cast<const TypeNode *>(type->detail);
+    return node->kind == TYPE_CALLABLE && !node->args.empty();
 }
 
 const TypeNode *type_element(const TypeNode *type, std::size_t index) {
@@ -245,6 +300,26 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
     base->display = node->display.c_str();
     base->detail = node;
     return base;
+}
+
+struct type_constraint *type_apply_function(
+    const std::vector<struct type_constraint *> &params,
+    struct type_constraint *result) {
+    std::vector<const TypeNode *> args;
+    args.reserve(params.size() + 1);
+    for (struct type_constraint *param : params)
+        args.push_back(type_from_constraint(param));
+    args.push_back(type_from_constraint(result));
+
+    const TypeNode *node = type_container(TYPE_CALLABLE, args);
+    struct type_constraint *type = new_type_constraint(TYPE_CALLABLE);
+    type->display = node->display.c_str();
+    type->detail = node;
+
+    for (struct type_constraint *param : params)
+        free_type_constraint(param);
+    free_type_constraint(result);
+    return type;
 }
 
 struct type_constraint *type_apply_nullable(struct type_constraint *base) {

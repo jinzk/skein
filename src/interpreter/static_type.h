@@ -38,7 +38,13 @@ const TypeNode *type_nullable(const TypeNode *type);
 
 bool type_is_any(const TypeNode *type);
 bool type_is_container(const TypeNode *type);
+bool type_is_function_signature(const TypeNode *type);
+int type_function_param_count(const TypeNode *type);
+const TypeNode *type_function_param(const TypeNode *type,
+                                     std::size_t index);
+const TypeNode *type_function_result(const TypeNode *type);
 bool type_constraint_has_arguments(const struct type_constraint *type);
+bool type_constraint_is_function_type(const struct type_constraint *type);
 int type_container_arity(enum type_constraint_kind kind);
 const TypeNode *type_element(const TypeNode *type, std::size_t index);
 const char *type_display(const TypeNode *type);
@@ -51,6 +57,9 @@ bool type_equal(const TypeNode *a, const TypeNode *b);
 struct type_constraint *type_apply_generic(struct type_constraint *base,
                                            struct type_constraint *arg1,
                                            struct type_constraint *arg2);
+struct type_constraint *type_apply_function(
+    const std::vector<struct type_constraint *> &params,
+    struct type_constraint *result);
 struct type_constraint *type_apply_nullable(struct type_constraint *base);
 
 } // namespace typecheck

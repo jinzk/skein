@@ -620,12 +620,65 @@ static struct type_constraint *make_nullable_type(
     return skein::typecheck::type_apply_nullable(base);
 }
 
+struct parsed_type_list {
+    struct type_constraint *type;
+    struct parsed_type_list *next;
+};
+
+static struct parsed_type_list *new_type_list(struct type_constraint *type,
+                                               struct parsed_type_list *next) {
+    struct parsed_type_list *node =
+        (struct parsed_type_list *)std::malloc(
+            sizeof(struct parsed_type_list));
+    if (!node) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    node->type = type;
+    node->next = next;
+    return node;
+}
+
+static void free_type_list(struct parsed_type_list *list) {
+    while (list) {
+        struct parsed_type_list *next = list->next;
+        free_type_constraint(list->type);
+        std::free(list);
+        list = next;
+    }
+}
+
+static struct type_constraint *make_function_type(
+    struct parsed_type_list *params, struct type_constraint *result) {
+    std::vector<struct type_constraint *> types;
+    for (struct parsed_type_list *item = params; item; item = item->next)
+        types.push_back(item->type);
+    struct type_constraint *type =
+        skein::typecheck::type_apply_function(types, result);
+    /* type_apply_function takes ownership of the constraint nodes. */
+    while (params) {
+        struct parsed_type_list *next = params->next;
+        std::free(params);
+        params = next;
+    }
+    return type;
+}
+
 static struct type_constraint *runtime_type_or_error(
     struct type_constraint *type, const char *where) {
-    if (skein::typecheck::type_constraint_has_arguments(type)) {
-        char message[128];
-        std::snprintf(message, sizeof(message),
+    const char *message = NULL;
+    char buffer[128];
+    if (skein::typecheck::type_constraint_is_function_type(type)) {
+        std::snprintf(buffer, sizeof(buffer),
+                      "function type signatures are not allowed in %s",
+                      where);
+        message = buffer;
+    } else if (skein::typecheck::type_constraint_has_arguments(type)) {
+        std::snprintf(buffer, sizeof(buffer),
                       "generic type arguments are not allowed in %s", where);
+        message = buffer;
+    }
+    if (message) {
         diag_report(g_token_line, g_token_column, "type error", message);
         g_statement_invalid = true;
     }
@@ -640,6 +693,7 @@ static struct type_constraint *runtime_type_or_error(
     struct ast *a;
     struct symlist *sl;
     struct type_constraint *type;
+    struct parsed_type_list *tl;
     struct pattern_field *pf;
     double d;
     long long i;
@@ -720,6 +774,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> struct_fields struct_field
 %type <sl> param symlist lambda_param_tail
 %type <type> type type_name func_ret_opt
+%type <tl> type_list
 %type <str> importref importpath fieldname impl_trait_name
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
@@ -727,6 +782,7 @@ static struct type_constraint *runtime_type_or_error(
 %destructor { free($$); } <str>
 %destructor { symlistfree_full($$); } <sl>
 %destructor { free_type_constraint($$); } <type>
+%destructor { free_type_list($$); } <tl>
 
 /* `NAME '.' NAME` is deliberately shifted for field/enum dot access instead
  * of reducing `NAME` to `exp` first.  The conflicts are resolved as shifts
@@ -1802,6 +1858,14 @@ type: type_name %prec AS                  { $$ = $1; }
     | type_name '[' type ',' type ']'     {
         $$ = make_generic_type($1, $3, $5);
       }
+    | '(' type_list ')' RARROW type       {
+        $$ = make_function_type($2, $5);
+      }
+    ;
+
+type_list: %empty                         { $$ = NULL; }
+    | type                                { $$ = new_type_list($1, NULL); }
+    | type ',' type_list                  { $$ = new_type_list($1, $3); }
     ;
 
 type_name: NAME                           {

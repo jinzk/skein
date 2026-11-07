@@ -21,6 +21,8 @@ namespace detail {
 struct FunctionSig {
     std::vector<const TypeNode *> params;
     bool variadic = false;
+    bool is_async = false;
+    bool is_generator = false;
     int optional_params = 0;
     const TypeNode *rest = nullptr;
     const TypeNode *result = nullptr;
@@ -44,6 +46,7 @@ std::string canonical_builtin_path(const std::string &path,
 
 FunctionSig signature_from_symlist(struct symlist *sl,
                                    bool skip_self = false);
+const TypeNode *signature_result_type(const FunctionSig &sig);
 FunctionSig method_signature_from_code(const struct function_code *code);
 FunctionSig method_signature_from_def(const struct funcdef *def);
 struct ast *find_single_return(struct ast *node, int &count);

@@ -555,6 +555,10 @@ const TypeNode *poly_heap(const TypeNode *element) {
     return type_container(TYPE_HEAP, {element});
 }
 
+const TypeNode *poly_task(const TypeNode *result) {
+    return type_container(TYPE_TASK, {result});
+}
+
 const TypeNode *poly_builtin(
     std::initializer_list<const TypeNode *> params,
     const TypeNode *result, int optional_params = 0,
@@ -660,6 +664,19 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin(
             {poly_callback({A}, B), poly_callback({B}, C)},
             poly_callback({A}, C));
+
+    if (path == "std.task.wait")
+        return poly_builtin({poly_task(T), integer_type}, T, 1);
+    if (path == "std.task.wait_all")
+        return poly_builtin(
+            {poly_list(poly_task(T)), integer_type}, poly_list(T), 1);
+    if (path == "std.task.done" || path == "std.task.cancel")
+        return poly_builtin({poly_task(T)}, bool_type);
+    if (path == "std.task.sleep")
+        return poly_builtin({integer_type},
+                            poly_task(type_builtin(TYPE_NULL)));
+    if (path == "std.task.yield")
+        return poly_builtin({}, poly_task(type_builtin(TYPE_NULL)));
 
     if (path == "std.dict.len")
         return poly_builtin({dict_kv}, integer_type);

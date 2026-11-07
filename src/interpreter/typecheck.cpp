@@ -504,7 +504,7 @@ struct Checker : public BuiltinContext {
 
         if (!check_call_args(sig, args, env, true))
             return false;
-        result = sig.result ? sig.result : type_any();
+        result = signature_result_type(sig);
         return true;
     }
 
@@ -520,15 +520,15 @@ struct Checker : public BuiltinContext {
         if (!function->def || !function->def->code)
             return false;
         FunctionSig sig = signature_from_symlist(function->def->code->sl);
-        sig.result = (function->def->code->ret_type &&
-                      !function->def->code->is_async &&
-                      !function->def->code->is_generator)
+        sig.result = function->def->code->ret_type
                          ? type_from_constraint(
                                function->def->code->ret_type.get())
                          : type_any();
+        sig.is_async = function->def->code->is_async;
+        sig.is_generator = function->def->code->is_generator;
         if (!check_call_args(sig, args, env, true))
             return false;
-        result = sig.result ? sig.result : type_any();
+        result = signature_result_type(sig);
         return true;
     }
 
@@ -806,12 +806,14 @@ struct Checker : public BuiltinContext {
                         (struct func_value_t *)sym->val;
                     if (fn->def && fn->def->code) {
                         sig = signature_from_symlist(fn->def->code->sl);
-                        sig.result = (fn->def->code->ret_type &&
-                                      !fn->def->code->is_async &&
-                                      !fn->def->code->is_generator)
-                                         ? type_from_constraint(
-                                               fn->def->code->ret_type.get())
-                                         : type_any();
+                        sig.result =
+                            fn->def->code->ret_type
+                                ? type_from_constraint(
+                                      fn->def->code->ret_type.get())
+                                : type_any();
+                        sig.is_async = fn->def->code->is_async;
+                        sig.is_generator =
+                            fn->def->code->is_generator;
                         found = true;
                     }
                 }
@@ -819,7 +821,7 @@ struct Checker : public BuiltinContext {
             if (found) {
                 if (!check_call_args(sig, args, env, true))
                     return false;
-                result = sig.result ? sig.result : type_any();
+                result = signature_result_type(sig);
                 return true;
             }
         }
@@ -1064,7 +1066,7 @@ struct Checker : public BuiltinContext {
 
     const TypeNode *function_type_from_sig(const FunctionSig &sig) {
         std::vector<const TypeNode *> args = sig.params;
-        args.push_back(sig.result ? sig.result : type_any());
+        args.push_back(signature_result_type(sig));
         return make_function_type(TYPE_FUNCTION, args, sig.optional_params,
                                   sig.variadic, false,
                                   sig.variadic ? sig.rest : nullptr);
@@ -1075,10 +1077,10 @@ struct Checker : public BuiltinContext {
         if (!code)
             return type_builtin(TYPE_FUNCTION);
         FunctionSig sig = signature_from_symlist(code->sl);
-        sig.result = (code->ret_type && !code->is_async &&
-                      !code->is_generator)
-                         ? type_from_constraint(code->ret_type.get())
-                         : type_any();
+        sig.result = code->ret_type ? type_from_constraint(code->ret_type.get())
+                                    : type_any();
+        sig.is_async = code->is_async;
+        sig.is_generator = code->is_generator;
         return function_type_from_sig(sig);
     }
 
@@ -1088,7 +1090,9 @@ struct Checker : public BuiltinContext {
         if (!def)
             return type_builtin(TYPE_FUNCTION);
         FunctionSig sig = signature_from_symlist(def->sl);
-        if (def->is_async || def->is_generator) {
+        sig.is_async = def->is_async;
+        sig.is_generator = def->is_generator;
+        if (def->is_generator) {
             sig.result = type_any();
             return function_type_from_sig(sig);
         }
@@ -1156,16 +1160,21 @@ struct Checker : public BuiltinContext {
         std::string key = name ? name : "";
         auto it = functions.find(key);
         if (it != functions.end())
-            return it->second.result ? it->second.result : type_any();
+            return signature_result_type(it->second);
         struct symbol *sym = lookupsym(key.c_str());
         if (sym && sym->val && sym->val->type == T_func) {
             struct func_value_t *fn = (struct func_value_t *)sym->val;
-            if (fn->def && fn->def->code &&
-                fn->def->code->ret_type &&
-                !fn->def->code->is_async &&
-                !fn->def->code->is_generator)
-                return type_from_constraint(
-                    fn->def->code->ret_type.get());
+            if (fn->def && fn->def->code) {
+                FunctionSig sig =
+                    signature_from_symlist(fn->def->code->sl);
+                sig.result = fn->def->code->ret_type
+                                 ? type_from_constraint(
+                                       fn->def->code->ret_type.get())
+                                 : type_any();
+                sig.is_async = fn->def->code->is_async;
+                sig.is_generator = fn->def->code->is_generator;
+                return signature_result_type(sig);
+            }
         }
         return type_any();
     }
@@ -1177,10 +1186,14 @@ struct Checker : public BuiltinContext {
             return type_any();
         struct funcdef *def = (struct funcdef *)function;
         check_funcdef(def, env);
-        if (def->is_async || def->is_generator)
+        if (def->is_generator)
             return type_any();
+        auto finish = [&](const TypeNode *result) {
+            return def->is_async ? type_container(TYPE_TASK, {result})
+                                 : result;
+        };
         if (def->ret_type)
-            return type_from_constraint(def->ret_type);
+            return finish(type_from_constraint(def->ret_type));
         if (!def->ast)
             return type_any();
         int return_count = 0;
@@ -1206,7 +1219,7 @@ struct Checker : public BuiltinContext {
             if (!item->variadic)
                 first = false;
         }
-        return infer(return_expr, local);
+        return finish(infer(return_expr, local));
     }
 
     void bind_pattern_types(const struct ast *node,
@@ -1463,10 +1476,10 @@ struct Checker : public BuiltinContext {
         FunctionSig sig;
         if (def->sl)
             sig = signature_from_symlist(def->sl);
-        sig.result = (def->ret_type && !def->is_async &&
-                      !def->is_generator)
-                         ? type_from_constraint(def->ret_type)
-                         : type_any();
+        sig.result = def->ret_type ? type_from_constraint(def->ret_type)
+                                   : type_any();
+        sig.is_async = def->is_async;
+        sig.is_generator = def->is_generator;
         if (def->name)
             functions[def->name] = sig;
 
@@ -2093,7 +2106,13 @@ struct Checker : public BuiltinContext {
                 const TypeNode *else_type = infer(flow->el, env);
                 return join_types(then_type, else_type);
             }
-            case 'b':
+            case 'b': {
+                const TypeNode *value =
+                    expr->l ? infer(expr->l, env) : type_any();
+                if (value->kind == TYPE_TASK)
+                    return type_element(value, 0);
+                return type_any();
+            }
             case 'w':
                 if (expr->l)
                     infer(expr->l, env);

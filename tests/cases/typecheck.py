@@ -677,6 +677,49 @@ def run_cases():
           "println(f(\"a\"));\n",
           stdout="1", not_stderr="type warning")
 
+    check("async task type",
+          "async func fetch(x: int): string { return \"ok\"; }\n"
+          "let t: task[string] = fetch(1);\n"
+          "let s: string = await t;\n"
+          "let f: (int) -> task[string] = fetch;\n"
+          "println(s); println(await f(2));\n",
+          stdout_all=["ok", "ok"], not_stderr="type warning")
+
+    check("async task result mismatch",
+          "async func fetch(x: int): string { return \"ok\"; }\n"
+          "let f: (int) -> task[int] = fetch;\n",
+          stderr="type error: expected (int) -> task[int], "
+                 "got (int) -> task[string]")
+
+    check("async lambda task type",
+          "let add = async func(a: int, b: int): int {\n"
+          "  return a + b;\n"
+          "};\n"
+          "let t: task[int] = add(1, 2);\n"
+          "println(await t);\n",
+          stdout="3", not_stderr="type warning")
+
+    check("async method task type",
+          "struct Box { value: int; }\n"
+          "impl Box {\n"
+          "  async func get(self, x: int): string { return \"ok\"; }\n"
+          "}\n"
+          "let b: Box = Box { value: 1 };\n"
+          "let t: task[string] = b.get(2);\n"
+          "let f = b.get;\n"
+          "let g: (int) -> task[string] = f;\n"
+          "println(await t); println(await g(3));\n",
+          stdout_all=["ok", "ok"], not_stderr="type warning")
+
+    check("task wait builtins",
+          "import std;\n"
+          "async func fetch(x: int): string { return \"ok\"; }\n"
+          "let ts: list[task[string]] = [fetch(1), fetch(2)];\n"
+          "let rs: list[string] = std.task.wait_all(ts);\n"
+          "let s: string = std.task.wait(fetch(3));\n"
+          "println(rs); println(s);\n",
+          stdout_all=["[ok, ok]", "ok"], not_stderr="type warning")
+
     check("local variable shadows function name",
           "import std;\n"
           "func path(g, from, to) { return 1; }\n"

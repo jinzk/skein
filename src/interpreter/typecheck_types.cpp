@@ -7,6 +7,7 @@
 #include "valuetype.h"
 
 #include <cstddef>
+#include <cstring>
 
 namespace skein {
 namespace typecheck {
@@ -60,7 +61,14 @@ const TypeNode *value_static_type(const struct value_t *value) {
         case T_builtin: return type_builtin(TYPE_BUILTIN);
         case T_method:
         case T_native: return type_builtin(TYPE_CALLABLE);
-        case T_userdata: return type_builtin(TYPE_USERDATA);
+        case T_userdata: {
+            const struct userdata_value_t *userdata =
+                (const struct userdata_value_t *)value;
+            if (userdata->meta && userdata->meta->name &&
+                std::strcmp(userdata->meta->name, "task") == 0)
+                return type_container(TYPE_TASK, {type_any()});
+            return type_builtin(TYPE_USERDATA);
+        }
         default: return type_any();
     }
 }
@@ -290,6 +298,16 @@ FunctionSig signature_from_symlist(struct symlist *sl, bool skip_self) {
     return sig;
 }
 
+const TypeNode *signature_result_type(const FunctionSig &sig) {
+    const TypeNode *result = sig.result ? sig.result : type_any();
+    /* Generator streams are not represented statically yet. */
+    if (sig.is_generator)
+        return type_any();
+    if (sig.is_async)
+        return type_container(TYPE_TASK, {result});
+    return result;
+}
+
 struct ast *find_single_return(struct ast *node, int &count) {
     if (!node)
         return NULL;
@@ -312,10 +330,11 @@ FunctionSig method_signature_from_code(const struct function_code *code) {
     if (!code)
         return sig;
     sig = signature_from_symlist(code->sl, true);
-    sig.result = (code->ret_type && !code->is_async &&
-                  !code->is_generator)
+    sig.result = code->ret_type
                      ? type_from_constraint(code->ret_type.get())
                      : type_any();
+    sig.is_async = code->is_async;
+    sig.is_generator = code->is_generator;
     return sig;
 }
 
@@ -324,9 +343,10 @@ FunctionSig method_signature_from_def(const struct funcdef *def) {
     if (!def)
         return sig;
     sig = signature_from_symlist(def->sl, true);
-    sig.result = (def->ret_type && !def->is_async && !def->is_generator)
-                     ? type_from_constraint(def->ret_type)
-                     : type_any();
+    sig.result = def->ret_type ? type_from_constraint(def->ret_type)
+                               : type_any();
+    sig.is_async = def->is_async;
+    sig.is_generator = def->is_generator;
     return sig;
 }
 

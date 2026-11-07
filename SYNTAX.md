@@ -752,7 +752,7 @@ const limit: int = 10;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error
+list dict deque heap set function builtin callable null userdata result error task
 ```
 
 任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`：
@@ -783,7 +783,7 @@ let c: char?;       // 默认 null
 | `any` / `null` | `null` |
 | `T?` | `null` |
 
-`function`、`builtin`、`callable`、`userdata`、`heap` 没有默认值，必须提供初始值。
+`function`、`builtin`、`callable`、`userdata`、`heap`、`task` 没有默认值，必须提供初始值。
 
 已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
@@ -815,7 +815,7 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
-- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
 - 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
@@ -948,6 +948,17 @@ struct Handler {
 - `obj.method` 会生成去掉 `self` 的函数类型；
 - `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
+- async 函数的类型为 `(参数) -> task[结果]`：
+
+  ```text
+  async func fetch(x: int): string { return "ok"; }
+  // fetch: (int) -> task[string]
+
+  let t: task[string] = fetch(1);
+  let s: string = await t;      // await task[T] 得到 T
+  ```
+
+- `task[T]` 可用于变量、参数和返回类型；`std.task.wait` / `std.task.wait_all` 会保留任务结果类型；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 
   ```text
@@ -1438,7 +1449,7 @@ func double(x) -> x * 2;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error
+list dict deque heap set function builtin callable null userdata result error task
 ```
 
 示例：

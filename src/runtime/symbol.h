@@ -29,7 +29,9 @@ enum type_constraint_kind {
     TYPE_NAMED,
     TYPE_INVALID,
     /* Static-only type variable used by builtin polymorphic signatures. */
-    TYPE_VAR
+    TYPE_VAR,
+    /* Static-only wrapper for async task results and generator streams. */
+    TYPE_TASK
 };
 
 struct type_constraint {

@@ -3041,7 +3041,9 @@ struct Handler {
 - `for ... in generator[T]` 的元素类型为 `T`；
 - `std.iter.collect` 对 `generator[T]` 返回 `list[T]`，`std.iter.map` / `std.iter.filter` 对 generator 返回新的 generator；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
 - `pair[A, B]` 表示二元异构结构，`p[0]` / `p[1]` 分别得到 `A` / `B`；`zip`、`dict.items`、`iter.enumerate` 使用 pair；
-- `union[A, B]` 表示 `A` 或 `B` 之一；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查。union 暂不做控制流收窄，需要时可用 `as` 断言；
+- `union[A, B]` 表示 `A` 或 `B` 之一；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；
+- union 支持常见控制流收窄：`if (x is T)` 的 then/else、`!`、`&&`、`match` 的 `case is T` 以及后续 `default` 分支；暂不支持字段路径（如 `p.x is T`）和 `||` 的正向收窄，需要时可继续用 `as`；
+- 收窄绑定在发生赋值后回退到声明类型，避免在分支中继续使用过期的窄化类型；
 - `pair` / `union` 是静态类型：`pair` 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。

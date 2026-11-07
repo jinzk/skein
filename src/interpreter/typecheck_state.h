@@ -15,6 +15,8 @@ namespace detail {
 
 struct VarInfo {
     const TypeNode *type = nullptr;
+    /* Original declared type when this binding is a narrowing overlay. */
+    const TypeNode *declared = nullptr;
     bool fixed = false;
     bool exported = false;
 };

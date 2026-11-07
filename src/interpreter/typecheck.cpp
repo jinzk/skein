@@ -130,6 +130,194 @@ struct Checker : public BuiltinContext {
         return lookup_var(name, env).type;
     }
 
+    struct NarrowFacts {
+        std::unordered_map<std::string, std::vector<const TypeNode *>>
+            positive;
+        std::unordered_map<std::string, std::vector<const TypeNode *>>
+            negative;
+    };
+
+    static bool simple_name(const struct ast *node, std::string &name) {
+        if (!node || node->nodetype != 'N')
+            return false;
+        const char *raw = ((const struct symref *)node)->name;
+        if (!raw)
+            return false;
+        name = raw;
+        return true;
+    }
+
+    static const TypeNode *non_null_type(const TypeNode *type) {
+        if (!type || !type->nullable)
+            return type;
+        if (type_container_arity(type->kind) > 0)
+            return type_container(type->kind, type->args, false);
+        if (type->kind == TYPE_NAMED)
+            return type_named(type->module.c_str(), type->name.c_str(),
+                              false);
+        return type_builtin(type->kind, false);
+    }
+
+    const TypeNode *narrow_include(const TypeNode *type,
+                                   const TypeNode *pattern) {
+        if (!type || type->kind == TYPE_ANY)
+            return pattern;
+        if (type->nullable) {
+            if (pattern && pattern->kind == TYPE_NULL)
+                return type_builtin(TYPE_NULL);
+            return narrow_include(non_null_type(type), pattern);
+        }
+        if (type->kind == TYPE_UNION) {
+            std::vector<const TypeNode *> kept;
+            for (const TypeNode *member : type->args) {
+                if (!member || member->kind == TYPE_ANY)
+                    return pattern;
+                MatchResult forward = match_type(member, pattern);
+                MatchResult reverse = match_type(pattern, member);
+                if (forward != MatchResult::Mismatch ||
+                    reverse != MatchResult::Mismatch)
+                    kept.push_back(narrow_include(member, pattern));
+            }
+            if (kept.empty())
+                return type;
+            if (kept.size() == 1)
+                return kept[0];
+            return type_container(TYPE_UNION, kept);
+        }
+        if (match_type(type, pattern) == MatchResult::Ok)
+            return type;
+        if (match_type(pattern, type) == MatchResult::Ok)
+            return pattern;
+        if (match_type(type, pattern) == MatchResult::Unknown)
+            return pattern;
+        return type;
+    }
+
+    const TypeNode *narrow_exclude(const TypeNode *type,
+                                   const TypeNode *pattern) {
+        if (!type || type->kind == TYPE_ANY || type->nullable)
+            return type;
+        if (type->kind == TYPE_UNION) {
+            std::vector<const TypeNode *> kept;
+            for (const TypeNode *member : type->args) {
+                if (!member || member->kind == TYPE_ANY) {
+                    kept.push_back(member);
+                    continue;
+                }
+                if (match_type(member, pattern) != MatchResult::Ok)
+                    kept.push_back(member);
+            }
+            if (kept.empty() || kept.size() == type->args.size())
+                return type;
+            if (kept.size() == 1)
+                return kept[0];
+            return type_container(TYPE_UNION, kept);
+        }
+        return type;
+    }
+
+    void apply_narrow_facts(Env &target, const Env &source,
+                            const NarrowFacts &facts) {
+        auto apply = [&](const std::unordered_map<
+                             std::string,
+                             std::vector<const TypeNode *>> &entries,
+                         bool include) {
+            for (const auto &entry : entries) {
+                const VarInfo *original = source.lookup(entry.first);
+                if (!original || !original->fixed)
+                    continue;
+                const TypeNode *type =
+                    original->type ? original->type : type_any();
+                for (const TypeNode *pattern : entry.second)
+                    type = include
+                               ? narrow_include(type, pattern)
+                               : narrow_exclude(type, pattern);
+                target.define(entry.first, type, true);
+                target.vars[entry.first].declared =
+                    original->declared ? original->declared
+                                       : original->type;
+            }
+        };
+        apply(facts.positive, true);
+        apply(facts.negative, false);
+    }
+
+    static void merge_facts(
+        std::unordered_map<std::string,
+                           std::vector<const TypeNode *>> &target,
+        const std::unordered_map<std::string,
+                                 std::vector<const TypeNode *>> &source) {
+        for (const auto &entry : source) {
+            auto &values = target[entry.first];
+            values.insert(values.end(), entry.second.begin(),
+                          entry.second.end());
+        }
+    }
+
+    bool check_condition(struct ast *cond, Env &env,
+                         NarrowFacts &positive, NarrowFacts &negative) {
+        if (!cond)
+            return true;
+        if (cond->nodetype == 'k') {
+            const struct is_node *node = (const struct is_node *)cond;
+            std::string name;
+            const VarInfo *info = NULL;
+            if (simple_name(node->value, name))
+                info = env.lookup(name);
+            if (info && info->fixed && node->type) {
+                const TypeNode *pattern =
+                    type_from_constraint(node->type);
+                if (pattern->kind != TYPE_INVALID) {
+                    positive.positive[name].push_back(pattern);
+                    negative.negative[name].push_back(pattern);
+                }
+            }
+            return check_expr(cond, type_any(), env, false, false);
+        }
+        if (cond->nodetype == '!') {
+            return check_condition(cond->l, env, negative, positive);
+        }
+        if (cond->nodetype == 'A') {
+            NarrowFacts left_positive;
+            NarrowFacts left_negative;
+            if (!check_condition(cond->l, env, left_positive,
+                                 left_negative))
+                return false;
+            Env right_env;
+            right_env.parent = &env;
+            apply_narrow_facts(right_env, env, left_positive);
+            NarrowFacts right_positive;
+            NarrowFacts right_negative;
+            if (!check_condition(cond->r, right_env, right_positive,
+                                 right_negative))
+                return false;
+            merge_facts(positive.positive, left_positive.positive);
+            merge_facts(positive.positive, right_positive.positive);
+            /* A false && may come from either side, so narrow nothing. */
+            return true;
+        }
+        if (cond->nodetype == 'Q') {
+            NarrowFacts left_positive;
+            NarrowFacts left_negative;
+            if (!check_condition(cond->l, env, left_positive,
+                                 left_negative))
+                return false;
+            Env right_env;
+            right_env.parent = &env;
+            apply_narrow_facts(right_env, env, left_negative);
+            NarrowFacts right_positive;
+            NarrowFacts right_negative;
+            if (!check_condition(cond->r, right_env, right_positive,
+                                 right_negative))
+                return false;
+            merge_facts(negative.negative, left_negative.negative);
+            merge_facts(negative.negative, right_negative.negative);
+            /* A true || may come from either side, so narrow nothing. */
+            return true;
+        }
+        return check_expr(cond, type_any(), env, false, false);
+    }
+
     bool warn_or_error(const TypeNode *actual, const TypeNode *expected,
                        int line, int column, bool explicit_cast,
                        bool force_element) {
@@ -1138,14 +1326,21 @@ struct Checker : public BuiltinContext {
                                ? owner->vars[name ? name : ""]
                                : lookup_var(name ? name : "", env);
             if (info.fixed) {
-                return check_expr(value, info.type, env, false,
-                                  needs_static_check(info.type));
+                const TypeNode *target =
+                    info.declared ? info.declared : info.type;
+                bool ok = check_expr(value, target, env, false,
+                                     needs_static_check(target));
+                if (info.declared && owner)
+                    owner->vars[name ? name : ""].type =
+                        info.declared;
+                return ok;
             }
             const TypeNode *rhs =
                 value ? infer(value, env) : type_any();
             if (owner) {
                 VarInfo &assigned = owner->vars[name ? name : ""];
                 assigned.type = owner == &env ? rhs : type_any();
+                assigned.declared = nullptr;
                 assigned.fixed = false;
                 if (assigned.exported && !module.empty())
                     g_exported_types[module][name ? name : ""] = assigned;
@@ -1943,22 +2138,29 @@ struct Checker : public BuiltinContext {
             case 'I':
             case 'T': {
                 struct flow *f = (struct flow *)stmt;
-                if (!check_expr(f->cond, type_any(), env, false, false))
+                NarrowFacts positive;
+                NarrowFacts negative;
+                if (!check_condition(f->cond, env, positive, negative))
                     return false;
                 Env then_env;
                 then_env.parent = &env;
+                apply_narrow_facts(then_env, env, positive);
                 if (!check_stmt(f->tl, then_env))
                     return false;
                 Env else_env;
                 else_env.parent = &env;
+                apply_narrow_facts(else_env, env, negative);
                 return check_stmt(f->el, else_env);
             }
             case 'W': {
                 struct flow *f = (struct flow *)stmt;
-                if (!check_expr(f->cond, type_any(), env, false, false))
+                NarrowFacts positive;
+                NarrowFacts negative;
+                if (!check_condition(f->cond, env, positive, negative))
                     return false;
                 Env child;
                 child.parent = &env;
+                apply_narrow_facts(child, env, positive);
                 return check_stmt(f->tl, child);
             }
             case 'E': {
@@ -2009,11 +2211,54 @@ struct Checker : public BuiltinContext {
                 struct match_node *match = (struct match_node *)stmt;
                 bool fixed = expr_fixed(match->expr, env);
                 const TypeNode *subject = infer(match->expr, env);
+                std::string subject_name;
+                bool named_subject =
+                    simple_name(match->expr, subject_name);
+                const VarInfo *subject_info =
+                    named_subject ? env.lookup(subject_name) : NULL;
+                if (subject_info && !subject_info->fixed)
+                    subject_info = NULL;
+                std::vector<const TypeNode *> excluded;
                 for (struct match_arm *arm =
                          (struct match_arm *)match->arms;
                      arm; arm = (struct match_arm *)arm->next) {
                     Env child;
                     child.parent = &env;
+                    const struct pattern_node *type_pattern = NULL;
+                    if (arm->pattern) {
+                        const struct ast *inner = arm->pattern;
+                        while (inner &&
+                               ((const struct pattern_node *)inner)
+                                       ->nodetype == NODE_PATTERN_AS)
+                            inner = ((const struct pattern_node *)inner)
+                                        ->items;
+                        if (inner &&
+                            ((const struct pattern_node *)inner)
+                                    ->nodetype == NODE_PATTERN_TYPE) {
+                            type_pattern =
+                                (const struct pattern_node *)inner;
+                        }
+                    }
+                    if (subject_info) {
+                        const TypeNode *narrowed = subject_info->type;
+                        for (const TypeNode *pattern : excluded)
+                            narrowed =
+                                narrow_exclude(narrowed, pattern);
+                        if (type_pattern && type_pattern->type) {
+                            const TypeNode *pattern =
+                                type_from_constraint(type_pattern->type);
+                            if (pattern->kind != TYPE_INVALID)
+                                narrowed =
+                                    narrow_include(narrowed, pattern);
+                        }
+                        if (narrowed != subject_info->type) {
+                            child.define(subject_name, narrowed, true);
+                            child.vars[subject_name].declared =
+                                subject_info->declared
+                                    ? subject_info->declared
+                                    : subject_info->type;
+                        }
+                    }
                     if (arm->pattern)
                         bind_pattern_types(arm->pattern, subject, child,
                                            fixed);
@@ -2021,6 +2266,13 @@ struct Checker : public BuiltinContext {
                                     false) ||
                         !check_stmt(arm->body, child))
                         return false;
+                    if (subject_info && type_pattern &&
+                        type_pattern->type && !arm->guard) {
+                        const TypeNode *pattern =
+                            type_from_constraint(type_pattern->type);
+                        if (pattern->kind != TYPE_INVALID)
+                            excluded.push_back(pattern);
+                    }
                 }
                 return true;
             }

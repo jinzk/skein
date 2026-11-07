@@ -1016,7 +1016,19 @@ struct Handler {
   let ys: list[union[int, string]] = xs;
   ```
 
-  union 按成员进行赋值/参数检查；暂不自动控制流收窄，分支内需要时可用 `as`。
+  union 按成员进行赋值/参数检查，并支持常见控制流收窄：
+
+  ```text
+  func f(x: union[int, string]) {
+    if (x is int) {
+      x + 1;          // x: int
+    } else {
+      len(x);         // x: string
+    }
+  }
+  ```
+
+  支持 `if (x is T)`、`!`、`&&`、`match` 的 `case is T` 和后续 `default` 分支；暂不支持字段路径 `p.x is T` 和 `||` 的正向收窄。赋值后收窄会回退到声明类型。
 - `pair` / `union` 是静态类型：`pair` 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证。
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 

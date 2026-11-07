@@ -897,6 +897,57 @@ def run_cases():
           "f(true);\n",
           stderr="type error: expected union[int, string], got bool")
 
+    check("union is narrowing",
+          "func use_int(v: int) { }\n"
+          "func use_string(v: string) { }\n"
+          "func f(x: union[int, string]) {\n"
+          "  if (x is int) { use_int(x); }\n"
+          "  else { use_string(x); }\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("union is narrowing mismatch",
+          "func use_string(v: string) { }\n"
+          "func f(x: union[int, string]) {\n"
+          "  if (x is int) { use_string(x); }\n"
+          "}\n",
+          stderr="type error: expected string, got int")
+
+    check("union negation and and narrowing",
+          "func use_int(v: int) { }\n"
+          "func use_string(v: string) { }\n"
+          "func f(x: union[int, string]) {\n"
+          "  if (!(x is int)) { use_string(x); }\n"
+          "  else { use_int(x); }\n"
+          "  if (x is int && x > 0) { use_int(x); }\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("union match narrowing",
+          "func use_int(v: int) { }\n"
+          "func use_string(v: string) { }\n"
+          "func f(x: union[int, string]) {\n"
+          "  match (x) {\n"
+          "    case is int => use_int(x);\n"
+          "    case is string => use_string(x);\n"
+          "  };\n"
+          "  match (x) {\n"
+          "    case is int => use_int(x);\n"
+          "    default => use_string(x);\n"
+          "  };\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("union match narrowing mismatch",
+          "func use_string(v: string) { }\n"
+          "func f(x: union[int, string]) {\n"
+          "  match (x) {\n"
+          "    case is int => use_string(x);\n"
+          "    default => 0;\n"
+          "  };\n"
+          "}\n",
+          stderr="type error: expected string, got int")
+
     check("opaque userdata types",
           "import std;\n"
           "func check() {\n"

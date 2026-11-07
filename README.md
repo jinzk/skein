@@ -3023,9 +3023,11 @@ struct Handler {
 - 运行时只检查值是否可调用，不检查参数/返回值；
 - 静态检查会校验函数赋值、参数/返回类型，以及通过函数类型发起的调用；
 - 参数按逆变、返回值按协变比较；`any` 仍然作为渐进边界；
-- 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名；可变参数或可选参数 builtin 仍退化为 `callable`；
+- 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名；可变参数 builtin 仍退化为 `callable`，部分带可选参数的容器 builtin 保留末尾可选参数信息；
+- 静态检查会拒绝多传参数；少传参数仍交给默认值或运行时处理；
 - `obj.method` 会生成去掉 `self` 的函数类型；
 - `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
+- `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 会推导两段函数组合的类型，并允许继续传入更多函数；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。
 

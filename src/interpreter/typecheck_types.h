@@ -21,6 +21,7 @@ namespace detail {
 struct FunctionSig {
     std::vector<const TypeNode *> params;
     bool variadic = false;
+    int optional_params = 0;
     const TypeNode *rest = nullptr;
     const TypeNode *result = nullptr;
 };

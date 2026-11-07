@@ -23,7 +23,7 @@ def run_cases():
     check(
         "diagnostic extra argument location",
         "func f(a) { return a; }\nf(1, 2);\n",
-        stderr="2:2: runtime error: function expects 1 argument(s), got 2",
+        stderr="2:6: type error: function expects 1 argument(s), got 2",
     )
     check(
         "diagnostic match failure location",

@@ -5,6 +5,10 @@ Extracted from the original test_skein.py main() body, lines 7539-8920.
 """
 from harness import *  # noqa: F401,F403
 
+import os
+
+OFF_ENV = dict(os.environ, SKEIN_TYPECHECK="off")
+
 
 def run_cases():
     ffi_probe = run("import std;\nkind_of(std.ffi)\n")
@@ -2702,7 +2706,7 @@ def run_cases():
           stdout_all=["1", "null"])
     check("arity error after argument evaluation",
           "func one(a) { return a; }\none(print(1), 2)\n",
-          stdout="1", stderr="expects 1 argument")
+          stdout="1", stderr="expects 1 argument", env=OFF_ENV)
     check("non-callable evaluates arguments", "1(print(7))\n",
           stdout="7", stderr="cannot call int")
 

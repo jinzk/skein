@@ -561,6 +561,79 @@ def run_cases():
           "println(std.set.values(s));\n",
           stdout="[1, 2]", not_stderr="type warning")
 
+    check("function type arity check",
+          "let f: (int) -> int = func(x: int): int -> x;\n"
+          "f(1, 2);\n",
+          stderr="type error: function expects 1 argument(s), got 2")
+
+    check("builtin template arity check",
+          "import std;\n"
+          "std.list.append([1], 2, 3);\n",
+          stderr="type error: function expects 2 argument(s), got 3")
+
+    check("optional builtin parameter type",
+          "import std;\n"
+          "let s: (list[int]) -> list[int] = std.list.sort;\n"
+          "let xs: list[int] = s([2, 1]);\n"
+          "let f = std.list.sort;\n"
+          "let ys: list[int] = f([2, 1], "
+          "func(a: int, b: int): int -> a - b);\n"
+          "println(xs); println(ys);\n",
+          stdout_all=["[1, 2]", "[1, 2]"])
+
+    check("default parameter function type",
+          "func f(a: int, b: int = 1): int { return a + b; }\n"
+          "let g: (int) -> int = f;\n"
+          "println(g(3));\n",
+          stdout="4", not_stderr="type warning")
+
+    check("iter callback checks",
+          "import std;\n"
+          "std.iter.filter([1], func(x: int): int -> x);\n",
+          stderr="type error: expected (int) -> bool, got (int) -> int")
+
+    check("iter map value checks list callback",
+          "import std;\n"
+          "let m = std.iter.map;\n"
+          "m([1], func(x: string): int -> 1);\n",
+          stderr="type error: expected (int) -> any, got (string) -> int")
+
+    check("iter map accepts dict",
+          "import std;\n"
+          'let g = std.iter.map({"a": 1}, '
+          "func(k: string): int -> 1);\n"
+          "println(std.iter.collect(g));\n",
+          stdout="[1]")
+
+    check("fn compose and pipe types",
+          "import std;\n"
+          "let c = std.fn.compose;\n"
+          "let f: (int) -> string = c("
+          "func(x: int): string -> str(x), "
+          "func(x: int): int -> x + 1);\n"
+          "let p = std.fn.pipe;\n"
+          "let g: (int) -> string = p("
+          "func(x: int): int -> x + 1, "
+          "func(x: int): string -> str(x));\n"
+          "println(f(1)); println(g(1));\n",
+          stdout_all=["2", "2"])
+
+    check("fn compose shape mismatch",
+          "import std;\n"
+          "let c = std.fn.compose;\n"
+          "c(func(x: string): string -> x, "
+          "func(x: int): int -> x);\n",
+          stderr="type error: expected (int) -> string, got (int) -> int")
+
+    check("fn compose variadic extras",
+          "import std;\n"
+          "let c = std.fn.compose;\n"
+          "let f = c(func(x: int): int -> x + 1, "
+          "func(x: int): int -> x * 2,\n"
+          "          func(x: int): int -> x - 3);\n"
+          "println(f(10));\n",
+          stdout="15")
+
     check("local variable shadows function name",
           "import std;\n"
           "func path(g, from, to) { return 1; }\n"

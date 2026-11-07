@@ -66,6 +66,22 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return false;
     };
 
+    if (path == "std.iter.map" || path == "std.iter.filter") {
+        bool is_map = path == "std.iter.map";
+        const TypeNode *element = type_any();
+        if (!args.empty())
+            element = context.infer_iterable_element(args[0], false, env);
+        if (args.size() > 1) {
+            const TypeNode *expected = function_type(
+                {element}, is_map ? type_any() : type_builtin(TYPE_BOOL));
+            if (!context.check_expr(args[1], expected, env, false, false))
+                return true;
+        }
+        /* Generators are not represented statically yet. */
+        result = type_any();
+        return true;
+    }
+
     if (path == "std.set.new" || path == "std.deque.new" ||
         path == "std.heap.new") {
         enum type_constraint_kind kind =
@@ -541,10 +557,11 @@ const TypeNode *poly_heap(const TypeNode *element) {
 
 const TypeNode *poly_builtin(
     std::initializer_list<const TypeNode *> params,
-    const TypeNode *result) {
+    const TypeNode *result, int optional_params = 0,
+    bool variadic = false) {
     std::vector<const TypeNode *> args(params);
     args.push_back(result);
-    return type_container(TYPE_BUILTIN, args);
+    return make_function_type(TYPE_BUILTIN, args, optional_params, variadic);
 }
 
 const TypeNode *poly_callback(
@@ -563,6 +580,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     const TypeNode *K = poly_var("K");
     const TypeNode *V = poly_var("V");
     const TypeNode *A = poly_var("A");
+    const TypeNode *B = poly_var("B");
+    const TypeNode *C = poly_var("C");
 
     const TypeNode *list_t = poly_list(T);
     const TypeNode *dict_kv = poly_dict(K, V);
@@ -575,22 +594,25 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.list.len")
         return poly_builtin({list_t}, integer_type);
     if (path == "std.list.slice")
-        return poly_builtin({list_t, integer_type, integer_type}, list_t);
+        return poly_builtin({list_t, integer_type, integer_type}, list_t,
+                            1);
     if (path == "std.list.contains")
         return poly_builtin({list_t, T}, bool_type);
     if (path == "std.list.index")
         return poly_builtin({list_t, T}, integer_type);
     if (path == "std.list.reverse")
         return poly_builtin({list_t}, list_t);
-    if (path == "std.list.sort" || path == "std.list.sort_desc" ||
-        path == "std.list.unique")
+    if (path == "std.list.sort")
+        return poly_builtin({list_t, any_type()}, list_t, 1);
+    if (path == "std.list.sort_desc" || path == "std.list.unique")
         return poly_builtin({list_t}, list_t);
     if (path == "std.list.is_sorted")
-        return poly_builtin({list_t}, bool_type);
+        return poly_builtin({list_t, any_type()}, bool_type, 1);
     if (path == "std.list.append")
         return poly_builtin({list_t, T}, list_t);
     if (path == "std.list.top_k")
-        return poly_builtin({list_t, integer_type}, list_t);
+        return poly_builtin({list_t, integer_type, any_type()}, list_t,
+                            1);
     if (path == "std.list.map")
         return poly_builtin({list_t, poly_callback({T}, U)},
                             poly_list(U));
@@ -599,22 +621,45 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
                             list_t);
     if (path == "std.list.reduce")
         return poly_builtin(
-            {list_t, poly_callback({A, T}, A), A}, A);
-    if (path == "std.list.sort_by" || path == "std.list.unique_by")
+            {list_t, poly_callback({A, T}, A), A}, A, 1);
+    if (path == "std.list.sort_by")
+        return poly_builtin(
+            {list_t, poly_callback({T}, U), any_type()}, list_t, 1);
+    if (path == "std.list.unique_by")
         return poly_builtin({list_t, poly_callback({T}, U)}, list_t);
     if (path == "std.list.group_by")
         return poly_builtin({list_t, poly_callback({T}, K)},
                             poly_dict(K, list_t));
-    if (path == "std.list.chunk" || path == "std.list.window")
+    if (path == "std.list.chunk")
         return poly_builtin({list_t, integer_type},
                             poly_list(poly_list(T)));
+    if (path == "std.list.window")
+        return poly_builtin({list_t, integer_type, integer_type},
+                            poly_list(poly_list(T)), 1);
     if (path == "std.list.zip")
         return poly_builtin(
             {list_t, poly_list(U)},
-            poly_list(poly_list(any_type())));
+            poly_list(poly_list(any_type())), 0, true);
     if (path == "std.list.binary_search")
         return poly_builtin(
-            {list_t, T}, poly_dict(text(), any_type()));
+            {list_t, T, any_type()},
+            poly_dict(text(), any_type()), 1);
+
+    if (path == "std.iter.map")
+        return poly_builtin({list_t, poly_callback({T}, U)},
+                            any_type());
+    if (path == "std.iter.filter")
+        return poly_builtin({list_t, poly_callback({T}, bool_type)},
+                            any_type());
+
+    if (path == "std.fn.compose")
+        return poly_builtin(
+            {poly_callback({B}, C), poly_callback({A}, B)},
+            poly_callback({A}, C), 0, true);
+    if (path == "std.fn.pipe")
+        return poly_builtin(
+            {poly_callback({A}, B), poly_callback({B}, C)},
+            poly_callback({A}, C), 0, true);
 
     if (path == "std.dict.len")
         return poly_builtin({dict_kv}, integer_type);
@@ -663,7 +708,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({deque_t}, poly_list(T));
 
     if (path == "std.heap.from_list")
-        return poly_builtin({list_t}, heap_t);
+        return poly_builtin(
+            {list_t, poly_callback({T, T}, bool_type)}, heap_t);
     if (path == "std.heap.size")
         return poly_builtin({heap_t}, integer_type);
     if (path == "std.heap.push")

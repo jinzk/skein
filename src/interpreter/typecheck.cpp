@@ -425,6 +425,23 @@ struct Checker : public BuiltinContext {
                 infer(arg, env);
             return true;
         }
+        if (!sig.variadic && args.size() > sig.params.size()) {
+            std::size_t extra = sig.params.size();
+            char message[256];
+            if (sig.optional_params > 0) {
+                std::snprintf(
+                    message, sizeof(message),
+                    "function expects at most %zu argument(s), got %zu",
+                    sig.params.size(), args.size());
+            } else {
+                std::snprintf(message, sizeof(message),
+                              "function expects %zu argument(s), got %zu",
+                              sig.params.size(), args.size());
+            }
+            report_error(args[extra] ? args[extra]->line : 0,
+                         args[extra] ? args[extra]->column : 0, message);
+            return false;
+        }
         for (std::size_t i = 0; i < args.size(); ++i) {
             const TypeNode *param =
                 i < sig.params.size()
@@ -534,6 +551,24 @@ struct Checker : public BuiltinContext {
                                       bindings);
             return true;
         }
+        if (!type_function_is_variadic(callee_type) &&
+            args.size() > static_cast<std::size_t>(count)) {
+            std::size_t extra = static_cast<std::size_t>(count);
+            char message[256];
+            if (type_function_optional_params(callee_type) > 0) {
+                std::snprintf(
+                    message, sizeof(message),
+                    "function expects at most %d argument(s), got %zu",
+                    count, args.size());
+            } else {
+                std::snprintf(message, sizeof(message),
+                              "function expects %d argument(s), got %zu",
+                              count, args.size());
+            }
+            report_error(args[extra] ? args[extra]->line : 0,
+                         args[extra] ? args[extra]->column : 0, message);
+            return false;
+        }
 
         std::vector<const TypeNode *> actual_types(args.size(), NULL);
         for (std::size_t i = 0; i < args.size(); ++i) {
@@ -592,6 +627,49 @@ struct Checker : public BuiltinContext {
 
         std::string path;
         bool has_path = flatten_path(call->callee, path);
+        std::string canonical =
+            has_path ? canonical_builtin_path(path, source)
+                     : std::string();
+
+        /*
+         * Enforce the maximum arity of known builtin templates even when the
+         * call is otherwise deferred to the runtime builtin.  Optional
+         * trailing parameters are included in the template, so this only
+         * rejects genuinely extra arguments.
+         */
+        if (!canonical.empty()) {
+            const TypeNode *polymorphic =
+                builtin_polymorphic_type(canonical);
+            bool spread = false;
+            for (struct ast *arg : args) {
+                if (arg && arg->nodetype == 'x') {
+                    spread = true;
+                    break;
+                }
+            }
+            int maximum = type_function_param_count(polymorphic);
+            if (!spread && maximum >= 0 && !type_function_is_variadic(
+                                              polymorphic) &&
+                args.size() > static_cast<std::size_t>(maximum)) {
+                std::size_t extra = static_cast<std::size_t>(maximum);
+                char message[256];
+                if (type_function_optional_params(polymorphic) > 0) {
+                    std::snprintf(
+                        message, sizeof(message),
+                        "function expects at most %d argument(s), got %zu",
+                        maximum, args.size());
+                } else {
+                    std::snprintf(
+                        message, sizeof(message),
+                        "function expects %d argument(s), got %zu",
+                        maximum, args.size());
+                }
+                report_error(args[extra] ? args[extra]->line : 0,
+                             args[extra] ? args[extra]->column : 0,
+                             message);
+                return false;
+            }
+        }
 
         /*
          * Container builtin wrappers in std.list/std.dict/... carry better
@@ -601,17 +679,33 @@ struct Checker : public BuiltinContext {
          */
         bool allow_builtin_check =
             has_path &&
-            (needs_static_check(expected) ||
+            (canonical.rfind("std.iter.", 0) == 0 ||
+             needs_static_check(expected) ||
              (!args.empty() &&
               expr_has_declared_container(args[0], env)));
         if (allow_builtin_check) {
-            std::string canonical =
-                canonical_builtin_path(path, source);
             const TypeNode *builtin_result = type_any();
             if (check_builtin(*this, canonical, args, expected, env,
                               builtin_result)) {
                 result = builtin_result;
                 return true;
+            }
+        }
+
+        if (canonical == "std.fn.compose" || canonical == "std.fn.pipe") {
+            for (struct ast *arg : args) {
+                const TypeNode *actual = infer(arg, env);
+                if (actual->kind == TYPE_FUNCTION ||
+                    actual->kind == TYPE_BUILTIN ||
+                    actual->kind == TYPE_CALLABLE ||
+                    actual->kind == TYPE_ANY)
+                    continue;
+                char message[512];
+                std::snprintf(message, sizeof(message),
+                              "%s expects callables, got %s",
+                              canonical.c_str(), type_display(actual));
+                report_error(arg->line, arg->column, message);
+                return false;
             }
         }
 
@@ -624,10 +718,13 @@ struct Checker : public BuiltinContext {
                      * annotation context, keep the historical behaviour:
                      * defer invalid base types to the runtime builtin.
                      */
-                    bool direct_builtin_path =
-                        has_path &&
-                        path.find('.') != std::string::npos;
-                    if (!direct_builtin_path || allow_builtin_check) {
+                    bool container_builtin_path =
+                        canonical.rfind("std.list.", 0) == 0 ||
+                        canonical.rfind("std.dict.", 0) == 0 ||
+                        canonical.rfind("std.set.", 0) == 0 ||
+                        canonical.rfind("std.deque.", 0) == 0 ||
+                        canonical.rfind("std.heap.", 0) == 0;
+                    if (!container_builtin_path || allow_builtin_check) {
                         if (!check_polymorphic_call(callee_type, args, env,
                                                     result))
                             return false;
@@ -641,6 +738,9 @@ struct Checker : public BuiltinContext {
                             type_function_param(callee_type,
                                                 (std::size_t)i));
                     sig.result = type_function_result(callee_type);
+                    sig.variadic = type_function_is_variadic(callee_type);
+                    sig.optional_params =
+                        type_function_optional_params(callee_type);
                     if (!check_call_args(sig, args, env, true))
                         return false;
                     result = sig.result ? sig.result : type_any();
@@ -924,7 +1024,7 @@ struct Checker : public BuiltinContext {
             return type_builtin(TYPE_CALLABLE);
         std::vector<const TypeNode *> args = sig.params;
         args.push_back(sig.result ? sig.result : type_any());
-        return type_container(TYPE_FUNCTION, args);
+        return make_function_type(TYPE_FUNCTION, args, sig.optional_params);
     }
 
     const TypeNode *function_type_from_code(
@@ -990,6 +1090,12 @@ struct Checker : public BuiltinContext {
         }
         sig.result = infer(return_expr, local);
         return function_type_from_sig(sig);
+    }
+
+    const TypeNode *infer_iterable_element(struct ast *iterable,
+                                           bool value_part,
+                                           Env &env) {
+        return iterable_element(infer(iterable, env), value_part);
     }
 
     const TypeNode *named_function_result(const char *name) {

@@ -23,6 +23,9 @@ struct BuiltinContext {
     virtual const TypeNode *infer_lambda_result(struct ast *function,
                                                 const TypeNode *element,
                                                 Env &env) = 0;
+    virtual const TypeNode *infer_iterable_element(struct ast *iterable,
+                                                   bool value_part,
+                                                   Env &env) = 0;
     virtual const TypeNode *named_function_result(const char *name) = 0;
     virtual void report_error(int line, int column,
                               const char *message) = 0;

@@ -76,6 +76,10 @@ const TypeNode *strip_nullable(const TypeNode *type) {
         return type_named(type->module.c_str(), type->name.c_str(), false);
     if (type->kind == TYPE_VAR)
         return type_variable(type->name.c_str());
+    if (type_is_function_signature(type))
+        return make_function_type(type->kind, type->args,
+                                  type->optional_params, type->variadic,
+                                  false);
     return type_builtin(type->kind, false);
 }
 
@@ -110,7 +114,16 @@ MatchResult match_function_signature(const TypeNode *actual,
                                      const TypeNode *expected) {
     std::size_t actual_params = actual->args.size() - 1;
     std::size_t expected_params = expected->args.size() - 1;
-    if (actual_params != expected_params)
+    if (expected_params > actual_params)
+        return MatchResult::Mismatch;
+    /*
+     * Optional trailing parameters are static-only metadata: a template can
+     * be assigned to a shorter function type when the extra parameters may
+     * be omitted.  Required parameter counts must still agree.
+     */
+    std::size_t optional =
+        static_cast<std::size_t>(type_function_optional_params(actual));
+    if (actual_params - expected_params > optional)
         return MatchResult::Mismatch;
 
     MatchResult result = MatchResult::Ok;
@@ -256,6 +269,8 @@ FunctionSig signature_from_symlist(struct symlist *sl, bool skip_self) {
             sig.rest = type;
         } else {
             sig.params.push_back(type);
+            if (item->has_default)
+                ++sig.optional_params;
         }
     }
     return sig;
@@ -520,6 +535,11 @@ const TypeNode *instantiate_type(const TypeNode *type,
     }
     if (!changed)
         return type;
+    if (type->kind == TYPE_CALLABLE || type->kind == TYPE_FUNCTION ||
+        type->kind == TYPE_BUILTIN) {
+        return make_function_type(type->kind, args, type->optional_params,
+                                  type->variadic, type->nullable);
+    }
     return type_container(type->kind, args, type->nullable);
 }
 
@@ -569,13 +589,32 @@ bool bind_type(const TypeNode *actual, const TypeNode *pattern,
                 return true;
             return false;
         }
-        if (actual->args.size() != pattern->args.size())
-            return false;
-        for (std::size_t i = 0; i < pattern->args.size(); ++i) {
-            if (!bind_type(actual->args[i], pattern->args[i], bindings))
+        std::size_t pattern_params = pattern->args.size() - 1;
+        std::size_t actual_params = actual->args.size() - 1;
+        if (pattern->variadic) {
+            std::size_t common =
+                actual_params < pattern_params ? actual_params
+                                               : pattern_params;
+            for (std::size_t i = 0; i < common; ++i) {
+                if (!bind_type(actual->args[i], pattern->args[i],
+                               bindings))
+                    return false;
+            }
+        } else {
+            if (actual_params > pattern_params)
                 return false;
+            std::size_t optional = static_cast<std::size_t>(
+                pattern->optional_params);
+            if (pattern_params - actual_params > optional)
+                return false;
+            for (std::size_t i = 0; i < actual_params; ++i) {
+                if (!bind_type(actual->args[i], pattern->args[i],
+                               bindings))
+                    return false;
+            }
         }
-        return true;
+        return bind_type(actual->args.back(), pattern->args.back(),
+                         bindings);
     }
 
     int arity = type_container_arity(pattern->kind);

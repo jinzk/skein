@@ -361,6 +361,23 @@ bool generator_next_value(const generator_ptr &generator,
     fiber *previous = current_fiber;
     switch_into(current, previous);
 
+    /*
+     * An async generator may suspend on an awaited task before yielding or
+     * finishing.  Generator fibers are not in the task pump's ready list, so
+     * resume this one directly once its awaited task completes.
+     */
+    while (current->state == FIBER_WAITING) {
+        if (!event_loop_init())
+            break;
+        uv_run(event_loop_handle(), UV_RUN_ONCE);
+        fiber_pump();
+        if (!current->await_task ||
+            task_get_state(current->await_task) != TASK_STATE_PENDING) {
+            fiber *caller = current_fiber;
+            switch_into(current, caller);
+        }
+    }
+
     if (current->state == FIBER_YIELDED) {
         value = current->yielded_value;
         current->yielded_value = NULL;
@@ -414,9 +431,21 @@ bool generator_close(const generator_ptr &generator) {
         return true;
     }
 
+    /* Let an async generator finish its current await before closing. */
     current->closing = true;
     freeval(current->resume_value);
     current->resume_value = NULL;
+    while (current->state == FIBER_WAITING) {
+        if (!event_loop_init())
+            break;
+        uv_run(event_loop_handle(), UV_RUN_ONCE);
+        fiber_pump();
+        if (!current->await_task ||
+            task_get_state(current->await_task) != TASK_STATE_PENDING) {
+            fiber *caller = current_fiber;
+            switch_into(current, caller);
+        }
+    }
 
     fiber *previous = current_fiber;
     for (int attempt = 0; attempt < 4; ++attempt) {
@@ -553,7 +582,6 @@ void fiber_pump() {
             remove_fiber(value);
             continue;
         }
-
         fiber *previous = current_fiber;
         switch_into(value, previous);
         if (value->state == FIBER_DONE)

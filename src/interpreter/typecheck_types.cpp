@@ -64,12 +64,20 @@ const TypeNode *value_static_type(const struct value_t *value) {
         case T_userdata: {
             const struct userdata_value_t *userdata =
                 (const struct userdata_value_t *)value;
-            if (userdata->meta && userdata->meta->name &&
-                std::strcmp(userdata->meta->name, "task") == 0)
+            const char *name =
+                userdata->meta ? userdata->meta->name : NULL;
+            if (name && std::strcmp(name, "task") == 0)
                 return type_container(TYPE_TASK, {type_any()});
-            if (userdata->meta && userdata->meta->name &&
-                std::strcmp(userdata->meta->name, "generator") == 0)
+            if (name && std::strcmp(name, "generator") == 0)
                 return type_container(TYPE_GENERATOR, {type_any()});
+            if (name && std::strcmp(name, "tcp_socket") == 0)
+                return type_builtin(TYPE_SOCKET);
+            if (name && std::strcmp(name, "tcp_listener") == 0)
+                return type_builtin(TYPE_LISTENER);
+            if (name && std::strcmp(name, "websocket") == 0)
+                return type_builtin(TYPE_WEBSOCKET);
+            if (userdata->meta && userdata->meta->stream)
+                return type_builtin(TYPE_STREAM);
             return type_builtin(TYPE_USERDATA);
         }
         default: return type_any();
@@ -170,6 +178,9 @@ MatchResult match_function_signature(const TypeNode *actual,
 bool needs_static_check(const TypeNode *type) {
     if (!type || type->kind == TYPE_ANY)
         return false;
+    if (type->kind == TYPE_SOCKET || type->kind == TYPE_LISTENER ||
+        type->kind == TYPE_WEBSOCKET || type->kind == TYPE_STREAM)
+        return true;
     if (has_concrete_container_arg(type))
         return true;
     if (type_is_function_signature(type)) {
@@ -476,6 +487,10 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
             return MatchResult::Unknown;
         return MatchResult::Mismatch;
     }
+    if (expected->kind == TYPE_STREAM && actual->kind == TYPE_SOCKET)
+        return MatchResult::Ok;
+    if (expected->kind == TYPE_SOCKET && actual->kind == TYPE_LISTENER)
+        return MatchResult::Ok;
     if (actual->kind != expected->kind)
         return MatchResult::Mismatch;
 

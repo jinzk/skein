@@ -39,6 +39,10 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_VAR: return "T";
         case TYPE_TASK: return "task";
         case TYPE_GENERATOR: return "generator";
+        case TYPE_SOCKET: return "socket";
+        case TYPE_LISTENER: return "listener";
+        case TYPE_WEBSOCKET: return "websocket";
+        case TYPE_STREAM: return "stream";
         case TYPE_INVALID:
         default: return "invalid";
     }

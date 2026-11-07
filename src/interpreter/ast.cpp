@@ -732,10 +732,6 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->ast = ast;
     a->ret_type = ret_type;
     a->moved = 0;
-    if (is_async && is_generator) {
-        yyerror("async generators are not supported");
-        is_generator = false;
-    }
     a->exported = exported;
     a->is_async = is_async;
     a->is_generator = is_generator;

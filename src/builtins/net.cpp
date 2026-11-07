@@ -230,8 +230,16 @@ const struct native_type net_socket_type = {
     "tcp_socket", net_describe, &net_stream_ops
 };
 
+const struct native_type net_listener_type = {
+    "tcp_listener", net_describe
+};
+
 value_t *new_socket_value(std::shared_ptr<net_socket> socket) {
     return newuserdataval(&net_socket_type, socket);
+}
+
+value_t *new_listener_value(std::shared_ptr<net_socket> socket) {
+    return newuserdataval(&net_listener_type, socket);
 }
 
 bool get_socket(struct value_t *value, std::shared_ptr<net_socket> &socket) {
@@ -240,7 +248,8 @@ bool get_socket(struct value_t *value, std::shared_ptr<net_socket> &socket) {
         return false;
     }
     struct userdata_value_t *userdata = (struct userdata_value_t *)value;
-    if (userdata->meta != &net_socket_type) {
+    if (userdata->meta != &net_socket_type &&
+        userdata->meta != &net_listener_type) {
         yyerror("expected a tcp socket, got %s", typename_of(value));
         return false;
     }
@@ -703,7 +712,7 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
 
         socket->listening = true;
         uv_freeaddrinfo(resolved.addresses);
-        return new_socket_value(socket);
+        return new_listener_value(socket);
     }
 
     uv_freeaddrinfo(resolved.addresses);
@@ -1403,7 +1412,7 @@ void on_listen_async_resolve(uv_getaddrinfo_t *request, int status,
             continue;
         }
         socket->listening = true;
-        async_complete(op, new_socket_value(std::move(socket)));
+        async_complete(op, new_listener_value(std::move(socket)));
         return;
     }
 

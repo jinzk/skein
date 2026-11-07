@@ -2954,7 +2954,7 @@ count = "three";    // 错误：variable count expects int, got string
 ```
 
 - 类型在运行时的初始化和重新赋值时检查，不做隐式转换；
-- 支持 `any int float number bool string char byte bytes list dict deque heap set function builtin callable null userdata result error task generator`；
+- 支持 `any int float number bool string char byte bytes list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream`；
 - 带类型标注的 `let` 可以省略初始值，使用默认值：
 
 ```text
@@ -2970,7 +2970,7 @@ dict          → {}
 any / null    → null
 ```
 
-- `function`、`builtin`、`callable`、`userdata`、`task`、`generator` 必须提供初始值；
+- `function`、`builtin`、`callable`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream` 必须提供初始值；
 - `const` 也可以带类型，例如 `const x: int = 1;`；
 - 普通类型标注只约束变量绑定，不约束容器内部元素，例如 `let a: list = [0]; a[0] = "x";` 仍允许；
 - `for` 的初始化部分也支持类型标注：`for (let i: int = 0; i < 3; i++)`。
@@ -3034,6 +3034,7 @@ struct Handler {
 - async 函数的类型为 `(参数) -> task[结果]`，例如 `async func fetch(x: int): string` 的类型是 `(int) -> task[string]`；`await task[T]` 推导为 `T`；
 - `task[T]` 可用于变量、参数和返回类型；`std.task.wait` / `std.task.wait_all` 会保留任务结果类型；
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_async` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
+- 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；
 - generator 函数的类型为 `(参数) -> generator[T]`，`T` 由函数体中的 `yield` 表达式合并得到；`for ... in generator[T]` 的元素类型为 `T`；
 - `std.iter.collect` 对 `generator[T]` 返回 `list[T]`，`std.iter.map` / `std.iter.filter` 对 generator 返回新的 generator；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
@@ -3333,7 +3334,7 @@ apply(sqrt, 16)
 ```
 
 - 语法为 `参数名: 类型`，不写类型表示 `any`；
-- 支持 `any`、`int`、`float`、`number`、`bool`、`string`、`bytes`、`list`、`dict`、`function`、`builtin`、`callable`、`null`、`userdata`、`task`、`generator`；
+- 支持 `any`、`int`、`float`、`number`、`bool`、`string`、`bytes`、`list`、`dict`、`function`、`builtin`、`callable`、`null`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`；
 - 调用时做运行时检查，不做隐式转换；
 - 类型错误不会进入函数体；
 - 逻辑运算和比较运算都返回 `bool`。
@@ -3717,7 +3718,7 @@ let result = await c.get("/api");
 - async 方法支持默认参数、可变参数、`defer` 和递归；
 - `self` 是接收者副本；共享 userdata 句柄正常共享，普通字段修改不会回写调用方；
 - enum 方法也支持 `async func`；
-- generator 方法仍然不支持 async generator。
+- async generator 也支持：函数体内可以 `await`，类型仍为 `generator[T]`，`next` / 迭代会驱动等待。
 
 async trait 方法：
 

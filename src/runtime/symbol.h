@@ -32,7 +32,12 @@ enum type_constraint_kind {
     TYPE_VAR,
     /* Static-only wrapper for async task results and generator streams. */
     TYPE_TASK,
-    TYPE_GENERATOR
+    TYPE_GENERATOR,
+    /* Static-only opaque userdata categories. */
+    TYPE_SOCKET,
+    TYPE_LISTENER,
+    TYPE_WEBSOCKET,
+    TYPE_STREAM
 };
 
 struct type_constraint {

@@ -752,7 +752,7 @@ const limit: int = 10;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error task generator
+list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream
 ```
 
 任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`：
@@ -783,7 +783,7 @@ let c: char?;       // 默认 null
 | `any` / `null` | `null` |
 | `T?` | `null` |
 
-`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator` 没有默认值，必须提供初始值。
+`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream` 没有默认值，必须提供初始值。
 
 已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
@@ -960,6 +960,7 @@ struct Handler {
 
 - `task[T]` 可用于变量、参数和返回类型；`std.task.wait` / `std.task.wait_all` 会保留任务结果类型；
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_async` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
+- 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；`std.task.retry` 返回 task，回调结果类型暂不精化；
 - generator 函数的类型为 `(参数) -> generator[T]`，`T` 由函数体中的 `yield` 表达式合并得到：
 
@@ -1465,7 +1466,7 @@ func double(x) -> x * 2;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error task generator
+list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream
 ```
 
 示例：
@@ -1854,7 +1855,7 @@ let result = await c.get("/api");
 - 默认值在 task 开始前求值；
 - `self` 是接收者副本；字段中的 userdata 等共享句柄正常共享，普通字段修改不会自动回写调用方；
 - enum 方法也可以声明为 `async func`；
-- generator 方法仍然不支持 async generator。
+- async generator 也支持：函数体内可以 `await`，类型仍为 `generator[T]`，`next` / 迭代会驱动等待。
 
 async trait 方法：
 

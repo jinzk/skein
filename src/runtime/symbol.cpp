@@ -156,6 +156,10 @@ const builtin_type_name kBuiltinTypeNames[] = {
     {"error", "error", TYPE_ERROR},
     {"task", "task", TYPE_TASK},
     {"generator", "generator", TYPE_GENERATOR},
+    {"socket", "socket", TYPE_SOCKET},
+    {"listener", "listener", TYPE_LISTENER},
+    {"websocket", "websocket", TYPE_WEBSOCKET},
+    {"stream", "stream", TYPE_STREAM},
 };
 
 const builtin_type_name *find_builtin_type_name(const char *name) {
@@ -194,6 +198,14 @@ bool type_constraint_matches(const struct type_constraint *type,
         return true;
     if (type->nullable && value->type == T_null)
         return true;
+
+    const char *userdata_name = NULL;
+    if (value->type == T_userdata) {
+        const struct userdata_value_t *userdata =
+            (const struct userdata_value_t *)value;
+        if (userdata->meta)
+            userdata_name = userdata->meta->name;
+    }
 
     switch (type->kind) {
         case TYPE_ANY:
@@ -242,17 +254,22 @@ bool type_constraint_matches(const struct type_constraint *type,
         case TYPE_NAMED:
             return named_type_matches(type->module, type->name, value);
         case TYPE_TASK:
-            return value->type == T_userdata &&
-                   ((const struct userdata_value_t *)value)->meta &&
-                   std::strcmp(
-                       ((const struct userdata_value_t *)value)->meta->name,
-                       "task") == 0;
+            return userdata_name && std::strcmp(userdata_name, "task") == 0;
         case TYPE_GENERATOR:
+            return userdata_name && std::strcmp(userdata_name, "generator") == 0;
+        case TYPE_SOCKET:
+            return userdata_name &&
+                   (std::strcmp(userdata_name, "tcp_socket") == 0 ||
+                    std::strcmp(userdata_name, "tcp_listener") == 0);
+        case TYPE_LISTENER:
+            return userdata_name &&
+                   std::strcmp(userdata_name, "tcp_listener") == 0;
+        case TYPE_WEBSOCKET:
+            return userdata_name && std::strcmp(userdata_name, "websocket") == 0;
+        case TYPE_STREAM:
             return value->type == T_userdata &&
                    ((const struct userdata_value_t *)value)->meta &&
-                   std::strcmp(
-                       ((const struct userdata_value_t *)value)->meta->name,
-                       "generator") == 0;
+                   ((const struct userdata_value_t *)value)->meta->stream;
         case TYPE_VAR:
             return false;
         case TYPE_INVALID:
@@ -310,6 +327,10 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_ERROR: base = "error"; break;
         case TYPE_TASK: base = "task"; break;
         case TYPE_GENERATOR: base = "generator"; break;
+        case TYPE_SOCKET: base = "socket"; break;
+        case TYPE_LISTENER: base = "listener"; break;
+        case TYPE_WEBSOCKET: base = "websocket"; break;
+        case TYPE_STREAM: base = "stream"; break;
         case TYPE_NAMED:
             base = type->name ? type->name : "invalid";
             break;

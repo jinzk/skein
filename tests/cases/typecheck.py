@@ -777,6 +777,52 @@ def run_cases():
           "let g: generator[int] = parts();\n",
           stderr="type error: expected generator[int], got generator[string]")
 
+    check("async generator",
+          "import std;\n"
+          "async func gen() {\n"
+          "  await std.task.sleep(1);\n"
+          "  yield 1;\n"
+          "  yield 2;\n"
+          "}\n"
+          "let g: generator[int] = gen();\n"
+          "let xs: list[int] = std.iter.collect(g);\n"
+          "println(xs);\n",
+          stdout="[1, 2]", not_stderr="type warning")
+
+    check("async generator awaited values",
+          "import std;\n"
+          "async func fetch(x: int): int { return x * 2; }\n"
+          "async func gen() {\n"
+          "  yield 1;\n"
+          "  yield await fetch(3);\n"
+          "}\n"
+          "let xs: list[int] = std.iter.collect(gen());\n"
+          "println(xs);\n",
+          stdout="[1, 6]", not_stderr="type warning")
+
+    check("opaque userdata types",
+          "import std;\n"
+          "func check() {\n"
+          "  let l: listener = std.net.tcp_listen(\"127.0.0.1\", 0);\n"
+          "  let addr: dict[string, any] = std.net.local_addr(l);\n"
+          "  let s: socket = std.net.tcp_connect(\n"
+          "    \"127.0.0.1\", addr[\"port\"]);\n"
+          "  let st: stream = std.fs.open(\"/tmp/x\", \"w\");\n"
+          "  let buf: stream = std.io.buffered(st, 1024);\n"
+          "  let wt: task[websocket] =\n"
+          "    std.websocket.connect_async(\"ws://x\");\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("opaque userdata mismatch",
+          "import std;\n"
+          "func check() {\n"
+          "  let l: listener = std.net.tcp_listen(\"127.0.0.1\", 0);\n"
+          "  let s: socket = std.net.accept(l);\n"
+          "  let x: listener = s;\n"
+          "}\n",
+          stderr="type error: expected listener, got socket")
+
     check("async builtin task types",
           "import std;\n"
           "func check() {\n"

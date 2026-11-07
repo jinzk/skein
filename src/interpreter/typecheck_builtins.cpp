@@ -783,38 +783,71 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({poly_generator(T)}, bool_type);
 
     const TypeNode *userdata_type = type_builtin(TYPE_USERDATA);
+    const TypeNode *socket_type = type_builtin(TYPE_SOCKET);
+    const TypeNode *listener_type = type_builtin(TYPE_LISTENER);
+    const TypeNode *websocket_type = type_builtin(TYPE_WEBSOCKET);
+    const TypeNode *stream_type = type_builtin(TYPE_STREAM);
     const TypeNode *bytes_type = type_builtin(TYPE_BYTES);
     const TypeNode *null_type = type_builtin(TYPE_NULL);
     const TypeNode *dict_any = poly_dict(text(), any_type());
 
-    if (path == "std.net.tcp_connect_async" ||
-        path == "std.net.tcp_listen_async")
+    if (path == "std.net.tcp_connect_async")
         return poly_builtin(
             {text(), integer_type, integer_type, text()},
-            poly_task(userdata_type), 2);
+            poly_task(socket_type), 2);
+    if (path == "std.net.tcp_listen_async")
+        return poly_builtin(
+            {text(), integer_type, integer_type, text()},
+            poly_task(listener_type), 2);
     if (path == "std.net.accept_async")
-        return poly_builtin({userdata_type, integer_type},
-                            poly_task(userdata_type), 1);
+        return poly_builtin({listener_type, integer_type},
+                            poly_task(socket_type), 1);
     if (path == "std.net.send_async")
-        return poly_builtin({userdata_type, any_type(), integer_type},
+        return poly_builtin({socket_type, any_type(), integer_type},
                             poly_task(integer_type), 1);
     if (path == "std.net.recv_async")
         return poly_builtin(
-            {userdata_type, integer_type, integer_type},
+            {socket_type, integer_type, integer_type},
             poly_task(bytes_type), 1);
     if (path == "std.net.resolve_async")
         return poly_builtin({text(), integer_type, text()},
                             poly_task(poly_list(dict_any)), 2);
     if (path == "std.net.shutdown_async")
-        return poly_builtin({userdata_type, integer_type},
+        return poly_builtin({socket_type, integer_type},
                             poly_task(null_type), 1);
 
+    if (path == "std.net.tcp_connect")
+        return poly_builtin(
+            {text(), integer_type, integer_type, text()}, socket_type, 2);
+    if (path == "std.net.tcp_listen")
+        return poly_builtin(
+            {text(), integer_type, integer_type, text()}, listener_type, 2);
+    if (path == "std.net.accept")
+        return poly_builtin({listener_type, integer_type}, socket_type, 1);
+    if (path == "std.net.send")
+        return poly_builtin({socket_type, any_type(), integer_type},
+                            integer_type, 1);
+    if (path == "std.net.recv")
+        return poly_builtin({socket_type, integer_type, integer_type},
+                            bytes_type, 1);
+    if (path == "std.net.resolve")
+        return poly_builtin({text(), integer_type, text()},
+                            poly_list(dict_any), 2);
+    if (path == "std.net.shutdown")
+        return poly_builtin({socket_type, integer_type}, null_type, 1);
+    if (path == "std.net.local_addr" || path == "std.net.peer_addr")
+        return poly_builtin({socket_type}, dict_any);
+
     if (path == "std.io.read_async")
-        return poly_builtin({userdata_type, integer_type, integer_type},
+        return poly_builtin({stream_type, integer_type, integer_type},
                             poly_task(bytes_type), 1);
     if (path == "std.io.write_async")
-        return poly_builtin({userdata_type, any_type(), integer_type},
+        return poly_builtin({stream_type, any_type(), integer_type},
                             poly_task(integer_type), 1);
+    if (path == "std.io.buffered")
+        return poly_builtin({stream_type, integer_type}, stream_type, 1);
+    if (path == "std.fs.open")
+        return poly_builtin({text(), text()}, stream_type);
 
     if (path == "std.http.request_async")
         return poly_builtin({text(), text(), dict_any},
@@ -842,12 +875,12 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
     if (path == "std.websocket.connect_async")
         return poly_builtin({text(), dict_any},
-                            poly_task(userdata_type), 1);
+                            poly_task(websocket_type), 1);
     if (path == "std.websocket.send_async")
-        return poly_builtin({userdata_type, any_type(), integer_type},
+        return poly_builtin({websocket_type, any_type(), integer_type},
                             poly_task(bool_type), 1);
     if (path == "std.websocket.receive_async")
-        return poly_builtin({userdata_type, integer_type},
+        return poly_builtin({websocket_type, integer_type},
                             poly_task(dict_any), 1);
 
     if (path == "std.dict.len")

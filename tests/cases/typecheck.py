@@ -948,6 +948,52 @@ def run_cases():
           "}\n",
           stderr="type error: expected string, got int")
 
+    check("field path narrowing",
+          "func use_int(v: int) { }\n"
+          "func use_string(v: string) { }\n"
+          "struct Box { value: union[int, string]; }\n"
+          "struct Outer { box: Box; }\n"
+          "func f(b: Box) {\n"
+          "  if (b.value is int) { use_int(b.value); }\n"
+          "  else { use_string(b.value); }\n"
+          "  match (b.value) {\n"
+          "    case is int => use_int(b.value);\n"
+          "    default => use_string(b.value);\n"
+          "  };\n"
+          "}\n"
+          "func g(o: Outer) {\n"
+          "  if (o.box.value is int) { use_int(o.box.value); }\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("field path narrowing mismatch",
+          "func use_string(v: string) { }\n"
+          "struct Box { value: union[int, string]; }\n"
+          "func f(b: Box) {\n"
+          "  if (b.value is int) { use_string(b.value); }\n"
+          "}\n",
+          stderr="type error: expected string, got int")
+
+    check("field path invalidation",
+          "func use_int(v: int) { }\n"
+          "struct Box { value: union[int, string]; }\n"
+          "impl Box { func clear(self) { } }\n"
+          "func f(b: Box) {\n"
+          "  if (b.value is int) {\n"
+          "    b.clear();\n"
+          "    use_int(b.value);\n"
+          "  }\n"
+          "}\n",
+          stderr="type error: expected int, got union[int, string]")
+
+    check("union or negative narrowing",
+          "func use_string(v: string) { }\n"
+          "func f(x: union[int, string]) {\n"
+          "  if (x is int || x is int) { }\n"
+          "  else { use_string(x); }\n"
+          "}\n",
+          not_stderr="type warning")
+
     check("opaque userdata types",
           "import std;\n"
           "func check() {\n"

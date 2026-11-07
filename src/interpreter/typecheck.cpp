@@ -135,6 +135,7 @@ struct Checker : public BuiltinContext {
             positive;
         std::unordered_map<std::string, std::vector<const TypeNode *>>
             negative;
+        std::unordered_map<std::string, const TypeNode *> originals;
     };
 
     static bool simple_name(const struct ast *node, std::string &name) {
@@ -145,6 +146,78 @@ struct Checker : public BuiltinContext {
             return false;
         name = raw;
         return true;
+    }
+
+    static bool narrow_path(const struct ast *node, std::string &path) {
+        if (!node)
+            return false;
+        if (node->nodetype == 'N') {
+            const char *raw = ((const struct symref *)node)->name;
+            if (!raw)
+                return false;
+            path = raw;
+            return true;
+        }
+        if (node->nodetype == 'j')
+            return flatten_path(node, path);
+        return false;
+    }
+
+    static std::string path_root(const std::string &path) {
+        std::size_t dot = path.find('.');
+        return dot == std::string::npos ? path : path.substr(0, dot);
+    }
+
+    static void invalidate_path_facts(Env &env,
+                                      const std::string &path) {
+        for (Env *scope = &env; scope; scope = scope->parent) {
+            auto &paths = scope->narrowed_paths;
+            for (auto it = paths.begin(); it != paths.end();) {
+                const std::string &key = it->first;
+                bool same = key == path;
+                bool child = key.size() > path.size() &&
+                             key.compare(0, path.size(), path) == 0 &&
+                             key[path.size()] == '.';
+                if (same || child)
+                    it = paths.erase(it);
+                else
+                    ++it;
+            }
+        }
+    }
+
+    static void invalidate_root_facts(Env &env,
+                                      const std::string &root) {
+        for (Env *scope = &env; scope; scope = scope->parent) {
+            auto &paths = scope->narrowed_paths;
+            for (auto it = paths.begin(); it != paths.end();) {
+                if (path_root(it->first) == root)
+                    it = paths.erase(it);
+                else
+                    ++it;
+            }
+        }
+    }
+
+    void invalidate_lvalue_facts(struct ast *target, Env &env) {
+        if (!target)
+            return;
+        std::string path;
+        if (narrow_path(target, path)) {
+            invalidate_path_facts(env, path);
+            return;
+        }
+        std::string root;
+        if (simple_name(lvalue_root(target), root))
+            invalidate_root_facts(env, root);
+    }
+
+    void invalidate_method_receiver(struct ast *callee, Env &env) {
+        if (!callee || callee->nodetype != 'j')
+            return;
+        std::string path;
+        if (narrow_path(callee, path))
+            invalidate_root_facts(env, path_root(path));
     }
 
     static const TypeNode *non_null_type(const TypeNode *type) {
@@ -223,34 +296,63 @@ struct Checker : public BuiltinContext {
                              std::vector<const TypeNode *>> &entries,
                          bool include) {
             for (const auto &entry : entries) {
-                const VarInfo *original = source.lookup(entry.first);
-                if (!original || !original->fixed)
+                const std::string &path = entry.first;
+                bool simple = path.find('.') == std::string::npos;
+                const VarInfo *original = source.lookup(path);
+                const TypeNode *type = nullptr;
+                auto original_it = facts.originals.find(path);
+                if (original_it != facts.originals.end())
+                    type = original_it->second;
+                else if (original)
+                    type = original->type;
+                if (!type)
                     continue;
-                const TypeNode *type =
-                    original->type ? original->type : type_any();
+                if (simple && (!original || !original->fixed))
+                    continue;
                 for (const TypeNode *pattern : entry.second)
                     type = include
                                ? narrow_include(type, pattern)
                                : narrow_exclude(type, pattern);
-                target.define(entry.first, type, true);
-                target.vars[entry.first].declared =
-                    original->declared ? original->declared
-                                       : original->type;
+                if (simple) {
+                    target.define(path, type, true);
+                    target.vars[path].declared =
+                        original->declared ? original->declared
+                                           : original->type;
+                } else {
+                    VarInfo info;
+                    info.type = type;
+                    info.declared = original_it != facts.originals.end()
+                                        ? original_it->second
+                                        : (original ? original->type
+                                                    : type_any());
+                    info.fixed = true;
+                    target.narrowed_paths[path] = info;
+                }
             }
         };
         apply(facts.positive, true);
         apply(facts.negative, false);
     }
 
-    static void merge_facts(
-        std::unordered_map<std::string,
-                           std::vector<const TypeNode *>> &target,
-        const std::unordered_map<std::string,
-                                 std::vector<const TypeNode *>> &source) {
-        for (const auto &entry : source) {
-            auto &values = target[entry.first];
-            values.insert(values.end(), entry.second.begin(),
-                          entry.second.end());
+    static void merge_facts(NarrowFacts &target,
+                            const NarrowFacts &source) {
+        auto merge_map = [](
+            std::unordered_map<std::string,
+                               std::vector<const TypeNode *>> &dst,
+            const std::unordered_map<
+                std::string, std::vector<const TypeNode *>> &src) {
+            for (const auto &entry : src) {
+                auto &values = dst[entry.first];
+                values.insert(values.end(), entry.second.begin(),
+                              entry.second.end());
+            }
+        };
+        merge_map(target.positive, source.positive);
+        merge_map(target.negative, source.negative);
+        for (const auto &entry : source.originals) {
+            if (target.originals.find(entry.first) ==
+                target.originals.end())
+                target.originals[entry.first] = entry.second;
         }
     }
 
@@ -260,16 +362,24 @@ struct Checker : public BuiltinContext {
             return true;
         if (cond->nodetype == 'k') {
             const struct is_node *node = (const struct is_node *)cond;
-            std::string name;
-            const VarInfo *info = NULL;
-            if (simple_name(node->value, name))
-                info = env.lookup(name);
-            if (info && info->fixed && node->type) {
+            std::string path;
+            if (narrow_path(node->value, path) && node->type) {
+                bool simple = path.find('.') == std::string::npos;
+                const TypeNode *original = NULL;
+                if (simple) {
+                    const VarInfo *info = env.lookup(path);
+                    if (info && info->fixed)
+                        original = info->type;
+                } else {
+                    original = infer(node->value, env);
+                }
                 const TypeNode *pattern =
                     type_from_constraint(node->type);
-                if (pattern->kind != TYPE_INVALID) {
-                    positive.positive[name].push_back(pattern);
-                    negative.negative[name].push_back(pattern);
+                if (original && pattern->kind != TYPE_INVALID) {
+                    positive.positive[path].push_back(pattern);
+                    negative.negative[path].push_back(pattern);
+                    positive.originals[path] = original;
+                    negative.originals[path] = original;
                 }
             }
             return check_expr(cond, type_any(), env, false, false);
@@ -291,8 +401,8 @@ struct Checker : public BuiltinContext {
             if (!check_condition(cond->r, right_env, right_positive,
                                  right_negative))
                 return false;
-            merge_facts(positive.positive, left_positive.positive);
-            merge_facts(positive.positive, right_positive.positive);
+            merge_facts(positive, left_positive);
+            merge_facts(positive, right_positive);
             /* A false && may come from either side, so narrow nothing. */
             return true;
         }
@@ -310,8 +420,8 @@ struct Checker : public BuiltinContext {
             if (!check_condition(cond->r, right_env, right_positive,
                                  right_negative))
                 return false;
-            merge_facts(negative.negative, left_negative.negative);
-            merge_facts(negative.negative, right_negative.negative);
+            merge_facts(negative, left_negative);
+            merge_facts(negative, right_negative);
             /* A true || may come from either side, so narrow nothing. */
             return true;
         }
@@ -495,6 +605,8 @@ struct Checker : public BuiltinContext {
             const TypeNode *result = type_any();
             if (!check_call(expr, expected, env, result) || error_)
                 return false;
+            invalidate_method_receiver(
+                ((struct ufncall *)expr)->callee, env);
             return warn_or_error(result, expected, expr->line,
                                  expr->column, explicit_cast,
                                  force_element);
@@ -754,6 +866,9 @@ struct Checker : public BuiltinContext {
             ((const struct string_value_t *)field_value)->value;
 
         const TypeNode *receiver = infer(callee->l, env);
+        std::string receiver_path;
+        if (narrow_path(callee->l, receiver_path))
+            invalidate_root_facts(env, path_root(receiver_path));
         FunctionSig sig;
         bool found = false;
         const struct funcdef *method_def = NULL;
@@ -1319,6 +1434,7 @@ struct Checker : public BuiltinContext {
                           bool compound) {
         if (!target)
             return true;
+        invalidate_lvalue_facts(target, env);
         if (target->nodetype == 'N') {
             const char *name = ((struct symref *)target)->name;
             Env *owner = env.owner_of(name ? name : "");
@@ -1876,6 +1992,7 @@ struct Checker : public BuiltinContext {
                 type = self_type;
                 fixed = true;
             }
+            invalidate_root_facts(local, name);
             local.define(name, type, fixed);
             struct ast *pattern = symlist_pattern_ast(item);
             if (pattern)
@@ -2090,6 +2207,7 @@ struct Checker : public BuiltinContext {
                     declared = def->v ? infer(def->v, env) : type_any();
                 }
                 const char *name = def->name ? def->name : "";
+                invalidate_root_facts(env, name ? name : "");
                 env.define(name, declared, fixed);
                 if (def->exported) {
                     env.vars[name].exported = true;
@@ -2122,6 +2240,7 @@ struct Checker : public BuiltinContext {
             }
             case 'U': {
                 struct incdec_node *inc = (struct incdec_node *)stmt;
+                invalidate_lvalue_facts(inc->target, env);
                 const TypeNode *type = type_any();
                 if (!resolve_lvalue(inc->target, env, type))
                     return false;
@@ -2211,13 +2330,21 @@ struct Checker : public BuiltinContext {
                 struct match_node *match = (struct match_node *)stmt;
                 bool fixed = expr_fixed(match->expr, env);
                 const TypeNode *subject = infer(match->expr, env);
-                std::string subject_name;
-                bool named_subject =
-                    simple_name(match->expr, subject_name);
+                std::string subject_path;
+                bool has_subject_path =
+                    narrow_path(match->expr, subject_path);
+                bool simple_subject =
+                    has_subject_path &&
+                    subject_path.find('.') == std::string::npos;
                 const VarInfo *subject_info =
-                    named_subject ? env.lookup(subject_name) : NULL;
-                if (subject_info && !subject_info->fixed)
+                    simple_subject ? env.lookup(subject_path) : NULL;
+                if (simple_subject &&
+                    (!subject_info || !subject_info->fixed)) {
+                    has_subject_path = false;
                     subject_info = NULL;
+                }
+                const TypeNode *subject_original =
+                    subject_info ? subject_info->type : subject;
                 std::vector<const TypeNode *> excluded;
                 for (struct match_arm *arm =
                          (struct match_arm *)match->arms;
@@ -2239,8 +2366,8 @@ struct Checker : public BuiltinContext {
                                 (const struct pattern_node *)inner;
                         }
                     }
-                    if (subject_info) {
-                        const TypeNode *narrowed = subject_info->type;
+                    if (has_subject_path) {
+                        const TypeNode *narrowed = subject_original;
                         for (const TypeNode *pattern : excluded)
                             narrowed =
                                 narrow_exclude(narrowed, pattern);
@@ -2251,12 +2378,20 @@ struct Checker : public BuiltinContext {
                                 narrowed =
                                     narrow_include(narrowed, pattern);
                         }
-                        if (narrowed != subject_info->type) {
-                            child.define(subject_name, narrowed, true);
-                            child.vars[subject_name].declared =
-                                subject_info->declared
-                                    ? subject_info->declared
-                                    : subject_info->type;
+                        if (narrowed != subject_original) {
+                            if (simple_subject) {
+                                child.define(subject_path, narrowed, true);
+                                child.vars[subject_path].declared =
+                                    subject_info->declared
+                                        ? subject_info->declared
+                                        : subject_info->type;
+                            } else {
+                                VarInfo info;
+                                info.type = narrowed;
+                                info.declared = subject_original;
+                                info.fixed = true;
+                                child.narrowed_paths[subject_path] = info;
+                            }
                         }
                     }
                     if (arm->pattern)
@@ -2266,7 +2401,7 @@ struct Checker : public BuiltinContext {
                                     false) ||
                         !check_stmt(arm->body, child))
                         return false;
-                    if (subject_info && type_pattern &&
+                    if (has_subject_path && type_pattern &&
                         type_pattern->type && !arm->guard) {
                         const TypeNode *pattern =
                             type_from_constraint(type_pattern->type);
@@ -2437,6 +2572,10 @@ struct Checker : public BuiltinContext {
                 const TypeNode *base = infer(expr->l, env);
                 std::string path;
                 bool has_path = flatten_path(expr, path);
+                if (has_path) {
+                    if (const VarInfo *fact = env.lookup_path(path))
+                        return fact->type ? fact->type : type_any();
+                }
                 if (base->kind == TYPE_ANY && has_path) {
                     const TypeNode *polymorphic =
                         builtin_polymorphic_type(
@@ -2490,6 +2629,8 @@ struct Checker : public BuiltinContext {
             case 'C': {
                 const TypeNode *result = type_any();
                 check_call(expr, type_any(), env, result);
+                invalidate_method_receiver(
+                    ((struct ufncall *)expr)->callee, env);
                 return result;
             }
             case NODE_CAST: {
@@ -2534,6 +2675,7 @@ struct Checker : public BuiltinContext {
             }
             case 'U': {
                 struct incdec_node *inc = (struct incdec_node *)expr;
+                invalidate_lvalue_facts(inc->target, env);
                 const TypeNode *type = type_any();
                 resolve_lvalue(inc->target, env, type);
                 return type;

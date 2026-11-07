@@ -1028,7 +1028,17 @@ struct Handler {
   }
   ```
 
-  支持 `if (x is T)`、`!`、`&&`、`match` 的 `case is T` 和后续 `default` 分支；暂不支持字段路径 `p.x is T` 和 `||` 的正向收窄。赋值后收窄会回退到声明类型。
+  支持 `if (x is T)`、`!`、`&&`、`match` 的 `case is T` 和后续 `default` 分支；也支持稳定字段路径：
+
+  ```text
+  struct Box { value: union[int, string]; }
+
+  if (b.value is int) {
+    b.value + 1;   // b.value: int
+  }
+  ```
+
+  对字段/变量写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄。赋值后收窄会回退到声明类型。
 - `pair` / `union` 是静态类型：`pair` 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证。
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 

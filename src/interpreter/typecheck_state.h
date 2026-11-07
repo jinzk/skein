@@ -36,6 +36,8 @@ struct StaticTypeInfo {
 struct Env {
     Env *parent = nullptr;
     std::unordered_map<std::string, VarInfo> vars;
+    /* Type facts for stable field paths such as "p.x". */
+    std::unordered_map<std::string, VarInfo> narrowed_paths;
 
     VarInfo *lookup(const std::string &name) {
         for (Env *env = this; env; env = env->parent) {
@@ -50,6 +52,15 @@ struct Env {
         for (const Env *env = this; env; env = env->parent) {
             auto it = env->vars.find(name);
             if (it != env->vars.end())
+                return &it->second;
+        }
+        return nullptr;
+    }
+
+    const VarInfo *lookup_path(const std::string &path) const {
+        for (const Env *env = this; env; env = env->parent) {
+            auto it = env->narrowed_paths.find(path);
+            if (it != env->narrowed_paths.end())
                 return &it->second;
         }
         return nullptr;

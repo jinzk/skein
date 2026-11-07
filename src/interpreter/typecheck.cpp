@@ -21,13 +21,23 @@ namespace {
 
 Mode g_mode = Mode::Warn;
 
+struct VarInfo {
+    const TypeNode *type = nullptr;
+    bool fixed = false;
+    bool exported = false;
+};
+
 std::unordered_map<std::string,
                    std::unordered_map<std::string, std::string>>
     g_import_aliases;
 
 std::unordered_map<std::string,
-                   std::unordered_map<std::string, const TypeNode *>>
+                   std::unordered_map<std::string, VarInfo>>
     g_persistent_bindings;
+
+std::unordered_map<std::string,
+                   std::unordered_map<std::string, VarInfo>>
+    g_exported_types;
 
 const TypeNode *value_static_type(const struct value_t *value) {
     if (!value)
@@ -242,6 +252,23 @@ FunctionSig signature_from_symlist(struct symlist *sl,
     return sig;
 }
 
+struct ast *find_single_return(struct ast *node, int &count) {
+    if (!node)
+        return NULL;
+    if (node->nodetype == 'R') {
+        ++count;
+        return count == 1 ? ((struct fnret *)node)->v : NULL;
+    }
+    if (node->nodetype == 'L') {
+        struct ast *left = find_single_return(node->l, count);
+        struct ast *right = find_single_return(node->r, count);
+        return count == 1 ? (left ? left : right) : NULL;
+    }
+    if (node->nodetype == 'X')
+        return find_single_return(((struct nscope *)node)->ast, count);
+    return NULL;
+}
+
 FunctionSig method_signature_from_code(const struct function_code *code) {
     FunctionSig sig;
     if (!code)
@@ -277,19 +304,40 @@ struct StaticTypeInfo {
 
 struct Env {
     Env *parent = nullptr;
-    std::unordered_map<std::string, const TypeNode *> vars;
+    std::unordered_map<std::string, VarInfo> vars;
 
-    const TypeNode *lookup(const std::string &name) const {
-        for (const Env *env = this; env; env = env->parent) {
+    VarInfo *lookup(const std::string &name) {
+        for (Env *env = this; env; env = env->parent) {
             auto it = env->vars.find(name);
             if (it != env->vars.end())
-                return it->second;
+                return &it->second;
         }
         return nullptr;
     }
 
-    void define(const std::string &name, const TypeNode *type) {
-        vars[name] = type ? type : type_any();
+    const VarInfo *lookup(const std::string &name) const {
+        for (const Env *env = this; env; env = env->parent) {
+            auto it = env->vars.find(name);
+            if (it != env->vars.end())
+                return &it->second;
+        }
+        return nullptr;
+    }
+
+    Env *owner_of(const std::string &name) {
+        for (Env *env = this; env; env = env->parent) {
+            if (env->vars.find(name) != env->vars.end())
+                return env;
+        }
+        return nullptr;
+    }
+
+    void define(const std::string &name, const TypeNode *type,
+                bool fixed = false) {
+        VarInfo info;
+        info.type = type ? type : type_any();
+        info.fixed = fixed;
+        vars[name] = info;
     }
 };
 
@@ -370,8 +418,10 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
     }
     if (actual->nullable)
         return MatchResult::Mismatch;
-    if (actual->kind == TYPE_NULL)
-        return MatchResult::Mismatch;
+    if (actual->kind == TYPE_NULL) {
+        return expected->kind == TYPE_NULL ? MatchResult::Ok
+                                           : MatchResult::Mismatch;
+    }
 
     if (expected->kind == TYPE_NUMBER) {
         if (actual->kind == TYPE_INT || actual->kind == TYPE_FLOAT ||
@@ -455,13 +505,22 @@ struct Checker {
                      const std::string &module_name)
         : source(source_name), module(module_name) {}
 
-    const TypeNode *lookup_name(const std::string &name, Env &env) {
-        if (const TypeNode *type = env.lookup(name))
-            return type;
+    VarInfo lookup_var(const std::string &name, Env &env) {
+        if (const VarInfo *info = env.lookup(name))
+            return *info;
         struct symbol *sym = lookupsym(name.c_str());
-        if (!sym)
-            return type_any();
-        return type_from_constraint(&sym->type);
+        VarInfo info;
+        if (!sym) {
+            info.type = type_any();
+            return info;
+        }
+        info.type = type_from_constraint(&sym->type);
+        info.fixed = sym->type.kind != TYPE_ANY;
+        return info;
+    }
+
+    const TypeNode *lookup_name(const std::string &name, Env &env) {
+        return lookup_var(name, env).type;
     }
 
     bool warn_or_error(const TypeNode *actual, const TypeNode *expected,
@@ -888,7 +947,7 @@ struct Checker {
                 }
             }
             if (found) {
-                if (!check_call_args(sig, args, env))
+                if (!check_call_args(sig, args, env, true))
                     return false;
                 result = sig.result ? sig.result : type_any();
                 return true;
@@ -997,8 +1056,91 @@ struct Checker {
         return false;
     }
 
-    bool expr_has_declared_container(struct ast *expr, Env &env) {
+    bool resolve_namespace_type(const std::string &path,
+                                const TypeNode *&type,
+                                bool *fixed = NULL) {
+        type = NULL;
+        if (fixed)
+            *fixed = false;
+        std::size_t dot = path.find('.');
+        if (dot == std::string::npos)
+            return false;
+        std::string root = path.substr(0, dot);
+        auto source_it = g_import_aliases.find(source);
+        if (source_it == g_import_aliases.end())
+            return false;
+        auto alias_it = source_it->second.find(root);
+        if (alias_it == source_it->second.end())
+            return false;
+
+        std::string module = alias_it->second;
+        std::string rest = path.substr(dot + 1);
+        std::vector<std::string> parts;
+        std::size_t start = 0;
+        while (start <= rest.size()) {
+            std::size_t next = rest.find('.', start);
+            parts.push_back(next == std::string::npos
+                                ? rest.substr(start)
+                                : rest.substr(start, next - start));
+            if (next == std::string::npos)
+                break;
+            start = next + 1;
+        }
+
+        for (std::size_t split = 0; split < parts.size(); ++split) {
+            std::string candidate_module = module;
+            for (std::size_t i = 0; i < split; ++i) {
+                candidate_module += '.';
+                candidate_module += parts[i];
+            }
+            std::string name;
+            for (std::size_t i = split; i < parts.size(); ++i) {
+                if (!name.empty())
+                    name += '.';
+                name += parts[i];
+            }
+            auto module_it = g_exported_types.find(candidate_module);
+            if (module_it == g_exported_types.end())
+                continue;
+            auto name_it = module_it->second.find(name);
+            if (name_it != module_it->second.end() &&
+                name_it->second.type) {
+                type = name_it->second.type;
+                if (fixed)
+                    *fixed = name_it->second.fixed;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool expr_fixed(struct ast *expr, Env &env) {
         if (!expr)
+            return false;
+        if (expr->nodetype == 'N') {
+            const char *name = ((struct symref *)expr)->name;
+            return lookup_var(name ? name : "", env).fixed;
+        }
+        if (expr->nodetype == 'j') {
+            std::string path;
+            const TypeNode *type = NULL;
+            bool fixed = false;
+            if (flatten_path(expr, path) &&
+                resolve_namespace_type(path, type, &fixed))
+                return fixed;
+            return expr_fixed(expr->l, env);
+        }
+        if (expr->nodetype == 'G')
+            return expr_fixed(expr->l, env);
+        if (expr->nodetype == NODE_CAST) {
+            struct cast_node *cast = (struct cast_node *)expr;
+            return needs_static_check(type_from_constraint(cast->type));
+        }
+        return false;
+    }
+
+    bool expr_has_declared_container(struct ast *expr, Env &env) {
+        if (!expr || !expr_fixed(expr, env))
             return false;
         if (expr->nodetype == 'N') {
             const char *name = ((struct symref *)expr)->name;
@@ -1008,7 +1150,74 @@ struct Checker {
             const TypeNode *base = infer(expr->l, env);
             return needs_static_check(field_type(base, expr, env));
         }
+        if (expr->nodetype == NODE_CAST)
+            return true;
         return false;
+    }
+
+    static struct ast *lvalue_root(struct ast *target) {
+        while (target &&
+               (target->nodetype == 'G' || target->nodetype == 'j'))
+            target = target->l;
+        return target;
+    }
+
+    void degrade_inferred_lvalue(struct ast *target, Env &env) {
+        struct ast *root = lvalue_root(target);
+        if (!root || root->nodetype != 'N')
+            return;
+        const char *name = ((struct symref *)root)->name;
+        Env *owner = env.owner_of(name ? name : "");
+        if (!owner)
+            return;
+        auto it = owner->vars.find(name ? name : "");
+        if (it == owner->vars.end() || it->second.fixed)
+            return;
+        const TypeNode *type = it->second.type;
+        int arity = type ? type_container_arity(type->kind) : -1;
+        if (arity > 0) {
+            std::vector<const TypeNode *> args((size_t)arity, type_any());
+            type = type_container(type->kind, args);
+        } else {
+            type = type_any();
+        }
+        it->second.type = type;
+    }
+
+    bool check_assignment(struct ast *target, struct ast *value, Env &env,
+                          bool compound) {
+        if (!target)
+            return true;
+        if (target->nodetype == 'N') {
+            const char *name = ((struct symref *)target)->name;
+            Env *owner = env.owner_of(name ? name : "");
+            VarInfo info = owner
+                               ? owner->vars[name ? name : ""]
+                               : lookup_var(name ? name : "", env);
+            if (info.fixed) {
+                return check_expr(value, info.type, env, false,
+                                  needs_static_check(info.type));
+            }
+            const TypeNode *rhs =
+                value ? infer(value, env) : type_any();
+            if (owner) {
+                VarInfo &assigned = owner->vars[name ? name : ""];
+                assigned.type = owner == &env ? rhs : type_any();
+                assigned.fixed = false;
+                if (assigned.exported && !module.empty())
+                    g_exported_types[module][name ? name : ""] = assigned;
+            }
+            return true;
+        }
+
+        bool fixed = expr_fixed(lvalue_root(target), env);
+        if (fixed)
+            return check_lvalue(target, value, env, compound);
+
+        if (value)
+            infer(value, env);
+        degrade_inferred_lvalue(target, env);
+        return true;
     }
 
     const TypeNode *infer_lambda_result(struct ast *function,
@@ -1020,7 +1229,12 @@ struct Checker {
         check_funcdef(def, env);
         if (def->ret_type)
             return type_from_constraint(def->ret_type);
-        if (!def->ast || def->ast->nodetype != 'R')
+        if (!def->ast)
+            return type_any();
+        int return_count = 0;
+        struct ast *return_expr =
+            find_single_return(def->ast, return_count);
+        if (!return_expr || return_count != 1)
             return type_any();
 
         Env local;
@@ -1040,7 +1254,7 @@ struct Checker {
             if (!item->variadic)
                 first = false;
         }
-        return infer(((struct fnret *)def->ast)->v, local);
+        return infer(return_expr, local);
     }
 
     bool check_builtin(const std::string &path,
@@ -1150,8 +1364,36 @@ struct Checker {
             }
             if (name == "map") {
                 const TypeNode *mapped = type_any();
-                if (args.size() > 1)
-                    mapped = infer_lambda_result(args[1], element, env);
+                if (args.size() > 1) {
+                    struct ast *mapper = args[1];
+                    if (mapper->nodetype == 'Z') {
+                        mapped = infer_lambda_result(mapper, element, env);
+                    } else if (mapper->nodetype == 'N') {
+                        const char *mapper_name =
+                            ((struct symref *)mapper)->name;
+                        auto fit = functions.find(
+                            mapper_name ? mapper_name : "");
+                        if (fit != functions.end()) {
+                            mapped = fit->second.result
+                                         ? fit->second.result
+                                         : type_any();
+                        } else {
+                            struct symbol *sym =
+                                lookupsym(mapper_name
+                                              ? mapper_name
+                                              : "");
+                            if (sym && sym->val &&
+                                sym->val->type == T_func) {
+                                struct func_value_t *fn =
+                                    (struct func_value_t *)sym->val;
+                                if (fn->def && fn->def->code &&
+                                    fn->def->code->ret_type)
+                                    mapped = type_from_constraint(
+                                        fn->def->code->ret_type.get());
+                            }
+                        }
+                    }
+                }
                 result = type_container(TYPE_LIST, {mapped});
                 return true;
             }
@@ -1437,7 +1679,8 @@ struct Checker {
     }
 
     void bind_pattern_types(const struct ast *node,
-                            const TypeNode *value, Env &env) {
+                            const TypeNode *value, Env &env,
+                            bool fixed = false) {
         if (!node)
             return;
         const struct pattern_node *pattern =
@@ -1447,11 +1690,12 @@ struct Checker {
             case NODE_PATTERN_REST:
                 if (pattern->name && *pattern->name &&
                     std::strcmp(pattern->name, "_") != 0)
-                    env.define(pattern->name, value ? value : type_any());
+                    env.define(pattern->name, value ? value : type_any(),
+                               fixed);
                 return;
             case NODE_PATTERN_AS: {
                 if (pattern->items)
-                    bind_pattern_types(pattern->items, value, env);
+                    bind_pattern_types(pattern->items, value, env, fixed);
                 if (pattern->name && *pattern->name &&
                     std::strcmp(pattern->name, "_") != 0) {
                     const struct pattern_node *inner =
@@ -1464,10 +1708,10 @@ struct Checker {
                             match_type(value, type) !=
                                 MatchResult::Mismatch)
                             type = value;
-                        env.define(pattern->name, type);
+                        env.define(pattern->name, type, true);
                     } else {
                         env.define(pattern->name,
-                                   value ? value : type_any());
+                                   value ? value : type_any(), fixed);
                     }
                 }
                 return;
@@ -1485,10 +1729,10 @@ struct Checker {
                      item; item = (const struct pattern_node *)item->next) {
                     if (item->nodetype == NODE_PATTERN_REST)
                         bind_pattern_types((const struct ast *)item, rest,
-                                           env);
+                                           env, fixed);
                     else
                         bind_pattern_types((const struct ast *)item, element,
-                                           env);
+                                           env, fixed);
                 }
                 return;
             }
@@ -1555,9 +1799,9 @@ struct Checker {
                                     field_type = fit->second;
                             }
                             bind_pattern_types(field->pattern, field_type,
-                                               env);
+                                               env, fixed);
                         } else if (field->rest_name) {
-                            env.define(field->rest_name, type_any());
+                            env.define(field->rest_name, type_any(), fixed);
                         }
                     }
                     break;
@@ -1574,9 +1818,10 @@ struct Checker {
                 for (struct pattern_field *field = pattern->fields; field;
                      field = field->next) {
                     if (field->pattern)
-                        bind_pattern_types(field->pattern, field_type, env);
+                        bind_pattern_types(field->pattern, field_type, env,
+                                           fixed);
                     else if (field->rest_name)
-                        env.define(field->rest_name, rest_type);
+                        env.define(field->rest_name, rest_type, fixed);
                 }
                 return;
             }
@@ -1584,7 +1829,8 @@ struct Checker {
                 for (const struct pattern_node *item =
                          (const struct pattern_node *)pattern->items;
                      item; item = (const struct pattern_node *)item->next)
-                    bind_pattern_types((const struct ast *)item, value, env);
+                    bind_pattern_types((const struct ast *)item, value, env,
+                                       fixed);
                 return;
             case NODE_PATTERN_TYPE:
             case NODE_PATTERN_LITERAL:
@@ -1712,12 +1958,15 @@ struct Checker {
             const TypeNode *type = type_from_constraint(item->type);
             if (item->variadic)
                 type = type_container(TYPE_LIST, {type});
-            if (self_type && std::string(name) == "self")
+            bool fixed = item->type != NULL;
+            if (self_type && std::string(name) == "self") {
                 type = self_type;
-            local.define(name, type);
+                fixed = true;
+            }
+            local.define(name, type, fixed);
             struct ast *pattern = symlist_pattern_ast(item);
             if (pattern)
-                bind_pattern_types(pattern, type, local);
+                bind_pattern_types(pattern, type, local, fixed);
         }
 
         return_types.push_back(def->ret_type
@@ -1844,38 +2093,48 @@ struct Checker {
         switch (stmt->nodetype) {
             case 'D': {
                 struct symdef *def = (struct symdef *)stmt;
-                const TypeNode *declared =
-                    def->type ? type_from_constraint(def->type)
-                              : type_any();
-                if (def->v && def->type) {
-                    if (!check_expr(def->v, declared, env, false,
+                const TypeNode *declared = type_any();
+                bool fixed = false;
+                if (def->type) {
+                    declared = type_from_constraint(def->type);
+                    fixed = true;
+                    if (def->v &&
+                        !check_expr(def->v, declared, env, false,
                                     needs_static_check(declared)))
                         return false;
-                } else if (def->v) {
-                    infer(def->v, env);
+                } else {
+                    declared = def->v ? infer(def->v, env) : type_any();
                 }
-                env.define(def->name ? def->name : "", declared);
+                const char *name = def->name ? def->name : "";
+                env.define(name, declared, fixed);
+                if (def->exported) {
+                    env.vars[name].exported = true;
+                    if (!module.empty()) {
+                        VarInfo info;
+                        info.type = declared;
+                        info.fixed = fixed;
+                        info.exported = true;
+                        g_exported_types[module][name] = info;
+                    }
+                }
                 return true;
             }
             case NODE_DESTRUCTURE: {
                 struct destructure_node *d =
                     (struct destructure_node *)stmt;
+                bool fixed = expr_fixed(d->value, env);
                 const TypeNode *value_type = infer(d->value, env);
-                bind_pattern_types(d->pattern, value_type, env);
+                bind_pattern_types(d->pattern, value_type, env, fixed);
                 return true;
             }
             case '=': {
                 struct symasgn *asgn = (struct symasgn *)stmt;
-                if (!check_lvalue(asgn->target, asgn->v, env, false))
-                    return false;
-                return true;
+                return check_assignment(asgn->target, asgn->v, env, false);
             }
             case 'a': {
                 struct compound_asgn *asgn =
                     (struct compound_asgn *)stmt;
-                if (!check_lvalue(asgn->target, asgn->v, env, true))
-                    return false;
-                return true;
+                return check_assignment(asgn->target, asgn->v, env, true);
             }
             case 'U': {
                 struct incdec_node *inc = (struct incdec_node *)stmt;
@@ -1933,14 +2192,15 @@ struct Checker {
             }
             case 'F': {
                 struct forinloop *f = (struct forinloop *)stmt;
+                bool fixed = expr_fixed(f->iterable, env);
                 const TypeNode *iterable = infer(f->iterable, env);
                 Env child;
                 child.parent = &env;
                 child.define(f->name ? f->name : "",
-                             iterable_element(iterable, false));
+                             iterable_element(iterable, false), fixed);
                 if (f->value_name)
                     child.define(f->value_name,
-                                 iterable_element(iterable, true));
+                                 iterable_element(iterable, true), fixed);
                 return check_stmt(f->body, child);
             }
             case 'S': {
@@ -1958,6 +2218,7 @@ struct Checker {
             }
             case NODE_MATCH: {
                 struct match_node *match = (struct match_node *)stmt;
+                bool fixed = expr_fixed(match->expr, env);
                 const TypeNode *subject = infer(match->expr, env);
                 for (struct match_arm *arm =
                          (struct match_arm *)match->arms;
@@ -1965,7 +2226,8 @@ struct Checker {
                     Env child;
                     child.parent = &env;
                     if (arm->pattern)
-                        bind_pattern_types(arm->pattern, subject, child);
+                        bind_pattern_types(arm->pattern, subject, child,
+                                           fixed);
                     if (!check_expr(arm->guard, type_any(), child, false,
                                     false) ||
                         !check_stmt(arm->body, child))
@@ -1996,14 +2258,10 @@ struct Checker {
             case 'J': {
                 struct import_node *imp = (struct import_node *)stmt;
                 std::string path = imp->path ? imp->path : "";
-                if (path.rfind("std", 0) == 0 &&
-                    (path.size() == 3 || path[3] == '.')) {
-                    std::string alias =
-                        imp->alias ? imp->alias
-                                   : last_path_component(path);
-                    if (!alias.empty())
-                        g_import_aliases[source][alias] = path;
-                }
+                std::string alias =
+                    imp->alias ? imp->alias : last_path_component(path);
+                if (!alias.empty())
+                    g_import_aliases[source][alias] = path;
                 return true;
             }
             case 'o': {
@@ -2083,7 +2341,11 @@ struct Checker {
                 const TypeNode *base = infer(expr->l, env);
                 if (base->kind == TYPE_ANY) {
                     std::string path;
+                    const TypeNode *exported = NULL;
                     struct value_t *value = NULL;
+                    if (flatten_path(expr, path) &&
+                        resolve_namespace_type(path, exported))
+                        return exported;
                     if (flatten_path(expr, path) &&
                         resolve_namespace_value(path, value))
                         return value_static_type(value);
@@ -2124,13 +2386,13 @@ struct Checker {
             }
             case '=': {
                 struct symasgn *asgn = (struct symasgn *)expr;
-                check_lvalue(asgn->target, asgn->v, env, false);
+                check_assignment(asgn->target, asgn->v, env, false);
                 return infer(asgn->v, env);
             }
             case 'a': {
                 struct compound_asgn *asgn =
                     (struct compound_asgn *)expr;
-                check_lvalue(asgn->target, asgn->v, env, true);
+                check_assignment(asgn->target, asgn->v, env, true);
                 return infer(asgn->target, env);
             }
             case 'U': {

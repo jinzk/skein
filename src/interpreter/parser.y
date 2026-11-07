@@ -1490,24 +1490,24 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                         copy_text(diag_current_source_name().c_str()),
                         $3, NULL);
       }
-    | funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc(NULL, $3, NULL, false, false, finish_function()); }
-    | funcstart '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc(NULL, $3, $6, false, false, finish_function()); }
-    | funcstart '(' symlist ')' RARROW exp
-                                           { $$ = newfunc(NULL, $3, newret($6), false, false, finish_function()); }
-    | ASYNC funcstart '(' symlist ')' '{' EMPTY_BLOCK_CLOSE
+    | funcstart '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           { $$ = newfunc(NULL, $3, NULL, false, false, finish_function(), $5); }
+    | funcstart '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newfunc(NULL, $3, $7, false, false, finish_function(), $5); }
+    | funcstart '(' symlist ')' func_ret_opt RARROW exp
+                                           { $$ = newfunc(NULL, $3, newret($7), false, false, finish_function(), $5); }
+    | ASYNC funcstart '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $4, NULL,
                                                           false, true,
-                                                          finish_function()); }
-    | ASYNC funcstart '(' symlist ')' '{' list '}'
-                                           { $$ = newfunc(NULL, $4, $7,
+                                                          finish_function(), $6); }
+    | ASYNC funcstart '(' symlist ')' func_ret_opt '{' list '}'
+                                           { $$ = newfunc(NULL, $4, $8,
                                                           false, true,
-                                                          finish_function()); }
-    | ASYNC funcstart '(' symlist ')' RARROW exp
-                                           { $$ = newfunc(NULL, $4, newret($7),
+                                                          finish_function(), $6); }
+    | ASYNC funcstart '(' symlist ')' func_ret_opt RARROW exp
+                                           { $$ = newfunc(NULL, $4, newret($8),
                                                           false, true,
-                                                          finish_function()); }
+                                                          finish_function(), $6); }
     | value
     ;
 

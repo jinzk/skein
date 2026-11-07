@@ -122,31 +122,65 @@ def run_cases():
           stdout_all=["[1, null]"])
 
     check("generic implicit any warning",
-          "let raw = [1];\n"
-          "let xs: list[int] = raw;\n"
+          "func raw() { return [1]; }\n"
+          "let xs: list[int] = raw();\n"
           "println(xs);\n",
           stderr="type warning: implicit any assigned to list[int]",
           env=WARN_ENV)
 
     check("generic as suppresses warning",
-          "let raw = [1];\n"
-          "let xs: list[int] = raw as list[int];\n"
+          "func raw() { return [1]; }\n"
+          "let xs: list[int] = raw() as list[int];\n"
           "println(xs);\n",
           not_stderr="type warning",
           env=WARN_ENV)
 
     check("generic strict rejects implicit any",
-          "let raw = [1];\n"
-          "let xs: list[int] = raw;\n",
+          "func raw() { return [1]; }\n"
+          "let xs: list[int] = raw();\n",
           stderr="type error: implicit any assigned to list[int]",
           env=STRICT_ENV)
 
     check("generic loose suppresses any warning",
-          "let raw = [1];\n"
-          "let xs: list[int] = raw;\n"
+          "func raw() { return [1]; }\n"
+          "let xs: list[int] = raw();\n"
           "println(xs);\n",
           not_stderr="type warning",
           env=LOOSE_ENV)
+
+    check("unannotated let infers container type",
+          "let raw = [1, 2];\n"
+          "let xs: list[int] = raw;\n"
+          "println(xs);\n",
+          not_stderr="type warning")
+
+    check("unannotated container mutation stays dynamic",
+          "let xs = [1];\n"
+          'xs[0] = "a";\n'
+          "println(xs);\n",
+          not_stderr="type error")
+
+    check("unannotated method receiver is checked",
+          "struct Box { xs: list[int]; }\n"
+          "impl Box {\n"
+          "  func add(self, x: int): list[int] { return self.xs + [x]; }\n"
+          "}\n"
+          "let b = Box { xs: [1] };\n"
+          'b.add("a");\n',
+          stderr="type error: expected int, got string")
+
+    check("anonymous function return annotation",
+          "let make = func(x: int): list[int] -> [x];\n"
+          "let xs: list[int] = make(2);\n"
+          'xs[0] = "a";\n',
+          stderr="type error: expected int, got string")
+
+    check("map infers single-return block lambda",
+          "import std;\n"
+          "let xs: list[int] = [1];\n"
+          "let ys: list[int] = std.list.map(xs, func(x) { return x * 2; });\n"
+          'ys[0] = "a";\n',
+          stderr="type error: expected int, got string")
 
     check("generic loose still reports concrete errors",
           'let xs: list[int] = [1, "a"];\n',
@@ -236,15 +270,15 @@ def run_cases():
           stderr="type error: expected int, got string")
 
     check("return annotation any warning",
-          "let raw = [1];\n"
-          "func numbers(): list[int] { return raw; }\n"
+          "func raw() { return [1]; }\n"
+          "func numbers(): list[int] { return raw(); }\n"
           "println(numbers());\n",
           stderr="type warning: implicit any assigned to list[int]",
           env=WARN_ENV)
 
     check("return annotation as suppresses warning",
-          "let raw = [1];\n"
-          "func numbers(): list[int] { return raw as list[int]; }\n"
+          "func raw() { return [1]; }\n"
+          "func numbers(): list[int] { return raw() as list[int]; }\n"
           "println(numbers());\n",
           not_stderr="type warning",
           env=WARN_ENV)
@@ -260,6 +294,11 @@ def run_cases():
           "func get_fn(): callable { return sqrt; }\n"
           "println(get_fn()(9));\n",
           stdout_all=["3"])
+
+    check("function call scalar argument check",
+          "func f(x: int) { return x; }\n"
+          'f("a");\n',
+          stderr="type error: expected int, got string")
 
     check("method call argument check",
           "struct Box { xs: list[int]; }\n"
@@ -350,6 +389,8 @@ def run_cases():
                 "    }\n"
                 "  }\n"
                 "  export func make_p(): P { return P { xs: [1] }; }\n"
+                "  export let nums: list[int] = [1, 2];\n"
+                "  export let nums2 = [3, 4];\n"
                 "}\n")
         main = os.path.join(tmp, "app", "main.skein")
         with open(main, "w", encoding="utf-8") as f:
@@ -373,6 +414,33 @@ def run_cases():
             f.write(
                 "import aa;\n"
                 "let p: aa.P = aa.make_p();\n"
+                'p.add("x");\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                "let ys: list[int] = aa.nums;\n"
+                'ys[0] = "a";\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                "let ys: list[int] = aa.nums2;\n"
+                'ys[0] = "a";\n')
+        proc = run_file(main)
+        assert proc.returncode == 1, proc.stderr
+        assert "type error: expected int, got string" in proc.stderr, proc.stderr
+
+        with open(main, "w", encoding="utf-8") as f:
+            f.write(
+                "import aa;\n"
+                "let p = aa.make_p();\n"
                 'p.add("x");\n')
         proc = run_file(main)
         assert proc.returncode == 1, proc.stderr

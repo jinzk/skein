@@ -2070,7 +2070,7 @@ def run_cases():
           stderr="function f expects at least 1 argument(s), got 0")
     check("variadic element type",
           'func f(...rest: number) { return len(rest); }\nf(1, "x")\n',
-          stderr="function f rest argument 2 expects number, got string")
+          stderr="type error: expected number, got string")
     check("variadic must be last",
           "func f(...xs, y) { return y; }\n",
           stderr="variadic parameter must be last")
@@ -2155,7 +2155,7 @@ def run_cases():
           "func f(x: int) { return x + 1; }\nf(2)\n", stdout="= 3")
     check("typed parameter error",
           'func f(x: int) { return x; }\nf("x")\n',
-          stderr="argument 1 (x) expects int, got string")
+          stderr="type error: expected int, got string")
     check("untyped parameter",
           'func f(x) { return x; }\nf("x")\n', stdout="= x")
     check("multiple typed parameters",
@@ -2164,13 +2164,13 @@ def run_cases():
           stdout="= 2.5")
     check("typed number rejects string",
           'func g(b: number) { return b; }\ng("x")\n',
-          stderr="expects number, got string")
+          stderr="type error: expected number, got string")
     check("typed bool",
           "func h(x: bool) { return x; }\nh(true)\nh(false)\n",
           stdout_all=["= true", "= false"])
     check("typed bool rejects int",
           "func h(x: bool) { return x; }\nh(1)\n",
-          stderr="expects bool, got int")
+          stderr="type error: expected bool, got int")
     check("typed bool accepts comparison",
           "func h(x: bool) { return x; }\nh(1 == 1)\n",
           stdout="= true")
@@ -2201,14 +2201,14 @@ def run_cases():
           stdout="= 4.0")
     check("typed callable rejects int",
           "func apply(fn: callable) { return fn; }\napply(1)\n",
-          stderr="expects callable, got int")
+          stderr="type error: expected callable, got int")
     check("typed function rejects builtin",
           "func apply(fn: function) { return fn; }\napply(sqrt)\n",
-          stderr="expects function, got builtin")
+          stderr="type error: expected function, got builtin")
     check("typed builtin rejects function",
           "func apply(fn: builtin) { return fn; }\n"
           "let f = func() { return 1; };\napply(f)\n",
-          stderr="expects builtin, got function")
+          stderr="type error: expected builtin, got function")
     check("typed any",
           "func f(x: any) { return x; }\nf(true)\n", stdout="= true")
     check("typed null",
@@ -2216,7 +2216,7 @@ def run_cases():
           stdout="null")
     check("typed null rejects int",
           "func f(x: null) { return x; }\nf(1)\n",
-          stderr="expects null, got int")
+          stderr="type error: expected null, got int")
     check("typed number accepts int and float",
           "func f(x: number) { return x; }\nf(1)\nf(1.5)\n",
           stdout_all=["= 1", "= 1.5"])
@@ -2233,7 +2233,7 @@ def run_cases():
           "func f(x: int) { hits = hits + 1; }\n"
           'f("bad");\nhits\n',
           stdout="= 0",
-          stderr="expects int, got string")
+          stderr="type error: expected int, got string")
     check("unknown type name",
           "func f(x: nope) { return x; }\n",
           stderr="unknown type name nope")
@@ -2528,7 +2528,7 @@ def run_cases():
           "impl Point { func draw(self) { print(\"point\"); } }\n"
           "func render(x: Drawable) { x.draw(); }\n"
           "render(Point { x: 1 });\n",
-          stderr="expects Drawable, got Point")
+          stderr="type error: expected Drawable, got Point")
     check("trait typed variable",
           "trait Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"

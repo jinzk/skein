@@ -252,6 +252,7 @@ endif()
 # links only bytecode/value runtime.
 add_library(skein_vm STATIC
   src/interpreter/vm.cpp
+  src/interpreter/vm_gc_roots.cpp
   src/interpreter/vm_host.cpp
 )
 set_target_properties(skein_vm PROPERTIES POSITION_INDEPENDENT_CODE ON)

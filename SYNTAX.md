@@ -815,7 +815,7 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
-- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`union[A, B]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
 - 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
@@ -1006,14 +1006,15 @@ struct Handler {
   let e: generator[pair[int, int]] = std.iter.enumerate([10]);
   ```
 
-- `union[A, B]` 表示两个类型之一：
+- `union[A, B]` 表示成员之一，支持两个以上平铺成员：
 
   ```text
-  let x: union[int, string] = 1;
+  let x: union[int, string, bool] = 1;
   x = "a";
+  x = true;
 
-  let xs = [1, "a"];   // list[union[int, string]]
-  let ys: list[union[int, string]] = xs;
+  let xs = [1, "a", true];   // list[union[int, string, bool]]
+  let ys: list[union[int, string, bool]] = xs;
   ```
 
   union 按成员进行赋值/参数检查，并支持常见控制流收窄：

@@ -2989,7 +2989,7 @@ let ys = raw as list[int];          // 显式信任边界
 let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 ```
 
-- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `union[A, B]`，支持嵌套和可空形式；
+- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `union[A, B, ...]`，支持嵌套和可空形式；
 - 只支持内建容器的类型参数，不支持 `struct Box<T>`、`func f<T>`、泛型 trait 或类型别名；
 - 用户类型可以作为参数，例如 `list[Point]`；`list` 仍然表示无元素约束；
 - 检查初始化（字面量、`from_list`、构造字段、函数参数、默认值）和插入（下标赋值、`append`、`+=`、`set.add`、`push`、`merge`）；
@@ -3041,7 +3041,7 @@ struct Handler {
 - `for ... in generator[T]` 的元素类型为 `T`；
 - `std.iter.collect` 对 `generator[T]` 返回 `list[T]`，`std.iter.map` / `std.iter.filter` 对 generator 返回新的 generator；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
 - `pair[A, B]` 表示二元异构结构，`p[0]` / `p[1]` 分别得到 `A` / `B`；`zip`、`dict.items`、`iter.enumerate` 使用 pair；
-- `union[A, B]` 表示 `A` 或 `B` 之一；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；
+- `union[A, B]` 表示成员之一，支持平铺多个成员，例如 `union[int, string, bool]`；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；
 - union 支持常见控制流收窄：`if (x is T)` 的 then/else、`!`、`&&`、`match` 的 `case is T` 以及后续 `default` 分支；
 - 支持稳定字段路径收窄，例如 `if (b.value is int) { b.value + 1; }`，包括嵌套字段；
 - 对字段/变量的写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄；

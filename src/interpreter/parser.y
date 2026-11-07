@@ -648,6 +648,22 @@ static void free_type_list(struct parsed_type_list *list) {
     }
 }
 
+static struct type_constraint *make_generic_type_list(
+    struct type_constraint *base, struct parsed_type_list *list) {
+    std::vector<struct type_constraint *> args;
+    for (struct parsed_type_list *item = list; item; item = item->next)
+        args.push_back(item->type);
+    struct type_constraint *type =
+        skein::typecheck::type_apply_generic_list(base, args);
+    /* type_apply_generic_list takes ownership of the constraint nodes. */
+    while (list) {
+        struct parsed_type_list *next = list->next;
+        std::free(list);
+        list = next;
+    }
+    return type;
+}
+
 static struct type_constraint *make_function_type(
     struct parsed_type_list *params, struct type_constraint *result) {
     std::vector<struct type_constraint *> types;
@@ -1857,6 +1873,10 @@ type: type_name %prec AS                  { $$ = $1; }
       }
     | type_name '[' type ',' type ']'     {
         $$ = make_generic_type($1, $3, $5);
+      }
+    | type_name '[' type ',' type ',' type_list ']' {
+        $$ = make_generic_type_list(
+            $1, new_type_list($3, new_type_list($5, $7)));
       }
     | '(' type_list ')' RARROW type       {
         $$ = make_function_type($2, $5);

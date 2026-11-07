@@ -994,6 +994,33 @@ def run_cases():
           "}\n",
           not_stderr="type warning")
 
+    check("flat union three members",
+          "import std;\n"
+          "let x: union[int, string, bool] = 1;\n"
+          "x = \"a\";\n"
+          "x = true;\n"
+          "let xs = [1, \"a\", true];\n"
+          "let ys: list[union[int, string, bool]] = xs;\n"
+          "let z: union[int, string, bool, null] = null;\n"
+          "println(ys); println(z);\n",
+          stdout_all=["[1, a, true]", "null"], not_stderr="type warning")
+
+    check("flat union narrowing",
+          "func use_sb(v: union[string, bool]) { }\n"
+          "func f(x: union[int, string, bool]) {\n"
+          "  if (x is int) { }\n"
+          "  else { use_sb(x); }\n"
+          "  match (x) {\n"
+          "    case is int => 0;\n"
+          "    default => use_sb(x);\n"
+          "  };\n"
+          "}\n",
+          not_stderr="type warning")
+
+    check("flat pair arity rejected",
+          "let p: pair[int, string, bool] = [1, \"a\", true];\n",
+          stderr="type error: type pair expects 2 type argument(s)")
+
     check("opaque userdata types",
           "import std;\n"
           "func check() {\n"

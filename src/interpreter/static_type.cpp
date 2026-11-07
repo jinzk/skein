@@ -4,6 +4,7 @@
 #include "runtime_state.h"
 
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
@@ -403,6 +404,79 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
     free_type_constraint(arg2);
 
     const TypeNode *node = type_container(base->kind, args, base->nullable);
+    base->display = node->display.c_str();
+    base->detail = node;
+    return base;
+}
+
+struct type_constraint *type_apply_generic_list(
+    struct type_constraint *base,
+    const std::vector<struct type_constraint *> &args) {
+    if (!base) {
+        for (struct type_constraint *arg : args)
+            free_type_constraint(arg);
+        return NULL;
+    }
+
+    if (base->kind == TYPE_UNION) {
+        if (args.size() < 2) {
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "type union expects at least 2 type argument(s)");
+            diag_report(g_token_line, g_token_column, "type error", message);
+            g_statement_invalid = true;
+            for (struct type_constraint *arg : args)
+                free_type_constraint(arg);
+            return base;
+        }
+        std::vector<const TypeNode *> members;
+        std::function<void(const TypeNode *)> append =
+            [&](const TypeNode *type) {
+                if (type && type->kind == TYPE_UNION) {
+                    for (const TypeNode *member : type->args)
+                        append(member);
+                    return;
+                }
+                members.push_back(type ? type : type_any());
+            };
+        for (struct type_constraint *arg : args)
+            append(type_from_constraint(arg));
+        for (struct type_constraint *arg : args)
+            free_type_constraint(arg);
+        const TypeNode *node =
+            type_container(TYPE_UNION, members, base->nullable);
+        base->display = node->display.c_str();
+        base->detail = node;
+        return base;
+    }
+
+    int arity = type_container_arity(base->kind);
+    if (arity < 0 || args.size() != static_cast<std::size_t>(arity)) {
+        char message[256];
+        if (arity < 0) {
+            std::snprintf(message, sizeof(message),
+                          "type %s does not accept type arguments",
+                          type_constraint_name(base));
+        } else {
+            std::snprintf(message, sizeof(message),
+                          "type %s expects %d type argument(s)",
+                          type_constraint_name(base), arity);
+        }
+        diag_report(g_token_line, g_token_column, "type error", message);
+        g_statement_invalid = true;
+        for (struct type_constraint *arg : args)
+            free_type_constraint(arg);
+        return base;
+    }
+
+    std::vector<const TypeNode *> members;
+    members.reserve(args.size());
+    for (struct type_constraint *arg : args)
+        members.push_back(type_from_constraint(arg));
+    for (struct type_constraint *arg : args)
+        free_type_constraint(arg);
+    const TypeNode *node =
+        type_container(base->kind, members, base->nullable);
     base->display = node->display.c_str();
     base->detail = node;
     return base;

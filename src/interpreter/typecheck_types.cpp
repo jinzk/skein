@@ -69,7 +69,8 @@ const TypeNode *value_static_type(const struct value_t *value) {
             if (name && std::strcmp(name, "task") == 0)
                 return type_container(TYPE_TASK, {type_any()});
             if (name && std::strcmp(name, "generator") == 0)
-                return type_container(TYPE_GENERATOR, {type_any()});
+                return type_container(TYPE_GENERATOR,
+                                      {type_any(), type_any()});
             if (name && std::strcmp(name, "tcp_socket") == 0)
                 return type_builtin(TYPE_SOCKET);
             if (name && std::strcmp(name, "tcp_listener") == 0)
@@ -314,8 +315,13 @@ FunctionSig signature_from_symlist(struct symlist *sl, bool skip_self) {
 
 const TypeNode *signature_result_type(const FunctionSig &sig) {
     const TypeNode *result = sig.result ? sig.result : type_any();
-    if (sig.is_generator)
-        return type_container(TYPE_GENERATOR, {result});
+    if (sig.is_generator) {
+        if (result->kind == TYPE_GENERATOR)
+            return result;
+        return type_container(
+            TYPE_GENERATOR,
+            {result, sig.generator_send ? sig.generator_send : type_any()});
+    }
     if (sig.is_async)
         return type_container(TYPE_TASK, {result});
     return result;

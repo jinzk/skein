@@ -73,11 +73,19 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             args.empty() ? type_any() : context.infer(args[0], env);
         if (actual->kind == TYPE_GENERATOR) {
             const TypeNode *element = type_element(actual, 0);
-            if (path == "std.generator.next")
+            if (path == "std.generator.next") {
+                if (args.size() > 1) {
+                    const TypeNode *send = type_element(actual, 1);
+                    if (!type_is_any(send) &&
+                        !context.check_expr(args[1], send, env, false,
+                                            true))
+                        return true;
+                }
                 result = type_container(
                     TYPE_DICT, {type_builtin(TYPE_STRING), element});
-            else
+            } else {
                 result = type_builtin(TYPE_BOOL);
+            }
         } else {
             /* Keep unknown/null generator values gradual. */
             result = type_any();
@@ -90,14 +98,14 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                                       ? type_any()
                                       : context.infer_iterable_element(
                                             args[0], false, env);
-        result = type_container(TYPE_GENERATOR, {element});
+        result = type_container(TYPE_GENERATOR, {element, type_any()});
         return true;
     }
 
     if (path == "std.iter.enumerate") {
         result = type_container(
             TYPE_GENERATOR,
-            {type_container(TYPE_LIST, {type_any()})});
+            {type_container(TYPE_LIST, {type_any()}), type_any()});
         return true;
     }
 
@@ -139,7 +147,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                 }
             }
         }
-        result = type_container(TYPE_GENERATOR, {mapped});
+        result = type_container(TYPE_GENERATOR, {mapped, type_any()});
         return true;
     }
 
@@ -620,8 +628,11 @@ const TypeNode *poly_task(const TypeNode *result) {
     return type_container(TYPE_TASK, {result});
 }
 
-const TypeNode *poly_generator(const TypeNode *element) {
-    return type_container(TYPE_GENERATOR, {element});
+const TypeNode *poly_generator(const TypeNode *element,
+                               const TypeNode *send = nullptr) {
+    return type_container(
+        TYPE_GENERATOR,
+        {element, send ? send : static_cast<const TypeNode *>(type_any())});
 }
 
 const TypeNode *poly_builtin(
@@ -776,7 +787,7 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
     if (path == "std.generator.next")
         return poly_builtin(
-            {poly_generator(T), any_type()},
+            {poly_generator(T, U), U},
             poly_dict(text(), T), 1);
     if (path == "std.generator.done" ||
         path == "std.generator.close")

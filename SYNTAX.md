@@ -815,7 +815,7 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
-- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
 - 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
@@ -976,6 +976,18 @@ struct Handler {
   ```
 
   `for ... in generator[T]` 的元素类型为 `T`；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
+  发送值类型可以写成 `generator[T, S]`，也可以由函数返回注解或 `let x: S = yield ...` 推断：
+
+  ```text
+  func echo() {
+    let x: string = yield "a";
+    yield x + "!";
+  }
+  // echo: () -> generator[string, string]
+
+  std.generator.next(echo(), "hi");
+  std.generator.next(echo(), 1);   // 错误：期望 string
+  ```
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 
   ```text

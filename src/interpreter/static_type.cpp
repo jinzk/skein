@@ -132,7 +132,12 @@ std::string node_display(enum type_constraint_kind kind,
     } else if (type_container_arity(kind) > 0 && !args.empty()) {
         text = builtin_kind_name(kind);
         text += '[';
-        for (std::size_t i = 0; i < args.size(); ++i) {
+        std::size_t count =
+            (kind == TYPE_GENERATOR && args.size() == 2 &&
+             type_is_any(args[1]))
+                ? 1
+                : args.size();
+        for (std::size_t i = 0; i < count; ++i) {
             if (i != 0) text += ", ";
             text += args[i] ? args[i]->display : "any";
         }
@@ -244,10 +249,11 @@ int type_container_arity(enum type_constraint_kind kind) {
         case TYPE_DEQUE:
         case TYPE_HEAP:
         case TYPE_TASK:
-        case TYPE_GENERATOR:
             return 1;
         case TYPE_DICT:
         case TYPE_RESULT:
+            return 2;
+        case TYPE_GENERATOR:
             return 2;
         default:
             return -1;
@@ -335,6 +341,29 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
         free_type_constraint(arg1);
         free_type_constraint(arg2);
         return NULL;
+    }
+
+    if (base->kind == TYPE_GENERATOR) {
+        if (!arg1) {
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "type generator expects 1 or 2 type argument(s)");
+            diag_report(g_token_line, g_token_column, "type error", message);
+            g_statement_invalid = true;
+            free_type_constraint(arg1);
+            free_type_constraint(arg2);
+            return base;
+        }
+        std::vector<const TypeNode *> args;
+        args.push_back(type_from_constraint(arg1));
+        args.push_back(arg2 ? type_from_constraint(arg2) : type_any());
+        free_type_constraint(arg1);
+        free_type_constraint(arg2);
+        const TypeNode *node =
+            type_container(TYPE_GENERATOR, args, base->nullable);
+        base->display = node->display.c_str();
+        base->detail = node;
+        return base;
     }
 
     int arity = type_container_arity(base->kind);

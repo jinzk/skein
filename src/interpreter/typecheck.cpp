@@ -28,6 +28,50 @@ namespace {
 
 Mode g_mode = Mode::Warn;
 
+std::string generator_identity(const struct funcdef *def) {
+    std::string key = diag_current_module_name();
+    key += '|';
+    if (def && def->name && *def->name) {
+        key += def->name;
+    } else {
+        key += std::to_string(def && def->ast ? def->ast->line : 0);
+        key += ':';
+        key += std::to_string(def && def->ast ? def->ast->column : 0);
+    }
+    return key;
+}
+
+std::string generator_identity(const struct function_code *code) {
+    std::string key = code ? code->module : "";
+    key += '|';
+    if (code && !code->name.empty()) {
+        key += code->name;
+    } else {
+        key += std::to_string(code ? code->def_line : 0);
+        key += ':';
+        key += std::to_string(code ? code->def_column : 0);
+    }
+    return key;
+}
+
+std::string generator_location_identity(const struct funcdef *def) {
+    std::string key = diag_current_module_name();
+    key += '|';
+    key += std::to_string(def && def->ast ? def->ast->line : 0);
+    key += ':';
+    key += std::to_string(def && def->ast ? def->ast->column : 0);
+    return key;
+}
+
+std::string generator_location_identity(const struct function_code *code) {
+    std::string key = code ? code->module : "";
+    key += '|';
+    key += std::to_string(code ? code->def_line : 0);
+    key += ':';
+    key += std::to_string(code ? code->def_column : 0);
+    return key;
+}
+
 struct Checker : public BuiltinContext {
     std::string source;
     std::string module;
@@ -35,8 +79,12 @@ struct Checker : public BuiltinContext {
     std::unordered_map<std::string, StaticTypeInfo> static_types;
     std::vector<const TypeNode *> return_types;
     std::vector<std::vector<const TypeNode *>> yield_types;
+    std::vector<const TypeNode *> generator_send_types;
+    std::vector<const TypeNode *> generator_yield_expected;
     std::unordered_map<const struct funcdef *, const TypeNode *>
         generator_elements;
+    std::unordered_map<const struct funcdef *, const TypeNode *>
+        generator_sends;
     std::unordered_set<std::string> warnings;
     bool error_ = false;
 
@@ -156,6 +204,18 @@ struct Checker : public BuiltinContext {
                     bool explicit_cast = false, bool force_element = false) {
         if (!expr)
             return true;
+        if (expr->nodetype == 'w' && expected &&
+            expected->kind != TYPE_ANY &&
+            !generator_send_types.empty()) {
+            const TypeNode *send = generator_send_types.back();
+            if (type_is_any(send)) {
+                generator_send_types.back() = expected;
+            } else if (match_type(send, expected) ==
+                       MatchResult::Mismatch) {
+                return warn_or_error(send, expected, expr->line,
+                                     expr->column, false, true);
+            }
+        }
         if (!force_element && !needs_static_check(expected)) {
             infer(expr, env);
             return true;
@@ -1093,18 +1153,37 @@ struct Checker : public BuiltinContext {
         if (!sig.is_generator)
             return;
         const TypeNode *element = NULL;
+        const TypeNode *send = NULL;
         if (def) {
             auto it = generator_elements.find(def);
             if (it != generator_elements.end())
                 element = it->second;
+            auto send_it = generator_sends.find(def);
+            if (send_it != generator_sends.end())
+                send = send_it->second;
         }
-        if (!element && code) {
-            auto it = g_generator_elements.find(code);
-            if (it != g_generator_elements.end())
-                element = it->second;
+        if (code) {
+            std::string key = generator_identity(code);
+            std::string location = generator_location_identity(code);
+            if (!element) {
+                auto it = g_generator_element_types.find(key);
+                if (it == g_generator_element_types.end())
+                    it = g_generator_element_types.find(location);
+                if (it != g_generator_element_types.end())
+                    element = it->second;
+            }
+            if (!send) {
+                auto it = g_generator_send_type_map.find(key);
+                if (it == g_generator_send_type_map.end())
+                    it = g_generator_send_type_map.find(location);
+                if (it != g_generator_send_type_map.end())
+                    send = it->second;
+            }
         }
         if (element)
             sig.result = element;
+        if (send)
+            sig.generator_send = send;
     }
 
     const TypeNode *function_type_from_code(
@@ -1133,6 +1212,10 @@ struct Checker : public BuiltinContext {
             sig.result = it == generator_elements.end()
                              ? type_any()
                              : it->second;
+            auto send = generator_sends.find(def);
+            sig.generator_send = send == generator_sends.end()
+                                     ? type_any()
+                                     : send->second;
             return function_type_from_sig(sig);
         }
 
@@ -1555,33 +1638,77 @@ struct Checker : public BuiltinContext {
                 bind_pattern_types(pattern, type, local, fixed);
         }
 
-        return_types.push_back(def->ret_type
-                                   ? type_from_constraint(def->ret_type)
-                                   : NULL);
+        const TypeNode *return_expected =
+            def->ret_type ? type_from_constraint(def->ret_type) : NULL;
         bool is_generator = def->is_generator != 0;
+        const TypeNode *declared_generator = NULL;
+        if (is_generator && return_expected &&
+            return_expected->kind == TYPE_GENERATOR) {
+            declared_generator = return_expected;
+            return_expected = NULL;
+        }
+        const TypeNode *declared_yield =
+            declared_generator ? type_element(declared_generator, 0)
+                               : NULL;
+        const TypeNode *declared_send =
+            declared_generator ? type_element(declared_generator, 1)
+                               : NULL;
+        return_types.push_back(return_expected);
         FunctionSig *sig_entry = NULL;
         if (def->name) {
             auto it = functions.find(def->name);
             if (it != functions.end())
                 sig_entry = &it->second;
         }
-        if (is_generator)
+        if (is_generator) {
             yield_types.emplace_back();
+            generator_send_types.push_back(declared_send
+                                               ? declared_send
+                                               : type_any());
+            generator_yield_expected.push_back(declared_yield
+                                                   ? declared_yield
+                                                   : NULL);
+        }
         bool ok = check_stmt(def->ast, local);
         if (is_generator) {
-            const TypeNode *element = type_any();
-            bool first = true;
-            for (const TypeNode *type : yield_types.back()) {
-                element = first ? type : join_types(element, type);
-                first = false;
+            const TypeNode *element = declared_yield;
+            if (!element) {
+                element = type_any();
+                bool first = true;
+                for (const TypeNode *type : yield_types.back()) {
+                    element = first ? type : join_types(element, type);
+                    first = false;
+                }
             }
+            const TypeNode *send = generator_send_types.back();
             yield_types.pop_back();
+            generator_send_types.pop_back();
+            generator_yield_expected.pop_back();
             generator_elements[def] = element;
-            std::shared_ptr<function_code> code = get_function_code(def);
-            if (code)
-                g_generator_elements[code.get()] = element;
-            if (sig_entry)
+            generator_sends[def] = send;
+            std::string key = generator_identity(def);
+            std::string location = generator_location_identity(def);
+            g_generator_element_types[key] = element;
+            g_generator_send_type_map[key] = send;
+            g_generator_element_types[location] = element;
+            g_generator_send_type_map[location] = send;
+            if (ok && !error_) {
+                std::shared_ptr<function_code> code =
+                    get_function_code(def);
+                if (code) {
+                    std::string code_key = generator_identity(code.get());
+                    std::string code_location =
+                        generator_location_identity(code.get());
+                    g_generator_element_types[code_key] = element;
+                    g_generator_send_type_map[code_key] = send;
+                    g_generator_element_types[code_location] = element;
+                    g_generator_send_type_map[code_location] = send;
+                }
+            }
+            if (sig_entry) {
                 sig_entry->result = element;
+                sig_entry->generator_send = send;
+            }
         }
         return_types.pop_back();
         return ok;
@@ -2184,8 +2311,18 @@ struct Checker : public BuiltinContext {
                 const TypeNode *value =
                     expr->l ? infer(expr->l, env)
                             : type_builtin(TYPE_NULL);
-                if (!yield_types.empty())
+                if (!yield_types.empty()) {
+                    if (expr->l && !generator_yield_expected.empty() &&
+                        generator_yield_expected.back() &&
+                        !type_is_any(generator_yield_expected.back())) {
+                        check_expr(expr->l,
+                                   generator_yield_expected.back(), env,
+                                   false, true);
+                    }
                     yield_types.back().push_back(value);
+                }
+                if (!generator_send_types.empty())
+                    return generator_send_types.back();
                 return type_any();
             }
             case 'n':

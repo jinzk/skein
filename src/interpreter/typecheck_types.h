@@ -26,6 +26,7 @@ struct FunctionSig {
     int optional_params = 0;
     const TypeNode *rest = nullptr;
     const TypeNode *result = nullptr;
+    const TypeNode *generator_send = nullptr;
 };
 
 enum class MatchResult {

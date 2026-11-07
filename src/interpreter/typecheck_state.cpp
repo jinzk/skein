@@ -16,8 +16,10 @@ std::unordered_map<std::string,
                    std::unordered_map<std::string, VarInfo>>
     g_exported_types;
 
-std::unordered_map<const struct function_code *, const TypeNode *>
-    g_generator_elements;
+std::unordered_map<std::string, const TypeNode *>
+    g_generator_element_types;
+std::unordered_map<std::string, const TypeNode *>
+    g_generator_send_type_map;
 
 } // namespace detail
 } // namespace typecheck

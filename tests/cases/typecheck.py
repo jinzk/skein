@@ -800,6 +800,43 @@ def run_cases():
           "println(xs);\n",
           stdout="[1, 6]", not_stderr="type warning")
 
+    check("generator send type inference",
+          "import std;\n"
+          "func echo() {\n"
+          "  let x: string = yield \"a\";\n"
+          "  yield x + \"!\";\n"
+          "}\n"
+          "let g: generator[string, string] = echo();\n"
+          "println(std.generator.next(g, \"hi\"));\n"
+          "println(std.generator.next(g, \"!\"));\n",
+          stdout_all=["a", "!!"], not_stderr="type warning")
+
+    check("generator send value mismatch",
+          "import std;\n"
+          "func echo() {\n"
+          "  let x: string = yield \"a\";\n"
+          "  yield x;\n"
+          "}\n"
+          "std.generator.next(echo(), 1);\n",
+          stderr="type error: expected string, got int")
+
+    check("generator declared yield and send",
+          "import std;\n"
+          "func typed(): generator[int, string] {\n"
+          "  yield 1;\n"
+          "  let x = yield 2;\n"
+          "  yield len(x);\n"
+          "}\n"
+          "let g: generator[int, string] = typed();\n"
+          "println(std.generator.next(g, \"ok\"));\n",
+          stdout="1", not_stderr="type warning")
+
+    check("generator declared yield mismatch",
+          "func g(): generator[int, string] {\n"
+          "  yield \"a\";\n"
+          "}\n",
+          stderr="type error: expected int, got string")
+
     check("opaque userdata types",
           "import std;\n"
           "func check() {\n"

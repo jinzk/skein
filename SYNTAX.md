@@ -921,6 +921,8 @@ struct Handler {
 - 参数按逆变、返回值按协变比较；`any` 仍然作为渐进边界；
 - 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名，例如 `let f: (number) -> number = sqrt;` 可以直接通过；
 - 可变参数或可选参数 builtin 仍退化为 `callable`；
+- `obj.method` 会生成去掉 `self` 的函数类型；
+- `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
 - `is` 和模式类型不接受函数类型签名：`f is (int) -> int` 会报错。
 
 `is` 和模式类型只接受不带类型参数的类型：

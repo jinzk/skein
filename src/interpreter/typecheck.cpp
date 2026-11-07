@@ -331,6 +331,34 @@ struct Checker : public BuiltinContext {
         return it == info->methods.end() ? NULL : it->second;
     }
 
+    const TypeNode *method_value_type(const TypeNode *base_type,
+                                      const char *name) {
+        if (!base_type || base_type->kind != TYPE_NAMED || !name)
+            return NULL;
+
+        structtype_lookup_result lookup;
+        if (lookup_type_node(base_type, lookup)) {
+            const type_def *def =
+                lookup.structure
+                    ? static_cast<const type_def *>(lookup.structure)
+                    : static_cast<const type_def *>(lookup.enumeration);
+            if (def) {
+                auto it = def->methods.find(name);
+                if (it != def->methods.end() && it->second &&
+                    it->second->code)
+                    return function_type_from_sig(
+                        method_signature_from_code(
+                            it->second->code.get()));
+            }
+        }
+
+        struct funcdef *method = static_method(base_type, name);
+        if (method)
+            return function_type_from_sig(
+                method_signature_from_def(method));
+        return NULL;
+    }
+
     const TypeNode *field_type(const TypeNode *base_type,
                                const struct ast *field_node, Env &env) {
         (void)env;
@@ -485,6 +513,32 @@ struct Checker : public BuiltinContext {
         std::vector<struct ast *> args;
         collect_call_args(call->args, args);
 
+        std::string path;
+        bool has_path = flatten_path(call->callee, path);
+
+        /*
+         * Container builtin wrappers in std.list/std.dict/... carry better
+         * hand-written signatures than their generic adapter function
+         * values, so try the builtin table before using a function value's
+         * own signature.
+         */
+        if (has_path) {
+            bool allow_check =
+                needs_static_check(expected) ||
+                (!args.empty() &&
+                 expr_has_declared_container(args[0], env));
+            if (allow_check) {
+                std::string canonical =
+                    canonical_builtin_path(path, source);
+                const TypeNode *builtin_result = type_any();
+                if (check_builtin(*this, canonical, args, expected, env,
+                                  builtin_result)) {
+                    result = builtin_result;
+                    return true;
+                }
+            }
+        }
+
         if (call->callee) {
             const TypeNode *callee_type = infer(call->callee, env);
             if (type_is_function_signature(callee_type)) {
@@ -501,8 +555,6 @@ struct Checker : public BuiltinContext {
             }
         }
 
-        std::string path;
-        bool has_path = flatten_path(call->callee, path);
         if (has_path && path.find('.') == std::string::npos) {
             FunctionSig sig;
             bool found = false;
@@ -517,11 +569,12 @@ struct Checker : public BuiltinContext {
                         (struct func_value_t *)sym->val;
                     if (fn->def && fn->def->code) {
                         sig = signature_from_symlist(fn->def->code->sl);
-                        sig.result =
-                            fn->def->code->ret_type
-                                ? type_from_constraint(
-                                      fn->def->code->ret_type.get())
-                                : type_any();
+                        sig.result = (fn->def->code->ret_type &&
+                                      !fn->def->code->is_async &&
+                                      !fn->def->code->is_generator)
+                                         ? type_from_constraint(
+                                               fn->def->code->ret_type.get())
+                                         : type_any();
                         found = true;
                     }
                 }
@@ -542,23 +595,6 @@ struct Checker : public BuiltinContext {
         if (call->callee && call->callee->nodetype == 'j') {
             if (check_method_call(call->callee, args, env, result))
                 return true;
-        }
-
-        if (has_path) {
-            bool allow_check =
-                needs_static_check(expected) ||
-                (!args.empty() &&
-                 expr_has_declared_container(args[0], env));
-            if (allow_check) {
-                std::string canonical =
-                    canonical_builtin_path(path, source);
-                const TypeNode *builtin_result = type_any();
-                if (check_builtin(*this, canonical, args, expected, env,
-                                  builtin_result)) {
-                    result = builtin_result;
-                    return true;
-                }
-            }
         }
 
         if (call->callee)
@@ -1642,7 +1678,22 @@ struct Checker : public BuiltinContext {
                         return value_static_type(value);
                     }
                 }
-                return field_type(base, expr, env);
+                const TypeNode *field = field_type(base, expr, env);
+                if (field->kind != TYPE_ANY)
+                    return field;
+                const struct ast *right = expr->r;
+                if (right && right->nodetype == 'V') {
+                    const struct value_t *value =
+                        ((const struct val *)right)->val;
+                    if (value && value->type == T_string) {
+                        const TypeNode *method = method_value_type(
+                            base,
+                            ((const struct string_value_t *)value)->value);
+                        if (method)
+                            return method;
+                    }
+                }
+                return field;
             }
             case 'C': {
                 const TypeNode *result = type_any();

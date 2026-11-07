@@ -45,6 +45,12 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return i >= args.size() ||
                context.check_expr(args[i], type, env, false, force);
     };
+    auto function_type = [](std::initializer_list<const TypeNode *> params,
+                            const TypeNode *return_type) {
+        std::vector<const TypeNode *> types(params);
+        types.push_back(return_type);
+        return type_container(TYPE_CALLABLE, types);
+    };
     auto require_kind = [&](std::size_t i,
                             enum type_constraint_kind kind) -> bool {
         if (i >= args.size())
@@ -80,10 +86,15 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             return true;
         const TypeNode *list_type = container_type(arg_type(0),
                                                    TYPE_LIST, 1);
+        const TypeNode *input_element =
+            list_type->args.empty() ? type_any() : list_type->args[0];
         const TypeNode *element =
             expected_element(expected, TYPE_LIST, 0);
-        if (element->kind == TYPE_ANY && !list_type->args.empty())
-            element = list_type->args[0];
+        if (element->kind == TYPE_ANY)
+            element = input_element;
+        /* map's input element type is independent from its result type. */
+        if (name == "map")
+            element = input_element;
         const TypeNode *target_list =
             type_container(TYPE_LIST, {element});
         if (!check_arg(0, target_list, false))
@@ -114,11 +125,28 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             return true;
         }
         if (name == "reverse" || name == "sort" ||
-            name == "sort_desc" || name == "sort_by" ||
-            name == "filter" || name == "unique" ||
-            name == "unique_by" || name == "top_k") {
+            name == "sort_desc" || name == "unique" ||
+            name == "top_k") {
             if (name == "top_k" && !check_arg(1, type_builtin(TYPE_INT),
                                               false))
+                return true;
+            result = target_list;
+            return true;
+        }
+        if (name == "filter") {
+            if (args.size() > 1 &&
+                !context.check_expr(
+                    args[1], function_type({element}, type_builtin(TYPE_BOOL)),
+                    env, false, false))
+                return true;
+            result = target_list;
+            return true;
+        }
+        if (name == "sort_by" || name == "unique_by") {
+            if (args.size() > 1 &&
+                !context.check_expr(args[1],
+                                    function_type({element}, type_any()),
+                                    env, false, false))
                 return true;
             result = target_list;
             return true;
@@ -132,24 +160,70 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             if (args.size() > 1) {
                 struct ast *mapper = args[1];
                 if (mapper->nodetype == 'Z') {
+                    const TypeNode *expected =
+                        function_type({element}, type_any());
+                    if (!context.check_expr(mapper, expected, env, false,
+                                            false))
+                        return true;
                     mapped = context.infer_lambda_result(mapper, element, env);
-                } else if (mapper->nodetype == 'N') {
-                    const char *mapper_name =
-                        ((struct symref *)mapper)->name;
-                    mapped = context.named_function_result(
-                        mapper_name ? mapper_name : "");
+                } else {
+                    const TypeNode *mapper_type =
+                        context.infer(mapper, env);
+                    if (type_is_function_signature(mapper_type)) {
+                        const TypeNode *expected =
+                            function_type({element}, type_any());
+                        if (match_type(mapper_type, expected) ==
+                            MatchResult::Mismatch) {
+                            char message[512];
+                            std::snprintf(
+                                message, sizeof(message),
+                                "expected %s, got %s",
+                                type_display(expected),
+                                type_display(mapper_type));
+                            context.report_error(mapper->line,
+                                                 mapper->column,
+                                                 message);
+                            return true;
+                        }
+                        mapped = type_function_result(mapper_type);
+                    } else if (mapper->nodetype == 'N') {
+                        const char *mapper_name =
+                            ((struct symref *)mapper)->name;
+                        mapped = context.named_function_result(
+                            mapper_name ? mapper_name : "");
+                    }
                 }
             }
             result = type_container(TYPE_LIST, {mapped});
             return true;
         }
         if (name == "reduce") {
-            result = type_any();
+            if (args.size() > 2) {
+                const TypeNode *accumulator =
+                    context.infer(args[2], env);
+                const TypeNode *expected =
+                    function_type({accumulator, element}, accumulator);
+                if (!context.check_expr(args[1], expected, env, false,
+                                        false))
+                    return true;
+                result = accumulator;
+            }
             return true;
         }
         if (name == "group_by") {
-            result = type_container(
-                TYPE_DICT, {type_any(), target_list});
+            const TypeNode *key = type_any();
+            if (args.size() > 1) {
+                struct ast *mapper = args[1];
+                if (mapper->nodetype == 'Z') {
+                    key = context.infer_lambda_result(mapper, element, env);
+                } else {
+                    const TypeNode *mapper_type =
+                        context.infer(mapper, env);
+                    if (type_is_function_signature(mapper_type))
+                        key = type_function_result(mapper_type);
+                }
+            }
+            result = type_container(TYPE_DICT, {key, target_list});
             return true;
         }
         if (name == "chunk" || name == "window") {

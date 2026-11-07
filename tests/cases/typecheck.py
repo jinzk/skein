@@ -467,6 +467,47 @@ def run_cases():
           'for (let a in xs) { a[0] = "x"; }\n',
           stderr="type error: expected int, got string")
 
+    check("method value function type",
+          "struct Box { xs: list[int]; }\n"
+          "impl Box {\n"
+          "  func add(self, x: int): list[int] { return self.xs + [x]; }\n"
+          "}\n"
+          "let b: Box = Box { xs: [1] };\n"
+          "let f = b.add;\n"
+          "let ys: list[int] = f(2);\n"
+          'f("a");\n',
+          stderr="type error: expected int, got string")
+
+    check("higher-order builtin callbacks",
+          "import std;\n"
+          "let xs: list[int] = [1, 2, 3];\n"
+          "let ys: list[string] = std.list.map(\n"
+          "  xs, func(x: int): string -> str(x));\n"
+          "let zs: list[int] = std.list.filter(\n"
+          "  xs, func(x: int): bool -> x > 1);\n"
+          "let total: int = std.list.reduce(\n"
+          "  xs, func(a: int, b: int): int -> a + b, 0);\n"
+          "let groups: dict[int, list[int]] = std.list.group_by(\n"
+          "  xs, func(x: int): int -> x % 2);\n"
+          "let sorted: list[int] = std.list.sort_by(\n"
+          "  xs, func(x: int): int -> 0 - x);\n"
+          "println(ys); println(zs); println(total);\n"
+          "println(groups); println(sorted);\n",
+          stdout_all=["[1, 2, 3]", "[2, 3]", "6",
+                      "{1: [1, 3], 0: [2]}", "[3, 2, 1]"])
+
+    check("filter callback return check",
+          "import std;\n"
+          "let xs: list[int] = [1];\n"
+          "std.list.filter(xs, func(x: int): int -> x);\n",
+          stderr="type error: expected (int) -> bool, got (int) -> int")
+
+    check("map callback parameter check",
+          "import std;\n"
+          "let xs: list[int] = [1];\n"
+          "std.list.map(xs, func(x: string): int -> 1);\n",
+          stderr="type error: expected (int) -> any, got (string) -> int")
+
     check("map infers expression lambda result",
           "import std;\n"
           "let xs: list[int] = [1];\n"

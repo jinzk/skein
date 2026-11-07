@@ -24,6 +24,7 @@
 #include "vm_eval.h"
 #include "vm_frame.h"
 #include "vm_gc_roots.h"
+#include "vm_slots.h"
 #include "vm_state.h"
 #include "vm_host.h"
 #include "vm_host_calls.h"
@@ -2935,15 +2936,26 @@ private:
         return sl && sl->sym && sl->sym->name ? sl->sym->name : "parameter";
     }
 
-    bool check_direct_param(uint32_t index, value_t *value) {
-        struct symlist *sl = param_meta(index);
-        if (!sl || !sl->type)
-            return true;
-        if (type_constraint_matches(sl->type, value))
-            return true;
-        yyerror("variable %s expects %s, got %s", param_name(index),
-                type_constraint_name(sl->type), typename_of(value));
-        return false;
+    VmSlotView make_slot_view() {
+        VmSlotView view;
+        view.proto = &proto();
+        view.current_def = current_def_.get();
+        view.param_values = &param_values_;
+        view.slot_values = &slot_values_;
+        view.slot_const = &slot_const_;
+        return view;
+    }
+
+    value_t *assign_direct_param(uint32_t index, value_t *value) {
+        return ::assign_direct_param(make_slot_view(), index, value);
+    }
+
+    value_t *compound_direct_param(uint32_t index, int op, value_t *value) {
+        return ::compound_direct_param(make_slot_view(), index, op, value);
+    }
+
+    value_t *incdec_direct_param(uint32_t index, int delta, bool prefix) {
+        return ::incdec_direct_param(make_slot_view(), index, delta, prefix);
     }
 
     struct symbol *direct_param_symbol(uint32_t index) {
@@ -2967,62 +2979,6 @@ private:
         sym.scope_owned = false;
         sym.global_slot = UINT32_MAX;
         return &sym;
-    }
-
-    value_t *assign_direct_param(uint32_t index, value_t *value) {
-        if (!value || index >= param_values_.size())
-            return value;
-        if (value->type == T_return || value->type == T_break ||
-            value->type == T_continue)
-            return value;
-        if (!check_direct_param(index, value)) {
-            freeval(value);
-            return NULL;
-        }
-        freeval(param_values_[index]);
-        param_values_[index] = value;
-        return dupval(value);
-    }
-
-    value_t *compound_direct_param(uint32_t index, int op, value_t *value) {
-        if (!value || index >= param_values_.size() || !param_values_[index]) {
-            freeval(value);
-            yyerror("invalid bytecode parameter slot");
-            return NULL;
-        }
-        value_t *result =
-            apply_binary_value(op, param_values_[index], value);
-        freeval(value);
-        if (!result)
-            return NULL;
-        if (!check_direct_param(index, result)) {
-            freeval(result);
-            return NULL;
-        }
-        freeval(param_values_[index]);
-        param_values_[index] = result;
-        return dupval(result);
-    }
-
-    value_t *incdec_direct_param(uint32_t index, int delta, bool prefix) {
-        if (index >= param_values_.size() || !param_values_[index]) {
-            yyerror("invalid bytecode parameter slot");
-            return NULL;
-        }
-        value_t *old = param_values_[index];
-        value_t *delta_value = newintval(delta);
-        value_t *result = apply_binary_value('+', old, delta_value);
-        freeval(delta_value);
-        if (!result)
-            return NULL;
-        if (!check_direct_param(index, result)) {
-            freeval(result);
-            return NULL;
-        }
-        value_t *ret = prefix ? dupval(result) : dupval(old);
-        freeval(old);
-        param_values_[index] = result;
-        return ret;
     }
 
     void recycle_param_values() {
@@ -3057,28 +3013,6 @@ private:
         param_symbols_.clear();
     }
 
-    bool check_direct_slot(uint32_t index, value_t *value,
-                           bool check_const) {
-        if (index >= proto().slots.size())
-            return false;
-        const skein::bc::SlotDesc &slot = proto().slots[index];
-        if (check_const &&
-            (slot.is_const ||
-             (index < slot_const_.size() && slot_const_[index]))) {
-            yyerror("cannot assign to constant %s", slot.name.c_str());
-            return false;
-        }
-        if (!validate_type_constraint(&slot.type)) {
-            return false;
-        }
-        if (!type_constraint_matches(&slot.type, value)) {
-            yyerror("variable %s expects %s, got %s", slot.name.c_str(),
-                    type_constraint_name(&slot.type), typename_of(value));
-            return false;
-        }
-        return true;
-    }
-
     struct symbol *direct_slot_symbol(uint32_t index) {
         if (index >= slot_values_.size() || index >= proto().slots.size())
             return NULL;
@@ -3103,118 +3037,21 @@ private:
     }
 
     value_t *assign_direct_slot(uint32_t index, value_t *value) {
-        if (!value || index >= slot_values_.size())
-            return value;
-        if (value->type == T_return || value->type == T_break ||
-            value->type == T_continue)
-            return value;
-        if (!check_direct_slot(index, value, true)) {
-            freeval(value);
-            return NULL;
-        }
-        freeval(slot_values_[index]);
-        slot_values_[index] = value;
-        return dupval(value);
+        return ::assign_direct_slot(make_slot_view(), index, value);
     }
 
     value_t *compound_direct_slot(uint32_t index, int op, value_t *value) {
-        if (!value || index >= slot_values_.size() || !slot_values_[index]) {
-            freeval(value);
-            yyerror("invalid bytecode slot");
-            return NULL;
-        }
-        value_t *result = apply_binary_value(op, slot_values_[index], value);
-        freeval(value);
-        if (!result)
-            return NULL;
-        if (!check_direct_slot(index, result, true)) {
-            freeval(result);
-            return NULL;
-        }
-        freeval(slot_values_[index]);
-        slot_values_[index] = result;
-        return dupval(result);
+        return ::compound_direct_slot(make_slot_view(), index, op, value);
     }
 
     value_t *incdec_direct_slot(uint32_t index, int delta, bool prefix) {
-        if (index >= slot_values_.size() || !slot_values_[index]) {
-            yyerror("invalid bytecode slot");
-            return NULL;
-        }
-        value_t *old = slot_values_[index];
-        value_t *delta_value = newintval(delta);
-        value_t *result = apply_binary_value('+', old, delta_value);
-        freeval(delta_value);
-        if (!result)
-            return NULL;
-        if (!check_direct_slot(index, result, true)) {
-            freeval(result);
-            return NULL;
-        }
-        value_t *ret = prefix ? dupval(result) : dupval(old);
-        freeval(old);
-        slot_values_[index] = result;
-        return ret;
-    }
-
-    static int slot_binary_char(uint8_t opcode) {
-        switch (static_cast<Op>(opcode)) {
-            case Op::Add: return '+';
-            case Op::Sub: return '-';
-            case Op::Mul: return '*';
-            case Op::Div: return '/';
-            case Op::Mod: return '%';
-            case Op::BitAnd: return '&';
-            case Op::BitOr: return '|';
-            case Op::BitXor: return '^';
-            case Op::Shl: return 's';
-            case Op::Shr: return 'r';
-            default: return 0;
-        }
+        return ::incdec_direct_slot(make_slot_view(), index, delta, prefix);
     }
 
     value_t *binary_slot_fused_direct(const Instr &ins,
                                       bool constant_rhs) {
-        const uint16_t left_index = ins.a;
-        const uint16_t right_index =
-            constant_rhs ? 0 : static_cast<uint16_t>(ins.b & 0xffffu);
-        const uint16_t dest_index =
-            constant_rhs ? ins.a : static_cast<uint16_t>(ins.b >> 16);
-        if (left_index >= slot_values_.size() ||
-            dest_index >= slot_values_.size() ||
-            (!constant_rhs && right_index >= slot_values_.size()) ||
-            !slot_values_[left_index] ||
-            (!constant_rhs && !slot_values_[right_index])) {
-            yyerror("invalid bytecode slot");
-            return NULL;
-        }
-        value_t *left = dupval(slot_values_[left_index]);
-        value_t *right = NULL;
-        if (constant_rhs) {
-            const Constant *constant = constant_at(proto(), ins.b);
-            if (!constant || constant->kind != ConstantKind::Value) {
-                freeval(left);
-                yyerror("invalid bytecode constant");
-                return NULL;
-            }
-            right = constant->value ? dupval(constant->value.get())
-                                    : newnull();
-        } else {
-            right = dupval(slot_values_[right_index]);
-        }
-        value_t *result =
-            apply_binary_value(slot_binary_char(ins.flags), left, right);
-        freeval(left);
-        freeval(right);
-        if (!result)
-            return NULL;
-        if (!check_direct_slot(dest_index, result, true)) {
-            freeval(result);
-            return NULL;
-        }
-        freeval(slot_values_[dest_index]);
-        slot_values_[dest_index] = result;
-        return dupval(result);
+        return ::binary_slot_fused_direct(make_slot_view(), ins,
+                                          constant_rhs);
     }
 
     void recycle_slot_values() {

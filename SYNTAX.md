@@ -1116,7 +1116,21 @@ if (a) {
 }
 ```
 
-条件必须放在圆括号中。`if` / `while` / `for` / `do` 的主体可以是代码块，也可以是单条语句；单条表达式语句需要分号。
+条件可以放在圆括号中，也可以省略（Go 风格）：
+
+```text
+if x { ... }
+if x { ... } else { ... }
+```
+
+`if` / `while` / `for` / `do` 的带括号主体可以是代码块，也可以是单条语句；单条表达式语句需要分号。省略条件括号时，body 必须使用 `{ ... }`。
+
+如果条件本身以 `(` 开头，会按带括号形式解析；想让整个条件被括号包围时写成 `if (x + y) { ... }`。条件中的 dict、struct、函数或 `match` 等复合字面量必须用括号包起来：
+
+```text
+if (d == {"a": 1}) { ... }
+if ((Point { x: 1 }) is Point) { ... }
+```
 
 所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `trait` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
 
@@ -1127,12 +1141,20 @@ while (condition) {
   ...
 }
 
+while condition {
+  ...
+}
+
 do {
   ...
 } while (condition);
+
+do {
+  ...
+} while condition;
 ```
 
-`do ... while` 至少执行一次循环体。`while` 必须和 `}` 在同一行；结尾分号可以省略，也可以保留（会当作空语句）。
+`do ... while` 至少执行一次循环体。`while` 必须和 `}` 在同一行。带括号形式的结尾分号可以省略，也可以保留（会当作空语句）；省略条件括号的形式必须以 `;` 结尾。
 
 ### 5.5 for
 
@@ -1144,11 +1166,18 @@ for (let i = 0; i < 10; i = i + 1) {
 for (;;) {
   break;
 }
+
+// 省略头部圆括号
+for let i = 0; i < 10; i = i + 1 {
+  print(i);
+}
 ```
 
 - 三个部分都可以为空；
 - 初始化部分支持空、表达式或 `let` 声明；
-- 条件和步进部分支持空或表达式。
+- 条件和步进部分支持空或表达式；
+- 省略头部括号时，body 必须是 `{ ... }`；
+- 省略括号时，`for i = 0; ...` 是赋值，`i` 必须已经声明；要新建变量请写 `for let i = 0; ...`。
 
 `for ... in`：
 
@@ -1226,6 +1255,12 @@ switch (value) {
     print("two or three");
   }
 
+  default => print("other");
+}
+
+// 省略条件圆括号
+switch value {
+  case 1 => print("one");
   default => print("other");
 }
 ```
@@ -1314,6 +1349,8 @@ let next = match (state) {
   default => state;
 };
 ```
+
+条件圆括号可以省略：`match state { ... }`。如果 subject 以 `(` 开头，会按 `match (subject) { ... }` 解析；subject 中的复合字面量需要括号。
 
 规则：
 

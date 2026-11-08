@@ -3185,6 +3185,19 @@ for (let key in {"a": 1, "b": 2}) {
 }
 ```
 
+控制流的条件圆括号也可以省略（Go 风格）：
+
+```text
+if x > 5 { print("big"); } else { print("small"); }
+while x > 0 { x = x - 1; }
+do { x = x - 1; } while x > 0;
+for let i = 0; i < 3; i = i + 1 { print(i); }
+switch x { case 1 => print("one"); default => print("other"); }
+match x { case 1 => "one"; default => "other"; }
+```
+
+条件中的 dict、struct、函数或 `match` 等复合字面量必须加括号，例如 `if (d == {"a": 1}) { ... }`。省略括号的 C 风格 `for` 里，`for i = 0; ...` 是赋值，`i` 必须已声明；要新建变量请写 `for let i = 0; ...`。如果条件本身以 `(` 开头，会按带括号形式解析。
+
 省略 `let` 和圆括号：
 
 ```text

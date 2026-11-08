@@ -174,6 +174,65 @@ def run_cases():
     check("for in without let rejects three variables",
           'for a, b, c in ({"a": 1}) { println(a); }\n',
           stderr="syntax error")
+    check("if without condition parens",
+          'let x = true;\nif x { println("yes"); }\n', stdout="yes\n")
+    check("if else without condition parens",
+          'let x = false;\n'
+          'if x { println("a"); } else { println("b"); }\n',
+          stdout="b\n")
+    check("else if without condition parens",
+          'let x = 2;\n'
+          'if x == 1 { println("a"); } '
+          'else if x == 2 { println("b"); } else { println("c"); }\n',
+          stdout="b\n")
+    check("while without condition parens",
+          "let i = 0;\n"
+          "while i < 2 { print(i); i = i + 1; }\n"
+          'println("");\n',
+          stdout="01\n")
+    check("switch without condition parens",
+          'let x = 1;\n'
+          'switch x { case 1 => println("one"); default => println("other"); }\n',
+          stdout="one\n")
+    check("match without condition parens",
+          "let x = 1;\n"
+          "let y = match x { case 1 => 10; default => 0; };\n"
+          "println(y);\n",
+          stdout="10\n")
+    check("do while without condition parens",
+          "let i = 0;\n"
+          "do { i = i + 1; } while i < 2;\n"
+          "println(i);\n",
+          stdout="2\n")
+    check("c for without header parens",
+          "for let i = 0; i < 3; i = i + 1 { print(i); }\n"
+          'println("");\n',
+          stdout="012\n")
+    check("c for without header parens uses existing variable",
+          "let i = 0;\n"
+          "for i = 0; i < 2; i = i + 1 { print(i); }\n"
+          'println("");\n',
+          stdout="01\n")
+    check("if condition composite literal needs parens",
+          'let d = {"a": 1};\n'
+          'if d == {"a": 1} { println("yes"); }\n',
+          stderr="syntax error")
+    check("if condition composite literal in parens",
+          'let d = {"a": 1};\n'
+          'if (d == {"a": 1}) { println("yes"); }\n',
+          stdout="yes\n")
+    check("nested match in if condition",
+          "let x = 1;\n"
+          "if match x { case 1 => true; default => false; } { "
+          'println("yes"); }\n',
+          stdout="yes\n")
+    check("parenthesized headers still work",
+          'if (true) { println("if"); }\n'
+          "let i = 0;\n"
+          'while (i < 1) { println("while"); i = i + 1; }\n'
+          'switch (1) { case 1 => println("switch"); }\n'
+          'for (let j = 0; j < 1; j = j + 1) { println("for"); }\n',
+          stdout_all=["if\n", "while\n", "switch\n", "for\n"])
     check("std.iter.for_each over list",
           "import std;\n"
           'std.iter.for_each([1, 2, 3], func(x) { print(x); })\n'

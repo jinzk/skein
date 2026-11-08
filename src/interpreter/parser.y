@@ -804,7 +804,9 @@ static struct type_constraint *runtime_type_or_error(
 %token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
-%token FOR_BODY_LBRACE "for body"
+%token BODY_LBRACE "body"
+%token HEADER_LPAREN "header ("
+%token DO_WHILE_LPAREN "do while ("
 
 %right ARROW RARROW
 %right '=' PLUS_ASSIGN MINUS_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
@@ -858,9 +860,10 @@ static struct type_constraint *runtime_type_or_error(
 %destructor { free_type_list($$); } <tl>
 
 /* `NAME '.' NAME` is deliberately shifted for field/enum dot access instead
- * of reducing `NAME` to `exp` first.  The conflicts are resolved as shifts
- * and this count keeps future grammar changes visible. */
-%expect 2
+ * of reducing `NAME` to `exp` first.  The conflicts are resolved as shifts;
+ * the no-parenthesis `for` header adds one more instance of the same
+ * ambiguity, and this count keeps future grammar changes visible. */
+%expect 3
 
 %start program
 %%
@@ -904,27 +907,49 @@ func_decl: funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                                           finish_function(), $8); }
     ;
 
-stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
-    | IF '(' exp ')' scope ELSE scope     { $$ = newflow('I', $3, $5, $7); }
-    | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
-    | DO scope eols do_while_start WHILE '(' exp ')'
+stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
+    | IF HEADER_LPAREN exp ')' scope ELSE scope     { $$ = newflow('I', $3, $5, $7); }
+    | IF exp BODY_LBRACE EMPTY_BLOCK_CLOSE %prec NOELSE
+                                           { $$ = newflow('I', $2, newscope(NULL), NULL); }
+    | IF exp BODY_LBRACE list '}' %prec NOELSE
+                                           { $$ = newflow('I', $2, newscope($4), NULL); }
+    | IF exp BODY_LBRACE EMPTY_BLOCK_CLOSE ELSE scope
+                                           { $$ = newflow('I', $2, newscope(NULL), $6); }
+    | IF exp BODY_LBRACE list '}' ELSE scope
+                                           { $$ = newflow('I', $2, newscope($4), $7); }
+    | WHILE HEADER_LPAREN exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
+    | WHILE exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = newflow('W', $2, newscope(NULL), NULL); }
+    | WHILE exp BODY_LBRACE list '}'
+                                           { $$ = newflow('W', $2, newscope($4), NULL); }
+    | DO scope eols do_while_start WHILE DO_WHILE_LPAREN exp ')'
                                            { $$ = newflow('E', $7, $2, NULL); }
-    | SWITCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
+    | DO scope eols do_while_start WHILE exp ';'
+                                           { $$ = newflow('E', $6, $2, NULL); }
+    | SWITCH HEADER_LPAREN exp ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newswitch($3, NULL); }
-    | SWITCH '(' exp ')' '{' switch_body '}'
+    | SWITCH HEADER_LPAREN exp ')' '{' switch_body '}'
                                            { $$ = newswitch($3, $6); }
-    | FOR '(' forinit ';' forcond ';' forend ')' scope
+    | SWITCH exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = newswitch($2, NULL); }
+    | SWITCH exp BODY_LBRACE switch_body '}'
+                                           { $$ = newswitch($2, $4); }
+    | FOR HEADER_LPAREN forinit ';' forcond ';' forend ')' scope
                                            { $$ = newfor($3, $5, $7, $9); }
-    | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
-    | FOR '(' LET NAME ',' NAME IN exp ')' scope
+    | FOR forinit ';' forcond ';' forend BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = newfor($2, $4, $6, newscope(NULL)); }
+    | FOR forinit ';' forcond ';' forend BODY_LBRACE list '}'
+                                           { $$ = newfor($2, $4, $6, newscope($8)); }
+    | FOR HEADER_LPAREN LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
+    | FOR HEADER_LPAREN LET NAME ',' NAME IN exp ')' scope
                                            { $$ = newforin($4, $6, $8, $10); }
-    | FOR NAME IN exp FOR_BODY_LBRACE EMPTY_BLOCK_CLOSE
+    | FOR NAME IN exp BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            { $$ = newforin($2, NULL, $4, newscope(NULL)); }
-    | FOR NAME IN exp FOR_BODY_LBRACE list '}'
+    | FOR NAME IN exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, NULL, $4, newscope($6)); }
-    | FOR NAME ',' NAME IN exp FOR_BODY_LBRACE EMPTY_BLOCK_CLOSE
+    | FOR NAME ',' NAME IN exp BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            { $$ = newforin($2, $4, $6, newscope(NULL)); }
-    | FOR NAME ',' NAME IN exp FOR_BODY_LBRACE list '}'
+    | FOR NAME ',' NAME IN exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, $4, $6, newscope($8)); }
     | DEFER exp ';'                       { $$ = newdefer($2); }
     | func_decl
@@ -1535,20 +1560,27 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = make_tuple_lambda($2, $6);
       }
     | '(' exp ')'                         { $$ = $2; }
-    | MATCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
+    | MATCH HEADER_LPAREN exp ')' BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            {
         yyerror("match requires at least one arm");
         $$ = newmatch($3, NULL);
       }
-    | MATCH '(' exp ')' '{' match_arms '}'
+    | MATCH HEADER_LPAREN exp ')' BODY_LBRACE match_arms '}'
                                            { $$ = newmatch($3, $6); }
-    | MATCH '(' exp ',' match_values ')' '{' EMPTY_BLOCK_CLOSE
+    | MATCH HEADER_LPAREN exp ',' match_values ')' BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            {
         yyerror("match requires at least one arm");
         $$ = newmatch(newtuple($3, $5), NULL);
       }
-    | MATCH '(' exp ',' match_values ')' '{' match_arms '}'
+    | MATCH HEADER_LPAREN exp ',' match_values ')' BODY_LBRACE match_arms '}'
                                            { $$ = newmatch(newtuple($3, $5), $8); }
+    | MATCH exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           {
+        yyerror("match requires at least one arm");
+        $$ = newmatch($2, NULL);
+      }
+    | MATCH exp BODY_LBRACE match_arms '}'
+                                           { $$ = newmatch($2, $4); }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }

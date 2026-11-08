@@ -100,6 +100,105 @@ static void report_same_line_error(const char *message) {
     yyerror("syntax error %s", message);
 }
 
+/*
+ * No-parenthesis headers such as `if x { ... }` need the first opening
+ * brace at the header's indentation to be recognized as the body.  A stack
+ * is used so a match expression inside an if condition can still consume
+ * its own brace before the outer if body.
+ */
+struct header_context {
+    int kind;
+    int indent;
+};
+
+static std::vector<header_context> header_stack;
+static int pending_header_kind = 0;
+static int pending_header_indent = 0;
+static bool pending_header_skip = false;
+static bool c_for_pending = false;
+static int c_for_indent = 0;
+static bool pending_for_skip = false;
+static bool pending_for_paren = false;
+static bool pending_do_while_skip = false;
+static bool pending_do_while_paren = false;
+static bool pending_match_skip = false;
+static bool pending_match_paren = false;
+static int pending_match_indent = 0;
+static int pending_decl_kind = 0;
+static bool pending_decl_skip = false;
+static std::vector<int> do_stack;
+
+static void start_header_context(int kind) {
+    if (pending_header_kind != 0)
+        header_stack.push_back(
+            header_context{pending_header_kind, pending_header_indent});
+    pending_header_kind = kind;
+    pending_header_indent = indent_count;
+    pending_header_skip = true;
+}
+
+static void note_header_context_token(int tok) {
+    if (pending_header_skip) {
+        pending_header_skip = false;
+    } else if (pending_header_kind != 0) {
+        if (tok != '(' && tok != EOL)
+            header_stack.push_back(
+                header_context{pending_header_kind, pending_header_indent});
+        pending_header_kind = 0;
+    }
+
+    if (pending_for_skip) {
+        pending_for_skip = false;
+    } else if (pending_for_paren) {
+        if (tok == '(')
+            c_for_pending = false;
+        pending_for_paren = false;
+    }
+
+    if (pending_do_while_skip) {
+        pending_do_while_skip = false;
+    } else {
+        pending_do_while_paren = false;
+    }
+
+    if (pending_match_skip) {
+        pending_match_skip = false;
+    } else if (pending_match_paren) {
+        if (tok != ':' && tok != ',' && tok != '}')
+            header_stack.push_back(
+                header_context{MATCH, pending_match_indent});
+        pending_match_paren = false;
+    }
+
+    if (pending_decl_skip) {
+        pending_decl_skip = false;
+    } else if (pending_decl_kind != 0) {
+        if (tok != ':' && tok != ',' && tok != '}' && tok != ';' &&
+            tok != EOL) {
+            if (pending_decl_kind == EXTERN)
+                extern_header = true;
+            else
+                declaration_header = true;
+        }
+        pending_decl_kind = 0;
+    }
+
+    if (tok == EOL) {
+        header_stack.clear();
+        c_for_pending = false;
+    } else if (tok == ';') {
+        while (!header_stack.empty() &&
+               header_stack.back().indent >= indent_count)
+            header_stack.pop_back();
+    } else if (tok == '}') {
+        while (!header_stack.empty() &&
+               header_stack.back().indent > indent_count)
+            header_stack.pop_back();
+        while (!do_stack.empty() && do_stack.back() > indent_count)
+            do_stack.pop_back();
+    }
+}
+
 static void note_for_name_token() {
     if (for_header == FOR_HEADER_SEEN)
         for_header = FOR_HEADER_ONE;
@@ -109,7 +208,7 @@ static void note_for_name_token() {
         for_header = FOR_HEADER_NONE;
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
@@ -462,7 +561,7 @@ static bool brace_starts_block() {
 static void note_token(int tok) {
     if (brace_stack.empty())
         return;
-    if (tok == '{' || tok == '}' ||
+    if (tok == '{' || tok == '}' || tok == BODY_LBRACE ||
         tok == EMPTY_DICT_CLOSE || tok == EMPTY_BLOCK_CLOSE ||
         tok == EOL)
         return;
@@ -557,20 +656,33 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     int prev_line = last_token_line;
     if (!brace_stack.empty())
         brace_stack.back().empty = false;
-    bool for_body = for_body_pending && for_operand_started &&
+    bool header_body = false;
+    if (!header_stack.empty() &&
+        header_stack.back().indent == indent_count) {
+        header_body = true;
+        header_stack.pop_back();
+    }
+    bool c_for_body = !header_body && c_for_pending &&
+                      indent_count == c_for_indent;
+    if (c_for_body)
+        c_for_pending = false;
+    bool for_body = !header_body && !c_for_body &&
+                    for_body_pending && for_operand_started &&
                     indent_count == for_body_indent;
-    bool body_brace = brace_starts_block() || for_body;
+    bool body_token = header_body || c_for_body || for_body;
+    bool body_brace = brace_starts_block() || body_token;
     if (body_brace && prev_line != 0 && g_token_line != prev_line)
         report_same_line_error(
             "opening brace must be on the same line as its header");
     for_header = FOR_HEADER_NONE;
     declaration_header = false;
     extern_header = false;
-    if (for_body) {
-        for_body_pending = false;
+    if (body_token) {
+        if (for_body)
+            for_body_pending = false;
         brace_stack.push_back(brace_frame{false, true});
         indent_count++;
-        YYRET(FOR_BODY_LBRACE);
+        YYRET(BODY_LBRACE);
     }
     if (for_body_pending && indent_count < for_body_indent)
         for_body_pending = false;
@@ -598,6 +710,34 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "[" { indent_count++; YYRET('['); }
 "]" { if (indent_count > 0) indent_count--; YYRET(']'); }
 "(" {
+    if (pending_match_paren) {
+        header_stack.push_back(
+            header_context{MATCH, pending_match_indent});
+        pending_match_paren = false;
+        pending_match_skip = false;
+        indent_count++;
+        YYRET(HEADER_LPAREN);
+    }
+    if (pending_do_while_paren) {
+        pending_do_while_paren = false;
+        pending_do_while_skip = false;
+        indent_count++;
+        YYRET(DO_WHILE_LPAREN);
+    }
+    if (pending_header_kind != 0) {
+        pending_header_kind = 0;
+        pending_header_skip = false;
+        indent_count++;
+        YYRET(HEADER_LPAREN);
+    }
+    if (pending_for_paren) {
+        pending_for_paren = false;
+        pending_for_skip = false;
+        c_for_pending = false;
+        for_header = FOR_HEADER_NONE;
+        indent_count++;
+        YYRET(HEADER_LPAREN);
+    }
     if (for_header != FOR_HEADER_NONE)
         for_header = FOR_HEADER_NONE;
     indent_count++;
@@ -613,46 +753,92 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 ">=" { yylval.fn = 5; YYRET(CMP); }
 "<=" { yylval.fn = 6; YYRET(CMP); }
 
-"if" { YYRET(IF); }
+"if" {
+    start_header_context(IF);
+    YYRET(IF);
+}
 "else" {
     if (last_token_line != 0 && g_token_line != last_token_line)
         report_same_line_error(
             "else must be on the same line as the preceding token");
     YYRET(ELSE);
 }
-"while" { YYRET(WHILE); }
-"do" { YYRET(DO); }
+"while" {
+    if (!do_stack.empty() && do_stack.back() == indent_count) {
+        do_stack.pop_back();
+        pending_do_while_paren = true;
+        pending_do_while_skip = true;
+    } else {
+        start_header_context(WHILE);
+    }
+    YYRET(WHILE);
+}
+"do" {
+    do_stack.push_back(indent_count);
+    YYRET(DO);
+}
 "for" {
-    for_header = FOR_HEADER_SEEN;
+    if (!declaration_header) {
+        for_header = FOR_HEADER_SEEN;
+        c_for_pending = true;
+        c_for_indent = indent_count;
+        pending_for_paren = true;
+        pending_for_skip = true;
+    }
     YYRET(FOR);
 }
 "struct" {
-    if (last_token != '.')
-        declaration_header = true;
+    if (last_token != '.') {
+        pending_decl_kind = STRUCT;
+        pending_decl_skip = true;
+    }
     YYRET(STRUCT);
 }
 "extern" {
-    if (last_token != '.')
-        extern_header = true;
+    if (last_token != '.') {
+        pending_decl_kind = EXTERN;
+        pending_decl_skip = true;
+    }
     YYRET(EXTERN);
 }
 "enum" {
-    if (last_token != '.')
-        declaration_header = true;
+    if (last_token != '.') {
+        pending_decl_kind = ENUM;
+        pending_decl_skip = true;
+    }
     YYRET(ENUM);
 }
 "impl" {
-    if (last_token != '.')
-        declaration_header = true;
+    if (last_token != '.') {
+        pending_decl_kind = IMPL;
+        pending_decl_skip = true;
+    }
     YYRET(IMPL);
 }
 "trait" {
-    if (last_token != '.')
-        declaration_header = true;
+    if (last_token != '.') {
+        pending_decl_kind = TRAIT;
+        pending_decl_skip = true;
+    }
     YYRET(TRAIT);
 }
-"switch" { YYRET(SWITCH); }
-"match" { YYRET(MATCH); }
+"switch" {
+    start_header_context(SWITCH);
+    YYRET(SWITCH);
+}
+"match" {
+    if (last_token != '.') {
+        if (pending_header_kind != 0) {
+            header_stack.push_back(
+                header_context{pending_header_kind, pending_header_indent});
+            pending_header_kind = 0;
+        }
+        pending_match_indent = indent_count;
+        pending_match_paren = true;
+        pending_match_skip = true;
+    }
+    YYRET(MATCH);
+}
 "case" { YYRET(CASE); }
 "default" { YYRET(DEFAULT); }
 "let" { YYRET(LET); }
@@ -680,6 +866,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         for_body_pending = true;
         for_operand_started = false;
         for_body_indent = indent_count;
+        c_for_pending = false;
     }
     for_header = FOR_HEADER_NONE;
     YYRET(IN);
@@ -987,6 +1174,22 @@ void reset_scanner_state(std::FILE *in) {
     prev_token_line = 0;
     declaration_header = false;
     extern_header = false;
+    header_stack.clear();
+    pending_header_kind = 0;
+    pending_header_indent = 0;
+    pending_header_skip = false;
+    c_for_pending = false;
+    c_for_indent = 0;
+    pending_for_skip = false;
+    pending_for_paren = false;
+    pending_do_while_skip = false;
+    pending_do_while_paren = false;
+    pending_match_skip = false;
+    pending_match_paren = false;
+    pending_match_indent = 0;
+    pending_decl_kind = 0;
+    pending_decl_skip = false;
+    do_stack.clear();
     brace_stack.clear();
     reset_for_header_state();
     for_body_indent = 0;
@@ -1015,6 +1218,22 @@ struct scanner_checkpoint {
     bool for_body_pending;
     bool for_operand_started;
     int for_body_indent;
+    std::vector<header_context> headers;
+    int pending_header_kind;
+    int pending_header_indent;
+    bool pending_header_skip;
+    bool c_for_pending;
+    int c_for_indent;
+    bool pending_for_skip;
+    bool pending_for_paren;
+    bool pending_do_while_skip;
+    bool pending_do_while_paren;
+    bool pending_match_skip;
+    bool pending_match_paren;
+    int pending_match_indent;
+    int pending_decl_kind;
+    bool pending_decl_skip;
+    std::vector<int> do_indents;
     std::vector<brace_frame> braces;
 };
 
@@ -1040,6 +1259,22 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->for_body_pending = for_body_pending;
     checkpoint->for_operand_started = for_operand_started;
     checkpoint->for_body_indent = for_body_indent;
+    checkpoint->headers = header_stack;
+    checkpoint->pending_header_kind = pending_header_kind;
+    checkpoint->pending_header_indent = pending_header_indent;
+    checkpoint->pending_header_skip = pending_header_skip;
+    checkpoint->c_for_pending = c_for_pending;
+    checkpoint->c_for_indent = c_for_indent;
+    checkpoint->pending_for_skip = pending_for_skip;
+    checkpoint->pending_for_paren = pending_for_paren;
+    checkpoint->pending_do_while_skip = pending_do_while_skip;
+    checkpoint->pending_do_while_paren = pending_do_while_paren;
+    checkpoint->pending_match_skip = pending_match_skip;
+    checkpoint->pending_match_paren = pending_match_paren;
+    checkpoint->pending_match_indent = pending_match_indent;
+    checkpoint->pending_decl_kind = pending_decl_kind;
+    checkpoint->pending_decl_skip = pending_decl_skip;
+    checkpoint->do_indents = do_stack;
     checkpoint->braces = brace_stack;
     return checkpoint;
 }
@@ -1066,6 +1301,22 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     for_body_pending = checkpoint->for_body_pending;
     for_operand_started = checkpoint->for_operand_started;
     for_body_indent = checkpoint->for_body_indent;
+    header_stack = checkpoint->headers;
+    pending_header_kind = checkpoint->pending_header_kind;
+    pending_header_indent = checkpoint->pending_header_indent;
+    pending_header_skip = checkpoint->pending_header_skip;
+    c_for_pending = checkpoint->c_for_pending;
+    c_for_indent = checkpoint->c_for_indent;
+    pending_for_skip = checkpoint->pending_for_skip;
+    pending_for_paren = checkpoint->pending_for_paren;
+    pending_do_while_skip = checkpoint->pending_do_while_skip;
+    pending_do_while_paren = checkpoint->pending_do_while_paren;
+    pending_match_skip = checkpoint->pending_match_skip;
+    pending_match_paren = checkpoint->pending_match_paren;
+    pending_match_indent = checkpoint->pending_match_indent;
+    pending_decl_kind = checkpoint->pending_decl_kind;
+    pending_decl_skip = checkpoint->pending_decl_skip;
+    do_stack = checkpoint->do_indents;
     brace_stack = checkpoint->braces;
     BEGIN(checkpoint->condition);
     delete checkpoint;

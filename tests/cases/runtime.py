@@ -750,9 +750,9 @@ def run_cases():
     check("do while single statement",
           "let i = 0;\ndo i = i + 1; while (i < 2);\ni\n",
           stdout="= 2")
-    check("do while while on next line",
+    check("do while while on next line rejected",
           "let i = 0;\ndo {\n  i = i + 1;\n}\nwhile (i < 2);\ni\n",
-          stdout="= 2")
+          stderr="while must be on the same line as the preceding '}'")
     check(
         "do while break continue",
         "let i = 0;\n"

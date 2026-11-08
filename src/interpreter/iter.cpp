@@ -285,6 +285,23 @@ struct value_t *iter_collect(const std::vector<struct value_t *> &args) {
     return (struct value_t *)out;
 }
 
+struct value_t *iter_for_each(const std::vector<struct value_t *> &args) {
+    iter_source source(args[0]);
+    struct value_t *item = NULL;
+    while (source.next(item)) {
+        std::vector<struct value_t *> call_args;
+        call_args.push_back(item);
+        struct value_t *result =
+            skein_call_function(args[1], std::move(call_args));
+        if (!result)
+            return NULL;
+        freeval(result);
+    }
+    if (source.failed)
+        return NULL;
+    return newnull();
+}
+
 } // namespace
 
 struct value_t *call_iter_builtin(
@@ -336,6 +353,17 @@ struct value_t *call_iter_builtin(
                 return NULL;
             }
             return iter_collect(args);
+        case B_for_each:
+            if (args.size() != 2) {
+                yyerror("for_each expects 2 arguments");
+                return NULL;
+            }
+            if (!callable_value(args[1])) {
+                yyerror("for_each expects a callable, got %s",
+                        typename_of(args[1]));
+                return NULL;
+            }
+            return iter_for_each(args);
         default:
             yyerror("unknown std.iter function");
             return NULL;

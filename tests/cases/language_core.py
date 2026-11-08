@@ -167,6 +167,51 @@ def run_cases():
     check("for in without let rejects three variables",
           'for a, b, c in ({"a": 1}) { println(a); }\n',
           stderr="syntax error")
+    check("for_each over list",
+          'for_each([1, 2, 3], func(x) { print(x); })\nprintln("");\n',
+          stdout="123\n")
+    check("for_each over dict keys",
+          'for_each(({"a": 1, "b": 2}), func(k) { print(k); })\n'
+          'println("");\n',
+          stdout="ab\n")
+    check("for_each closure accumulator",
+          "let total = 0;\n"
+          "for_each([1, 2, 3], func(x) { total = total + x; })\n"
+          "println(total);\n",
+          stdout="6\n")
+    check("for_each string and bytes",
+          'for_each("ab", func(c) { print(c); })\n'
+          'for_each(bytes_from_hex("00ff"), func(b) { print(b); })\n'
+          'println("");\n',
+          stdout="ab0255\n")
+    check("for_each generator",
+          "func gen() { yield 1; yield 2; }\n"
+          'for_each(gen(), func(v) { print(v); })\nprintln("");\n',
+          stdout="12\n")
+    check("for_each set",
+          "import std;\n"
+          "let n = 0;\n"
+          "for_each(std.set.from_list([1, 2, 3]), func(v) { n = n + v; })\n"
+          "println(n);\n",
+          stdout="6\n")
+    check("for_each first class",
+          "let f = for_each;\n"
+          'f([1, 2], func(x) { print(x); })\nprintln("");\n',
+          stdout="12\n")
+    check("for_each return exits callback only",
+          "for_each([1, 2, 3], func(x) {"
+          " if (x == 2) { return; } print(x); })\n"
+          'println("");\n',
+          stdout="13\n")
+    check("for_each requires callable",
+          "for_each([1], 42)\n",
+          stderr="for_each expects a callable")
+    check("for_each arity",
+          "for_each([1])\n",
+          stderr="for_each expects 2 arguments")
+    check("for_each propagates callback errors",
+          "for_each([1, 2], func(x) { missing_symbol; })\n",
+          stderr="symbol not found missing_symbol")
     check("increment float", "let x = 1.5;\nx++\nx\n++x\nx\n",
           stdout_all=["= 1.5", "= 2.5", "= 3.5", "= 3.5"])
     check("increment list element",

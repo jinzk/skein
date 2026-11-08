@@ -1194,6 +1194,21 @@ for key, value in ({"a": 1, "b": 2}) {
 - 循环变量只存在于循环作用域；
 - 支持 `break` / `continue` / `return`。
 
+全局函数 `for_each(iterable, fn)` 等价于：
+
+```text
+for x in iterable {
+  fn(x);
+}
+```
+
+- 支持 list / dict / string / bytes / set / deque / heap / generator；
+- dict 回调接收 key；
+- 忽略回调返回值，返回 `null`；
+- 回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；
+- 回调错误会向上传播；
+- async 回调不会被自动 `await`。
+
 ### 5.6 switch
 
 ```text

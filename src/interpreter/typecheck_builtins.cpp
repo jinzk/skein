@@ -971,6 +971,9 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
 const TypeNode *builtin_function_type(int functype) {
     switch (functype) {
+        case B_for_each:
+            return builtin_sig({any_type(), any_type()},
+                               type_builtin(TYPE_NULL));
         case B_sqrt:
         case B_exp:
         case B_log:

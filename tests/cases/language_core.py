@@ -255,6 +255,53 @@ def run_cases():
     check("for_each is not a global builtin",
           "for_each([1], func(x) { })\n",
           stderr="symbol not found for_each")
+    check("body brace must share header line",
+          "func f() {\n"
+          "  if (true)\n"
+          "  {\n"
+          "  }\n"
+          "}\n"
+          "f();\n",
+          stderr="opening brace must be on the same line as its header")
+    check("else must share closing brace line",
+          "func f() {\n"
+          "  if (false) {\n"
+          "  }\n"
+          "  else {\n"
+          "  }\n"
+          "}\n"
+          "f();\n",
+          stderr="else must be on the same line as the preceding token")
+    check("do while must share closing brace line",
+          'do {\n  print("x");\n}\nwhile (false);\n',
+          stderr="while must be on the same line as the preceding '}'")
+    check("struct body brace must share header line",
+          "func f() {\n"
+          "  struct P\n"
+          "  {\n"
+          "    x: int = 1;\n"
+          "  }\n"
+          "}\n"
+          "f();\n",
+          stderr="opening brace must be on the same line as its header")
+    check("switch body brace must share header line",
+          "func f() {\n"
+          "  switch (1)\n"
+          "  {\n"
+          '    case 1 => print("x");\n'
+          "  }\n"
+          "}\n"
+          "f();\n",
+          stderr="opening brace must be on the same line as its header")
+    check("for in body brace must share header line",
+          "func f() {\n"
+          "  for x in [1, 2]\n"
+          "  {\n"
+          "    print(x);\n"
+          "  }\n"
+          "}\n"
+          "f();\n",
+          stderr="opening brace must be on the same line as its header")
     check("increment float", "let x = 1.5;\nx++\nx\n++x\nx\n",
           stdout_all=["= 1.5", "= 2.5", "= 3.5", "= 3.5"])
     check("increment list element",

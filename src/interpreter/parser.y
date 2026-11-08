@@ -27,6 +27,16 @@ static int flow_keyword_line = 0;
 static int flow_keyword_column = 0;
 static std::vector<int> func_yield_counts;
 
+extern int prev_token_line;
+
+static void check_do_while_line() {
+    if (prev_token_line != 0 && g_token_line != prev_token_line) {
+        diag_set_location(g_token_line, g_token_column);
+        yyerror("syntax error while must be on the same line as the "
+                "preceding '}'");
+    }
+}
+
 static void start_function() {
     func_yield_counts.push_back(0);
 }
@@ -897,7 +907,8 @@ func_decl: funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
 stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | IF '(' exp ')' scope ELSE scope     { $$ = newflow('I', $3, $5, $7); }
     | WHILE '(' exp ')' scope             { $$ = newflow('W', $3, $5, NULL); }
-    | DO scope eols WHILE '(' exp ')'     { $$ = newflow('E', $6, $2, NULL); }
+    | DO scope eols do_while_start WHILE '(' exp ')'
+                                           { $$ = newflow('E', $7, $2, NULL); }
     | SWITCH '(' exp ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newswitch($3, NULL); }
     | SWITCH '(' exp ')' '{' switch_body '}'
@@ -1474,6 +1485,8 @@ scope: stmt                               { $$ = $1; }
      | '{' EMPTY_BLOCK_CLOSE              { $$ = newscope(NULL); }
      | '{' list '}'                       { $$ = newscope($2); }
      ;
+
+do_while_start: %empty { check_do_while_line(); };
 
 list: %empty                              { $$ = NULL; }
     | scope list {

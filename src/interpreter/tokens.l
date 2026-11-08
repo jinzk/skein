@@ -48,6 +48,10 @@ static int char_start_column = 1;
 
 static int last_token = 0;
 static int prev_token = 0;
+int last_token_line = 0;
+int prev_token_line = 0;
+static bool declaration_header = false;
+static bool extern_header = false;
 
 struct brace_frame {
     bool is_dict;
@@ -91,6 +95,11 @@ static void note_for_header_token(int tok) {
         for_operand_started = true;
 }
 
+static void report_same_line_error(const char *message) {
+    diag_set_location(g_token_line, g_token_column);
+    yyerror("syntax error %s", message);
+}
+
 static void note_for_name_token() {
     if (for_header == FOR_HEADER_SEEN)
         for_header = FOR_HEADER_ONE;
@@ -100,7 +109,7 @@ static void note_for_name_token() {
         for_header = FOR_HEADER_NONE;
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_token(yyret_tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
@@ -438,6 +447,8 @@ static int make_name_token(const char *text, int len) {
 static bool brace_starts_block() {
     if (last_token == NAME && prev_token == PACKAGE)
         return true;
+    if (declaration_header || extern_header)
+        return true;
     if (last_token == ')' || last_token == ELSE || last_token == DO ||
         last_token == ARROW)
         return true;
@@ -513,6 +524,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "@" |
 "?" {
     if (yytext[0] == ';') {
+        declaration_header = false;
+        extern_header = false;
         if (!for_body_pending || indent_count <= for_body_indent)
             reset_for_header_state();
     } else if (yytext[0] == ',') {
@@ -541,11 +554,18 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 ">>" { YYRET(SHR); }
 
 "{" {
+    int prev_line = last_token_line;
     if (!brace_stack.empty())
         brace_stack.back().empty = false;
     bool for_body = for_body_pending && for_operand_started &&
                     indent_count == for_body_indent;
+    bool body_brace = brace_starts_block() || for_body;
+    if (body_brace && prev_line != 0 && g_token_line != prev_line)
+        report_same_line_error(
+            "opening brace must be on the same line as its header");
     for_header = FOR_HEADER_NONE;
+    declaration_header = false;
+    extern_header = false;
     if (for_body) {
         for_body_pending = false;
         brace_stack.push_back(brace_frame{false, true});
@@ -554,7 +574,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     if (for_body_pending && indent_count < for_body_indent)
         for_body_pending = false;
-    brace_stack.push_back(brace_frame{!brace_starts_block(), true});
+    brace_stack.push_back(brace_frame{!body_brace, true});
     indent_count++;
     YYRET('{');
 }
@@ -562,6 +582,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "}" {
     if (indent_count > 0) indent_count--;
     for_header = FOR_HEADER_NONE;
+    declaration_header = false;
+    extern_header = false;
     if (for_body_pending && indent_count < for_body_indent)
         for_body_pending = false;
     int tok = '}';
@@ -592,18 +614,43 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "<=" { yylval.fn = 6; YYRET(CMP); }
 
 "if" { YYRET(IF); }
-"else" { YYRET(ELSE); }
+"else" {
+    if (last_token_line != 0 && g_token_line != last_token_line)
+        report_same_line_error(
+            "else must be on the same line as the preceding token");
+    YYRET(ELSE);
+}
 "while" { YYRET(WHILE); }
 "do" { YYRET(DO); }
 "for" {
     for_header = FOR_HEADER_SEEN;
     YYRET(FOR);
 }
-"struct" { YYRET(STRUCT); }
-"extern" { YYRET(EXTERN); }
-"enum" { YYRET(ENUM); }
-"impl" { YYRET(IMPL); }
-"trait" { YYRET(TRAIT); }
+"struct" {
+    if (last_token != '.')
+        declaration_header = true;
+    YYRET(STRUCT);
+}
+"extern" {
+    if (last_token != '.')
+        extern_header = true;
+    YYRET(EXTERN);
+}
+"enum" {
+    if (last_token != '.')
+        declaration_header = true;
+    YYRET(ENUM);
+}
+"impl" {
+    if (last_token != '.')
+        declaration_header = true;
+    YYRET(IMPL);
+}
+"trait" {
+    if (last_token != '.')
+        declaration_header = true;
+    YYRET(TRAIT);
+}
 "switch" { YYRET(SWITCH); }
 "match" { YYRET(MATCH); }
 "case" { YYRET(CASE); }
@@ -936,6 +983,10 @@ void reset_scanner_state(std::FILE *in) {
     input_pos = 0;
     last_token = 0;
     prev_token = 0;
+    last_token_line = 0;
+    prev_token_line = 0;
+    declaration_header = false;
+    extern_header = false;
     brace_stack.clear();
     reset_for_header_state();
     for_body_indent = 0;
@@ -956,6 +1007,10 @@ struct scanner_checkpoint {
     int stdin_eof;
     int last_token;
     int prev_token;
+    int last_token_line;
+    int prev_token_line;
+    bool declaration_header;
+    bool extern_header;
     int for_header;
     bool for_body_pending;
     bool for_operand_started;
@@ -977,6 +1032,10 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->stdin_eof = g_stdin_eof;
     checkpoint->last_token = last_token;
     checkpoint->prev_token = prev_token;
+    checkpoint->last_token_line = last_token_line;
+    checkpoint->prev_token_line = prev_token_line;
+    checkpoint->declaration_header = declaration_header;
+    checkpoint->extern_header = extern_header;
     checkpoint->for_header = for_header;
     checkpoint->for_body_pending = for_body_pending;
     checkpoint->for_operand_started = for_operand_started;
@@ -999,6 +1058,10 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     g_stdin_eof = checkpoint->stdin_eof;
     last_token = checkpoint->last_token;
     prev_token = checkpoint->prev_token;
+    last_token_line = checkpoint->last_token_line;
+    prev_token_line = checkpoint->prev_token_line;
+    declaration_header = checkpoint->declaration_header;
+    extern_header = checkpoint->extern_header;
     for_header = (enum for_header_state)checkpoint->for_header;
     for_body_pending = checkpoint->for_body_pending;
     for_operand_started = checkpoint->for_operand_started;

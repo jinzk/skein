@@ -72,7 +72,7 @@ def statement():
                           for _ in range(rng.randint(1, 4)))
         return (
             "let total = 0;\n"
-            f"for (v in [{items}]) {{ total = total + v; }}\n"
+            f"for (let v in [{items}]) {{ total = total + v; }}\n"
             "print(total);"
         )
     if kind == 6:

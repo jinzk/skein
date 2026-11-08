@@ -66,7 +66,7 @@ for x in [1, 2, 3] {
   print(x);
 }
 
-for key, value in ({"a": 1, "b": 2}) {
+for key, value in {"a": 1, "b": 2} {
   print(key + "=" + str(value));
 }
 
@@ -109,15 +109,20 @@ newforin(name, value_name, iterable, body)
 
 1. **循环体必须是块**：`for x in xs { ... }`。不支持
    `for x in xs print(x);`。
-2. **复合字面量或块字面量作操作数时要加括号**：
+2. **以 dict 字面量开头的操作数可以省略括号**：
 
    ```skein
-   for x in ({1: 2}) { ... }
+   for x in {1: 2} { ... }
+   ```
+
+   但操作数本身以 struct / 函数 / `match` 等复合字面量结尾时仍需括号：
+
+   ```skein
    for x in (Point { x: 1 }) { ... }
    for x in (func() { return [1]; }()) { ... }
    ```
 
-   这与 Go 对 range 后 composite literal 的限制一致。
+   后者与 Go 对 range 后 composite literal 的限制一致。
 3. **顶层换行后接 `{` 仍不支持**，与现有 `if (...) \n {` 的行为一致；
    函数体内部没有 `EOL` token，所以可以换行。
 4. **双变量只支持 dict**，沿用现有运行时错误。
@@ -275,7 +280,8 @@ indent_count++;
 8. 循环内 `return`。
 9. 遮蔽：外层 `x` 在循环后保持原值。
 10. `for x in x`：迭代对象使用外层 `x`。
-11. 操作数加括号：`for x in ({1: 2})`、`for x in (Point { x: 1 })`。
+11. dict 字面量操作数：`for x in {1: 2}` 可直接书写；struct 字面量仍需括号：
+    `for x in (Point { x: 1 })`。
 12. 空体：`for x in xs {}`。
 13. 循环变量类型推断与 `for (let ... in ...)` 一致。
 

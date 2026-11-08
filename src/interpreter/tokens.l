@@ -77,11 +77,18 @@ enum for_header_state {
 
 static enum for_header_state for_header = FOR_HEADER_NONE;
 static bool for_body_pending = false;
+static bool for_operand_started = false;
 static int for_body_indent = 0;
 
 static void reset_for_header_state() {
     for_header = FOR_HEADER_NONE;
     for_body_pending = false;
+    for_operand_started = false;
+}
+
+static void note_for_header_token(int tok) {
+    if (for_body_pending && tok != IN && tok != EOL)
+        for_operand_started = true;
 }
 
 static void note_for_name_token() {
@@ -93,7 +100,7 @@ static void note_for_name_token() {
         for_header = FOR_HEADER_NONE;
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_token(yyret_tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_token(yyret_tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
@@ -536,7 +543,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "{" {
     if (!brace_stack.empty())
         brace_stack.back().empty = false;
-    bool for_body = for_body_pending && indent_count == for_body_indent;
+    bool for_body = for_body_pending && for_operand_started &&
+                    indent_count == for_body_indent;
     for_header = FOR_HEADER_NONE;
     if (for_body) {
         for_body_pending = false;
@@ -623,6 +631,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "in" {
     if (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO) {
         for_body_pending = true;
+        for_operand_started = false;
         for_body_indent = indent_count;
     }
     for_header = FOR_HEADER_NONE;
@@ -950,6 +959,7 @@ struct scanner_checkpoint {
     int prev_token;
     int for_header;
     bool for_body_pending;
+    bool for_operand_started;
     int for_body_indent;
     std::vector<brace_frame> braces;
 };
@@ -970,6 +980,7 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->prev_token = prev_token;
     checkpoint->for_header = for_header;
     checkpoint->for_body_pending = for_body_pending;
+    checkpoint->for_operand_started = for_operand_started;
     checkpoint->for_body_indent = for_body_indent;
     checkpoint->braces = brace_stack;
     return checkpoint;
@@ -991,6 +1002,7 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     prev_token = checkpoint->prev_token;
     for_header = (enum for_header_state)checkpoint->for_header;
     for_body_pending = checkpoint->for_body_pending;
+    for_operand_started = checkpoint->for_operand_started;
     for_body_indent = checkpoint->for_body_indent;
     brace_stack = checkpoint->braces;
     BEGIN(checkpoint->condition);

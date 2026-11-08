@@ -158,8 +158,15 @@ def run_cases():
     check("for in without let requires block",
           "let xs = [1, 2];\nfor x in xs println(x);\n",
           stderr="syntax error")
-    check("for in without let dict requires parens",
-          'for k in {"a": 1} { println(k); }\n',
+    check("for in without let dict literal operand",
+          'for k, v in {1: 10, 2: 20} { println(str(k) + "=" + str(v)); }\n',
+          stdout="1=10\n2=20\n")
+    check("for in without let empty dict literal operand",
+          'for k in {} { println(k); }\n',
+          stdout="")
+    check("for in without let struct literal requires parens",
+          "struct P { x: int = 1; }\n"
+          'for p in P { x: 1 } { println(p.x); }\n',
           stderr="syntax error")
     check("for in without let two vars require dict",
           "for k, v in [1, 2] { println(k); }\n",

@@ -91,6 +91,23 @@ void remove_waiter(std::vector<channel_waiter *> &waiters,
         waiters.end());
 }
 
+void channel_fiber_sleep(long long ms) {
+    if (ms <= 0)
+        ms = 1;
+    struct value_t *value = newintval(ms);
+    struct value_t *sleep_value =
+        call_task_builtin(B_task_sleep, {value});
+    freeval(value);
+    if (!sleep_value)
+        return;
+    task_ptr task;
+    if (get_task_value(sleep_value, task)) {
+        struct value_t *result = fiber_await_task(task);
+        freeval(result);
+    }
+    freeval(sleep_value);
+}
+
 extern const struct native_type kMessageType;
 extern const struct native_type kChannelType;
 
@@ -287,6 +304,28 @@ struct value_t *channel_send_value(
         return nullptr;
     }
 
+    if (blocking && fiber_in_fiber()) {
+        for (;;) {
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (state->closed) {
+                    yyerror("thread.closed: channel is closed");
+                    return nullptr;
+                }
+                if (state->capacity < 0 ||
+                    state->queue.size() < (size_t)state->capacity) {
+                    state->queue.push_back(dupval(message));
+                    notify_recv_waiters(*state);
+                    state->cv.notify_all();
+                    return newnull();
+                }
+            }
+            if (g_interrupted)
+                return nullptr;
+            channel_fiber_sleep(1);
+        }
+    }
+
     std::unique_lock<std::mutex> lock(state->mutex);
     channel_waiter waiter;
     if (blocking) {
@@ -316,6 +355,39 @@ struct value_t *channel_send_value(
 
 struct value_t *channel_recv_value(
     const std::shared_ptr<channel_state> &state, long long timeout_ms) {
+    if (fiber_in_fiber()) {
+        const auto start = std::chrono::steady_clock::now();
+        for (;;) {
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (!state->queue.empty()) {
+                    struct value_t *message = state->queue.front();
+                    state->queue.pop_front();
+                    notify_send_waiters(*state);
+                    return message;
+                }
+                if (state->closed)
+                    return newnull();
+            }
+            if (g_interrupted)
+                return nullptr;
+            long long sleep_ms = 1;
+            if (timeout_ms > 0) {
+                const long long elapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+                const long long remaining = timeout_ms - elapsed;
+                if (remaining <= 0) {
+                    yyerror("std.thread.Channel.recv timed out");
+                    return nullptr;
+                }
+                sleep_ms = remaining < 1 ? remaining : 1;
+            }
+            channel_fiber_sleep(sleep_ms);
+        }
+    }
+
     std::unique_lock<std::mutex> lock(state->mutex);
     if (state->queue.empty() && !state->closed) {
         channel_waiter waiter;
@@ -460,6 +532,19 @@ struct value_t *channel_select(
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(
                               timeout_ms > 0 ? timeout_ms : 0);
+
+    if (fiber_in_fiber()) {
+        for (;;) {
+            if (struct value_t *ready = select_poll(channels, start))
+                return ready;
+            if (timeout_ms > 0 &&
+                std::chrono::steady_clock::now() >= deadline)
+                return select_timeout_result();
+            if (g_interrupted)
+                return nullptr;
+            channel_fiber_sleep(1);
+        }
+    }
 
     for (;;) {
         if (struct value_t *ready = select_poll(channels, start))

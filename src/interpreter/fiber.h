@@ -10,6 +10,7 @@ struct generator;
 using generator_ptr = std::shared_ptr<generator>;
 
 bool fiber_available();
+bool fiber_in_fiber();
 task_ptr fiber_start_async(std::function<value_t *()> body);
 value_t *fiber_await_task(const task_ptr &task);
 value_t *fiber_yield_value(value_t *value);

@@ -227,6 +227,10 @@ bool fiber_available() {
     return true;
 }
 
+bool fiber_in_fiber() {
+    return current_fiber != nullptr;
+}
+
 task_ptr fiber_start_async(std::function<value_t *()> body) {
     task_ptr task = task_create();
     fiber *value = new fiber(std::move(body), FIBER_TASK);

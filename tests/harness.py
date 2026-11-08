@@ -1075,6 +1075,40 @@ def check_extended_stdlib():
                 stdout_all=["sent=[0, 1]", "x=2", "y=2"],
             )
 
+            delay_worker = os.path.join(
+                thread_tmp, "thread_delay_worker.skein")
+            with open(delay_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    std.time.sleep(50);\n"
+                    "    ctx.handles[\"signal\"].send("
+                    "std.thread.Message.from({\"x\": 9}));\n"
+                    "    return {\"ok\": true};\n"
+                    "}\n"
+                )
+            delay_worker_path = delay_worker.replace("\\", "\\\\")
+            check(
+                "std.thread fiber channel wait",
+                "import std;\n"
+                "async func wait_channel(ch) {\n"
+                "    let msg = ch.recv();\n"
+                "    return msg.payload[\"x\"];\n"
+                "}\n"
+                'let ch = std.thread.Channel(1);\n'
+                f'let t = std.thread.spawn("{delay_worker_path}", '
+                f'std.thread.Message.from({{}}, {{"signal": ch}}));\n'
+                'let task = wait_channel(ch);\n'
+                'print("before|");\n'
+                'std.io.flush(std.io.stdout);\n'
+                'await std.task.sleep(10);\n'
+                'print("after|");\n'
+                'std.io.flush(std.io.stdout);\n'
+                'print("value="); print(await task);\n'
+                't.join();\n',
+                stdout="before|after|value=9",
+            )
+
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:
         check(

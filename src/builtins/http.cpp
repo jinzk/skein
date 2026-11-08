@@ -11,6 +11,7 @@
 #include "net.h"
 #include "repl.h"
 #include "task.h"
+#include "worker_pool.h"
 #ifdef SKEIN_ENABLE_TLS
 #include "tls.h"
 #endif
@@ -2752,7 +2753,7 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
 value_t *http_serve(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 5 || args[0]->type != T_dict ||
         (args[1]->type != T_func && args[1]->type != T_builtin &&
-         args[1]->type != T_method)) {
+         args[1]->type != T_method && args[1]->type != T_native)) {
         yyerror("std.http.serve expects server, handler, optional "
                 "max_requests, max_per_connection, idle_timeout_ms");
         return NULL;
@@ -2965,6 +2966,136 @@ value_t *http_serve(const std::vector<value_t *> &args) {
     return await_task_value(new_task_value(std::move(server_task)));
 }
 
+value_t *http_serve_workers(const std::vector<value_t *> &args) {
+    if (args.size() < 3 || args.size() > 6 || args[0]->type != T_dict ||
+        args[1]->type != T_int ||
+        ((int_value_t *)args[1])->value <= 0 ||
+        args[2]->type != T_string) {
+        yyerror("std.http.serve_workers expects server, worker count, "
+                "script and optional serve limits");
+        return NULL;
+    }
+
+    value_t *worker_count = dupval(args[1]);
+    value_t *script = dupval(args[2]);
+    value_t *options = (value_t *)newdictval();
+    dict_set(options, "protocol", newstrval("hybrid"));
+    std::vector<value_t *> pool_args{worker_count, script, options};
+    value_t *pool = call_worker_builtin(B_worker_pool, pool_args);
+    freeval(worker_count);
+    freeval(script);
+    freeval(options);
+    if (!pool)
+        return NULL;
+
+    struct pool_holder {
+        value_t *pool = nullptr;
+        ~pool_holder() { freeval(pool); }
+    };
+    std::shared_ptr<pool_holder> holder =
+        std::make_shared<pool_holder>();
+    holder->pool = pool;
+
+    long long worker_timeout_ms = 30000;
+    value_t *timeout_option = dict_get(args[0], "worker_timeout_ms");
+    if (timeout_option && timeout_option->type == T_int &&
+        ((int_value_t *)timeout_option)->value >= 0)
+        worker_timeout_ms = ((int_value_t *)timeout_option)->value;
+
+    value_t *handler = newnativeval(
+        [holder, worker_timeout_ms](
+            const std::vector<value_t *> &call_args) -> value_t * {
+            auto error_response = [](int status, const std::string &message) {
+                value_t *response = (value_t *)newdictval();
+                dict_set(response, "status", newintval(status));
+                dict_set(response, "headers", (value_t *)newdictval());
+                dict_set(response, "body", newbytesval(message));
+                return response;
+            };
+            if (call_args.size() != 1 || !call_args[0] ||
+                call_args[0]->type != T_dict)
+                return error_response(400, "invalid HTTP request");
+            value_t *request = call_args[0];
+            if (dict_get(request, "body_reader"))
+                return error_response(
+                    501, "serve_workers does not support stream_request_body");
+
+            std::string body;
+            if (!body_value(dict_get(request, "body"), body,
+                            "std.http.serve_workers"))
+                return NULL;
+
+            value_t *params = (value_t *)newlistval();
+            list_value_t *items = (list_value_t *)params;
+            items->payload->items.push_back(dupval(dict_get(request, "method")));
+            items->payload->items.push_back(dupval(dict_get(request, "path")));
+            items->payload->items.push_back(dupval(dict_get(request, "headers")));
+            value_t *method = newstrval("handle");
+            value_t *body_arg = newbytesval(body);
+            std::vector<value_t *> call{holder->pool, method, params,
+                                        body_arg};
+            value_t *timeout_value = nullptr;
+            if (worker_timeout_ms > 0) {
+                timeout_value = newintval(worker_timeout_ms);
+                call.push_back(timeout_value);
+            }
+            value_t *worker_result =
+                call_worker_builtin(B_worker_call_bytes, call);
+            freeval(method);
+            freeval(params);
+            freeval(body_arg);
+            if (timeout_value)
+                freeval(timeout_value);
+            if (!worker_result)
+                return error_response(502, "worker call failed");
+            if (worker_result->type != T_result) {
+                freeval(worker_result);
+                return error_response(502, "invalid worker result");
+            }
+            result_value_t *result = (result_value_t *)worker_result;
+            if (!result->ok) {
+                std::string message = "worker error";
+                if (result->error &&
+                    result->error->type == T_error)
+                    message = ((error_value_t *)result->error)->message;
+                freeval(worker_result);
+                return error_response(502, message);
+            }
+            value_t *payload = result->value;
+            value_t *meta = dict_get(payload, "value");
+            value_t *reply_body = dict_get(payload, "body");
+            if (!meta || meta->type != T_dict) {
+                freeval(worker_result);
+                return error_response(502, "worker must return metadata dict");
+            }
+            value_t *status = dict_get(meta, "status");
+            long long status_code = 200;
+            if (status && status->type == T_int)
+                status_code = ((int_value_t *)status)->value;
+            value_t *headers = dict_get(meta, "headers");
+            value_t *response = (value_t *)newdictval();
+            dict_set(response, "status", newintval(status_code));
+            dict_set(response, "headers",
+                     headers && headers->type == T_dict
+                         ? dupval(headers)
+                         : (value_t *)newdictval());
+            dict_set(response, "body",
+                     reply_body && reply_body->type == T_bytes
+                         ? dupval(reply_body)
+                         : newbytesval(""));
+            freeval(worker_result);
+            return response;
+        },
+        holder);
+
+    std::vector<value_t *> serve_args{args[0], handler};
+    for (size_t i = 3; i < args.size(); ++i)
+        serve_args.push_back(args[i]);
+    value_t *served = http_serve(serve_args);
+    freeval(handler);
+    return served;
+}
+
 value_t *http_upgrade(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2 || args[0]->type != T_dict) {
         yyerror("std.http.upgrade expects a request and optional headers");
@@ -3168,6 +3299,8 @@ struct value_t *call_http_builtin(
             return http_respond_async(args);
         case B_http_serve:
             return http_serve(args);
+        case B_http_serve_workers:
+            return http_serve_workers(args);
         case B_http_upgrade:
             return http_upgrade(args);
         case B_http_cookies:

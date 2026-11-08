@@ -714,6 +714,32 @@ std.http.close(s);
 - 达到限制或空闲超时后发送 `Connection: close` 并关闭连接；
 - 返回已处理请求数。
 
+主进程 accept + 子进程处理：
+
+```text
+std.http.serve_workers(server, workers, script
+                       [, max_requests[, max_per_connection
+                       [, idle_timeout_ms]]]) -> served
+```
+
+- HTTP 连接、TLS、keep-alive 仍由主进程处理；
+- 每个请求通过 hybrid IPC 发给 worker；
+- worker 必须使用 `{"protocol":"hybrid"}`；
+- worker 的 `params` 为 `[method, path, headers]`，请求 body 走 raw body；
+- worker 返回的 `result` 应为 `{"status": ..., "headers": ...}`，
+  response body 走 raw body；
+- `server["worker_timeout_ms"]` 控制单次 worker 调用超时，
+  默认 30000，`0` 表示不超时；
+- worker 调用使用异步等待，多个连接可以并发占用不同 worker；
+- 当前不支持 `stream_request_body`，该模式返回 501；
+- WebSocket upgrade / SSE 仍应使用独立 HTTP 服务或后续 socket handoff。
+
+```text
+let s = std.http.listen("127.0.0.1", 8080);
+let served = std.http.serve_workers(
+  s, 4, "worker.skein", 1000);
+```
+
 流式 body：
 
 ```text
@@ -2462,6 +2488,7 @@ std.http.accept_async
 std.http.respond
 std.http.respond_async
 std.http.serve
+std.http.serve_workers
 std.http.upgrade
 std.http.cookies
 std.http.read_body
@@ -2653,8 +2680,10 @@ std.process.pid
 
 std.worker.pool
 std.worker.call
+std.worker.call_bytes
 std.worker.map
 std.worker.submit
+std.worker.submit_bytes
 std.worker.wait
 std.worker.shutdown
 std.worker.stats
@@ -4161,8 +4190,10 @@ print(std.process.wait(p));
 ```text
 std.worker.pool(size, script[, options]) -> pool
 std.worker.call(pool, method, args[, timeout_ms]) -> result
+std.worker.call_bytes(pool, method, args, body[, timeout_ms]) -> result
 std.worker.map(pool, method, items[, timeout_ms]) -> list
 std.worker.submit(pool, method, args) -> job
+std.worker.submit_bytes(pool, method, args, body) -> job
 std.worker.wait(job[, timeout_ms]) -> result
 std.worker.shutdown(pool)
 std.worker.stats(pool) -> dict
@@ -4174,6 +4205,65 @@ std.worker.stats(pool) -> dict
 queue_limit       默认 1024
 restart_limit     默认 3
 ready_timeout_ms  默认 5000
+protocol          "jsonl"（默认）或 "hybrid"
+```
+
+`protocol = "hybrid"` 使用 JSON header + raw body，避免大 body 的 JSON
+转义和 base64 开销。请求帧：
+
+```text
+{"id":1,"method":"handle","params":[...],"body_len":N}\n
+<N 字节原始 body>
+```
+
+响应帧：
+
+```text
+{"id":1,"ok":true,"result":...,"body_len":M}\n
+<M 字节原始 body>
+```
+
+hybrid worker 启动时发送：
+
+```text
+{"ready":true,"version":1,"protocol":"hybrid"}
+```
+
+并新增：
+
+```text
+std.worker.call_bytes(pool, method, args, body[, timeout_ms]) -> result
+std.worker.submit_bytes(pool, method, args, body) -> job
+```
+
+`call_bytes` / `wait` 成功时返回的 value 是：
+
+```text
+{"value": <result>, "body": <bytes>}
+```
+
+单个 body 上限为 256 MiB。默认 JSON Lines worker 脚本不受影响。
+
+worker 脚本读取 hybrid 请求：
+
+```text
+let line = std.io.read_line(std.io.stdin);
+let request = std.json.parse(bytes_to_string(line));
+let body = bytes_from_string("");
+if (request["body_len"] > 0) {
+  body = std.io.read_exact(std.io.stdin, request["body_len"]);
+}
+
+let response = {
+  "id": request["id"],
+  "ok": true,
+  "result": request["params"][0],
+  "body_len": len(body)
+};
+std.io.write_all(std.io.stdout,
+                 bytes_from_string(std.json.stringify(response) + "\n"));
+std.io.write_all(std.io.stdout, body);
+std.io.flush(std.io.stdout);
 ```
 
 - `size`：worker 进程数

@@ -9,8 +9,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
+import urllib.request
 
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
@@ -553,111 +555,6 @@ def check_extended_stdlib():
             'print(std.process.wait(p));\n',
             stdout_all=["3", "abc", "0"],
         )
-        with tempfile.TemporaryDirectory() as worker_tmp:
-            worker_script = os.path.join(worker_tmp, "worker.skein")
-            with open(worker_script, "w", encoding="utf-8") as handle:
-                handle.write(
-                    "import std;\n"
-                    "std.io.write_all(std.io.stdout, bytes_from_string("
-                    "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
-                    "std.io.flush(std.io.stdout);\n"
-                    "while (true) {\n"
-                    "  let line = std.io.read_line(std.io.stdin);\n"
-                    "  if (line == null) { break; }\n"
-                    "  let request = std.json.parse(bytes_to_string(line));\n"
-                    "  let result = request[\"params\"][0] + "
-                    "request[\"params\"][1];\n"
-                    "  let response = {\"id\": request[\"id\"], "
-                    "\"ok\": true, \"result\": result};\n"
-                    "  std.io.write_all(std.io.stdout, bytes_from_string("
-                    "std.json.stringify(response) + \"\\n\"));\n"
-                    "  std.io.flush(std.io.stdout);\n"
-                    "}\n"
-                )
-            worker_path = worker_script.replace("\\", "\\\\")
-            binary_path = os.path.abspath(BIN).replace("\\", "\\\\")
-            check(
-                "json lines worker over pipes",
-                "import std;\n"
-                f'let p = std.process.spawn("{binary_path}", '
-                f'{{"args": ["{worker_path}"]}});\n'
-                'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
-                'std.io.write_all(p["stdin"], bytes_from_string('
-                '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
-                'std.io.flush(p["stdin"]);\n'
-                'let line = std.io.read_line(p["stdout"]);\n'
-                'print(bytes_to_string(line));\n'
-                'std.io.close(p["stdin"]);\n'
-                'print(std.process.wait(p));\n',
-                stdout_all=['{"ready":true,"version":1}',
-                            '{"id":1,"ok":true,"result":5}', "0"],
-            )
-            check(
-                "std.worker pool call and map",
-                "import std;\n"
-                f'let pool = std.worker.pool(2, "{worker_path}");\n'
-                'let one = std.worker.call(pool, "add", [2, 3]);\n'
-                'print(std.result.unwrap(one));\n'
-                'print(std.worker.map(pool, "add", '
-                '[[1, 2], [3, 4], [5, 6]]));\n'
-                'std.worker.shutdown(pool);\n',
-                stdout_all=["5", "[3, 7, 11]"],
-            )
-            restart_script = os.path.join(worker_tmp, "restart.skein")
-            with open(restart_script, "w", encoding="utf-8") as handle:
-                handle.write(
-                    "import std;\n"
-                    "std.io.write_all(std.io.stdout, bytes_from_string("
-                    "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
-                    "std.io.flush(std.io.stdout);\n"
-                    "while (true) {\n"
-                    "  let line = std.io.read_line(std.io.stdin);\n"
-                    "  if (line == null) { break; }\n"
-                    "  let request = std.json.parse(bytes_to_string(line));\n"
-                    "  let method = request[\"method\"];\n"
-                    "  if (method == \"die\") { break; }\n"
-                    "  if (method == \"slow\") { std.time.sleep(500); }\n"
-                    "  let result = request[\"params\"][0] + "
-                    "request[\"params\"][1];\n"
-                    "  let response = {\"id\": request[\"id\"], "
-                    "\"ok\": true, \"result\": result};\n"
-                    "  std.io.write_all(std.io.stdout, bytes_from_string("
-                    "std.json.stringify(response) + \"\\n\"));\n"
-                    "  std.io.flush(std.io.stdout);\n"
-                    "}\n"
-                )
-            restart_path = restart_script.replace("\\", "\\\\")
-            check(
-                "std.worker submit and wait",
-                "import std;\n"
-                f'let pool = std.worker.pool(2, "{worker_path}");\n'
-                'let a = std.worker.submit(pool, "add", [1, 2]);\n'
-                'let b = std.worker.submit(pool, "add", [3, 4]);\n'
-                'let c = std.worker.submit(pool, "add", [5, 6]);\n'
-                'print(std.result.unwrap(std.worker.wait(a)));\n'
-                'print(std.result.unwrap(std.worker.wait(b)));\n'
-                'print(std.result.unwrap(std.worker.wait(c)));\n'
-                'let stats = std.worker.stats(pool);\n'
-                'print(stats["workers"]);\n'
-                'print(stats["available"]);\n'
-                'std.worker.shutdown(pool);\n',
-                stdout_all=["3", "7", "11", "2", "2"],
-            )
-            check(
-                "std.worker crash and timeout restart",
-                "import std;\n"
-                f'let pool = std.worker.pool(1, "{restart_path}");\n'
-                'print(std.result.is_err('
-                'std.worker.call(pool, "die", [1, 2])));\n'
-                'print(std.result.unwrap('
-                'std.worker.call(pool, "add", [2, 3])));\n'
-                'print(std.result.is_err('
-                'std.worker.call(pool, "slow", [1, 2], 100)));\n'
-                'print(std.result.unwrap('
-                'std.worker.call(pool, "add", [4, 5])));\n'
-                'std.worker.shutdown(pool);\n',
-                stdout_all=["true", "5", "true", "9"],
-            )
         check(
             "std process spawn repeated close",
             "import std;\n"
@@ -684,6 +581,328 @@ def check_extended_stdlib():
             'std.io.flush(std.io.stdout);\n',
             stdout="hello",
         )
+
+    with tempfile.TemporaryDirectory() as worker_tmp:
+        worker_script = os.path.join(worker_tmp, "worker.skein")
+        with open(worker_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
+                "std.io.flush(std.io.stdout);\n"
+                "while (true) {\n"
+                "  let line = std.io.read_line(std.io.stdin);\n"
+                "  if (line == null) { break; }\n"
+                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let result = request[\"params\"][0] + "
+                "request[\"params\"][1];\n"
+                "  let response = {\"id\": request[\"id\"], "
+                "\"ok\": true, \"result\": result};\n"
+                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.json.stringify(response) + \"\\n\"));\n"
+                "  std.io.flush(std.io.stdout);\n"
+                "}\n"
+            )
+        worker_path = worker_script.replace("\\", "\\\\")
+        binary_path = os.path.abspath(BIN).replace("\\", "\\\\")
+        check(
+            "json lines worker over pipes",
+            "import std;\n"
+            f'let p = std.process.spawn("{binary_path}", '
+            f'{{"args": ["{worker_path}"]}});\n'
+            'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
+            'std.io.write_all(p["stdin"], bytes_from_string('
+            '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
+            'std.io.flush(p["stdin"]);\n'
+            'let line = std.io.read_line(p["stdout"]);\n'
+            'print(bytes_to_string(line));\n'
+            'std.io.close(p["stdin"]);\n'
+            'print(std.process.wait(p));\n',
+            stdout_all=['{"ready":true,"version":1}',
+                        '{"id":1,"ok":true,"result":5}', "0"],
+        )
+        check(
+            "std.worker pool call and map",
+            "import std;\n"
+            f'let pool = std.worker.pool(2, "{worker_path}");\n'
+            'let one = std.worker.call(pool, "add", [2, 3]);\n'
+            'print(std.result.unwrap(one));\n'
+            'print(std.worker.map(pool, "add", '
+            '[[1, 2], [3, 4], [5, 6]]));\n'
+            'std.worker.shutdown(pool);\n',
+            stdout_all=["5", "[3, 7, 11]"],
+        )
+        restart_script = os.path.join(worker_tmp, "restart.skein")
+        with open(restart_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
+                "std.io.flush(std.io.stdout);\n"
+                "while (true) {\n"
+                "  let line = std.io.read_line(std.io.stdin);\n"
+                "  if (line == null) { break; }\n"
+                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let method = request[\"method\"];\n"
+                "  if (method == \"die\") { break; }\n"
+                "  if (method == \"slow\") { std.time.sleep(500); }\n"
+                "  let result = request[\"params\"][0] + "
+                "request[\"params\"][1];\n"
+                "  let response = {\"id\": request[\"id\"], "
+                "\"ok\": true, \"result\": result};\n"
+                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.json.stringify(response) + \"\\n\"));\n"
+                "  std.io.flush(std.io.stdout);\n"
+                "}\n"
+            )
+        restart_path = restart_script.replace("\\", "\\\\")
+        check(
+            "std.worker submit and wait",
+            "import std;\n"
+            f'let pool = std.worker.pool(2, "{worker_path}");\n'
+            'let a = std.worker.submit(pool, "add", [1, 2]);\n'
+            'let b = std.worker.submit(pool, "add", [3, 4]);\n'
+            'let c = std.worker.submit(pool, "add", [5, 6]);\n'
+            'print(std.result.unwrap(std.worker.wait(a)));\n'
+            'print(std.result.unwrap(std.worker.wait(b)));\n'
+            'print(std.result.unwrap(std.worker.wait(c)));\n'
+            'let stats = std.worker.stats(pool);\n'
+            'print(stats["workers"]);\n'
+            'print(stats["available"]);\n'
+            'std.worker.shutdown(pool);\n',
+            stdout_all=["3", "7", "11", "2", "2"],
+        )
+        check(
+            "std.worker crash and timeout restart",
+            "import std;\n"
+            f'let pool = std.worker.pool(1, "{restart_path}");\n'
+            'print(std.result.is_err('
+            'std.worker.call(pool, "die", [1, 2])));\n'
+            'print(std.result.unwrap('
+            'std.worker.call(pool, "add", [2, 3])));\n'
+            'print(std.result.is_err('
+            'std.worker.call(pool, "slow", [1, 2], 100)));\n'
+            'print(std.result.unwrap('
+            'std.worker.call(pool, "add", [4, 5])));\n'
+            'std.worker.shutdown(pool);\n',
+            stdout_all=["true", "5", "true", "9"],
+        )
+        hybrid_script = os.path.join(worker_tmp, "hybrid_worker.skein")
+        with open(hybrid_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "\"{\\\"ready\\\":true,\\\"version\\\":1,"
+                "\\\"protocol\\\":\\\"hybrid\\\"}\\n\"));\n"
+                "std.io.flush(std.io.stdout);\n"
+                "while (true) {\n"
+                "  let line = std.io.read_line(std.io.stdin);\n"
+                "  if (line == null) { break; }\n"
+                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let body = bytes_from_string(\"\");\n"
+                "  if (request[\"body_len\"] > 0) {\n"
+                "    body = std.io.read_exact(std.io.stdin, "
+                "request[\"body_len\"]);\n"
+                "  }\n"
+                "  let response = {\"id\": request[\"id\"], "
+                "\"ok\": true, \"result\": request[\"params\"][0], "
+                "\"body_len\": len(body)};\n"
+                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.json.stringify(response) + \"\\n\"));\n"
+                "  std.io.write_all(std.io.stdout, body);\n"
+                "  std.io.flush(std.io.stdout);\n"
+                "}\n"
+            )
+        hybrid_path = hybrid_script.replace("\\", "\\\\")
+        check(
+            "std.worker hybrid call_bytes",
+            "import std;\n"
+            f'let pool = std.worker.pool(1, "{hybrid_path}", '
+            '{"protocol": "hybrid"});\n'
+            'let reply = std.result.unwrap(std.worker.call_bytes('
+            'pool, "echo", [7], bytes_from_string("raw-body-123")));\n'
+            'print(reply["value"]);\n'
+            'print(bytes_to_string(reply["body"]));\n'
+            'std.worker.shutdown(pool);\n',
+            stdout_all=["7", "raw-body-123"],
+        )
+        check(
+            "std.worker hybrid submit_bytes",
+            "import std;\n"
+            f'let pool = std.worker.pool(1, "{hybrid_path}", '
+            '{"protocol": "hybrid"});\n'
+            'let job = std.worker.submit_bytes('
+            'pool, "echo", [9], bytes_from_string("two"));\n'
+            'let reply = std.result.unwrap(std.worker.wait(job));\n'
+            'print(reply["value"]);\n'
+            'print(bytes_to_string(reply["body"]));\n'
+            'std.worker.shutdown(pool);\n',
+            stdout_all=["9", "two"],
+        )
+        serve_worker_script = os.path.join(
+            worker_tmp, "serve_worker.skein")
+        with open(serve_worker_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "\"{\\\"ready\\\":true,\\\"version\\\":1,"
+                "\\\"protocol\\\":\\\"hybrid\\\"}\\n\"));\n"
+                "std.io.flush(std.io.stdout);\n"
+                "while (true) {\n"
+                "  let line = std.io.read_line(std.io.stdin);\n"
+                "  if (line == null) { break; }\n"
+                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let body = bytes_from_string(\"\");\n"
+                "  if (request[\"body_len\"] > 0) {\n"
+                "    body = std.io.read_exact(std.io.stdin, "
+                "request[\"body_len\"]);\n"
+                "  }\n"
+                "  let result = {\"status\": 200, "
+                "\"headers\": {\"Content-Type\": \"text/plain\"}};\n"
+                "  let response = {\"id\": request[\"id\"], "
+                "\"ok\": true, \"result\": result, "
+                "\"body_len\": len(body)};\n"
+                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.json.stringify(response) + \"\\n\"));\n"
+                "  std.io.write_all(std.io.stdout, body);\n"
+                "  std.io.flush(std.io.stdout);\n"
+                "}\n"
+            )
+        serve_worker_path = serve_worker_script.replace("\\", "\\\\")
+        serve_script = os.path.join(worker_tmp, "serve_workers.skein")
+        with open(serve_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                f"println(std.http.serve_workers(s, 1, "
+                f"\"{serve_worker_path}\", 1));\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), serve_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_workers did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port_line}/echo",
+                data=b"hello-body",
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                assert response.status == 200
+                assert response.read() == b"hello-body"
+            out, err = server.communicate(timeout=10)
+            assert server.returncode == 0, err
+            assert "1" in out
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        slow_script = os.path.join(
+            worker_tmp, "slow_hybrid_worker.skein")
+        with open(slow_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "\"{\\\"ready\\\":true,\\\"version\\\":1,"
+                "\\\"protocol\\\":\\\"hybrid\\\"}\\n\"));\n"
+                "std.io.flush(std.io.stdout);\n"
+                "while (true) {\n"
+                "  let line = std.io.read_line(std.io.stdin);\n"
+                "  if (line == null) { break; }\n"
+                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let body = bytes_from_string(\"\");\n"
+                "  if (request[\"body_len\"] > 0) {\n"
+                "    body = std.io.read_exact(std.io.stdin, "
+                "request[\"body_len\"]);\n"
+                "  }\n"
+                "  std.time.sleep(300);\n"
+                "  let result = {\"status\": 200, "
+                "\"headers\": {\"Content-Type\": \"text/plain\"}};\n"
+                "  let response = {\"id\": request[\"id\"], "
+                "\"ok\": true, \"result\": result, "
+                "\"body_len\": len(body)};\n"
+                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.json.stringify(response) + \"\\n\"));\n"
+                "  std.io.write_all(std.io.stdout, body);\n"
+                "  std.io.flush(std.io.stdout);\n"
+                "}\n"
+            )
+        slow_path = slow_script.replace("\\", "\\\\")
+        concurrent_script = os.path.join(
+            worker_tmp, "serve_workers_concurrent.skein")
+        with open(concurrent_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                "s[\"worker_timeout_ms\"] = 10000;\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                f"println(std.http.serve_workers(s, 2, "
+                f"\"{slow_path}\", 2));\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), concurrent_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_workers did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            concurrent_results = []
+
+            def concurrent_hit(index):
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port_line}/r{index}",
+                    data=b"payload",
+                    method="POST",
+                )
+                with urllib.request.urlopen(
+                        request, timeout=10) as response:
+                    concurrent_results.append(
+                        (response.status, response.read()))
+
+            threads = [
+                threading.Thread(target=concurrent_hit, args=(index,))
+                for index in range(2)
+            ]
+            started = time.monotonic()
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            elapsed = time.monotonic() - started
+            assert len(concurrent_results) == 2
+            assert all(status == 200 and body == b"payload"
+                       for status, body in concurrent_results)
+            assert elapsed < 0.55, (
+                "serve_workers handled requests sequentially: "
+                f"{elapsed:.3f}s"
+            )
+            out, err = server.communicate(timeout=10)
+            assert server.returncode == 0, err
+            assert "2" in out
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
 
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:

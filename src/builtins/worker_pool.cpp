@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "builtins_io.h"
+#include "fiber.h"
 #include "json.h"
 #include "platform.h"
 #include "process_spawn.h"
@@ -27,6 +28,10 @@ struct worker_slot {
     value_t *stdout_stream = nullptr;
     std::shared_ptr<worker_job> job;
     bool busy = false;
+    /* Set while a fiber is blocked reading this slot's response. */
+    bool completing = false;
+    /* Bytes read past the current protocol line. */
+    std::string pending;
     int failures = 0;
 };
 
@@ -36,6 +41,7 @@ struct worker_job {
     std::string request;
     int slot = -1;
     bool done = false;
+    bool binary = false;
     value_t *result = nullptr;
 
     ~worker_job() {
@@ -48,6 +54,7 @@ struct worker_pool {
     std::vector<worker_slot> workers;
     std::vector<std::shared_ptr<worker_job>> queue;
     std::string script;
+    bool hybrid = false;
     long long next_id = 1;
     long long queue_limit = 1024;
     long long restart_limit = 3;
@@ -159,13 +166,39 @@ bool flush_stream(value_t *stream) {
     return true;
 }
 
-value_t *read_line(value_t *stream, long long timeout_ms,
-                   std::string &error) {
-    if (timeout_ms <= 0)
-        return call_io(B_io_read_line, {stream});
+value_t *read_line(value_t *stream, std::string *pending,
+                   long long timeout_ms, std::string &error) {
+    std::string buffer;
+    if (pending && !pending->empty()) {
+        buffer.swap(*pending);
+        const size_t newline = buffer.find('\n');
+        if (newline != std::string::npos) {
+            *pending = buffer.substr(newline + 1);
+            buffer.resize(newline);
+            return newstrval(buffer.c_str());
+        }
+    }
+    if (timeout_ms <= 0) {
+        value_t *line = call_io(B_io_read_line, {stream});
+        if (!line)
+            return nullptr;
+        if (line->type == T_null) {
+            if (buffer.empty())
+                return line;
+            freeval(line);
+            return newstrval(buffer.c_str());
+        }
+        std::string text;
+        if (line->type == T_bytes)
+            text = ((bytes_value_t *)line)->value;
+        else if (line->type == T_string)
+            text = ((string_value_t *)line)->value;
+        freeval(line);
+        buffer += text;
+        return newstrval(buffer.c_str());
+    }
 
     const auto start = std::chrono::steady_clock::now();
-    std::string buffer;
     for (;;) {
         const auto now = std::chrono::steady_clock::now();
         const long long elapsed = std::chrono::duration_cast<
@@ -222,6 +255,8 @@ value_t *read_line(value_t *stream, long long timeout_ms,
         const size_t newline = bytes.find('\n');
         if (newline != std::string::npos) {
             buffer.append(bytes.data(), newline);
+            if (pending)
+                *pending = bytes.substr(newline + 1);
             freeval(chunk);
             break;
         }
@@ -229,6 +264,42 @@ value_t *read_line(value_t *stream, long long timeout_ms,
         freeval(chunk);
     }
     return newstrval(buffer.c_str());
+}
+
+value_t *read_exact_stream(value_t *stream, std::string *pending,
+                           size_t size, long long timeout_ms,
+                           std::string &error) {
+    if (size == 0)
+        return newbytesval(std::string());
+    std::string buffered;
+    if (pending && !pending->empty()) {
+        const size_t take = std::min(size, pending->size());
+        buffered.assign(pending->data(), take);
+        pending->erase(0, take);
+    }
+    if (buffered.size() == size)
+        return newbytesval(std::move(buffered));
+    const size_t remaining = size - buffered.size();
+    value_t *size_value = newintval((long long)remaining);
+    std::vector<value_t *> args{stream, size_value};
+    value_t *timeout_value = nullptr;
+    if (timeout_ms > 0) {
+        timeout_value = newintval(timeout_ms);
+        args.push_back(timeout_value);
+    }
+    value_t *result = call_io(B_io_read_exact, args);
+    freeval(size_value);
+    if (timeout_value)
+        freeval(timeout_value);
+    if (!result || result->type != T_bytes) {
+        if (result)
+            freeval(result);
+        error = "worker body read failed";
+        return nullptr;
+    }
+    buffered += ((bytes_value_t *)result)->value;
+    freeval(result);
+    return newbytesval(std::move(buffered));
 }
 
 value_t *json_stringify(value_t *value) {
@@ -242,7 +313,8 @@ value_t *json_parse(value_t *value) {
 void close_worker(worker_slot &slot, bool kill_if_running);
 
 bool spawn_worker(worker_slot &slot, const std::string &script,
-                  long long ready_timeout_ms, std::string &error) {
+                  long long ready_timeout_ms, bool hybrid,
+                  std::string &error) {
     const std::string executable = platform_executable_path();
     if (executable.empty()) {
         error = "cannot locate the skein executable";
@@ -277,8 +349,12 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
     slot.process = process;
     slot.stdin_stream = stdin_stream;
     slot.stdout_stream = stdout_stream;
+    /* Reserve the slot while the handshake runs so no fiber can dispatch. */
+    slot.busy = true;
+    slot.completing = true;
 
-    value_t *ready_line = read_line(stdout_stream, ready_timeout_ms, error);
+    value_t *ready_line = read_line(stdout_stream, &slot.pending,
+                                    ready_timeout_ms, error);
     if (!ready_line) {
         close_worker(slot, true);
         if (error.empty())
@@ -289,16 +365,27 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
     freeval(ready_line);
     value_t *ready_flag = dict_get(ready, "ready");
     value_t *version = dict_get(ready, "version");
+    value_t *protocol = dict_get(ready, "protocol");
+    const bool protocol_ok =
+        hybrid ? (protocol && protocol->type == T_string &&
+                  std::strcmp(((string_value_t *)protocol)->value,
+                              "hybrid") == 0)
+               : (!protocol ||
+                  (protocol->type == T_string &&
+                   std::strcmp(((string_value_t *)protocol)->value,
+                               "jsonl") == 0));
     if (!ready || !ready_flag || ready_flag->type != T_bool ||
         !((bool_value_t *)ready_flag)->value || !version ||
         version->type != T_int ||
-        ((int_value_t *)version)->value != 1) {
+        ((int_value_t *)version)->value != 1 || !protocol_ok) {
         freeval(ready);
         close_worker(slot, true);
         error = "worker ready frame is invalid";
         return false;
     }
     freeval(ready);
+    slot.busy = false;
+    slot.completing = false;
     return true;
 }
 
@@ -338,23 +425,37 @@ bool worker_usable(const worker_slot &slot) {
 
 bool restart_worker(worker_pool *pool, worker_slot &slot,
                     std::string &error) {
+    /* Keep the slot reserved for the whole restart, including the pumps that
+       process wait/spawn can perform. */
+    slot.busy = true;
+    slot.completing = true;
     close_worker(slot, true);
     if (slot.failures >= pool->restart_limit) {
+        slot.busy = false;
+        slot.completing = false;
         error = "worker restart limit exceeded";
         return false;
     }
     ++slot.failures;
+    slot.busy = true;
+    slot.completing = true;
     if (!pool->script.empty() &&
-        spawn_worker(slot, pool->script, pool->ready_timeout_ms, error)) {
+        spawn_worker(slot, pool->script, pool->ready_timeout_ms,
+                     pool->hybrid, error)) {
         ++pool->restarts;
         return true;
     }
+    slot.busy = false;
+    slot.completing = false;
     error = "cannot restart worker";
     return false;
 }
 
 bool make_request(long long id, const std::string &method, value_t *params,
+                  const std::string *body, bool hybrid,
                   std::string &line) {
+    if (body && !hybrid)
+        return false;
     dict_value_t *request = newdictval();
     request->payload->items.push_back(std::make_pair(
         newstrval("id"), newintval(id)));
@@ -362,20 +463,29 @@ bool make_request(long long id, const std::string &method, value_t *params,
         newstrval("method"), newstrval(method.c_str())));
     request->payload->items.push_back(std::make_pair(
         newstrval("params"), dupval(params)));
+    if (hybrid) {
+        request->payload->items.push_back(std::make_pair(
+            newstrval("body_len"),
+            newintval(body ? (long long)body->size() : 0)));
+    }
     value_t *json = json_stringify((value_t *)request);
     freeval((value_t *)request);
     if (!json)
         return false;
     line = ((string_value_t *)json)->value;
     line.push_back('\n');
+    if (body)
+        line.append(*body);
     freeval(json);
     return true;
 }
 
-bool read_response(value_t *stdout_stream, long long expected_id,
-                   long long timeout_ms, value_t *&result,
+bool read_response(value_t *stdout_stream, std::string *pending,
+                   long long expected_id,
+                   long long timeout_ms, bool binary, value_t *&result,
                    std::string &transport_error) {
-    value_t *line = read_line(stdout_stream, timeout_ms, transport_error);
+    value_t *line = read_line(stdout_stream, pending, timeout_ms,
+                              transport_error);
     if (!line)
         return false;
     if (line->type == T_null) {
@@ -398,11 +508,61 @@ bool read_response(value_t *stdout_stream, long long expected_id,
         transport_error = "invalid worker response";
         return false;
     }
-    if (((bool_value_t *)ok)->value) {
+
+    size_t body_size = 0;
+    value_t *body_len = dict_get(response, "body_len");
+    if (body_len) {
+        if (body_len->type != T_int ||
+            ((int_value_t *)body_len)->value < 0) {
+            freeval(response);
+            transport_error = "invalid worker body length";
+            return false;
+        }
+        body_size = (size_t)((int_value_t *)body_len)->value;
+    }
+    if (body_size > 256u * 1024u * 1024u) {
+        freeval(response);
+        transport_error = "worker body is too large";
+        return false;
+    }
+    std::string body;
+    if (body_size > 0) {
+        value_t *body_value =
+            read_exact_stream(stdout_stream, pending, body_size, timeout_ms,
+                              transport_error);
+        if (!body_value) {
+            freeval(response);
+            return false;
+        }
+        body = ((bytes_value_t *)body_value)->value;
+        freeval(body_value);
+    }
+
+    const bool ok_value = ((bool_value_t *)ok)->value;
+    if (ok_value) {
         value_t *value = dict_get(response, "result");
-        result = newresultok(value ? dupval(value) : newnull());
+        if (binary) {
+            dict_value_t *combined = newdictval();
+            combined->payload->items.push_back(std::make_pair(
+                newstrval("value"), value ? dupval(value) : newnull()));
+            combined->payload->items.push_back(std::make_pair(
+                newstrval("body"), newbytesval(body)));
+            result = newresultok((value_t *)combined);
+        } else {
+            if (!body.empty()) {
+                freeval(response);
+                transport_error = "unexpected worker body";
+                return false;
+            }
+            result = newresultok(value ? dupval(value) : newnull());
+        }
         freeval(response);
         return true;
+    }
+    if (!body.empty()) {
+        freeval(response);
+        transport_error = "unexpected worker error body";
+        return false;
     }
     value_t *error = dict_get(response, "error");
     std::string kind = "worker";
@@ -430,16 +590,18 @@ void fail_job(const std::shared_ptr<worker_job> &job,
     job->slot = -1;
 }
 
-void complete_slot(worker_pool *pool, size_t index, long long timeout_ms) {
+bool complete_slot(worker_pool *pool, size_t index, long long timeout_ms) {
     worker_slot &slot = pool->workers[index];
     std::shared_ptr<worker_job> job = slot.job;
-    if (!job)
-        return;
+    if (!job || slot.completing)
+        return false;
+    slot.completing = true;
     value_t *result = nullptr;
     std::string transport_error;
-    const bool ok = read_response(slot.stdout_stream, job->id, timeout_ms,
-                                  result, transport_error);
-    slot.busy = false;
+    const bool ok = read_response(slot.stdout_stream, &slot.pending, job->id,
+                                  timeout_ms, job->binary, result,
+                                  transport_error);
+    slot.completing = false;
     slot.job.reset();
     job->slot = -1;
     if (!ok) {
@@ -447,14 +609,16 @@ void complete_slot(worker_pool *pool, size_t index, long long timeout_ms) {
         restart_worker(pool, slot, restart_error);
         fail_job(job, transport_error.empty() ? "worker read failed"
                                               : transport_error);
-        return;
+        return true;
     }
+    slot.busy = false;
     if (result && result->type == T_result &&
         ((result_value_t *)result)->ok) {
         slot.failures = 0;
     }
     job->result = result;
     job->done = true;
+    return true;
 }
 
 void try_dispatch(worker_pool *pool) {
@@ -480,16 +644,23 @@ void try_dispatch(worker_pool *pool) {
         }
         std::shared_ptr<worker_job> job = pool->queue.front();
         pool->queue.erase(pool->queue.begin());
+        job->slot = (int)index;
+        slot.job = job;
+        slot.busy = true;
+        /* Block other fibers from reading this slot until the request is out. */
+        slot.completing = true;
         if (!write_bytes(slot.stdin_stream, job->request) ||
             !flush_stream(slot.stdin_stream)) {
+            slot.completing = false;
+            slot.job.reset();
+            slot.busy = false;
+            job->slot = -1;
             std::string error;
             restart_worker(pool, slot, error);
             fail_job(job, "cannot send request");
             continue;
         }
-        job->slot = (int)index;
-        slot.job = job;
-        slot.busy = true;
+        slot.completing = false;
     }
 }
 
@@ -502,6 +673,20 @@ long long remaining_timeout(
                              std::chrono::steady_clock::now() - start)
                              .count();
     return timeout_ms - elapsed;
+}
+
+/* Let other fibers run while another fiber completes this worker slot.
+   Use a real fiber suspension: polling task waits do not yield the native
+   stack to the caller and can starve queued jobs with many concurrent
+   requests. */
+void worker_yield() {
+    value_t *task_value = call_task_builtin(B_task_yield, {});
+    if (!task_value)
+        return;
+    task_ptr task;
+    if (get_task_value(task_value, task))
+        fiber_await_task(task);
+    freeval(task_value);
 }
 
 }  // namespace
@@ -531,6 +716,22 @@ value_t *call_worker_builtin(
                     continue;
                 const std::string key =
                     ((string_value_t *)entry.first)->value;
+                if (key == "protocol") {
+                    if (entry.second->type != T_string) {
+                        yyerror("std.worker.pool protocol must be a string");
+                        return NULL;
+                    }
+                    const std::string protocol =
+                        ((string_value_t *)entry.second)->value;
+                    if (protocol == "hybrid")
+                        pool->hybrid = true;
+                    else if (protocol != "jsonl") {
+                        yyerror("std.worker.pool: unknown protocol %s",
+                                protocol.c_str());
+                        return NULL;
+                    }
+                    continue;
+                }
                 if (entry.second->type != T_int ||
                     ((int_value_t *)entry.second)->value < 0) {
                     yyerror("std.worker.pool option %s must be a "
@@ -557,7 +758,8 @@ value_t *call_worker_builtin(
             std::string error;
             if (!spawn_worker(pool->workers[(size_t)i],
                               ((string_value_t *)args[1])->value,
-                              pool->ready_timeout_ms, error)) {
+                              pool->ready_timeout_ms, pool->hybrid,
+                              error)) {
                 for (worker_slot &worker : pool->workers) {
                     if (worker.process)
                         close_worker(worker, true);
@@ -641,7 +843,7 @@ value_t *call_worker_builtin(
         job->pool = pool;
         job->id = pool->next_id++;
         if (!make_request(job->id, ((string_value_t *)args[1])->value,
-                          args[2], job->request)) {
+                          args[2], nullptr, pool->hybrid, job->request)) {
             yyerror("std.worker.submit: cannot encode request");
             return NULL;
         }
@@ -652,6 +854,99 @@ value_t *call_worker_builtin(
         pool->queue.push_back(job);
         try_dispatch(pool.get());
         return new_job_value(std::move(job));
+    }
+
+    if (functype == B_worker_submit_bytes) {
+        if (args.size() != 4 || args[1]->type != T_string ||
+            args[2]->type != T_list || args[3]->type != T_bytes) {
+            yyerror("std.worker.submit_bytes expects pool, method, list "
+                    "and bytes body");
+            return NULL;
+        }
+        std::shared_ptr<worker_pool> pool;
+        if (!get_pool(args[0], pool)) {
+            yyerror("std.worker.submit_bytes expects a worker pool");
+            return NULL;
+        }
+        if (!pool->hybrid) {
+            yyerror("std.worker.submit_bytes requires a hybrid worker pool");
+            return NULL;
+        }
+        std::shared_ptr<worker_job> job = std::make_shared<worker_job>();
+        job->pool = pool;
+        job->id = pool->next_id++;
+        job->binary = true;
+        const std::string &body = ((bytes_value_t *)args[3])->value;
+        if (!make_request(job->id, ((string_value_t *)args[1])->value,
+                          args[2], &body, true, job->request)) {
+            yyerror("std.worker.submit_bytes: cannot encode request");
+            return NULL;
+        }
+        if ((long long)pool->queue.size() >= pool->queue_limit) {
+            yyerror("std.worker.submit_bytes: worker queue is full");
+            return NULL;
+        }
+        pool->queue.push_back(job);
+        try_dispatch(pool.get());
+        return new_job_value(std::move(job));
+    }
+
+    if (functype == B_worker_call_bytes) {
+        if ((args.size() != 4 && args.size() != 5) ||
+            args[1]->type != T_string || args[2]->type != T_list ||
+            args[3]->type != T_bytes) {
+            yyerror("std.worker.call_bytes expects pool, method, list, "
+                    "bytes body and optional timeout");
+            return NULL;
+        }
+        std::shared_ptr<worker_pool> pool;
+        if (!get_pool(args[0], pool)) {
+            yyerror("std.worker.call_bytes expects a worker pool");
+            return NULL;
+        }
+        if (!pool->hybrid) {
+            yyerror("std.worker.call_bytes requires a hybrid worker pool");
+            return NULL;
+        }
+        long long timeout_ms = 0;
+        if (args.size() == 5) {
+            if (args[4]->type != T_int ||
+                ((int_value_t *)args[4])->value < 0) {
+                yyerror("std.worker.call_bytes timeout must be a "
+                        "non-negative integer");
+                return NULL;
+            }
+            timeout_ms = ((int_value_t *)args[4])->value;
+        }
+        std::shared_ptr<worker_job> job = std::make_shared<worker_job>();
+        job->pool = pool;
+        job->id = pool->next_id++;
+        job->binary = true;
+        const std::string &body = ((bytes_value_t *)args[3])->value;
+        if (!make_request(job->id, ((string_value_t *)args[1])->value,
+                          args[2], &body, true, job->request)) {
+            yyerror("std.worker.call_bytes: cannot encode request");
+            return NULL;
+        }
+        if ((long long)pool->queue.size() >= pool->queue_limit) {
+            yyerror("std.worker.call_bytes: worker queue is full");
+            return NULL;
+        }
+        pool->queue.push_back(job);
+        try_dispatch(pool.get());
+
+        value_t *job_value = new_job_value(job);
+        std::vector<value_t *> wait_args{job_value};
+        value_t *timeout_value = nullptr;
+        if (args.size() == 5) {
+            timeout_value = newintval(timeout_ms);
+            wait_args.push_back(timeout_value);
+        }
+        value_t *result = call_worker_builtin(B_worker_wait, wait_args);
+        freeval(job_value);
+        if (timeout_value)
+            freeval(timeout_value);
+        return result;
     }
 
     if (functype == B_worker_wait) {
@@ -688,8 +983,15 @@ value_t *call_worker_builtin(
             if (job->done)
                 return job->result ? dupval(job->result) : newnull();
             if (job->slot >= 0) {
-                complete_slot(pool.get(), (size_t)job->slot,
-                              remaining_timeout(start, timeout_ms));
+                if (complete_slot(pool.get(), (size_t)job->slot,
+                                  remaining_timeout(start, timeout_ms)))
+                    continue;
+                if (timeout_ms > 0 &&
+                    remaining_timeout(start, timeout_ms) <= 0) {
+                    fail_job(job, "worker wait timed out");
+                    continue;
+                }
+                worker_yield();
                 continue;
             }
             bool queued = false;
@@ -704,16 +1006,34 @@ value_t *call_worker_builtin(
                 continue;
             }
             bool found_busy = false;
+            bool completed = false;
             for (size_t i = 0; i < pool->workers.size(); ++i) {
                 if (pool->workers[i].busy) {
-                    complete_slot(pool.get(), i,
-                                  remaining_timeout(start, timeout_ms));
+                    completed = complete_slot(
+                        pool.get(), i,
+                        remaining_timeout(start, timeout_ms));
                     found_busy = true;
                     break;
                 }
             }
-            if (found_busy)
+            if (found_busy) {
+                if (completed)
+                    continue;
+                if (timeout_ms > 0 &&
+                    remaining_timeout(start, timeout_ms) <= 0) {
+                    for (auto it = pool->queue.begin();
+                         it != pool->queue.end(); ++it) {
+                        if (*it == job) {
+                            pool->queue.erase(it);
+                            break;
+                        }
+                    }
+                    fail_job(job, "worker wait timed out");
+                    continue;
+                }
+                worker_yield();
                 continue;
+            }
             if (timeout_ms > 0 &&
                 remaining_timeout(start, timeout_ms) <= 0) {
                 for (auto it = pool->queue.begin(); it != pool->queue.end();
@@ -762,7 +1082,8 @@ value_t *call_worker_builtin(
     if (!is_map) {
         worker_slot *slot = nullptr;
         for (worker_slot &worker : pool->workers) {
-            if (!worker.busy && worker_usable(worker)) {
+            if (!worker.busy && !worker.completing &&
+                worker_usable(worker)) {
                 slot = &worker;
                 break;
             }
@@ -773,17 +1094,23 @@ value_t *call_worker_builtin(
         }
         const long long id = pool->next_id++;
         std::string line;
-        if (!make_request(id, method, args[2], line) ||
+        slot->busy = true;
+        /* Reserve the slot before writing in case the write yields fibers. */
+        slot->completing = true;
+        if (!make_request(id, method, args[2], nullptr, pool->hybrid, line) ||
             !write_bytes(slot->stdin_stream, line) ||
             !flush_stream(slot->stdin_stream)) {
+            slot->completing = false;
+            slot->busy = false;
             yyerror("std.worker.call: cannot send request");
             return NULL;
         }
-        slot->busy = true;
         value_t *result = nullptr;
         std::string transport_error;
-        const bool ok = read_response(slot->stdout_stream, id, timeout_ms,
-                                      result, transport_error);
+        const bool ok = read_response(slot->stdout_stream, &slot->pending, id,
+                                      timeout_ms, false, result,
+                                      transport_error);
+        slot->completing = false;
         slot->busy = false;
         if (!ok) {
             std::string restart_error;
@@ -826,23 +1153,29 @@ value_t *call_worker_builtin(
             }
             const long long id = pool->next_id++;
             std::string line;
+            worker.busy = true;
+            worker.completing = true;
             if (!make_request(id, method, items->payload->items[start + i],
-                              line) ||
+                              nullptr, pool->hybrid, line) ||
                 !write_bytes(worker.stdin_stream, line) ||
                 !flush_stream(worker.stdin_stream)) {
+                worker.completing = false;
+                worker.busy = false;
                 freeval((value_t *)results);
                 yyerror("std.worker.map: cannot send request");
                 return NULL;
             }
-            worker.busy = true;
             ids.push_back(id);
         }
         for (size_t i = 0; i < count; ++i) {
             worker_slot &worker = pool->workers[i];
             value_t *result = nullptr;
             std::string transport_error;
-            if (!read_response(worker.stdout_stream, ids[i], timeout_ms,
-                               result, transport_error)) {
+            const bool ok =
+                read_response(worker.stdout_stream, &worker.pending, ids[i],
+                              timeout_ms, false, result, transport_error);
+            worker.completing = false;
+            if (!ok) {
                 worker.busy = false;
                 std::string restart_error;
                 restart_worker(pool.get(), worker, restart_error);

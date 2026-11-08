@@ -23,6 +23,11 @@ const std::string &package_current_import_base();
 value_t *package_import(const char *dotted_path, const char *base_dir,
                         std::string &error);
 
+/* Parse a worker entry script in the current eval context.  Parser globals
+ * are saved/restored so a worker can parse while the creating thread is
+ * suspended inside its own parse/eval statement. */
+bool parse_worker_source(const std::string &path, std::string &error);
+
 /* Build a dictionary from exported symbols in `scope`. */
 value_t *package_build_namespace(scope_t *scope, std::string &error);
 

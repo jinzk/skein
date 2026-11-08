@@ -12,11 +12,11 @@
 extern volatile std::sig_atomic_t g_interrupted;
 extern volatile std::sig_atomic_t g_stdin_eof;
 
-extern bool g_interactive;
-extern bool g_show_prompt;
-extern int g_package_loading;
-extern bool g_keep_going;
-extern bool g_script_stop;
-extern bool g_statement_invalid;
+extern thread_local bool g_interactive;
+extern thread_local bool g_show_prompt;
+extern thread_local int g_package_loading;
+extern thread_local bool g_keep_going;
+extern thread_local bool g_script_stop;
+extern thread_local bool g_statement_invalid;
 
 #endif

@@ -5,16 +5,16 @@
 #include <vector>
 
 /* Location of the most recently scanned token. */
-extern int g_token_line;
-extern int g_token_column;
+extern thread_local int g_token_line;
+extern thread_local int g_token_column;
 
 /* Current runtime error location, set while evaluating an AST node. */
-extern int g_error_line;
-extern int g_error_column;
+extern thread_local int g_error_line;
+extern thread_local int g_error_column;
 
 /* Location of the most recent break/continue value. */
-extern int g_flow_line;
-extern int g_flow_column;
+extern thread_local int g_flow_line;
+extern thread_local int g_flow_column;
 
 void diag_set_flow_location(int line, int column);
 

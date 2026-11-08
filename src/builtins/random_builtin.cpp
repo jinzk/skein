@@ -14,7 +14,7 @@
 namespace {
 
 std::mt19937_64 &engine() {
-    static std::mt19937_64 value = [] {
+    static thread_local std::mt19937_64 value = [] {
         std::random_device device;
         const uint64_t seed =
             ((uint64_t)device() << 32) ^ (uint64_t)device() ^

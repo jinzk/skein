@@ -6,11 +6,11 @@
 namespace {
 
 eval_context &default_context() {
-    static eval_context context;
+    static thread_local eval_context context;
     return context;
 }
 
-eval_context *current_context = NULL;
+thread_local eval_context *current_context = NULL;
 
 void visit_eval_context_roots(void *ctx, gc_mark_fn mark,
                               void *mark_ctx) {

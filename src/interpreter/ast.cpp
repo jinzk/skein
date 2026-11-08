@@ -36,7 +36,7 @@ static void set_loc_from(T *node, const struct ast *anchor) {
             anchor ? anchor->column : 0);
 }
 
-static std::vector<std::pair<int, int>> func_locations;
+static thread_local std::vector<std::pair<int, int>> func_locations;
 
 void push_func_location(int line, int column) {
     func_locations.push_back(std::make_pair(line, column));
@@ -791,7 +791,7 @@ struct symlist_metadata {
     struct ast *pattern = NULL;
 };
 
-static std::unordered_map<struct symlist *, struct symlist_metadata>
+static thread_local std::unordered_map<struct symlist *, struct symlist_metadata>
     symlist_metadata_map;
 
 struct ast *symlist_default_ast(struct symlist *sl) {
@@ -871,7 +871,7 @@ void symlistfree_full(struct symlist *sl) {
     symlistfree(sl);
 }
 
-static std::unordered_map<function_code *, struct ast *> function_bodies;
+static thread_local std::unordered_map<function_code *, struct ast *> function_bodies;
 
 struct ast *function_body_ast(struct function_code *code) {
     if (!code)
@@ -912,7 +912,7 @@ void free_function_code(struct function_code *code) {
  * defined inside another function).  All executions share the same code
  * (body + parameter list), but each gets its own closure environment.
  */
-static std::unordered_map<struct funcdef *, std::shared_ptr<function_code>>
+static thread_local std::unordered_map<struct funcdef *, std::shared_ptr<function_code>>
     function_codes;
 
 std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
@@ -958,6 +958,19 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
 
 void release_function_code(struct funcdef *node) {
     function_codes.erase(node);
+}
+
+void ast_thread_shutdown() {
+    function_codes.clear();
+    for (auto &entry : function_bodies)
+        treefree(entry.second);
+    function_bodies.clear();
+    for (auto &entry : symlist_metadata_map) {
+        treefree(entry.second.default_value);
+        treefree(entry.second.pattern);
+    }
+    symlist_metadata_map.clear();
+    func_locations.clear();
 }
 
 struct ast *newlist(struct ast *v, struct ast *l) {

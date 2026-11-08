@@ -86,7 +86,7 @@ struct process_resource {
 };
 
 std::vector<std::shared_ptr<process_resource>> &process_registry() {
-    static std::vector<std::shared_ptr<process_resource>> registry;
+    static thread_local std::vector<std::shared_ptr<process_resource>> registry;
     return registry;
 }
 

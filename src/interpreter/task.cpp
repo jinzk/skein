@@ -29,7 +29,7 @@ enum task_status {
 
 struct task;
 std::vector<task *> &task_registry() {
-    static std::vector<task *> tasks;
+    static thread_local std::vector<task *> tasks;
     return tasks;
 }
 

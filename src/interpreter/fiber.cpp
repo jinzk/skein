@@ -94,12 +94,12 @@ struct fiber {
     void fiber_main();
 };
 
-fiber *current_fiber = NULL;
-eval_context *root_context = NULL;
-bool shutting_down = false;
-bool generator_warnings_enabled = true;
-std::deque<fiber *> ready_fibers;
-std::vector<fiber *> all_fibers;
+thread_local fiber *current_fiber = NULL;
+thread_local eval_context *root_context = NULL;
+thread_local bool shutting_down = false;
+thread_local bool generator_warnings_enabled = true;
+thread_local std::deque<fiber *> ready_fibers;
+thread_local std::vector<fiber *> all_fibers;
 
 void remove_fiber(fiber *value) {
     all_fibers.erase(std::remove(all_fibers.begin(), all_fibers.end(), value),

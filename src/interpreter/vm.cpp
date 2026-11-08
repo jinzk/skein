@@ -54,11 +54,11 @@ using skein::bc::Proto;
 using skein::bc::ProtoPtr;
 using skein::bc::SourceLoc;
 
-int vm_enabled_state = -1;
-int vm_max_depth_state = -1;
-int vm_stats_state = -1;
-bool vm_trace_state = false;
-bool vm_trace_initialized = false;
+thread_local int vm_enabled_state = -1;
+thread_local int vm_max_depth_state = -1;
+thread_local int vm_stats_state = -1;
+thread_local bool vm_trace_state = false;
+thread_local bool vm_trace_initialized = false;
 
 int vm_max_depth() {
     if (vm_max_depth_state < 0) {
@@ -92,8 +92,8 @@ bool read_bool_env(const char *name, bool fallback) {
  * cheap on POSIX but surprisingly expensive in the Windows CRT, where it
  * dominated faster call-heavy benchmarks.
  */
-int vm_param_pool_state = -1;
-int vm_slot_pool_state = -1;
+thread_local int vm_param_pool_state = -1;
+thread_local int vm_slot_pool_state = -1;
 
 bool vm_param_pool_enabled() {
     if (vm_param_pool_state < 0)

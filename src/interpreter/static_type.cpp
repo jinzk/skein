@@ -53,7 +53,7 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
 }
 
 std::unordered_map<std::string, std::unique_ptr<TypeNode>> &type_pool() {
-    static std::unordered_map<std::string, std::unique_ptr<TypeNode>> pool;
+    static thread_local std::unordered_map<std::string, std::unique_ptr<TypeNode>> pool;
     return pool;
 }
 

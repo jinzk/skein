@@ -574,12 +574,12 @@ typedef std::unique_ptr<h2_connection, h2_connection_deleter>
     h2_connection_ptr;
 
 std::vector<h2_connection_ptr> &h2_pool() {
-    static std::vector<h2_connection_ptr> pool;
+    static thread_local std::vector<h2_connection_ptr> pool;
     return pool;
 }
 
 std::map<std::string, task_ptr> &h2_connecting() {
-    static std::map<std::string, task_ptr> connecting;
+    static thread_local std::map<std::string, task_ptr> connecting;
     return connecting;
 }
 

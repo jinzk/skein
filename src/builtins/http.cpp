@@ -80,7 +80,7 @@ struct pooled_connection {
 };
 
 std::vector<std::unique_ptr<pooled_connection>> &connection_pool() {
-    static std::vector<std::unique_ptr<pooled_connection>> pool;
+    static thread_local std::vector<std::unique_ptr<pooled_connection>> pool;
     return pool;
 }
 

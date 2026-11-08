@@ -959,6 +959,36 @@ def check_extended_stdlib():
             stdout_all=["capacity=-1", "length=5"],
         )
 
+        with tempfile.TemporaryDirectory() as thread_tmp:
+            thread_worker = os.path.join(thread_tmp, "thread_worker.skein")
+            with open(thread_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "func handle(payload) {\n"
+                    "    if (payload[\"n\"] < 0) { missing_function(); }\n"
+                    "    return {\"n\": payload[\"n\"] * 2};\n"
+                    "}\n"
+                )
+            thread_worker_path = thread_worker.replace("\\", "\\\\")
+            check(
+                "std.thread pool submit and error",
+                "import std;\n"
+                f'let pool = std.thread.pool(2, "{thread_worker_path}");\n'
+                'let f1 = pool.submit({"n": 21});\n'
+                'let f2 = pool.submit({"n": 5});\n'
+                'let r1 = f1.wait();\n'
+                'let r2 = f2.wait();\n'
+                'print("r1="); print(r1["ok"]); print(":"); '
+                'print(r1["value"]["n"]);\n'
+                'print("r2="); print(r2["ok"]); print(":"); '
+                'print(r2["value"]["n"]);\n'
+                'let f3 = pool.submit({"n": -1});\n'
+                'let r3 = f3.wait();\n'
+                'print("fail="); print(r3["ok"]);\n'
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout_all=["r1=true:42", "r2=true:10", "fail=false"],
+            )
+
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:
         check(

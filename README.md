@@ -2690,6 +2690,7 @@ std.worker.shutdown
 std.worker.stats
 
 std.thread.unbounded_channel
+std.thread.pool
 ```
 
 规则：
@@ -4493,6 +4494,62 @@ print(r["value"].payload["x"]);
 
 ch.close();
 ```
+
+### 线程池
+
+```text
+std.thread.pool(size, script[, options]) -> pool
+
+pool.submit(value) -> future
+future.wait([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
+future.try_wait() -> {"ok": bool, "closed": bool, "value"?: message}
+
+pool.close()
+pool.join()
+pool.stats() -> dict
+```
+
+`options`：
+
+```text
+entry     默认 "handle"
+queue     默认 1024；正整数或 "unbounded"
+```
+
+worker 脚本导出 `handle(payload)`：
+
+```skein
+# worker.skein
+func handle(payload) {
+    return {"n": payload["n"] * 2};
+}
+```
+
+使用：
+
+```skein
+import std;
+
+let pool = std.thread.pool(2, "worker.skein");
+let f1 = pool.submit({"n": 21});
+let f2 = pool.submit({"n": 5});
+let r1 = f1.wait();
+let r2 = f2.wait();
+print(r1["value"]["n"]);
+print(r2["value"]["n"]);
+pool.close();
+pool.join();
+```
+
+规则：
+
+- 每个 worker 是独立 runtime，加载一次脚本并循环处理 job；
+- `handle` 抛错时返回 `{"ok": false, "error": ...}`，worker 继续；
+- `pool.submit` 会复制 payload；
+- `pool.close()` 停止接收新 job，worker 排空后退出；
+- `pool.join()` 等待 worker 线程结束；
+- `stats()` 返回 `size/ready/submitted/completed/failed/queued`；
+- 当前实现使用 OS 线程等待和 payload 复制；fiber 感知唤醒与 COW 会在后续补齐。
 
 ### 带编码的文本文件
 

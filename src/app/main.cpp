@@ -272,6 +272,7 @@ int main(int argc, char **argv) {
 #endif
     net_shutdown();
     donescope();
+    ast_thread_shutdown();
     process_spawn_shutdown();
     skein_vm_shutdown();
     structtype_shutdown();

@@ -10,9 +10,9 @@
 #include <string_view>
 #include <vector>
 
-static scope_context fallback_context;
-static scope_context *active_context = NULL;
-static bool tearing_down = false;
+static thread_local scope_context fallback_context;
+static thread_local scope_context *active_context = NULL;
+static thread_local bool tearing_down = false;
 
 bool scope_teardown_active() {
     return tearing_down;

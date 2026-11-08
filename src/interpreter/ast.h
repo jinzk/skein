@@ -549,6 +549,8 @@ void release_function_code(struct funcdef *node);
 struct ast *function_body_ast(struct function_code *code);
 void set_function_body_ast(struct function_code *code, struct ast *body);
 void clear_function_body_ast(struct function_code *code);
+/* Release thread-local AST/function caches before TLS teardown. */
+void ast_thread_shutdown();
 
 /* Parameter default/pattern ASTs are interpreter-owned metadata. */
 struct ast *symlist_default_ast(struct symlist *sl);

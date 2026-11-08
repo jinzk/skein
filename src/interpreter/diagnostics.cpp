@@ -7,22 +7,22 @@
 #include <cstring>
 #include <vector>
 
-int g_token_line = 1;
-int g_token_column = 1;
-int g_error_line = 0;
-int g_error_column = 0;
-int g_flow_line = 0;
-int g_flow_column = 0;
+thread_local int g_token_line = 1;
+thread_local int g_token_column = 1;
+thread_local int g_error_line = 0;
+thread_local int g_error_column = 0;
+thread_local int g_flow_line = 0;
+thread_local int g_flow_column = 0;
 
-static int current_line = 1;
-static int current_column = 1;
-static int error_count = 0;
-static int lexical_error_line = 0;
-static std::string source_name;
-static std::string module_name;
-static std::vector<std::string> source_lines;
+static thread_local int current_line = 1;
+static thread_local int current_column = 1;
+static thread_local int error_count = 0;
+static thread_local int lexical_error_line = 0;
+static thread_local std::string source_name;
+static thread_local std::string module_name;
+static thread_local std::vector<std::string> source_lines;
 
-static std::vector<diag_call_frame> call_stack;
+static thread_local std::vector<diag_call_frame> call_stack;
 static const size_t MAX_REPORTED_FRAMES = 8;
 
 void diag_scan_token(const char *text, int length) {

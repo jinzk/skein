@@ -45,12 +45,12 @@ struct function_vm_cache {
     bool compile_failed = false;
 };
 
-std::unordered_map<function_code *, default_cache_entry> default_cache;
+thread_local std::unordered_map<function_code *, default_cache_entry> default_cache;
 /*
  * Registry used only for lifecycle management.  The hot path reaches the
  * cache through function_code::vm_cache, so no hash lookup happens per call.
  */
-std::unordered_map<function_code *, std::unique_ptr<function_vm_cache>>
+thread_local std::unordered_map<function_code *, std::unique_ptr<function_vm_cache>>
     vm_caches;
 
 void release_jit_code(function_vm_cache *cache) {
@@ -597,10 +597,11 @@ skein::bc::ProtoPtr skein_vm_prepare_function_body(
     return prepare_function_body(def);
 }
 
-static bool cache_clearing = false;
+static thread_local bool cache_clearing = false;
+static thread_local bool vm_bridge_teardown = false;
 
 void skein_vm_forget_function_code(function_code *code) {
-    if (!code || cache_clearing)
+    if (!code || cache_clearing || vm_bridge_teardown)
         return;
     default_cache.erase(code);
     auto it = vm_caches.find(code);
@@ -614,6 +615,7 @@ void skein_vm_shutdown() {
     if (cache_clearing)
         return;
     cache_clearing = true;
+    vm_bridge_teardown = true;
     default_cache.clear();
     for (auto &entry : vm_caches) {
         release_vm_cache(entry.second.get());
@@ -740,6 +742,8 @@ ParamPatternResult skein_vm_match_parameter_pattern(
     ensure_vm_host();
     if (!def || !def->code || index < 0 || !value)
         return ParamPatternResult::Unsupported;
+    if (!skein_vm_enabled())
+        return ParamPatternResult::Unsupported;
 
     function_code *code = def->code.get();
     function_vm_cache &cache = *cache_for(code);
@@ -798,6 +802,8 @@ bool skein_vm_try_execute_function_body(
     ensure_vm_host();
     out = NULL;
     if (!def || !def->code)
+        return false;
+    if (!skein_vm_enabled())
         return false;
 
     function_code *code = def->code.get();

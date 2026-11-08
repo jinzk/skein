@@ -12,7 +12,7 @@ struct event_loop_runtime {
 };
 
 event_loop_runtime &runtime() {
-    static event_loop_runtime state;
+    static thread_local event_loop_runtime state;
     return state;
 }
 

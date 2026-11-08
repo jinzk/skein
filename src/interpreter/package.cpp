@@ -9,6 +9,7 @@
 #include "eval.h"
 #include "eval_context.h"
 #include "parser.hpp"
+#include "parser_lock.h"
 #include "platform.h"
 #include "repl.h"
 #include "scopestack.h"
@@ -39,6 +40,7 @@
 #include <vector>
 
 extern FILE *yyin;
+extern int indent_count;
 extern int yychar;
 extern YYSTYPE yylval;
 extern int yynerrs;
@@ -60,12 +62,12 @@ struct resolved_package {
     bool has_source;
 };
 
-std::string main_source_path;
-std::vector<std::string> search_roots;
-std::string import_base;
-fs::path project_root;
-std::vector<package_load_context> load_stack;
-std::vector<std::string> loading_paths;
+thread_local std::string main_source_path;
+thread_local std::vector<std::string> search_roots;
+thread_local std::string import_base;
+thread_local fs::path project_root;
+thread_local std::vector<package_load_context> load_stack;
+thread_local std::vector<std::string> loading_paths;
 
 struct embedded_package_source {
     const char *name;
@@ -664,6 +666,8 @@ bool parse_package_source(const std::string &source_text,
         return false;
     }
 
+    std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
+
     int saved_char = yychar;
     YYSTYPE saved_lval = yylval;
     int saved_errs = yynerrs;
@@ -716,6 +720,67 @@ bool parse_package_source(const std::string &source_text,
         result = NULL;
         if (error.empty())
             error = "package failed to load";
+        return false;
+    }
+    return true;
+}
+
+bool parse_worker_source_impl(const std::string &path, std::string &error) {
+    std::string source;
+    if (!load_source_file(path, source_encoding_get(), source, error)) {
+        error = "cannot load worker script " + path + ": " + error;
+        return false;
+    }
+    FILE *file = source_text_file(source, error);
+    if (!file) {
+        error = "cannot open worker script " + path + ": " + error;
+        return false;
+    }
+
+    std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
+
+    int saved_char = yychar;
+    YYSTYPE saved_lval = yylval;
+    int saved_errs = yynerrs;
+    FILE *saved_yyin = yyin;
+    int saved_indent = indent_count;
+    scanner_checkpoint *scan_cp = scanner_checkpoint_save();
+    diag_source_checkpoint diag_cp;
+    diag_save_source(diag_cp);
+
+    bool saved_interactive = g_interactive;
+    int saved_runtime_errors = active_eval_context().runtime_error_count;
+    bool saved_invalid = g_statement_invalid;
+    int errors_before = diag_error_count();
+    std::string saved_import_base = import_base;
+
+    g_interactive = false;
+    g_statement_invalid = false;
+    ++g_package_loading;
+    parser_begin_nested_parse();
+    yyin = file;
+    reset_scanner_state(file);
+    diag_start_source();
+    diag_set_source_name(path);
+    diag_set_module_name("worker");
+
+    int status = yyparse();
+
+    scanner_checkpoint_restore(scan_cp);
+    yyin = saved_yyin;
+    indent_count = saved_indent;
+    diag_restore_source(diag_cp);
+    restore_parser_globals(saved_char, saved_lval, saved_errs);
+    import_base = saved_import_base;
+    g_interactive = saved_interactive;
+    --g_package_loading;
+    active_eval_context().runtime_error_count = saved_runtime_errors;
+    g_statement_invalid = saved_invalid;
+    std::fclose(file);
+
+    if (status != 0 || diag_error_count() != errors_before) {
+        if (error.empty())
+            error = "worker script failed to parse";
         return false;
     }
     return true;
@@ -775,6 +840,10 @@ value_t *import_embedded_package(const std::string &dotted,
 }
 
 } // namespace
+
+bool parse_worker_source(const std::string &path, std::string &error) {
+    return parse_worker_source_impl(path, error);
+}
 
 void package_configure(const std::string &source_path,
                        const std::vector<std::string> &cli_dirs) {

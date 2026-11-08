@@ -36,7 +36,7 @@ struct symbol *newsym(const char *name) {
 }
 
 static const char *intern_type_name(const char *name) {
-    static std::unordered_set<std::string> names;
+    static thread_local std::unordered_set<std::string> names;
     if (!name) name = "";
     std::unordered_set<std::string>::iterator it = names.find(name);
     if (it == names.end()) it = names.insert(name).first;

@@ -365,7 +365,6 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     skein::jit::thread_state ts;
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
-    ts.saves.reserve(64);
     ts.tail_call = tail_call;
     ts.root_module = diag_current_module_name();
     ts.root_source = diag_current_source_name();

@@ -130,6 +130,16 @@ slot/scope/global/field/index      约 1.0x
 `method` JIT 0.195s -> 0.113s。主要收益来自 Windows 小对象分配和
 `std::vector`/`std::string` 的堆操作。
 
+2026-11-08 分配热点收敛：
+
+- 去掉通用 JIT 调用路径上 `thread_state.saves.reserve(64)` 造成的
+  每次调用约 6KB 分配；
+- 非 interned `int_value_t` 与 `func_value_t` 使用 thread-local free
+  list 回收，避免算术结果和函数值反复走通用分配器；
+- `call_bench`（100 万次调用）的 mimalloc 统计从约 1290 万次分配 /
+  6.2 GiB 降到约 300 万次 / 290 MiB；JIT `call` 从 0.313s 降到
+  0.276s，`method` 降到 0.101s。
+
 尚未落地：
 
 - **per-pc liveness / safepoint 表**：root 表第一版对所有 value slot

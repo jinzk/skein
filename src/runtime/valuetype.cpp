@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <utility>
 
 namespace {
@@ -80,6 +81,40 @@ small_int_table &small_ints() {
     return table;
 }
 
+/*
+ * Non-interned integers are extremely common in hot loops.  Recycle them
+ * through a small thread-local free list instead of paying a general heap
+ * allocation for every arithmetic result.
+ */
+constexpr size_t MAX_FREE_INTS = 4096;
+thread_local int_value_t *free_int_head = nullptr;
+thread_local size_t free_int_count = 0;
+
+constexpr size_t MAX_FREE_FUNCS = 4096;
+thread_local func_value_t *free_func_head = nullptr;
+thread_local size_t free_func_count = 0;
+
+func_value_t *alloc_func_value() {
+    if (free_func_head) {
+        func_value_t *value = free_func_head;
+        free_func_head = value->next;
+        --free_func_count;
+        return new (value) func_value_t;
+    }
+    return new func_value_t;
+}
+
+void recycle_func_value(func_value_t *value) {
+    value->~func_value_t();
+    if (free_func_count < MAX_FREE_FUNCS) {
+        value->next = free_func_head;
+        free_func_head = value;
+        ++free_func_count;
+    } else {
+        ::operator delete(value);
+    }
+}
+
 bool_value_t &bool_singleton(bool value) {
     static bool_value_t false_value{T_bool, false};
     static bool_value_t true_value{T_bool, true};
@@ -96,6 +131,15 @@ value_t &null_singleton() {
 struct value_t *newintval(long long i) {
     if (i >= SMALL_INT_MIN && i <= SMALL_INT_MAX)
         return (struct value_t *)&small_ints().values[i - SMALL_INT_MIN];
+    if (free_int_head) {
+        struct int_value_t *v = free_int_head;
+        free_int_head = reinterpret_cast<int_value_t *>(v->value);
+        --free_int_count;
+        v->type = T_int;
+        v->value = i;
+        v->interned = false;
+        return (struct value_t *)v;
+    }
     struct int_value_t *v = new int_value_t;
     v->type = T_int;
     v->value = i;
@@ -234,7 +278,7 @@ struct value_t *newfuncval(
     std::shared_ptr<function_code> code,
     std::shared_ptr<struct scope_t> closure,
     std::vector<std::shared_ptr<struct upvalue_cell>> upvalues) {
-    struct func_value_t *v = new func_value_t;
+    struct func_value_t *v = alloc_func_value();
     v->type = T_func;
     v->def = std::make_shared<function_def>();
     v->def->code = code;
@@ -688,7 +732,7 @@ struct value_t *dupval(struct value_t *v) {
         }
         case T_func: {
             struct func_value_t *src = (struct func_value_t *)v;
-            struct func_value_t *dst = new func_value_t;
+            struct func_value_t *dst = alloc_func_value();
             dst->type = T_func;
             dst->def = src->def;
             return (struct value_t *)dst;
@@ -794,8 +838,16 @@ void freeval(struct value_t *v) {
     switch (v->type) {
         case T_int: {
             struct int_value_t *integer = (struct int_value_t *)v;
-            if (!integer->interned)
-                delete integer;
+            if (!integer->interned) {
+                if (free_int_count < MAX_FREE_INTS) {
+                    integer->value =
+                        reinterpret_cast<long long>(free_int_head);
+                    free_int_head = integer;
+                    ++free_int_count;
+                } else {
+                    delete integer;
+                }
+            }
             break;
         }
         case T_float:
@@ -826,7 +878,7 @@ void freeval(struct value_t *v) {
             delete (struct dict_value_t *)v;
             break;
         case T_func:
-            delete (struct func_value_t *)v;
+            recycle_func_value((struct func_value_t *)v);
             break;
         case T_builtin:
             delete (struct builtin_value_t *)v;

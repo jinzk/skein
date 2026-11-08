@@ -265,6 +265,8 @@ struct dict_value_t {
 struct func_value_t {
     enum val_type type;
     std::shared_ptr<function_def> def;
+    /* Free-list link used only while the object is pooled. */
+    struct func_value_t *next = nullptr;
 };
 
 struct builtin_value_t {

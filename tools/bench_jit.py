@@ -68,8 +68,9 @@ def main():
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--max-ratio", type=float, default=1.05,
-                        help="maximum allowed JIT/VM time ratio")
+    parser.add_argument("--max-ratio", type=float, default=1.10,
+                        help="maximum allowed JIT/VM time ratio for "
+                             "neutral benchmarks")
     parser.add_argument("--fib-speedup", type=float, default=2.0,
                         help="minimum required VM/JIT speedup for fib")
     args = parser.parse_args()

@@ -1,7 +1,7 @@
 #include "worker_pool.h"
 
 #include "ast.h"
-#include "io.h"
+#include "builtins_io.h"
 #include "json.h"
 #include "platform.h"
 #include "process_spawn.h"

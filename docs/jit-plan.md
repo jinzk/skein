@@ -29,8 +29,8 @@ Go/No-Go 标准见 §10。
 
 已落地：
 
-- `SKEIN_ENABLE_JIT` + `find_package(asmjit CONFIG REQUIRED)`；
-- `skein_jit` target，使用系统 asmjit 1.11；
+- `SKEIN_ENABLE_JIT` + 内置 `third_party/asmjit`（固定 1.11.0）；
+- `skein_jit` target，使用 pinned asmjit 1.11；
 - `function_code::vm_cache` 直接指针，替代 per-call 哈希查找；
 - `Proto::stack_depth`，由 verifier 写入；
 - `fib` 的 JIT 子集：`LOAD_PARAM` / `LOAD_CONST` / `LOAD_GLOBAL` /
@@ -210,23 +210,33 @@ JIT/AOT 序列化与 AOT 编译是独立决策，不阻塞 Phase 1。
 
 ## 5. 依赖策略
 
-### 5.1 使用系统 asmjit
+### 5.1 使用内置 asmjit
 
-当前开发机已安装：
+JIT 使用 `third_party/asmjit` 中的固定版本，避免系统包版本漂移：
 
 ```text
-libasmjit-dev  0.0~git20231115.1da9e4d
+upstream commit        1da9e4d957fc8c48d1eac68c76c1b139b3691a24
 ASMJIT_LIBRARY_VERSION = 1.11.0
-CMake target   asmjit::asmjit
+CMake target           asmjit::asmjit
 ```
 
-CMake 直接使用系统包，不引入 `third_party/asmjit`：
+上游没有 release tag，该提交对应 Debian
+`libasmjit-dev 0.0~git20231115.1da9e4d` 的源码；来源和版本记录在
+`third_party/asmjit/VERSION.md`。
+
+CMake 优先 `add_subdirectory`，只有目录缺失时才回退到系统包：
 
 ```cmake
-option(SKEIN_ENABLE_JIT "Enable experimental JIT (requires asmjit)" OFF)
-
 if(SKEIN_ENABLE_JIT)
-  find_package(asmjit CONFIG REQUIRED)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/asmjit/CMakeLists.txt")
+    set(ASMJIT_STATIC ON)
+    set(ASMJIT_TEST OFF)
+    set(ASMJIT_NO_INSTALL ON)
+    set(ASMJIT_NO_NATVIS ON)
+    add_subdirectory(third_party/asmjit EXCLUDE_FROM_ALL)
+  else()
+    find_package(asmjit CONFIG REQUIRED)
+  endif()
 
   if(NOT TARGET asmjit::asmjit)
     message(FATAL_ERROR "asmjit found but asmjit::asmjit target is missing")
@@ -257,18 +267,19 @@ if(SKEIN_ENABLE_JIT)
 endif()
 ```
 
-安装方式：
+为什么内置：
 
-- Debian/Ubuntu：`sudo apt install libasmjit-dev`
-- MSYS2/MinGW：
-  - `pacman -S mingw-w64-ucrt-x86_64-asmjit`
-  - 或 `mingw-w64-x86_64-asmjit`
-  - 或 `mingw-w64-clang-x86_64-asmjit`
+- MSYS2 当前的 `mingw-w64-ucrt-x86_64-asmjit` 是 1.21 快照，
+  公开 API 已改为 snake_case（`new_label`、`code_size` 等），与当前
+  JIT 代码不兼容；
+- 上游没有 release tag，直接 `find_package` 无法保证拿到 1.11 API；
+- `SKEIN_ENABLE_JIT=OFF` 时不会编译 `third_party/asmjit`，默认构建
+  不受影响。
 
-### 5.2 不手动定义 asmjit 宏
+### 5.2 asmjit 构建宏
 
-系统包的 imported target 已经设置正确的宏（例如 `ASMJIT_STATIC`）。
-不要额外定义：
+内置构建由 asmjit 自己的 CMake target 设置 `ASMJIT_STATIC` 和平台
+相关宏。不要额外定义：
 
 ```cmake
 # 不要这样做
@@ -277,14 +288,16 @@ target_compile_definitions(skein_jit PRIVATE ASMJIT_NO_COMPILER)
 target_compile_definitions(skein_jit PRIVATE ASMJIT_NO_LOGGING)
 ```
 
-`ASMJIT_NO_*` 会改变头文件中的类布局和 API，但预编译的 `libasmjit.a`
-是按发行版默认配置编译的。混用可能导致 ABI 不一致。
-如果需要裁剪 asmjit，必须从源码构建并保证头文件与库宏一致。
+`ASMJIT_NO_*` 会改变头文件中的类布局和 API，但库是按 asmjit 默认
+配置编译的。混用可能导致 ABI 不一致。如果需要裁剪 asmjit，必须
+通过 asmjit 的 CMake 选项重新构建，保证头文件与库宏一致。
 
 ### 5.3 版本保护
 
-Debian 的 CMake config 没有 `asmjit_VERSION` 变量，因此不能写
-`find_package(asmjit 1.11 CONFIG REQUIRED)`。使用编译期检查：
+`third_party/asmjit/VERSION.md` 记录固定提交和版本。回退到系统包
+时，可在 `src/jit` 增加编译期检查；注意 Debian 的 CMake config 没有
+`asmjit_VERSION` 变量，不能写
+`find_package(asmjit 1.11 CONFIG REQUIRED)`：
 
 ```cpp
 #include <asmjit/core/api-config.h>
@@ -333,7 +346,7 @@ asmjit::JitRuntime rt(&params);
 
 ### 6.2 Week 1 任务
 
-1. `find_package(asmjit)` 接入，`SKEIN_ENABLE_JIT=ON` 可配置；
+1. `third_party/asmjit` 接入，`SKEIN_ENABLE_JIT=ON` 可配置；
 2. `return 42` smoke：
    - Linux GCC/Clang；
    - MSYS2 `mingw64` 或 `ucrt64`；
@@ -379,7 +392,7 @@ asmjit::JitRuntime rt(&params);
    - 32 字节 shadow space；
    - 16 字节栈对齐；
    - 无 red zone；
-4. 检查 `libasmjit.dll` 部署；
+4. 确认静态链接 asmjit，发布包无需 `libasmjit.dll`；
 5. 形成 Go/No-Go 报告。
 
 ---
@@ -756,22 +769,20 @@ frame 中的 value 需要显式登记，否则可达性分析不完整。
 
 ### 8.1 依赖
 
-MSYS2：
+默认使用仓库内置的 `third_party/asmjit`，以静态库方式链接，Windows
+构建不需要额外安装 asmjit，也不需要随包分发 `libasmjit.dll`。
+
+如果显式删除内置目录并回退到 MSYS2 系统包：
 
 ```bash
 pacman -S mingw-w64-ucrt-x86_64-asmjit
-```
-
-如果 CMake 找不到：
-
-```bash
 cmake ... -DCMAKE_PREFIX_PATH=$MINGW_PREFIX
 ```
 
-MSYS2 的 asmjit 包默认构建共享库，运行时需要 `libasmjit.dll`：
+系统包默认构建共享库，运行时需要 `libasmjit.dll`：
 
 - 开发/CI：把 `$MINGW_PREFIX/bin` 加入 `PATH`；
-- 发布单文件：随包附带 DLL，或自己构建静态 asmjit。
+- 发布单文件：随包附带 DLL，或重新启用内置静态构建。
 
 ### 8.2 Win64 ABI
 
@@ -891,7 +902,7 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 | 风险 | 对策 |
 |---|---|
 | asmjit MinGW 非官方 CI 支持 | Week 1 smoke；失败则暂时关闭 Windows JIT |
-| 系统包版本旧（1.11.0） | 按 1.11 写；`static_assert` 最低版本 |
+| 系统包版本与 JIT 代码不匹配 | 使用 `third_party/asmjit` 固定 1.11.0；`VERSION.md` 记录提交 |
 | 不同发行版 asmjit 版本不一致 | CMake 只要求 config；编译期版本检查 |
 | 手动 `ASMJIT_NO_*` 导致 ABI 不一致 | 不手动定义；使用 imported target |
 | MSYS2 asmjit 是 shared | 开发时带 DLL；发布时静态构建或随包分发 |

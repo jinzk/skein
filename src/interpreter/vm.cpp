@@ -87,6 +87,28 @@ bool read_bool_env(const char *name, bool fallback) {
     return true;
 }
 
+/*
+ * These switches are consulted on every VM call.  Cache them: getenv is
+ * cheap on POSIX but surprisingly expensive in the Windows CRT, where it
+ * dominated faster call-heavy benchmarks.
+ */
+int vm_param_pool_state = -1;
+int vm_slot_pool_state = -1;
+
+bool vm_param_pool_enabled() {
+    if (vm_param_pool_state < 0)
+        vm_param_pool_state =
+            read_bool_env("SKEIN_VM_PARAM_POOL", true) ? 1 : 0;
+    return vm_param_pool_state != 0;
+}
+
+bool vm_slot_pool_enabled() {
+    if (vm_slot_pool_state < 0)
+        vm_slot_pool_state =
+            read_bool_env("SKEIN_VM_SLOT_POOL", true) ? 1 : 0;
+    return vm_slot_pool_state != 0;
+}
+
 
 void ensure_stats_flags() {
     if (vm_stats_state < 0)
@@ -188,7 +210,7 @@ public:
                 param_symbols_.push_back(lookupsym(name.c_str()));
         }
         direct_slots_ = !proto.slots.empty() && proto.slots_direct_safe &&
-                        read_bool_env("SKEIN_VM_SLOT_POOL", true);
+                        vm_slot_pool_enabled();
         if (direct_slots_) {
             slot_values_.assign(proto.slots.size(), NULL);
             slot_const_.assign(proto.slots.size(), 0);
@@ -3148,16 +3170,16 @@ private:
         proto_ptr_ = proto.get();
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
-                           read_bool_env("SKEIN_VM_PARAM_POOL", true);
+                           vm_param_pool_enabled();
         direct_params_ = proto->params_direct &&
-                         read_bool_env("SKEIN_VM_PARAM_POOL", true);
+                         vm_param_pool_enabled();
         direct_slots_ = !proto->slots.empty() &&
                         proto->slots_direct_safe &&
-                        read_bool_env("SKEIN_VM_SLOT_POOL", true);
+                        vm_slot_pool_enabled();
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
                           !proto->uses_handlers &&
-                          read_bool_env("SKEIN_VM_SLOT_POOL", true);
+                          vm_slot_pool_enabled();
         pc_ = 0;
         errors_before_ = context_.runtime_error_count;
         saved_handler_depth_ = context_.handler_depth;
@@ -3222,16 +3244,16 @@ private:
         proto_ptr_ = proto.get();
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
-                           read_bool_env("SKEIN_VM_PARAM_POOL", true);
+                           vm_param_pool_enabled();
         direct_params_ = proto->params_direct &&
-                         read_bool_env("SKEIN_VM_PARAM_POOL", true);
+                         vm_param_pool_enabled();
         direct_slots_ = !proto->slots.empty() &&
                         proto->slots_direct_safe &&
-                        read_bool_env("SKEIN_VM_SLOT_POOL", true);
+                        vm_slot_pool_enabled();
         slot_pool_safe_ = proto->params_direct &&
                           !proto->has_closures && !proto->uses_defers &&
                           !proto->uses_handlers &&
-                          read_bool_env("SKEIN_VM_SLOT_POOL", true);
+                          vm_slot_pool_enabled();
         pc_ = 0;
         errors_before_ = context_.runtime_error_count;
         handler_body_depth_ = 0;

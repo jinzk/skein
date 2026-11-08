@@ -2,7 +2,7 @@
 
 #include "ast.h"
 #include "fiber.h"
-#include "io.h"
+#include "builtins_io.h"
 #include "repl.h"
 #include "task.h"
 #include "valuetype.h"

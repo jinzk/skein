@@ -1013,6 +1013,8 @@ struct attribute_flags {
     bool packed = false;
     bool layout_unsafe = false;
     std::string layout_name;
+    std::string calling_convention;
+    bool unsupported_convention = false;
 };
 
 struct spec {
@@ -1501,6 +1503,23 @@ private:
                         if (cur().text == "packed" ||
                             cur().text == "__packed__") {
                             flags.packed = true;
+                        } else if (cur().text == "__stdcall__" ||
+                                   cur().text == "__stdcall" ||
+                                   cur().text == "stdcall") {
+                            flags.calling_convention = "stdcall";
+                        } else if (cur().text == "__cdecl__" ||
+                                   cur().text == "__cdecl" ||
+                                   cur().text == "cdecl") {
+                            flags.calling_convention = "c";
+                        } else if (cur().text == "__fastcall__" ||
+                                   cur().text == "__fastcall" ||
+                                   cur().text == "fastcall") {
+                            flags.calling_convention = "fastcall";
+                        } else if (cur().text == "__vectorcall__" ||
+                                   cur().text == "__vectorcall" ||
+                                   cur().text == "vectorcall") {
+                            flags.calling_convention = "vectorcall";
+                            flags.unsupported_convention = true;
                         } else if (is_layout_attribute(cur().text)) {
                             flags.layout_unsafe = true;
                             if (flags.layout_name.empty())
@@ -1808,6 +1827,10 @@ private:
                 text == "__asm" || text == "asm" ||
                 text == "__extension__") {
                 skip_attributes(flags);
+                if (!flags.calling_convention.empty())
+                    s.calling_convention = flags.calling_convention;
+                if (flags.unsupported_convention)
+                    s.unsupported_convention = true;
                 continue;
             }
             if (is_calling_convention(text)) {

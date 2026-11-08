@@ -6,7 +6,7 @@ typedef struct DepPoint {
     double y;
 } DepPoint;
 
-typedef unsigned long DepSize;
+typedef unsigned long long DepSize;
 
 enum DepMode {
     DEP_MODE_A = 1,

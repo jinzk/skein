@@ -4,7 +4,7 @@
 #include "eval.h"
 #include "fiber.h"
 #include "http.h"
-#include "io.h"
+#include "builtins_io.h"
 #include "task.h"
 #include "valuetype.h"
 

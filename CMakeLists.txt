@@ -221,9 +221,22 @@ target_include_directories(skein_value_runtime PUBLIC
 )
 target_link_libraries(skein_value_runtime PUBLIC skein_runtime)
 
-# Optional JIT backend.  asmjit is a system dependency; see docs/jit-plan.md.
+# Optional JIT backend.  asmjit is pinned under third_party/asmjit so the
+# experimental JIT always builds against the API version it was written for.
+# A system asmjit (>= 1.11) is used as a fallback if the vendored copy is
+# absent.  See docs/jit-plan.md.
 if(SKEIN_ENABLE_JIT)
-  find_package(asmjit CONFIG REQUIRED)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/asmjit/CMakeLists.txt")
+    set(ASMJIT_STATIC ON)
+    set(ASMJIT_TEST OFF)
+    set(ASMJIT_NO_INSTALL ON)
+    set(ASMJIT_NO_NATVIS ON)
+    add_subdirectory(third_party/asmjit EXCLUDE_FROM_ALL)
+    set(SKEIN_ASMJIT_SOURCE "vendored asmjit")
+  else()
+    find_package(asmjit CONFIG REQUIRED)
+    set(SKEIN_ASMJIT_SOURCE "system asmjit")
+  endif()
   if(NOT TARGET asmjit::asmjit)
     message(FATAL_ERROR "asmjit found but asmjit::asmjit is missing")
   endif()
@@ -245,7 +258,7 @@ if(SKEIN_ENABLE_JIT)
     PRIVATE
       asmjit::asmjit
   )
-  message(STATUS "JIT enabled (asmjit)")
+  message(STATUS "JIT enabled (${SKEIN_ASMJIT_SOURCE})")
 endif()
 
 # Bytecode executor.  Fiber/package/struct/pattern services and the evaluator
@@ -396,6 +409,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE skein_builtins)
+if(WIN32 AND MINGW)
+  # Windows defaults to a 1 MiB main-thread stack, which is exhausted before
+  # the interpreter's recursion limit.  Match the usual 8 MiB POSIX stack.
+  set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY
+    LINK_FLAGS " -Wl,--stack,8388608")
+endif()
 
 # Embedded Skein standard-library packages.  Each .skein source is turned into
 # a C string at build time and imported in memory by package.cpp.

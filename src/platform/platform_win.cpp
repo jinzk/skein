@@ -409,7 +409,9 @@ bool platform_environ(
             continue;
         std::string name;
         std::string value;
-        if (!narrow_utf8(std::wstring(entry, separator), name) ||
+        if (!narrow_utf8(
+                std::wstring(entry, static_cast<size_t>(separator - entry)),
+                name) ||
             !narrow_utf8(std::wstring(separator + 1), value)) {
             FreeEnvironmentStringsW(block);
             entries.clear();

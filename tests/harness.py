@@ -43,15 +43,20 @@ def run(source, timeout=None, env=None):
     if timeout is None:
         timeout = DEFAULT_TIMEOUT
     try:
-        return subprocess.run(
+        proc = subprocess.run(
             [BIN],
-            input=source,
-            text=True,
-            encoding="utf-8",
+            input=source.encode("utf-8"),
             capture_output=True,
             timeout=timeout,
             env=env,
         )
+        proc.stdout = proc.stdout.decode("utf-8", errors="replace")
+        proc.stderr = proc.stderr.decode("utf-8", errors="replace")
+        # The Windows CRT translates "\n" to "\r\n" on text-mode pipes.
+        # Goldens are written with LF, so normalize here.
+        proc.stdout = proc.stdout.replace("\r\n", "\n")
+        proc.stderr = proc.stderr.replace("\r\n", "\n")
+        return proc
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(f"interpreter timed out for input {source!r}") from exc
 
@@ -454,6 +459,8 @@ def check_extended_stdlib():
 
     with tempfile.TemporaryDirectory() as tmp:
         base = tmp.replace("\\", "\\\\").replace('"', '\\"')
+        host_sep = "\\" if sys.platform == "win32" else "/"
+        host_join = f"{tmp}{host_sep}a{host_sep}b{host_sep}x.txt"
         check(
             "std fs directory and path helpers",
             "import std;\n"
@@ -472,8 +479,8 @@ def check_extended_stdlib():
             f'std.fs.remove("{base}/a/b/y.txt");\n'
             f'std.fs.exists("{base}/a/b/y.txt")\n',
             stdout_all=["[x.txt]", "file", "2",
-                        f"{tmp}/a/b/x.txt", "x.txt", f"{tmp}/a/b",
-                        ".txt", f"{tmp}/a/b/x.txt", "1", "= 0"],
+                        host_join, "x.txt", f"{tmp}/a/b",
+                        ".txt", host_join, "1", "= 0"],
         )
 
     if sys.platform != "win32":

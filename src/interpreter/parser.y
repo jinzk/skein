@@ -772,6 +772,8 @@ static struct type_constraint *runtime_type_or_error(
     char *str;
 }
 
+%define api.token.prefix {SKEIN_TOK_}
+
 %token <d> FLOAT "float"
 %token <i> INT "integer"
 %token <str> NAME "identifier"
@@ -2081,7 +2083,7 @@ program: %empty
 %%
 
 void parser_begin_nested_parse() {
-    yychar = YYEMPTY;
+    yychar = SKEIN_TOK_YYEMPTY;
     yynerrs = 0;
 }
 

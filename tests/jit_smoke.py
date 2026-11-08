@@ -17,10 +17,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def run(binary, script, jit, threshold="0"):
+def run(binary, script, jit, threshold="1"):
     env = dict(os.environ)
     env["SKEIN_VM"] = "1"
     env["SKEIN_JIT"] = "1" if jit else "0"
+    # The JIT compiles after `jit_hits >= threshold`; 0 would disable it
+    # entirely, so use 1 to exercise code generation on the second call.
     env["SKEIN_JIT_THRESHOLD"] = threshold
     proc = subprocess.run(
         [str(binary), str(script)],

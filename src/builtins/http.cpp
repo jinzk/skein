@@ -7,7 +7,7 @@
 #include "eval.h"
 #include "fiber.h"
 #include "http1_parser.h"
-#include "io.h"
+#include "builtins_io.h"
 #include "net.h"
 #include "repl.h"
 #include "task.h"

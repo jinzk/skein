@@ -18,7 +18,8 @@ cmake --build build
 [docs/bytecode.md](docs/bytecode.md)。JIT spike 的路线、依赖和验收标准见
 [docs/jit-plan.md](docs/jit-plan.md)。
 
-可选 JIT 构建需要 asmjit（Debian/Ubuntu 安装 `libasmjit-dev`）：
+可选 JIT 构建使用仓库内置的 `third_party/asmjit`（固定 1.11.0，
+版本与来源见 `third_party/asmjit/VERSION.md`），无需额外安装 asmjit：
 
 ```bash
 cmake -S . -B build -G Ninja -DSKEIN_ENABLE_JIT=ON

@@ -7,7 +7,7 @@ def run_cases():
     check(
         "path parse posix",
         "import std.path;\n"
-        'let p = path.parse("/a/b/../c.txt");\n'
+        'let p = path.parse("/a/b/../c.txt", "posix");\n'
         'print(p["style"]);\n'
         'print(p["root"]);\n'
         'print(p["dir"]);\n'
@@ -100,11 +100,11 @@ def run_cases():
     check(
         "path normalize posix",
         "import std.path;\n"
-        'print(path.normalize("/a/./b/../c"));\n'
-        'print(path.normalize("/../.."));\n'
-        'print(path.normalize("a/../../b"));\n'
-        'print(path.normalize(""));\n'
-        'print(path.normalize("/"));\n',
+        'print(path.normalize("/a/./b/../c", "posix"));\n'
+        'print(path.normalize("/../..", "posix"));\n'
+        'print(path.normalize("a/../../b", "posix"));\n'
+        'print(path.normalize("", "posix"));\n'
+        'print(path.normalize("/", "posix"));\n',
         stdout_all=["/a/c", "/", "../b", ".", "/"],
     )
     check(
@@ -125,10 +125,10 @@ def run_cases():
     check(
         "path join basic",
         "import std.path;\n"
-        'print(path.join());\n'
-        'print(path.join("a"));\n'
-        'print(path.join("a", "b", "c"));\n'
-        'print(path.join("a", "/b"));\n'
+        'print(path.join({"style": "posix"}));\n'
+        'print(path.join("a", {"style": "posix"}));\n'
+        'print(path.join("a", "b", "c", {"style": "posix"}));\n'
+        'print(path.join("a", "/b", {"style": "posix"}));\n'
         'print(path.join("C:/a", "b", {"style": "windows"}));\n'
         'print(path.join("C:/a", "D:/b", {"style": "windows"}));\n'
         'print(path.join("C:/a", "/b", {"style": "windows"}));\n'
@@ -169,12 +169,12 @@ def run_cases():
     check(
         "path relative",
         "import std.path;\n"
-        'print(path.relative("/a/b", "/a/c/d"));\n'
-        'print(path.relative("/a/b", "/a/b"));\n'
-        'print(path.relative("/a/b/c", "/a"));\n'
-        'print(path.relative("/a/b", "/"));\n'
-        'print(path.relative("", "a"));\n'
-        'print(path.relative(".", "a"));\n'
+        'print(path.relative("/a/b", "/a/c/d", "posix"));\n'
+        'print(path.relative("/a/b", "/a/b", "posix"));\n'
+        'print(path.relative("/a/b/c", "/a", "posix"));\n'
+        'print(path.relative("/a/b", "/", "posix"));\n'
+        'print(path.relative("", "a", "posix"));\n'
+        'print(path.relative(".", "a", "posix"));\n'
         'print(path.relative("C:/A/b", "c:/a/c", "windows"));\n'
         'print(path.relative("C:/a", "D:/b", "windows"));\n',
         stdout_all=[
@@ -185,12 +185,12 @@ def run_cases():
     check(
         "path basename dirname",
         "import std.path;\n"
-        'print(path.basename("/"));\n'
-        'print(path.basename("a/b/"));\n'
-        'print(path.basename("."));\n'
-        'print(path.dirname("/"));\n'
-        'print(path.dirname("a"));\n'
-        'print(path.dirname("a/b"));\n'
+        'print(path.basename("/", "posix"));\n'
+        'print(path.basename("a/b/", "posix"));\n'
+        'print(path.basename(".", "posix"));\n'
+        'print(path.dirname("/", "posix"));\n'
+        'print(path.dirname("a", "posix"));\n'
+        'print(path.dirname("a/b", "posix"));\n'
         'print(path.dirname("C:/foo", "windows"));\n'
         'print(path.dirname("C:foo", "windows"));\n'
         'print(path.basename("//server/share", "windows"));\n'
@@ -214,11 +214,11 @@ def run_cases():
     check(
         "path with_ext",
         "import std.path;\n"
-        'print(path.with_ext("a/b.txt", "md"));\n'
-        'print(path.with_ext("a/b.txt", ".md"));\n'
-        'print(path.with_ext("a/b.txt", ""));\n'
-        'print(path.with_ext("a/../b.txt", "md"));\n'
-        'print(path.with_ext("目录/😀.txt", "md"));\n'
+        'print(path.with_ext("a/b.txt", "md", "posix"));\n'
+        'print(path.with_ext("a/b.txt", ".md", "posix"));\n'
+        'print(path.with_ext("a/b.txt", "", "posix"));\n'
+        'print(path.with_ext("a/../b.txt", "md", "posix"));\n'
+        'print(path.with_ext("目录/😀.txt", "md", "posix"));\n'
         'print(path.with_ext("C:/a.txt", "md", "windows"));\n',
         stdout_all=["a/b.md", "a/b.md", "a/b", "b.md", "目录/😀.md",
                     "C:\\a.md"],
@@ -256,8 +256,8 @@ def run_cases():
         "path unicode components",
         "import std.path;\n"
         'print(path.basename("目录/😀.txt"));\n'
-        'print(path.parse("目录/😀.txt")["parts"]);\n'
-        'print(path.normalize("目录/../😀.txt"));\n'
+        'print(path.parse("目录/😀.txt", "posix")["parts"]);\n'
+        'print(path.normalize("目录/../😀.txt", "posix"));\n'
         'print(path.equals("/café/😀", "/café/😀", "posix"));\n',
         stdout_all=["😀.txt", "[目录, 😀.txt]", "😀.txt", "true"],
     )
@@ -294,7 +294,7 @@ def run_cases():
     )
     check(
         "path relative mixed",
-        'import std.path;\npath.relative("/a", "b")\n',
+        'import std.path;\npath.relative("/a", "b", "posix")\n',
         stderr="both be absolute or both be relative",
     )
     check(

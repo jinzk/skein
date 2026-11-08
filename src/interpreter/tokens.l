@@ -91,7 +91,7 @@ static void reset_for_header_state() {
 }
 
 static void note_for_header_token(int tok) {
-    if (for_body_pending && tok != IN && tok != EOL)
+    if (for_body_pending && tok != SKEIN_TOK_IN && tok != SKEIN_TOK_EOL)
         for_operand_started = true;
 }
 
@@ -141,7 +141,7 @@ static void note_header_context_token(int tok) {
     if (pending_header_skip) {
         pending_header_skip = false;
     } else if (pending_header_kind != 0) {
-        if (tok != '(' && tok != EOL)
+        if (tok != '(' && tok != SKEIN_TOK_EOL)
             header_stack.push_back(
                 header_context{pending_header_kind, pending_header_indent});
         pending_header_kind = 0;
@@ -166,7 +166,7 @@ static void note_header_context_token(int tok) {
     } else if (pending_match_paren) {
         if (tok != ':' && tok != ',' && tok != '}')
             header_stack.push_back(
-                header_context{MATCH, pending_match_indent});
+                header_context{SKEIN_TOK_MATCH, pending_match_indent});
         pending_match_paren = false;
     }
 
@@ -174,8 +174,8 @@ static void note_header_context_token(int tok) {
         pending_decl_skip = false;
     } else if (pending_decl_kind != 0) {
         if (tok != ':' && tok != ',' && tok != '}' && tok != ';' &&
-            tok != EOL) {
-            if (pending_decl_kind == EXTERN)
+            tok != SKEIN_TOK_EOL) {
+            if (pending_decl_kind == SKEIN_TOK_EXTERN)
                 extern_header = true;
             else
                 declaration_header = true;
@@ -183,7 +183,7 @@ static void note_header_context_token(int tok) {
         pending_decl_kind = 0;
     }
 
-    if (tok == EOL) {
+    if (tok == SKEIN_TOK_EOL) {
         header_stack.clear();
         c_for_pending = false;
     } else if (tok == ';') {
@@ -208,7 +208,7 @@ static void note_for_name_token() {
         for_header = FOR_HEADER_NONE;
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
@@ -477,10 +477,10 @@ static int lex_decimal_integer(const char *text, int len) {
     long long value = std::strtoll(clean.c_str(), NULL, 10);
     if (errno == ERANGE) {
         yylval.d = std::strtod(clean.c_str(), NULL);
-        return FLOAT;
+        return SKEIN_TOK_FLOAT;
     }
     yylval.i = value;
-    return INT;
+    return SKEIN_TOK_INT;
 }
 
 static int lex_prefixed_integer(const char *text, int len, int base,
@@ -492,16 +492,16 @@ static int lex_prefixed_integer(const char *text, int len, int base,
         diag_report_lexical(g_token_line, g_token_column,
                             "%s integer literal out of range", kind);
         yylval.i = 0;
-        return INT;
+        return SKEIN_TOK_INT;
     }
     yylval.i = (long long)value;
-    return INT;
+    return SKEIN_TOK_INT;
 }
 
 static int lex_float(const char *text, int len) {
     std::string clean = strip_numeric_underscores(text, len);
     yylval.d = std::strtod(clean.c_str(), NULL);
-    return FLOAT;
+    return SKEIN_TOK_FLOAT;
 }
 
 /* Copy a token of explicit byte length into yylval.str, NFC-normalizing
@@ -535,7 +535,7 @@ static int make_name_token(const char *text, int len) {
     std::memcpy(raw, name.data(), name.size());
     raw[name.size()] = '\0';
     yylval.str = raw;
-    return NAME;
+    return SKEIN_TOK_NAME;
 }
 /*
  * Decide whether an opening brace introduces a block body.  Only syntactic
@@ -544,12 +544,12 @@ static int make_name_token(const char *text, int len) {
  * choice is irrelevant because the closing brace stays a normal '}'.
  */
 static bool brace_starts_block() {
-    if (last_token == NAME && prev_token == PACKAGE)
+    if (last_token == SKEIN_TOK_NAME && prev_token == SKEIN_TOK_PACKAGE)
         return true;
     if (declaration_header || extern_header)
         return true;
-    if (last_token == ')' || last_token == ELSE || last_token == DO ||
-        last_token == ARROW)
+    if (last_token == ')' || last_token == SKEIN_TOK_ELSE || last_token == SKEIN_TOK_DO ||
+        last_token == SKEIN_TOK_ARROW)
         return true;
     return false;
 }
@@ -561,9 +561,9 @@ static bool brace_starts_block() {
 static void note_token(int tok) {
     if (brace_stack.empty())
         return;
-    if (tok == '{' || tok == '}' || tok == BODY_LBRACE ||
-        tok == EMPTY_DICT_CLOSE || tok == EMPTY_BLOCK_CLOSE ||
-        tok == EOL)
+    if (tok == '{' || tok == '}' || tok == SKEIN_TOK_BODY_LBRACE ||
+        tok == SKEIN_TOK_EMPTY_DICT_CLOSE || tok == SKEIN_TOK_EMPTY_BLOCK_CLOSE ||
+        tok == SKEIN_TOK_EOL)
         return;
     brace_stack.back().empty = false;
 }
@@ -590,21 +590,21 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 
 ^"#!"[^\n]*\n? { }
 
-"++" { YYRET(INC); }
-"--" { YYRET(DEC); }
+"++" { YYRET(SKEIN_TOK_INC); }
+"--" { YYRET(SKEIN_TOK_DEC); }
 
-"+=" { YYRET(PLUS_ASSIGN); }
-"-=" { YYRET(MINUS_ASSIGN); }
-"*=" { YYRET(MUL_ASSIGN); }
-"/=" { YYRET(DIV_ASSIGN); }
-"%=" { YYRET(MOD_ASSIGN); }
-"&=" { YYRET(AND_ASSIGN); }
-"|=" { YYRET(OR_ASSIGN); }
-"|>>" { YYRET(PIPE_APPLY); }
-"|>" { YYRET(PIPE); }
-"^=" { YYRET(XOR_ASSIGN); }
-"<<=" { YYRET(SHL_ASSIGN); }
-">>=" { YYRET(SHR_ASSIGN); }
+"+=" { YYRET(SKEIN_TOK_PLUS_ASSIGN); }
+"-=" { YYRET(SKEIN_TOK_MINUS_ASSIGN); }
+"*=" { YYRET(SKEIN_TOK_MUL_ASSIGN); }
+"/=" { YYRET(SKEIN_TOK_DIV_ASSIGN); }
+"%=" { YYRET(SKEIN_TOK_MOD_ASSIGN); }
+"&=" { YYRET(SKEIN_TOK_AND_ASSIGN); }
+"|=" { YYRET(SKEIN_TOK_OR_ASSIGN); }
+"|>>" { YYRET(SKEIN_TOK_PIPE_APPLY); }
+"|>" { YYRET(SKEIN_TOK_PIPE); }
+"^=" { YYRET(SKEIN_TOK_XOR_ASSIGN); }
+"<<=" { YYRET(SKEIN_TOK_SHL_ASSIGN); }
+">>=" { YYRET(SKEIN_TOK_SHR_ASSIGN); }
 
 "+" |
 "-" |
@@ -636,21 +636,21 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     YYRET(yytext[0]);
 }
 
-"$" { YYRET(PLACEHOLDER); }
+"$" { YYRET(SKEIN_TOK_PLACEHOLDER); }
 
-"..." { YYRET(ELLIPSIS); }
+"..." { YYRET(SKEIN_TOK_ELLIPSIS); }
 
-".." { YYRET(DOTDOT); }
+".." { YYRET(SKEIN_TOK_DOTDOT); }
 
-"=>" { YYRET(ARROW); }
-"->" { YYRET(RARROW); }
+"=>" { YYRET(SKEIN_TOK_ARROW); }
+"->" { YYRET(SKEIN_TOK_RARROW); }
 
-"::" { YYRET(COLONCOLON); }
+"::" { YYRET(SKEIN_TOK_COLONCOLON); }
 
-"&&" { YYRET(LOGAND); }
-"||" { YYRET(LOGOR); }
-"<<" { YYRET(SHL); }
-">>" { YYRET(SHR); }
+"&&" { YYRET(SKEIN_TOK_LOGAND); }
+"||" { YYRET(SKEIN_TOK_LOGOR); }
+"<<" { YYRET(SKEIN_TOK_SHL); }
+">>" { YYRET(SKEIN_TOK_SHR); }
 
 "{" {
     int prev_line = last_token_line;
@@ -682,7 +682,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
             for_body_pending = false;
         brace_stack.push_back(brace_frame{false, true});
         indent_count++;
-        YYRET(BODY_LBRACE);
+        YYRET(SKEIN_TOK_BODY_LBRACE);
     }
     if (for_body_pending && indent_count < for_body_indent)
         for_body_pending = false;
@@ -703,7 +703,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         brace_frame frame = brace_stack.back();
         brace_stack.pop_back();
         if (frame.empty)
-            tok = frame.is_dict ? EMPTY_DICT_CLOSE : EMPTY_BLOCK_CLOSE;
+            tok = frame.is_dict ? SKEIN_TOK_EMPTY_DICT_CLOSE : SKEIN_TOK_EMPTY_BLOCK_CLOSE;
     }
     YYRET(tok);
 }
@@ -712,23 +712,23 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "(" {
     if (pending_match_paren) {
         header_stack.push_back(
-            header_context{MATCH, pending_match_indent});
+            header_context{SKEIN_TOK_MATCH, pending_match_indent});
         pending_match_paren = false;
         pending_match_skip = false;
         indent_count++;
-        YYRET(HEADER_LPAREN);
+        YYRET(SKEIN_TOK_HEADER_LPAREN);
     }
     if (pending_do_while_paren) {
         pending_do_while_paren = false;
         pending_do_while_skip = false;
         indent_count++;
-        YYRET(DO_WHILE_LPAREN);
+        YYRET(SKEIN_TOK_DO_WHILE_LPAREN);
     }
     if (pending_header_kind != 0) {
         pending_header_kind = 0;
         pending_header_skip = false;
         indent_count++;
-        YYRET(HEADER_LPAREN);
+        YYRET(SKEIN_TOK_HEADER_LPAREN);
     }
     if (pending_for_paren) {
         pending_for_paren = false;
@@ -736,7 +736,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         c_for_pending = false;
         for_header = FOR_HEADER_NONE;
         indent_count++;
-        YYRET(HEADER_LPAREN);
+        YYRET(SKEIN_TOK_HEADER_LPAREN);
     }
     if (for_header != FOR_HEADER_NONE)
         for_header = FOR_HEADER_NONE;
@@ -745,23 +745,23 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 }
 ")" { if (indent_count > 0) indent_count--; YYRET(')'); }
 
-">" { yylval.fn = 1; YYRET(CMP); }
-"<" { yylval.fn = 2; YYRET(CMP); }
+">" { yylval.fn = 1; YYRET(SKEIN_TOK_CMP); }
+"<" { yylval.fn = 2; YYRET(SKEIN_TOK_CMP); }
 "<>" |
-"!=" { yylval.fn = 3; YYRET(CMP); }
-"==" { yylval.fn = 4; YYRET(CMP); }
-">=" { yylval.fn = 5; YYRET(CMP); }
-"<=" { yylval.fn = 6; YYRET(CMP); }
+"!=" { yylval.fn = 3; YYRET(SKEIN_TOK_CMP); }
+"==" { yylval.fn = 4; YYRET(SKEIN_TOK_CMP); }
+">=" { yylval.fn = 5; YYRET(SKEIN_TOK_CMP); }
+"<=" { yylval.fn = 6; YYRET(SKEIN_TOK_CMP); }
 
 "if" {
-    start_header_context(IF);
-    YYRET(IF);
+    start_header_context(SKEIN_TOK_IF);
+    YYRET(SKEIN_TOK_IF);
 }
 "else" {
     if (last_token_line != 0 && g_token_line != last_token_line)
         report_same_line_error(
             "else must be on the same line as the preceding token");
-    YYRET(ELSE);
+    YYRET(SKEIN_TOK_ELSE);
 }
 "while" {
     if (!do_stack.empty() && do_stack.back() == indent_count) {
@@ -769,13 +769,13 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         pending_do_while_paren = true;
         pending_do_while_skip = true;
     } else {
-        start_header_context(WHILE);
+        start_header_context(SKEIN_TOK_WHILE);
     }
-    YYRET(WHILE);
+    YYRET(SKEIN_TOK_WHILE);
 }
 "do" {
     do_stack.push_back(indent_count);
-    YYRET(DO);
+    YYRET(SKEIN_TOK_DO);
 }
 "for" {
     if (!declaration_header) {
@@ -785,46 +785,46 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         pending_for_paren = true;
         pending_for_skip = true;
     }
-    YYRET(FOR);
+    YYRET(SKEIN_TOK_FOR);
 }
 "struct" {
     if (last_token != '.') {
-        pending_decl_kind = STRUCT;
+        pending_decl_kind = SKEIN_TOK_STRUCT;
         pending_decl_skip = true;
     }
-    YYRET(STRUCT);
+    YYRET(SKEIN_TOK_STRUCT);
 }
 "extern" {
     if (last_token != '.') {
-        pending_decl_kind = EXTERN;
+        pending_decl_kind = SKEIN_TOK_EXTERN;
         pending_decl_skip = true;
     }
-    YYRET(EXTERN);
+    YYRET(SKEIN_TOK_EXTERN);
 }
 "enum" {
     if (last_token != '.') {
-        pending_decl_kind = ENUM;
+        pending_decl_kind = SKEIN_TOK_ENUM;
         pending_decl_skip = true;
     }
-    YYRET(ENUM);
+    YYRET(SKEIN_TOK_ENUM);
 }
 "impl" {
     if (last_token != '.') {
-        pending_decl_kind = IMPL;
+        pending_decl_kind = SKEIN_TOK_IMPL;
         pending_decl_skip = true;
     }
-    YYRET(IMPL);
+    YYRET(SKEIN_TOK_IMPL);
 }
 "trait" {
     if (last_token != '.') {
-        pending_decl_kind = TRAIT;
+        pending_decl_kind = SKEIN_TOK_TRAIT;
         pending_decl_skip = true;
     }
-    YYRET(TRAIT);
+    YYRET(SKEIN_TOK_TRAIT);
 }
 "switch" {
-    start_header_context(SWITCH);
-    YYRET(SWITCH);
+    start_header_context(SKEIN_TOK_SWITCH);
+    YYRET(SKEIN_TOK_SWITCH);
 }
 "match" {
     if (last_token != '.') {
@@ -837,30 +837,30 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         pending_match_paren = true;
         pending_match_skip = true;
     }
-    YYRET(MATCH);
+    YYRET(SKEIN_TOK_MATCH);
 }
-"case" { YYRET(CASE); }
-"default" { YYRET(DEFAULT); }
-"let" { YYRET(LET); }
-"const" { YYRET(CONST); }
-"func" { YYRET(FUNC); }
-"async" { YYRET(ASYNC); }
-"await" { YYRET(AWAIT); }
-"yield" { YYRET(YIELD); }
-"defer" { YYRET(DEFER); }
-"package" { YYRET(PACKAGE); }
-"import" { YYRET(IMPORT); }
-"export" { YYRET(EXPORT); }
-"return" { YYRET(RETURN); }
-"break" { YYRET(BREAK); }
-"continue" { YYRET(CONTINUE); }
-"fail" { YYRET(FAIL); }
-"is" { YYRET(IS); }
-"label" { YYRET(LABEL); }
-"on" { YYRET(ON); }
-"error" { YYRET(ERROR); }
-"recover" { YYRET(RECOVER); }
-"pass" { YYRET(PASS); }
+"case" { YYRET(SKEIN_TOK_CASE); }
+"default" { YYRET(SKEIN_TOK_DEFAULT); }
+"let" { YYRET(SKEIN_TOK_LET); }
+"const" { YYRET(SKEIN_TOK_CONST); }
+"func" { YYRET(SKEIN_TOK_FUNC); }
+"async" { YYRET(SKEIN_TOK_ASYNC); }
+"await" { YYRET(SKEIN_TOK_AWAIT); }
+"yield" { YYRET(SKEIN_TOK_YIELD); }
+"defer" { YYRET(SKEIN_TOK_DEFER); }
+"package" { YYRET(SKEIN_TOK_PACKAGE); }
+"import" { YYRET(SKEIN_TOK_IMPORT); }
+"export" { YYRET(SKEIN_TOK_EXPORT); }
+"return" { YYRET(SKEIN_TOK_RETURN); }
+"break" { YYRET(SKEIN_TOK_BREAK); }
+"continue" { YYRET(SKEIN_TOK_CONTINUE); }
+"fail" { YYRET(SKEIN_TOK_FAIL); }
+"is" { YYRET(SKEIN_TOK_IS); }
+"label" { YYRET(SKEIN_TOK_LABEL); }
+"on" { YYRET(SKEIN_TOK_ON); }
+"error" { YYRET(SKEIN_TOK_ERROR); }
+"recover" { YYRET(SKEIN_TOK_RECOVER); }
+"pass" { YYRET(SKEIN_TOK_PASS); }
 "in" {
     if (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO) {
         for_body_pending = true;
@@ -869,100 +869,100 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         c_for_pending = false;
     }
     for_header = FOR_HEADER_NONE;
-    YYRET(IN);
+    YYRET(SKEIN_TOK_IN);
 }
-"as" { YYRET(AS); }
-"null" { YYRET(NULLVAL); }
-"true" { YYRET(TRUE); }
-"false" { YYRET(FALSE); }
+"as" { YYRET(SKEIN_TOK_AS); }
+"null" { YYRET(SKEIN_TOK_NULLVAL); }
+"true" { YYRET(SKEIN_TOK_TRUE); }
+"false" { YYRET(SKEIN_TOK_FALSE); }
 
-"sqrt" { yylval.fn = B_sqrt; YYRET(BUILTIN); }
-"exp" { yylval.fn = B_exp; YYRET(BUILTIN); }
-"log" { yylval.fn = B_log; YYRET(BUILTIN); }
-"abs" { yylval.fn = B_abs; YYRET(BUILTIN); }
-"sin" { yylval.fn = B_sin; YYRET(BUILTIN); }
-"cos" { yylval.fn = B_cos; YYRET(BUILTIN); }
-"tan" { yylval.fn = B_tan; YYRET(BUILTIN); }
-"asin" { yylval.fn = B_asin; YYRET(BUILTIN); }
-"acos" { yylval.fn = B_acos; YYRET(BUILTIN); }
-"atan" { yylval.fn = B_atan; YYRET(BUILTIN); }
-"atan2" { yylval.fn = B_atan2; YYRET(BUILTIN); }
-"pow" { yylval.fn = B_pow; YYRET(BUILTIN); }
-"floor" { yylval.fn = B_floor; YYRET(BUILTIN); }
-"ceil" { yylval.fn = B_ceil; YYRET(BUILTIN); }
-"round" { yylval.fn = B_round; YYRET(BUILTIN); }
-"trunc" { yylval.fn = B_trunc; YYRET(BUILTIN); }
-"log2" { yylval.fn = B_log2; YYRET(BUILTIN); }
-"log10" { yylval.fn = B_log10; YYRET(BUILTIN); }
-"hypot" { yylval.fn = B_hypot; YYRET(BUILTIN); }
-"min" { yylval.fn = B_min; YYRET(BUILTIN); }
-"max" { yylval.fn = B_max; YYRET(BUILTIN); }
-"len" { yylval.fn = B_len; YYRET(BUILTIN); }
-"range" { yylval.fn = B_range; YYRET(BUILTIN); }
-"print" { yylval.fn = B_print; YYRET(BUILTIN); }
-"println" { yylval.fn = B_println; YYRET(BUILTIN); }
+"sqrt" { yylval.fn = B_sqrt; YYRET(SKEIN_TOK_BUILTIN); }
+"exp" { yylval.fn = B_exp; YYRET(SKEIN_TOK_BUILTIN); }
+"log" { yylval.fn = B_log; YYRET(SKEIN_TOK_BUILTIN); }
+"abs" { yylval.fn = B_abs; YYRET(SKEIN_TOK_BUILTIN); }
+"sin" { yylval.fn = B_sin; YYRET(SKEIN_TOK_BUILTIN); }
+"cos" { yylval.fn = B_cos; YYRET(SKEIN_TOK_BUILTIN); }
+"tan" { yylval.fn = B_tan; YYRET(SKEIN_TOK_BUILTIN); }
+"asin" { yylval.fn = B_asin; YYRET(SKEIN_TOK_BUILTIN); }
+"acos" { yylval.fn = B_acos; YYRET(SKEIN_TOK_BUILTIN); }
+"atan" { yylval.fn = B_atan; YYRET(SKEIN_TOK_BUILTIN); }
+"atan2" { yylval.fn = B_atan2; YYRET(SKEIN_TOK_BUILTIN); }
+"pow" { yylval.fn = B_pow; YYRET(SKEIN_TOK_BUILTIN); }
+"floor" { yylval.fn = B_floor; YYRET(SKEIN_TOK_BUILTIN); }
+"ceil" { yylval.fn = B_ceil; YYRET(SKEIN_TOK_BUILTIN); }
+"round" { yylval.fn = B_round; YYRET(SKEIN_TOK_BUILTIN); }
+"trunc" { yylval.fn = B_trunc; YYRET(SKEIN_TOK_BUILTIN); }
+"log2" { yylval.fn = B_log2; YYRET(SKEIN_TOK_BUILTIN); }
+"log10" { yylval.fn = B_log10; YYRET(SKEIN_TOK_BUILTIN); }
+"hypot" { yylval.fn = B_hypot; YYRET(SKEIN_TOK_BUILTIN); }
+"min" { yylval.fn = B_min; YYRET(SKEIN_TOK_BUILTIN); }
+"max" { yylval.fn = B_max; YYRET(SKEIN_TOK_BUILTIN); }
+"len" { yylval.fn = B_len; YYRET(SKEIN_TOK_BUILTIN); }
+"range" { yylval.fn = B_range; YYRET(SKEIN_TOK_BUILTIN); }
+"print" { yylval.fn = B_print; YYRET(SKEIN_TOK_BUILTIN); }
+"println" { yylval.fn = B_println; YYRET(SKEIN_TOK_BUILTIN); }
 "list"/"." {
     int token = make_name_token("list", 4);
     if (token)
         YYRET(token);
     yylval.fn = B_list;
-    YYRET(BUILTIN);
+    YYRET(SKEIN_TOK_BUILTIN);
 }
-"list" { yylval.fn = B_list; YYRET(BUILTIN); }
+"list" { yylval.fn = B_list; YYRET(SKEIN_TOK_BUILTIN); }
 "dict"/"." {
     int token = make_name_token("dict", 4);
     if (token)
         YYRET(token);
     yylval.fn = B_dict;
-    YYRET(BUILTIN);
+    YYRET(SKEIN_TOK_BUILTIN);
 }
-"dict" { yylval.fn = B_dict; YYRET(BUILTIN); }
-"int" { yylval.fn = B_int; YYRET(BUILTIN); }
-"float" { yylval.fn = B_float; YYRET(BUILTIN); }
-"bool" { yylval.fn = B_bool; YYRET(BUILTIN); }
-"str" { yylval.fn = B_str; YYRET(BUILTIN); }
-"char" { yylval.fn = B_char; YYRET(BUILTIN); }
-"byte" { yylval.fn = B_byte; YYRET(BUILTIN); }
-"kind_of" { yylval.fn = B_kind_of; YYRET(BUILTIN); }
-"type_name" { yylval.fn = B_type_name; YYRET(BUILTIN); }
-"type_module" { yylval.fn = B_type_module; YYRET(BUILTIN); }
-"type_source" { yylval.fn = B_type_source; YYRET(BUILTIN); }
-"format" { yylval.fn = B_format; YYRET(BUILTIN); }
-"read_file" { yylval.fn = B_read_file; YYRET(BUILTIN); }
-"write_file" { yylval.fn = B_write_file; YYRET(BUILTIN); }
-"append_file" { yylval.fn = B_append_file; YYRET(BUILTIN); }
-"file_exists" { yylval.fn = B_file_exists; YYRET(BUILTIN); }
-"file_open" { yylval.fn = B_file_open; YYRET(BUILTIN); }
-"file_read" { yylval.fn = B_file_read; YYRET(BUILTIN); }
-"file_write" { yylval.fn = B_file_write; YYRET(BUILTIN); }
-"file_seek" { yylval.fn = B_file_seek; YYRET(BUILTIN); }
-"file_tell" { yylval.fn = B_file_tell; YYRET(BUILTIN); }
-"file_eof" { yylval.fn = B_file_eof; YYRET(BUILTIN); }
-"file_close" { yylval.fn = B_file_close; YYRET(BUILTIN); }
-"file_flush" { yylval.fn = B_file_flush; YYRET(BUILTIN); }
-"input" { yylval.fn = B_input; YYRET(BUILTIN); }
-"split" { yylval.fn = B_split; YYRET(BUILTIN); }
-"split_ws" { yylval.fn = B_split_ws; YYRET(BUILTIN); }
-"trim" { yylval.fn = B_trim; YYRET(BUILTIN); }
-"find" { yylval.fn = B_find; YYRET(BUILTIN); }
-"substr" { yylval.fn = B_substr; YYRET(BUILTIN); }
-"bytes_from_string" { yylval.fn = B_bytes_from_string; YYRET(BUILTIN); }
-"bytes_to_string" { yylval.fn = B_bytes_to_string; YYRET(BUILTIN); }
-"bytes_from_char" { yylval.fn = B_bytes_from_char; YYRET(BUILTIN); }
-"char_from_bytes" { yylval.fn = B_char_from_bytes; YYRET(BUILTIN); }
-"bytes_len" { yylval.fn = B_bytes_len; YYRET(BUILTIN); }
-"bytes_get" { yylval.fn = B_bytes_get; YYRET(BUILTIN); }
-"bytes_slice" { yylval.fn = B_bytes_slice; YYRET(BUILTIN); }
-"bytes_concat" { yylval.fn = B_bytes_concat; YYRET(BUILTIN); }
-"bytes_hex" { yylval.fn = B_bytes_hex; YYRET(BUILTIN); }
-"bytes_from_hex" { yylval.fn = B_bytes_from_hex; YYRET(BUILTIN); }
-"bytes_to_int" { yylval.fn = B_bytes_to_int; YYRET(BUILTIN); }
-"int_to_bytes" { yylval.fn = B_int_to_bytes; YYRET(BUILTIN); }
-"read_bytes" { yylval.fn = B_read_bytes; YYRET(BUILTIN); }
-"write_bytes" { yylval.fn = B_write_bytes; YYRET(BUILTIN); }
-"append_bytes" { yylval.fn = B_append_bytes; YYRET(BUILTIN); }
-"file_read_bytes" { yylval.fn = B_file_read_bytes; YYRET(BUILTIN); }
-"file_write_bytes" { yylval.fn = B_file_write_bytes; YYRET(BUILTIN); }
+"dict" { yylval.fn = B_dict; YYRET(SKEIN_TOK_BUILTIN); }
+"int" { yylval.fn = B_int; YYRET(SKEIN_TOK_BUILTIN); }
+"float" { yylval.fn = B_float; YYRET(SKEIN_TOK_BUILTIN); }
+"bool" { yylval.fn = B_bool; YYRET(SKEIN_TOK_BUILTIN); }
+"str" { yylval.fn = B_str; YYRET(SKEIN_TOK_BUILTIN); }
+"char" { yylval.fn = B_char; YYRET(SKEIN_TOK_BUILTIN); }
+"byte" { yylval.fn = B_byte; YYRET(SKEIN_TOK_BUILTIN); }
+"kind_of" { yylval.fn = B_kind_of; YYRET(SKEIN_TOK_BUILTIN); }
+"type_name" { yylval.fn = B_type_name; YYRET(SKEIN_TOK_BUILTIN); }
+"type_module" { yylval.fn = B_type_module; YYRET(SKEIN_TOK_BUILTIN); }
+"type_source" { yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
+"format" { yylval.fn = B_format; YYRET(SKEIN_TOK_BUILTIN); }
+"read_file" { yylval.fn = B_read_file; YYRET(SKEIN_TOK_BUILTIN); }
+"write_file" { yylval.fn = B_write_file; YYRET(SKEIN_TOK_BUILTIN); }
+"append_file" { yylval.fn = B_append_file; YYRET(SKEIN_TOK_BUILTIN); }
+"file_exists" { yylval.fn = B_file_exists; YYRET(SKEIN_TOK_BUILTIN); }
+"file_open" { yylval.fn = B_file_open; YYRET(SKEIN_TOK_BUILTIN); }
+"file_read" { yylval.fn = B_file_read; YYRET(SKEIN_TOK_BUILTIN); }
+"file_write" { yylval.fn = B_file_write; YYRET(SKEIN_TOK_BUILTIN); }
+"file_seek" { yylval.fn = B_file_seek; YYRET(SKEIN_TOK_BUILTIN); }
+"file_tell" { yylval.fn = B_file_tell; YYRET(SKEIN_TOK_BUILTIN); }
+"file_eof" { yylval.fn = B_file_eof; YYRET(SKEIN_TOK_BUILTIN); }
+"file_close" { yylval.fn = B_file_close; YYRET(SKEIN_TOK_BUILTIN); }
+"file_flush" { yylval.fn = B_file_flush; YYRET(SKEIN_TOK_BUILTIN); }
+"input" { yylval.fn = B_input; YYRET(SKEIN_TOK_BUILTIN); }
+"split" { yylval.fn = B_split; YYRET(SKEIN_TOK_BUILTIN); }
+"split_ws" { yylval.fn = B_split_ws; YYRET(SKEIN_TOK_BUILTIN); }
+"trim" { yylval.fn = B_trim; YYRET(SKEIN_TOK_BUILTIN); }
+"find" { yylval.fn = B_find; YYRET(SKEIN_TOK_BUILTIN); }
+"substr" { yylval.fn = B_substr; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_from_string" { yylval.fn = B_bytes_from_string; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_to_string" { yylval.fn = B_bytes_to_string; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_from_char" { yylval.fn = B_bytes_from_char; YYRET(SKEIN_TOK_BUILTIN); }
+"char_from_bytes" { yylval.fn = B_char_from_bytes; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_len" { yylval.fn = B_bytes_len; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_get" { yylval.fn = B_bytes_get; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_slice" { yylval.fn = B_bytes_slice; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_concat" { yylval.fn = B_bytes_concat; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_hex" { yylval.fn = B_bytes_hex; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_from_hex" { yylval.fn = B_bytes_from_hex; YYRET(SKEIN_TOK_BUILTIN); }
+"bytes_to_int" { yylval.fn = B_bytes_to_int; YYRET(SKEIN_TOK_BUILTIN); }
+"int_to_bytes" { yylval.fn = B_int_to_bytes; YYRET(SKEIN_TOK_BUILTIN); }
+"read_bytes" { yylval.fn = B_read_bytes; YYRET(SKEIN_TOK_BUILTIN); }
+"write_bytes" { yylval.fn = B_write_bytes; YYRET(SKEIN_TOK_BUILTIN); }
+"append_bytes" { yylval.fn = B_append_bytes; YYRET(SKEIN_TOK_BUILTIN); }
+"file_read_bytes" { yylval.fn = B_file_read_bytes; YYRET(SKEIN_TOK_BUILTIN); }
+"file_write_bytes" { yylval.fn = B_file_write_bytes; YYRET(SKEIN_TOK_BUILTIN); }
 
 {ASCII_NAME} {
     int tok = make_name_token(yytext, yyleng);
@@ -1018,19 +1018,19 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     diag_report_lexical(g_token_line, g_token_column,
                         "invalid hexadecimal integer literal");
     yylval.i = 0;
-    YYRET(INT);
+    YYRET(SKEIN_TOK_INT);
 }
 0[bB][0-9A-Za-z_]* {
     diag_report_lexical(g_token_line, g_token_column,
                         "invalid binary integer literal");
     yylval.i = 0;
-    YYRET(INT);
+    YYRET(SKEIN_TOK_INT);
 }
 0[oO][0-9A-Za-z_]* {
     diag_report_lexical(g_token_line, g_token_column,
                         "invalid octal integer literal");
     yylval.i = 0;
-    YYRET(INT);
+    YYRET(SKEIN_TOK_INT);
 }
 
 {DIGITS}".." { yyless((int)(yyleng - 2)); YYRET(lex_decimal_integer(yytext, yyleng)); }
@@ -1043,7 +1043,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     diag_report_lexical(g_token_line, g_token_column,
                         "invalid numeric literal");
     yylval.i = 0;
-    YYRET(INT);
+    YYRET(SKEIN_TOK_INT);
 }
 
 "." { YYRET('.'); }
@@ -1064,7 +1064,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
                             "unterminated string literal");
         string_buffer.clear();
         BEGIN(INITIAL);
-        YYRET(EOL);
+        YYRET(SKEIN_TOK_EOL);
     }
     <<EOF>> {
         diag_report_lexical(string_start_line, string_start_column,
@@ -1086,7 +1086,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         }
         std::memcpy(yylval.str, string_buffer.c_str(), len);
         yylval.str[len] = '\0';
-        YYRET(XSTRING);
+        YYRET(SKEIN_TOK_XSTRING);
     }
     . {
         append_unescaped(yytext, (int)yyleng);
@@ -1106,7 +1106,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
                             "unterminated character literal");
         char_buffer.clear();
         BEGIN(INITIAL);
-        YYRET(EOL);
+        YYRET(SKEIN_TOK_EOL);
     }
     <<EOF>> {
         diag_report_lexical(char_start_line, char_start_column,
@@ -1130,7 +1130,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
             yylval.i = (long long)codepoint;
         }
         char_buffer.clear();
-        YYRET(CHAR);
+        YYRET(SKEIN_TOK_CHAR);
     }
     . {
         char_buffer += yytext;
@@ -1140,7 +1140,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 \n {
     if (indent_count == 0) {
         reset_for_header_state();
-        YYRET(EOL);
+        YYRET(SKEIN_TOK_EOL);
     }
 }
 

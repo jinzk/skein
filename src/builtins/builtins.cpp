@@ -19,7 +19,7 @@
 #include "http.h"
 #include "http2.h"
 #include "websocket.h"
-#include "io.h"
+#include "builtins_io.h"
 #include "json.h"
 #include "net.h"
 #include "result.h"

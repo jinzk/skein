@@ -1890,6 +1890,7 @@ std.io
 std.fs
 std.process
 std.worker
+std.thread
 std.type
 std.meta
 std.module
@@ -2687,6 +2688,8 @@ std.worker.submit_bytes
 std.worker.wait
 std.worker.shutdown
 std.worker.stats
+
+std.thread.unbounded_channel
 ```
 
 规则：
@@ -4446,6 +4449,50 @@ file_exists("out.txt")
 - 不会自动创建父目录；
 - 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
 - Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
+
+### 线程 Channel
+
+```text
+std.thread.Channel(capacity) -> channel
+std.thread.unbounded_channel() -> channel
+std.thread.Message.from(payload[, handles]) -> message
+
+channel.send(message)
+channel.try_send(message) -> bool
+channel.recv([timeout_ms]) -> message | null
+channel.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
+channel.close()
+
+channel.closed
+channel.capacity
+channel.length
+```
+
+- `capacity >= 1`；`Channel(0)` 报错；
+- 无界 Channel 使用 `std.thread.unbounded_channel()`，`capacity == -1`；
+- Channel 只接收 `std.thread.Message`；
+- `Message.from` 会复制 payload，发送方后续修改不影响消息；
+- `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
+- `send` 在队列满时阻塞；`try_send` 不阻塞；
+- `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
+- `recv(timeout_ms)` 超时抛错；
+- `close()` 幂等，保留队列中未读消息；
+- 当前 Channel 的阻塞使用 OS 线程等待；跨线程 fiber 唤醒会在 per-thread runtime 落地后补齐。
+
+示例：
+
+```skein
+import std;
+
+let ch = std.thread.Channel(2);
+let msg = std.thread.Message.from({"x": 1});
+ch.send(msg);
+
+let r = ch.try_recv();
+print(r["value"].payload["x"]);
+
+ch.close();
+```
 
 ### 带编码的文本文件
 

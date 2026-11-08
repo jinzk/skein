@@ -904,6 +904,61 @@ def check_extended_stdlib():
                 server.kill()
                 server.wait()
 
+        check(
+            "std.thread channel copy and close",
+            "import std;\n"
+            'let ch = std.thread.Channel(2);\n'
+            'let msg = std.thread.Message.from({"x": 1, "items": [1, 2]});\n'
+            'print("sent="); print(ch.try_send(msg));\n'
+            'let r = ch.try_recv();\n'
+            'print("x="); print(r["value"].payload["x"]);\n'
+            'print("items="); print(r["value"].payload["items"]);\n'
+            'ch.close();\n'
+            'let r2 = ch.try_recv();\n'
+            'print("empty_ok="); print(r2["ok"]);\n'
+            'print("closed="); print(r2["closed"]);\n',
+            stdout_all=["sent=true", "x=1", "items=[1, 2]",
+                        "empty_ok=false", "closed=true"],
+        )
+        check(
+            "std.thread message payload isolation",
+            "import std;\n"
+            'let source = {"x": 1};\n'
+            'let msg = std.thread.Message.from(source);\n'
+            'source["x"] = 2;\n'
+            'print("after_source="); print(msg.payload["x"]);\n'
+            'let copy = msg.payload;\n'
+            'copy["x"] = 3;\n'
+            'print("after_copy="); print(msg.payload["x"]);\n',
+            stdout_all=["after_source=1", "after_copy=1"],
+        )
+        check(
+            "std.thread message handles",
+            "import std;\n"
+            'let inner = std.thread.Channel(1);\n'
+            'let msg = std.thread.Message.from({"x": 1}, '
+            '{"reply": inner});\n'
+            'let ch = std.thread.Channel(1);\n'
+            'ch.send(msg);\n'
+            'let got = ch.try_recv();\n'
+            'got["value"].handles["reply"].send('
+            'std.thread.Message.from({"ok": true}));\n'
+            'let reply = inner.try_recv();\n'
+            'print("ok="); print(reply["value"].payload["ok"]);\n',
+            stdout_all=["ok=true"],
+        )
+        check(
+            "std.thread unbounded channel",
+            "import std;\n"
+            'let ch = std.thread.unbounded_channel();\n'
+            'for (let i = 0; i < 5; i++) {\n'
+            '  ch.send(std.thread.Message.from(i));\n'
+            '}\n'
+            'print("capacity="); print(ch.capacity);\n'
+            'print("length="); print(ch.length);\n',
+            stdout_all=["capacity=-1", "length=5"],
+        )
+
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:
         check(

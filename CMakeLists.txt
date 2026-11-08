@@ -376,6 +376,7 @@ add_library(skein_builtins STATIC
   src/builtins/regex_builtin.cpp
   src/builtins/result.cpp
   src/builtins/time_builtin.cpp
+  src/builtins/thread_channel.cpp
   src/builtins/websocket.cpp
   src/builtins/worker_pool.cpp
   src/builtins/example_binding.cpp

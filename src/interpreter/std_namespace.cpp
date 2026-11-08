@@ -380,6 +380,17 @@ value_t *build_namespace_impl() {
             {"shutdown", B_worker_shutdown},
             {"stats", B_worker_stats},
         })));
+    value_t *message_namespace = builtin_module({
+        {"from", B_thread_message_from},
+    });
+    value_t *thread_module = builtin_module({
+        {"Channel", B_thread_channel},
+        {"unbounded_channel", B_thread_unbounded_channel},
+    });
+    dict_append_item((struct dict_value_t *)thread_module,
+                     newstrval("Message"), message_namespace);
+    root->payload->items.push_back(std::make_pair(
+        newstrval("thread"), thread_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("type"),
         builtin_module({

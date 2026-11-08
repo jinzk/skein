@@ -2393,6 +2393,7 @@ std.io
 std.fs
 std.process
 std.worker
+std.thread
 std.type
 std.meta
 std.module

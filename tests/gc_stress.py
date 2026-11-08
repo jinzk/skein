@@ -60,6 +60,6 @@ def check(proc, label):
 
 proc = run({})
 ok = check(proc, "vm-stress")
-proc = run({"SKEIN_JIT": "1", "SKEIN_JIT_THRESHOLD": "0"})
+proc = run({"SKEIN_JIT": "1", "SKEIN_JIT_THRESHOLD": "1"})
 ok = check(proc, "jit-stress") and ok
 sys.exit(0 if ok else 1)

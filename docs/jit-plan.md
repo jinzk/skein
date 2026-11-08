@@ -140,6 +140,18 @@ slot/scope/global/field/index      约 1.0x
   6.2 GiB 降到约 300 万次 / 290 MiB；JIT `call` 从 0.313s 降到
   0.276s，`method` 降到 0.101s。
 
+2026-11-08 per-pc root 实验结论：
+
+- 尝试了 JIT root visitor（按 pc 只扫描 locals + 当前 operand depth）：
+  普通基准持平，`SKEIN_GC_STRESS` 下约慢 4 倍，已回退；
+- 尝试了 dynamic array root（JIT 每 pc 更新 live count，GC 只扫描
+  连续前缀）：普通基准和 GC stress 均无明显收益，已回退；
+- 结论：当前 GC root 扫描不是主要瓶颈，per-pc liveness 应作为
+  frame reuse / moving GC / OSR-deopt 的前置基础设施推进，而不是
+  作为独立的跑分优化；
+- 同时修复 `tests/gc_stress.py` 的 `SKEIN_JIT_THRESHOLD=0`，现在
+  GC stress 会真正启用 JIT 路径。
+
 尚未落地：
 
 - **per-pc liveness / safepoint 表**：root 表第一版对所有 value slot

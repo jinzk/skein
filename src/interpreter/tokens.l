@@ -61,6 +61,38 @@ struct brace_frame {
  */
 static std::vector<brace_frame> brace_stack;
 
+/*
+ * Recognize the unparenthesized `for NAME in exp { ... }` header so the
+ * opening brace can be classified as a loop body instead of a dict/struct
+ * literal.  Only the token sequence is tracked here; the parser still owns
+ * all validation.
+ */
+enum for_header_state {
+    FOR_HEADER_NONE,
+    FOR_HEADER_SEEN,
+    FOR_HEADER_ONE,
+    FOR_HEADER_COMMA,
+    FOR_HEADER_TWO
+};
+
+static enum for_header_state for_header = FOR_HEADER_NONE;
+static bool for_body_pending = false;
+static int for_body_indent = 0;
+
+static void reset_for_header_state() {
+    for_header = FOR_HEADER_NONE;
+    for_body_pending = false;
+}
+
+static void note_for_name_token() {
+    if (for_header == FOR_HEADER_SEEN)
+        for_header = FOR_HEADER_ONE;
+    else if (for_header == FOR_HEADER_COMMA)
+        for_header = FOR_HEADER_TWO;
+    else if (for_header != FOR_HEADER_NONE)
+        for_header = FOR_HEADER_NONE;
+}
+
 #define YYRET(tok) do { int yyret_tok = (tok); note_token(yyret_tok); prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
@@ -472,7 +504,18 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "~" |
 "!" |
 "@" |
-"?" { YYRET(yytext[0]); }
+"?" {
+    if (yytext[0] == ';') {
+        if (!for_body_pending || indent_count <= for_body_indent)
+            reset_for_header_state();
+    } else if (yytext[0] == ',') {
+        if (for_header == FOR_HEADER_ONE)
+            for_header = FOR_HEADER_COMMA;
+        else if (for_header != FOR_HEADER_NONE)
+            for_header = FOR_HEADER_NONE;
+    }
+    YYRET(yytext[0]);
+}
 
 "$" { YYRET(PLACEHOLDER); }
 
@@ -493,6 +536,16 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "{" {
     if (!brace_stack.empty())
         brace_stack.back().empty = false;
+    bool for_body = for_body_pending && indent_count == for_body_indent;
+    for_header = FOR_HEADER_NONE;
+    if (for_body) {
+        for_body_pending = false;
+        brace_stack.push_back(brace_frame{false, true});
+        indent_count++;
+        YYRET(FOR_BODY_LBRACE);
+    }
+    if (for_body_pending && indent_count < for_body_indent)
+        for_body_pending = false;
     brace_stack.push_back(brace_frame{!brace_starts_block(), true});
     indent_count++;
     YYRET('{');
@@ -500,6 +553,9 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 
 "}" {
     if (indent_count > 0) indent_count--;
+    for_header = FOR_HEADER_NONE;
+    if (for_body_pending && indent_count < for_body_indent)
+        for_body_pending = false;
     int tok = '}';
     if (!brace_stack.empty()) {
         brace_frame frame = brace_stack.back();
@@ -511,7 +567,12 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 }
 "[" { indent_count++; YYRET('['); }
 "]" { if (indent_count > 0) indent_count--; YYRET(']'); }
-"(" { indent_count++; YYRET('('); }
+"(" {
+    if (for_header != FOR_HEADER_NONE)
+        for_header = FOR_HEADER_NONE;
+    indent_count++;
+    YYRET('(');
+}
 ")" { if (indent_count > 0) indent_count--; YYRET(')'); }
 
 ">" { yylval.fn = 1; YYRET(CMP); }
@@ -526,7 +587,10 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "else" { YYRET(ELSE); }
 "while" { YYRET(WHILE); }
 "do" { YYRET(DO); }
-"for" { YYRET(FOR); }
+"for" {
+    for_header = FOR_HEADER_SEEN;
+    YYRET(FOR);
+}
 "struct" { YYRET(STRUCT); }
 "extern" { YYRET(EXTERN); }
 "enum" { YYRET(ENUM); }
@@ -556,7 +620,14 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "error" { YYRET(ERROR); }
 "recover" { YYRET(RECOVER); }
 "pass" { YYRET(PASS); }
-"in" { YYRET(IN); }
+"in" {
+    if (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO) {
+        for_body_pending = true;
+        for_body_indent = indent_count;
+    }
+    for_header = FOR_HEADER_NONE;
+    YYRET(IN);
+}
 "as" { YYRET(AS); }
 "null" { YYRET(NULLVAL); }
 "true" { YYRET(TRUE); }
@@ -654,6 +725,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     int tok = make_name_token(yytext, yyleng);
     if (tok == 0)
         return 0;
+    note_for_name_token();
     YYRET(tok);
 }
 
@@ -665,6 +737,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         int tok = make_name_token(yytext, yyleng);
         if (tok == 0)
             return 0;
+        note_for_name_token();
         YYRET(tok);
     }
 
@@ -675,6 +748,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         int tok = make_name_token(yytext, keep);
         if (tok == 0)
             return 0;
+        note_for_name_token();
         YYRET(tok);
     }
 
@@ -821,8 +895,10 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 }
 
 \n {
-    if (indent_count == 0)
+    if (indent_count == 0) {
+        reset_for_header_state();
         YYRET(EOL);
+    }
 }
 
 . {
@@ -852,6 +928,8 @@ void reset_scanner_state(std::FILE *in) {
     last_token = 0;
     prev_token = 0;
     brace_stack.clear();
+    reset_for_header_state();
+    for_body_indent = 0;
     std::clearerr(in);
     yyrestart(in);
 }
@@ -869,6 +947,9 @@ struct scanner_checkpoint {
     int stdin_eof;
     int last_token;
     int prev_token;
+    int for_header;
+    bool for_body_pending;
+    int for_body_indent;
     std::vector<brace_frame> braces;
 };
 
@@ -886,6 +967,9 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->stdin_eof = g_stdin_eof;
     checkpoint->last_token = last_token;
     checkpoint->prev_token = prev_token;
+    checkpoint->for_header = for_header;
+    checkpoint->for_body_pending = for_body_pending;
+    checkpoint->for_body_indent = for_body_indent;
     checkpoint->braces = brace_stack;
     return checkpoint;
 }
@@ -904,6 +988,9 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     g_stdin_eof = checkpoint->stdin_eof;
     last_token = checkpoint->last_token;
     prev_token = checkpoint->prev_token;
+    for_header = (enum for_header_state)checkpoint->for_header;
+    for_body_pending = checkpoint->for_body_pending;
+    for_body_indent = checkpoint->for_body_indent;
     brace_stack = checkpoint->braces;
     BEGIN(checkpoint->condition);
     delete checkpoint;

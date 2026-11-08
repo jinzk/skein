@@ -105,6 +105,68 @@ def run_cases():
     check("increment in for loop",
           "let n = 0;\nfor (let i = 0; i < 3; i++) { n = n + i; }\nn\n",
           stdout="= 3")
+    check("for in without let over list",
+          "for x in [1, 2, 3] { println(x); }\n",
+          stdout="1\n2\n3\n")
+    check("for in without let over dict keys",
+          'for k in ({"a": 1, "b": 2}) { println(k); }\n',
+          stdout="a\nb\n")
+    check("for in without let dict pairs",
+          'for k, v in ({"a": 1, "b": 2}) { println(k + "=" + str(v)); }\n',
+          stdout="a=1\nb=2\n")
+    check("for in without let range builtin",
+          "for i in range(3) { println(i); }\n",
+          stdout="0\n1\n2\n")
+    check("for in without let empty body",
+          "for x in [] {}\n", code=0)
+    check("for in without let shadows outer variable",
+          "let x = 99;\nfor x in [1, 2] { println(x); }\nprintln(x);\n",
+          stdout="1\n2\n99\n")
+    check("for in without let iterable uses outer binding",
+          "let x = [4, 5];\nfor x in x { println(x); }\nprintln(len(x));\n",
+          stdout="4\n5\n2\n")
+    check("for in without let string",
+          'for c in "ab" { println(c); }\n', stdout="a\nb\n")
+    check("for in without let bytes",
+          'for b in bytes_from_hex("00ff") { println(b); }\n',
+          stdout="0\n255\n")
+    check("for in without let generator",
+          "func gen() { yield 1; yield 2; }\n"
+          "for x in gen() { println(x); }\n",
+          stdout="1\n2\n")
+    check("for in without let nested label",
+          "label outer: for i in [1, 2] {\n"
+          "  for j in [1, 2] {\n"
+          "    if (j == 2) { continue outer; }\n"
+          "    println(i * 10 + j);\n"
+          "  }\n"
+          "}\n",
+          stdout="11\n21\n")
+    check("for in without let break",
+          "for x in [1, 2, 3] { if (x == 2) { break; } println(x); }\n",
+          stdout="1\n")
+    check("for in without let set",
+          "import std;\n"
+          "let s = std.set.from_list([1, 2, 3]);\n"
+          "let n = 0;\n"
+          "for v in s { n = n + v; }\n"
+          "println(n);\n",
+          stdout="6\n")
+    check("for in without let infers element type",
+          "for x in [1, 2] { let y: string = x; }\n",
+          stderr="variable y expects string, got int")
+    check("for in without let requires block",
+          "let xs = [1, 2];\nfor x in xs println(x);\n",
+          stderr="syntax error")
+    check("for in without let dict requires parens",
+          'for k in {"a": 1} { println(k); }\n',
+          stderr="syntax error")
+    check("for in without let two vars require dict",
+          "for k, v in [1, 2] { println(k); }\n",
+          stderr="two-variable for-in requires dict")
+    check("for in without let rejects three variables",
+          'for a, b, c in ({"a": 1}) { println(a); }\n',
+          stderr="syntax error")
     check("increment float", "let x = 1.5;\nx++\nx\n++x\nx\n",
           stdout_all=["= 1.5", "= 2.5", "= 3.5", "= 3.5"])
     check("increment list element",

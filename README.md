@@ -3181,6 +3181,18 @@ for (let key in {"a": 1, "b": 2}) {
 }
 ```
 
+省略 `let` 和圆括号：
+
+```text
+for x in [1, 2, 3] {
+  print(x);
+}
+
+for key, value in ({"a": 1, "b": 2}) {
+  print(key + "=" + str(value));
+}
+```
+
 `for ... in` 规则：
 
 - 单变量：list 遍历元素，dict 遍历键；deque / heap / set 也遍历元素（heap 按层序，set 按插入顺序）；
@@ -3188,7 +3200,8 @@ for (let key in {"a": 1, "b": 2}) {
 - list 需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
 - 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；
-- 循环变量只在循环作用域内有效；
+- 循环变量只在循环作用域内有效；省略 `let` 时同样是块级新变量，会遮蔽外层同名变量；
+- 省略 `let` 和圆括号时，循环体必须是 `{ ... }`；dict、struct 或函数字面量作操作数时要加括号，例如 `for k in ({"a": 1})`；
 - 支持 `break` / `continue` / `return`。
 
 `do ... while` 至少执行一次循环体；`while` 可以写在 `}` 的下一行，结尾分号可省略。

@@ -794,6 +794,7 @@ static struct type_constraint *runtime_type_or_error(
 %token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
+%token FOR_BODY_LBRACE "for body"
 
 %right ARROW RARROW
 %right '=' PLUS_ASSIGN MINUS_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
@@ -906,6 +907,14 @@ stmt: IF '(' exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
     | FOR '(' LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
     | FOR '(' LET NAME ',' NAME IN exp ')' scope
                                            { $$ = newforin($4, $6, $8, $10); }
+    | FOR NAME IN exp FOR_BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = newforin($2, NULL, $4, newscope(NULL)); }
+    | FOR NAME IN exp FOR_BODY_LBRACE list '}'
+                                           { $$ = newforin($2, NULL, $4, newscope($6)); }
+    | FOR NAME ',' NAME IN exp FOR_BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = newforin($2, $4, $6, newscope(NULL)); }
+    | FOR NAME ',' NAME IN exp FOR_BODY_LBRACE list '}'
+                                           { $$ = newforin($2, $4, $6, newscope($8)); }
     | DEFER exp ';'                       { $$ = newdefer($2); }
     | func_decl
     | decorators func_decl                { $$ = lower_function_decorators($1, (struct funcdef *)$2); }

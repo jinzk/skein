@@ -35,12 +35,29 @@ struct thread_state {
     std::string saved_source;
     std::string root_module;
     std::string root_source;
+    bool saved_module_valid = false;
+    bool saved_source_valid = false;
     bool top_level = false;
     bool tail_call = false;
     bool depth_counted = false;
     bool diag_pushed = false;
     int retained_diag_frames = 0;
     bool entered = false;
+
+    /* Nested direct JIT calls reuse this state; save one entry per call. */
+    struct call_save {
+        int saved_handler_depth = 0;
+        size_t scope_mark = 0;
+        std::string saved_module;
+        std::string saved_source;
+        bool entered = false;
+        bool depth_counted = false;
+        bool diag_pushed = false;
+        bool tail_call = false;
+        bool module_valid = false;
+        bool source_valid = false;
+    };
+    std::vector<call_save> saves;
 
     /* Pending trampoline request produced by a non-self TAIL_CALL. */
     value_t *tail_callee = nullptr;
@@ -84,6 +101,16 @@ construct_fn construct();
 void set_bind_frame(bind_frame_fn fn);
 bind_frame_fn bind_frame();
 
+/*
+ * Fast-path call resolver installed by the VM bridge.  Returns a native entry
+ * for an already-compiled callee, or null when the generic invoke path must
+ * be used.  It must not consume the callee or its arguments.
+ */
+using direct_fn = void *(*)(value_t *callee, value_t **args, uint32_t argc,
+                            thread_state *ts, function_def **def_out);
+void set_direct(direct_fn fn);
+direct_fn direct();
+
 /* True when the runtime switch (SKEIN_JIT=1) enables the JIT. */
 bool available();
 
@@ -102,6 +129,9 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level = false,
 /* Execute a compiled Proto.  Takes ownership of the argument pointers. */
 value_t *enter(JitCode *code, thread_state *ts, function_def *def,
                value_t **args, uint32_t argc);
+
+/* Raw native entry point of compiled code, for direct JIT-to-JIT calls. */
+void *entry(JitCode *code);
 
 /* Release executable memory and the JitCode object. */
 void release(JitCode *code);

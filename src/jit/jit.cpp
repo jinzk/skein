@@ -37,6 +37,7 @@
 
 extern "C" {
 SKEIN_JIT_SYSV value_t *skein_jit_null();
+SKEIN_JIT_SYSV value_t *skein_jit_int(long long value);
 SKEIN_JIT_SYSV value_t *skein_jit_dup(value_t *value);
 SKEIN_JIT_SYSV void skein_jit_free(value_t *value);
 SKEIN_JIT_SYSV value_t *skein_jit_binary(value_t *left, value_t *right, int op, int line,
@@ -73,6 +74,15 @@ SKEIN_JIT_SYSV int skein_jit_bind_patterns(function_def *def, value_t **values,
                             uint32_t argc);
 SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **args, uint32_t argc,
                           int line, int column);
+/*
+ * Fast-path resolver used by generated CALL sites.  Returns the native entry
+ * of an already-compiled callee, or null when the generic invoke path must be
+ * used.  It does not consume `callee` or `args`.
+ */
+SKEIN_JIT_SYSV void *skein_jit_direct_target(value_t *callee, value_t **args,
+                                             uint32_t argc,
+                                             skein::jit::thread_state *ts,
+                                             function_def **def_out);
 SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                uint32_t argc, int line, int column);
 SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
@@ -151,10 +161,12 @@ constexpr int kStatusOff = 32;
 constexpr int kSavedRdiOff = 40;
 constexpr int kSavedRsiOff = 48;
 constexpr int kRootMarkOff = 56;
-constexpr int kHeaderSize = 64;
+constexpr int kDirectDefOff = 64;
+constexpr int kHeaderSize = 72;
 #else
 constexpr int kRootMarkOff = 40;
-constexpr int kHeaderSize = 48;
+constexpr int kDirectDefOff = 48;
+constexpr int kHeaderSize = 56;
 #endif
 
 int slot_op_char(uint8_t opcode) {
@@ -207,6 +219,7 @@ invoke_fn g_invoke = nullptr;
 invoke_fn g_tail_invoke = nullptr;
 construct_fn g_build_struct = nullptr;
 bind_frame_fn g_bind_frame = nullptr;
+direct_fn g_direct = nullptr;
 
 } // namespace
 
@@ -218,6 +231,8 @@ void set_construct(construct_fn fn) { g_build_struct = fn; }
 construct_fn construct() { return g_build_struct; }
 void set_bind_frame(bind_frame_fn fn) { g_bind_frame = fn; }
 bind_frame_fn bind_frame() { return g_bind_frame; }
+void set_direct(direct_fn fn) { g_direct = fn; }
+direct_fn direct() { return g_direct; }
 
 bool available() {
     static int state = -1;
@@ -467,6 +482,23 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                                      stack_off(depth)),
               asmjit::imm(0));
     };
+    /*
+     * Consume an operand known to be an int.  Interned small ints need no
+     * work; allocate a branch around the helper for the uncommon case.
+     */
+    auto free_int_slot = [&](int depth) {
+        asmjit::Label skip = a.newLabel();
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, stack_off(depth)));
+        a.cmp(asmjit::x86::byte_ptr(
+                  asmjit::x86::rdi,
+                  static_cast<int>(offsetof(int_value_t, interned))),
+              asmjit::imm(0));
+        a.jne(skip);
+        call_addr(fn_address(&skein_jit_free));
+        a.bind(skip);
+        clear_slot(depth);
+    };
 
     /* Prologue. */
     a.push(asmjit::x86::rbp);
@@ -559,16 +591,51 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
             case skein::bc::Op::LoadConst: {
                 const skein::bc::Constant &constant = proto.consts[ins.b];
-                a.mov(asmjit::x86::rdi,
-                      asmjit::imm(fn_address(constant.value.get())));
-                call_addr(fn_address(&skein_jit_dup));
-                push_reg(depth, asmjit::x86::rax);
-                a.test(asmjit::x86::rax, asmjit::x86::rax);
-                a.jz(abort_label);
+                const value_t *value = constant.value.get();
+                bool shared_singleton = false;
+                if (value) {
+                    if (value->type == T_int)
+                        shared_singleton =
+                            ((const int_value_t *)value)->interned;
+                    else if (value->type == T_bool ||
+                             value->type == T_null)
+                        shared_singleton = true;
+                }
+                if (shared_singleton) {
+                    a.mov(asmjit::x86::rax,
+                          asmjit::imm(fn_address(value)));
+                    push_reg(depth, asmjit::x86::rax);
+                } else {
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::imm(fn_address(value)));
+                    call_addr(fn_address(&skein_jit_dup));
+                    push_reg(depth, asmjit::x86::rax);
+                    a.test(asmjit::x86::rax, asmjit::x86::rax);
+                    a.jz(abort_label);
+                }
                 break;
             }
 
-            case skein::bc::Op::LoadParam:
+            case skein::bc::Op::LoadParam: {
+                const asmjit::Label slow_load = a.newLabel();
+                const asmjit::Label load_done = a.newLabel();
+                a.mov(asmjit::x86::rax,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             param_off(ins.b)));
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(slow_load);
+                a.cmp(asmjit::x86::dword_ptr(asmjit::x86::rax),
+                      asmjit::imm(T_int));
+                a.jne(slow_load);
+                a.cmp(asmjit::x86::byte_ptr(
+                          asmjit::x86::rax,
+                          static_cast<int>(
+                              offsetof(int_value_t, interned))),
+                      asmjit::imm(0));
+                a.je(slow_load);
+                push_reg(depth, asmjit::x86::rax);
+                a.jmp(load_done);
+                a.bind(slow_load);
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              param_off(ins.b)));
@@ -576,7 +643,9 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 push_reg(depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
+                a.bind(load_done);
                 break;
+            }
 
             case skein::bc::Op::LoadGlobal:
                 a.mov(asmjit::x86::rdi,
@@ -985,13 +1054,76 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::Shr: {
                 const int left_depth = depth - 2;
                 const int right_depth = depth - 1;
+                const int op = slot_op_char(ins.op);
+                const bool int_fast_path = op == '+' || op == '-';
+                asmjit::Label slow_binary;
+                asmjit::Label binary_done;
+                if (int_fast_path) {
+                    slow_binary = a.newLabel();
+                    binary_done = a.newLabel();
+
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rbp, stack_off(left_depth)));
+                    a.mov(asmjit::x86::rsi,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rbp, stack_off(right_depth)));
+                    a.test(asmjit::x86::rdi, asmjit::x86::rdi);
+                    a.jz(slow_binary);
+                    a.test(asmjit::x86::rsi, asmjit::x86::rsi);
+                    a.jz(slow_binary);
+                    a.cmp(asmjit::x86::dword_ptr(asmjit::x86::rdi),
+                          asmjit::imm(T_int));
+                    a.jne(slow_binary);
+                    a.cmp(asmjit::x86::dword_ptr(asmjit::x86::rsi),
+                          asmjit::imm(T_int));
+                    a.jne(slow_binary);
+
+                    a.mov(asmjit::x86::rax,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rdi,
+                              static_cast<int>(
+                                  offsetof(int_value_t, value))));
+                    if (op == '+') {
+                        a.add(asmjit::x86::rax,
+                              asmjit::x86::qword_ptr(
+                                  asmjit::x86::rsi,
+                                  static_cast<int>(
+                                      offsetof(int_value_t, value))));
+                    } else {
+                        a.sub(asmjit::x86::rax,
+                              asmjit::x86::qword_ptr(
+                                  asmjit::x86::rsi,
+                                  static_cast<int>(
+                                      offsetof(int_value_t, value))));
+                    }
+                    a.jo(slow_binary);
+
+                    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 -kResultOff),
+                          asmjit::x86::rax);
+                    free_int_slot(left_depth);
+                    free_int_slot(right_depth);
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 -kResultOff));
+                    call_addr(fn_address(&skein_jit_int));
+                    a.mov(asmjit::x86::qword_ptr(
+                              asmjit::x86::rbp, stack_off(left_depth)),
+                          asmjit::x86::rax);
+                    clear_slot(right_depth);
+                    a.test(asmjit::x86::rax, asmjit::x86::rax);
+                    a.jz(abort_label);
+                    a.jmp(binary_done);
+                    a.bind(slow_binary);
+                }
+
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(left_depth)));
                 a.mov(asmjit::x86::rsi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(right_depth)));
-                const int op = slot_op_char(ins.op);
                 a.mov(asmjit::x86::edx, asmjit::imm(op));
                 a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
                 a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
@@ -1002,6 +1134,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                       asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
+                if (int_fast_path)
+                    a.bind(binary_done);
                 break;
             }
 
@@ -1009,6 +1143,78 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 const int left_depth = depth - 2;
                 const int right_depth = depth - 1;
                 const int op = ins.flags & 0x7f;
+                const bool jump_true = (ins.flags & 0x80) != 0;
+                const bool int_fast_path = op >= 1 && op <= 6;
+                asmjit::Label slow_compare;
+                asmjit::Label compare_done;
+                if (int_fast_path) {
+                    asmjit::x86::CondCode cond =
+                        asmjit::x86::CondCode::kNE;
+                    switch (op) {
+                        case 1:
+                            cond = asmjit::x86::CondCode::kSignedGT;
+                            break;
+                        case 2:
+                            cond = asmjit::x86::CondCode::kSignedLT;
+                            break;
+                        case 3: cond = asmjit::x86::CondCode::kNE; break;
+                        case 4: cond = asmjit::x86::CondCode::kE; break;
+                        case 5:
+                            cond = asmjit::x86::CondCode::kSignedGE;
+                            break;
+                        case 6:
+                            cond = asmjit::x86::CondCode::kSignedLE;
+                            break;
+                        default: break;
+                    }
+
+                    slow_compare = a.newLabel();
+                    compare_done = a.newLabel();
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rbp, stack_off(left_depth)));
+                    a.mov(asmjit::x86::rsi,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rbp, stack_off(right_depth)));
+                    a.test(asmjit::x86::rdi, asmjit::x86::rdi);
+                    a.jz(slow_compare);
+                    a.test(asmjit::x86::rsi, asmjit::x86::rsi);
+                    a.jz(slow_compare);
+                    a.cmp(asmjit::x86::dword_ptr(asmjit::x86::rdi),
+                          asmjit::imm(T_int));
+                    a.jne(slow_compare);
+                    a.cmp(asmjit::x86::dword_ptr(asmjit::x86::rsi),
+                          asmjit::imm(T_int));
+                    a.jne(slow_compare);
+                    a.mov(asmjit::x86::rax,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rdi,
+                              static_cast<int>(
+                                  offsetof(int_value_t, value))));
+                    a.cmp(asmjit::x86::rax,
+                          asmjit::x86::qword_ptr(
+                              asmjit::x86::rsi,
+                              static_cast<int>(
+                                  offsetof(int_value_t, value))));
+                    a.set(cond, asmjit::x86::al);
+                    a.movzx(asmjit::x86::eax, asmjit::x86::al);
+                    a.mov(asmjit::x86::dword_ptr(asmjit::x86::rbp,
+                                                 -kStatusOff),
+                          asmjit::x86::eax);
+                    free_int_slot(left_depth);
+                    free_int_slot(right_depth);
+                    a.mov(asmjit::x86::eax,
+                          asmjit::x86::dword_ptr(asmjit::x86::rbp,
+                                                 -kStatusOff));
+                    a.test(asmjit::x86::al, asmjit::x86::al);
+                    if (jump_true)
+                        a.jnz(target_label(ins.b));
+                    else
+                        a.jz(target_label(ins.b));
+                    a.jmp(compare_done);
+                    a.bind(slow_compare);
+                }
+
                 a.mov(asmjit::x86::edi, asmjit::imm(op));
                 a.mov(asmjit::x86::rsi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -1028,10 +1234,12 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                       asmjit::imm(0));
                 a.je(abort_label);
                 a.test(asmjit::x86::al, asmjit::x86::al);
-                if ((ins.flags & 0x80) != 0)
+                if (jump_true)
                     a.jnz(target_label(ins.b));
                 else
                     a.jz(target_label(ins.b));
+                if (int_fast_path)
+                    a.bind(compare_done);
                 break;
             }
 
@@ -1069,6 +1277,74 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::Call: {
                 const int argc = static_cast<int>(ins.b);
                 const int callee_depth = depth - argc - 1;
+                const asmjit::Label slow_call = a.newLabel();
+                const asmjit::Label call_done = a.newLabel();
+
+                /*
+                 * Fast path: resolve an already-compiled callee and call its
+                 * native entry directly.  This avoids the generic
+                 * invoke -> VM bridge -> enter round trip on every call.
+                 * The resolver does not consume callee or arguments.
+                 */
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::edx, asmjit::imm(argc));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.lea(asmjit::x86::r8,
+                      asmjit::x86::ptr(asmjit::x86::rbp, -kDirectDefOff));
+                call_addr(fn_address(&skein_jit_direct_target));
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(slow_call);
+
+#if defined(_WIN32)
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kDirectDefOff));
+                a.lea(asmjit::x86::r8,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::r9d, asmjit::imm(argc));
+#else
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kDirectDefOff));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(argc));
+#endif
+                a.call(asmjit::x86::rax);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kResultOff),
+                      asmjit::x86::rax);
+
+                /* Arguments now belong to the callee's frame; callee is ours. */
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)));
+                call_addr(fn_address(&skein_jit_free));
+                for (int i = callee_depth; i < depth; ++i)
+                    clear_slot(i);
+                a.mov(asmjit::x86::rax,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kResultOff));
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)),
+                      asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                a.jmp(call_done);
+
+                a.bind(slow_call);
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(callee_depth)));
@@ -1086,6 +1362,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                       asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
+                a.bind(call_done);
                 break;
             }
 
@@ -1255,6 +1532,10 @@ value_t *enter(JitCode *code, thread_state *ts, function_def *def,
                                uint32_t);
     Entry entry = reinterpret_cast<Entry>(code->entry);
     return entry(ts, def, args, argc);
+}
+
+void *entry(JitCode *code) {
+    return code ? reinterpret_cast<void *>(code->entry) : nullptr;
 }
 
 void release(JitCode *code) {

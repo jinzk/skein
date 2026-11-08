@@ -43,6 +43,10 @@ using skein::jit::internal::unpack_loc;
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_null() { return newnull(); }
 
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_int(long long value) {
+    return newintval(value);
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_dup(value_t *value) { return dupval(value); }
 
 extern "C" SKEIN_JIT_SYSV void skein_jit_free(value_t *value) { freeval(value); }
@@ -808,6 +812,15 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **a
     return fn(callee, args, argc);
 }
 
+extern "C" SKEIN_JIT_SYSV void *skein_jit_direct_target(
+    value_t *callee, value_t **args, uint32_t argc,
+    skein::jit::thread_state *ts, function_def **def_out) {
+    skein::jit::direct_fn fn = skein::jit::direct();
+    if (!fn)
+        return nullptr;
+    return fn(callee, args, argc, ts, def_out);
+}
+
 extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
                                function_def *def) {
     if (!ts || !ts->ctx)
@@ -819,10 +832,27 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
         return 0;
     }
 
+    /*
+     * Direct JIT-to-JIT calls reuse the caller's thread_state.  Save the
+     * caller's per-call fields so nested enters/leaves form a proper stack.
+     */
+    skein::jit::thread_state::call_save saved;
+    saved.saved_handler_depth = ts->saved_handler_depth;
+    saved.scope_mark = ts->scope_mark;
+    saved.saved_module = ts->saved_module;
+    saved.saved_source = ts->saved_source;
+    saved.entered = ts->entered;
+    saved.depth_counted = ts->depth_counted;
+    saved.diag_pushed = ts->diag_pushed;
+    saved.tail_call = ts->tail_call;
+    saved.module_valid = ts->saved_module_valid;
+    saved.source_valid = ts->saved_source_valid;
+    ts->saves.push_back(std::move(saved));
+
     ts->saved_handler_depth = context.handler_depth;
     ts->scope_mark = context.scopes.restore_stack.size();
-    ts->saved_module = diag_current_module_name();
-    ts->saved_source = diag_current_source_name();
+    ts->saved_module_valid = false;
+    ts->saved_source_valid = false;
     ts->entered = true;
     if (!ts->tail_call) {
         ++context.vm_call_depth;
@@ -834,10 +864,20 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
 
     if (!ts->top_level) {
         if (def && def->code) {
-            if (!def->code->module.empty())
+            const std::string &current_module = diag_current_module_name();
+            if (!def->code->module.empty() &&
+                def->code->module != current_module) {
+                ts->saved_module = current_module;
+                ts->saved_module_valid = true;
                 diag_set_module_name(def->code->module);
-            if (!def->code->source.empty())
+            }
+            const std::string &current_source = diag_current_source_name();
+            if (!def->code->source.empty() &&
+                def->code->source != current_source) {
+                ts->saved_source = current_source;
+                ts->saved_source_valid = true;
                 diag_set_source_name(def->code->source);
+            }
         }
         const char *name = "<anonymous>";
         int line = g_error_line;
@@ -851,7 +891,9 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
                 column = def->code->def_column;
         }
         if (diag_call_depth() < 64) {
-            if (read_bool_env("SKEIN_JIT_DEBUG", false))
+            static const bool debug_enabled =
+                read_bool_env("SKEIN_JIT_DEBUG", false);
+            if (debug_enabled)
                 std::fprintf(stderr, "[jit] enter %s depth=%d\n", name,
                              diag_call_depth());
             diag_push_call(name, line, column);
@@ -869,13 +911,17 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         skein_vm_eval_popscope();
     context.handler_depth = ts->saved_handler_depth;
     if (!ts->tail_pending) {
-        diag_set_module_name(ts->saved_module);
-        diag_set_source_name(ts->saved_source);
+        if (ts->saved_module_valid)
+            diag_set_module_name(ts->saved_module);
+        if (ts->saved_source_valid)
+            diag_set_source_name(ts->saved_source);
     }
     if (ts->depth_counted && context.vm_call_depth > 0)
         --context.vm_call_depth;
     if (!ts->top_level && ts->diag_pushed) {
-        if (read_bool_env("SKEIN_JIT_DEBUG", false))
+        static const bool debug_enabled =
+            read_bool_env("SKEIN_JIT_DEBUG", false);
+        if (debug_enabled)
             std::fprintf(stderr, "[jit] leave depth=%d tail=%d\n",
                          diag_call_depth(), ts->tail_pending ? 1 : 0);
         if (ts->tail_pending)
@@ -883,15 +929,42 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         else
             diag_pop_call();
     }
-    ts->diag_pushed = false;
-    ts->entered = false;
+
+    if (!ts->saves.empty()) {
+        skein::jit::thread_state::call_save saved = std::move(ts->saves.back());
+        ts->saves.pop_back();
+        ts->saved_handler_depth = saved.saved_handler_depth;
+        ts->scope_mark = saved.scope_mark;
+        ts->saved_module = std::move(saved.saved_module);
+        ts->saved_source = std::move(saved.saved_source);
+        ts->entered = saved.entered;
+        ts->depth_counted = saved.depth_counted;
+        ts->diag_pushed = saved.diag_pushed;
+        ts->tail_call = saved.tail_call;
+        ts->saved_module_valid = saved.module_valid;
+        ts->saved_source_valid = saved.source_valid;
+    } else {
+        ts->diag_pushed = false;
+        ts->entered = false;
+        ts->saved_module_valid = false;
+        ts->saved_source_valid = false;
+    }
 }
 
 extern "C" SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts,
                                   value_t **values, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
-        freeval(values[i]);
+        value_t *value = values[i];
         values[i] = nullptr;
+        if (!value)
+            continue;
+        if (value->type == T_int) {
+            if (((int_value_t *)value)->interned)
+                continue;
+        } else if (value->type == T_bool || value->type == T_null) {
+            continue;
+        }
+        freeval(value);
     }
     skein_jit_leave(ts);
 }

@@ -365,6 +365,7 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     skein::jit::thread_state ts;
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
+    ts.saves.reserve(64);
     ts.tail_call = tail_call;
     ts.root_module = diag_current_module_name();
     ts.root_source = diag_current_source_name();
@@ -502,6 +503,52 @@ value_t *skein_vm_jit_tail_invoke(value_t *callee, value_t **args,
 
 } // namespace
 
+#ifdef SKEIN_ENABLE_JIT
+/*
+ * Fast-path resolver called from generated CALL code.  It only returns an
+ * entry when the callee is already compiled and its arguments match; the
+ * generic invoke path remains responsible for compiling, methods, builtins,
+ * pattern bindings, and VM fallbacks.
+ */
+static void *jit_resolve_direct_target(value_t *callee, value_t **args,
+                                       uint32_t argc,
+                                       skein::jit::thread_state *ts,
+                                       function_def **def_out) {
+    if (def_out)
+        *def_out = nullptr;
+    if (!callee || callee->type != T_func || !ts)
+        return nullptr;
+    /*
+     * Tail calls and pending trampolines rely on per-call thread_state
+     * ownership; keep those on the generic invoke path.
+     */
+    if (ts->tail_call || ts->tail_pending)
+        return nullptr;
+    struct func_value_t *fn = (struct func_value_t *)callee;
+    if (!fn->def || !fn->def->code)
+        return nullptr;
+    function_code *code = fn->def->code.get();
+    if (code->is_method || !jit_function_eligible(code))
+        return nullptr;
+    if ((uint32_t)code->nparams != argc)
+        return nullptr;
+    if (jit_params_have_patterns(code))
+        return nullptr;
+    if (!jit_args_match(code, args, argc, false))
+        return nullptr;
+    function_vm_cache *cache = cache_for(code);
+    if (!cache->jit || !cache->proto)
+        return nullptr;
+    for (const skein::bc::Instr &ins : cache->proto->code) {
+        if (static_cast<skein::bc::Op>(ins.op) == skein::bc::Op::TailCall)
+            return nullptr;
+    }
+    if (def_out)
+        *def_out = fn->def.get();
+    return skein::jit::entry(cache->jit);
+}
+#endif
+
 static void ensure_vm_host() {
     static const bool installed = []() {
         vm_host &host = skein_vm_host();
@@ -530,6 +577,7 @@ static void ensure_vm_host() {
         host.fn_skein_vm_try_jit_call = &skein_vm_try_jit_call;
         host.fn_skein_vm_jit_invoke = &skein_vm_jit_invoke;
         skein::jit::set_invoke(&skein_vm_jit_invoke);
+        skein::jit::set_direct(&jit_resolve_direct_target);
         skein::jit::set_tail_invoke(&skein_vm_jit_tail_invoke);
         skein::jit::set_construct(&skein_vm_build_struct);
         skein::jit::set_bind_frame(&skein_vm_bind_pattern_frame);

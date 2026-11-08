@@ -54,7 +54,7 @@ void diag_mark_script_failure();
 void diag_report_lexical(int line, int column, const char *fmt, ...);
 
 /* Runtime call stack. */
-void diag_push_call(const std::string &name, int line, int column);
+void diag_push_call(const char *name, int line, int column);
 void diag_pop_call();
 int diag_call_depth();
 
@@ -82,7 +82,7 @@ void diag_restore_source(const diag_source_checkpoint &checkpoint);
 void diag_start_source();
 
 struct diag_call_frame {
-    std::string name;
+    const char *name;
     int line;
     int column;
 };

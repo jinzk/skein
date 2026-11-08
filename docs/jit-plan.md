@@ -74,6 +74,18 @@ Go/No-Go 标准见 §10。
 - `SKEIN_JIT_DUMP` 输出 asmjit 反汇编；
 - `tests/jit_smoke.py` 对比 VM/JIT 输出与错误位置。
 
+2026-11-08 热路径优化：
+
+- JIT-to-JIT 直接调用：已编译 callee 通过 VM bridge 注册的 resolver
+  取得原生入口，绕过 `invoke`/`vm_bridge`/`enter` 多层 C++ 派发；
+- `thread_state` 支持嵌套保存/恢复，直接调用共享调用者状态；
+- `ADD`/`SUB`/整数 `CMP_JUMP` 生成内联快路径，溢出或类型不符时回退
+  通用 helper；
+- 小整数参数/常量直接复用 interned 单例，清理时跳过 interned int /
+  bool / null；
+- 诊断调用帧改为稳定 `const char*`，enter/leave 的调试开关只读取一次
+  `getenv`，避免 Windows CRT 上的每调用开销。
+
 本机 `fib(27)` 实测：
 
 ```text
@@ -89,12 +101,26 @@ call_bench   SKEIN_JIT=0 ~0.49s   SKEIN_JIT=1 ~0.25s   （约 2.0x）
 pattern_bench SKEIN_JIT=0 ~0.30s  SKEIN_JIT=1 ~0.20s   （约 1.5x）
 ```
 
+MSYS2 UCRT64 / Windows x64 实测（`RelWithDebInfo`，`SKEIN_VM=1`，
+`SKEIN_JIT_THRESHOLD=1`）：
+
+```text
+fib          0.300s -> 0.064s   （约 4.7x）
+call         0.790s -> 0.560s   （约 1.4x）
+method       0.354s -> 0.195s   （约 1.8x）
+pattern      0.545s -> 0.445s   （约 1.2x）
+slot/scope/global/field/index  约 1.0x
+```
+
+Windows 上剩余的主要开销是大 frame 的保守清零、GC roots 和 cleanup；
+`fib` 已超过 VM，`call`/`method`/`pattern` 也有收益，其余基准持平。
+
 尚未落地：
 
 - **per-pc liveness / safepoint 表**：root 表第一版对所有 value slot
   保守标记，尚未做按 pc 的精确 liveness；
-- Win64 ABI 代码路径已接入（MinGW `sysv_abi` helper + Win64 entry thunk）；
-  当前不纳入主线，由维护者在 MSYS2 环境单独验证；
+- Win64 ABI 代码路径已接入并在 MSYS2 UCRT64 上验证（`sysv_abi` helper
+  + Win64 entry thunk）；
 - 非自递归尾调用依赖 driver loop；JIT entry 本身仍会分配临时帧，
   但不会形成调用栈增长。该项暂按性能 backlog 处理，不阻塞当前
   frame slot / GC / Win64 工作；待 GC root 表与 safepoint 稳定后再评估

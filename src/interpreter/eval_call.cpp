@@ -151,7 +151,7 @@ static struct value_t *invoke_function_body(
         frame_line = def->code->def_line;
         frame_column = def->code->def_column;
     }
-    call_stack_guard frame_guard(frame_name, frame_line, frame_column);
+    call_stack_guard frame_guard(frame_name.c_str(), frame_line, frame_column);
     bool saved_allow_await = eval_ctx().allow_await;
     eval_ctx().allow_await = def->code->is_async;
     eval_push_closure_scope(def->closure);

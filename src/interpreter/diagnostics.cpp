@@ -179,9 +179,9 @@ static void print_call_stack() {
         const diag_call_frame &frame = call_stack[i - 1];
         if (frame.line > 0)
             std::fprintf(stderr, "  in %s() called from line %d\n",
-                         frame.name.c_str(), frame.line);
+                         frame.name, frame.line);
         else
-            std::fprintf(stderr, "  in %s()\n", frame.name.c_str());
+            std::fprintf(stderr, "  in %s()\n", frame.name);
     }
 }
 
@@ -284,7 +284,7 @@ bool diag_lexical_error_on_line(int line) {
     return line > 0 && lexical_error_line == line;
 }
 
-void diag_push_call(const std::string &name, int line, int column) {
+void diag_push_call(const char *name, int line, int column) {
     call_stack.push_back(diag_call_frame{name, line, column});
 }
 

@@ -68,6 +68,7 @@ value_t *build_namespace_impl() {
         {"drop", B_iter_drop},
         {"enumerate", B_iter_enumerate},
         {"collect", B_iter_collect},
+        {"for_each", B_iter_for_each},
     });
     value_t *dict_module = builtin_module({
         {"len", B_len},

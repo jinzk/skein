@@ -744,6 +744,9 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.iter.filter")
         return poly_builtin({list_t, poly_callback({T}, bool_type)},
                             any_type());
+    if (path == "std.iter.for_each")
+        return poly_builtin({any_type(), any_type()},
+                            type_builtin(TYPE_NULL));
 
     if (path == "std.fn.compose")
         return poly_builtin(
@@ -971,9 +974,6 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
 const TypeNode *builtin_function_type(int functype) {
     switch (functype) {
-        case B_for_each:
-            return builtin_sig({any_type(), any_type()},
-                               type_builtin(TYPE_NULL));
         case B_sqrt:
         case B_exp:
         case B_log:

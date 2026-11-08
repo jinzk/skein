@@ -1195,16 +1195,19 @@ for key, value in {"a": 1, "b": 2} {
 - 循环变量只存在于循环作用域；
 - 支持 `break` / `continue` / `return`。
 
-全局函数 `for_each(iterable, fn)` 等价于：
+`std.iter.for_each(iterable, fn)` 逐个调用 `fn` 并返回 `null`：
 
-```text
-for x in iterable {
-  fn(x);
-}
+```skein
+import std;
+
+std.iter.for_each([1, 2, 3], func(x) { print(x); });
+std.iter.for_each([10, 20], func(i, x) { println(str(i) + ":" + str(x)); });
+std.iter.for_each({"a": 1}, func(k, v) { println(k + "=" + str(v)); });
 ```
 
 - 支持 list / dict / string / bytes / set / deque / heap / generator；
-- dict 回调接收 key；
+- 1 个参数：接收元素；dict 接收 key；
+- 2 个参数：list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`；
 - 忽略回调返回值，返回 `null`；
 - 回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；
 - 回调错误会向上传播；
@@ -2422,6 +2425,8 @@ std.iter.collect(std.iter.map([1, 2, 3], func(x) -> x * 2))
 std.iter.collect(std.iter.filter(range(0, 6), func(x) -> x % 2 == 0))
 std.iter.collect(std.iter.take(range(0, 100), 3))
 std.iter.collect(std.iter.enumerate(["a", "b"]))
+std.iter.for_each([10, 20], func(i, x) { println(str(i) + ":" + str(x)); })
+std.iter.for_each({"a": 1}, func(k, v) { println(k + "=" + str(v)); })
 
 std.dict.get({"a": 1}, "b", 0)
 std.dict.keys({"a": 1, "b": 2})

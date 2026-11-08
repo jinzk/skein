@@ -404,8 +404,8 @@ enum bifs {
     B_iter_drop,
     B_iter_enumerate,
     B_iter_collect,
-    B_slice,
-    B_for_each
+    B_iter_for_each,
+    B_slice
 };
 
 #endif

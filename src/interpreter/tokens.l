@@ -665,7 +665,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "max" { yylval.fn = B_max; YYRET(BUILTIN); }
 "len" { yylval.fn = B_len; YYRET(BUILTIN); }
 "range" { yylval.fn = B_range; YYRET(BUILTIN); }
-"for_each" { yylval.fn = B_for_each; YYRET(BUILTIN); }
 "print" { yylval.fn = B_print; YYRET(BUILTIN); }
 "println" { yylval.fn = B_println; YYRET(BUILTIN); }
 "list"/"." {

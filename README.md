@@ -2188,6 +2188,9 @@ std.iter.collect(std.iter.take(range(0, 100), 3))  // [0, 1, 2]
 std.iter.collect(std.iter.drop([1, 2, 3, 4], 2))   // [3, 4]
 std.iter.collect(std.iter.enumerate(["a", "b"]))   // [[0, a], [1, b]]
 
+std.iter.for_each([10, 20], func(i, x) { println(str(i) + ":" + str(x)); })
+std.iter.for_each({"a": 1}, func(k, v) { println(k + "=" + str(v)); })
+
 func gen() { yield 1; yield 2; yield 3; }
 std.iter.collect(std.iter.map(gen(), func(x) -> x * 10))
                                                      // [10, 20, 30]
@@ -2232,6 +2235,7 @@ std.iter.take
 std.iter.drop
 std.iter.enumerate
 std.iter.collect
+std.iter.for_each
 
 std.dict.len
 std.dict.get
@@ -3876,7 +3880,7 @@ for (let value in values) {
 
 `is` 只接受类型名或 trait 名作为右操作数；结构体类型名按包解析。
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`for_each`、`print`、`println`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`println`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_module`、`type_source`、`format`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
 
 ```text
 let f = sqrt;
@@ -3886,7 +3890,7 @@ func apply(fn, x) { return fn(x); }
 apply(sqrt, 16)
 ```
 
-`for_each(iterable, fn)` 等价于 `for x in iterable { fn(x); }`：按 for-in 的规则逐个调用 `fn`（dict 回调接收 key），忽略返回值并返回 `null`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；async 回调不会被自动 `await`。
+`std.iter.for_each(iterable, fn)` 逐个调用 `fn`，忽略返回值并返回 `null`。回调可以写 1 个或 2 个参数：1 个参数时接收元素（dict 为 key）；2 个参数时 list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；async 回调不会被自动 `await`。
 
 函数调用会先按从左到右的顺序求值参数，再检查被调用者类型和参数个数，因此参数中的副作用总会执行。
 

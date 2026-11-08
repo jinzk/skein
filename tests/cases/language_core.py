@@ -174,51 +174,87 @@ def run_cases():
     check("for in without let rejects three variables",
           'for a, b, c in ({"a": 1}) { println(a); }\n',
           stderr="syntax error")
-    check("for_each over list",
-          'for_each([1, 2, 3], func(x) { print(x); })\nprintln("");\n',
+    check("std.iter.for_each over list",
+          "import std;\n"
+          'std.iter.for_each([1, 2, 3], func(x) { print(x); })\n'
+          'println("");\n',
           stdout="123\n")
-    check("for_each over dict keys",
-          'for_each(({"a": 1, "b": 2}), func(k) { print(k); })\n'
+    check("std.iter.for_each over dict keys",
+          "import std;\n"
+          'std.iter.for_each({"a": 1, "b": 2}, func(k) { print(k); })\n'
           'println("");\n',
           stdout="ab\n")
-    check("for_each closure accumulator",
+    check("std.iter.for_each list index and value",
+          "import std;\n"
+          "std.iter.for_each([10, 20], func(i, x) {"
+          ' print(str(i) + ":" + str(x) + " "); })\n'
+          'println("");\n',
+          stdout="0:10 1:20 \n")
+    check("std.iter.for_each dict key and value",
+          "import std;\n"
+          'std.iter.for_each({"a": 1, "b": 2}, func(k, v) {'
+          ' print(k + "=" + str(v) + " "); })\n'
+          'println("");\n',
+          stdout="a=1 b=2 \n")
+    check("std.iter.for_each string index and char",
+          "import std;\n"
+          'std.iter.for_each("ab", func(i, c) {'
+          ' print(str(i) + ":" + str(c) + " "); })\n'
+          'println("");\n',
+          stdout="0:a 1:b \n")
+    check("std.iter.for_each closure accumulator",
+          "import std;\n"
           "let total = 0;\n"
-          "for_each([1, 2, 3], func(x) { total = total + x; })\n"
+          "std.iter.for_each([1, 2, 3], func(x) { total = total + x; })\n"
           "println(total);\n",
           stdout="6\n")
-    check("for_each string and bytes",
-          'for_each("ab", func(c) { print(c); })\n'
-          'for_each(bytes_from_hex("00ff"), func(b) { print(b); })\n'
+    check("std.iter.for_each string and bytes",
+          "import std;\n"
+          'std.iter.for_each("ab", func(c) { print(c); })\n'
+          'std.iter.for_each(bytes_from_hex("00ff"), func(b) { print(b); })\n'
           'println("");\n',
           stdout="ab0255\n")
-    check("for_each generator",
+    check("std.iter.for_each generator",
+          "import std;\n"
           "func gen() { yield 1; yield 2; }\n"
-          'for_each(gen(), func(v) { print(v); })\nprintln("");\n',
+          'std.iter.for_each(gen(), func(v) { print(v); })\n'
+          'println("");\n',
           stdout="12\n")
-    check("for_each set",
+    check("std.iter.for_each set",
           "import std;\n"
           "let n = 0;\n"
-          "for_each(std.set.from_list([1, 2, 3]), func(v) { n = n + v; })\n"
+          "std.iter.for_each(std.set.from_list([1, 2, 3]),"
+          " func(v) { n = n + v; })\n"
           "println(n);\n",
           stdout="6\n")
-    check("for_each first class",
-          "let f = for_each;\n"
+    check("std.iter.for_each first class",
+          "import std;\n"
+          "let f = std.iter.for_each;\n"
           'f([1, 2], func(x) { print(x); })\nprintln("");\n',
           stdout="12\n")
-    check("for_each return exits callback only",
-          "for_each([1, 2, 3], func(x) {"
+    check("std.iter.for_each return exits callback only",
+          "import std;\n"
+          "std.iter.for_each([1, 2, 3], func(x) {"
           " if (x == 2) { return; } print(x); })\n"
           'println("");\n',
           stdout="13\n")
-    check("for_each requires callable",
-          "for_each([1], 42)\n",
-          stderr="for_each expects a callable")
-    check("for_each arity",
-          "for_each([1])\n",
-          stderr="for_each expects 2 arguments")
-    check("for_each propagates callback errors",
-          "for_each([1, 2], func(x) { missing_symbol; })\n",
+    check("std.iter.for_each requires callable",
+          "import std;\nstd.iter.for_each([1], 42)\n",
+          stderr="std.iter.for_each expects a callable")
+    check("std.iter.for_each arity",
+          "import std;\nstd.iter.for_each([1])\n",
+          stderr="std.iter.for_each expects 2 arguments")
+    check("std.iter.for_each rejects three callback parameters",
+          "import std;\n"
+          "std.iter.for_each([1], func(a, b, c) { print(a); })\n",
+          stderr="callback must accept 1 or 2 parameters")
+    check("std.iter.for_each propagates callback errors",
+          "import std;\n"
+          "std.iter.for_each([1, 2], func(x) { missing_symbol; })\n",
           stderr="symbol not found missing_symbol")
+    check("for_each is not a global builtin",
+          "for_each([1], func(x) { })\n",
+          stderr="symbol not found for_each")
     check("increment float", "let x = 1.5;\nx++\nx\n++x\nx\n",
           stdout_all=["= 1.5", "= 2.5", "= 3.5", "= 3.5"])
     check("increment list element",

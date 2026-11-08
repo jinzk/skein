@@ -445,9 +445,7 @@ struct value_t *call_builtin(int functype,
         return call_meta_builtin(functype, args);
     if (functype >= B_fn_compose && functype <= B_fn_always)
         return call_fn_builtin(functype, args);
-    if (functype >= B_iter_map && functype <= B_iter_collect)
-        return call_iter_builtin(functype, args);
-    if (functype == B_for_each)
+    if (functype >= B_iter_map && functype <= B_iter_for_each)
         return call_iter_builtin(functype, args);
     if (functype == B_ffi_bind) {
 #ifdef SKEIN_ENABLE_FFI

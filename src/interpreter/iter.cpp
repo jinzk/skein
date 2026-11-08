@@ -4,6 +4,7 @@
 #include "eval_helpers.h"
 #include "fiber.h"
 #include "runtime_context.h"
+#include "structtype.h"
 #include "unicode.h"
 #include "valuetype.h"
 
@@ -285,17 +286,68 @@ struct value_t *iter_collect(const std::vector<struct value_t *> &args) {
     return (struct value_t *)out;
 }
 
+bool for_each_wants_two_args(struct value_t *fn, bool &two_args) {
+    two_args = false;
+    int declared = -1;
+    int required = -1;
+    if (fn && fn->type == T_func) {
+        struct func_value_t *func = (struct func_value_t *)fn;
+        if (func->def && func->def->code) {
+            declared = func->def->code->nparams;
+            required = func->def->code->required_params;
+        }
+    } else if (fn && fn->type == T_method) {
+        struct method_value_t *method = (struct method_value_t *)fn;
+        if (method->method && method->method->code) {
+            /* Bound method arity excludes the implicit receiver. */
+            declared = method->method->code->nparams - 1;
+            required = method->method->code->required_params - 1;
+        }
+    }
+    if (declared < 0)
+        return true;
+    if (required > 2) {
+        yyerror("std.iter.for_each callback must accept 1 or 2 parameters");
+        return false;
+    }
+    two_args = declared >= 2;
+    return true;
+}
+
 struct value_t *iter_for_each(const std::vector<struct value_t *> &args) {
+    bool two_args = false;
+    if (!for_each_wants_two_args(args[1], two_args))
+        return NULL;
+
+    if (two_args && args[0] && args[0]->type == T_dict) {
+        struct dict_value_t *dict = (struct dict_value_t *)args[0];
+        for (auto &entry : dict->payload->items) {
+            std::vector<struct value_t *> call_args;
+            call_args.push_back(dupval(entry.first));
+            call_args.push_back(dupval(entry.second));
+            struct value_t *result =
+                skein_call_function(args[1], std::move(call_args));
+            if (!result)
+                return NULL;
+            freeval(result);
+        }
+        return newnull();
+    }
+
     iter_source source(args[0]);
     struct value_t *item = NULL;
+    long long index = 0;
     while (source.next(item)) {
         std::vector<struct value_t *> call_args;
+        if (two_args)
+            call_args.push_back(newintval(index));
         call_args.push_back(item);
         struct value_t *result =
             skein_call_function(args[1], std::move(call_args));
         if (!result)
             return NULL;
         freeval(result);
+        ++index;
     }
     if (source.failed)
         return NULL;
@@ -353,13 +405,13 @@ struct value_t *call_iter_builtin(
                 return NULL;
             }
             return iter_collect(args);
-        case B_for_each:
+        case B_iter_for_each:
             if (args.size() != 2) {
-                yyerror("for_each expects 2 arguments");
+                yyerror("std.iter.for_each expects 2 arguments");
                 return NULL;
             }
             if (!callable_value(args[1])) {
-                yyerror("for_each expects a callable, got %s",
+                yyerror("std.iter.for_each expects a callable, got %s",
                         typename_of(args[1]));
                 return NULL;
             }

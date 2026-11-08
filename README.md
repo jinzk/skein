@@ -2691,6 +2691,7 @@ std.worker.stats
 
 std.thread.unbounded_channel
 std.thread.pool
+std.thread.spawn
 ```
 
 规则：
@@ -4550,6 +4551,65 @@ pool.join();
 - `pool.join()` 等待 worker 线程结束；
 - `stats()` 返回 `size/ready/submitted/completed/failed/queued`；
 - 当前实现使用 OS 线程等待和 payload 复制；fiber 感知唤醒与 COW 会在后续补齐。
+
+### 单线程
+
+```text
+std.thread.spawn(script, message[, options]) -> thread
+
+thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
+thread.detach()
+thread.is_alive() -> bool
+thread.cancel() -> bool
+thread.id
+```
+
+`options`：
+
+```text
+entry     默认 "main"
+```
+
+线程入口接收一个 Message：
+
+```skein
+# thread_worker.skein
+func main(ctx) {
+    let signal = ctx.handles["signal"];
+    signal.send(std.thread.Message.from({"x": ctx.payload["x"]}));
+    return {"x": ctx.payload["x"]};
+}
+```
+
+使用：
+
+```skein
+import std;
+
+let ch = std.thread.Channel(1);
+let msg = std.thread.Message.from(
+    {"x": 5},
+    {"signal": ch}
+);
+
+let t = std.thread.spawn("thread_worker.skein", msg);
+let signal = ch.recv();
+let result = t.join();
+
+print(signal.payload["x"]);
+print(result["ok"]);
+print(result["value"]["x"]);
+```
+
+规则：
+
+- `spawn` 等待脚本加载和入口解析完成后返回；
+- 子线程拥有自己的 runtime、eval context、AST/function 缓存；
+- 入口函数默认 `main`，接收一个 Message 参数；
+- `join()` 返回 `{ok, value}` 或 `{ok:false, error}`；
+- `detach()` 后线程自行运行和退出；
+- `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
+- 子线程结果必须是 data-only 值。
 
 ### 带编码的文本文件
 

@@ -29,6 +29,8 @@
 #include <utility>
 #include <vector>
 
+#include <atomic>
+
 namespace {
 
 struct message_state {
@@ -1032,6 +1034,325 @@ struct value_t *thread_pool(const std::vector<struct value_t *> &args) {
     return value;
 }
 
+/* ------------------------------------------------------------------ */
+/* Single thread                                                       */
+/* ------------------------------------------------------------------ */
+
+struct thread_state : std::enable_shared_from_this<thread_state> {
+    std::thread thread;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool startup_done = false;
+    std::string startup_error;
+    bool done = false;
+    bool detached = false;
+    bool joined = false;
+    bool canceled = false;
+    long long id = 0;
+    struct value_t *result = nullptr;
+
+    ~thread_state() {
+        if (thread.joinable())
+            thread.detach();
+        freeval(result);
+        result = nullptr;
+    }
+};
+
+extern const struct native_type kThreadType;
+
+std::atomic<long long> next_thread_id{1};
+
+struct value_t *new_thread_value(std::shared_ptr<thread_state> state) {
+    return newuserdataval(&kThreadType, std::move(state));
+}
+
+struct value_t *thread_ok_envelope(struct value_t *value) {
+    struct value_t *envelope = (struct value_t *)newdictval();
+    struct dict_value_t *dict = (struct dict_value_t *)envelope;
+    dict_append_item(dict, newstrval("ok"), newboolval(true));
+    dict_append_item(dict, newstrval("value"), value ? value : newnull());
+    return envelope;
+}
+
+struct value_t *thread_error_envelope(struct value_t *error) {
+    struct value_t *envelope = (struct value_t *)newdictval();
+    struct dict_value_t *dict = (struct dict_value_t *)envelope;
+    dict_append_item(dict, newstrval("ok"), newboolval(false));
+    dict_append_item(dict, newstrval("error"),
+                     error ? error : newerrorval("thread", "thread failed"));
+    return envelope;
+}
+
+void thread_entry_main(std::shared_ptr<thread_state> state,
+                       const std::string &script, const std::string &entry,
+                       struct value_t *argument) {
+    struct skein_context hooks = {
+        pool_worker_call,
+        pool_worker_call_builtin,
+        runtime_error_report,
+        nullptr,
+    };
+    skein_context_set(&hooks);
+    skein_vm_set_enabled(false);
+    g_interactive = false;
+    g_show_prompt = false;
+
+    eval_context context;
+    set_active_eval_context(&context);
+    initscope();
+    eval_begin_root_defers();
+
+    package_configure(script, {});
+    std::string error;
+    struct value_t *handler = nullptr;
+    bool loaded = parse_worker_source(script, error);
+    if (loaded) {
+        handler = lookup_global_symbol(entry.c_str());
+        if (!callable_value(handler)) {
+            loaded = false;
+            error = "thread entry function not found: " + entry;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->startup_done = true;
+        if (!loaded)
+            state->startup_error = error;
+    }
+    state->cv.notify_all();
+
+    if (!loaded) {
+        freeval(argument);
+        argument = nullptr;
+    } else {
+        eval_capture_snapshot snapshot;
+        eval_capture_begin(snapshot);
+        struct value_t *result =
+            skein_call_function(handler, {argument});
+        argument = nullptr;
+        if (result && is_task_value(result)) {
+            task_ptr task;
+            if (get_task_value(result, task)) {
+                freeval(result);
+                result = fiber_await_task(task);
+            }
+        }
+        eval_capture_result captured = eval_capture_end(snapshot);
+
+        struct value_t *envelope = nullptr;
+        if (captured.failed || !result) {
+            struct value_t *err = captured.error;
+            captured.error = nullptr;
+            if (!err)
+                err = newerrorval("thread", "thread function failed");
+            std::unordered_set<const void *> visiting;
+            std::string copy_error;
+            struct value_t *safe_error =
+                copy_data_value(err, visiting, copy_error);
+            freeval(err);
+            envelope = thread_error_envelope(
+                safe_error ? safe_error : newerrorval("thread", copy_error));
+        } else {
+            std::unordered_set<const void *> visiting;
+            std::string copy_error;
+            struct value_t *safe_value =
+                copy_data_value(result, visiting, copy_error);
+            freeval(result);
+            if (safe_value)
+                envelope = thread_ok_envelope(safe_value);
+            else
+                envelope = thread_error_envelope(
+                    newerrorval("thread", copy_error));
+        }
+        freeval(captured.error);
+
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->result = envelope;
+            state->done = true;
+        }
+        state->cv.notify_all();
+    }
+
+    eval_run_root_defers();
+    fiber_disable_generator_warnings();
+    task_shutdown();
+    fiber_shutdown();
+    event_loop_shutdown();
+    ast_thread_shutdown();
+    skein_vm_shutdown();
+    set_active_eval_context(nullptr);
+    skein_context_set(nullptr);
+}
+
+struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3 ||
+        args[0]->type != T_string || args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn expects script, Message and optional options");
+        return nullptr;
+    }
+    std::shared_ptr<message_state> message;
+    if (!get_message_state(args[1], message)) {
+        yyerror("std.thread.spawn expects a Message");
+        return nullptr;
+    }
+    std::string entry = "main";
+    if (args.size() == 3) {
+        if (args[2]->type != T_dict) {
+            yyerror("std.thread.spawn options must be a dict");
+            return nullptr;
+        }
+        struct value_t *entry_value = dict_get_handle(args[2], "entry");
+        if (entry_value) {
+            if (entry_value->type != T_string) {
+                yyerror("std.thread.spawn entry must be a string");
+                return nullptr;
+            }
+            entry = ((string_value_t *)entry_value)->value;
+        }
+    }
+
+    std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
+    state->id = next_thread_id.fetch_add(1);
+    struct value_t *argument = dupval(args[1]);
+    try {
+        state->thread = std::thread(thread_entry_main, state,
+                                    ((string_value_t *)args[0])->value,
+                                    entry, argument);
+    } catch (const std::exception &) {
+        freeval(argument);
+        yyerror("std.thread.spawn could not start thread");
+        return nullptr;
+    }
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->cv.wait(lock, [&state] { return state->startup_done; });
+    if (!state->startup_error.empty()) {
+        std::string error = state->startup_error;
+        lock.unlock();
+        if (state->thread.joinable())
+            state->thread.join();
+        yyerror("std.thread.spawn: %s", error.c_str());
+        return nullptr;
+    }
+    lock.unlock();
+    return new_thread_value(std::move(state));
+}
+
+std::string thread_describe(const void *) {
+    return "<thread>";
+}
+
+struct value_t *thread_get_field(void *data, const char *name) {
+    thread_state *raw = static_cast<thread_state *>(data);
+    if (!raw || !name) {
+        yyerror("thread has no such field");
+        return nullptr;
+    }
+    std::shared_ptr<thread_state> state = raw->shared_from_this();
+
+    if (std::strcmp(name, "join") == 0) {
+        return newnativeval(
+            [state](const std::vector<struct value_t *> &args) {
+                long long timeout_ms = 0;
+                if (args.size() > 1) {
+                    yyerror("thread.join expects 0 or 1 argument");
+                    return (struct value_t *)nullptr;
+                }
+                if (args.size() == 1) {
+                    if (args[0]->type != T_int ||
+                        ((int_value_t *)args[0])->value < 0) {
+                        yyerror("thread.join timeout must be a "
+                                "non-negative integer");
+                        return (struct value_t *)nullptr;
+                    }
+                    timeout_ms = ((int_value_t *)args[0])->value;
+                }
+                std::unique_lock<std::mutex> lock(state->mutex);
+                if (!state->done) {
+                    if (timeout_ms > 0) {
+                        if (!state->cv.wait_for(
+                                lock, std::chrono::milliseconds(timeout_ms),
+                                [&state] { return state->done; })) {
+                            yyerror("std.thread.join timed out");
+                            return (struct value_t *)nullptr;
+                        }
+                    } else {
+                        state->cv.wait(lock, [&state] { return state->done; });
+                    }
+                }
+                if (!state->joined) {
+                    state->joined = true;
+                    lock.unlock();
+                    if (state->thread.joinable())
+                        state->thread.join();
+                    lock.lock();
+                }
+                return state->result ? dupval(state->result) : newnull();
+            },
+            state);
+    }
+    if (std::strcmp(name, "detach") == 0) {
+        return newnativeval(
+            [state](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("thread.detach expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (!state->detached) {
+                    if (state->thread.joinable())
+                        state->thread.detach();
+                    state->detached = true;
+                }
+                return newnull();
+            },
+            state);
+    }
+    if (std::strcmp(name, "is_alive") == 0) {
+        return newnativeval(
+            [state](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("thread.is_alive expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                std::lock_guard<std::mutex> lock(state->mutex);
+                return newboolval(!state->done);
+            },
+            state);
+    }
+    if (std::strcmp(name, "cancel") == 0) {
+        return newnativeval(
+            [state](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("thread.cancel expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->canceled = true;
+                return newboolval(true);
+            },
+            state);
+    }
+    if (std::strcmp(name, "id") == 0)
+        return newintval(state->id);
+
+    yyerror("thread has no field %s", name);
+    return nullptr;
+}
+
+const struct native_type kThreadType = {
+    "thread",
+    thread_describe,
+    nullptr,
+    thread_get_field,
+    nullptr,
+    nullptr,
+};
+
+
 
 struct value_t *thread_message_from(const std::vector<struct value_t *> &args) {
     if (args.empty() || args.size() > 2) {
@@ -1104,6 +1425,8 @@ struct value_t *call_thread_channel_builtin(
             return thread_channel(-1);
         case B_thread_pool:
             return thread_pool(args);
+        case B_thread_spawn:
+            return thread_spawn(args);
         default:
             yyerror("unknown thread function");
             return nullptr;

@@ -989,6 +989,46 @@ def check_extended_stdlib():
                 stdout_all=["r1=true:42", "r2=true:10", "fail=false"],
             )
 
+            spawn_worker = os.path.join(
+                thread_tmp, "thread_spawn_worker.skein")
+            with open(spawn_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    if (ctx.payload[\"fail\"]) { missing_function(); }\n"
+                    "    let signal = ctx.handles[\"signal\"];\n"
+                    "    signal.send(std.thread.Message.from("
+                    "{\"x\": ctx.payload[\"x\"]}));\n"
+                    "    return {\"x\": ctx.payload[\"x\"]};\n"
+                    "}\n"
+                )
+            spawn_worker_path = spawn_worker.replace("\\", "\\\\")
+            check(
+                "std.thread spawn and join",
+                "import std;\n"
+                'let ch = std.thread.Channel(1);\n'
+                f'let msg = std.thread.Message.from({{"x": 5, '
+                f'"fail": false}}, {{"signal": ch}});\n'
+                f'let t = std.thread.spawn("{spawn_worker_path}", msg);\n'
+                'let signal = ch.recv();\n'
+                'let r = t.join();\n'
+                'print("signal="); print(signal.payload["x"]);\n'
+                'print("ok="); print(r["ok"]); print(":"); '
+                'print(r["value"]["x"]);\n'
+                'print("alive="); print(t.is_alive());\n',
+                stdout_all=["signal=5", "ok=true:5", "alive=false"],
+            )
+            check(
+                "std.thread spawn error join",
+                "import std;\n"
+                f'let msg = std.thread.Message.from({{"x": 1, '
+                f'"fail": true}});\n'
+                f'let t = std.thread.spawn("{spawn_worker_path}", msg);\n'
+                'let r = t.join();\n'
+                'print("ok="); print(r["ok"]);\n',
+                stdout_all=["ok=false"],
+            )
+
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:
         check(

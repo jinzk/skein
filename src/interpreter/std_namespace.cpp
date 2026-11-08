@@ -387,6 +387,7 @@ value_t *build_namespace_impl() {
         {"Channel", B_thread_channel},
         {"unbounded_channel", B_thread_unbounded_channel},
         {"pool", B_thread_pool},
+        {"spawn", B_thread_spawn},
     });
     dict_append_item((struct dict_value_t *)thread_module,
                      newstrval("Message"), message_namespace);

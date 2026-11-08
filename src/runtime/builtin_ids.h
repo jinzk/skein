@@ -372,6 +372,7 @@ enum bifs {
     B_thread_channel,
     B_thread_unbounded_channel,
     B_thread_pool,
+    B_thread_spawn,
     B_deque_new,
     B_deque_from_list,
     B_deque_size,

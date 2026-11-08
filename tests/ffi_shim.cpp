@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <thread>
 
 #if defined(_WIN32)
@@ -315,6 +316,10 @@ SHIM_EXPORT void shim_churn_text(std::size_t size) {
             std::free(block);
         }
     }
+}
+
+SHIM_EXPORT void shim_throw(void) {
+    throw std::runtime_error("shim crash");
 }
 
 } // extern "C"

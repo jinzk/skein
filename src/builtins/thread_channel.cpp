@@ -355,7 +355,7 @@ std::string channel_describe(const void *) {
 
 struct value_t *channel_send_value(
     const std::shared_ptr<channel_state> &state, struct value_t *message,
-    bool blocking) {
+    bool blocking, long long timeout_ms = 0) {
     std::shared_ptr<message_state> message_data;
     if (!get_message_state(message, message_data)) {
         yyerror("std.thread.Channel.send expects a Message");
@@ -363,6 +363,7 @@ struct value_t *channel_send_value(
     }
 
     if (blocking && fiber_in_fiber()) {
+        const auto start = std::chrono::steady_clock::now();
         for (;;) {
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
@@ -380,6 +381,16 @@ struct value_t *channel_send_value(
             }
             if (g_interrupted)
                 return nullptr;
+            if (timeout_ms > 0) {
+                const long long elapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+                if (elapsed >= timeout_ms) {
+                    yyerror("thread.timeout: channel send timed out");
+                    return nullptr;
+                }
+            }
             channel_fiber_sleep(1);
         }
     }
@@ -390,11 +401,22 @@ struct value_t *channel_send_value(
         /* NOTE: this blocks the current OS thread.  The fiber-aware
          * transport will replace this with a task wait. */
         state->send_waiters.push_back(&waiter);
-        while (!state->closed && state->capacity >= 0 &&
-               state->queue.size() >= (size_t)state->capacity) {
-            waiter.cv.wait(lock);
+        auto ready = [&state] {
+            return state->closed || state->capacity < 0 ||
+                   state->queue.size() < (size_t)state->capacity;
+        };
+        bool signaled = true;
+        if (timeout_ms > 0) {
+            signaled = waiter.cv.wait_for(
+                lock, std::chrono::milliseconds(timeout_ms), ready);
+        } else {
+            waiter.cv.wait(lock, ready);
         }
         remove_waiter(state->send_waiters, &waiter);
+        if (!signaled && !ready()) {
+            yyerror("thread.timeout: channel send timed out");
+            return nullptr;
+        }
     } else if (state->closed ||
                (state->capacity >= 0 &&
                 state->queue.size() >= (size_t)state->capacity)) {
@@ -879,10 +901,24 @@ struct value_t *dict_get_handle(struct value_t *dict, const char *key) {
 struct pool_state;
 struct future_state;
 
+enum class worker_status {
+    starting,
+    alive,
+    dead,
+};
+
+struct pool_worker_slot {
+    worker_status status = worker_status::starting;
+    long long restarts = 0;
+};
+
 struct pool_state : std::enable_shared_from_this<pool_state> {
     std::shared_ptr<channel_state> jobs;
+    /* Every worker generation, joined when the pool shuts down. */
     std::vector<std::thread> threads;
+    std::vector<std::unique_ptr<pool_worker_slot>> workers;
     std::mutex mutex;
+    std::mutex threads_mutex;
     std::condition_variable cv;
     size_t size = 0;
     size_t ready = 0;
@@ -891,22 +927,56 @@ struct pool_state : std::enable_shared_from_this<pool_state> {
     std::string startup_error;
     bool closing = false;
     bool joined = false;
+    bool worker_vm = false;
+    long long restart_limit = 0;
     long long submitted = 0;
     long long completed = 0;
     long long failed = 0;
+    long long active = 0;
+
+    bool all_workers_dead_locked() const {
+        if (workers.empty())
+            return true;
+        for (const auto &worker : workers) {
+            if (worker->status != worker_status::dead)
+                return false;
+        }
+        return true;
+    }
+
+    void join_workers() {
+        for (;;) {
+            std::vector<std::thread> pending;
+            {
+                std::lock_guard<std::mutex> lock(threads_mutex);
+                pending.swap(threads);
+            }
+            if (pending.empty())
+                break;
+            for (std::thread &thread : pending) {
+                if (thread.joinable())
+                    thread.join();
+            }
+            std::lock_guard<std::mutex> lock(threads_mutex);
+            if (threads.empty())
+                break;
+        }
+    }
 
     ~pool_state() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            closing = true;
+        }
         if (jobs)
             channel_close_state(jobs);
-        for (std::thread &thread : threads) {
-            if (thread.joinable())
-                thread.join();
-        }
+        join_workers();
     }
 };
 
 struct future_state : std::enable_shared_from_this<future_state> {
     std::shared_ptr<channel_state> reply;
+    std::atomic<bool> canceled{false};
 };
 
 extern const struct native_type kPoolType;
@@ -951,7 +1021,24 @@ bool load_worker_script(pool_state &pool, struct value_t *&handler,
     return true;
 }
 
-void worker_thread_main(pool_state *pool) {
+void send_worker_crash(const std::shared_ptr<channel_state> &reply,
+                       const std::string &reason) {
+    if (!reply)
+        return;
+    struct value_t *envelope = (struct value_t *)newdictval();
+    dict_append_item((struct dict_value_t *)envelope, newstrval("ok"),
+                     newboolval(false));
+    dict_append_item((struct dict_value_t *)envelope, newstrval("error"),
+                     newerrorval("thread.worker_crashed", reason));
+    struct value_t *message =
+        make_message_owned(envelope, (struct value_t *)newdictval());
+    channel_try_push(reply, message);
+    freeval(message);
+}
+
+void spawn_worker_thread(pool_state *pool, size_t slot_index);
+
+void worker_thread_main(pool_state *pool, size_t slot_index) {
     struct skein_context hooks = {
         pool_worker_call,
         pool_worker_call_builtin,
@@ -959,7 +1046,7 @@ void worker_thread_main(pool_state *pool) {
         nullptr,
     };
     skein_context_set(&hooks);
-    skein_vm_set_enabled(false);
+    skein_vm_set_enabled(pool->worker_vm);
     g_interactive = false;
     g_show_prompt = false;
 
@@ -970,12 +1057,31 @@ void worker_thread_main(pool_state *pool) {
 
     struct value_t *handler = nullptr;
     std::string error;
-    bool loaded = load_worker_script(*pool, handler, error);
+    bool loaded = false;
+    bool crashed = false;
+    std::string crash_reason;
+    try {
+        loaded = load_worker_script(*pool, handler, error);
+    } catch (const std::exception &e) {
+        error = e.what();
+        crash_reason = error;
+        crashed = true;
+    } catch (...) {
+        error = "worker startup failed";
+        crash_reason = error;
+        crashed = true;
+    }
 
     {
         std::lock_guard<std::mutex> lock(pool->mutex);
-        if (!loaded)
-            pool->startup_error = error;
+        pool_worker_slot &slot = *pool->workers[slot_index];
+        if (loaded) {
+            slot.status = worker_status::alive;
+        } else {
+            slot.status = worker_status::dead;
+            if (!crashed)
+                pool->startup_error = error;
+        }
         ++pool->ready;
     }
     pool->cv.notify_all();
@@ -1014,53 +1120,96 @@ void worker_thread_main(pool_state *pool) {
                 continue;
             }
 
-            eval_capture_snapshot snapshot;
-            eval_capture_begin(snapshot);
-            struct value_t *result =
-                skein_call_function(handler, {payload});
-            if (result && is_task_value(result)) {
-                task_ptr task;
-                if (get_task_value(result, task)) {
-                    freeval(result);
-                    result = fiber_await_task(task);
-                }
-            }
-            eval_capture_result captured = eval_capture_end(snapshot);
-
-            struct value_t *envelope = (struct value_t *)newdictval();
-            bool ok = !captured.failed && result;
-            if (ok) {
-                dict_append_item((struct dict_value_t *)envelope,
-                                 newstrval("ok"), newboolval(true));
-                dict_append_item((struct dict_value_t *)envelope,
-                                 newstrval("value"), result);
-                result = nullptr;
-            } else {
-                struct value_t *err = captured.error;
-                captured.error = nullptr;
-                if (!err)
-                    err = newerrorval("worker", "worker handler failed");
-                dict_append_item((struct dict_value_t *)envelope,
-                                 newstrval("ok"), newboolval(false));
-                dict_append_item((struct dict_value_t *)envelope,
-                                 newstrval("error"), err);
-                freeval(result);
-            }
-
-            struct value_t *reply_message =
-                make_message_owned(envelope, (struct value_t *)newdictval());
-            channel_try_push(reply, reply_message);
-            freeval(reply_message);
-
             {
                 std::lock_guard<std::mutex> lock(pool->mutex);
-                if (ok)
-                    ++pool->completed;
-                else
-                    ++pool->failed;
+                ++pool->active;
+            }
+            bool job_crashed = false;
+            try {
+                eval_capture_snapshot snapshot;
+                eval_capture_begin(snapshot);
+                struct value_t *result =
+                    skein_call_function(handler, {payload});
+                payload = nullptr;
+                if (result && is_task_value(result)) {
+                    task_ptr task;
+                    if (get_task_value(result, task)) {
+                        freeval(result);
+                        result = fiber_await_task(task);
+                    }
+                }
+                eval_capture_result captured = eval_capture_end(snapshot);
+
+                struct value_t *envelope = (struct value_t *)newdictval();
+                bool ok = !captured.failed && result;
+                if (ok) {
+                    dict_append_item((struct dict_value_t *)envelope,
+                                     newstrval("ok"), newboolval(true));
+                    dict_append_item((struct dict_value_t *)envelope,
+                                     newstrval("value"), result);
+                    result = nullptr;
+                } else {
+                    struct value_t *err = captured.error;
+                    captured.error = nullptr;
+                    if (!err)
+                        err = newerrorval("worker", "worker handler failed");
+                    dict_append_item((struct dict_value_t *)envelope,
+                                     newstrval("ok"), newboolval(false));
+                    dict_append_item((struct dict_value_t *)envelope,
+                                     newstrval("error"), err);
+                    freeval(result);
+                }
+
+                struct value_t *reply_message =
+                    make_message_owned(envelope,
+                                       (struct value_t *)newdictval());
+                channel_try_push(reply, reply_message);
+                freeval(reply_message);
+
+                {
+                    std::lock_guard<std::mutex> lock(pool->mutex);
+                    if (ok)
+                        ++pool->completed;
+                    else
+                        ++pool->failed;
+                }
+                freeval(captured.error);
+            } catch (const std::exception &e) {
+                job_crashed = true;
+                crash_reason = e.what();
+                send_worker_crash(reply, crash_reason);
+                std::lock_guard<std::mutex> lock(pool->mutex);
+                ++pool->failed;
+            } catch (...) {
+                job_crashed = true;
+                crash_reason = "unknown worker exception";
+                send_worker_crash(reply, crash_reason);
+                std::lock_guard<std::mutex> lock(pool->mutex);
+                ++pool->failed;
+            }
+            {
+                std::lock_guard<std::mutex> lock(pool->mutex);
+                if (pool->active > 0)
+                    --pool->active;
             }
             freeval(job);
-            freeval(captured.error);
+            if (job_crashed) {
+                crashed = true;
+                break;
+            }
+        }
+    }
+
+    bool restart = false;
+    {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        pool_worker_slot &slot = *pool->workers[slot_index];
+        slot.status = worker_status::dead;
+        if (crashed && !pool->closing &&
+            pool->restart_limit > slot.restarts) {
+            ++slot.restarts;
+            slot.status = worker_status::starting;
+            restart = true;
         }
     }
 
@@ -1073,9 +1222,37 @@ void worker_thread_main(pool_state *pool) {
     skein_vm_shutdown();
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
+
+    if (restart) {
+        try {
+            spawn_worker_thread(pool, slot_index);
+        } catch (const std::exception &) {
+            std::lock_guard<std::mutex> lock(pool->mutex);
+            pool->workers[slot_index]->status = worker_status::dead;
+        }
+    }
 }
 
-struct value_t *pool_submit(pool_state &pool, struct value_t *value) {
+void spawn_worker_thread(pool_state *pool, size_t slot_index) {
+    std::thread thread(worker_thread_main, pool, slot_index);
+    std::lock_guard<std::mutex> lock(pool->threads_mutex);
+    pool->threads.push_back(std::move(thread));
+}
+
+struct value_t *pool_submit(pool_state &pool, struct value_t *value,
+                            long long timeout_ms) {
+    {
+        std::lock_guard<std::mutex> lock(pool.mutex);
+        if (pool.closing) {
+            yyerror("thread.closed: pool is closed");
+            return nullptr;
+        }
+        if (pool.all_workers_dead_locked()) {
+            yyerror("thread.pool_failed: all workers have exited");
+            return nullptr;
+        }
+    }
+
     std::shared_ptr<message_state> source;
     struct value_t *payload = nullptr;
     struct value_t *handles = (struct value_t *)newdictval();
@@ -1101,7 +1278,8 @@ struct value_t *pool_submit(pool_state &pool, struct value_t *value) {
     dict_set_owned(handles, "reply", reply_value);
 
     struct value_t *message = make_message_owned(payload, handles);
-    struct value_t *sent = channel_send_value(pool.jobs, message, true);
+    struct value_t *sent =
+        channel_send_value(pool.jobs, message, true, timeout_ms);
     freeval(message);
     if (!sent)
         return nullptr;
@@ -1118,8 +1296,17 @@ struct value_t *pool_submit(pool_state &pool, struct value_t *value) {
 
 struct value_t *future_wait(struct future_state &future,
                             long long timeout_ms) {
+    if (future.canceled.load()) {
+        yyerror("thread.cancelled: future was canceled");
+        return nullptr;
+    }
     struct value_t *message =
         channel_recv_value(future.reply, timeout_ms);
+    if (future.canceled.load()) {
+        freeval(message);
+        yyerror("thread.cancelled: future was canceled");
+        return nullptr;
+    }
     if (!message)
         return nullptr;
     std::shared_ptr<message_state> state;
@@ -1140,6 +1327,16 @@ struct value_t *future_wait(struct future_state &future,
 }
 
 struct value_t *future_try_wait(struct future_state &future) {
+    if (future.canceled.load()) {
+        struct value_t *result = (struct value_t *)newdictval();
+        dict_append_item((struct dict_value_t *)result, newstrval("ok"),
+                         newboolval(false));
+        dict_append_item((struct dict_value_t *)result, newstrval("closed"),
+                         newboolval(true));
+        dict_append_item((struct dict_value_t *)result, newstrval("canceled"),
+                         newboolval(true));
+        return result;
+    }
     struct value_t *raw = channel_try_recv_value(future.reply);
     if (!raw || raw->type != T_dict)
         return raw;
@@ -1189,18 +1386,21 @@ struct value_t *pool_get_field(void *data, const char *name) {
     if (std::strcmp(name, "submit") == 0) {
         return newnativeval(
             [pool](const std::vector<struct value_t *> &args) {
-                if (args.size() != 1) {
-                    yyerror("pool.submit expects 1 argument");
+                if (args.empty() || args.size() > 2) {
+                    yyerror("pool.submit expects value and optional timeout");
                     return (struct value_t *)nullptr;
                 }
-                {
-                    std::lock_guard<std::mutex> lock(pool->mutex);
-                    if (pool->closing) {
-                        yyerror("thread.closed: pool is closed");
+                long long timeout_ms = 0;
+                if (args.size() == 2) {
+                    if (args[1]->type != T_int ||
+                        ((int_value_t *)args[1])->value < 0) {
+                        yyerror("pool.submit timeout must be a "
+                                "non-negative integer");
                         return (struct value_t *)nullptr;
                     }
+                    timeout_ms = ((int_value_t *)args[1])->value;
                 }
-                return pool_submit(*pool, args[0]);
+                return pool_submit(*pool, args[0], timeout_ms);
             },
             pool);
     }
@@ -1224,12 +1424,10 @@ struct value_t *pool_get_field(void *data, const char *name) {
                     if (pool->joined)
                         return newnull();
                     pool->joined = true;
+                    pool->closing = true;
                 }
                 channel_close_state(pool->jobs);
-                for (std::thread &thread : pool->threads) {
-                    if (thread.joinable())
-                        thread.join();
-                }
+                pool->join_workers();
                 return newnull();
             },
             pool);
@@ -1240,16 +1438,38 @@ struct value_t *pool_get_field(void *data, const char *name) {
                 struct value_t *stats = (struct value_t *)newdictval();
                 struct dict_value_t *dict = (struct dict_value_t *)stats;
                 std::lock_guard<std::mutex> lock(pool->mutex);
+                long long alive = 0;
+                long long dead = 0;
+                long long restarts = 0;
+                for (const auto &worker : pool->workers) {
+                    if (worker->status == worker_status::alive)
+                        ++alive;
+                    else if (worker->status == worker_status::dead)
+                        ++dead;
+                    restarts += worker->restarts;
+                }
                 dict_append_item(dict, newstrval("size"),
+                                 newintval((long long)pool->size));
+                dict_append_item(dict, newstrval("workers"),
                                  newintval((long long)pool->size));
                 dict_append_item(dict, newstrval("ready"),
                                  newintval((long long)pool->ready));
+                dict_append_item(dict, newstrval("alive"),
+                                 newintval(alive));
+                dict_append_item(dict, newstrval("dead"),
+                                 newintval(dead));
+                dict_append_item(dict, newstrval("restarts"),
+                                 newintval(restarts));
+                dict_append_item(dict, newstrval("restart_limit"),
+                                 newintval(pool->restart_limit));
                 dict_append_item(dict, newstrval("submitted"),
                                  newintval(pool->submitted));
                 dict_append_item(dict, newstrval("completed"),
                                  newintval(pool->completed));
                 dict_append_item(dict, newstrval("failed"),
                                  newintval(pool->failed));
+                dict_append_item(dict, newstrval("active"),
+                                 newintval(pool->active));
                 long long queued = 0;
                 if (pool->jobs) {
                     std::lock_guard<std::mutex> jobs_lock(
@@ -1306,6 +1526,20 @@ struct value_t *future_get_field(void *data, const char *name) {
                     return (struct value_t *)nullptr;
                 }
                 return future_try_wait(*future);
+            },
+            future);
+    }
+    if (std::strcmp(name, "cancel") == 0) {
+        return newnativeval(
+            [future](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("future.cancel expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                bool first = !future->canceled.exchange(true);
+                if (first)
+                    channel_close_state(future->reply);
+                return newboolval(first);
             },
             future);
     }
@@ -1374,35 +1608,63 @@ struct value_t *thread_pool(const std::vector<struct value_t *> &args) {
                 return nullptr;
             }
         }
+        struct value_t *restart = dict_get_handle(args[2], "restart_limit");
+        if (restart) {
+            if (restart->type != T_int ||
+                ((int_value_t *)restart)->value < 0) {
+                yyerror("std.thread.pool restart_limit must be a "
+                        "non-negative integer");
+                return nullptr;
+            }
+            pool->restart_limit = ((int_value_t *)restart)->value;
+        }
+        struct value_t *worker_vm = dict_get_handle(args[2], "worker_vm");
+        if (worker_vm) {
+            if (worker_vm->type != T_bool) {
+                yyerror("std.thread.pool worker_vm must be a bool");
+                return nullptr;
+            }
+            pool->worker_vm = ((bool_value_t *)worker_vm)->value;
+        }
     }
 
     pool->jobs = std::make_shared<channel_state>(queue_capacity);
+    pool->workers.reserve((size_t)size);
+    for (long long i = 0; i < size; ++i)
+        pool->workers.push_back(std::make_unique<pool_worker_slot>());
     try {
-        for (long long i = 0; i < size; ++i)
-            pool->threads.emplace_back(worker_thread_main, pool.get());
+        for (size_t i = 0; i < pool->workers.size(); ++i)
+            spawn_worker_thread(pool.get(), i);
     } catch (const std::exception &) {
-        channel_close_state(pool->jobs);
-        for (std::thread &thread : pool->threads) {
-            if (thread.joinable())
-                thread.join();
+        {
+            std::lock_guard<std::mutex> guard(pool->mutex);
+            pool->closing = true;
         }
+        channel_close_state(pool->jobs);
+        pool->join_workers();
         yyerror("std.thread.pool could not start workers");
         return nullptr;
     }
 
     std::unique_lock<std::mutex> lock(pool->mutex);
     pool->cv.wait(lock, [&pool] {
-        return pool->ready == pool->size || !pool->startup_error.empty();
+        return pool->ready >= pool->size || !pool->startup_error.empty();
     });
     if (!pool->startup_error.empty()) {
         std::string error = pool->startup_error;
+        pool->closing = true;
         lock.unlock();
         channel_close_state(pool->jobs);
-        for (std::thread &thread : pool->threads) {
-            if (thread.joinable())
-                thread.join();
-        }
+        pool->join_workers();
         yyerror("std.thread.pool: %s", error.c_str());
+        return nullptr;
+    }
+    if (pool->all_workers_dead_locked()) {
+        pool->closing = true;
+        lock.unlock();
+        channel_close_state(pool->jobs);
+        pool->join_workers();
+        yyerror("std.thread.pool: all workers failed to start");
         return nullptr;
     }
     lock.unlock();

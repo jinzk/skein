@@ -4504,9 +4504,10 @@ ch.close();
 ```text
 std.thread.pool(size, script[, options]) -> pool
 
-pool.submit(value) -> future
+pool.submit(value[, timeout_ms]) -> future
 future.wait([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
-future.try_wait() -> {"ok": bool, "closed": bool, "value"?: message}
+future.try_wait() -> {"ok": bool, "closed": bool, "canceled"?: bool, "value"?: message}
+future.cancel() -> bool
 
 pool.close()
 pool.join()
@@ -4516,8 +4517,10 @@ pool.stats() -> dict
 `options`：
 
 ```text
-entry     默认 "handle"
-queue     默认 1024；正整数或 "unbounded"
+entry         默认 "handle"
+queue         默认 1024；正整数或 "unbounded"
+restart_limit 默认 0；worker 异常退出后的重启次数
+worker_vm     默认 false；实验中，启用后 worker 使用 VM/JIT
 ```
 
 worker 脚本导出 `handle(payload)`：
@@ -4549,10 +4552,14 @@ pool.join();
 
 - 每个 worker 是独立 runtime，加载一次脚本并循环处理 job；
 - `handle` 抛错时返回 `{"ok": false, "error": ...}`，worker 继续；
-- `pool.submit` 会复制 payload；
+- worker 发生未捕获的原生异常时，当前 job 的 future 返回 `error("thread.worker_crashed", ...)`；
+- `restart_limit > 0` 时异常退出的 worker 会被重启，最多重启该次数；
+- 所有 worker 死亡后，新的 `submit` 报 `thread.pool_failed`；
+- `pool.submit` 会复制 payload；`submit(value, timeout_ms)` 超时抛 `thread.timeout`；
+- `future.cancel()` 关闭结果通道；之后的 `wait()` 抛 `thread.cancelled`，`try_wait()` 返回 `canceled: true`；
 - `pool.close()` 停止接收新 job，worker 排空后退出；
 - `pool.join()` 等待 worker 线程结束；
-- `stats()` 返回 `size/ready/submitted/completed/failed/queued`；
+- `stats()` 返回 `size/workers/ready/alive/dead/restarts/restart_limit/submitted/completed/failed/active/queued`；
 - 当前实现使用 OS 线程等待；pool 的 payload 在提交时深拷贝。
 
 ### 单线程

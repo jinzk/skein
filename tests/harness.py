@@ -1162,6 +1162,118 @@ def check_extended_stdlib():
                 stdout="before|after|value=9",
             )
 
+            slow_worker = os.path.join(thread_tmp, "thread_pool_slow.skein")
+            with open(slow_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(payload) {\n"
+                    "    std.time.sleep(200);\n"
+                    "    return {\"n\": payload[\"n\"]};\n"
+                    "}\n"
+                )
+            slow_worker_path = slow_worker.replace("\\", "\\\\")
+            check(
+                "std.thread pool stats and future cancel",
+                "import std;\n"
+                f'let pool = std.thread.pool(1, "{slow_worker_path}", '
+                '{"entry": "handle", "queue": 1});\n'
+                'let f = pool.submit({"n": 1});\n'
+                'print("cancel="); print(f.cancel());\n'
+                'print("cancel2="); print(f.cancel());\n'
+                'let r = f.try_wait();\n'
+                'print("canceled="); print(r["canceled"]);\n'
+                'let s = pool.stats();\n'
+                'print("workers="); print(s["workers"]); print(":"); '
+                'print("alive="); print(s["alive"]);\n'
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout_all=["cancel=true", "cancel2=false", "canceled=true",
+                            "workers=1:alive=1"],
+            )
+            check(
+                "std.thread pool submit timeout",
+                "import std;\n"
+                f'let pool = std.thread.pool(1, "{slow_worker_path}", '
+                '{"entry": "handle", "queue": 1});\n'
+                'let f1 = pool.submit({"n": 1});\n'
+                'let f2 = pool.submit({"n": 2});\n'
+                'let f3 = pool.submit({"n": 3}, 10);\n',
+                stderr="thread.timeout",
+            )
+            check(
+                "std.thread pool worker vm",
+                "import std;\n"
+                f'let pool = std.thread.pool(2, "{slow_worker_path}", '
+                '{"entry": "handle", "worker_vm": true});\n'
+                'let f = pool.submit({"n": 21});\n'
+                'let r = f.wait();\n'
+                'print("ok="); print(r["ok"]); print(":"); '
+                'print(r["value"]["n"]);\n'
+                'let s = pool.stats();\n'
+                'print("alive="); print(s["alive"]);\n'
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout_all=["ok=true:21", "alive=2"],
+            )
+
+            if FFI_SHIM:
+                manifest = os.path.join(thread_tmp, "shim_throw.ffi.json")
+                with open(manifest, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        '{"ffi": 1, "types": {}, "functions": '
+                        '{"shim_throw": {"result": "void", "args": []}}}\n'
+                    )
+                crash_worker = os.path.join(
+                    thread_tmp, "thread_pool_crash.skein")
+                with open(crash_worker, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        f"let lib = std.ffi.open({skein_string(FFI_SHIM)}, "
+                        f"{skein_string(manifest)});\n"
+                        "func main(payload) {\n"
+                        "    if (payload[\"crash\"]) {\n"
+                        "        std.ffi.call(lib, \"shim_throw\", []);\n"
+                        "    }\n"
+                        "    return {\"n\": payload[\"n\"] * 2};\n"
+                        "}\n"
+                    )
+                crash_worker_path = crash_worker.replace("\\", "\\\\")
+                check(
+                    "std.thread pool worker crash restart",
+                    "import std;\n"
+                    f'let pool = std.thread.pool(1, "{crash_worker_path}", '
+                    '{"entry": "main", "restart_limit": 1});\n'
+                    'let r1 = pool.submit({"n": 3, "crash": false}).wait();\n'
+                    'let r2 = pool.submit({"n": 4, "crash": true}).wait();\n'
+                    'let r3 = pool.submit({"n": 5, "crash": false}).wait();\n'
+                    'print("r1="); print(r1["ok"]); print(":"); '
+                    'print(r1["value"]["n"]);\n'
+                    'print("r2="); print(r2["ok"]); print(":"); '
+                    'print(std.error.kind(r2["error"]));\n'
+                    'print("r3="); print(r3["ok"]); print(":"); '
+                    'print(r3["value"]["n"]);\n'
+                    'let s = pool.stats();\n'
+                    'print("alive="); print(s["alive"]); print(":"); '
+                    'print("dead="); print(s["dead"]); print(":"); '
+                    'print("restarts="); print(s["restarts"]);\n'
+                    'pool.close();\n'
+                    'pool.join();\n',
+                    stdout_all=["r1=true:6", "r2=false:thread.worker_crashed",
+                                "r3=true:10", "alive=1:dead=0:restarts=1"],
+                )
+                check(
+                    "std.thread pool worker crash no restart",
+                    "import std;\n"
+                    f'let pool = std.thread.pool(1, "{crash_worker_path}", '
+                    '{"entry": "main", "restart_limit": 0});\n'
+                    'let r = pool.submit({"n": 4, "crash": true}).wait();\n'
+                    'print("r="); print(r["ok"]); print(":"); '
+                    'print(std.error.kind(r["error"]));\n'
+                    'let f = pool.submit({"n": 5, "crash": false});\n',
+                    stdout="r=false:thread.worker_crashed",
+                    stderr="thread.pool_failed",
+                )
+
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:
         check(

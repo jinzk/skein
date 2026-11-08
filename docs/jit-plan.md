@@ -115,6 +115,21 @@ slot/scope/global/field/index  约 1.0x
 Windows 上剩余的主要开销是大 frame 的保守清零、GC roots 和 cleanup；
 `fib` 已超过 VM，`call`/`method`/`pattern` 也有收益，其余基准持平。
 
+启用 `-DSKEIN_USE_MIMALLOC=ON`（MinGW 下自动静态链接
+libstdc++/libgcc）后，Windows 绝对性能进一步下降：
+
+```text
+fib      VM 0.293s -> JIT 0.053s   （约 5.5x）
+call     VM 0.497s -> JIT 0.378s   （约 1.3x）
+method   VM 0.203s -> JIT 0.113s   （约 1.8x）
+pattern  VM 0.314s -> JIT 0.249s   （约 1.3x）
+slot/scope/global/field/index      约 1.0x
+```
+
+对比未启用 mimalloc：`call` VM 0.790s -> 0.497s、JIT 0.560s -> 0.378s，
+`method` JIT 0.195s -> 0.113s。主要收益来自 Windows 小对象分配和
+`std::vector`/`std::string` 的堆操作。
+
 尚未落地：
 
 - **per-pc liveness / safepoint 表**：root 表第一版对所有 value slot

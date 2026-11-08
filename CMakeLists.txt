@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
 option(SKEIN_ENABLE_JIT "Enable the experimental asmjit-backed JIT" OFF)
+option(SKEIN_USE_MIMALLOC "Use mimalloc for C++ allocations (Windows/Linux)" OFF)
 if(SKEIN_VM_ONLY)
   add_compile_definitions(SKEIN_VM_ONLY=1)
 endif()
@@ -414,6 +415,37 @@ if(WIN32 AND MINGW)
   # the interpreter's recursion limit.  Match the usual 8 MiB POSIX stack.
   set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY
     LINK_FLAGS " -Wl,--stack,8388608")
+endif()
+
+if(SKEIN_USE_MIMALLOC)
+  find_path(MIMALLOC_INCLUDE_DIR mimalloc-new-delete.h)
+  # Prefer the static archive; on Windows a shared libstdc++ has its own
+  # operator new/delete, which would split allocations between mimalloc and
+  # the DLL CRT.
+  if(NOT MIMALLOC_LIBRARY)
+    set(_skein_library_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    find_library(MIMALLOC_STATIC_LIBRARY NAMES mimalloc)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES "${_skein_library_suffixes}")
+    if(MIMALLOC_STATIC_LIBRARY)
+      set(MIMALLOC_LIBRARY "${MIMALLOC_STATIC_LIBRARY}")
+    else()
+      find_library(MIMALLOC_LIBRARY NAMES mimalloc)
+    endif()
+  endif()
+  if(NOT MIMALLOC_INCLUDE_DIR OR NOT MIMALLOC_LIBRARY)
+    message(FATAL_ERROR
+      "SKEIN_USE_MIMALLOC requires mimalloc headers and library")
+  endif()
+  if(WIN32 AND MINGW)
+    set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY
+      LINK_FLAGS " -static-libstdc++ -static-libgcc")
+  endif()
+  target_sources(${PROJECT_NAME} PRIVATE src/platform/mimalloc_override.cpp)
+  target_include_directories(${PROJECT_NAME} PRIVATE
+    ${MIMALLOC_INCLUDE_DIR})
+  target_link_libraries(${PROJECT_NAME} PRIVATE ${MIMALLOC_LIBRARY})
+  message(STATUS "Using mimalloc: ${MIMALLOC_LIBRARY}")
 endif()
 
 # Embedded Skein standard-library packages.  Each .skein source is turned into

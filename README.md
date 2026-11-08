@@ -28,7 +28,21 @@ SKEIN_JIT=1 ./build/skein benchmarks/fib_bench.skein
 ```
 
 `SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数，`SKEIN_JIT_DUMP=1`
-会输出生成的汇编。
+会输出生成的汇编。JIT/VM 对比基准：
+
+```bash
+python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check
+```
+
+Windows 上可选用 mimalloc 降低小对象分配开销：
+
+```bash
+cmake -S . -B build -G Ninja -DSKEIN_ENABLE_JIT=ON -DSKEIN_USE_MIMALLOC=ON
+cmake --build build
+```
+
+MinGW 下该选项会自动使用静态 libstdc++/libgcc，避免动态 libstdc++ 与
+mimalloc 的 `operator new/delete` 分配器不一致。
 
 只构建 VM 后端（不支持 `--no-vm`）：
 
@@ -127,7 +141,7 @@ cmake --build build
 build\skein.exe
 ```
 
-Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv、PCRE2 和 Boost.Context。平台相关代码集中在 `platform_win.cpp`：
+Windows 构建需要 MSYS2 中的 MinGW-w64 GCC、CMake、Bison、Flex、libuv、PCRE2 和 Boost.Context。可选安装 `mingw-w64-ucrt-x86_64-mimalloc`，并用 `-DSKEIN_USE_MIMALLOC=ON` 降低分配密集型负载的开销。平台相关代码集中在 `platform_win.cpp`：
 
 - 设置控制台输入输出代码页为 UTF-8；
 - 命令行参数通过 `GetCommandLineW` / `CommandLineToArgvW` 转换为 UTF-8，脚本路径和 `-I` / `--package-path` 支持中文路径；

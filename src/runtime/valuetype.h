@@ -123,7 +123,11 @@ struct bool_value_t {
 
 struct string_value_t {
     enum val_type type;
-    char *value;
+    /* `value` points at `storage->c_str()` when storage is set.  Borrowed
+     * names (VM member lookups) leave storage null and point `value` at
+     * caller-owned memory that outlives the temporary value. */
+    char *value = nullptr;
+    std::shared_ptr<const std::string> storage;
 };
 
 struct char_value_t {
@@ -136,9 +140,28 @@ struct byte_value_t {
     unsigned int value; /* 0..255 */
 };
 
+/* Reference-counted byte buffer with copy-on-write mutation.  Values that
+ * share a buffer keep value semantics; `write()` detaches when the buffer is
+ * aliased. */
+struct bytes_buffer {
+    std::shared_ptr<std::string> storage;
+
+    bytes_buffer() = default;
+    explicit bytes_buffer(std::string data);
+
+    const std::string &read() const;
+    std::string &write();
+    std::size_t size() const;
+    bool empty() const;
+    const char *data() const;
+    const char *c_str() const;
+    const char &operator[](std::size_t index) const;
+    operator const std::string &() const { return read(); }
+};
+
 struct bytes_value_t {
     enum val_type type;
-    std::string value;
+    bytes_buffer value;
 };
 
 struct list_payload {

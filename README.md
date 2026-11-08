@@ -4006,7 +4006,7 @@ apply(sqrt, 16)
 
 ## 对象生命周期
 
-- 普通值由引用计数管理；`list` / `dict` 的 payload 会被别名共享，写入时才分离；
+- 普通值由引用计数管理；`list` / `dict` / `struct` / `bytes` 的 payload 会被别名共享，写入时才分离；`string` / `bytes` 使用引用计数缓冲；
 - 函数值复制时共享函数代码和闭包环境，文件句柄等原生资源共享底层句柄；
 - 闭包按引用捕获定义处的作用域，因此局部变量会在闭包存活期间继续存在；
 - 运行时使用**作用域粒度的标记式环回收器**（`gc.cpp`）：从全局作用域、当前作用域链和恢复栈出发，标记可达 scope，再清理不可达 scope 的符号表；
@@ -4476,13 +4476,13 @@ channel.length
 - `capacity >= 1`；`Channel(0)` 报错；
 - 无界 Channel 使用 `std.thread.unbounded_channel()`，`capacity == -1`；
 - Channel 只接收 `std.thread.Message`；
-- `Message.from` 会复制 payload，发送方后续修改不影响消息；
+- `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
 - `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
 - `send` 在队列满时阻塞；`try_send` 不阻塞；
 - `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
 - `recv(timeout_ms)` 超时抛错；
 - `close()` 幂等，保留队列中未读消息；
-- 当前 Channel 的阻塞使用 OS 线程等待；跨线程 fiber 唤醒会在 per-thread runtime 落地后补齐。
+- 当前 Channel 阻塞在 fiber 中通过 task 轮询挂起，非 fiber 上下文使用 OS 线程等待；
 
 示例：
 
@@ -4553,7 +4553,7 @@ pool.join();
 - `pool.close()` 停止接收新 job，worker 排空后退出；
 - `pool.join()` 等待 worker 线程结束；
 - `stats()` 返回 `size/ready/submitted/completed/failed/queued`；
-- 当前实现使用 OS 线程等待和 payload 复制；fiber 感知唤醒与 COW 会在后续补齐。
+- 当前实现使用 OS 线程等待；pool 的 payload 在提交时深拷贝。
 
 ### 单线程
 

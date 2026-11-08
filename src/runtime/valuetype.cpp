@@ -160,7 +160,8 @@ struct value_t *newboolval(bool b) {
 struct value_t *newstrval(const char *s) {
     struct string_value_t *v = new string_value_t;
     v->type = T_string;
-    v->value = dupstr(s);
+    v->storage = std::make_shared<const std::string>(s ? s : "");
+    v->value = const_cast<char *>(v->storage->c_str());
     return (struct value_t *)v;
 }
 
@@ -178,10 +179,47 @@ struct value_t *newbyteval(unsigned int value) {
     return (struct value_t *)v;
 }
 
+bytes_buffer::bytes_buffer(std::string data)
+    : storage(std::make_shared<std::string>(std::move(data))) {}
+
+const std::string &bytes_buffer::read() const {
+    static const std::string empty;
+    return storage ? *storage : empty;
+}
+
+std::string &bytes_buffer::write() {
+    if (!storage) {
+        storage = std::make_shared<std::string>();
+    } else if (storage.use_count() > 1) {
+        storage = std::make_shared<std::string>(*storage);
+    }
+    return *storage;
+}
+
+std::size_t bytes_buffer::size() const {
+    return read().size();
+}
+
+bool bytes_buffer::empty() const {
+    return read().empty();
+}
+
+const char *bytes_buffer::data() const {
+    return read().data();
+}
+
+const char *bytes_buffer::c_str() const {
+    return read().c_str();
+}
+
+const char &bytes_buffer::operator[](std::size_t index) const {
+    return read()[index];
+}
+
 struct value_t *newbytesval(std::string data) {
     struct bytes_value_t *v = new bytes_value_t;
     v->type = T_bytes;
-    v->value = std::move(data);
+    v->value = bytes_buffer(std::move(data));
     return (struct value_t *)v;
 }
 
@@ -708,14 +746,27 @@ struct value_t *dupval(struct value_t *v) {
             return newfloatval(((struct float_value_t *)v)->value);
         case T_bool:
             return newboolval(((struct bool_value_t *)v)->value);
-        case T_string:
-            return newstrval(((struct string_value_t *)v)->value);
+        case T_string: {
+            struct string_value_t *src = (struct string_value_t *)v;
+            if (!src->storage)
+                return newstrval(src->value);
+            struct string_value_t *dst = new string_value_t;
+            dst->type = T_string;
+            dst->value = src->value;
+            dst->storage = src->storage;
+            return (struct value_t *)dst;
+        }
         case T_char:
             return newcharval(((struct char_value_t *)v)->value);
         case T_byte:
             return newbyteval(((struct byte_value_t *)v)->value);
-        case T_bytes:
-            return newbytesval(((struct bytes_value_t *)v)->value);
+        case T_bytes: {
+            struct bytes_value_t *src = (struct bytes_value_t *)v;
+            struct bytes_value_t *dst = new bytes_value_t;
+            dst->type = T_bytes;
+            dst->value = src->value;
+            return (struct value_t *)dst;
+        }
         case T_list: {
             struct list_value_t *src = (struct list_value_t *)v;
             struct list_value_t *dst = new list_value_t;
@@ -858,7 +909,6 @@ void freeval(struct value_t *v) {
             break;
         case T_string: {
             struct string_value_t *s = (struct string_value_t *)v;
-            std::free(s->value);
             delete s;
             break;
         }

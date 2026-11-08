@@ -289,7 +289,7 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
             return false;
         }
         long long i = ((struct int_value_t *)index)->value;
-        std::string &data = ((struct bytes_value_t *)container)->value;
+        const std::string &data = ((struct bytes_value_t *)container)->value.read();
         if (i < 0 || (unsigned long long)i >= data.size()) {
             yyerror("bytes index %lld out of range", i);
             return false;

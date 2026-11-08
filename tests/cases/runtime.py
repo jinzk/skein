@@ -503,6 +503,15 @@ def run_cases():
         stdout_all=["{a: 1}", "{a: 1, b: 2}"],
     )
     check(
+        "bytes alias copy on write",
+        'let a = bytes_from_string("ab");\n'
+        'let b = a;\n'
+        'b[0] = 65;\n'
+        'print(bytes_to_string(a));\n'
+        'print(bytes_to_string(b));\n',
+        stdout_all=["ab", "Ab"],
+    )
+    check(
         "nested list alias copy on write",
         "let a = [[1], [2]];\nlet b = a;\nb[0][0] = 9;\na\nb\n",
         stdout_all=["= [[1], [2]]", "= [[9], [2]]"],

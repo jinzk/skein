@@ -449,7 +449,7 @@ static struct value_t *write_member_value(struct value_t *container,
         } else {
             long long i = ((struct int_value_t *)idx)->value;
             long long byte = ((struct int_value_t *)val)->value;
-            std::string &data = ((struct bytes_value_t *)container)->value;
+            std::string &data = ((struct bytes_value_t *)container)->value.write();
             if (i < 0 || (unsigned long long)i >= data.size()) {
                 yyerror("bytes index %lld out of range", i);
             } else if (byte < 0 || byte > 255) {
@@ -574,7 +574,7 @@ static struct value_t *increment_member_value(struct value_t *container,
             yyerror("bytes index must be an integer, got %s", typename_of(idx));
         } else {
             long long i = ((struct int_value_t *)idx)->value;
-            std::string &data = ((struct bytes_value_t *)container)->value;
+            std::string &data = ((struct bytes_value_t *)container)->value.write();
             if (i < 0 || (unsigned long long)i >= data.size()) {
                 yyerror("bytes index %lld out of range", i);
             } else {
@@ -957,7 +957,7 @@ struct value_t *read_member_value(struct value_t *container,
             return NULL;
         }
         long long i = ((struct int_value_t *)index)->value;
-        std::string &data = ((struct bytes_value_t *)container)->value;
+        const std::string &data = ((struct bytes_value_t *)container)->value.read();
         if (i < 0 || (unsigned long long)i >= data.size()) {
             yyerror("bytes index %lld out of range", i);
             return NULL;

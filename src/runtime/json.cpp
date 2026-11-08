@@ -716,8 +716,8 @@ struct value_t *json_parse(const std::vector<struct value_t *> &args,
 
     std::string text =
         args[0]->type == T_string
-            ? ((struct string_value_t *)args[0])->value
-            : ((struct bytes_value_t *)args[0])->value;
+            ? std::string(((struct string_value_t *)args[0])->value)
+            : std::string(((struct bytes_value_t *)args[0])->value);
     JsonParser parser(text);
     struct value_t *value = parser.parse_document();
     if (!value) {

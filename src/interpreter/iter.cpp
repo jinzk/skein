@@ -109,7 +109,7 @@ struct iter_source {
             case T_bytes: {
                 auto *bytes = (struct bytes_value_t *)value;
                 out.reserve(bytes->value.size());
-                for (unsigned char byte : bytes->value)
+                for (unsigned char byte : bytes->value.read())
                     out.push_back(newintval(byte));
                 return true;
             }

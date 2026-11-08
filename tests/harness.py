@@ -933,6 +933,22 @@ def check_extended_stdlib():
             stdout_all=["after_source=1", "after_copy=1"],
         )
         check(
+            "std.thread message copy on write",
+            "import std;\n"
+            'let body = bytes_from_string("ab");\n'
+            'let items = [1, 2];\n'
+            'let msg = std.thread.Message.from('
+            '{"x": 1, "items": items, "body": body});\n'
+            'items[0] = 9;\n'
+            'body[0] = 65;\n'
+            'print("items="); print(msg.payload["items"][0]);\n'
+            'print("body="); print(bytes_to_string(msg.payload["body"]));\n'
+            'let view = msg.payload;\n'
+            'view["items"][0] = 7;\n'
+            'print("view="); print(msg.payload["items"][0]);\n',
+            stdout_all=["items=1", "body=ab", "view=1"],
+        )
+        check(
             "std.thread message handles",
             "import std;\n"
             'let inner = std.thread.Channel(1);\n'
@@ -1027,6 +1043,43 @@ def check_extended_stdlib():
                 'let r = t.join();\n'
                 'print("ok="); print(r["ok"]);\n',
                 stdout_all=["ok=false"],
+            )
+
+            cow_worker = os.path.join(
+                thread_tmp, "thread_cow_worker.skein")
+            with open(cow_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    let items = ctx.payload[\"items\"];\n"
+                    "    items[0] = 99;\n"
+                    "    let body = ctx.payload[\"body\"];\n"
+                    "    body[0] = 90;\n"
+                    "    let copy = ctx.payload;\n"
+                    "    copy[\"x\"] = 42;\n"
+                    "    return {\"items\": items[0], "
+                    "\"body\": bytes_to_string(body), "
+                    "\"x\": copy[\"x\"]};\n"
+                    "}\n"
+                )
+            cow_worker_path = cow_worker.replace("\\", "\\\\")
+            check(
+                "std.thread message cross-thread copy on write",
+                "import std;\n"
+                'let body = bytes_from_string("ab");\n'
+                'let items = [1, 2];\n'
+                'let msg = std.thread.Message.from('
+                '{"x": 1, "items": items, "body": body});\n'
+                f'let t = std.thread.spawn("{cow_worker_path}", msg);\n'
+                'let r = t.join();\n'
+                'print("child="); print(r["value"]["items"]); print(":"); '
+                'print(r["value"]["body"]); print(":"); '
+                'print(r["value"]["x"]);\n'
+                'let view = msg.payload;\n'
+                'print("parent="); print(view["items"][0]); print(":"); '
+                'print(bytes_to_string(view["body"])); print(":"); '
+                'print(view["x"]);\n',
+                stdout_all=["child=99:Zb:42", "parent=1:ab:1"],
             )
             check(
                 "std.thread select data and timeout",

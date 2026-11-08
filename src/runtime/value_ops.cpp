@@ -191,8 +191,8 @@ bool value_equals(struct value_t *a, struct value_t *b) {
             return ((struct byte_value_t *)a)->value ==
                    ((struct byte_value_t *)b)->value;
         case T_bytes:
-            return ((struct bytes_value_t *)a)->value ==
-                   ((struct bytes_value_t *)b)->value;
+            return ((struct bytes_value_t *)a)->value.read() ==
+                   ((struct bytes_value_t *)b)->value.read();
         case T_list: {
             struct list_value_t *la = (struct list_value_t *)a;
             struct list_value_t *lb = (struct list_value_t *)b;

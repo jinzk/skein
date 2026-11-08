@@ -224,6 +224,73 @@ struct value_t *copy_data_value(struct value_t *value,
     }
 }
 
+bool validate_data_value(struct value_t *value,
+                         std::unordered_set<const void *> &visiting,
+                         std::string &error) {
+    if (!value) {
+        error = "Message payload is null";
+        return false;
+    }
+    switch (value->type) {
+        case T_null:
+        case T_bool:
+        case T_int:
+        case T_float:
+        case T_char:
+        case T_byte:
+        case T_string:
+        case T_bytes:
+        case T_error:
+            return true;
+        case T_result: {
+            struct result_value_t *result = (struct result_value_t *)value;
+            return validate_data_value(
+                result->ok ? result->value : result->error, visiting, error);
+        }
+        case T_list: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct list_value_t *list = (struct list_value_t *)value;
+            for (struct value_t *item : list->payload->items) {
+                if (!validate_data_value(item, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        case T_dict: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct dict_value_t *dict = (struct dict_value_t *)value;
+            for (const auto &entry : dict->payload->items) {
+                if (!validate_data_value(entry.first, visiting, error) ||
+                    !validate_data_value(entry.second, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        default:
+            error = std::string("Message payload does not support ") +
+                    typename_of(value);
+            return false;
+    }
+}
+
 struct value_t *copy_handles_value(struct value_t *handles) {
     struct value_t *copy = (struct value_t *)newdictval();
     if (!handles || handles->type != T_dict)
@@ -265,17 +332,8 @@ struct value_t *message_get_field(void *data, const char *name) {
         yyerror("thread.Message has no such field");
         return nullptr;
     }
-    if (std::strcmp(name, "payload") == 0) {
-        std::unordered_set<const void *> visiting;
-        std::string error;
-        struct value_t *copy =
-            copy_data_value(state->payload, visiting, error);
-        if (!copy) {
-            yyerror("%s", error.c_str());
-            return nullptr;
-        }
-        return copy;
-    }
+    if (std::strcmp(name, "payload") == 0)
+        return dupval(state->payload);
     if (std::strcmp(name, "handles") == 0)
         return copy_handles_value(state->handles);
     yyerror("thread.Message has no field %s", name);
@@ -1679,11 +1737,11 @@ struct value_t *thread_message_from(const std::vector<struct value_t *> &args) {
     }
     std::unordered_set<const void *> visiting;
     std::string error;
-    struct value_t *payload = copy_data_value(args[0], visiting, error);
-    if (!payload) {
+    if (!validate_data_value(args[0], visiting, error)) {
         yyerror("%s", error.c_str());
         return nullptr;
     }
+    struct value_t *payload = dupval(args[0]);
 
     struct value_t *handles = (struct value_t *)newdictval();
     if (args.size() == 2) {

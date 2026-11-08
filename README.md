@@ -2692,6 +2692,9 @@ std.worker.stats
 std.thread.unbounded_channel
 std.thread.pool
 std.thread.spawn
+std.thread.select
+std.thread.try_broadcast
+std.thread.broadcast
 ```
 
 规则：
@@ -4610,6 +4613,46 @@ print(result["value"]["x"]);
 - `detach()` 后线程自行运行和退出；
 - `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
 - 子线程结果必须是 data-only 值。
+
+### select / broadcast
+
+```text
+std.thread.select(channels[, timeout_ms]) -> dict
+std.thread.try_broadcast(channels, message) -> dict
+std.thread.broadcast(channels, message) -> null
+```
+
+`select` 返回：
+
+```text
+{"index": 0, "value": message}
+{"index": 1, "closed": true}
+{"index": -1, "timeout": true}
+```
+
+示例：
+
+```skein
+let a = std.thread.Channel(1);
+let b = std.thread.Channel(1);
+b.send(std.thread.Message.from({"v": "b"}));
+
+let r = std.thread.select([a, b], 1000);
+print(r["index"]);
+print(r["value"].payload["v"]);
+```
+
+规则：
+
+- 当前只支持 Channel；
+- 多个 channel 同时就绪时使用轮转起点，避免总是选 0 号；
+- 有数据优先，排空后才返回 closed；
+- `timeout_ms = 0` 表示不超时；
+- `try_broadcast` 返回：
+  ```text
+  {"sent": [0, 1], "full": [], "closed": []}
+  ```
+- `broadcast` 逐个阻塞发送；任一失败时抛错，已发送的不回滚。
 
 ### 带编码的文本文件
 

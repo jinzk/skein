@@ -502,7 +502,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_worker_pool && functype <= B_worker_stats)
         return call_worker_builtin(functype, args);
     if (functype >= B_thread_message_from &&
-        functype <= B_thread_spawn)
+        functype <= B_thread_broadcast)
         return call_thread_channel_builtin(functype, args);
     if (functype >= B_crypto_sha256 && functype <= B_crypto_hmac_sha256)
         return call_crypto_builtin(functype, args);

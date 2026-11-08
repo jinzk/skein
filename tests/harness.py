@@ -1028,6 +1028,52 @@ def check_extended_stdlib():
                 'print("ok="); print(r["ok"]);\n',
                 stdout_all=["ok=false"],
             )
+            check(
+                "std.thread select data and timeout",
+                "import std;\n"
+                'let a = std.thread.Channel(1);\n'
+                'let b = std.thread.Channel(1);\n'
+                'b.send(std.thread.Message.from({"v": "b"}));\n'
+                'let r = std.thread.select([a, b], 1000);\n'
+                'print("index="); print(r["index"]); print(":"); '
+                'print(r["value"].payload["v"]);\n'
+                'let empty = std.thread.Channel(1);\n'
+                'let t = std.thread.select([empty], 10);\n'
+                'print("timeout="); print(t["timeout"]);\n'
+                'empty.close();\n'
+                'let c = std.thread.select([empty], 1000);\n'
+                'print("closed="); print(c["closed"]); print(":"); '
+                'print(c["index"]);\n',
+                stdout_all=["index=1:b", "timeout=true", "closed=true:0"],
+            )
+            check(
+                "std.thread select blocks until send",
+                "import std;\n"
+                'let signal = std.thread.Channel(1);\n'
+                'let empty = std.thread.Channel(1);\n'
+                f'let msg = std.thread.Message.from({{"x": 7, '
+                f'"fail": false}}, {{"signal": signal}});\n'
+                f'let t = std.thread.spawn("{spawn_worker_path}", msg);\n'
+                'let r = std.thread.select([empty, signal], 1000);\n'
+                'print("index="); print(r["index"]); print(":"); '
+                'print(r["value"].payload["x"]);\n'
+                't.join();\n',
+                stdout_all=["index=1:7"],
+            )
+            check(
+                "std.thread try_broadcast",
+                "import std;\n"
+                'let x = std.thread.Channel(1);\n'
+                'let y = std.thread.Channel(1);\n'
+                'let sent = std.thread.try_broadcast([x, y], '
+                'std.thread.Message.from({"v": 2}));\n'
+                'print("sent="); print(sent["sent"]);\n'
+                'let rx = x.try_recv();\n'
+                'let ry = y.try_recv();\n'
+                'print("x="); print(rx["value"].payload["v"]);\n'
+                'print("y="); print(ry["value"].payload["v"]);\n',
+                stdout_all=["sent=[0, 1]", "x=2", "y=2"],
+            )
 
     probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:

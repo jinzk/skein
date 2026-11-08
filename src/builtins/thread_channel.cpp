@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include <algorithm>
 #include <atomic>
 
 namespace {
@@ -46,12 +47,19 @@ struct message_state {
     }
 };
 
+struct channel_waiter {
+    std::condition_variable cv;
+    std::atomic<bool> ready{false};
+};
+
 struct channel_state : std::enable_shared_from_this<channel_state> {
     explicit channel_state(long long cap) : capacity(cap) {}
 
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<struct value_t *> queue;
+    std::vector<channel_waiter *> recv_waiters;
+    std::vector<channel_waiter *> send_waiters;
     long long capacity = 0; /* -1 means unbounded */
     bool closed = false;
 
@@ -62,8 +70,32 @@ struct channel_state : std::enable_shared_from_this<channel_state> {
     }
 };
 
+void notify_recv_waiters(channel_state &state) {
+    for (channel_waiter *waiter : state.recv_waiters) {
+        waiter->ready.store(true, std::memory_order_release);
+        waiter->cv.notify_all();
+    }
+}
+
+void notify_send_waiters(channel_state &state) {
+    for (channel_waiter *waiter : state.send_waiters) {
+        waiter->ready.store(true, std::memory_order_release);
+        waiter->cv.notify_all();
+    }
+}
+
+void remove_waiter(std::vector<channel_waiter *> &waiters,
+                   channel_waiter *waiter) {
+    waiters.erase(
+        std::remove(waiters.begin(), waiters.end(), waiter),
+        waiters.end());
+}
+
 extern const struct native_type kMessageType;
 extern const struct native_type kChannelType;
+
+bool get_channel_state(struct value_t *value,
+                       std::shared_ptr<channel_state> &state);
 
 bool is_handle_value(struct value_t *value) {
     if (!value || value->type != T_userdata)
@@ -256,13 +288,16 @@ struct value_t *channel_send_value(
     }
 
     std::unique_lock<std::mutex> lock(state->mutex);
+    channel_waiter waiter;
     if (blocking) {
         /* NOTE: this blocks the current OS thread.  The fiber-aware
          * transport will replace this with a task wait. */
-        state->cv.wait(lock, [&state] {
-            return state->closed || state->capacity < 0 ||
-                   state->queue.size() < (size_t)state->capacity;
-        });
+        state->send_waiters.push_back(&waiter);
+        while (!state->closed && state->capacity >= 0 &&
+               state->queue.size() >= (size_t)state->capacity) {
+            waiter.cv.wait(lock);
+        }
+        remove_waiter(state->send_waiters, &waiter);
     } else if (state->closed ||
                (state->capacity >= 0 &&
                 state->queue.size() >= (size_t)state->capacity)) {
@@ -274,6 +309,7 @@ struct value_t *channel_send_value(
         return nullptr;
     }
     state->queue.push_back(dupval(message));
+    notify_recv_waiters(*state);
     state->cv.notify_all();
     return blocking ? newnull() : newboolval(true);
 }
@@ -281,22 +317,30 @@ struct value_t *channel_send_value(
 struct value_t *channel_recv_value(
     const std::shared_ptr<channel_state> &state, long long timeout_ms) {
     std::unique_lock<std::mutex> lock(state->mutex);
-    if (timeout_ms > 0) {
-        if (!state->cv.wait_for(
-                lock, std::chrono::milliseconds(timeout_ms),
-                [&state] { return state->closed || !state->queue.empty(); })) {
+    if (state->queue.empty() && !state->closed) {
+        channel_waiter waiter;
+        state->recv_waiters.push_back(&waiter);
+        auto ready = [&state] {
+            return state->closed || !state->queue.empty();
+        };
+        bool signaled = true;
+        if (timeout_ms > 0) {
+            signaled = waiter.cv.wait_for(
+                lock, std::chrono::milliseconds(timeout_ms), ready);
+        } else {
+            waiter.cv.wait(lock, ready);
+        }
+        remove_waiter(state->recv_waiters, &waiter);
+        if (!signaled && state->queue.empty()) {
             yyerror("std.thread.Channel.recv timed out");
             return nullptr;
         }
-    } else {
-        state->cv.wait(lock, [&state] {
-            return state->closed || !state->queue.empty();
-        });
     }
     if (state->queue.empty())
         return newnull();
     struct value_t *message = state->queue.front();
     state->queue.pop_front();
+    notify_send_waiters(*state);
     return message;
 }
 
@@ -308,6 +352,7 @@ struct value_t *channel_try_recv_value(
     if (!state->queue.empty()) {
         struct value_t *message = state->queue.front();
         state->queue.pop_front();
+        notify_send_waiters(*state);
         dict_append_item(dict, newstrval("ok"), newboolval(true));
         dict_append_item(dict, newstrval("closed"),
                          newboolval(state->closed));
@@ -319,6 +364,138 @@ struct value_t *channel_try_recv_value(
                      newboolval(state->closed));
     return result;
 }
+
+bool collect_channels(struct value_t *value,
+                      std::vector<std::shared_ptr<channel_state>> &channels,
+                      std::string &error) {
+    if (!value || value->type != T_list) {
+        error = "expected a list of channels";
+        return false;
+    }
+    struct list_value_t *list = (struct list_value_t *)value;
+    for (struct value_t *item : list->payload->items) {
+        std::shared_ptr<channel_state> channel;
+        if (!get_channel_state(item, channel)) {
+            error = "expected a list of channels";
+            return false;
+        }
+        channels.push_back(std::move(channel));
+    }
+    if (channels.empty()) {
+        error = "channel list must not be empty";
+        return false;
+    }
+    return true;
+}
+
+void unregister_select_waiter(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    channel_waiter *waiter) {
+    for (const auto &channel : channels) {
+        std::lock_guard<std::mutex> lock(channel->mutex);
+        remove_waiter(channel->recv_waiters, waiter);
+    }
+}
+
+struct value_t *select_value_result(size_t index, struct value_t *message) {
+    struct value_t *result = (struct value_t *)newdictval();
+    dict_append_item((struct dict_value_t *)result, newstrval("index"),
+                     newintval((long long)index));
+    dict_append_item((struct dict_value_t *)result, newstrval("value"),
+                     message);
+    return result;
+}
+
+struct value_t *select_closed_result(size_t index) {
+    struct value_t *result = (struct value_t *)newdictval();
+    dict_append_item((struct dict_value_t *)result, newstrval("index"),
+                     newintval((long long)index));
+    dict_append_item((struct dict_value_t *)result, newstrval("closed"),
+                     newboolval(true));
+    return result;
+}
+
+struct value_t *select_timeout_result() {
+    struct value_t *result = (struct value_t *)newdictval();
+    dict_append_item((struct dict_value_t *)result, newstrval("index"),
+                     newintval(-1));
+    dict_append_item((struct dict_value_t *)result, newstrval("timeout"),
+                     newboolval(true));
+    return result;
+}
+
+/* Poll the channels without registering a waiter. */
+struct value_t *select_poll(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    size_t start) {
+    const size_t count = channels.size();
+    for (size_t k = 0; k < count; ++k) {
+        size_t i = (start + k) % count;
+        struct value_t *message = nullptr;
+        bool closed = false;
+        {
+            std::lock_guard<std::mutex> lock(channels[i]->mutex);
+            if (!channels[i]->queue.empty()) {
+                message = channels[i]->queue.front();
+                channels[i]->queue.pop_front();
+                notify_send_waiters(*channels[i]);
+            } else if (channels[i]->closed) {
+                closed = true;
+            }
+        }
+        if (message)
+            return select_value_result(i, message);
+        if (closed)
+            return select_closed_result(i);
+    }
+    return nullptr;
+}
+
+struct value_t *channel_select(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    long long timeout_ms) {
+    static thread_local size_t cursor = 0;
+    const size_t count = channels.size();
+    const size_t start = cursor++ % count;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(
+                              timeout_ms > 0 ? timeout_ms : 0);
+
+    for (;;) {
+        if (struct value_t *ready = select_poll(channels, start))
+            return ready;
+        if (timeout_ms > 0 &&
+            std::chrono::steady_clock::now() >= deadline)
+            return select_timeout_result();
+
+        channel_waiter waiter;
+        for (const auto &channel : channels) {
+            std::lock_guard<std::mutex> lock(channel->mutex);
+            channel->recv_waiters.push_back(&waiter);
+        }
+
+        if (struct value_t *ready = select_poll(channels, start)) {
+            unregister_select_waiter(channels, &waiter);
+            return ready;
+        }
+
+        std::mutex wait_mutex;
+        std::unique_lock<std::mutex> wait_lock(wait_mutex);
+        if (timeout_ms > 0) {
+            waiter.cv.wait_until(wait_lock, deadline, [&waiter] {
+                return waiter.ready.load(std::memory_order_acquire);
+            });
+        } else {
+            waiter.cv.wait(wait_lock, [&waiter] {
+                return waiter.ready.load(std::memory_order_acquire);
+            });
+        }
+        wait_lock.unlock();
+        unregister_select_waiter(channels, &waiter);
+    }
+}
+
+
 
 struct value_t *channel_get_field(void *data, const char *name) {
     channel_state *raw = static_cast<channel_state *>(data);
@@ -426,19 +603,31 @@ const struct native_type kChannelType = {
 /* Thread pool                                                         */
 /* ------------------------------------------------------------------ */
 
-bool channel_try_push(const std::shared_ptr<channel_state> &state,
-                      struct value_t *message) {
+enum class push_result {
+    sent,
+    full,
+    closed,
+};
+
+push_result channel_push_impl(const std::shared_ptr<channel_state> &state,
+                              struct value_t *message) {
     if (!state || !message)
-        return false;
+        return push_result::closed;
     std::lock_guard<std::mutex> lock(state->mutex);
     if (state->closed)
-        return false;
+        return push_result::closed;
     if (state->capacity >= 0 &&
         state->queue.size() >= (size_t)state->capacity)
-        return false;
+        return push_result::full;
     state->queue.push_back(dupval(message));
+    notify_recv_waiters(*state);
     state->cv.notify_all();
-    return true;
+    return push_result::sent;
+}
+
+bool channel_try_push(const std::shared_ptr<channel_state> &state,
+                      struct value_t *message) {
+    return channel_push_impl(state, message) == push_result::sent;
 }
 
 void channel_close_state(const std::shared_ptr<channel_state> &state) {
@@ -447,8 +636,52 @@ void channel_close_state(const std::shared_ptr<channel_state> &state) {
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->closed = true;
+        notify_recv_waiters(*state);
+        notify_send_waiters(*state);
     }
     state->cv.notify_all();
+}
+
+struct value_t *channel_try_broadcast(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    struct value_t *message) {
+    std::shared_ptr<message_state> message_data;
+    if (!get_message_state(message, message_data)) {
+        yyerror("std.thread.try_broadcast expects a Message");
+        return nullptr;
+    }
+    struct value_t *result = (struct value_t *)newdictval();
+    struct dict_value_t *dict = (struct dict_value_t *)result;
+    struct value_t *sent = (struct value_t *)newlistval();
+    struct value_t *full = (struct value_t *)newlistval();
+    struct value_t *closed = (struct value_t *)newlistval();
+    for (size_t i = 0; i < channels.size(); ++i) {
+        push_result outcome = channel_push_impl(channels[i], message);
+        struct value_t *index = newintval((long long)i);
+        if (outcome == push_result::sent)
+            ((struct list_value_t *)sent)->payload->items.push_back(index);
+        else if (outcome == push_result::full)
+            ((struct list_value_t *)full)->payload->items.push_back(index);
+        else
+            ((struct list_value_t *)closed)->payload->items.push_back(index);
+    }
+    dict_append_item(dict, newstrval("sent"), sent);
+    dict_append_item(dict, newstrval("full"), full);
+    dict_append_item(dict, newstrval("closed"), closed);
+    return result;
+}
+
+struct value_t *channel_broadcast(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    struct value_t *message) {
+    for (const auto &channel : channels) {
+        struct value_t *result =
+            channel_send_value(channel, message, true);
+        if (!result)
+            return nullptr;
+        freeval(result);
+    }
+    return newnull();
 }
 
 bool get_channel_state(struct value_t *value,
@@ -1427,6 +1660,46 @@ struct value_t *call_thread_channel_builtin(
             return thread_pool(args);
         case B_thread_spawn:
             return thread_spawn(args);
+        case B_thread_select: {
+            if (args.empty() || args.size() > 2) {
+                yyerror("std.thread.select expects endpoints and optional "
+                        "timeout");
+                return nullptr;
+            }
+            long long timeout_ms = 0;
+            if (args.size() == 2) {
+                if (args[1]->type != T_int ||
+                    ((int_value_t *)args[1])->value < 0) {
+                    yyerror("std.thread.select timeout must be a "
+                            "non-negative integer");
+                    return nullptr;
+                }
+                timeout_ms = ((int_value_t *)args[1])->value;
+            }
+            std::vector<std::shared_ptr<channel_state>> channels;
+            std::string error;
+            if (!collect_channels(args[0], channels, error)) {
+                yyerror("std.thread.select: %s", error.c_str());
+                return nullptr;
+            }
+            return channel_select(channels, timeout_ms);
+        }
+        case B_thread_try_broadcast:
+        case B_thread_broadcast: {
+            if (args.size() != 2) {
+                yyerror("std.thread.broadcast expects endpoints and Message");
+                return nullptr;
+            }
+            std::vector<std::shared_ptr<channel_state>> channels;
+            std::string error;
+            if (!collect_channels(args[0], channels, error)) {
+                yyerror("std.thread.broadcast: %s", error.c_str());
+                return nullptr;
+            }
+            if (functype == B_thread_try_broadcast)
+                return channel_try_broadcast(channels, args[1]);
+            return channel_broadcast(channels, args[1]);
+        }
         default:
             yyerror("unknown thread function");
             return nullptr;

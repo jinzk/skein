@@ -109,6 +109,51 @@ def main():
         if expected not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1
+
+        pkg_dir = os.path.join(tmp, "leakpkg")
+        os.makedirs(pkg_dir)
+        with open(os.path.join(pkg_dir, "leakpkg.skein"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(
+                "package leakpkg {\n"
+                "  let base = 10;\n"
+                "  func helper(x) { return x + base; }\n"
+                "  export let offset = 3;\n"
+                "  export func calc(x) { return helper(x) + offset; }\n"
+                "}\n"
+            )
+        main_path = os.path.join(tmp, "import_main.skein")
+        with open(main_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import leakpkg;\n"
+                "func make_worker() {\n"
+                "    thread func worker(ctx) {\n"
+                '        return {"v": leakpkg.calc(ctx.payload["n"])};\n'
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let w = make_worker();\n"
+                "let t = std.thread.spawn(w, "
+                'std.thread.Message.from({"n": 4}));\n'
+                "let r = t.join();\n"
+                'print("import=" + str(r["value"]["v"]));\n'
+            )
+        proc = subprocess.run(
+            [BIN, main_path],
+            cwd=tmp,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=180,
+            env=env,
+        )
+        if proc.returncode != 0:
+            sys.stderr.write(proc.stderr)
+            return 1
+        if "import=17" not in proc.stdout:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            return 1
         return 0
 
 

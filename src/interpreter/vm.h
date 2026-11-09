@@ -20,9 +20,10 @@ struct thread_transfer_function;
  * function.  `Data` values are owned data-only snapshots; `Function` values
  * point at another prepared Proto payload. */
 struct thread_transfer_value {
-    enum class Kind { Null, Data, Function };
+    enum class Kind { Null, Data, Namespace, Function };
     Kind kind = Kind::Null;
     std::shared_ptr<struct value_t> data;
+    std::vector<std::pair<std::string, thread_transfer_value>> fields;
     std::shared_ptr<struct thread_transfer_function> function;
 };
 

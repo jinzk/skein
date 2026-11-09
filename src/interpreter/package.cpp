@@ -932,6 +932,88 @@ value_t *package_import(const char *dotted_path, const char *base_dir,
     return package_import_impl(dotted_path, base_dir, error);
 }
 
+bool package_import_cache_key(const char *dotted_path, const char *base_dir,
+                              std::string &key, std::string &error) {
+    import_spec spec;
+    if (!parse_import_spec(dotted_path, spec, error))
+        return false;
+    if (is_reserved_main_package(spec.dotted)) {
+        error = "package name \"main\" is reserved for the entry script";
+        return false;
+    }
+    if (spec.kind == IMPORT_ABSOLUTE && spec.dotted == "std") {
+        key = "builtin:std";
+        return true;
+    }
+    if (spec.kind == IMPORT_ABSOLUTE) {
+        if (find_embedded_source(spec.dotted)) {
+            if (skein::module_registered(spec.dotted)) {
+                error = "ambiguous import: " + spec.dotted +
+                        " is both a package and a native module";
+                return false;
+            }
+            key = "builtin:" + spec.dotted;
+            return true;
+        }
+    }
+
+    resolved_package resolved;
+    if (spec.kind == IMPORT_ABSOLUTE) {
+        std::string resolve_error;
+        if (!resolve_package(spec.dotted, resolved, resolve_error)) {
+            if (skein::module_registered(spec.dotted)) {
+                error = "native module imports cannot be transferred";
+                return false;
+            }
+            if (is_std_submodule(spec.dotted)) {
+                error = "std submodule imports cannot be transferred";
+                return false;
+            }
+            error = resolve_error;
+            return false;
+        }
+        if (skein::module_registered(spec.dotted)) {
+            error = "ambiguous import: " + spec.dotted +
+                    " is both a package and a native module";
+            return false;
+        }
+    } else {
+        fs::path base;
+        if (spec.kind == IMPORT_PROJECT) {
+            base = project_root;
+        } else {
+            std::string lexical_base =
+                (base_dir && *base_dir) ? base_dir : import_base;
+            if (lexical_base.empty()) {
+                error = "no base directory for relative import";
+                return false;
+            }
+            base = path_from_utf8(lexical_base);
+            for (int i = 0; i < spec.up_levels; ++i) {
+                fs::path parent = base.parent_path();
+                if (parent.empty() || parent == base) {
+                    error = "relative import escapes filesystem root";
+                    return false;
+                }
+                base = parent;
+            }
+        }
+        if (base.empty()) {
+            error = "no project root for import";
+            return false;
+        }
+        if (!resolve_package_at(base, spec.dotted, resolved, error))
+            return false;
+    }
+    key = resolved.key;
+    return true;
+}
+
+void package_seed_import(const std::string &key, value_t *namespace_value) {
+    std::string hidden = package_cache_key(key);
+    save_global_symbol(hidden.c_str(), namespace_value);
+}
+
 value_t *package_build_namespace(scope_t *scope, std::string &error) {
     if (!scope) {
         error = "missing package scope";

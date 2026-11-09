@@ -2767,6 +2767,50 @@ def check_extended_stdlib():
             )
             assert proc.stdout.strip() == "42", proc.stdout
 
+            transfer_pkg_dir = os.path.join(deadlock_tmp, "threadpkg")
+            os.makedirs(transfer_pkg_dir)
+            with open(os.path.join(transfer_pkg_dir, "threadpkg.skein"),
+                      "w", encoding="utf-8") as handle:
+                handle.write(
+                    "package threadpkg {\n"
+                    "  let base = 10;\n"
+                    "  func helper(x) { return x + base; }\n"
+                    "  export let offset = 3;\n"
+                    "  export func calc(x) { return helper(x) + offset; }\n"
+                    "}\n"
+                )
+            transfer_main = os.path.join(deadlock_tmp,
+                                         "thread_import_main.skein")
+            with open(transfer_main, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "import threadpkg;\n"
+                    "func make_worker() {\n"
+                    "    thread func worker(ctx) {\n"
+                    '        return {"v": threadpkg.calc('
+                    'ctx.payload["n"])};\n'
+                    "    }\n"
+                    "    return worker;\n"
+                    "}\n"
+                    "let w = make_worker();\n"
+                    "let t = std.thread.spawn(w, "
+                    'std.thread.Message.from({"n": 4}));\n'
+                    "let r = t.join();\n"
+                    'print(r["value"]["v"]);\n'
+                )
+            proc = subprocess.run(
+                [os.path.abspath(BIN), transfer_main],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert proc.returncode == 0, (
+                "thread func with imported module failed: "
+                f"{proc.stdout!r} {proc.stderr!r}"
+            )
+            assert proc.stdout.strip() == "17", proc.stdout
+
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)
             http_worker = os.path.join(

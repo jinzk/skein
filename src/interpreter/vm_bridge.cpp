@@ -4,6 +4,7 @@
 #include "ast.h"
 #include "compiler.h"
 #include "diagnostics.h"
+#include "dict.h"
 #include "eval.h"
 #include "eval_context.h"
 #include "eval_internal.h"
@@ -878,6 +879,22 @@ bool materialize_thread_value(
             }
             out = dupval(value.data.get());
             return true;
+        case thread_transfer_value::Kind::Namespace: {
+            struct dict_value_t *dict = newdictval();
+            dict->payload->is_namespace = true;
+            for (const auto &field : value.fields) {
+                struct value_t *field_value = nullptr;
+                if (!materialize_thread_value(context, field.second,
+                                              field_value, error)) {
+                    freeval((struct value_t *)dict);
+                    return false;
+                }
+                dict_append_item(dict, newstrval(field.first.c_str()),
+                                 field_value);
+            }
+            out = (struct value_t *)dict;
+            return true;
+        }
         case thread_transfer_value::Kind::Function:
             if (!value.function) {
                 error = "invalid transferred function value";

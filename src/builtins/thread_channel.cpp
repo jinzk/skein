@@ -2452,7 +2452,10 @@ struct thread_payload_builder {
                        std::shared_ptr<thread_transfer_function>>
         functions;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    std::vector<std::pair<std::string, thread_transfer_value>> modules;
     std::unordered_set<std::string> global_names;
+    std::unordered_set<std::string> module_keys;
+    std::unordered_set<const void *> namespace_visiting;
     std::string error;
 
     bool transfer_value(struct value_t *value, const char *what,
@@ -2461,6 +2464,12 @@ struct thread_payload_builder {
         if (!value) {
             out.kind = thread_transfer_value::Kind::Null;
             return true;
+        }
+        if (value->type == T_dict) {
+            const struct dict_value_t *dict =
+                (const struct dict_value_t *)value;
+            if (dict->payload && dict->payload->is_namespace)
+                return transfer_namespace(value, out);
         }
         if (value->type == T_func)
             return transfer_function(value, out);
@@ -2475,6 +2484,34 @@ struct thread_payload_builder {
         out.kind = thread_transfer_value::Kind::Data;
         out.data = std::shared_ptr<struct value_t>(copy, thread_value_deleter());
         return true;
+    }
+
+    bool transfer_namespace(struct value_t *value,
+                            thread_transfer_value &out) {
+        struct dict_value_t *dict = (struct dict_value_t *)value;
+        const void *identity = dict->payload.get();
+        if (!namespace_visiting.insert(identity).second) {
+            error = "cyclic module namespace";
+            return false;
+        }
+        out = thread_transfer_value();
+        out.kind = thread_transfer_value::Kind::Namespace;
+        bool ok = true;
+        for (const auto &item : dict->payload->items) {
+            if (!item.first || item.first->type != T_string)
+                continue;
+            std::string name =
+                ((const struct string_value_t *)item.first)->value;
+            std::string what = "module export " + name;
+            thread_transfer_value field;
+            if (!transfer_value(item.second, what.c_str(), field)) {
+                ok = false;
+                break;
+            }
+            out.fields.emplace_back(std::move(name), std::move(field));
+        }
+        namespace_visiting.erase(identity);
+        return ok;
     }
 
     bool transfer_function(struct value_t *value, thread_transfer_value &out) {
@@ -2505,7 +2542,9 @@ struct thread_payload_builder {
         out.function = payload;
         if (!fill_captures(payload, def))
             return false;
-        return collect_globals(payload);
+        if (!collect_globals(payload))
+            return false;
+        return collect_imports(payload);
     }
 
     bool fill_captures(
@@ -2562,10 +2601,48 @@ struct thread_payload_builder {
         return true;
     }
 
+    bool collect_imports(
+        const std::shared_ptr<thread_transfer_function> &payload) {
+        for (const skein::bc::ImportDesc &import : payload->proto->imports) {
+            if (import.path.empty() || import.path == "std")
+                continue;
+            std::string key;
+            std::string import_error;
+            if (!package_import_cache_key(
+                    import.path.c_str(),
+                    import.base.empty() ? nullptr : import.base.c_str(), key,
+                    import_error)) {
+                error = "import " + import.path + ": " + import_error;
+                return false;
+            }
+            if (!module_keys.insert(key).second)
+                continue;
+            struct value_t *namespace_value =
+                package_import(import.path.c_str(),
+                               import.base.empty() ? nullptr
+                                                   : import.base.c_str(),
+                               import_error);
+            if (!namespace_value) {
+                error = "import " + import.path + ": " + import_error;
+                return false;
+            }
+            std::string what = "module " + import.path;
+            thread_transfer_value transfer;
+            bool ok =
+                transfer_value(namespace_value, what.c_str(), transfer);
+            freeval(namespace_value);
+            if (!ok)
+                return false;
+            modules.emplace_back(std::move(key), std::move(transfer));
+        }
+        return true;
+    }
+
     bool build_entry(
         struct value_t *entry,
         std::shared_ptr<thread_transfer_function> &payload,
-        std::vector<std::pair<std::string, thread_transfer_value>> &out) {
+        std::vector<std::pair<std::string, thread_transfer_value>> &out,
+        std::vector<std::pair<std::string, thread_transfer_value>> &out_modules) {
         skein::bc::ProtoPtr proto;
         if (!skein_vm_prepare_thread_proto(entry, proto, error))
             return false;
@@ -2579,7 +2656,10 @@ struct thread_payload_builder {
             return false;
         if (!collect_globals(payload))
             return false;
+        if (!collect_imports(payload))
+            return false;
         out = std::move(globals);
+        out_modules = std::move(modules);
         return true;
     }
 };
@@ -2588,6 +2668,7 @@ void thread_proto_entry_main(
     std::shared_ptr<thread_state> state,
     std::shared_ptr<thread_transfer_function> entry,
     std::vector<std::pair<std::string, thread_transfer_value>> globals,
+    std::vector<std::pair<std::string, thread_transfer_value>> modules,
     struct value_t *argument,
     std::shared_ptr<const thread_env_snapshot> env_snapshot) {
     thread_env_install(env_snapshot);
@@ -2608,22 +2689,37 @@ void thread_proto_entry_main(
 
     {
         struct value_t *std_namespace = skein::stdlib::build_namespace();
-        if (std_namespace)
+        if (std_namespace) {
             save_global_symbol("std", std_namespace);
+            package_seed_import("builtin:std", dupval(std_namespace));
+        }
     }
     std::shared_ptr<thread_transfer_context> transfer_context =
         skein_vm_thread_transfer_context_create();
     std::string setup_error;
-    for (auto &item : globals) {
+    for (auto &item : modules) {
         struct value_t *value = nullptr;
         std::string error;
         if (!skein_vm_materialize_thread_value(transfer_context, item.second,
                                                value, error)) {
-            setup_error = "global " + item.first + ": " + error;
+            setup_error = "module " + item.first + ": " + error;
             break;
         }
-        if (value)
-            save_global_symbol(item.first.c_str(), value);
+        package_seed_import(item.first, value);
+    }
+    modules.clear();
+    if (setup_error.empty()) {
+        for (auto &item : globals) {
+            struct value_t *value = nullptr;
+            std::string error;
+            if (!skein_vm_materialize_thread_value(
+                    transfer_context, item.second, value, error)) {
+                setup_error = "global " + item.first + ": " + error;
+                break;
+            }
+            if (value)
+                save_global_symbol(item.first.c_str(), value);
+        }
     }
     globals.clear();
 
@@ -2890,7 +2986,8 @@ struct value_t *thread_spawn_function(
     thread_payload_builder builder;
     std::shared_ptr<thread_transfer_function> entry;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
-    if (!builder.build_entry(args[0], entry, globals)) {
+    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    if (!builder.build_entry(args[0], entry, globals, modules)) {
         yyerror("std.thread.spawn_function: %s", builder.error.c_str());
         return nullptr;
     }
@@ -2901,7 +2998,8 @@ struct value_t *thread_spawn_function(
     try {
         state->thread = std::thread(thread_proto_entry_main, state,
                                     std::move(entry), std::move(globals),
-                                    argument, thread_env_capture());
+                                    std::move(modules), argument,
+                                    thread_env_capture());
     } catch (const std::exception &) {
         freeval(argument);
         yyerror("std.thread.spawn_function could not start thread");

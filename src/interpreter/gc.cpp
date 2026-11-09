@@ -6,6 +6,7 @@
 #include "structtype.h"
 #include "symbol.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -111,7 +112,19 @@ void mark_root_value(void *ctx, value_t *value) {
     static_cast<cycle_collector *>(ctx)->mark_value(value);
 }
 
+std::atomic<void (*)()> thread_cycle_collector{nullptr};
+
 } // namespace
+
+void gc_set_thread_cycle_collector(void (*fn)()) {
+    thread_cycle_collector.store(fn);
+}
+
+void collect_thread_cycles() {
+    void (*collector)() = thread_cycle_collector.load();
+    if (collector)
+        collector();
+}
 
 void collect_cycles(scope_context &context) {
     prune_scopes(context);
@@ -142,6 +155,7 @@ void collect_cycles(scope_context &context) {
     }
 
     scopes.clear();
+    collect_thread_cycles();
     prune_scopes(context);
 }
 

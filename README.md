@@ -2857,6 +2857,8 @@ std.thread.spawn
 std.thread.duplex
 std.thread.spawn_with_channel
 std.thread.spawn_with_duplex
+std.thread.collect
+std.thread.debug_counts
 std.thread.select
 std.thread.try_broadcast
 std.thread.broadcast
@@ -4821,6 +4823,8 @@ thread.link
 - `select` 接受 Channel 或 duplex endpoint，endpoint 使用其 in 方向；`broadcast` 仅接受 Channel；
 - `spawn_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
 - `spawn_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
+- `std.thread.collect()` 主动回收不可达的 Message/Channel/duplex 环；仅在没有活动 worker 线程时执行。
+- `std.thread.debug_counts()` 返回 `messages/channels/duplexes/endpoints/collected` 诊断计数。
 
 ### select / broadcast
 

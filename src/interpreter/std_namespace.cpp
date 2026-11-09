@@ -391,6 +391,8 @@ value_t *build_namespace_impl() {
         {"duplex", B_thread_duplex},
         {"spawn_with_channel", B_thread_spawn_with_channel},
         {"spawn_with_duplex", B_thread_spawn_with_duplex},
+        {"debug_counts", B_thread_debug_counts},
+        {"collect", B_thread_collect},
         {"select", B_thread_select},
         {"try_broadcast", B_thread_try_broadcast},
         {"broadcast", B_thread_broadcast},

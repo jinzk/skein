@@ -9,6 +9,7 @@
 #include "eval_context.h"
 #include "event_loop.h"
 #include "fiber.h"
+#include "gc.h"
 #include "package.h"
 #include "platform.h"
 #include "runtime_context.h"
@@ -27,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -75,10 +77,6 @@ struct channel_state : std::enable_shared_from_this<channel_state> {
 };
 
 struct duplex_state {
-    explicit duplex_state(long long capacity)
-        : parent_to_child(std::make_shared<channel_state>(capacity)),
-          child_to_parent(std::make_shared<channel_state>(capacity)) {}
-
     std::shared_ptr<channel_state> parent_to_child;
     std::shared_ptr<channel_state> child_to_parent;
 };
@@ -95,6 +93,150 @@ struct duplex_endpoint_state
         return parent ? duplex->child_to_parent : duplex->parent_to_child;
     }
 };
+
+std::mutex thread_cycle_registry_mutex;
+std::vector<std::weak_ptr<message_state>> thread_message_registry;
+std::vector<std::weak_ptr<channel_state>> thread_channel_registry;
+std::vector<std::weak_ptr<duplex_state>> thread_duplex_registry;
+std::vector<std::weak_ptr<duplex_endpoint_state>> thread_endpoint_registry;
+
+std::mutex thread_runtime_gate;
+long long active_thread_runtimes = 0;
+std::atomic<long long> thread_gc_collected{0};
+
+void thread_runtime_enter() {
+    std::lock_guard<std::mutex> lock(thread_runtime_gate);
+    ++active_thread_runtimes;
+}
+
+void thread_runtime_leave() {
+    std::lock_guard<std::mutex> lock(thread_runtime_gate);
+    --active_thread_runtimes;
+}
+
+void collect_thread_cycles_entry();
+
+void ensure_thread_cycle_collector() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        gc_set_thread_cycle_collector(&collect_thread_cycles_entry);
+    });
+}
+
+template <typename T>
+void prune_registry(std::vector<std::weak_ptr<T>> &registry) {
+    if (registry.size() < 1024)
+        return;
+    size_t write = 0;
+    for (size_t i = 0; i < registry.size(); ++i) {
+        if (!registry[i].expired())
+            registry[write++] = registry[i];
+    }
+    registry.resize(write);
+}
+
+std::shared_ptr<message_state> make_message_state() {
+    ensure_thread_cycle_collector();
+    std::shared_ptr<message_state> state =
+        std::make_shared<message_state>();
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        thread_message_registry.push_back(state);
+        prune_registry(thread_message_registry);
+    }
+    return state;
+}
+
+std::shared_ptr<channel_state> make_channel_state(long long capacity) {
+    ensure_thread_cycle_collector();
+    std::shared_ptr<channel_state> state =
+        std::make_shared<channel_state>(capacity);
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        thread_channel_registry.push_back(state);
+        prune_registry(thread_channel_registry);
+    }
+    return state;
+}
+
+std::shared_ptr<duplex_state> make_duplex_state(long long capacity) {
+    ensure_thread_cycle_collector();
+    std::shared_ptr<duplex_state> state =
+        std::make_shared<duplex_state>();
+    state->parent_to_child = make_channel_state(capacity);
+    state->child_to_parent = make_channel_state(capacity);
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        thread_duplex_registry.push_back(state);
+        prune_registry(thread_duplex_registry);
+    }
+    return state;
+}
+
+std::shared_ptr<duplex_endpoint_state> make_duplex_endpoint_state() {
+    ensure_thread_cycle_collector();
+    std::shared_ptr<duplex_endpoint_state> state =
+        std::make_shared<duplex_endpoint_state>();
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        thread_endpoint_registry.push_back(state);
+        prune_registry(thread_endpoint_registry);
+    }
+    return state;
+}
+
+struct value_t *thread_debug_counts(
+    const std::vector<struct value_t *> &args) {
+    if (!args.empty()) {
+        yyerror("std.thread.debug_counts expects no arguments");
+        return nullptr;
+    }
+    auto count_live = [](auto &registry) {
+        long long live = 0;
+        size_t write = 0;
+        for (size_t i = 0; i < registry.size(); ++i) {
+            if (registry[i].lock()) {
+                ++live;
+                registry[write++] = registry[i];
+            }
+        }
+        registry.resize(write);
+        return live;
+    };
+    long long messages = 0;
+    long long channels = 0;
+    long long duplexes = 0;
+    long long endpoints = 0;
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        messages = count_live(thread_message_registry);
+        channels = count_live(thread_channel_registry);
+        duplexes = count_live(thread_duplex_registry);
+        endpoints = count_live(thread_endpoint_registry);
+    }
+    struct value_t *result = (struct value_t *)newdictval();
+    dict_append_item((struct dict_value_t *)result, newstrval("messages"),
+                     newintval(messages));
+    dict_append_item((struct dict_value_t *)result, newstrval("channels"),
+                     newintval(channels));
+    dict_append_item((struct dict_value_t *)result, newstrval("duplexes"),
+                     newintval(duplexes));
+    dict_append_item((struct dict_value_t *)result, newstrval("endpoints"),
+                     newintval(endpoints));
+    dict_append_item((struct dict_value_t *)result, newstrval("collected"),
+                     newintval(thread_gc_collected.load()));
+    return result;
+}
+
+struct value_t *thread_collect(
+    const std::vector<struct value_t *> &args) {
+    if (!args.empty()) {
+        yyerror("std.thread.collect expects no arguments");
+        return nullptr;
+    }
+    collect_thread_cycles();
+    return newnull();
+}
 
 void wake_fiber_handles(const std::vector<void *> &handles) {
     for (void *handle : handles)
@@ -1331,7 +1473,7 @@ struct value_t *duplex_endpoint_get_field(void *data, const char *name) {
     }
     if (std::strcmp(name, "child") == 0) {
         std::shared_ptr<duplex_endpoint_state> peer =
-            std::make_shared<duplex_endpoint_state>();
+            make_duplex_endpoint_state();
         peer->duplex = endpoint->duplex;
         peer->parent = !endpoint->parent;
         return new_duplex_endpoint_value(std::move(peer));
@@ -1374,8 +1516,8 @@ struct value_t *thread_duplex(const std::vector<struct value_t *> &args) {
         return nullptr;
     }
     std::shared_ptr<duplex_endpoint_state> endpoint =
-        std::make_shared<duplex_endpoint_state>();
-    endpoint->duplex = std::make_shared<duplex_state>(capacity);
+        make_duplex_endpoint_state();
+    endpoint->duplex = make_duplex_state(capacity);
     endpoint->parent = true;
     return new_duplex_endpoint_value(std::move(endpoint));
 }
@@ -1478,7 +1620,7 @@ bool get_channel_state(struct value_t *value,
 
 struct value_t *make_message_owned(struct value_t *payload,
                                    struct value_t *handles) {
-    std::shared_ptr<message_state> state = std::make_shared<message_state>();
+    std::shared_ptr<message_state> state = make_message_state();
     state->payload = payload;
     state->handles = handles ? handles : (struct value_t *)newdictval();
     return new_message_value(std::move(state));
@@ -1889,8 +2031,7 @@ bool pool_submit_raw(pool_state &pool, struct value_t *value,
         return false;
     }
 
-    std::shared_ptr<channel_state> reply =
-        std::make_shared<channel_state>(1);
+    std::shared_ptr<channel_state> reply = make_channel_state(1);
     struct value_t *reply_value = new_channel_value(reply);
     dict_set_owned(handles, "reply", reply_value);
 
@@ -2226,7 +2367,7 @@ std::shared_ptr<pool_state> create_pool_state(
     pool->entry = entry;
     pool->restart_limit = restart_limit;
     pool->worker_vm = worker_vm;
-    pool->jobs = std::make_shared<channel_state>(queue_capacity);
+    pool->jobs = make_channel_state(queue_capacity);
     pool->workers.reserve(size);
     for (std::size_t i = 0; i < size; ++i)
         pool->workers.push_back(std::make_unique<pool_worker_slot>());
@@ -2451,6 +2592,7 @@ struct value_t *thread_error_envelope(struct value_t *error) {
 void thread_entry_main(std::shared_ptr<thread_state> state,
                        const std::string &script, const std::string &entry,
                        struct value_t *argument) {
+    thread_runtime_enter();
     struct skein_context hooks = {
         pool_worker_call,
         pool_worker_call_builtin,
@@ -2549,6 +2691,7 @@ void thread_entry_main(std::shared_ptr<thread_state> state,
     skein_vm_shutdown();
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
+    thread_runtime_leave();
 }
 
 struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
@@ -2608,7 +2751,7 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
 struct value_t *message_with_handle(
     const std::shared_ptr<message_state> &source, const char *name,
     struct value_t *handle) {
-    std::shared_ptr<message_state> state = std::make_shared<message_state>();
+    std::shared_ptr<message_state> state = make_message_state();
     state->payload = dupval(source->payload);
     state->handles = (struct value_t *)newdictval();
     if (source->handles && source->handles->type == T_dict) {
@@ -2653,7 +2796,7 @@ struct value_t *thread_spawn_with_channel(
     }
 
     std::shared_ptr<channel_state> channel =
-        std::make_shared<channel_state>(capacity);
+        make_channel_state(capacity);
     struct value_t *channel_value = new_channel_value(channel);
     struct value_t *injected =
         message_with_handle(message, "channel", channel_value);
@@ -2701,13 +2844,13 @@ struct value_t *thread_spawn_with_duplex(
     }
 
     std::shared_ptr<duplex_state> duplex =
-        std::make_shared<duplex_state>(capacity);
+        make_duplex_state(capacity);
     std::shared_ptr<duplex_endpoint_state> parent =
-        std::make_shared<duplex_endpoint_state>();
+        make_duplex_endpoint_state();
     parent->duplex = duplex;
     parent->parent = true;
     std::shared_ptr<duplex_endpoint_state> child =
-        std::make_shared<duplex_endpoint_state>();
+        make_duplex_endpoint_state();
     child->duplex = duplex;
     child->parent = false;
 
@@ -2895,7 +3038,7 @@ struct value_t *thread_message_from(const std::vector<struct value_t *> &args) {
         }
     }
 
-    std::shared_ptr<message_state> state = std::make_shared<message_state>();
+    std::shared_ptr<message_state> state = make_message_state();
     state->payload = payload;
     state->handles = handles;
     return new_message_value(std::move(state));
@@ -2906,7 +3049,191 @@ struct value_t *thread_channel(long long capacity) {
         yyerror("std.thread.Channel capacity must be >= 1 or -1");
         return nullptr;
     }
-    return new_channel_value(std::make_shared<channel_state>(capacity));
+    return new_channel_value(make_channel_state(capacity));
+}
+
+struct thread_gc_node {
+    enum class kind { message, channel, duplex, endpoint };
+    kind type = kind::message;
+    void *identity = nullptr;
+    std::shared_ptr<void> keepalive;
+    long long refs = 0;
+    long long internal_in = 0;
+    bool marked = false;
+    std::vector<thread_gc_node *> out;
+};
+
+void collect_thread_cycles_impl() {
+    std::vector<std::unique_ptr<thread_gc_node>> nodes;
+    std::unordered_map<const void *, thread_gc_node *> by_identity;
+
+    auto add_registry = [&nodes, &by_identity](auto &registry,
+                                               thread_gc_node::kind type) {
+        size_t write = 0;
+        for (size_t i = 0; i < registry.size(); ++i) {
+            auto locked = registry[i].lock();
+            if (!locked)
+                continue;
+            registry[write++] = registry[i];
+            auto node = std::make_unique<thread_gc_node>();
+            node->type = type;
+            node->identity = locked.get();
+            node->refs = locked.use_count();
+            node->keepalive = locked;
+            by_identity[node->identity] = node.get();
+            nodes.push_back(std::move(node));
+        }
+        registry.resize(write);
+    };
+
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        add_registry(thread_message_registry, thread_gc_node::kind::message);
+        add_registry(thread_channel_registry, thread_gc_node::kind::channel);
+        add_registry(thread_duplex_registry, thread_gc_node::kind::duplex);
+        add_registry(thread_endpoint_registry, thread_gc_node::kind::endpoint);
+    }
+    if (nodes.empty())
+        return;
+
+    auto node_for = [&by_identity](const void *identity) -> thread_gc_node * {
+        auto it = by_identity.find(identity);
+        return it == by_identity.end() ? nullptr : it->second;
+    };
+    auto add_edge = [&node_for](thread_gc_node *from, const void *identity) {
+        thread_gc_node *to = node_for(identity);
+        if (!to)
+            return;
+        from->out.push_back(to);
+        ++to->internal_in;
+    };
+
+    for (auto &node : nodes) {
+        switch (node->type) {
+            case thread_gc_node::kind::message: {
+                auto *state = static_cast<message_state *>(node->identity);
+                if (!state->handles || state->handles->type != T_dict)
+                    break;
+                for (const auto &entry :
+                     ((dict_value_t *)state->handles)->payload->items) {
+                    value_t *value = entry.second;
+                    if (!value || value->type != T_userdata)
+                        continue;
+                    auto *userdata = (userdata_value_t *)value;
+                    if (!userdata->data)
+                        continue;
+                    if (userdata->meta == &kChannelType)
+                        add_edge(node.get(),
+                                 static_cast<channel_state *>(
+                                     userdata->data.get()));
+                    else if (userdata->meta == &kDuplexEndpointType)
+                        add_edge(node.get(),
+                                 static_cast<duplex_endpoint_state *>(
+                                     userdata->data.get()));
+                }
+                break;
+            }
+            case thread_gc_node::kind::channel: {
+                auto *state = static_cast<channel_state *>(node->identity);
+                std::lock_guard<std::mutex> lock(state->mutex);
+                for (value_t *value : state->queue) {
+                    if (!value || value->type != T_userdata)
+                        continue;
+                    auto *userdata = (userdata_value_t *)value;
+                    if (userdata->meta == &kMessageType && userdata->data)
+                        add_edge(node.get(),
+                                 static_cast<message_state *>(
+                                     userdata->data.get()));
+                }
+                break;
+            }
+            case thread_gc_node::kind::duplex: {
+                auto *state = static_cast<duplex_state *>(node->identity);
+                if (state->parent_to_child)
+                    add_edge(node.get(), state->parent_to_child.get());
+                if (state->child_to_parent)
+                    add_edge(node.get(), state->child_to_parent.get());
+                break;
+            }
+            case thread_gc_node::kind::endpoint: {
+                auto *state =
+                    static_cast<duplex_endpoint_state *>(node->identity);
+                if (state->duplex)
+                    add_edge(node.get(), state->duplex.get());
+                break;
+            }
+        }
+    }
+
+    std::vector<thread_gc_node *> stack;
+    for (auto &node : nodes) {
+        if (node->refs - 1 - node->internal_in > 0)
+            stack.push_back(node.get());
+    }
+    while (!stack.empty()) {
+        thread_gc_node *node = stack.back();
+        stack.pop_back();
+        if (node->marked)
+            continue;
+        node->marked = true;
+        for (thread_gc_node *child : node->out)
+            stack.push_back(child);
+    }
+
+    bool collected = false;
+    for (auto &node : nodes) {
+        if (node->marked)
+            continue;
+        collected = true;
+        ++thread_gc_collected;
+        switch (node->type) {
+            case thread_gc_node::kind::message: {
+                auto *state = static_cast<message_state *>(node->identity);
+                value_t *handles = state->handles;
+                state->handles = nullptr;
+                value_t *payload = state->payload;
+                state->payload = nullptr;
+                freeval(handles);
+                freeval(payload);
+                break;
+            }
+            case thread_gc_node::kind::channel: {
+                auto *state = static_cast<channel_state *>(node->identity);
+                std::deque<value_t *> queued;
+                {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    queued.swap(state->queue);
+                    state->closed = true;
+                }
+                for (value_t *value : queued)
+                    freeval(value);
+                break;
+            }
+            case thread_gc_node::kind::duplex: {
+                auto *state = static_cast<duplex_state *>(node->identity);
+                std::shared_ptr<channel_state> left =
+                    std::move(state->parent_to_child);
+                std::shared_ptr<channel_state> right =
+                    std::move(state->child_to_parent);
+                break;
+            }
+            case thread_gc_node::kind::endpoint: {
+                auto *state =
+                    static_cast<duplex_endpoint_state *>(node->identity);
+                std::shared_ptr<duplex_state> duplex =
+                    std::move(state->duplex);
+                break;
+            }
+        }
+    }
+    (void)collected;
+}
+
+void collect_thread_cycles_entry() {
+    std::unique_lock<std::mutex> lock(thread_runtime_gate);
+    if (active_thread_runtimes != 0)
+        return;
+    collect_thread_cycles_impl();
 }
 
 }  // namespace
@@ -2917,6 +3244,7 @@ thread_local skein_context worker_runtime_hooks;
 }
 
 bool thread_worker_begin(bool worker_vm, std::string &error) {
+    thread_runtime_enter();
     (void)error;
     worker_runtime_hooks.call = pool_worker_call;
     worker_runtime_hooks.call_builtin = pool_worker_call_builtin;
@@ -2944,6 +3272,7 @@ void thread_worker_end() {
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
     worker_runtime_context.reset();
+    thread_runtime_leave();
 }
 
 struct thread_pool_link {
@@ -3104,6 +3433,10 @@ struct value_t *call_thread_channel_builtin(
             return thread_spawn_with_channel(args);
         case B_thread_spawn_with_duplex:
             return thread_spawn_with_duplex(args);
+        case B_thread_debug_counts:
+            return thread_debug_counts(args);
+        case B_thread_collect:
+            return thread_collect(args);
         case B_thread_capabilities:
             return thread_capabilities(args);
         default:

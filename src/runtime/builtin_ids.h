@@ -381,6 +381,8 @@ enum bifs {
     B_thread_duplex,
     B_thread_spawn_with_channel,
     B_thread_spawn_with_duplex,
+    B_thread_collect,
+    B_thread_debug_counts,
     B_thread_capabilities,
     B_deque_new,
     B_deque_from_list,

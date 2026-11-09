@@ -12,6 +12,12 @@ struct scope_context;
 void collect_cycles(struct scope_context &context);
 void maybe_collect_cycles();
 
+/* Break unreachable Message/Channel/duplex userdata cycles.  Runs only when
+ * no worker threads are active.  The builtins layer registers the concrete
+ * collector because the runtime must not link against builtins. */
+void gc_set_thread_cycle_collector(void (*fn)());
+void collect_thread_cycles();
+
 /* True when SKEIN_GC_STRESS requests collection at VM safepoints. */
 bool gc_stress_enabled();
 

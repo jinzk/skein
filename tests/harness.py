@@ -2421,6 +2421,79 @@ def check_extended_stdlib():
                 'print("ok="); print(r["ok"]); print("|");\n',
                 stdout="reply=42|ok=true|",
             )
+            check(
+                "std.thread message cycle collection",
+                "import std;\n"
+                'let base = std.thread.debug_counts();\n'
+                'let ch = std.thread.Channel(1);\n'
+                'let msg = std.thread.Message.from({"x": 1}, '
+                '{"ch": ch});\n'
+                'ch.send(msg);\n'
+                'ch = null;\n'
+                'msg = null;\n'
+                'std.thread.collect();\n'
+                'let after = std.thread.debug_counts();\n'
+                'print("m="); '
+                'print(after["messages"] - base["messages"]); '
+                'print("|");\n'
+                'print("c="); '
+                'print(after["channels"] - base["channels"]); '
+                'print("|");\n'
+                'print("g="); '
+                'print(after["collected"] > base["collected"]); '
+                'print("|");\n'
+                'let base2 = std.thread.debug_counts();\n'
+                'let link = std.thread.duplex(1);\n'
+                'let dmsg = std.thread.Message.from({"x": 2}, '
+                '{"link": link});\n'
+                'link.send(dmsg);\n'
+                'link = null;\n'
+                'dmsg = null;\n'
+                'std.thread.collect();\n'
+                'let after2 = std.thread.debug_counts();\n'
+                'print("dm="); '
+                'print(after2["messages"] - base2["messages"]); '
+                'print("|");\n'
+                'print("dc="); '
+                'print(after2["channels"] - base2["channels"]); '
+                'print("|");\n'
+                'print("dd="); '
+                'print(after2["duplexes"] - base2["duplexes"]); '
+                'print("|");\n'
+                'print("de="); '
+                'print(after2["endpoints"] - base2["endpoints"]); '
+                'print("|");\n',
+                stdout="m=0|c=0|g=true|dm=0|dc=0|dd=0|de=0|",
+            )
+            auto_cycle_source = (
+                "import std;\n"
+                'let base = std.thread.debug_counts();\n'
+                'let ch = std.thread.Channel(1);\n'
+                'let msg = std.thread.Message.from({"x": 1}, '
+                '{"ch": ch});\n'
+                'ch.send(msg);\n'
+                'ch = null;\n'
+                'msg = null;\n'
+            )
+            for index in range(80):
+                auto_cycle_source += f"let z{index} = {index};\n"
+            auto_cycle_source += (
+                'let after = std.thread.debug_counts();\n'
+                'print("m="); '
+                'print(after["messages"] - base["messages"]); '
+                'print("|");\n'
+                'print("c="); '
+                'print(after["channels"] - base["channels"]); '
+                'print("|");\n'
+                'print("g="); '
+                'print(after["collected"] > base["collected"]); '
+                'print("|");\n'
+            )
+            check(
+                "std.thread automatic cycle collection",
+                auto_cycle_source,
+                stdout="m=0|c=0|g=true|",
+            )
 
             cow_worker = os.path.join(
                 thread_tmp, "thread_cow_worker.skein")

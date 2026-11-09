@@ -2848,6 +2848,7 @@ def check_extended_stdlib():
                 "thread encode failed: "
                 f"{enc.stdout!r} {enc.stderr!r}"
             )
+            shutil.rmtree(os.path.join(deadlock_tmp, "threadpkg"))
             dec = subprocess.run(
                 [os.path.abspath(BIN), decode_path],
                 cwd=deadlock_tmp,

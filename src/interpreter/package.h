@@ -33,6 +33,14 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
  * `namespace_value`. */
 void package_seed_import(const std::string &key, value_t *namespace_value);
 
+/* Seed an import by its source-level path/base so child imports can skip
+ * filesystem resolution.  Takes ownership of `namespace_value`. */
+void package_seed_import_path(const char *dotted_path, const char *base_dir,
+                              value_t *namespace_value);
+
+/* Release thread-local seeded imports. */
+void package_clear_import_seeds();
+
 /* Parse a worker entry script in the current eval context.  Parser globals
  * are saved/restored so a worker can parse while the creating thread is
  * suspended inside its own parse/eval statement. */

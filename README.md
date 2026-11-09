@@ -4806,7 +4806,7 @@ let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
 - 入口必须是同步函数、恰好一个参数；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
 - 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
 - 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
-- 被传递的函数不能使用默认/模式/可变参数，也不能包含嵌套函数或 defer；用户 `import` 会在父线程加载并把命名空间快照传入子线程，模块导出需能按 data/function 规则传递；入口内新建闭包仍不支持；
+- 被传递的函数不能使用默认/模式/可变参数，也不能包含嵌套函数或 defer；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；入口内新建闭包仍不支持；
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
 - `std.thread.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_encoded(bytes, Message)` 可在另一个进程反序列化并启动线程：
   ```skein

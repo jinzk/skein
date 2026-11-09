@@ -214,6 +214,28 @@ std::string package_cache_key(const std::string &canonical_path) {
     return std::string("\x01pkg:") + canonical_path;
 }
 
+struct seeded_import_entry {
+    std::string path;
+    std::string base;
+    value_t *namespace_value = nullptr;
+};
+
+std::vector<seeded_import_entry> &seeded_import_registry() {
+    static thread_local std::vector<seeded_import_entry> entries;
+    return entries;
+}
+
+value_t *take_seeded_import(const char *dotted_path, const char *base_dir) {
+    if (!dotted_path)
+        return NULL;
+    std::string base = base_dir ? base_dir : "";
+    for (const seeded_import_entry &entry : seeded_import_registry()) {
+        if (entry.path == dotted_path && entry.base == base)
+            return dupval(entry.namespace_value);
+    }
+    return NULL;
+}
+
 bool package_file_exists(const fs::path &dir, const std::string &name,
                          fs::path &file) {
     std::error_code ec;
@@ -475,6 +497,8 @@ value_t *import_std_submodule(const std::string &dotted,
 
 value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                              std::string &error) {
+    if (value_t *seeded = take_seeded_import(dotted_path, base_dir))
+        return seeded;
     import_spec spec;
     if (!parse_import_spec(dotted_path, spec, error))
         return NULL;
@@ -1012,6 +1036,33 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
 void package_seed_import(const std::string &key, value_t *namespace_value) {
     std::string hidden = package_cache_key(key);
     save_global_symbol(hidden.c_str(), namespace_value);
+}
+
+void package_seed_import_path(const char *dotted_path, const char *base_dir,
+                              value_t *namespace_value) {
+    if (!dotted_path) {
+        freeval(namespace_value);
+        return;
+    }
+    std::string base = base_dir ? base_dir : "";
+    for (seeded_import_entry &entry : seeded_import_registry()) {
+        if (entry.path == dotted_path && entry.base == base) {
+            freeval(entry.namespace_value);
+            entry.namespace_value = namespace_value;
+            return;
+        }
+    }
+    seeded_import_entry entry;
+    entry.path = dotted_path;
+    entry.base = std::move(base);
+    entry.namespace_value = namespace_value;
+    seeded_import_registry().push_back(std::move(entry));
+}
+
+void package_clear_import_seeds() {
+    for (seeded_import_entry &entry : seeded_import_registry())
+        freeval(entry.namespace_value);
+    seeded_import_registry().clear();
 }
 
 value_t *package_build_namespace(scope_t *scope, std::string &error) {

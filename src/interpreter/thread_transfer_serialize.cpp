@@ -19,7 +19,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 2u;
+constexpr uint32_t kPayloadVersion = 3u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -1930,7 +1930,7 @@ void collect_transfer(
 bool skein_vm_serialize_thread_payload(
     const std::shared_ptr<struct thread_transfer_function> &entry,
     const std::vector<std::pair<std::string, thread_transfer_value>> &globals,
-    const std::vector<std::pair<std::string, thread_transfer_value>> &modules,
+    const std::vector<struct thread_transfer_module> &modules,
     std::string &bytes, std::string &error) {
     if (!entry || !entry->proto) {
         error = "invalid thread payload entry";
@@ -1951,7 +1951,7 @@ bool skein_vm_serialize_thread_payload(
             return false;
     }
     for (const auto &item : modules) {
-        collect_transfer(item.second, ids, order, 0, ok, error);
+        collect_transfer(item.value, ids, order, 0, ok, error);
         if (!ok)
             return false;
     }
@@ -1966,7 +1966,7 @@ bool skein_vm_serialize_thread_payload(
     for (const auto &item : globals)
         collect_transfer_types(item.second, types, type_order, 0);
     for (const auto &item : modules)
-        collect_transfer_types(item.second, types, type_order, 0);
+        collect_transfer_types(item.value, types, type_order, 0);
 
     writer out;
     out.u32(kPayloadMagic);
@@ -2005,8 +2005,10 @@ bool skein_vm_serialize_thread_payload(
     }
     out.u32((uint32_t)modules.size());
     for (const auto &item : modules) {
-        out.str(item.first);
-        if (!write_transfer(out, item.second, ids, 0, error))
+        out.str(item.key);
+        out.str(item.path);
+        out.str(item.base);
+        if (!write_transfer(out, item.value, ids, 0, error))
             return false;
     }
     bytes = std::move(out.data);
@@ -2017,7 +2019,7 @@ bool skein_vm_deserialize_thread_payload(
     const std::string &bytes,
     std::shared_ptr<struct thread_transfer_function> &entry,
     std::vector<std::pair<std::string, thread_transfer_value>> &globals,
-    std::vector<std::pair<std::string, thread_transfer_value>> &modules,
+    std::vector<struct thread_transfer_module> &modules,
     std::string &error) {
     reader in(bytes);
     uint32_t magic = 0;
@@ -2113,14 +2115,15 @@ bool skein_vm_deserialize_thread_payload(
     modules.clear();
     modules.reserve(module_count);
     for (uint32_t i = 0; i < module_count; ++i) {
-        std::string name;
-        thread_transfer_value value;
-        if (!in.str(name) || !read_transfer(in, functions, value, 0, error)) {
+        thread_transfer_module module;
+        if (!in.str(module.key) || !in.str(module.path) ||
+            !in.str(module.base) ||
+            !read_transfer(in, functions, module.value, 0, error)) {
             if (error.empty())
                 error = in.error;
             return false;
         }
-        modules.emplace_back(std::move(name), std::move(value));
+        modules.push_back(std::move(module));
     }
     return true;
 }

@@ -35,6 +35,13 @@ struct thread_transfer_function {
     std::vector<thread_transfer_value> captures;
 };
 
+struct thread_transfer_module {
+    std::string key;
+    std::string path;
+    std::string base;
+    thread_transfer_value value;
+};
+
 /* Opaque memo table used while materializing one transfer graph. */
 struct thread_transfer_context;
 
@@ -123,7 +130,7 @@ bool skein_vm_materialize_thread_value(
 bool skein_vm_serialize_thread_payload(
     const std::shared_ptr<struct thread_transfer_function> &entry,
     const std::vector<std::pair<std::string, thread_transfer_value>> &globals,
-    const std::vector<std::pair<std::string, thread_transfer_value>> &modules,
+    const std::vector<struct thread_transfer_module> &modules,
     std::string &bytes, std::string &error);
 
 /* Deserialize a thread payload previously produced by
@@ -132,7 +139,7 @@ bool skein_vm_deserialize_thread_payload(
     const std::string &bytes,
     std::shared_ptr<struct thread_transfer_function> &entry,
     std::vector<std::pair<std::string, thread_transfer_value>> &globals,
-    std::vector<std::pair<std::string, thread_transfer_value>> &modules,
+    std::vector<struct thread_transfer_module> &modules,
     std::string &error);
 
 #endif

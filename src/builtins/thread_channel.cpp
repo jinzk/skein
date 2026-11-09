@@ -2452,7 +2452,7 @@ struct thread_payload_builder {
                        std::shared_ptr<thread_transfer_function>>
         functions;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
-    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    std::vector<thread_transfer_module> modules;
     std::unordered_set<std::string> global_names;
     std::unordered_set<std::string> module_keys;
     std::unordered_set<const void *> namespace_visiting;
@@ -2633,7 +2633,12 @@ struct thread_payload_builder {
             freeval(namespace_value);
             if (!ok)
                 return false;
-            modules.emplace_back(std::move(key), std::move(transfer));
+            thread_transfer_module module;
+            module.key = std::move(key);
+            module.path = import.path;
+            module.base = import.base;
+            module.value = std::move(transfer);
+            modules.push_back(std::move(module));
         }
         return true;
     }
@@ -2642,7 +2647,7 @@ struct thread_payload_builder {
         struct value_t *entry,
         std::shared_ptr<thread_transfer_function> &payload,
         std::vector<std::pair<std::string, thread_transfer_value>> &out,
-        std::vector<std::pair<std::string, thread_transfer_value>> &out_modules) {
+        std::vector<thread_transfer_module> &out_modules) {
         skein::bc::ProtoPtr proto;
         if (!skein_vm_prepare_thread_proto(entry, proto, error))
             return false;
@@ -2668,7 +2673,7 @@ void thread_proto_entry_main(
     std::shared_ptr<thread_state> state,
     std::shared_ptr<thread_transfer_function> entry,
     std::vector<std::pair<std::string, thread_transfer_value>> globals,
-    std::vector<std::pair<std::string, thread_transfer_value>> modules,
+    std::vector<thread_transfer_module> modules,
     struct value_t *argument,
     std::shared_ptr<const thread_env_snapshot> env_snapshot) {
     thread_env_install(env_snapshot);
@@ -2692,6 +2697,8 @@ void thread_proto_entry_main(
         if (std_namespace) {
             save_global_symbol("std", std_namespace);
             package_seed_import("builtin:std", dupval(std_namespace));
+            package_seed_import_path("std", nullptr,
+                                     dupval(std_namespace));
         }
     }
     std::shared_ptr<thread_transfer_context> transfer_context =
@@ -2700,12 +2707,15 @@ void thread_proto_entry_main(
     for (auto &item : modules) {
         struct value_t *value = nullptr;
         std::string error;
-        if (!skein_vm_materialize_thread_value(transfer_context, item.second,
+        if (!skein_vm_materialize_thread_value(transfer_context, item.value,
                                                value, error)) {
-            setup_error = "module " + item.first + ": " + error;
+            setup_error = "module " + item.path + ": " + error;
             break;
         }
-        package_seed_import(item.first, value);
+        package_seed_import(item.key, dupval(value));
+        package_seed_import_path(
+            item.path.c_str(),
+            item.base.empty() ? nullptr : item.base.c_str(), value);
     }
     modules.clear();
     if (setup_error.empty()) {
@@ -2979,7 +2989,7 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
 static struct value_t *thread_spawn_payload(
     std::shared_ptr<thread_transfer_function> entry,
     std::vector<std::pair<std::string, thread_transfer_value>> globals,
-    std::vector<std::pair<std::string, thread_transfer_value>> modules,
+    std::vector<thread_transfer_module> modules,
     struct value_t *message, const char *what) {
     std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
     state->id = next_thread_id.fetch_add(1);
@@ -3019,7 +3029,7 @@ struct value_t *thread_spawn_function(
     thread_payload_builder builder;
     std::shared_ptr<thread_transfer_function> entry;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
-    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    std::vector<thread_transfer_module> modules;
     if (!builder.build_entry(args[0], entry, globals, modules)) {
         yyerror("std.thread.spawn_function: %s", builder.error.c_str());
         return nullptr;
@@ -3037,7 +3047,7 @@ struct value_t *thread_encode(const std::vector<struct value_t *> &args) {
     thread_payload_builder builder;
     std::shared_ptr<thread_transfer_function> entry;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
-    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    std::vector<thread_transfer_module> modules;
     if (!builder.build_entry(args[0], entry, globals, modules)) {
         yyerror("std.thread.encode: %s", builder.error.c_str());
         return nullptr;
@@ -3063,7 +3073,7 @@ struct value_t *thread_spawn_encoded(
         ((const struct bytes_value_t *)args[0])->value.read();
     std::shared_ptr<thread_transfer_function> entry;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
-    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    std::vector<thread_transfer_module> modules;
     std::string error;
     if (!skein_vm_deserialize_thread_payload(bytes, entry, globals, modules,
                                              error)) {
@@ -3658,6 +3668,7 @@ void thread_worker_end() {
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
     worker_runtime_context.reset();
+    package_clear_import_seeds();
     value_runtime_thread_shutdown();
     thread_runtime_leave();
 }

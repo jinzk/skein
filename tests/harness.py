@@ -2613,6 +2613,24 @@ def check_extended_stdlib():
                 'pool.join();\n',
                 stdout_all=["ok=true:21", "alive=2"],
             )
+            check(
+                "std.thread fiber future wake latency",
+                "import std;\n"
+                "async func run(pool) {\n"
+                "    let t0 = std.time.monotonic_ms();\n"
+                "    for (let i = 0; i < 100; i = i + 1) {\n"
+                '        let r = pool.submit({"n": i}).wait();\n'
+                "    }\n"
+                "    return std.time.monotonic_ms() - t0;\n"
+                "}\n"
+                f'let pool = std.thread.pool(1, "{thread_worker_path}");\n'
+                "let elapsed = await run(pool);\n"
+                'print("elapsed="); print(elapsed); print("|");\n'
+                'print("under="); print(elapsed < 900); print("|");\n'
+                "pool.close();\n"
+                "pool.join();\n",
+                stdout="under=true|",
+            )
 
             if FFI_SHIM:
                 manifest = os.path.join(thread_tmp, "shim_throw.ffi.json")

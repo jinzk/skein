@@ -11,6 +11,7 @@
 #include "net.h"
 #include "package.h"
 #include "platform.h"
+#include "process_spawn.h"
 #include "repl.h"
 #include "symbol.h"
 #include "task.h"
@@ -44,7 +45,10 @@
 #include <vector>
 
 #if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -53,6 +57,8 @@ value_t *await_task_value(value_t *task_value);
 std::string http_platform_name();
 bool request_unsupported_feature(value_t *request,
                                  std::string &message, bool allow_sse);
+std::shared_ptr<http_shared_state> map_shared_state_file(
+    const std::string &path, bool create, std::string &error);
 
 void free_args(std::vector<value_t *> &args) {
     for (size_t i = 0; i < args.size(); ++i)
@@ -3151,6 +3157,65 @@ struct worker_bootstrap_file {
     }
 };
 
+#if SKEIN_HAS_REUSE_PORT
+std::string make_reuse_port_bootstrap(
+    const std::string &host, long long port,
+    const std::string &script, const std::string &entry,
+    long long max_requests, long long max_per_connection,
+    long long idle_timeout_ms, long long max_connections,
+    std::size_t max_header_bytes, std::size_t max_headers,
+    std::size_t max_body_bytes, long long h2_max_concurrent_streams,
+    bool stream_request_body, const std::string &shared_path,
+    const std::string &cert_file, const std::string &key_file,
+    bool unsupported_501, const std::string &unsupported_message) {
+    std::string source = "import std;\n";
+    source += "let s = {\"host\": \"" + escape_skein_string(host) +
+              "\", \"port\": " + std::to_string(port) + "};\n";
+    if (!cert_file.empty()) {
+        source += "s[\"cert\"] = \"" + escape_skein_string(cert_file) +
+                  "\";\n";
+        source += "s[\"key\"] = \"" + escape_skein_string(key_file) +
+                  "\";\n";
+    }
+    source += "let ts = std.http.serve_threads(s, 1, \"" +
+              escape_skein_string(script) + "\", {\n";
+    source += "  \"strategy\": \"reuse_port\",\n";
+    source += "  \"entry\": \"" + escape_skein_string(entry) + "\",\n";
+    source += "  \"max_requests\": " + std::to_string(max_requests) +
+              ",\n";
+    source += "  \"max_per_connection\": " +
+              std::to_string(max_per_connection) + ",\n";
+    source += "  \"idle_timeout_ms\": " +
+              std::to_string(idle_timeout_ms) + ",\n";
+    source += "  \"max_connections\": " +
+              std::to_string(max_connections) + ",\n";
+    source += "  \"max_header_bytes\": " +
+              std::to_string(max_header_bytes) + ",\n";
+    source += "  \"max_headers\": " + std::to_string(max_headers) +
+              ",\n";
+    source += "  \"max_body_bytes\": " +
+              std::to_string(max_body_bytes) + ",\n";
+    source += "  \"h2_max_concurrent_streams\": " +
+              std::to_string(h2_max_concurrent_streams) + ",\n";
+    source += "  \"stream_request_body\": ";
+    source += stream_request_body ? "true" : "false";
+    source += ",\n";
+    source += "  \"shared_state_path\": \"" +
+              escape_skein_string(shared_path) + "\",\n";
+    source += "  \"unsupported_501\": ";
+    source += unsupported_501 ? "true" : "false";
+    source += ",\n";
+    source += "  \"unsupported_message\": \"" +
+              escape_skein_string(unsupported_message) + "\"\n";
+    source += "});\n";
+    source += "println(\"ready\");\n";
+    source += "std.io.flush(std.io.stdout);\n";
+    source += "let served = ts.join();\n";
+    source += "println(\"served=\" + str(served));\n";
+    return source;
+}
+#endif
+
 value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (args.size() < 3 || args.size() > 6 || args[0]->type != T_dict ||
         args[1]->type != T_int ||
@@ -3171,6 +3236,8 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         options = args[3];
     }
 
+    long long workers = ((int_value_t *)args[1])->value;
+
     std::string strategy = "auto";
     if (options) {
         value_t *value = dict_get(options, "strategy");
@@ -3182,14 +3249,21 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             strategy = ((string_value_t *)value)->value;
         }
     }
-    if (strategy == "auto")
+    if (strategy == "auto") {
+#if SKEIN_HAS_REUSE_PORT
+        strategy = "reuse_port";
+#else
         strategy = "dispatch";
+#endif
+    }
+#if !SKEIN_HAS_REUSE_PORT
     if (strategy == "reuse_port") {
-        yyerror("std.http.serve_workers: process reuse_port is not "
-                "implemented yet");
+        yyerror("std.http.serve_workers: reuse_port is not supported "
+                "on this platform");
         return NULL;
     }
-    if (strategy != "dispatch") {
+#endif
+    if (strategy != "dispatch" && strategy != "reuse_port") {
         yyerror("std.http.serve_workers strategy must be "
                 "\"auto\", \"dispatch\" or \"reuse_port\"");
         return NULL;
@@ -3314,11 +3388,24 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         value_t *key = dict_get(args[0], "key");
         process_tls = cert && key;
     }
-    auto process_capability = [process_tls](const std::string &name) {
-        if (name == "http1" || name == "keep_alive" || name == "dispatch")
+    bool reuse_mode = strategy == "reuse_port";
+    bool http2_capable = false;
+#ifdef SKEIN_ENABLE_HTTP2
+    http2_capable = reuse_mode && process_tls;
+#endif
+    auto process_capability = [&](const std::string &name) {
+        if (name == "http1" || name == "keep_alive")
             return true;
+        if (name == "dispatch")
+            return !reuse_mode;
         if (name == "tls")
             return process_tls;
+        if (name == "reuse_port")
+            return reuse_mode;
+        if (name == "http2")
+            return http2_capable;
+        if (name == "stream_request_body" || name == "stream_response")
+            return reuse_mode;
         return false;
     };
     std::string missing;
@@ -3349,20 +3436,35 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         }
     }
 
+    long long max_connections = 0;
+    std::size_t max_header_bytes = 64 * 1024;
+    std::size_t max_headers = 100;
+    std::size_t max_body_bytes = 16 * 1024 * 1024;
+    bool stream_request_body = false;
+    long long h2_max_concurrent_streams = 16;
     if (options) {
-        long long max_connections = 0;
         if (!read_option("max_connections", max_connections))
             return NULL;
-        dict_set(args[0], "max_connections", newintval(max_connections));
-        std::size_t max_header_bytes = 64 * 1024;
-        std::size_t max_headers = 100;
-        std::size_t max_body_bytes = 16 * 1024 * 1024;
         if (!positive_size_option(options, "max_header_bytes",
                                   max_header_bytes) ||
             !positive_size_option(options, "max_headers", max_headers) ||
             !positive_size_option(options, "max_body_bytes",
                                   max_body_bytes))
             return NULL;
+        value_t *stream_value = dict_get(options, "stream_request_body");
+        if (stream_value) {
+            if (stream_value->type != T_bool) {
+                yyerror("std.http.serve_workers stream_request_body "
+                        "must be a bool");
+                return NULL;
+            }
+            stream_request_body =
+                ((bool_value_t *)stream_value)->value;
+        }
+        if (!read_option("h2_max_concurrent_streams",
+                         h2_max_concurrent_streams))
+            return NULL;
+        dict_set(args[0], "max_connections", newintval(max_connections));
         dict_set(args[0], "max_header_bytes",
                  newintval((long long)max_header_bytes));
         dict_set(args[0], "max_headers",
@@ -3371,34 +3473,238 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                  newintval((long long)max_body_bytes));
         dict_set(args[0], "worker_timeout_ms",
                  newintval(worker_timeout_ms));
+    } else {
+        value_t *max_connections_value =
+            dict_get(args[0], "max_connections");
+        if (max_connections_value) {
+            if (max_connections_value->type != T_int ||
+                ((int_value_t *)max_connections_value)->value < 0) {
+                yyerror("std.http.serve_workers max_connections must be "
+                        "a non-negative integer");
+                return NULL;
+            }
+            max_connections =
+                ((int_value_t *)max_connections_value)->value;
+        }
+        if (!positive_size_option(args[0], "max_header_bytes",
+                                  max_header_bytes) ||
+            !positive_size_option(args[0], "max_headers", max_headers) ||
+            !positive_size_option(args[0], "max_body_bytes",
+                                  max_body_bytes))
+            return NULL;
     }
 
     value_t *caps = (value_t *)newdictval();
     dict_set(caps, "schema", newintval(1));
     dict_set(caps, "platform",
              newstrval(http_platform_name().c_str()));
-    dict_set(caps, "strategy", newstrval("dispatch"));
+    dict_set(caps, "strategy", newstrval(strategy.c_str()));
     value_t *strategies = (value_t *)newlistval();
     ((list_value_t *)strategies)
         ->payload->items.push_back(newstrval("dispatch"));
+#if SKEIN_HAS_REUSE_PORT
+    ((list_value_t *)strategies)
+        ->payload->items.push_back(newstrval("reuse_port"));
+#endif
     dict_set(caps, "strategies", strategies);
     dict_set(caps, "http1", newboolval(true));
-    dict_set(caps, "http2", newboolval(false));
+    dict_set(caps, "http2", newboolval(http2_capable));
     dict_set(caps, "tls", newboolval(process_tls));
     dict_set(caps, "keep_alive", newboolval(true));
-    dict_set(caps, "stream_request_body", newboolval(false));
-    dict_set(caps, "stream_response", newboolval(false));
+    dict_set(caps, "stream_request_body",
+             newboolval(reuse_mode));
+    dict_set(caps, "stream_response", newboolval(reuse_mode));
     dict_set(caps, "websocket", newboolval(false));
     dict_set(caps, "sse", newboolval(false));
     dict_set(caps, "raw_socket", newboolval(false));
-    dict_set(caps, "reuse_port", newboolval(false));
-    dict_set(caps, "dispatch", newboolval(true));
-    dict_set(args[0], "strategy", newstrval("dispatch"));
+    dict_set(caps, "reuse_port", newboolval(reuse_mode));
+    dict_set(caps, "dispatch", newboolval(!reuse_mode));
+    dict_set(args[0], "strategy",
+             newstrval(strategy.c_str()));
     dict_set(args[0], "platform",
              newstrval(http_platform_name().c_str()));
     dict_set(args[0], "capabilities", caps);
 
+    (void)workers;
+    (void)stream_request_body;
+
     std::string user_script = ((string_value_t *)args[2])->value;
+
+#if SKEIN_HAS_REUSE_PORT
+    if (reuse_mode) {
+        value_t *host_value = dict_get(args[0], "host");
+        value_t *port_value = dict_get(args[0], "port");
+        std::string host = "127.0.0.1";
+        if (host_value && host_value->type == T_string)
+            host = ((string_value_t *)host_value)->value;
+        long long port = 0;
+        if (port_value && port_value->type == T_int)
+            port = ((int_value_t *)port_value)->value;
+        value_t *listener = dict_get(args[0], "socket");
+        if (port <= 0 && listener) {
+            value_t *addr =
+                call_net(B_net_local_addr, {dupval(listener)});
+            if (addr && addr->type == T_dict) {
+                value_t *p = dict_get(addr, "port");
+                if (p && p->type == T_int)
+                    port = ((int_value_t *)p)->value;
+            }
+            freeval(addr);
+        }
+        if (port <= 0) {
+            std::vector<value_t *> listen_args{
+                newstrval(host.c_str()), newintval(0), newintval(0)};
+            value_t *temp = call_net(B_net_tcp_listen, listen_args);
+            if (temp) {
+                value_t *addr =
+                    call_net(B_net_local_addr, {dupval(temp)});
+                if (addr && addr->type == T_dict) {
+                    value_t *p = dict_get(addr, "port");
+                    if (p && p->type == T_int)
+                        port = ((int_value_t *)p)->value;
+                }
+                freeval(addr);
+                call_net(B_net_close, {dupval(temp)});
+                freeval(temp);
+            }
+        }
+        if (port <= 0) {
+            yyerror("std.http.serve_workers: cannot determine "
+                    "reuse_port port");
+            return NULL;
+        }
+        if (listener)
+            call_net(B_net_close, {dupval(listener)});
+
+        std::string cert_file;
+        std::string key_file;
+        value_t *cert = dict_get(args[0], "cert");
+        value_t *key = dict_get(args[0], "key");
+        if (cert && key && cert->type == T_string &&
+            key->type == T_string) {
+            cert_file = ((string_value_t *)cert)->value;
+            key_file = ((string_value_t *)key)->value;
+        }
+
+        std::string temp_dir;
+        if (!platform_get_env("TMPDIR", temp_dir) &&
+            !platform_get_env("TEMP", temp_dir))
+            temp_dir = ".";
+        static std::atomic<unsigned long long> sequence{0};
+        unsigned long long stamp =
+            (unsigned long long)std::chrono::steady_clock::now()
+                .time_since_epoch()
+                .count();
+        unsigned long long serial = sequence.fetch_add(1);
+        std::string base = "skein-http-proc-" +
+                           std::to_string(stamp) + "-" +
+                           std::to_string(serial);
+        std::string shared_path = temp_dir + "/" + base + ".shm";
+        std::string bootstrap_path = temp_dir + "/" + base + ".skein";
+        std::string shared_error;
+        std::shared_ptr<http_shared_state> shared =
+            map_shared_state_file(shared_path, true, shared_error);
+        if (!shared) {
+            yyerror("std.http.serve_workers: %s", shared_error.c_str());
+            return NULL;
+        }
+        struct file_cleanup {
+            std::string shared;
+            std::string bootstrap;
+            ~file_cleanup() {
+                if (!shared.empty())
+                    std::remove(shared.c_str());
+                if (!bootstrap.empty())
+                    std::remove(bootstrap.c_str());
+            }
+        } cleanup_files{shared_path, bootstrap_path};
+
+        std::string source = make_reuse_port_bootstrap(
+            host, port, user_script, entry, max_requests,
+            max_per_connection, idle_timeout_ms, max_connections,
+            max_header_bytes, max_headers, max_body_bytes,
+            h2_max_concurrent_streams, stream_request_body, shared_path,
+            cert_file, key_file, unsupported_501, unsupported_message);
+        std::string write_error;
+        if (!platform_write_file(bootstrap_path, source, false,
+                                 write_error)) {
+            yyerror("std.http.serve_workers: cannot write reuse_port "
+                    "bootstrap: %s", write_error.c_str());
+            return NULL;
+        }
+
+        std::string executable = platform_executable_path();
+        if (executable.empty()) {
+            yyerror("std.http.serve_workers: cannot locate interpreter");
+            return NULL;
+        }
+        std::vector<value_t *> children;
+        auto stop_children = [&children]() {
+            for (value_t *process : children) {
+                call_process_spawn_builtin(B_process_kill,
+                                           {dupval(process)});
+                call_process_spawn_builtin(B_process_close,
+                                           {dupval(process)});
+                freeval(process);
+            }
+            children.clear();
+        };
+        for (long long i = 0; i < workers; ++i) {
+            value_t *file = newstrval(executable.c_str());
+            value_t *spawn_options = (value_t *)newdictval();
+            value_t *args_list = (value_t *)newlistval();
+            ((list_value_t *)args_list)->payload->items.push_back(
+                newstrval(bootstrap_path.c_str()));
+            dict_set(spawn_options, "args", args_list);
+            std::vector<value_t *> spawn_args{file, spawn_options};
+            value_t *process = call_process_spawn_builtin(
+                B_process_spawn, spawn_args);
+            freeval(file);
+            freeval(spawn_options);
+            if (!process) {
+                stop_children();
+                yyerror("std.http.serve_workers: cannot start worker "
+                        "process");
+                return NULL;
+            }
+            children.push_back(process);
+            value_t *stdout_stream = dict_get(process, "stdout");
+            value_t *line =
+                call_io(B_io_read_line, {dupval(stdout_stream)});
+            if (!line) {
+                stop_children();
+                yyerror("std.http.serve_workers: worker did not report "
+                        "ready");
+                return NULL;
+            }
+            std::string text;
+            if (line->type == T_bytes)
+                text = ((bytes_value_t *)line)->value;
+            else if (line->type == T_string)
+                text = ((string_value_t *)line)->value;
+            freeval(line);
+            if (text.find("ready") == std::string::npos) {
+                stop_children();
+                yyerror("std.http.serve_workers: worker failed: %s",
+                        text.c_str());
+                return NULL;
+            }
+        }
+        for (value_t *process : children) {
+            value_t *status = call_process_spawn_builtin(
+                B_process_wait, {dupval(process)});
+            freeval(status);
+            call_process_spawn_builtin(B_process_close,
+                                       {dupval(process)});
+        }
+        long long served = shared->served.load();
+        for (value_t *process : children)
+            freeval(process);
+        children.clear();
+        return newintval(served);
+    }
+#endif
+
     std::string bootstrap_source =
         make_worker_bootstrap(user_script, entry);
     worker_bootstrap_file bootstrap;
@@ -4275,6 +4581,46 @@ const native_type kThreadServerType = {
     nullptr,
 };
 
+std::shared_ptr<http_shared_state> map_shared_state_file(
+    const std::string &path, bool create, std::string &error) {
+#if defined(_WIN32)
+    (void)path;
+    (void)create;
+    error = "shared state is not supported on this platform";
+    return nullptr;
+#else
+    int fd = ::open(path.c_str(), O_RDWR | O_CREAT, 0600);
+    if (fd < 0) {
+        error = "cannot open shared state: " +
+                std::string(std::strerror(errno));
+        return nullptr;
+    }
+    if (::ftruncate(fd, (off_t)sizeof(http_shared_state)) != 0) {
+        int saved = errno;
+        ::close(fd);
+        error = "cannot size shared state: " +
+                std::string(std::strerror(saved));
+        return nullptr;
+    }
+    void *memory = ::mmap(nullptr, sizeof(http_shared_state),
+                          PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    int saved = errno;
+    ::close(fd);
+    if (memory == MAP_FAILED) {
+        error = "cannot map shared state: " +
+                std::string(std::strerror(saved));
+        return nullptr;
+    }
+    auto *state = reinterpret_cast<http_shared_state *>(memory);
+    if (create)
+        new (state) http_shared_state();
+    return std::shared_ptr<http_shared_state>(
+        state, [](http_shared_state *value) {
+            ::munmap(value, sizeof(http_shared_state));
+        });
+#endif
+}
+
 value_t *http_serve_threads(const std::vector<value_t *> &args) {
     if (args.size() < 3 || args.size() > 4 ||
         args[0]->type != T_dict || args[1]->type != T_int ||
@@ -4285,10 +4631,6 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
         return NULL;
     }
     value_t *socket = dict_get(args[0], "socket");
-    if (!socket) {
-        yyerror("std.http.serve_threads expects a std.http server");
-        return NULL;
-    }
     long long workers = ((int_value_t *)args[1])->value;
     std::string script = ((string_value_t *)args[2])->value;
 
@@ -4561,7 +4903,48 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
 #else
     state->http2_enabled = false;
 #endif
-    state->shared = std::make_shared<http_shared_state>();
+    value_t *shared_path_value =
+        options ? dict_get(options, "shared_state_path") : nullptr;
+    if (shared_path_value) {
+        if (shared_path_value->type != T_string) {
+            yyerror("std.http.serve_threads shared_state_path must be a "
+                    "string");
+            return NULL;
+        }
+        std::string shared_error;
+        state->shared = map_shared_state_file(
+            ((string_value_t *)shared_path_value)->value, false,
+            shared_error);
+        if (!state->shared) {
+            yyerror("std.http.serve_threads: %s", shared_error.c_str());
+            return NULL;
+        }
+    } else {
+        state->shared = std::make_shared<http_shared_state>();
+    }
+    if (options) {
+        value_t *unsupported = dict_get(options, "unsupported_501");
+        if (unsupported) {
+            if (unsupported->type != T_bool) {
+                yyerror("std.http.serve_threads unsupported_501 must be "
+                        "a bool");
+                return NULL;
+            }
+            state->unsupported_501 =
+                ((bool_value_t *)unsupported)->value;
+        }
+        value_t *unsupported_text =
+            dict_get(options, "unsupported_message");
+        if (unsupported_text) {
+            if (unsupported_text->type != T_string) {
+                yyerror("std.http.serve_threads unsupported_message "
+                        "must be a string");
+                return NULL;
+            }
+            state->unsupported_message =
+                ((string_value_t *)unsupported_text)->value;
+        }
+    }
 
     std::shared_ptr<thread_server_state> server =
         std::make_shared<thread_server_state>();
@@ -4592,7 +4975,8 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
         }
         std::string host = ((string_value_t *)host_value)->value;
         long long port = ((int_value_t *)port_value)->value;
-        call_net(B_net_close, {dupval(socket)});
+        if (socket)
+            call_net(B_net_close, {dupval(socket)});
         server->reuse = create_reuse_port_server(
             host, (int)port, script, entry, (std::size_t)workers,
             worker_vm, cert_file, key_file, state, error);
@@ -4604,6 +4988,11 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     }
 #endif
 
+    if (!socket) {
+        yyerror("std.http.serve_threads expects a std.http server for "
+                "dispatch");
+        return NULL;
+    }
     std::shared_ptr<thread_pool_link> pool = thread_pool_link_create(
         (std::size_t)workers, script, entry, queue_capacity, restart_limit,
         worker_vm, error);

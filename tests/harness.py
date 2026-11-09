@@ -321,6 +321,11 @@ def check_unicode_normalization_samples():
 
 
 def check_extended_stdlib():
+    reuse_platform = (
+        sys.platform.startswith("linux") or
+        sys.platform.startswith("freebsd") or
+        sys.platform.startswith("dragonfly")
+    )
     check(
         "std regex basics",
         "import std;\n"
@@ -809,14 +814,102 @@ def check_extended_stdlib():
             '{"strategy": "dispatch", "require": ["http2"]});\n',
             stderr="missing capabilities: http2",
         )
-        check(
-            "std.http serve_workers reuse_port pending",
-            "import std;\n"
-            'let s = std.http.listen("127.0.0.1", 0);\n'
-            f'let n = std.http.serve_workers(s, 1, "{serve_worker_path}", '
-            '{"strategy": "reuse_port"});\n',
-            stderr="process reuse_port is not implemented yet",
-        )
+        if reuse_platform:
+            workers_reuse_worker = os.path.join(
+                worker_tmp, "serve_workers_reuse_worker.skein")
+            with open(workers_reuse_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    "  return {\"status\": 200,\n"
+                    "          \"headers\": {\"X-Worker\": "
+                    "str(req[\"worker_id\"])},\n"
+                    "          \"body\": \"ok\"};\n"
+                    "}\n"
+                )
+            workers_reuse_path = workers_reuse_worker.replace("\\", "\\\\")
+            workers_reuse_script = os.path.join(
+                worker_tmp, "serve_workers_reuse.skein")
+            with open(workers_reuse_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    "println(s[\"port\"]);\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    f"let n = std.http.serve_workers(s, 4, "
+                    f"\"{workers_reuse_path}\", {{\"strategy\": "
+                    f"\"reuse_port\", \"max_requests\": 8}});\n"
+                    "println(\"served=\" + str(n));\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), workers_reuse_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                port_line = server.stdout.readline().strip()
+                assert port_line.isdigit(), (
+                    "serve_workers reuse_port did not report a port: "
+                    f"{port_line!r} / {server.stderr.read()}"
+                )
+                reuse_results = []
+                reuse_errors = []
+                reuse_lock = threading.Lock()
+
+                def workers_reuse_hit(index):
+                    last_error = None
+                    for _ in range(200):
+                        try:
+                            request = urllib.request.Request(
+                                f"http://127.0.0.1:{port_line}/r{index}")
+                            with urllib.request.urlopen(
+                                    request, timeout=5) as response:
+                                body = response.read()
+                                worker = response.headers.get("X-Worker")
+                            with reuse_lock:
+                                reuse_results.append(
+                                    (response.status, body, worker))
+                            return
+                        except Exception as exc:
+                            last_error = exc
+                            time.sleep(0.02)
+                    with reuse_lock:
+                        reuse_errors.append((index, repr(last_error)))
+
+                reuse_threads = [
+                    threading.Thread(target=workers_reuse_hit, args=(index,))
+                    for index in range(8)
+                ]
+                for thread in reuse_threads:
+                    thread.start()
+                for thread in reuse_threads:
+                    thread.join()
+                assert not reuse_errors, reuse_errors
+                assert len(reuse_results) == 8, reuse_results
+                assert all(status == 200 and body == b"ok"
+                           for status, body, _ in reuse_results), reuse_results
+                out, err = server.communicate(timeout=30)
+                assert server.returncode == 0, err
+                assert "served=8" in out, out
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+        else:
+            check(
+                "std.http serve_workers reuse_port unsupported",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let n = std.http.serve_workers(s, 1, '
+                f'"{serve_worker_path}", '
+                '{"strategy": "reuse_port"});\n',
+                stderr="reuse_port is not supported",
+            )
 
         workers_501_script = os.path.join(
             worker_tmp, "serve_workers_require_501.skein")
@@ -932,7 +1025,8 @@ def check_extended_stdlib():
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 f"println(std.http.serve_workers(s, 2, "
-                f"\"{slow_path}\", 2));\n"
+                f"\"{slow_path}\", {{\"strategy\": \"dispatch\", "
+                f"\"max_requests\": 2}}));\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), concurrent_script],
@@ -1199,11 +1293,6 @@ def check_extended_stdlib():
             'print("strategies="); print(len(c["strategies"]));\n',
             stdout_all=["schema=1", "platform=", "http1=true",
                         "websocket=false", "strategies="],
-        )
-        reuse_platform = (
-            sys.platform.startswith("linux") or
-            sys.platform.startswith("freebsd") or
-            sys.platform.startswith("dragonfly")
         )
         check(
             "std.http thread_capabilities dispatch",

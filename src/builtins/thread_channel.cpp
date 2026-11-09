@@ -2365,6 +2365,7 @@ struct value_t *thread_error_envelope(struct value_t *error) {
 
 void thread_proto_entry_main(
     std::shared_ptr<thread_state> state, skein::bc::ProtoPtr proto,
+    std::vector<std::pair<std::string, struct value_t *>> globals,
     struct value_t *argument,
     std::shared_ptr<const thread_env_snapshot> env_snapshot) {
     thread_env_install(env_snapshot);
@@ -2378,6 +2379,8 @@ void thread_proto_entry_main(
     }
     state->cv.notify_all();
     if (!proto) {
+        for (auto &entry : globals)
+            freeval(entry.second);
         freeval(argument);
         thread_worker_end();
         return;
@@ -2388,6 +2391,9 @@ void thread_proto_entry_main(
         if (std_namespace)
             save_global_symbol("std", std_namespace);
     }
+    for (auto &entry : globals)
+        save_global_symbol(entry.first.c_str(), entry.second);
+    globals.clear();
 
     eval_capture_snapshot snapshot;
     eval_capture_begin(snapshot);
@@ -2637,14 +2643,67 @@ struct value_t *thread_spawn_function(
         return nullptr;
     }
 
+    /* Snapshot only globals the entry actually touches.  Name constants are
+     * shared with field names, diagnostics and labels, so collect the names
+     * from the global opcodes instead of scanning every constant. */
+    std::vector<std::string> global_names;
+    std::unordered_set<std::string> seen_globals;
+    auto note_global = [&](const std::string &name) {
+        if (name.empty() || name == "std")
+            return;
+        if (seen_globals.insert(name).second)
+            global_names.push_back(name);
+    };
+    for (const skein::bc::Instr &ins : proto->code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadGlobal:
+            case skein::bc::Op::StoreGlobal:
+            case skein::bc::Op::CompoundGlobal:
+            case skein::bc::Op::IncDecGlobal:
+                if (ins.b < proto->consts.size()) {
+                    const skein::bc::Constant &constant =
+                        proto->consts[ins.b];
+                    if (constant.kind == skein::bc::ConstantKind::Name)
+                        note_global(constant.name);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto->index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Global)
+            note_global(index.base_name);
+    }
+    std::vector<std::pair<std::string, struct value_t *>> globals;
+    for (const std::string &name : global_names) {
+        struct symbol *symbol = lookupsym(name.c_str());
+        if (!symbol || !symbol->val)
+            continue;
+        std::unordered_set<const void *> visiting;
+        std::string capture_error;
+        struct value_t *value =
+            copy_data_value(symbol->val, visiting, capture_error);
+        if (!value) {
+            for (auto &entry : globals)
+                freeval(entry.second);
+            yyerror("std.thread.spawn_function: global %s: %s",
+                    name.c_str(), capture_error.c_str());
+            return nullptr;
+        }
+        globals.emplace_back(name, value);
+    }
+
     std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
     state->id = next_thread_id.fetch_add(1);
     struct value_t *argument = dupval(args[1]);
     try {
         state->thread = std::thread(thread_proto_entry_main, state,
-                                    std::move(proto), argument,
-                                    thread_env_capture());
+                                    std::move(proto), std::move(globals),
+                                    argument, thread_env_capture());
     } catch (const std::exception &) {
+        for (auto &entry : globals)
+            freeval(entry.second);
         freeval(argument);
         yyerror("std.thread.spawn_function could not start thread");
         return nullptr;

@@ -3127,8 +3127,33 @@ def check_extended_stdlib():
                 "let t3 = std.thread.spawn(std_worker, "
                 'std.thread.Message.from({"n": 9}));\n'
                 "let r3 = t3.join();\n"
-                'print("s=" + str(r3["value"]["v"]) + "|");\n',
-                stdout_all=["v=5|", "f=7|", "s=9|"],
+                'print("s=" + str(r3["value"]["v"]) + "|");\n'
+                "let base = 10;\n"
+                'let config = {"factor": 3};\n'
+                "thread func glob_worker(ctx) {\n"
+                '    return {"v": ctx.payload["n"] + base};\n'
+                "}\n"
+                "thread func dict_worker(ctx) {\n"
+                "    return {\"v\": ctx.payload[\"n\"] * "
+                "config[\"factor\"]};\n"
+                "}\n"
+                "let t4 = std.thread.spawn(glob_worker, "
+                'std.thread.Message.from({"n": 4}));\n'
+                "let r4 = t4.join();\n"
+                "let t5 = std.thread.spawn(dict_worker, "
+                'std.thread.Message.from({"n": 4}));\n'
+                "let r5 = t5.join();\n"
+                'print("g=" + str(r4["value"]["v"]) + ":" + '
+                'str(r5["value"]["v"]) + "|");\n'
+                "let field_helper = func() { return 1; };\n"
+                "thread func shadow_worker(ctx) {\n"
+                '    return {"v": ctx.payload["field_helper"] + base};\n'
+                "}\n"
+                "let t6 = std.thread.spawn(shadow_worker, "
+                'std.thread.Message.from({"field_helper": 4}));\n'
+                "let r6 = t6.join();\n"
+                'print("h=" + str(r6["value"]["v"]) + "|");\n',
+                stdout_all=["v=5|", "f=7|", "s=9|", "g=14:12|", "h=14|"],
             )
             check(
                 "std.thread spawn plain function rejected",

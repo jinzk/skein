@@ -10,6 +10,12 @@ bool event_loop_init();
 bool event_loop_initialized();
 uv_loop_t *event_loop_handle();
 
+/* Thread-safe wakeup for fibers blocked on non-I/O state (channels, etc.).
+ * The handle belongs to the loop of the thread that created it; callers on
+ * other threads may pass it to event_loop_wake(). */
+void *event_loop_wake_handle();
+void event_loop_wake(void *handle);
+
 enum event_wait_result {
     EVENT_WAIT_OK,
     EVENT_WAIT_TIMEOUT,

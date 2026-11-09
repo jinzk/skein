@@ -13,6 +13,7 @@ bool fiber_available();
 bool fiber_in_fiber();
 task_ptr fiber_start_async(std::function<value_t *()> body);
 value_t *fiber_await_task(const task_ptr &task);
+bool fiber_wait_for(std::function<bool()> ready, long long timeout_ms);
 value_t *fiber_yield_value(value_t *value);
 
 generator_ptr generator_create(std::function<value_t *()> body);

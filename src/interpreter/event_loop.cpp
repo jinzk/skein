@@ -8,6 +8,8 @@ namespace {
 struct event_loop_runtime {
     uv_loop_t loop;
     uv_timer_t ticker;
+    uv_async_t wake;
+    bool has_wake = false;
     bool initialized = false;
 };
 
@@ -17,6 +19,10 @@ event_loop_runtime &runtime() {
 }
 
 void on_timer_close(uv_handle_t *) {}
+
+void on_loop_wake(uv_async_t *) {
+    /* Wake uv_run(); the caller's fiber_pump() rechecks fiber predicates. */
+}
 
 } // namespace
 
@@ -46,6 +52,24 @@ bool event_loop_initialized() {
 
 uv_loop_t *event_loop_handle() {
     return runtime().initialized ? &runtime().loop : NULL;
+}
+
+void *event_loop_wake_handle() {
+    event_loop_runtime &state = runtime();
+    if (!state.initialized)
+        return NULL;
+    if (!state.has_wake) {
+        if (uv_async_init(&state.loop, &state.wake, on_loop_wake) != 0)
+            return NULL;
+        uv_unref((uv_handle_t *)&state.wake);
+        state.has_wake = true;
+    }
+    return &state.wake;
+}
+
+void event_loop_wake(void *handle) {
+    if (handle)
+        uv_async_send((uv_async_t *)handle);
 }
 
 event_timeout make_event_timeout(long long timeout_ms) {
@@ -97,6 +121,10 @@ void event_loop_shutdown() {
         return;
     uv_timer_stop(&state.ticker);
     uv_close((uv_handle_t *)&state.ticker, on_timer_close);
+    if (state.has_wake) {
+        uv_close((uv_handle_t *)&state.wake, on_timer_close);
+        state.has_wake = false;
+    }
     uv_run(&state.loop, UV_RUN_DEFAULT);
     uv_loop_close(&state.loop);
     state.initialized = false;

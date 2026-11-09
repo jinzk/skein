@@ -59,6 +59,7 @@ struct fiber {
     std::function<value_t *()> body;
     task_ptr task;
     task_ptr await_task;
+    std::function<bool()> wait_ready;
     fiber_state state = FIBER_READY;
     fiber_kind kind = FIBER_TASK;
     value_t *yielded_value = NULL;
@@ -113,6 +114,25 @@ void make_ready(fiber *value) {
     value->state = FIBER_READY;
     value->queued = true;
     ready_fibers.push_back(value);
+}
+
+bool fiber_wait_satisfied(fiber *value) {
+    if (!value)
+        return true;
+    if (value->canceled)
+        return true;
+    bool waiting = false;
+    if (value->await_task) {
+        waiting = true;
+        if (task_get_state(value->await_task) != TASK_STATE_PENDING)
+            return true;
+    }
+    if (value->wait_ready) {
+        waiting = true;
+        if (value->wait_ready())
+            return true;
+    }
+    return !waiting;
 }
 
 void switch_into(fiber *value, fiber *previous) {
@@ -375,8 +395,7 @@ bool generator_next_value(const generator_ptr &generator,
             break;
         uv_run(event_loop_handle(), UV_RUN_ONCE);
         fiber_pump();
-        if (!current->await_task ||
-            task_get_state(current->await_task) != TASK_STATE_PENDING) {
+        if (fiber_wait_satisfied(current)) {
             fiber *caller = current_fiber;
             switch_into(current, caller);
         }
@@ -444,8 +463,7 @@ bool generator_close(const generator_ptr &generator) {
             break;
         uv_run(event_loop_handle(), UV_RUN_ONCE);
         fiber_pump();
-        if (!current->await_task ||
-            task_get_state(current->await_task) != TASK_STATE_PENDING) {
+        if (fiber_wait_satisfied(current)) {
             fiber *caller = current_fiber;
             switch_into(current, caller);
         }
@@ -561,6 +579,29 @@ value_t *fiber_await_task(const task_ptr &task) {
     return await_result(task);
 }
 
+bool fiber_wait_for(std::function<bool()> ready, long long timeout_ms) {
+    fiber *value = current_fiber;
+    if (!value) {
+        if (!ready || ready())
+            return true;
+        return false;
+    }
+    if (value->canceled)
+        return false;
+
+    task_ptr timer;
+    if (timeout_ms > 0)
+        timer = new_sleep_task(timeout_ms);
+
+    value->wait_ready = std::move(ready);
+    value->await_task = timer;
+    suspend_current();
+    value->wait_ready = nullptr;
+    value->await_task = nullptr;
+    bool canceled = value->canceled;
+    return !canceled;
+}
+
 void fiber_pump() {
     struct skein_context *runtime = skein_context_current();
     if (runtime && runtime->drain_background)
@@ -570,10 +611,8 @@ void fiber_pump() {
             fiber *value = all_fibers[i];
             if (value->state != FIBER_WAITING)
                 continue;
-            if (value->canceled || !value->await_task ||
-                task_get_state(value->await_task) != TASK_STATE_PENDING) {
+            if (fiber_wait_satisfied(value))
                 make_ready(value);
-            }
         }
 
         if (ready_fibers.empty())

@@ -19,6 +19,7 @@ enum task_state_code {
 };
 
 task_ptr task_create();
+task_ptr new_sleep_task(long long timeout_ms);
 struct value_t *new_task_value(task_ptr task);
 void task_set_cancel(const task_ptr &task, std::function<void()> cancel);
 void task_complete(const task_ptr &task, struct value_t *result);

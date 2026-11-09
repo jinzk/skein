@@ -61,6 +61,8 @@ struct channel_state : std::enable_shared_from_this<channel_state> {
     std::deque<struct value_t *> queue;
     std::vector<channel_waiter *> recv_waiters;
     std::vector<channel_waiter *> send_waiters;
+    std::vector<void *> recv_fiber_wakes;
+    std::vector<void *> send_fiber_wakes;
     long long capacity = 0; /* -1 means unbounded */
     bool closed = false;
 
@@ -71,11 +73,30 @@ struct channel_state : std::enable_shared_from_this<channel_state> {
     }
 };
 
+void wake_fiber_handles(const std::vector<void *> &handles) {
+    for (void *handle : handles)
+        event_loop_wake(handle);
+}
+
+void add_fiber_handle(std::vector<void *> &handles, void *handle) {
+    if (handle)
+        handles.push_back(handle);
+}
+
+void remove_fiber_handle(std::vector<void *> &handles, void *handle) {
+    if (!handle)
+        return;
+    auto it = std::find(handles.begin(), handles.end(), handle);
+    if (it != handles.end())
+        handles.erase(it);
+}
+
 void notify_recv_waiters(channel_state &state) {
     for (channel_waiter *waiter : state.recv_waiters) {
         waiter->ready.store(true, std::memory_order_release);
         waiter->cv.notify_all();
     }
+    wake_fiber_handles(state.recv_fiber_wakes);
 }
 
 void notify_send_waiters(channel_state &state) {
@@ -83,6 +104,7 @@ void notify_send_waiters(channel_state &state) {
         waiter->ready.store(true, std::memory_order_release);
         waiter->cv.notify_all();
     }
+    wake_fiber_handles(state.send_fiber_wakes);
 }
 
 void remove_waiter(std::vector<channel_waiter *> &waiters,
@@ -365,6 +387,12 @@ struct value_t *channel_send_value(
 
     if (blocking && fiber_in_fiber()) {
         const auto start = std::chrono::steady_clock::now();
+        void *wake_handle = event_loop_wake_handle();
+        auto ready = [state] {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            return state->closed || state->capacity < 0 ||
+                   state->queue.size() < (size_t)state->capacity;
+        };
         for (;;) {
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
@@ -379,20 +407,39 @@ struct value_t *channel_send_value(
                     state->cv.notify_all();
                     return newnull();
                 }
+                add_fiber_handle(state->send_fiber_wakes, wake_handle);
             }
-            if (g_interrupted)
+            if (g_interrupted) {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                remove_fiber_handle(state->send_fiber_wakes, wake_handle);
                 return nullptr;
+            }
+            long long remaining = 0;
             if (timeout_ms > 0) {
                 const long long elapsed =
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - start)
                         .count();
-                if (elapsed >= timeout_ms) {
+                remaining = timeout_ms - elapsed;
+                if (remaining <= 0) {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    remove_fiber_handle(state->send_fiber_wakes, wake_handle);
                     yyerror("thread.timeout: channel send timed out");
                     return nullptr;
                 }
             }
-            channel_fiber_sleep(1);
+            bool alive = true;
+            if (wake_handle) {
+                alive = fiber_wait_for(ready, remaining);
+            } else {
+                channel_fiber_sleep(1);
+            }
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                remove_fiber_handle(state->send_fiber_wakes, wake_handle);
+            }
+            if (!alive)
+                return nullptr;
         }
     }
 
@@ -446,6 +493,11 @@ struct value_t *channel_recv_value_status(
     result = channel_recv_result::closed;
     if (fiber_in_fiber()) {
         const auto start = std::chrono::steady_clock::now();
+        void *wake_handle = event_loop_wake_handle();
+        auto ready = [state] {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            return state->closed || !state->queue.empty();
+        };
         for (;;) {
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
@@ -458,23 +510,39 @@ struct value_t *channel_recv_value_status(
                 }
                 if (state->closed)
                     return newnull();
+                add_fiber_handle(state->recv_fiber_wakes, wake_handle);
             }
-            if (g_interrupted)
+            if (g_interrupted) {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                remove_fiber_handle(state->recv_fiber_wakes, wake_handle);
                 return nullptr;
-            long long sleep_ms = 1;
+            }
+            long long remaining = 0;
             if (timeout_ms > 0) {
                 const long long elapsed =
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - start)
                         .count();
-                const long long remaining = timeout_ms - elapsed;
+                remaining = timeout_ms - elapsed;
                 if (remaining <= 0) {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    remove_fiber_handle(state->recv_fiber_wakes, wake_handle);
                     result = channel_recv_result::timeout;
                     return nullptr;
                 }
-                sleep_ms = remaining < 1 ? remaining : 1;
             }
-            channel_fiber_sleep(sleep_ms);
+            bool alive = true;
+            if (wake_handle) {
+                alive = fiber_wait_for(ready, remaining);
+            } else {
+                channel_fiber_sleep(1);
+            }
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                remove_fiber_handle(state->recv_fiber_wakes, wake_handle);
+            }
+            if (!alive)
+                return nullptr;
         }
     }
 

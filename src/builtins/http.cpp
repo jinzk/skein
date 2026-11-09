@@ -3216,6 +3216,298 @@ std::string make_reuse_port_bootstrap(
 }
 #endif
 
+struct http_capabilities {
+    bool http1 = true;
+    bool http2 = false;
+    bool tls = false;
+    bool keep_alive = true;
+    bool stream_request_body = false;
+    bool stream_response = false;
+    bool websocket = false;
+    bool sse = false;
+    bool raw_socket = false;
+    bool reuse_port = false;
+    bool dispatch = true;
+    std::string strategy;
+    std::vector<std::string> strategies;
+    std::string platform;
+};
+
+http_capabilities make_capabilities(const std::string &strategy,
+                                    bool tls, bool http2,
+                                    bool stream_body) {
+    http_capabilities caps;
+    caps.strategy = strategy;
+    caps.tls = tls;
+    caps.http2 = http2;
+    caps.stream_request_body = stream_body;
+    caps.stream_response = strategy == "reuse_port";
+    caps.reuse_port =
+        strategy == "reuse_port" && SKEIN_HAS_REUSE_PORT != 0;
+    caps.dispatch = true;
+    caps.platform = http_platform_name();
+    caps.strategies.push_back("dispatch");
+#if SKEIN_HAS_REUSE_PORT
+    caps.strategies.push_back("reuse_port");
+#endif
+    return caps;
+}
+
+bool capability_enabled(const http_capabilities &caps,
+                        const std::string &name) {
+    if (name == "http1") return caps.http1;
+    if (name == "http2") return caps.http2;
+    if (name == "tls") return caps.tls;
+    if (name == "keep_alive") return caps.keep_alive;
+    if (name == "stream_request_body") return caps.stream_request_body;
+    if (name == "stream_response") return caps.stream_response;
+    if (name == "websocket") return caps.websocket;
+    if (name == "sse") return caps.sse;
+    if (name == "raw_socket") return caps.raw_socket;
+    if (name == "reuse_port") return caps.reuse_port;
+    if (name == "dispatch") return caps.dispatch;
+    return false;
+}
+
+value_t *capabilities_value(const http_capabilities &caps) {
+    value_t *result = (value_t *)newdictval();
+    dict_set(result, "schema", newintval(1));
+    dict_set(result, "platform", newstrval(caps.platform.c_str()));
+    dict_set(result, "strategy", newstrval(caps.strategy.c_str()));
+    value_t *strategies = (value_t *)newlistval();
+    for (const std::string &name : caps.strategies)
+        ((list_value_t *)strategies)
+            ->payload->items.push_back(newstrval(name.c_str()));
+    dict_set(result, "strategies", strategies);
+    dict_set(result, "http1", newboolval(caps.http1));
+    dict_set(result, "http2", newboolval(caps.http2));
+    dict_set(result, "tls", newboolval(caps.tls));
+    dict_set(result, "keep_alive", newboolval(caps.keep_alive));
+    dict_set(result, "stream_request_body",
+             newboolval(caps.stream_request_body));
+    dict_set(result, "stream_response",
+             newboolval(caps.stream_response));
+    dict_set(result, "websocket", newboolval(caps.websocket));
+    dict_set(result, "sse", newboolval(caps.sse));
+    dict_set(result, "raw_socket", newboolval(caps.raw_socket));
+    dict_set(result, "reuse_port", newboolval(caps.reuse_port));
+    dict_set(result, "dispatch", newboolval(caps.dispatch));
+    return result;
+}
+
+struct process_server_state
+    : std::enable_shared_from_this<process_server_state> {
+    std::string strategy;
+    bool tls = false;
+    bool unsupported_501 = false;
+    std::string unsupported_message;
+    std::shared_ptr<http_shared_state> shared;
+    long long workers = 0;
+    long long max_requests = 0;
+    std::string script;
+    std::string entry = "handle";
+
+    value_t *pool = nullptr;
+    task_ptr server_task;
+    bool pool_shutdown = false;
+
+    std::vector<value_t *> children;
+    bool joined = false;
+    std::mutex mutex;
+
+    ~process_server_state();
+};
+
+void process_server_stop_children(process_server_state *server, bool wait) {
+    for (value_t *process : server->children) {
+        if (wait) {
+            value_t *status = call_process_spawn_builtin(
+                B_process_wait, {process});
+            if (status)
+                freeval(status);
+        } else {
+            value_t *killed = call_process_spawn_builtin(
+                B_process_kill, {process});
+            if (killed)
+                freeval(killed);
+        }
+        value_t *closed = call_process_spawn_builtin(
+            B_process_close, {process});
+        if (closed)
+            freeval(closed);
+        freeval(process);
+    }
+    server->children.clear();
+}
+
+void process_server_close_pool(process_server_state *server) {
+    if (!server->pool || server->pool_shutdown)
+        return;
+    server->pool_shutdown = true;
+    value_t *result = call_worker_builtin(
+        B_worker_shutdown, {server->pool});
+    if (result)
+        freeval(result);
+    freeval(server->pool);
+    server->pool = nullptr;
+}
+
+process_server_state::~process_server_state() {
+    if (shared)
+        shared->stopping.store(true);
+    process_server_stop_children(this, false);
+    process_server_close_pool(this);
+}
+
+long long process_server_join(process_server_state *server) {
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        if (server->joined)
+            return server->shared ? server->shared->served.load() : 0;
+        server->joined = true;
+    }
+    if (server->server_task) {
+        value_t *result = fiber_await_task(server->server_task);
+        if (result)
+            freeval(result);
+        server->server_task = nullptr;
+    }
+    process_server_stop_children(server, true);
+    process_server_close_pool(server);
+    return server->shared ? server->shared->served.load() : 0;
+}
+
+value_t *process_server_build_stats(process_server_state *server) {
+    value_t *stats = nullptr;
+    long long workers = server->workers;
+    bool joined = false;
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        joined = server->joined;
+    }
+    if (server->pool) {
+        stats = call_worker_builtin(B_worker_stats, {server->pool});
+        if (!stats)
+            return nullptr;
+        long long available = 0;
+        value_t *available_value = dict_get(stats, "available");
+        if (available_value && available_value->type == T_int)
+            available = ((int_value_t *)available_value)->value;
+        dict_set(stats, "size", newintval(workers));
+        dict_set(stats, "ready", newintval(available));
+        dict_set(stats, "alive", newintval(available));
+        dict_set(stats, "dead",
+                 newintval(workers > available ? workers - available : 0));
+        dict_set(stats, "restart_limit", newintval(0));
+        dict_set(stats, "submitted", newintval(0));
+        dict_set(stats, "completed",
+                 newintval(server->shared ? server->shared->served.load()
+                                          : 0));
+        dict_set(stats, "failed", newintval(0));
+        dict_set(stats, "active", newintval(0));
+    } else {
+        stats = (value_t *)newdictval();
+        long long alive = joined ? 0 : workers;
+        dict_set(stats, "size", newintval(workers));
+        dict_set(stats, "workers", newintval(workers));
+        dict_set(stats, "ready", newintval(workers));
+        dict_set(stats, "alive", newintval(alive));
+        dict_set(stats, "dead", newintval(joined ? workers : 0));
+        dict_set(stats, "restarts", newintval(0));
+        dict_set(stats, "restart_limit", newintval(0));
+        dict_set(stats, "submitted",
+                 newintval(server->shared ? server->shared->claimed.load()
+                                          : 0));
+        dict_set(stats, "completed",
+                 newintval(server->shared ? server->shared->served.load()
+                                          : 0));
+        dict_set(stats, "failed", newintval(0));
+        dict_set(stats, "active", newintval(0));
+        dict_set(stats, "queued", newintval(0));
+    }
+    dict_set(stats, "served",
+             newintval(server->shared ? server->shared->served.load() : 0));
+    dict_set(stats, "stopping",
+             newboolval(server->shared ? server->shared->stopping.load()
+                                       : false));
+    dict_set(stats, "strategy", newstrval(server->strategy.c_str()));
+    dict_set(stats, "max_requests", newintval(server->max_requests));
+    return stats;
+}
+
+std::string process_server_describe(const void *) {
+    return "<process_server>";
+}
+
+value_t *process_server_get_field(void *data, const char *name) {
+    process_server_state *raw = static_cast<process_server_state *>(data);
+    if (!raw || !name) {
+        yyerror("std.http.ProcessServer has no such field");
+        return nullptr;
+    }
+    std::shared_ptr<process_server_state> server = raw->shared_from_this();
+
+    if (std::strcmp(name, "stop") == 0) {
+        return newnativeval(
+            [server](const std::vector<value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("ProcessServer.stop expects no arguments");
+                    return (value_t *)nullptr;
+                }
+                if (server->shared)
+                    server->shared->stopping.store(true);
+                return newnull();
+            },
+            server);
+    }
+    if (std::strcmp(name, "join") == 0) {
+        return newnativeval(
+            [server](const std::vector<value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("ProcessServer.join expects no arguments");
+                    return (value_t *)nullptr;
+                }
+                return newintval(process_server_join(server.get()));
+            },
+            server);
+    }
+    if (std::strcmp(name, "stats") == 0) {
+        return newnativeval(
+            [server](const std::vector<value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("ProcessServer.stats expects no arguments");
+                    return (value_t *)nullptr;
+                }
+                return process_server_build_stats(server.get());
+            },
+            server);
+    }
+    if (std::strcmp(name, "strategy") == 0)
+        return newstrval(server->strategy.c_str());
+    if (std::strcmp(name, "served") == 0)
+        return newintval(server->shared ? server->shared->served.load() : 0);
+    if (std::strcmp(name, "capabilities") == 0) {
+        bool http2 = false;
+#ifdef SKEIN_ENABLE_HTTP2
+        http2 = server->strategy == "reuse_port" && server->tls;
+#endif
+        bool stream_body = server->strategy == "reuse_port";
+        return capabilities_value(make_capabilities(
+            server->strategy, server->tls, http2, stream_body));
+    }
+    yyerror("std.http.ProcessServer has no field %s", name);
+    return nullptr;
+}
+
+const native_type kProcessServerType = {
+    "process_server",
+    process_server_describe,
+    nullptr,
+    process_server_get_field,
+    nullptr,
+    nullptr,
+};
+
 value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (args.size() < 3 || args.size() > 6 || args[0]->type != T_dict ||
         args[1]->type != T_int ||
@@ -3641,10 +3933,8 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         std::vector<value_t *> children;
         auto stop_children = [&children]() {
             for (value_t *process : children) {
-                call_process_spawn_builtin(B_process_kill,
-                                           {dupval(process)});
-                call_process_spawn_builtin(B_process_close,
-                                           {dupval(process)});
+                call_process_spawn_builtin(B_process_kill, {process});
+                call_process_spawn_builtin(B_process_close, {process});
                 freeval(process);
             }
             children.clear();
@@ -3690,18 +3980,20 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                 return NULL;
             }
         }
-        for (value_t *process : children) {
-            value_t *status = call_process_spawn_builtin(
-                B_process_wait, {dupval(process)});
-            freeval(status);
-            call_process_spawn_builtin(B_process_close,
-                                       {dupval(process)});
-        }
-        long long served = shared->served.load();
-        for (value_t *process : children)
-            freeval(process);
+        std::shared_ptr<process_server_state> server =
+            std::make_shared<process_server_state>();
+        server->strategy = strategy;
+        server->tls = !cert_file.empty();
+        server->unsupported_501 = unsupported_501;
+        server->unsupported_message = unsupported_message;
+        server->shared = shared;
+        server->workers = workers;
+        server->max_requests = max_requests;
+        server->script = user_script;
+        server->entry = entry;
+        server->children = std::move(children);
         children.clear();
-        return newintval(served);
+        return newuserdataval(&kProcessServerType, server);
     }
 #endif
 
@@ -3728,16 +4020,37 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (!pool)
         return NULL;
 
-    struct pool_holder {
-        value_t *pool = nullptr;
-        ~pool_holder() { freeval(pool); }
-    };
-    std::shared_ptr<pool_holder> holder =
-        std::make_shared<pool_holder>();
-    holder->pool = pool;
+    std::string cert_file;
+    std::string key_file;
+    value_t *cert = dict_get(args[0], "cert");
+    value_t *key = dict_get(args[0], "key");
+    if (cert && key) {
+        if (cert->type != T_string || key->type != T_string) {
+            freeval(pool);
+            yyerror("std.http.serve_workers: invalid TLS server "
+                    "certificate");
+            return NULL;
+        }
+        cert_file = ((string_value_t *)cert)->value;
+        key_file = ((string_value_t *)key)->value;
+    }
+
+    std::shared_ptr<process_server_state> server =
+        std::make_shared<process_server_state>();
+    server->strategy = strategy;
+    server->tls = !cert_file.empty();
+    server->unsupported_501 = unsupported_501;
+    server->unsupported_message = unsupported_message;
+    server->shared = std::make_shared<http_shared_state>();
+    server->workers = workers;
+    server->max_requests = max_requests;
+    server->script = user_script;
+    server->entry = entry;
+    server->pool = dupval(pool);
+    freeval(pool);
 
     value_t *handler = newnativeval(
-        [holder, worker_timeout_ms, unsupported_501,
+        [server, worker_timeout_ms, unsupported_501,
          unsupported_message](
             const std::vector<value_t *> &call_args) -> value_t * {
             auto error_response = [](int status, const std::string &message) {
@@ -3772,7 +4085,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             items->payload->items.push_back(dupval(dict_get(request, "headers")));
             value_t *method = newstrval("handle");
             value_t *body_arg = newbytesval(body);
-            std::vector<value_t *> call{holder->pool, method, params,
+            std::vector<value_t *> call{server->pool, method, params,
                                         body_arg};
             value_t *timeout_value = nullptr;
             if (worker_timeout_ms > 0) {
@@ -3832,17 +4145,40 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             freeval(worker_result);
             return response;
         },
-        holder);
+        server);
 
-    std::vector<value_t *> serve_args{args[0], handler};
-    serve_args.push_back(newintval(max_requests));
-    serve_args.push_back(newintval(max_per_connection));
-    serve_args.push_back(newintval(idle_timeout_ms));
-    value_t *served = http_serve(serve_args);
-    for (size_t i = 2; i < serve_args.size(); ++i)
-        freeval(serve_args[i]);
+    std::shared_ptr<http_server_state> state =
+        std::make_shared<http_server_state>();
+    state->max_requests = max_requests;
+    state->max_per_connection = max_per_connection;
+    state->idle_timeout_ms = idle_timeout_ms;
+    state->max_connections = max_connections;
+    state->stream_request_body = false;
+    state->max_header_bytes = max_header_bytes;
+    state->max_headers = max_headers;
+    state->max_body_bytes = max_body_bytes;
+    state->shared = server->shared;
+    state->unsupported_501 = unsupported_501;
+    state->unsupported_message = unsupported_message;
+
+    value_t *socket = dict_get(args[0], "socket");
+    if (!socket) {
+        process_server_close_pool(server.get());
+        yyerror("std.http.serve_workers expects a std.http server for "
+                "dispatch");
+        return NULL;
+    }
+
+    task_ptr task = start_http_server(socket, handler, state, cert_file,
+                                      key_file);
     freeval(handler);
-    return served;
+    if (!task) {
+        process_server_close_pool(server.get());
+        yyerror("std.http.serve_workers could not start the server");
+        return NULL;
+    }
+    server->server_task = task;
+    return newuserdataval(&kProcessServerType, server);
 }
 
 value_t *thread_server_response(int status, const std::string &message) {
@@ -3868,85 +4204,6 @@ std::string http_platform_name() {
 #else
     return "unix";
 #endif
-}
-
-struct http_capabilities {
-    bool http1 = true;
-    bool http2 = false;
-    bool tls = false;
-    bool keep_alive = true;
-    bool stream_request_body = false;
-    bool stream_response = false;
-    bool websocket = false;
-    bool sse = false;
-    bool raw_socket = false;
-    bool reuse_port = false;
-    bool dispatch = true;
-    std::string strategy;
-    std::vector<std::string> strategies;
-    std::string platform;
-};
-
-http_capabilities make_capabilities(const std::string &strategy,
-                                    bool tls, bool http2,
-                                    bool stream_body) {
-    http_capabilities caps;
-    caps.strategy = strategy;
-    caps.tls = tls;
-    caps.http2 = http2;
-    caps.stream_request_body = stream_body;
-    caps.stream_response = strategy == "reuse_port";
-    caps.reuse_port =
-        strategy == "reuse_port" && SKEIN_HAS_REUSE_PORT != 0;
-    caps.dispatch = true;
-    caps.platform = http_platform_name();
-    caps.strategies.push_back("dispatch");
-#if SKEIN_HAS_REUSE_PORT
-    caps.strategies.push_back("reuse_port");
-#endif
-    return caps;
-}
-
-bool capability_enabled(const http_capabilities &caps,
-                        const std::string &name) {
-    if (name == "http1") return caps.http1;
-    if (name == "http2") return caps.http2;
-    if (name == "tls") return caps.tls;
-    if (name == "keep_alive") return caps.keep_alive;
-    if (name == "stream_request_body") return caps.stream_request_body;
-    if (name == "stream_response") return caps.stream_response;
-    if (name == "websocket") return caps.websocket;
-    if (name == "sse") return caps.sse;
-    if (name == "raw_socket") return caps.raw_socket;
-    if (name == "reuse_port") return caps.reuse_port;
-    if (name == "dispatch") return caps.dispatch;
-    return false;
-}
-
-value_t *capabilities_value(const http_capabilities &caps) {
-    value_t *result = (value_t *)newdictval();
-    dict_set(result, "schema", newintval(1));
-    dict_set(result, "platform", newstrval(caps.platform.c_str()));
-    dict_set(result, "strategy", newstrval(caps.strategy.c_str()));
-    value_t *strategies = (value_t *)newlistval();
-    for (const std::string &name : caps.strategies)
-        ((list_value_t *)strategies)
-            ->payload->items.push_back(newstrval(name.c_str()));
-    dict_set(result, "strategies", strategies);
-    dict_set(result, "http1", newboolval(caps.http1));
-    dict_set(result, "http2", newboolval(caps.http2));
-    dict_set(result, "tls", newboolval(caps.tls));
-    dict_set(result, "keep_alive", newboolval(caps.keep_alive));
-    dict_set(result, "stream_request_body",
-             newboolval(caps.stream_request_body));
-    dict_set(result, "stream_response",
-             newboolval(caps.stream_response));
-    dict_set(result, "websocket", newboolval(caps.websocket));
-    dict_set(result, "sse", newboolval(caps.sse));
-    dict_set(result, "raw_socket", newboolval(caps.raw_socket));
-    dict_set(result, "reuse_port", newboolval(caps.reuse_port));
-    dict_set(result, "dispatch", newboolval(caps.dispatch));
-    return result;
 }
 
 bool request_unsupported_feature(value_t *request,

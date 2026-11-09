@@ -766,13 +766,16 @@ def check_extended_stdlib():
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"let n = std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_workers(s, 1, "
                 f"\"{serve_worker_path}\", "
                 f"{{\"strategy\": \"dispatch\", \"max_requests\": 1}});\n"
                 "println(\"server=\" + s[\"strategy\"] + \":\" + "
                 "s[\"platform\"] + \":\" + "
                 "str(s[\"capabilities\"][\"http1\"]));\n"
-                "println(n);\n"
+                "println(\"ps=\" + ps.strategy + \":\" + "
+                "str(ps.capabilities[\"dispatch\"]) + \":\" + "
+                "str(ps.stats()[\"workers\"]));\n"
+                "println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), serve_script],
@@ -799,6 +802,7 @@ def check_extended_stdlib():
             out, err = server.communicate(timeout=10)
             assert server.returncode == 0, err
             assert "server=dispatch:" in out, out
+            assert "ps=dispatch:true:1" in out, out
             assert ":true" in out, out
             assert out.rstrip().endswith("1"), out
         finally:
@@ -836,10 +840,16 @@ def check_extended_stdlib():
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                     "println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
-                    f"let n = std.http.serve_workers(s, 4, "
+                    f"let ps = std.http.serve_workers(s, 4, "
                     f"\"{workers_reuse_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"max_requests\": 8}});\n"
-                    "println(\"served=\" + str(n));\n"
+                    "println(\"info=\" + ps.strategy + \":\" + "
+                    "str(ps.capabilities[\"reuse_port\"]) + \":\" + "
+                    "str(ps.stats()[\"workers\"]));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "let served = ps.join();\n"
+                    "println(\"served=\" + str(served));\n"
+                    "println(\"served_after=\" + str(ps.served));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), workers_reuse_script],
@@ -895,7 +905,74 @@ def check_extended_stdlib():
                            for status, body, _ in reuse_results), reuse_results
                 out, err = server.communicate(timeout=30)
                 assert server.returncode == 0, err
+                assert "info=reuse_port:true:4" in out, out
                 assert "served=8" in out, out
+                assert "served_after=8" in out, out
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+
+            workers_stop_script = os.path.join(
+                worker_tmp, "serve_workers_stop.skein")
+            with open(workers_stop_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    "println(s[\"port\"]);\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    f"let ps = std.http.serve_workers(s, 2, "
+                    f"\"{workers_reuse_path}\", {{\"strategy\": "
+                    f"\"reuse_port\"}});\n"
+                    "println(\"ready\");\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "std.time.sleep(1500);\n"
+                    "ps.stop();\n"
+                    "println(\"stopping=\" + str(ps.stats()[\"stopping\"]));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "println(\"served=\" + str(ps.join()));\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), workers_stop_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                port_line = server.stdout.readline().strip()
+                assert port_line.isdigit(), (
+                    "serve_workers stop did not report a port: "
+                    f"{port_line!r} / {server.stderr.read()}"
+                )
+                ready_line = server.stdout.readline().strip()
+                assert ready_line == "ready", (
+                    "serve_workers stop did not become ready: "
+                    f"{ready_line!r} / {server.stderr.read()}"
+                )
+                stop_result = None
+                for _ in range(100):
+                    try:
+                        with urllib.request.urlopen(
+                                f"http://127.0.0.1:{port_line}/one",
+                                timeout=5) as response:
+                            stop_result = (response.status, response.read())
+                        break
+                    except Exception:
+                        time.sleep(0.02)
+                assert stop_result == (200, b"ok"), stop_result
+                out, err = server.communicate(timeout=30)
+                assert server.returncode == 0, err
+                assert "stopping=true" in out, out
+                served_values = [
+                    int(line.split("=", 1)[1])
+                    for line in out.splitlines()
+                    if line.startswith("served=")
+                ]
+                assert served_values and served_values[-1] >= 1, out
             finally:
                 if server.poll() is None:
                     server.kill()
@@ -919,11 +996,12 @@ def check_extended_stdlib():
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"println(std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_workers(s, 1, "
                 f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"require\": [\"http2\"], "
                 f"\"on_unsupported\": \"501\", "
-                f"\"max_requests\": 1}}));\n"
+                f"\"max_requests\": 1}});\n"
+                "println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), workers_501_script],
@@ -962,9 +1040,10 @@ def check_extended_stdlib():
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"println(std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_workers(s, 1, "
                 f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
-                f"\"max_requests\": 2}}));\n"
+                f"\"max_requests\": 2}});\n"
+                "println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), workers_features_script],
@@ -1024,9 +1103,10 @@ def check_extended_stdlib():
                 "s[\"worker_timeout_ms\"] = 10000;\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"println(std.http.serve_workers(s, 2, "
+                f"let ps = std.http.serve_workers(s, 2, "
                 f"\"{slow_path}\", {{\"strategy\": \"dispatch\", "
-                f"\"max_requests\": 2}}));\n"
+                f"\"max_requests\": 2}});\n"
+                "println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), concurrent_script],

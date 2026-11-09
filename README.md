@@ -724,20 +724,24 @@ std.http.close(s);
 - 达到限制或空闲超时后发送 `Connection: close` 并关闭连接；
 - 返回已处理请求数。
 
-主进程 accept + 子进程处理：
+主进程 + 进程 worker 处理：
 
 ```text
-std.http.serve_workers(server, workers, script
-                       [, max_requests[, max_per_connection
-                       [, idle_timeout_ms]]]) -> served
+std.http.serve_workers(server, workers, script[, options])
+  -> ProcessServer
 
-std.http.serve_workers(server, workers, script, options) -> served
+ProcessServer.stop()
+ProcessServer.join() -> served
+ProcessServer.stats() -> dict
+ProcessServer.strategy -> string
+ProcessServer.capabilities -> dict
+ProcessServer.served -> int
 ```
 
 `options`：
 
 ```text
-strategy            "auto" / "dispatch" / "reuse_port"（当前进程模式仅 dispatch；reuse_port 尚未实现）
+strategy            "auto" / "dispatch" / "reuse_port"，默认 "auto"
 entry               worker 入口，默认 "handle"
 require             []，能力列表
 on_unsupported      "error"（默认）/ "501" / "warn"
@@ -751,30 +755,44 @@ max_headers         默认 100
 max_body_bytes      默认 16 MiB
 ```
 
-- HTTP 连接、TLS、keep-alive 仍由主进程处理；
-- 每个请求通过内部 bootstrap + hybrid IPC 发给进程 worker；
+- `strategy: "auto"` 在 Linux/BSD 选择 `reuse_port`，在 Windows 选择 `dispatch`；
+- `dispatch`：accept、TLS、keep-alive 由主进程处理，每个请求通过内部
+  bootstrap + hybrid IPC 发给进程 worker；
+- `reuse_port`：父进程创建 POSIX 共享内存并启动多个子进程；每个子进程内部
+  运行 `serve_threads(1, ..., strategy:"reuse_port", shared_state_path:...)`，
+  独立 bind + listen + accept；
+- `reuse_port` 的 `max_requests` / `served` 通过共享 mmap atomic 跨进程精确计数；
+- 当前仅 Linux/BSD 支持进程 `reuse_port`；其他平台显式请求会报错；
 - 用户脚本导出 `handle(req)`，不再手写 IPC 协议：
   ```skein
   func handle(req) {
       return {"status": 200, "headers": {}, "body": "ok"};
   }
   ```
-- request dict 当前包含 `method/path/headers/body`；
+- request dict 当前包含 `method/path/headers/body`；reuse_port 额外包含
+  `worker_id`；
 - worker 返回值必须是 `{status, headers, body}`；
 - `body_stream` 在进程 dispatch 下返回 501；
 - `worker_timeout_ms` 控制单次 worker 调用超时，默认 30000，`0` 表示不超时；
 - worker 调用使用异步等待，多个连接可以并发占用不同 worker；
-- 当前不支持 `stream_request_body`，该模式返回 501；
-- WebSocket upgrade / SSE 在进程 dispatch 模式返回 501；
+- `stream_request_body` 仅 `reuse_port` 支持；dispatch 下 capability 为
+  false，请求返回 501；
+- `reuse_port` + TLS 支持 HTTP/2 ALPN；WebSocket upgrade / SSE 在进程模式
+  返回 501；
 - `server["strategy"]` / `server["platform"]` / `server["capabilities"]`
   会在启动后写入；
 - `require` / `on_unsupported` 语义与 `serve_threads` 一致；
-- 进程池 Linux `reuse_port` 仍在迁移中。
+- `serve_workers` 立即返回 `ProcessServer`，`join()` 等待所有 worker 结束并
+  返回已处理请求数。
 
-```text
+```skein
+import std;
+
 let s = std.http.listen("127.0.0.1", 8080);
-let served = std.http.serve_workers(
-  s, 4, "worker.skein", 1000);
+let ps = std.http.serve_workers(
+  s, 4, "worker.skein", {"max_requests": 1000});
+print(ps.strategy);
+let served = ps.join();
 ```
 
 进程内线程池处理：

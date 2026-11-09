@@ -3118,8 +3118,17 @@ def check_extended_stdlib():
                 "let t2 = std.thread.spawn_function(plain, "
                 'std.thread.Message.from({"n": 7}));\n'
                 "let r2 = t2.join();\n"
-                'print("f=" + str(r2["value"]["v"]) + "|");\n',
-                stdout_all=["v=5|", "f=7|"],
+                'print("f=" + str(r2["value"]["v"]) + "|");\n'
+                "thread func std_worker(ctx) {\n"
+                "    let items = std.list.append([1], "
+                'ctx.payload["n"]);\n'
+                '    return {"v": items[1]};\n'
+                "}\n"
+                "let t3 = std.thread.spawn(std_worker, "
+                'std.thread.Message.from({"n": 9}));\n'
+                "let r3 = t3.join();\n"
+                'print("s=" + str(r3["value"]["v"]) + "|");\n',
+                stdout_all=["v=5|", "f=7|", "s=9|"],
             )
             check(
                 "std.thread spawn plain function rejected",

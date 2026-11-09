@@ -941,7 +941,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
                           node->is_thread_entry != 0,
                           node->ast ? node->ast->line : 0,
                           node->ast ? node->ast->column : 0,
-                          diag_current_module_name(), {}},
+                          diag_current_module_name(), {}, {}, {}},
         free_function_code);
     code->source = diag_current_source_name();
     code->is_thread_entry = node->is_thread_entry != 0;

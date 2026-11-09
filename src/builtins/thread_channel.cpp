@@ -16,6 +16,7 @@
 #include "runtime_context.h"
 #include "runtime_state.h"
 #include "scopestack.h"
+#include "std_namespace.h"
 #include "structtype.h"
 #include "symbol.h"
 #include "task.h"
@@ -2380,6 +2381,12 @@ void thread_proto_entry_main(
         freeval(argument);
         thread_worker_end();
         return;
+    }
+
+    {
+        struct value_t *std_namespace = skein::stdlib::build_namespace();
+        if (std_namespace)
+            save_global_symbol("std", std_namespace);
     }
 
     eval_capture_snapshot snapshot;

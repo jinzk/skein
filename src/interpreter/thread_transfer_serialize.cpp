@@ -30,6 +30,44 @@ struct value_deleter {
 using owned_value = std::shared_ptr<struct value_t>;
 using owned_type = std::shared_ptr<struct type_constraint>;
 
+struct value_owner {
+    struct value_t *pointer = nullptr;
+
+    value_owner() = default;
+    explicit value_owner(struct value_t *value) : pointer(value) {}
+    value_owner(const value_owner &) = delete;
+    value_owner &operator=(const value_owner &) = delete;
+    value_owner(value_owner &&other) noexcept : pointer(other.pointer) {
+        other.pointer = nullptr;
+    }
+    value_owner &operator=(value_owner &&other) noexcept {
+        if (this != &other) {
+            reset();
+            pointer = other.pointer;
+            other.pointer = nullptr;
+        }
+        return *this;
+    }
+    ~value_owner() { reset(); }
+
+    struct value_t *get() const { return pointer; }
+    struct value_t *release() {
+        struct value_t *value = pointer;
+        pointer = nullptr;
+        return value;
+    }
+    void reset() {
+        if (pointer) {
+            freeval(pointer);
+            pointer = nullptr;
+        }
+    }
+};
+
+owned_value take_owned(value_owner &owner) {
+    return owned_value(owner.release(), value_deleter());
+}
+
 owned_type make_owned_type(struct type_constraint *type) {
     return owned_type(type, [](struct type_constraint *value) {
         free_type_constraint(value);
@@ -235,6 +273,10 @@ enum class value_tag : uint8_t {
     Result,
     List,
     Dict,
+    Set,
+    Deque,
+    Lru,
+    Builtin,
 };
 
 bool write_value(writer &out, const struct value_t *value, int depth,
@@ -324,6 +366,48 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             }
             return true;
         }
+        case T_set: {
+            const struct set_value_t *set = (const struct set_value_t *)value;
+            std::vector<struct value_t *> items;
+            set_values_in_order(set->payload.get(), items);
+            out.u8((uint8_t)value_tag::Set);
+            out.u32((uint32_t)items.size());
+            for (const struct value_t *item : items) {
+                if (!write_value(out, item, depth + 1, error))
+                    return false;
+            }
+            return true;
+        }
+        case T_deque: {
+            const struct deque_value_t *deque =
+                (const struct deque_value_t *)value;
+            std::vector<struct value_t *> items;
+            deque_items_in_order(deque->payload.get(), items);
+            out.u8((uint8_t)value_tag::Deque);
+            out.u32((uint32_t)items.size());
+            for (const struct value_t *item : items) {
+                if (!write_value(out, item, depth + 1, error))
+                    return false;
+            }
+            return true;
+        }
+        case T_lru: {
+            const struct lru_value_t *lru = (const struct lru_value_t *)value;
+            out.u8((uint8_t)value_tag::Lru);
+            out.u64((uint64_t)lru->payload->capacity);
+            out.u32((uint32_t)lru->payload->items.size());
+            for (const auto &item : lru->payload->items) {
+                if (!write_value(out, item.first, depth + 1, error) ||
+                    !write_value(out, item.second, depth + 1, error))
+                    return false;
+            }
+            return true;
+        }
+        case T_builtin:
+            out.u8((uint8_t)value_tag::Builtin);
+            out.u32((uint32_t)((const struct builtin_value_t *)value)
+                        ->functype);
+            return true;
         default:
             error = std::string("cannot serialize value of type ") +
                     typename_of(value);
@@ -336,10 +420,10 @@ bool write_value(writer &out, const struct value_t *value, int depth,
     return write_value_inner(out, value, depth, error);
 }
 
-bool read_value(reader &in, owned_value &value, int depth,
+bool read_value(reader &in, value_owner &value, int depth,
                 std::string &error);
 
-bool read_value_inner(reader &in, owned_value &value, int depth,
+bool read_value_inner(reader &in, value_owner &value, int depth,
                       std::string &error) {
     if (depth > kMaxDepth) {
         error = "thread payload value nesting is too deep";
@@ -352,7 +436,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
     }
     switch ((value_tag)tag) {
         case value_tag::Null:
-            value = owned_value(newnull(), value_deleter());
+            value = value_owner(newnull());
             return true;
         case value_tag::Bool: {
             uint8_t raw = 0;
@@ -360,7 +444,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newboolval(raw != 0), value_deleter());
+            value = value_owner(newboolval(raw != 0));
             return true;
         }
         case value_tag::Int: {
@@ -369,7 +453,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newintval((long long)raw), value_deleter());
+            value = value_owner(newintval((long long)raw));
             return true;
         }
         case value_tag::Float: {
@@ -378,7 +462,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newfloatval(raw), value_deleter());
+            value = value_owner(newfloatval(raw));
             return true;
         }
         case value_tag::Char: {
@@ -387,7 +471,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newcharval(raw), value_deleter());
+            value = value_owner(newcharval(raw));
             return true;
         }
         case value_tag::Byte: {
@@ -396,7 +480,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newbyteval(raw), value_deleter());
+            value = value_owner(newbyteval(raw));
             return true;
         }
         case value_tag::String: {
@@ -405,7 +489,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newstrval(raw.c_str()), value_deleter());
+            value = value_owner(newstrval(raw.c_str()));
             return true;
         }
         case value_tag::Bytes: {
@@ -414,7 +498,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newbytesval(std::move(raw)), value_deleter());
+            value = value_owner(newbytesval(std::move(raw)));
             return true;
         }
         case value_tag::Error: {
@@ -424,7 +508,7 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            value = owned_value(newerrorval(kind, message), value_deleter());
+            value = value_owner(newerrorval(kind, message));
             return true;
         }
         case value_tag::Result: {
@@ -433,14 +517,12 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 error = in.error;
                 return false;
             }
-            owned_value nested;
+            value_owner nested;
             if (!read_value(in, nested, depth + 1, error))
                 return false;
-            struct value_t *raw = nested.get();
-            nested.reset();
-            value = owned_value(ok ? newresultok(raw)
-                                   : newresulterr(raw),
-                                value_deleter());
+            struct value_t *raw = nested.release();
+            value = value_owner(ok ? newresultok(raw)
+                                   : newresulterr(raw));
             return true;
         }
         case value_tag::List: {
@@ -450,13 +532,12 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 return false;
             }
             struct list_value_t *list = newlistval();
-            value = owned_value((struct value_t *)list, value_deleter());
+            value = value_owner((struct value_t *)list);
             for (uint32_t i = 0; i < count; ++i) {
-                owned_value item;
+                value_owner item;
                 if (!read_value(in, item, depth + 1, error))
                     return false;
-                list->payload->items.push_back(item.get());
-                item.reset();
+                list->payload->items.push_back(item.release());
             }
             return true;
         }
@@ -468,21 +549,97 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
                 return false;
             }
             struct dict_value_t *dict = newdictval();
-            value = owned_value((struct value_t *)dict, value_deleter());
+            value = value_owner((struct value_t *)dict);
             dict->payload->is_namespace = namespace_flag != 0;
             for (uint32_t i = 0; i < count; ++i) {
-                owned_value key;
-                owned_value item;
+                value_owner key;
+                value_owner item;
                 if (!read_value(in, key, depth + 1, error) ||
                     !read_value(in, item, depth + 1, error)) {
                     return false;
                 }
-                struct value_t *raw_key = key.get();
-                struct value_t *raw_item = item.get();
-                key.reset();
-                item.reset();
-                dict_append_item(dict, raw_key, raw_item);
+                dict_append_item(dict, key.release(), item.release());
             }
+            return true;
+        }
+        case value_tag::Set: {
+            uint32_t count = 0;
+            if (!in.count(count)) {
+                error = in.error;
+                return false;
+            }
+            struct set_value_t *set = newsetval();
+            value = value_owner((struct value_t *)set);
+            std::shared_ptr<set_node> root = set->payload->root;
+            std::shared_ptr<deque_payload> order = set->payload->order;
+            std::size_t size = 0;
+            for (uint32_t i = 0; i < count; ++i) {
+                value_owner item;
+                if (!read_value(in, item, depth + 1, error))
+                    return false;
+                bool added = false;
+                root = set_insert(root, item.get(), added);
+                if (added) {
+                    order = deque_push_back_payload(order, item.get());
+                    ++size;
+                }
+            }
+            set->payload->root = std::move(root);
+            set->payload->order = std::move(order);
+            set->payload->size = size;
+            return true;
+        }
+        case value_tag::Deque: {
+            uint32_t count = 0;
+            if (!in.count(count)) {
+                error = in.error;
+                return false;
+            }
+            struct deque_value_t *deque = newdequeval();
+            value = value_owner((struct value_t *)deque);
+            std::shared_ptr<deque_payload> payload = deque->payload;
+            for (uint32_t i = 0; i < count; ++i) {
+                value_owner item;
+                if (!read_value(in, item, depth + 1, error))
+                    return false;
+                payload = deque_push_back_payload(payload, item.get());
+            }
+            deque->payload = std::move(payload);
+            return true;
+        }
+        case value_tag::Lru: {
+            uint64_t capacity = 0;
+            uint32_t count = 0;
+            if (!in.u64(capacity) || !in.count(count)) {
+                error = in.error;
+                return false;
+            }
+            if (count > capacity) {
+                error = "thread payload LRU item count exceeds capacity";
+                return false;
+            }
+            struct lru_value_t *lru =
+                newlruval((std::size_t)capacity);
+            value = value_owner((struct value_t *)lru);
+            for (uint32_t i = 0; i < count; ++i) {
+                value_owner key;
+                value_owner item;
+                if (!read_value(in, key, depth + 1, error) ||
+                    !read_value(in, item, depth + 1, error)) {
+                    return false;
+                }
+                lru->payload->items.emplace_back(key.release(),
+                                                 item.release());
+            }
+            return true;
+        }
+        case value_tag::Builtin: {
+            uint32_t functype = 0;
+            if (!in.u32(functype)) {
+                error = in.error;
+                return false;
+            }
+            value = value_owner(newbuiltinval((int)functype));
             return true;
         }
     }
@@ -490,9 +647,165 @@ bool read_value_inner(reader &in, owned_value &value, int depth,
     return false;
 }
 
-bool read_value(reader &in, owned_value &value, int depth,
+bool read_value(reader &in, value_owner &value, int depth,
                 std::string &error) {
     return read_value_inner(in, value, depth, error);
+}
+
+bool write_proto(writer &out, const skein::bc::Proto &proto,
+                 std::string &error);
+bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
+                std::string &error);
+
+bool write_pattern(writer &out, const skein::bc::PatternDesc &pattern,
+                   std::string &error) {
+    out.u8((uint8_t)pattern.kind);
+    out.str(pattern.name);
+    out.str(pattern.module);
+    out.str(pattern.type_name);
+    out.str(pattern.variant);
+    out.u8(pattern.kind == skein::bc::PatternDesc::Kind::Type ? 1 : 0);
+    if (pattern.kind == skein::bc::PatternDesc::Kind::Type)
+        write_type(out, &pattern.type);
+    out.i64((int64_t)pattern.range_start);
+    out.i64((int64_t)pattern.range_end);
+    out.u8(pattern.literal_value ? 1 : 0);
+    if (pattern.literal_value &&
+        !write_value(out, pattern.literal_value.get(), 0, error))
+        return false;
+    out.u8(pattern.literal_expr ? 1 : 0);
+    if (pattern.literal_expr) {
+        if (!write_proto(out, *pattern.literal_expr, error))
+            return false;
+    }
+    out.u32((uint32_t)pattern.items.size());
+    for (uint32_t item : pattern.items)
+        out.u32(item);
+    out.u32(pattern.child);
+    out.u32((uint32_t)pattern.fields.size());
+    for (const skein::bc::PatternFieldDesc &field : pattern.fields) {
+        out.str(field.key);
+        out.str(field.rest_name);
+        out.u32(field.pattern);
+        out.u8(field.rest ? 1 : 0);
+    }
+    out.u32((uint32_t)pattern.binding_slots.size());
+    for (const skein::bc::PatternSlotDesc &slot : pattern.binding_slots) {
+        out.str(slot.name);
+        out.u32(slot.slot);
+    }
+    out.u8(pattern.is_dict ? 1 : 0);
+    return true;
+}
+
+bool read_pattern(reader &in, skein::bc::PatternDesc &pattern,
+                  std::string &error) {
+    uint8_t kind = 0;
+    if (!in.u8(kind) || !in.str(pattern.name) || !in.str(pattern.module) ||
+        !in.str(pattern.type_name) || !in.str(pattern.variant)) {
+        error = in.error;
+        return false;
+    }
+    pattern.kind = (skein::bc::PatternDesc::Kind)kind;
+    uint8_t has_type = 0;
+    if (!in.u8(has_type)) {
+        error = in.error;
+        return false;
+    }
+    if (has_type) {
+        if (!read_type_value(in, pattern.type, error))
+            return false;
+    } else {
+        type_constraint_set_any(&pattern.type);
+    }
+    int64_t range_start = 0;
+    int64_t range_end = 0;
+    if (!in.i64(range_start) || !in.i64(range_end)) {
+        error = in.error;
+        return false;
+    }
+    pattern.range_start = (long long)range_start;
+    pattern.range_end = (long long)range_end;
+
+    uint8_t has_literal = 0;
+    if (!in.u8(has_literal)) {
+        error = in.error;
+        return false;
+    }
+    if (has_literal) {
+        value_owner value;
+        if (!read_value(in, value, 0, error))
+            return false;
+        pattern.literal_value = take_owned(value);
+    }
+    uint8_t has_expr = 0;
+    if (!in.u8(has_expr)) {
+        error = in.error;
+        return false;
+    }
+    if (has_expr) {
+        std::shared_ptr<skein::bc::Proto> expr;
+        if (!read_proto(in, expr, error))
+            return false;
+        pattern.literal_expr = std::move(expr);
+    }
+
+    uint32_t item_count = 0;
+    if (!in.count(item_count)) {
+        error = in.error;
+        return false;
+    }
+    pattern.items.reserve(item_count);
+    for (uint32_t i = 0; i < item_count; ++i) {
+        uint32_t item = 0;
+        if (!in.u32(item)) {
+            error = in.error;
+            return false;
+        }
+        pattern.items.push_back(item);
+    }
+    if (!in.u32(pattern.child)) {
+        error = in.error;
+        return false;
+    }
+    uint32_t field_count = 0;
+    if (!in.count(field_count)) {
+        error = in.error;
+        return false;
+    }
+    pattern.fields.reserve(field_count);
+    for (uint32_t i = 0; i < field_count; ++i) {
+        skein::bc::PatternFieldDesc field;
+        uint8_t rest = 0;
+        if (!in.str(field.key) || !in.str(field.rest_name) ||
+            !in.u32(field.pattern) || !in.u8(rest)) {
+            error = in.error;
+            return false;
+        }
+        field.rest = rest != 0;
+        pattern.fields.push_back(std::move(field));
+    }
+    uint32_t slot_count = 0;
+    if (!in.count(slot_count)) {
+        error = in.error;
+        return false;
+    }
+    pattern.binding_slots.reserve(slot_count);
+    for (uint32_t i = 0; i < slot_count; ++i) {
+        skein::bc::PatternSlotDesc slot;
+        if (!in.str(slot.name) || !in.u32(slot.slot)) {
+            error = in.error;
+            return false;
+        }
+        pattern.binding_slots.push_back(std::move(slot));
+    }
+    uint8_t is_dict = 0;
+    if (!in.u8(is_dict)) {
+        error = in.error;
+        return false;
+    }
+    pattern.is_dict = is_dict != 0;
+    return true;
 }
 
 bool write_transfer(
@@ -552,12 +865,12 @@ bool read_transfer(
             value = thread_transfer_value();
             return true;
         case 1: {
-            owned_value data;
+            value_owner data;
             if (!read_value(in, data, depth + 1, error))
                 return false;
             value = thread_transfer_value();
             value.kind = thread_transfer_value::Kind::Data;
-            value.data = std::move(data);
+            value.data = take_owned(data);
             return true;
         }
         case 2: {
@@ -612,10 +925,6 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
     if (!proto.packages.empty()) {
         error = "cannot serialize a Proto with nested packages";
-        return false;
-    }
-    if (!proto.patterns.empty() || !proto.match_arms.empty()) {
-        error = "cannot serialize a Proto with patterns";
         return false;
     }
     if (!proto.constructs.empty() || !proto.field_or_enum.empty()) {
@@ -704,6 +1013,20 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
         out.u32((uint32_t)call.spread.size());
         for (bool spread : call.spread)
             out.u8(spread ? 1 : 0);
+    }
+
+    out.u32((uint32_t)proto.patterns.size());
+    for (const skein::bc::PatternDesc &pattern : proto.patterns) {
+        if (!write_pattern(out, pattern, error))
+            return false;
+    }
+    out.u32((uint32_t)proto.match_arms.size());
+    for (const auto &arms : proto.match_arms) {
+        out.u32((uint32_t)arms.size());
+        for (const skein::bc::MatchArmDesc &arm : arms) {
+            out.u32(arm.pattern);
+            out.u8(arm.has_guard ? 1 : 0);
+        }
     }
 
     out.u32((uint32_t)proto.param_names.size());
@@ -809,10 +1132,10 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         constant.kind = (skein::bc::ConstantKind)kind;
         switch (constant.kind) {
             case skein::bc::ConstantKind::Value: {
-                owned_value value;
+                value_owner value;
                 if (!read_value(in, value, 0, error))
                     return false;
-                constant.value = std::move(value);
+                constant.value = take_owned(value);
                 break;
             }
             case skein::bc::ConstantKind::Name:
@@ -948,6 +1271,46 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             call.spread.push_back(spread != 0);
         }
         proto->call_descs.push_back(std::move(call));
+    }
+
+    uint32_t pattern_count = 0;
+    if (!in.count(pattern_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->patterns.reserve(pattern_count);
+    for (uint32_t i = 0; i < pattern_count; ++i) {
+        skein::bc::PatternDesc pattern;
+        if (!read_pattern(in, pattern, error))
+            return false;
+        proto->patterns.push_back(std::move(pattern));
+    }
+
+    uint32_t match_count = 0;
+    if (!in.count(match_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->match_arms.reserve(match_count);
+    for (uint32_t i = 0; i < match_count; ++i) {
+        uint32_t arm_count = 0;
+        if (!in.count(arm_count)) {
+            error = in.error;
+            return false;
+        }
+        std::vector<skein::bc::MatchArmDesc> arms;
+        arms.reserve(arm_count);
+        for (uint32_t j = 0; j < arm_count; ++j) {
+            skein::bc::MatchArmDesc arm;
+            uint8_t guard = 0;
+            if (!in.u32(arm.pattern) || !in.u8(guard)) {
+                error = in.error;
+                return false;
+            }
+            arm.has_guard = guard != 0;
+            arms.push_back(arm);
+        }
+        proto->match_arms.push_back(std::move(arms));
     }
 
     uint32_t param_count = 0;

@@ -3369,6 +3369,37 @@ def check_extended_stdlib():
                 stdout_all=["encoded=14|"],
             )
             check(
+                "std.thread encode containers and patterns",
+                "import std;\n"
+                "let s = std.set.from_list([1, 2, 3]);\n"
+                "let d = std.deque.from_list([4, 5]);\n"
+                "let l = std.lru.new(2);\n"
+                'let r0 = std.lru.put(l, "a", 7);\n'
+                'l = r0["lru"];\n'
+                'r0 = std.lru.put(l, "b", 8);\n'
+                'l = r0["lru"];\n'
+                "func make_worker(sv, dv, lv) {\n"
+                "    thread func worker(ctx) {\n"
+                '        let n = ctx.payload["n"];\n'
+                "        let m = match n { case 1 => 10; "
+                "default => 20; };\n"
+                '        let got = std.lru.get(lv, "a");\n'
+                '        return {"s": std.set.values(sv), '
+                '"d": std.deque.to_list(dv), '
+                '"l": got["value"], "m": m};\n'
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let blob = std.thread.encode(make_worker(s, d, l));\n"
+                "let t = std.thread.spawn_encoded(blob, "
+                'std.thread.Message.from({"n": 1}));\n'
+                "let r = t.join();\n"
+                'print("s=" + str(r["value"]["s"]) + "|d=" + '
+                'str(r["value"]["d"]) + "|l=" + str(r["value"]["l"]) + '
+                '"|m=" + str(r["value"]["m"]) + "|");\n',
+                stdout_all=["s=[1, 2, 3]|d=[4, 5]|l=7|m=10|"],
+            )
+            check(
                 "std.thread transfer rejects defaults",
                 "import std;\n"
                 "func with_default(x, y = 2) { return x + y; }\n"

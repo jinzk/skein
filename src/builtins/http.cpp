@@ -3540,7 +3540,7 @@ value_t *process_server_get_field(void *data, const char *name) {
     if (std::strcmp(name, "capabilities") == 0) {
         bool http2 = false;
 #ifdef SKEIN_ENABLE_HTTP2
-        http2 = server->strategy == "reuse_port" && server->tls;
+        http2 = server->strategy == "reuse_port";
 #endif
         bool stream_body = server->strategy == "reuse_port";
         return capabilities_value(make_capabilities(
@@ -3734,7 +3734,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     bool reuse_mode = strategy == "reuse_port";
     bool http2_capable = false;
 #ifdef SKEIN_ENABLE_HTTP2
-    http2_capable = reuse_mode && process_tls;
+    http2_capable = reuse_mode;
 #endif
     auto process_capability = [&](const std::string &name) {
         if (name == "http1" || name == "keep_alive")
@@ -4495,30 +4495,64 @@ void reuse_port_worker_main(
     http_connection_fn connection_fn;
 #ifdef SKEIN_ENABLE_HTTP2
     if (server->http2_enabled) {
-        connection_fn = [](value_t *stream, value_t *handler,
+        auto serve_h2 = [](value_t *stream, value_t *handler,
                            http_server_state *state) {
-            std::string protocol;
-            value_t *selected =
-                call_tls(B_tls_alpn, {dupval(stream)});
-            if (selected && selected->type == T_string)
-                protocol = ((string_value_t *)selected)->value;
-            freeval(selected);
-            if (protocol == "h2") {
-                h2_connection_config config;
-                config.max_requests = state->max_requests;
-                config.max_per_connection = state->max_per_connection;
-                config.idle_timeout_ms = state->idle_timeout_ms;
-                config.max_body_bytes = state->max_body_bytes;
-                config.stream_request_body = state->stream_request_body;
-                config.on_request_body = nullptr;
-                config.max_concurrent_streams =
-                    state->h2_max_concurrent_streams;
-                http2_serve_connection(stream, handler, config,
-                                       state->shared);
-                return;
-            }
-            handle_http_server_connection(stream, handler, state);
+            h2_connection_config config;
+            config.max_requests = state->max_requests;
+            config.max_per_connection = state->max_per_connection;
+            config.idle_timeout_ms = state->idle_timeout_ms;
+            config.max_body_bytes = state->max_body_bytes;
+            config.stream_request_body = state->stream_request_body;
+            config.on_request_body = nullptr;
+            config.max_concurrent_streams =
+                state->h2_max_concurrent_streams;
+            http2_serve_connection(stream, handler, config, state->shared);
         };
+        if (!server->cert_file.empty()) {
+            connection_fn = [serve_h2](value_t *stream, value_t *handler,
+                                       http_server_state *state) {
+                std::string protocol;
+                value_t *selected =
+                    call_tls(B_tls_alpn, {dupval(stream)});
+                if (selected && selected->type == T_string)
+                    protocol = ((string_value_t *)selected)->value;
+                freeval(selected);
+                if (protocol == "h2") {
+                    serve_h2(stream, handler, state);
+                    return;
+                }
+                handle_http_server_connection(stream, handler, state);
+            };
+        } else {
+            connection_fn = [serve_h2](value_t *stream, value_t *handler,
+                                       http_server_state *state) {
+                static const std::string preface =
+                    "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+                std::string peeked;
+                bool h2 = false;
+                for (int attempt = 0; attempt < 50; ++attempt) {
+                    std::string chunk;
+                    if (!net_peek(stream, chunk, preface.size(), 50))
+                        break;
+                    if (chunk.size() > preface.size())
+                        chunk.resize(preface.size());
+                    peeked = std::move(chunk);
+                    if (preface.compare(0, peeked.size(), peeked) != 0)
+                        break;
+                    if (peeked.size() == preface.size()) {
+                        h2 = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(1));
+                }
+                if (h2) {
+                    serve_h2(stream, handler, state);
+                    return;
+                }
+                handle_http_server_connection(stream, handler, state);
+            };
+        }
     }
 #endif
 
@@ -5175,7 +5209,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
 
     bool http2_capable = false;
 #ifdef SKEIN_ENABLE_HTTP2
-    http2_capable = strategy == "reuse_port" && !cert_file.empty();
+    http2_capable = strategy == "reuse_port";
 #endif
     http_capabilities caps = make_capabilities(
         strategy, !cert_file.empty(), http2_capable,
@@ -5224,7 +5258,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     state->unsupported_message = unsupported_message;
 #ifdef SKEIN_ENABLE_HTTP2
     state->http2_enabled =
-        strategy == "reuse_port" && !cert_file.empty();
+        strategy == "reuse_port";
 #else
     state->http2_enabled = false;
 #endif

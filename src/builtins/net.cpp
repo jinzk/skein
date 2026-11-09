@@ -12,12 +12,14 @@
 #include <uv.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -25,6 +27,8 @@
 #include <winsock2.h>
 #else
 #include <arpa/inet.h>
+#include <poll.h>
+#include <sys/socket.h>
 #endif
 
 namespace {
@@ -1876,6 +1880,55 @@ value_t *net_resolve(const std::vector<value_t *> &args) {
 }
 
 } // namespace
+
+bool net_peek(value_t *socket_value, std::string &data, std::size_t size,
+              long long timeout_ms) {
+    data.clear();
+    std::shared_ptr<net_socket> socket;
+    if (!get_socket(socket_value, socket) || !socket || !socket->handle)
+        return false;
+    if (size == 0)
+        return true;
+    uv_os_fd_t fd = (uv_os_fd_t)-1;
+    if (uv_fileno((uv_handle_t *)socket->handle, &fd) != 0)
+        return false;
+    std::vector<char> buffer(size);
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(timeout_ms > 0 ? timeout_ms : 50);
+    for (;;) {
+        int received = -1;
+#ifdef _WIN32
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET((SOCKET)fd, &readfds);
+        timeval tv = {0, 0};
+        int ready = select(0, &readfds, nullptr, nullptr, &tv);
+        if (ready > 0)
+            received = ::recv((SOCKET)fd, buffer.data(), (int)size, MSG_PEEK);
+        else if (ready < 0)
+            return false;
+#else
+        struct pollfd pfd;
+        pfd.fd = (int)fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int ready = poll(&pfd, 1, 0);
+        if (ready > 0)
+            received = (int)::recv((int)fd, buffer.data(), size, MSG_PEEK);
+        else if (ready < 0)
+            return false;
+#endif
+        if (received > 0) {
+            data.assign(buffer.data(), (std::size_t)received);
+            return true;
+        }
+        if (received == 0)
+            return false;
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
 
 void net_shutdown() {
     uv_loop_t *loop = event_loop_handle();

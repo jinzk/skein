@@ -781,7 +781,7 @@ max_body_bytes      默认 16 MiB
 - worker 调用使用异步等待，多个连接可以并发占用不同 worker；
 - `stream_request_body` 仅 `reuse_port` 支持；dispatch 下 capability 为
   false，请求返回 501；
-- `reuse_port` + TLS 支持 HTTP/2 ALPN；`reuse_port` 支持 WebSocket upgrade 与 SSE，dispatch 下返回 501；
+- `reuse_port` + TLS 支持 HTTP/2 ALPN；明文 `reuse_port` 支持 h2c prior knowledge；`reuse_port` 支持 WebSocket upgrade 与 SSE，dispatch 下返回 501；
 - `server["strategy"]` / `server["platform"]` / `server["capabilities"]`
   会在启动后写入；
 - `require` / `on_unsupported` 语义与 `serve_threads` 一致；
@@ -853,7 +853,7 @@ func handle(req) {
 - `reuse_port` 仅 Linux/FreeBSD/DragonFly/Solaris/AIX 支持；其他平台显式请求会报错；
 - `reuse_port` 使用 `max_requests` 的共享原子计数，超过上限的请求返回 503；
 - `reuse_port` 的 `max_connections` 使用共享原子计数，按所有 worker 的活跃连接全局限制；
-- `reuse_port` + TLS 时通过 ALPN 同时支持 `h2` 和 `http/1.1`；明文 reuse_port 当前为 HTTP/1.1；
+- `reuse_port` + TLS 时通过 ALPN 同时支持 `h2` 和 `http/1.1`；明文 reuse_port 通过 prior knowledge 检测 h2c，同时保留 HTTP/1.1；
 - `reuse_port` 支持 `stream_request_body`，worker 直接调用 `std.http.read_body(req)`，不跨线程传输 body；
 - `dispatch` 不支持 `stream_request_body`，启动时报错；
 - request dict 包含 `method/path/headers/body/http_major/http_minor/keep_alive/remote_addr/remote_port`，不包含 `socket`；
@@ -886,7 +886,7 @@ let served = ts.join();
 | 能力 | dispatch | reuse_port |
 |---|---|---|
 | HTTP/1.1 | 是 | 是 |
-| HTTP/2 | 否 | TLS ALPN `h2` |
+| HTTP/2 | 否 | TLS ALPN `h2` / 明文 h2c prior knowledge |
 | TLS | 是 | 是 |
 | keep-alive | 是 | 是 |
 | `stream_request_body` | 否（启动失败） | 是 |

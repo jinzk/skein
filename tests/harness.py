@@ -2218,6 +2218,81 @@ def check_extended_stdlib():
                 'println("served=" + str(ps.join()));\n',
                 True)
 
+            h2c_worker = os.path.join(
+                worker_tmp, "serve_h2c_worker.skein")
+            with open(h2c_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    '  return {"status": 200, "body": "ok:" + '
+                    'req["path"]};\n'
+                    "}\n"
+                )
+            h2c_worker_path = h2c_worker.replace("\\", "\\\\")
+
+            def run_h2c_case(label, call):
+                script = os.path.join(
+                    worker_tmp, "h2c_" + label + ".skein")
+                with open(script, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        'let s = std.http.listen("127.0.0.1", 0);\n'
+                        "std.io.flush(std.io.stdout);\n"
+                        f"let srv = std.http.{call}(s, 2, "
+                        f"\"{h2c_worker_path}\", {{\"strategy\": "
+                        f"\"reuse_port\", \"max_requests\": 2}});\n"
+                        'println("info=" + str(s["port"]) + ":" + '
+                        'str(srv.capabilities["http2"]));\n'
+                        "std.io.flush(std.io.stdout);\n"
+                        'println("served=" + str(srv.join()));\n'
+                    )
+                server = subprocess.Popen(
+                    [os.path.abspath(BIN), script],
+                    cwd=worker_tmp,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=os.environ.copy(),
+                )
+                try:
+                    info_line = server.stdout.readline().strip()
+                    assert info_line.startswith("info="), (
+                        f"{label} did not report info: "
+                        f"{info_line!r} / {server.stderr.read()}"
+                    )
+                    port_text, http2_flag = (
+                        info_line.split("=", 1)[1].split(":"))
+                    assert http2_flag == "true", info_line
+                    client = run(
+                        "import std;\n"
+                        f'let a = std.http2.get('
+                        f'"http://127.0.0.1:{port_text}/h2");\n'
+                        'println(str(a["status"]) + " " + '
+                        'a["protocol"]);\n'
+                        'println(bytes_to_string(a["body"]));\n'
+                        f'let b = std.http.get('
+                        f'"http://127.0.0.1:{port_text}/h1");\n'
+                        'println(str(b["status"]));\n'
+                        'println(bytes_to_string(b["body"]));\n',
+                        timeout=20,
+                    )
+                    assert client.returncode == 0, client.stderr
+                    assert "200 h2" in client.stdout, client.stdout
+                    assert "ok:/h2" in client.stdout, client.stdout
+                    assert "ok:/h1" in client.stdout, client.stdout
+                    out, err = server.communicate(timeout=20)
+                    assert server.returncode == 0, (label, err)
+                    assert "served=2" in out, (label, out)
+                finally:
+                    if server.poll() is None:
+                        server.kill()
+                        server.wait()
+
+            run_h2c_case("threads", "serve_threads")
+            run_h2c_case("workers", "serve_workers")
+
             tls_probe = run(
                 'import std;\nstd.dict.has(std, "tls")\n')
             tls_enabled = "= true" in tls_probe.stdout

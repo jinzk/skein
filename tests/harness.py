@@ -933,6 +933,9 @@ def check_extended_stdlib():
                 f"\"{threads_worker_path}\", "
                 f"{{\"max_requests\": 1, \"strategy\": \"dispatch\"}});\n"
                 "println(s[\"port\"]);\n"
+                "println(\"server=\" + s[\"strategy\"] + \":\" + "
+                "s[\"platform\"] + \":\" + "
+                "str(s[\"capabilities\"][\"http1\"]));\n"
                 "println(\"caps=\" + str(ts.capabilities[\"http1\"]) + "
                 "\":\" + str(ts.capabilities[\"http2\"]));\n"
                 "println(\"strategy=\" + ts.strategy);\n"
@@ -955,8 +958,11 @@ def check_extended_stdlib():
                 "serve_threads did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
+            server_line = server.stdout.readline().strip()
             caps_line = server.stdout.readline().strip()
             strategy_line = server.stdout.readline().strip()
+            assert server_line.startswith("server=dispatch:"), server_line
+            assert server_line.endswith(":true"), server_line
             assert caps_line == "caps=true:false", caps_line
             assert strategy_line == "strategy=dispatch", strategy_line
             request = urllib.request.Request(
@@ -1115,6 +1121,38 @@ def check_extended_stdlib():
             stdout_all=["schema=1", "platform=", "http1=true",
                         "websocket=false", "strategies="],
         )
+        reuse_platform = (
+            sys.platform.startswith("linux") or
+            sys.platform.startswith("freebsd") or
+            sys.platform.startswith("dragonfly")
+        )
+        check(
+            "std.http thread_capabilities dispatch",
+            "import std;\n"
+            'let c = std.http.thread_capabilities('
+            '{"strategy": "dispatch"});\n'
+            'print(c["strategy"] + ":" + str(c["http2"]) + ":" + '
+            'str(c["stream_request_body"]));\n',
+            stdout="dispatch:false:false",
+        )
+        if reuse_platform:
+            check(
+                "std.http thread_capabilities reuse_port",
+                "import std;\n"
+                'let c = std.http.thread_capabilities('
+                '{"strategy": "reuse_port"});\n'
+                'print(c["strategy"] + ":" + str(c["http2"]) + ":" + '
+                'str(c["stream_request_body"]));\n',
+                stdout="reuse_port:true:true",
+            )
+        else:
+            check(
+                "std.http thread_capabilities reuse_port unsupported",
+                "import std;\n"
+                'std.http.thread_capabilities('
+                '{"strategy": "reuse_port"});\n',
+                stderr="reuse_port is not supported",
+            )
         check(
             "std.http serve_threads require fails fast",
             "import std;\n"
@@ -1258,6 +1296,59 @@ def check_extended_stdlib():
                 server.kill()
                 server.wait()
 
+        stream_response_worker = os.path.join(
+            worker_tmp, "serve_threads_stream_response_worker.skein")
+        with open(stream_response_worker, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "func parts() { yield \"a\"; yield \"b\"; }\n"
+                "func handle(req) {\n"
+                "  return {\"status\": 200, \"body_stream\": parts()};\n"
+                "}\n"
+            )
+        stream_response_worker_path = stream_response_worker.replace(
+            "\\", "\\\\")
+        stream_response_script = os.path.join(
+            worker_tmp, "serve_threads_stream_response.skein")
+        with open(stream_response_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 1, "
+                f"\"{stream_response_worker_path}\", {{\"strategy\": "
+                f"\"dispatch\", \"max_requests\": 1}});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "ts.join();\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), stream_response_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "stream_response server did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            try:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port_line}/stream", timeout=10)
+                raise AssertionError("expected 501 for dispatch stream_response")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 501, (exc.code, exc.read())
+            server.communicate(timeout=10)
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
         if FFI_SHIM:
             crash_manifest = os.path.join(
                 worker_tmp, "serve_threads_crash.ffi.json")
@@ -1332,11 +1423,7 @@ def check_extended_stdlib():
                     server.kill()
                     server.wait()
 
-        reuse_supported = (
-            sys.platform.startswith("linux") or
-            sys.platform.startswith("freebsd") or
-            sys.platform.startswith("dragonfly")
-        )
+        reuse_supported = reuse_platform
         if reuse_supported:
             reuse_worker = os.path.join(
                 worker_tmp, "serve_threads_reuse_worker.skein")
@@ -1413,6 +1500,70 @@ def check_extended_stdlib():
                 out, err = server.communicate(timeout=10)
                 assert server.returncode == 0, err
                 assert "served=8" in out, out
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+
+            sse_worker = os.path.join(
+                worker_tmp, "serve_threads_reuse_sse_worker.skein")
+            with open(sse_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func events() {\n"
+                    "  yield \"data: one\\n\\n\";\n"
+                    "  yield \"data: two\\n\\n\";\n"
+                    "}\n"
+                    "func handle(req) {\n"
+                    "  return {\"status\": 200,\n"
+                    "          \"headers\": {\"Content-Type\": "
+                    "\"text/event-stream\"},\n"
+                    "          \"body_stream\": events()};\n"
+                    "}\n"
+                )
+            sse_worker_path = sse_worker.replace("\\", "\\\\")
+            sse_script = os.path.join(
+                worker_tmp, "serve_threads_reuse_sse.skein")
+            with open(sse_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    f"let ts = std.http.serve_threads(s, 1, "
+                    f"\"{sse_worker_path}\", {{\"strategy\": "
+                    f"\"reuse_port\", \"max_requests\": 1}});\n"
+                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "str(ts.capabilities[\"stream_response\"]));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "ts.join();\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), sse_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                info_line = server.stdout.readline().strip()
+                assert info_line.startswith("info="), (
+                    "reuse_port sse did not report info: "
+                    f"{info_line!r} / {server.stderr.read()}"
+                )
+                assert info_line.endswith(":true"), info_line
+                port_text = info_line.split("=", 1)[1].split(":")[0]
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port_text}/events",
+                    headers={"Accept": "text/event-stream"})
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    assert response.status == 200
+                    body = response.read()
+                    assert b"data: one" in body, body
+                    assert b"data: two" in body, body
+                out, err = server.communicate(timeout=10)
+                assert server.returncode == 0, err
             finally:
                 if server.poll() is None:
                     server.kill()
@@ -1576,6 +1727,45 @@ def check_extended_stdlib():
                 '{"strategy": "reuse_port"});\n',
                 stderr="reuse_port is not supported",
             )
+
+        with tempfile.TemporaryDirectory() as deadlock_tmp:
+            package_dir = os.path.join(deadlock_tmp, "deadlockpkg")
+            os.makedirs(package_dir)
+            deadlock_worker = os.path.join(
+                deadlock_tmp, "deadlock_worker.skein")
+            with open(deadlock_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(payload) { return payload; }\n"
+                )
+            with open(os.path.join(package_dir, "deadlockpkg.skein"),
+                      "w", encoding="utf-8") as handle:
+                handle.write(
+                    "package deadlockpkg {\n"
+                    "  import std;\n"
+                    "  let pool = std.thread.pool(1, "
+                    "\"deadlock_worker.skein\");\n"
+                    "  export let value = 1;\n"
+                    "}\n"
+                )
+            deadlock_main = os.path.join(deadlock_tmp, "main.skein")
+            with open(deadlock_main, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import deadlockpkg;\n"
+                    "print(deadlockpkg.value);\n"
+                )
+            proc = subprocess.run(
+                [os.path.abspath(BIN), deadlock_main],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert proc.returncode != 0, (
+                "pool inside imported module unexpectedly succeeded: "
+                f"{proc.stdout!r} {proc.stderr!r}"
+            )
+            assert "worker script parser is busy" in proc.stderr, proc.stderr
 
         check(
             "std.thread channel copy and close",

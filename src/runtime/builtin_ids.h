@@ -250,6 +250,7 @@ enum bifs {
     B_http_cookies,
     B_http_read_body,
     B_http_close,
+    B_http_thread_capabilities,
     B_http2_request,
     B_http2_get,
     B_http2_post,

@@ -28,6 +28,8 @@
 #include "std_arena_source.inc"
 #include "std_path_source.inc"
 
+#include <chrono>
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -666,6 +668,8 @@ bool parse_package_source(const std::string &source_text,
         return false;
     }
 
+    std::lock_guard<std::recursive_timed_mutex> parse_gate(
+        package_parse_gate());
     std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
 
     int saved_char = yychar;
@@ -726,6 +730,13 @@ bool parse_package_source(const std::string &source_text,
 }
 
 bool parse_worker_source_impl(const std::string &path, std::string &error) {
+    std::unique_lock<std::recursive_timed_mutex> parse_gate(
+        package_parse_gate(), std::defer_lock);
+    if (!parse_gate.try_lock_for(std::chrono::milliseconds(2000))) {
+        error = "worker script parser is busy; creating a pool or thread "
+                "inside an imported module top level is not supported";
+        return false;
+    }
     std::string source;
     if (!load_source_file(path, source_encoding_get(), source, error)) {
         error = "cannot load worker script " + path + ": " + error;

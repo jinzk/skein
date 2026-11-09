@@ -1157,11 +1157,29 @@ void worker_thread_main(pool_state *pool, size_t slot_index) {
                 struct value_t *envelope = (struct value_t *)newdictval();
                 bool ok = !captured.failed && result;
                 if (ok) {
-                    dict_append_item((struct dict_value_t *)envelope,
-                                     newstrval("ok"), newboolval(true));
-                    dict_append_item((struct dict_value_t *)envelope,
-                                     newstrval("value"), result);
+                    std::unordered_set<const void *> visiting;
+                    std::string copy_error;
+                    struct value_t *safe =
+                        copy_data_value(result, visiting, copy_error);
+                    freeval(result);
                     result = nullptr;
+                    if (!safe) {
+                        ok = false;
+                        dict_append_item(
+                            (struct dict_value_t *)envelope,
+                            newstrval("ok"), newboolval(false));
+                        dict_append_item(
+                            (struct dict_value_t *)envelope,
+                            newstrval("error"),
+                            newerrorval("thread", copy_error));
+                    } else {
+                        dict_append_item(
+                            (struct dict_value_t *)envelope,
+                            newstrval("ok"), newboolval(true));
+                        dict_append_item(
+                            (struct dict_value_t *)envelope,
+                            newstrval("value"), safe);
+                    }
                 } else {
                     struct value_t *err = captured.error;
                     captured.error = nullptr;

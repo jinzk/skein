@@ -3275,7 +3275,7 @@ value_t *capabilities_value(const http_capabilities &caps) {
 }
 
 bool request_unsupported_feature(value_t *request,
-                                 std::string &message) {
+                                 std::string &message, bool allow_sse) {
     value_t *headers = dict_get(request, "headers");
     std::string upgrade =
         lower_ascii(header_value(headers, "Upgrade"));
@@ -3283,6 +3283,8 @@ bool request_unsupported_feature(value_t *request,
         message = "websocket is not supported";
         return true;
     }
+    if (allow_sse)
+        return false;
     std::string accept =
         lower_ascii(header_value(headers, "Accept"));
     if (accept.find("text/event-stream") != std::string::npos) {
@@ -3388,7 +3390,7 @@ value_t *make_reuse_handler(
             server->active.fetch_add(1);
             value_t *source = args[0];
             std::string unsupported;
-            if (request_unsupported_feature(source, unsupported)) {
+            if (request_unsupported_feature(source, unsupported, true)) {
                 server->active.fetch_sub(1);
                 return thread_server_response(501, unsupported);
             }
@@ -3635,7 +3637,7 @@ value_t *thread_dispatch(
                                       server->unsupported_message);
     value_t *request = args[0];
     std::string unsupported;
-    if (request_unsupported_feature(request, unsupported))
+    if (request_unsupported_feature(request, unsupported, false))
         return thread_server_response(501, unsupported);
     if (dict_get(request, "body_reader"))
         return thread_server_response(
@@ -3711,6 +3713,9 @@ value_t *thread_dispatch(
             status = 503;
         else if (kind.find("timeout") != std::string::npos)
             status = 504;
+        else if (message.find("does not support generator") !=
+                 std::string::npos)
+            status = 501;
         return thread_server_response(status, message);
     }
 
@@ -4198,6 +4203,12 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     server->tls = !cert_file.empty();
     server->unsupported_501 = state->unsupported_501;
     server->unsupported_message = state->unsupported_message;
+    if (args[0]->type == T_dict) {
+        dict_set(args[0], "strategy", newstrval(strategy.c_str()));
+        dict_set(args[0], "platform",
+                 newstrval(http_platform_name().c_str()));
+        dict_set(args[0], "capabilities", capabilities_value(caps));
+    }
 
     std::string error;
 #if SKEIN_HAS_REUSE_PORT
@@ -4253,6 +4264,59 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     }
     server->server_task = task;
     return newuserdataval(&kThreadServerType, server);
+}
+
+value_t *http_thread_capabilities(
+    const std::vector<value_t *> &args) {
+    if (args.size() > 1 ||
+        (args.size() == 1 && args[0]->type != T_dict)) {
+        yyerror("std.http.thread_capabilities expects optional options "
+                "dict");
+        return NULL;
+    }
+    std::string strategy = "auto";
+    if (args.size() == 1) {
+        value_t *value = dict_get(args[0], "strategy");
+        if (value) {
+            if (value->type != T_string) {
+                yyerror("std.http.thread_capabilities strategy must be "
+                        "a string");
+                return NULL;
+            }
+            strategy = ((string_value_t *)value)->value;
+        }
+    }
+    if (strategy != "auto" && strategy != "dispatch" &&
+        strategy != "reuse_port") {
+        yyerror("std.http.thread_capabilities strategy must be "
+                "\"auto\", \"dispatch\" or \"reuse_port\"");
+        return NULL;
+    }
+    if (strategy == "auto") {
+#if SKEIN_HAS_REUSE_PORT
+        strategy = "reuse_port";
+#else
+        strategy = "dispatch";
+#endif
+    }
+#if !SKEIN_HAS_REUSE_PORT
+    if (strategy == "reuse_port") {
+        yyerror("std.http.thread_capabilities: reuse_port is not "
+                "supported on this platform");
+        return NULL;
+    }
+#endif
+    bool tls = false;
+#ifdef SKEIN_ENABLE_TLS
+    tls = true;
+#endif
+    bool http2 = false;
+#ifdef SKEIN_ENABLE_HTTP2
+    http2 = strategy == "reuse_port";
+#endif
+    http_capabilities caps = make_capabilities(
+        strategy, tls, http2, strategy == "reuse_port");
+    return capabilities_value(caps);
 }
 
 value_t *http_upgrade(const std::vector<value_t *> &args) {
@@ -4470,6 +4534,8 @@ struct value_t *call_http_builtin(
             return http_read_body(args);
         case B_http_close:
             return http_close(args);
+        case B_http_thread_capabilities:
+            return http_thread_capabilities(args);
         default:
             yyerror("unknown http function");
             return NULL;

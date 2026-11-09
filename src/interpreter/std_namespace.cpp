@@ -600,6 +600,7 @@ value_t *build_namespace_impl() {
             {"cookies", B_http_cookies},
             {"read_body", B_http_read_body},
             {"close", B_http_close},
+            {"thread_capabilities", B_http_thread_capabilities},
         })));
 #ifdef SKEIN_ENABLE_HTTP2
     root->payload->items.push_back(std::make_pair(

@@ -789,6 +789,16 @@ if(BUILD_TESTING)
         TIMEOUT 300
       )
       add_test(
+        NAME thread_stress_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_stress.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(thread_stress_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 300
+      )
+      add_test(
         NAME repl_flush_test
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/repl_flush.py
@@ -849,6 +859,18 @@ if(BUILD_TESTING)
         LABELS "sanitize;lsan"
         RUN_SERIAL TRUE
         TIMEOUT 900
+      )
+      add_test(
+        NAME thread_leak_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_leak.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(thread_leak_test PROPERTIES
+        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=1"
+        LABELS "sanitize;lsan"
+        RUN_SERIAL TRUE
+        TIMEOUT 300
       )
     endif()
     add_test(

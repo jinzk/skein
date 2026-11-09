@@ -6,6 +6,7 @@
 #include "valuetype.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -17,7 +18,7 @@
  * owns compilation timing and fallback reporting.
  */
 struct vm_stats_data {
-    bool enabled = false;
+    std::atomic<bool> enabled{false};
     uint64_t statements_compiled = 0;
     uint64_t statements_fallback = 0;
     uint64_t functions_compiled = 0;

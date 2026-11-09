@@ -98,7 +98,7 @@ static int max_call_depth() {
     return limit;
 }
 
-static int call_depth = 0;
+static thread_local int call_depth = 0;
 
 namespace {
 struct call_depth_guard {

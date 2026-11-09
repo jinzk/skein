@@ -115,6 +115,15 @@ generator / async 的 fiber 栈默认 2 MiB，可通过 `SKEIN_FIBER_STACK_KB`
 调整（sanitizer 构建建议 8192）。AST 参考后端的调用深度可用
 `SKEIN_MAX_CALL_DEPTH` 调整（sanitizer 测试使用 128）。
 
+TSan 构建（不能与 `SKEIN_SANITIZE` 同时启用）：
+
+```bash
+cmake -S . -B build-tsan -G Ninja -DSKEIN_TSAN=ON
+cmake --build build-tsan
+TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan \
+  -R 'thread_tsan|net_tsan' --output-on-failure
+```
+
 统一的本地/CI 检查脚本覆盖 Debug、Release、ASan+UBSan、LSan、VM-only、
 runtime-only 链接以及 docs / boundary / diff 检查：
 

@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
+option(SKEIN_TSAN "Build with ThreadSanitizer" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
 option(SKEIN_ENABLE_JIT "Enable the experimental asmjit-backed JIT" OFF)
 option(SKEIN_USE_MIMALLOC "Use mimalloc for C++ allocations (Windows/Linux)" OFF)
@@ -24,6 +25,23 @@ if(SKEIN_SANITIZE)
         "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address,undefined")
   else()
     message(FATAL_ERROR "SKEIN_SANITIZE requires GCC or Clang")
+  endif()
+endif()
+
+if(SKEIN_TSAN)
+  if(SKEIN_SANITIZE)
+    message(FATAL_ERROR "SKEIN_TSAN cannot be combined with SKEIN_SANITIZE")
+  endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(SKEIN_TSAN_FLAGS "-fsanitize=thread -fno-omit-frame-pointer")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${SKEIN_TSAN_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SKEIN_TSAN_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS
+        "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
+    set(CMAKE_SHARED_LINKER_FLAGS
+        "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=thread")
+  else()
+    message(FATAL_ERROR "SKEIN_TSAN requires GCC or Clang")
   endif()
 endif()
 
@@ -871,6 +889,28 @@ if(BUILD_TESTING)
         LABELS "sanitize;lsan"
         RUN_SERIAL TRUE
         TIMEOUT 300
+      )
+    endif()
+    if(SKEIN_TSAN)
+      add_test(
+        NAME thread_tsan_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_stress.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(thread_tsan_test PROPERTIES
+        ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+        LABELS "sanitize;tsan"
+        RUN_SERIAL TRUE
+        TIMEOUT 300
+      )
+      add_test(NAME net_tsan_test COMMAND ${SKEIN_TEST_COMMAND})
+      set_tests_properties(net_tsan_test PROPERTIES
+        ENVIRONMENT
+          "SKEIN_TEST_ONLY_MODULES=net;SKEIN_TEST_TIMEOUT=180;TSAN_OPTIONS=halt_on_error=1"
+        LABELS "sanitize;tsan"
+        RUN_SERIAL TRUE
+        TIMEOUT 600
       )
     endif()
     add_test(

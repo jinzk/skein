@@ -10,6 +10,7 @@
 #include "builtins_io.h"
 #include "net.h"
 #include "package.h"
+#include "parser_lock.h"
 #include "platform.h"
 #include "process_spawn.h"
 #include "repl.h"
@@ -4511,9 +4512,12 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
     }
 
     std::unique_lock<std::mutex> lock(server->mutex);
-    server->cv.wait(lock, [&server, workers] {
-        return server->startup_failed || server->ready >= workers;
-    });
+    {
+        parser_lock_suspend parse_suspend;
+        server->cv.wait(lock, [&server, workers] {
+            return server->startup_failed || server->ready >= workers;
+        });
+    }
     if (server->startup_failed) {
         error = server->startup_error;
         lock.unlock();

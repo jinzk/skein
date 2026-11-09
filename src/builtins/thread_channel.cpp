@@ -11,6 +11,7 @@
 #include "fiber.h"
 #include "gc.h"
 #include "package.h"
+#include "parser_lock.h"
 #include "platform.h"
 #include "runtime_context.h"
 #include "runtime_state.h"
@@ -2391,9 +2392,12 @@ std::shared_ptr<pool_state> create_pool_state(
     }
 
     std::unique_lock<std::mutex> lock(pool->mutex);
-    pool->cv.wait(lock, [&pool] {
-        return pool->ready >= pool->size || !pool->startup_error.empty();
-    });
+    {
+        parser_lock_suspend parse_suspend;
+        pool->cv.wait(lock, [&pool] {
+            return pool->ready >= pool->size || !pool->startup_error.empty();
+        });
+    }
     if (!pool->startup_error.empty()) {
         std::string startup_error = pool->startup_error;
         lock.unlock();
@@ -2735,7 +2739,10 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     }
 
     std::unique_lock<std::mutex> lock(state->mutex);
-    state->cv.wait(lock, [&state] { return state->startup_done; });
+    {
+        parser_lock_suspend parse_suspend;
+        state->cv.wait(lock, [&state] { return state->startup_done; });
+    }
     if (!state->startup_error.empty()) {
         std::string error = state->startup_error;
         lock.unlock();

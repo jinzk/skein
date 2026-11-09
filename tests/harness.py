@@ -2124,14 +2124,19 @@ def check_extended_stdlib():
                     "import std;\n"
                     "func handle(payload) { return payload; }\n"
                 )
+            deadlock_worker_path = deadlock_worker.replace("\\", "\\\\")
             with open(os.path.join(package_dir, "deadlockpkg.skein"),
                       "w", encoding="utf-8") as handle:
                 handle.write(
                     "package deadlockpkg {\n"
                     "  import std;\n"
-                    "  let pool = std.thread.pool(1, "
-                    "\"deadlock_worker.skein\");\n"
-                    "  export let value = 1;\n"
+                    f"  let pool = std.thread.pool(1, "
+                    f"\"{deadlock_worker_path}\");\n"
+                    '  let f = pool.submit({"v": 7});\n'
+                    "  let r = f.wait();\n"
+                    '  export let value = r["value"]["v"];\n'
+                    "  pool.close();\n"
+                    "  pool.join();\n"
                     "}\n"
                 )
             deadlock_main = os.path.join(deadlock_tmp, "main.skein")
@@ -2147,11 +2152,104 @@ def check_extended_stdlib():
                 text=True,
                 timeout=20,
             )
-            assert proc.returncode != 0, (
-                "pool inside imported module unexpectedly succeeded: "
+            assert proc.returncode == 0, (
+                "pool inside imported module failed: "
                 f"{proc.stdout!r} {proc.stderr!r}"
             )
-            assert "worker script parser is busy" in proc.stderr, proc.stderr
+            assert proc.stdout.strip() == "7", proc.stdout
+
+            spawn_dir = os.path.join(deadlock_tmp, "spawnpkg")
+            os.makedirs(spawn_dir)
+            spawn_worker = os.path.join(
+                deadlock_tmp, "deadlock_spawn_worker.skein")
+            with open(spawn_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    '    return {"x": ctx.payload["x"] + 1};\n'
+                    "}\n"
+                )
+            spawn_worker_path = spawn_worker.replace("\\", "\\\\")
+            with open(os.path.join(spawn_dir, "spawnpkg.skein"),
+                      "w", encoding="utf-8") as handle:
+                handle.write(
+                    "package spawnpkg {\n"
+                    "  import std;\n"
+                    f"  let t = std.thread.spawn(\"{spawn_worker_path}\", "
+                    'std.thread.Message.from({"x": 41}));\n'
+                    "  let r = t.join();\n"
+                    '  export let value = r["value"]["x"];\n'
+                    "}\n"
+                )
+            spawn_main = os.path.join(deadlock_tmp, "spawn_main.skein")
+            with open(spawn_main, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import spawnpkg;\n"
+                    "print(spawnpkg.value);\n"
+                )
+            proc = subprocess.run(
+                [os.path.abspath(BIN), spawn_main],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert proc.returncode == 0, (
+                "spawn inside imported module failed: "
+                f"{proc.stdout!r} {proc.stderr!r}"
+            )
+            assert proc.stdout.strip() == "42", proc.stdout
+
+            http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
+            os.makedirs(http_pkg_dir)
+            http_worker = os.path.join(
+                deadlock_tmp, "deadlock_http_worker.skein")
+            with open(http_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    '    return {"status": 200, "body": "ok"};\n'
+                    "}\n"
+                )
+            http_worker_path = http_worker.replace("\\", "\\\\")
+            with open(os.path.join(http_pkg_dir, "httpservepkg.skein"),
+                      "w", encoding="utf-8") as handle:
+                handle.write(
+                    "package httpservepkg {\n"
+                    "  import std;\n"
+                    '  let s = std.http.listen("127.0.0.1", 0);\n'
+                    '  export let port = s["port"];\n'
+                    f"  export let ts = std.http.serve_threads(s, 1, "
+                    f"\"{http_worker_path}\", {{\"max_requests\": 1}});\n"
+                    "}\n"
+                )
+            http_main = os.path.join(deadlock_tmp, "http_main.skein")
+            with open(http_main, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "import httpservepkg;\n"
+                    "println(httpservepkg.port);\n"
+                    'let r = std.http.get("http://127.0.0.1:" + '
+                    'str(httpservepkg.port) + "/x");\n'
+                    'println(r["status"]);\n'
+                    "println(httpservepkg.ts.join());\n"
+                )
+            proc = subprocess.run(
+                [os.path.abspath(BIN), http_main],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert proc.returncode == 0, (
+                "serve_threads inside imported module failed: "
+                f"{proc.stdout!r} {proc.stderr!r}"
+            )
+            http_lines = proc.stdout.splitlines()
+            assert len(http_lines) >= 3, proc.stdout
+            assert http_lines[0].isdigit(), proc.stdout
+            assert http_lines[1] == "200", proc.stdout
+            assert http_lines[2] == "1", proc.stdout
 
         check(
             "std.thread channel copy and close",

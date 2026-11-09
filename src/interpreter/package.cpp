@@ -671,6 +671,7 @@ bool parse_package_source(const std::string &source_text,
     std::lock_guard<std::recursive_timed_mutex> parse_gate(
         package_parse_gate());
     std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
+    parser_lock_depth_guard depth_guard;
 
     int saved_char = yychar;
     YYSTYPE saved_lval = yylval;
@@ -732,9 +733,8 @@ bool parse_package_source(const std::string &source_text,
 bool parse_worker_source_impl(const std::string &path, std::string &error) {
     std::unique_lock<std::recursive_timed_mutex> parse_gate(
         package_parse_gate(), std::defer_lock);
-    if (!parse_gate.try_lock_for(std::chrono::milliseconds(2000))) {
-        error = "worker script parser is busy; creating a pool or thread "
-                "inside an imported module top level is not supported";
+    if (!parse_gate.try_lock_for(std::chrono::milliseconds(10000))) {
+        error = "worker script parser is busy";
         return false;
     }
     std::string source;
@@ -749,6 +749,7 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
     }
 
     std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
+    parser_lock_depth_guard depth_guard;
 
     int saved_char = yychar;
     YYSTYPE saved_lval = yylval;

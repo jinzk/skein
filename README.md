@@ -4730,8 +4730,7 @@ pool.join();
 - `pool.close()` 停止接收新 job，worker 排空后退出；
 - `pool.join()` 等待 worker 线程结束；
 - `stats()` 返回 `size/workers/ready/alive/dead/restarts/restart_limit/submitted/completed/failed/active/queued`；
-- 不要在被导入模块的顶层创建 pool/spawn；当前会报
-  `worker script parser is busy`，用于避免 parser 死锁。
+- 支持在被导入模块的顶层创建 pool/spawn；解析器在求值顶层语句时会释放解析锁，worker 可以在该窗口解析入口脚本。
 
 ### 单线程
 

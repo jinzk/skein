@@ -4645,7 +4645,7 @@ channel.length
 - `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
 - `recv(timeout_ms)` 超时抛错；
 - `close()` 幂等，保留队列中未读消息；
-- fiber 中的 Channel 阻塞通过事件循环 async wake 挂起/唤醒，不再使用 1ms 轮询；非 fiber 上下文使用 OS 线程等待；
+- fiber 中的 Channel send/recv/select 通过事件循环 async wake 挂起/唤醒，不再使用 1ms 轮询；非 fiber 上下文使用 OS 线程等待；
 
 示例：
 

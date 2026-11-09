@@ -2738,6 +2738,7 @@ void thread_proto_entry_main(
     std::shared_ptr<thread_transfer_function> entry,
     std::vector<std::pair<std::string, thread_transfer_value>> globals,
     std::vector<thread_transfer_module> modules,
+    std::vector<thread_transfer_type> types,
     struct value_t *argument,
     std::shared_ptr<const thread_env_snapshot> env_snapshot) {
     thread_env_install(env_snapshot);
@@ -2768,18 +2769,23 @@ void thread_proto_entry_main(
     std::shared_ptr<thread_transfer_context> transfer_context =
         skein_vm_thread_transfer_context_create();
     std::string setup_error;
-    for (auto &item : modules) {
-        struct value_t *value = nullptr;
-        std::string error;
-        if (!skein_vm_materialize_thread_value(transfer_context, item.value,
-                                               value, error)) {
-            setup_error = "module " + item.path + ": " + error;
-            break;
+    if (!skein_vm_apply_thread_types(transfer_context, types, setup_error))
+        setup_error = "types: " + setup_error;
+    types.clear();
+    if (setup_error.empty()) {
+        for (auto &item : modules) {
+            struct value_t *value = nullptr;
+            std::string error;
+            if (!skein_vm_materialize_thread_value(transfer_context, item.value,
+                                                   value, error)) {
+                setup_error = "module " + item.path + ": " + error;
+                break;
+            }
+            package_seed_import(item.key, dupval(value));
+            package_seed_import_path(
+                item.path.c_str(),
+                item.base.empty() ? nullptr : item.base.c_str(), value);
         }
-        package_seed_import(item.key, dupval(value));
-        package_seed_import_path(
-            item.path.c_str(),
-            item.base.empty() ? nullptr : item.base.c_str(), value);
     }
     modules.clear();
     if (setup_error.empty()) {
@@ -3054,6 +3060,7 @@ static struct value_t *thread_spawn_payload(
     std::shared_ptr<thread_transfer_function> entry,
     std::vector<std::pair<std::string, thread_transfer_value>> globals,
     std::vector<thread_transfer_module> modules,
+    std::vector<thread_transfer_type> types,
     struct value_t *message, const char *what) {
     std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
     state->id = next_thread_id.fetch_add(1);
@@ -3061,8 +3068,8 @@ static struct value_t *thread_spawn_payload(
     try {
         state->thread = std::thread(thread_proto_entry_main, state,
                                     std::move(entry), std::move(globals),
-                                    std::move(modules), argument,
-                                    thread_env_capture());
+                                    std::move(modules), std::move(types),
+                                    argument, thread_env_capture());
     } catch (const std::exception &) {
         freeval(argument);
         yyerror("%s could not start thread", what);
@@ -3099,8 +3106,8 @@ struct value_t *thread_spawn_function(
         return nullptr;
     }
     return thread_spawn_payload(std::move(entry), std::move(globals),
-                                std::move(modules), args[1],
-                                "std.thread.spawn_function");
+                                std::move(modules), {},
+                                args[1], "std.thread.spawn_function");
 }
 
 struct value_t *thread_encode(const std::vector<struct value_t *> &args) {
@@ -3138,14 +3145,15 @@ struct value_t *thread_spawn_encoded(
     std::shared_ptr<thread_transfer_function> entry;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
     std::vector<thread_transfer_module> modules;
+    std::vector<thread_transfer_type> types;
     std::string error;
     if (!skein_vm_deserialize_thread_payload(bytes, entry, globals, modules,
-                                             error)) {
+                                             types, error)) {
         yyerror("std.thread.spawn_encoded: %s", error.c_str());
         return nullptr;
     }
     return thread_spawn_payload(std::move(entry), std::move(globals),
-                                std::move(modules), args[1],
+                                std::move(modules), std::move(types), args[1],
                                 "std.thread.spawn_encoded");
 }
 

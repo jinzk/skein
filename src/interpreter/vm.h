@@ -59,6 +59,32 @@ struct thread_transfer_module {
     thread_transfer_value value;
 };
 
+struct thread_transfer_type_field {
+    std::string name;
+    struct type_constraint type;
+    bool has_default = false;
+    uint32_t default_index = UINT32_MAX;
+    std::shared_ptr<struct thread_transfer_function> default_function;
+};
+
+struct thread_transfer_type_variant {
+    std::string name;
+    std::vector<thread_transfer_type_field> fields;
+};
+
+struct thread_transfer_type {
+    bool is_enum = false;
+    std::string module;
+    std::string name;
+    bool exported = false;
+    std::vector<thread_transfer_type_field> fields;
+    std::vector<thread_transfer_type_variant> variants;
+    std::vector<std::pair<std::string,
+                          std::shared_ptr<struct thread_transfer_function>>>
+        methods;
+    std::vector<uint32_t> method_indices;
+};
+
 /* Opaque memo table used while materializing one transfer graph. */
 struct thread_transfer_context;
 
@@ -143,6 +169,12 @@ bool skein_vm_materialize_thread_value(
     const struct thread_transfer_value &value, struct value_t *&out,
     std::string &error);
 
+/* Attach transferred methods and field defaults to registered types. */
+bool skein_vm_apply_thread_types(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const std::vector<struct thread_transfer_type> &types,
+    std::string &error);
+
 /* Serialize a prepared thread payload into a portable byte stream. */
 bool skein_vm_serialize_thread_payload(
     const std::shared_ptr<struct thread_transfer_function> &entry,
@@ -157,6 +189,7 @@ bool skein_vm_deserialize_thread_payload(
     std::shared_ptr<struct thread_transfer_function> &entry,
     std::vector<std::pair<std::string, thread_transfer_value>> &globals,
     std::vector<struct thread_transfer_module> &modules,
+    std::vector<struct thread_transfer_type> &types,
     std::string &error);
 
 #endif

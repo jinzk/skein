@@ -86,6 +86,21 @@ def main():
             "let t7 = std.thread.spawn_encoded(encoded_blob, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined7 = t7.join();\n"
+            "struct MB { x: int = 4; }\n"
+            "impl MB { func add(self, n) { return self.x + n; } }\n"
+            "let mb = MB {};\n"
+            "func make_method_worker(v) {\n"
+            "    thread func inner(ctx) {\n"
+            "        let fresh = MB {};\n"
+            '        return {"v": v.add(ctx.payload["n"]) + fresh.x};\n'
+            "    }\n"
+            "    return inner;\n"
+            "}\n"
+            "let method_blob = std.thread.encode("
+            "make_method_worker(mb));\n"
+            "let t8 = std.thread.spawn_encoded(method_blob, "
+            'std.thread.Message.from({"n": 3}));\n'
+            "let joined8 = t8.join();\n"
             'println("pool=" + str(r1["value"]["v"]) + ":" + '
             'str(r2["value"]["v"]) + " thread=" + '
             'str(joined["value"]["v"]) + " src=" + '
@@ -94,7 +109,8 @@ def main():
             'str(joined4["value"]["v"]) + " data=" + '
             'str(joined5["value"][2]) + " transfer=" + '
             'str(joined6["value"]["v"]) + " encoded=" + '
-            'str(joined7["value"]["v"]));\n'
+            'str(joined7["value"]["v"]) + " method=" + '
+            'str(joined8["value"]["v"]));\n'
         )
         env = os.environ.copy()
         env.setdefault("ASAN_OPTIONS", "detect_leaks=1")
@@ -110,7 +126,8 @@ def main():
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
             return 1
-        expected = "pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 transfer=12 encoded=12"
+        expected = ("pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 "
+                    "transfer=12 encoded=12 method=11")
         if expected not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1

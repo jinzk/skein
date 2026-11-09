@@ -2867,15 +2867,18 @@ def check_extended_stdlib():
             with open(typed_encode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    "struct Point { x: int; y: int; }\n"
+                    "struct Point { x: int = 1; y: int = 2; }\n"
+                    "impl Point { func add(self, n) { "
+                    "return self.x + n; } }\n"
                     "enum E { A { n: int; }; B; }\n"
                     "let p = Point { x: 3, y: 4 };\n"
                     "let e = E.A { n: 5 };\n"
                     "func make_worker(pv, ev) {\n"
                     "    thread func worker(ctx) {\n"
-                    "        let q = Point { x: pv.x + 1, y: pv.y + 2 };\n"
+                    "        let q = Point {};\n"
                     "        let f = E.A { n: ev.n + 1 };\n"
-                    '        return {"x": q.x, "y": q.y, "n": f.n};\n'
+                    '        return {"x": q.x, "y": q.y, "n": f.n, '
+                    '"m": pv.add(ev.n)};\n'
                     "    }\n"
                     "    return worker;\n"
                     "}\n"
@@ -2893,7 +2896,8 @@ def check_extended_stdlib():
                     "let r = t.join();\n"
                     'print(str(r["value"]["x"]) + ":" + '
                     'str(r["value"]["y"]) + ":" + '
-                    'str(r["value"]["n"]));\n'
+                    'str(r["value"]["n"]) + ":" + '
+                    'str(r["value"]["m"]));\n'
                 )
             enc = subprocess.run(
                 [os.path.abspath(BIN), typed_encode],
@@ -2917,7 +2921,7 @@ def check_extended_stdlib():
                 "typed thread decode failed: "
                 f"{dec.stdout!r} {dec.stderr!r}"
             )
-            assert dec.stdout.strip() == "4:6:6", dec.stdout
+            assert dec.stdout.strip() == "1:2:6:8", dec.stdout
 
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)

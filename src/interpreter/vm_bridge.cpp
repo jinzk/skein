@@ -832,7 +832,7 @@ std::shared_ptr<function_code> make_transfer_code(
     code->module = proto.module;
     code->is_async = proto.is_async;
     code->is_generator = proto.is_generator;
-    code->is_method = false;
+    code->is_method = proto.is_method;
     code->variadic = proto.variadic;
     code->def_line = proto.def_line;
     code->def_column = proto.def_column;
@@ -1029,6 +1029,127 @@ bool skein_vm_materialize_thread_value(
     }
     out = nullptr;
     return materialize_thread_value(context, value, out, error);
+}
+
+bool skein_vm_apply_thread_types(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const std::vector<struct thread_transfer_type> &types,
+    std::string &error) {
+    if (!context) {
+        error = "missing thread transfer context";
+        return false;
+    }
+    for (const thread_transfer_type &type : types) {
+        struct struct_def *structure = nullptr;
+        struct enum_def *enumeration = nullptr;
+        if (type.is_enum)
+            enumeration =
+                structtype_find_enum(type.module.c_str(), type.name.c_str());
+        else
+            structure =
+                structtype_find_struct(type.module.c_str(), type.name.c_str());
+        if (!structure && !enumeration) {
+            error = "thread payload type is not registered: " + type.module +
+                    "." + type.name;
+            return false;
+        }
+        struct type_def *definition =
+            structure ? (struct type_def *)structure
+                      : (struct type_def *)enumeration;
+        for (const auto &method : type.methods) {
+            if (!method.second) {
+                error = "thread payload method is missing: " + method.first;
+                return false;
+            }
+            if (definition->methods.count(method.first))
+                continue;
+            struct value_t *function_value = nullptr;
+            thread_transfer_value transfer;
+            transfer.kind = thread_transfer_value::Kind::Function;
+            transfer.function = method.second;
+            if (!materialize_thread_value(context, transfer, function_value,
+                                          error))
+                return false;
+            if (!function_value || function_value->type != T_func) {
+                freeval(function_value);
+                error = "thread payload method is not callable";
+                return false;
+            }
+            const func_value_t *function =
+                (const func_value_t *)function_value;
+            std::shared_ptr<function_def> method_def =
+                function->def;
+            freeval(function_value);
+            if (!method_def) {
+                error = "thread payload method has no function definition";
+                return false;
+            }
+            std::string method_error;
+            if (!structtype_add_method(definition, method.first,
+                                       std::move(method_def), method_error)) {
+                error = method_error.empty()
+                            ? "cannot attach thread payload method"
+                            : method_error;
+                return false;
+            }
+        }
+        auto attach_default = [&](struct field_def &field,
+                                  const thread_transfer_type_field &source) {
+            if (!source.has_default || !source.default_function)
+                return true;
+            if (field.has_default)
+                return true;
+            struct value_t *function_value = nullptr;
+            thread_transfer_value transfer;
+            transfer.kind = thread_transfer_value::Kind::Function;
+            transfer.function = source.default_function;
+            if (!materialize_thread_value(context, transfer, function_value,
+                                          error))
+                return false;
+            if (!function_value || function_value->type != T_func) {
+                freeval(function_value);
+                error = "thread payload field default is not callable";
+                return false;
+            }
+            const func_value_t *function =
+                (const func_value_t *)function_value;
+            field.default_value = function->def;
+            field.has_default = true;
+            freeval(function_value);
+            return true;
+        };
+        if (structure) {
+            for (const thread_transfer_type_field &field : type.fields) {
+                for (struct field_def &declared : structure->fields) {
+                    if (declared.name == field.name) {
+                        if (!attach_default(declared, field))
+                            return false;
+                        break;
+                    }
+                }
+            }
+        } else {
+            for (const thread_transfer_type_variant &variant : type.variants) {
+                for (struct variant_def &declared : enumeration->variants) {
+                    if (declared.name != variant.name)
+                        continue;
+                    for (const thread_transfer_type_field &field :
+                         variant.fields) {
+                        for (struct field_def &declared_field :
+                             declared.fields) {
+                            if (declared_field.name == field.name) {
+                                if (!attach_default(declared_field, field))
+                                    return false;
+                                break;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    return true;
 }
 
 static thread_local bool cache_clearing = false;

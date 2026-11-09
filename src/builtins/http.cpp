@@ -3043,6 +3043,114 @@ value_t *http_serve(const std::vector<value_t *> &args) {
     return await_task_value(new_task_value(std::move(server_task)));
 }
 
+std::string escape_skein_string(const std::string &text) {
+    std::string out;
+    for (char c : text) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
+std::string make_worker_bootstrap(const std::string &script,
+                                  const std::string &entry) {
+    std::string source = R"(import std;
+
+let pool = std.thread.pool(1, "@SCRIPT@", {"entry": "@ENTRY@"});
+std.io.write_all(std.io.stdout, bytes_from_string(
+    "{\"ready\":true,\"version\":1,\"protocol\":\"hybrid\"}\n"));
+std.io.flush(std.io.stdout);
+
+while (true) {
+    let line = std.io.read_line(std.io.stdin);
+    if (line == null) { break; }
+    let request = std.json.parse(bytes_to_string(line));
+    let body = bytes_from_string("");
+    if (request["body_len"] > 0) {
+        body = std.io.read_exact(std.io.stdin, request["body_len"]);
+    }
+    let req = {
+        "method": request["params"][0],
+        "path": request["params"][1],
+        "headers": request["params"][2],
+        "body": body
+    };
+    let future = pool.submit(req);
+    let result = future.wait();
+    if (result["ok"]) {
+        let response = result["value"];
+        let body_value = response["body"];
+        let response_body = bytes_from_string("");
+        if (std.type.name(body_value) == "bytes") {
+            response_body = body_value;
+        } else if (body_value != null) {
+            response_body = bytes_from_string(str(body_value));
+        }
+        let reply = {"id": request["id"], "ok": true,
+                     "result": {"status": response["status"],
+                                "headers": response["headers"]},
+                     "body_len": len(response_body)};
+        std.io.write_all(std.io.stdout,
+            bytes_from_string(std.json.stringify(reply) + "\n"));
+        std.io.write_all(std.io.stdout, response_body);
+        std.io.flush(std.io.stdout);
+    } else {
+        let reply = {"id": request["id"], "ok": false,
+                     "error": "worker handler failed"};
+        std.io.write_all(std.io.stdout,
+            bytes_from_string(std.json.stringify(reply) + "\n"));
+        std.io.flush(std.io.stdout);
+    }
+}
+)";
+    const std::string script_marker = "@SCRIPT@";
+    const std::string entry_marker = "@ENTRY@";
+    auto replace_all = [&source](const std::string &marker,
+                                 const std::string &value) {
+        size_t pos = 0;
+        while ((pos = source.find(marker, pos)) != std::string::npos) {
+            source.replace(pos, marker.size(), value);
+            pos += value.size();
+        }
+    };
+    replace_all(script_marker, escape_skein_string(script));
+    replace_all(entry_marker, escape_skein_string(entry));
+    return source;
+}
+
+bool write_worker_bootstrap(const std::string &source, std::string &path,
+                            std::string &error) {
+    std::string directory;
+    if (!platform_get_env("TEMP", directory) &&
+        !platform_get_env("TMPDIR", directory))
+        directory = ".";
+    static std::atomic<unsigned long long> counter{0};
+    unsigned long long serial = counter.fetch_add(1);
+    unsigned long long stamp =
+        (unsigned long long)std::chrono::steady_clock::now()
+            .time_since_epoch()
+            .count();
+    path = directory + "/skein-http-worker-" + std::to_string(stamp) +
+           "-" + std::to_string(serial) + ".skein";
+    if (!platform_write_file(path, source, false, error))
+        return false;
+    return true;
+}
+
+struct worker_bootstrap_file {
+    std::string path;
+    ~worker_bootstrap_file() {
+        if (!path.empty())
+            std::remove(path.c_str());
+    }
+};
+
 value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (args.size() < 3 || args.size() > 6 || args[0]->type != T_dict ||
         args[1]->type != T_int ||
@@ -3127,6 +3235,18 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         yyerror("std.http.serve_workers on_unsupported must be "
                 "\"error\", \"501\" or \"warn\"");
         return NULL;
+    }
+
+    std::string entry = "handle";
+    if (options) {
+        value_t *value = dict_get(options, "entry");
+        if (value) {
+            if (value->type != T_string) {
+                yyerror("std.http.serve_workers entry must be a string");
+                return NULL;
+            }
+            entry = ((string_value_t *)value)->value;
+        }
     }
 
     auto read_option = [&options](const char *key, long long &out) -> bool {
@@ -3278,8 +3398,20 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
              newstrval(http_platform_name().c_str()));
     dict_set(args[0], "capabilities", caps);
 
+    std::string user_script = ((string_value_t *)args[2])->value;
+    std::string bootstrap_source =
+        make_worker_bootstrap(user_script, entry);
+    worker_bootstrap_file bootstrap;
+    std::string bootstrap_error;
+    if (!write_worker_bootstrap(bootstrap_source, bootstrap.path,
+                                bootstrap_error)) {
+        yyerror("std.http.serve_workers: cannot write worker bootstrap: "
+                "%s", bootstrap_error.c_str());
+        return NULL;
+    }
+
     value_t *worker_count = dupval(args[1]);
-    value_t *script = dupval(args[2]);
+    value_t *script = newstrval(bootstrap.path.c_str());
     value_t *pool_options = (value_t *)newdictval();
     dict_set(pool_options, "protocol", newstrval("hybrid"));
     std::vector<value_t *> pool_args{worker_count, script, pool_options};
@@ -3361,7 +3493,13 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                     result->error->type == T_error)
                     message = ((error_value_t *)result->error)->message;
                 freeval(worker_result);
-                return error_response(502, message);
+                int status = 502;
+                if (message.find("does not support generator") !=
+                        std::string::npos ||
+                    message.find("stream_response") !=
+                        std::string::npos)
+                    status = 501;
+                return error_response(status, message);
             }
             value_t *payload = result->value;
             value_t *meta = dict_get(payload, "value");

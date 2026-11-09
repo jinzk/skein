@@ -4325,6 +4325,8 @@ let data = await std.io.read_async(p["stdout"], 4096);
 
 `std.io.stdin`、`std.io.stdout`、`std.io.stderr` 也作为标准流暴露，方便子进程侧实现自己的协议。
 
+标准流是进程级共享资源；多个 worker 线程并发输出时，单次 `print` / `println` 以及 `std.io.write_all` / `std.io.flush` 调用会通过进程级锁串行化，避免一次调用内部被其他线程插入。
+
 注意：
 
 - `std.process.close` 只关闭管道，不杀死进程；需要终止时先 `kill`；

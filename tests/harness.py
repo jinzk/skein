@@ -2768,6 +2768,48 @@ def check_extended_stdlib():
                 'pool.join();\n',
                 stdout_all=["child=99:42", "parent=1:7"],
             )
+            stdio_worker = os.path.join(
+                thread_tmp, "thread_stdio_worker.skein")
+            with open(stdio_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    let id = ctx.payload[\"id\"];\n"
+                    "    for (let i = 0; i < 100; i++) {\n"
+                    "        println(\"line:\" + str(id) + \":\" + "
+                    "str(i));\n"
+                    "    }\n"
+                    "    return {\"id\": id};\n"
+                    "}\n"
+                )
+            stdio_worker_path = stdio_worker.replace("\\", "\\\\")
+            stdio_source = (
+                "import std;\n"
+                "let threads = [];\n"
+                "for (let i = 0; i < 4; i++) {\n"
+                '    let msg = std.thread.Message.from({"id": i});\n'
+                f'    let t = std.thread.spawn("{stdio_worker_path}", '
+                f'msg);\n'
+                "    threads = std.list.append(threads, t);\n"
+                "}\n"
+                "for (let t in threads) {\n"
+                "    let r = t.join();\n"
+                "}\n"
+                'println("done");\n'
+            )
+            proc = run(stdio_source, timeout=60)
+            assert proc.returncode == 0, (proc.stdout, proc.stderr)
+            stdio_lines = [
+                line for line in proc.stdout.splitlines()
+                if line.startswith("line:")
+            ]
+            assert len(stdio_lines) == 400, (
+                len(stdio_lines), proc.stdout[:2000])
+            for line in stdio_lines:
+                parts = line.split(":")
+                assert (len(parts) == 3 and parts[0] == "line" and
+                        parts[1].isdigit() and parts[2].isdigit()), line
+            assert "done" in proc.stdout, proc.stdout
 
             spawn_worker = os.path.join(
                 thread_tmp, "thread_spawn_worker.skein")

@@ -39,6 +39,7 @@
 #include "regex_builtin.h"
 #include "serialization.h"
 #include "repl.h"
+#include "stdio_stream.h"
 #include "structtype.h"
 #include "time_builtin.h"
 #include "thread_channel.h"
@@ -544,10 +545,13 @@ struct value_t *call_builtin(int functype,
         if (functype == B_format && args.empty()) {
             yyerror("format expects at least 1 argument");
         } else if (is_print && args.empty()) {
-            if (add_newline)
+            if (add_newline) {
+                std::lock_guard<std::mutex> lock(stdio_output_mutex());
                 std::printf("\n");
+            }
             ret = newnull();
         } else if (is_print && args.size() == 1) {
+            std::lock_guard<std::mutex> lock(stdio_output_mutex());
             printvalue(args[0]);
             if (add_newline)
                 std::printf("\n");
@@ -565,12 +569,15 @@ struct value_t *call_builtin(int functype,
             } else if (functype == B_format) {
                 ret = newstrval(out.c_str());
             } else {
+                std::lock_guard<std::mutex> lock(stdio_output_mutex());
                 std::printf("%s%s", out.c_str(), add_newline ? "\n" : "");
                 ret = newnull();
             }
         }
-        if (is_print && g_interactive)
+        if (is_print && g_interactive) {
+            std::lock_guard<std::mutex> lock(stdio_output_mutex());
             std::fflush(stdout);
+        }
         return ret;
     }
 

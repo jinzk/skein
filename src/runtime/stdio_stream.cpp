@@ -6,7 +6,14 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
+
+static std::mutex g_stdio_output_mutex;
+
+std::mutex &stdio_output_mutex() {
+    return g_stdio_output_mutex;
+}
 
 struct stdio_resource {
     std::FILE *file = nullptr;
@@ -65,6 +72,7 @@ static bool stdio_write(void *data, const std::string &bytes,
         error = "stream is not writable";
         return false;
     }
+    std::lock_guard<std::mutex> lock(stdio_output_mutex());
     written = std::fwrite(bytes.data(), 1, bytes.size(), resource->file);
     if (written != bytes.size()) {
         error = std::strerror(errno);
@@ -80,6 +88,7 @@ static bool stdio_flush(void *data, std::string &error) {
         error = "stream is not writable";
         return false;
     }
+    std::lock_guard<std::mutex> lock(stdio_output_mutex());
     if (std::fflush(resource->file) != 0) {
         error = std::strerror(errno);
         return false;

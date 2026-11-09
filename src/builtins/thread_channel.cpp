@@ -25,6 +25,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -2529,6 +2530,66 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     return new_thread_value(std::move(state));
 }
 
+struct value_t *thread_spawn_source(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3 ||
+        args[0]->type != T_string || args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn_source expects source, Message and "
+                "optional options");
+        return nullptr;
+    }
+    const std::string &source = ((string_value_t *)args[0])->value;
+    namespace fs = std::filesystem;
+    static std::atomic<unsigned long long> source_counter{0};
+    std::vector<fs::path> directories;
+    const std::string cwd = thread_cwd();
+    if (!cwd.empty())
+        directories.emplace_back(fs::u8path(cwd));
+    std::error_code fs_error;
+    fs::path temp_dir = fs::temp_directory_path(fs_error);
+    if (!fs_error && !temp_dir.empty())
+        directories.push_back(temp_dir);
+    if (directories.empty()) {
+        yyerror("std.thread.spawn_source: no writable temporary directory");
+        return nullptr;
+    }
+
+    fs::path path;
+    std::string write_error;
+    for (const fs::path &directory : directories) {
+        for (int attempt = 0; attempt < 32; ++attempt) {
+            const unsigned long long id =
+                source_counter.fetch_add(1, std::memory_order_relaxed);
+            path = directory /
+                   ("skein-thread-source-" + std::to_string(id) +
+                    ".skein");
+            if (platform_write_file(path.u8string(), source, false,
+                                    write_error))
+                break;
+            path.clear();
+        }
+        if (!path.empty())
+            break;
+    }
+    if (path.empty()) {
+        yyerror("std.thread.spawn_source: %s",
+                write_error.c_str());
+        return nullptr;
+    }
+
+    std::vector<struct value_t *> spawn_args;
+    spawn_args.push_back(newstrval(path.u8string().c_str()));
+    spawn_args.push_back(dupval(args[1]));
+    if (args.size() == 3)
+        spawn_args.push_back(dupval(args[2]));
+    struct value_t *thread = thread_spawn(spawn_args);
+    for (struct value_t *arg : spawn_args)
+        freeval(arg);
+    std::error_code remove_error;
+    fs::remove(path, remove_error);
+    return thread;
+}
+
 struct value_t *message_with_handle(
     const std::shared_ptr<message_state> &source, const char *name,
     struct value_t *handle) {
@@ -3169,6 +3230,8 @@ struct value_t *call_thread_channel_builtin(
             return thread_pool(args);
         case B_thread_spawn:
             return thread_spawn(args);
+        case B_thread_spawn_source:
+            return thread_spawn_source(args);
         case B_thread_select: {
             if (args.empty() || args.size() > 2) {
                 yyerror("std.thread.select expects endpoints and optional "

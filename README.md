@@ -2884,6 +2884,7 @@ std.worker.stats
 std.thread.unbounded_channel
 std.thread.pool
 std.thread.spawn
+std.thread.spawn_source
 std.thread.duplex
 std.thread.spawn_with_channel
 std.thread.spawn_with_duplex
@@ -4768,6 +4769,7 @@ pool.join();
 
 ```text
 std.thread.spawn(script, message[, options]) -> thread
+std.thread.spawn_source(source, message[, options]) -> thread
 
 thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
 thread.detach()
@@ -4781,6 +4783,8 @@ thread.id
 ```text
 entry     默认 "main"
 ```
+
+`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析。Proto/bytecode 入口仍未启用。
 
 线程入口接收一个 Message：
 

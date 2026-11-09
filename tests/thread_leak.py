@@ -33,9 +33,16 @@ def main():
             f'let t = std.thread.spawn('
             f'"{worker.replace(chr(92), chr(92) * 2)}", msg);\n'
             "let joined = t.join();\n"
+            'let src = "func main(ctx) {\\n'
+            '    return {\\"v\\": ctx.payload[\\"n\\"] + 2};\\n'
+            '}\\n";\n'
+            f'let t2 = std.thread.spawn_source(src, '
+            f'std.thread.Message.from({{"n": 3}}));\n'
+            "let joined2 = t2.join();\n"
             'println("pool=" + str(r1["value"]["v"]) + ":" + '
             'str(r2["value"]["v"]) + " thread=" + '
-            'str(joined["value"]["v"]));\n'
+            'str(joined["value"]["v"]) + " src=" + '
+            'str(joined2["value"]["v"]));\n'
         )
         env = os.environ.copy()
         env.setdefault("ASAN_OPTIONS", "detect_leaks=1")
@@ -51,7 +58,7 @@ def main():
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
             return 1
-        expected = "pool=2:3 thread=5"
+        expected = "pool=2:3 thread=5 src=5"
         if expected not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1

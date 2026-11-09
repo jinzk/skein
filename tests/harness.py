@@ -3084,6 +3084,25 @@ def check_extended_stdlib():
                 stdout_all=["signal=5", "ok=true:5", "alive=false"],
             )
             check(
+                "std.thread spawn_source",
+                "import std;\n"
+                'let src = "func main(ctx) {\\n'
+                '    return {\\"v\\": ctx.payload[\\"n\\"] + 1};\\n'
+                '}\\n";\n'
+                'let t = std.thread.spawn_source(src, '
+                'std.thread.Message.from({"n": 4}));\n'
+                'let r = t.join();\n'
+                'print("v1=" + str(r["value"]["v"]) + "|");\n'
+                'let src2 = "func run(ctx) {\\n'
+                '    return {\\"v\\": ctx.payload[\\"n\\"] * 3};\\n'
+                '}\\n";\n'
+                'let t2 = std.thread.spawn_source(src2, '
+                'std.thread.Message.from({"n": 5}), {"entry": "run"});\n'
+                'let r2 = t2.join();\n'
+                'print("v2=" + str(r2["value"]["v"]) + "|");\n',
+                stdout_all=["v1=5|", "v2=15|"],
+            )
+            check(
                 "std.thread spawn error join",
                 "import std;\n"
                 f'let msg = std.thread.Message.from({{"x": 1, '

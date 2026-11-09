@@ -4801,7 +4801,8 @@ let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
 - `thread func` 是上下文关键字，只能作为声明语句出现，可嵌套在其他函数内；
 - 入口必须是同步函数、恰好一个参数；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
 - 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
-- 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；函数值、用户 `import` 模块、defer 以及入口内新建闭包仍不支持；
+- 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
+- 被传递的函数不能使用默认/模式/可变参数，也不能包含嵌套函数或 defer；用户 `import` 模块以及入口内新建闭包仍不支持；
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口。
 
 线程入口接收一个 Message：

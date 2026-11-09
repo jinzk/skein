@@ -2364,10 +2364,230 @@ struct value_t *thread_error_envelope(struct value_t *error) {
     return envelope;
 }
 
+static void collect_upvalue_use(const skein::bc::Proto &proto,
+                                std::vector<bool> &used) {
+    for (const skein::bc::Instr &ins : proto.code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadUpvalue:
+            case skein::bc::Op::StoreUpvalue:
+            case skein::bc::Op::CompoundUpvalue:
+            case skein::bc::Op::IncDecUpvalue:
+                if (ins.b < used.size())
+                    used[ins.b] = true;
+                break;
+            default:
+                break;
+        }
+    }
+    std::unordered_map<std::string, std::size_t> by_name;
+    for (std::size_t i = 0; i < proto.upvalues.size(); ++i)
+        by_name.emplace(proto.upvalues[i], i);
+    auto note_name = [&](const std::string &name) {
+        auto it = by_name.find(name);
+        if (it != by_name.end())
+            used[it->second] = true;
+    };
+    for (const skein::bc::Instr &ins : proto.code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadName:
+            case skein::bc::Op::StoreName:
+            case skein::bc::Op::CompoundName:
+            case skein::bc::Op::IncDecName:
+                if (ins.b < proto.consts.size()) {
+                    const skein::bc::Constant &constant = proto.consts[ins.b];
+                    if (constant.kind == skein::bc::ConstantKind::Name)
+                        note_name(constant.name);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto.index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Upvalue &&
+            index.base_index < used.size())
+            used[index.base_index] = true;
+        else if (index.base_kind == skein::bc::IndexBaseKind::Name)
+            note_name(index.base_name);
+    }
+}
+
+static void collect_global_names(const skein::bc::Proto &proto,
+                                 std::vector<std::string> &names) {
+    std::unordered_set<std::string> seen;
+    auto note = [&](const std::string &name) {
+        if (name.empty() || name == "std")
+            return;
+        if (seen.insert(name).second)
+            names.push_back(name);
+    };
+    for (const skein::bc::Instr &ins : proto.code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadGlobal:
+            case skein::bc::Op::StoreGlobal:
+            case skein::bc::Op::CompoundGlobal:
+            case skein::bc::Op::IncDecGlobal:
+                if (ins.b < proto.consts.size()) {
+                    const skein::bc::Constant &constant = proto.consts[ins.b];
+                    if (constant.kind == skein::bc::ConstantKind::Name)
+                        note(constant.name);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto.index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Global)
+            note(index.base_name);
+    }
+}
+
+struct thread_value_deleter {
+    void operator()(struct value_t *value) const { freeval(value); }
+};
+
+struct thread_payload_builder {
+    std::unordered_map<const function_def *,
+                       std::shared_ptr<thread_transfer_function>>
+        functions;
+    std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    std::unordered_set<std::string> global_names;
+    std::string error;
+
+    bool transfer_value(struct value_t *value, const char *what,
+                        thread_transfer_value &out) {
+        out = thread_transfer_value();
+        if (!value) {
+            out.kind = thread_transfer_value::Kind::Null;
+            return true;
+        }
+        if (value->type == T_func)
+            return transfer_function(value, out);
+        std::unordered_set<const void *> visiting;
+        std::string copy_error;
+        struct value_t *copy =
+            copy_data_value(value, visiting, copy_error);
+        if (!copy) {
+            error = std::string(what ? what : "value") + ": " + copy_error;
+            return false;
+        }
+        out.kind = thread_transfer_value::Kind::Data;
+        out.data = std::shared_ptr<struct value_t>(copy, thread_value_deleter());
+        return true;
+    }
+
+    bool transfer_function(struct value_t *value, thread_transfer_value &out) {
+        const func_value_t *function = (const func_value_t *)value;
+        if (!function->def || !function->def->code) {
+            error = "function value has no function code";
+            return false;
+        }
+        const std::shared_ptr<function_def> &def = function->def;
+        auto existing = functions.find(def.get());
+        if (existing != functions.end()) {
+            out.kind = thread_transfer_value::Kind::Function;
+            out.function = existing->second;
+            return true;
+        }
+        skein::bc::ProtoPtr proto;
+        std::string prepare_error;
+        if (!skein_vm_prepare_thread_helper(value, proto, prepare_error)) {
+            error = prepare_error;
+            return false;
+        }
+        std::shared_ptr<thread_transfer_function> payload =
+            std::make_shared<thread_transfer_function>();
+        payload->name = def->code->name;
+        payload->proto = std::move(proto);
+        functions.emplace(def.get(), payload);
+        out.kind = thread_transfer_value::Kind::Function;
+        out.function = payload;
+        if (!fill_captures(payload, def))
+            return false;
+        return collect_globals(payload);
+    }
+
+    bool fill_captures(
+        const std::shared_ptr<thread_transfer_function> &payload,
+        const std::shared_ptr<function_def> &def) {
+        const skein::bc::Proto &proto = *payload->proto;
+        std::vector<bool> used(proto.upvalues.size(), false);
+        collect_upvalue_use(proto, used);
+        payload->captures.assign(proto.upvalues.size(),
+                                 thread_transfer_value());
+        for (std::size_t i = 0; i < used.size(); ++i) {
+            if (!used[i])
+                continue;
+            struct value_t *captured = nullptr;
+            if (i < def->upvalues.size()) {
+                const std::shared_ptr<upvalue_cell> &cell = def->upvalues[i];
+                if (cell)
+                    captured = cell->slot ? *cell->slot : cell->value;
+            }
+            if (!captured && def->closure) {
+                std::string_view name(proto.upvalues[i]);
+                for (scope_t *scope = def->closure.get();
+                     scope && !scope->is_global; scope = scope->parent.get()) {
+                    struct symbol *sym = scope->syms.find(name);
+                    if (sym) {
+                        captured = sym->val;
+                        break;
+                    }
+                }
+            }
+            std::string what = "captured " + proto.upvalues[i];
+            if (!transfer_value(captured, what.c_str(), payload->captures[i]))
+                return false;
+        }
+        return true;
+    }
+
+    bool collect_globals(
+        const std::shared_ptr<thread_transfer_function> &payload) {
+        std::vector<std::string> names;
+        collect_global_names(*payload->proto, names);
+        for (const std::string &name : names) {
+            if (!global_names.insert(name).second)
+                continue;
+            struct value_t *value = lookup_global_symbol(name.c_str());
+            if (!value)
+                continue;
+            std::string what = "global " + name;
+            thread_transfer_value transfer;
+            if (!transfer_value(value, what.c_str(), transfer))
+                return false;
+            globals.emplace_back(name, std::move(transfer));
+        }
+        return true;
+    }
+
+    bool build_entry(
+        struct value_t *entry,
+        std::shared_ptr<thread_transfer_function> &payload,
+        std::vector<std::pair<std::string, thread_transfer_value>> &out) {
+        skein::bc::ProtoPtr proto;
+        if (!skein_vm_prepare_thread_proto(entry, proto, error))
+            return false;
+        const func_value_t *function = (const func_value_t *)entry;
+        const std::shared_ptr<function_def> &def = function->def;
+        payload = std::make_shared<thread_transfer_function>();
+        payload->name = def->code->name;
+        payload->proto = std::move(proto);
+        functions.emplace(def.get(), payload);
+        if (!fill_captures(payload, def))
+            return false;
+        if (!collect_globals(payload))
+            return false;
+        out = std::move(globals);
+        return true;
+    }
+};
+
 void thread_proto_entry_main(
-    std::shared_ptr<thread_state> state, skein::bc::ProtoPtr proto,
-    std::vector<struct value_t *> captures,
-    std::vector<std::pair<std::string, struct value_t *>> globals,
+    std::shared_ptr<thread_state> state,
+    std::shared_ptr<thread_transfer_function> entry,
+    std::vector<std::pair<std::string, thread_transfer_value>> globals,
     struct value_t *argument,
     std::shared_ptr<const thread_env_snapshot> env_snapshot) {
     thread_env_install(env_snapshot);
@@ -2376,15 +2596,11 @@ void thread_proto_entry_main(
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->startup_done = true;
-        if (!proto)
+        if (!entry)
             state->startup_error = "invalid thread entry proto";
     }
     state->cv.notify_all();
-    if (!proto) {
-        for (struct value_t *capture : captures)
-            freeval(capture);
-        for (auto &entry : globals)
-            freeval(entry.second);
+    if (!entry) {
         freeval(argument);
         thread_worker_end();
         return;
@@ -2395,16 +2611,45 @@ void thread_proto_entry_main(
         if (std_namespace)
             save_global_symbol("std", std_namespace);
     }
-    for (auto &entry : globals)
-        save_global_symbol(entry.first.c_str(), entry.second);
+    std::shared_ptr<thread_transfer_context> transfer_context =
+        skein_vm_thread_transfer_context_create();
+    std::string setup_error;
+    for (auto &item : globals) {
+        struct value_t *value = nullptr;
+        std::string error;
+        if (!skein_vm_materialize_thread_value(transfer_context, item.second,
+                                               value, error)) {
+            setup_error = "global " + item.first + ": " + error;
+            break;
+        }
+        if (value)
+            save_global_symbol(item.first.c_str(), value);
+    }
     globals.clear();
 
     eval_capture_snapshot snapshot;
     eval_capture_begin(snapshot);
     struct value_t *result = nullptr;
     std::string call_error;
-    skein_vm_call_proto(proto, std::move(captures), argument, result,
-                        call_error);
+    bool call_started = false;
+    if (setup_error.empty()) {
+        thread_transfer_value entry_value;
+        entry_value.kind = thread_transfer_value::Kind::Function;
+        entry_value.function = std::move(entry);
+        struct value_t *function = nullptr;
+        if (!skein_vm_materialize_thread_value(transfer_context, entry_value,
+                                               function, call_error)) {
+            call_error = "thread entry: " + call_error;
+        } else {
+            result = skein_call_function(function, {argument});
+            call_started = true;
+            freeval(function);
+        }
+    } else {
+        call_error = setup_error;
+    }
+    if (!call_started)
+        freeval(argument);
     eval_capture_result captured = eval_capture_end(snapshot);
 
     struct value_t *envelope = nullptr;
@@ -2441,6 +2686,7 @@ void thread_proto_entry_main(
         state->done = true;
     }
     state->cv.notify_all();
+    transfer_context.reset();
     thread_worker_end();
 }
 
@@ -2641,160 +2887,12 @@ struct value_t *thread_spawn_function(
         yyerror("std.thread.spawn_function expects function and Message");
         return nullptr;
     }
-    skein::bc::ProtoPtr proto;
-    std::string error;
-    if (!skein_vm_prepare_thread_proto(args[0], proto, error)) {
-        yyerror("std.thread.spawn_function: %s", error.c_str());
+    thread_payload_builder builder;
+    std::shared_ptr<thread_transfer_function> entry;
+    std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    if (!builder.build_entry(args[0], entry, globals)) {
+        yyerror("std.thread.spawn_function: %s", builder.error.c_str());
         return nullptr;
-    }
-
-    /* Carry only captured upvalues the entry actually reads or writes.
-     * Nested functions conservatively capture every enclosing local, which
-     * would otherwise drag unrelated function values into the child. */
-    std::vector<bool> used_upvalues(proto->upvalues.size(), false);
-    for (const skein::bc::Instr &ins : proto->code) {
-        switch ((skein::bc::Op)ins.op) {
-            case skein::bc::Op::LoadUpvalue:
-            case skein::bc::Op::StoreUpvalue:
-            case skein::bc::Op::CompoundUpvalue:
-            case skein::bc::Op::IncDecUpvalue:
-                if (ins.b < used_upvalues.size())
-                    used_upvalues[ins.b] = true;
-                break;
-            default:
-                break;
-        }
-    }
-    for (const skein::bc::IndexDesc &index : proto->index_ops) {
-        if (index.base_kind == skein::bc::IndexBaseKind::Upvalue &&
-            index.base_index < used_upvalues.size())
-            used_upvalues[index.base_index] = true;
-    }
-    /* AST-compiled bodies may reference captured names through LoadName;
-     * mark those synthesized upvalues as used too. */
-    std::unordered_map<std::string, std::size_t> upvalue_by_name;
-    for (std::size_t i = 0; i < proto->upvalues.size(); ++i)
-        upvalue_by_name.emplace(proto->upvalues[i], i);
-    auto note_name_upvalue = [&](const std::string &name) {
-        auto it = upvalue_by_name.find(name);
-        if (it != upvalue_by_name.end())
-            used_upvalues[it->second] = true;
-    };
-    for (const skein::bc::Instr &ins : proto->code) {
-        switch ((skein::bc::Op)ins.op) {
-            case skein::bc::Op::LoadName:
-            case skein::bc::Op::StoreName:
-            case skein::bc::Op::CompoundName:
-            case skein::bc::Op::IncDecName:
-                if (ins.b < proto->consts.size()) {
-                    const skein::bc::Constant &constant =
-                        proto->consts[ins.b];
-                    if (constant.kind == skein::bc::ConstantKind::Name)
-                        note_name_upvalue(constant.name);
-                }
-                break;
-            default:
-                break;
-        }
-    }
-    for (const skein::bc::IndexDesc &index : proto->index_ops) {
-        if (index.base_kind == skein::bc::IndexBaseKind::Name)
-            note_name_upvalue(index.base_name);
-    }
-    const func_value_t *function = (const func_value_t *)args[0];
-    std::vector<struct value_t *> captures(proto->upvalues.size(), nullptr);
-    for (std::size_t index = 0; index < captures.size(); ++index) {
-        if (!used_upvalues[index])
-            continue;
-        struct value_t *captured = nullptr;
-        if (function->def && index < function->def->upvalues.size()) {
-            const std::shared_ptr<upvalue_cell> &cell =
-                function->def->upvalues[index];
-            if (cell)
-                captured = cell->slot ? *cell->slot : cell->value;
-        }
-        if (!captured && function->def && function->def->closure) {
-            /* The AST backend keeps captures in a scope chain instead of
-             * upvalue cells. */
-            std::string_view name(proto->upvalues[index]);
-            for (scope_t *scope = function->def->closure.get();
-                 scope && !scope->is_global; scope = scope->parent.get()) {
-                struct symbol *sym = scope->syms.find(name);
-                if (sym) {
-                    captured = sym->val;
-                    break;
-                }
-            }
-        }
-        if (!captured) {
-            captures[index] = newnull();
-            continue;
-        }
-        std::unordered_set<const void *> visiting;
-        std::string capture_error;
-        struct value_t *copy =
-            copy_data_value(captured, visiting, capture_error);
-        if (!copy) {
-            for (struct value_t *value : captures)
-                freeval(value);
-            yyerror("std.thread.spawn_function: captured %s: %s",
-                    proto->upvalues[index].c_str(), capture_error.c_str());
-            return nullptr;
-        }
-        captures[index] = copy;
-    }
-
-    /* Snapshot only globals the entry actually touches.  Name constants are
-     * shared with field names, diagnostics and labels, so collect the names
-     * from the global opcodes instead of scanning every constant. */
-    std::vector<std::string> global_names;
-    std::unordered_set<std::string> seen_globals;
-    auto note_global = [&](const std::string &name) {
-        if (name.empty() || name == "std")
-            return;
-        if (seen_globals.insert(name).second)
-            global_names.push_back(name);
-    };
-    for (const skein::bc::Instr &ins : proto->code) {
-        switch ((skein::bc::Op)ins.op) {
-            case skein::bc::Op::LoadGlobal:
-            case skein::bc::Op::StoreGlobal:
-            case skein::bc::Op::CompoundGlobal:
-            case skein::bc::Op::IncDecGlobal:
-                if (ins.b < proto->consts.size()) {
-                    const skein::bc::Constant &constant =
-                        proto->consts[ins.b];
-                    if (constant.kind == skein::bc::ConstantKind::Name)
-                        note_global(constant.name);
-                }
-                break;
-            default:
-                break;
-        }
-    }
-    for (const skein::bc::IndexDesc &index : proto->index_ops) {
-        if (index.base_kind == skein::bc::IndexBaseKind::Global)
-            note_global(index.base_name);
-    }
-    std::vector<std::pair<std::string, struct value_t *>> globals;
-    for (const std::string &name : global_names) {
-        struct symbol *symbol = lookupsym(name.c_str());
-        if (!symbol || !symbol->val)
-            continue;
-        std::unordered_set<const void *> visiting;
-        std::string capture_error;
-        struct value_t *value =
-            copy_data_value(symbol->val, visiting, capture_error);
-        if (!value) {
-            for (struct value_t *capture : captures)
-                freeval(capture);
-            for (auto &entry : globals)
-                freeval(entry.second);
-            yyerror("std.thread.spawn_function: global %s: %s",
-                    name.c_str(), capture_error.c_str());
-            return nullptr;
-        }
-        globals.emplace_back(name, value);
     }
 
     std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
@@ -2802,14 +2900,9 @@ struct value_t *thread_spawn_function(
     struct value_t *argument = dupval(args[1]);
     try {
         state->thread = std::thread(thread_proto_entry_main, state,
-                                    std::move(proto), std::move(captures),
-                                    std::move(globals), argument,
-                                    thread_env_capture());
+                                    std::move(entry), std::move(globals),
+                                    argument, thread_env_capture());
     } catch (const std::exception &) {
-        for (struct value_t *capture : captures)
-            freeval(capture);
-        for (auto &entry : globals)
-            freeval(entry.second);
         freeval(argument);
         yyerror("std.thread.spawn_function could not start thread");
         return nullptr;

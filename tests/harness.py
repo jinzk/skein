@@ -3212,6 +3212,64 @@ def check_extended_stdlib():
                 stdout_all=["c=14|", "d=2|", "e=2:1|", "f=18|"],
             )
             check(
+                "std.thread transfers function values",
+                "import std;\n"
+                "let base = 100;\n"
+                "func make_adder(n) {\n"
+                "    return func(x) { return x + n + base; };\n"
+                "}\n"
+                "let f1 = make_adder(1);\n"
+                "let f2 = make_adder(2);\n"
+                "func make_worker() {\n"
+                "    thread func worker(ctx) {\n"
+                "        return {\"v\": f1(ctx.payload[\"n\"]) + "
+                "f2(ctx.payload[\"n\"])};\n"
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let w = make_worker();\n"
+                "let t = std.thread.spawn(w, "
+                'std.thread.Message.from({"n": 10}));\n'
+                "let r = t.join();\n"
+                'print("two=" + str(r["value"]["v"]) + "|");\n'
+                "func helper(x) { return x * 2; }\n"
+                "func helper2(x) { return helper(x) + 1; }\n"
+                "thread func global_worker(ctx) {\n"
+                '    return {"v": helper2(ctx.payload["n"])};\n'
+                "}\n"
+                "let t2 = std.thread.spawn(global_worker, "
+                'std.thread.Message.from({"n": 5}));\n'
+                "let r2 = t2.join();\n"
+                'print("chain=" + str(r2["value"]["v"]) + "|");\n'
+                "func even(n) { if (n == 0) { return true; } "
+                "return odd(n - 1); }\n"
+                "func odd(n) { if (n == 0) { return false; } "
+                "return even(n - 1); }\n"
+                "thread func parity(ctx) {\n"
+                '    return {"v": even(ctx.payload["n"])};\n'
+                "}\n"
+                "let t3 = std.thread.spawn(parity, "
+                'std.thread.Message.from({"n": 10}));\n'
+                "let r3 = t3.join();\n"
+                'print("mutual=" + str(r3["value"]["v"]) + "|");\n',
+                stdout_all=["two=223|", "chain=11|", "mutual=true|"],
+            )
+            check(
+                "std.thread transfer rejects defaults",
+                "import std;\n"
+                "func with_default(x, y = 2) { return x + y; }\n"
+                "func make_worker() {\n"
+                "    thread func worker(ctx) {\n"
+                '        return {"v": with_default(ctx.payload["n"])};\n'
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let w = make_worker();\n"
+                "std.thread.spawn(w, "
+                'std.thread.Message.from({"n": 10}));\n',
+                stderr="cannot transfer a function with default parameters",
+            )
+            check(
                 "std.thread spawn plain function rejected",
                 "import std;\n"
                 "func plain(ctx) {\n"

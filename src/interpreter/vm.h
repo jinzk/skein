@@ -7,10 +7,35 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 struct ast;
 struct function_code;
 struct function_def;
+
+struct thread_transfer_function;
+
+/* One value captured by a Proto-backed thread entry or a transferred
+ * function.  `Data` values are owned data-only snapshots; `Function` values
+ * point at another prepared Proto payload. */
+struct thread_transfer_value {
+    enum class Kind { Null, Data, Function };
+    Kind kind = Kind::Null;
+    std::shared_ptr<struct value_t> data;
+    std::shared_ptr<struct thread_transfer_function> function;
+};
+
+/* A function prepared in the parent thread and reconstructed in the child. */
+struct thread_transfer_function {
+    std::string name;
+    skein::bc::ProtoPtr proto;
+    /* Parallel to proto->upvalues. */
+    std::vector<thread_transfer_value> captures;
+};
+
+/* Opaque memo table used while materializing one transfer graph. */
+struct thread_transfer_context;
 
 enum class ParamPatternResult {
     Matched,
@@ -78,12 +103,19 @@ bool skein_vm_prepare_thread_proto(
     const struct value_t *function, skein::bc::ProtoPtr &proto,
     std::string &error);
 
-/* Execute a prepared thread-entry Proto with one argument.  `captures` is
- * parallel to `proto->upvalues`; null entries are unused upvalue slots and
- * are consumed on success or failure. */
-bool skein_vm_call_proto(
-    const skein::bc::ProtoPtr &proto,
-    std::vector<struct value_t *> captures, struct value_t *argument,
-    struct value_t *&result, std::string &error);
+/* Prepare a function value for transfer as a child-side function.  Bodies
+ * must not contain nested functions, defers, default/pattern/variadic
+ * parameters, or methods. */
+bool skein_vm_prepare_thread_helper(
+    const struct value_t *function, skein::bc::ProtoPtr &proto,
+    std::string &error);
+
+/* Materialize a prepared transfer graph in the current (child) thread. */
+std::shared_ptr<thread_transfer_context>
+skein_vm_thread_transfer_context_create();
+bool skein_vm_materialize_thread_value(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const struct thread_transfer_value &value, struct value_t *&out,
+    std::string &error);
 
 #endif

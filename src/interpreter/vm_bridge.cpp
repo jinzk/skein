@@ -601,6 +601,106 @@ skein::bc::ProtoPtr skein_vm_prepare_function_body(
     return prepare_function_body(def);
 }
 
+static void populate_ast_upvalues(const std::shared_ptr<function_def> &def) {
+    if (!def || !def->code || !def->code->upvalues.empty() || !def->closure)
+        return;
+    /* The AST backend does not pre-populate function_code::upvalues.
+     * Recover the visible non-global names before compiling so the body
+     * binds them as upvalues and captured locals shadow globals. */
+    std::unordered_set<std::string> seen;
+    for (scope_t *scope = def->closure.get();
+         scope && !scope->is_global; scope = scope->parent.get()) {
+        for (struct symbol *sym : scope->syms.small) {
+            if (!sym || !sym->name || !*sym->name)
+                continue;
+            if (seen.insert(sym->name).second)
+                def->code->upvalues.emplace_back(sym->name);
+        }
+    }
+}
+
+static void recover_ast_proto_upvalues(
+    const std::shared_ptr<function_def> &def, skein::bc::Proto &copy) {
+    if (!copy.upvalues.empty() || !def->closure)
+        return;
+    /* A cached Proto may have been compiled before the AST backend
+     * populated function_code::upvalues.  Recover the free names referenced
+     * by the body so the child can rebuild a closure scope for them. */
+    auto find_closure_symbol = [&](const std::string &name) {
+        std::string_view key(name);
+        for (scope_t *scope = def->closure.get();
+             scope && !scope->is_global; scope = scope->parent.get()) {
+            if (struct symbol *sym = scope->syms.find(key))
+                return sym;
+        }
+        return (struct symbol *)nullptr;
+    };
+    std::unordered_set<std::string> seen;
+    auto add_upvalue = [&](const std::string &name) {
+        if (name.empty() || name == "std")
+            return;
+        if (!seen.insert(name).second)
+            return;
+        if (!find_closure_symbol(name))
+            return;
+        copy.upvalues.push_back(name);
+    };
+    for (const skein::bc::Instr &ins : copy.code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadName:
+            case skein::bc::Op::StoreName:
+            case skein::bc::Op::CompoundName:
+            case skein::bc::Op::IncDecName:
+                if (ins.b < copy.consts.size()) {
+                    const skein::bc::Constant &constant = copy.consts[ins.b];
+                    if (constant.kind == skein::bc::ConstantKind::Name)
+                        add_upvalue(constant.name);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : copy.index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Name)
+            add_upvalue(index.base_name);
+    }
+}
+
+static std::shared_ptr<skein::bc::Proto> clone_thread_proto(
+    const skein::bc::ProtoPtr &source) {
+    std::shared_ptr<skein::bc::Proto> copy =
+        std::make_shared<skein::bc::Proto>(*source);
+    copy->name_ic.clear();
+    copy->member_ic.clear();
+    copy->index_read_ic.clear();
+    return copy;
+}
+
+static bool validate_transferable_body(
+    const skein::bc::ProtoPtr &source, const char *what,
+    std::string &error) {
+    if (source->has_closures || source->uses_defers ||
+        !source->defer_protos.empty()) {
+        error = std::string(what) + " cannot use closures or defer";
+        return false;
+    }
+    for (const skein::bc::Constant &constant : source->consts) {
+        if (constant.function) {
+            error = std::string(what) + " contains a nested function";
+            return false;
+        }
+    }
+    for (const skein::bc::PatternDesc &pattern : source->patterns) {
+        if (pattern.literal_expr) {
+            error = std::string(what) +
+                    " contains a nested pattern expression";
+            return false;
+        }
+    }
+    return true;
+}
+
 bool skein_vm_prepare_thread_proto(
     const struct value_t *function, skein::bc::ProtoPtr &proto,
     std::string &error) {
@@ -624,164 +724,233 @@ bool skein_vm_prepare_thread_proto(
                 "parameter";
         return false;
     }
-    if (def->code->upvalues.empty() && def->closure) {
-        /* The AST backend does not pre-populate function_code::upvalues.
-         * Recover the visible non-global names before compiling so the body
-         * binds them as upvalues and captured locals shadow globals. */
-        std::unordered_set<std::string> seen;
-        for (const auto &name : def->code->upvalues)
-            seen.insert(name);
-        for (scope_t *scope = def->closure.get();
-             scope && !scope->is_global; scope = scope->parent.get()) {
-            for (struct symbol *sym : scope->syms.small) {
-                if (!sym || !sym->name || !*sym->name)
-                    continue;
-                if (seen.insert(sym->name).second)
-                    def->code->upvalues.emplace_back(sym->name);
-            }
-        }
-    }
+    populate_ast_upvalues(def);
     skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
     if (!source) {
         error = "cannot compile thread entry";
         return false;
     }
-    if (source->has_closures || source->uses_defers ||
-        !source->defer_protos.empty()) {
-        error = "thread entry cannot use closures or defer";
+    if (!validate_transferable_body(source, "thread entry", error))
         return false;
-    }
-    for (const skein::bc::Constant &constant : source->consts) {
-        if (constant.function) {
-            error = "thread entry contains a nested function";
-            return false;
-        }
-    }
-    for (const skein::bc::PatternDesc &pattern : source->patterns) {
-        if (pattern.literal_expr) {
-            error = "thread entry contains a nested pattern expression";
-            return false;
-        }
-    }
-    std::shared_ptr<skein::bc::Proto> copy =
-        std::make_shared<skein::bc::Proto>(*source);
-    copy->name_ic.clear();
-    copy->member_ic.clear();
-    copy->index_read_ic.clear();
-    if (copy->upvalues.empty() && def->closure) {
-        /* The AST backend does not pre-populate function_code::upvalues.
-         * Recover the free names referenced by the compiled body so the
-         * child runtime can rebuild a closure scope for them. */
-        auto find_closure_symbol = [&](const std::string &name) {
-            std::string_view key(name);
-            for (scope_t *scope = def->closure.get();
-                 scope && !scope->is_global; scope = scope->parent.get()) {
-                if (struct symbol *sym = scope->syms.find(key))
-                    return sym;
-            }
-            return (struct symbol *)nullptr;
-        };
-        std::unordered_set<std::string> seen;
-        auto add_upvalue = [&](const std::string &name) {
-            if (name.empty() || name == "std")
-                return;
-            if (!seen.insert(name).second)
-                return;
-            if (!find_closure_symbol(name))
-                return;
-            copy->upvalues.push_back(name);
-        };
-        for (const skein::bc::Instr &ins : copy->code) {
-            switch ((skein::bc::Op)ins.op) {
-                case skein::bc::Op::LoadName:
-                case skein::bc::Op::StoreName:
-                case skein::bc::Op::CompoundName:
-                case skein::bc::Op::IncDecName:
-                    if (ins.b < copy->consts.size()) {
-                        const skein::bc::Constant &constant =
-                            copy->consts[ins.b];
-                        if (constant.kind == skein::bc::ConstantKind::Name)
-                            add_upvalue(constant.name);
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
-        for (const skein::bc::IndexDesc &index : copy->index_ops) {
-            if (index.base_kind == skein::bc::IndexBaseKind::Name)
-                add_upvalue(index.base_name);
-        }
-    }
+    std::shared_ptr<skein::bc::Proto> copy = clone_thread_proto(source);
+    recover_ast_proto_upvalues(def, *copy);
     proto = std::move(copy);
     return true;
 }
 
-bool skein_vm_call_proto(
-    const skein::bc::ProtoPtr &proto,
-    std::vector<struct value_t *> captures, struct value_t *argument,
-    struct value_t *&result, std::string &error) {
-    (void)error;
-    if (!proto) {
-        for (struct value_t *capture : captures)
-            freeval(capture);
-        freeval(argument);
-        result = nullptr;
+bool skein_vm_prepare_thread_helper(
+    const struct value_t *function, skein::bc::ProtoPtr &proto,
+    std::string &error) {
+    if (!function || function->type != T_func) {
+        error = "thread function value is not callable";
         return false;
     }
-    ensure_vm_host();
-    std::shared_ptr<function_code> code = std::make_shared<function_code>();
-    code->sl = newsymlist(newsym("ctx"), nullptr, nullptr);
-    code->nparams = (int)proto->nparams;
-    code->required_params = (int)proto->required_params;
-    code->name = proto->name;
-    code->module = proto->module;
-    code->is_async = proto->is_async;
-    code->is_generator = proto->is_generator;
-    code->is_method = proto->is_method;
-    code->variadic = proto->variadic;
-    code->upvalues = proto->upvalues;
-    std::vector<std::shared_ptr<upvalue_cell>> cells(proto->upvalues.size());
-    std::shared_ptr<scope_t> closure;
-    for (size_t i = 0; i < captures.size() && i < cells.size(); ++i) {
-        if (!captures[i])
-            continue;
-        if (!closure) {
-            closure = std::make_shared<scope_t>();
-            closure->is_function = false;
-            closure->is_global = false;
-            closure->ret = nullptr;
-            closure->function_scope = nullptr;
-            closure->parent = active_scope_context().global_scope;
+    const func_value_t *value = (const func_value_t *)function;
+    if (!value->def || !value->def->code) {
+        error = "thread function value has no function code";
+        return false;
+    }
+    const std::shared_ptr<function_def> &def = value->def;
+    if (def->code->is_method) {
+        error = "cannot transfer a method value";
+        return false;
+    }
+    if (def->code->variadic) {
+        error = "cannot transfer a variadic function";
+        return false;
+    }
+    if (def->code->required_params != def->code->nparams) {
+        error = "cannot transfer a function with default parameters";
+        return false;
+    }
+    for (struct symlist *param = def->code->sl; param; param = param->next) {
+        if (param->has_pattern) {
+            error = "cannot transfer a function with pattern parameters";
+            return false;
         }
-        struct symbol *sym = newsym(proto->upvalues[i].c_str());
-        sym->val = dupval(captures[i]);
-        type_constraint_set_any(&sym->type);
-        closure->syms.insert(sym);
-        std::shared_ptr<upvalue_cell> cell = std::make_shared<upvalue_cell>();
-        cell->value = captures[i];
-        captures[i] = nullptr;
-        cell->name = proto->upvalues[i];
-        cells[i] = std::move(cell);
     }
-    function_vm_cache &cache = *cache_for(code.get());
-    cache.proto = proto;
-    cache.compile_failed = false;
-    struct func_value_t *function =
-        (struct func_value_t *)newfuncval(code, closure, cells);
-    result = skein_call_function((struct value_t *)function, {argument});
-    freeval((struct value_t *)function);
-    skein_vm_forget_function_code(code.get());
-    for (const std::shared_ptr<upvalue_cell> &cell : cells) {
-        if (!cell || !cell->value)
-            continue;
-        if (cell->value != result)
-            freeval(cell->value);
-        cell->value = nullptr;
+    populate_ast_upvalues(def);
+    skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
+    if (!source) {
+        error = "cannot compile thread function value";
+        return false;
     }
-    symlistfree(code->sl);
-    code->sl = nullptr;
+    if (!validate_transferable_body(source, "thread function value", error))
+        return false;
+    std::shared_ptr<skein::bc::Proto> copy = clone_thread_proto(source);
+    recover_ast_proto_upvalues(def, *copy);
+    proto = std::move(copy);
     return true;
+}
+
+struct thread_transfer_context {
+    std::unordered_map<const thread_transfer_function *, struct value_t *>
+        functions;
+
+    ~thread_transfer_context() {
+        /* Break capture cycles before dropping the materialized functions. */
+        for (auto &entry : functions) {
+            struct func_value_t *function = (struct func_value_t *)entry.second;
+            if (!function->def)
+                continue;
+            for (const std::shared_ptr<upvalue_cell> &cell :
+                 function->def->upvalues) {
+                if (cell && cell->value) {
+                    freeval(cell->value);
+                    cell->value = nullptr;
+                }
+            }
+        }
+        for (auto &entry : functions)
+            freeval(entry.second);
+    }
+};
+
+namespace {
+
+void free_transferred_def(struct function_def *def) {
+    if (!def)
+        return;
+    for (const std::shared_ptr<upvalue_cell> &cell : def->upvalues) {
+        if (cell && cell->value) {
+            freeval(cell->value);
+            cell->value = nullptr;
+        }
+    }
+    delete def;
+}
+
+std::shared_ptr<function_code> make_transfer_code(
+    const thread_transfer_function &payload) {
+    const skein::bc::Proto &proto = *payload.proto;
+    std::shared_ptr<function_code> code(
+        new function_code(), free_function_code);
+    code->nparams = (int)proto.nparams;
+    code->required_params = (int)proto.required_params;
+    code->name = proto.name.empty() ? payload.name : proto.name;
+    code->module = proto.module;
+    code->is_async = proto.is_async;
+    code->is_generator = proto.is_generator;
+    code->is_method = false;
+    code->variadic = proto.variadic;
+    code->def_line = proto.def_line;
+    code->def_column = proto.def_column;
+    code->upvalues = proto.upvalues;
+
+    struct symlist *head = nullptr;
+    struct symlist *tail = nullptr;
+    for (uint32_t i = 0; i < proto.nparams; ++i) {
+        std::string name =
+            i < proto.param_names.size() ? proto.param_names[i] : "";
+        struct symbol *sym = newsym(name.empty() ? "arg" : name.c_str());
+        struct symlist *node = newsymlist(sym, nullptr, nullptr);
+        if (tail)
+            tail->next = node;
+        else
+            head = node;
+        tail = node;
+    }
+    code->sl = head;
+
+    function_vm_cache &cache = *cache_for(code.get());
+    cache.proto = payload.proto;
+    cache.compile_failed = false;
+    return code;
+}
+
+bool materialize_thread_function(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const std::shared_ptr<thread_transfer_function> &payload,
+    struct value_t *&out, std::string &error);
+
+bool materialize_thread_value(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const thread_transfer_value &value, struct value_t *&out,
+    std::string &error) {
+    switch (value.kind) {
+        case thread_transfer_value::Kind::Null:
+            out = newnull();
+            return true;
+        case thread_transfer_value::Kind::Data:
+            if (!value.data) {
+                error = "invalid transferred data value";
+                return false;
+            }
+            out = dupval(value.data.get());
+            return true;
+        case thread_transfer_value::Kind::Function:
+            if (!value.function) {
+                error = "invalid transferred function value";
+                return false;
+            }
+            return materialize_thread_function(context, value.function, out,
+                                                error);
+    }
+    error = "invalid transferred value";
+    return false;
+}
+
+bool materialize_thread_function(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const std::shared_ptr<thread_transfer_function> &payload,
+    struct value_t *&out, std::string &error) {
+    if (!payload || !payload->proto) {
+        error = "invalid transferred function";
+        return false;
+    }
+    auto found = context->functions.find(payload.get());
+    if (found != context->functions.end()) {
+        out = dupval(found->second);
+        return true;
+    }
+
+    ensure_vm_host();
+    std::shared_ptr<function_code> code = make_transfer_code(*payload);
+    std::shared_ptr<function_def> def(
+        new function_def(), free_transferred_def);
+    def->code = code;
+    def->upvalues.assign(payload->proto->upvalues.size(), nullptr);
+    struct func_value_t *function =
+        (struct func_value_t *)newfuncval(code, nullptr, {});
+    function->def = std::move(def);
+    context->functions.emplace(payload.get(), (struct value_t *)function);
+
+    for (std::size_t i = 0;
+         i < payload->captures.size() && i < function->def->upvalues.size();
+         ++i) {
+        struct value_t *capture = nullptr;
+        if (!materialize_thread_value(context, payload->captures[i], capture,
+                                      error)) {
+            return false;
+        }
+        std::shared_ptr<upvalue_cell> cell = std::make_shared<upvalue_cell>();
+        cell->value = capture;
+        if (i < payload->proto->upvalues.size())
+            cell->name = payload->proto->upvalues[i];
+        function->def->upvalues[i] = std::move(cell);
+    }
+    out = dupval((struct value_t *)function);
+    return true;
+}
+
+} // namespace
+
+std::shared_ptr<thread_transfer_context>
+skein_vm_thread_transfer_context_create() {
+    return std::make_shared<thread_transfer_context>();
+}
+
+bool skein_vm_materialize_thread_value(
+    const std::shared_ptr<thread_transfer_context> &context,
+    const struct thread_transfer_value &value, struct value_t *&out,
+    std::string &error) {
+    if (!context) {
+        error = "missing thread transfer context";
+        out = nullptr;
+        return false;
+    }
+    out = nullptr;
+    return materialize_thread_value(context, value, out, error);
 }
 
 static thread_local bool cache_clearing = false;

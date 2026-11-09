@@ -66,13 +66,30 @@ def main():
             "let t5 = std.thread.spawn(captured_data, "
             'std.thread.Message.from({"n": 0}));\n'
             "let joined5 = t5.join();\n"
+            "func make_adder(n) {\n"
+            "    return func(x) { return x + n; };\n"
+            "}\n"
+            "let adder = make_adder(3);\n"
+            "func helper(x) { return x * 2; }\n"
+            "func make_transfer(f) {\n"
+            "    thread func inner(ctx) {\n"
+            '        return {"v": f(ctx.payload["n"]) + '
+            'helper(ctx.payload["n"])};\n'
+            "    }\n"
+            "    return inner;\n"
+            "}\n"
+            "let transfer = make_transfer(adder);\n"
+            "let t6 = std.thread.spawn(transfer, "
+            'std.thread.Message.from({"n": 3}));\n'
+            "let joined6 = t6.join();\n"
             'println("pool=" + str(r1["value"]["v"]) + ":" + '
             'str(r2["value"]["v"]) + " thread=" + '
             'str(joined["value"]["v"]) + " src=" + '
             'str(joined2["value"]["v"]) + " proto=" + '
             'str(joined3["value"]["v"]) + " closure=" + '
             'str(joined4["value"]["v"]) + " data=" + '
-            'str(joined5["value"][2]));\n'
+            'str(joined5["value"][2]) + " transfer=" + '
+            'str(joined6["value"]["v"]));\n'
         )
         env = os.environ.copy()
         env.setdefault("ASAN_OPTIONS", "detect_leaks=1")
@@ -88,7 +105,7 @@ def main():
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
             return 1
-        expected = "pool=2:3 thread=5 src=5 proto=6 closure=7 data=3"
+        expected = "pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 transfer=12"
         if expected not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1

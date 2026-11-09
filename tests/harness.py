@@ -851,6 +851,54 @@ def check_extended_stdlib():
             except Exception as exc:
                 client_result["error"] = repr(exc)
 
+        shutdown_script = os.path.join(
+            worker_tmp, "serve_workers_shutdown.skein")
+        with open(shutdown_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ps = std.http.serve_workers(s, 1, "
+                f"\"{slow_worker_path}\", "
+                "{\"strategy\": \"dispatch\", \"max_requests\": 0});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "std.task.wait(std.task.sleep(700));\n"
+                "let started = std.time.monotonic_ms();\n"
+                "let served = ps.shutdown(100);\n"
+                "println(\"shutdown=\" + str(served) + \":\" + "
+                "str(std.time.monotonic_ms() - started));\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), shutdown_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_workers shutdown did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            client = threading.Thread(target=slow_request, args=(port_line,))
+            client.start()
+            out, err = server.communicate(timeout=20)
+            assert server.returncode == 0, err
+            shutdown_lines = [
+                line for line in out.splitlines()
+                if line.startswith("shutdown=")
+            ]
+            assert shutdown_lines, out
+            elapsed = int(shutdown_lines[0].rsplit(":", 1)[1])
+            assert elapsed < 5000, shutdown_lines[0]
+            client.join(timeout=10)
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
         if reuse_platform:
             workers_reuse_worker = os.path.join(
                 worker_tmp, "serve_workers_reuse_worker.skein")

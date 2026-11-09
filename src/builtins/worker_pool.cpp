@@ -147,14 +147,91 @@ value_t *call_io(int functype, std::vector<value_t *> args) {
     return call_io_builtin(functype, args);
 }
 
+value_t *wait_async_task(value_t *task, long long timeout_ms,
+                         std::string &error,
+                         const char *timeout_message) {
+    if (!task) {
+        error = "cannot start worker operation";
+        return nullptr;
+    }
+    if (fiber_in_fiber()) {
+        task_ptr pending_task;
+        if (!get_task_value(task, pending_task)) {
+            freeval(task);
+            error = "invalid worker task";
+            return nullptr;
+        }
+        auto ready = [pending_task]() {
+            return task_get_state(pending_task) != TASK_STATE_PENDING;
+        };
+        if (!fiber_wait_for(ready, timeout_ms)) {
+            value_t *cancelled =
+                call_task_builtin(B_task_cancel, {task});
+            if (cancelled)
+                freeval(cancelled);
+            freeval(task);
+            error = timeout_message;
+            return nullptr;
+        }
+    }
+
+    value_t *wait_timeout =
+        timeout_ms > 0 ? newintval(timeout_ms) : nullptr;
+    std::vector<value_t *> wait_args{task};
+    if (wait_timeout)
+        wait_args.push_back(wait_timeout);
+    value_t *wait_result =
+        call_task_builtin(B_task_try_wait, wait_args);
+    if (wait_timeout)
+        freeval(wait_timeout);
+    freeval(task);
+    if (!wait_result) {
+        error = "cannot wait for worker response";
+        return nullptr;
+    }
+    result_value_t *result = (result_value_t *)wait_result;
+    if (!result->ok) {
+        if (result->error && result->error->type == T_error)
+            error = ((error_value_t *)result->error)->message;
+        else
+            error = "worker response failed";
+        freeval(wait_result);
+        return nullptr;
+    }
+    value_t *chunk = result->value;
+    result->value = nullptr;
+    freeval(wait_result);
+    if (!chunk) {
+        error = "worker response failed";
+        return nullptr;
+    }
+    return chunk;
+}
+
 bool write_bytes(value_t *stream, const std::string &data) {
-    value_t *bytes = newbytesval(data);
-    value_t *result = call_io(
-        B_io_write_all, {stream, bytes});
-    freeval(bytes);
-    if (!result)
-        return false;
-    freeval(result);
+    size_t offset = 0;
+    while (offset < data.size()) {
+        value_t *bytes = newbytesval(data.substr(offset));
+        value_t *task = call_io(B_io_write_async, {stream, bytes});
+        freeval(bytes);
+        if (!task)
+            return false;
+        std::string error;
+        value_t *result =
+            wait_async_task(task, 0, error, "worker write timed out");
+        if (!result)
+            return false;
+        if (result->type != T_int) {
+            freeval(result);
+            return false;
+        }
+        const long long written = ((int_value_t *)result)->value;
+        freeval(result);
+        if (written <= 0 ||
+            (size_t)written > data.size() - offset)
+            return false;
+        offset += (size_t)written;
+    }
     return true;
 }
 
@@ -164,6 +241,25 @@ bool flush_stream(value_t *stream) {
         return false;
     freeval(result);
     return true;
+}
+
+value_t *read_async_chunk(value_t *stream, long long max_bytes,
+                          long long timeout_ms, std::string &error,
+                          const char *timeout_message) {
+    value_t *size = newintval(max_bytes);
+    value_t *timeout = timeout_ms > 0 ? newintval(timeout_ms) : nullptr;
+    std::vector<value_t *> args{stream, size};
+    if (timeout)
+        args.push_back(timeout);
+    value_t *task = call_io(B_io_read_async, args);
+    freeval(size);
+    if (timeout)
+        freeval(timeout);
+    if (!task) {
+        error = "cannot start worker read";
+        return nullptr;
+    }
+    return wait_async_task(task, timeout_ms, error, timeout_message);
 }
 
 value_t *read_line(value_t *stream, std::string *pending,
@@ -178,7 +274,7 @@ value_t *read_line(value_t *stream, std::string *pending,
             return newstrval(buffer.c_str());
         }
     }
-    if (timeout_ms <= 0) {
+    if (timeout_ms <= 0 && !fiber_in_fiber()) {
         value_t *line = call_io(B_io_read_line, {stream});
         if (!line)
             return nullptr;
@@ -200,48 +296,21 @@ value_t *read_line(value_t *stream, std::string *pending,
 
     const auto start = std::chrono::steady_clock::now();
     for (;;) {
-        const auto now = std::chrono::steady_clock::now();
-        const long long elapsed = std::chrono::duration_cast<
-            std::chrono::milliseconds>(now - start).count();
-        const long long remaining = timeout_ms - elapsed;
-        if (remaining <= 0) {
-            error = "worker response timed out";
-            return nullptr;
+        long long remaining = 0;
+        if (timeout_ms > 0) {
+            const auto now = std::chrono::steady_clock::now();
+            const long long elapsed = std::chrono::duration_cast<
+                std::chrono::milliseconds>(now - start).count();
+            remaining = timeout_ms - elapsed;
+            if (remaining <= 0) {
+                error = "worker response timed out";
+                return nullptr;
+            }
         }
-        value_t *size = newintval(65536);
-        value_t *timeout = newintval(remaining);
-        value_t *task = call_io(B_io_read_async, {stream, size, timeout});
-        freeval(size);
-        freeval(timeout);
-        if (!task) {
-            error = "cannot start worker read";
+        value_t *chunk = read_async_chunk(stream, 65536, remaining, error,
+                                          "worker response timed out");
+        if (!chunk)
             return nullptr;
-        }
-        value_t *wait_timeout = newintval(remaining);
-        value_t *wait_result = call_task_builtin(
-            B_task_try_wait, {task, wait_timeout});
-        freeval(wait_timeout);
-        freeval(task);
-        if (!wait_result) {
-            error = "cannot wait for worker response";
-            return nullptr;
-        }
-        result_value_t *result = (result_value_t *)wait_result;
-        if (!result->ok) {
-            if (result->error && result->error->type == T_error)
-                error = ((error_value_t *)result->error)->message;
-            else
-                error = "worker response failed";
-            freeval(wait_result);
-            return nullptr;
-        }
-        value_t *chunk = result->value;
-        result->value = nullptr;
-        freeval(wait_result);
-        if (!chunk) {
-            error = "worker response failed";
-            return nullptr;
-        }
         if (chunk->type == T_null) {
             freeval(chunk);
             break;
@@ -277,28 +346,46 @@ value_t *read_exact_stream(value_t *stream, std::string *pending,
         buffered.assign(pending->data(), take);
         pending->erase(0, take);
     }
-    if (buffered.size() == size)
-        return newbytesval(std::move(buffered));
-    const size_t remaining = size - buffered.size();
-    value_t *size_value = newintval((long long)remaining);
-    std::vector<value_t *> args{stream, size_value};
-    value_t *timeout_value = nullptr;
-    if (timeout_ms > 0) {
-        timeout_value = newintval(timeout_ms);
-        args.push_back(timeout_value);
+    const auto start = std::chrono::steady_clock::now();
+    while (buffered.size() < size) {
+        const size_t missing = size - buffered.size();
+        long long remaining = 0;
+        if (timeout_ms > 0) {
+            const auto now = std::chrono::steady_clock::now();
+            const long long elapsed = std::chrono::duration_cast<
+                std::chrono::milliseconds>(now - start).count();
+            remaining = timeout_ms - elapsed;
+            if (remaining <= 0) {
+                error = "worker body read timed out";
+                return nullptr;
+            }
+        }
+        const long long request =
+            (long long)std::min<size_t>(missing, 65536);
+        value_t *chunk = read_async_chunk(stream, request, remaining, error,
+                                          "worker body read timed out");
+        if (!chunk)
+            return nullptr;
+        if (chunk->type == T_null) {
+            freeval(chunk);
+            error = "worker closed its stdout";
+            return nullptr;
+        }
+        if (chunk->type != T_bytes) {
+            freeval(chunk);
+            error = "worker protocol expected bytes";
+            return nullptr;
+        }
+        const std::string &bytes = ((bytes_value_t *)chunk)->value;
+        if (bytes.empty()) {
+            freeval(chunk);
+            error = "worker body read failed";
+            return nullptr;
+        }
+        buffered.append(bytes.data(),
+                        std::min<size_t>(bytes.size(), missing));
+        freeval(chunk);
     }
-    value_t *result = call_io(B_io_read_exact, args);
-    freeval(size_value);
-    if (timeout_value)
-        freeval(timeout_value);
-    if (!result || result->type != T_bytes) {
-        if (result)
-            freeval(result);
-        error = "worker body read failed";
-        return nullptr;
-    }
-    buffered += ((bytes_value_t *)result)->value;
-    freeval(result);
     return newbytesval(std::move(buffered));
 }
 

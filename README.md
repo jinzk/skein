@@ -124,6 +124,14 @@ TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan \
   -R 'thread_tsan|net_tsan' --output-on-failure
 ```
 
+Linux JIT + mimalloc 构建与全量测试：
+
+```bash
+MIMALLOC_PREFIX=/path/to/mimalloc tools/check_linux_jit_mimalloc.sh
+```
+
+未设置 `MIMALLOC_PREFIX` 时要求系统 include/library 路径中已有 mimalloc。
+
 统一的本地/CI 检查脚本覆盖 Debug、Release、ASan+UBSan、LSan、VM-only、
 runtime-only 链接以及 docs / boundary / diff 检查：
 

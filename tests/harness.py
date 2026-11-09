@@ -2254,6 +2254,49 @@ def check_extended_stdlib():
                 stdout_all=["r1=true:42", "r2=true:10", "fail=false"],
             )
 
+            message_worker = os.path.join(
+                thread_tmp, "thread_message_worker.skein")
+            with open(message_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "func handle(payload) {\n"
+                    "    return payload;\n"
+                    "}\n"
+                )
+            message_worker_path = message_worker.replace("\\", "\\\\")
+            check(
+                "std.thread message container payloads",
+                "import std;\n"
+                "struct P { x: int; text: string; }\n"
+                "enum E { A; B { n: int; }; }\n"
+                'let l = std.lru.new(4);\n'
+                'l = std.lru.put(l, "a", 1)["lru"];\n'
+                'l = std.lru.put(l, "b", 2)["lru"];\n'
+                'let d = std.deque.from_list([1, 2, 3]);\n'
+                'let s = std.set.from_list([7, 8, 9]);\n'
+                'let payload = {"p": P { x: 42, text: "hi" },\n'
+                '               "e": E.B { n: 5 }, "l": l, "d": d, "s": s};\n'
+                'let msg = std.thread.Message.from(payload);\n'
+                f'let pool = std.thread.pool(1, "{message_worker_path}");\n'
+                'let r = pool.submit(msg.payload).wait();\n'
+                'let v = r["value"];\n'
+                'print("p="); print(v["p"].x); print(":"); '
+                'print(v["p"].text); print("|");\n'
+                'let en = match (v["e"]) { case E.B { n } => n; '
+                'default => 0; };\n'
+                'print("e="); print(en); print("|");\n'
+                'let lr = std.lru.get(v["l"], "a");\n'
+                'print("l="); print(lr["found"]); print(":"); '
+                'print(lr["value"]); print(":"); '
+                'print(std.lru.len(v["l"])); print("|");\n'
+                'print("d="); print(std.deque.size(v["d"])); print(":"); '
+                'print(std.deque.to_list(v["d"])[2]); print("|");\n'
+                'print("s="); print(std.set.size(v["s"])); print(":"); '
+                'print(std.set.has(v["s"], 8)); print("|");\n'
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout="p=42:hi|e=5|l=true:1:2|d=3:3|s=3:true|",
+            )
+
             spawn_worker = os.path.join(
                 thread_tmp, "thread_spawn_worker.skein")
             with open(spawn_worker, "w", encoding="utf-8") as handle:

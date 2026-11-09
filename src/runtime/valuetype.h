@@ -416,6 +416,9 @@ struct set_value_t *newsetval();
 /* Borrowed pointers in queue order; no dupval. */
 void deque_items_in_order(const struct deque_payload *payload,
                           std::vector<value_t *> &out);
+/* Persistent push; dupvals `value` and returns a new payload. */
+std::shared_ptr<deque_payload> deque_push_back_payload(
+    const std::shared_ptr<deque_payload> &source, struct value_t *value);
 /* Borrowed pointers in level order; no dupval. */
 void heap_items_level_order(const struct heap_payload *payload,
                             std::vector<value_t *> &out);

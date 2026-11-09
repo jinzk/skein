@@ -32,9 +32,6 @@ struct value_t;
 
 const char *math_builtin_name(int functype);
 
-std::shared_ptr<deque_payload> deque_push_back_payload(
-    const std::shared_ptr<deque_payload> &source, struct value_t *value);
-
 struct value_t *call_fn_builtin(
     int functype, const std::vector<struct value_t *> &args);
 

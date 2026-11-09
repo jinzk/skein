@@ -14,6 +14,7 @@
 #include "runtime_context.h"
 #include "runtime_state.h"
 #include "scopestack.h"
+#include "structtype.h"
 #include "symbol.h"
 #include "task.h"
 #include "vm.h"
@@ -149,6 +150,168 @@ struct value_t *copy_data_value(struct value_t *value,
                                 std::unordered_set<const void *> &visiting,
                                 std::string &error);
 
+struct value_t *copy_lru_value(struct value_t *value,
+                               std::unordered_set<const void *> &visiting,
+                               std::string &error) {
+    const void *payload = value_payload(value);
+    if (payload && !visiting.insert(payload).second) {
+        error = "Message payload contains a cycle";
+        return nullptr;
+    }
+    struct lru_value_t *source = (struct lru_value_t *)value;
+    struct lru_value_t *copy = newlruval(source->payload->capacity);
+    for (const auto &entry : source->payload->items) {
+        struct value_t *key =
+            copy_data_value(entry.first, visiting, error);
+        if (!key) {
+            freeval((struct value_t *)copy);
+            if (payload)
+                visiting.erase(payload);
+            return nullptr;
+        }
+        struct value_t *item =
+            copy_data_value(entry.second, visiting, error);
+        if (!item) {
+            freeval(key);
+            freeval((struct value_t *)copy);
+            if (payload)
+                visiting.erase(payload);
+            return nullptr;
+        }
+        copy->payload->items.push_back(std::make_pair(key, item));
+    }
+    if (payload)
+        visiting.erase(payload);
+    return (struct value_t *)copy;
+}
+
+struct value_t *copy_deque_value(struct value_t *value,
+                                 std::unordered_set<const void *> &visiting,
+                                 std::string &error) {
+    const void *payload = value_payload(value);
+    if (payload && !visiting.insert(payload).second) {
+        error = "Message payload contains a cycle";
+        return nullptr;
+    }
+    struct deque_value_t *source = (struct deque_value_t *)value;
+    struct deque_value_t *copy = newdequeval();
+    std::vector<struct value_t *> items;
+    deque_items_in_order(source->payload.get(), items);
+    for (struct value_t *item : items) {
+        struct value_t *child =
+            copy_data_value(item, visiting, error);
+        if (!child) {
+            freeval((struct value_t *)copy);
+            if (payload)
+                visiting.erase(payload);
+            return nullptr;
+        }
+        copy->payload = deque_push_back_payload(copy->payload, child);
+        freeval(child);
+    }
+    if (payload)
+        visiting.erase(payload);
+    return (struct value_t *)copy;
+}
+
+struct value_t *copy_set_value(struct value_t *value,
+                               std::unordered_set<const void *> &visiting,
+                               std::string &error) {
+    const void *payload = value_payload(value);
+    if (payload && !visiting.insert(payload).second) {
+        error = "Message payload contains a cycle";
+        return nullptr;
+    }
+    struct set_value_t *source = (struct set_value_t *)value;
+    struct set_value_t *copy = newsetval();
+    std::vector<struct value_t *> keys;
+    set_values_in_order(source->payload.get(), keys);
+    for (struct value_t *key : keys) {
+        struct value_t *child =
+            copy_data_value(key, visiting, error);
+        if (!child) {
+            freeval((struct value_t *)copy);
+            if (payload)
+                visiting.erase(payload);
+            return nullptr;
+        }
+        bool added = false;
+        std::shared_ptr<set_node> root =
+            set_insert(copy->payload->root, child, added);
+        if (added) {
+            copy->payload->root = std::move(root);
+            copy->payload->order =
+                deque_push_back_payload(copy->payload->order, child);
+            copy->payload->size += 1;
+        }
+        freeval(child);
+    }
+    if (payload)
+        visiting.erase(payload);
+    return (struct value_t *)copy;
+}
+
+struct value_t *copy_struct_value(struct value_t *value,
+                                  std::unordered_set<const void *> &visiting,
+                                  std::string &error) {
+    const void *payload = value_payload(value);
+    if (payload && !visiting.insert(payload).second) {
+        error = "Message payload contains a cycle";
+        return nullptr;
+    }
+    struct struct_value_t *source = (struct struct_value_t *)value;
+    struct struct_value_t *copy = new struct_value_t;
+    copy->type = T_struct;
+    copy->def = source->def;
+    copy->payload = std::make_shared<struct_payload>();
+    copy->payload->fields.reserve(source->payload->fields.size());
+    for (struct value_t *field : source->payload->fields) {
+        struct value_t *child =
+            copy_data_value(field, visiting, error);
+        if (!child) {
+            delete copy;
+            if (payload)
+                visiting.erase(payload);
+            return nullptr;
+        }
+        copy->payload->fields.push_back(child);
+    }
+    if (payload)
+        visiting.erase(payload);
+    return (struct value_t *)copy;
+}
+
+struct value_t *copy_enum_value(struct value_t *value,
+                                std::unordered_set<const void *> &visiting,
+                                std::string &error) {
+    const void *payload = value_payload(value);
+    if (payload && !visiting.insert(payload).second) {
+        error = "Message payload contains a cycle";
+        return nullptr;
+    }
+    struct enum_value_t *source = (struct enum_value_t *)value;
+    struct enum_value_t *copy = new enum_value_t;
+    copy->type = T_enum;
+    copy->def = source->def;
+    copy->variant = source->variant;
+    copy->payload = std::make_shared<struct_payload>();
+    copy->payload->fields.reserve(source->payload->fields.size());
+    for (struct value_t *field : source->payload->fields) {
+        struct value_t *child =
+            copy_data_value(field, visiting, error);
+        if (!child) {
+            delete copy;
+            if (payload)
+                visiting.erase(payload);
+            return nullptr;
+        }
+        copy->payload->fields.push_back(child);
+    }
+    if (payload)
+        visiting.erase(payload);
+    return (struct value_t *)copy;
+}
+
 struct value_t *copy_dict_value(struct value_t *value,
                                 std::unordered_set<const void *> &visiting,
                                 std::string &error) {
@@ -240,6 +403,20 @@ struct value_t *copy_data_value(struct value_t *value,
         }
         case T_dict:
             return copy_dict_value(value, visiting, error);
+        case T_lru:
+            return copy_lru_value(value, visiting, error);
+        case T_deque:
+            return copy_deque_value(value, visiting, error);
+        case T_set:
+            return copy_set_value(value, visiting, error);
+        case T_struct:
+            return copy_struct_value(value, visiting, error);
+        case T_enum:
+            return copy_enum_value(value, visiting, error);
+        case T_heap:
+            error = "Message payload does not support heap comparator "
+                    "functions";
+            return nullptr;
         default:
             error = std::string("Message payload does not support ") +
                     typename_of(value);
@@ -307,6 +484,106 @@ bool validate_data_value(struct value_t *value,
                 visiting.erase(payload);
             return true;
         }
+        case T_lru: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct lru_value_t *lru = (struct lru_value_t *)value;
+            for (const auto &entry : lru->payload->items) {
+                if (!validate_data_value(entry.first, visiting, error) ||
+                    !validate_data_value(entry.second, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        case T_deque: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct deque_value_t *deque = (struct deque_value_t *)value;
+            std::vector<struct value_t *> items;
+            deque_items_in_order(deque->payload.get(), items);
+            for (struct value_t *item : items) {
+                if (!validate_data_value(item, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        case T_set: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct set_value_t *set = (struct set_value_t *)value;
+            std::vector<struct value_t *> keys;
+            set_values_in_order(set->payload.get(), keys);
+            for (struct value_t *key : keys) {
+                if (!validate_data_value(key, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        case T_struct: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct struct_value_t *structure =
+                (struct struct_value_t *)value;
+            for (struct value_t *field : structure->payload->fields) {
+                if (!validate_data_value(field, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        case T_enum: {
+            const void *payload = value_payload(value);
+            if (payload && !visiting.insert(payload).second) {
+                error = "Message payload contains a cycle";
+                return false;
+            }
+            struct enum_value_t *enumeration = (struct enum_value_t *)value;
+            for (struct value_t *field : enumeration->payload->fields) {
+                if (!validate_data_value(field, visiting, error)) {
+                    if (payload)
+                        visiting.erase(payload);
+                    return false;
+                }
+            }
+            if (payload)
+                visiting.erase(payload);
+            return true;
+        }
+        case T_heap:
+            error = "Message payload does not support heap comparator "
+                    "functions";
+            return false;
         default:
             error = std::string("Message payload does not support ") +
                     typename_of(value);

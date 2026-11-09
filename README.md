@@ -4640,6 +4640,7 @@ channel.length
 - 无界 Channel 使用 `std.thread.unbounded_channel()`，`capacity == -1`；
 - Channel 只接收 `std.thread.Message`；
 - `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
+- payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；
 - `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
 - `send` 在队列满时阻塞；`try_send` 不阻塞；
 - `recv` 在队列空时阻塞；关闭且排空后返回 `null`；

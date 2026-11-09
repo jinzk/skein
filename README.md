@@ -780,6 +780,7 @@ max_connections    默认 0
 max_header_bytes   默认 64 KiB
 max_headers        默认 100
 max_body_bytes     默认 16 MiB
+h2_max_concurrent_streams 默认 16（reuse_port HTTP/2）
 ```
 
 worker 脚本导出 `handle(req)`，返回 response dict：
@@ -801,12 +802,15 @@ func handle(req) {
 - `reuse_port`：每个 worker 线程独立 bind + listen + accept + TLS + HTTP 解析，并在本地执行 `handle(req)`；
 - `reuse_port` 仅 Linux/FreeBSD/DragonFly/Solaris/AIX 支持；其他平台显式请求会报错；
 - `reuse_port` 使用 `max_requests` 的共享原子计数，超过上限的请求返回 503；
+- `reuse_port` + TLS 时通过 ALPN 同时支持 `h2` 和 `http/1.1`；明文 reuse_port 当前为 HTTP/1.1；
+- `reuse_port` 支持 `stream_request_body`，worker 直接调用 `std.http.read_body(req)`，不跨线程传输 body；
+- `dispatch` 不支持 `stream_request_body`，启动时报错；
 - request dict 包含 `method/path/headers/body/http_major/http_minor/keep_alive/remote_addr/remote_port`，不包含 `socket`；
+- reuse_port 的 request dict 额外包含 `worker_id`；
 - worker 返回值必须是 `{status, headers, body}`；
 - dispatch 下 worker 崩溃返回 502，worker 超时返回 504，worker 全部退出返回 503；
 - `serve_threads` 立即返回 `ThreadServer`，`join()` 等待服务结束并返回已处理请求数；
-- capabilities 为 HTTP/1.1、非流式，并报告 `reuse_port` / `strategies` / `platform`；
-- 当前不支持 `stream_request_body`，启动时直接报错；
+- capabilities 报告 `http1` / `http2` / `stream_request_body` / `reuse_port` / `strategies` / `platform`；
 - `max_requests` 达到后停止 accept，连接任务排空后退出。
 
 ```skein

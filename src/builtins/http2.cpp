@@ -2842,6 +2842,26 @@ struct h2_server_state {
     value_t *on_request_body = NULL;
     std::size_t max_body_bytes = 16 * 1024 * 1024;
     std::vector<nghttp2_settings_entry> settings;
+    std::shared_ptr<http_shared_state> shared;
+
+    bool stopping_now() const {
+        return shared ? shared->stopping.load() : stopping;
+    }
+    void request_stop() {
+        if (shared)
+            shared->stopping.store(true);
+        else
+            stopping = true;
+    }
+    long long served_now() const {
+        return shared ? shared->served.load() : served;
+    }
+    void note_served() {
+        if (shared)
+            shared->served.fetch_add(1);
+        else
+            ++served;
+    }
 };
 
 void handle_h2_server_connection(value_t *stream, long long connection_id,
@@ -2885,9 +2905,9 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             std::chrono::steady_clock::now();
         while (connection_open) {
             if (!draining &&
-                (state->stopping ||
+                (state->stopping_now() ||
                  (state->max_requests != 0 &&
-                  state->served >= state->max_requests)))
+                  state->served_now() >= state->max_requests)))
                 draining = true;
 
             rv = nghttp2_session_send(connection.session);
@@ -2898,8 +2918,9 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             }
 
             while (!draining && !connection.ready.empty()) {
-                if (state->max_requests != 0 &&
-                    state->served + (long long)handler_tasks.size() >=
+                if (!state->shared && state->max_requests != 0 &&
+                    state->served_now() +
+                            (long long)handler_tasks.size() >=
                         state->max_requests) {
                     draining = true;
                     break;
@@ -2919,6 +2940,26 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 if (it == connection.requests.end() || !it->second ||
                     it->second->responded)
                     continue;
+
+                if (state->shared) {
+                    long long ticket =
+                        state->shared->claimed.fetch_add(1) + 1;
+                    if (state->max_requests != 0 &&
+                        ticket > state->max_requests) {
+                        state->request_stop();
+                        draining = true;
+                        value_t *response = (value_t *)newdictval();
+                        dict_set(response, "status", newintval(503));
+                        dict_set(response, "headers",
+                                 (value_t *)newdictval());
+                        dict_set(response, "body",
+                                 newbytesval("server is shutting down"));
+                        submit_server_response(connection, stream_id,
+                                               response);
+                        freeval(response);
+                        continue;
+                    }
+                }
 
                 value_t *request = make_request(
                     it->second, stream, connection_id,
@@ -2988,13 +3029,13 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                     connection_open = false;
                     break;
                 }
-                ++state->served;
+                state->note_served();
                 ++connection_requests;
                 if (stream_id > last_served_stream_id)
                     last_served_stream_id = stream_id;
                 if (state->max_requests != 0 &&
-                    state->served >= state->max_requests) {
-                    state->stopping = true;
+                    state->served_now() >= state->max_requests) {
+                    state->request_stop();
                     draining = true;
                 }
                 if (state->max_per_connection != 0 &&
@@ -3042,7 +3083,7 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 }
             }
             if (timed_out) {
-                if (state->stopping)
+                if (state->stopping_now())
                     draining = true;
                 if (draining && handler_tasks.empty())
                     break;
@@ -3217,11 +3258,11 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
         long long next_connection_id = 1;
         std::vector<task_ptr> connections;
         for (;;) {
-            if (state.stopping)
+            if (state.stopping_now())
                 break;
             if (state.max_requests != 0 &&
-                state.served >= state.max_requests) {
-                state.stopping = true;
+                state.served_now() >= state.max_requests) {
+                state.request_stop();
                 break;
             }
             for (size_t i = 0; i < connections.size();) {
@@ -3317,7 +3358,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
             connections.push_back(connection_task);
         }
 
-        state.stopping = true;
+        state.request_stop();
         for (size_t i = 0; i < connections.size(); ++i) {
             if (task_get_state(connections[i]) != TASK_STATE_PENDING)
                 continue;
@@ -3329,7 +3370,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
             freeval(captured.error);
         }
         connections.clear();
-        return newintval(state.served);
+        return newintval(state.served_now());
     });
     if (!server_task)
         return NULL;
@@ -3337,6 +3378,27 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
 }
 
 } // namespace
+
+void http2_serve_connection(
+    struct value_t *stream, struct value_t *handler,
+    const h2_connection_config &config,
+    const std::shared_ptr<http_shared_state> &shared) {
+    h2_server_state state;
+    state.max_requests = config.max_requests;
+    state.max_per_connection = config.max_per_connection;
+    state.idle_timeout_ms = config.idle_timeout_ms;
+    state.stream_request_body = config.stream_request_body;
+    state.on_request_body = config.on_request_body;
+    state.max_body_bytes = config.max_body_bytes;
+    state.shared = shared;
+    if (config.max_concurrent_streams > 0) {
+        nghttp2_settings_entry entry;
+        entry.settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
+        entry.value = (uint32_t)config.max_concurrent_streams;
+        state.settings.push_back(entry);
+    }
+    handle_h2_server_connection(stream, 1, handler, &state);
+}
 
 value_t *call_http2_builtin(int functype,
                             const std::vector<value_t *> &args) {

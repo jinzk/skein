@@ -16,6 +16,9 @@
 #include "task.h"
 #include "thread_channel.h"
 #include "worker_pool.h"
+#ifdef SKEIN_ENABLE_HTTP2
+#include "http2.h"
+#endif
 #ifdef SKEIN_ENABLE_TLS
 #include "tls.h"
 #endif
@@ -2565,12 +2568,6 @@ void drain_http1_pull_body(const std::shared_ptr<http1_pull_body> &body) {
     freeval(captured.error);
 }
 
-struct http_shared_state {
-    std::atomic<long long> claimed{0};
-    std::atomic<long long> served{0};
-    std::atomic<bool> stopping{false};
-};
-
 struct http_server_state {
     long long max_requests = 0;
     long long max_per_connection = 100;
@@ -2581,6 +2578,8 @@ struct http_server_state {
     std::size_t max_header_bytes = 64 * 1024;
     std::size_t max_headers = 100;
     std::size_t max_body_bytes = 16 * 1024 * 1024;
+    bool http2_enabled = false;
+    long long h2_max_concurrent_streams = 16;
     std::shared_ptr<http_shared_state> shared;
 };
 
@@ -2782,14 +2781,20 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
     freeval(stream);
 }
 
+using http_connection_fn = std::function<void(
+    value_t *, value_t *, http_server_state *)>;
+
 task_ptr start_http_server(value_t *socket, value_t *handler,
                            std::shared_ptr<http_server_state> state,
                            const std::string &cert_file,
-                           const std::string &key_file) {
+                           const std::string &key_file,
+                           const std::vector<std::string> &alpn = {},
+                           const http_connection_fn &connection_fn = {}) {
     value_t *socket_copy = dupval(socket);
     value_t *handler_copy = dupval(handler);
     task_ptr server_task = fiber_start_async(
-        [socket_copy, handler_copy, state, cert_file, key_file]() {
+        [socket_copy, handler_copy, state, cert_file, key_file, alpn,
+         connection_fn]() {
         std::vector<task_ptr> connections;
         for (;;) {
             if (state->shared->stopping.load())
@@ -2856,6 +2861,16 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                 tls_args.push_back(dupval(client));
                 tls_args.push_back(newstrval(cert_file.c_str()));
                 tls_args.push_back(newstrval(key_file.c_str()));
+                if (!alpn.empty()) {
+                    value_t *options = (value_t *)newdictval();
+                    value_t *protocols = (value_t *)newlistval();
+                    for (const std::string &protocol : alpn)
+                        ((list_value_t *)protocols)
+                            ->payload->items.push_back(
+                                newstrval(protocol.c_str()));
+                    dict_set(options, "alpn", protocols);
+                    tls_args.push_back(options);
+                }
                 stream = call_tls(B_tls_server, tls_args);
                 if (!stream) {
                     close_socket(client);
@@ -2872,9 +2887,12 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
             }
 
             task_ptr connection_task = fiber_start_async(
-                [stream, handler_copy, state]() {
-                handle_http_server_connection(stream, handler_copy,
-                                              state.get());
+                [stream, handler_copy, state, connection_fn]() {
+                if (connection_fn)
+                    connection_fn(stream, handler_copy, state.get());
+                else
+                    handle_http_server_connection(stream, handler_copy,
+                                                  state.get());
                 return (value_t *)NULL;
             });
             if (!connection_task) {
@@ -3163,6 +3181,7 @@ struct reuse_port_server_state
     std::string script;
     std::string entry = "handle";
     bool worker_vm = false;
+    bool http2_enabled = false;
     std::size_t worker_count = 0;
     std::vector<std::thread> threads;
     std::mutex mutex;
@@ -3231,13 +3250,43 @@ void reuse_port_worker_fail(
 
 value_t *make_reuse_handler(
     const std::shared_ptr<reuse_port_server_state> &server,
-    value_t *handler) {
+    value_t *handler, std::size_t worker_index) {
     return newnativeval(
-        [server, handler](const std::vector<value_t *> &args) -> value_t * {
-            if (args.empty())
+        [server, handler, worker_index](
+            const std::vector<value_t *> &args) -> value_t * {
+            if (args.empty() || !args[0] || args[0]->type != T_dict)
                 return nullptr;
             server->active.fetch_add(1);
-            value_t *request = dupval(args[0]);
+            value_t *source = args[0];
+            value_t *request = (value_t *)newdictval();
+            const char *fields[] = {
+                "method", "path", "headers", "body", "http_major",
+                "http_minor", "keep_alive", "body_reader",
+                "connection_id", "scheme", "authority"};
+            for (const char *field : fields) {
+                value_t *value = dict_get(source, field);
+                if (value)
+                    dict_set(request, field, dupval(value));
+            }
+            value_t *socket = dict_get(source, "socket");
+            if (socket) {
+                value_t *peer =
+                    call_net(B_net_peer_addr, {dupval(socket)});
+                if (peer && peer->type == T_dict) {
+                    value_t *address = dict_get(peer, "address");
+                    value_t *port = dict_get(peer, "port");
+                    if (address)
+                        dict_set(request, "remote_addr",
+                                 dupval(address));
+                    if (port)
+                        dict_set(request, "remote_port",
+                                 dupval(port));
+                }
+                freeval(peer);
+            }
+            dict_set(request, "worker_id",
+                     newintval((long long)worker_index));
+
             value_t *response =
                 skein_call_function(handler, {request});
             if (response && is_task_value(response))
@@ -3253,7 +3302,8 @@ value_t *make_reuse_handler(
 }
 
 void reuse_port_worker_main(
-    std::shared_ptr<reuse_port_server_state> server) {
+    std::shared_ptr<reuse_port_server_state> server,
+    std::size_t worker_index) {
     server->alive.fetch_add(1);
     std::string error;
     thread_worker_begin(server->worker_vm, error);
@@ -3278,7 +3328,6 @@ void reuse_port_worker_main(
 
     if (!loaded) {
         reuse_port_worker_fail(server, error);
-        freeval(handler);
         thread_worker_end();
         server->alive.fetch_sub(1);
         return;
@@ -3296,7 +3345,6 @@ void reuse_port_worker_main(
     if (!listener) {
         reuse_port_worker_fail(
             server, "could not bind reuse_port listener");
-        freeval(handler);
         thread_worker_end();
         server->alive.fetch_sub(1);
         return;
@@ -3311,16 +3359,54 @@ void reuse_port_worker_main(
     std::shared_ptr<http_server_state> state =
         std::make_shared<http_server_state>(*server->config);
     state->shared = server->shared;
-    value_t *wrapped = make_reuse_handler(server, handler);
+    value_t *wrapped = make_reuse_handler(server, handler, worker_index);
+
+    std::vector<std::string> alpn;
+    if (!server->cert_file.empty()) {
+        alpn.push_back("http/1.1");
+        if (server->http2_enabled)
+            alpn.insert(alpn.begin(), "h2");
+    }
+
+    http_connection_fn connection_fn;
+#ifdef SKEIN_ENABLE_HTTP2
+    if (server->http2_enabled) {
+        connection_fn = [](value_t *stream, value_t *handler,
+                           http_server_state *state) {
+            std::string protocol;
+            value_t *selected =
+                call_tls(B_tls_alpn, {dupval(stream)});
+            if (selected && selected->type == T_string)
+                protocol = ((string_value_t *)selected)->value;
+            freeval(selected);
+            if (protocol == "h2") {
+                h2_connection_config config;
+                config.max_requests = state->max_requests;
+                config.max_per_connection = state->max_per_connection;
+                config.idle_timeout_ms = state->idle_timeout_ms;
+                config.max_body_bytes = state->max_body_bytes;
+                config.stream_request_body = state->stream_request_body;
+                config.on_request_body = nullptr;
+                config.max_concurrent_streams =
+                    state->h2_max_concurrent_streams;
+                http2_serve_connection(stream, handler, config,
+                                       state->shared);
+                return;
+            }
+            handle_http_server_connection(stream, handler, state);
+        };
+    }
+#endif
+
     task_ptr task = start_http_server(
-        listener, wrapped, state, server->cert_file, server->key_file);
+        listener, wrapped, state, server->cert_file, server->key_file,
+        alpn, connection_fn);
     if (task) {
         value_t *result = fiber_await_task(task);
         freeval(result);
     }
     freeval(wrapped);
     freeval(listener);
-    freeval(handler);
     thread_worker_end();
     server->alive.fetch_sub(1);
 }
@@ -3334,6 +3420,7 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
         std::make_shared<reuse_port_server_state>();
     server->shared = config->shared;
     server->config = std::move(config);
+    server->http2_enabled = server->config->http2_enabled;
     server->host = host;
     server->port = port;
     server->script = script;
@@ -3345,7 +3432,7 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
 
     try {
         for (std::size_t i = 0; i < workers; ++i)
-            server->threads.emplace_back(reuse_port_worker_main, server);
+            server->threads.emplace_back(reuse_port_worker_main, server, i);
     } catch (const std::exception &) {
         error = "could not start reuse_port workers";
         server->stop_server();
@@ -3660,9 +3747,14 @@ value_t *thread_server_get_field(void *data, const char *name) {
                              : 0);
     if (std::strcmp(name, "capabilities") == 0) {
         value_t *caps = (value_t *)newdictval();
+        bool http2 =
+            server->http && server->http->http2_enabled;
+        bool stream_body =
+            server->http && server->http->stream_request_body;
         dict_set(caps, "http1", newboolval(true));
-        dict_set(caps, "http2", newboolval(false));
-        dict_set(caps, "stream_request_body", newboolval(false));
+        dict_set(caps, "http2", newboolval(http2));
+        dict_set(caps, "stream_request_body",
+                 newboolval(stream_body));
         dict_set(caps, "reuse_port",
                  newboolval(SKEIN_HAS_REUSE_PORT != 0));
         dict_set(caps, "keep_alive", newboolval(true));
@@ -3790,11 +3882,14 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     long long idle_timeout_ms = 0;
     long long max_connections = 0;
     long long worker_timeout_ms = 30000;
+    long long h2_max_concurrent_streams = 16;
     if (!read_non_negative("max_requests", max_requests) ||
         !read_non_negative("max_per_connection", max_per_connection) ||
         !read_non_negative("idle_timeout_ms", idle_timeout_ms) ||
         !read_non_negative("max_connections", max_connections) ||
-        !read_non_negative("worker_timeout_ms", worker_timeout_ms))
+        !read_non_negative("worker_timeout_ms", worker_timeout_ms) ||
+        !read_non_negative("h2_max_concurrent_streams",
+                           h2_max_concurrent_streams))
         return NULL;
 
     std::size_t max_header_bytes = 64 * 1024;
@@ -3813,6 +3908,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
                                max_body_bytes)))
         return NULL;
 
+    bool stream_request_body = false;
     value_t *stream_body_value = option("stream_request_body");
     if (stream_body_value && stream_body_value->type != T_null) {
         if (stream_body_value->type != T_bool) {
@@ -3820,11 +3916,8 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
                     "a bool");
             return NULL;
         }
-        if (((bool_value_t *)stream_body_value)->value) {
-            yyerror("std.http.serve_threads does not support "
-                    "stream_request_body");
-            return NULL;
-        }
+        stream_request_body =
+            ((bool_value_t *)stream_body_value)->value;
     }
 
     value_t *on_request_body = dict_get(args[0], "on_request_body");
@@ -3883,6 +3976,11 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
                 "supported by reuse_port");
         return NULL;
     }
+    if (stream_request_body && strategy != "reuse_port") {
+        yyerror("std.http.serve_threads: stream_request_body requires "
+                "reuse_port");
+        return NULL;
+    }
 
     std::shared_ptr<http_server_state> state =
         std::make_shared<http_server_state>();
@@ -3890,10 +3988,18 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     state->max_per_connection = max_per_connection;
     state->idle_timeout_ms = idle_timeout_ms;
     state->max_connections = max_connections;
-    state->stream_request_body = false;
+    state->stream_request_body =
+        strategy == "reuse_port" ? stream_request_body : false;
     state->max_header_bytes = max_header_bytes;
     state->max_headers = max_headers;
     state->max_body_bytes = max_body_bytes;
+    state->h2_max_concurrent_streams = h2_max_concurrent_streams;
+#ifdef SKEIN_ENABLE_HTTP2
+    state->http2_enabled =
+        strategy == "reuse_port" && !cert_file.empty();
+#else
+    state->http2_enabled = false;
+#endif
     state->shared = std::make_shared<http_shared_state>();
 
     std::shared_ptr<thread_server_state> server =

@@ -5,7 +5,9 @@ import base64
 import hashlib
 import os
 import random
+import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1096,8 +1098,9 @@ def check_extended_stdlib():
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
             's["stream_request_body"] = true;\n'
-            'let ts = std.http.serve_threads(s, 1, "missing.skein");\n',
-            stderr="does not support stream_request_body",
+            'let ts = std.http.serve_threads(s, 1, "missing.skein", '
+            '{"strategy": "dispatch"});\n',
+            stderr="stream_request_body requires reuse_port",
         )
 
         if FFI_SHIM:
@@ -1185,10 +1188,10 @@ def check_extended_stdlib():
             with open(reuse_worker, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    "let worker_id = std.random.int(1, 1000000);\n"
                     "func handle(req) {\n"
                     "  return {\"status\": 200,\n"
-                    "          \"headers\": {\"X-Worker\": str(worker_id)},\n"
+                    "          \"headers\": {\"X-Worker\": "
+                    "str(req[\"worker_id\"])},\n"
                     "          \"body\": \"ok\"};\n"
                     "}\n"
                 )
@@ -1201,7 +1204,7 @@ def check_extended_stdlib():
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                     f"let ts = std.http.serve_threads(s, 4, "
                     f"\"{reuse_worker_path}\", {{\"strategy\": "
-                    f"\"reuse_port\", \"max_requests\": 4}});\n"
+                    f"\"reuse_port\", \"max_requests\": 8}});\n"
                     "println(\"info=\" + str(s[\"port\"]) + \":\" + "
                     "ts.strategy + \":\" + "
                     "str(ts.capabilities[\"reuse_port\"]));\n"
@@ -1241,24 +1244,174 @@ def check_extended_stdlib():
 
                 reuse_threads = [
                     threading.Thread(target=reuse_hit, args=(index,))
-                    for index in range(4)
+                    for index in range(8)
                 ]
                 for thread in reuse_threads:
                     thread.start()
                 for thread in reuse_threads:
                     thread.join()
-                assert len(reuse_results) == 4, reuse_results
+                assert len(reuse_results) == 8, reuse_results
                 assert all(status == 200 and body == b"ok"
                            for status, body, _ in reuse_results), reuse_results
                 workers_seen = {item[2] for item in reuse_results}
                 assert len(workers_seen) >= 2, reuse_results
                 out, err = server.communicate(timeout=10)
                 assert server.returncode == 0, err
-                assert "served=4" in out, out
+                assert "served=8" in out, out
             finally:
                 if server.poll() is None:
                     server.kill()
                     server.wait()
+
+            stream_worker = os.path.join(
+                worker_tmp, "serve_threads_stream_worker.skein")
+            with open(stream_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    "  let out = \"\";\n"
+                    "  let chunk = std.http.read_body(req);\n"
+                    "  while (chunk != null) {\n"
+                    "    out = out + bytes_to_string(chunk);\n"
+                    "    chunk = std.http.read_body(req);\n"
+                    "  }\n"
+                    "  return {\"status\": 200, \"body\": \"pull=\" + out};\n"
+                    "}\n"
+                )
+            stream_worker_path = stream_worker.replace("\\", "\\\\")
+            stream_script = os.path.join(
+                worker_tmp, "serve_threads_stream.skein")
+            with open(stream_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    f"let ts = std.http.serve_threads(s, 2, "
+                    f"\"{stream_worker_path}\", {{\"strategy\": "
+                    f"\"reuse_port\", \"stream_request_body\": true, "
+                    f"\"max_requests\": 1}});\n"
+                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "str(ts.capabilities[\"stream_request_body\"]));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "println(\"served=\" + str(ts.join()));\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), stream_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                info_line = server.stdout.readline().strip()
+                assert info_line.startswith("info="), (
+                    "serve_threads stream body did not report info: "
+                    f"{info_line!r} / {server.stderr.read()}"
+                )
+                port_text = info_line.split("=", 1)[1].split(":")[0]
+                assert info_line.endswith(":true"), info_line
+                client = socket.create_connection(
+                    ("127.0.0.1", int(port_text)), timeout=10)
+                client.sendall(
+                    b"POST /stream HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1\r\n"
+                    b"Transfer-Encoding: chunked\r\n"
+                    b"Connection: close\r\n\r\n"
+                    b"6\r\nhello \r\n"
+                    b"8\r\nchunked \r\n"
+                    b"5\r\nworld\r\n"
+                    b"0\r\n\r\n")
+                response = b""
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                client.close()
+                assert b"pull=hello chunked world" in response, response
+                out, err = server.communicate(timeout=10)
+                assert server.returncode == 0, err
+                assert "served=1" in out, out
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+
+            tls_probe = run(
+                'import std;\nstd.dict.has(std, "tls")\n')
+            tls_enabled = "= true" in tls_probe.stdout
+            if tls_enabled and shutil.which("openssl"):
+                tls_cert = os.path.join(worker_tmp, "h2_cert.pem")
+                tls_key = os.path.join(worker_tmp, "h2_key.pem")
+                cert_proc = subprocess.run(
+                    ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+                     "-nodes", "-keyout", tls_key, "-out", tls_cert,
+                     "-days", "1", "-subj", "/CN=localhost",
+                     "-addext", "subjectAltName=DNS:localhost"],
+                    capture_output=True, text=True)
+                assert cert_proc.returncode == 0, cert_proc.stderr
+                h2_script = os.path.join(
+                    worker_tmp, "serve_threads_h2_tls.skein")
+                with open(h2_script, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        f"let s = std.http.listen_tls(\"127.0.0.1\", 0, "
+                        f"\"{tls_cert.replace(chr(92), chr(92) * 2)}\", "
+                        f"\"{tls_key.replace(chr(92), chr(92) * 2)}\");\n"
+                        f"let ts = std.http.serve_threads(s, 2, "
+                        f"\"{threads_worker_path}\", {{\"strategy\": "
+                        f"\"reuse_port\", \"max_requests\": 2}});\n"
+                        "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                        "str(ts.capabilities[\"http2\"]));\n"
+                        "std.io.flush(std.io.stdout);\n"
+                        "println(\"served=\" + str(ts.join()));\n"
+                    )
+                server = subprocess.Popen(
+                    [os.path.abspath(BIN), h2_script],
+                    cwd=worker_tmp,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=os.environ.copy(),
+                )
+                try:
+                    info_line = server.stdout.readline().strip()
+                    assert info_line.startswith("info="), (
+                        "serve_threads h2 did not report info: "
+                        f"{info_line!r} / {server.stderr.read()}"
+                    )
+                    port_text = info_line.split("=", 1)[1].split(":")[0]
+                    assert info_line.endswith(":true"), info_line
+                    client = run(
+                        "import std;\n"
+                        f'let a = std.http2.get('
+                        f'"https://127.0.0.1:{port_text}/h2", '
+                        '{"tls": {"verify": false}});\n'
+                        'println(str(a["status"]) + " " + '
+                        'a["protocol"]);\n'
+                        'println(bytes_to_string(a["body"]));\n'
+                        f'let b = std.http.get('
+                        f'"https://127.0.0.1:{port_text}/h1", '
+                        '{"tls": {"verify": false}});\n'
+                        'println(str(b["status"]));\n'
+                        'println(bytes_to_string(b["body"]));\n',
+                        timeout=20,
+                    )
+                    assert client.returncode == 0, client.stderr
+                    assert "200 h2" in client.stdout, client.stdout
+                    assert "ok:/h2" in client.stdout, client.stdout
+                    assert "ok:/h1" in client.stdout, client.stdout
+                    out, err = server.communicate(timeout=10)
+                    assert server.returncode == 0, err
+                    assert "served=2" in out, out
+                finally:
+                    if server.poll() is None:
+                        server.kill()
+                        server.wait()
         else:
             check(
                 "std.http serve_threads reuse_port unsupported",

@@ -3,8 +3,16 @@
 
 #include "valuetype.h"
 
+#include <atomic>
 #include <memory>
 #include <vector>
+
+/* Shared counters for servers that may run across worker threads. */
+struct http_shared_state {
+    std::atomic<long long> claimed{0};
+    std::atomic<long long> served{0};
+    std::atomic<bool> stopping{false};
+};
 
 /* A server request body that the handler reads chunk by chunk. */
 struct request_body {

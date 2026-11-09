@@ -977,6 +977,83 @@ def check_extended_stdlib():
                 if server.poll() is None:
                     server.kill()
                     server.wait()
+
+            workers_stream_worker = os.path.join(
+                worker_tmp, "serve_workers_stream_worker.skein")
+            with open(workers_stream_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    "  let out = \"\";\n"
+                    "  let chunk = std.http.read_body(req);\n"
+                    "  while (chunk != null) {\n"
+                    "    out = out + bytes_to_string(chunk);\n"
+                    "    chunk = std.http.read_body(req);\n"
+                    "  }\n"
+                    "  return {\"status\": 200, \"body\": \"pull=\" + out};\n"
+                    "}\n"
+                )
+            workers_stream_path = workers_stream_worker.replace("\\", "\\\\")
+            workers_stream_script = os.path.join(
+                worker_tmp, "serve_workers_stream.skein")
+            with open(workers_stream_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    f"let ps = std.http.serve_workers(s, 2, "
+                    f"\"{workers_stream_path}\", {{\"strategy\": "
+                    f"\"reuse_port\", \"stream_request_body\": true, "
+                    f"\"max_requests\": 1}});\n"
+                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "str(ps.capabilities[\"stream_request_body\"]));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "println(\"served=\" + str(ps.join()));\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), workers_stream_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                info_line = server.stdout.readline().strip()
+                assert info_line.startswith("info="), (
+                    "serve_workers stream body did not report info: "
+                    f"{info_line!r} / {server.stderr.read()}"
+                )
+                port_text, stream_flag = (
+                    info_line.split("=", 1)[1].split(":"))
+                assert stream_flag == "true", info_line
+                client = socket.create_connection(
+                    ("127.0.0.1", int(port_text)), timeout=10)
+                client.sendall(
+                    b"POST /stream HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1\r\n"
+                    b"Transfer-Encoding: chunked\r\n"
+                    b"Connection: close\r\n\r\n"
+                    b"6\r\nhello \r\n"
+                    b"8\r\nchunked \r\n"
+                    b"5\r\nworld\r\n"
+                    b"0\r\n\r\n")
+                response = b""
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                client.close()
+                assert b"pull=hello chunked world" in response, response
+                out, err = server.communicate(timeout=30)
+                assert server.returncode == 0, err
+                assert "served=1" in out, out
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
         else:
             check(
                 "std.http serve_workers reuse_port unsupported",

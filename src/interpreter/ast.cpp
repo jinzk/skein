@@ -735,6 +735,7 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->exported = exported;
     a->is_async = is_async;
     a->is_generator = is_generator;
+    a->is_thread_entry = 0;
     a->is_method = 0;
     a->decorated_generator_source = NULL;
     a->decorated_generator_async = 0;

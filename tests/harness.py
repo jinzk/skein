@@ -2043,6 +2043,67 @@ def check_extended_stdlib():
                     if server.poll() is None:
                         server.kill()
                         server.wait()
+
+                process_h2_script = os.path.join(
+                    worker_tmp, "serve_workers_h2_tls.skein")
+                with open(process_h2_script, "w",
+                          encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        f"let s = std.http.listen_tls(\"127.0.0.1\", 0, "
+                        f"\"{tls_cert.replace(chr(92), chr(92) * 2)}\", "
+                        f"\"{tls_key.replace(chr(92), chr(92) * 2)}\");\n"
+                        f"let ps = std.http.serve_workers(s, 2, "
+                        f"\"{workers_reuse_path}\", {{\"strategy\": "
+                        f"\"reuse_port\", \"max_requests\": 2}});\n"
+                        "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                        "str(ps.capabilities[\"http2\"]));\n"
+                        "std.io.flush(std.io.stdout);\n"
+                        "println(\"served=\" + str(ps.join()));\n"
+                    )
+                server = subprocess.Popen(
+                    [os.path.abspath(BIN), process_h2_script],
+                    cwd=worker_tmp,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=os.environ.copy(),
+                )
+                try:
+                    info_line = server.stdout.readline().strip()
+                    assert info_line.startswith("info="), (
+                        "serve_workers h2 did not report info: "
+                        f"{info_line!r} / {server.stderr.read()}"
+                    )
+                    port_text = info_line.split("=", 1)[1].split(":")[0]
+                    assert info_line.endswith(":true"), info_line
+                    client = run(
+                        "import std;\n"
+                        f'let a = std.http2.get('
+                        f'"https://127.0.0.1:{port_text}/h2", '
+                        '{"tls": {"verify": false}});\n'
+                        'println(str(a["status"]) + " " + '
+                        'a["protocol"]);\n'
+                        'println(bytes_to_string(a["body"]));\n'
+                        f'let b = std.http.get('
+                        f'"https://127.0.0.1:{port_text}/h1", '
+                        '{"tls": {"verify": false}});\n'
+                        'println(str(b["status"]));\n'
+                        'println(bytes_to_string(b["body"]));\n',
+                        timeout=30,
+                    )
+                    assert client.returncode == 0, client.stderr
+                    assert "200 h2" in client.stdout, client.stdout
+                    assert client.stdout.count("ok") >= 2, client.stdout
+                    out, err = server.communicate(timeout=30)
+                    assert server.returncode == 0, err
+                    assert "served=2" in out, out
+                finally:
+                    if server.poll() is None:
+                        server.kill()
+                        server.wait()
         else:
             check(
                 "std.http serve_threads reuse_port unsupported",

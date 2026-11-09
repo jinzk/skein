@@ -277,6 +277,8 @@ enum class value_tag : uint8_t {
     Deque,
     Lru,
     Builtin,
+    Struct,
+    Enum,
 };
 
 bool write_value(writer &out, const struct value_t *value, int depth,
@@ -408,6 +410,33 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             out.u32((uint32_t)((const struct builtin_value_t *)value)
                         ->functype);
             return true;
+        case T_struct: {
+            const struct struct_value_t *structure =
+                (const struct struct_value_t *)value;
+            out.u8((uint8_t)value_tag::Struct);
+            out.str(structure->def ? structure->def->module : "");
+            out.str(structure->def ? structure->def->name : "");
+            out.u32((uint32_t)structure->payload->fields.size());
+            for (const struct value_t *field : structure->payload->fields) {
+                if (!write_value(out, field, depth + 1, error))
+                    return false;
+            }
+            return true;
+        }
+        case T_enum: {
+            const struct enum_value_t *enumeration =
+                (const struct enum_value_t *)value;
+            out.u8((uint8_t)value_tag::Enum);
+            out.str(enumeration->def ? enumeration->def->module : "");
+            out.str(enumeration->def ? enumeration->def->name : "");
+            out.u32((uint32_t)enumeration->variant);
+            out.u32((uint32_t)enumeration->payload->fields.size());
+            for (const struct value_t *field : enumeration->payload->fields) {
+                if (!write_value(out, field, depth + 1, error))
+                    return false;
+            }
+            return true;
+        }
         default:
             error = std::string("cannot serialize value of type ") +
                     typename_of(value);
@@ -640,6 +669,67 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
                 return false;
             }
             value = value_owner(newbuiltinval((int)functype));
+            return true;
+        }
+        case value_tag::Struct: {
+            std::string module;
+            std::string name;
+            uint32_t count = 0;
+            if (!in.str(module) || !in.str(name) || !in.count(count)) {
+                error = in.error;
+                return false;
+            }
+            struct struct_def *def =
+                structtype_find_struct(module.c_str(), name.c_str());
+            if (!def) {
+                error = "thread payload struct type is not registered: " +
+                        module + "." + name;
+                return false;
+            }
+            std::shared_ptr<struct_payload> payload =
+                std::make_shared<struct_payload>();
+            payload->fields.reserve(count);
+            for (uint32_t i = 0; i < count; ++i) {
+                value_owner field;
+                if (!read_value(in, field, depth + 1, error))
+                    return false;
+                payload->fields.push_back(field.release());
+            }
+            value = value_owner(newstructval(def, std::move(payload)));
+            return true;
+        }
+        case value_tag::Enum: {
+            std::string module;
+            std::string name;
+            uint32_t variant = 0;
+            uint32_t count = 0;
+            if (!in.str(module) || !in.str(name) || !in.u32(variant) ||
+                !in.count(count)) {
+                error = in.error;
+                return false;
+            }
+            struct enum_def *def =
+                structtype_find_enum(module.c_str(), name.c_str());
+            if (!def) {
+                error = "thread payload enum type is not registered: " +
+                        module + "." + name;
+                return false;
+            }
+            if (variant >= def->variants.size()) {
+                error = "thread payload enum variant is out of range";
+                return false;
+            }
+            std::shared_ptr<struct_payload> payload =
+                std::make_shared<struct_payload>();
+            payload->fields.reserve(count);
+            for (uint32_t i = 0; i < count; ++i) {
+                value_owner field;
+                if (!read_value(in, field, depth + 1, error))
+                    return false;
+                payload->fields.push_back(field.release());
+            }
+            value = value_owner(newenumval(def, (int)variant,
+                                           std::move(payload)));
             return true;
         }
     }
@@ -927,10 +1017,6 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
         error = "cannot serialize a Proto with nested packages";
         return false;
     }
-    if (!proto.constructs.empty() || !proto.field_or_enum.empty()) {
-        error = "cannot serialize a Proto with struct/enum construction";
-        return false;
-    }
     if (!proto.struct_decls.empty() || !proto.enum_decls.empty() ||
         !proto.trait_decls.empty() || !proto.impl_decls.empty()) {
         error = "cannot serialize a Proto with type declarations";
@@ -1006,6 +1092,25 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
         out.str(import.path);
         out.str(import.alias);
         out.str(import.base);
+    }
+
+    out.u32((uint32_t)proto.constructs.size());
+    for (const skein::bc::ConstructDesc &construct : proto.constructs) {
+        out.str(construct.module);
+        out.str(construct.name);
+        out.str(construct.variant);
+        out.u32((uint32_t)construct.fields.size());
+        for (const std::string &field : construct.fields)
+            out.str(field);
+        out.u32((uint32_t)construct.spread.size());
+        for (bool spread : construct.spread)
+            out.u8(spread ? 1 : 0);
+    }
+    out.u32((uint32_t)proto.field_or_enum.size());
+    for (const skein::bc::FieldOrEnumDesc &field : proto.field_or_enum) {
+        out.str(field.module);
+        out.str(field.base);
+        out.str(field.field);
     }
 
     out.u32((uint32_t)proto.call_descs.size());
@@ -1246,6 +1351,61 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             return false;
         }
         proto->imports.push_back(std::move(import));
+    }
+
+    uint32_t construct_count = 0;
+    if (!in.count(construct_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->constructs.reserve(construct_count);
+    for (uint32_t i = 0; i < construct_count; ++i) {
+        skein::bc::ConstructDesc construct;
+        uint32_t field_count = 0;
+        uint32_t spread_count = 0;
+        if (!in.str(construct.module) || !in.str(construct.name) ||
+            !in.str(construct.variant) || !in.count(field_count)) {
+            error = in.error;
+            return false;
+        }
+        construct.fields.reserve(field_count);
+        for (uint32_t j = 0; j < field_count; ++j) {
+            std::string field;
+            if (!in.str(field)) {
+                error = in.error;
+                return false;
+            }
+            construct.fields.push_back(std::move(field));
+        }
+        if (!in.count(spread_count)) {
+            error = in.error;
+            return false;
+        }
+        construct.spread.reserve(spread_count);
+        for (uint32_t j = 0; j < spread_count; ++j) {
+            uint8_t spread = 0;
+            if (!in.u8(spread)) {
+                error = in.error;
+                return false;
+            }
+            construct.spread.push_back(spread != 0);
+        }
+        proto->constructs.push_back(std::move(construct));
+    }
+    uint32_t field_or_enum_count = 0;
+    if (!in.count(field_or_enum_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->field_or_enum.reserve(field_or_enum_count);
+    for (uint32_t i = 0; i < field_or_enum_count; ++i) {
+        skein::bc::FieldOrEnumDesc field;
+        if (!in.str(field.module) || !in.str(field.base) ||
+            !in.str(field.field)) {
+            error = in.error;
+            return false;
+        }
+        proto->field_or_enum.push_back(std::move(field));
     }
 
     uint32_t call_count = 0;

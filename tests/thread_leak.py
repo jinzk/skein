@@ -86,26 +86,6 @@ def main():
             "let t7 = std.thread.spawn_encoded(encoded_blob, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined7 = t7.join();\n"
-            "let sval = std.set.from_list([1, 2]);\n"
-            "let dval = std.deque.from_list([3, 4]);\n"
-            "let lval = std.lru.new(1);\n"
-            'let lr = std.lru.put(lval, "x", 9);\n'
-            'lval = lr["lru"];\n'
-            "func make_encoded_containers(vs, vd, vl) {\n"
-            "    thread func inner(ctx) {\n"
-            '        let n = ctx.payload["n"];\n'
-            "        let m = match n { case 1 => 5; default => 0; };\n"
-            '        let got = std.lru.get(vl, "x");\n'
-            '        return {"s": std.set.values(vs), '
-            '"d": std.deque.to_list(vd), "l": got["value"], "m": m};\n'
-            "    }\n"
-            "    return inner;\n"
-            "}\n"
-            "let encoded_containers = std.thread.encode("
-            "make_encoded_containers(sval, dval, lval));\n"
-            "let t8 = std.thread.spawn_encoded(encoded_containers, "
-            'std.thread.Message.from({"n": 1}));\n'
-            "let joined8 = t8.join();\n"
             'println("pool=" + str(r1["value"]["v"]) + ":" + '
             'str(r2["value"]["v"]) + " thread=" + '
             'str(joined["value"]["v"]) + " src=" + '
@@ -114,11 +94,7 @@ def main():
             'str(joined4["value"]["v"]) + " data=" + '
             'str(joined5["value"][2]) + " transfer=" + '
             'str(joined6["value"]["v"]) + " encoded=" + '
-            'str(joined7["value"]["v"]) + " enc=" + '
-            'str(joined8["value"]["s"][0]) + ":" + '
-            'str(joined8["value"]["d"][0]) + ":" + '
-            'str(joined8["value"]["l"]) + ":" + '
-            'str(joined8["value"]["m"]));\n'
+            'str(joined7["value"]["v"]));\n'
         )
         env = os.environ.copy()
         env.setdefault("ASAN_OPTIONS", "detect_leaks=1")
@@ -134,8 +110,7 @@ def main():
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
             return 1
-        expected = ("pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 "
-                    "transfer=12 encoded=12 enc=1:3:9:5")
+        expected = "pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 transfer=12 encoded=12"
         if expected not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1

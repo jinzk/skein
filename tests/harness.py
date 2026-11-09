@@ -3440,6 +3440,51 @@ def check_extended_stdlib():
                 stdout_all=["cancel=true", "cancel2=false", "canceled=true",
                             "workers=1:alive=1"],
             )
+            cancel_worker = os.path.join(
+                thread_tmp, "thread_pool_cancel_worker.skein")
+            with open(cancel_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(payload) {\n"
+                    "    std.time.sleep(300);\n"
+                    "    std.fs.write_text(payload[\"path\"], "
+                    "str(payload[\"n\"]), \"utf-8\");\n"
+                    "    return {\"n\": payload[\"n\"]};\n"
+                    "}\n"
+                )
+            cancel_worker_path = cancel_worker.replace("\\", "\\\\")
+            cancel_paths = [
+                os.path.join(thread_tmp, f"thread_cancel_{index}.txt")
+                for index in range(1, 4)
+            ]
+            check(
+                "std.thread future cancel skips queued job",
+                "import std;\n"
+                f'let pool = std.thread.pool(1, '
+                f'"{cancel_worker_path}", '
+                '{"entry": "handle", "queue": 8});\n'
+                f'let f1 = pool.submit({{"n": 1, "path": '
+                f"{skein_string(cancel_paths[0])}}});\n"
+                f'let f2 = pool.submit({{"n": 2, "path": '
+                f"{skein_string(cancel_paths[1])}}});\n"
+                'print("cancel=" + str(f2.cancel()) + "|");\n'
+                'let r1 = f1.wait();\n'
+                'print("r1=" + str(r1["value"]["n"]) + "|");\n'
+                f'let f3 = pool.submit({{"n": 3, "path": '
+                f"{skein_string(cancel_paths[2])}}});\n"
+                'let r3 = f3.wait();\n'
+                'print("r3=" + str(r3["value"]["n"]) + "|");\n'
+                f'print("p1=" + str(std.fs.exists('
+                f"{skein_string(cancel_paths[0])})) + \"|\");\n"
+                f'print("p2=" + str(std.fs.exists('
+                f"{skein_string(cancel_paths[1])})) + \"|\");\n"
+                f'print("p3=" + str(std.fs.exists('
+                f"{skein_string(cancel_paths[2])})) + \"|\");\n"
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout_all=["cancel=true|", "r1=1|", "r3=3|",
+                            "p1=1|", "p2=0|", "p3=1|"],
+            )
             check(
                 "std.thread pool submit timeout",
                 "import std;\n"

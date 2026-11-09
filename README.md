@@ -4741,7 +4741,7 @@ pool.join();
 - `restart_limit > 0` 时异常退出的 worker 会被重启，最多重启该次数；
 - 所有 worker 死亡后，新的 `submit` 报 `thread.pool_failed`；
 - `pool.submit` 共享经过校验的 payload（容器 COW，string/bytes 共享底层 buffer），写入时分离；`submit(value, timeout_ms)` 超时抛 `thread.timeout`；
-- `future.cancel()` 关闭结果通道；之后的 `wait()` 抛 `thread.cancelled`，`try_wait()` 返回 `canceled: true`；
+- `future.cancel()` 关闭结果通道；之后的 `wait()` 抛 `thread.cancelled`，`try_wait()` 返回 `canceled: true`；尚未开始的排队 job 会被 worker 跳过，正在执行的 job 无法中断；
 - `pool.close()` 停止接收新 job，worker 排空后退出；
 - `pool.join()` 等待 worker 线程结束；
 - `stats()` 返回 `size/workers/ready/alive/dead/restarts/restart_limit/submitted/completed/failed/active/queued`；

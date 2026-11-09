@@ -43,6 +43,8 @@ struct message_state {
     struct value_t *payload = nullptr;
     /* Owned dict of name -> handle userdata. */
     struct value_t *handles = nullptr;
+    /* Shared cancellation flag for thread-pool jobs. */
+    std::shared_ptr<std::atomic<bool>> canceled;
 
     ~message_state() {
         freeval(payload);
@@ -1485,7 +1487,8 @@ struct pool_state : std::enable_shared_from_this<pool_state> {
 
 struct future_state : std::enable_shared_from_this<future_state> {
     std::shared_ptr<channel_state> reply;
-    std::atomic<bool> canceled{false};
+    std::shared_ptr<std::atomic<bool>> canceled =
+        std::make_shared<std::atomic<bool>>(false);
 };
 
 extern const struct native_type kPoolType;
@@ -1598,6 +1601,10 @@ void worker_thread_main(
                 freeval(job);
                 continue;
             }
+            if (message->canceled && message->canceled->load()) {
+                freeval(job);
+                continue;
+            }
             struct value_t *payload = nullptr;
             std::unordered_set<const void *> visiting;
             std::string copy_error;
@@ -1605,6 +1612,11 @@ void worker_thread_main(
             if (!payload) {
                 std::lock_guard<std::mutex> lock(pool->mutex);
                 ++pool->failed;
+                freeval(job);
+                continue;
+            }
+            if (message->canceled && message->canceled->load()) {
+                freeval(payload);
                 freeval(job);
                 continue;
             }
@@ -1787,7 +1799,11 @@ bool pool_submit_raw(pool_state &pool, struct value_t *value,
     struct value_t *reply_value = new_channel_value(reply);
     dict_set_owned(handles, "reply", reply_value);
 
+    auto canceled = std::make_shared<std::atomic<bool>>(false);
     struct value_t *message = make_message_owned(payload, handles);
+    std::shared_ptr<message_state> message_state;
+    if (get_message_state(message, message_state))
+        message_state->canceled = canceled;
     struct value_t *sent =
         channel_send_value(pool.jobs, message, true, timeout_ms);
     freeval(message);
@@ -1799,6 +1815,7 @@ bool pool_submit_raw(pool_state &pool, struct value_t *value,
 
     future = std::make_shared<future_state>();
     future->reply = reply;
+    future->canceled = canceled;
     {
         std::lock_guard<std::mutex> lock(pool.mutex);
         ++pool.submitted;
@@ -1822,13 +1839,13 @@ thread_future_status future_wait_raw(future_state &future,
                                      struct value_t *&payload,
                                      std::string &error) {
     payload = nullptr;
-    if (future.canceled.load())
+    if (future.canceled->load())
         return thread_future_status::canceled;
 
     channel_recv_result result = channel_recv_result::closed;
     struct value_t *message =
         channel_recv_value_status(future.reply, timeout_ms, result);
-    if (future.canceled.load()) {
+    if (future.canceled->load()) {
         freeval(message);
         return thread_future_status::canceled;
     }
@@ -1876,7 +1893,7 @@ struct value_t *future_wait(struct future_state &future,
 }
 
 struct value_t *future_try_wait(struct future_state &future) {
-    if (future.canceled.load()) {
+    if (future.canceled->load()) {
         struct value_t *result = (struct value_t *)newdictval();
         dict_append_item((struct dict_value_t *)result, newstrval("ok"),
                          newboolval(false));
@@ -2079,7 +2096,7 @@ struct value_t *future_get_field(void *data, const char *name) {
                     yyerror("future.cancel expects no arguments");
                     return (struct value_t *)nullptr;
                 }
-                bool first = !future->canceled.exchange(true);
+                bool first = !future->canceled->exchange(true);
                 if (first)
                     channel_close_state(future->reply);
                 return newboolval(first);
@@ -3090,7 +3107,7 @@ void thread_future_link_cancel(
     const std::shared_ptr<thread_future_link> &future) {
     if (!future || !future->future)
         return;
-    bool first = !future->future->canceled.exchange(true);
+    bool first = !future->future->canceled->exchange(true);
     if (first)
         channel_close_state(future->future->reply);
 }

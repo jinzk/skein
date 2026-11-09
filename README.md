@@ -740,6 +740,72 @@ let served = std.http.serve_workers(
   s, 4, "worker.skein", 1000);
 ```
 
+进程内线程池处理：
+
+```text
+std.http.serve_threads(server, workers, script[, options])
+  -> ThreadServer
+
+ThreadServer.stop()
+ThreadServer.join() -> served
+ThreadServer.stats() -> dict
+ThreadServer.strategy -> string
+ThreadServer.capabilities -> dict
+ThreadServer.served -> int
+```
+
+`options`：
+
+```text
+entry              worker 入口，默认 "handle"
+queue              pool 队列，默认 1024 或 "unbounded"
+restart_limit      worker 重启次数，默认 0
+worker_vm          默认 false
+worker_timeout_ms  单请求 worker 超时，默认 30000，0 表示不超时
+max_requests       默认 0
+max_per_connection 默认 100
+idle_timeout_ms    默认 0
+max_connections    默认 0
+max_header_bytes   默认 64 KiB
+max_headers        默认 100
+max_body_bytes     默认 16 MiB
+```
+
+worker 脚本导出 `handle(req)`，返回 response dict：
+
+```skein
+func handle(req) {
+    return {
+        "status": 200,
+        "headers": {"Content-Type": "text/plain"},
+        "body": "hello " + req["path"]
+    };
+}
+```
+
+规则：
+
+- accept、TLS、HTTP/1.1 解析和 keep-alive 在主线程 event loop 中完成；
+- 每个请求通过线程池派发到 worker；
+- request dict 包含 `method/path/headers/body/http_major/http_minor/keep_alive/remote_addr/remote_port`，不包含 `socket`；
+- worker 返回值必须是 `{status, headers, body}`；
+- worker 崩溃返回 502，worker 超时返回 504，worker 全部退出返回 503；
+- `serve_threads` 立即返回 `ThreadServer`，`join()` 等待服务结束并返回已处理请求数；
+- 当前策略为 `"pool"`，capabilities 为 HTTP/1.1、非流式；
+- 当前不支持 `stream_request_body`，启动时直接报错；
+- `max_requests` 达到后停止 accept，连接任务排空后退出。
+
+```skein
+import std;
+
+let s = std.http.listen("127.0.0.1", 8080);
+let ts = std.http.serve_threads(
+  s, 4, "worker.skein", {"max_requests": 1000});
+print(ts.strategy);
+print(ts.capabilities["http1"]);
+let served = ts.join();
+```
+
 流式 body：
 
 ```text
@@ -2490,6 +2556,7 @@ std.http.respond
 std.http.respond_async
 std.http.serve
 std.http.serve_workers
+std.http.serve_threads
 std.http.upgrade
 std.http.cookies
 std.http.read_body

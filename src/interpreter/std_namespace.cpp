@@ -594,6 +594,7 @@ value_t *build_namespace_impl() {
             {"respond_async", B_http_respond_async},
             {"serve", B_http_serve},
             {"serve_workers", B_http_serve_workers},
+            {"serve_threads", B_http_serve_threads},
             {"upgrade", B_http_upgrade},
             {"cookies", B_http_cookies},
             {"read_body", B_http_read_body},

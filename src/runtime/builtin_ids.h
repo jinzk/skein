@@ -245,6 +245,7 @@ enum bifs {
     B_http_respond_async,
     B_http_serve,
     B_http_serve_workers,
+    B_http_serve_threads,
     B_http_upgrade,
     B_http_cookies,
     B_http_read_body,

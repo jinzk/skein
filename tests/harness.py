@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import urllib.error
 import urllib.request
 
 
@@ -904,6 +905,269 @@ def check_extended_stdlib():
                 server.kill()
                 server.wait()
 
+        threads_worker = os.path.join(
+            worker_tmp, "serve_threads_worker.skein")
+        with open(threads_worker, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "func handle(req) {\n"
+                "  let body = bytes_to_string(req[\"body\"]);\n"
+                "  return {\"status\": 200,\n"
+                "          \"headers\": {\n"
+                "            \"X-Has-Socket\": "
+                "str(std.dict.has(req, \"socket\") != 0),\n"
+                "            \"X-Remote\": str(req[\"remote_addr\"]),\n"
+                "            \"X-Method\": req[\"method\"]},\n"
+                "          \"body\": req[\"path\"] + \":\" + body};\n"
+                "}\n"
+            )
+        threads_worker_path = threads_worker.replace("\\", "\\\\")
+        threads_script = os.path.join(worker_tmp, "serve_threads.skein")
+        with open(threads_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 2, "
+                f"\"{threads_worker_path}\", {{\"max_requests\": 1}});\n"
+                "println(s[\"port\"]);\n"
+                "println(\"caps=\" + str(ts.capabilities[\"http1\"]) + "
+                "\":\" + str(ts.capabilities[\"http2\"]));\n"
+                "println(\"strategy=\" + ts.strategy);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "println(\"served=\" + str(ts.join()));\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), threads_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_threads did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port_line}/echo",
+                data=b"hello-threads",
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                assert response.status == 200
+                assert response.read() == b"/echo:hello-threads"
+                assert response.headers.get("X-Has-Socket") == "false"
+                assert response.headers.get("X-Remote") == "127.0.0.1"
+                assert response.headers.get("X-Method") == "POST"
+            out, err = server.communicate(timeout=10)
+            assert server.returncode == 0, err
+            assert "caps=true:false" in out, out
+            assert "strategy=pool" in out, out
+            assert "served=1" in out, out
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        slow_threads_worker = os.path.join(
+            worker_tmp, "serve_threads_slow.skein")
+        with open(slow_threads_worker, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "func handle(req) {\n"
+                "  std.time.sleep(300);\n"
+                "  return {\"status\": 200, \"body\": req[\"path\"]};\n"
+                "}\n"
+            )
+        slow_threads_path = slow_threads_worker.replace("\\", "\\\\")
+        concurrent_threads_script = os.path.join(
+            worker_tmp, "serve_threads_concurrent.skein")
+        with open(concurrent_threads_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 2, "
+                f"\"{slow_threads_path}\", {{\"max_requests\": 2}});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "ts.join();\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), concurrent_threads_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_threads concurrent did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            results = []
+
+            def threads_hit(index):
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port_line}/r{index}"
+                )
+                with urllib.request.urlopen(
+                        request, timeout=10) as response:
+                    results.append((response.status, response.read()))
+
+            threads = [
+                threading.Thread(target=threads_hit, args=(index,))
+                for index in range(2)
+            ]
+            started = time.monotonic()
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            elapsed = time.monotonic() - started
+            assert len(results) == 2
+            assert all(status == 200 for status, _ in results)
+            assert elapsed < 0.55, (
+                "serve_threads handled requests sequentially: "
+                f"{elapsed:.3f}s"
+            )
+            out, err = server.communicate(timeout=10)
+            assert server.returncode == 0, err
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        timeout_threads_script = os.path.join(
+            worker_tmp, "serve_threads_timeout.skein")
+        with open(timeout_threads_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 1, "
+                f"\"{slow_threads_path}\", {{\"max_requests\": 1, "
+                f"\"worker_timeout_ms\": 50}});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "ts.join();\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), timeout_threads_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_threads timeout did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            try:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port_line}/slow", timeout=10)
+                raise AssertionError("expected 504 for worker timeout")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 504, (exc.code, exc.read())
+            server.communicate(timeout=10)
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        check(
+            "std.http serve_threads stream body rejected",
+            "import std;\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            's["stream_request_body"] = true;\n'
+            'let ts = std.http.serve_threads(s, 1, "missing.skein");\n',
+            stderr="does not support stream_request_body",
+        )
+
+        if FFI_SHIM:
+            crash_manifest = os.path.join(
+                worker_tmp, "serve_threads_crash.ffi.json")
+            with open(crash_manifest, "w", encoding="utf-8") as handle:
+                handle.write(
+                    '{"ffi": 1, "types": {}, "functions": '
+                    '{"shim_throw": {"result": "void", "args": []}}}\n'
+                )
+            crash_threads_worker = os.path.join(
+                worker_tmp, "serve_threads_crash_worker.skein")
+            with open(crash_threads_worker, "w",
+                      encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    f"let lib = std.ffi.open("
+                    f"{skein_string(os.path.abspath(FFI_SHIM))}, "
+                    f"{skein_string(crash_manifest)});\n"
+                    "func handle(req) {\n"
+                    "  if (req[\"path\"] == \"/crash\") {\n"
+                    "    std.ffi.call(lib, \"shim_throw\", []);\n"
+                    "  }\n"
+                    "  return {\"status\": 200, \"body\": \"ok\"};\n"
+                    "}\n"
+                )
+            crash_threads_path = crash_threads_worker.replace("\\", "\\\\")
+            crash_threads_script = os.path.join(
+                worker_tmp, "serve_threads_crash.skein")
+            with open(crash_threads_script, "w",
+                      encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    f"let ts = std.http.serve_threads(s, 1, "
+                    f"\"{crash_threads_path}\", {{\"max_requests\": 2, "
+                    f"\"restart_limit\": 1}});\n"
+                    "println(s[\"port\"]);\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "ts.join();\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), crash_threads_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                port_line = server.stdout.readline().strip()
+                assert port_line.isdigit(), (
+                    "serve_threads crash did not report a port: "
+                    f"{port_line!r} / {server.stderr.read()}"
+                )
+                try:
+                    urllib.request.urlopen(
+                        f"http://127.0.0.1:{port_line}/crash", timeout=10)
+                    raise AssertionError("expected 502 for worker crash")
+                except urllib.error.HTTPError as exc:
+                    assert exc.code == 502, (exc.code, exc.read())
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port_line}/ok",
+                        timeout=10) as response:
+                    assert response.status == 200
+                    assert response.read() == b"ok"
+                out, err = server.communicate(timeout=10)
+                assert server.returncode == 0, err
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+
         check(
             "std.thread channel copy and close",
             "import std;\n"
@@ -1228,7 +1492,7 @@ def check_extended_stdlib():
                 with open(crash_worker, "w", encoding="utf-8") as handle:
                     handle.write(
                         "import std;\n"
-                        f"let lib = std.ffi.open({skein_string(FFI_SHIM)}, "
+                        f"let lib = std.ffi.open({skein_string(os.path.abspath(FFI_SHIM))}, "
                         f"{skein_string(manifest)});\n"
                         "func main(payload) {\n"
                         "    if (payload[\"crash\"]) {\n"

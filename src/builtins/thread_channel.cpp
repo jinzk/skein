@@ -433,14 +433,23 @@ struct value_t *channel_send_value(
     return blocking ? newnull() : newboolval(true);
 }
 
-struct value_t *channel_recv_value(
-    const std::shared_ptr<channel_state> &state, long long timeout_ms) {
+enum class channel_recv_result {
+    message,
+    closed,
+    timeout,
+};
+
+struct value_t *channel_recv_value_status(
+    const std::shared_ptr<channel_state> &state, long long timeout_ms,
+    channel_recv_result &result) {
+    result = channel_recv_result::closed;
     if (fiber_in_fiber()) {
         const auto start = std::chrono::steady_clock::now();
         for (;;) {
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
                 if (!state->queue.empty()) {
+                    result = channel_recv_result::message;
                     struct value_t *message = state->queue.front();
                     state->queue.pop_front();
                     notify_send_waiters(*state);
@@ -459,7 +468,7 @@ struct value_t *channel_recv_value(
                         .count();
                 const long long remaining = timeout_ms - elapsed;
                 if (remaining <= 0) {
-                    yyerror("std.thread.Channel.recv timed out");
+                    result = channel_recv_result::timeout;
                     return nullptr;
                 }
                 sleep_ms = remaining < 1 ? remaining : 1;
@@ -484,15 +493,28 @@ struct value_t *channel_recv_value(
         }
         remove_waiter(state->recv_waiters, &waiter);
         if (!signaled && state->queue.empty()) {
-            yyerror("std.thread.Channel.recv timed out");
+            result = channel_recv_result::timeout;
             return nullptr;
         }
     }
     if (state->queue.empty())
         return newnull();
+    result = channel_recv_result::message;
     struct value_t *message = state->queue.front();
     state->queue.pop_front();
     notify_send_waiters(*state);
+    return message;
+}
+
+struct value_t *channel_recv_value(
+    const std::shared_ptr<channel_state> &state, long long timeout_ms) {
+    channel_recv_result result = channel_recv_result::closed;
+    struct value_t *message =
+        channel_recv_value_status(state, timeout_ms, result);
+    if (result == channel_recv_result::timeout) {
+        yyerror("std.thread.Channel.recv timed out");
+        return nullptr;
+    }
     return message;
 }
 
@@ -1239,17 +1261,19 @@ void spawn_worker_thread(pool_state *pool, size_t slot_index) {
     pool->threads.push_back(std::move(thread));
 }
 
-struct value_t *pool_submit(pool_state &pool, struct value_t *value,
-                            long long timeout_ms) {
+bool pool_submit_raw(pool_state &pool, struct value_t *value,
+                     long long timeout_ms,
+                     std::shared_ptr<future_state> &future,
+                     std::string &error) {
     {
         std::lock_guard<std::mutex> lock(pool.mutex);
         if (pool.closing) {
-            yyerror("thread.closed: pool is closed");
-            return nullptr;
+            error = "thread.closed: pool is closed";
+            return false;
         }
         if (pool.all_workers_dead_locked()) {
-            yyerror("thread.pool_failed: all workers have exited");
-            return nullptr;
+            error = "thread.pool_failed: all workers have exited";
+            return false;
         }
     }
 
@@ -1257,7 +1281,6 @@ struct value_t *pool_submit(pool_state &pool, struct value_t *value,
     struct value_t *payload = nullptr;
     struct value_t *handles = (struct value_t *)newdictval();
     std::unordered_set<const void *> visiting;
-    std::string error;
 
     if (get_message_state(value, source)) {
         payload = copy_data_value(source->payload, visiting, error);
@@ -1268,8 +1291,7 @@ struct value_t *pool_submit(pool_state &pool, struct value_t *value,
     }
     if (!payload) {
         freeval(handles);
-        yyerror("%s", error.c_str());
-        return nullptr;
+        return false;
     }
 
     std::shared_ptr<channel_state> reply =
@@ -1281,46 +1303,85 @@ struct value_t *pool_submit(pool_state &pool, struct value_t *value,
     struct value_t *sent =
         channel_send_value(pool.jobs, message, true, timeout_ms);
     freeval(message);
-    if (!sent)
-        return nullptr;
+    if (!sent) {
+        if (error.empty())
+            error = "thread.timeout: pool submit timed out";
+        return false;
+    }
 
-    std::shared_ptr<future_state> future =
-        std::make_shared<future_state>();
+    future = std::make_shared<future_state>();
     future->reply = reply;
     {
         std::lock_guard<std::mutex> lock(pool.mutex);
         ++pool.submitted;
     }
+    return true;
+}
+
+struct value_t *pool_submit(pool_state &pool, struct value_t *value,
+                            long long timeout_ms) {
+    std::shared_ptr<future_state> future;
+    std::string error;
+    if (!pool_submit_raw(pool, value, timeout_ms, future, error)) {
+        yyerror("%s", error.c_str());
+        return nullptr;
+    }
     return new_future_value(std::move(future));
+}
+
+thread_future_status future_wait_raw(future_state &future,
+                                     long long timeout_ms,
+                                     struct value_t *&payload,
+                                     std::string &error) {
+    payload = nullptr;
+    if (future.canceled.load())
+        return thread_future_status::canceled;
+
+    channel_recv_result result = channel_recv_result::closed;
+    struct value_t *message =
+        channel_recv_value_status(future.reply, timeout_ms, result);
+    if (future.canceled.load()) {
+        freeval(message);
+        return thread_future_status::canceled;
+    }
+    if (result == channel_recv_result::timeout) {
+        freeval(message);
+        return thread_future_status::pending;
+    }
+    if (!message || message->type == T_null) {
+        freeval(message);
+        return thread_future_status::closed;
+    }
+    std::shared_ptr<message_state> state;
+    if (!get_message_state(message, state)) {
+        freeval(message);
+        error = "invalid future reply";
+        return thread_future_status::closed;
+    }
+    payload = dupval(state->payload);
+    freeval(message);
+    return thread_future_status::ready;
 }
 
 struct value_t *future_wait(struct future_state &future,
                             long long timeout_ms) {
-    if (future.canceled.load()) {
-        yyerror("thread.cancelled: future was canceled");
-        return nullptr;
-    }
-    struct value_t *message =
-        channel_recv_value(future.reply, timeout_ms);
-    if (future.canceled.load()) {
-        freeval(message);
-        yyerror("thread.cancelled: future was canceled");
-        return nullptr;
-    }
-    if (!message)
-        return nullptr;
-    std::shared_ptr<message_state> state;
-    if (!get_message_state(message, state)) {
-        freeval(message);
-        return nullptr;
-    }
-    std::unordered_set<const void *> visiting;
+    struct value_t *payload = nullptr;
     std::string error;
-    struct value_t *payload =
-        copy_data_value(state->payload, visiting, error);
-    freeval(message);
-    if (!payload) {
-        yyerror("%s", error.c_str());
+    thread_future_status status =
+        future_wait_raw(future, timeout_ms, payload, error);
+    if (status == thread_future_status::canceled) {
+        freeval(payload);
+        yyerror("thread.cancelled: future was canceled");
+        return nullptr;
+    }
+    if (status == thread_future_status::pending) {
+        yyerror("thread.timeout: future wait timed out");
+        return nullptr;
+    }
+    if (status == thread_future_status::closed) {
+        freeval(payload);
+        if (!error.empty())
+            yyerror("%s", error.c_str());
         return nullptr;
     }
     return payload;
@@ -1356,12 +1417,7 @@ struct value_t *future_try_wait(struct future_state &future) {
     std::shared_ptr<message_state> state;
     if (!get_message_state(message, state))
         return raw;
-    std::unordered_set<const void *> visiting;
-    std::string error;
-    struct value_t *payload =
-        copy_data_value(state->payload, visiting, error);
-    if (!payload)
-        return raw;
+    struct value_t *payload = dupval(state->payload);
     freeval(dict->payload->items[(size_t)value_index].second);
     dict->payload->items[(size_t)value_index].second = payload;
     return raw;
@@ -1369,6 +1425,48 @@ struct value_t *future_try_wait(struct future_state &future) {
 
 std::string pool_describe(const void *) {
     return "<thread_pool>";
+}
+
+struct value_t *pool_stats_value(pool_state &pool) {
+    struct value_t *stats = (struct value_t *)newdictval();
+    struct dict_value_t *dict = (struct dict_value_t *)stats;
+    std::lock_guard<std::mutex> lock(pool.mutex);
+    long long alive = 0;
+    long long dead = 0;
+    long long restarts = 0;
+    for (const auto &worker : pool.workers) {
+        if (worker->status == worker_status::alive)
+            ++alive;
+        else if (worker->status == worker_status::dead)
+            ++dead;
+        restarts += worker->restarts;
+    }
+    dict_append_item(dict, newstrval("size"),
+                     newintval((long long)pool.size));
+    dict_append_item(dict, newstrval("workers"),
+                     newintval((long long)pool.size));
+    dict_append_item(dict, newstrval("ready"),
+                     newintval((long long)pool.ready));
+    dict_append_item(dict, newstrval("alive"), newintval(alive));
+    dict_append_item(dict, newstrval("dead"), newintval(dead));
+    dict_append_item(dict, newstrval("restarts"), newintval(restarts));
+    dict_append_item(dict, newstrval("restart_limit"),
+                     newintval(pool.restart_limit));
+    dict_append_item(dict, newstrval("submitted"),
+                     newintval(pool.submitted));
+    dict_append_item(dict, newstrval("completed"),
+                     newintval(pool.completed));
+    dict_append_item(dict, newstrval("failed"),
+                     newintval(pool.failed));
+    dict_append_item(dict, newstrval("active"),
+                     newintval(pool.active));
+    long long queued = 0;
+    if (pool.jobs) {
+        std::lock_guard<std::mutex> jobs_lock(pool.jobs->mutex);
+        queued = (long long)pool.jobs->queue.size();
+    }
+    dict_append_item(dict, newstrval("queued"), newintval(queued));
+    return stats;
 }
 
 std::string future_describe(const void *) {
@@ -1435,50 +1533,7 @@ struct value_t *pool_get_field(void *data, const char *name) {
     if (std::strcmp(name, "stats") == 0) {
         return newnativeval(
             [pool](const std::vector<struct value_t *> &) {
-                struct value_t *stats = (struct value_t *)newdictval();
-                struct dict_value_t *dict = (struct dict_value_t *)stats;
-                std::lock_guard<std::mutex> lock(pool->mutex);
-                long long alive = 0;
-                long long dead = 0;
-                long long restarts = 0;
-                for (const auto &worker : pool->workers) {
-                    if (worker->status == worker_status::alive)
-                        ++alive;
-                    else if (worker->status == worker_status::dead)
-                        ++dead;
-                    restarts += worker->restarts;
-                }
-                dict_append_item(dict, newstrval("size"),
-                                 newintval((long long)pool->size));
-                dict_append_item(dict, newstrval("workers"),
-                                 newintval((long long)pool->size));
-                dict_append_item(dict, newstrval("ready"),
-                                 newintval((long long)pool->ready));
-                dict_append_item(dict, newstrval("alive"),
-                                 newintval(alive));
-                dict_append_item(dict, newstrval("dead"),
-                                 newintval(dead));
-                dict_append_item(dict, newstrval("restarts"),
-                                 newintval(restarts));
-                dict_append_item(dict, newstrval("restart_limit"),
-                                 newintval(pool->restart_limit));
-                dict_append_item(dict, newstrval("submitted"),
-                                 newintval(pool->submitted));
-                dict_append_item(dict, newstrval("completed"),
-                                 newintval(pool->completed));
-                dict_append_item(dict, newstrval("failed"),
-                                 newintval(pool->failed));
-                dict_append_item(dict, newstrval("active"),
-                                 newintval(pool->active));
-                long long queued = 0;
-                if (pool->jobs) {
-                    std::lock_guard<std::mutex> jobs_lock(
-                        pool->jobs->mutex);
-                    queued = (long long)pool->jobs->queue.size();
-                }
-                dict_append_item(dict, newstrval("queued"),
-                                 newintval(queued));
-                return stats;
+                return pool_stats_value(*pool);
             },
             pool);
     }
@@ -1566,6 +1621,58 @@ const struct native_type kFutureType = {
     nullptr,
 };
 
+std::shared_ptr<pool_state> create_pool_state(
+    std::size_t size, const std::string &script, const std::string &entry,
+    long long queue_capacity, long long restart_limit, bool worker_vm,
+    std::string &error) {
+    std::shared_ptr<pool_state> pool = std::make_shared<pool_state>();
+    pool->size = size;
+    pool->script = script;
+    pool->entry = entry;
+    pool->restart_limit = restart_limit;
+    pool->worker_vm = worker_vm;
+    pool->jobs = std::make_shared<channel_state>(queue_capacity);
+    pool->workers.reserve(size);
+    for (std::size_t i = 0; i < size; ++i)
+        pool->workers.push_back(std::make_unique<pool_worker_slot>());
+
+    auto fail = [&pool, &error](const std::string &message) {
+        error = message;
+        {
+            std::lock_guard<std::mutex> guard(pool->mutex);
+            pool->closing = true;
+        }
+        channel_close_state(pool->jobs);
+        pool->join_workers();
+    };
+
+    try {
+        for (std::size_t i = 0; i < pool->workers.size(); ++i)
+            spawn_worker_thread(pool.get(), i);
+    } catch (const std::exception &) {
+        fail("could not start workers");
+        return nullptr;
+    }
+
+    std::unique_lock<std::mutex> lock(pool->mutex);
+    pool->cv.wait(lock, [&pool] {
+        return pool->ready >= pool->size || !pool->startup_error.empty();
+    });
+    if (!pool->startup_error.empty()) {
+        std::string startup_error = pool->startup_error;
+        lock.unlock();
+        fail(startup_error);
+        return nullptr;
+    }
+    if (pool->all_workers_dead_locked()) {
+        lock.unlock();
+        fail("all workers failed to start");
+        return nullptr;
+    }
+    lock.unlock();
+    return pool;
+}
+
 struct value_t *thread_pool(const std::vector<struct value_t *> &args) {
     if (args.size() < 2 || args.size() > 3 ||
         args[0]->type != T_int ||
@@ -1575,23 +1682,24 @@ struct value_t *thread_pool(const std::vector<struct value_t *> &args) {
         return nullptr;
     }
     long long size = ((int_value_t *)args[0])->value;
-    std::shared_ptr<pool_state> pool = std::make_shared<pool_state>();
-    pool->size = (size_t)size;
-    pool->script = ((string_value_t *)args[1])->value;
+    std::string script = ((string_value_t *)args[1])->value;
+    std::string entry = "handle";
     long long queue_capacity = 1024;
+    long long restart_limit = 0;
+    bool worker_vm = false;
 
     if (args.size() == 3) {
         if (args[2]->type != T_dict) {
             yyerror("std.thread.pool options must be a dict");
             return nullptr;
         }
-        struct value_t *entry = dict_get_handle(args[2], "entry");
-        if (entry) {
-            if (entry->type != T_string) {
+        struct value_t *entry_value = dict_get_handle(args[2], "entry");
+        if (entry_value) {
+            if (entry_value->type != T_string) {
                 yyerror("std.thread.pool entry must be a string");
                 return nullptr;
             }
-            pool->entry = ((string_value_t *)entry)->value;
+            entry = ((string_value_t *)entry_value)->value;
         }
         struct value_t *queue = dict_get_handle(args[2], "queue");
         if (queue) {
@@ -1616,60 +1724,27 @@ struct value_t *thread_pool(const std::vector<struct value_t *> &args) {
                         "non-negative integer");
                 return nullptr;
             }
-            pool->restart_limit = ((int_value_t *)restart)->value;
+            restart_limit = ((int_value_t *)restart)->value;
         }
-        struct value_t *worker_vm = dict_get_handle(args[2], "worker_vm");
-        if (worker_vm) {
-            if (worker_vm->type != T_bool) {
+        struct value_t *vm = dict_get_handle(args[2], "worker_vm");
+        if (vm) {
+            if (vm->type != T_bool) {
                 yyerror("std.thread.pool worker_vm must be a bool");
                 return nullptr;
             }
-            pool->worker_vm = ((bool_value_t *)worker_vm)->value;
+            worker_vm = ((bool_value_t *)vm)->value;
         }
     }
 
-    pool->jobs = std::make_shared<channel_state>(queue_capacity);
-    pool->workers.reserve((size_t)size);
-    for (long long i = 0; i < size; ++i)
-        pool->workers.push_back(std::make_unique<pool_worker_slot>());
-    try {
-        for (size_t i = 0; i < pool->workers.size(); ++i)
-            spawn_worker_thread(pool.get(), i);
-    } catch (const std::exception &) {
-        {
-            std::lock_guard<std::mutex> guard(pool->mutex);
-            pool->closing = true;
-        }
-        channel_close_state(pool->jobs);
-        pool->join_workers();
-        yyerror("std.thread.pool could not start workers");
-        return nullptr;
-    }
-
-    std::unique_lock<std::mutex> lock(pool->mutex);
-    pool->cv.wait(lock, [&pool] {
-        return pool->ready >= pool->size || !pool->startup_error.empty();
-    });
-    if (!pool->startup_error.empty()) {
-        std::string error = pool->startup_error;
-        pool->closing = true;
-        lock.unlock();
-        channel_close_state(pool->jobs);
-        pool->join_workers();
+    std::string error;
+    std::shared_ptr<pool_state> pool =
+        create_pool_state((std::size_t)size, script, entry, queue_capacity,
+                          restart_limit, worker_vm, error);
+    if (!pool) {
         yyerror("std.thread.pool: %s", error.c_str());
         return nullptr;
     }
-    if (pool->all_workers_dead_locked()) {
-        pool->closing = true;
-        lock.unlock();
-        channel_close_state(pool->jobs);
-        pool->join_workers();
-        yyerror("std.thread.pool: all workers failed to start");
-        return nullptr;
-    }
-    lock.unlock();
-    struct value_t *value = new_pool_value(std::move(pool));
-    return value;
+    return new_pool_value(std::move(pool));
 }
 
 /* ------------------------------------------------------------------ */
@@ -2042,6 +2117,96 @@ struct value_t *thread_channel(long long capacity) {
 }
 
 }  // namespace
+
+struct thread_pool_link {
+    std::shared_ptr<pool_state> pool;
+};
+
+struct thread_future_link {
+    std::shared_ptr<future_state> future;
+};
+
+std::shared_ptr<thread_pool_link> thread_pool_link_create(
+    std::size_t workers, const std::string &script, const std::string &entry,
+    long long queue_capacity, long long restart_limit, bool worker_vm,
+    std::string &error) {
+    std::shared_ptr<pool_state> pool = create_pool_state(
+        workers, script, entry, queue_capacity, restart_limit, worker_vm,
+        error);
+    if (!pool)
+        return nullptr;
+    std::shared_ptr<thread_pool_link> link =
+        std::make_shared<thread_pool_link>();
+    link->pool = std::move(pool);
+    return link;
+}
+
+bool thread_pool_link_submit(
+    const std::shared_ptr<thread_pool_link> &pool, struct value_t *payload,
+    long long timeout_ms, std::shared_ptr<thread_future_link> &future,
+    std::string &error) {
+    if (!pool || !pool->pool) {
+        error = "thread.pool_failed: pool is not available";
+        return false;
+    }
+    std::shared_ptr<future_state> state;
+    if (!pool_submit_raw(*pool->pool, payload, timeout_ms, state, error))
+        return false;
+    future = std::make_shared<thread_future_link>();
+    future->future = std::move(state);
+    return true;
+}
+
+thread_future_status thread_future_link_wait(
+    const std::shared_ptr<thread_future_link> &future, long long timeout_ms,
+    struct value_t *&payload, std::string &error) {
+    payload = nullptr;
+    if (!future || !future->future) {
+        error = "thread.pool_failed: future is not available";
+        return thread_future_status::closed;
+    }
+    return future_wait_raw(*future->future, timeout_ms, payload, error);
+}
+
+void thread_future_link_cancel(
+    const std::shared_ptr<thread_future_link> &future) {
+    if (!future || !future->future)
+        return;
+    bool first = !future->future->canceled.exchange(true);
+    if (first)
+        channel_close_state(future->future->reply);
+}
+
+void thread_pool_link_close(const std::shared_ptr<thread_pool_link> &pool) {
+    if (!pool || !pool->pool)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(pool->pool->mutex);
+        pool->pool->closing = true;
+    }
+    channel_close_state(pool->pool->jobs);
+}
+
+void thread_pool_link_join(const std::shared_ptr<thread_pool_link> &pool) {
+    if (!pool || !pool->pool)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(pool->pool->mutex);
+        pool->pool->closing = true;
+        pool->pool->joined = true;
+    }
+    channel_close_state(pool->pool->jobs);
+    pool->pool->join_workers();
+}
+
+struct value_t *thread_pool_link_stats(
+    const std::shared_ptr<thread_pool_link> &pool) {
+    if (!pool || !pool->pool) {
+        yyerror("thread.pool_failed: pool is not available");
+        return nullptr;
+    }
+    return pool_stats_value(*pool->pool);
+}
 
 struct value_t *call_thread_channel_builtin(
     int functype, const std::vector<struct value_t *> &args) {

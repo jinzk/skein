@@ -663,7 +663,7 @@ print(msg["type"] + ": " + msg["data"]);
 std.websocket.close(ws);
 ```
 
-服务端：
+服务端（`std.http.serve` / `serve_threads` reuse_port）：
 
 ```text
 let req = std.http.accept(s, 5000);
@@ -673,6 +673,9 @@ let msg = std.websocket.receive(ws);
 std.websocket.send(ws, "echo:" + msg["data"]);
 std.websocket.close(ws);
 ```
+
+在 `serve` / `serve_threads` reuse_port 的 handler 中，升级后应返回
+`{"status": 101}`；服务器不会再写普通 HTTP 响应，并在 handler 返回时关闭连接。
 
 消息 dict：
 
@@ -778,8 +781,7 @@ max_body_bytes      默认 16 MiB
 - worker 调用使用异步等待，多个连接可以并发占用不同 worker；
 - `stream_request_body` 仅 `reuse_port` 支持；dispatch 下 capability 为
   false，请求返回 501；
-- `reuse_port` + TLS 支持 HTTP/2 ALPN；WebSocket upgrade / SSE 在进程模式
-  返回 501；
+- `reuse_port` + TLS 支持 HTTP/2 ALPN；`reuse_port` 支持 WebSocket upgrade 与 SSE，dispatch 下返回 501；
 - `server["strategy"]` / `server["platform"]` / `server["capabilities"]`
   会在启动后写入；
 - `require` / `on_unsupported` 语义与 `serve_threads` 一致；
@@ -864,7 +866,8 @@ func handle(req) {
   - `"error"`：启动失败；
   - `"warn"`：输出警告并继续；
   - `"501"`：启动成功，但请求返回 501；
-- WebSocket upgrade 与 SSE 请求在 `serve_threads` 下返回 501；
+- `reuse_port` 支持 WebSocket upgrade，handler 内通过 `std.websocket.accept(req)` 完成升级并收发；升级后返回 `{"status": 101}`，dispatch 下返回 501；
+- `reuse_port` 支持 SSE；dispatch 下返回 501；
 - `max_requests` 达到后停止 accept，连接任务排空后退出。
 
 ```skein
@@ -888,8 +891,8 @@ let served = ts.join();
 | keep-alive | 是 | 是 |
 | `stream_request_body` | 否（启动失败） | 是 |
 | `stream_response` | 否 | 是 |
-| WebSocket | 否（501） | 否（501） |
-| SSE | 否（501） | 否（501） |
+| WebSocket | 否（501） | 是（handler 内完成） |
+| SSE | 否（501） | 是 |
 | raw socket | 否 | 否 |
 | `max_requests` | 单线程 | 全局 atomic |
 

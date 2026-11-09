@@ -2091,6 +2091,133 @@ def check_extended_stdlib():
                 "serve_workers max_connections", "workers",
                 maxconn_process_path)
 
+            ws_worker = os.path.join(
+                worker_tmp, "serve_ws_worker.skein")
+            with open(ws_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    "  let ws = std.websocket.accept(req);\n"
+                    "  let m = std.websocket.receive(ws);\n"
+                    '  std.websocket.send(ws, "echo:" + m["data"]);\n'
+                    "  std.websocket.close(ws);\n"
+                    '  return {"status": 101};\n'
+                    "}\n"
+                )
+            ws_worker_path = ws_worker.replace("\\", "\\\\")
+
+            def run_ws_case(label, source, wait_ready):
+                script = os.path.join(
+                    worker_tmp, "ws_" + label + ".skein")
+                with open(script, "w", encoding="utf-8") as handle:
+                    handle.write(source)
+                server = subprocess.Popen(
+                    [os.path.abspath(BIN), script],
+                    cwd=worker_tmp,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=os.environ.copy(),
+                )
+                try:
+                    port_line = server.stdout.readline().strip()
+                    assert port_line.isdigit(), (
+                        f"{label} did not report a port: "
+                        f"{port_line!r} / {server.stderr.read()}"
+                    )
+                    if wait_ready:
+                        ready_line = server.stdout.readline().strip()
+                        assert ready_line == "ready", (
+                            f"{label} did not become ready: "
+                            f"{ready_line!r} / {server.stderr.read()}"
+                        )
+                    port = int(port_line)
+                    client = None
+                    last_error = None
+                    for _ in range(200):
+                        try:
+                            client = socket.create_connection(
+                                ("127.0.0.1", port), timeout=5)
+                            break
+                        except OSError as exc:
+                            last_error = exc
+                            time.sleep(0.02)
+                    assert client is not None, (label, last_error)
+                    key = base64.b64encode(b"0123456789abcdef").decode()
+                    client.sendall(
+                        b"GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                        b"Connection: Upgrade\r\nUpgrade: websocket\r\n"
+                        b"Sec-WebSocket-Version: 13\r\n"
+                        b"Sec-WebSocket-Key: " + key.encode() +
+                        b"\r\n\r\n")
+                    response = b""
+                    while b"\r\n\r\n" not in response:
+                        chunk = client.recv(4096)
+                        if not chunk:
+                            break
+                        response += chunk
+                    assert b"101 Switching Protocols" in response, response
+                    assert ("Sec-WebSocket-Accept: " +
+                            ws_accept_key(key)).encode() in response
+                    ws_write_frame(client, 1, b"hello", True)
+                    opcode, payload = ws_read_frame(client)
+                    assert opcode == 1 and payload == b"echo:hello", (
+                        label, opcode, payload)
+                    opcode, _ = ws_read_frame(client)
+                    assert opcode == 8, (label, opcode)
+                    client.close()
+                    out, err = server.communicate(timeout=20)
+                    assert server.returncode == 0, (label, err)
+                    assert "served=1" in out, (label, out)
+                finally:
+                    if server.poll() is None:
+                        server.kill()
+                        server.wait()
+
+            run_ws_case(
+                "serve",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                'println(s["port"]);\n'
+                "std.io.flush(std.io.stdout);\n"
+                "let n = std.http.serve(s, func(req) {\n"
+                "  let ws = std.websocket.accept(req);\n"
+                "  let m = std.websocket.receive(ws);\n"
+                '  std.websocket.send(ws, "echo:" + m["data"]);\n'
+                "  std.websocket.close(ws);\n"
+                '  return {"status": 101};\n'
+                "}, 1);\n"
+                'println("served=" + str(n));\n',
+                False)
+            run_ws_case(
+                "threads",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                'println(s["port"]);\n'
+                "std.io.flush(std.io.stdout);\n"
+                f"let ts = std.http.serve_threads(s, 2, "
+                f"\"{ws_worker_path}\", {{\"strategy\": \"reuse_port\", "
+                f"\"max_requests\": 1}});\n"
+                'println("ready");\n'
+                "std.io.flush(std.io.stdout);\n"
+                'println("served=" + str(ts.join()));\n',
+                True)
+            run_ws_case(
+                "workers",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                'println(s["port"]);\n'
+                "std.io.flush(std.io.stdout);\n"
+                f"let ps = std.http.serve_workers(s, 2, "
+                f"\"{ws_worker_path}\", {{\"strategy\": \"reuse_port\", "
+                f"\"max_requests\": 1}});\n"
+                'println("ready");\n'
+                "std.io.flush(std.io.stdout);\n"
+                'println("served=" + str(ps.join()));\n',
+                True)
+
             tls_probe = run(
                 'import std;\nstd.dict.has(std, "tls")\n')
             tls_enabled = "= true" in tls_probe.stdout

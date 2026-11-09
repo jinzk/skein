@@ -57,7 +57,8 @@ namespace {
 value_t *await_task_value(value_t *task_value);
 std::string http_platform_name();
 bool request_unsupported_feature(value_t *request,
-                                 std::string &message, bool allow_sse);
+                                 std::string &message, bool allow_sse,
+                                 bool allow_websocket = false);
 std::shared_ptr<http_shared_state> map_shared_state_file(
     const std::string &path, bool create, std::string &error);
 
@@ -2712,6 +2713,12 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             connection_open = false;
             break;
         }
+        if (status == 101) {
+            /* The handler already wrote the switching-protocols response. */
+            freeval(response);
+            connection_open = false;
+            break;
+        }
         value_t *headers = dict_get(response, "headers");
         if (headers && headers->type != T_dict &&
             headers->type != T_null) {
@@ -3281,6 +3288,7 @@ http_capabilities make_capabilities(const std::string &strategy,
     caps.http2 = http2;
     caps.stream_request_body = stream_body;
     caps.stream_response = strategy == "reuse_port";
+    caps.websocket = strategy == "reuse_port";
     caps.reuse_port =
         strategy == "reuse_port" && SKEIN_HAS_REUSE_PORT != 0;
     caps.dispatch = true;
@@ -3739,6 +3747,8 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             return reuse_mode;
         if (name == "http2")
             return http2_capable;
+        if (name == "websocket")
+            return reuse_mode;
         if (name == "stream_request_body" || name == "stream_response")
             return reuse_mode;
         return false;
@@ -3849,7 +3859,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     dict_set(caps, "stream_request_body",
              newboolval(reuse_mode));
     dict_set(caps, "stream_response", newboolval(reuse_mode));
-    dict_set(caps, "websocket", newboolval(false));
+    dict_set(caps, "websocket", newboolval(reuse_mode));
     dict_set(caps, "sse", newboolval(false));
     dict_set(caps, "raw_socket", newboolval(false));
     dict_set(caps, "reuse_port", newboolval(reuse_mode));
@@ -4250,11 +4260,13 @@ std::string http_platform_name() {
 }
 
 bool request_unsupported_feature(value_t *request,
-                                 std::string &message, bool allow_sse) {
+                                 std::string &message, bool allow_sse,
+                                 bool allow_websocket) {
     value_t *headers = dict_get(request, "headers");
     std::string upgrade =
         lower_ascii(header_value(headers, "Upgrade"));
-    if (upgrade.find("websocket") != std::string::npos) {
+    if (!allow_websocket &&
+        upgrade.find("websocket") != std::string::npos) {
         message = "websocket is not supported";
         return true;
     }
@@ -4365,14 +4377,15 @@ value_t *make_reuse_handler(
             server->active.fetch_add(1);
             value_t *source = args[0];
             std::string unsupported;
-            if (request_unsupported_feature(source, unsupported, true)) {
+            if (request_unsupported_feature(source, unsupported, true,
+                                            true)) {
                 server->active.fetch_sub(1);
                 return thread_server_response(501, unsupported);
             }
             value_t *request = (value_t *)newdictval();
             const char *fields[] = {
                 "method", "path", "headers", "body", "http_major",
-                "http_minor", "keep_alive", "body_reader",
+                "http_minor", "keep_alive", "body_reader", "socket",
                 "connection_id", "scheme", "authority"};
             for (const char *field : fields) {
                 value_t *value = dict_get(source, field);

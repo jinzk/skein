@@ -1052,6 +1052,38 @@ def run_cases():
         "import example.nope;\n",
         stderr="package not found",
     )
+    with tempfile.TemporaryDirectory() as native_thread_dir:
+        native_thread_worker = os.path.join(
+            native_thread_dir, "native_thread_worker.skein")
+        with open(native_thread_worker, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import example.math;\n"
+                "func handle(payload) {\n"
+                "    let counter = math.counter_new(payload[\"a\"]);\n"
+                "    return {\"v\": math.add(payload[\"a\"], 10), "
+                "\"c\": counter.value};\n"
+                "}\n"
+            )
+        native_thread_path = native_thread_worker.replace("\\", "\\\\")
+        check(
+            "native module imported by thread pool",
+            "import std;\n"
+            f'let pool = std.thread.pool(4, "{native_thread_path}");\n'
+            "let futures = [];\n"
+            "for (let i = 0; i < 8; i++) {\n"
+            '  futures = std.list.append(futures, '
+            'pool.submit({"a": i}));\n'
+            "}\n"
+            "let out = [];\n"
+            "for (let f in futures) {\n"
+            "  let r = f.wait();\n"
+            '  out = std.list.append(out, r["value"]["v"]);\n'
+            "}\n"
+            "print(out);\n"
+            "pool.close();\n"
+            "pool.join();\n",
+            stdout="[10, 11, 12, 13, 14, 15, 16, 17]",
+        )
     if has_ffi and FFI_SHIM:
         check(
             "extern lib binding",

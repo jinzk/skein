@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -195,6 +196,11 @@ void c_for_each_child(
     userdata->type->visit_children(userdata->data, &bridge, visit_thunk);
 }
 
+std::mutex &registry_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
 std::unordered_map<const skein_native_type *, std::unique_ptr<native_type>>
     &type_metas() {
     static std::unordered_map<const skein_native_type *,
@@ -204,6 +210,7 @@ std::unordered_map<const skein_native_type *, std::unique_ptr<native_type>>
 }
 
 const native_type *meta_for(const skein_native_type *type) {
+    std::lock_guard<std::mutex> lock(registry_mutex());
     std::unique_ptr<native_type> &slot = type_metas()[type];
     if (!slot) {
         slot = std::make_unique<native_type>();
@@ -383,6 +390,7 @@ const skein_api *api_table() {
 struct module_state {
     const skein_module *module = nullptr;
     std::shared_ptr<dynamic_library> library;
+    std::mutex init_mutex;
     bool initialized = false;
     bool finished = false;
 
@@ -429,11 +437,10 @@ value_t *constant_value(const skein_constant &constant) {
     }
 }
 
-value_t *build_namespace(registered_module &entry) {
+value_t *build_namespace(const std::shared_ptr<module_state> &state) {
     dict_value_t *namespace_value = newdictval();
     namespace_value->payload->is_namespace = true;
 
-    std::shared_ptr<module_state> state = entry.state;
     const skein_module *module = state->module;
     for (size_t i = 0; i < module->function_count; ++i) {
         const skein_function &function = module->functions[i];
@@ -494,10 +501,6 @@ bool register_module(const skein_module *module,
                 "\" is reserved";
         return false;
     }
-    if (find_module(module->name)) {
-        error = std::string("duplicate native module ") + module->name;
-        return false;
-    }
 
     registered_module entry;
     entry.import_path = module->name;
@@ -507,11 +510,18 @@ bool register_module(const skein_module *module,
     entry.state = std::make_shared<module_state>();
     entry.state->module = module;
     entry.state->library = std::move(library);
+
+    std::lock_guard<std::mutex> lock(registry_mutex());
+    if (find_module(module->name)) {
+        error = std::string("duplicate native module ") + module->name;
+        return false;
+    }
     modules().push_back(std::move(entry));
     return true;
 }
 
 bool module_registered(const std::string &name) {
+    std::lock_guard<std::mutex> lock(registry_mutex());
     return find_module(name) != NULL;
 }
 
@@ -541,25 +551,35 @@ bool load_dynamic_module(const std::string &path, std::string &import_path,
 }
 
 struct value_t *import_module(const std::string &name, std::string &error) {
-    registered_module *entry = find_module(name);
-    if (!entry) {
-        error = "native module not found: " + name;
-        return NULL;
-    }
-    if (!entry->state->initialized) {
-        module_owner_guard guard(entry->state);
-        if (entry->state->module->init &&
-            entry->state->module->init(skein_context_current(), api_table()) !=
-                SKEIN_OK) {
-            error = "native module " + name + " failed to initialize";
+    std::shared_ptr<module_state> state;
+    {
+        std::lock_guard<std::mutex> lock(registry_mutex());
+        registered_module *entry = find_module(name);
+        if (!entry) {
+            error = "native module not found: " + name;
             return NULL;
         }
-        entry->state->initialized = true;
+        state = entry->state;
     }
-    return build_namespace(*entry);
+
+    {
+        std::lock_guard<std::mutex> init_lock(state->init_mutex);
+        if (!state->initialized) {
+            module_owner_guard guard(state);
+            if (state->module->init &&
+                state->module->init(skein_context_current(), api_table()) !=
+                    SKEIN_OK) {
+                error = "native module " + name + " failed to initialize";
+                return NULL;
+            }
+            state->initialized = true;
+        }
+    }
+    return build_namespace(state);
 }
 
 bool unload_module(const std::string &name, std::string &error) {
+    std::lock_guard<std::mutex> lock(registry_mutex());
     std::vector<registered_module> &entries = modules();
     for (auto it = entries.begin(); it != entries.end(); ++it) {
         if (it->import_path != name)

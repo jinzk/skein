@@ -735,6 +735,7 @@ std.http.serve_workers(server, workers, script[, options])
 
 ProcessServer.stop()
 ProcessServer.join([timeout_ms]) -> served
+ProcessServer.shutdown([timeout_ms]) -> served
 ProcessServer.stats() -> dict
 ProcessServer.strategy -> string
 ProcessServer.capabilities -> dict
@@ -786,6 +787,7 @@ max_body_bytes      默认 16 MiB
   会在启动后写入；
 - `require` / `on_unsupported` 语义与 `serve_threads` 一致；
 - `serve_workers` 立即返回 `ProcessServer`，`join([timeout_ms])` 等待所有 worker 结束并返回已处理请求数；超时抛 `ProcessServer.join timed out`，可 `stop()` 后重试；
+- `shutdown([timeout_ms])` 先优雅停止，超时后强制关闭：dispatch 终止 worker 进程并关闭活动连接，reuse_port 直接终止子进程；完成后返回已处理请求数；
 
 ```skein
 import std;
@@ -805,6 +807,7 @@ std.http.serve_threads(server, workers, script[, options])
 
 ThreadServer.stop()
 ThreadServer.join([timeout_ms]) -> served
+ThreadServer.shutdown([timeout_ms]) -> served
 ThreadServer.stats() -> dict
 ThreadServer.strategy -> string
 ThreadServer.capabilities -> dict
@@ -860,6 +863,7 @@ func handle(req) {
 - worker 返回值必须是 `{status, headers, body}`；
 - dispatch 下 worker 崩溃返回 502，worker 超时返回 504，worker 全部退出返回 503；
 - `serve_threads` 立即返回 `ThreadServer`，`join([timeout_ms])` 等待服务结束并返回已处理请求数；超时抛 `ThreadServer.join timed out`，可 `stop()` 后重试；
+- `shutdown([timeout_ms])` 先优雅停止，超时后关闭活动连接并设置强制停止标记；线程内正在执行的 handler 不能被抢占，若仍无法退出则抛 `ThreadServer.shutdown timed out`；
 - capabilities 报告 `http1` / `http2` / `stream_request_body` / `reuse_port` / `strategies` / `platform`；
 - `require` 在启动时检查能力：缺失时按 `on_unsupported` 处理；
   - `"error"`：启动失败；

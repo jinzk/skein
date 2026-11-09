@@ -310,7 +310,8 @@ value_t *json_parse(value_t *value) {
     return call_json_builtin(B_json_parse, {value});
 }
 
-void close_worker(worker_slot &slot, bool kill_if_running);
+void close_worker(worker_slot &slot, bool kill_if_running,
+                  bool force = false);
 
 bool spawn_worker(worker_slot &slot, const std::string &script,
                   long long ready_timeout_ms, bool hybrid,
@@ -389,19 +390,21 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
     return true;
 }
 
-void close_worker(worker_slot &slot, bool kill_if_running) {
+void close_worker(worker_slot &slot, bool kill_if_running, bool force) {
     if (slot.stdin_stream) {
         value_t *result = call_io(B_io_close, {slot.stdin_stream});
         if (result)
             freeval(result);
     }
     if (slot.process) {
-        value_t *timeout = newintval(1000);
-        value_t *wait_result = call_process_spawn_builtin(
-            B_process_wait, {slot.process, timeout});
-        freeval(timeout);
-        if (wait_result)
-            freeval(wait_result);
+        if (!force) {
+            value_t *timeout = newintval(1000);
+            value_t *wait_result = call_process_spawn_builtin(
+                B_process_wait, {slot.process, timeout});
+            freeval(timeout);
+            if (wait_result)
+                freeval(wait_result);
+        }
         if (kill_if_running) {
             value_t *kill_result = call_process_spawn_builtin(
                 B_process_kill, {slot.process});
@@ -690,6 +693,24 @@ void worker_yield() {
 }
 
 }  // namespace
+
+void worker_pool_force_shutdown(struct value_t *value) {
+    std::shared_ptr<worker_pool> pool;
+    if (!get_pool(value, pool))
+        return;
+    for (const auto &job : pool->queue)
+        fail_job(job, "worker pool shut down");
+    pool->queue.clear();
+    for (worker_slot &worker : pool->workers) {
+        if (worker.job) {
+            fail_job(worker.job, "worker pool shut down");
+            worker.job.reset();
+        }
+        worker.busy = false;
+        worker.completing = false;
+        close_worker(worker, true, true);
+    }
+}
 
 value_t *call_worker_builtin(
     int functype, const std::vector<value_t *> &args) {

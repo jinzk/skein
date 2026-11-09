@@ -818,6 +818,39 @@ def check_extended_stdlib():
             '{"strategy": "dispatch", "require": ["http2"]});\n',
             stderr="missing capabilities: http2",
         )
+        check(
+            "std.http ProcessServer shutdown",
+            "import std;\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            f'let ps = std.http.serve_workers(s, 1, '
+            f'"{serve_worker_path}", '
+            '{"strategy": "dispatch", "max_requests": 0});\n'
+            'print(ps.shutdown(2000));\n',
+            stdout="0",
+        )
+
+        slow_worker_script = os.path.join(
+            worker_tmp, "serve_slow_worker.skein")
+        with open(slow_worker_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "func handle(req) {\n"
+                "  std.time.sleep(30000);\n"
+                "  return {\"status\": 200, \"body\": \"slow\"};\n"
+                "}\n"
+            )
+        slow_worker_path = slow_worker_script.replace("\\", "\\\\")
+        client_result = {}
+
+        def slow_request(port_text):
+            try:
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port_text}/slow",
+                        timeout=20) as response:
+                    client_result["status"] = response.status
+            except Exception as exc:
+                client_result["error"] = repr(exc)
+
         if reuse_platform:
             workers_reuse_worker = os.path.join(
                 worker_tmp, "serve_workers_reuse_worker.skein")
@@ -913,6 +946,49 @@ def check_extended_stdlib():
                     server.kill()
                     server.wait()
 
+            workers_shutdown_script = os.path.join(
+                worker_tmp, "serve_workers_reuse_shutdown.skein")
+            with open(workers_shutdown_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    f"let ps = std.http.serve_workers(s, 2, "
+                    f"\"{slow_worker_path}\", "
+                    "{\"strategy\": \"reuse_port\", \"max_requests\": 0});\n"
+                    "println(s[\"port\"]);\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "std.time.sleep(1500);\n"
+                    "let started = std.time.monotonic_ms();\n"
+                    "let served = ps.shutdown(100);\n"
+                    "println(\"shutdown=\" + str(served) + \":\" + "
+                    "str(std.time.monotonic_ms() - started));\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), workers_shutdown_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=os.environ.copy(),
+            )
+            try:
+                port_line = server.stdout.readline().strip()
+                assert port_line.isdigit(), (
+                    "serve_workers reuse shutdown did not report a port: "
+                    f"{port_line!r} / {server.stderr.read()}"
+                )
+                client = threading.Thread(target=slow_request,
+                                          args=(port_line,))
+                client.start()
+                out, err = server.communicate(timeout=30)
+                assert server.returncode == 0, err
+                assert "shutdown=" in out, out
+                client.join(timeout=10)
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+
             check(
                 "std.http serve_threads reuse join timeout",
                 "import std;\n"
@@ -922,6 +998,16 @@ def check_extended_stdlib():
                 f'"max_requests": 0}});\n'
                 "ts.join(10);\n",
                 stderr="ThreadServer.join timed out",
+            )
+            check(
+                "std.http serve_threads reuse shutdown",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let ts = std.http.serve_threads(s, 1, '
+                f'"{workers_reuse_path}", {{"strategy": "reuse_port", '
+                f'"max_requests": 0}});\n'
+                'print(ts.shutdown(2000));\n',
+                stdout="0",
             )
 
             workers_stop_script = os.path.join(
@@ -2694,6 +2780,16 @@ def check_extended_stdlib():
                 '{"strategy": "dispatch", "max_requests": 0});\n'
                 "ts.join(10);\n",
                 stderr="ThreadServer.join timed out",
+            )
+            check(
+                "std.http serve_threads shutdown",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let ts = std.http.serve_threads(s, 1, '
+                f'"{thread_worker_path}", '
+                '{"strategy": "dispatch", "max_requests": 0});\n'
+                'print(ts.shutdown(2000));\n',
+                stdout="0",
             )
 
             message_worker = os.path.join(

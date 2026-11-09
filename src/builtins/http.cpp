@@ -63,6 +63,8 @@ bool request_unsupported_feature(value_t *request,
 std::shared_ptr<http_shared_state> map_shared_state_file(
     const std::string &path, bool create, std::string &error);
 
+constexpr long long kHttpShutdownForceGraceMs = 5000;
+
 void free_args(std::vector<value_t *> &args) {
     for (size_t i = 0; i < args.size(); ++i)
         freeval(args[i]);
@@ -2580,6 +2582,11 @@ void drain_http1_pull_body(const std::shared_ptr<http1_pull_body> &body) {
     freeval(captured.error);
 }
 
+struct http_connection_registry {
+    std::mutex mutex;
+    std::vector<value_t *> streams;
+};
+
 struct http_server_state {
     long long max_requests = 0;
     long long max_per_connection = 100;
@@ -2595,7 +2602,30 @@ struct http_server_state {
     bool unsupported_501 = false;
     std::string unsupported_message;
     std::shared_ptr<http_shared_state> shared;
+    /* Shared with reuse_port worker copies; set when a shutdown deadline is hit. */
+    std::shared_ptr<std::atomic<bool>> force_stop =
+        std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<http_connection_registry> tracked_connections =
+        std::make_shared<http_connection_registry>();
 };
+
+bool http_force_stopping(const http_server_state *state) {
+    return state && state->force_stop && state->force_stop->load();
+}
+
+void http_close_tracked_connections(
+    const std::shared_ptr<http_server_state> &state) {
+    if (!state || !state->tracked_connections)
+        return;
+    std::vector<value_t *> streams;
+    {
+        std::lock_guard<std::mutex> lock(
+            state->tracked_connections->mutex);
+        streams = state->tracked_connections->streams;
+    }
+    for (value_t *stream : streams)
+        close_socket(stream);
+}
 
 void handle_http_server_connection(value_t *stream, value_t *handler,
                                    http_server_state *state) {
@@ -2604,6 +2634,7 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
     std::chrono::steady_clock::time_point last_activity =
         std::chrono::steady_clock::now();
     while (connection_open && !state->shared->stopping.load() &&
+           !http_force_stopping(state) &&
            (state->max_requests == 0 ||
             state->shared->served.load() < state->max_requests)) {
         http1::message message;
@@ -2646,7 +2677,8 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             }
         }
         if (timed_out) {
-            if (state->shared->stopping.load())
+            if (state->shared->stopping.load() ||
+                http_force_stopping(state))
                 break;
             if (state->idle_timeout_ms != 0 &&
                 std::chrono::steady_clock::now() - last_activity >=
@@ -2945,6 +2977,30 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                             state->shared->active_connections.fetch_sub(1);
                     }
                 } guard{state};
+                struct tracking_guard {
+                    std::shared_ptr<http_connection_registry> registry;
+                    value_t *tracked = nullptr;
+                    ~tracking_guard() {
+                        if (!registry || !tracked)
+                            return;
+                        {
+                            std::lock_guard<std::mutex> lock(
+                                registry->mutex);
+                            auto &streams = registry->streams;
+                            auto it = std::find(streams.begin(),
+                                                streams.end(), tracked);
+                            if (it != streams.end())
+                                streams.erase(it);
+                        }
+                        freeval(tracked);
+                    }
+                } tracking{state->tracked_connections, nullptr};
+                if (tracking.registry) {
+                    tracking.tracked = dupval(stream);
+                    std::lock_guard<std::mutex> lock(
+                        tracking.registry->mutex);
+                    tracking.registry->streams.push_back(tracking.tracked);
+                }
                 if (connection_fn)
                     connection_fn(stream, handler_copy, state.get());
                 else
@@ -3396,6 +3452,7 @@ struct process_server_state
 
     value_t *pool = nullptr;
     task_ptr server_task;
+    std::shared_ptr<http_server_state> http;
     bool pool_shutdown = false;
 
     std::vector<value_t *> children;
@@ -3458,6 +3515,54 @@ void process_server_close_pool(process_server_state *server) {
         freeval(result);
     freeval(server->pool);
     server->pool = nullptr;
+}
+
+void process_server_force(process_server_state *server) {
+    if (server->http && server->http->force_stop)
+        server->http->force_stop->store(true);
+    if (server->strategy == "reuse_port") {
+        process_server_stop_children(server, false);
+        return;
+    }
+    http_close_tracked_connections(server->http);
+    if (server->pool && !server->pool_shutdown)
+        worker_pool_force_shutdown(server->pool);
+}
+
+bool process_server_shutdown(process_server_state *server,
+                             long long timeout_ms, long long &served) {
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        if (server->joined) {
+            served = server->shared ? server->shared->served.load() : 0;
+            return true;
+        }
+    }
+    if (server->shared)
+        server->shared->stopping.store(true);
+    if (server->server_task) {
+        bool stopped = await_task_timeout(server->server_task, timeout_ms);
+        if (!stopped) {
+            process_server_force(server);
+            stopped = await_task_timeout(server->server_task,
+                                         kHttpShutdownForceGraceMs);
+        }
+        if (!stopped)
+            return false;
+        server->server_task = nullptr;
+    } else {
+        bool stopped = process_server_stop_children(server, true,
+                                                    timeout_ms);
+        if (!stopped)
+            process_server_stop_children(server, false);
+    }
+    process_server_close_pool(server);
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        server->joined = true;
+    }
+    served = server->shared ? server->shared->served.load() : 0;
+    return true;
 }
 
 process_server_state::~process_server_state() {
@@ -3600,6 +3705,34 @@ value_t *process_server_get_field(void *data, const char *name) {
                 if (!process_server_join(server.get(), timeout_ms,
                                          served)) {
                     yyerror("std.http.ProcessServer.join timed out");
+                    return (value_t *)nullptr;
+                }
+                return newintval(served);
+            },
+            server);
+    }
+    if (std::strcmp(name, "shutdown") == 0) {
+        return newnativeval(
+            [server](const std::vector<value_t *> &args) {
+                long long timeout_ms = 0;
+                if (args.size() > 1) {
+                    yyerror("ProcessServer.shutdown expects 0 or 1 "
+                            "argument");
+                    return (value_t *)nullptr;
+                }
+                if (args.size() == 1) {
+                    if (args[0]->type != T_int ||
+                        ((int_value_t *)args[0])->value < 0) {
+                        yyerror("ProcessServer.shutdown timeout must be a "
+                                "non-negative integer");
+                        return (value_t *)nullptr;
+                    }
+                    timeout_ms = ((int_value_t *)args[0])->value;
+                }
+                long long served = 0;
+                if (!process_server_shutdown(server.get(), timeout_ms,
+                                             served)) {
+                    yyerror("std.http.ProcessServer.shutdown timed out");
                     return (value_t *)nullptr;
                 }
                 return newintval(served);
@@ -4314,6 +4447,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         yyerror("std.http.serve_workers could not start the server");
         return NULL;
     }
+    server->http = state;
     server->server_task = task;
     return newuserdataval(&kProcessServerType, server);
 }
@@ -4580,6 +4714,8 @@ void reuse_port_worker_main(
     std::shared_ptr<http_server_state> state =
         std::make_shared<http_server_state>(*server->config);
     state->shared = server->shared;
+    state->tracked_connections =
+        std::make_shared<http_connection_registry>();
     value_t *wrapped = make_reuse_handler(server, handler, worker_index);
 
     std::vector<std::string> alpn;
@@ -4749,6 +4885,66 @@ std::string thread_server_describe(const void *) {
     return "<thread_server>";
 }
 
+bool thread_server_wait(thread_server_state *server, long long timeout_ms) {
+#if SKEIN_HAS_REUSE_PORT
+    if (server->reuse)
+        return server->reuse->wait_server(timeout_ms);
+#endif
+    if (!server->server_task)
+        return true;
+    return await_task_timeout(server->server_task, timeout_ms);
+}
+
+void thread_server_finish(thread_server_state *server) {
+#if SKEIN_HAS_REUSE_PORT
+    if (server->reuse) {
+        server->reuse->join_server();
+        return;
+    }
+#endif
+    server->server_task = nullptr;
+    thread_pool_link_join(server->pool);
+}
+
+void thread_server_force(thread_server_state *server) {
+    if (server->http && server->http->force_stop)
+        server->http->force_stop->store(true);
+#if SKEIN_HAS_REUSE_PORT
+    if (server->reuse)
+        return;
+#endif
+    http_close_tracked_connections(server->http);
+}
+
+bool thread_server_shutdown(thread_server_state *server, long long timeout_ms,
+                            long long &served) {
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        if (server->joined) {
+            served = server->http && server->http->shared
+                         ? server->http->shared->served.load()
+                         : 0;
+            return true;
+        }
+    }
+    if (server->http && server->http->shared)
+        server->http->shared->stopping.store(true);
+    if (!thread_server_wait(server, timeout_ms)) {
+        thread_server_force(server);
+        if (!thread_server_wait(server, kHttpShutdownForceGraceMs))
+            return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        server->joined = true;
+    }
+    thread_server_finish(server);
+    served = server->http && server->http->shared
+                 ? server->http->shared->served.load()
+                 : 0;
+    return true;
+}
+
 value_t *thread_dispatch(
     const std::shared_ptr<thread_server_state> &server,
     const std::vector<value_t *> &args) {
@@ -4912,39 +5108,47 @@ value_t *thread_server_get_field(void *data, const char *name) {
                     should_join = !server->joined;
                 }
                 if (should_join) {
-#if SKEIN_HAS_REUSE_PORT
-                    if (server->reuse) {
-                        if (!server->reuse->wait_server(timeout_ms)) {
-                            yyerror("std.http.ThreadServer.join timed out");
-                            return (value_t *)nullptr;
-                        }
-                        {
-                            std::lock_guard<std::mutex> lock(
-                                server->mutex);
-                            server->joined = true;
-                        }
-                        server->reuse->join_server();
-                    } else
-#endif
-                    {
-                        if (!await_task_timeout(server->server_task,
-                                                timeout_ms)) {
-                            yyerror("std.http.ThreadServer.join timed out");
-                            return (value_t *)nullptr;
-                        }
-                        {
-                            std::lock_guard<std::mutex> lock(
-                                server->mutex);
-                            server->joined = true;
-                        }
-                        server->server_task = nullptr;
-                        thread_pool_link_join(server->pool);
+                    if (!thread_server_wait(server.get(), timeout_ms)) {
+                        yyerror("std.http.ThreadServer.join timed out");
+                        return (value_t *)nullptr;
                     }
+                    {
+                        std::lock_guard<std::mutex> lock(server->mutex);
+                        server->joined = true;
+                    }
+                    thread_server_finish(server.get());
                 }
                 long long served =
                     server->http && server->http->shared
                         ? server->http->shared->served.load()
                         : 0;
+                return newintval(served);
+            },
+            server);
+    }
+    if (std::strcmp(name, "shutdown") == 0) {
+        return newnativeval(
+            [server](const std::vector<value_t *> &args) {
+                long long timeout_ms = 0;
+                if (args.size() > 1) {
+                    yyerror("ThreadServer.shutdown expects 0 or 1 argument");
+                    return (value_t *)nullptr;
+                }
+                if (args.size() == 1) {
+                    if (args[0]->type != T_int ||
+                        ((int_value_t *)args[0])->value < 0) {
+                        yyerror("ThreadServer.shutdown timeout must be a "
+                                "non-negative integer");
+                        return (value_t *)nullptr;
+                    }
+                    timeout_ms = ((int_value_t *)args[0])->value;
+                }
+                long long served = 0;
+                if (!thread_server_shutdown(server.get(), timeout_ms,
+                                            served)) {
+                    yyerror("std.http.ThreadServer.shutdown timed out");
+                    return (value_t *)nullptr;
+                }
                 return newintval(served);
             },
             server);

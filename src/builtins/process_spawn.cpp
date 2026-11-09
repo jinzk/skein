@@ -120,6 +120,20 @@ void close_pipe(process_pipe *pipe) {
     if (!pipe || !pipe->open)
         return;
     pipe->open = false;
+    pipe->reading = false;
+    pipe->writing = false;
+    if (pipe->pending_read) {
+        pipe_async_op *op = pipe->pending_read;
+        pipe->pending_read = nullptr;
+        op->pipe = nullptr;
+        skein_async::async_fail(op, "read_async: pipe closed");
+    }
+    if (pipe->pending_write) {
+        pipe_async_op *op = pipe->pending_write;
+        pipe->pending_write = nullptr;
+        op->pipe = nullptr;
+        skein_async::async_fail(op, "write_async: pipe closed");
+    }
     if (!uv_is_closing((uv_handle_t *)&pipe->handle))
         uv_close((uv_handle_t *)&pipe->handle, nullptr);
 }

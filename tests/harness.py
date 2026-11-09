@@ -906,6 +906,18 @@ def check_extended_stdlib():
             stderr="missing capabilities: http2",
         )
         check(
+            "std.http require raises structured unsupported error",
+            "import std;\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            f'let n = std.http.serve_workers(s, 1, "{serve_worker_path}", '
+            '{"strategy": "dispatch", "require": ["http2"]}) '
+            "on error(e) {\n"
+            '    print("kind=" + std.error.kind(e));\n'
+            "    recover null;\n"
+            "};\n",
+            stdout="kind=http.unsupported",
+        )
+        check(
             "std.http ProcessServer shutdown",
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'

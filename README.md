@@ -866,7 +866,7 @@ func handle(req) {
 - `shutdown([timeout_ms])` 先优雅停止，超时后关闭活动连接并设置强制停止标记；线程内正在执行的 handler 不能被抢占，若仍无法退出则抛 `ThreadServer.shutdown timed out`；
 - capabilities 报告 `http1` / `http2` / `stream_request_body` / `reuse_port` / `strategies` / `platform`；
 - `require` 在启动时检查能力：缺失时按 `on_unsupported` 处理；
-  - `"error"`：启动失败；
+  - `"error"`：启动失败，抛 `error(kind="http.unsupported")`；
   - `"warn"`：输出警告并继续；
   - `"501"`：启动成功，但请求返回 501；
 - `reuse_port` 支持 WebSocket upgrade，handler 内通过 `std.websocket.accept(req)` 完成升级并收发；升级后返回 `{"status": 101}`，dispatch 下返回 501；

@@ -3983,8 +3983,9 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     std::string unsupported_message;
     if (!missing.empty()) {
         if (on_unsupported == "error") {
-            yyerror("std.http.serve_workers: missing capabilities: %s",
-                    missing.c_str());
+            const std::string message =
+                "std.http.serve_workers: missing capabilities: " + missing;
+            eval_raise(newerrorval("http.unsupported", message.c_str()));
             return NULL;
         }
         if (on_unsupported == "warn") {
@@ -5553,8 +5554,9 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     std::string unsupported_message;
     if (!missing.empty()) {
         if (on_unsupported == "error") {
-            yyerror("std.http.serve_threads: missing capabilities: %s",
-                    missing.c_str());
+            const std::string message =
+                "std.http.serve_threads: missing capabilities: " + missing;
+            eval_raise(newerrorval("http.unsupported", message.c_str()));
             return NULL;
         }
         if (on_unsupported == "warn") {

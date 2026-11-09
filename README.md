@@ -1209,6 +1209,11 @@ std.http2.close(s);
 - `https://` 通过 TLS ALPN 协商 `h2`，未协商成功会报错；
 - 支持同步和 async 客户端；
 - 支持 h2c / TLS 服务端；
+- flow control 由 nghttp2 管理：大 body 在 `initial_window_size` 较小时通过 WINDOW_UPDATE 推进；
+- 服务端 draining 时会等待响应 body 发送完成后再发送 GOAWAY；
+- 客户端允许在响应完成前收到 GOAWAY，只要对应 stream 已被处理；
+- `stream_request_body` + `read_body` 与客户端 `on_body` / `body_stream` 形成双向背压；
+- priority/weight 交给 nghttp2 默认调度，当前未暴露显式权重 API；
 - 默认整体读取请求和响应 body；可用 `body_stream` / `on_body` 流式处理；
 - `max_body_bytes` 默认 16 MiB；
 - request dict 额外包含 `connection_id`，便于标识所属连接；

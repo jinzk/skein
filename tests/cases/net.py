@@ -811,6 +811,220 @@ def run_cases():
                     http2_server_proc.terminate()
                     http2_server_proc.wait(timeout=5)
 
+            def h2_free_port():
+                probe = socket.socket()
+                probe.bind(("127.0.0.1", 0))
+                value = probe.getsockname()[1]
+                probe.close()
+                return value
+
+            def h2_start_server(source, port):
+                proc = subprocess.Popen(
+                    [BIN],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                proc.stdin.write(source)
+                proc.stdin.close()
+                deadline = time.time() + 5
+                while time.time() < deadline:
+                    try:
+                        probe = socket.create_connection(
+                            ("127.0.0.1", port), timeout=0.2)
+                        probe.close()
+                        return proc
+                    except OSError:
+                        time.sleep(0.05)
+                raise AssertionError("http2 stress server did not listen")
+
+            h2_chunk = "0123456789abcdef" * 64
+            h2_build_body = (
+                f'let chunk = "{h2_chunk}";\n'
+                "let parts = [];\n"
+                "for (let i = 0; i < 1024; i = i + 1) {\n"
+                "  parts = std.list.append(parts, chunk);\n"
+                "}\n"
+                'let body = std.string.join(parts, "");\n'
+            )
+
+            flow_port = h2_free_port()
+            flow_server = (
+                "import std;\n"
+                f'let s = std.http2.listen("127.0.0.1", {flow_port});\n'
+                's["settings"] = {"max_concurrent_streams": 4, '
+                '"initial_window_size": 16384};\n'
+                "let n = std.http2.serve(s, func(req) {\n"
+                '  if (req["path"] == "/download") {\n'
+                + h2_build_body +
+                '    return {"status": 200, "body": body};\n'
+                "  }\n"
+                '  return {"status": 200, "body": "len=" + '
+                'str(len(req["body"]))};\n'
+                "}, 2);\n"
+                'println("served " + str(n));\n'
+            )
+            flow_proc = h2_start_server(flow_server, flow_port)
+            try:
+                flow_client = run(
+                    "import std;\n"
+                    + h2_build_body +
+                    f'let up = std.http2.post('
+                    f'"http://127.0.0.1:{flow_port}/upload", body,\n'
+                    '  {"settings": {"initial_window_size": 16384}});\n'
+                    'println("sent=" + str(len(body)));\n'
+                    'println(str(up["status"]) + ":" + '
+                    'bytes_to_string(up["body"]));\n'
+                    f'let down = std.http2.get('
+                    f'"http://127.0.0.1:{flow_port}/download",\n'
+                    '  {"settings": {"initial_window_size": 16384}});\n'
+                    'println("down=" + str(len(down["body"])));\n',
+                    timeout=30,
+                )
+                assert flow_client.returncode == 0, flow_client.stderr
+                assert "sent=1048576" in flow_client.stdout, (
+                    flow_client.stdout)
+                assert "200:len=1048576" in flow_client.stdout, (
+                    flow_client.stdout)
+                assert "down=1048576" in flow_client.stdout, (
+                    flow_client.stdout)
+                flow_proc.wait(timeout=20)
+                assert "served 2" in flow_proc.stdout.read()
+            finally:
+                if flow_proc.poll() is None:
+                    flow_proc.terminate()
+                    flow_proc.wait(timeout=5)
+
+            stream_port = h2_free_port()
+            stream_server = (
+                "import std;\n"
+                f'let s = std.http2.listen("127.0.0.1", {stream_port});\n'
+                's["settings"] = {"max_concurrent_streams": 4, '
+                '"initial_window_size": 16384};\n'
+                's["stream_request_body"] = true;\n'
+                "let n = std.http2.serve(s, func(req) {\n"
+                "  let total = 0;\n"
+                "  let chunk = std.http.read_body(req);\n"
+                "  while (chunk != null) {\n"
+                "    total = total + len(chunk);\n"
+                "    std.time.sleep(1);\n"
+                "    chunk = std.http.read_body(req);\n"
+                "  }\n"
+                '  return {"status": 200, "body": "total=" + '
+                'str(total)};\n'
+                "}, 1);\n"
+                'println("served " + str(n));\n'
+            )
+            stream_proc = h2_start_server(stream_server, stream_port)
+            try:
+                stream_client = run(
+                    "import std;\n"
+                    + h2_build_body +
+                    f'let r = std.http2.post('
+                    f'"http://127.0.0.1:{stream_port}/upload", body,\n'
+                    '  {"settings": {"initial_window_size": 16384}});\n'
+                    'println(str(r["status"]) + ":" + '
+                    'bytes_to_string(r["body"]));\n',
+                    timeout=30,
+                )
+                assert stream_client.returncode == 0, stream_client.stderr
+                assert "200:total=1048576" in stream_client.stdout, (
+                    stream_client.stdout)
+                stream_proc.wait(timeout=20)
+                assert "served 1" in stream_proc.stdout.read()
+            finally:
+                if stream_proc.poll() is None:
+                    stream_proc.terminate()
+                    stream_proc.wait(timeout=5)
+
+            back_port = h2_free_port()
+            back_server = (
+                "import std;\n"
+                f'let s = std.http2.listen("127.0.0.1", {back_port});\n'
+                's["settings"] = {"max_concurrent_streams": 4, '
+                '"initial_window_size": 16384};\n'
+                "let n = std.http2.serve(s, func(req) {\n"
+                + h2_build_body +
+                '  return {"status": 200, "body": body};\n'
+                "}, 1);\n"
+                'println("served " + str(n));\n'
+            )
+            back_proc = h2_start_server(back_server, back_port)
+            try:
+                back_client = run(
+                    "import std;\n"
+                    "let total = 0;\n"
+                    "let chunks = 0;\n"
+                    f'let r = std.http2.get('
+                    f'"http://127.0.0.1:{back_port}/big",\n'
+                    '  {"settings": {"initial_window_size": 16384},\n'
+                    '   "on_body": func(chunk) {\n'
+                    "       total = total + len(chunk);\n"
+                    "       chunks = chunks + 1;\n"
+                    "       std.time.sleep(1);\n"
+                    "   }});\n"
+                    'println("status=" + str(r["status"]));\n'
+                    'println("total=" + str(total));\n'
+                    'println("chunks=" + str(chunks));\n',
+                    timeout=30,
+                )
+                assert back_client.returncode == 0, back_client.stderr
+                assert "status=200" in back_client.stdout, (
+                    back_client.stdout)
+                assert "total=1048576" in back_client.stdout, (
+                    back_client.stdout)
+                back_proc.wait(timeout=20)
+                assert "served 1" in back_proc.stdout.read()
+            finally:
+                if back_proc.poll() is None:
+                    back_proc.terminate()
+                    back_proc.wait(timeout=5)
+
+            many_port = h2_free_port()
+            many_server = (
+                "import std;\n"
+                f'let s = std.http2.listen("127.0.0.1", {many_port});\n'
+                's["settings"] = {"max_concurrent_streams": 2, '
+                '"initial_window_size": 16384};\n'
+                "let n = std.http2.serve(s, func(req) {\n"
+                "  std.time.sleep(5);\n"
+                '  return {"status": 200, "body": req["path"]};\n'
+                "}, 16);\n"
+                'println("served " + str(n));\n'
+            )
+            many_proc = h2_start_server(many_server, many_port)
+            try:
+                many_items = ", ".join(
+                    '{"url": "http://127.0.0.1:%d/r%d"}' % (many_port, i)
+                    for i in range(16))
+                many_client = run(
+                    "import std;\n"
+                    f"let responses = std.http2.request_many(["
+                    f"{many_items}],\n"
+                    '  {"settings": {"max_concurrent_streams": 2, '
+                    '"initial_window_size": 16384}});\n'
+                    'println("count=" + str(len(responses)));\n'
+                    "let ok = true;\n"
+                    "for (let i = 0; i < len(responses); i = i + 1) {\n"
+                    '  if (responses[i]["status"] != 200) { ok = false; }\n'
+                    '  if (bytes_to_string(responses[i]["body"]) != '
+                    '"/r" + str(i)) { ok = false; }\n'
+                    "}\n"
+                    'println("ok=" + str(ok));\n',
+                    timeout=30,
+                )
+                assert many_client.returncode == 0, many_client.stderr
+                assert "count=16" in many_client.stdout, many_client.stdout
+                assert "ok=true" in many_client.stdout, many_client.stdout
+                many_proc.wait(timeout=20)
+                assert "served 16" in many_proc.stdout.read()
+            finally:
+                if many_proc.poll() is None:
+                    many_proc.terminate()
+                    many_proc.wait(timeout=5)
+
             http2_goaway_probe = socket.socket()
             http2_goaway_probe.bind(("127.0.0.1", 0))
             http2_goaway_port = http2_goaway_probe.getsockname()[1]

@@ -476,6 +476,7 @@ struct h2_connection {
     std::string response_body;
     std::string failure;
     bool goaway = false;
+    int32_t goaway_last_stream_id = 0;
     bool peer_settings_received = false;
     std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
     std::size_t received_body_bytes = 0;
@@ -1066,8 +1067,10 @@ int client_on_stream_close(nghttp2_session *, int32_t stream_id,
 int client_on_frame_recv(nghttp2_session *, const nghttp2_frame *frame,
                          void *user_data) {
     h2_connection *connection = (h2_connection *)user_data;
-    if (frame->hd.type == NGHTTP2_GOAWAY)
+    if (frame->hd.type == NGHTTP2_GOAWAY) {
         connection->goaway = true;
+        connection->goaway_last_stream_id = frame->goaway.last_stream_id;
+    }
     if (frame->hd.type == NGHTTP2_SETTINGS &&
         !(frame->hd.flags & NGHTTP2_FLAG_ACK))
         connection->peer_settings_received = true;
@@ -1554,8 +1557,9 @@ value_t *exchange_once(h2_connection *connection,
             connection->failure = "nghttp2 send failed";
             break;
         }
-        if (connection->goaway && !connection->done) {
-            connection->failure = "server sent GOAWAY";
+        if (connection->goaway && !connection->done &&
+            connection->stream_id > connection->goaway_last_stream_id) {
+            connection->failure = "server did not process stream";
             break;
         }
         value_t *chunk = h2_read(connection);
@@ -2303,9 +2307,17 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
         if (all_done)
             break;
         if (connection->goaway) {
-            connection->failure = "server sent GOAWAY";
-            failed = true;
-            break;
+            for (size_t i = 0; i < stream_order.size(); ++i) {
+                int32_t id = stream_order[i];
+                if (id <= connection->goaway_last_stream_id)
+                    continue;
+                h2_connection::multi_response &entry =
+                    connection->multi_streams[id];
+                if (!entry.done) {
+                    entry.failure = "server did not process stream";
+                    entry.done = true;
+                }
+            }
         }
         value_t *chunk = h2_read(connection);
         if (!chunk) {
@@ -3052,7 +3064,10 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             if (rv != 0)
                 break;
 
-            if (draining && handler_tasks.empty())
+            if (draining && handler_tasks.empty() &&
+                connection.requests.empty() &&
+                connection.response_bodies.empty() &&
+                connection.response_streams.empty())
                 break;
 
             long long read_timeout = 100;

@@ -1410,6 +1410,7 @@ value_t *net_tcp_connect_async(const std::vector<value_t *> &args) {
 struct listen_async_op : async_state {
     uv_getaddrinfo_t request = {};
     struct addrinfo *addresses = NULL;
+    bool reuse_port = false;
 
     ~listen_async_op() override {
         if (addresses)
@@ -1436,6 +1437,11 @@ void on_listen_async_resolve(uv_getaddrinfo_t *request, int status,
     op->addresses = addresses;
 
     int last_status = 0;
+    unsigned int bind_flags = 0;
+#if SKEIN_HAS_REUSE_PORT
+    if (op->reuse_port)
+        bind_flags |= UV_TCP_REUSEPORT;
+#endif
     for (struct addrinfo *address = addresses; address;
          address = address->ai_next) {
         std::shared_ptr<net_socket> socket = new_socket();
@@ -1443,7 +1449,7 @@ void on_listen_async_resolve(uv_getaddrinfo_t *request, int status,
             last_status = UV_ENOMEM;
             continue;
         }
-        int rc = uv_tcp_bind(socket->handle, address->ai_addr, 0);
+        int rc = uv_tcp_bind(socket->handle, address->ai_addr, bind_flags);
         if (rc == 0)
             rc = uv_listen((uv_stream_t *)socket->handle, 16,
                            on_connection);
@@ -1462,8 +1468,8 @@ void on_listen_async_resolve(uv_getaddrinfo_t *request, int status,
 }
 
 value_t *net_tcp_listen_async(const std::vector<value_t *> &args) {
-    if (args.size() < 2 || args.size() > 4) {
-        yyerror("std.net.tcp_listen_async expects 2 to 4 arguments");
+    if (args.size() < 2 || args.size() > 5) {
+        yyerror("std.net.tcp_listen_async expects 2 to 5 arguments");
         return NULL;
     }
     if (args[0]->type != T_string) {
@@ -1479,6 +1485,36 @@ value_t *net_tcp_listen_async(const std::vector<value_t *> &args) {
     int family = AF_UNSPEC;
     if (!get_optional_family(args, 3, family))
         return NULL;
+    bool reuse_port = false;
+    if (args.size() == 5) {
+        if (args[4]->type != T_dict) {
+            yyerror("tcp_listen_async options must be a dict");
+            return NULL;
+        }
+        value_t *flag = NULL;
+        struct dict_value_t *options = (struct dict_value_t *)args[4];
+        for (const auto &entry : options->payload->items) {
+            if (entry.first->type == T_string &&
+                std::strcmp(
+                    ((struct string_value_t *)entry.first)->value,
+                    "reuse_port") == 0) {
+                flag = entry.second;
+                break;
+            }
+        }
+        if (flag) {
+            if (flag->type != T_bool) {
+                yyerror("tcp_listen_async reuse_port must be a bool");
+                return NULL;
+            }
+            reuse_port = ((bool_value_t *)flag)->value;
+        }
+    }
+    if (reuse_port && !SKEIN_HAS_REUSE_PORT) {
+        yyerror("tcp_listen_async: reuse_port is not supported on this "
+                "platform");
+        return NULL;
+    }
     if (g_interrupted)
         return NULL;
 
@@ -1488,6 +1524,7 @@ value_t *net_tcp_listen_async(const std::vector<value_t *> &args) {
     hints.ai_flags = AI_PASSIVE;
 
     listen_async_op *op = new listen_async_op;
+    op->reuse_port = reuse_port;
     task_ptr task;
     std::string timeout_error =
         async_timeout_error("tcp_listen_async", timeout_ms);

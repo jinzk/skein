@@ -824,7 +824,7 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
             poly_task(socket_type), 2);
     if (path == "std.net.tcp_listen_async")
         return poly_builtin(
-            {text(), integer_type, integer_type, text()},
+            {text(), integer_type, integer_type, text(), dict_any},
             poly_task(listener_type), 2);
     if (path == "std.net.accept_async")
         return poly_builtin({listener_type, integer_type},

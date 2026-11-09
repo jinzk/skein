@@ -4106,6 +4106,23 @@ def run_cases():
                 async_server_proc.kill()
                 async_server_proc.wait()
 
+        if sys.platform.startswith("linux"):
+            check(
+                "std net tcp_listen_async reuse_port",
+                "import std;\n"
+                'let a = std.task.wait(std.net.tcp_listen_async('
+                '"127.0.0.1", 0, 1000, "any", {"reuse_port": true}));\n'
+                'let port = std.net.local_addr(a)["port"];\n'
+                'let b = std.task.wait(std.net.tcp_listen_async('
+                '"127.0.0.1", port, 1000, "any", '
+                '{"reuse_port": true}));\n'
+                'print("same=" + str(std.net.local_addr(a)["port"] == '
+                'std.net.local_addr(b)["port"]));\n'
+                "std.net.close(a);\n"
+                "std.net.close(b);\n",
+                stdout="same=true",
+            )
+
         check(
             "std net accept timeout",
             "import std;\n"

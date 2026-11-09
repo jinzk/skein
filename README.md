@@ -415,7 +415,7 @@ std.net.peer_addr(socket)
 {address: "127.0.0.1", port: 8080, family: "ipv4"}
 ```
 
-`tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。
+`tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。`tcp_listen` / `tcp_listen_async` 的 `options` 支持 `{"reuse_port": true}`（Linux/BSD）。
 
 异步网络：
 
@@ -428,7 +428,7 @@ let socket = std.task.wait(t);
 
 ```text
 tcp_connect_async(host, port[, timeout_ms[, family]]) → task
-tcp_listen_async(host, port[, timeout_ms[, family]])  → task
+tcp_listen_async(host, port[, timeout_ms[, family[, options]]])  → task
 accept_async(listener[, timeout_ms])                  → task
 send_async(socket, data[, timeout_ms])                → task
 recv_async(socket, size[, timeout_ms])                → task

@@ -8,6 +8,7 @@
 #include "eval_context.h"
 #include "eval_internal.h"
 #include "pattern.h"
+#include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
 #include "valuetype.h"
@@ -24,7 +25,9 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -611,11 +614,6 @@ bool skein_vm_prepare_thread_proto(
         return false;
     }
     const std::shared_ptr<function_def> &def = value->def;
-    if (def->closure || !def->upvalues.empty() ||
-        !def->code->upvalues.empty()) {
-        error = "thread entry cannot capture a closure";
-        return false;
-    }
     if (def->code->nparams != 1 ||
         def->code->required_params != 1 ||
         def->code->variadic ||
@@ -625,6 +623,23 @@ bool skein_vm_prepare_thread_proto(
         error = "thread entry must be a synchronous function with one "
                 "parameter";
         return false;
+    }
+    if (def->code->upvalues.empty() && def->closure) {
+        /* The AST backend does not pre-populate function_code::upvalues.
+         * Recover the visible non-global names before compiling so the body
+         * binds them as upvalues and captured locals shadow globals. */
+        std::unordered_set<std::string> seen;
+        for (const auto &name : def->code->upvalues)
+            seen.insert(name);
+        for (scope_t *scope = def->closure.get();
+             scope && !scope->is_global; scope = scope->parent.get()) {
+            for (struct symbol *sym : scope->syms.small) {
+                if (!sym || !sym->name || !*sym->name)
+                    continue;
+                if (seen.insert(sym->name).second)
+                    def->code->upvalues.emplace_back(sym->name);
+            }
+        }
     }
     skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
     if (!source) {
@@ -653,15 +668,64 @@ bool skein_vm_prepare_thread_proto(
     copy->name_ic.clear();
     copy->member_ic.clear();
     copy->index_read_ic.clear();
+    if (copy->upvalues.empty() && def->closure) {
+        /* The AST backend does not pre-populate function_code::upvalues.
+         * Recover the free names referenced by the compiled body so the
+         * child runtime can rebuild a closure scope for them. */
+        auto find_closure_symbol = [&](const std::string &name) {
+            std::string_view key(name);
+            for (scope_t *scope = def->closure.get();
+                 scope && !scope->is_global; scope = scope->parent.get()) {
+                if (struct symbol *sym = scope->syms.find(key))
+                    return sym;
+            }
+            return (struct symbol *)nullptr;
+        };
+        std::unordered_set<std::string> seen;
+        auto add_upvalue = [&](const std::string &name) {
+            if (name.empty() || name == "std")
+                return;
+            if (!seen.insert(name).second)
+                return;
+            if (!find_closure_symbol(name))
+                return;
+            copy->upvalues.push_back(name);
+        };
+        for (const skein::bc::Instr &ins : copy->code) {
+            switch ((skein::bc::Op)ins.op) {
+                case skein::bc::Op::LoadName:
+                case skein::bc::Op::StoreName:
+                case skein::bc::Op::CompoundName:
+                case skein::bc::Op::IncDecName:
+                    if (ins.b < copy->consts.size()) {
+                        const skein::bc::Constant &constant =
+                            copy->consts[ins.b];
+                        if (constant.kind == skein::bc::ConstantKind::Name)
+                            add_upvalue(constant.name);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+        for (const skein::bc::IndexDesc &index : copy->index_ops) {
+            if (index.base_kind == skein::bc::IndexBaseKind::Name)
+                add_upvalue(index.base_name);
+        }
+    }
     proto = std::move(copy);
     return true;
 }
 
 bool skein_vm_call_proto(
-    const skein::bc::ProtoPtr &proto, struct value_t *argument,
+    const skein::bc::ProtoPtr &proto,
+    std::vector<struct value_t *> captures, struct value_t *argument,
     struct value_t *&result, std::string &error) {
     (void)error;
     if (!proto) {
+        for (struct value_t *capture : captures)
+            freeval(capture);
+        freeval(argument);
         result = nullptr;
         return false;
     }
@@ -676,16 +740,45 @@ bool skein_vm_call_proto(
     code->is_generator = proto->is_generator;
     code->is_method = proto->is_method;
     code->variadic = proto->variadic;
-    std::shared_ptr<function_def> def = std::make_shared<function_def>();
-    def->code = code;
+    code->upvalues = proto->upvalues;
+    std::vector<std::shared_ptr<upvalue_cell>> cells(proto->upvalues.size());
+    std::shared_ptr<scope_t> closure;
+    for (size_t i = 0; i < captures.size() && i < cells.size(); ++i) {
+        if (!captures[i])
+            continue;
+        if (!closure) {
+            closure = std::make_shared<scope_t>();
+            closure->is_function = false;
+            closure->is_global = false;
+            closure->ret = nullptr;
+            closure->function_scope = nullptr;
+            closure->parent = active_scope_context().global_scope;
+        }
+        struct symbol *sym = newsym(proto->upvalues[i].c_str());
+        sym->val = dupval(captures[i]);
+        type_constraint_set_any(&sym->type);
+        closure->syms.insert(sym);
+        std::shared_ptr<upvalue_cell> cell = std::make_shared<upvalue_cell>();
+        cell->value = captures[i];
+        captures[i] = nullptr;
+        cell->name = proto->upvalues[i];
+        cells[i] = std::move(cell);
+    }
     function_vm_cache &cache = *cache_for(code.get());
     cache.proto = proto;
     cache.compile_failed = false;
     struct func_value_t *function =
-        (struct func_value_t *)newfuncval(code, nullptr);
+        (struct func_value_t *)newfuncval(code, closure, cells);
     result = skein_call_function((struct value_t *)function, {argument});
     freeval((struct value_t *)function);
     skein_vm_forget_function_code(code.get());
+    for (const std::shared_ptr<upvalue_cell> &cell : cells) {
+        if (!cell || !cell->value)
+            continue;
+        if (cell->value != result)
+            freeval(cell->value);
+        cell->value = nullptr;
+    }
     symlistfree(code->sl);
     code->sl = nullptr;
     return true;

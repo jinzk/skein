@@ -3156,6 +3156,62 @@ def check_extended_stdlib():
                 stdout_all=["v=5|", "f=7|", "s=9|", "g=14:12|", "h=14|"],
             )
             check(
+                "std.thread thread func captures upvalues",
+                "import std;\n"
+                "let base = 10;\n"
+                "func make_worker(n) {\n"
+                "    thread func worker(ctx) {\n"
+                '        return {"v": ctx.payload["n"] + n};\n'
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let w = make_worker(10);\n"
+                "let t = std.thread.spawn(w, "
+                'std.thread.Message.from({"n": 4}));\n'
+                "let r = t.join();\n"
+                'print("c=" + str(r["value"]["v"]) + "|");\n'
+                "func make_data() {\n"
+                "    let data = [1, 2, 3];\n"
+                "    thread func worker(ctx) {\n"
+                "        return data;\n"
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let w2 = make_data();\n"
+                "let t2 = std.thread.spawn(w2, "
+                'std.thread.Message.from({"n": 0}));\n'
+                "let r2 = t2.join();\n"
+                'print("d=" + str(r2["value"][1]) + "|");\n'
+                "func make_mut() {\n"
+                '    let state = {"n": 1};\n'
+                "    thread func worker(ctx) {\n"
+                '        state["n"] = state["n"] + 1;\n'
+                '        return {"v": state["n"]};\n'
+                "    }\n"
+                '    return {"run": worker, "state": state};\n'
+                "}\n"
+                "let p = make_mut();\n"
+                "let t3 = std.thread.spawn(p[\"run\"], "
+                'std.thread.Message.from({"n": 0}));\n'
+                "let r3 = t3.join();\n"
+                'print("e=" + str(r3["value"]["v"]) + ":" + '
+                'str(p["state"]["n"]) + "|");\n'
+                "let shadow_fn = func() { return 1; };\n"
+                "func make_shadow(n) {\n"
+                "    let shadow_fn = n + 1;\n"
+                "    thread func worker(ctx) {\n"
+                '        return {"v": shadow_fn + base};\n'
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let w3 = make_shadow(7);\n"
+                "let t4 = std.thread.spawn(w3, "
+                'std.thread.Message.from({"n": 0}));\n'
+                "let r4 = t4.join();\n"
+                'print("f=" + str(r4["value"]["v"]) + "|");\n',
+                stdout_all=["c=14|", "d=2|", "e=2:1|", "f=18|"],
+            )
+            check(
                 "std.thread spawn plain function rejected",
                 "import std;\n"
                 "func plain(ctx) {\n"

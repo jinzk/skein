@@ -30,6 +30,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -2365,6 +2366,7 @@ struct value_t *thread_error_envelope(struct value_t *error) {
 
 void thread_proto_entry_main(
     std::shared_ptr<thread_state> state, skein::bc::ProtoPtr proto,
+    std::vector<struct value_t *> captures,
     std::vector<std::pair<std::string, struct value_t *>> globals,
     struct value_t *argument,
     std::shared_ptr<const thread_env_snapshot> env_snapshot) {
@@ -2379,6 +2381,8 @@ void thread_proto_entry_main(
     }
     state->cv.notify_all();
     if (!proto) {
+        for (struct value_t *capture : captures)
+            freeval(capture);
         for (auto &entry : globals)
             freeval(entry.second);
         freeval(argument);
@@ -2399,7 +2403,8 @@ void thread_proto_entry_main(
     eval_capture_begin(snapshot);
     struct value_t *result = nullptr;
     std::string call_error;
-    skein_vm_call_proto(proto, argument, result, call_error);
+    skein_vm_call_proto(proto, std::move(captures), argument, result,
+                        call_error);
     eval_capture_result captured = eval_capture_end(snapshot);
 
     struct value_t *envelope = nullptr;
@@ -2643,6 +2648,102 @@ struct value_t *thread_spawn_function(
         return nullptr;
     }
 
+    /* Carry only captured upvalues the entry actually reads or writes.
+     * Nested functions conservatively capture every enclosing local, which
+     * would otherwise drag unrelated function values into the child. */
+    std::vector<bool> used_upvalues(proto->upvalues.size(), false);
+    for (const skein::bc::Instr &ins : proto->code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadUpvalue:
+            case skein::bc::Op::StoreUpvalue:
+            case skein::bc::Op::CompoundUpvalue:
+            case skein::bc::Op::IncDecUpvalue:
+                if (ins.b < used_upvalues.size())
+                    used_upvalues[ins.b] = true;
+                break;
+            default:
+                break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto->index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Upvalue &&
+            index.base_index < used_upvalues.size())
+            used_upvalues[index.base_index] = true;
+    }
+    /* AST-compiled bodies may reference captured names through LoadName;
+     * mark those synthesized upvalues as used too. */
+    std::unordered_map<std::string, std::size_t> upvalue_by_name;
+    for (std::size_t i = 0; i < proto->upvalues.size(); ++i)
+        upvalue_by_name.emplace(proto->upvalues[i], i);
+    auto note_name_upvalue = [&](const std::string &name) {
+        auto it = upvalue_by_name.find(name);
+        if (it != upvalue_by_name.end())
+            used_upvalues[it->second] = true;
+    };
+    for (const skein::bc::Instr &ins : proto->code) {
+        switch ((skein::bc::Op)ins.op) {
+            case skein::bc::Op::LoadName:
+            case skein::bc::Op::StoreName:
+            case skein::bc::Op::CompoundName:
+            case skein::bc::Op::IncDecName:
+                if (ins.b < proto->consts.size()) {
+                    const skein::bc::Constant &constant =
+                        proto->consts[ins.b];
+                    if (constant.kind == skein::bc::ConstantKind::Name)
+                        note_name_upvalue(constant.name);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto->index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Name)
+            note_name_upvalue(index.base_name);
+    }
+    const func_value_t *function = (const func_value_t *)args[0];
+    std::vector<struct value_t *> captures(proto->upvalues.size(), nullptr);
+    for (std::size_t index = 0; index < captures.size(); ++index) {
+        if (!used_upvalues[index])
+            continue;
+        struct value_t *captured = nullptr;
+        if (function->def && index < function->def->upvalues.size()) {
+            const std::shared_ptr<upvalue_cell> &cell =
+                function->def->upvalues[index];
+            if (cell)
+                captured = cell->slot ? *cell->slot : cell->value;
+        }
+        if (!captured && function->def && function->def->closure) {
+            /* The AST backend keeps captures in a scope chain instead of
+             * upvalue cells. */
+            std::string_view name(proto->upvalues[index]);
+            for (scope_t *scope = function->def->closure.get();
+                 scope && !scope->is_global; scope = scope->parent.get()) {
+                struct symbol *sym = scope->syms.find(name);
+                if (sym) {
+                    captured = sym->val;
+                    break;
+                }
+            }
+        }
+        if (!captured) {
+            captures[index] = newnull();
+            continue;
+        }
+        std::unordered_set<const void *> visiting;
+        std::string capture_error;
+        struct value_t *copy =
+            copy_data_value(captured, visiting, capture_error);
+        if (!copy) {
+            for (struct value_t *value : captures)
+                freeval(value);
+            yyerror("std.thread.spawn_function: captured %s: %s",
+                    proto->upvalues[index].c_str(), capture_error.c_str());
+            return nullptr;
+        }
+        captures[index] = copy;
+    }
+
     /* Snapshot only globals the entry actually touches.  Name constants are
      * shared with field names, diagnostics and labels, so collect the names
      * from the global opcodes instead of scanning every constant. */
@@ -2685,6 +2786,8 @@ struct value_t *thread_spawn_function(
         struct value_t *value =
             copy_data_value(symbol->val, visiting, capture_error);
         if (!value) {
+            for (struct value_t *capture : captures)
+                freeval(capture);
             for (auto &entry : globals)
                 freeval(entry.second);
             yyerror("std.thread.spawn_function: global %s: %s",
@@ -2699,9 +2802,12 @@ struct value_t *thread_spawn_function(
     struct value_t *argument = dupval(args[1]);
     try {
         state->thread = std::thread(thread_proto_entry_main, state,
-                                    std::move(proto), std::move(globals),
-                                    argument, thread_env_capture());
+                                    std::move(proto), std::move(captures),
+                                    std::move(globals), argument,
+                                    thread_env_capture());
     } catch (const std::exception &) {
+        for (struct value_t *capture : captures)
+            freeval(capture);
         for (auto &entry : globals)
             freeval(entry.second);
         freeval(argument);

@@ -70,16 +70,20 @@ void skein_vm_shutdown();
 
 /*
  * Prepare an immutable Proto for a thread entry function.
- * The function must be a non-capturing, synchronous, one-parameter
- * function whose body can run without the parent's global scope.
+ * The function must be a synchronous, one-parameter function whose body can
+ * run without the parent's global scope.  Captured upvalues are carried by
+ * value and re-bound in the child runtime.
  */
 bool skein_vm_prepare_thread_proto(
     const struct value_t *function, skein::bc::ProtoPtr &proto,
     std::string &error);
 
-/* Execute a prepared thread-entry Proto with one argument. */
+/* Execute a prepared thread-entry Proto with one argument.  `captures` is
+ * parallel to `proto->upvalues`; null entries are unused upvalue slots and
+ * are consumed on success or failure. */
 bool skein_vm_call_proto(
-    const skein::bc::ProtoPtr &proto, struct value_t *argument,
+    const skein::bc::ProtoPtr &proto,
+    std::vector<struct value_t *> captures, struct value_t *argument,
     struct value_t *&result, std::string &error);
 
 #endif

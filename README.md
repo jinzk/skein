@@ -4786,7 +4786,7 @@ thread.id
 entry     默认 "main"
 ```
 
-`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析。Proto/bytecode 入口仍未启用。
+`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析，仍会在子线程重新解析源码。需要复用 Proto/bytecode 时使用 `thread func` 或 `std.thread.spawn_function`。
 
 Proto 入口：
 
@@ -4798,10 +4798,10 @@ thread func worker(ctx) {
 let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
 ```
 
-- `thread func` 是上下文关键字，只允许顶层声明；
-- 入口必须是同步函数、恰好一个参数，且不能捕获闭包/upvalue；
+- `thread func` 是上下文关键字，只能作为声明语句出现，可嵌套在其他函数内；
+- 入口必须是同步函数、恰好一个参数；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
 - 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
-- 函数体目前要求自包含（参数、语言 builtin 和自动注入的基础 `std`）；引用的全局数据值会按 data-only 快照传入子线程；函数值、用户 `import` 模块和闭包仍不支持；
+- 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；函数值、用户 `import` 模块、defer 以及入口内新建闭包仍不支持；
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口。
 
 线程入口接收一个 Message：

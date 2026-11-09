@@ -15,16 +15,33 @@ struct function_code;
 struct function_def;
 
 struct thread_transfer_function;
+struct thread_transfer_heap;
+struct thread_transfer_heap_node;
 
 /* One value captured by a Proto-backed thread entry or a transferred
  * function.  `Data` values are owned data-only snapshots; `Function` values
  * point at another prepared Proto payload. */
 struct thread_transfer_value {
-    enum class Kind { Null, Data, Namespace, Function };
+    enum class Kind { Null, Data, Namespace, Function, Heap };
     Kind kind = Kind::Null;
     std::shared_ptr<struct value_t> data;
     std::vector<std::pair<std::string, thread_transfer_value>> fields;
     std::shared_ptr<struct thread_transfer_function> function;
+    std::shared_ptr<struct thread_transfer_heap> heap;
+};
+
+struct thread_transfer_heap_node {
+    thread_transfer_value value;
+    uint32_t rank = 0;
+    uint32_t left = UINT32_MAX;
+    uint32_t right = UINT32_MAX;
+};
+
+struct thread_transfer_heap {
+    thread_transfer_value less;
+    std::vector<thread_transfer_heap_node> nodes;
+    uint32_t root = UINT32_MAX;
+    uint64_t size = 0;
 };
 
 /* A function prepared in the parent thread and reconstructed in the child. */

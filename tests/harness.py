@@ -3436,26 +3436,33 @@ def check_extended_stdlib():
                 'l = r0["lru"];\n'
                 'r0 = std.lru.put(l, "b", 8);\n'
                 'l = r0["lru"];\n'
-                "func make_worker(sv, dv, lv) {\n"
+                "let h = std.heap.from_list([3, 1, 2], "
+                "func(a, b) { return a < b; });\n"
+                "func make_worker(sv, dv, lv, hv) {\n"
                 "    thread func worker(ctx) {\n"
                 '        let n = ctx.payload["n"];\n'
                 "        let m = match n { case 1 => 10; "
                 "default => 20; };\n"
                 '        let got = std.lru.get(lv, "a");\n'
+                '        let popped = std.heap.pop(hv);\n'
                 '        return {"s": std.set.values(sv), '
                 '"d": std.deque.to_list(dv), '
-                '"l": got["value"], "m": m};\n'
+                '"l": got["value"], "m": m, '
+                '"h": popped["value"], '
+                '"hs": std.heap.size(popped["heap"])};\n'
                 "    }\n"
                 "    return worker;\n"
                 "}\n"
-                "let blob = std.thread.encode(make_worker(s, d, l));\n"
+                "let blob = std.thread.encode(make_worker(s, d, l, h));\n"
                 "let t = std.thread.spawn_encoded(blob, "
                 'std.thread.Message.from({"n": 1}));\n'
                 "let r = t.join();\n"
                 'print("s=" + str(r["value"]["s"]) + "|d=" + '
                 'str(r["value"]["d"]) + "|l=" + str(r["value"]["l"]) + '
-                '"|m=" + str(r["value"]["m"]) + "|");\n',
-                stdout_all=["s=[1, 2, 3]|d=[4, 5]|l=7|m=10|"],
+                '"|m=" + str(r["value"]["m"]) + "|h=" + '
+                'str(r["value"]["h"]) + ":" + '
+                'str(r["value"]["hs"]) + "|");\n',
+                stdout_all=["s=[1, 2, 3]|d=[4, 5]|l=7|m=10|h=1:2|"],
             )
             check(
                 "std.thread transfer rejects defaults",

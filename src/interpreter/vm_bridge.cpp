@@ -895,6 +895,67 @@ bool materialize_thread_value(
             out = (struct value_t *)dict;
             return true;
         }
+        case thread_transfer_value::Kind::Heap: {
+            if (!value.heap) {
+                error = "invalid transferred heap";
+                return false;
+            }
+            struct value_t *less = nullptr;
+            if (!materialize_thread_value(context, value.heap->less, less,
+                                          error))
+                return false;
+            struct heap_less_deleter {
+                void operator()(struct value_t *item) const {
+                    freeval(item);
+                }
+            };
+            std::unique_ptr<struct value_t, heap_less_deleter> less_owner(
+                less);
+            std::vector<std::shared_ptr<heap_node>> nodes;            nodes.reserve(value.heap->nodes.size());
+            for (const thread_transfer_heap_node &record :
+                 value.heap->nodes) {
+                std::shared_ptr<heap_node> node = std::make_shared<heap_node>();
+                node->rank = (int)record.rank;
+                if (!materialize_thread_value(context, record.value,
+                                              node->value, error))
+                    return false;
+                nodes.push_back(std::move(node));
+            }
+            if (nodes.empty()) {
+                if (value.heap->root != UINT32_MAX) {
+                    error = "transferred heap root is out of range";
+                    return false;
+                }
+            } else if (value.heap->root >= nodes.size()) {
+                error = "transferred heap root is out of range";
+                return false;
+            }
+            for (std::size_t i = 0; i < nodes.size(); ++i) {
+                const thread_transfer_heap_node &record =
+                    value.heap->nodes[i];
+                if (record.left != UINT32_MAX) {
+                    if (record.left >= nodes.size()) {
+                        error = "transferred heap child is out of range";
+                        return false;
+                    }
+                    nodes[i]->left = nodes[record.left];
+                }
+                if (record.right != UINT32_MAX) {
+                    if (record.right >= nodes.size()) {
+                        error = "transferred heap child is out of range";
+                        return false;
+                    }
+                    nodes[i]->right = nodes[record.right];
+                }
+            }
+            struct heap_value_t *heap =
+                newheapval(less_owner.release());
+            if (!nodes.empty())
+                heap->payload->root = nodes[value.heap->root];
+            heap->payload->size = (std::size_t)value.heap->size;
+            out = (struct value_t *)heap;
+            return true;
+        }
         case thread_transfer_value::Kind::Function:
             if (!value.function) {
                 error = "invalid transferred function value";

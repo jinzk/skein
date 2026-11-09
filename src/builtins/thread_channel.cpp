@@ -2471,8 +2471,16 @@ struct thread_payload_builder {
             if (dict->payload && dict->payload->is_namespace)
                 return transfer_namespace(value, out);
         }
+        if (value->type == T_heap)
+            return transfer_heap(value, out);
         if (value->type == T_func)
             return transfer_function(value, out);
+        if (value->type == T_builtin) {
+            out.kind = thread_transfer_value::Kind::Data;
+            out.data = std::shared_ptr<struct value_t>(
+                dupval(value), thread_value_deleter());
+            return true;
+        }
         std::unordered_set<const void *> visiting;
         std::string copy_error;
         struct value_t *copy =
@@ -2514,7 +2522,63 @@ struct thread_payload_builder {
         return ok;
     }
 
-    bool transfer_function(struct value_t *value, thread_transfer_value &out) {
+    bool transfer_heap(struct value_t *value,
+                       thread_transfer_value &out) {
+        const struct heap_value_t *heap =
+            (const struct heap_value_t *)value;
+        if (!heap->payload) {
+            error = "invalid heap value";
+            return false;
+        }
+        std::shared_ptr<thread_transfer_heap> payload =
+            std::make_shared<thread_transfer_heap>();
+        if (!transfer_value(heap->payload->less, "heap comparator",
+                            payload->less))
+            return false;
+        payload->size = heap->payload->size;
+
+        std::unordered_map<const void *, uint32_t> ids;
+        std::vector<const struct heap_node *> order;
+        auto collect = [&](auto &&self,
+                           const std::shared_ptr<heap_node> &node) -> bool {
+            if (!node || ids.count(node.get()))
+                return true;
+            ids.emplace(node.get(), (uint32_t)order.size());
+            order.push_back(node.get());
+            return self(self, node->left) && self(self, node->right);
+        };
+        if (!collect(collect, heap->payload->root))
+            return false;
+        payload->nodes.reserve(order.size());
+        for (const struct heap_node *node : order) {
+            thread_transfer_heap_node record;
+            record.rank = (uint32_t)node->rank;
+            if (!transfer_value(node->value, "heap value", record.value))
+                return false;
+            auto left = ids.find(node->left.get());
+            if (left != ids.end())
+                record.left = left->second;
+            auto right = ids.find(node->right.get());
+            if (right != ids.end())
+                record.right = right->second;
+            payload->nodes.push_back(std::move(record));
+        }
+        if (heap->payload->root) {
+            auto root = ids.find(heap->payload->root.get());
+            if (root == ids.end()) {
+                error = "invalid heap root";
+                return false;
+            }
+            payload->root = root->second;
+        }
+        out = thread_transfer_value();
+        out.kind = thread_transfer_value::Kind::Heap;
+        out.heap = std::move(payload);
+        return true;
+    }
+
+    bool transfer_function(struct value_t *value,
+                           thread_transfer_value &out) {
         const func_value_t *function = (const func_value_t *)value;
         if (!function->def || !function->def->code) {
             error = "function value has no function code";

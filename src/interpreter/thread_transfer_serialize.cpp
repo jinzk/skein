@@ -868,6 +868,12 @@ void collect_transfer_types(const thread_transfer_value &value,
     } else if (value.kind == thread_transfer_value::Kind::Namespace) {
         for (const auto &field : value.fields)
             collect_transfer_types(field.second, types, order, depth + 1);
+    } else if (value.kind == thread_transfer_value::Kind::Heap) {
+        if (value.heap) {
+            collect_transfer_types(value.heap->less, types, order, depth + 1);
+            for (const thread_transfer_heap_node &node : value.heap->nodes)
+                collect_transfer_types(node.value, types, order, depth + 1);
+        }
     }
 }
 
@@ -1227,6 +1233,27 @@ bool write_transfer(
             out.u32(it->second);
             return true;
         }
+        case thread_transfer_value::Kind::Heap: {
+            if (!value.heap) {
+                error = "invalid thread payload heap";
+                return false;
+            }
+            out.u8(4);
+            if (!write_transfer(out, value.heap->less, ids, depth + 1, error))
+                return false;
+            out.u32(value.heap->root);
+            out.u64(value.heap->size);
+            out.u32((uint32_t)value.heap->nodes.size());
+            for (const thread_transfer_heap_node &node :
+                 value.heap->nodes) {
+                if (!write_transfer(out, node.value, ids, depth + 1, error))
+                    return false;
+                out.u32(node.rank);
+                out.u32(node.left);
+                out.u32(node.right);
+            }
+            return true;
+        }
     }
     error = "invalid thread payload transfer kind";
     return false;
@@ -1293,6 +1320,76 @@ bool read_transfer(
             value = thread_transfer_value();
             value.kind = thread_transfer_value::Kind::Function;
             value.function = functions[index];
+            return true;
+        }
+        case 4: {
+            std::shared_ptr<thread_transfer_heap> heap =
+                std::make_shared<thread_transfer_heap>();
+            if (!read_transfer(in, functions, heap->less, depth + 1, error))
+                return false;
+            uint32_t node_count = 0;
+            if (!in.u32(heap->root) || !in.u64(heap->size) ||
+                !in.count(node_count)) {
+                error = in.error;
+                return false;
+            }
+            heap->nodes.resize(node_count);
+            for (uint32_t i = 0; i < node_count; ++i) {
+                thread_transfer_heap_node &node = heap->nodes[i];
+                if (!read_transfer(in, functions, node.value, depth + 1,
+                                   error) ||
+                    !in.u32(node.rank) || !in.u32(node.left) ||
+                    !in.u32(node.right)) {
+                    if (error.empty())
+                        error = in.error;
+                    return false;
+                }
+                if ((node.left != UINT32_MAX && node.left >= node_count) ||
+                    (node.right != UINT32_MAX && node.right >= node_count)) {
+                    error = "thread payload heap child index is out of range";
+                    return false;
+                }
+            }
+            if (node_count == 0) {
+                if (heap->root != UINT32_MAX) {
+                    error = "thread payload heap root is out of range";
+                    return false;
+                }
+            } else if (heap->root >= node_count) {
+                error = "thread payload heap root is out of range";
+                return false;
+            }
+            if (node_count > 0) {
+                std::vector<uint8_t> state(node_count, 0);
+                std::vector<std::pair<uint32_t, bool>> stack;
+                stack.emplace_back(heap->root, false);
+                while (!stack.empty()) {
+                    uint32_t index = stack.back().first;
+                    bool exiting = stack.back().second;
+                    stack.pop_back();
+                    if (exiting) {
+                        state[index] = 2;
+                        continue;
+                    }
+                    if (state[index] == 1) {
+                        error = "thread payload heap contains a cycle";
+                        return false;
+                    }
+                    if (state[index] == 2)
+                        continue;
+                    state[index] = 1;
+                    stack.emplace_back(index, true);
+                    const thread_transfer_heap_node &node =
+                        heap->nodes[index];
+                    if (node.left != UINT32_MAX)
+                        stack.emplace_back(node.left, false);
+                    if (node.right != UINT32_MAX)
+                        stack.emplace_back(node.right, false);
+                }
+            }
+            value = thread_transfer_value();
+            value.kind = thread_transfer_value::Kind::Heap;
+            value.heap = std::move(heap);
             return true;
         }
         default:
@@ -1919,6 +2016,20 @@ void collect_transfer(
     } else if (value.kind == thread_transfer_value::Kind::Namespace) {
         for (const auto &field : value.fields) {
             collect_transfer(field.second, ids, order, depth + 1, ok, error);
+            if (!ok)
+                return;
+        }
+    } else if (value.kind == thread_transfer_value::Kind::Heap) {
+        if (!value.heap) {
+            error = "invalid thread payload heap";
+            ok = false;
+            return;
+        }
+        collect_transfer(value.heap->less, ids, order, depth + 1, ok, error);
+        if (!ok)
+            return;
+        for (const thread_transfer_heap_node &node : value.heap->nodes) {
+            collect_transfer(node.value, ids, order, depth + 1, ok, error);
             if (!ok)
                 return;
         }

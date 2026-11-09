@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "platform.h"
+#include "runtime_state.h"
 #include "valuetype.h"
 
 #include <string>
@@ -23,7 +24,7 @@ struct value_t *call_env_builtin(
                 return NULL;
             }
             std::string value;
-            if (platform_get_env(
+            if (thread_env_get(
                     ((struct string_value_t *)args[0])->value, value))
                 return newstrval(value.c_str());
             if (args.size() == 2)
@@ -36,7 +37,7 @@ struct value_t *call_env_builtin(
                 return NULL;
             }
             std::string value;
-            return newboolval(platform_get_env(
+            return newboolval(thread_env_get(
                 ((struct string_value_t *)args[0])->value, value));
         }
         case B_env_set: {
@@ -45,12 +46,16 @@ struct value_t *call_env_builtin(
                 yyerror("std.env.set expects 2 string arguments");
                 return NULL;
             }
-            if (!platform_set_env(
-                    ((struct string_value_t *)args[0])->value,
-                    ((struct string_value_t *)args[1])->value)) {
+            const std::string &name =
+                ((struct string_value_t *)args[0])->value;
+            const std::string &value =
+                ((struct string_value_t *)args[1])->value;
+            if (!thread_env_valid_name(name) ||
+                value.find('\0') != std::string::npos) {
                 yyerror("std.env.set: invalid name or value");
                 return NULL;
             }
+            thread_env_set(name, value);
             return newnull();
         }
         case B_env_unset: {
@@ -58,11 +63,13 @@ struct value_t *call_env_builtin(
                 yyerror("std.env.unset expects 1 string argument");
                 return NULL;
             }
-            if (!platform_unset_env(
-                    ((struct string_value_t *)args[0])->value)) {
+            const std::string &name =
+                ((struct string_value_t *)args[0])->value;
+            if (!thread_env_valid_name(name)) {
                 yyerror("std.env.unset: invalid name");
                 return NULL;
             }
+            thread_env_unset(name);
             return newnull();
         }
         case B_env_all: {
@@ -72,10 +79,7 @@ struct value_t *call_env_builtin(
                 return NULL;
             }
             std::vector<std::pair<std::string, std::string>> entries;
-            if (!platform_environ(entries)) {
-                yyerror("std.env.all: cannot read environment");
-                return NULL;
-            }
+            thread_env_all(entries);
             struct dict_value_t *result = newdictval();
             for (const auto &entry : entries) {
                 result->payload->items.push_back(std::make_pair(

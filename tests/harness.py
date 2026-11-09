@@ -452,6 +452,93 @@ def check_extended_stdlib():
         stdout_all=["= abc", "= true", "= changed", "= false",
                     "= fallback"],
     )
+    with tempfile.TemporaryDirectory() as env_tmp:
+        env_worker = os.path.join(env_tmp, "env_worker.skein")
+        with open(env_worker, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "func main(ctx) {\n"
+                "    let before = std.env.get(\"SKEIN_THREAD_ENV\");\n"
+                "    std.env.set(\"SKEIN_THREAD_ENV\", \"child\");\n"
+                "    return {\"before\": before == null ? \"null\" : "
+                "before, \"after\": "
+                "std.env.get(\"SKEIN_THREAD_ENV\")};\n"
+                "}\n"
+            )
+        check(
+            "std env thread isolation",
+            "import std;\n"
+            'std.env.set("SKEIN_THREAD_ENV", "parent");\n'
+            'let msg = std.thread.Message.from({"x": 1});\n'
+            f'let t = std.thread.spawn({skein_string(env_worker)}, msg);\n'
+            'let r = t.join();\n'
+            'print("child_before=" + r["value"]["before"]);\n'
+            'print("|child_after=" + r["value"]["after"]);\n'
+            'print("|parent=" + std.env.get("SKEIN_THREAD_ENV"));\n',
+            stdout_all=["child_before=parent", "child_after=child",
+                        "parent=parent"],
+        )
+
+        cwd_parent = os.path.join(env_tmp, "cwd_parent")
+        cwd_child = os.path.join(env_tmp, "cwd_child")
+        os.makedirs(cwd_parent)
+        os.makedirs(cwd_child)
+        with open(os.path.join(cwd_child, "marker.txt"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("child-data")
+        cwd_worker = os.path.join(env_tmp, "cwd_worker.skein")
+        with open(cwd_worker, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "func main(ctx) {\n"
+                "    std.fs.chdir(ctx.payload[\"dir\"]);\n"
+                "    return {\"cwd\": std.fs.cwd(), "
+                "\"exists\": std.fs.exists(\"marker.txt\"), "
+                "\"text\": std.fs.read_text(\"marker.txt\", "
+                "\"utf-8\")};\n"
+                "}\n"
+            )
+        check(
+            "std fs chdir thread isolation",
+            "import std;\n"
+            f"std.fs.chdir({skein_string(cwd_parent)});\n"
+            "let before = std.fs.cwd();\n"
+            f'let msg = std.thread.Message.from({{"dir": '
+            f"{skein_string(cwd_child)}}});\n"
+            f'let t = std.thread.spawn({skein_string(cwd_worker)}, msg);\n'
+            'let r = t.join();\n'
+            'print("child_text=" + r["value"]["text"]);\n'
+            'print("|child_exists=" + str(r["value"]["exists"]));\n'
+            'print("|parent_same=" + str(std.fs.cwd() == before));\n',
+            stdout_all=["child_text=child-data", "child_exists=1",
+                        "parent_same=true"],
+        )
+
+        spawn_child = os.path.join(env_tmp, "spawn_child.skein")
+        with open(spawn_child, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "println(\"env=\" + (std.env.get(\"SKEIN_SPAWN_ENV\") "
+                "== null ? \"null\" : "
+                "std.env.get(\"SKEIN_SPAWN_ENV\")));\n"
+                "println(\"cwd_ok=\" + str(std.fs.cwd() == "
+                "std.env.get(\"SKEIN_SPAWN_CWD\")));\n"
+            )
+        check(
+            "std process spawn thread env and cwd",
+            "import std;\n"
+            'std.env.set("SKEIN_SPAWN_ENV", "from-thread");\n'
+            f"std.env.set(\"SKEIN_SPAWN_CWD\", "
+            f"{skein_string(cwd_child)});\n"
+            f"std.fs.chdir({skein_string(cwd_child)});\n"
+            f'let p = std.process.spawn('
+            f"{skein_string(os.path.abspath(BIN))}, "
+            f'{{"args": [{skein_string(spawn_child)}]}});\n'
+            'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
+            'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
+            "std.process.wait(p);\n",
+            stdout_all=["env=from-thread", "cwd_ok=true"],
+        )
 
     check(
         "std crypto sha256",

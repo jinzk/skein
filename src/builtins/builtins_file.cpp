@@ -1,4 +1,5 @@
 #include "builtins_internal.h"
+#include "runtime_state.h"
 
 static bool collect_command_env(
     const std::vector<struct value_t *> &args, size_t index,
@@ -34,6 +35,61 @@ static bool collect_command_env(
                          ((struct string_value_t *)val)->value);
     }
     return true;
+}
+
+static std::string quote_shell(const std::string &text) {
+#ifdef _WIN32
+    std::string out = "\"";
+    for (char c : text) {
+        if (c == '"')
+            out += "\\\"";
+        else
+            out.push_back(c);
+    }
+    out += "\"";
+    return out;
+#else
+    std::string out = "'";
+    for (char c : text) {
+        if (c == '\'')
+            out += "'\\''";
+        else
+            out.push_back(c);
+    }
+    out += "'";
+    return out;
+#endif
+}
+
+static std::string command_in_thread_cwd(const std::string &command) {
+    if (thread_cwd_override().empty())
+        return command;
+    const std::string cwd = thread_cwd();
+    if (cwd.empty())
+        return command;
+#ifdef _WIN32
+    return "cd /d " + quote_shell(cwd) + " && " + command;
+#else
+    return "cd " + quote_shell(cwd) + " && " + command;
+#endif
+}
+
+static void merge_thread_env(
+    std::vector<std::pair<std::string, std::string>> &env) {
+    std::vector<std::pair<std::string, std::string>> overrides;
+    thread_env_overrides(overrides);
+    for (const auto &override : overrides) {
+        bool replaced = false;
+        for (auto &entry : env) {
+            if (entry.first == override.first) {
+                entry.second = override.second;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced)
+            env.push_back(override);
+    }
 }
 
 bool get_file_resource(struct value_t *value,
@@ -110,11 +166,13 @@ struct value_t *call_file_builtin(
                 std::vector<std::pair<std::string, std::string>> env;
                 if (!collect_command_env(args, 1, "command", env))
                     break;
+                merge_thread_env(env);
                 std::string output;
                 int status = 0;
                 if (!platform_run_command(
-                        ((struct string_value_t *)arg)->value, env, output,
-                        status))
+                        command_in_thread_cwd(
+                            ((struct string_value_t *)arg)->value),
+                        env, output, status))
                     yyerror("command failed to start");
                 else
                     ret = newstrval(output.c_str());
@@ -129,9 +187,12 @@ struct value_t *call_file_builtin(
                 std::vector<std::pair<std::string, std::string>> env;
                 if (!collect_command_env(args, 1, "command_status", env))
                     break;
+                merge_thread_env(env);
                 int status = 0;
                 if (!platform_run_command_status(
-                        ((struct string_value_t *)arg)->value, env, status))
+                        command_in_thread_cwd(
+                            ((struct string_value_t *)arg)->value),
+                        env, status))
                     yyerror("command_status failed to start");
                 else
                     ret = newintval(status);
@@ -156,8 +217,9 @@ struct value_t *call_file_builtin(
             }
             std::string data;
             std::string error;
-            if (!platform_read_file(
-                    ((struct string_value_t *)args[0])->value, data, error)) {
+            const std::string path = thread_resolve_path(
+                ((struct string_value_t *)args[0])->value);
+            if (!platform_read_file(path, data, error)) {
                 yyerror("std.fs.read_text: %s", error.c_str());
                 break;
             }
@@ -199,8 +261,9 @@ struct value_t *call_file_builtin(
                 break;
             }
             if (!platform_write_file(
-                    ((struct string_value_t *)args[0])->value, data, false,
-                    error)) {
+                    thread_resolve_path(
+                        ((struct string_value_t *)args[0])->value),
+                    data, false, error)) {
                 yyerror("std.fs.write_text: %s", error.c_str());
                 break;
             }
@@ -215,7 +278,9 @@ struct value_t *call_file_builtin(
                 std::string data;
                 std::string error;
                 if (!platform_read_file(
-                        ((struct string_value_t *)arg)->value, data, error))
+                        thread_resolve_path(
+                            ((struct string_value_t *)arg)->value),
+                        data, error))
                     yyerror("read_file: %s", error.c_str());
                 else if (data.find('\0') != std::string::npos)
                     yyerror("read_file: file contains NUL byte");
@@ -234,7 +299,8 @@ struct value_t *call_file_builtin(
             } else {
                 std::string error;
                 if (!platform_write_file(
-                        ((struct string_value_t *)args[0])->value,
+                        thread_resolve_path(
+                            ((struct string_value_t *)args[0])->value),
                         ((struct string_value_t *)args[1])->value,
                         functype == B_append_file, error))
                     yyerror("%s: %s", name, error.c_str());
@@ -249,7 +315,9 @@ struct value_t *call_file_builtin(
                         typename_of(arg));
             } else {
                 ret = newintval(platform_file_exists(
-                                    ((struct string_value_t *)arg)->value)
+                                    thread_resolve_path(
+                                        ((struct string_value_t *)arg)
+                                            ->value))
                                     ? 1
                                     : 0);
             }
@@ -268,7 +336,8 @@ struct value_t *call_file_builtin(
                 break;
             }
             std::string error;
-            const char *path = ((struct string_value_t *)args[0])->value;
+            std::string path = thread_resolve_path(
+                ((struct string_value_t *)args[0])->value);
             platform_file_ptr file = platform_file_open(path, mode, error);
             if (!file)
                 yyerror("file_open: %s", error.c_str());

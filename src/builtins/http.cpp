@@ -15,6 +15,7 @@
 #include "platform.h"
 #include "process_spawn.h"
 #include "repl.h"
+#include "runtime_state.h"
 #include "symbol.h"
 #include "task.h"
 #include "thread_channel.h"
@@ -4658,7 +4659,9 @@ value_t *make_reuse_handler(
 
 void reuse_port_worker_main(
     std::shared_ptr<reuse_port_server_state> server,
-    std::size_t worker_index) {
+    std::size_t worker_index,
+    std::shared_ptr<const thread_env_snapshot> env_snapshot) {
+    thread_env_install(env_snapshot);
     server->alive.fetch_add(1);
     std::string error;
     thread_worker_begin(server->worker_vm, error);
@@ -4825,7 +4828,8 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
 
     try {
         for (std::size_t i = 0; i < workers; ++i)
-            server->threads.emplace_back(reuse_port_worker_main, server, i);
+            server->threads.emplace_back(reuse_port_worker_main, server, i,
+                                         thread_env_capture());
     } catch (const std::exception &) {
         error = "could not start reuse_port workers";
         server->stop_server();

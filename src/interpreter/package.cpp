@@ -12,6 +12,7 @@
 #include "parser_lock.h"
 #include "platform.h"
 #include "repl.h"
+#include "runtime_state.h"
 #include "scopestack.h"
 #include "source_encoding.h"
 #include "stdio_stream.h"
@@ -882,10 +883,8 @@ void package_configure(const std::string &source_path,
     }
 
     if (search_roots.empty()) {
-        std::error_code cwd_error;
-        fs::path cwd = fs::current_path(cwd_error);
-        main_directory =
-            normalize_dir(cwd_error ? "." : path_to_utf8(cwd));
+        const std::string cwd = thread_cwd();
+        main_directory = normalize_dir(cwd.empty() ? "." : cwd);
         search_roots.push_back(main_directory);
     }
 
@@ -898,7 +897,7 @@ void package_configure(const std::string &source_path,
     }
 
     std::string env;
-    if (platform_get_env("SKEIN_PACKAGE_PATH", env) && !env.empty()) {
+    if (thread_env_get("SKEIN_PACKAGE_PATH", env) && !env.empty()) {
 #ifdef _WIN32
         const char separator = ';';
 #else

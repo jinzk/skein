@@ -1,6 +1,7 @@
 #include "fs_extra.h"
 
 #include "ast.h"
+#include "runtime_state.h"
 #include "valuetype.h"
 
 #include <algorithm>
@@ -34,6 +35,10 @@ std::string path_text(const fs::path &path) {
 
 fs::path text_path(const std::string &text) {
     return fs::u8path(text);
+}
+
+fs::path resolved_path(const std::string &text) {
+    return text_path(thread_resolve_path(text));
 }
 
 std::string path_error(const std::error_code &error) {
@@ -70,7 +75,7 @@ struct value_t *call_fs_extra_builtin(
             if (!require_string("std.fs.listdir", args[0], "a path"))
                 return NULL;
             const fs::path directory =
-                text_path(((struct string_value_t *)args[0])->value);
+                resolved_path(((struct string_value_t *)args[0])->value);
             std::error_code error;
             if (!fs::is_directory(directory, error)) {
                 yyerror("std.fs.listdir: %s",
@@ -112,7 +117,7 @@ struct value_t *call_fs_extra_builtin(
                 return NULL;
             }
             const fs::path path =
-                text_path(((struct string_value_t *)args[0])->value);
+                resolved_path(((struct string_value_t *)args[0])->value);
             std::error_code error;
             bool created = recursive
                                ? fs::create_directories(path, error)
@@ -140,7 +145,7 @@ struct value_t *call_fs_extra_builtin(
             if (!require_string("std.fs.remove", args[0], "a path"))
                 return NULL;
             const fs::path path =
-                text_path(((struct string_value_t *)args[0])->value);
+                resolved_path(((struct string_value_t *)args[0])->value);
             std::error_code error;
             const bool removed = fs::remove(path, error);
             if (error || !removed) {
@@ -161,9 +166,9 @@ struct value_t *call_fs_extra_builtin(
                 !require_string("std.fs.rename", args[1], "a target path"))
                 return NULL;
             const fs::path source =
-                text_path(((struct string_value_t *)args[0])->value);
+                resolved_path(((struct string_value_t *)args[0])->value);
             const fs::path target =
-                text_path(((struct string_value_t *)args[1])->value);
+                resolved_path(((struct string_value_t *)args[1])->value);
             std::error_code error;
             fs::rename(source, target, error);
             if (error) {
@@ -181,7 +186,7 @@ struct value_t *call_fs_extra_builtin(
             if (!require_string("std.fs.stat", args[0], "a path"))
                 return NULL;
             const fs::path path =
-                text_path(((struct string_value_t *)args[0])->value);
+                resolved_path(((struct string_value_t *)args[0])->value);
             std::error_code error;
             const fs::file_status status = fs::status(path, error);
             if (error || !fs::exists(status)) {
@@ -231,13 +236,12 @@ struct value_t *call_fs_extra_builtin(
                         (int)args.size());
                 return NULL;
             }
-            std::error_code error;
-            const fs::path path = fs::current_path(error);
-            if (error) {
-                yyerror("std.fs.cwd: %s", path_error(error).c_str());
+            const std::string cwd = thread_cwd();
+            if (cwd.empty()) {
+                yyerror("std.fs.cwd: cannot read working directory");
                 return NULL;
             }
-            return newstrval(path_text(path).c_str());
+            return newstrval(cwd.c_str());
         }
         case B_fs_chdir: {
             if (args.size() != 1) {
@@ -247,12 +251,11 @@ struct value_t *call_fs_extra_builtin(
             }
             if (!require_string("std.fs.chdir", args[0], "a path"))
                 return NULL;
-            std::error_code error;
-            fs::current_path(
-                text_path(((struct string_value_t *)args[0])->value),
-                error);
-            if (error) {
-                yyerror("std.fs.chdir: %s", path_error(error).c_str());
+            std::string chdir_error;
+            if (!thread_chdir(
+                    ((struct string_value_t *)args[0])->value,
+                    chdir_error)) {
+                yyerror("std.fs.chdir: %s", chdir_error.c_str());
                 return NULL;
             }
             return newnull();
@@ -296,7 +299,10 @@ struct value_t *call_fs_extra_builtin(
                 result = path.extension();
             } else if (functype == B_fs_path_abs) {
                 std::error_code error;
-                result = fs::absolute(path, error);
+                result = fs::absolute(
+                    resolved_path(
+                        ((struct string_value_t *)args[0])->value),
+                    error);
                 if (error) {
                     yyerror("std.fs.path_abs: %s",
                             path_error(error).c_str());

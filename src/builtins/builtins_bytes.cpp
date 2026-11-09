@@ -1,4 +1,5 @@
 #include "builtins_internal.h"
+#include "runtime_state.h"
 
 static bool is_valid_utf8(const std::string &data) {
     size_t pos = 0;
@@ -364,7 +365,9 @@ struct value_t *call_bytes_builtin(
             std::string data;
             std::string error;
             if (!platform_read_file(
-                    ((struct string_value_t *)arg)->value, data, error))
+                    thread_resolve_path(
+                        ((struct string_value_t *)arg)->value),
+                    data, error))
                 yyerror("read_bytes: %s", error.c_str());
             else
                 ret = newbytesval(std::move(data));
@@ -381,7 +384,8 @@ struct value_t *call_bytes_builtin(
             }
             std::string error;
             if (!platform_write_file(
-                    ((struct string_value_t *)args[0])->value,
+                    thread_resolve_path(
+                        ((struct string_value_t *)args[0])->value),
                     ((struct bytes_value_t *)args[1])->value,
                     functype == B_append_bytes, error))
                 yyerror("%s: %s", name, error.c_str());

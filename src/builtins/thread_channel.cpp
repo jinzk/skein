@@ -1547,7 +1547,10 @@ void send_worker_crash(const std::shared_ptr<channel_state> &reply,
 
 void spawn_worker_thread(pool_state *pool, size_t slot_index);
 
-void worker_thread_main(pool_state *pool, size_t slot_index) {
+void worker_thread_main(
+    pool_state *pool, size_t slot_index,
+    std::shared_ptr<const thread_env_snapshot> env_snapshot) {
+    thread_env_install(env_snapshot);
     std::string error;
     thread_worker_begin(pool->worker_vm, error);
 
@@ -1739,7 +1742,8 @@ void worker_thread_main(pool_state *pool, size_t slot_index) {
 }
 
 void spawn_worker_thread(pool_state *pool, size_t slot_index) {
-    std::thread thread(worker_thread_main, pool, slot_index);
+    std::thread thread(worker_thread_main, pool, slot_index,
+                       thread_env_capture());
     std::lock_guard<std::mutex> lock(pool->threads_mutex);
     pool->threads.push_back(std::move(thread));
 }
@@ -2338,9 +2342,11 @@ struct value_t *thread_error_envelope(struct value_t *error) {
     return envelope;
 }
 
-void thread_entry_main(std::shared_ptr<thread_state> state,
-                       const std::string &script, const std::string &entry,
-                       struct value_t *argument) {
+void thread_entry_main(
+    std::shared_ptr<thread_state> state, const std::string &script,
+    const std::string &entry, struct value_t *argument,
+    std::shared_ptr<const thread_env_snapshot> env_snapshot) {
+    thread_env_install(env_snapshot);
     thread_runtime_enter();
     struct skein_context hooks = {
         pool_worker_call,
@@ -2476,7 +2482,8 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     try {
         state->thread = std::thread(thread_entry_main, state,
                                     ((string_value_t *)args[0])->value,
-                                    entry, argument);
+                                    entry, argument,
+                                    thread_env_capture());
     } catch (const std::exception &) {
         freeval(argument);
         yyerror("std.thread.spawn could not start thread");

@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "async_support.h"
 #include "event_loop.h"
+#include "runtime_state.h"
 #include "task.h"
 #include "valuetype.h"
 
@@ -691,6 +692,7 @@ value_t *call_process_spawn_builtin(
         }
         std::vector<std::string> arguments;
         std::vector<std::string> environment;
+        std::vector<std::pair<std::string, std::string>> env_overrides;
         std::string cwd;
         bool inherit_stderr = false;
         if (args.size() == 2) {
@@ -731,10 +733,8 @@ value_t *call_process_spawn_builtin(
                                     name);
                             return NULL;
                         }
-                        environment.push_back(
-                            std::string(
-                                ((string_value_t *)env_entry.first)->value) +
-                            "=" +
+                        env_overrides.emplace_back(
+                            ((string_value_t *)env_entry.first)->value,
                             ((string_value_t *)env_entry.second)->value);
                     }
                 } else if (key == "cwd") {
@@ -761,6 +761,29 @@ value_t *call_process_spawn_builtin(
                 }
             }
         }
+        {
+            std::vector<std::pair<std::string, std::string>> merged;
+            thread_env_all(merged);
+            for (const auto &override : env_overrides) {
+                bool replaced = false;
+                for (auto &entry : merged) {
+                    if (entry.first == override.first) {
+                        entry.second = override.second;
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced)
+                    merged.push_back(override);
+            }
+            environment.reserve(merged.size());
+            for (const auto &entry : merged)
+                environment.push_back(entry.first + "=" + entry.second);
+        }
+        if (cwd.empty())
+            cwd = thread_cwd();
+        else
+            cwd = thread_resolve_path(cwd);
         if (!event_loop_init()) {
             yyerror("%s: cannot initialize event loop", name);
             return NULL;

@@ -5303,6 +5303,8 @@ std.env.all()                     → dict
 std.process.run(command[, options]) → dict
 ```
 
+`std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn` / `std.process.run` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
+
 `std.process.run` 的 `options` 支持：
 
 ```text
@@ -5348,6 +5350,9 @@ std.fs.path_dirname(path)
 std.fs.path_extname(path)
 std.fs.path_abs(path)
 std.fs.path_normalize(path)
+```
+
+`std.fs.cwd` / `std.fs.chdir` 是线程局部工作目录：相对路径的 `std.fs` 操作、`std.fs.open` / 文件读写、`std.process.spawn` / `std.process.run` / `std.process.command` 默认使用当前线程的工作目录；不会改变进程级 OS cwd。新线程在启动时继承创建线程的工作目录。
 
 std.compress.gzip(bytes)          → bytes
 std.compress.gunzip(bytes)        → bytes

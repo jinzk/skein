@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "platform.h"
+#include "runtime_state.h"
 #include "valuetype.h"
 
 #include <chrono>
@@ -164,6 +165,27 @@ struct value_t *call_process_builtin(
             }
         }
     }
+
+    {
+        std::vector<std::pair<std::string, std::string>> overrides;
+        thread_env_overrides(overrides);
+        for (const auto &override : overrides) {
+            bool replaced = false;
+            for (auto &entry : env) {
+                if (entry.first == override.first) {
+                    entry.second = override.second;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced)
+                env.push_back(override);
+        }
+    }
+    if (cwd.empty())
+        cwd = thread_cwd();
+    else
+        cwd = thread_resolve_path(cwd);
 
     temp_files files;
     files.input = temp_path("stdin");

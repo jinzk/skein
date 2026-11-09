@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -12,6 +13,11 @@
 #include <vector>
 
 #include "runtime_state.h"
+
+std::mutex &command_environment_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 
 namespace {
 
@@ -137,6 +143,7 @@ bool platform_run_command(
     output.clear();
     status = -1;
 
+    std::lock_guard<std::mutex> lock(command_environment_mutex());
     scoped_environment scope(env);
     if (!scope.ok())
         return false;
@@ -171,6 +178,7 @@ bool platform_run_command_status(
     int &status) {
     status = -1;
 
+    std::lock_guard<std::mutex> lock(command_environment_mutex());
     scoped_environment scope(env);
     if (!scope.ok())
         return false;

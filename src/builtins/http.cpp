@@ -6,6 +6,7 @@
 #include "cookie.h"
 #include "eval.h"
 #include "fiber.h"
+#include "event_loop.h"
 #include "http1_parser.h"
 #include "builtins_io.h"
 #include "net.h"
@@ -3342,6 +3343,45 @@ value_t *capabilities_value(const http_capabilities &caps) {
     return result;
 }
 
+bool await_task_timeout(const task_ptr &task, long long timeout_ms) {
+    if (!task)
+        return true;
+    if (task_get_state(task) != TASK_STATE_PENDING) {
+        value_t *result = fiber_await_task(task);
+        freeval(result);
+        return true;
+    }
+    if (timeout_ms <= 0) {
+        value_t *result = fiber_await_task(task);
+        freeval(result);
+        return true;
+    }
+    if (fiber_in_fiber()) {
+        auto ready = [task]() {
+            return task_get_state(task) != TASK_STATE_PENDING;
+        };
+        if (!fiber_wait_for(ready, timeout_ms))
+            return false;
+        if (task_get_state(task) == TASK_STATE_PENDING)
+            return false;
+    } else {
+        if (!event_loop_init())
+            return false;
+        event_timeout timeout = make_event_timeout(timeout_ms);
+        while (task_get_state(task) == TASK_STATE_PENDING) {
+            if (g_interrupted)
+                return false;
+            if (event_timeout_expired(timeout))
+                return false;
+            uv_run(event_loop_handle(), UV_RUN_ONCE);
+            fiber_pump();
+        }
+    }
+    value_t *result = fiber_await_task(task);
+    freeval(result);
+    return true;
+}
+
 struct process_server_state
     : std::enable_shared_from_this<process_server_state> {
     std::string strategy;
@@ -3365,7 +3405,27 @@ struct process_server_state
     ~process_server_state();
 };
 
-void process_server_stop_children(process_server_state *server, bool wait) {
+bool process_server_stop_children(process_server_state *server, bool wait,
+                                  long long timeout_ms = 0) {
+    if (wait && timeout_ms > 0 && !server->children.empty()) {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(timeout_ms);
+        for (;;) {
+            bool all_exited = true;
+            for (value_t *process : server->children) {
+                long long status = 0;
+                if (!process_try_wait(process, status)) {
+                    all_exited = false;
+                    break;
+                }
+            }
+            if (all_exited)
+                break;
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
     for (value_t *process : server->children) {
         if (wait) {
             value_t *status = call_process_spawn_builtin(
@@ -3385,6 +3445,7 @@ void process_server_stop_children(process_server_state *server, bool wait) {
         freeval(process);
     }
     server->children.clear();
+    return true;
 }
 
 void process_server_close_pool(process_server_state *server) {
@@ -3406,22 +3467,29 @@ process_server_state::~process_server_state() {
     process_server_close_pool(this);
 }
 
-long long process_server_join(process_server_state *server) {
+bool process_server_join(process_server_state *server, long long timeout_ms,
+                         long long &served) {
     {
         std::lock_guard<std::mutex> lock(server->mutex);
-        if (server->joined)
-            return server->shared ? server->shared->served.load() : 0;
-        server->joined = true;
+        if (server->joined) {
+            served = server->shared ? server->shared->served.load() : 0;
+            return true;
+        }
     }
     if (server->server_task) {
-        value_t *result = fiber_await_task(server->server_task);
-        if (result)
-            freeval(result);
+        if (!await_task_timeout(server->server_task, timeout_ms))
+            return false;
         server->server_task = nullptr;
     }
-    process_server_stop_children(server, true);
+    if (!process_server_stop_children(server, true, timeout_ms))
+        return false;
     process_server_close_pool(server);
-    return server->shared ? server->shared->served.load() : 0;
+    {
+        std::lock_guard<std::mutex> lock(server->mutex);
+        server->joined = true;
+    }
+    served = server->shared ? server->shared->served.load() : 0;
+    return true;
 }
 
 value_t *process_server_build_stats(process_server_state *server) {
@@ -3514,11 +3582,27 @@ value_t *process_server_get_field(void *data, const char *name) {
     if (std::strcmp(name, "join") == 0) {
         return newnativeval(
             [server](const std::vector<value_t *> &args) {
-                if (!args.empty()) {
-                    yyerror("ProcessServer.join expects no arguments");
+                long long timeout_ms = 0;
+                if (args.size() > 1) {
+                    yyerror("ProcessServer.join expects 0 or 1 argument");
                     return (value_t *)nullptr;
                 }
-                return newintval(process_server_join(server.get()));
+                if (args.size() == 1) {
+                    if (args[0]->type != T_int ||
+                        ((int_value_t *)args[0])->value < 0) {
+                        yyerror("ProcessServer.join timeout must be a "
+                                "non-negative integer");
+                        return (value_t *)nullptr;
+                    }
+                    timeout_ms = ((int_value_t *)args[0])->value;
+                }
+                long long served = 0;
+                if (!process_server_join(server.get(), timeout_ms,
+                                         served)) {
+                    yyerror("std.http.ProcessServer.join timed out");
+                    return (value_t *)nullptr;
+                }
+                return newintval(served);
             },
             server);
     }
@@ -4320,6 +4404,19 @@ struct reuse_port_server_state
             shared->stopping.store(true);
     }
 
+    bool wait_server(long long timeout_ms) {
+        if (timeout_ms <= 0)
+            return true;
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(timeout_ms);
+        while (alive.load() > 0) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return true;
+    }
+
     void join_server() {
         bool should_join = false;
         {
@@ -4795,30 +4892,52 @@ value_t *thread_server_get_field(void *data, const char *name) {
     if (std::strcmp(name, "join") == 0) {
         return newnativeval(
             [server](const std::vector<value_t *> &args) {
-                if (!args.empty()) {
-                    yyerror("ThreadServer.join expects no arguments");
+                long long timeout_ms = 0;
+                if (args.size() > 1) {
+                    yyerror("ThreadServer.join expects 0 or 1 argument");
                     return (value_t *)nullptr;
+                }
+                if (args.size() == 1) {
+                    if (args[0]->type != T_int ||
+                        ((int_value_t *)args[0])->value < 0) {
+                        yyerror("ThreadServer.join timeout must be a "
+                                "non-negative integer");
+                        return (value_t *)nullptr;
+                    }
+                    timeout_ms = ((int_value_t *)args[0])->value;
                 }
                 bool should_join = false;
                 {
                     std::lock_guard<std::mutex> lock(server->mutex);
-                    if (!server->joined) {
-                        server->joined = true;
-                        should_join = true;
-                    }
+                    should_join = !server->joined;
                 }
                 if (should_join) {
 #if SKEIN_HAS_REUSE_PORT
                     if (server->reuse) {
+                        if (!server->reuse->wait_server(timeout_ms)) {
+                            yyerror("std.http.ThreadServer.join timed out");
+                            return (value_t *)nullptr;
+                        }
+                        {
+                            std::lock_guard<std::mutex> lock(
+                                server->mutex);
+                            server->joined = true;
+                        }
                         server->reuse->join_server();
                     } else
 #endif
                     {
-                        if (server->server_task) {
-                            value_t *result =
-                                fiber_await_task(server->server_task);
-                            freeval(result);
+                        if (!await_task_timeout(server->server_task,
+                                                timeout_ms)) {
+                            yyerror("std.http.ThreadServer.join timed out");
+                            return (value_t *)nullptr;
                         }
+                        {
+                            std::lock_guard<std::mutex> lock(
+                                server->mutex);
+                            server->joined = true;
+                        }
+                        server->server_task = nullptr;
                         thread_pool_link_join(server->pool);
                     }
                 }

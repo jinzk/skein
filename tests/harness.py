@@ -775,7 +775,7 @@ def check_extended_stdlib():
                 "println(\"ps=\" + ps.strategy + \":\" + "
                 "str(ps.capabilities[\"dispatch\"]) + \":\" + "
                 "str(ps.stats()[\"workers\"]));\n"
-                "println(ps.join());\n"
+                "println(ps.join(5000));\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), serve_script],
@@ -847,7 +847,7 @@ def check_extended_stdlib():
                     "str(ps.capabilities[\"reuse_port\"]) + \":\" + "
                     "str(ps.stats()[\"workers\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
-                    "let served = ps.join();\n"
+                    "let served = ps.join(30000);\n"
                     "println(\"served=\" + str(served));\n"
                     "println(\"served_after=\" + str(ps.served));\n"
                 )
@@ -912,6 +912,17 @@ def check_extended_stdlib():
                 if server.poll() is None:
                     server.kill()
                     server.wait()
+
+            check(
+                "std.http serve_threads reuse join timeout",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let ts = std.http.serve_threads(s, 1, '
+                f'"{workers_reuse_path}", {{"strategy": "reuse_port", '
+                f'"max_requests": 0}});\n'
+                "ts.join(10);\n",
+                stderr="ThreadServer.join timed out",
+            )
 
             workers_stop_script = os.path.join(
                 worker_tmp, "serve_workers_stop.skein")
@@ -1270,7 +1281,7 @@ def check_extended_stdlib():
                 "\":\" + str(ts.capabilities[\"http2\"]));\n"
                 "println(\"strategy=\" + ts.strategy);\n"
                 "std.io.flush(std.io.stdout);\n"
-                "println(\"served=\" + str(ts.join()));\n"
+                "println(\"served=\" + str(ts.join(5000)));\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), threads_script],
@@ -1776,7 +1787,7 @@ def check_extended_stdlib():
                     "ts.strategy + \":\" + "
                     "str(ts.capabilities[\"reuse_port\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
-                    "println(\"served=\" + str(ts.join()));\n"
+                    "println(\"served=\" + str(ts.join(30000)));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), reuse_script],
@@ -2673,6 +2684,16 @@ def check_extended_stdlib():
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout_all=["r1=true:42", "r2=true:10", "fail=false"],
+            )
+            check(
+                "std.http serve_threads join timeout",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let ts = std.http.serve_threads(s, 1, '
+                f'"{thread_worker_path}", '
+                '{"strategy": "dispatch", "max_requests": 0});\n'
+                "ts.join(10);\n",
+                stderr="ThreadServer.join timed out",
             )
 
             message_worker = os.path.join(

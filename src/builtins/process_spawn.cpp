@@ -647,6 +647,20 @@ bool get_process(const value_t *value, std::shared_ptr<process_resource> &out) {
 
 }  // namespace
 
+bool process_try_wait(struct value_t *value, long long &status) {
+    std::shared_ptr<process_resource> process;
+    if (!get_process(value, process) || !process)
+        return false;
+    if (!process->exited && event_loop_initialized())
+        uv_run(event_loop_handle(), UV_RUN_NOWAIT);
+    if (!process->exited)
+        return false;
+    status = process->term_signal != 0
+                 ? 128 + (long long)process->term_signal
+                 : process->exit_status;
+    return true;
+}
+
 value_t *call_process_spawn_builtin(
     int functype, const std::vector<value_t *> &args) {
     const char *name = process_name(functype);

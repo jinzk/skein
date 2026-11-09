@@ -1103,6 +1103,161 @@ def check_extended_stdlib():
             stderr="stream_request_body requires reuse_port",
         )
 
+        check(
+            "std.thread capabilities",
+            "import std;\n"
+            'let c = std.thread.capabilities();\n'
+            'print("schema="); print(c["schema"]);\n'
+            'print("platform="); print(c["platform"]);\n'
+            'print("http1="); print(c["http1"]);\n'
+            'print("websocket="); print(c["websocket"]);\n'
+            'print("strategies="); print(len(c["strategies"]));\n',
+            stdout_all=["schema=1", "platform=", "http1=true",
+                        "websocket=false", "strategies="],
+        )
+        check(
+            "std.http serve_threads require fails fast",
+            "import std;\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            'let ts = std.http.serve_threads(s, 1, "missing.skein", '
+            '{"strategy": "dispatch", "require": ["http2"]});\n',
+            stderr="missing capabilities: http2",
+        )
+
+        require_501_script = os.path.join(
+            worker_tmp, "serve_threads_require_501.skein")
+        with open(require_501_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 1, "
+                f"\"{threads_worker_path}\", {{\"strategy\": "
+                f"\"dispatch\", \"require\": [\"http2\"], "
+                f"\"on_unsupported\": \"501\", "
+                f"\"max_requests\": 1}});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "ts.join();\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), require_501_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "require 501 server did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            try:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port_line}/x", timeout=10)
+                raise AssertionError("expected 501 for missing capability")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 501, (exc.code, exc.read())
+            server.communicate(timeout=10)
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        require_warn_script = os.path.join(
+            worker_tmp, "serve_threads_require_warn.skein")
+        with open(require_warn_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 1, "
+                f"\"{threads_worker_path}\", {{\"strategy\": "
+                f"\"dispatch\", \"require\": [\"http2\"], "
+                f"\"on_unsupported\": \"warn\", "
+                f"\"max_requests\": 1}});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "ts.join();\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), require_warn_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "require warn server did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port_line}/x")
+            with urllib.request.urlopen(request, timeout=10) as response:
+                assert response.status == 200
+            out, err = server.communicate(timeout=10)
+            assert "missing capabilities: http2" in err, err
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        feature_script = os.path.join(
+            worker_tmp, "serve_threads_unsupported_features.skein")
+        with open(feature_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                f"let ts = std.http.serve_threads(s, 1, "
+                f"\"{threads_worker_path}\", {{\"strategy\": "
+                f"\"dispatch\", \"max_requests\": 2}});\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                "ts.join();\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), feature_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "feature 501 server did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            for headers, label in (
+                ({"Upgrade": "websocket", "Connection": "Upgrade"},
+                 "websocket"),
+                ({"Accept": "text/event-stream"}, "sse"),
+            ):
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port_line}/feature",
+                    headers=headers)
+                try:
+                    urllib.request.urlopen(request, timeout=10)
+                    raise AssertionError(
+                        f"expected 501 for {label}")
+                except urllib.error.HTTPError as exc:
+                    assert exc.code == 501, (label, exc.code, exc.read())
+            server.communicate(timeout=10)
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
         if FFI_SHIM:
             crash_manifest = os.path.join(
                 worker_tmp, "serve_threads_crash.ffi.json")

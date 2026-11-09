@@ -781,6 +781,8 @@ max_header_bytes   默认 64 KiB
 max_headers        默认 100
 max_body_bytes     默认 16 MiB
 h2_max_concurrent_streams 默认 16（reuse_port HTTP/2）
+require            能力列表，默认空
+on_unsupported     缺失能力时："error"（默认）/ "501" / "warn"
 ```
 
 worker 脚本导出 `handle(req)`，返回 response dict：
@@ -811,6 +813,11 @@ func handle(req) {
 - dispatch 下 worker 崩溃返回 502，worker 超时返回 504，worker 全部退出返回 503；
 - `serve_threads` 立即返回 `ThreadServer`，`join()` 等待服务结束并返回已处理请求数；
 - capabilities 报告 `http1` / `http2` / `stream_request_body` / `reuse_port` / `strategies` / `platform`；
+- `require` 在启动时检查能力：缺失时按 `on_unsupported` 处理；
+  - `"error"`：启动失败；
+  - `"warn"`：输出警告并继续；
+  - `"501"`：启动成功，但请求返回 501；
+- WebSocket upgrade 与 SSE 请求在 `serve_threads` 下返回 501；
 - `max_requests` 达到后停止 accept，连接任务排空后退出。
 
 ```skein
@@ -822,6 +829,30 @@ let ts = std.http.serve_threads(
 print(ts.strategy);
 print(ts.capabilities["http1"]);
 let served = ts.join();
+```
+
+能力矩阵：
+
+| 能力 | dispatch | reuse_port |
+|---|---|---|
+| HTTP/1.1 | 是 | 是 |
+| HTTP/2 | 否 | TLS ALPN `h2` |
+| TLS | 是 | 是 |
+| keep-alive | 是 | 是 |
+| `stream_request_body` | 否（启动失败） | 是 |
+| `stream_response` | 否 | 是 |
+| WebSocket | 否（501） | 否（501） |
+| SSE | 否（501） | 否（501） |
+| raw socket | 否 | 否 |
+| `max_requests` | 单线程 | 全局 atomic |
+
+`require` 示例：
+
+```skein
+let ts = std.http.serve_threads(
+  s, 4, "worker.skein",
+  {"strategy": "reuse_port",
+   "require": ["http2", "stream_request_body"]});
 ```
 
 流式 body：
@@ -2780,6 +2811,7 @@ std.thread.spawn
 std.thread.select
 std.thread.try_broadcast
 std.thread.broadcast
+std.thread.capabilities
 ```
 
 规则：
@@ -4745,6 +4777,50 @@ print(r["value"].payload["v"]);
   {"sent": [0, 1], "full": [], "closed": []}
   ```
 - `broadcast` 逐个阻塞发送；任一失败时抛错，已发送的不回滚。
+
+### 能力查询
+
+```text
+std.thread.capabilities() -> dict
+```
+
+返回全局能力：
+
+```text
+{
+  "schema": 1,
+  "platform": "linux",
+  "strategy": "auto",
+  "strategies": ["dispatch", "reuse_port"],
+  "reuse_port": true,
+  "dispatch": true,
+  "http1": true,
+  "http2": true,
+  "tls": true,
+  "keep_alive": true,
+  "stream_request_body": true,
+  "stream_response": true,
+  "websocket": false,
+  "sse": false,
+  "raw_socket": false
+}
+```
+
+`ThreadServer.capabilities` 返回实际策略的能力，并包含同样的
+`schema` / `platform` / `strategy` / `strategies` 字段。
+
+`serve_threads` 的 `require` / `on_unsupported`：
+
+```skein
+let ts = std.http.serve_threads(
+  s, 4, "worker.skein",
+  {"require": ["http2"],
+   "on_unsupported": "501"});
+```
+
+- `"error"`：缺失能力时启动失败；
+- `"warn"`：输出警告并继续；
+- `"501"`：启动成功，但请求返回 501。
 
 ### 带编码的文本文件
 

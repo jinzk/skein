@@ -391,6 +391,7 @@ value_t *build_namespace_impl() {
         {"select", B_thread_select},
         {"try_broadcast", B_thread_try_broadcast},
         {"broadcast", B_thread_broadcast},
+        {"capabilities", B_thread_capabilities},
     });
     dict_append_item((struct dict_value_t *)thread_module,
                      newstrval("Message"), message_namespace);

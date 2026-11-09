@@ -377,6 +377,7 @@ enum bifs {
     B_thread_select,
     B_thread_try_broadcast,
     B_thread_broadcast,
+    B_thread_capabilities,
     B_deque_new,
     B_deque_from_list,
     B_deque_size,

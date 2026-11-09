@@ -10,6 +10,7 @@
 #include "event_loop.h"
 #include "fiber.h"
 #include "package.h"
+#include "platform.h"
 #include "runtime_context.h"
 #include "runtime_state.h"
 #include "scopestack.h"
@@ -907,6 +908,11 @@ void dict_set_owned(struct value_t *dict, const char *key,
     dict_append_item(object, newstrval(key), value);
 }
 
+void dict_set(struct value_t *dict, const char *key,
+              struct value_t *value) {
+    dict_set_owned(dict, key, value);
+}
+
 struct value_t *dict_get_handle(struct value_t *dict, const char *key) {
     if (!dict || dict->type != T_dict)
         return nullptr;
@@ -1725,6 +1731,60 @@ struct value_t *thread_pool(const std::vector<struct value_t *> &args) {
     return new_pool_value(std::move(pool));
 }
 
+struct value_t *thread_capabilities(
+    const std::vector<struct value_t *> &args) {
+    if (!args.empty()) {
+        yyerror("std.thread.capabilities expects no arguments");
+        return nullptr;
+    }
+    value_t *caps = (value_t *)newdictval();
+    dict_set(caps, "schema", newintval(1));
+#if defined(_WIN32)
+    dict_set(caps, "platform", newstrval("windows"));
+#elif defined(__linux__)
+    dict_set(caps, "platform", newstrval("linux"));
+#elif defined(__APPLE__)
+    dict_set(caps, "platform", newstrval("macos"));
+#elif defined(__FreeBSD__)
+    dict_set(caps, "platform", newstrval("freebsd"));
+#else
+    dict_set(caps, "platform", newstrval("unix"));
+#endif
+    dict_set(caps, "strategy", newstrval("auto"));
+    value_t *strategies = (value_t *)newlistval();
+    ((list_value_t *)strategies)
+        ->payload->items.push_back(newstrval("dispatch"));
+#if SKEIN_HAS_REUSE_PORT
+    ((list_value_t *)strategies)
+        ->payload->items.push_back(newstrval("reuse_port"));
+#endif
+    dict_set(caps, "strategies", strategies);
+    dict_set(caps, "reuse_port",
+             newboolval(SKEIN_HAS_REUSE_PORT != 0));
+    dict_set(caps, "dispatch", newboolval(true));
+    dict_set(caps, "http1", newboolval(true));
+#if defined(SKEIN_ENABLE_HTTP2)
+    dict_set(caps, "http2",
+             newboolval(SKEIN_HAS_REUSE_PORT != 0));
+#else
+    dict_set(caps, "http2", newboolval(false));
+#endif
+#if defined(SKEIN_ENABLE_TLS)
+    dict_set(caps, "tls", newboolval(true));
+#else
+    dict_set(caps, "tls", newboolval(false));
+#endif
+    dict_set(caps, "keep_alive", newboolval(true));
+    dict_set(caps, "stream_request_body",
+             newboolval(SKEIN_HAS_REUSE_PORT != 0));
+    dict_set(caps, "stream_response",
+             newboolval(SKEIN_HAS_REUSE_PORT != 0));
+    dict_set(caps, "websocket", newboolval(false));
+    dict_set(caps, "sse", newboolval(false));
+    dict_set(caps, "raw_socket", newboolval(false));
+    return caps;
+}
+
 /* ------------------------------------------------------------------ */
 /* Single thread                                                       */
 /* ------------------------------------------------------------------ */
@@ -2283,6 +2343,8 @@ struct value_t *call_thread_channel_builtin(
                 return channel_try_broadcast(channels, args[1]);
             return channel_broadcast(channels, args[1]);
         }
+        case B_thread_capabilities:
+            return thread_capabilities(args);
         default:
             yyerror("unknown thread function");
             return nullptr;

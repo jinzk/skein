@@ -2580,6 +2580,8 @@ struct http_server_state {
     std::size_t max_body_bytes = 16 * 1024 * 1024;
     bool http2_enabled = false;
     long long h2_max_concurrent_streams = 16;
+    bool unsupported_501 = false;
+    std::string unsupported_message;
     std::shared_ptr<http_shared_state> shared;
 };
 
@@ -3168,6 +3170,128 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     return served;
 }
 
+value_t *thread_server_response(int status, const std::string &message) {
+    value_t *response = (value_t *)newdictval();
+    value_t *headers = (value_t *)newdictval();
+    dict_set(headers, "Content-Type",
+             newstrval("text/plain; charset=utf-8"));
+    dict_set(response, "status", newintval(status));
+    dict_set(response, "headers", headers);
+    dict_set(response, "body", newbytesval(message));
+    return response;
+}
+
+std::string http_platform_name() {
+#if defined(_WIN32)
+    return "windows";
+#elif defined(__linux__)
+    return "linux";
+#elif defined(__APPLE__)
+    return "macos";
+#elif defined(__FreeBSD__)
+    return "freebsd";
+#else
+    return "unix";
+#endif
+}
+
+struct http_capabilities {
+    bool http1 = true;
+    bool http2 = false;
+    bool tls = false;
+    bool keep_alive = true;
+    bool stream_request_body = false;
+    bool stream_response = false;
+    bool websocket = false;
+    bool sse = false;
+    bool raw_socket = false;
+    bool reuse_port = false;
+    bool dispatch = true;
+    std::string strategy;
+    std::vector<std::string> strategies;
+    std::string platform;
+};
+
+http_capabilities make_capabilities(const std::string &strategy,
+                                    bool tls, bool http2,
+                                    bool stream_body) {
+    http_capabilities caps;
+    caps.strategy = strategy;
+    caps.tls = tls;
+    caps.http2 = http2;
+    caps.stream_request_body = stream_body;
+    caps.stream_response = strategy == "reuse_port";
+    caps.reuse_port =
+        strategy == "reuse_port" && SKEIN_HAS_REUSE_PORT != 0;
+    caps.dispatch = true;
+    caps.platform = http_platform_name();
+    caps.strategies.push_back("dispatch");
+#if SKEIN_HAS_REUSE_PORT
+    caps.strategies.push_back("reuse_port");
+#endif
+    return caps;
+}
+
+bool capability_enabled(const http_capabilities &caps,
+                        const std::string &name) {
+    if (name == "http1") return caps.http1;
+    if (name == "http2") return caps.http2;
+    if (name == "tls") return caps.tls;
+    if (name == "keep_alive") return caps.keep_alive;
+    if (name == "stream_request_body") return caps.stream_request_body;
+    if (name == "stream_response") return caps.stream_response;
+    if (name == "websocket") return caps.websocket;
+    if (name == "sse") return caps.sse;
+    if (name == "raw_socket") return caps.raw_socket;
+    if (name == "reuse_port") return caps.reuse_port;
+    if (name == "dispatch") return caps.dispatch;
+    return false;
+}
+
+value_t *capabilities_value(const http_capabilities &caps) {
+    value_t *result = (value_t *)newdictval();
+    dict_set(result, "schema", newintval(1));
+    dict_set(result, "platform", newstrval(caps.platform.c_str()));
+    dict_set(result, "strategy", newstrval(caps.strategy.c_str()));
+    value_t *strategies = (value_t *)newlistval();
+    for (const std::string &name : caps.strategies)
+        ((list_value_t *)strategies)
+            ->payload->items.push_back(newstrval(name.c_str()));
+    dict_set(result, "strategies", strategies);
+    dict_set(result, "http1", newboolval(caps.http1));
+    dict_set(result, "http2", newboolval(caps.http2));
+    dict_set(result, "tls", newboolval(caps.tls));
+    dict_set(result, "keep_alive", newboolval(caps.keep_alive));
+    dict_set(result, "stream_request_body",
+             newboolval(caps.stream_request_body));
+    dict_set(result, "stream_response",
+             newboolval(caps.stream_response));
+    dict_set(result, "websocket", newboolval(caps.websocket));
+    dict_set(result, "sse", newboolval(caps.sse));
+    dict_set(result, "raw_socket", newboolval(caps.raw_socket));
+    dict_set(result, "reuse_port", newboolval(caps.reuse_port));
+    dict_set(result, "dispatch", newboolval(caps.dispatch));
+    return result;
+}
+
+bool request_unsupported_feature(value_t *request,
+                                 std::string &message) {
+    value_t *headers = dict_get(request, "headers");
+    std::string upgrade =
+        lower_ascii(header_value(headers, "Upgrade"));
+    if (upgrade.find("websocket") != std::string::npos) {
+        message = "websocket is not supported";
+        return true;
+    }
+    std::string accept =
+        lower_ascii(header_value(headers, "Accept"));
+    if (accept.find("text/event-stream") != std::string::npos) {
+        message = "sse is not supported";
+        return true;
+    }
+    return false;
+}
+
 #if SKEIN_HAS_REUSE_PORT
 
 struct reuse_port_server_state
@@ -3182,6 +3306,8 @@ struct reuse_port_server_state
     std::string entry = "handle";
     bool worker_vm = false;
     bool http2_enabled = false;
+    bool unsupported_501 = false;
+    std::string unsupported_message;
     std::size_t worker_count = 0;
     std::vector<std::thread> threads;
     std::mutex mutex;
@@ -3256,8 +3382,16 @@ value_t *make_reuse_handler(
             const std::vector<value_t *> &args) -> value_t * {
             if (args.empty() || !args[0] || args[0]->type != T_dict)
                 return nullptr;
+            if (server->unsupported_501)
+                return thread_server_response(
+                    501, server->unsupported_message);
             server->active.fetch_add(1);
             value_t *source = args[0];
+            std::string unsupported;
+            if (request_unsupported_feature(source, unsupported)) {
+                server->active.fetch_sub(1);
+                return thread_server_response(501, unsupported);
+            }
             value_t *request = (value_t *)newdictval();
             const char *fields[] = {
                 "method", "path", "headers", "body", "http_major",
@@ -3421,6 +3555,8 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
     server->shared = config->shared;
     server->config = std::move(config);
     server->http2_enabled = server->config->http2_enabled;
+    server->unsupported_501 = server->config->unsupported_501;
+    server->unsupported_message = server->config->unsupported_message;
     server->host = host;
     server->port = port;
     server->script = script;
@@ -3464,6 +3600,9 @@ struct thread_server_state : std::enable_shared_from_this<thread_server_state> {
     std::string strategy = "pool";
     long long worker_timeout_ms = 30000;
     bool joined = false;
+    bool tls = false;
+    bool unsupported_501 = false;
+    std::string unsupported_message;
     std::mutex mutex;
     value_t *on_request_body = nullptr;
 #if SKEIN_HAS_REUSE_PORT
@@ -3486,23 +3625,18 @@ std::string thread_server_describe(const void *) {
     return "<thread_server>";
 }
 
-value_t *thread_server_response(int status, const std::string &message) {
-    value_t *response = (value_t *)newdictval();
-    value_t *headers = (value_t *)newdictval();
-    dict_set(headers, "Content-Type",
-             newstrval("text/plain; charset=utf-8"));
-    dict_set(response, "status", newintval(status));
-    dict_set(response, "headers", headers);
-    dict_set(response, "body", newbytesval(message));
-    return response;
-}
-
 value_t *thread_dispatch(
     const std::shared_ptr<thread_server_state> &server,
     const std::vector<value_t *> &args) {
     if (args.size() != 1 || !args[0] || args[0]->type != T_dict)
         return thread_server_response(400, "invalid HTTP request");
+    if (server->unsupported_501)
+        return thread_server_response(501,
+                                      server->unsupported_message);
     value_t *request = args[0];
+    std::string unsupported;
+    if (request_unsupported_feature(request, unsupported))
+        return thread_server_response(501, unsupported);
     if (dict_get(request, "body_reader"))
         return thread_server_response(
             501, "stream_request_body is not supported");
@@ -3746,38 +3880,12 @@ value_t *thread_server_get_field(void *data, const char *name) {
                              ? server->http->shared->served.load()
                              : 0);
     if (std::strcmp(name, "capabilities") == 0) {
-        value_t *caps = (value_t *)newdictval();
         bool http2 =
             server->http && server->http->http2_enabled;
         bool stream_body =
             server->http && server->http->stream_request_body;
-        dict_set(caps, "http1", newboolval(true));
-        dict_set(caps, "http2", newboolval(http2));
-        dict_set(caps, "stream_request_body",
-                 newboolval(stream_body));
-        dict_set(caps, "reuse_port",
-                 newboolval(SKEIN_HAS_REUSE_PORT != 0));
-        dict_set(caps, "keep_alive", newboolval(true));
-        dict_set(caps, "dispatch", newboolval(true));
-        dict_set(caps, "strategy", newstrval(server->strategy.c_str()));
-        value_t *strategies = (value_t *)newlistval();
-        ((list_value_t *)strategies)
-            ->payload->items.push_back(newstrval("dispatch"));
-#if SKEIN_HAS_REUSE_PORT
-        ((list_value_t *)strategies)
-            ->payload->items.push_back(newstrval("reuse_port"));
-#endif
-        dict_set(caps, "strategies", strategies);
-#if defined(_WIN32)
-        dict_set(caps, "platform", newstrval("windows"));
-#elif defined(__linux__)
-        dict_set(caps, "platform", newstrval("linux"));
-#elif defined(__APPLE__)
-        dict_set(caps, "platform", newstrval("macos"));
-#else
-        dict_set(caps, "platform", newstrval("unix"));
-#endif
-        return caps;
+        return capabilities_value(make_capabilities(
+            server->strategy, server->tls, http2, stream_body));
     }
 
     yyerror("std.http.ThreadServer has no field %s", name);
@@ -3982,6 +4090,83 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
         return NULL;
     }
 
+    std::string on_unsupported = "error";
+    value_t *on_unsupported_value = option("on_unsupported");
+    if (on_unsupported_value) {
+        if (on_unsupported_value->type != T_string) {
+            yyerror("std.http.serve_threads on_unsupported must be a "
+                    "string");
+            return NULL;
+        }
+        on_unsupported =
+            ((string_value_t *)on_unsupported_value)->value;
+    }
+    if (on_unsupported != "error" && on_unsupported != "501" &&
+        on_unsupported != "warn") {
+        yyerror("std.http.serve_threads on_unsupported must be "
+                "\"error\", \"501\" or \"warn\"");
+        return NULL;
+    }
+
+    std::vector<std::string> required;
+    value_t *require_value = option("require");
+    if (require_value && require_value->type != T_null) {
+        if (require_value->type == T_string) {
+            required.push_back(
+                ((string_value_t *)require_value)->value);
+        } else if (require_value->type == T_list) {
+            for (value_t *item :
+                 ((list_value_t *)require_value)->payload->items) {
+                if (!item || item->type != T_string) {
+                    yyerror("std.http.serve_threads require entries "
+                            "must be strings");
+                    return NULL;
+                }
+                required.push_back(
+                    ((string_value_t *)item)->value);
+            }
+        } else {
+            yyerror("std.http.serve_threads require must be a string "
+                    "or list of strings");
+            return NULL;
+        }
+    }
+
+    bool http2_capable = false;
+#ifdef SKEIN_ENABLE_HTTP2
+    http2_capable = strategy == "reuse_port" && !cert_file.empty();
+#endif
+    http_capabilities caps = make_capabilities(
+        strategy, !cert_file.empty(), http2_capable,
+        strategy == "reuse_port" ? stream_request_body : false);
+    std::string missing;
+    for (const std::string &name : required) {
+        if (capability_enabled(caps, name))
+            continue;
+        if (!missing.empty())
+            missing += ", ";
+        missing += name;
+    }
+    bool unsupported_501 = false;
+    std::string unsupported_message;
+    if (!missing.empty()) {
+        if (on_unsupported == "error") {
+            yyerror("std.http.serve_threads: missing capabilities: %s",
+                    missing.c_str());
+            return NULL;
+        }
+        if (on_unsupported == "warn") {
+            std::fprintf(stderr,
+                         "std.http.serve_threads: missing capabilities: "
+                         "%s\n", missing.c_str());
+            std::fflush(stderr);
+        } else {
+            unsupported_501 = true;
+            unsupported_message =
+                "unsupported capabilities: " + missing;
+        }
+    }
+
     std::shared_ptr<http_server_state> state =
         std::make_shared<http_server_state>();
     state->max_requests = max_requests;
@@ -3994,6 +4179,8 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     state->max_headers = max_headers;
     state->max_body_bytes = max_body_bytes;
     state->h2_max_concurrent_streams = h2_max_concurrent_streams;
+    state->unsupported_501 = unsupported_501;
+    state->unsupported_message = unsupported_message;
 #ifdef SKEIN_ENABLE_HTTP2
     state->http2_enabled =
         strategy == "reuse_port" && !cert_file.empty();
@@ -4008,6 +4195,9 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
     server->script = script;
     server->strategy = strategy;
     server->worker_timeout_ms = worker_timeout_ms;
+    server->tls = !cert_file.empty();
+    server->unsupported_501 = state->unsupported_501;
+    server->unsupported_message = state->unsupported_message;
 
     std::string error;
 #if SKEIN_HAS_REUSE_PORT

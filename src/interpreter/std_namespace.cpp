@@ -390,6 +390,8 @@ value_t *build_namespace_impl() {
         {"spawn", B_thread_spawn},
         {"spawn_source", B_thread_spawn_source},
         {"spawn_function", B_thread_spawn_function},
+        {"encode", B_thread_encode},
+        {"spawn_encoded", B_thread_spawn_encoded},
         {"duplex", B_thread_duplex},
         {"spawn_with_channel", B_thread_spawn_with_channel},
         {"spawn_with_duplex", B_thread_spawn_with_duplex},

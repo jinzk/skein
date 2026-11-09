@@ -2976,6 +2976,39 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     return new_thread_value(std::move(state));
 }
 
+static struct value_t *thread_spawn_payload(
+    std::shared_ptr<thread_transfer_function> entry,
+    std::vector<std::pair<std::string, thread_transfer_value>> globals,
+    std::vector<std::pair<std::string, thread_transfer_value>> modules,
+    struct value_t *message, const char *what) {
+    std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
+    state->id = next_thread_id.fetch_add(1);
+    struct value_t *argument = dupval(message);
+    try {
+        state->thread = std::thread(thread_proto_entry_main, state,
+                                    std::move(entry), std::move(globals),
+                                    std::move(modules), argument,
+                                    thread_env_capture());
+    } catch (const std::exception &) {
+        freeval(argument);
+        yyerror("%s could not start thread", what);
+        return nullptr;
+    }
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->cv.wait(lock, [&state] { return state->startup_done; });
+    if (!state->startup_error.empty()) {
+        std::string startup_error = state->startup_error;
+        lock.unlock();
+        if (state->thread.joinable())
+            state->thread.join();
+        yyerror("%s: %s", what, startup_error.c_str());
+        return nullptr;
+    }
+    lock.unlock();
+    return new_thread_value(std::move(state));
+}
+
 struct value_t *thread_spawn_function(
     const std::vector<struct value_t *> &args) {
     if (args.size() != 2 || args[0]->type != T_func ||
@@ -2991,33 +3024,55 @@ struct value_t *thread_spawn_function(
         yyerror("std.thread.spawn_function: %s", builder.error.c_str());
         return nullptr;
     }
+    return thread_spawn_payload(std::move(entry), std::move(globals),
+                                std::move(modules), args[1],
+                                "std.thread.spawn_function");
+}
 
-    std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
-    state->id = next_thread_id.fetch_add(1);
-    struct value_t *argument = dupval(args[1]);
-    try {
-        state->thread = std::thread(thread_proto_entry_main, state,
-                                    std::move(entry), std::move(globals),
-                                    std::move(modules), argument,
-                                    thread_env_capture());
-    } catch (const std::exception &) {
-        freeval(argument);
-        yyerror("std.thread.spawn_function could not start thread");
+struct value_t *thread_encode(const std::vector<struct value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_func) {
+        yyerror("std.thread.encode expects a function");
         return nullptr;
     }
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    state->cv.wait(lock, [&state] { return state->startup_done; });
-    if (!state->startup_error.empty()) {
-        std::string startup_error = state->startup_error;
-        lock.unlock();
-        if (state->thread.joinable())
-            state->thread.join();
-        yyerror("std.thread.spawn_function: %s", startup_error.c_str());
+    thread_payload_builder builder;
+    std::shared_ptr<thread_transfer_function> entry;
+    std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    if (!builder.build_entry(args[0], entry, globals, modules)) {
+        yyerror("std.thread.encode: %s", builder.error.c_str());
         return nullptr;
     }
-    lock.unlock();
-    return new_thread_value(std::move(state));
+    std::string bytes;
+    std::string error;
+    if (!skein_vm_serialize_thread_payload(entry, globals, modules, bytes,
+                                           error)) {
+        yyerror("std.thread.encode: %s", error.c_str());
+        return nullptr;
+    }
+    return newbytesval(std::move(bytes));
+}
+
+struct value_t *thread_spawn_encoded(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() != 2 || args[0]->type != T_bytes ||
+        args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn_encoded expects bytes and Message");
+        return nullptr;
+    }
+    const std::string &bytes =
+        ((const struct bytes_value_t *)args[0])->value.read();
+    std::shared_ptr<thread_transfer_function> entry;
+    std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    std::vector<std::pair<std::string, thread_transfer_value>> modules;
+    std::string error;
+    if (!skein_vm_deserialize_thread_payload(bytes, entry, globals, modules,
+                                             error)) {
+        yyerror("std.thread.spawn_encoded: %s", error.c_str());
+        return nullptr;
+    }
+    return thread_spawn_payload(std::move(entry), std::move(globals),
+                                std::move(modules), args[1],
+                                "std.thread.spawn_encoded");
 }
 
 struct value_t *thread_spawn_source(
@@ -3723,6 +3778,10 @@ struct value_t *call_thread_channel_builtin(
             return thread_spawn_source(args);
         case B_thread_spawn_function:
             return thread_spawn_function(args);
+        case B_thread_encode:
+            return thread_encode(args);
+        case B_thread_spawn_encoded:
+            return thread_spawn_encoded(args);
         case B_thread_select: {
             if (args.empty() || args.size() > 2) {
                 yyerror("std.thread.select expects endpoints and optional "

@@ -119,4 +119,20 @@ bool skein_vm_materialize_thread_value(
     const struct thread_transfer_value &value, struct value_t *&out,
     std::string &error);
 
+/* Serialize a prepared thread payload into a portable byte stream. */
+bool skein_vm_serialize_thread_payload(
+    const std::shared_ptr<struct thread_transfer_function> &entry,
+    const std::vector<std::pair<std::string, thread_transfer_value>> &globals,
+    const std::vector<std::pair<std::string, thread_transfer_value>> &modules,
+    std::string &bytes, std::string &error);
+
+/* Deserialize a thread payload previously produced by
+ * skein_vm_serialize_thread_payload. */
+bool skein_vm_deserialize_thread_payload(
+    const std::string &bytes,
+    std::shared_ptr<struct thread_transfer_function> &entry,
+    std::vector<std::pair<std::string, thread_transfer_value>> &globals,
+    std::vector<std::pair<std::string, thread_transfer_value>> &modules,
+    std::string &error);
+
 #endif

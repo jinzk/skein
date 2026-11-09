@@ -2811,6 +2811,56 @@ def check_extended_stdlib():
             )
             assert proc.stdout.strip() == "17", proc.stdout
 
+            encode_path = os.path.join(deadlock_tmp, "encode_main.skein")
+            with open(encode_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "import threadpkg;\n"
+                    "func make_worker() {\n"
+                    "    thread func worker(ctx) {\n"
+                    '        return {"v": threadpkg.calc('
+                    'ctx.payload["n"])};\n'
+                    "    }\n"
+                    "    return worker;\n"
+                    "}\n"
+                    'write_bytes("thread_payload.bin", '
+                    "std.thread.encode(make_worker()));\n"
+                    'print("encoded");\n'
+                )
+            decode_path = os.path.join(deadlock_tmp, "decode_main.skein")
+            with open(decode_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    'let blob = read_bytes("thread_payload.bin");\n'
+                    "let t = std.thread.spawn_encoded(blob, "
+                    'std.thread.Message.from({"n": 4}));\n'
+                    "let r = t.join();\n"
+                    'print(r["value"]["v"]);\n'
+                )
+            enc = subprocess.run(
+                [os.path.abspath(BIN), encode_path],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert enc.returncode == 0, (
+                "thread encode failed: "
+                f"{enc.stdout!r} {enc.stderr!r}"
+            )
+            dec = subprocess.run(
+                [os.path.abspath(BIN), decode_path],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert dec.returncode == 0, (
+                "thread decode failed: "
+                f"{dec.stdout!r} {dec.stderr!r}"
+            )
+            assert dec.stdout.strip() == "17", dec.stdout
+
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)
             http_worker = os.path.join(
@@ -3297,6 +3347,26 @@ def check_extended_stdlib():
                 "let r3 = t3.join();\n"
                 'print("mutual=" + str(r3["value"]["v"]) + "|");\n',
                 stdout_all=["two=223|", "chain=11|", "mutual=true|"],
+            )
+            check(
+                "std.thread encode roundtrip",
+                "import std;\n"
+                "func helper(x) { return x * 2; }\n"
+                "func make_adder(n) { return func(x) { return x + n; }; }\n"
+                "let f = make_adder(5);\n"
+                "func make_worker(fn) {\n"
+                "    thread func worker(ctx) {\n"
+                "        return {\"v\": fn(ctx.payload[\"n\"]) + "
+                "helper(ctx.payload[\"n\"])};\n"
+                "    }\n"
+                "    return worker;\n"
+                "}\n"
+                "let blob = std.thread.encode(make_worker(f));\n"
+                "let t = std.thread.spawn_encoded(blob, "
+                'std.thread.Message.from({"n": 3}));\n'
+                "let r = t.join();\n"
+                'print("encoded=" + str(r["value"]["v"]) + "|");\n',
+                stdout_all=["encoded=14|"],
             )
             check(
                 "std.thread transfer rejects defaults",

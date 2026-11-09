@@ -82,6 +82,10 @@ def main():
             "let t6 = std.thread.spawn(transfer, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined6 = t6.join();\n"
+            "let encoded_blob = std.thread.encode(transfer);\n"
+            "let t7 = std.thread.spawn_encoded(encoded_blob, "
+            'std.thread.Message.from({"n": 3}));\n'
+            "let joined7 = t7.join();\n"
             'println("pool=" + str(r1["value"]["v"]) + ":" + '
             'str(r2["value"]["v"]) + " thread=" + '
             'str(joined["value"]["v"]) + " src=" + '
@@ -89,7 +93,8 @@ def main():
             'str(joined3["value"]["v"]) + " closure=" + '
             'str(joined4["value"]["v"]) + " data=" + '
             'str(joined5["value"][2]) + " transfer=" + '
-            'str(joined6["value"]["v"]));\n'
+            'str(joined6["value"]["v"]) + " encoded=" + '
+            'str(joined7["value"]["v"]));\n'
         )
         env = os.environ.copy()
         env.setdefault("ASAN_OPTIONS", "detect_leaks=1")
@@ -105,7 +110,7 @@ def main():
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
             return 1
-        expected = "pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 transfer=12"
+        expected = "pool=2:3 thread=5 src=5 proto=6 closure=7 data=3 transfer=12 encoded=12"
         if expected not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1

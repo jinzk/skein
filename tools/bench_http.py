@@ -226,6 +226,8 @@ def main():
                         help="force a server strategy (default: server auto)")
     parser.add_argument("--timeout", type=float, default=60.0,
                         help="server/client timeout in seconds")
+    parser.add_argument("--check-rate", type=float, default=0.0,
+                        help="fail when throughput is below this req/s")
     args = parser.parse_args()
 
     if args.workers <= 0:
@@ -249,6 +251,13 @@ def main():
             print(f"{mode}: {exc}", file=sys.stderr)
             continue
         print_result(result)
+        if args.check_rate > 0 and result["rate"] < args.check_rate:
+            failures += 1
+            print(
+                f"{mode}: throughput {result['rate']:.0f} req/s is below "
+                f"{args.check_rate:.0f} req/s",
+                file=sys.stderr,
+            )
     if failures:
         return 1
     return 0

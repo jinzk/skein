@@ -810,6 +810,23 @@ if(BUILD_TESTING)
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
+      add_test(
+        NAME http_dispatch_bench_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_http.py
+                --bin $<TARGET_FILE:${PROJECT_NAME}>
+                --mode threads
+                --strategy dispatch
+                --requests 400
+                --concurrency 8
+                --workers 4
+                --check-rate 1000
+      )
+      set_tests_properties(http_dispatch_bench_test PROPERTIES
+        LABELS "bench"
+        RUN_SERIAL TRUE
+        TIMEOUT 120
+      )
     endif()
     if(SKEIN_SANITIZE)
       # LeakSanitizer run.  Known non-VM leaks are excluded:

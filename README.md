@@ -2854,6 +2854,9 @@ std.worker.stats
 std.thread.unbounded_channel
 std.thread.pool
 std.thread.spawn
+std.thread.duplex
+std.thread.spawn_with_channel
+std.thread.spawn_with_duplex
 std.thread.select
 std.thread.try_broadcast
 std.thread.broadcast
@@ -4786,6 +4789,38 @@ print(result["value"]["x"]);
 - `detach()` 后线程自行运行和退出；
 - `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
 - 子线程结果必须是 data-only 值。
+
+### 双向 duplex
+
+```text
+std.thread.duplex(capacity) -> link
+link.child -> endpoint
+
+link.send(message)
+link.try_send(message) -> bool
+link.recv([timeout_ms]) -> message | null
+link.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
+link.close_send()
+link.close_recv()
+link.close()
+link.closed
+link.capacity
+link.length
+
+std.thread.spawn_with_channel(script, message, capacity[, options]) -> thread
+std.thread.spawn_with_duplex(script, message, capacity[, options]) -> thread
+thread.channel
+thread.link
+```
+
+- `duplex` 内部有 `parent_to_child` 和 `child_to_parent` 两条 lane；
+- `link.send` 发往 child，`link.recv` 接收 child 发来的消息；
+- `link.child` 是反方向端点：`child.send` 发往 parent，`child.recv` 接收 parent 的消息；
+- `close_send` 只关闭 out 方向；对端 `recv` 排空后得到 `null`；
+- `close_recv` 只关闭 in 方向；`closed` 反映 in 方向是否关闭；
+- `select` 接受 Channel 或 duplex endpoint，endpoint 使用其 in 方向；`broadcast` 仅接受 Channel；
+- `spawn_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
+- `spawn_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
 
 ### select / broadcast
 

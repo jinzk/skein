@@ -2337,6 +2337,91 @@ def check_extended_stdlib():
                 stdout_all=["ok=false"],
             )
 
+            check(
+                "std.thread duplex basic",
+                "import std;\n"
+                'let link = std.thread.duplex(2);\n'
+                'let child = link.child;\n'
+                'link.send(std.thread.Message.from({"v": "p2c"}));\n'
+                'print("child="); print(child.recv().payload["v"]); '
+                'print("|");\n'
+                'child.send(std.thread.Message.from({"v": "c2p"}));\n'
+                'print("parent="); print(link.recv().payload["v"]); '
+                'print("|");\n'
+                'print("closed="); print(link.closed); print("|");\n'
+                'link.close_send();\n'
+                'print("recv_null="); print(child.recv() == null); '
+                'print("|");\n'
+                'link.close_recv();\n'
+                'print("closed2="); print(link.closed); print("|");\n',
+                stdout="child=p2c|parent=c2p|closed=false|"
+                       "recv_null=true|closed2=true|",
+            )
+            check(
+                "std.thread select duplex endpoint",
+                "import std;\n"
+                'let link = std.thread.duplex(1);\n'
+                'let child = link.child;\n'
+                'child.send(std.thread.Message.from({"v": 7}));\n'
+                'let r = std.thread.select([link], 1000);\n'
+                'print("index="); print(r["index"]); print(":");\n'
+                'print(r["value"].payload["v"]);\n',
+                stdout="index=0:7",
+            )
+
+            duplex_worker = os.path.join(
+                thread_tmp, "thread_duplex_worker.skein")
+            with open(duplex_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    let link = ctx.handles[\"link\"];\n"
+                    "    link.send(std.thread.Message.from(\n"
+                    "        {\"reply\": ctx.payload[\"v\"] + 1}));\n"
+                    "    return {\"done\": true};\n"
+                    "}\n"
+                )
+            duplex_worker_path = duplex_worker.replace("\\", "\\\\")
+            channel_worker = os.path.join(
+                thread_tmp, "thread_channel_worker.skein")
+            with open(channel_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    let ch = ctx.handles[\"channel\"];\n"
+                    "    ch.send(std.thread.Message.from(\n"
+                    "        {\"reply\": ctx.payload[\"v\"] * 2}));\n"
+                    "    return {\"done\": true};\n"
+                    "}\n"
+                )
+            channel_worker_path = channel_worker.replace("\\", "\\\\")
+            check(
+                "std.thread spawn with duplex",
+                "import std;\n"
+                f'let t = std.thread.spawn_with_duplex('
+                f'"{duplex_worker_path}", '
+                f'std.thread.Message.from({{"v": 41}}), 1);\n'
+                'let reply = t.link.recv(1000);\n'
+                'print("reply="); print(reply.payload["reply"]); '
+                'print("|");\n'
+                'let r = t.join();\n'
+                'print("ok="); print(r["ok"]); print("|");\n',
+                stdout="reply=42|ok=true|",
+            )
+            check(
+                "std.thread spawn with channel",
+                "import std;\n"
+                f'let t = std.thread.spawn_with_channel('
+                f'"{channel_worker_path}", '
+                f'std.thread.Message.from({{"v": 21}}), 1);\n'
+                'let reply = t.channel.recv(1000);\n'
+                'print("reply="); print(reply.payload["reply"]); '
+                'print("|");\n'
+                'let r = t.join();\n'
+                'print("ok="); print(r["ok"]); print("|");\n',
+                stdout="reply=42|ok=true|",
+            )
+
             cow_worker = os.path.join(
                 thread_tmp, "thread_cow_worker.skein")
             with open(cow_worker, "w", encoding="utf-8") as handle:

@@ -74,6 +74,28 @@ struct channel_state : std::enable_shared_from_this<channel_state> {
     }
 };
 
+struct duplex_state {
+    explicit duplex_state(long long capacity)
+        : parent_to_child(std::make_shared<channel_state>(capacity)),
+          child_to_parent(std::make_shared<channel_state>(capacity)) {}
+
+    std::shared_ptr<channel_state> parent_to_child;
+    std::shared_ptr<channel_state> child_to_parent;
+};
+
+struct duplex_endpoint_state
+    : std::enable_shared_from_this<duplex_endpoint_state> {
+    std::shared_ptr<duplex_state> duplex;
+    bool parent = true;
+
+    const std::shared_ptr<channel_state> &out() const {
+        return parent ? duplex->parent_to_child : duplex->child_to_parent;
+    }
+    const std::shared_ptr<channel_state> &in() const {
+        return parent ? duplex->child_to_parent : duplex->parent_to_child;
+    }
+};
+
 void wake_fiber_handles(const std::vector<void *> &handles) {
     for (void *handle : handles)
         event_loop_wake(handle);
@@ -134,6 +156,9 @@ void channel_fiber_sleep(long long ms) {
 
 extern const struct native_type kMessageType;
 extern const struct native_type kChannelType;
+extern const struct native_type kDuplexEndpointType;
+
+void channel_close_state(const std::shared_ptr<channel_state> &state);
 
 bool get_channel_state(struct value_t *value,
                        std::shared_ptr<channel_state> &state);
@@ -143,7 +168,8 @@ bool is_handle_value(struct value_t *value) {
         return false;
     struct userdata_value_t *userdata = (struct userdata_value_t *)value;
     return userdata->meta && userdata->meta->name &&
-           std::strcmp(userdata->meta->name, "thread_channel") == 0;
+           (std::strcmp(userdata->meta->name, "thread_channel") == 0 ||
+            std::strcmp(userdata->meta->name, "thread_duplex") == 0);
 }
 
 struct value_t *copy_data_value(struct value_t *value,
@@ -887,7 +913,7 @@ struct value_t *channel_try_recv_value(
 
 bool collect_channels(struct value_t *value,
                       std::vector<std::shared_ptr<channel_state>> &channels,
-                      std::string &error) {
+                      std::string &error, bool accept_endpoints = false) {
     if (!value || value->type != T_list) {
         error = "expected a list of channels";
         return false;
@@ -895,11 +921,25 @@ bool collect_channels(struct value_t *value,
     struct list_value_t *list = (struct list_value_t *)value;
     for (struct value_t *item : list->payload->items) {
         std::shared_ptr<channel_state> channel;
-        if (!get_channel_state(item, channel)) {
-            error = "expected a list of channels";
-            return false;
+        if (get_channel_state(item, channel)) {
+            channels.push_back(std::move(channel));
+            continue;
         }
-        channels.push_back(std::move(channel));
+        if (accept_endpoints && item && item->type == T_userdata) {
+            struct userdata_value_t *userdata =
+                (struct userdata_value_t *)item;
+            if (userdata->meta == &kDuplexEndpointType && userdata->data) {
+                std::shared_ptr<duplex_endpoint_state> endpoint =
+                    std::static_pointer_cast<duplex_endpoint_state>(
+                        userdata->data);
+                channels.push_back(endpoint->in());
+                continue;
+            }
+        }
+        error = accept_endpoints
+                    ? "expected a list of channels or duplex endpoints"
+                    : "expected a list of channels";
+        return false;
     }
     if (channels.empty()) {
         error = "channel list must not be empty";
@@ -1179,6 +1219,166 @@ const struct native_type kChannelType = {
     nullptr,
     nullptr,
 };
+
+std::string duplex_endpoint_describe(const void *) {
+    return "<thread_duplex>";
+}
+
+struct value_t *new_duplex_endpoint_value(
+    std::shared_ptr<duplex_endpoint_state> state) {
+    return newuserdataval(&kDuplexEndpointType, std::move(state));
+}
+
+struct value_t *duplex_endpoint_get_field(void *data, const char *name) {
+    duplex_endpoint_state *raw =
+        static_cast<duplex_endpoint_state *>(data);
+    if (!raw || !name) {
+        yyerror("std.thread.duplex has no such field");
+        return nullptr;
+    }
+    std::shared_ptr<duplex_endpoint_state> endpoint = raw->shared_from_this();
+
+    if (std::strcmp(name, "send") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                if (args.size() != 1) {
+                    yyerror("duplex.send expects 1 argument");
+                    return (struct value_t *)nullptr;
+                }
+                return channel_send_value(endpoint->out(), args[0], true, 0);
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "try_send") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                if (args.size() != 1) {
+                    yyerror("duplex.try_send expects 1 argument");
+                    return (struct value_t *)nullptr;
+                }
+                return channel_send_value(endpoint->out(), args[0], false);
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "recv") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                long long timeout_ms = 0;
+                if (args.size() > 1) {
+                    yyerror("duplex.recv expects 0 or 1 argument");
+                    return (struct value_t *)nullptr;
+                }
+                if (args.size() == 1) {
+                    if (args[0]->type != T_int ||
+                        ((struct int_value_t *)args[0])->value < 0) {
+                        yyerror("duplex.recv timeout must be a "
+                                "non-negative integer");
+                        return (struct value_t *)nullptr;
+                    }
+                    timeout_ms = ((struct int_value_t *)args[0])->value;
+                }
+                return channel_recv_value(endpoint->in(), timeout_ms);
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "try_recv") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("duplex.try_recv expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                return channel_try_recv_value(endpoint->in());
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "close_send") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("duplex.close_send expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                channel_close_state(endpoint->out());
+                return newnull();
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "close_recv") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("duplex.close_recv expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                channel_close_state(endpoint->in());
+                return newnull();
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "close") == 0) {
+        return newnativeval(
+            [endpoint](const std::vector<struct value_t *> &args) {
+                if (!args.empty()) {
+                    yyerror("duplex.close expects no arguments");
+                    return (struct value_t *)nullptr;
+                }
+                channel_close_state(endpoint->out());
+                channel_close_state(endpoint->in());
+                return newnull();
+            },
+            endpoint);
+    }
+    if (std::strcmp(name, "child") == 0) {
+        std::shared_ptr<duplex_endpoint_state> peer =
+            std::make_shared<duplex_endpoint_state>();
+        peer->duplex = endpoint->duplex;
+        peer->parent = !endpoint->parent;
+        return new_duplex_endpoint_value(std::move(peer));
+    }
+    if (std::strcmp(name, "closed") == 0) {
+        std::lock_guard<std::mutex> lock(endpoint->in()->mutex);
+        return newboolval(endpoint->in()->closed);
+    }
+    if (std::strcmp(name, "capacity") == 0) {
+        std::lock_guard<std::mutex> lock(endpoint->in()->mutex);
+        return newintval(endpoint->in()->capacity);
+    }
+    if (std::strcmp(name, "length") == 0) {
+        std::lock_guard<std::mutex> lock(endpoint->in()->mutex);
+        return newintval(
+            (long long)endpoint->in()->queue.size());
+    }
+
+    yyerror("std.thread.duplex has no field %s", name);
+    return nullptr;
+}
+
+const struct native_type kDuplexEndpointType = {
+    "thread_duplex",
+    duplex_endpoint_describe,
+    nullptr,
+    duplex_endpoint_get_field,
+    nullptr,
+    nullptr,
+};
+
+struct value_t *thread_duplex(const std::vector<struct value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_int) {
+        yyerror("std.thread.duplex expects a capacity integer");
+        return nullptr;
+    }
+    long long capacity = ((struct int_value_t *)args[0])->value;
+    if (capacity <= 0) {
+        yyerror("std.thread.duplex capacity must be >= 1");
+        return nullptr;
+    }
+    std::shared_ptr<duplex_endpoint_state> endpoint =
+        std::make_shared<duplex_endpoint_state>();
+    endpoint->duplex = std::make_shared<duplex_state>(capacity);
+    endpoint->parent = true;
+    return new_duplex_endpoint_value(std::move(endpoint));
+}
 
 /* ------------------------------------------------------------------ */
 /* Thread pool                                                         */
@@ -2212,6 +2412,8 @@ struct thread_state : std::enable_shared_from_this<thread_state> {
     bool canceled = false;
     long long id = 0;
     struct value_t *result = nullptr;
+    std::shared_ptr<channel_state> channel;
+    std::shared_ptr<duplex_endpoint_state> link;
 
     ~thread_state() {
         if (thread.joinable())
@@ -2403,6 +2605,138 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     return new_thread_value(std::move(state));
 }
 
+struct value_t *message_with_handle(
+    const std::shared_ptr<message_state> &source, const char *name,
+    struct value_t *handle) {
+    std::shared_ptr<message_state> state = std::make_shared<message_state>();
+    state->payload = dupval(source->payload);
+    state->handles = (struct value_t *)newdictval();
+    if (source->handles && source->handles->type == T_dict) {
+        for (const auto &entry :
+             ((struct dict_value_t *)source->handles)->payload->items) {
+            dict_append_item((struct dict_value_t *)state->handles,
+                             dupval(entry.first), dupval(entry.second));
+        }
+    }
+    dict_append_item((struct dict_value_t *)state->handles,
+                     newstrval(name), dupval(handle));
+    return new_message_value(std::move(state));
+}
+
+std::shared_ptr<thread_state> thread_state_of(struct value_t *value) {
+    if (!value || value->type != T_userdata)
+        return nullptr;
+    struct userdata_value_t *userdata = (struct userdata_value_t *)value;
+    if (userdata->meta != &kThreadType || !userdata->data)
+        return nullptr;
+    return std::static_pointer_cast<thread_state>(userdata->data);
+}
+
+struct value_t *thread_spawn_with_channel(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() < 3 || args.size() > 4 ||
+        args[0]->type != T_string || args[1]->type != T_userdata ||
+        args[2]->type != T_int) {
+        yyerror("std.thread.spawn_with_channel expects script, Message, "
+                "capacity and optional options");
+        return nullptr;
+    }
+    long long capacity = ((struct int_value_t *)args[2])->value;
+    if (capacity <= 0) {
+        yyerror("std.thread.spawn_with_channel capacity must be >= 1");
+        return nullptr;
+    }
+    std::shared_ptr<message_state> message;
+    if (!get_message_state(args[1], message)) {
+        yyerror("std.thread.spawn_with_channel expects a Message");
+        return nullptr;
+    }
+
+    std::shared_ptr<channel_state> channel =
+        std::make_shared<channel_state>(capacity);
+    struct value_t *channel_value = new_channel_value(channel);
+    struct value_t *injected =
+        message_with_handle(message, "channel", channel_value);
+    freeval(channel_value);
+
+    std::vector<struct value_t *> spawn_args;
+    spawn_args.push_back(dupval(args[0]));
+    spawn_args.push_back(injected);
+    if (args.size() == 4)
+        spawn_args.push_back(dupval(args[3]));
+    struct value_t *thread = thread_spawn(spawn_args);
+    freeval(spawn_args[0]);
+    freeval(injected);
+    if (spawn_args.size() == 3)
+        freeval(spawn_args[2]);
+    if (!thread)
+        return nullptr;
+
+    std::shared_ptr<thread_state> state = thread_state_of(thread);
+    if (state) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->channel = std::move(channel);
+    }
+    return thread;
+}
+
+struct value_t *thread_spawn_with_duplex(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() < 3 || args.size() > 4 ||
+        args[0]->type != T_string || args[1]->type != T_userdata ||
+        args[2]->type != T_int) {
+        yyerror("std.thread.spawn_with_duplex expects script, Message, "
+                "capacity and optional options");
+        return nullptr;
+    }
+    long long capacity = ((struct int_value_t *)args[2])->value;
+    if (capacity <= 0) {
+        yyerror("std.thread.spawn_with_duplex capacity must be >= 1");
+        return nullptr;
+    }
+    std::shared_ptr<message_state> message;
+    if (!get_message_state(args[1], message)) {
+        yyerror("std.thread.spawn_with_duplex expects a Message");
+        return nullptr;
+    }
+
+    std::shared_ptr<duplex_state> duplex =
+        std::make_shared<duplex_state>(capacity);
+    std::shared_ptr<duplex_endpoint_state> parent =
+        std::make_shared<duplex_endpoint_state>();
+    parent->duplex = duplex;
+    parent->parent = true;
+    std::shared_ptr<duplex_endpoint_state> child =
+        std::make_shared<duplex_endpoint_state>();
+    child->duplex = duplex;
+    child->parent = false;
+
+    struct value_t *child_value = new_duplex_endpoint_value(child);
+    struct value_t *injected =
+        message_with_handle(message, "link", child_value);
+    freeval(child_value);
+
+    std::vector<struct value_t *> spawn_args;
+    spawn_args.push_back(dupval(args[0]));
+    spawn_args.push_back(injected);
+    if (args.size() == 4)
+        spawn_args.push_back(dupval(args[3]));
+    struct value_t *thread = thread_spawn(spawn_args);
+    freeval(spawn_args[0]);
+    freeval(injected);
+    if (spawn_args.size() == 3)
+        freeval(spawn_args[2]);
+    if (!thread)
+        return nullptr;
+
+    std::shared_ptr<thread_state> state = thread_state_of(thread);
+    if (state) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->link = std::move(parent);
+    }
+    return thread;
+}
+
 std::string thread_describe(const void *) {
     return "<thread>";
 }
@@ -2497,6 +2831,16 @@ struct value_t *thread_get_field(void *data, const char *name) {
                 return newboolval(true);
             },
             state);
+    }
+    if (std::strcmp(name, "channel") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return state->channel ? new_channel_value(state->channel)
+                              : newnull();
+    }
+    if (std::strcmp(name, "link") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return state->link ? new_duplex_endpoint_value(state->link)
+                           : newnull();
     }
     if (std::strcmp(name, "id") == 0)
         return newintval(state->id);
@@ -2732,7 +3076,7 @@ struct value_t *call_thread_channel_builtin(
             }
             std::vector<std::shared_ptr<channel_state>> channels;
             std::string error;
-            if (!collect_channels(args[0], channels, error)) {
+            if (!collect_channels(args[0], channels, error, true)) {
                 yyerror("std.thread.select: %s", error.c_str());
                 return nullptr;
             }
@@ -2754,6 +3098,12 @@ struct value_t *call_thread_channel_builtin(
                 return channel_try_broadcast(channels, args[1]);
             return channel_broadcast(channels, args[1]);
         }
+        case B_thread_duplex:
+            return thread_duplex(args);
+        case B_thread_spawn_with_channel:
+            return thread_spawn_with_channel(args);
+        case B_thread_spawn_with_duplex:
+            return thread_spawn_with_duplex(args);
         case B_thread_capabilities:
             return thread_capabilities(args);
         default:

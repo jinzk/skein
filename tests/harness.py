@@ -928,7 +928,8 @@ def check_extended_stdlib():
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 f"let ts = std.http.serve_threads(s, 2, "
-                f"\"{threads_worker_path}\", {{\"max_requests\": 1}});\n"
+                f"\"{threads_worker_path}\", "
+                f"{{\"max_requests\": 1, \"strategy\": \"dispatch\"}});\n"
                 "println(s[\"port\"]);\n"
                 "println(\"caps=\" + str(ts.capabilities[\"http1\"]) + "
                 "\":\" + str(ts.capabilities[\"http2\"]));\n"
@@ -952,6 +953,10 @@ def check_extended_stdlib():
                 "serve_threads did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
+            caps_line = server.stdout.readline().strip()
+            strategy_line = server.stdout.readline().strip()
+            assert caps_line == "caps=true:false", caps_line
+            assert strategy_line == "strategy=dispatch", strategy_line
             request = urllib.request.Request(
                 f"http://127.0.0.1:{port_line}/echo",
                 data=b"hello-threads",
@@ -965,8 +970,6 @@ def check_extended_stdlib():
                 assert response.headers.get("X-Method") == "POST"
             out, err = server.communicate(timeout=10)
             assert server.returncode == 0, err
-            assert "caps=true:false" in out, out
-            assert "strategy=pool" in out, out
             assert "served=1" in out, out
         finally:
             if server.poll() is None:
@@ -991,7 +994,8 @@ def check_extended_stdlib():
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 f"let ts = std.http.serve_threads(s, 2, "
-                f"\"{slow_threads_path}\", {{\"max_requests\": 2}});\n"
+                f"\"{slow_threads_path}\", "
+                f"{{\"max_requests\": 2, \"strategy\": \"dispatch\"}});\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
@@ -1053,7 +1057,8 @@ def check_extended_stdlib():
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 f"let ts = std.http.serve_threads(s, 1, "
                 f"\"{slow_threads_path}\", {{\"max_requests\": 1, "
-                f"\"worker_timeout_ms\": 50}});\n"
+                f"\"worker_timeout_ms\": 50, "
+                f"\"strategy\": \"dispatch\"}});\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
@@ -1129,7 +1134,8 @@ def check_extended_stdlib():
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                     f"let ts = std.http.serve_threads(s, 1, "
                     f"\"{crash_threads_path}\", {{\"max_requests\": 2, "
-                    f"\"restart_limit\": 1}});\n"
+                    f"\"restart_limit\": 1, "
+                    f"\"strategy\": \"dispatch\"}});\n"
                     "println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
                     "ts.join();\n"
@@ -1167,6 +1173,101 @@ def check_extended_stdlib():
                 if server.poll() is None:
                     server.kill()
                     server.wait()
+
+        reuse_supported = (
+            sys.platform.startswith("linux") or
+            sys.platform.startswith("freebsd") or
+            sys.platform.startswith("dragonfly")
+        )
+        if reuse_supported:
+            reuse_worker = os.path.join(
+                worker_tmp, "serve_threads_reuse_worker.skein")
+            with open(reuse_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let worker_id = std.random.int(1, 1000000);\n"
+                    "func handle(req) {\n"
+                    "  return {\"status\": 200,\n"
+                    "          \"headers\": {\"X-Worker\": str(worker_id)},\n"
+                    "          \"body\": \"ok\"};\n"
+                    "}\n"
+                )
+            reuse_worker_path = reuse_worker.replace("\\", "\\\\")
+            reuse_script = os.path.join(
+                worker_tmp, "serve_threads_reuse.skein")
+            with open(reuse_script, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                    f"let ts = std.http.serve_threads(s, 4, "
+                    f"\"{reuse_worker_path}\", {{\"strategy\": "
+                    f"\"reuse_port\", \"max_requests\": 4}});\n"
+                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "ts.strategy + \":\" + "
+                    "str(ts.capabilities[\"reuse_port\"]));\n"
+                    "std.io.flush(std.io.stdout);\n"
+                    "println(\"served=\" + str(ts.join()));\n"
+                )
+            server = subprocess.Popen(
+                [os.path.abspath(BIN), reuse_script],
+                cwd=worker_tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=os.environ.copy(),
+            )
+            try:
+                info_line = server.stdout.readline().strip()
+                assert info_line.startswith("info="), (
+                    "serve_threads reuse_port did not report info: "
+                    f"{info_line!r} / {server.stderr.read()}"
+                )
+                port_text, strategy, reuse_flag = (
+                    info_line.split("=", 1)[1].split(":"))
+                assert strategy == "reuse_port", info_line
+                assert reuse_flag == "true", info_line
+                reuse_results = []
+
+                def reuse_hit(index):
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{port_text}/r{index}")
+                    with urllib.request.urlopen(
+                            request, timeout=10) as response:
+                        reuse_results.append(
+                            (response.status, response.read(),
+                             response.headers.get("X-Worker")))
+
+                reuse_threads = [
+                    threading.Thread(target=reuse_hit, args=(index,))
+                    for index in range(4)
+                ]
+                for thread in reuse_threads:
+                    thread.start()
+                for thread in reuse_threads:
+                    thread.join()
+                assert len(reuse_results) == 4, reuse_results
+                assert all(status == 200 and body == b"ok"
+                           for status, body, _ in reuse_results), reuse_results
+                workers_seen = {item[2] for item in reuse_results}
+                assert len(workers_seen) >= 2, reuse_results
+                out, err = server.communicate(timeout=10)
+                assert server.returncode == 0, err
+                assert "served=4" in out, out
+            finally:
+                if server.poll() is None:
+                    server.kill()
+                    server.wait()
+        else:
+            check(
+                "std.http serve_threads reuse_port unsupported",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                'let ts = std.http.serve_threads(s, 1, "missing.skein", '
+                '{"strategy": "reuse_port"});\n',
+                stderr="reuse_port is not supported",
+            )
 
         check(
             "std.thread channel copy and close",

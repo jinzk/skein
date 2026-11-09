@@ -2,7 +2,9 @@
 
 #include "ast.h"
 #include "async_support.h"
+#include "dict.h"
 #include "event_loop.h"
+#include "platform.h"
 #include "repl.h"
 #include "task.h"
 #include "valuetype.h"
@@ -645,8 +647,8 @@ value_t *net_tcp_connect(const std::vector<value_t *> &args) {
 }
 
 value_t *net_tcp_listen(const std::vector<value_t *> &args) {
-    if (args.size() < 2 || args.size() > 4) {
-        yyerror("std.net.tcp_listen expects 2 to 4 arguments");
+    if (args.size() < 2 || args.size() > 5) {
+        yyerror("std.net.tcp_listen expects 2 to 5 arguments");
         return NULL;
     }
     if (args[0]->type != T_string) {
@@ -662,6 +664,35 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
     int family = AF_UNSPEC;
     if (!get_optional_family(args, 3, family))
         return NULL;
+    bool reuse_port = false;
+    if (args.size() == 5) {
+        if (args[4]->type != T_dict) {
+            yyerror("tcp_listen options must be a dict");
+            return NULL;
+        }
+        value_t *flag = NULL;
+        struct dict_value_t *options = (struct dict_value_t *)args[4];
+        for (const auto &entry : options->payload->items) {
+            if (entry.first->type == T_string &&
+                std::strcmp(
+                    ((struct string_value_t *)entry.first)->value,
+                    "reuse_port") == 0) {
+                flag = entry.second;
+                break;
+            }
+        }
+        if (flag) {
+            if (flag->type != T_bool) {
+                yyerror("tcp_listen reuse_port must be a bool");
+                return NULL;
+            }
+            reuse_port = ((bool_value_t *)flag)->value;
+        }
+    }
+    if (reuse_port && !SKEIN_HAS_REUSE_PORT) {
+        yyerror("tcp_listen: reuse_port is not supported on this platform");
+        return NULL;
+    }
     if (g_interrupted)
         return NULL;
 
@@ -686,6 +717,12 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
         return NULL;
     }
 
+    unsigned int bind_flags = 0;
+#if SKEIN_HAS_REUSE_PORT
+    if (reuse_port)
+        bind_flags |= UV_TCP_REUSEPORT;
+#endif
+
     int last_status = 0;
     for (struct addrinfo *address = resolved.addresses; address;
          address = address->ai_next) {
@@ -700,7 +737,7 @@ value_t *net_tcp_listen(const std::vector<value_t *> &args) {
             continue;
         }
 
-        int rc = uv_tcp_bind(socket->handle, address->ai_addr, 0);
+        int rc = uv_tcp_bind(socket->handle, address->ai_addr, bind_flags);
         if (rc == 0)
             rc = uv_listen((uv_stream_t *)socket->handle, 16,
                            on_connection);

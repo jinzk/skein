@@ -11,6 +11,13 @@ struct value_t *call_thread_channel_builtin(
     int functype, const std::vector<struct value_t *> &args);
 
 /*
+ * Common per-thread runtime setup/teardown for worker threads that execute
+ * Skein code (thread pool workers and reuse-port HTTP workers).
+ */
+bool thread_worker_begin(bool worker_vm, std::string &error);
+void thread_worker_end();
+
+/*
  * C++ link to the thread pool for native subsystems such as the HTTP server.
  * The script-facing std.thread.pool wrappers are built on the same state.
  */

@@ -1061,24 +1061,10 @@ void send_worker_crash(const std::shared_ptr<channel_state> &reply,
 void spawn_worker_thread(pool_state *pool, size_t slot_index);
 
 void worker_thread_main(pool_state *pool, size_t slot_index) {
-    struct skein_context hooks = {
-        pool_worker_call,
-        pool_worker_call_builtin,
-        runtime_error_report,
-        nullptr,
-    };
-    skein_context_set(&hooks);
-    skein_vm_set_enabled(pool->worker_vm);
-    g_interactive = false;
-    g_show_prompt = false;
-
-    eval_context context;
-    set_active_eval_context(&context);
-    initscope();
-    eval_begin_root_defers();
+    std::string error;
+    thread_worker_begin(pool->worker_vm, error);
 
     struct value_t *handler = nullptr;
-    std::string error;
     bool loaded = false;
     bool crashed = false;
     std::string crash_reason;
@@ -1235,15 +1221,7 @@ void worker_thread_main(pool_state *pool, size_t slot_index) {
         }
     }
 
-    eval_run_root_defers();
-    fiber_disable_generator_warnings();
-    task_shutdown();
-    fiber_shutdown();
-    event_loop_shutdown();
-    ast_thread_shutdown();
-    skein_vm_shutdown();
-    set_active_eval_context(nullptr);
-    skein_context_set(nullptr);
+    thread_worker_end();
 
     if (restart) {
         try {
@@ -2117,6 +2095,41 @@ struct value_t *thread_channel(long long capacity) {
 }
 
 }  // namespace
+
+namespace {
+thread_local std::unique_ptr<eval_context> worker_runtime_context;
+thread_local skein_context worker_runtime_hooks;
+}
+
+bool thread_worker_begin(bool worker_vm, std::string &error) {
+    (void)error;
+    worker_runtime_hooks.call = pool_worker_call;
+    worker_runtime_hooks.call_builtin = pool_worker_call_builtin;
+    worker_runtime_hooks.error = runtime_error_report;
+    worker_runtime_hooks.drain_background = nullptr;
+    skein_context_set(&worker_runtime_hooks);
+    skein_vm_set_enabled(worker_vm);
+    g_interactive = false;
+    g_show_prompt = false;
+    worker_runtime_context = std::make_unique<eval_context>();
+    set_active_eval_context(worker_runtime_context.get());
+    initscope();
+    eval_begin_root_defers();
+    return true;
+}
+
+void thread_worker_end() {
+    eval_run_root_defers();
+    fiber_disable_generator_warnings();
+    task_shutdown();
+    fiber_shutdown();
+    event_loop_shutdown();
+    ast_thread_shutdown();
+    skein_vm_shutdown();
+    set_active_eval_context(nullptr);
+    skein_context_set(nullptr);
+    worker_runtime_context.reset();
+}
 
 struct thread_pool_link {
     std::shared_ptr<pool_state> pool;

@@ -1,6 +1,14 @@
 #ifndef SKEIN_PLATFORM_H
 #define SKEIN_PLATFORM_H
 
+/* Platforms where libuv's UV_TCP_REUSEPORT bind flag is available. */
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__DragonFly__) || \
+    defined(__sun) || defined(_AIX)
+#define SKEIN_HAS_REUSE_PORT 1
+#else
+#define SKEIN_HAS_REUSE_PORT 0
+#endif
+
 #include <cstdio>
 #include <memory>
 #include <string>

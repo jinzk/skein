@@ -380,7 +380,7 @@ std.net.close(s);
 
 ```text
 tcp_connect(host, port[, timeout_ms[, family]])
-tcp_listen(host, port[, timeout_ms[, family]])
+tcp_listen(host, port[, timeout_ms[, family[, options]]])
 accept(listener[, timeout_ms])
 send(socket, data[, timeout_ms])
 recv(socket, size[, timeout_ms])
@@ -391,6 +391,16 @@ shutdown(socket[, timeout_ms])
 `timeout_ms` 为 `0` 或省略时不设置超时；正数表示一次调用的总超时时间，检查精度约 10ms。
 `family` 支持 `"any"`、`"ipv4"`、`"ipv6"`。
 `"any"` 会使用解析结果中的第一个可绑定地址；需要同时监听 IPv4/IPv6 时应分别创建 listener。
+
+`tcp_listen` 的 `options`：
+
+```text
+reuse_port  bool，默认 false
+```
+
+`reuse_port` 使用 `SO_REUSEPORT`，仅 Linux/FreeBSD/DragonFly/Solaris/AIX 支持；
+其他平台传 `true` 会报错。多个 listener 绑定同一端口时，所有 listener
+都必须启用 `reuse_port`。
 
 地址查询：
 
@@ -758,6 +768,7 @@ ThreadServer.served -> int
 
 ```text
 entry              worker 入口，默认 "handle"
+strategy           "auto" / "dispatch" / "reuse_port"，默认 "auto"
 queue              pool 队列，默认 1024 或 "unbounded"
 restart_limit      worker 重启次数，默认 0
 worker_vm          默认 false
@@ -785,13 +796,16 @@ func handle(req) {
 
 规则：
 
-- accept、TLS、HTTP/1.1 解析和 keep-alive 在主线程 event loop 中完成；
-- 每个请求通过线程池派发到 worker；
+- `strategy: "auto"` 在 Linux/BSD 选择 `reuse_port`，在 Windows 选择 `dispatch`；
+- `dispatch`：accept、TLS、HTTP/1.1 解析和 keep-alive 在主线程 event loop 中完成，每个请求通过线程池派发到 worker；
+- `reuse_port`：每个 worker 线程独立 bind + listen + accept + TLS + HTTP 解析，并在本地执行 `handle(req)`；
+- `reuse_port` 仅 Linux/FreeBSD/DragonFly/Solaris/AIX 支持；其他平台显式请求会报错；
+- `reuse_port` 使用 `max_requests` 的共享原子计数，超过上限的请求返回 503；
 - request dict 包含 `method/path/headers/body/http_major/http_minor/keep_alive/remote_addr/remote_port`，不包含 `socket`；
 - worker 返回值必须是 `{status, headers, body}`；
-- worker 崩溃返回 502，worker 超时返回 504，worker 全部退出返回 503；
+- dispatch 下 worker 崩溃返回 502，worker 超时返回 504，worker 全部退出返回 503；
 - `serve_threads` 立即返回 `ThreadServer`，`join()` 等待服务结束并返回已处理请求数；
-- 当前策略为 `"pool"`，capabilities 为 HTTP/1.1、非流式；
+- capabilities 为 HTTP/1.1、非流式，并报告 `reuse_port` / `strategies` / `platform`；
 - 当前不支持 `stream_request_body`，启动时直接报错；
 - `max_requests` 达到后停止 accept，连接任务排空后退出。
 

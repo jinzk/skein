@@ -3523,11 +3523,13 @@ def check_extended_stdlib():
                     'let s = pool.stats();\n'
                     'print("alive="); print(s["alive"]); print(":"); '
                     'print("dead="); print(s["dead"]); print(":"); '
-                    'print("restarts="); print(s["restarts"]);\n'
+                    'print("restarts="); print(s["restarts"]); print(":"); '
+                    'print("ready="); print(s["ready"]);\n'
                     'pool.close();\n'
                     'pool.join();\n',
                     stdout_all=["r1=true:6", "r2=false:thread.worker_crashed",
-                                "r3=true:10", "alive=1:dead=0:restarts=1"],
+                                "r3=true:10",
+                                "alive=1:dead=0:restarts=1:ready=1"],
                 )
                 check(
                     "std.thread pool worker crash no restart",

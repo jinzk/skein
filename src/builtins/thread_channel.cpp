@@ -1721,6 +1721,8 @@ void worker_thread_main(
         std::lock_guard<std::mutex> lock(pool->mutex);
         pool_worker_slot &slot = *pool->workers[slot_index];
         slot.status = worker_status::dead;
+        if (pool->ready > 0)
+            --pool->ready;
         if (crashed && !pool->closing &&
             pool->restart_limit > slot.restarts) {
             ++slot.restarts;

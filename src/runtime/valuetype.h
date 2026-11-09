@@ -405,6 +405,8 @@ struct value_t *newfuncval(
 void free_function_code(struct function_code *code);
 struct value_t *dupval(struct value_t *v);
 
+/* Release thread-local value free lists before a worker runtime exits. */
+void value_runtime_thread_shutdown();
 struct list_value_t *newlistval();
 struct dict_value_t *newdictval();
 struct lru_value_t *newlruval(std::size_t capacity);

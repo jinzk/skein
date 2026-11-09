@@ -128,6 +128,23 @@ value_t &null_singleton() {
 
 } // namespace
 
+void value_runtime_thread_shutdown() {
+    while (free_int_head) {
+        int_value_t *value = free_int_head;
+        free_int_head = reinterpret_cast<int_value_t *>(value->value);
+        delete value;
+    }
+    free_int_count = 0;
+    while (free_func_head) {
+        func_value_t *value = free_func_head;
+        free_func_head = value->next;
+        ::operator delete(value);
+    }
+    free_func_count = 0;
+    render_depth = 0;
+    free_depth = 0;
+}
+
 struct value_t *newintval(long long i) {
     if (i >= SMALL_INT_MIN && i <= SMALL_INT_MAX)
         return (struct value_t *)&small_ints().values[i - SMALL_INT_MIN];

@@ -2378,8 +2378,9 @@ void thread_entry_main(
     g_interactive = false;
     g_show_prompt = false;
 
-    eval_context context;
-    set_active_eval_context(&context);
+    std::unique_ptr<eval_context> context =
+        std::make_unique<eval_context>();
+    set_active_eval_context(context.get());
     initscope();
     eval_begin_root_defers();
 
@@ -2465,6 +2466,8 @@ void thread_entry_main(
     skein_vm_shutdown();
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
+    context.reset();
+    value_runtime_thread_shutdown();
     thread_runtime_leave();
 }
 
@@ -3050,6 +3053,7 @@ void thread_worker_end() {
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
     worker_runtime_context.reset();
+    value_runtime_thread_shutdown();
     thread_runtime_leave();
 }
 

@@ -730,6 +730,24 @@ std.http.close(s);
 std.http.serve_workers(server, workers, script
                        [, max_requests[, max_per_connection
                        [, idle_timeout_ms]]]) -> served
+
+std.http.serve_workers(server, workers, script, options) -> served
+```
+
+`options`：
+
+```text
+strategy            "auto" / "dispatch" / "reuse_port"（当前进程模式仅 dispatch；reuse_port 尚未实现）
+require             []，能力列表
+on_unsupported      "error"（默认）/ "501" / "warn"
+max_requests        默认 0
+max_per_connection  默认 100
+idle_timeout_ms     默认 0
+worker_timeout_ms   默认 30000
+max_connections     默认 0
+max_header_bytes    默认 64 KiB
+max_headers         默认 100
+max_body_bytes      默认 16 MiB
 ```
 
 - HTTP 连接、TLS、keep-alive 仍由主进程处理；
@@ -738,11 +756,14 @@ std.http.serve_workers(server, workers, script
 - worker 的 `params` 为 `[method, path, headers]`，请求 body 走 raw body；
 - worker 返回的 `result` 应为 `{"status": ..., "headers": ...}`，
   response body 走 raw body；
-- `server["worker_timeout_ms"]` 控制单次 worker 调用超时，
-  默认 30000，`0` 表示不超时；
+- `worker_timeout_ms` 控制单次 worker 调用超时，默认 30000，`0` 表示不超时；
 - worker 调用使用异步等待，多个连接可以并发占用不同 worker；
 - 当前不支持 `stream_request_body`，该模式返回 501；
-- WebSocket upgrade / SSE 仍应使用独立 HTTP 服务或后续 socket handoff。
+- WebSocket upgrade / SSE 在进程 dispatch 模式返回 501；
+- `server["strategy"]` / `server["platform"]` / `server["capabilities"]`
+  会在启动后写入；
+- `require` / `on_unsupported` 语义与 `serve_threads` 一致；
+- 进程池 `handle(req)` 契约和 Linux `reuse_port` 仍在迁移中。
 
 ```text
 let s = std.http.listen("127.0.0.1", 8080);

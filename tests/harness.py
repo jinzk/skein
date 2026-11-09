@@ -779,8 +779,13 @@ def check_extended_stdlib():
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"println(std.http.serve_workers(s, 1, "
-                f"\"{serve_worker_path}\", 1));\n"
+                f"let n = std.http.serve_workers(s, 1, "
+                f"\"{serve_worker_path}\", "
+                f"{{\"strategy\": \"dispatch\", \"max_requests\": 1}});\n"
+                "println(\"server=\" + s[\"strategy\"] + \":\" + "
+                "s[\"platform\"] + \":\" + "
+                "str(s[\"capabilities\"][\"http1\"]));\n"
+                "println(n);\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), serve_script],
@@ -806,7 +811,117 @@ def check_extended_stdlib():
                 assert response.read() == b"hello-body"
             out, err = server.communicate(timeout=10)
             assert server.returncode == 0, err
-            assert "1" in out
+            assert "server=dispatch:" in out, out
+            assert ":true" in out, out
+            assert out.rstrip().endswith("1"), out
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        check(
+            "std.http serve_workers require fails fast",
+            "import std;\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            f'let n = std.http.serve_workers(s, 1, "{serve_worker_path}", '
+            '{"strategy": "dispatch", "require": ["http2"]});\n',
+            stderr="missing capabilities: http2",
+        )
+        check(
+            "std.http serve_workers reuse_port pending",
+            "import std;\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            f'let n = std.http.serve_workers(s, 1, "{serve_worker_path}", '
+            '{"strategy": "reuse_port"});\n',
+            stderr="process reuse_port is not implemented yet",
+        )
+
+        workers_501_script = os.path.join(
+            worker_tmp, "serve_workers_require_501.skein")
+        with open(workers_501_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                f"println(std.http.serve_workers(s, 1, "
+                f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
+                f"\"require\": [\"http2\"], "
+                f"\"on_unsupported\": \"501\", "
+                f"\"max_requests\": 1}}));\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), workers_501_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_workers 501 did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            try:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port_line}/x", timeout=10)
+                raise AssertionError(
+                    "expected 501 for missing process capability")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 501, (exc.code, exc.read())
+            server.communicate(timeout=10)
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.wait()
+
+        workers_features_script = os.path.join(
+            worker_tmp, "serve_workers_features.skein")
+        with open(workers_features_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "let s = std.http.listen(\"127.0.0.1\", 0);\n"
+                "println(s[\"port\"]);\n"
+                "std.io.flush(std.io.stdout);\n"
+                f"println(std.http.serve_workers(s, 1, "
+                f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
+                f"\"max_requests\": 2}}));\n"
+            )
+        server = subprocess.Popen(
+            [os.path.abspath(BIN), workers_features_script],
+            cwd=worker_tmp,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        try:
+            port_line = server.stdout.readline().strip()
+            assert port_line.isdigit(), (
+                "serve_workers features did not report a port: "
+                f"{port_line!r} / {server.stderr.read()}"
+            )
+            for headers, label in (
+                ({"Upgrade": "websocket", "Connection": "Upgrade"},
+                 "websocket"),
+                ({"Accept": "text/event-stream"}, "sse"),
+            ):
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port_line}/feature",
+                    headers=headers)
+                try:
+                    urllib.request.urlopen(request, timeout=10)
+                    raise AssertionError(
+                        f"expected 501 for process {label}")
+                except urllib.error.HTTPError as exc:
+                    assert exc.code == 501, (label, exc.code, exc.read())
+            server.communicate(timeout=10)
         finally:
             if server.poll() is None:
                 server.kill()

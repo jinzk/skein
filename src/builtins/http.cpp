@@ -50,6 +50,9 @@
 namespace {
 
 value_t *await_task_value(value_t *task_value);
+std::string http_platform_name();
+bool request_unsupported_feature(value_t *request,
+                                 std::string &message, bool allow_sse);
 
 void free_args(std::vector<value_t *> &args) {
     for (size_t i = 0; i < args.size(); ++i)
@@ -3046,19 +3049,244 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         ((int_value_t *)args[1])->value <= 0 ||
         args[2]->type != T_string) {
         yyerror("std.http.serve_workers expects server, worker count, "
-                "script and optional serve limits");
+                "script and optional options or serve limits");
         return NULL;
     }
 
+    value_t *options = nullptr;
+    if (args.size() > 3 && args[3]->type == T_dict) {
+        if (args.size() > 4) {
+            yyerror("std.http.serve_workers options cannot be combined "
+                    "with positional serve limits");
+            return NULL;
+        }
+        options = args[3];
+    }
+
+    std::string strategy = "auto";
+    if (options) {
+        value_t *value = dict_get(options, "strategy");
+        if (value) {
+            if (value->type != T_string) {
+                yyerror("std.http.serve_workers strategy must be a string");
+                return NULL;
+            }
+            strategy = ((string_value_t *)value)->value;
+        }
+    }
+    if (strategy == "auto")
+        strategy = "dispatch";
+    if (strategy == "reuse_port") {
+        yyerror("std.http.serve_workers: process reuse_port is not "
+                "implemented yet");
+        return NULL;
+    }
+    if (strategy != "dispatch") {
+        yyerror("std.http.serve_workers strategy must be "
+                "\"auto\", \"dispatch\" or \"reuse_port\"");
+        return NULL;
+    }
+
+    std::string on_unsupported = "error";
+    std::vector<std::string> required;
+    if (options) {
+        value_t *value = dict_get(options, "on_unsupported");
+        if (value) {
+            if (value->type != T_string) {
+                yyerror("std.http.serve_workers on_unsupported must be a "
+                        "string");
+                return NULL;
+            }
+            on_unsupported = ((string_value_t *)value)->value;
+        }
+        value_t *require_value = dict_get(options, "require");
+        if (require_value && require_value->type != T_null) {
+            if (require_value->type == T_string) {
+                required.push_back(
+                    ((string_value_t *)require_value)->value);
+            } else if (require_value->type == T_list) {
+                for (value_t *item :
+                     ((list_value_t *)require_value)->payload->items) {
+                    if (!item || item->type != T_string) {
+                        yyerror("std.http.serve_workers require entries "
+                                "must be strings");
+                        return NULL;
+                    }
+                    required.push_back(
+                        ((string_value_t *)item)->value);
+                }
+            } else {
+                yyerror("std.http.serve_workers require must be a "
+                        "string or list of strings");
+                return NULL;
+            }
+        }
+    }
+    if (on_unsupported != "error" && on_unsupported != "501" &&
+        on_unsupported != "warn") {
+        yyerror("std.http.serve_workers on_unsupported must be "
+                "\"error\", \"501\" or \"warn\"");
+        return NULL;
+    }
+
+    auto read_option = [&options](const char *key, long long &out) -> bool {
+        if (!options)
+            return true;
+        value_t *value = dict_get(options, key);
+        if (!value)
+            return true;
+        if (value->type != T_int ||
+            ((int_value_t *)value)->value < 0) {
+            yyerror("std.http.serve_workers %s must be a non-negative "
+                    "integer", key);
+            return false;
+        }
+        out = ((int_value_t *)value)->value;
+        return true;
+    };
+
+    long long max_requests = 0;
+    long long max_per_connection = 100;
+    long long idle_timeout_ms = 0;
+    if (options) {
+        if (!read_option("max_requests", max_requests) ||
+            !read_option("max_per_connection", max_per_connection) ||
+            !read_option("idle_timeout_ms", idle_timeout_ms))
+            return NULL;
+    } else {
+        for (size_t i = 3; i < args.size(); ++i) {
+            if (args[i]->type != T_int ||
+                ((int_value_t *)args[i])->value < 0) {
+                yyerror("std.http.serve_workers limits must be "
+                        "non-negative integers");
+                return NULL;
+            }
+            long long value = ((int_value_t *)args[i])->value;
+            if (i == 3)
+                max_requests = value;
+            else if (i == 4)
+                max_per_connection = value;
+            else
+                idle_timeout_ms = value;
+        }
+    }
+
+    long long worker_timeout_ms = 30000;
+    {
+        value_t *value = options ? dict_get(options, "worker_timeout_ms")
+                                 : nullptr;
+        if (!value)
+            value = dict_get(args[0], "worker_timeout_ms");
+        if (value) {
+            if (value->type != T_int ||
+                ((int_value_t *)value)->value < 0) {
+                yyerror("std.http.serve_workers worker_timeout_ms must "
+                        "be a non-negative integer");
+                return NULL;
+            }
+            worker_timeout_ms = ((int_value_t *)value)->value;
+        }
+    }
+
+    bool process_tls = false;
+    {
+        value_t *cert = dict_get(args[0], "cert");
+        value_t *key = dict_get(args[0], "key");
+        process_tls = cert && key;
+    }
+    auto process_capability = [process_tls](const std::string &name) {
+        if (name == "http1" || name == "keep_alive" || name == "dispatch")
+            return true;
+        if (name == "tls")
+            return process_tls;
+        return false;
+    };
+    std::string missing;
+    for (const std::string &name : required) {
+        if (process_capability(name))
+            continue;
+        if (!missing.empty())
+            missing += ", ";
+        missing += name;
+    }
+    bool unsupported_501 = false;
+    std::string unsupported_message;
+    if (!missing.empty()) {
+        if (on_unsupported == "error") {
+            yyerror("std.http.serve_workers: missing capabilities: %s",
+                    missing.c_str());
+            return NULL;
+        }
+        if (on_unsupported == "warn") {
+            std::fprintf(stderr,
+                         "std.http.serve_workers: missing capabilities: "
+                         "%s\n", missing.c_str());
+            std::fflush(stderr);
+        } else {
+            unsupported_501 = true;
+            unsupported_message =
+                "unsupported capabilities: " + missing;
+        }
+    }
+
+    if (options) {
+        long long max_connections = 0;
+        if (!read_option("max_connections", max_connections))
+            return NULL;
+        dict_set(args[0], "max_connections", newintval(max_connections));
+        std::size_t max_header_bytes = 64 * 1024;
+        std::size_t max_headers = 100;
+        std::size_t max_body_bytes = 16 * 1024 * 1024;
+        if (!positive_size_option(options, "max_header_bytes",
+                                  max_header_bytes) ||
+            !positive_size_option(options, "max_headers", max_headers) ||
+            !positive_size_option(options, "max_body_bytes",
+                                  max_body_bytes))
+            return NULL;
+        dict_set(args[0], "max_header_bytes",
+                 newintval((long long)max_header_bytes));
+        dict_set(args[0], "max_headers",
+                 newintval((long long)max_headers));
+        dict_set(args[0], "max_body_bytes",
+                 newintval((long long)max_body_bytes));
+        dict_set(args[0], "worker_timeout_ms",
+                 newintval(worker_timeout_ms));
+    }
+
+    value_t *caps = (value_t *)newdictval();
+    dict_set(caps, "schema", newintval(1));
+    dict_set(caps, "platform",
+             newstrval(http_platform_name().c_str()));
+    dict_set(caps, "strategy", newstrval("dispatch"));
+    value_t *strategies = (value_t *)newlistval();
+    ((list_value_t *)strategies)
+        ->payload->items.push_back(newstrval("dispatch"));
+    dict_set(caps, "strategies", strategies);
+    dict_set(caps, "http1", newboolval(true));
+    dict_set(caps, "http2", newboolval(false));
+    dict_set(caps, "tls", newboolval(process_tls));
+    dict_set(caps, "keep_alive", newboolval(true));
+    dict_set(caps, "stream_request_body", newboolval(false));
+    dict_set(caps, "stream_response", newboolval(false));
+    dict_set(caps, "websocket", newboolval(false));
+    dict_set(caps, "sse", newboolval(false));
+    dict_set(caps, "raw_socket", newboolval(false));
+    dict_set(caps, "reuse_port", newboolval(false));
+    dict_set(caps, "dispatch", newboolval(true));
+    dict_set(args[0], "strategy", newstrval("dispatch"));
+    dict_set(args[0], "platform",
+             newstrval(http_platform_name().c_str()));
+    dict_set(args[0], "capabilities", caps);
+
     value_t *worker_count = dupval(args[1]);
     value_t *script = dupval(args[2]);
-    value_t *options = (value_t *)newdictval();
-    dict_set(options, "protocol", newstrval("hybrid"));
-    std::vector<value_t *> pool_args{worker_count, script, options};
+    value_t *pool_options = (value_t *)newdictval();
+    dict_set(pool_options, "protocol", newstrval("hybrid"));
+    std::vector<value_t *> pool_args{worker_count, script, pool_options};
     value_t *pool = call_worker_builtin(B_worker_pool, pool_args);
     freeval(worker_count);
     freeval(script);
-    freeval(options);
+    freeval(pool_options);
     if (!pool)
         return NULL;
 
@@ -3070,14 +3298,9 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         std::make_shared<pool_holder>();
     holder->pool = pool;
 
-    long long worker_timeout_ms = 30000;
-    value_t *timeout_option = dict_get(args[0], "worker_timeout_ms");
-    if (timeout_option && timeout_option->type == T_int &&
-        ((int_value_t *)timeout_option)->value >= 0)
-        worker_timeout_ms = ((int_value_t *)timeout_option)->value;
-
     value_t *handler = newnativeval(
-        [holder, worker_timeout_ms](
+        [holder, worker_timeout_ms, unsupported_501,
+         unsupported_message](
             const std::vector<value_t *> &call_args) -> value_t * {
             auto error_response = [](int status, const std::string &message) {
                 value_t *response = (value_t *)newdictval();
@@ -3090,6 +3313,11 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                 call_args[0]->type != T_dict)
                 return error_response(400, "invalid HTTP request");
             value_t *request = call_args[0];
+            if (unsupported_501)
+                return error_response(501, unsupported_message);
+            std::string feature;
+            if (request_unsupported_feature(request, feature, false))
+                return error_response(501, feature);
             if (dict_get(request, "body_reader"))
                 return error_response(
                     501, "serve_workers does not support stream_request_body");
@@ -3163,9 +3391,12 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         holder);
 
     std::vector<value_t *> serve_args{args[0], handler};
-    for (size_t i = 3; i < args.size(); ++i)
-        serve_args.push_back(args[i]);
+    serve_args.push_back(newintval(max_requests));
+    serve_args.push_back(newintval(max_per_connection));
+    serve_args.push_back(newintval(idle_timeout_ms));
     value_t *served = http_serve(serve_args);
+    for (size_t i = 2; i < serve_args.size(); ++i)
+        freeval(serve_args[i]);
     freeval(handler);
     return served;
 }

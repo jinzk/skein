@@ -3,8 +3,10 @@
 
 #include "pattern.h"
 #include "valuetype.h"
+#include "bytecode.h"
 
 #include <memory>
+#include <string>
 
 struct ast;
 struct function_code;
@@ -65,5 +67,19 @@ ParamPatternResult skein_vm_match_parameter_pattern(
 void skein_vm_forget_function_code(struct function_code *code);
 /* Clear VM-side function caches before runtime/type teardown. */
 void skein_vm_shutdown();
+
+/*
+ * Prepare an immutable Proto for a thread entry function.
+ * The function must be a non-capturing, synchronous, one-parameter
+ * function whose body can run without the parent's global scope.
+ */
+bool skein_vm_prepare_thread_proto(
+    const struct value_t *function, skein::bc::ProtoPtr &proto,
+    std::string &error);
+
+/* Execute a prepared thread-entry Proto with one argument. */
+bool skein_vm_call_proto(
+    const skein::bc::ProtoPtr &proto, struct value_t *argument,
+    struct value_t *&result, std::string &error);
 
 #endif

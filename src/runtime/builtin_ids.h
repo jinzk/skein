@@ -376,6 +376,7 @@ enum bifs {
     B_thread_pool,
     B_thread_spawn,
     B_thread_spawn_source,
+    B_thread_spawn_function,
     B_thread_select,
     B_thread_try_broadcast,
     B_thread_broadcast,

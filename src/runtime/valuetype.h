@@ -25,6 +25,8 @@ struct function_code {
     bool variadic;
     bool is_async;
     bool is_generator;
+    /* True for `thread func` declarations. */
+    bool is_thread_entry = false;
     int def_line = 0;
     int def_column = 0;
     /* Module that defined this function, used for lazy compilation. */

@@ -144,6 +144,9 @@ struct funcdef {
     int exported;
     int is_async;
     int is_generator;
+    /* True for `thread func` declarations: the function can be used as a
+     * Proto-backed thread entry. */
+    int is_thread_entry;
     /* Set for hidden method bodies so the first parameter keeps method
      * semantics (self is const) when called as an ordinary function. */
     int is_method;

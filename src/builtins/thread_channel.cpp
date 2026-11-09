@@ -2362,6 +2362,70 @@ struct value_t *thread_error_envelope(struct value_t *error) {
     return envelope;
 }
 
+void thread_proto_entry_main(
+    std::shared_ptr<thread_state> state, skein::bc::ProtoPtr proto,
+    struct value_t *argument,
+    std::shared_ptr<const thread_env_snapshot> env_snapshot) {
+    thread_env_install(env_snapshot);
+    std::string begin_error;
+    thread_worker_begin(true, begin_error);
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->startup_done = true;
+        if (!proto)
+            state->startup_error = "invalid thread entry proto";
+    }
+    state->cv.notify_all();
+    if (!proto) {
+        freeval(argument);
+        thread_worker_end();
+        return;
+    }
+
+    eval_capture_snapshot snapshot;
+    eval_capture_begin(snapshot);
+    struct value_t *result = nullptr;
+    std::string call_error;
+    skein_vm_call_proto(proto, argument, result, call_error);
+    eval_capture_result captured = eval_capture_end(snapshot);
+
+    struct value_t *envelope = nullptr;
+    if (captured.failed || !result) {
+        struct value_t *err = captured.error;
+        captured.error = nullptr;
+        if (!err)
+            err = newerrorval("thread", call_error.empty()
+                                           ? "thread function failed"
+                                           : call_error.c_str());
+        std::unordered_set<const void *> visiting;
+        std::string copy_error;
+        struct value_t *safe_error =
+            copy_data_value(err, visiting, copy_error);
+        freeval(err);
+        envelope = thread_error_envelope(
+            safe_error ? safe_error : newerrorval("thread", copy_error));
+    } else {
+        std::unordered_set<const void *> visiting;
+        std::string copy_error;
+        struct value_t *safe_value =
+            copy_data_value(result, visiting, copy_error);
+        freeval(result);
+        if (safe_value)
+            envelope = thread_ok_envelope(safe_value);
+        else
+            envelope = thread_error_envelope(
+                newerrorval("thread", copy_error));
+    }
+    freeval(captured.error);
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->result = envelope;
+        state->done = true;
+    }
+    state->cv.notify_all();
+    thread_worker_end();
+}
+
 void thread_entry_main(
     std::shared_ptr<thread_state> state, const std::string &script,
     const std::string &entry, struct value_t *argument,
@@ -2472,10 +2536,32 @@ void thread_entry_main(
     thread_runtime_leave();
 }
 
+struct value_t *thread_spawn_function(
+    const std::vector<struct value_t *> &args);
+
 struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     if (args.size() < 2 || args.size() > 3 ||
-        args[0]->type != T_string || args[1]->type != T_userdata) {
-        yyerror("std.thread.spawn expects script, Message and optional options");
+        args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn expects script or thread func, Message "
+                "and optional options");
+        return nullptr;
+    }
+    if (args[0]->type == T_func) {
+        const func_value_t *function = (const func_value_t *)args[0];
+        if (!function->def || !function->def->code ||
+            !function->def->code->is_thread_entry) {
+            yyerror("std.thread.spawn function must be declared thread func");
+            return nullptr;
+        }
+        if (args.size() != 2) {
+            yyerror("std.thread.spawn thread func does not accept options");
+            return nullptr;
+        }
+        return thread_spawn_function(args);
+    }
+    if (args[0]->type != T_string) {
+        yyerror("std.thread.spawn expects script or thread func, Message "
+                "and optional options");
         return nullptr;
     }
     std::shared_ptr<message_state> message;
@@ -2530,9 +2616,49 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     return new_thread_value(std::move(state));
 }
 
-struct value_t *thread_spawn_source(
+struct value_t *thread_spawn_function(
     const std::vector<struct value_t *> &args) {
-    if (args.size() < 2 || args.size() > 3 ||
+    if (args.size() != 2 || args[0]->type != T_func ||
+        args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn_function expects function and Message");
+        return nullptr;
+    }
+    skein::bc::ProtoPtr proto;
+    std::string error;
+    if (!skein_vm_prepare_thread_proto(args[0], proto, error)) {
+        yyerror("std.thread.spawn_function: %s", error.c_str());
+        return nullptr;
+    }
+
+    std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
+    state->id = next_thread_id.fetch_add(1);
+    struct value_t *argument = dupval(args[1]);
+    try {
+        state->thread = std::thread(thread_proto_entry_main, state,
+                                    std::move(proto), argument,
+                                    thread_env_capture());
+    } catch (const std::exception &) {
+        freeval(argument);
+        yyerror("std.thread.spawn_function could not start thread");
+        return nullptr;
+    }
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->cv.wait(lock, [&state] { return state->startup_done; });
+    if (!state->startup_error.empty()) {
+        std::string startup_error = state->startup_error;
+        lock.unlock();
+        if (state->thread.joinable())
+            state->thread.join();
+        yyerror("std.thread.spawn_function: %s", startup_error.c_str());
+        return nullptr;
+    }
+    lock.unlock();
+    return new_thread_value(std::move(state));
+}
+
+struct value_t *thread_spawn_source(
+    const std::vector<struct value_t *> &args) {    if (args.size() < 2 || args.size() > 3 ||
         args[0]->type != T_string || args[1]->type != T_userdata) {
         yyerror("std.thread.spawn_source expects source, Message and "
                 "optional options");
@@ -3232,6 +3358,8 @@ struct value_t *call_thread_channel_builtin(
             return thread_spawn(args);
         case B_thread_spawn_source:
             return thread_spawn_source(args);
+        case B_thread_spawn_function:
+            return thread_spawn_function(args);
         case B_thread_select: {
             if (args.empty() || args.size() > 2) {
                 yyerror("std.thread.select expects endpoints and optional "

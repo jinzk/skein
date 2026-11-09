@@ -11,6 +11,7 @@
 #include "structtype.h"
 #include "symbol.h"
 #include "valuetype.h"
+#include "runtime_context.h"
 #include "vm_host.h"
 
 #ifdef SKEIN_ENABLE_JIT
@@ -595,6 +596,99 @@ skein::bc::ProtoPtr skein_vm_prepare_function_body(
     const std::shared_ptr<function_def> &def) {
     ensure_vm_host();
     return prepare_function_body(def);
+}
+
+bool skein_vm_prepare_thread_proto(
+    const struct value_t *function, skein::bc::ProtoPtr &proto,
+    std::string &error) {
+    if (!function || function->type != T_func) {
+        error = "thread entry must be a function";
+        return false;
+    }
+    const func_value_t *value = (const func_value_t *)function;
+    if (!value->def || !value->def->code) {
+        error = "thread entry has no function code";
+        return false;
+    }
+    const std::shared_ptr<function_def> &def = value->def;
+    if (def->closure || !def->upvalues.empty() ||
+        !def->code->upvalues.empty()) {
+        error = "thread entry cannot capture a closure";
+        return false;
+    }
+    if (def->code->nparams != 1 ||
+        def->code->required_params != 1 ||
+        def->code->variadic ||
+        def->code->is_async ||
+        def->code->is_generator ||
+        def->code->is_method) {
+        error = "thread entry must be a synchronous function with one "
+                "parameter";
+        return false;
+    }
+    skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
+    if (!source) {
+        error = "cannot compile thread entry";
+        return false;
+    }
+    if (source->has_closures || source->uses_defers ||
+        !source->defer_protos.empty()) {
+        error = "thread entry cannot use closures or defer";
+        return false;
+    }
+    for (const skein::bc::Constant &constant : source->consts) {
+        if (constant.function) {
+            error = "thread entry contains a nested function";
+            return false;
+        }
+    }
+    for (const skein::bc::PatternDesc &pattern : source->patterns) {
+        if (pattern.literal_expr) {
+            error = "thread entry contains a nested pattern expression";
+            return false;
+        }
+    }
+    std::shared_ptr<skein::bc::Proto> copy =
+        std::make_shared<skein::bc::Proto>(*source);
+    copy->name_ic.clear();
+    copy->member_ic.clear();
+    copy->index_read_ic.clear();
+    proto = std::move(copy);
+    return true;
+}
+
+bool skein_vm_call_proto(
+    const skein::bc::ProtoPtr &proto, struct value_t *argument,
+    struct value_t *&result, std::string &error) {
+    (void)error;
+    if (!proto) {
+        result = nullptr;
+        return false;
+    }
+    ensure_vm_host();
+    std::shared_ptr<function_code> code = std::make_shared<function_code>();
+    code->sl = newsymlist(newsym("ctx"), nullptr, nullptr);
+    code->nparams = (int)proto->nparams;
+    code->required_params = (int)proto->required_params;
+    code->name = proto->name;
+    code->module = proto->module;
+    code->is_async = proto->is_async;
+    code->is_generator = proto->is_generator;
+    code->is_method = proto->is_method;
+    code->variadic = proto->variadic;
+    std::shared_ptr<function_def> def = std::make_shared<function_def>();
+    def->code = code;
+    function_vm_cache &cache = *cache_for(code.get());
+    cache.proto = proto;
+    cache.compile_failed = false;
+    struct func_value_t *function =
+        (struct func_value_t *)newfuncval(code, nullptr);
+    result = skein_call_function((struct value_t *)function, {argument});
+    freeval((struct value_t *)function);
+    skein_vm_forget_function_code(code.get());
+    symlistfree(code->sl);
+    code->sl = nullptr;
+    return true;
 }
 
 static thread_local bool cache_clearing = false;

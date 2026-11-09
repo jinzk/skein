@@ -938,11 +938,13 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
                           node->name ? node->name : "",
                           node->is_method != 0, variadic,
                           node->is_async != 0, node->is_generator != 0,
+                          node->is_thread_entry != 0,
                           node->ast ? node->ast->line : 0,
                           node->ast ? node->ast->column : 0,
                           diag_current_module_name(), {}},
         free_function_code);
     code->source = diag_current_source_name();
+    code->is_thread_entry = node->is_thread_entry != 0;
     code->decorated_generator_async = node->decorated_generator_async != 0;
     if (node->ret_type) {
         code->ret_type =

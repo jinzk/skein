@@ -3103,6 +3103,35 @@ def check_extended_stdlib():
                 stdout_all=["v1=5|", "v2=15|"],
             )
             check(
+                "std.thread thread func proto entry",
+                "import std;\n"
+                "thread func worker(ctx) {\n"
+                '    return {"v": ctx.payload["n"] + 1};\n'
+                "}\n"
+                "let t = std.thread.spawn(worker, "
+                'std.thread.Message.from({"n": 4}));\n'
+                "let r = t.join();\n"
+                'print("v=" + str(r["value"]["v"]) + "|");\n'
+                "func plain(ctx) {\n"
+                '    return {"v": ctx.payload["n"]};\n'
+                "}\n"
+                "let t2 = std.thread.spawn_function(plain, "
+                'std.thread.Message.from({"n": 7}));\n'
+                "let r2 = t2.join();\n"
+                'print("f=" + str(r2["value"]["v"]) + "|");\n',
+                stdout_all=["v=5|", "f=7|"],
+            )
+            check(
+                "std.thread spawn plain function rejected",
+                "import std;\n"
+                "func plain(ctx) {\n"
+                '    return {"v": ctx.payload["n"]};\n'
+                "}\n"
+                "std.thread.spawn(plain, "
+                'std.thread.Message.from({"n": 7}));\n',
+                stderr="must be declared thread func",
+            )
+            check(
                 "std.thread spawn error join",
                 "import std;\n"
                 f'let msg = std.thread.Message.from({{"x": 1, '

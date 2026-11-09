@@ -2885,6 +2885,7 @@ std.thread.unbounded_channel
 std.thread.pool
 std.thread.spawn
 std.thread.spawn_source
+std.thread.spawn_function
 std.thread.duplex
 std.thread.spawn_with_channel
 std.thread.spawn_with_duplex
@@ -4770,6 +4771,7 @@ pool.join();
 ```text
 std.thread.spawn(script, message[, options]) -> thread
 std.thread.spawn_source(source, message[, options]) -> thread
+std.thread.spawn_function(function, message) -> thread
 
 thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
 thread.detach()
@@ -4785,6 +4787,22 @@ entry     默认 "main"
 ```
 
 `spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析。Proto/bytecode 入口仍未启用。
+
+Proto 入口：
+
+```skein
+thread func worker(ctx) {
+    return {"v": ctx.payload["n"] + 1};
+}
+
+let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
+```
+
+- `thread func` 是上下文关键字，只允许顶层声明；
+- 入口必须是同步函数、恰好一个参数，且不能捕获闭包/upvalue；
+- 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
+- 函数体目前要求自包含（参数和语言 builtin），不能依赖父线程全局变量或 `import` 的模块；
+- `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口。
 
 线程入口接收一个 Message：
 

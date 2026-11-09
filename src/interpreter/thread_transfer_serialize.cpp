@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include "dict.h"
+#include "structeval.h"
 #include "structtype.h"
 #include "symbol.h"
 #include "verifier.h"
@@ -11,13 +12,14 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 1u;
+constexpr uint32_t kPayloadVersion = 2u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -740,6 +742,299 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
 bool read_value(reader &in, value_owner &value, int depth,
                 std::string &error) {
     return read_value_inner(in, value, depth, error);
+}
+
+struct type_record {
+    bool is_enum = false;
+    const struct struct_def *structure = nullptr;
+    const struct enum_def *enumeration = nullptr;
+};
+
+using type_map = std::unordered_map<std::string, type_record>;
+
+std::string type_identity(const std::string &module,
+                          const std::string &name) {
+    return module + '\x1f' + name;
+}
+
+void note_type(type_map &types, std::vector<type_record> &order,
+               const struct struct_def *def) {
+    if (!def)
+        return;
+    std::string key = type_identity(def->module, def->name);
+    if (types.count(key))
+        return;
+    type_record record;
+    record.structure = def;
+    types.emplace(key, record);
+    order.push_back(record);
+}
+
+void note_type(type_map &types, std::vector<type_record> &order,
+               const struct enum_def *def) {
+    if (!def)
+        return;
+    std::string key = type_identity(def->module, def->name);
+    if (types.count(key))
+        return;
+    type_record record;
+    record.is_enum = true;
+    record.enumeration = def;
+    types.emplace(key, record);
+    order.push_back(record);
+}
+
+void collect_value_types(const struct value_t *value, type_map &types,
+                         std::vector<type_record> &order, int depth) {
+    if (!value || depth > kMaxDepth)
+        return;
+    switch (value->type) {
+        case T_struct: {
+            const struct struct_value_t *structure =
+                (const struct struct_value_t *)value;
+            note_type(types, order, structure->def);
+            for (const struct value_t *field : structure->payload->fields)
+                collect_value_types(field, types, order, depth + 1);
+            break;
+        }
+        case T_enum: {
+            const struct enum_value_t *enumeration =
+                (const struct enum_value_t *)value;
+            note_type(types, order, enumeration->def);
+            for (const struct value_t *field : enumeration->payload->fields)
+                collect_value_types(field, types, order, depth + 1);
+            break;
+        }
+        case T_result: {
+            const struct result_value_t *result =
+                (const struct result_value_t *)value;
+            collect_value_types(result->ok ? result->value : result->error,
+                                types, order, depth + 1);
+            break;
+        }
+        case T_list: {
+            const struct list_value_t *list =
+                (const struct list_value_t *)value;
+            for (const struct value_t *item : list->payload->items)
+                collect_value_types(item, types, order, depth + 1);
+            break;
+        }
+        case T_dict: {
+            const struct dict_value_t *dict =
+                (const struct dict_value_t *)value;
+            for (const auto &item : dict->payload->items) {
+                collect_value_types(item.first, types, order, depth + 1);
+                collect_value_types(item.second, types, order, depth + 1);
+            }
+            break;
+        }
+        case T_lru: {
+            const struct lru_value_t *lru = (const struct lru_value_t *)value;
+            for (const auto &item : lru->payload->items) {
+                collect_value_types(item.first, types, order, depth + 1);
+                collect_value_types(item.second, types, order, depth + 1);
+            }
+            break;
+        }
+        case T_deque: {
+            const struct deque_value_t *deque =
+                (const struct deque_value_t *)value;
+            std::vector<struct value_t *> items;
+            deque_items_in_order(deque->payload.get(), items);
+            for (const struct value_t *item : items)
+                collect_value_types(item, types, order, depth + 1);
+            break;
+        }
+        case T_set: {
+            const struct set_value_t *set = (const struct set_value_t *)value;
+            std::vector<struct value_t *> items;
+            set_values_in_order(set->payload.get(), items);
+            for (const struct value_t *item : items)
+                collect_value_types(item, types, order, depth + 1);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void collect_transfer_types(const thread_transfer_value &value,
+                            type_map &types,
+                            std::vector<type_record> &order, int depth) {
+    if (depth > kMaxDepth)
+        return;
+    if (value.kind == thread_transfer_value::Kind::Data) {
+        collect_value_types(value.data.get(), types, order, depth + 1);
+    } else if (value.kind == thread_transfer_value::Kind::Namespace) {
+        for (const auto &field : value.fields)
+            collect_transfer_types(field.second, types, order, depth + 1);
+    }
+}
+
+void collect_proto_types(const skein::bc::Proto &proto, type_map &types,
+                         std::vector<type_record> &order, int depth) {
+    if (depth > kMaxDepth)
+        return;
+    for (const skein::bc::Constant &constant : proto.consts) {
+        if (constant.kind == skein::bc::ConstantKind::Value)
+            collect_value_types(constant.value.get(), types, order, depth + 1);
+    }
+    for (const skein::bc::ConstructDesc &construct : proto.constructs) {
+        if (construct.variant.empty()) {
+            note_type(types, order,
+                      structtype_find_struct(construct.module.c_str(),
+                                             construct.name.c_str()));
+        } else {
+            note_type(types, order,
+                      structtype_find_enum(construct.module.c_str(),
+                                           construct.name.c_str()));
+        }
+    }
+    for (const skein::bc::FieldOrEnumDesc &field : proto.field_or_enum) {
+        note_type(types, order,
+                  structtype_find_struct(field.module.c_str(),
+                                         field.base.c_str()));
+        note_type(types, order,
+                  structtype_find_enum(field.module.c_str(),
+                                       field.base.c_str()));
+    }
+    for (const skein::bc::PatternDesc &pattern : proto.patterns) {
+        if (pattern.literal_value)
+            collect_value_types(pattern.literal_value.get(), types, order,
+                                depth + 1);
+        if (pattern.literal_expr)
+            collect_proto_types(*pattern.literal_expr, types, order,
+                                depth + 1);
+    }
+}
+
+bool write_type_metadata(writer &out,
+                         const std::vector<type_record> &types,
+                         std::string &error) {
+    (void)error;
+    out.u32((uint32_t)types.size());
+    for (const type_record &record : types) {
+        out.u8(record.is_enum ? 1 : 0);
+        if (record.is_enum) {
+            const struct enum_def *def = record.enumeration;
+            out.str(def->module);
+            out.str(def->name);
+            out.u8(def->exported ? 1 : 0);
+            out.u32((uint32_t)def->variants.size());
+            for (const struct variant_def &variant : def->variants) {
+                out.str(variant.name);
+                out.u32((uint32_t)variant.fields.size());
+                for (const struct field_def &field : variant.fields) {
+                    out.str(field.name);
+                    write_type(out, &field.type);
+                }
+            }
+        } else {
+            const struct struct_def *def = record.structure;
+            out.str(def->module);
+            out.str(def->name);
+            out.u8(def->exported ? 1 : 0);
+            out.u32((uint32_t)def->fields.size());
+            for (const struct field_def &field : def->fields) {
+                out.str(field.name);
+                write_type(out, &field.type);
+            }
+        }
+    }
+    return true;
+}
+
+bool read_type_metadata(reader &in, std::string &error) {
+    uint32_t count = 0;
+    if (!in.count(count)) {
+        error = in.error;
+        return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        uint8_t is_enum = 0;
+        std::string module;
+        std::string name;
+        uint8_t exported = 0;
+        if (!in.u8(is_enum) || !in.str(module) || !in.str(name) ||
+            !in.u8(exported)) {
+            error = in.error;
+            return false;
+        }
+        if (is_enum) {
+            if (structtype_find_enum(module.c_str(), name.c_str()))
+                continue;
+            uint32_t variant_count = 0;
+            if (!in.count(variant_count)) {
+                error = in.error;
+                return false;
+            }
+            std::vector<variant_meta> variants;
+            variants.reserve(variant_count);
+            for (uint32_t v = 0; v < variant_count; ++v) {
+                variant_meta variant;
+                if (!in.str(variant.name)) {
+                    error = in.error;
+                    return false;
+                }
+                uint32_t field_count = 0;
+                if (!in.count(field_count)) {
+                    error = in.error;
+                    return false;
+                }
+                variant.fields.reserve(field_count);
+                for (uint32_t f = 0; f < field_count; ++f) {
+                    field_meta field;
+                    if (!in.str(field.name) ||
+                        !read_type_value(in, field.type, error)) {
+                        if (error.empty())
+                            error = in.error;
+                        return false;
+                    }
+                    variant.fields.push_back(std::move(field));
+                }
+                variants.push_back(std::move(variant));
+            }
+            std::string declare_error;
+            if (!declare_enum_meta(module.c_str(), module.c_str(),
+                                   name.c_str(), exported != 0, variants,
+                                   nullptr, declare_error)) {
+                error = declare_error.empty()
+                            ? "cannot register thread payload enum type"
+                            : declare_error;
+                return false;
+            }
+        } else {
+            if (structtype_find_struct(module.c_str(), name.c_str()))
+                continue;
+            uint32_t field_count = 0;
+            if (!in.count(field_count)) {
+                error = in.error;
+                return false;
+            }
+            std::vector<field_meta> fields;
+            fields.reserve(field_count);
+            for (uint32_t f = 0; f < field_count; ++f) {
+                field_meta field;
+                if (!in.str(field.name) ||
+                    !read_type_value(in, field.type, error)) {
+                    if (error.empty())
+                        error = in.error;
+                    return false;
+                }
+                fields.push_back(std::move(field));
+            }
+            std::string declare_error;
+            if (!declare_struct_meta(module.c_str(), module.c_str(),
+                                     name.c_str(), exported != 0, fields,
+                                     nullptr, declare_error)) {
+                error = declare_error.empty()
+                            ? "cannot register thread payload struct type"
+                            : declare_error;
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool write_proto(writer &out, const skein::bc::Proto &proto,
@@ -1661,10 +1956,24 @@ bool skein_vm_serialize_thread_payload(
             return false;
     }
 
+    type_map types;
+    std::vector<type_record> type_order;
+    for (const auto &function : order) {
+        collect_proto_types(*function->proto, types, type_order, 0);
+        for (const thread_transfer_value &capture : function->captures)
+            collect_transfer_types(capture, types, type_order, 0);
+    }
+    for (const auto &item : globals)
+        collect_transfer_types(item.second, types, type_order, 0);
+    for (const auto &item : modules)
+        collect_transfer_types(item.second, types, type_order, 0);
+
     writer out;
     out.u32(kPayloadMagic);
     out.u32(kPayloadVersion);
     out.u32(kEndianMarker);
+    if (!write_type_metadata(out, type_order, error))
+        return false;
     out.u32((uint32_t)order.size());
 
     /* Function metadata first so captures can reference any function. */
@@ -1730,6 +2039,8 @@ bool skein_vm_deserialize_thread_payload(
         error = "unsupported thread payload byte order";
         return false;
     }
+    if (!read_type_metadata(in, error))
+        return false;
 
     uint32_t function_count = 0;
     if (!in.count(function_count)) {

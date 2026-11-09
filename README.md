@@ -4814,7 +4814,7 @@ let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
   # 另一个进程：
   let t = std.thread.spawn_encoded(read_bytes("entry.bin"), msg);
   ```
-  当前可序列化的 Proto 不含 type 声明或嵌套函数；data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（目标进程需已注册同名类型）以及 builtin 函数常量，heap 值仍会报错。
+  当前可序列化的 Proto 不含 type 声明或嵌套函数；data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（字段/variant 元数据随 payload 注册，方法/默认值不随类型传输）以及 builtin 函数常量，heap 值仍会报错。
 
 线程入口接收一个 Message：
 

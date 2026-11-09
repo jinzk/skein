@@ -2861,39 +2861,42 @@ def check_extended_stdlib():
             )
             assert dec.stdout.strip() == "17", dec.stdout
 
-            typed_encode_source = (
-                "import std;\n"
-                "struct Point { x: int; y: int; }\n"
-                "enum E { A { n: int; }; B; }\n"
-                "let p = Point { x: 3, y: 4 };\n"
-                "let e = E.A { n: 5 };\n"
-                "func make_worker(pv, ev) {\n"
-                "    thread func worker(ctx) {\n"
-                "        let q = Point { x: pv.x + 1, y: pv.y + 2 };\n"
-                "        let f = E.A { n: ev.n + 1 };\n"
-                '        return {"x": q.x, "y": q.y, "n": f.n};\n'
-                "    }\n"
-                "    return worker;\n"
-                "}\n"
-                'write_bytes("typed_payload.bin", '
-                "std.thread.encode(make_worker(p, e)));\n"
-            )
-            typed_decode_source = (
-                "import std;\n"
-                "struct Point { x: int; y: int; }\n"
-                "enum E { A { n: int; }; B; }\n"
-                'let blob = read_bytes("typed_payload.bin");\n'
-                "let t = std.thread.spawn_encoded(blob, "
-                'std.thread.Message.from({"n": 0}));\n'
-                "let r = t.join();\n"
-                'print(str(r["value"]["x"]) + ":" + '
-                'str(r["value"]["y"]) + ":" + '
-                'str(r["value"]["n"]));\n'
-            )
+            typed_encode = os.path.join(deadlock_tmp,
+                                        "typed_encode_main.skein")
+            with open(typed_encode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "struct Point { x: int; y: int; }\n"
+                    "enum E { A { n: int; }; B; }\n"
+                    "let p = Point { x: 3, y: 4 };\n"
+                    "let e = E.A { n: 5 };\n"
+                    "func make_worker(pv, ev) {\n"
+                    "    thread func worker(ctx) {\n"
+                    "        let q = Point { x: pv.x + 1, y: pv.y + 2 };\n"
+                    "        let f = E.A { n: ev.n + 1 };\n"
+                    '        return {"x": q.x, "y": q.y, "n": f.n};\n'
+                    "    }\n"
+                    "    return worker;\n"
+                    "}\n"
+                    'write_bytes("typed_payload.bin", '
+                    "std.thread.encode(make_worker(p, e)));\n"
+                )
+            typed_decode = os.path.join(deadlock_tmp,
+                                        "typed_decode_main.skein")
+            with open(typed_decode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    'let blob = read_bytes("typed_payload.bin");\n'
+                    "let t = std.thread.spawn_encoded(blob, "
+                    'std.thread.Message.from({"n": 0}));\n'
+                    "let r = t.join();\n"
+                    'print(str(r["value"]["x"]) + ":" + '
+                    'str(r["value"]["y"]) + ":" + '
+                    'str(r["value"]["n"]));\n'
+                )
             enc = subprocess.run(
-                [os.path.abspath(BIN)],
+                [os.path.abspath(BIN), typed_encode],
                 cwd=deadlock_tmp,
-                input=typed_encode_source,
                 capture_output=True,
                 text=True,
                 timeout=20,
@@ -2903,9 +2906,8 @@ def check_extended_stdlib():
                 f"{enc.stdout!r} {enc.stderr!r}"
             )
             dec = subprocess.run(
-                [os.path.abspath(BIN)],
+                [os.path.abspath(BIN), typed_decode],
                 cwd=deadlock_tmp,
-                input=typed_decode_source,
                 capture_output=True,
                 text=True,
                 timeout=20,

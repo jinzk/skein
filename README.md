@@ -762,6 +762,7 @@ max_body_bytes      默认 16 MiB
   运行 `serve_threads(1, ..., strategy:"reuse_port", shared_state_path:...)`，
   独立 bind + listen + accept；
 - `reuse_port` 的 `max_requests` / `served` 通过共享 mmap atomic 跨进程精确计数；
+- `reuse_port` 的 `max_connections` 同样通过共享 mmap atomic 跨进程限制；
 - 当前仅 Linux/BSD 支持进程 `reuse_port`；其他平台显式请求会报错；
 - 用户脚本导出 `handle(req)`，不再手写 IPC 协议：
   ```skein
@@ -849,6 +850,7 @@ func handle(req) {
 - `reuse_port`：每个 worker 线程独立 bind + listen + accept + TLS + HTTP 解析，并在本地执行 `handle(req)`；
 - `reuse_port` 仅 Linux/FreeBSD/DragonFly/Solaris/AIX 支持；其他平台显式请求会报错；
 - `reuse_port` 使用 `max_requests` 的共享原子计数，超过上限的请求返回 503；
+- `reuse_port` 的 `max_connections` 使用共享原子计数，按所有 worker 的活跃连接全局限制；
 - `reuse_port` + TLS 时通过 ALPN 同时支持 `h2` 和 `http/1.1`；明文 reuse_port 当前为 HTTP/1.1；
 - `reuse_port` 支持 `stream_request_body`，worker 直接调用 `std.http.read_body(req)`，不跨线程传输 body；
 - `dispatch` 不支持 `stream_request_body`，启动时报错；

@@ -2808,6 +2808,22 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
         [socket_copy, handler_copy, state, cert_file, key_file, alpn,
          connection_fn]() {
         std::vector<task_ptr> connections;
+        auto reserve_connection = [state]() -> bool {
+            if (state->max_connections <= 0)
+                return true;
+            long long active =
+                state->shared->active_connections.load();
+            while (active < state->max_connections) {
+                if (state->shared->active_connections
+                        .compare_exchange_weak(active, active + 1))
+                    return true;
+            }
+            return false;
+        };
+        auto release_connection = [state]() {
+            if (state->max_connections > 0)
+                state->shared->active_connections.fetch_sub(1);
+        };
         for (;;) {
             if (state->shared->stopping.load())
                 break;
@@ -2823,23 +2839,15 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                 else
                     ++i;
             }
-            if (state->max_connections > 0 &&
-                (long long)connections.size() >=
-                    state->max_connections) {
-                value_t *sleep_task = call_task_builtin(
-                    B_task_sleep, {newintval(20)});
-                value_t *slept = await_task_value(sleep_task);
-                freeval(slept);
-                continue;
-            }
 
             std::vector<value_t *> accept_args;
             accept_args.push_back(dupval(socket_copy));
             accept_args.push_back(newintval(50));
             value_t *accept_task =
                 call_net(B_net_accept_async, accept_args);
-            if (!accept_task)
+            if (!accept_task) {
                 break;
+            }
 
             eval_capture_snapshot snapshot;
             eval_capture_begin(snapshot);
@@ -2898,8 +2906,37 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
 #endif
             }
 
+            bool reserved = false;
+            if (state->max_connections > 0) {
+                while (!reserved) {
+                    if (state->shared->stopping.load())
+                        break;
+                    reserved = reserve_connection();
+                    if (!reserved) {
+                        value_t *sleep_task = call_task_builtin(
+                            B_task_sleep, {newintval(20)});
+                        value_t *slept = await_task_value(sleep_task);
+                        freeval(slept);
+                    }
+                }
+            } else {
+                reserved = true;
+            }
+            if (!reserved) {
+                close_socket(stream);
+                freeval(stream);
+                continue;
+            }
+
             task_ptr connection_task = fiber_start_async(
                 [stream, handler_copy, state, connection_fn]() {
+                struct connection_guard {
+                    std::shared_ptr<http_server_state> state;
+                    ~connection_guard() {
+                        if (state && state->max_connections > 0)
+                            state->shared->active_connections.fetch_sub(1);
+                    }
+                } guard{state};
                 if (connection_fn)
                     connection_fn(stream, handler_copy, state.get());
                 else
@@ -2910,6 +2947,7 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
             if (!connection_task) {
                 close_socket(stream);
                 freeval(stream);
+                release_connection();
                 break;
             }
             connections.push_back(connection_task);
@@ -3431,6 +3469,10 @@ value_t *process_server_build_stats(process_server_state *server) {
     dict_set(stats, "stopping",
              newboolval(server->shared ? server->shared->stopping.load()
                                        : false));
+    dict_set(stats, "connections",
+             newintval(server->shared
+                           ? server->shared->active_connections.load()
+                           : 0));
     dict_set(stats, "strategy", newstrval(server->strategy.c_str()));
     dict_set(stats, "max_requests", newintval(server->max_requests));
     return stats;
@@ -4785,6 +4827,10 @@ value_t *thread_server_get_field(void *data, const char *name) {
                              newboolval(shared
                                             ? shared->stopping.load()
                                             : false));
+                    dict_set(stats, "connections",
+                             newintval(shared
+                                           ? shared->active_connections.load()
+                                           : 0));
                     dict_set(stats, "strategy",
                              newstrval(server->strategy.c_str()));
                     dict_set(stats, "max_requests",
@@ -4804,6 +4850,11 @@ value_t *thread_server_get_field(void *data, const char *name) {
                          newboolval(server->http && server->http->shared
                                         ? server->http->shared->stopping.load()
                                         : false));
+                dict_set(stats, "connections",
+                         newintval(server->http && server->http->shared
+                                       ? server->http->shared
+                                             ->active_connections.load()
+                                       : 0));
                 dict_set(stats, "strategy",
                          newstrval(server->strategy.c_str()));
                 dict_set(stats, "max_requests",

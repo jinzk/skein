@@ -1970,6 +1970,127 @@ def check_extended_stdlib():
                     server.kill()
                     server.wait()
 
+            maxconn_threads_worker = os.path.join(
+                worker_tmp, "maxconn_threads_worker.skein")
+            with open(maxconn_threads_worker, "w",
+                      encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    "  std.time.sleep(300);\n"
+                    '  return {"status": 200, "body": "ok"};\n'
+                    "}\n"
+                )
+            maxconn_threads_path = maxconn_threads_worker.replace(
+                "\\", "\\\\")
+            maxconn_process_worker = os.path.join(
+                worker_tmp, "maxconn_process_worker.skein")
+            with open(maxconn_process_worker, "w",
+                      encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(req) {\n"
+                    "  std.time.sleep(300);\n"
+                    '  return {"status": 200, "body": "ok"};\n'
+                    "}\n"
+                )
+            maxconn_process_path = maxconn_process_worker.replace(
+                "\\", "\\\\")
+
+            def run_connection_limit(label, mode, worker_path):
+                script = os.path.join(
+                    worker_tmp, f"maxconn_{mode}.skein")
+                call = ("serve_threads" if mode == "threads"
+                        else "serve_workers")
+                with open(script, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        'let s = std.http.listen("127.0.0.1", 0);\n'
+                        'println(s["port"]);\n'
+                        "std.io.flush(std.io.stdout);\n"
+                        f"let srv = std.http.{call}(s, 2, "
+                        f"\"{worker_path}\", {{\"strategy\": "
+                        f"\"reuse_port\", \"max_connections\": 1, "
+                        f"\"max_requests\": 2}});\n"
+                        'println("ready");\n'
+                        "std.io.flush(std.io.stdout);\n"
+                        'println("served=" + str(srv.join()));\n'
+                    )
+                server = subprocess.Popen(
+                    [os.path.abspath(BIN), script],
+                    cwd=worker_tmp,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=os.environ.copy(),
+                )
+                try:
+                    port_line = server.stdout.readline().strip()
+                    assert port_line.isdigit(), (
+                        f"{label} did not report a port: "
+                        f"{port_line!r} / {server.stderr.read()}"
+                    )
+                    ready_line = server.stdout.readline().strip()
+                    assert ready_line == "ready", (
+                        f"{label} did not become ready: "
+                        f"{ready_line!r} / {server.stderr.read()}"
+                    )
+                    port = int(port_line)
+                    results = []
+                    results_lock = threading.Lock()
+
+                    def hit(index):
+                        last_error = None
+                        for _ in range(200):
+                            try:
+                                with urllib.request.urlopen(
+                                        f"http://127.0.0.1:{port}/r{index}",
+                                        timeout=10) as response:
+                                    status = response.status
+                                    body = response.read()
+                                with results_lock:
+                                    results.append((status, body))
+                                return
+                            except Exception as exc:
+                                last_error = exc
+                                time.sleep(0.02)
+                        with results_lock:
+                            results.append((None, repr(last_error)))
+
+                    started = time.monotonic()
+                    hits = [
+                        threading.Thread(target=hit, args=(index,))
+                        for index in range(2)
+                    ]
+                    for thread in hits:
+                        thread.start()
+                    for thread in hits:
+                        thread.join()
+                    elapsed = time.monotonic() - started
+                    assert len(results) == 2, results
+                    assert all(status == 200 and body == b"ok"
+                               for status, body in results), results
+                    assert elapsed >= 0.5, (
+                        f"{label} allowed concurrent connections: "
+                        f"{elapsed:.3f}s"
+                    )
+                    out, err = server.communicate(timeout=20)
+                    assert server.returncode == 0, (label, err)
+                    assert "served=2" in out, (label, out)
+                finally:
+                    if server.poll() is None:
+                        server.kill()
+                        server.wait()
+
+            run_connection_limit(
+                "serve_threads max_connections", "threads",
+                maxconn_threads_path)
+            run_connection_limit(
+                "serve_workers max_connections", "workers",
+                maxconn_process_path)
+
             tls_probe = run(
                 'import std;\nstd.dict.has(std, "tls")\n')
             tls_enabled = "= true" in tls_probe.stdout

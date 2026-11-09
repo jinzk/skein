@@ -12,6 +12,7 @@ struct http_shared_state {
     std::atomic<long long> claimed{0};
     std::atomic<long long> served{0};
     std::atomic<bool> stopping{false};
+    std::atomic<long long> active_connections{0};
 };
 
 /* A server request body that the handler reads chunk by chunk. */

@@ -640,6 +640,28 @@ void unregister_select_waiter(
     }
 }
 
+void register_select_fiber_wakes(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    void *handle) {
+    if (!handle)
+        return;
+    for (const auto &channel : channels) {
+        std::lock_guard<std::mutex> lock(channel->mutex);
+        add_fiber_handle(channel->recv_fiber_wakes, handle);
+    }
+}
+
+void unregister_select_fiber_wakes(
+    const std::vector<std::shared_ptr<channel_state>> &channels,
+    void *handle) {
+    if (!handle)
+        return;
+    for (const auto &channel : channels) {
+        std::lock_guard<std::mutex> lock(channel->mutex);
+        remove_fiber_handle(channel->recv_fiber_wakes, handle);
+    }
+}
+
 struct value_t *select_value_result(size_t index, struct value_t *message) {
     struct value_t *result = (struct value_t *)newdictval();
     dict_append_item((struct dict_value_t *)result, newstrval("index"),
@@ -705,15 +727,41 @@ struct value_t *channel_select(
                               timeout_ms > 0 ? timeout_ms : 0);
 
     if (fiber_in_fiber()) {
+        void *wake_handle = event_loop_wake_handle();
+        auto ready = [channels] {
+            for (const auto &channel : channels) {
+                std::lock_guard<std::mutex> lock(channel->mutex);
+                if (!channel->queue.empty() || channel->closed)
+                    return true;
+            }
+            return false;
+        };
         for (;;) {
-            if (struct value_t *ready = select_poll(channels, start))
-                return ready;
-            if (timeout_ms > 0 &&
-                std::chrono::steady_clock::now() >= deadline)
-                return select_timeout_result();
+            if (struct value_t *ready_value = select_poll(channels, start))
+                return ready_value;
             if (g_interrupted)
                 return nullptr;
-            channel_fiber_sleep(1);
+            long long remaining = 0;
+            if (timeout_ms > 0) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= deadline)
+                    return select_timeout_result();
+                remaining =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        deadline - now).count();
+                if (remaining <= 0)
+                    remaining = 1;
+            }
+            bool alive = true;
+            if (wake_handle) {
+                register_select_fiber_wakes(channels, wake_handle);
+                alive = fiber_wait_for(ready, remaining);
+                unregister_select_fiber_wakes(channels, wake_handle);
+            } else {
+                channel_fiber_sleep(1);
+            }
+            if (!alive)
+                return nullptr;
         }
     }
 

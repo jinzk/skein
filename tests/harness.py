@@ -2410,6 +2410,27 @@ def check_extended_stdlib():
                 't.join();\n',
                 stdout="before|after|value=9",
             )
+            check(
+                "std.thread fiber select wait",
+                "import std;\n"
+                "async func watch(empty, signal) {\n"
+                "    return std.thread.select([empty, signal], 2000);\n"
+                "}\n"
+                "async func wait_timeout(ch) {\n"
+                "    return std.thread.select([ch], 10);\n"
+                "}\n"
+                'let signal = std.thread.Channel(1);\n'
+                'let empty = std.thread.Channel(1);\n'
+                'let task = watch(empty, signal);\n'
+                'await std.task.sleep(10);\n'
+                'signal.send(std.thread.Message.from({"x": 11}));\n'
+                'let r = await task;\n'
+                'print("index="); print(r["index"]); print(":");\n'
+                'print(r["value"].payload["x"]);\n'
+                'let timeout = await wait_timeout(empty);\n'
+                'print("timeout="); print(timeout["timeout"]);\n',
+                stdout_all=["index=1:11", "timeout=true"],
+            )
 
             slow_worker = os.path.join(thread_tmp, "thread_pool_slow.skein")
             with open(slow_worker, "w", encoding="utf-8") as handle:

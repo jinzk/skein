@@ -817,6 +817,16 @@ if(BUILD_TESTING)
         TIMEOUT 300
       )
       add_test(
+        NAME http_stress_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/http_stress.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(http_stress_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 300
+      )
+      add_test(
         NAME repl_flush_test
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/repl_flush.py

@@ -2738,6 +2738,36 @@ def check_extended_stdlib():
                 'pool.join();\n',
                 stdout="p=42:hi|e=5|l=true:1:2|d=3:3|s=3:true|",
             )
+            pool_cow_worker = os.path.join(
+                thread_tmp, "thread_pool_cow.skein")
+            with open(pool_cow_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "func handle(payload) {\n"
+                    "    payload[\"nested\"][\"items\"][0] = 99;\n"
+                    "    payload[\"nested\"][\"inner\"][\"v\"] = 42;\n"
+                    "    return payload;\n"
+                    "}\n"
+                )
+            pool_cow_worker_path = pool_cow_worker.replace("\\", "\\\\")
+            check(
+                "std.thread pool result copy on write",
+                "import std;\n"
+                f'let pool = std.thread.pool(1, '
+                f'"{pool_cow_worker_path}");\n'
+                'let items = [1, 2];\n'
+                'let payload = {"nested": {"items": items, '
+                '"inner": {"v": 7}}};\n'
+                'let r = pool.submit(payload).wait();\n'
+                'print("child="); '
+                'print(r["value"]["nested"]["items"][0]); print(":"); '
+                'print(r["value"]["nested"]["inner"]["v"]);\n'
+                'print("parent="); '
+                'print(payload["nested"]["items"][0]); print(":"); '
+                'print(payload["nested"]["inner"]["v"]);\n'
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout_all=["child=99:42", "parent=1:7"],
+            )
 
             spawn_worker = os.path.join(
                 thread_tmp, "thread_spawn_worker.skein")
@@ -2972,6 +3002,40 @@ def check_extended_stdlib():
                 'print(bytes_to_string(view["body"])); print(":"); '
                 'print(view["x"]);\n',
                 stdout_all=["child=99:Zb:42", "parent=1:ab:1"],
+            )
+            cow_result_worker = os.path.join(
+                thread_tmp, "thread_cow_result_worker.skein")
+            with open(cow_result_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func main(ctx) {\n"
+                    "    let shared = {\"items\": [1, 2], "
+                    "\"inner\": {\"v\": 7}};\n"
+                    "    ctx.handles[\"signal\"].send("
+                    "std.thread.Message.from({\"shared\": shared}));\n"
+                    "    return {\"shared\": shared};\n"
+                    "}\n"
+                )
+            cow_result_worker_path = cow_result_worker.replace("\\", "\\\\")
+            check(
+                "std.thread result copy on write",
+                "import std;\n"
+                'let ch = std.thread.Channel(1);\n'
+                'let msg = std.thread.Message.from({"x": 0}, '
+                '{"signal": ch});\n'
+                f'let t = std.thread.spawn("{cow_result_worker_path}", '
+                f'msg);\n'
+                'let signal = ch.recv();\n'
+                'let r = t.join();\n'
+                'let out = r["value"]["shared"];\n'
+                'out["items"][0] = 99;\n'
+                'out["inner"]["v"] = 42;\n'
+                'print("result="); print(out["items"][0]); print(":"); '
+                'print(out["inner"]["v"]);\n'
+                'print("signal="); '
+                'print(signal.payload["shared"]["items"][0]); print(":"); '
+                'print(signal.payload["shared"]["inner"]["v"]);\n',
+                stdout_all=["result=99:42", "signal=1:7"],
             )
             check(
                 "std.thread select data and timeout",

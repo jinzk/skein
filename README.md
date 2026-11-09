@@ -4734,7 +4734,7 @@ pool.join();
 - worker 发生未捕获的原生异常时，当前 job 的 future 返回 `error("thread.worker_crashed", ...)`；
 - `restart_limit > 0` 时异常退出的 worker 会被重启，最多重启该次数；
 - 所有 worker 死亡后，新的 `submit` 报 `thread.pool_failed`；
-- `pool.submit` 会复制容器结构，string/bytes 共享底层 buffer；`submit(value, timeout_ms)` 超时抛 `thread.timeout`；
+- `pool.submit` 共享经过校验的 payload（容器 COW，string/bytes 共享底层 buffer），写入时分离；`submit(value, timeout_ms)` 超时抛 `thread.timeout`；
 - `future.cancel()` 关闭结果通道；之后的 `wait()` 抛 `thread.cancelled`，`try_wait()` 返回 `canceled: true`；
 - `pool.close()` 停止接收新 job，worker 排空后退出；
 - `pool.join()` 等待 worker 线程结束；
@@ -4798,7 +4798,7 @@ print(result["value"]["x"]);
 - `join()` 返回 `{ok, value}` 或 `{ok:false, error}`；
 - `detach()` 后线程自行运行和退出；
 - `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
-- 子线程结果必须是 data-only 值。
+- 子线程结果必须是 data-only 值；返回值经校验后按 COW 共享，调用方写入时分离。
 
 ### 双向 duplex
 

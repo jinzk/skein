@@ -268,7 +268,7 @@ def check_encoding_two_byte_tables():
                     f'"{encoding}"), "{encoding}"))'
                 )
                 expected.append("= " + hex_data)
-        proc = run("\n".join(lines) + "\n", timeout=30)
+        proc = run("\n".join(lines) + "\n", timeout=max(30.0, DEFAULT_TIMEOUT))
         assert proc.returncode == 0, proc.stderr
         actual = [line.strip() for line in proc.stdout.splitlines()
                   if line.strip()]
@@ -313,7 +313,7 @@ def check_unicode_normalization_samples():
                     form.upper(), sample).encode("utf-8").hex()
             )
 
-    proc = run("\n".join(lines) + "\n", timeout=30)
+    proc = run("\n".join(lines) + "\n", timeout=max(30.0, DEFAULT_TIMEOUT))
     assert proc.returncode == 0, proc.stderr
     actual = [line.strip() for line in proc.stdout.splitlines()
               if line.strip()]
@@ -1469,7 +1469,11 @@ def check_extended_stdlib():
             assert len(concurrent_results) == 2
             assert all(status == 200 and body == b"payload"
                        for status, body in concurrent_results)
-            assert elapsed < 0.55, (
+            sanitized = bool(
+                os.environ.get("ASAN_OPTIONS")
+                or os.environ.get("TSAN_OPTIONS"))
+            limit = 0.9 if sanitized else 0.55
+            assert elapsed < limit, (
                 "serve_workers handled requests sequentially: "
                 f"{elapsed:.3f}s"
             )
@@ -1620,7 +1624,11 @@ def check_extended_stdlib():
             elapsed = time.monotonic() - started
             assert len(results) == 2
             assert all(status == 200 for status, _ in results)
-            assert elapsed < 0.55, (
+            sanitized = bool(
+                os.environ.get("ASAN_OPTIONS")
+                or os.environ.get("TSAN_OPTIONS"))
+            limit = 0.9 if sanitized else 0.55
+            assert elapsed < limit, (
                 "serve_threads handled requests sequentially: "
                 f"{elapsed:.3f}s"
             )

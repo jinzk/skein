@@ -633,12 +633,16 @@ def run_cases():
             http_server_proc.stdin.write(
                 "import std;\n"
                 f'let s = std.http.listen("127.0.0.1", {http_port});\n'
+                'println("ready");\n'
+                "std.io.flush(std.io.stdout);\n"
                 "let req = std.http.accept(s, 10000);\n"
                 'std.http.respond(req, 200, {"X-Test": "yes"}, '
                 '"hello " + req["path"]);\n'
                 "std.http.close(s);\n"
             )
             http_server_proc.stdin.close()
+            ready_line = http_server_proc.stdout.readline().strip()
+            assert ready_line == "ready", ready_line
             deadline = time.time() + 5
             while time.time() < deadline:
                 try:
@@ -685,12 +689,16 @@ def run_cases():
             http_async_server_proc.stdin.write(
                 "import std;\n"
                 f'let s = std.http.listen("127.0.0.1", {http_async_port});\n'
+                'println("ready");\n'
+                "std.io.flush(std.io.stdout);\n"
                 "let req = await std.http.accept_async(s, 10000);\n"
                 'await std.http.respond_async(req, 200, '
                 '{"X-Async": "yes"}, "async " + req["path"]);\n'
                 "std.http.close(s);\n"
             )
             http_async_server_proc.stdin.close()
+            async_ready_line = http_async_server_proc.stdout.readline().strip()
+            assert async_ready_line == "ready", async_ready_line
             deadline = time.time() + 5
             while time.time() < deadline:
                 try:

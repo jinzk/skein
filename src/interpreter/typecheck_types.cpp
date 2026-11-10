@@ -517,10 +517,13 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
     }
     if (actual->nullable)
         return MatchResult::Mismatch;
-    if (actual->kind == TYPE_NULL) {
-        return expected->kind == TYPE_NULL ? MatchResult::Ok
-                                           : MatchResult::Mismatch;
+    if (actual->kind == TYPE_NULL || actual->kind == TYPE_VOID) {
+        return expected->kind == TYPE_NULL || expected->kind == TYPE_VOID
+                   ? MatchResult::Ok
+                   : MatchResult::Mismatch;
     }
+    if (expected->kind == TYPE_VOID)
+        return MatchResult::Mismatch;
 
     if (expected->kind == TYPE_NUMBER) {
         if (actual->kind == TYPE_INT || actual->kind == TYPE_FLOAT ||

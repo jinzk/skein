@@ -23,6 +23,8 @@ enum type_constraint_kind {
     TYPE_BUILTIN,
     TYPE_CALLABLE,
     TYPE_NULL,
+    /* Static-only "no successful value"; runtime value is null. */
+    TYPE_VOID,
     TYPE_USERDATA,
     TYPE_RESULT,
     TYPE_ERROR,

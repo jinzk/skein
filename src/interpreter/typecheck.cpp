@@ -609,9 +609,19 @@ struct Checker : public BuiltinContext {
             const TypeNode *result = type_any();
             if (!check_call(expr, expected, env, result) || error_)
                 return false;
-            if (((struct ufncall *)expr)->launch && result &&
-                result->kind != TYPE_TASK)
+            if (((struct ufncall *)expr)->launch && result) {
+                if (result->kind == TYPE_TASK) {
+                    char message[512];
+                    std::snprintf(
+                        message, sizeof(message),
+                        "launch cannot start a call that already returns %s; "
+                        "call it directly and use .wait()",
+                        type_display(result));
+                    report_error(expr->line, expr->column, message);
+                    return false;
+                }
                 result = type_container(TYPE_TASK, {result});
+            }
             invalidate_method_receiver(
                 ((struct ufncall *)expr)->callee, env);
             return warn_or_error(result, expected, expr->line,
@@ -2718,9 +2728,19 @@ struct Checker : public BuiltinContext {
             case 'C': {
                 const TypeNode *result = type_any();
                 check_call(expr, type_any(), env, result);
-                if (((struct ufncall *)expr)->launch && result &&
-                    result->kind != TYPE_TASK)
+                if (((struct ufncall *)expr)->launch && result) {
+                    if (result->kind == TYPE_TASK) {
+                        char message[512];
+                        std::snprintf(
+                            message, sizeof(message),
+                            "launch cannot start a call that already returns "
+                            "%s; call it directly and use .wait()",
+                            type_display(result));
+                        report_error(expr->line, expr->column, message);
+                        return type_any();
+                    }
                     result = type_container(TYPE_TASK, {result});
+                }
                 invalidate_method_receiver(
                     ((struct ufncall *)expr)->callee, env);
                 return result;

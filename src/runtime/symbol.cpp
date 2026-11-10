@@ -151,6 +151,7 @@ const builtin_type_name kBuiltinTypeNames[] = {
     {"builtin", "builtin", TYPE_BUILTIN},
     {"callable", "callable", TYPE_CALLABLE},
     {"null", "null", TYPE_NULL},
+    {"void", "void", TYPE_VOID},
     {"userdata", "userdata", TYPE_USERDATA},
     {"result", "result", TYPE_RESULT},
     {"error", "error", TYPE_ERROR},
@@ -247,6 +248,7 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_func || value->type == T_builtin ||
                    value->type == T_method || value->type == T_native;
         case TYPE_NULL:
+        case TYPE_VOID:
             return value->type == T_null;
         case TYPE_USERDATA:
             return value->type == T_userdata;
@@ -332,6 +334,7 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_BUILTIN: base = "builtin"; break;
         case TYPE_CALLABLE: base = "callable"; break;
         case TYPE_NULL: base = "null"; break;
+        case TYPE_VOID: base = "void"; break;
         case TYPE_USERDATA: base = "userdata"; break;
         case TYPE_RESULT: base = "result"; break;
         case TYPE_ERROR: base = "error"; break;

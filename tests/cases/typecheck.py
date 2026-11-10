@@ -691,6 +691,25 @@ def run_cases():
           stderr="type error: expected (int) -> task[int], "
                  "got (int) -> task[string]")
 
+    check("launch task void",
+          "func noop(): void { let x = 1; }\n"
+          "let t: task[void] = launch noop();\n"
+          "println(str(t.wait()));\n",
+          stdout="null", not_stderr="type warning")
+
+    check("launch task any",
+          "func work(n) { return n + 1; }\n"
+          "let t: task[any] = launch work(41);\n"
+          "println(t.wait());\n",
+          stdout="42", not_stderr="type warning")
+
+    check("task invariant mismatch",
+          "struct Dog { name: string; }\n"
+          "struct Animal { name: string; }\n"
+          "func make_dog(): Dog { return Dog { name: \"d\" }; }\n"
+          "let t: task[Animal] = launch make_dog();\n",
+          stderr="expected task[Animal], got task[Dog]")
+
     check("async lambda task type",
           "let add = async func(a: int, b: int): int {\n"
           "  return a + b;\n"

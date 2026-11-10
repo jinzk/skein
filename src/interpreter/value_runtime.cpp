@@ -784,6 +784,7 @@ struct value_t *default_value_for_type(
         case TYPE_SET:
             return (struct value_t *)newsetval();
         case TYPE_NULL:
+        case TYPE_VOID:
         case TYPE_ANY:
             return newnull();
         case TYPE_FUNCTION:

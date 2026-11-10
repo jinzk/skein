@@ -33,6 +33,7 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_BUILTIN: return "builtin";
         case TYPE_CALLABLE: return "callable";
         case TYPE_NULL: return "null";
+        case TYPE_VOID: return "void";
         case TYPE_USERDATA: return "userdata";
         case TYPE_RESULT: return "result";
         case TYPE_ERROR: return "error";

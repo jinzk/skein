@@ -602,6 +602,24 @@ static struct ast *new_call_with_placeholders(
 }
 
 /*
+ * `launch` binds to a call expression, but `launch f(x).wait()` must launch
+ * `f(x)` and then call `.wait()` on the task instead of launching the whole
+ * chain.  Attribute calls whose receiver is itself a call keep the historical
+ * tight-binding behaviour by descending to the receiver call.
+ */
+static struct ast *launch_target_call(struct ast *node) {
+    struct ast *current = node;
+    while (current && current->nodetype == 'C') {
+        struct ast *callee = ((struct ufncall *)current)->callee;
+        if (!callee || callee->nodetype != 'j' || !callee->l ||
+            callee->l->nodetype != 'C')
+            break;
+        current = callee->l;
+    }
+    return current;
+}
+
+/*
  * `struct Name with Trait, pkg.Other { ... }` and the enum form lower to
  * the declaration followed by `impl Trait for Name;` statements.  `with` is
  * not a reserved word: it is parsed as a NAME and validated here, so code
@@ -901,7 +919,6 @@ static struct type_constraint *runtime_type_or_error(
 %right INC DEC
 %precedence '['
 %precedence '.'
-%precedence LAUNCH
 %precedence '('
 %precedence ON
 %precedence NOELSE
@@ -1746,13 +1763,14 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | MATCH exp BODY_LBRACE match_arms '}'
                                            { $$ = newmatch($2, $4); }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
-    | LAUNCH exp %prec LAUNCH {
-        if (!$2 || $2->nodetype != 'C') {
+    | LAUNCH exp %prec UMINUS {
+        struct ast *target = launch_target_call($2);
+        if (!target || target->nodetype != 'C') {
             yyerror("launch expects a call expression");
             treefree($2);
             $$ = NULL;
         } else {
-            ((struct ufncall *)$2)->launch = 1;
+            ((struct ufncall *)target)->launch = 1;
             $$ = $2;
         }
       }

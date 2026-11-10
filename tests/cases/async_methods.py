@@ -294,12 +294,18 @@ def run_cases():
     )
 
     check(
-        "launch adopts async task",
+        "launch rejects statically task-returning callee",
         "import std;\n"
-        "async func add(a, b) { return a + b; }\n"
-        "let t = launch add(2, 3);\n"
-        "println(t.wait());\n",
-        stdout="5\n",
+        "async func add(a: int, b: int): int { return a + b; }\n"
+        "launch add(2, 3);\n",
+        stderr="launch cannot start a call that already returns task[int]",
+    )
+
+    check(
+        "launch rejects task builtin",
+        "import std;\n"
+        "launch std.task.sleep(1);\n",
+        stderr="launch cannot start a call that already returns task[null]",
     )
 
     check(
@@ -333,39 +339,39 @@ def run_cases():
     check(
         "launch structured waits for children",
         "import std;\n"
-        "async func child() {\n"
-        "  await std.task.sleep(10);\n"
+        "func child() {\n"
+        "  std.task.sleep(10).wait();\n"
         '  println("child");\n'
         "  return 1;\n"
         "}\n"
-        "async func parent() {\n"
+        "func parent() {\n"
         "  let t = launch child();\n"
         '  println("parent-body");\n'
         "  return 0;\n"
         "}\n"
-        "println(await parent());\n",
+        "println(launch parent().wait());\n",
         stdout="parent-body\nchild\n0\n",
     )
 
     check(
         "launch child failure cancels siblings",
         "import std;\n"
-        "async func ok(tag) {\n"
-        "  await std.task.sleep(20);\n"
+        "func ok(tag) {\n"
+        "  std.task.sleep(20).wait();\n"
         '  println("ok-" + tag);\n'
         "  return tag;\n"
         "}\n"
-        "async func bad() {\n"
-        "  await std.task.sleep(5);\n"
+        "func bad() {\n"
+        "  std.task.sleep(5).wait();\n"
         '  fail "sibling-fail";\n'
         "}\n"
-        "async func parent() {\n"
+        "func parent() {\n"
         '  let a = launch ok("a");\n'
         "  let b = launch bad();\n"
         '  let c = launch ok("c");\n'
         "  return 0;\n"
         "}\n"
-        "println(await parent());\n",
+        "println(launch parent().wait());\n",
         stderr="sibling-fail",
         not_stderr="ok-a",
     )
@@ -373,19 +379,19 @@ def run_cases():
     check(
         "launch detach removes structured wait",
         "import std;\n"
-        "async func child() {\n"
-        "  await std.task.sleep(10);\n"
+        "func child() {\n"
+        "  std.task.sleep(10).wait();\n"
         '  println("child");\n'
         "  return 1;\n"
         "}\n"
-        "async func parent() {\n"
+        "func parent() {\n"
         "  let t = launch child();\n"
         "  t.detach();\n"
         '  println("parent");\n'
         "  return 0;\n"
         "}\n"
-        "println(await parent());\n"
-        "await std.task.sleep(30);\n",
+        "println(launch parent().wait());\n"
+        "std.task.sleep(30).wait();\n",
         stdout="parent\n0\nchild\n",
     )
 

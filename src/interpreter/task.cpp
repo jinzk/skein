@@ -338,20 +338,36 @@ value_t *task_wait(const std::vector<value_t *> &args) {
         return NULL;
 
     if (!value->done()) {
-        if (!event_loop_init()) {
-            yyerror("task.wait: cannot initialize event loop");
-            return NULL;
-        }
-        event_timeout timeout = make_event_timeout(timeout_ms);
-        while (!value->done()) {
-            if (g_interrupted)
-                return NULL;
-            if (event_timeout_expired(timeout)) {
-                report_timeout("task.wait", timeout_ms);
+        if (fiber_in_fiber()) {
+            /*
+             * A task waited on from a fiber must suspend that fiber instead
+             * of driving the event loop inline; otherwise sibling tasks and
+             * the structured parent scope cannot make progress.
+             */
+            if (timeout_ms <= 0)
+                return fiber_await_task(value);
+            auto ready = [value]() { return value->done(); };
+            if (!fiber_wait_for(ready, timeout_ms) || !value->done()) {
+                if (!value->done())
+                    report_timeout("task.wait", timeout_ms);
                 return NULL;
             }
-            uv_run(event_loop_handle(), UV_RUN_ONCE);
-            fiber_pump();
+        } else {
+            if (!event_loop_init()) {
+                yyerror("task.wait: cannot initialize event loop");
+                return NULL;
+            }
+            event_timeout timeout = make_event_timeout(timeout_ms);
+            while (!value->done()) {
+                if (g_interrupted)
+                    return NULL;
+                if (event_timeout_expired(timeout)) {
+                    report_timeout("task.wait", timeout_ms);
+                    return NULL;
+                }
+                uv_run(event_loop_handle(), UV_RUN_ONCE);
+                fiber_pump();
+            }
         }
     }
 
@@ -390,29 +406,45 @@ value_t *task_wait_all(const std::vector<value_t *> &args) {
     }
 
     if (!tasks.empty()) {
-        if (!event_loop_init()) {
-            yyerror("task.wait_all: cannot initialize event loop");
-            return NULL;
-        }
-        event_timeout timeout = make_event_timeout(timeout_ms);
-        for (;;) {
-            bool all_done = true;
-            for (size_t i = 0; i < tasks.size(); ++i) {
-                if (!tasks[i]->done()) {
-                    all_done = false;
-                    break;
+        auto all_done = [&tasks]() {
+            for (const std::shared_ptr<task> &item : tasks) {
+                if (!item->done())
+                    return false;
+            }
+            return true;
+        };
+        if (fiber_in_fiber()) {
+            if (timeout_ms <= 0) {
+                for (const std::shared_ptr<task> &item : tasks) {
+                    if (item->done())
+                        continue;
+                    value_t *result = fiber_await_task(item);
+                    if (!result)
+                        return NULL;
+                    freeval(result);
                 }
-            }
-            if (all_done)
-                break;
-            if (g_interrupted)
-                return NULL;
-            if (event_timeout_expired(timeout)) {
-                report_timeout("task.wait_all", timeout_ms);
+            } else if (!fiber_wait_for(all_done, timeout_ms) ||
+                       !all_done()) {
+                if (!all_done())
+                    report_timeout("task.wait_all", timeout_ms);
                 return NULL;
             }
-            uv_run(event_loop_handle(), UV_RUN_ONCE);
-            fiber_pump();
+        } else {
+            if (!event_loop_init()) {
+                yyerror("task.wait_all: cannot initialize event loop");
+                return NULL;
+            }
+            event_timeout timeout = make_event_timeout(timeout_ms);
+            while (!all_done()) {
+                if (g_interrupted)
+                    return NULL;
+                if (event_timeout_expired(timeout)) {
+                    report_timeout("task.wait_all", timeout_ms);
+                    return NULL;
+                }
+                uv_run(event_loop_handle(), UV_RUN_ONCE);
+                fiber_pump();
+            }
         }
     }
 

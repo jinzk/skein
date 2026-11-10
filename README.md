@@ -537,8 +537,8 @@ let t = launch work(41);
 println(t.wait());     // 42
 println(t.done());     // true
 
-async func fetch() { await std.task.sleep(10); return "ok"; }
-let f = launch fetch();  // async callee 在运行时 adopt，不会产生 task[task[T]]
+func fetch() { std.task.sleep(10).wait(); return "ok"; }
+let f = launch fetch();
 println(f.wait());
 ```
 
@@ -566,8 +566,11 @@ t.detached() -> bool
 当前限制：
 
 - `launch` 是保留关键字（不要求 `f` 为 async）；
-- `launch` 推导为 `task[T]`；callee 已返回 task 时保持该 `task[T]`（运行时 adopt，不产生 `task[task[T]]`）；
-- 静态“禁止 launch task-returning 函数”的检查留到移除 `async` 后；
+- `launch` 推导为 `task[T]`；`func f(): void` 推导为 `task[void]`；
+- 静态已知返回 `task[...]` 的调用不能 `launch`，会报
+  `launch cannot start a call that already returns task[...]; call it directly and use .wait()`；
+- 只有 `any`/未知 callee 才允许运行时 adopt/proxy，不会产生 `task[task[T]]`；
+- `task[T]` 采用 invariant：`task[Dog]` 不能赋给 `task[Animal]`；
 - 跨线程不能直接 `wait` task，继续使用 Channel/Message。
 
 HTTP/1.1 客户端：
@@ -1476,36 +1479,47 @@ std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
 - `serve_threads` / `serve_processes` / `reuse_port` 使用同一套证书上下文缓存，
   轮换对所有 worker 生效；
 
-async / await：
+并发：`launch` / `task`（推荐）：
 
 ```text
 import std;
 
-async func fetch(port) {
-  let socket = await std.net.tcp_connect_task("127.0.0.1", port, 1000);
-  let data = await std.net.recv_task(socket, 4096, 1000);
+func fetch(port) {
+  let socket = std.net.tcp_connect_task("127.0.0.1", port, 1000).wait();
+  let data = std.net.recv_task(socket, 4096, 1000).wait();
   std.net.close(socket);
   return data;
 }
 
-let a = fetch(8080);
-let b = fetch(8081);
+let a = launch fetch(8080);
+let b = launch fetch(8081);
 
-let da = await a;
-let db = await b;
+let da = a.wait();
+let db = b.wait();
 ```
 
 规则：
 
-- `async` 修饰函数，调用后返回 task；
-- async 函数调用后立即开始运行，遇到第一个 `await` 时挂起；
-- `await` 只能用于 async 函数或顶层；
-- 普通函数不能使用 `await`；
-- 多个 async 函数可以先启动，再分别 await，从而并发执行；
-- async 函数内部错误会变成 task 失败；
-- `await` 未捕获的 task 失败会报错，`await std.task.catch(task)` 可以恢复；
-- `yield` 不用于 async；主动让出使用 `await std.task.yield()`；
+- 普通函数可以直接调用会挂起的 API，并在当前 fiber 上隐式挂起；
+- `launch` 创建新 task，立即返回 `task[T]`，不阻塞、不自动 `.wait()`；
+- `t.wait()` 等待并返回值；`std.task.wait(t)` 保留为兼容别名；
+- 多个 task 可以先 `launch`，再分别 `wait()`，从而并发执行；
+- task 内部错误会变成 task 失败，在 `wait()` 处抛出；
+- `t.try_wait()` 返回 `result[T]`，用于不抛出地检查结果；
+- `yield` 不用于 task；主动让出使用 `std.task.yield()`；
 - 协程栈由 Boost.Context 提供，支持 Boost.Context 覆盖的平台。
+
+旧 `async` / `await` 语法仍作为 deprecated alias 保留：
+
+```text
+async func old_fetch(port) {
+  return await std.net.tcp_connect_task("127.0.0.1", port, 1000);
+}
+let t = await old_fetch(8080);
+```
+
+新代码应使用普通函数 + `launch` + `.wait()`；`async` 函数仍是 task-returning，
+因此不能直接 `launch old_fetch(...)`，需要改为普通函数。
 
 生成器：
 

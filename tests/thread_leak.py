@@ -82,8 +82,8 @@ def main():
             "let t6 = std.thread.spawn(transfer, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined6 = t6.join();\n"
-            "let encoded_blob = std.thread.encode(transfer);\n"
-            "let t7 = std.thread.spawn_encoded(encoded_blob, "
+            "let encoded_blob = std.entry.encode(transfer);\n"
+            "let t7 = std.thread.spawn_entry(encoded_blob, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined7 = t7.join();\n"
             "struct MB { x: int = 4; }\n"
@@ -96,9 +96,9 @@ def main():
             "    }\n"
             "    return inner;\n"
             "}\n"
-            "let method_blob = std.thread.encode("
+            "let method_blob = std.entry.encode("
             "make_method_worker(mb));\n"
-            "let t8 = std.thread.spawn_encoded(method_blob, "
+            "let t8 = std.thread.spawn_entry(method_blob, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined8 = t8.join();\n"
             'println("pool=" + str(r1["value"]["v"]) + ":" + '

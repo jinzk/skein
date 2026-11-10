@@ -3548,9 +3548,9 @@ struct value_t *thread_spawn_function(
                                 args[1], "std.thread.spawn_function");
 }
 
-struct value_t *thread_encode(const std::vector<struct value_t *> &args) {
+struct value_t *entry_encode(const std::vector<struct value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_func) {
-        yyerror("std.thread.encode expects a function");
+        yyerror("std.entry.encode expects a function");
         return nullptr;
     }
     thread_payload_builder builder;
@@ -3558,24 +3558,24 @@ struct value_t *thread_encode(const std::vector<struct value_t *> &args) {
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
     std::vector<thread_transfer_module> modules;
     if (!builder.build_entry(args[0], entry, globals, modules)) {
-        yyerror("std.thread.encode: %s", builder.error.c_str());
+        yyerror("std.entry.encode: %s", builder.error.c_str());
         return nullptr;
     }
     std::string bytes;
     std::string error;
     if (!skein_vm_serialize_thread_payload(entry, globals, modules, bytes,
                                            error)) {
-        yyerror("std.thread.encode: %s", error.c_str());
+        yyerror("std.entry.encode: %s", error.c_str());
         return nullptr;
     }
     return newbytesval(std::move(bytes));
 }
 
-struct value_t *thread_spawn_encoded(
+struct value_t *thread_spawn_entry(
     const std::vector<struct value_t *> &args) {
     if (args.size() != 2 || args[0]->type != T_bytes ||
         args[1]->type != T_userdata) {
-        yyerror("std.thread.spawn_encoded expects bytes and Message");
+        yyerror("std.thread.spawn_entry expects bytes and Message");
         return nullptr;
     }
     const std::string &bytes =
@@ -3587,12 +3587,12 @@ struct value_t *thread_spawn_encoded(
     std::string error;
     if (!skein_vm_deserialize_thread_payload(bytes, entry, globals, modules,
                                              types, error)) {
-        yyerror("std.thread.spawn_encoded: %s", error.c_str());
+        yyerror("std.thread.spawn_entry: %s", error.c_str());
         return nullptr;
     }
     return thread_spawn_payload(std::move(entry), std::move(globals),
                                 std::move(modules), std::move(types), args[1],
-                                "std.thread.spawn_encoded");
+                                "std.thread.spawn_entry");
 }
 
 struct value_t *thread_spawn_source(
@@ -4162,7 +4162,7 @@ bool take_u32(const std::string &data, std::size_t &pos, uint32_t &value) {
 
 } // namespace
 
-bool thread_run_encoded_blocking(const std::string &bytes,
+bool thread_run_entry_blocking(const std::string &bytes,
                                  struct value_t *message,
                                  struct value_t *&result,
                                  std::string &error) {
@@ -4176,7 +4176,7 @@ bool thread_run_encoded_blocking(const std::string &bytes,
     struct value_t *argument = dupval(message);
     struct value_t *thread = thread_spawn_payload(
         std::move(entry), std::move(globals), std::move(modules),
-        std::move(types), argument, "std.process.spawn_encoded");
+        std::move(types), argument, "std.process.spawn_entry");
     if (!thread) {
         error = "could not start encoded process entry";
         return false;
@@ -4201,7 +4201,7 @@ bool thread_run_encoded_blocking(const std::string &bytes,
     return true;
 }
 
-bool thread_run_encoded_request(const std::string &request,
+bool thread_run_entry_request(const std::string &request,
                                 std::string &result, std::string &error) {
     std::size_t pos = 0;
     uint32_t magic = 0;
@@ -4241,7 +4241,7 @@ bool thread_run_encoded_request(const std::string &request,
     message_state->handles = (struct value_t *)newdictval();
     struct value_t *message = new_message_value(std::move(message_state));
     struct value_t *envelope = nullptr;
-    bool ok = thread_run_encoded_blocking(entry_bytes, message, envelope,
+    bool ok = thread_run_entry_blocking(entry_bytes, message, envelope,
                                           error);
     freeval(message);
     if (!ok)
@@ -4413,10 +4413,10 @@ struct value_t *call_thread_channel_builtin(
             return thread_spawn_source(args);
         case B_thread_spawn_function:
             return thread_spawn_function(args);
-        case B_thread_encode:
-            return thread_encode(args);
-        case B_thread_spawn_encoded:
-            return thread_spawn_encoded(args);
+        case B_entry_encode:
+            return entry_encode(args);
+        case B_thread_spawn_entry:
+            return thread_spawn_entry(args);
         case B_thread_select: {
             if (args.empty() || args.size() > 2) {
                 yyerror("std.thread.select expects endpoints and optional "

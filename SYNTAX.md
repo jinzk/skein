@@ -2397,7 +2397,7 @@ std.thread
 std.type
 std.meta
 std.plugin
-std.module
+std.entry
 std.net
 std.http
 std.tls（可选）

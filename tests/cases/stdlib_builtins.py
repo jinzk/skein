@@ -1178,13 +1178,6 @@ def run_cases():
             stdout_all=["= test.dynamic", "= 42"],
         )
         check(
-            "native module legacy module alias",
-            "import std;\n"
-            f"let name = std.module.load({native_module});\n"
-            "name\n",
-            stdout_all=["= test.dynamic"],
-        )
-        check(
             "native module dynamic load error",
             'import std;\nstd.plugin.load("/definitely/not/a/module.so")\n',
             stderr="std.plugin.load",

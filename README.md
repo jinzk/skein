@@ -603,7 +603,7 @@ let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem", 0, {
 });
 ```
 
-`std.http.serve` / `std.http.serve_threads` / `std.http.serve_workers` 会沿用服务端
+`std.http.serve` / `std.http.serve_threads` / `std.http.serve_processes` 会沿用服务端
 `client_ca_file` / `client_auth`。
 
 HTTP/1.1 服务端：
@@ -763,7 +763,7 @@ std.http.close(s);
 主进程 + 进程 worker 处理：
 
 ```text
-std.http.serve_workers(server, workers, script[, options])
+std.http.serve_processes(server, workers, script[, options])
   -> ProcessServer
 
 ProcessServer.stop()
@@ -823,14 +823,14 @@ max_body_bytes      默认 16 MiB
 - `server["strategy"]` / `server["platform"]` / `server["capabilities"]`
   会在启动后写入；
 - `require` / `on_unsupported` 语义与 `serve_threads` 一致；
-- `serve_workers` 立即返回 `ProcessServer`，`join([timeout_ms])` 等待所有 worker 结束并返回已处理请求数；超时抛 `ProcessServer.join timed out`，可 `stop()` 后重试；
+- `serve_processes` 立即返回 `ProcessServer`，`join([timeout_ms])` 等待所有 worker 结束并返回已处理请求数；超时抛 `ProcessServer.join timed out`，可 `stop()` 后重试；
 - `shutdown([timeout_ms])` 先优雅停止，超时后强制关闭：dispatch 终止 worker 进程并关闭活动连接，reuse_port 直接终止子进程；完成后返回已处理请求数；
 
 ```skein
 import std;
 
 let s = std.http.listen("127.0.0.1", 8080);
-let ps = std.http.serve_workers(
+let ps = std.http.serve_processes(
   s, 4, "worker.skein", {"max_requests": 1000});
 print(ps.strategy);
 let served = ps.join();
@@ -1408,7 +1408,7 @@ std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
   时间戳，变化时重建上下文，因此新连接使用新证书，旧连接继续使用握手时的旧证书；
 - 证书/私钥重建失败时保留旧上下文并输出 `tls: certificate reload failed ...`
   诊断，不中断监听，也不重试直到文件时间戳再次变化；
-- `serve_threads` / `serve_workers` / `reuse_port` 使用同一套证书上下文缓存，
+- `serve_threads` / `serve_processes` / `reuse_port` 使用同一套证书上下文缓存，
   轮换对所有 worker 生效；
 
 async / await：
@@ -2052,7 +2052,7 @@ example.math.ANSWER;
 - `skein_api` 由 host 通过 `init` 传入，值以 opaque handle 传递；
 - `skein_api` v1 追加了 `new_list` / `new_dict` / `as_userdata`；使用新字段前
   应检查 `size`，旧 host 的 ABI 表会更短；
-- 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；`std.module` 保留为 deprecated alias；
+- 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；
 - `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
@@ -2138,7 +2138,7 @@ std.thread
 std.type
 std.meta
 std.plugin
-std.module
+std.entry
 std.net
 std.http
 std.tls（可选）
@@ -2686,8 +2686,8 @@ std.fs.file_write_bytes
 std.process.command
 std.process.status
 std.process.command_status
-std.process.spawn_encoded
-std.process.run_encoded
+std.process.spawn_entry
+std.process.run_entry
 std.process.result
 
 std.type.kind_of
@@ -2706,8 +2706,6 @@ std.meta.has_type
 std.plugin
 std.plugin.load
 std.plugin.unload
-std.module.load
-std.module.unload
 
 std.net.tcp_connect
 std.net.tcp_listen
@@ -2740,7 +2738,7 @@ std.http.accept_async
 std.http.respond
 std.http.respond_async
 std.http.serve
-std.http.serve_workers
+std.http.serve_processes
 std.http.serve_threads
 std.http.upgrade
 std.http.cookies
@@ -2927,8 +2925,8 @@ std.fs.path_normalize
 
 std.process.run
 std.process.spawn
-std.process.spawn_encoded
-std.process.run_encoded
+std.process.spawn_entry
+std.process.run_entry
 std.process.result
 std.process.wait
 std.process.kill
@@ -2950,8 +2948,8 @@ std.thread.pool
 std.thread.spawn
 std.thread.spawn_source
 std.thread.spawn_function
-std.thread.encode
-std.thread.spawn_encoded
+std.entry.encode
+std.thread.spawn_entry
 std.thread.duplex
 std.thread.spawn_with_channel
 std.thread.spawn_with_duplex
@@ -4364,14 +4362,14 @@ bytes_to_string(r["stdout"])
 ### 编码进程入口
 
 ```text
-std.process.run_encoded(blob, message[, options]) → envelope
-std.process.spawn_encoded(blob, message[, options]) → process
+std.process.run_entry(blob, message[, options]) → envelope
+std.process.spawn_entry(blob, message[, options]) → process
 std.process.result(process[, timeout_ms]) → envelope
 ```
 
-- `blob` 来自 `std.thread.encode(entry)`；
+- `blob` 来自 `std.entry.encode(entry)`；
 - Message payload 以 data-only 值序列化后通过 stdin 发送；
-- 子进程用 `--run-encoded` 读取请求、反序列化 Proto 入口并执行；
+- 子进程用 `--run-entry` 读取请求、反序列化 Proto 入口并执行；
 - 返回值为 `{"ok": bool, ...}` envelope；
 - `options` 支持 `env`、`cwd`、`stderr`、`timeout_ms`；
 - 子进程不依赖入口源码，也不需要重新解析脚本；
@@ -4381,8 +4379,8 @@ std.process.result(process[, timeout_ms]) → envelope
 thread func worker(ctx) {
   return {"v": ctx.payload["n"] + 1};
 }
-let blob = std.thread.encode(worker);
-let r = std.process.run_encoded(blob, std.thread.Message.from({"n": 4}));
+let blob = std.entry.encode(worker);
+let r = std.process.run_entry(blob, std.thread.Message.from({"n": 4}));
 r["value"]["v"]   // 5
 ```
 
@@ -4892,8 +4890,8 @@ pool.join();
 std.thread.spawn(script, message[, options]) -> thread
 std.thread.spawn_source(source, message[, options]) -> thread
 std.thread.spawn_function(function, message) -> thread
-std.thread.encode(function) -> bytes
-std.thread.spawn_encoded(bytes, message) -> thread
+std.entry.encode(function) -> bytes
+std.thread.spawn_entry(bytes, message) -> thread
 
 thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
 thread.detach()
@@ -4930,11 +4928,11 @@ let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
 - 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
 - 嵌套函数和 `defer` 以 Proto/声明元数据传递，子线程在自身栈帧上重新捕获局部变量；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
-- `std.thread.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_encoded(bytes, Message)` 可在另一个进程反序列化并启动线程：
+- `std.entry.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_entry(bytes, Message)` 可在另一个进程反序列化并启动线程：
   ```skein
-  write_bytes("entry.bin", std.thread.encode(worker));
+  write_bytes("entry.bin", std.entry.encode(worker));
   # 另一个进程：
-  let t = std.thread.spawn_encoded(read_bytes("entry.bin"), msg);
+  let t = std.thread.spawn_entry(read_bytes("entry.bin"), msg);
   ```
   当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` / `lru` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器。
 

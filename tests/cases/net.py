@@ -3358,7 +3358,7 @@ def run_cases():
                         )
                     else:
                         serve = (
-                            "let ps = std.http.serve_workers(s, 2, "
+                            "let ps = std.http.serve_processes(s, 2, "
                             f"\"{cluster_worker_path}\", {options});\n"
                             'println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
@@ -3429,7 +3429,7 @@ def run_cases():
                             f'"{tls_cert}", "{tls_key}");\n'
                             'println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
-                            f'let ps = std.http.serve_workers(s, 2, '
+                            f'let ps = std.http.serve_processes(s, 2, '
                             f'"{rp_worker_path}", {{"strategy": '
                             f'"reuse_port", "max_requests": {rp_requests}}});\n'
                             'println("info=" + ps.strategy + ":" + '

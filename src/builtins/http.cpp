@@ -3959,12 +3959,12 @@ const native_type kProcessServerType = {
     nullptr,
 };
 
-value_t *http_serve_workers(const std::vector<value_t *> &args) {
+value_t *http_serve_processes(const std::vector<value_t *> &args) {
     if (args.size() < 3 || args.size() > 6 || args[0]->type != T_dict ||
         args[1]->type != T_int ||
         ((int_value_t *)args[1])->value <= 0 ||
         args[2]->type != T_string) {
-        yyerror("std.http.serve_workers expects server, worker count, "
+        yyerror("std.http.serve_processes expects server, worker count, "
                 "script and optional options or serve limits");
         return NULL;
     }
@@ -3972,7 +3972,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     value_t *options = nullptr;
     if (args.size() > 3 && args[3]->type == T_dict) {
         if (args.size() > 4) {
-            yyerror("std.http.serve_workers options cannot be combined "
+            yyerror("std.http.serve_processes options cannot be combined "
                     "with positional serve limits");
             return NULL;
         }
@@ -3986,7 +3986,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         value_t *value = dict_get(options, "strategy");
         if (value) {
             if (value->type != T_string) {
-                yyerror("std.http.serve_workers strategy must be a string");
+                yyerror("std.http.serve_processes strategy must be a string");
                 return NULL;
             }
             strategy = ((string_value_t *)value)->value;
@@ -4001,13 +4001,13 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     }
 #if !SKEIN_HAS_REUSE_PORT
     if (strategy == "reuse_port") {
-        yyerror("std.http.serve_workers: reuse_port is not supported "
+        yyerror("std.http.serve_processes: reuse_port is not supported "
                 "on this platform");
         return NULL;
     }
 #endif
     if (strategy != "dispatch" && strategy != "reuse_port") {
-        yyerror("std.http.serve_workers strategy must be "
+        yyerror("std.http.serve_processes strategy must be "
                 "\"auto\", \"dispatch\" or \"reuse_port\"");
         return NULL;
     }
@@ -4018,7 +4018,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         value_t *value = dict_get(options, "on_unsupported");
         if (value) {
             if (value->type != T_string) {
-                yyerror("std.http.serve_workers on_unsupported must be a "
+                yyerror("std.http.serve_processes on_unsupported must be a "
                         "string");
                 return NULL;
             }
@@ -4033,7 +4033,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                 for (value_t *item :
                      ((list_value_t *)require_value)->payload->items) {
                     if (!item || item->type != T_string) {
-                        yyerror("std.http.serve_workers require entries "
+                        yyerror("std.http.serve_processes require entries "
                                 "must be strings");
                         return NULL;
                     }
@@ -4041,7 +4041,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                         ((string_value_t *)item)->value);
                 }
             } else {
-                yyerror("std.http.serve_workers require must be a "
+                yyerror("std.http.serve_processes require must be a "
                         "string or list of strings");
                 return NULL;
             }
@@ -4049,7 +4049,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     }
     if (on_unsupported != "error" && on_unsupported != "501" &&
         on_unsupported != "warn") {
-        yyerror("std.http.serve_workers on_unsupported must be "
+        yyerror("std.http.serve_processes on_unsupported must be "
                 "\"error\", \"501\" or \"warn\"");
         return NULL;
     }
@@ -4059,7 +4059,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         value_t *value = dict_get(options, "entry");
         if (value) {
             if (value->type != T_string) {
-                yyerror("std.http.serve_workers entry must be a string");
+                yyerror("std.http.serve_processes entry must be a string");
                 return NULL;
             }
             entry = ((string_value_t *)value)->value;
@@ -4074,7 +4074,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             return true;
         if (value->type != T_int ||
             ((int_value_t *)value)->value < 0) {
-            yyerror("std.http.serve_workers %s must be a non-negative "
+            yyerror("std.http.serve_processes %s must be a non-negative "
                     "integer", key);
             return false;
         }
@@ -4094,7 +4094,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         for (size_t i = 3; i < args.size(); ++i) {
             if (args[i]->type != T_int ||
                 ((int_value_t *)args[i])->value < 0) {
-                yyerror("std.http.serve_workers limits must be "
+                yyerror("std.http.serve_processes limits must be "
                         "non-negative integers");
                 return NULL;
             }
@@ -4117,7 +4117,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         if (value) {
             if (value->type != T_int ||
                 ((int_value_t *)value)->value < 0) {
-                yyerror("std.http.serve_workers worker_timeout_ms must "
+                yyerror("std.http.serve_processes worker_timeout_ms must "
                         "be a non-negative integer");
                 return NULL;
             }
@@ -4166,13 +4166,13 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (!missing.empty()) {
         if (on_unsupported == "error") {
             const std::string message =
-                "std.http.serve_workers: missing capabilities: " + missing;
+                "std.http.serve_processes: missing capabilities: " + missing;
             eval_raise(newerrorval("http.unsupported", message.c_str()));
             return NULL;
         }
         if (on_unsupported == "warn") {
             std::fprintf(stderr,
-                         "std.http.serve_workers: missing capabilities: "
+                         "std.http.serve_processes: missing capabilities: "
                          "%s\n", missing.c_str());
             std::fflush(stderr);
         } else {
@@ -4200,7 +4200,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         value_t *stream_value = dict_get(options, "stream_request_body");
         if (stream_value) {
             if (stream_value->type != T_bool) {
-                yyerror("std.http.serve_workers stream_request_body "
+                yyerror("std.http.serve_processes stream_request_body "
                         "must be a bool");
                 return NULL;
             }
@@ -4208,7 +4208,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                 ((bool_value_t *)stream_value)->value;
         }
         if (stream_request_body && strategy != "reuse_port") {
-            yyerror("std.http.serve_workers: stream_request_body requires "
+            yyerror("std.http.serve_processes: stream_request_body requires "
                     "reuse_port");
             return NULL;
         }
@@ -4230,7 +4230,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         if (max_connections_value) {
             if (max_connections_value->type != T_int ||
                 ((int_value_t *)max_connections_value)->value < 0) {
-                yyerror("std.http.serve_workers max_connections must be "
+                yyerror("std.http.serve_processes max_connections must be "
                         "a non-negative integer");
                 return NULL;
             }
@@ -4320,7 +4320,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             }
         }
         if (port <= 0) {
-            yyerror("std.http.serve_workers: cannot determine "
+            yyerror("std.http.serve_processes: cannot determine "
                     "reuse_port port");
             return NULL;
         }
@@ -4364,7 +4364,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         std::shared_ptr<http_shared_state> shared =
             map_shared_state_file(shared_path, true, shared_error);
         if (!shared) {
-            yyerror("std.http.serve_workers: %s", shared_error.c_str());
+            yyerror("std.http.serve_processes: %s", shared_error.c_str());
             return NULL;
         }
         struct file_cleanup {
@@ -4388,14 +4388,14 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
         std::string write_error;
         if (!platform_write_file(bootstrap_path, source, false,
                                  write_error)) {
-            yyerror("std.http.serve_workers: cannot write reuse_port "
+            yyerror("std.http.serve_processes: cannot write reuse_port "
                     "bootstrap: %s", write_error.c_str());
             return NULL;
         }
 
         std::string executable = platform_executable_path();
         if (executable.empty()) {
-            yyerror("std.http.serve_workers: cannot locate interpreter");
+            yyerror("std.http.serve_processes: cannot locate interpreter");
             return NULL;
         }
         std::vector<value_t *> children;
@@ -4421,7 +4421,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             freeval(spawn_options);
             if (!process) {
                 stop_children();
-                yyerror("std.http.serve_workers: cannot start worker "
+                yyerror("std.http.serve_processes: cannot start worker "
                         "process");
                 return NULL;
             }
@@ -4431,7 +4431,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                 call_io(B_io_read_line, {dupval(stdout_stream)});
             if (!line) {
                 stop_children();
-                yyerror("std.http.serve_workers: worker did not report "
+                yyerror("std.http.serve_processes: worker did not report "
                         "ready");
                 return NULL;
             }
@@ -4443,7 +4443,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             freeval(line);
             if (text.find("ready") == std::string::npos) {
                 stop_children();
-                yyerror("std.http.serve_workers: worker failed: %s",
+                yyerror("std.http.serve_processes: worker failed: %s",
                         text.c_str());
                 return NULL;
             }
@@ -4471,7 +4471,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     std::string bootstrap_error;
     if (!write_worker_bootstrap(bootstrap_source, bootstrap.path,
                                 bootstrap_error)) {
-        yyerror("std.http.serve_workers: cannot write worker bootstrap: "
+        yyerror("std.http.serve_processes: cannot write worker bootstrap: "
                 "%s", bootstrap_error.c_str());
         return NULL;
     }
@@ -4497,7 +4497,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (cert && key) {
         if (cert->type != T_string || key->type != T_string) {
             freeval(pool);
-            yyerror("std.http.serve_workers: invalid TLS server "
+            yyerror("std.http.serve_processes: invalid TLS server "
                     "certificate");
             return NULL;
         }
@@ -4509,7 +4509,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (client_ca) {
         if (client_ca->type != T_string) {
             freeval(pool);
-            yyerror("std.http.serve_workers: invalid client_ca_file");
+            yyerror("std.http.serve_processes: invalid client_ca_file");
             return NULL;
         }
         client_ca_file = ((string_value_t *)client_ca)->value;
@@ -4517,7 +4517,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     if (client_auth_value) {
         if (client_auth_value->type != T_string) {
             freeval(pool);
-            yyerror("std.http.serve_workers: invalid client_auth");
+            yyerror("std.http.serve_processes: invalid client_auth");
             return NULL;
         }
         client_auth = ((string_value_t *)client_auth_value)->value;
@@ -4559,11 +4559,11 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                 return error_response(501, feature);
             if (dict_get(request, "body_reader"))
                 return error_response(
-                    501, "serve_workers does not support stream_request_body");
+                    501, "serve_processes does not support stream_request_body");
 
             std::string body;
             if (!body_value(dict_get(request, "body"), body,
-                            "std.http.serve_workers"))
+                            "std.http.serve_processes"))
                 return NULL;
 
             value_t *params = (value_t *)newlistval();
@@ -4674,7 +4674,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     value_t *socket = dict_get(args[0], "socket");
     if (!socket) {
         process_server_close_pool(server.get());
-        yyerror("std.http.serve_workers expects a std.http server for "
+        yyerror("std.http.serve_processes expects a std.http server for "
                 "dispatch");
         return NULL;
     }
@@ -4684,7 +4684,7 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
     freeval(handler);
     if (!task) {
         process_server_close_pool(server.get());
-        yyerror("std.http.serve_workers could not start the server");
+        yyerror("std.http.serve_processes could not start the server");
         return NULL;
     }
     server->http = state;
@@ -6232,8 +6232,8 @@ struct value_t *call_http_builtin(
             return http_respond_async(args);
         case B_http_serve:
             return http_serve(args);
-        case B_http_serve_workers:
-            return http_serve_workers(args);
+        case B_http_serve_processes:
+            return http_serve_processes(args);
         case B_http_serve_threads:
             return http_serve_threads(args);
         case B_http_upgrade:

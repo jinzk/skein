@@ -64,14 +64,14 @@
 static struct value_t *module_load_builtin(
     const std::vector<struct value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_string) {
-        yyerror("std.module.load expects a string path");
+        yyerror("std.plugin.load expects a string path");
         return NULL;
     }
     std::string import_path;
     std::string error;
     if (!skein::load_dynamic_module(
             ((struct string_value_t *)args[0])->value, import_path, error)) {
-        yyerror("std.module.load: %s", error.c_str());
+        yyerror("std.plugin.load: %s", error.c_str());
         return NULL;
     }
     return newstrval(import_path.c_str());
@@ -80,13 +80,13 @@ static struct value_t *module_load_builtin(
 static struct value_t *module_unload_builtin(
     const std::vector<struct value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_string) {
-        yyerror("std.module.unload expects a string name");
+        yyerror("std.plugin.unload expects a string name");
         return NULL;
     }
     std::string error;
     if (!skein::unload_module(((struct string_value_t *)args[0])->value,
                               error)) {
-        yyerror("std.module.unload: %s", error.c_str());
+        yyerror("std.plugin.unload: %s", error.c_str());
         return NULL;
     }
     return newnull();

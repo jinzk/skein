@@ -635,8 +635,8 @@ value_t *new_pipe_value(std::shared_ptr<process_resource> process,
 const char *process_name(int functype) {
     switch (functype) {
         case B_process_spawn: return "std.process.spawn";
-        case B_process_spawn_encoded: return "std.process.spawn_encoded";
-        case B_process_run_encoded: return "std.process.run_encoded";
+        case B_process_spawn_entry: return "std.process.spawn_entry";
+        case B_process_run_entry: return "std.process.run_entry";
         case B_process_result: return "std.process.result";
         case B_process_wait: return "std.process.wait";
         case B_process_kill: return "std.process.kill";
@@ -709,7 +709,7 @@ long long process_option_timeout(value_t *options) {
     return ((int_value_t *)timeout)->value;
 }
 
-value_t *spawn_encoded_process(const value_t *entry, const value_t *message,
+value_t *spawn_entry_process(const value_t *entry, const value_t *message,
                                value_t *options, std::string &error) {
     if (!entry || entry->type != T_bytes) {
         error = "expected encoded entry bytes";
@@ -740,7 +740,7 @@ value_t *spawn_encoded_process(const value_t *entry, const value_t *message,
     value_t *spawn_options = (value_t *)newdictval();
     value_t *arguments = (value_t *)newlistval();
     ((list_value_t *)arguments)->payload->items.push_back(
-        newstrval("--run-encoded"));
+        newstrval("--run-entry"));
     process_dict_set(spawn_options, "args", arguments);
     bool has_stderr = false;
     if (options && options->type == T_dict) {
@@ -1059,8 +1059,8 @@ value_t *call_process_spawn_builtin(
         return (value_t *)result;
     }
 
-    if (functype == B_process_spawn_encoded ||
-        functype == B_process_run_encoded) {
+    if (functype == B_process_spawn_entry ||
+        functype == B_process_run_entry) {
         if (args.size() < 2 || args.size() > 3 ||
             args[0]->type != T_bytes || args[1]->type != T_userdata) {
             yyerror("%s expects encoded bytes, Message, and optional options",
@@ -1073,13 +1073,13 @@ value_t *call_process_spawn_builtin(
             return NULL;
         }
         std::string error;
-        value_t *process = spawn_encoded_process(args[0], args[1], options,
+        value_t *process = spawn_entry_process(args[0], args[1], options,
                                                  error);
         if (!process) {
             yyerror("%s: %s", name, error.c_str());
             return NULL;
         }
-        if (functype == B_process_spawn_encoded)
+        if (functype == B_process_spawn_entry)
             return process;
         value_t *envelope = read_process_encoded_result(
             process, process_option_timeout(options));

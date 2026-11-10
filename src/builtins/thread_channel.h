@@ -10,16 +10,16 @@
 struct value_t *call_thread_channel_builtin(
     int functype, const std::vector<struct value_t *> &args);
 
-/* Run a `std.thread.encode` blob synchronously with the given Message.
- * Used by process IPC (`--run-encoded`) and std.process.run_encoded. */
-bool thread_run_encoded_blocking(const std::string &bytes,
+/* Run a `std.entry.encode` blob synchronously with the given Message.
+ * Used by process IPC (`--run-entry`) and std.process.run_entry. */
+bool thread_run_entry_blocking(const std::string &bytes,
                                  struct value_t *message,
                                  struct value_t *&result,
                                  std::string &error);
 
 /* Parse a process request (entry blob + serialized Message payload), run it,
  * and serialize the result envelope as data values. */
-bool thread_run_encoded_request(const std::string &request,
+bool thread_run_entry_request(const std::string &request,
                                 std::string &result, std::string &error);
 
 /* Borrowed payload for process IPC; returns a duplicated value. */

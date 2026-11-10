@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> package_dirs;
     std::string source_encoding;
     bool force_interactive = false;
-    bool run_encoded = false;
+    bool run_entry = false;
 
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
@@ -199,8 +199,8 @@ int main(int argc, char **argv) {
             skein_vm_set_stats(true);
         } else if (arg == "-k" || arg == "--keep-going") {
             g_keep_going = true;
-        } else if (arg == "--run-encoded") {
-            run_encoded = true;
+        } else if (arg == "--run-entry") {
+            run_entry = true;
         } else if (arg == "-" || (!arg.empty() && arg[0] != '-')) {
             if (!script_path.empty()) {
                 print_usage(program);
@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
     }
 
     source_encoding_set(source_encoding);
-    if (run_encoded) {
+    if (run_entry) {
         if (!script_path.empty()) {
             print_usage(program);
             return 2;
@@ -232,7 +232,7 @@ int main(int argc, char **argv) {
         }
         std::string result;
         std::string error;
-        if (!thread_run_encoded_request(request, result, error)) {
+        if (!thread_run_entry_request(request, result, error)) {
             std::fprintf(stderr, "skein: %s\n", error.c_str());
             return 1;
         }

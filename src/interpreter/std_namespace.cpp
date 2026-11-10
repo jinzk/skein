@@ -362,8 +362,8 @@ value_t *build_namespace_impl() {
             {"command_status", B_command_status},
             {"run", B_process_run},
             {"spawn", B_process_spawn},
-            {"spawn_encoded", B_process_spawn_encoded},
-            {"run_encoded", B_process_run_encoded},
+            {"spawn_entry", B_process_spawn_entry},
+            {"run_entry", B_process_run_entry},
             {"result", B_process_result},
             {"wait", B_process_wait},
             {"kill", B_process_kill},
@@ -393,8 +393,7 @@ value_t *build_namespace_impl() {
         {"spawn", B_thread_spawn},
         {"spawn_source", B_thread_spawn_source},
         {"spawn_function", B_thread_spawn_function},
-        {"encode", B_thread_encode},
-        {"spawn_encoded", B_thread_spawn_encoded},
+        {"spawn_entry", B_thread_spawn_entry},
         {"duplex", B_thread_duplex},
         {"spawn_with_channel", B_thread_spawn_with_channel},
         {"spawn_with_duplex", B_thread_spawn_with_duplex},
@@ -409,6 +408,11 @@ value_t *build_namespace_impl() {
                      newstrval("Message"), message_namespace);
     root->payload->items.push_back(std::make_pair(
         newstrval("thread"), thread_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("entry"),
+        builtin_module({
+            {"encode", B_entry_encode},
+        })));
     root->payload->items.push_back(std::make_pair(
         newstrval("type"),
         builtin_module({
@@ -552,13 +556,6 @@ value_t *build_namespace_impl() {
             {"load", B_module_load},
             {"unload", B_module_unload},
         })));
-    /* Deprecated alias for the old native-module namespace. */
-    root->payload->items.push_back(std::make_pair(
-        newstrval("module"),
-        builtin_module({
-            {"load", B_module_load},
-            {"unload", B_module_unload},
-        })));
     root->payload->items.push_back(std::make_pair(
         newstrval("task"),
         builtin_module({
@@ -613,7 +610,7 @@ value_t *build_namespace_impl() {
             {"respond", B_http_respond},
             {"respond_async", B_http_respond_async},
             {"serve", B_http_serve},
-            {"serve_workers", B_http_serve_workers},
+            {"serve_processes", B_http_serve_processes},
             {"serve_threads", B_http_serve_threads},
             {"upgrade", B_http_upgrade},
             {"cookies", B_http_cookies},

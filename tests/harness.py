@@ -683,18 +683,18 @@ def check_extended_stdlib():
         "thread func worker(ctx) {\n"
         '  return {"v": ctx.payload["n"] + 1};\n'
         "}\n"
-        "let blob = std.thread.encode(worker);\n"
-        "let r = std.process.run_encoded(blob, "
+        "let blob = std.entry.encode(worker);\n"
+        "let r = std.process.run_entry(blob, "
         'std.thread.Message.from({"n": 4}));\n'
         'print(r["ok"]); print(":"); print(r["value"]["v"]); print("|");\n'
-        "let p = std.process.spawn_encoded(blob, "
+        "let p = std.process.spawn_entry(blob, "
         'std.thread.Message.from({"n": 7}));\n'
         "print(std.process.pid(p) > 0); print(\"|\");\n"
         "let r2 = std.process.result(p, 10000);\n"
         'print(r2["value"]["v"]); print("|");\n'
         "thread func bad(ctx) { missing_function(); }\n"
-        "let bad_blob = std.thread.encode(bad);\n"
-        "let r3 = std.process.run_encoded(bad_blob, "
+        "let bad_blob = std.entry.encode(bad);\n"
+        "let r3 = std.process.run_entry(bad_blob, "
         "std.thread.Message.from({}));\n"
         'print(r3["ok"]); print("|");\n',
         stdout="true:5|true|8|false|",
@@ -873,14 +873,14 @@ def check_extended_stdlib():
                 "}\n"
             )
         serve_worker_path = serve_worker_script.replace("\\", "\\\\")
-        serve_script = os.path.join(worker_tmp, "serve_workers.skein")
+        serve_script = os.path.join(worker_tmp, "serve_processes.skein")
         with open(serve_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"let ps = std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{serve_worker_path}\", "
                 f"{{\"strategy\": \"dispatch\", \"max_requests\": 1}});\n"
                 "println(\"server=\" + s[\"strategy\"] + \":\" + "
@@ -902,7 +902,7 @@ def check_extended_stdlib():
         try:
             port_line = server.stdout.readline().strip()
             assert port_line.isdigit(), (
-                "serve_workers did not report a port: "
+                "serve_processes did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
             request = urllib.request.Request(
@@ -930,10 +930,10 @@ def check_extended_stdlib():
                 server.wait()
 
         check(
-            "std.http serve_workers require fails fast",
+            "std.http serve_processes require fails fast",
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            f'let n = std.http.serve_workers(s, 1, "{serve_worker_path}", '
+            f'let n = std.http.serve_processes(s, 1, "{serve_worker_path}", '
             '{"strategy": "dispatch", "require": ["http2"]});\n',
             stderr="missing capabilities: http2",
         )
@@ -941,7 +941,7 @@ def check_extended_stdlib():
             "std.http require raises structured unsupported error",
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            f'let n = std.http.serve_workers(s, 1, "{serve_worker_path}", '
+            f'let n = std.http.serve_processes(s, 1, "{serve_worker_path}", '
             '{"strategy": "dispatch", "require": ["http2"]}) '
             "on error(e) {\n"
             '    print("kind=" + std.error.kind(e));\n'
@@ -953,7 +953,7 @@ def check_extended_stdlib():
             "std.http ProcessServer shutdown",
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            f'let ps = std.http.serve_workers(s, 1, '
+            f'let ps = std.http.serve_processes(s, 1, '
             f'"{serve_worker_path}", '
             '{"strategy": "dispatch", "max_requests": 0});\n'
             'print(ps.shutdown(2000));\n',
@@ -983,12 +983,12 @@ def check_extended_stdlib():
                 client_result["error"] = repr(exc)
 
         shutdown_script = os.path.join(
-            worker_tmp, "serve_workers_shutdown.skein")
+            worker_tmp, "serve_processes_shutdown.skein")
         with open(shutdown_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                f"let ps = std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{slow_worker_path}\", "
                 "{\"strategy\": \"dispatch\", \"max_requests\": 0});\n"
                 "println(s[\"port\"]);\n"
@@ -1010,7 +1010,7 @@ def check_extended_stdlib():
         try:
             port_line = server.stdout.readline().strip()
             assert port_line.isdigit(), (
-                "serve_workers shutdown did not report a port: "
+                "serve_processes shutdown did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
             client = threading.Thread(target=slow_request, args=(port_line,))
@@ -1032,7 +1032,7 @@ def check_extended_stdlib():
 
         if reuse_platform:
             workers_reuse_worker = os.path.join(
-                worker_tmp, "serve_workers_reuse_worker.skein")
+                worker_tmp, "serve_processes_reuse_worker.skein")
             with open(workers_reuse_worker, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
@@ -1045,14 +1045,14 @@ def check_extended_stdlib():
                 )
             workers_reuse_path = workers_reuse_worker.replace("\\", "\\\\")
             workers_reuse_script = os.path.join(
-                worker_tmp, "serve_workers_reuse.skein")
+                worker_tmp, "serve_processes_reuse.skein")
             with open(workers_reuse_script, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                     "println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
-                    f"let ps = std.http.serve_workers(s, 4, "
+                    f"let ps = std.http.serve_processes(s, 4, "
                     f"\"{workers_reuse_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"max_requests\": 8, "
                     f"\"max_connections\": 1}});\n"
@@ -1077,7 +1077,7 @@ def check_extended_stdlib():
             try:
                 port_line = server.stdout.readline().strip()
                 assert port_line.isdigit(), (
-                    "serve_workers reuse_port did not report a port: "
+                    "serve_processes reuse_port did not report a port: "
                     f"{port_line!r} / {server.stderr.read()}"
                 )
                 reuse_results = []
@@ -1127,12 +1127,12 @@ def check_extended_stdlib():
                     server.wait()
 
             workers_shutdown_script = os.path.join(
-                worker_tmp, "serve_workers_reuse_shutdown.skein")
+                worker_tmp, "serve_processes_reuse_shutdown.skein")
             with open(workers_shutdown_script, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                    f"let ps = std.http.serve_workers(s, 2, "
+                    f"let ps = std.http.serve_processes(s, 2, "
                     f"\"{slow_worker_path}\", "
                     "{\"strategy\": \"reuse_port\", \"max_requests\": 0});\n"
                     "println(s[\"port\"]);\n"
@@ -1154,7 +1154,7 @@ def check_extended_stdlib():
             try:
                 port_line = server.stdout.readline().strip()
                 assert port_line.isdigit(), (
-                    "serve_workers reuse shutdown did not report a port: "
+                    "serve_processes reuse shutdown did not report a port: "
                     f"{port_line!r} / {server.stderr.read()}"
                 )
                 client = threading.Thread(target=slow_request,
@@ -1191,14 +1191,14 @@ def check_extended_stdlib():
             )
 
             workers_stop_script = os.path.join(
-                worker_tmp, "serve_workers_stop.skein")
+                worker_tmp, "serve_processes_stop.skein")
             with open(workers_stop_script, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                     "println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
-                    f"let ps = std.http.serve_workers(s, 2, "
+                    f"let ps = std.http.serve_processes(s, 2, "
                     f"\"{workers_reuse_path}\", {{\"strategy\": "
                     f"\"reuse_port\"}});\n"
                     "println(\"ready\");\n"
@@ -1222,12 +1222,12 @@ def check_extended_stdlib():
             try:
                 port_line = server.stdout.readline().strip()
                 assert port_line.isdigit(), (
-                    "serve_workers stop did not report a port: "
+                    "serve_processes stop did not report a port: "
                     f"{port_line!r} / {server.stderr.read()}"
                 )
                 ready_line = server.stdout.readline().strip()
                 assert ready_line == "ready", (
-                    "serve_workers stop did not become ready: "
+                    "serve_processes stop did not become ready: "
                     f"{ready_line!r} / {server.stderr.read()}"
                 )
                 stop_result = None
@@ -1256,7 +1256,7 @@ def check_extended_stdlib():
                     server.wait()
 
             workers_stream_worker = os.path.join(
-                worker_tmp, "serve_workers_stream_worker.skein")
+                worker_tmp, "serve_processes_stream_worker.skein")
             with open(workers_stream_worker, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
@@ -1272,12 +1272,12 @@ def check_extended_stdlib():
                 )
             workers_stream_path = workers_stream_worker.replace("\\", "\\\\")
             workers_stream_script = os.path.join(
-                worker_tmp, "serve_workers_stream.skein")
+                worker_tmp, "serve_processes_stream.skein")
             with open(workers_stream_script, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                    f"let ps = std.http.serve_workers(s, 2, "
+                    f"let ps = std.http.serve_processes(s, 2, "
                     f"\"{workers_stream_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"stream_request_body\": true, "
                     f"\"max_requests\": 1}});\n"
@@ -1299,7 +1299,7 @@ def check_extended_stdlib():
             try:
                 info_line = server.stdout.readline().strip()
                 assert info_line.startswith("info="), (
-                    "serve_workers stream body did not report info: "
+                    "serve_processes stream body did not report info: "
                     f"{info_line!r} / {server.stderr.read()}"
                 )
                 port_text, stream_flag = (
@@ -1333,24 +1333,24 @@ def check_extended_stdlib():
                     server.wait()
         else:
             check(
-                "std.http serve_workers reuse_port unsupported",
+                "std.http serve_processes reuse_port unsupported",
                 "import std;\n"
                 'let s = std.http.listen("127.0.0.1", 0);\n'
-                f'let n = std.http.serve_workers(s, 1, '
+                f'let n = std.http.serve_processes(s, 1, '
                 f'"{serve_worker_path}", '
                 '{"strategy": "reuse_port"});\n',
                 stderr="reuse_port is not supported",
             )
 
         workers_501_script = os.path.join(
-            worker_tmp, "serve_workers_require_501.skein")
+            worker_tmp, "serve_processes_require_501.skein")
         with open(workers_501_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"let ps = std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"require\": [\"http2\"], "
                 f"\"on_unsupported\": \"501\", "
@@ -1370,7 +1370,7 @@ def check_extended_stdlib():
         try:
             port_line = server.stdout.readline().strip()
             assert port_line.isdigit(), (
-                "serve_workers 501 did not report a port: "
+                "serve_processes 501 did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
             try:
@@ -1387,14 +1387,14 @@ def check_extended_stdlib():
                 server.wait()
 
         workers_features_script = os.path.join(
-            worker_tmp, "serve_workers_features.skein")
+            worker_tmp, "serve_processes_features.skein")
         with open(workers_features_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"let ps = std.http.serve_workers(s, 1, "
+                f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"max_requests\": 2}});\n"
                 "println(ps.join());\n"
@@ -1412,7 +1412,7 @@ def check_extended_stdlib():
         try:
             port_line = server.stdout.readline().strip()
             assert port_line.isdigit(), (
-                "serve_workers features did not report a port: "
+                "serve_processes features did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
             for headers, label in (
@@ -1449,7 +1449,7 @@ def check_extended_stdlib():
             )
         slow_path = slow_script.replace("\\", "\\\\")
         concurrent_script = os.path.join(
-            worker_tmp, "serve_workers_concurrent.skein")
+            worker_tmp, "serve_processes_concurrent.skein")
         with open(concurrent_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
@@ -1457,7 +1457,7 @@ def check_extended_stdlib():
                 "s[\"worker_timeout_ms\"] = 10000;\n"
                 "println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
-                f"let ps = std.http.serve_workers(s, 2, "
+                f"let ps = std.http.serve_processes(s, 2, "
                 f"\"{slow_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"max_requests\": 2}});\n"
                 "println(ps.join());\n"
@@ -1473,7 +1473,7 @@ def check_extended_stdlib():
         try:
             port_line = server.stdout.readline().strip()
             assert port_line.isdigit(), (
-                "serve_workers did not report a port: "
+                "serve_processes did not report a port: "
                 f"{port_line!r} / {server.stderr.read()}"
             )
             concurrent_results = []
@@ -1507,7 +1507,7 @@ def check_extended_stdlib():
                 or os.environ.get("TSAN_OPTIONS"))
             limit = 0.9 if sanitized else 0.55
             assert elapsed < limit, (
-                "serve_workers handled requests sequentially: "
+                "serve_processes handled requests sequentially: "
                 f"{elapsed:.3f}s"
             )
             out, err = server.communicate(timeout=10)
@@ -2286,7 +2286,7 @@ def check_extended_stdlib():
                 script = os.path.join(
                     worker_tmp, f"maxconn_{mode}.skein")
                 call = ("serve_threads" if mode == "threads"
-                        else "serve_workers")
+                        else "serve_processes")
                 with open(script, "w", encoding="utf-8") as handle:
                     handle.write(
                         "import std;\n"
@@ -2373,7 +2373,7 @@ def check_extended_stdlib():
                 "serve_threads max_connections", "threads",
                 maxconn_threads_path)
             run_connection_limit(
-                "serve_workers max_connections", "workers",
+                "serve_processes max_connections", "workers",
                 maxconn_process_path)
 
             ws_worker = os.path.join(
@@ -2495,7 +2495,7 @@ def check_extended_stdlib():
                 'let s = std.http.listen("127.0.0.1", 0);\n'
                 'println(s["port"]);\n'
                 "std.io.flush(std.io.stdout);\n"
-                f"let ps = std.http.serve_workers(s, 2, "
+                f"let ps = std.http.serve_processes(s, 2, "
                 f"\"{ws_worker_path}\", {{\"strategy\": \"reuse_port\", "
                 f"\"max_requests\": 1}});\n"
                 'println("ready");\n'
@@ -2576,7 +2576,7 @@ def check_extended_stdlib():
                         server.wait()
 
             run_h2c_case("threads", "serve_threads")
-            run_h2c_case("workers", "serve_workers")
+            run_h2c_case("workers", "serve_processes")
 
             tls_probe = run(
                 'import std;\nstd.dict.has(std, "tls")\n')
@@ -2653,7 +2653,7 @@ def check_extended_stdlib():
                         server.wait()
 
                 process_h2_script = os.path.join(
-                    worker_tmp, "serve_workers_h2_tls.skein")
+                    worker_tmp, "serve_processes_h2_tls.skein")
                 with open(process_h2_script, "w",
                           encoding="utf-8") as handle:
                     handle.write(
@@ -2661,7 +2661,7 @@ def check_extended_stdlib():
                         f"let s = std.http.listen_tls(\"127.0.0.1\", 0, "
                         f"\"{tls_cert.replace(chr(92), chr(92) * 2)}\", "
                         f"\"{tls_key.replace(chr(92), chr(92) * 2)}\");\n"
-                        f"let ps = std.http.serve_workers(s, 2, "
+                        f"let ps = std.http.serve_processes(s, 2, "
                         f"\"{workers_reuse_path}\", {{\"strategy\": "
                         f"\"reuse_port\", \"max_requests\": 2}});\n"
                         "println(\"info=\" + str(s[\"port\"]) + \":\" + "
@@ -2682,7 +2682,7 @@ def check_extended_stdlib():
                 try:
                     info_line = server.stdout.readline().strip()
                     assert info_line.startswith("info="), (
-                        "serve_workers h2 did not report info: "
+                        "serve_processes h2 did not report info: "
                         f"{info_line!r} / {server.stderr.read()}"
                     )
                     port_text = info_line.split("=", 1)[1].split(":")[0]
@@ -2865,7 +2865,7 @@ def check_extended_stdlib():
                     "    return worker;\n"
                     "}\n"
                     'write_bytes("thread_payload.bin", '
-                    "std.thread.encode(make_worker()));\n"
+                    "std.entry.encode(make_worker()));\n"
                     'print("encoded");\n'
                 )
             decode_path = os.path.join(deadlock_tmp, "decode_main.skein")
@@ -2873,7 +2873,7 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     'let blob = read_bytes("thread_payload.bin");\n'
-                    "let t = std.thread.spawn_encoded(blob, "
+                    "let t = std.thread.spawn_entry(blob, "
                     'std.thread.Message.from({"n": 4}));\n'
                     "let r = t.join();\n"
                     'print(r["value"]["v"]);\n'
@@ -2924,7 +2924,7 @@ def check_extended_stdlib():
                     "    return worker;\n"
                     "}\n"
                     'write_bytes("typed_payload.bin", '
-                    "std.thread.encode(make_worker(p, e)));\n"
+                    "std.entry.encode(make_worker(p, e)));\n"
                 )
             typed_decode = os.path.join(deadlock_tmp,
                                         "typed_decode_main.skein")
@@ -2932,7 +2932,7 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     'let blob = read_bytes("typed_payload.bin");\n'
-                    "let t = std.thread.spawn_encoded(blob, "
+                    "let t = std.thread.spawn_entry(blob, "
                     'std.thread.Message.from({"n": 0}));\n'
                     "let r = t.join();\n"
                     'print(str(r["value"]["x"]) + ":" + '
@@ -2991,7 +2991,7 @@ def check_extended_stdlib():
                     "  return worker;\n"
                     "}\n"
                     'write_bytes("proto1_payload.bin", '
-                    "std.thread.encode(make_worker(Counter { value: 7 })));\n"
+                    "std.entry.encode(make_worker(Counter { value: 7 })));\n"
                 )
             proto1_decode = os.path.join(deadlock_tmp,
                                          "proto1_decode_main.skein")
@@ -2999,7 +2999,7 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     'let blob = read_bytes("proto1_payload.bin");\n'
-                    "let t = std.thread.spawn_encoded(blob, "
+                    "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let r = t.join();\n"
                     'print(str(r["value"]["add"]) + ":" + '
@@ -3076,7 +3076,7 @@ def check_extended_stdlib():
                     "\"list\": [10, 20, 30], \"deque\": dq, "
                     "\"lru\": l, \"set\": s};\n"
                     'write_bytes("proto3_payload.bin", '
-                    "std.thread.encode(make_worker(box)));\n"
+                    "std.entry.encode(make_worker(box)));\n"
                 )
             proto3_decode = os.path.join(deadlock_tmp,
                                          "proto3_decode_main.skein")
@@ -3084,7 +3084,7 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     'let blob = read_bytes("proto3_payload.bin");\n'
-                    "let t = std.thread.spawn_encoded(blob, "
+                    "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let v = t.join()[\"value\"];\n"
                     'print("fn=" + str(v["fn"]) + "|top=" + '
@@ -3139,7 +3139,7 @@ def check_extended_stdlib():
                     "  return {\"sum\": l.sum(2), \"x\": l.x, "
                     "\"y\": l.y, \"n\": k.n};\n"
                     "}\n"
-                    "let blob = std.thread.encode(worker);\n"
+                    "let blob = std.entry.encode(worker);\n"
                     'write_bytes("proto2_payload.bin", blob);\n'
                 )
             proto2_decode = os.path.join(deadlock_tmp,
@@ -3148,7 +3148,7 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     'let blob = read_bytes("proto2_payload.bin");\n'
-                    "let t = std.thread.spawn_encoded(blob, "
+                    "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let v = t.join()[\"value\"];\n"
                     'print(str(v["sum"]) + ":" + str(v["x"]) + ":" + '
@@ -3190,8 +3190,8 @@ def check_extended_stdlib():
                 "  let add = make_adder(10);\n"
                 '  return {"v": add(5)};\n'
                 "}\n"
-                "let blob = std.thread.encode(worker);\n"
-                "let t = std.thread.spawn_encoded(blob, "
+                "let blob = std.entry.encode(worker);\n"
+                "let t = std.thread.spawn_entry(blob, "
                 "std.thread.Message.from({}));\n"
                 'let r = t.join()["value"];\n'
                 'print("result="); print(r["v"]); print("|");\n',
@@ -3425,8 +3425,8 @@ def check_extended_stdlib():
             'let r = t.join();\n'
             'print("spawn="); print(r["value"]["top"]); print(":"); '
             'print(r["value"]["n"]); print("|");\n'
-            'let blob = std.thread.encode(worker);\n'
-            'let t2 = std.thread.spawn_encoded(blob, msg);\n'
+            'let blob = std.entry.encode(worker);\n'
+            'let t2 = std.thread.spawn_entry(blob, msg);\n'
             'let r2 = t2.join();\n'
             'print("encoded="); print(r2["value"]["top"]); print(":"); '
             'print(r2["value"]["n"]); print("|");\n'
@@ -3512,10 +3512,10 @@ def check_extended_stdlib():
                 stderr="stream_request_body requires reuse_port",
             )
             check(
-                "std.http serve_workers stream body requires reuse_port",
+                "std.http serve_processes stream body requires reuse_port",
                 "import std;\n"
                 'let s = std.http.listen("127.0.0.1", 0);\n'
-                f'let ps = std.http.serve_workers(s, 1, '
+                f'let ps = std.http.serve_processes(s, 1, '
                 f'"{thread_worker_path}", '
                 '{"strategy": "dispatch", "stream_request_body": true});\n',
                 stderr="stream_request_body requires reuse_port",
@@ -3859,8 +3859,8 @@ def check_extended_stdlib():
                 "    }\n"
                 "    return worker;\n"
                 "}\n"
-                "let blob = std.thread.encode(make_worker(f));\n"
-                "let t = std.thread.spawn_encoded(blob, "
+                "let blob = std.entry.encode(make_worker(f));\n"
+                "let t = std.thread.spawn_entry(blob, "
                 'std.thread.Message.from({"n": 3}));\n'
                 "let r = t.join();\n"
                 'print("encoded=" + str(r["value"]["v"]) + "|");\n',
@@ -3893,8 +3893,8 @@ def check_extended_stdlib():
                 "    }\n"
                 "    return worker;\n"
                 "}\n"
-                "let blob = std.thread.encode(make_worker(s, d, l, h));\n"
-                "let t = std.thread.spawn_encoded(blob, "
+                "let blob = std.entry.encode(make_worker(s, d, l, h));\n"
+                "let t = std.thread.spawn_entry(blob, "
                 'std.thread.Message.from({"n": 1}));\n'
                 "let r = t.join();\n"
                 'print("s=" + str(r["value"]["s"]) + "|d=" + '

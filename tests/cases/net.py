@@ -3406,6 +3406,88 @@ def run_cases():
                     check_cluster_rotation("threads", "reuse_port")
                     check_cluster_rotation("workers", "reuse_port")
 
+                if sys_module.platform.startswith("linux"):
+                    rp_dir = os.path.join(tls_tmp, "reuse_tls")
+                    os.makedirs(rp_dir, exist_ok=True)
+                    rp_worker = os.path.join(rp_dir, "rp_worker.skein")
+                    with open(rp_worker, "w", encoding="utf-8") as handle:
+                        handle.write(
+                            "import std;\n"
+                            "func handle(req) {\n"
+                            '  return {"status": 200, "headers": '
+                            '{"X-Worker": str(req["worker_id"])}, '
+                            '"body": "rp:" + req["path"]};\n'
+                            "}\n"
+                        )
+                    rp_worker_path = rp_worker.replace("\\", "\\\\")
+                    rp_requests = 2 if http2_enabled else 1
+                    rp_server = os.path.join(rp_dir, "rp_server.skein")
+                    with open(rp_server, "w", encoding="utf-8") as handle:
+                        handle.write(
+                            "import std;\n"
+                            f'let s = std.http.listen_tls("127.0.0.1", 0, '
+                            f'"{tls_cert}", "{tls_key}");\n'
+                            'println(s["port"]);\n'
+                            "std.io.flush(std.io.stdout);\n"
+                            f'let ps = std.http.serve_workers(s, 2, '
+                            f'"{rp_worker_path}", {{"strategy": '
+                            f'"reuse_port", "max_requests": {rp_requests}}});\n'
+                            'println("info=" + ps.strategy + ":" + '
+                            'str(ps.capabilities["reuse_port"]) + ":" + '
+                            'str(ps.capabilities["http2"]));\n'
+                            "std.io.flush(std.io.stdout);\n"
+                            "let served = ps.join(30000);\n"
+                            'println("served=" + str(served));\n'
+                        )
+                    rp_proc = subprocess.Popen(
+                        [BIN, rp_server],
+                        cwd=rp_dir,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    try:
+                        rp_port_line = rp_proc.stdout.readline().strip()
+                        assert rp_port_line.isdigit(), (
+                            rp_port_line, rp_proc.stderr.read())
+                        rp_info = rp_proc.stdout.readline().strip()
+                        assert "info=reuse_port:true:" in rp_info, rp_info
+                        rp_port = int(rp_port_line)
+                        h1 = run(
+                            "import std;\n"
+                            f'let r = std.http.get('
+                            f'"https://127.0.0.1:{rp_port}/h1", '
+                            '{"tls": {"verify": false}});\n'
+                            'println(r["status"]);\n'
+                            'println(bytes_to_string(r["body"]));\n'
+                        )
+                        assert h1.returncode == 0, h1.stderr
+                        assert "200" in h1.stdout, h1.stdout
+                        assert "rp:/h1" in h1.stdout, h1.stdout
+                        if http2_enabled:
+                            h2 = run(
+                                "import std;\n"
+                                f'let a = std.http2.get('
+                                f'"https://127.0.0.1:{rp_port}/h2", '
+                                '{"tls": {"verify": false}});\n'
+                                'println(str(a["status"]) + " " + '
+                                'a["protocol"]);\n'
+                                'println(bytes_to_string(a["body"]));\n',
+                                timeout=15,
+                            )
+                            assert h2.returncode == 0, h2.stderr
+                            assert "200 h2" in h2.stdout, h2.stdout
+                            assert "rp:/h2" in h2.stdout, h2.stdout
+                        rp_proc.wait(timeout=30)
+                        assert rp_proc.returncode == 0, rp_proc.stderr.read()
+                        rp_out = rp_proc.stdout.read()
+                        assert f"served={rp_requests}" in rp_out, rp_out
+                    finally:
+                        if rp_proc.poll() is None:
+                            rp_proc.terminate()
+                            rp_proc.wait(timeout=5)
+
         serve_probe = socket.socket()
         serve_probe.bind(("127.0.0.1", 0))
         serve_port = serve_probe.getsockname()[1]

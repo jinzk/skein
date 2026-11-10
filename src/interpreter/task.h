@@ -37,6 +37,9 @@ bool is_task_value(struct value_t *value);
 struct value_t *call_task_builtin(
     int functype, const std::vector<struct value_t *> &args);
 
+/* Mark result/error values of every live task on this thread. */
+void task_visit_values(void (*visit)(void *, struct value_t *), void *ctx);
+
 void task_shutdown();
 
 #endif

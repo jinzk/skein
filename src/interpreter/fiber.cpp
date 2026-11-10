@@ -5,6 +5,8 @@
 #include "eval.h"
 #include "eval_context.h"
 #include "event_loop.h"
+#include "gc.h"
+#include "gc_roots.h"
 #include "repl.h"
 #include "runtime_context.h"
 #include "scopestack.h"
@@ -217,6 +219,66 @@ thread_local bool shutting_down = false;
 thread_local bool generator_warnings_enabled = true;
 thread_local std::deque<fiber *> ready_fibers;
 thread_local std::vector<fiber *> all_fibers;
+thread_local std::vector<fiber *> generator_fibers;
+thread_local bool fiber_gc_roots_registered = false;
+
+void forget_generator_fiber(fiber *value) {
+    generator_fibers.erase(
+        std::remove(generator_fibers.begin(), generator_fibers.end(), value),
+        generator_fibers.end());
+}
+
+/*
+ * Suspended fibers keep their eval scopes and yielded/resumed values on
+ * their own stacks, outside the active context's root table.  Mark them from
+ * the thread-level GC hook so cycle collection does not clear live state.
+ */
+void fiber_gc_roots_visit(void *ctx, gc_scope_mark_fn mark_scope,
+                          gc_mark_fn mark_value) {
+    auto mark_fiber = [&](fiber *value) {
+        if (!value)
+            return;
+        if (value->yielded_value)
+            mark_value(ctx, value->yielded_value);
+        if (value->final_value)
+            mark_value(ctx, value->final_value);
+        if (value->error_value)
+            mark_value(ctx, value->error_value);
+        if (value->resume_value)
+            mark_value(ctx, value->resume_value);
+        scope_context &scopes = value->eval.scopes;
+        if (scopes.global_scope)
+            mark_scope(ctx, scopes.global_scope.get());
+        if (scopes.current)
+            mark_scope(ctx, scopes.current.get());
+        for (const std::shared_ptr<scope_t> &scope : scopes.restore_stack) {
+            if (scope)
+                mark_scope(ctx, scope.get());
+        }
+        gc_roots_visit(scopes, mark_value, ctx);
+    };
+    for (fiber *value : all_fibers)
+        mark_fiber(value);
+    for (fiber *value : generator_fibers)
+        mark_fiber(value);
+    task_visit_values(mark_value, ctx);
+}
+
+void ensure_fiber_gc_roots() {
+    if (fiber_gc_roots_registered)
+        return;
+    const char *configured = std::getenv("SKEIN_FIBER_GC_ROOTS");
+    if (configured && *configured &&
+        (std::strcmp(configured, "0") == 0 ||
+         std::strcmp(configured, "off") == 0 ||
+         std::strcmp(configured, "false") == 0 ||
+         std::strcmp(configured, "no") == 0)) {
+        fiber_gc_roots_registered = true;
+        return;
+    }
+    gc_set_thread_root_visitor(&fiber_gc_roots_visit);
+    fiber_gc_roots_registered = true;
+}
 
 void remove_fiber(fiber *value) {
     all_fibers.erase(std::remove(all_fibers.begin(), all_fibers.end(), value),
@@ -407,6 +469,7 @@ bool fiber_in_fiber() {
 }
 
 task_ptr fiber_start_async(std::function<value_t *()> body) {
+    ensure_fiber_gc_roots();
     task_ptr task = task_create();
     fiber *value = new fiber(std::move(body), FIBER_TASK);
     value->task = task;
@@ -461,6 +524,7 @@ struct generator {
             }
             if (root_context)
                 adopt_scopes(value->eval.scopes, root_context->scopes);
+            forget_generator_fiber(value);
             delete value;
         }
     }
@@ -484,7 +548,9 @@ const struct native_type generator_type = {
 generator_ptr generator_create(std::function<value_t *()> body) {
     if (!fiber_available())
         return NULL;
+    ensure_fiber_gc_roots();
     fiber *value = new fiber(std::move(body), FIBER_GENERATOR);
+    generator_fibers.push_back(value);
     value->eval.scopes.global_scope =
         active_eval_context().scopes.global_scope;
     value->eval.capture_errors = true;
@@ -575,6 +641,7 @@ bool generator_next_value(const generator_ptr &generator,
     }
     value_t *error_value = current->error_value;
     current->error_value = NULL;
+    forget_generator_fiber(current);
     delete current;
     generator->value = NULL;
     if (failed) {
@@ -603,6 +670,7 @@ bool generator_close(const generator_ptr &generator) {
 
     if (!generator->started) {
         /* The body never ran, so there are no defers to execute. */
+        forget_generator_fiber(current);
         delete current;
         generator->value = NULL;
         generator->done = true;
@@ -644,6 +712,7 @@ bool generator_close(const generator_ptr &generator) {
     current->yielded_value = NULL;
     freeval(current->final_value);
     current->final_value = NULL;
+    forget_generator_fiber(current);
     delete current;
     generator->value = NULL;
     generator->done = true;
@@ -831,6 +900,9 @@ void fiber_shutdown() {
         }
     }
     fiber_stacks.clear();
+    generator_fibers.clear();
+    gc_set_thread_root_visitor(NULL);
+    fiber_gc_roots_registered = false;
     shutting_down = false;
 }
 

@@ -116,6 +116,12 @@ void mark_root_value(void *ctx, value_t *value) {
     static_cast<cycle_collector *>(ctx)->mark_value(value);
 }
 
+void mark_scope_root(void *ctx, struct scope_t *scope) {
+    static_cast<cycle_collector *>(ctx)->mark_scope(scope);
+}
+
+thread_local gc_thread_roots_fn thread_roots_visitor = nullptr;
+
 std::atomic<void (*)()> thread_cycle_collector{nullptr};
 
 /*
@@ -150,6 +156,10 @@ void gc_mark_upvalue_cell(struct upvalue_cell *cell) {
         cell->gc_epoch = gc_cell_epoch;
 }
 
+void gc_set_thread_root_visitor(gc_thread_roots_fn visit) {
+    thread_roots_visitor = visit;
+}
+
 void gc_sweep_all_cells(scope_context &context) {
     sweep_cells(true, &context);
 }
@@ -181,6 +191,9 @@ void collect_cycles(scope_context &context) {
     for (auto &s : context.restore_stack)
         collector.mark_scope(s.get());
     gc_roots_visit(context, mark_root_value, &collector);
+    if (thread_roots_visitor) {
+        thread_roots_visitor(&collector, &mark_scope_root, &mark_root_value);
+    }
     structtype_visit_functions(
         [&collector](const std::shared_ptr<function_def> &def) {
             collector.mark_function(def);

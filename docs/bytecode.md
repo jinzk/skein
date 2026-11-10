@@ -334,7 +334,9 @@ struct Instr {
   sanitizer 构建使用更小的值以适配更大的 C++ 帧。
 - 已实现第一版 GC root 表：VM/JIT frame 的 param/slot/operand stack、
   upvalue cell、defer/iterator 以及 `eval_context.control_value` 会显式
-  登记为 roots，cycle collector 会把它们纳入可达性分析；
+  登记为 roots；挂起的 task/generator fiber 的 `eval.scopes`、栈上值以及
+  task result/error 也通过 thread-level root visitor 标记；
+  cycle collector 会把它们纳入可达性分析；
   `SKEIN_GC_STRESS` 可在 VM/JIT safepoint 强制收集。
   尚未实现 per-pc liveness / moving GC，见
   [jit-plan.md](jit-plan.md)；AOT、字节码序列化与磁盘缓存待决策。

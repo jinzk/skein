@@ -244,3 +244,40 @@ def run_cases():
         for item in stats[-1].split(": ", 1)[1].split())
     assert int(fields["reused"]) > 0, stats[-1]
     assert int(fields["allocated"]) <= 2, stats[-1]
+
+    check(
+        "suspended generator survives cycle collection",
+        "import std;\n"
+        "func make_gen() {\n"
+        "  let data = [1, 2, 3];\n"
+        "  func peek() { return data; }\n"
+        "  return func() {\n"
+        "    yield peek();\n"
+        "    data = std.list.append(data, 4);\n"
+        "    yield peek();\n"
+        "  };\n"
+        "}\n"
+        "let g = make_gen()();\n"
+        "let first = std.generator.next(g);\n"
+        "println(first[\"value\"]);\n"
+        + "if (false) { }\n" * 80
+        + "let second = std.generator.next(g);\n"
+        "println(second[\"value\"]);\n",
+        stdout="[1, 2, 3]\n[1, 2, 3, 4]\n",
+    )
+
+    check(
+        "suspended async task survives cycle collection",
+        "import std;\n"
+        "async func hold(v) {\n"
+        "  for (let i = 0; i < 3; i = i + 1) {\n"
+        "    await std.task.sleep(1);\n"
+        "    v = std.list.append(v, i);\n"
+        "  }\n"
+        "  return v;\n"
+        "}\n"
+        "let t = hold([1, 2, 3]);\n"
+        + "if (false) { }\n" * 80
+        + "println(await t);\n",
+        stdout="[1, 2, 3, 0, 1, 2]\n",
+    )

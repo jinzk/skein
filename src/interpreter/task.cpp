@@ -1012,6 +1012,19 @@ void task_shutdown() {
     }
 }
 
+void task_visit_values(void (*visit)(void *, struct value_t *), void *ctx) {
+    if (!visit)
+        return;
+    for (task *value : task_registry()) {
+        if (!value)
+            continue;
+        if (value->result)
+            visit(ctx, value->result);
+        if (value->error_value)
+            visit(ctx, value->error_value);
+    }
+}
+
 struct value_t *call_task_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     switch (functype) {

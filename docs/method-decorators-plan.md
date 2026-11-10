@@ -912,7 +912,7 @@ variadic、trait、跨包、命名函数和 async 场景。
   - 修复类型检查提前物化 `function_code` 时的 AST 双重释放；
 - `std.meta.methods` 的 `async` 字段；
 - VM 函数缓存退出释放修复；
-- `tests/cases/decorators.py`、`tests/cases/async_methods.py` 及注册；
+- `tests/cases/decorators.py`、`tests/cases/task_methods.py` 及注册；
 - README / SYNTAX / architecture 文档更新。
 
 验证结果：

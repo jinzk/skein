@@ -609,6 +609,16 @@ value_t *make_request(value_t *client, const http1::message &message) {
     dict_set(request, "http_minor", newintval(message.http_minor));
     dict_set(request, "keep_alive", newboolval(message.keep_alive));
     dict_set(request, "socket", dupval(client));
+    value_t *peer = call_net(B_net_peer_addr, {dupval(client)});
+    if (peer && peer->type == T_dict) {
+        value_t *address = dict_get(peer, "address");
+        value_t *port = dict_get(peer, "port");
+        if (address)
+            dict_set(request, "remote_addr", dupval(address));
+        if (port)
+            dict_set(request, "remote_port", dupval(port));
+    }
+    freeval(peer);
     return request;
 }
 
@@ -3326,8 +3336,28 @@ while (true) {
         "method": request["params"][0],
         "path": request["params"][1],
         "headers": request["params"][2],
-        "body": body
+        "body": body,
+        "http_major": 0,
+        "http_minor": 0,
+        "keep_alive": false,
+        "remote_addr": null,
+        "remote_port": 0
     };
+    if (len(request["params"]) > 3) {
+        req["http_major"] = request["params"][3];
+    }
+    if (len(request["params"]) > 4) {
+        req["http_minor"] = request["params"][4];
+    }
+    if (len(request["params"]) > 5) {
+        req["keep_alive"] = request["params"][5];
+    }
+    if (len(request["params"]) > 6) {
+        req["remote_addr"] = request["params"][6];
+    }
+    if (len(request["params"]) > 7) {
+        req["remote_port"] = request["params"][7];
+    }
     let future = pool.submit(req);
     let result = future.wait();
     if (result["ok"]) {
@@ -3348,8 +3378,12 @@ while (true) {
         std.io.write_all(std.io.stdout, response_body);
         std.io.flush(std.io.stdout);
     } else {
+        let error_text = "worker handler failed";
+        if (result["error"] != null) {
+            error_text = str(result["error"]);
+        }
         let reply = {"id": request["id"], "ok": false,
-                     "error": "worker handler failed"};
+                     "error": error_text};
         std.io.write_all(std.io.stdout,
             bytes_from_string(std.json.stringify(reply) + "\n"));
         std.io.flush(std.io.stdout);
@@ -4537,6 +4571,21 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             items->payload->items.push_back(dupval(dict_get(request, "method")));
             items->payload->items.push_back(dupval(dict_get(request, "path")));
             items->payload->items.push_back(dupval(dict_get(request, "headers")));
+            value_t *major = dict_get(request, "http_major");
+            items->payload->items.push_back(
+                major ? dupval(major) : newintval(0));
+            value_t *minor = dict_get(request, "http_minor");
+            items->payload->items.push_back(
+                minor ? dupval(minor) : newintval(0));
+            value_t *keep_alive = dict_get(request, "keep_alive");
+            items->payload->items.push_back(
+                keep_alive ? dupval(keep_alive) : newboolval(false));
+            value_t *remote_addr = dict_get(request, "remote_addr");
+            items->payload->items.push_back(
+                remote_addr ? dupval(remote_addr) : newnull());
+            value_t *remote_port = dict_get(request, "remote_port");
+            items->payload->items.push_back(
+                remote_port ? dupval(remote_port) : newintval(0));
             value_t *method = newstrval("handle");
             value_t *body_arg = newbytesval(body);
             std::vector<value_t *> call{server->pool, method, params,
@@ -4572,6 +4621,11 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
                     message.find("stream_response") !=
                         std::string::npos)
                     status = 501;
+                else if (message.find("timeout") != std::string::npos)
+                    status = 504;
+                else if (message.find("pool_failed") != std::string::npos ||
+                         message.find("closed") != std::string::npos)
+                    status = 503;
                 return error_response(status, message);
             }
             value_t *payload = result->value;
@@ -4585,6 +4639,8 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             long long status_code = 200;
             if (status && status->type == T_int)
                 status_code = ((int_value_t *)status)->value;
+            if (status_code < 100 || status_code > 999)
+                status_code = 502;
             value_t *headers = dict_get(meta, "headers");
             value_t *response = (value_t *)newdictval();
             dict_set(response, "status", newintval(status_code));

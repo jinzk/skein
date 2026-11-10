@@ -807,9 +807,13 @@ max_body_bytes      默认 16 MiB
       return {"status": 200, "headers": {}, "body": "ok"};
   }
   ```
-- request dict 当前包含 `method/path/headers/body`；reuse_port 额外包含
-  `worker_id`；
-- worker 返回值必须是 `{status, headers, body}`；
+- request dict 与 `serve_threads` 一致，包含
+  `method/path/headers/body/http_major/http_minor/keep_alive/remote_addr/remote_port`；
+  reuse_port 额外包含 `worker_id`；
+- worker 返回值必须是 `{status, headers, body}`；`status` 必须在 `100..999`，
+  否则按 502 处理；
+- worker 错误返回 502，worker 超时返回 504，worker 不可用返回 503，
+  unsupported 返回 501；
 - `body_stream` 在进程 dispatch 下返回 501；
 - `worker_timeout_ms` 控制单次 worker 调用超时，默认 30000，`0` 表示不超时；
 - worker 调用使用异步等待，多个连接可以并发占用不同 worker；

@@ -864,7 +864,11 @@ def check_extended_stdlib():
                 "import std;\n"
                 "func handle(req) {\n"
                 "  return {\"status\": 200,\n"
-                "          \"headers\": {\"Content-Type\": \"text/plain\"},\n"
+                "          \"headers\": {\"Content-Type\": \"text/plain\",\n"
+                "                      \"X-Method\": req[\"method\"],\n"
+                "                      \"X-Major\": str(req[\"http_major\"]),\n"
+                "                      \"X-Keep\": str(req[\"keep_alive\"]),\n"
+                "                      \"X-Remote\": str(req[\"remote_addr\"])},\n"
                 "          \"body\": bytes_to_string(req[\"body\"])};\n"
                 "}\n"
             )
@@ -909,6 +913,11 @@ def check_extended_stdlib():
             with urllib.request.urlopen(request, timeout=10) as response:
                 assert response.status == 200
                 assert response.read() == b"hello-body"
+                assert response.headers.get("X-Method") == "POST"
+                assert response.headers.get("X-Major") == "1"
+                assert response.headers.get("X-Remote") == "127.0.0.1", dict(
+                    response.headers)
+                assert response.headers.get("X-Keep") is not None
             out, err = server.communicate(timeout=10)
             assert server.returncode == 0, err
             assert "server=dispatch:" in out, out

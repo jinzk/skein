@@ -1,8 +1,11 @@
 {
   "linux": {
-    "threads_dispatch": 5521.0
+    "threads_dispatch": 5521.0,
+    "processes_dispatch": 5475.0,
+    "processes_reuse_port": 5692.0
   },
   "win32": {
-    "threads_dispatch": 11439.0
+    "threads_dispatch": 11439.0,
+    "processes_dispatch": 8921.0
   }
 }

@@ -1074,7 +1074,7 @@ def run_cases():
           "  let st: stream = std.fs.open(\"/tmp/x\", \"w\");\n"
           "  let buf: stream = std.io.buffered(st, 1024);\n"
           "  let wt: task[websocket] =\n"
-          "    std.websocket.connect_async(\"ws://x\");\n"
+          "    std.websocket.connect_task(\"ws://x\");\n"
           "}\n",
           not_stderr="type warning")
 
@@ -1090,11 +1090,11 @@ def run_cases():
     check("async builtin task types",
           "import std;\n"
           "func check() {\n"
-          "  let t = std.http.get_async(\"http://x\");\n"
+          "  let t = std.http.get_task(\"http://x\");\n"
           "  let d: dict[string, any] = await t;\n"
-          "  let c = std.net.tcp_connect_async(\"127.0.0.1\", 1);\n"
+          "  let c = std.net.tcp_connect_task(\"127.0.0.1\", 1);\n"
           "  let sock: userdata = await c;\n"
-          "  let u = std.net.recv_async(sock, 10);\n"
+          "  let u = std.net.recv_task(sock, 10);\n"
           "  let b: bytes = await u;\n"
           "}\n",
           not_stderr="type warning")
@@ -1102,7 +1102,7 @@ def run_cases():
     check("async builtin task mismatch",
           "import std;\n"
           "func check() {\n"
-          "  let t: task[int] = std.http.get_async(\"http://x\");\n"
+          "  let t: task[int] = std.http.get_task(\"http://x\");\n"
           "}\n",
           stderr="type error: expected task[int], "
                  "got task[dict[string, any]]")

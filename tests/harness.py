@@ -634,7 +634,7 @@ def check_extended_stdlib():
             "std process spawn async",
             "import std;\n"
             'let p = std.process.spawn("/bin/echo", {"args": ["async"]});\n'
-            'let data = await std.io.read_async(p["stdout"], 4096);\n'
+            'let data = await std.io.read_task(p["stdout"], 4096);\n'
             'print(bytes_to_string(data));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["async", "0"],
@@ -643,9 +643,9 @@ def check_extended_stdlib():
             "std process spawn async write",
             "import std;\n"
             'let p = std.process.spawn("/bin/cat");\n'
-            'print(await std.io.write_async(p["stdin"], "abc"));\n'
+            'print(await std.io.write_task(p["stdin"], "abc"));\n'
             'std.io.close(p["stdin"]);\n'
-            'let data = await std.io.read_async(p["stdout"], 4096);\n'
+            'let data = await std.io.read_task(p["stdout"], 4096);\n'
             'print(bytes_to_string(data));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["3", "abc", "0"],

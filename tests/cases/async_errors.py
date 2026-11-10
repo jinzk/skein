@@ -698,6 +698,13 @@ def run_cases():
     check(
         "std net resolve async",
         "import std;\n"
+        'let t = std.net.resolve_task("localhost", 1000, "ipv4");\n'
+        "len(std.task.wait(t)) > 0\n",
+        stdout="= true",
+    )
+    check(
+        "std net resolve async alias",
+        "import std;\n"
         'let t = std.net.resolve_async("localhost", 1000, "ipv4");\n'
         "len(std.task.wait(t)) > 0\n",
         stdout="= true",
@@ -705,8 +712,8 @@ def run_cases():
     check(
         "std net concurrent resolve async",
         "import std;\n"
-        'let a = std.net.resolve_async("localhost", 1000, "ipv4");\n'
-        'let b = std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        'let a = std.net.resolve_task("localhost", 1000, "ipv4");\n'
+        'let b = std.net.resolve_task("localhost", 1000, "ipv4");\n'
         "let values = std.task.wait_all([a, b]);\n"
         "len(values) == 2 && len(values[0]) > 0 && len(values[1]) > 0\n",
         stdout="= true",
@@ -714,7 +721,7 @@ def run_cases():
     check(
         "std net async resolve cancel",
         "import std;\n"
-        'let t = std.net.resolve_async("localhost", 5000);\n'
+        'let t = std.net.resolve_task("localhost", 5000);\n'
         "std.task.cancel(t)\n"
         "std.task.wait(t);\n",
         stdout="= true",

@@ -936,7 +936,7 @@ def run_cases():
         "async await net",
         "import std;\n"
         "async func resolve_one() {\n"
-        '  return await std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        '  return await std.net.resolve_task("localhost", 1000, "ipv4");\n'
         "}\n"
         "len(await resolve_one()) > 0\n",
         stdout="= true",

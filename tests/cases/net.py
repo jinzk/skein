@@ -102,8 +102,8 @@ def run_cases():
             "import std;\n"
             f'let s = std.net.tcp_connect("127.0.0.1", '
             f'{async_stream_port}, 1000, "ipv4");\n'
-            'await std.io.write_async(s, "hello", 1000)\n'
-            "let data = await std.io.read_async(s, 100, 1000);\n"
+            'await std.io.write_task(s, "hello", 1000)\n'
+            "let data = await std.io.read_task(s, 100, 1000);\n"
             "println(bytes_to_string(data));\n"
             "std.io.close(s);\n"
         )
@@ -119,8 +119,8 @@ def run_cases():
             'import std;\n'
             f'let f = std.fs.open("{test_file}", "rb");\n'
             'let b = std.io.buffered(f, 4);\n'
-            'len(await std.io.read_async(b, 2)) == 2\n'
-            'len(await std.io.read_async(b, 100)) > 0\n'
+            'len(await std.io.read_task(b, 2)) == 2\n'
+            'len(await std.io.read_task(b, 100)) > 0\n'
             'std.io.close(b)\n',
             stdout_all=["= true", "= true", "= true"],
         )
@@ -246,7 +246,7 @@ def run_cases():
             "import std;\n"
             f'let a = await std.http.get_async('
             f'"http://127.0.0.1:{async_keepalive_port}/a");\n'
-            f'let b = await std.http.get_async('
+            f'let b = await std.http.get_task('
             f'"http://127.0.0.1:{async_keepalive_port}/b");\n'
             'println(bytes_to_string(a["body"]));\n'
             'println(bytes_to_string(b["body"]));\n'
@@ -314,9 +314,9 @@ def run_cases():
         stale_async_thread.start()
         stale_async_proc = run(
             "import std;\n"
-            f'let a = await std.http.get_async('
+            f'let a = await std.http.get_task('
             f'"http://127.0.0.1:{stale_async_port}/a");\n'
-            f'let b = await std.http.get_async('
+            f'let b = await std.http.get_task('
             f'"http://127.0.0.1:{stale_async_port}/b");\n'
             'println(bytes_to_string(a["body"]));\n'
             'println(bytes_to_string(b["body"]));\n'
@@ -367,7 +367,7 @@ def run_cases():
             '  println("s=" + bytes_to_string(chunk));\n'
             "}});\n"
             'println("sb=" + bytes_to_string(a["body"]));\n'
-            f'let b = await std.http.get_async('
+            f'let b = await std.http.get_task('
             f'"http://127.0.0.1:{stream_port}/b", '
             '{"on_body": func(chunk) {\n'
             '  println("a=" + bytes_to_string(chunk));\n'
@@ -449,7 +449,7 @@ def run_cases():
             f'"http://127.0.0.1:{request_stream_port}/a", '
             '{"body_stream": parts()});\n'
             'println(bytes_to_string(a["body"]));\n'
-            f'let b = await std.http.post_async('
+            f'let b = await std.http.post_task('
             f'"http://127.0.0.1:{request_stream_port}/b", '
             '{"body_stream": async_parts()});\n'
             'println(bytes_to_string(b["body"]));\n',
@@ -511,7 +511,7 @@ def run_cases():
                 f'"http://127.0.0.1:{serve_stream_port}/a");\n'
                 'println(a["headers"]["transfer-encoding"]);\n'
                 'println(bytes_to_string(a["body"]));\n'
-                f'let b = await std.http.get_async('
+                f'let b = await std.http.get_task('
                 f'"http://127.0.0.1:{serve_stream_port}/b");\n'
                 'println(bytes_to_string(b["body"]));\n',
                 timeout=15,
@@ -605,7 +605,7 @@ def run_cases():
         http_async_thread.start()
         http_async_proc = run(
             "import std;\n"
-            f'let t = std.http.get_async('
+            f'let t = std.http.get_task('
             f'"http://127.0.0.1:{http_async_port}/");\n'
             'let r = await t;\n'
             'println(r["status"]);\n'
@@ -691,8 +691,8 @@ def run_cases():
                 f'let s = std.http.listen("127.0.0.1", {http_async_port});\n'
                 'println("ready");\n'
                 "std.io.flush(std.io.stdout);\n"
-                "let req = await std.http.accept_async(s, 10000);\n"
-                'await std.http.respond_async(req, 200, '
+                "let req = await std.http.accept_task(s, 10000);\n"
+                'await std.http.respond_task(req, 200, '
                 '{"X-Async": "yes"}, "async " + req["path"]);\n'
                 "std.http.close(s);\n"
             )
@@ -787,7 +787,7 @@ def run_cases():
                     f'let b = std.http2.post('
                     f'"http://127.0.0.1:{http2_port}/post", "payload");\n'
                     'println(bytes_to_string(b["body"]));\n'
-                    'let c = await std.http2.get_async('
+                    'let c = await std.http2.get_task('
                     f'"http://127.0.0.1:{http2_port}/async");\n'
                     'println(bytes_to_string(c["body"]));\n',
                     timeout=15,
@@ -1150,7 +1150,7 @@ def run_cases():
                     '  println("s=" + bytes_to_string(chunk));\n'
                     "}});\n"
                     'println("sb=" + bytes_to_string(a["body"]));\n'
-                    f'let b = await std.http2.post_async('
+                    f'let b = await std.http2.post_task('
                     f'"http://127.0.0.1:{http2_stream_port}/b", '
                     '{"body_stream": async_parts(), '
                     '"on_body": func(chunk) {\n'
@@ -1226,7 +1226,7 @@ def run_cases():
                     f'let a = std.http2.get('
                     f'"http://127.0.0.1:{http2_send_port}/a");\n'
                     'println(bytes_to_string(a["body"]));\n'
-                    f'let b = await std.http2.get_async('
+                    f'let b = await std.http2.get_task('
                     f'"http://127.0.0.1:{http2_send_port}/b");\n'
                     'println(bytes_to_string(b["body"]));\n',
                     timeout=15,
@@ -1297,7 +1297,7 @@ def run_cases():
                     'println(bytes_to_string(rs[0]["body"]));\n'
                     'println(bytes_to_string(rs[1]["body"]));\n'
                     'println(bytes_to_string(rs[2]["body"]));\n'
-                    "let rs2 = await std.http2.request_many_async([\n"
+                    "let rs2 = await std.http2.request_many_task([\n"
                     f'  {{"url": '
                     f'"http://127.0.0.1:{http2_many_port}/d"}},\n'
                     f'  {{"url": '
@@ -1570,10 +1570,10 @@ def run_cases():
                     '{"cookie_jar": jar});\n'
                     'println(bytes_to_string(b["body"]));\n'
                     "let jar2 = {};\n"
-                    f'let c = await std.http2.get_async('
+                    f'let c = await std.http2.get_task('
                     f'"http://127.0.0.1:{http2_cookie_port}/set", '
                     '{"cookie_jar": jar2});\n'
-                    f'let d = await std.http2.get_async('
+                    f'let d = await std.http2.get_task('
                     f'"http://127.0.0.1:{http2_cookie_port}/check", '
                     '{"cookie_jar": jar2});\n'
                     'println(bytes_to_string(d["body"]));\n'
@@ -1584,7 +1584,7 @@ def run_cases():
                         f'"http://127.0.0.1:{http2_cookie_port}/gzip", '
                         '{"decompress": true});\n'
                         'println(bytes_to_string(g["body"]));\n'
-                        f'let h = await std.http2.get_async('
+                        f'let h = await std.http2.get_task('
                         f'"http://127.0.0.1:{http2_cookie_port}/gzip", '
                         '{"decompress": true});\n'
                         'println(bytes_to_string(h["body"]));\n'
@@ -2040,11 +2040,11 @@ def run_cases():
                 started = time.time()
                 http2_shared_client = run(
                     "import std;\n"
-                    f'let t1 = std.http2.get_async('
+                    f'let t1 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_port}/a");\n'
-                    f'let t2 = std.http2.get_async('
+                    f'let t2 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_port}/b");\n'
-                    f'let t3 = std.http2.get_async('
+                    f'let t3 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_port}/c");\n'
                     "let a = await t1;\n"
                     "let b = await t2;\n"
@@ -2052,11 +2052,11 @@ def run_cases():
                     'println(bytes_to_string(a["body"]));\n'
                     'println(bytes_to_string(b["body"]));\n'
                     'println(bytes_to_string(c["body"]));\n'
-                    f'let p1 = std.http2.post_async('
+                    f'let p1 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_shared_port}/d", "one");\n'
-                    f'let p2 = std.http2.post_async('
+                    f'let p2 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_shared_port}/e", "two");\n'
-                    f'let p3 = std.http2.post_async('
+                    f'let p3 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_shared_port}/f", "three");\n'
                     "let d = await p1;\n"
                     "let e = await p2;\n"
@@ -2073,7 +2073,7 @@ def run_cases():
                 assert len(shared_lines) == 6, http2_shared_client.stdout
                 shared_cids = [line.split()[0] for line in shared_lines]
                 assert len(set(shared_cids)) == 1, (
-                    "get_async/post_async did not share one connection: "
+                    "get_task/post_task did not share one connection: "
                     + http2_shared_client.stdout)
                 assert "GET /a" in shared_lines[0], http2_shared_client.stdout
                 assert "GET /b" in shared_lines[1], http2_shared_client.stdout
@@ -2133,15 +2133,15 @@ def run_cases():
                 assert ready, "http2 shared goaway server did not listen"
                 http2_shared_go_client = run(
                     "import std;\n"
-                    f'let a = await std.http2.get_async('
+                    f'let a = await std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/a");\n'
-                    f'let b = await std.http2.get_async('
+                    f'let b = await std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/b");\n'
                     'println(bytes_to_string(a["body"]));\n'
                     'println(bytes_to_string(b["body"]));\n'
-                    f'let t1 = std.http2.get_async('
+                    f'let t1 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/c");\n'
-                    f'let t2 = std.http2.get_async('
+                    f'let t2 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/d");\n'
                     "let c = await t1;\n"
                     "let d = await t2;\n"
@@ -2157,7 +2157,7 @@ def run_cases():
                 assert go_cids[0] == go_cids[1], http2_shared_go_client.stdout
                 assert go_cids[2] == go_cids[3], http2_shared_go_client.stdout
                 assert go_cids[0] != go_cids[2], (
-                    "get_async reused a GOAWAY connection: "
+                    "get_task reused a GOAWAY connection: "
                     + http2_shared_go_client.stdout)
                 http2_shared_go_proc.wait(timeout=10)
                 go_output = http2_shared_go_proc.stdout.read()
@@ -2206,9 +2206,9 @@ def run_cases():
                 assert ready, "http2 retry server did not listen"
                 http2_retry_client = run(
                     "import std;\n"
-                    f'let t1 = std.http2.get_async('
+                    f'let t1 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_retry_port}/a");\n'
-                    f'let t2 = std.http2.get_async('
+                    f'let t2 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_retry_port}/b");\n'
                     "let a = await t1;\n"
                     "let b = await t2;\n"
@@ -2275,9 +2275,9 @@ def run_cases():
                 assert ready, "http2 drain server did not listen"
                 http2_drain_client = run(
                     "import std;\n"
-                    f'let t1 = std.http2.get_async('
+                    f'let t1 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_drain_port}/a");\n'
-                    f'let t2 = std.http2.get_async('
+                    f'let t2 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_drain_port}/b");\n'
                     "let a = await t1;\n"
                     "let b = await t2;\n"
@@ -2345,12 +2345,12 @@ def run_cases():
                     "import std;\n"
                     "func p1() { yield \"hello\"; }\n"
                     "func p2() { yield \"world\"; }\n"
-                    f'let t1 = std.http2.post_async('
+                    f'let t1 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_ss_port}/a", '
                     '{"body_stream": p1(), "on_body": func(c) {\n'
                     '  println("s1=" + bytes_to_string(c));\n'
                     "}});\n"
-                    f'let t2 = std.http2.post_async('
+                    f'let t2 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_ss_port}/b", '
                     '{"body_stream": p2(), "on_body": func(c) {\n'
                     '  println("s2=" + bytes_to_string(c));\n'
@@ -2579,8 +2579,8 @@ def run_cases():
                     f'{tls_async_port}, 1000);\n'
                     'let t = std.tls.client(s, "localhost", '
                     f'{{"ca_file": "{tls_cert}"}});\n'
-                    'await std.io.write_async(t, "hello");\n'
-                    "println(bytes_to_string(await std.io.read_async(t, 100)));\n"
+                    'await std.io.write_task(t, "hello");\n'
+                    "println(bytes_to_string(await std.io.read_task(t, 100)));\n"
                     "std.io.close(t);\n"
                 )
                 tls_async_thread.join(timeout=5)
@@ -2731,7 +2731,7 @@ def run_cases():
                 async_https_thread.start()
                 async_https_proc = run(
                     "import std;\n"
-                    f'let r = await std.http.get_async('
+                    f'let r = await std.http.get_task('
                     f'"https://localhost:{async_https_port}/", '
                     f'{{"tls": {{"ca_file": "{tls_cert}"}}}});\n'
                     'println(r["status"]);\n'
@@ -2764,8 +2764,8 @@ def run_cases():
                         f'let s = std.http.listen_tls("127.0.0.1", '
                         f'{async_https_server_port}, "{tls_cert}", '
                         f'"{tls_key}");\n'
-                        "let req = await std.http.accept_async(s, 10000);\n"
-                        'await std.http.respond_async(req, 200, '
+                        "let req = await std.http.accept_task(s, 10000);\n"
+                        'await std.http.respond_task(req, 200, '
                         '{"X-Async": "yes"}, "async secure " + '
                         'req["path"]);\n'
                         "std.http.close(s);\n"
@@ -3850,7 +3850,7 @@ def run_cases():
             'std.io.write_all(a["socket"], "one");\n'
             'println(bytes_to_string(std.io.read(a["socket"], 100)));\n'
             'std.io.close(a["socket"]);\n'
-            f'let b = await std.http.get_async('
+            f'let b = await std.http.get_task('
             f'"http://127.0.0.1:{upgrade_server_port}/", '
             '{"upgrade": true, "headers": {"Upgrade": "test"}});\n'
             'println(str(b["status"]) + " " + str(b["upgraded"]));\n'
@@ -4065,7 +4065,7 @@ def run_cases():
                 f'"http://127.0.0.1:{redirect_port}/post307", "payload", '
                 '{"follow_redirects": true});\n'
                 'println(bytes_to_string(c["body"]));\n'
-                f'let d = await std.http.get_async('
+                f'let d = await std.http.get_task('
                 f'"http://127.0.0.1:{redirect_port}/a", '
                 '{"follow_redirects": true});\n'
                 'println(bytes_to_string(d["body"]));\n'
@@ -4154,11 +4154,11 @@ def run_cases():
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar})["body"]));\n'
                 "let jar2 = {};\n"
-                f'let ar = await std.http.get_async('
+                f'let ar = await std.http.get_task('
                 f'"http://127.0.0.1:{cookie_port}/set", '
                 '{"cookie_jar": jar2});\n'
                 'println("acount=" + str(len(std.http.cookies(ar))));\n'
-                f'let ac = await std.http.get_async('
+                f'let ac = await std.http.get_task('
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar2});\n'
                 'println("acheck=" + bytes_to_string(ac["body"]));\n',
@@ -4249,7 +4249,7 @@ def run_cases():
                     f'"http://127.0.0.1:{compression_port}/br", '
                     '{"decompress": true});\n'
                     'println(bytes_to_string(d["body"]));\n'
-                    f'let e = await std.http.get_async('
+                    f'let e = await std.http.get_task('
                     f'"http://127.0.0.1:{compression_port}/gzip", '
                     '{"decompress": true});\n'
                     'println(bytes_to_string(e["body"]));\n'
@@ -4669,12 +4669,12 @@ def run_cases():
         async_thread.start()
         async_proc = run(
             "import std;\n"
-            f'let t = std.net.tcp_connect_async('
+            f'let t = std.net.tcp_connect_task('
             f'"127.0.0.1", {async_port}, 1000, "ipv4");\n'
             "let s = std.task.wait(t);\n"
-            'let st = std.net.send_async(s, "hello", 1000);\n'
+            'let st = std.net.send_task(s, "hello", 1000);\n'
             "std.task.wait(st)\n"
-            "let rt = std.net.recv_async(s, 100, 1000);\n"
+            "let rt = std.net.recv_task(s, 100, 1000);\n"
             "let data = std.task.wait(rt);\n"
             "println(bytes_to_string(data));\n"
             "std.net.close(s);\n"
@@ -4751,17 +4751,17 @@ def run_cases():
         try:
             async_server_proc.stdin.write(
                 "import std;\n"
-                f'let lt = std.net.tcp_listen_async('
+                f'let lt = std.net.tcp_listen_task('
                 f'"127.0.0.1", {async_listen_port}, 1000, "ipv4");\n'
                 "let listener = std.task.wait(lt);\n"
-                "let at = std.net.accept_async(listener, 1000);\n"
+                "let at = std.net.accept_task(listener, 1000);\n"
                 "let client = std.task.wait(at);\n"
-                "let rt = std.net.recv_async(client, 100, 1000);\n"
+                "let rt = std.net.recv_task(client, 100, 1000);\n"
                 "let data = std.task.wait(rt);\n"
-                "let st = std.net.send_async(client, bytes_concat("
+                "let st = std.net.send_task(client, bytes_concat("
                 'bytes_from_string("async:"), data), 1000);\n'
                 "std.task.wait(st)\n"
-                "let ht = std.net.shutdown_async(client, 1000);\n"
+                "let ht = std.net.shutdown_task(client, 1000);\n"
                 "std.task.wait(ht)\n"
                 "std.net.close(client);\n"
                 "std.net.close(listener);\n"
@@ -4796,12 +4796,12 @@ def run_cases():
 
         if sys.platform.startswith("linux"):
             check(
-                "std net tcp_listen_async reuse_port",
+                "std net tcp_listen_task reuse_port",
                 "import std;\n"
-                'let a = std.task.wait(std.net.tcp_listen_async('
+                'let a = std.task.wait(std.net.tcp_listen_task('
                 '"127.0.0.1", 0, 1000, "any", {"reuse_port": true}));\n'
                 'let port = std.net.local_addr(a)["port"];\n'
-                'let b = std.task.wait(std.net.tcp_listen_async('
+                'let b = std.task.wait(std.net.tcp_listen_task('
                 '"127.0.0.1", port, 1000, "any", '
                 '{"reuse_port": true}));\n'
                 'print("same=" + str(std.net.local_addr(a)["port"] == '
@@ -4825,7 +4825,7 @@ def run_cases():
             "std net async accept timeout",
             "import std;\n"
             'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
-            "let a = std.net.accept_async(listener, 50);\n"
+            "let a = std.net.accept_task(listener, 50);\n"
             "std.task.wait(a);\n"
             "std.net.close(listener);\n",
             stderr="accept_async: timed out",
@@ -4834,7 +4834,7 @@ def run_cases():
             "std net async cancel",
             "import std;\n"
             'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
-            "let a = std.net.accept_async(listener, 1000);\n"
+            "let a = std.net.accept_task(listener, 1000);\n"
             "std.task.cancel(a)\n"
             "std.task.wait(a);\n"
             "std.net.close(listener);\n",
@@ -4845,7 +4845,7 @@ def run_cases():
             "std net async close pending",
             "import std;\n"
             'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
-            "let a = std.net.accept_async(listener, 1000);\n"
+            "let a = std.net.accept_task(listener, 1000);\n"
             "std.net.close(listener);\n"
             "std.task.wait(a);\n",
             stderr="accept_async: listener closed",
@@ -4854,7 +4854,7 @@ def run_cases():
             "std net async pending shutdown",
             "import std;\n"
             'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
-            "let pending = std.net.accept_async(listener, 10000);\n",
+            "let pending = std.net.accept_task(listener, 10000);\n",
         )
         check(
             "std net ipv4 family",

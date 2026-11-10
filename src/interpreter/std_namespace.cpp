@@ -280,6 +280,9 @@ value_t *build_namespace_impl() {
         {"buffered", B_io_buffered},
         {"read_async", B_io_read_async},
         {"write_async", B_io_write_async},
+        /* LANG-2 primary names; the _async forms remain deprecated aliases. */
+        {"read_task", B_io_read_async},
+        {"write_task", B_io_write_async},
     });
     dict_value_t *io_dict = (dict_value_t *)io_module;
     io_dict->payload->items.push_back(std::make_pair(
@@ -503,6 +506,13 @@ value_t *build_namespace_impl() {
             {"recv_async", B_net_recv_async},
             {"resolve_async", B_net_resolve_async},
             {"shutdown_async", B_net_shutdown_async},
+            {"tcp_connect_task", B_net_tcp_connect_async},
+            {"tcp_listen_task", B_net_tcp_listen_async},
+            {"accept_task", B_net_accept_async},
+            {"send_task", B_net_send_async},
+            {"recv_task", B_net_recv_async},
+            {"resolve_task", B_net_resolve_async},
+            {"shutdown_task", B_net_shutdown_async},
         })));
 #ifdef SKEIN_ENABLE_FFI
     root->payload->items.push_back(std::make_pair(
@@ -603,12 +613,17 @@ value_t *build_namespace_impl() {
             {"request_async", B_http_request_async},
             {"get_async", B_http_get_async},
             {"post_async", B_http_post_async},
+            {"request_task", B_http_request_async},
+            {"get_task", B_http_get_async},
+            {"post_task", B_http_post_async},
             {"listen", B_http_listen},
             {"listen_tls", B_http_listen_tls},
             {"accept", B_http_accept},
             {"accept_async", B_http_accept_async},
+            {"accept_task", B_http_accept_async},
             {"respond", B_http_respond},
             {"respond_async", B_http_respond_async},
+            {"respond_task", B_http_respond_async},
             {"serve", B_http_serve},
             {"serve_processes", B_http_serve_processes},
             {"serve_threads", B_http_serve_threads},
@@ -628,8 +643,12 @@ value_t *build_namespace_impl() {
             {"request_async", B_http2_request_async},
             {"get_async", B_http2_get_async},
             {"post_async", B_http2_post_async},
+            {"request_task", B_http2_request_async},
+            {"get_task", B_http2_get_async},
+            {"post_task", B_http2_post_async},
             {"request_many", B_http2_request_many},
             {"request_many_async", B_http2_request_many_async},
+            {"request_many_task", B_http2_request_many_async},
             {"listen", B_http2_listen},
             {"listen_tls", B_http2_listen_tls},
             {"serve", B_http2_serve},
@@ -650,11 +669,14 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"connect", B_ws_connect},
             {"connect_async", B_ws_connect_async},
+            {"connect_task", B_ws_connect_async},
             {"accept", B_ws_accept},
             {"send", B_ws_send},
             {"send_async", B_ws_send_async},
+            {"send_task", B_ws_send_async},
             {"receive", B_ws_receive},
             {"receive_async", B_ws_receive_async},
+            {"receive_task", B_ws_receive_async},
             {"ping", B_ws_ping},
             {"close", B_ws_close},
         })));

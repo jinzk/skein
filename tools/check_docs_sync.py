@@ -87,6 +87,19 @@ NON_FUNCTION_EXPORTS = {
     "io": {"stdin", "stdout", "stderr"},
 }
 
+# LANG-2 keeps the old *_async names as deprecated aliases but documents only
+# the *_task primary names.
+DEPRECATED_ALIASES = {
+    "io": {"read_async", "write_async"},
+    "net": {"tcp_connect_async", "tcp_listen_async", "accept_async",
+            "send_async", "recv_async", "resolve_async", "shutdown_async"},
+    "http": {"request_async", "get_async", "post_async", "accept_async",
+             "respond_async"},
+    "http2": {"request_async", "get_async", "post_async",
+              "request_many_async"},
+    "websocket": {"connect_async", "send_async", "receive_async"},
+}
+
 
 def function_list(readme_text):
     marker = "当前提供的函数："
@@ -141,7 +154,8 @@ def main():
 
     for module, functions in sorted(registry.items()):
         documented = listed.get(module, set())
-        missing = sorted(functions - documented)
+        aliases = DEPRECATED_ALIASES.get(module, set())
+        missing = sorted(functions - documented - aliases)
         if missing:
             fail(f"README function list missing std.{module}."
                  + f"{{{','.join(missing)}}}")

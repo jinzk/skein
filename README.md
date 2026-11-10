@@ -439,32 +439,33 @@ std.net.peer_addr(socket)
 {address: "127.0.0.1", port: 8080, family: "ipv4"}
 ```
 
-`tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。`tcp_listen` / `tcp_listen_async` 的 `options` 支持 `{"reuse_port": true}`（Linux/BSD）。
+`tcp_listen("127.0.0.1", 0)` 后可以用 `local_addr` 获取实际监听端口。`tcp_listen` / `tcp_listen_task` 的 `options` 支持 `{"reuse_port": true}`（Linux/BSD）。
 
 异步网络：
 
 ```text
-let t = std.net.tcp_connect_async("127.0.0.1", 8080, 1000);
+let t = std.net.tcp_connect_task("127.0.0.1", 8080, 1000);
 let socket = std.task.wait(t);
 ```
 
 异步函数：
 
 ```text
-tcp_connect_async(host, port[, timeout_ms[, family]]) → task
-tcp_listen_async(host, port[, timeout_ms[, family[, options]]])  → task
-accept_async(listener[, timeout_ms])                  → task
-send_async(socket, data[, timeout_ms])                → task
-recv_async(socket, size[, timeout_ms])                → task
-resolve_async(host[, timeout_ms[, family]])           → task
-shutdown_async(socket[, timeout_ms])                  → task
+tcp_connect_task(host, port[, timeout_ms[, family]]) → task
+tcp_listen_task(host, port[, timeout_ms[, family[, options]]])  → task
+accept_task(listener[, timeout_ms])                  → task
+send_task(socket, data[, timeout_ms])                → task
+recv_task(socket, size[, timeout_ms])                → task
+resolve_task(host[, timeout_ms[, family]])           → task
+shutdown_task(socket[, timeout_ms])                  → task
 ```
 
 - task 完成值分别是 socket、listener、发送字节数、bytes、地址 list 或 null；
 - `timeout_ms` 是异步操作自身的超时，不是 `std.task.wait` 的超时；
 - `std.task.cancel(task)` 会取消底层网络操作；
 - 可以同时启动多个 task，再用 `std.task.wait_all` 等待；
-- `std.net.close` 仍是同步操作。
+- `std.net.close` 仍是同步操作；
+- `*_task` 是主名称；旧 `*_async` 名称仍作为 deprecated alias 注册，行为完全一致，文档统一使用 `*_task`。
 
 Task：
 
@@ -610,13 +611,13 @@ let r = std.http.request("DELETE", "http://127.0.0.1:8080/items/1", {
 异步客户端：
 
 ```text
-let t = std.http.get_async("http://127.0.0.1:8080/api");
+let t = std.http.get_task("http://127.0.0.1:8080/api");
 let r = await t;
 
-let t2 = std.http.post_async("http://127.0.0.1:8080/items", "hello");
+let t2 = std.http.post_task("http://127.0.0.1:8080/items", "hello");
 let r2 = await t2;
 
-let t3 = std.http.request_async("DELETE", "http://127.0.0.1:8080/items/1");
+let t3 = std.http.request_task("DELETE", "http://127.0.0.1:8080/items/1");
 await t3;
 ```
 
@@ -676,9 +677,9 @@ std.http.close(s);
 ```text
 let s = std.http.listen("127.0.0.1", 8080);
 
-let req = await std.http.accept_async(s, 5000);
+let req = await std.http.accept_task(s, 5000);
 
-let sent = std.http.respond_async(req, 200, {
+let sent = std.http.respond_task(req, 200, {
   "Content-Type": "text/plain"
 }, "hello " + req["path"]);
 await sent;
@@ -724,12 +725,12 @@ WebSocket：
 
 ```text
 std.websocket.connect(url[, options])          → ws
-std.websocket.connect_async(url[, options])    → task
+std.websocket.connect_task(url[, options])    → task
 std.websocket.accept(request)                  → ws
 std.websocket.send(ws, data[, timeout_ms])     → bool
-std.websocket.send_async(ws, data[, timeout_ms]) → task
+std.websocket.send_task(ws, data[, timeout_ms]) → task
 std.websocket.receive(ws[, timeout_ms])        → message
-std.websocket.receive_async(ws[, timeout_ms])  → task
+std.websocket.receive_task(ws[, timeout_ms])  → task
 std.websocket.ping(ws[, data])                 → bool
 std.websocket.close(ws[, code[, reason]])      → bool
 ```
@@ -1234,7 +1235,7 @@ s["max_connections"] = 100;
 
 - 超过限制时请求失败或连接关闭；
 - `max_connections = 0` 表示不限制；
-- `std.http.accept` / `accept_async` 也使用 server dict 中的限制；
+- `std.http.accept` / `accept_task` 也使用 server dict 中的限制；
 - HTTP/2 使用 `max_body_bytes` / `max_connections`，header 限制通过 `settings.max_header_list_size`。
 
 HTTP/2：
@@ -1243,11 +1244,11 @@ HTTP/2：
 std.http2.request(method, url[, options]) → response
 std.http2.get(url[, options])           → response
 std.http2.post(url[, body[, options]])  → response
-std.http2.request_async(method, url[, options]) → task
-std.http2.get_async(url[, options])             → task
-std.http2.post_async(url[, body[, options]])    → task
+std.http2.request_task(method, url[, options]) → task
+std.http2.get_task(url[, options])             → task
+std.http2.post_task(url[, body[, options]])    → task
 std.http2.request_many(requests[, options])     → list
-std.http2.request_many_async(requests[, options]) → task
+std.http2.request_many_task(requests[, options]) → task
 std.http2.listen(host, port[, timeout_ms])      → server
 std.http2.listen_tls(host, port, cert, key[, timeout_ms[, options]]) → server
 std.http2.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]]) → int
@@ -1267,7 +1268,7 @@ print(str(a["status"]) + " " + a["protocol"]);
 print(bytes_to_string(a["body"]));
 
 let b = std.http2.post("https://example.com/echo", "payload");
-let c = await std.http2.get_async("https://example.com/async");
+let c = await std.http2.get_task("https://example.com/async");
 ```
 
 批量并发请求（同一连接、多个 stream）：
@@ -1279,7 +1280,7 @@ let responses = std.http2.request_many([
   {"url": "https://example.com/c", "method": "PUT", "body": "x"}
 ]);
 
-let responses2 = await std.http2.request_many_async([
+let responses2 = await std.http2.request_many_task([
   {"url": "https://example.com/d"},
   {"url": "https://example.com/e", "method": "DELETE"}
 ]);
@@ -1337,9 +1338,9 @@ std.http2.close(s);
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
 - 同步和 async 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
-- async 的 `get_async` / `post_async` / `request_async` 可以共享同一连接并并发执行；
+- async 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
 - async 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
-- `request_many` / `request_many_async` 在单连接上并发提交多个 stream；
+- `request_many` / `request_many_task` 在单连接上并发提交多个 stream；
 - 收到 GOAWAY 或共享连接失败时，async 幂等请求会换新连接重试一次；
 - 使用 `body_stream` / `on_body` 的请求不自动重试。
 
@@ -1465,7 +1466,7 @@ std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
 - 默认校验证书和主机名；
 - 测试环境可显式 `"verify": false`；
 - TLS 流实现 `std.io` 接口；
-- TLS 流支持 `std.io.read_async` / `write_async`；
+- TLS 流支持 `std.io.read_task` / `write_task`；
 - TLS 握手在 `std.tls.client/server` 包装时同步完成；
 - 服务端 ALPN 会按服务端列表选择第一个客户端也支持的协议；
 - `std.tls.server` 按证书/私钥路径和选项缓存 `SSL_CTX`；每次接受新连接时检查文件
@@ -1481,8 +1482,8 @@ async / await：
 import std;
 
 async func fetch(port) {
-  let socket = await std.net.tcp_connect_async("127.0.0.1", port, 1000);
-  let data = await std.net.recv_async(socket, 4096, 1000);
+  let socket = await std.net.tcp_connect_task("127.0.0.1", port, 1000);
+  let data = await std.net.recv_task(socket, 4096, 1000);
   std.net.close(socket);
   return data;
 }
@@ -1717,7 +1718,7 @@ let v = std.result.unwrap(std.result.err("boom")) on error(e) {
 异步错误恢复：
 
 ```text
-let t = std.net.tcp_connect_async("127.0.0.1", 1, 1000);
+let t = std.net.tcp_connect_task("127.0.0.1", 1, 1000);
 let r = await std.task.catch(t);
 
 if (std.result.is_err(r)) {
@@ -2720,8 +2721,8 @@ std.io.read_all
 std.io.read_line
 std.io.copy
 std.io.buffered
-std.io.read_async
-std.io.write_async
+std.io.read_task
+std.io.write_task
 
 std.io.stdin
 std.io.stdout
@@ -2781,26 +2782,26 @@ std.net.shutdown
 std.net.resolve
 std.net.local_addr
 std.net.peer_addr
-std.net.tcp_connect_async
-std.net.tcp_listen_async
-std.net.accept_async
-std.net.send_async
-std.net.recv_async
-std.net.resolve_async
-std.net.shutdown_async
+std.net.tcp_connect_task
+std.net.tcp_listen_task
+std.net.accept_task
+std.net.send_task
+std.net.recv_task
+std.net.resolve_task
+std.net.shutdown_task
 
 std.http.request
 std.http.get
 std.http.post
-std.http.request_async
-std.http.get_async
-std.http.post_async
+std.http.request_task
+std.http.get_task
+std.http.post_task
 std.http.listen
 std.http.listen_tls
 std.http.accept
-std.http.accept_async
+std.http.accept_task
 std.http.respond
-std.http.respond_async
+std.http.respond_task
 std.http.serve
 std.http.serve_processes
 std.http.serve_threads
@@ -2813,11 +2814,11 @@ std.http.thread_capabilities
 std.http2.request
 std.http2.get
 std.http2.post
-std.http2.request_async
-std.http2.get_async
-std.http2.post_async
+std.http2.request_task
+std.http2.get_task
+std.http2.post_task
 std.http2.request_many
-std.http2.request_many_async
+std.http2.request_many_task
 std.http2.listen
 std.http2.listen_tls
 std.http2.serve
@@ -2828,12 +2829,12 @@ std.tls.server
 std.tls.alpn
 
 std.websocket.connect
-std.websocket.connect_async
+std.websocket.connect_task
 std.websocket.accept
 std.websocket.send
-std.websocket.send_async
+std.websocket.send_task
 std.websocket.receive
-std.websocket.receive_async
+std.websocket.receive_task
 std.websocket.ping
 std.websocket.close
 
@@ -3127,9 +3128,9 @@ socket 异步流：
 ```text
 let s = std.net.tcp_connect("127.0.0.1", 8080);
 
-await std.io.write_async(s, "hello", 1000);
+await std.io.write_task(s, "hello", 1000);
 
-let data = await std.io.read_async(s, 4096, 1000);
+let data = await std.io.read_task(s, 4096, 1000);
 if (data == null) {
   print("closed");
 } else {
@@ -3144,8 +3145,8 @@ std.io.close(s);
 ```text
 let f = std.fs.open("data.bin", "rb");
 
-let first = await std.io.read_async(f, 4096);
-let rest = await std.io.read_async(f, 4096);
+let first = await std.io.read_task(f, 4096);
+let rest = await std.io.read_task(f, 4096);
 
 std.io.close(f);
 ```
@@ -3153,7 +3154,7 @@ std.io.close(f);
 ```text
 let f = std.fs.open("out.bin", "w+b");
 
-let n = await std.io.write_async(f, bytes_from_string("hello"));
+let n = await std.io.write_task(f, bytes_from_string("hello"));
 std.io.close(f);
 ```
 
@@ -3174,8 +3175,8 @@ std.io.read_all(stream[, limit])              → bytes
 std.io.read_line(stream[, limit])             → bytes
 std.io.copy(dst, src[, limit])                → int
 std.io.buffered(stream[, size])               → stream
-std.io.read_async(stream, max[, timeout_ms])  → task
-std.io.write_async(stream, data[, timeout_ms]) → task
+std.io.read_task(stream, max[, timeout_ms])  → task
+std.io.write_task(stream, data[, timeout_ms]) → task
 ```
 
 规则：
@@ -3187,10 +3188,10 @@ std.io.write_async(stream, data[, timeout_ms]) → task
 - `read_all` 默认上限 16 MiB；
 - `seek` / `tell` 只适用于可 seek 的流；
 - `buffered` 包装读缓冲和写缓冲，`close` 会先 flush；
-- `read_async` / `write_async` 返回 task，socket 和文件都支持；
+- `read_task` / `write_task` 返回 task，socket 和文件都支持；
 - 文件异步 I/O 使用 libuv 线程池，不阻塞事件循环；
 - 同一文件同时只允许一个异步操作；异步未完成时同步 read/write/seek/tell/close 会报错；
-- `write_async` 返回实际写入字节数，可能部分写入；
+- `write_task` 返回实际写入字节数，可能部分写入；
 - buffered 流会代理底层流的异步读写；
 - 文件和 socket 共用 `std.io`，文件仍可用 `std.fs.seek` / `std.fs.tell`。
 
@@ -3417,7 +3418,7 @@ struct Handler {
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
 - async 函数的类型为 `(参数) -> task[结果]`，例如 `async func fetch(x: int): string` 的类型是 `(int) -> task[string]`；`await task[T]` 推导为 `T`；
 - `task[T]` 可用于变量、参数和返回类型；`std.task.wait` / `std.task.wait_all` 会保留任务结果类型；
-- 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_async` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
+- 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；
 - generator 函数的类型为 `(参数) -> generator[T]`，`T` 由函数体中的 `yield` 表达式合并得到；发送值类型可以写成 `generator[T, S]`；
@@ -4162,7 +4163,7 @@ struct Client { host: string; }
 
 impl Client {
   async func get(self, path: string) {
-    return await std.http.get_async(self.host + path);
+    return await std.http.get_task(self.host + path);
   }
 }
 
@@ -4215,7 +4216,7 @@ func timed(fn) {
 impl Client {
   @timed
   async func get(self, path) {
-    return await std.http.get_async(self.host + path);
+    return await std.http.get_task(self.host + path);
   }
 }
 ```
@@ -4546,7 +4547,7 @@ print(std.process.wait(p));
 异步形式：
 
 ```text
-let data = await std.io.read_async(p["stdout"], 4096);
+let data = await std.io.read_task(p["stdout"], 4096);
 ```
 
 `std.io.stdin`、`std.io.stdout`、`std.io.stderr` 也作为标准流暴露，方便子进程侧实现自己的协议。

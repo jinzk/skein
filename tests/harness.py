@@ -700,6 +700,32 @@ def check_extended_stdlib():
         stdout="true:5|true|8|false|",
     )
 
+    check(
+        "std process func entry",
+        "import std;\n"
+        "process func entry(ctx) {\n"
+        '  return {"v": ctx.payload["n"] * 2};\n'
+        "}\n"
+        "let blob = std.entry.encode(entry);\n"
+        "let r = std.process.run_entry(blob, "
+        'std.thread.Message.from({"n": 21}));\n'
+        'print(r["ok"]); print(":"); print(r["value"]["v"]); print("|");\n'
+        "let p = std.process.spawn_entry(blob, "
+        'std.thread.Message.from({"n": 5}));\n'
+        "let r2 = std.process.result(p, 10000);\n"
+        'print(r2["value"]["v"]); print("|");\n',
+        stdout="true:42|10|",
+    )
+
+    check(
+        "std process func entry requires one ctx parameter",
+        "import std;\n"
+        "process func bad() { return 1; }\n"
+        "std.entry.encode(bad);\n",
+        stderr="process func entry must be a sync function with one ctx "
+               "parameter",
+    )
+
     with tempfile.TemporaryDirectory() as worker_tmp:
         worker_script = os.path.join(worker_tmp, "worker.skein")
         with open(worker_script, "w", encoding="utf-8") as handle:

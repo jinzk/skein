@@ -4477,6 +4477,23 @@ let r = std.process.run_entry(blob, std.thread.Message.from({"n": 4}));
 r["value"]["v"]   // 5
 ```
 
+`process func` 是进程入口声明（与 `thread func` 平行）：
+
+```skein
+process func entry(ctx) {
+  return {"v": ctx.payload["n"] * 2};
+}
+
+let blob = std.entry.encode(entry);
+let r = std.process.run_entry(blob, std.thread.Message.from({"n": 21}));
+r["value"]["v"]   // 42
+```
+
+- `process func` 必须是同步、单一 `ctx` 参数，不能是 generator；
+- 通过 `std.entry.encode` 编码后用 `std.process.spawn_entry` / `run_entry` 启动；
+- 子进程通过 `--run-entry` 反序列化执行，不依赖入口源码；
+- `process` 只在 `process func` 组合中作为上下文关键字，其他位置仍是普通标识符。
+
 ### 长驻进程与管道
 
 ```text

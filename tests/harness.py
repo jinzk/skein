@@ -3302,6 +3302,32 @@ def check_extended_stdlib():
             'print("r="); print(r); print("|");\n',
             stdout_all=["waiters=1|", "is_null: true", "closed: true"],
         )
+        check(
+            "std.thread Message heap payload",
+            "import std;\n"
+            'let h = std.heap.from_list([3, 1, 2], '
+            'func(a, b) { return a < b; });\n'
+            'let msg = std.thread.Message.from({"heap": h, "n": 5});\n'
+            'thread func worker(ctx) {\n'
+            '  return {"top": std.heap.peek(ctx.payload["heap"]), '
+            '"n": ctx.payload["n"]};\n'
+            '}\n'
+            'let t = std.thread.spawn(worker, msg);\n'
+            'let r = t.join();\n'
+            'print("spawn="); print(r["value"]["top"]); print(":"); '
+            'print(r["value"]["n"]); print("|");\n'
+            'let blob = std.thread.encode(worker);\n'
+            'let t2 = std.thread.spawn_encoded(blob, msg);\n'
+            'let r2 = t2.join();\n'
+            'print("encoded="); print(r2["value"]["top"]); print(":"); '
+            'print(r2["value"]["n"]); print("|");\n'
+            'let ch = std.thread.Channel(1);\n'
+            'ch.send(msg);\n'
+            'let got = ch.recv();\n'
+            'print("channel="); '
+            'print(std.heap.peek(got.payload["heap"])); print("|");\n',
+            stdout="spawn=1:5|encoded=1:5|channel=1|",
+        )
 
         with tempfile.TemporaryDirectory() as thread_tmp:
             thread_worker = os.path.join(thread_tmp, "thread_worker.skein")
@@ -3331,6 +3357,31 @@ def check_extended_stdlib():
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout_all=["r1=true:42", "r2=true:10", "fail=false"],
+            )
+            heap_worker = os.path.join(thread_tmp, "heap_worker.skein")
+            with open(heap_worker, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func handle(payload) {\n"
+                    '    return {"top": std.heap.peek(payload["heap"]), '
+                    '"n": payload["n"]};\n'
+                    "}\n"
+                )
+            heap_worker_path = heap_worker.replace("\\", "\\\\")
+            check(
+                "std.thread pool Message heap payload",
+                "import std;\n"
+                'let h = std.heap.from_list([3, 1, 2], '
+                'func(a, b) { return a < b; });\n'
+                'let msg = std.thread.Message.from({"heap": h, "n": 5});\n'
+                f'let pool = std.thread.pool(1, "{heap_worker_path}");\n'
+                'let f = pool.submit(msg);\n'
+                'let r = f.wait();\n'
+                'print("pool="); print(r["value"]["top"]); print(":"); '
+                'print(r["value"]["n"]);\n'
+                'pool.close();\n'
+                'pool.join();\n',
+                stdout="pool=1:5",
             )
             check(
                 "std.http serve_threads join timeout",

@@ -390,6 +390,24 @@ struct value_t *copy_data_value(struct value_t *value,
     return dupval(value);
 }
 
+bool validate_heap_comparator(struct value_t *value, std::string &error) {
+    if (!value || value->type != T_func) {
+        error = "heap comparator must be a function";
+        return false;
+    }
+    const struct func_value_t *function =
+        (const struct func_value_t *)value;
+    if (!function->def || !function->def->code) {
+        error = "heap comparator has no function code";
+        return false;
+    }
+    if (!function->def->upvalues.empty()) {
+        error = "heap comparator captures a closure";
+        return false;
+    }
+    return true;
+}
+
 bool validate_data_value(struct value_t *value,
                          std::unordered_set<const void *> &visiting,
                          std::string &error) {
@@ -546,9 +564,26 @@ bool validate_data_value(struct value_t *value,
                 visiting.erase(payload);
             return true;
         }
-        case T_heap:
-            error = "Message payload does not support heap comparator "
-                    "functions";
+        case T_heap: {
+            const struct heap_value_t *heap =
+                (const struct heap_value_t *)value;
+            if (!heap->payload) {
+                error = "invalid heap value";
+                return false;
+            }
+            if (!validate_heap_comparator(heap->payload->less, error))
+                return false;
+            std::vector<struct value_t *> items;
+            heap_items_level_order(heap->payload.get(), items);
+            for (struct value_t *item : items) {
+                if (!validate_data_value(item, visiting, error))
+                    return false;
+            }
+            return true;
+        }
+        case T_func:
+            error = "Message payload does not support standalone function "
+                    "values";
             return false;
         default:
             error = std::string("Message payload does not support ") +
@@ -2570,6 +2605,155 @@ struct thread_value_deleter {
     void operator()(struct value_t *value) const { freeval(value); }
 };
 
+bool contains_transfer_special(
+    const struct value_t *value,
+    std::unordered_set<const void *> &visiting, int depth = 0) {
+    if (!value || depth > 64)
+        return false;
+    switch (value->type) {
+    case T_heap:
+    case T_func:
+    case T_native:
+    case T_userdata:
+        return true;
+    case T_dict: {
+        const struct dict_value_t *dict =
+            (const struct dict_value_t *)value;
+        if (dict->payload && dict->payload->is_namespace)
+            return true;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        for (const auto &entry : dict->payload->items) {
+            if (contains_transfer_special(entry.first, visiting, depth + 1) ||
+                contains_transfer_special(entry.second, visiting,
+                                          depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    case T_list: {
+        const struct list_value_t *list =
+            (const struct list_value_t *)value;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        for (const struct value_t *item : list->payload->items) {
+            if (contains_transfer_special(item, visiting, depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    case T_lru: {
+        const struct lru_value_t *lru = (const struct lru_value_t *)value;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        for (const auto &entry : lru->payload->items) {
+            if (contains_transfer_special(entry.first, visiting, depth + 1) ||
+                contains_transfer_special(entry.second, visiting,
+                                          depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    case T_deque: {
+        const struct deque_value_t *deque =
+            (const struct deque_value_t *)value;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        std::vector<struct value_t *> items;
+        deque_items_in_order(deque->payload.get(), items);
+        for (struct value_t *item : items) {
+            if (contains_transfer_special(item, visiting, depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    case T_set: {
+        const struct set_value_t *set = (const struct set_value_t *)value;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        std::vector<struct value_t *> keys;
+        set_values_in_order(set->payload.get(), keys);
+        for (struct value_t *key : keys) {
+            if (contains_transfer_special(key, visiting, depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    case T_result: {
+        const struct result_value_t *result =
+            (const struct result_value_t *)value;
+        return contains_transfer_special(
+            result->ok ? result->value : result->error, visiting, depth + 1);
+    }
+    case T_struct: {
+        const struct struct_value_t *structure =
+            (const struct struct_value_t *)value;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        for (const struct value_t *field : structure->payload->fields) {
+            if (contains_transfer_special(field, visiting, depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    case T_enum: {
+        const struct enum_value_t *enumeration =
+            (const struct enum_value_t *)value;
+        const void *identity = value_payload(value);
+        if (identity && !visiting.insert(identity).second)
+            return false;
+        for (const struct value_t *field : enumeration->payload->fields) {
+            if (contains_transfer_special(field, visiting, depth + 1)) {
+                if (identity)
+                    visiting.erase(identity);
+                return true;
+            }
+        }
+        if (identity)
+            visiting.erase(identity);
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
 struct thread_payload_builder {
     std::unordered_map<const function_def *,
                        std::shared_ptr<thread_transfer_function>>
@@ -2604,6 +2788,18 @@ struct thread_payload_builder {
             out.data = std::shared_ptr<struct value_t>(
                 dupval(value), thread_value_deleter());
             return true;
+        }
+        {
+            std::unordered_set<const void *> special_visiting;
+            if (contains_transfer_special(value, special_visiting)) {
+                if (value->type == T_list || value->type == T_dict ||
+                    value->type == T_set || value->type == T_deque ||
+                    value->type == T_lru)
+                    return transfer_container(value, out);
+                error = std::string(what ? what : "value") +
+                        " contains a heap/function but is not a container";
+                return false;
+            }
         }
         std::unordered_set<const void *> visiting;
         std::string copy_error;

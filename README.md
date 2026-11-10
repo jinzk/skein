@@ -4885,6 +4885,10 @@ thread func worker(ctx) {
 let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
 ```
 
+- `Message.from` 的 payload 允许 `heap`，包括容器内的 heap；heap comparator 必须是不捕获闭包的函数；
+- heap 是持久化数据结构，跨线程/进程入口共享只读结构；payload 仍不允许 standalone function 值；
+- `std.thread.pool` 的 submit payload 和线程返回值同样支持 heap。
+
 - `thread func` 是上下文关键字，只能作为声明语句出现，可嵌套在其他函数内；
 - 入口必须是同步函数、恰好一个参数；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
 - 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；

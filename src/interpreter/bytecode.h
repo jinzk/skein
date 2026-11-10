@@ -490,6 +490,13 @@ const char *op_name(Op op);
 /* Human-readable disassembly, used by SKEIN_VM_TRACE and debugging. */
 std::string disassemble(const Proto &proto);
 
+/*
+ * True when executing this proto can suspend its fiber: async/generator
+ * bodies, or a proto containing AWAIT/YIELD (defensive check for malformed or
+ * hand-built bytecode).  JIT compilation must reject these.
+ */
+bool proto_may_suspend(const Proto &proto);
+
 } // namespace bc
 } // namespace skein
 

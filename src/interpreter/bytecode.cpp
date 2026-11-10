@@ -137,6 +137,17 @@ std::string constant_brief(const Constant &c) {
 
 } // namespace
 
+bool proto_may_suspend(const Proto &proto) {
+    if (proto.is_async || proto.is_generator)
+        return true;
+    for (const Instr &ins : proto.code) {
+        if (ins.op == static_cast<uint8_t>(Op::Await) ||
+            ins.op == static_cast<uint8_t>(Op::Yield))
+            return true;
+    }
+    return false;
+}
+
 std::string disassemble(const Proto &proto) {
     std::ostringstream out;
     out << "proto " << (proto.name.empty() ? "<anonymous>" : proto.name)

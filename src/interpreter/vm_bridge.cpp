@@ -211,6 +211,18 @@ void jit_debug_proto(const char *what, const skein::bc::Proto &proto) {
                  proto.stack_depth.size());
 }
 
+bool jit_code_may_suspend(function_code *code) {
+    return code && (code->is_async || code->is_generator);
+}
+
+void jit_debug_suspendable(function_code *code) {
+    if (!read_bool_env("SKEIN_JIT_DEBUG", false))
+        return;
+    std::fprintf(stderr, "[jit] suspendable %s\n",
+                 !code || code->name.empty() ? "<anonymous>"
+                                             : code->name.c_str());
+}
+
 bool jit_function_eligible(function_code *code) {
     return code && !code->is_generator && !code->is_async &&
            !code->variadic && code->required_params == code->nparams;
@@ -299,6 +311,10 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
             return false;
         def = fv->def;
         code = def->code.get();
+        if (jit_code_may_suspend(code)) {
+            jit_debug_suspendable(code);
+            return false;
+        }
         pattern_frame = jit_params_have_patterns(code);
         if (!jit_function_eligible(code) ||
             !jit_args_match(code, call_args, call_argc, pattern_frame))
@@ -309,6 +325,10 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
             return false;
         def = method->method;
         code = def->code.get();
+        if (jit_code_may_suspend(code)) {
+            jit_debug_suspendable(code);
+            return false;
+        }
         if (!code->is_method || !jit_function_eligible(code) ||
             jit_params_have_patterns(code))
             return false;
@@ -344,6 +364,14 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
         skein::bc::ProtoPtr proto = prepare_function_body(def);
         if (proto)
             jit_debug_proto("try", *proto);
+        if (proto && skein::bc::proto_may_suspend(*proto)) {
+            if (read_bool_env("SKEIN_JIT_DEBUG", false))
+                std::fprintf(stderr, "[jit] suspendable %s\n",
+                             code->name.empty() ? "<anonymous>"
+                                                : code->name.c_str());
+            cache->jit_failed = true;
+            return false;
+        }
         if (!proto ||
             !skein::jit::can_compile(*proto, false, pattern_frame)) {
             if (read_bool_env("SKEIN_JIT_DEBUG", false))

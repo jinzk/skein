@@ -248,8 +248,9 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         (pattern_frame && proto.uses_names);
     if ((!proto.params_direct && !name_mode) ||
         (proto.uses_names && !name_mode) || proto.has_closures ||
-        proto.uses_defers || proto.uses_handlers || proto.is_generator ||
-        proto.is_async || proto.variadic || !proto.upvalues.empty())
+        proto.uses_defers || proto.uses_handlers ||
+        proto_may_suspend(proto) ||
+        proto.variadic || !proto.upvalues.empty())
         return false;
     if (proto.nparams != proto.required_params)
         return false;

@@ -17,13 +17,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def run(binary, script, jit, threshold="1"):
+def run(binary, script, jit, threshold="1", debug=False):
     env = dict(os.environ)
     env["SKEIN_VM"] = "1"
     env["SKEIN_JIT"] = "1" if jit else "0"
     # The JIT compiles after `jit_hits >= threshold`; 0 would disable it
     # entirely, so use 1 to exercise code generation on the second call.
     env["SKEIN_JIT_THRESHOLD"] = threshold
+    if debug:
+        env["SKEIN_JIT_DEBUG"] = "1"
     proc = subprocess.run(
         [str(binary), str(script)],
         env=env,
@@ -311,6 +313,26 @@ def main():
             encoding="utf-8",
         )
         ok &= compare(binary, "pattern-dict-error", pattern_dict_error)
+
+        async_gen = tmp_path / "async_gen.skein"
+        async_gen.write_text(
+            "import std;\n"
+            "async func work(n) { return n + 1; }\n"
+            "println(await work(1));\n"
+            "println(await work(2));\n"
+            "func gen() { yield 1; yield 2; }\n"
+            "for (let x in gen()) { println(x); }\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "async-generator", async_gen)
+        rc, out, err = run(binary, async_gen, True, debug=True)
+        if rc != 0 or "[jit] suspendable work" not in err:
+            print(
+                "jit smoke: async function was not rejected as suspendable",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
 
     if not ok:
         return 1

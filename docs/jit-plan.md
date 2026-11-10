@@ -547,6 +547,12 @@ JIT 使用 `stack_depth[pc]` 计算操作数栈的固定 frame 偏移，
 - 无 pattern / variadic / method；
 - 无 `ControlBreak` / `ControlContinue`。
 
+`may_suspend` 统一由 `skein::bc::proto_may_suspend()` 判定：
+`is_async || is_generator || 含 AWAIT/YIELD opcode`。JIT 在
+`jit_function_eligible` 之前就拒绝可挂起函数；`SKEIN_JIT_DEBUG=1` 会输出
+`[jit] suspendable <name>`，保证普通 VM 路径执行挂起函数。v1 不做
+safepoint 挂起 JIT 帧。
+
 `fib` 的 opcode 子集：
 
 ```text

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Compare std.http.serve_threads with std.http.serve_workers.
 
-This is a manual benchmark tool, not part of the CTest gate. It starts a
-generated server, sends a fixed number of keep-alive HTTP/1.1 requests from
-a configurable number of client threads, and reports throughput plus latency
-percentiles. The server uses max_requests=requests so it stops on its own and
-join() returns an exact served count.
+Starts a generated server, sends a fixed number of keep-alive HTTP/1.1
+requests from a configurable number of client threads, and reports throughput
+plus latency percentiles. The server uses max_requests=requests so it stops on
+its own and join() returns an exact served count.
+
+With --check-rate and/or --baseline it also acts as a regression gate.
 
 Usage:
     python tools/bench_http.py --bin build-msys2-jit-mi2/skein.exe
@@ -14,12 +15,17 @@ Usage:
 
 import argparse
 import http.client
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_BASELINE = os.path.join(ROOT, "benchmarks",
+                                "bench_http_baseline.json")
 
 
 def escape_skein_path(path):
@@ -209,6 +215,24 @@ def print_result(result):
     )
 
 
+def baseline_key(result):
+    return f"{result['mode']}_{result['strategy']}"
+
+
+def load_baseline(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if sys.platform in data and isinstance(data[sys.platform], dict):
+        return data[sys.platform]
+    default = data.get("default")
+    return default if isinstance(default, dict) else None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bin", default="./skein",
@@ -228,6 +252,10 @@ def main():
                         help="server/client timeout in seconds")
     parser.add_argument("--check-rate", type=float, default=0.0,
                         help="fail when throughput is below this req/s")
+    parser.add_argument("--baseline", default=DEFAULT_BASELINE,
+                        help="throughput baseline JSON")
+    parser.add_argument("--max-regression", type=float, default=0.5,
+                        help="allowed fractional drop below the baseline")
     args = parser.parse_args()
 
     if args.workers <= 0:
@@ -240,6 +268,7 @@ def main():
         parser.error("--requests must be at least --concurrency")
 
     modes = ["threads", "workers"] if args.mode == "both" else [args.mode]
+    baseline = load_baseline(args.baseline)
     failures = 0
     for mode in modes:
         try:
@@ -258,6 +287,19 @@ def main():
                 f"{args.check_rate:.0f} req/s",
                 file=sys.stderr,
             )
+        if baseline:
+            key = baseline_key(result)
+            reference = baseline.get(key)
+            if isinstance(reference, (int, float)) and reference > 0:
+                limit = reference * (1.0 - args.max_regression)
+                if result["rate"] < limit:
+                    failures += 1
+                    print(
+                        f"{key}: throughput {result['rate']:.0f} req/s is "
+                        f"below {limit:.0f} req/s (baseline {reference:.0f}, "
+                        f"max regression {args.max_regression:.0%})",
+                        file=sys.stderr,
+                    )
     if failures:
         return 1
     return 0

@@ -877,11 +877,26 @@ if(BUILD_TESTING)
                 --concurrency 8
                 --workers 4
                 --check-rate 1000
+                --baseline
+                ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/bench_http_baseline.json
+                --max-regression 0.5
       )
       set_tests_properties(http_dispatch_bench_test PROPERTIES
         LABELS "bench"
         RUN_SERIAL TRUE
         TIMEOUT 120
+      )
+      add_test(
+        NAME thread_bench_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_threads.py
+                --bin $<TARGET_FILE:${PROJECT_NAME}>
+                --check
+      )
+      set_tests_properties(thread_bench_test PROPERTIES
+        LABELS "bench"
+        RUN_SERIAL TRUE
+        TIMEOUT 300
       )
     endif()
     if(SKEIN_SANITIZE)

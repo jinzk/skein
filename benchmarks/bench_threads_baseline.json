@@ -1,0 +1,14 @@
+{
+  "linux": {
+    "pool_seq": 17700.0,
+    "pool_batch": 18700.0,
+    "channel": 175000.0,
+    "spawn": 5900.0
+  },
+  "win32": {
+    "pool_seq": 71000.0,
+    "pool_batch": 46500.0,
+    "channel": 377000.0,
+    "spawn": 6250.0
+  }
+}

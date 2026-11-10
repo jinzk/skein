@@ -4,6 +4,8 @@
 - 状态：M1 方法装饰器、M2 命名函数装饰器、M3 async 方法、
   M4 async 方法装饰器、M5 generator 方法装饰器已实现（2026-11-07）
 - 方案：A（AST lowering / 编译器生成包装方法）
+- 2026-11-11 更新：语言层 `async` / `await` 已移除；本文 M3/M4 的 async
+  部分仅为历史记录，当前方法装饰器只覆盖普通函数和 generator。
 - 关联文档：[README.md](../README.md)、[SYNTAX.md](../SYNTAX.md)、
   [architecture.md](architecture.md)、[metaprogramming-plan.md](metaprogramming-plan.md)、
   [bytecode.md](bytecode.md)

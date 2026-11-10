@@ -3044,6 +3044,98 @@ def check_extended_stdlib():
             'print("length="); print(ch.length);\n',
             stdout_all=["capacity=-1", "length=5"],
         )
+        check(
+            "std.thread Channel constructors and stats",
+            "import std;\n"
+            'let a = std.thread.Channel.unbounded();\n'
+            'print("cap="); print(a.capacity); print("|");\n'
+            'let b = std.thread.Channel.bounded(2);\n'
+            'print("b="); print(b.capacity); print("|");\n'
+            'let c = std.thread.Channel.new(3);\n'
+            'print("c="); print(c.capacity); print("|");\n'
+            'a.send(std.thread.Message.from(1));\n'
+            'print("len="); print(a.length); print("|");\n'
+            'print("sends="); print(a.total_sends); print("|");\n'
+            'print("waiters="); print(a.waiters); print("|");\n'
+            'let r = a.try_recv();\n'
+            'print("recvs="); print(a.total_recvs); print("|");\n'
+            'let s = a.stats;\n'
+            'print("stats="); print(s["capacity"]); print(":"); '
+            'print(s["length"]); print("|");\n'
+            'a.close();\n'
+            'let empty = a.try_recv();\n'
+            'print("closed="); print(empty["closed"]); print("|");\n'
+            'let zero = std.thread.Channel(0);\n'
+            'print("try0="); print(zero.try_send('
+            'std.thread.Message.from(2))); print("|");\n',
+            stdout_all=["cap=-1|", "b=2|", "c=3|", "len=1|", "sends=1|",
+                        "waiters=0|", "recvs=1|", "stats=-1:0|",
+                        "closed=true|", "try0=false|"],
+        )
+        check(
+            "std.thread Channel rendezvous",
+            "import std;\n"
+            'let ch = std.thread.Channel(0);\n'
+            'let src = "import std;\\nfunc run(ctx) {\\n'
+            '  ctx.handles[\\"ch\\"].send(std.thread.Message.from('
+            'ctx.payload[\\"v\\"]));\\n'
+            '  return {\\"ok\\": true};\\n}\\n";\n'
+            'let t = std.thread.spawn_source(src, '
+            'std.thread.Message.from({"v": 7}, {"ch": ch}), '
+            '{"entry": "run"});\n'
+            'let msg = ch.recv(5000);\n'
+            'print("got="); print(msg.payload); print("|");\n'
+            'let r = t.join();\n'
+            'print("ok="); print(r["ok"]); print("|");\n'
+            'print("sends="); print(ch.total_sends); print("|");\n'
+            'print("recvs="); print(ch.total_recvs); print("|");\n',
+            stdout_all=["got=7|", "ok=true|", "sends=1|", "recvs=1|"],
+        )
+        check(
+            "std.thread Channel waiter fifo",
+            "import std;\n"
+            'let ch = std.thread.Channel(1);\n'
+            'let src = "import std;\\nfunc run(ctx) {\\n'
+            '  ctx.handles[\\"ch\\"].send(std.thread.Message.from('
+            'ctx.payload[\\"v\\"]));\\n'
+            '  return {\\"ok\\": true};\\n}\\n";\n'
+            'ch.send(std.thread.Message.from(0));\n'
+            'let t1 = std.thread.spawn_source(src, '
+            'std.thread.Message.from({"v": 1}, {"ch": ch}), '
+            '{"entry": "run"});\n'
+            'std.time.sleep(200);\n'
+            'print("w1="); print(ch.send_waiters); print("|");\n'
+            'let t2 = std.thread.spawn_source(src, '
+            'std.thread.Message.from({"v": 2}, {"ch": ch}), '
+            '{"entry": "run"});\n'
+            'std.time.sleep(200);\n'
+            'print("w2="); print(ch.send_waiters); print("|");\n'
+            'let a = ch.recv(); print("a="); print(a.payload); print("|");\n'
+            'let b = ch.recv(); print("b="); print(b.payload); print("|");\n'
+            'let c = ch.recv(); print("c="); print(c.payload); print("|");\n'
+            'print("j1="); print(t1.join()["ok"]); print("|");\n'
+            'print("j2="); print(t2.join()["ok"]); print("|");\n',
+            stdout_all=["w1=1|", "w2=2|", "a=0|", "b=1|", "c=2|",
+                        "j1=true|", "j2=true|"],
+        )
+        check(
+            "std.thread Channel close wakes waiters",
+            "import std;\n"
+            'let ch = std.thread.Channel(1);\n'
+            'let src = "func run(ctx) {\\n'
+            '  let m = ctx.handles[\\"ch\\"].recv();\\n'
+            '  return {\\"is_null\\": m == null, '
+            '\\"closed\\": ctx.handles[\\"ch\\"].closed};\\n}\\n";\n'
+            'let t = std.thread.spawn_source(src, '
+            'std.thread.Message.from({}, {"ch": ch}), '
+            '{"entry": "run"});\n'
+            'std.time.sleep(200);\n'
+            'print("waiters="); print(ch.recv_waiters); print("|");\n'
+            'ch.close();\n'
+            'let r = t.join();\n'
+            'print("r="); print(r); print("|");\n',
+            stdout_all=["waiters=1|", "is_null: true", "closed: true"],
+        )
 
         with tempfile.TemporaryDirectory() as thread_tmp:
             thread_worker = os.path.join(thread_tmp, "thread_worker.skein")

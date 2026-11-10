@@ -9,6 +9,8 @@
 #include "value_ops.h"
 #include "value_runtime.h"
 
+#include "builtin_ids.h"
+
 #include <climits>
 #include <cmath>
 #include <cstring>
@@ -963,6 +965,29 @@ struct value_t *read_member_value(struct value_t *container,
             return NULL;
         }
         return newintval((unsigned char)data[(size_t)i]);
+    }
+
+    if (container->type == T_builtin) {
+        if (!field_access) {
+            yyerror("cannot index %s", typename_of(container));
+            return NULL;
+        }
+        if (index->type != T_string) {
+            yyerror("builtin field name must be a string, got %s",
+                    typename_of(index));
+            return NULL;
+        }
+        int functype = ((struct builtin_value_t *)container)->functype;
+        const char *name = ((struct string_value_t *)index)->value;
+        if (functype == B_thread_channel) {
+            if (std::strcmp(name, "unbounded") == 0)
+                return newbuiltinval(B_thread_unbounded_channel);
+            if (std::strcmp(name, "bounded") == 0 ||
+                std::strcmp(name, "new") == 0)
+                return newbuiltinval(B_thread_channel);
+        }
+        yyerror("builtin has no field %s", name);
+        return NULL;
     }
 
     if (container->type == T_dict) {

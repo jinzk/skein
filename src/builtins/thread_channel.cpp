@@ -72,8 +72,12 @@ struct channel_state : std::enable_shared_from_this<channel_state> {
     std::vector<channel_waiter *> send_waiters;
     std::vector<void *> recv_fiber_wakes;
     std::vector<void *> send_fiber_wakes;
-    long long capacity = 0; /* -1 means unbounded */
+    long long capacity = 0; /* -1 means unbounded, 0 means rendezvous */
     bool closed = false;
+    long long total_sends = 0;
+    long long total_recvs = 0;
+    long long send_timeouts = 0;
+    long long recv_timeouts = 0;
 
     ~channel_state() {
         for (struct value_t *value : queue)
@@ -270,12 +274,55 @@ void notify_recv_waiters(channel_state &state) {
     wake_fiber_handles(state.recv_fiber_wakes);
 }
 
+void notify_recv_waiter(channel_state &state) {
+    if (!state.recv_waiters.empty()) {
+        channel_waiter *waiter = state.recv_waiters.front();
+        waiter->ready.store(true, std::memory_order_release);
+        waiter->cv.notify_all();
+        return;
+    }
+    if (!state.recv_fiber_wakes.empty())
+        event_loop_wake(state.recv_fiber_wakes.front());
+}
+
 void notify_send_waiters(channel_state &state) {
     for (channel_waiter *waiter : state.send_waiters) {
         waiter->ready.store(true, std::memory_order_release);
         waiter->cv.notify_all();
     }
     wake_fiber_handles(state.send_fiber_wakes);
+}
+
+void notify_send_waiter(channel_state &state) {
+    if (!state.send_waiters.empty()) {
+        channel_waiter *waiter = state.send_waiters.front();
+        waiter->ready.store(true, std::memory_order_release);
+        waiter->cv.notify_all();
+        return;
+    }
+    if (!state.send_fiber_wakes.empty())
+        event_loop_wake(state.send_fiber_wakes.front());
+}
+
+bool channel_can_enqueue_locked(const channel_state &state) {
+    if (state.capacity < 0)
+        return true;
+    if (state.capacity == 0)
+        return state.queue.empty() && (!state.recv_waiters.empty() ||
+                                       !state.recv_fiber_wakes.empty());
+    return state.queue.size() < (size_t)state.capacity;
+}
+
+bool channel_has_receiver_locked(const channel_state &state) {
+    return !state.recv_waiters.empty() || !state.recv_fiber_wakes.empty();
+}
+
+bool channel_can_enqueue_nonblocking_locked(const channel_state &state) {
+    if (state.capacity < 0)
+        return true;
+    if (state.capacity == 0)
+        return state.queue.empty() && channel_has_receiver_locked(state);
+    return state.queue.size() < (size_t)state.capacity;
 }
 
 void remove_waiter(std::vector<channel_waiter *> &waiters,
@@ -586,8 +633,7 @@ struct value_t *channel_send_value(
         void *wake_handle = event_loop_wake_handle();
         auto ready = [state] {
             std::lock_guard<std::mutex> lock(state->mutex);
-            return state->closed || state->capacity < 0 ||
-                   state->queue.size() < (size_t)state->capacity;
+            return state->closed || channel_can_enqueue_locked(*state);
         };
         for (;;) {
             {
@@ -596,10 +642,10 @@ struct value_t *channel_send_value(
                     yyerror("thread.closed: channel is closed");
                     return nullptr;
                 }
-                if (state->capacity < 0 ||
-                    state->queue.size() < (size_t)state->capacity) {
+                if (channel_can_enqueue_locked(*state)) {
                     state->queue.push_back(dupval(message));
-                    notify_recv_waiters(*state);
+                    ++state->total_sends;
+                    notify_recv_waiter(*state);
                     state->cv.notify_all();
                     return newnull();
                 }
@@ -620,6 +666,7 @@ struct value_t *channel_send_value(
                 if (remaining <= 0) {
                     std::lock_guard<std::mutex> lock(state->mutex);
                     remove_fiber_handle(state->send_fiber_wakes, wake_handle);
+                    ++state->send_timeouts;
                     yyerror("thread.timeout: channel send timed out");
                     return nullptr;
                 }
@@ -646,8 +693,7 @@ struct value_t *channel_send_value(
          * transport will replace this with a task wait. */
         state->send_waiters.push_back(&waiter);
         auto ready = [&state] {
-            return state->closed || state->capacity < 0 ||
-                   state->queue.size() < (size_t)state->capacity;
+            return state->closed || channel_can_enqueue_locked(*state);
         };
         bool signaled = true;
         if (timeout_ms > 0) {
@@ -658,12 +704,12 @@ struct value_t *channel_send_value(
         }
         remove_waiter(state->send_waiters, &waiter);
         if (!signaled && !ready()) {
+            ++state->send_timeouts;
             yyerror("thread.timeout: channel send timed out");
             return nullptr;
         }
     } else if (state->closed ||
-               (state->capacity >= 0 &&
-                state->queue.size() >= (size_t)state->capacity)) {
+               !channel_can_enqueue_nonblocking_locked(*state)) {
         return newboolval(false);
     }
 
@@ -672,7 +718,8 @@ struct value_t *channel_send_value(
         return nullptr;
     }
     state->queue.push_back(dupval(message));
-    notify_recv_waiters(*state);
+    ++state->total_sends;
+    notify_recv_waiter(*state);
     state->cv.notify_all();
     return blocking ? newnull() : newboolval(true);
 }
@@ -701,12 +748,15 @@ struct value_t *channel_recv_value_status(
                     result = channel_recv_result::message;
                     struct value_t *message = state->queue.front();
                     state->queue.pop_front();
-                    notify_send_waiters(*state);
+                    ++state->total_recvs;
+                    notify_send_waiter(*state);
                     return message;
                 }
                 if (state->closed)
                     return newnull();
                 add_fiber_handle(state->recv_fiber_wakes, wake_handle);
+                if (state->capacity == 0)
+                    notify_send_waiter(*state);
             }
             if (g_interrupted) {
                 std::lock_guard<std::mutex> lock(state->mutex);
@@ -723,6 +773,7 @@ struct value_t *channel_recv_value_status(
                 if (remaining <= 0) {
                     std::lock_guard<std::mutex> lock(state->mutex);
                     remove_fiber_handle(state->recv_fiber_wakes, wake_handle);
+                    ++state->recv_timeouts;
                     result = channel_recv_result::timeout;
                     return nullptr;
                 }
@@ -746,6 +797,8 @@ struct value_t *channel_recv_value_status(
     if (state->queue.empty() && !state->closed) {
         channel_waiter waiter;
         state->recv_waiters.push_back(&waiter);
+        if (state->capacity == 0)
+            notify_send_waiter(*state);
         auto ready = [&state] {
             return state->closed || !state->queue.empty();
         };
@@ -758,6 +811,7 @@ struct value_t *channel_recv_value_status(
         }
         remove_waiter(state->recv_waiters, &waiter);
         if (!signaled && state->queue.empty()) {
+            ++state->recv_timeouts;
             result = channel_recv_result::timeout;
             return nullptr;
         }
@@ -767,7 +821,8 @@ struct value_t *channel_recv_value_status(
     result = channel_recv_result::message;
     struct value_t *message = state->queue.front();
     state->queue.pop_front();
-    notify_send_waiters(*state);
+    ++state->total_recvs;
+    notify_send_waiter(*state);
     return message;
 }
 
@@ -791,7 +846,8 @@ struct value_t *channel_try_recv_value(
     if (!state->queue.empty()) {
         struct value_t *message = state->queue.front();
         state->queue.pop_front();
-        notify_send_waiters(*state);
+        ++state->total_recvs;
+        notify_send_waiter(*state);
         dict_append_item(dict, newstrval("ok"), newboolval(true));
         dict_append_item(dict, newstrval("closed"),
                          newboolval(state->closed));
@@ -858,6 +914,8 @@ void register_select_fiber_wakes(
     for (const auto &channel : channels) {
         std::lock_guard<std::mutex> lock(channel->mutex);
         add_fiber_handle(channel->recv_fiber_wakes, handle);
+        if (channel->capacity == 0)
+            notify_send_waiter(*channel);
     }
 }
 
@@ -913,7 +971,8 @@ struct value_t *select_poll(
             if (!channels[i]->queue.empty()) {
                 message = channels[i]->queue.front();
                 channels[i]->queue.pop_front();
-                notify_send_waiters(*channels[i]);
+                ++channels[i]->total_recvs;
+                notify_send_waiter(*channels[i]);
             } else if (channels[i]->closed) {
                 closed = true;
             }
@@ -986,6 +1045,8 @@ struct value_t *channel_select(
         for (const auto &channel : channels) {
             std::lock_guard<std::mutex> lock(channel->mutex);
             channel->recv_waiters.push_back(&waiter);
+            if (channel->capacity == 0)
+                notify_send_waiter(*channel);
         }
 
         if (struct value_t *ready = select_poll(channels, start)) {
@@ -1080,11 +1141,7 @@ struct value_t *channel_get_field(void *data, const char *name) {
                     yyerror("Channel.close expects no arguments");
                     return (struct value_t *)nullptr;
                 }
-                {
-                    std::lock_guard<std::mutex> lock(state->mutex);
-                    state->closed = true;
-                }
-                state->cv.notify_all();
+                channel_close_state(state);
                 return newnull();
             },
             state);
@@ -1098,6 +1155,71 @@ struct value_t *channel_get_field(void *data, const char *name) {
     if (std::strcmp(name, "length") == 0) {
         std::lock_guard<std::mutex> lock(state->mutex);
         return newintval((long long)state->queue.size());
+    }
+    if (std::strcmp(name, "waiters") == 0 ||
+        std::strcmp(name, "send_waiters") == 0 ||
+        std::strcmp(name, "recv_waiters") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (std::strcmp(name, "send_waiters") == 0)
+            return newintval((long long)(state->send_waiters.size() +
+                                         state->send_fiber_wakes.size()));
+        if (std::strcmp(name, "recv_waiters") == 0)
+            return newintval((long long)(state->recv_waiters.size() +
+                                         state->recv_fiber_wakes.size()));
+        return newintval((long long)(state->send_waiters.size() +
+                                     state->recv_waiters.size() +
+                                     state->send_fiber_wakes.size() +
+                                     state->recv_fiber_wakes.size()));
+    }
+    if (std::strcmp(name, "total_sends") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return newintval(state->total_sends);
+    }
+    if (std::strcmp(name, "total_recvs") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return newintval(state->total_recvs);
+    }
+    if (std::strcmp(name, "send_timeouts") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return newintval(state->send_timeouts);
+    }
+    if (std::strcmp(name, "recv_timeouts") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return newintval(state->recv_timeouts);
+    }
+    if (std::strcmp(name, "stats") == 0) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        struct value_t *result = (struct value_t *)newdictval();
+        struct dict_value_t *dict = (struct dict_value_t *)result;
+        dict_append_item(dict, newstrval("capacity"),
+                         newintval(state->capacity));
+        dict_append_item(dict, newstrval("length"),
+                         newintval((long long)state->queue.size()));
+        dict_append_item(dict, newstrval("closed"),
+                         newboolval(state->closed));
+        dict_append_item(
+            dict, newstrval("waiters"),
+            newintval((long long)(state->send_waiters.size() +
+                                  state->recv_waiters.size() +
+                                  state->send_fiber_wakes.size() +
+                                  state->recv_fiber_wakes.size())));
+        dict_append_item(
+            dict, newstrval("send_waiters"),
+            newintval((long long)(state->send_waiters.size() +
+                                  state->send_fiber_wakes.size())));
+        dict_append_item(
+            dict, newstrval("recv_waiters"),
+            newintval((long long)(state->recv_waiters.size() +
+                                  state->recv_fiber_wakes.size())));
+        dict_append_item(dict, newstrval("total_sends"),
+                         newintval(state->total_sends));
+        dict_append_item(dict, newstrval("total_recvs"),
+                         newintval(state->total_recvs));
+        dict_append_item(dict, newstrval("send_timeouts"),
+                         newintval(state->send_timeouts));
+        dict_append_item(dict, newstrval("recv_timeouts"),
+                         newintval(state->recv_timeouts));
+        return result;
     }
 
     yyerror("thread.Channel has no field %s", name);
@@ -1294,7 +1416,8 @@ push_result channel_push_impl(const std::shared_ptr<channel_state> &state,
         state->queue.size() >= (size_t)state->capacity)
         return push_result::full;
     state->queue.push_back(dupval(message));
-    notify_recv_waiters(*state);
+    ++state->total_sends;
+    notify_recv_waiter(*state);
     state->cv.notify_all();
     return push_result::sent;
 }
@@ -3513,8 +3636,8 @@ struct value_t *thread_message_from(const std::vector<struct value_t *> &args) {
 }
 
 struct value_t *thread_channel(long long capacity) {
-    if (capacity == 0 || capacity < -1) {
-        yyerror("std.thread.Channel capacity must be >= 1 or -1");
+    if (capacity < -1) {
+        yyerror("std.thread.Channel capacity must be >= 0 or -1");
         return nullptr;
     }
     return new_channel_value(make_channel_state(capacity));

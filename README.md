@@ -4717,7 +4717,10 @@ file_exists("out.txt")
 
 ```text
 std.thread.Channel(capacity) -> channel
-std.thread.unbounded_channel() -> channel
+std.thread.Channel.bounded(capacity) -> channel
+std.thread.Channel.new(capacity) -> channel
+std.thread.Channel.unbounded() -> channel
+std.thread.unbounded_channel() -> channel        # 兼容别名
 std.thread.Message.from(payload[, handles]) -> message
 
 channel.send(message)
@@ -4729,19 +4732,37 @@ channel.close()
 channel.closed
 channel.capacity
 channel.length
+channel.waiters
+channel.send_waiters
+channel.recv_waiters
+channel.total_sends
+channel.total_recvs
+channel.send_timeouts
+channel.recv_timeouts
+channel.stats -> dict
 ```
 
-- `capacity >= 1`；`Channel(0)` 报错；
-- 无界 Channel 使用 `std.thread.unbounded_channel()`，`capacity == -1`；
+- `capacity >= 1` 为有界队列；`capacity == 0` 为 rendezvous；`capacity == -1`
+  为无界队列；
+- `Channel.unbounded()` / `unbounded_channel()` 返回同一类无界 Channel，
+  `capacity == -1`；`Channel.bounded(n)` / `Channel.new(n)` 等价于
+  `Channel(n)`；
 - Channel 只接收 `std.thread.Message`；
 - `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
 - payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；
 - `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
-- `send` 在队列满时阻塞；`try_send` 不阻塞；
+- `send` 在队列满时阻塞；rendezvous（capacity 0）下阻塞到有接收者等待；
+  `try_send` 不阻塞，无空间/无接收者时返回 `false`；
 - `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
 - `recv(timeout_ms)` 超时抛错；
-- `close()` 幂等，保留队列中未读消息；
-- fiber 中的 Channel send/recv/select 通过事件循环 async wake 挂起/唤醒，不再使用 1ms 轮询；非 fiber 上下文使用 OS 线程等待；
+- `close()` 幂等，保留队列中未读消息，并唤醒所有 send/recv/select 等待者；
+- fiber 中的 Channel send/recv/select 通过事件循环 async wake 挂起/唤醒；
+  非 fiber 上下文使用 OS 线程等待；
+- 等待者按 FIFO 唤醒（OS 线程等待者优先于 fiber 等待者）；
+- `std.thread.select` 使用 round-robin 起点，避免固定顺序造成饥饿；
+- `waiters` / `send_waiters` / `recv_waiters` 返回当前等待者数量；
+- `total_sends` / `total_recvs` / `send_timeouts` / `recv_timeouts` 为累计统计；
+- `stats` 返回包含上述字段的 dict；
 
 示例：
 
@@ -4754,8 +4775,16 @@ ch.send(msg);
 
 let r = ch.try_recv();
 print(r["value"].payload["x"]);
+print(ch.stats["total_sends"]);
 
 ch.close();
+```
+
+无界与 rendezvous：
+
+```skein
+let a = std.thread.Channel.unbounded();
+let b = std.thread.Channel(0);   // send 等待 recv
 ```
 
 ### 线程池

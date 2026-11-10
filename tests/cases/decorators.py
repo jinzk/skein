@@ -311,17 +311,15 @@ def run_cases():
         "struct P { n: int; }\n"
         "impl P {\n"
         "  @trace\n"
-        "  async func nums(self) {\n"
-        "    await std.task.sleep(1);\n"
+        "  func nums(self) {\n"
+        "    std.task.sleep(1).wait();\n"
         "    yield self.n;\n"
         "    yield self.n + 1;\n"
         "  }\n"
         "}\n"
         "let xs: list[int] = std.iter.collect(P { n: 5 }.nums());\n"
-        "println(xs);\n"
-        'let m = std.meta.methods("P")[0];\n'
-        'println(m["async"]);\n',
-        ["enter", "exit", "[5, 6]", "true"],
+        "println(xs);\n",
+        ["enter", "exit", "[5, 6]"],
     )
 
     run_case(
@@ -497,16 +495,16 @@ def run_cases():
 
     run_case(
         "func trace(fn) {\n"
-        "  return async func(...args) {\n"
+        "  return func(...args) {\n"
         '    println("before");\n'
-        "    let r = await fn(...args);\n"
+        "    let r = fn(...args);\n"
         '    println("after");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
         "@trace\n"
-        "async func get() { return 7; }\n"
-        "println(await get());\n",
+        "func get() { return 7; }\n"
+        "println(get());\n",
         ["before", "after", "7"],
     )
 
@@ -526,10 +524,10 @@ def run_cases():
     run_case(
         "import std;\n"
         "func timed(fn) {\n"
-        "  return async func(...args) {\n"
+        "  return func(...args) {\n"
         '    println("before");\n'
-        "    await std.task.sleep(1);\n"
-        "    let r = await fn(...args);\n"
+        "    std.task.sleep(1).wait();\n"
+        "    let r = fn(...args);\n"
         '    println("after");\n'
         "    return r;\n"
         "  };\n"
@@ -537,51 +535,52 @@ def run_cases():
         "struct C { x: int; }\n"
         "impl C {\n"
         "  @timed\n"
-        "  async func get(self) { return self.x; }\n"
+        "  func get(self) { return self.x; }\n"
         "}\n"
-        "println(await C { x: 7 }.get());\n",
+        "println(C { x: 7 }.get());\n",
         ["before", "after", "7"],
     )
 
     run_case(
         "import std;\n"
         "func timed(fn) {\n"
-        "  return async func(...args) {\n"
+        "  return func(...args) {\n"
         '    println("before");\n'
-        "    let r = await fn(...args);\n"
+        "    let r = fn(...args);\n"
         '    println("after");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
-        "trait S { async func handle(self); }\n"
+        "trait S { func handle(self); }\n"
         "struct C { x: int; }\n"
         "impl S for C {\n"
         "  @timed\n"
-        "  async func handle(self) { return self.x; }\n"
+        "  func handle(self) { return self.x; }\n"
         "}\n"
-        "async func use(s: S) { return await s.handle(); }\n"
-        "println(await use(C { x: 5 }));\n",
+        "func use(s: S) { return s.handle(); }\n"
+        "println(use(C { x: 5 }));\n",
         ["before", "after", "5"],
     )
 
     check(
-        "async decorator non-callable result",
+        "decorator non-callable result on method",
         "func bad(fn) { return 42; }\n"
         "struct C { x: int; }\n"
         "impl C {\n"
         "  @bad\n"
-        "  async func get(self) { return self.x; }\n"
+        "  func get(self) { return self.x; }\n"
         "}\n",
         stderr="expects callable, got int",
     )
 
     check(
-        "async decorator itself",
-        "async func adec(fn) { return fn; }\n"
+        "task-returning decorator",
+        "import std;\n"
+        "func adec(fn) { return std.task.sleep(1); }\n"
         "struct C { x: int; }\n"
         "impl C {\n"
         "  @adec\n"
-        "  async func get(self) { return self.x; }\n"
+        "  func get(self) { return self.x; }\n"
         "}\n",
         stderr="expects callable, got task",
     )

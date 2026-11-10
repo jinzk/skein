@@ -272,7 +272,6 @@ int main(int argc, char **argv) {
     }
 
     eval_context context;
-    context.allow_await = true;
     set_active_eval_context(&context);
     eval_begin_root_defers();
     initscope();

@@ -378,8 +378,8 @@ package route {
       return _response(404, "not found");
     };
 
-    let resume = async func(req, index, pending) {
-      let result = await pending;
+    let resume = func(req, index, pending) {
+      let result = pending.wait();
       if (result != null) {
         return result;
       }
@@ -388,7 +388,7 @@ package route {
       while (i < len(middlewares)) {
         let value = middlewares[i](req);
         if (type_name(value) == "task") {
-          value = await value;
+          value = value.wait();
         }
         if (value != null) {
           return value;
@@ -398,7 +398,7 @@ package route {
 
       let response = route_request(req);
       if (type_name(response) == "task") {
-        response = await response;
+        response = response.wait();
       }
       return response;
     };

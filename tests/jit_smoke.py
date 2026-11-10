@@ -314,21 +314,21 @@ def main():
         )
         ok &= compare(binary, "pattern-dict-error", pattern_dict_error)
 
-        async_gen = tmp_path / "async_gen.skein"
-        async_gen.write_text(
+        suspend_gen = tmp_path / "suspend_gen.skein"
+        suspend_gen.write_text(
             "import std;\n"
-            "async func work(n) { return n + 1; }\n"
-            "println(await work(1));\n"
-            "println(await work(2));\n"
+            "func work(n) { yield n + 1; }\n"
+            'println(std.generator.next(work(1))["value"]);\n'
+            'println(std.generator.next(work(2))["value"]);\n'
             "func gen() { yield 1; yield 2; }\n"
             "for (let x in gen()) { println(x); }\n",
             encoding="utf-8",
         )
-        ok &= compare(binary, "async-generator", async_gen)
-        rc, out, err = run(binary, async_gen, True, debug=True)
+        ok &= compare(binary, "suspend-generator", suspend_gen)
+        rc, out, err = run(binary, suspend_gen, True, debug=True)
         if rc != 0 or "[jit] suspendable work" not in err:
             print(
-                "jit smoke: async function was not rejected as suspendable",
+                "jit smoke: suspendable function was not rejected",
                 file=sys.stderr,
             )
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)

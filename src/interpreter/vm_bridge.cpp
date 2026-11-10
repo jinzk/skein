@@ -200,19 +200,19 @@ void jit_debug_proto(const char *what, const skein::bc::Proto &proto) {
     std::fprintf(stderr,
                  "[jit] %s %s params_direct=%d names=%d slots=%zu "
                  "closures=%d defers=%d handlers=%d method=%d gen=%d "
-                 "async=%d variadic=%d nparams=%u required=%u stack_depth=%zu\n",
+                 "variadic=%d nparams=%u required=%u stack_depth=%zu\n",
                  what, proto.name.empty() ? "<anonymous>" : proto.name.c_str(),
                  proto.params_direct ? 1 : 0, proto.uses_names ? 1 : 0,
                  proto.slots.size(), proto.has_closures ? 1 : 0,
                  proto.uses_defers ? 1 : 0, proto.uses_handlers ? 1 : 0,
                  proto.is_method ? 1 : 0, proto.is_generator ? 1 : 0,
-                 proto.is_async ? 1 : 0, proto.variadic ? 1 : 0,
+                 proto.variadic ? 1 : 0,
                  proto.nparams, proto.required_params,
                  proto.stack_depth.size());
 }
 
 bool jit_code_may_suspend(function_code *code) {
-    return code && (code->is_async || code->is_generator);
+    return code && code->is_generator;
 }
 
 void jit_debug_suspendable(function_code *code) {
@@ -224,7 +224,7 @@ void jit_debug_suspendable(function_code *code) {
 }
 
 bool jit_function_eligible(function_code *code) {
-    return code && !code->is_generator && !code->is_async &&
+    return code && !code->is_generator &&
            !code->variadic && code->required_params == code->nparams;
 }
 
@@ -739,7 +739,6 @@ bool skein_vm_prepare_thread_proto(
     if (def->code->nparams != 1 ||
         def->code->required_params != 1 ||
         def->code->variadic ||
-        def->code->is_async ||
         def->code->is_generator ||
         def->code->is_method) {
         error = "thread entry must be a synchronous function with one "
@@ -851,7 +850,6 @@ std::shared_ptr<function_code> make_transfer_code(
     code->required_params = (int)proto.required_params;
     code->name = proto.name.empty() ? payload.name : proto.name;
     code->module = proto.module;
-    code->is_async = proto.is_async;
     code->is_generator = proto.is_generator;
     code->is_method = proto.is_method;
     code->variadic = proto.variadic;

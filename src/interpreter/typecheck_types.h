@@ -21,7 +21,6 @@ namespace detail {
 struct FunctionSig {
     std::vector<const TypeNode *> params;
     bool variadic = false;
-    bool is_async = false;
     bool is_generator = false;
     int optional_params = 0;
     const TypeNode *rest = nullptr;

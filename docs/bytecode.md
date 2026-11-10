@@ -57,7 +57,7 @@ SKEIN_VM_STATS=1 ./build/skein script.skein
 cmake -S . -B build-vm-only -DSKEIN_VM_ONLY=ON
 cmake --build build-vm-only
 
-# generator / async fiber 栈大小（KB，默认 2048）
+# task / generator fiber 栈大小（KB，默认 1024）
 SKEIN_FIBER_STACK_KB=8192 ./build/skein script.skein
 
 # 统一检查：Debug/Release、ASan+UBSan、LSan、VM-only、
@@ -143,7 +143,7 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - `on error` / `recover` / `pass`（handler 栈 + 局部 unwind）
 - `defer`（独立 Proto + 显式 upvalue cell，在 scope exit/unwind 时执行；
   引用后续声明的局部会在编译期被拒绝）
-- `await` / `yield`
+- `yield`
 - `import`
 - 块作用域（`PUSH_SCOPE` / `POP_SCOPE`）
 - 自增/自减、复合赋值（变量目标）
@@ -231,7 +231,7 @@ ITER_NEW / ITER_NEXT / ITER_END
 SWITCH_CHECK / CASE_MATCH
 MATCH_BEGIN / MATCH_TEST / MATCH_BIND
 ASSIGN_INDEX / COMPOUND_INDEX / INCDEC_INDEX
-AWAIT / YIELD / FAIL / PASS / RECOVER
+YIELD / FAIL / PASS / RECOVER
 PUSH_FAIL_HANDLER / PUSH_RECOVER_HANDLER / POP_HANDLER
 CHECK_RESULT / BIND_NAME / ENTER_HANDLER_BODY / LEAVE_HANDLER_BODY
 DEFER_PUSH
@@ -318,7 +318,7 @@ struct Instr {
   指针，回退用的 AST 保存在 L2 side table；`function_code->sl` 只保留
   参数/trait 签名元数据。
 - fast frame 支持普通函数以及 handler、defer、iterator；generator、
-  async、默认参数、variadic、method 和参数 pattern 调用仍回退
+  默认参数、variadic、method 和参数 pattern 调用仍回退
   `call_value_args` / C++ 递归。
 - 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；已解析的全局访问使用
   显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位；`obj.field` 的
@@ -351,7 +351,7 @@ struct Instr {
 5. GC root 表第一版已落地；下一步是 per-pc liveness / moving GC 准备；
    Handler JIT、尾调用 frame reuse、OSR/deopt 依赖这一步（见
    [jit-plan.md](jit-plan.md)）；AOT、字节码序列化待决策；
-6. generator/async 与 VM 状态整合；
+6. generator/task 与 VM 状态整合；
 7. unboxed slot、内联缓存、超指令、computed goto；
 8. AST 后端降级为可选参考实现。
 

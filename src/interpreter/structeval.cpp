@@ -60,7 +60,6 @@ static std::shared_ptr<function_def> make_field_default(
                  (field ? field : "?") + ">";
     code->is_method = false;
     code->variadic = false;
-    code->is_async = false;
     code->is_generator = false;
     code->def_line = expr->line;
     code->def_column = expr->column;
@@ -193,11 +192,6 @@ static bool method_signature_matches(const method_sig *sig,
     }
     if (code->variadic) {
         error = "trait methods cannot be variadic";
-        return false;
-    }
-    if (sig->is_async != code->is_async) {
-        error = "method " + sig->name + " async marker does not match " +
-                "the trait signature";
         return false;
     }
     if ((int)sig->params.size() != code->nparams) {
@@ -432,7 +426,6 @@ void eval_trait_decl(struct trait_node *t) {
         }
         method_sig sig;
         sig.name = m->name;
-        sig.is_async = m->is_async != 0;
         for (struct symlist *p = params; p; p = p->next) {
             if (p->variadic) {
                 yyerror("trait methods cannot be variadic");
@@ -459,11 +452,6 @@ void eval_trait_decl(struct trait_node *t) {
             freeval(value);
             if (!definition || !definition->code) {
                 yyerror("invalid trait default method %s", m->name);
-                return;
-            }
-            if ((definition->code->is_async != 0) != (m->is_async != 0)) {
-                yyerror("trait method %s async marker does not match its "
-                        "default body", m->name);
                 return;
             }
             defaults.emplace_back(m->name, std::move(definition));
@@ -590,7 +578,6 @@ bool declare_trait_meta(
         }
         method_sig signature;
         signature.name = method.name;
-        signature.is_async = method.is_async;
         for (const trait_param_meta &param : method.params) {
             if (param.variadic) {
                 yyerror("trait methods cannot be variadic");
@@ -611,11 +598,6 @@ bool declare_trait_meta(
             if (!method_signature_matches(&signature, method.code.get(),
                                           signature_error)) {
                 yyerror("%s", signature_error.c_str());
-                return false;
-            }
-            if ((method.code->is_async != 0) != method.is_async) {
-                yyerror("trait method %s async marker does not match its "
-                        "default body", method.name.c_str());
                 return false;
             }
             std::shared_ptr<function_def> definition =

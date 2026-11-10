@@ -40,7 +40,6 @@ void save_vm_frame(const VmFrameView &view) {
     state.saved_handler_depth = *view.saved_handler_depth;
     state.caller_handler_depth = view.context->handler_depth;
     state.handler_body_depth = *view.handler_body_depth;
-    state.allow_await = view.context->allow_await;
     state.diag_frames = *view.diag_frames;
     state.diag_module = diag_current_module_name();
     state.diag_source = diag_current_source_name();
@@ -85,7 +84,6 @@ void restore_vm_frame(const VmFrameView &view, SavedVmState state) {
     *view.saved_handler_depth = state.saved_handler_depth;
     *view.handler_body_depth = state.handler_body_depth;
     view.context->handler_depth = state.caller_handler_depth;
-    view.context->allow_await = state.allow_await;
     *view.diag_frames = state.diag_frames;
     diag_set_module_name(state.diag_module);
     diag_set_source_name(state.diag_source);

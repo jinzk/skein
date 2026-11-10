@@ -634,7 +634,7 @@ def check_extended_stdlib():
             "std process spawn async",
             "import std;\n"
             'let p = std.process.spawn("/bin/echo", {"args": ["async"]});\n'
-            'let data = await std.io.read_task(p["stdout"], 4096);\n'
+            'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
             'print(bytes_to_string(data));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["async", "0"],
@@ -643,9 +643,9 @@ def check_extended_stdlib():
             "std process spawn async write",
             "import std;\n"
             'let p = std.process.spawn("/bin/cat");\n'
-            'print(await std.io.write_task(p["stdin"], "abc"));\n'
+            'print(std.io.write_task(p["stdin"], "abc").wait());\n'
             'std.io.close(p["stdin"]);\n'
-            'let data = await std.io.read_task(p["stdout"], 4096);\n'
+            'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
             'print(bytes_to_string(data));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["3", "abc", "0"],
@@ -722,8 +722,8 @@ def check_extended_stdlib():
         "import std;\n"
         "process func bad() { return 1; }\n"
         "std.entry.encode(bad);\n",
-        stderr="process func entry must be a sync function with one ctx "
-               "parameter",
+        stderr="process func entry must be a non-generator function with one "
+               "ctx parameter",
     )
 
     with tempfile.TemporaryDirectory() as worker_tmp:
@@ -4257,41 +4257,41 @@ def check_extended_stdlib():
             check(
                 "std.thread fiber channel wait",
                 "import std;\n"
-                "async func wait_channel(ch) {\n"
+                "func wait_channel(ch) {\n"
                 "    let msg = ch.recv();\n"
                 "    return msg.payload[\"x\"];\n"
                 "}\n"
                 'let ch = std.thread.Channel(1);\n'
                 f'let t = std.thread.spawn("{delay_worker_path}", '
                 f'std.thread.Message.from({{}}, {{"signal": ch}}));\n'
-                'let task = wait_channel(ch);\n'
+                'let task = launch wait_channel(ch);\n'
                 'print("before|");\n'
                 'std.io.flush(std.io.stdout);\n'
-                'await std.task.sleep(10);\n'
+                'std.task.sleep(10).wait();\n'
                 'print("after|");\n'
                 'std.io.flush(std.io.stdout);\n'
-                'print("value="); print(await task);\n'
+                'print("value="); print(task.wait());\n'
                 't.join();\n',
                 stdout="before|after|value=9",
             )
             check(
                 "std.thread fiber select wait",
                 "import std;\n"
-                "async func watch(empty, signal) {\n"
+                "func watch(empty, signal) {\n"
                 "    return std.thread.select([empty, signal], 2000);\n"
                 "}\n"
-                "async func wait_timeout(ch) {\n"
+                "func wait_timeout(ch) {\n"
                 "    return std.thread.select([ch], 10);\n"
                 "}\n"
                 'let signal = std.thread.Channel(1);\n'
                 'let empty = std.thread.Channel(1);\n'
-                'let task = watch(empty, signal);\n'
-                'await std.task.sleep(10);\n'
+                'let task = launch watch(empty, signal);\n'
+                'std.task.sleep(10).wait();\n'
                 'signal.send(std.thread.Message.from({"x": 11}));\n'
-                'let r = await task;\n'
+                'let r = task.wait();\n'
                 'print("index="); print(r["index"]); print(":");\n'
                 'print(r["value"].payload["x"]);\n'
-                'let timeout = await wait_timeout(empty);\n'
+                'let timeout = wait_timeout(empty);\n'
                 'print("timeout="); print(timeout["timeout"]);\n',
                 stdout_all=["index=1:11", "timeout=true"],
             )
@@ -4397,7 +4397,7 @@ def check_extended_stdlib():
             check(
                 "std.thread fiber future wake latency",
                 "import std;\n"
-                "async func run(pool) {\n"
+                "func run(pool) {\n"
                 "    let t0 = std.time.monotonic_ms();\n"
                 "    for (let i = 0; i < 100; i = i + 1) {\n"
                 '        let r = pool.submit({"n": i}).wait();\n'
@@ -4405,7 +4405,7 @@ def check_extended_stdlib():
                 "    return std.time.monotonic_ms() - t0;\n"
                 "}\n"
                 f'let pool = std.thread.pool(1, "{thread_worker_path}");\n'
-                "let elapsed = await run(pool);\n"
+                "let elapsed = run(pool);\n"
                 'print("elapsed="); print(elapsed); print("|");\n'
                 'print("under="); print(elapsed < 900); print("|");\n'
                 "pool.close();\n"

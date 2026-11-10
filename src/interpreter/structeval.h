@@ -74,7 +74,6 @@ struct trait_param_meta {
 struct trait_method_meta {
     std::string name;
     std::vector<trait_param_meta> params;
-    bool is_async = false;
     std::shared_ptr<struct function_code> code;
 };
 

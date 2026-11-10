@@ -169,77 +169,73 @@ def run_cases():
           'print(items[1]["method"] + " " + items[1]["pattern"]);\n',
           stdout_all=["2", "GET /a", "POST /b/:id"])
 
-    check("route async handler",
+    check("route task handler",
           'import std;\nimport std.route;\n'
           'let app = route.new();\n'
-          'app.get("/x", async func(req) {\n'
-          '  await std.task.sleep(1);\n'
+          'app.get("/x", func(req) {\n'
+          '  std.task.sleep(1).wait();\n'
           '  return {"status": 200, "body": "ok"};\n'
           '});\n'
-          'let task = app.dispatch({"method": "GET", "path": "/x"});\n'
-          'print(type_name(task));\n'
-          'let resp = await task;\n'
+          'let resp = app.dispatch({"method": "GET", "path": "/x"});\n'
           'print(resp["body"]);\n',
-          stdout_all=["task", "ok"])
+          stdout_all=["ok"])
 
-    check("route async middleware continues",
+    check("route task middleware continues",
           'import std;\nimport std.route;\n'
           'let app = route.new();\n'
-          'app.use(async func(req) {\n'
-          '  await std.task.sleep(1);\n'
+          'app.use(func(req) {\n'
+          '  std.task.sleep(1).wait();\n'
           '  print("mw1");\n'
           '  return null;\n'
           '});\n'
           'app.use(func(req) { print("mw2"); return null; });\n'
           'app.get("/x", func(req) { '
           'return {"status": 200, "body": "ok"}; });\n'
-          'let task = app.dispatch({"method": "GET", "path": "/x"});\n'
-          'print(type_name(task));\n'
-          'let resp = await task;\n'
+          'let resp = app.dispatch({"method": "GET", "path": "/x"});\n'
           'print(resp["body"]);\n',
-          stdout_all=["task", "mw1", "mw2", "ok"])
+          stdout_all=["mw1", "mw2", "ok"])
 
-    check("route sync then async middleware",
+    check("route sync then task middleware",
           'import std;\nimport std.route;\n'
           'let app = route.new();\n'
           'app.use(func(req) { print("sync"); return null; });\n'
-          'app.use(async func(req) {\n'
-          '  await std.task.sleep(1);\n'
+          'app.use(func(req) {\n'
+          '  std.task.sleep(1).wait();\n'
           '  print("async");\n'
           '  return null;\n'
           '});\n'
           'app.get("/x", func(req) { '
           'return {"status": 200, "body": "ok"}; });\n'
-          'let resp = await app.dispatch({"method": "GET", "path": "/x"});\n'
+          'let resp = app.dispatch({"method": "GET", "path": "/x"});\n'
           'print(resp["body"]);\n',
           stdout_all=["sync", "async", "ok"])
 
-    check("route async middleware short circuit",
+    check("route task middleware short circuit",
           'import std;\nimport std.route;\n'
           'let app = route.new();\n'
-          'app.use(async func(req) {\n'
-          '  await std.task.sleep(1);\n'
+          'app.use(func(req) {\n'
+          '  std.task.sleep(1).wait();\n'
           '  return {"status": 401, "body": "no"};\n'
           '});\n'
           'app.get("/x", func(req) { '
           'return {"status": 200, "body": "ok"}; });\n'
-          'let resp = await app.dispatch({"method": "GET", "path": "/x"});\n'
+          'let resp = app.dispatch({"method": "GET", "path": "/x"});\n'
           'print(resp["status"]);\n'
           'print(resp["body"]);\n',
           stdout_all=["401", "no"])
 
-    check("route async middleware and handler",
+    check("route task middleware and handler",
           'import std;\nimport std.route;\n'
           'let app = route.new();\n'
-          'app.use(async func(req) {\n'
-          '  await std.task.sleep(1);\n'
+          'app.use(func(req) {\n'
+          '  std.task.sleep(1).wait();\n'
           '  return null;\n'
           '});\n'
-          'app.get("/x", async func(req) {\n'
-          '  await std.task.sleep(1);\n'
+          'app.get("/x", func(req) {\n'
+          '  std.task.sleep(1).wait();\n'
           '  return {"status": 200, "body": "both"};\n'
           '});\n'
-          'let resp = await app.dispatch({"method": "GET", "path": "/x"});\n'
+          'let resp = app.dispatch({"method": "GET", "path": "/x"});\n'
           'print(resp["body"]);\n',
           stdout="both")
 

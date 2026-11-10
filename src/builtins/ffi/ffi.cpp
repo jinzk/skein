@@ -223,17 +223,15 @@ static value_t *ffi_callback(const std::vector<value_t *> &args) {
     if (function->type == T_func) {
         func_value_t *callee = (func_value_t *)function;
         if (callee->def && callee->def->code &&
-            (callee->def->code->is_async ||
-             callee->def->code->is_generator)) {
-            yyerror("ffi callbacks must be synchronous functions");
+            callee->def->code->is_generator) {
+            yyerror("ffi callbacks must be non-generator functions");
             return NULL;
         }
     } else if (function->type == T_method) {
         method_value_t *method = (method_value_t *)function;
         if (method->method && method->method->code &&
-            (method->method->code->is_async ||
-             method->method->code->is_generator)) {
-            yyerror("ffi callbacks must be synchronous functions");
+            method->method->code->is_generator) {
+            yyerror("ffi callbacks must be non-generator functions");
             return NULL;
         }
     } else if (function->type != T_builtin) {

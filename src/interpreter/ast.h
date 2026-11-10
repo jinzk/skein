@@ -142,7 +142,6 @@ struct funcdef {
     struct type_constraint *ret_type;
     int moved; /* body/params transferred to a runtime function value */
     int exported;
-    int is_async;
     int is_generator;
     /* True for `thread func` declarations: the function can be used as a
      * Proto-backed thread entry. */
@@ -159,9 +158,6 @@ struct funcdef {
      * inference.
      */
     struct funcdef *decorated_generator_source;
-    /* Original async flag of a decorated async generator method, preserved
-     * for std.meta.methods even though the forwarder is a normal function. */
-    int decorated_generator_async;
     /* Static-only self type for a hidden decorated method body.  The hidden
      * body is bound as an ordinary function, so type checking needs the impl
      * type to infer field and yield/send types. */
@@ -361,7 +357,6 @@ struct trait_method {
     struct symlist *params;
     /* Optional default implementation (a function AST node). */
     struct ast *func;
-    int is_async;
     struct trait_method *next;
 };
 
@@ -540,10 +535,8 @@ struct ast *newcast(struct ast *value, struct type_constraint *type);
 struct ast *newspread(struct ast *value);
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported = false, bool is_async = false,
-                    bool is_generator = false,
+                    bool exported = false, bool is_generator = false,
                     struct type_constraint *ret_type = NULL);
-struct ast *newawait(struct ast *value);
 struct ast *newyield(struct ast *value);
 struct ast *newdefer(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
@@ -592,7 +585,6 @@ struct ast *newtraitdecl(char *name, char *module,
                          struct trait_method *methods,
                          bool exported = false);
 struct ast *newtraitmethod(char *name, struct symlist *params,
-                           bool is_async = false,
                            struct ast *func = NULL);
 struct ast *append_trait_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *module,

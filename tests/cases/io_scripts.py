@@ -265,12 +265,12 @@ def run_cases():
             "io file async",
             f'import std;\n'
             f'let w = std.fs.open("{quoted_stream_copy}", "w+b");\n'
-            f'await std.io.write_task(w, "file async data")\n'
+            f'std.io.write_task(w, "file async data").wait()\n'
             f'std.io.close(w)\n'
             f'let r = std.fs.open("{quoted_stream_copy}", "rb");\n'
-            f'bytes_to_string(await std.io.read_async(r, 4))\n'
-            f'len(await std.io.read_task(r, 100))\n'
-            f'await std.io.read_task(r, 100) == null\n'
+            f'bytes_to_string(std.io.read_async(r, 4).wait())\n'
+            f'len(std.io.read_task(r, 100).wait())\n'
+            f'std.io.read_task(r, 100).wait() == null\n'
             f'std.io.eof(r)\n'
             f'std.io.close(r)\n',
             stdout_all=[

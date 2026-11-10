@@ -677,19 +677,18 @@ def run_cases():
           "println(f(\"a\"));\n",
           stdout="1", not_stderr="type warning")
 
-    check("async task type",
-          "async func fetch(x: int): string { return \"ok\"; }\n"
-          "let t: task[string] = fetch(1);\n"
-          "let s: string = await t;\n"
-          "let f: (int) -> task[string] = fetch;\n"
-          "println(s); println(await f(2));\n",
+    check("function result type",
+          "func fetch(x: int): string { return \"ok\"; }\n"
+          "let s: string = fetch(1);\n"
+          "let f: (int) -> string = fetch;\n"
+          "println(s); println(f(2));\n",
           stdout_all=["ok", "ok"], not_stderr="type warning")
 
-    check("async task result mismatch",
-          "async func fetch(x: int): string { return \"ok\"; }\n"
-          "let f: (int) -> task[int] = fetch;\n",
-          stderr="type error: expected (int) -> task[int], "
-                 "got (int) -> task[string]")
+    check("function result mismatch",
+          "func fetch(x: int): string { return \"ok\"; }\n"
+          "let f: (int) -> int = fetch;\n",
+          stderr="type error: expected (int) -> int, "
+                 "got (int) -> string")
 
     check("launch task void",
           "func noop(): void { let x = 1; }\n"
@@ -710,32 +709,32 @@ def run_cases():
           "let t: task[Animal] = launch make_dog();\n",
           stderr="expected task[Animal], got task[Dog]")
 
-    check("async lambda task type",
-          "let add = async func(a: int, b: int): int {\n"
+    check("launch lambda task type",
+          "let add = func(a: int, b: int): int {\n"
           "  return a + b;\n"
           "};\n"
-          "let t: task[int] = add(1, 2);\n"
-          "println(await t);\n",
+          "let t: task[int] = launch add(1, 2);\n"
+          "println(t.wait());\n",
           stdout="3", not_stderr="type warning")
 
-    check("async method task type",
+    check("method result type",
           "struct Box { value: int; }\n"
           "impl Box {\n"
-          "  async func get(self, x: int): string { return \"ok\"; }\n"
+          "  func get(self, x: int): string { return \"ok\"; }\n"
           "}\n"
           "let b: Box = Box { value: 1 };\n"
-          "let t: task[string] = b.get(2);\n"
+          "let s: string = b.get(2);\n"
           "let f = b.get;\n"
-          "let g: (int) -> task[string] = f;\n"
-          "println(await t); println(await g(3));\n",
+          "let g: (int) -> string = f;\n"
+          "println(s); println(g(3));\n",
           stdout_all=["ok", "ok"], not_stderr="type warning")
 
     check("task wait builtins",
           "import std;\n"
-          "async func fetch(x: int): string { return \"ok\"; }\n"
-          "let ts: list[task[string]] = [fetch(1), fetch(2)];\n"
+          "func fetch(x: int): string { return \"ok\"; }\n"
+          "let ts: list[task[string]] = [launch fetch(1), launch fetch(2)];\n"
           "let rs: list[string] = std.task.wait_all(ts);\n"
-          "let s: string = std.task.wait(fetch(3));\n"
+          "let s: string = std.task.wait(launch fetch(3));\n"
           "println(rs); println(s);\n",
           stdout_all=["[ok, ok]", "ok"], not_stderr="type warning")
 
@@ -796,10 +795,10 @@ def run_cases():
           "let g: generator[int] = parts();\n",
           stderr="type error: expected generator[int], got generator[string]")
 
-    check("async generator",
+    check("generator suspension",
           "import std;\n"
-          "async func gen() {\n"
-          "  await std.task.sleep(1);\n"
+          "func gen() {\n"
+          "  std.task.sleep(1).wait();\n"
           "  yield 1;\n"
           "  yield 2;\n"
           "}\n"
@@ -808,12 +807,12 @@ def run_cases():
           "println(xs);\n",
           stdout="[1, 2]", not_stderr="type warning")
 
-    check("async generator awaited values",
+    check("generator yielded values",
           "import std;\n"
-          "async func fetch(x: int): int { return x * 2; }\n"
-          "async func gen() {\n"
+          "func fetch(x: int): int { return x * 2; }\n"
+          "func gen() {\n"
           "  yield 1;\n"
-          "  yield await fetch(3);\n"
+          "  yield fetch(3);\n"
           "}\n"
           "let xs: list[int] = std.iter.collect(gen());\n"
           "println(xs);\n",
@@ -1106,19 +1105,19 @@ def run_cases():
           "}\n",
           stderr="type error: expected listener, got socket")
 
-    check("async builtin task types",
+    check("builtin task types",
           "import std;\n"
           "func check() {\n"
           "  let t = std.http.get_task(\"http://x\");\n"
-          "  let d: dict[string, any] = await t;\n"
+          "  let d: dict[string, any] = t.wait();\n"
           "  let c = std.net.tcp_connect_task(\"127.0.0.1\", 1);\n"
-          "  let sock: userdata = await c;\n"
+          "  let sock: userdata = c.wait();\n"
           "  let u = std.net.recv_task(sock, 10);\n"
-          "  let b: bytes = await u;\n"
+          "  let b: bytes = u.wait();\n"
           "}\n",
           not_stderr="type warning")
 
-    check("async builtin task mismatch",
+    check("builtin task mismatch",
           "import std;\n"
           "func check() {\n"
           "  let t: task[int] = std.http.get_task(\"http://x\");\n"
@@ -1131,7 +1130,7 @@ def run_cases():
           "func check() {\n"
           "  let t = std.task.sleep(1);\n"
           "  let c = std.task.catch(t);\n"
-          "  let r: result[null, error] = await c;\n"
+          "  let r: result[null, error] = c.wait();\n"
           "  let tw: result[null, error] = std.task.try_wait(t);\n"
           "  let ta: result[list[null], error] =\n"
           "    std.task.try_wait_all([t]);\n"

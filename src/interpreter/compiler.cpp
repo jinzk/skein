@@ -725,7 +725,6 @@ struct Compiler {
              method = method->next) {
             skein::bc::TraitMethodMeta method_meta;
             method_meta.name = method->name ? method->name : "";
-            method_meta.is_async = method->is_async != 0;
             struct symlist *params =
                 method->func
                     ? ((struct funcdef *)method->func)->sl
@@ -814,7 +813,6 @@ struct Compiler {
                      (field ? field : "?") + ">";
         code->is_method = false;
         code->variadic = false;
-        code->is_async = false;
         code->is_generator = false;
         code->def_line = expr->line;
         code->def_column = expr->column;
@@ -2607,12 +2605,6 @@ struct Compiler {
                 return;
             }
 
-            case 'b':
-                compile(node->l);
-                if (!ok) return;
-                emit(Op::Await, 0, 0, 0, here);
-                return;
-
             case 'w':
                 compile(node->l);
                 if (!ok) return;
@@ -3443,6 +3435,8 @@ struct Compiler {
 
     void compile_call(ast *node, bool tail = false) {
         struct ufncall *call = (struct ufncall *)node;
+        /* `return launch f()` still needs the Return after the launch Call. */
+        bool return_value = tail;
         if (call->launch)
             tail = false;
         std::vector<ast *> args;
@@ -3469,6 +3463,8 @@ struct Compiler {
                  call->launch ? 1 : 0,
                  static_cast<uint16_t>(args.size()),
                  static_cast<uint32_t>(args.size()), loc_of(node));
+            if (!tail && return_value)
+                emit(Op::Return, 0, 0, 0, loc_of(node));
             return;
         }
 
@@ -3487,7 +3483,7 @@ struct Compiler {
         uint32_t descriptor = add_call_desc(std::move(spread));
         emit(Op::CallSpread, call->launch ? 1 : 0, 0, descriptor,
              loc_of(node));
-        if (tail)
+        if (tail || (!tail && return_value))
             emit(Op::Return, 0, 0, 0, loc_of(node));
     }
 };
@@ -3689,7 +3685,6 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     compiler.proto.required_params =
         static_cast<uint32_t>(code->required_params);
     compiler.proto.variadic = code->variadic;
-    compiler.proto.is_async = code->is_async;
     compiler.proto.is_generator = code->is_generator;
     compiler.proto.is_method = code->is_method;
     compiler.proto.def_line = body->line;

@@ -197,7 +197,7 @@ struct ast *build_decorator_chain(
 
 struct ast *build_wrapper_body(const std::string &decorator_name,
                                const struct symlist *params,
-                               int line, int column, bool is_async) {
+                               int line, int column) {
     std::vector<struct ast *> arguments;
     for (const struct symlist *param = params; param; param = param->next) {
         const char *name =
@@ -214,12 +214,6 @@ struct ast *build_wrapper_body(const std::string &decorator_name,
     struct ast *call = newcall(make_ref(decorator_name), argument_list);
     call->line = line;
     call->column = column;
-    if (is_async) {
-        struct ast *awaited = newawait(call);
-        awaited->line = line;
-        awaited->column = column;
-        call = awaited;
-    }
     struct ast *body = newret(call);
     body->line = line;
     body->column = column;
@@ -273,26 +267,15 @@ struct ast *lower_impl_decorators(struct impl_node *impl) {
             body->method_self_type =
                 new_named_type_constraint(impl->type_name, impl->module);
 
-        /*
-         * A generator method's forwarder is an ordinary function that returns
-         * the generator produced by the decorator chain.  It must not be
-         * marked async: for async generators the decorator result is a
-         * generator, not a task, so awaiting it would be wrong.
-         */
         bool body_is_generator = body->is_generator != 0;
-        bool wrapper_is_async = body->is_async != 0 && !body_is_generator;
-
         struct ast *wrapper_body = build_wrapper_body(
-            decorator_name, body->sl, method->line, method->column,
-            wrapper_is_async);
+            decorator_name, body->sl, method->line, method->column);
         struct funcdef *wrapper = (struct funcdef *)newfunc(
-            NULL, wrapper_params, wrapper_body, false, wrapper_is_async,
-            false);
+            NULL, wrapper_params, wrapper_body, false, false);
         wrapper->line = method->line;
         wrapper->column = method->column;
         if (body_is_generator) {
             wrapper->decorated_generator_source = body;
-            wrapper->decorated_generator_async = body->is_async != 0;
             if (body->ret_type &&
                 body->ret_type->kind == TYPE_GENERATOR)
                 wrapper->ret_type =

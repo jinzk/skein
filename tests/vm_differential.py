@@ -179,12 +179,12 @@ def generator_program():
     )
 
 
-def async_program():
+def task_program():
     return (
         "import std;\n"
-        "async func inc(x) -> x + 1;\n"
-        "print(await inc(3));\n"
-        "print(await inc(await inc(4)));\n"
+        "func inc(x) -> x + 1;\n"
+        "print(launch inc(3).wait());\n"
+        "print(launch inc(launch inc(4).wait()).wait());\n"
     )
 
 
@@ -249,7 +249,7 @@ FEATURES = [
     overflow_program,
     error_program,
     generator_program,
-    async_program,
+    task_program,
     closure_scope_program,
     defer_error_program,
     pattern_default_program,

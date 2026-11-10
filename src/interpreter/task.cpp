@@ -1035,6 +1035,8 @@ static value_t *task_bounded_parallel_map(
                     return false;
                 }
                 freeval(produced);
+                /* The map owns the task and converts its outcome to result. */
+                value->observed = true;
                 active.push_back(std::move(value));
                 active_index.push_back(next);
             } else if (produced->type == T_result) {

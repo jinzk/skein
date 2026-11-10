@@ -364,8 +364,6 @@ const TypeNode *signature_result_type(const FunctionSig &sig) {
             TYPE_GENERATOR,
             {result, sig.generator_send ? sig.generator_send : type_any()});
     }
-    if (sig.is_async)
-        return type_container(TYPE_TASK, {result});
     return result;
 }
 
@@ -394,7 +392,6 @@ FunctionSig method_signature_from_code(const struct function_code *code) {
     sig.result = code->ret_type
                      ? type_from_constraint(code->ret_type.get())
                      : type_any();
-    sig.is_async = code->is_async;
     sig.is_generator = code->is_generator;
     return sig;
 }
@@ -406,7 +403,6 @@ FunctionSig method_signature_from_def(const struct funcdef *def) {
     sig = signature_from_symlist(def->sl, true);
     sig.result = def->ret_type ? type_from_constraint(def->ret_type)
                                : type_any();
-    sig.is_async = def->is_async;
     sig.is_generator = def->is_generator;
     return sig;
 }

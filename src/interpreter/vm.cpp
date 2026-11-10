@@ -1937,7 +1937,6 @@ public:
                     for (const auto &method : meta.methods) {
                         trait_method_meta method_meta;
                         method_meta.name = method.name;
-                        method_meta.is_async = method.is_async;
                         method_meta.code = method.code;
                         method_meta.params.reserve(method.params.size());
                         for (const auto &param : method.params) {
@@ -2084,32 +2083,6 @@ public:
                     if (is_control(result))
                         return abort_control(result);
                     push(result);
-                    break;
-                }
-
-                case Op::Await: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (!context_.allow_await) {
-                        yyerror("await outside async function");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    task_ptr task;
-                    value_t *result = NULL;
-                    if (!get_task_value(value, task)) {
-                        freeval(value);
-                        return abort_error();
-                    }
-                    result = fiber_await_task(task);
-                    freeval(value);
-                    if (context_.control != EVAL_CONTROL_NONE ||
-                        context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    push(result ? result : newnull());
                     break;
                 }
 
@@ -2872,7 +2845,6 @@ private:
     static bool proto_can_frame(const Proto &proto) {
         for (const Instr &ins : proto.code) {
             switch (static_cast<Op>(ins.op)) {
-                case Op::Await:
                 case Op::Yield:
                 case Op::ControlBreak:
                 case Op::ControlContinue:
@@ -2903,7 +2875,7 @@ private:
         if (!def || !def->code)
             return false;
         function_code *code = def->code.get();
-        if (code->is_generator || code->is_async || code->is_method ||
+        if (code->is_generator || code->is_method ||
             code->variadic || code->required_params != code->nparams ||
             (int)argc != code->nparams)
             return false;
@@ -3223,7 +3195,6 @@ private:
         saved_handler_depth_ = context_.handler_depth;
         handler_body_depth_ = 0;
         context_.handler_depth = 0;
-        context_.allow_await = false;
         scope_mark_ = context_.scopes.restore_stack.size();
         frame_stack_base_ = stack_.size();
         name_cache_.assign(proto->consts.size(), NameCacheSlot{});
@@ -3296,7 +3267,6 @@ private:
         errors_before_ = context_.runtime_error_count;
         handler_body_depth_ = 0;
         context_.handler_depth = 0;
-        context_.allow_await = false;
         name_cache_.assign(proto->consts.size(), NameCacheSlot{});
         name_scope_generation_ = 0;
         param_symbols_.clear();

@@ -27,7 +27,6 @@ struct eval_context {
     int vm_call_depth = 0;
     /* Pending VM defer records across the current fiber's VM frames. */
     int vm_defer_count = 0;
-    bool allow_await = false;
     bool capture_errors = false;
     bool has_captured_error = false;
     std::string captured_error;

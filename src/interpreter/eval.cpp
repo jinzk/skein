@@ -566,21 +566,6 @@ struct value_t *eval(struct ast *a) {
             break;
         }
 
-        case 'b': {
-            if (!eval_ctx().allow_await) {
-                yyerror("await outside async function");
-                break;
-            }
-            struct value_t *v = eval(a->l);
-            if (!v)
-                break;
-            task_ptr task;
-            if (get_task_value(v, task))
-                ret = fiber_await_task(task);
-            freeval(v);
-            break;
-        }
-
         case 'w': {
             struct value_t *v = a->l ? eval(a->l) : newnull();
             if (!v)

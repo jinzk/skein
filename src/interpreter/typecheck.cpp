@@ -746,7 +746,33 @@ struct Checker : public BuiltinContext {
 
     const TypeNode *method_value_type(const TypeNode *base_type,
                                       const char *name) {
-        if (!base_type || base_type->kind != TYPE_NAMED || !name)
+        if (!name)
+            return NULL;
+        if (base_type && base_type->kind == TYPE_TASK) {
+            const TypeNode *element = type_element(base_type, 0);
+            const TypeNode *result_type = type_container(
+                TYPE_RESULT, {element, type_builtin(TYPE_ERROR)});
+            if (std::strcmp(name, "wait") == 0)
+                return make_function_type(TYPE_CALLABLE,
+                                          {type_builtin(TYPE_INT), element},
+                                          1);
+            if (std::strcmp(name, "try_wait") == 0)
+                return make_function_type(
+                    TYPE_CALLABLE, {type_builtin(TYPE_INT), result_type}, 1);
+            if (std::strcmp(name, "detach") == 0)
+                return make_function_type(TYPE_CALLABLE, {base_type});
+            if (std::strcmp(name, "detached") == 0 ||
+                std::strcmp(name, "done") == 0 ||
+                std::strcmp(name, "cancel") == 0)
+                return make_function_type(TYPE_CALLABLE,
+                                          {type_builtin(TYPE_BOOL)});
+            if (std::strcmp(name, "catch") == 0)
+                return make_function_type(
+                    TYPE_CALLABLE,
+                    {type_container(TYPE_TASK, {result_type})});
+            return NULL;
+        }
+        if (!base_type || base_type->kind != TYPE_NAMED)
             return NULL;
 
         structtype_lookup_result lookup;
@@ -886,6 +912,40 @@ struct Checker : public BuiltinContext {
         std::string receiver_path;
         if (narrow_path(callee->l, receiver_path))
             invalidate_root_facts(env, path_root(receiver_path));
+
+        if (receiver && receiver->kind == TYPE_TASK) {
+            const TypeNode *element = type_element(receiver, 0);
+            const TypeNode *result_type = type_container(
+                TYPE_RESULT, {element, type_builtin(TYPE_ERROR)});
+            std::size_t max_args = 0;
+            if (std::strcmp(method_name, "wait") == 0) {
+                result = element;
+                max_args = 1;
+            } else if (std::strcmp(method_name, "try_wait") == 0) {
+                result = result_type;
+                max_args = 1;
+            } else if (std::strcmp(method_name, "detach") == 0) {
+                result = receiver;
+            } else if (std::strcmp(method_name, "detached") == 0 ||
+                       std::strcmp(method_name, "done") == 0 ||
+                       std::strcmp(method_name, "cancel") == 0) {
+                result = type_builtin(TYPE_BOOL);
+            } else if (std::strcmp(method_name, "catch") == 0) {
+                result = type_container(TYPE_TASK, {result_type});
+            } else {
+                return false;
+            }
+            if (args.size() > max_args) {
+                char message[256];
+                std::snprintf(message, sizeof(message),
+                              "task.%s expects at most %zu argument(s)",
+                              method_name, max_args);
+                report_error(callee->line, callee->column, message);
+                return false;
+            }
+            return true;
+        }
+
         FunctionSig sig;
         bool found = false;
         const struct funcdef *method_def = NULL;
@@ -941,7 +1001,6 @@ struct Checker : public BuiltinContext {
                          ? type_from_constraint(
                                function->def->code->ret_type.get())
                          : type_any();
-        sig.is_async = function->def->code->is_async;
         sig.is_generator = function->def->code->is_generator;
         adjust_generator_result(sig, NULL, function->def->code.get());
         if (!check_call_args(sig, args, env, true))
@@ -1230,7 +1289,6 @@ struct Checker : public BuiltinContext {
                                 ? type_from_constraint(
                                       fn->def->code->ret_type.get())
                                 : type_any();
-                        sig.is_async = fn->def->code->is_async;
                         sig.is_generator =
                             fn->def->code->is_generator;
                         found = true;
@@ -1596,7 +1654,6 @@ struct Checker : public BuiltinContext {
         FunctionSig sig = signature_from_symlist(code->sl);
         sig.result = code->ret_type ? type_from_constraint(code->ret_type.get())
                                     : type_any();
-        sig.is_async = code->is_async;
         sig.is_generator = code->is_generator;
         adjust_generator_result(sig, NULL, code);
         return function_type_from_sig(sig);
@@ -1608,7 +1665,6 @@ struct Checker : public BuiltinContext {
         if (!def)
             return type_builtin(TYPE_FUNCTION);
         FunctionSig sig = signature_from_symlist(def->sl);
-        sig.is_async = def->is_async;
         sig.is_generator = def->is_generator;
         if (def->is_generator) {
             auto it = generator_elements.find(def);
@@ -1696,7 +1752,6 @@ struct Checker : public BuiltinContext {
                                  ? type_from_constraint(
                                        fn->def->code->ret_type.get())
                                  : type_any();
-                sig.is_async = fn->def->code->is_async;
                 sig.is_generator = fn->def->code->is_generator;
                 adjust_generator_result(sig, NULL, fn->def->code.get());
                 return signature_result_type(sig);
@@ -1714,12 +1769,8 @@ struct Checker : public BuiltinContext {
         check_funcdef(def, env);
         if (def->is_generator)
             return type_any();
-        auto finish = [&](const TypeNode *result) {
-            return def->is_async ? type_container(TYPE_TASK, {result})
-                                 : result;
-        };
         if (def->ret_type)
-            return finish(type_from_constraint(def->ret_type));
+            return type_from_constraint(def->ret_type);
         if (!def->ast)
             return type_any();
         int return_count = 0;
@@ -1745,7 +1796,7 @@ struct Checker : public BuiltinContext {
             if (!item->variadic)
                 first = false;
         }
-        return finish(infer(return_expr, local));
+        return infer(return_expr, local);
     }
 
     void bind_pattern_types(const struct ast *node,
@@ -2034,7 +2085,6 @@ struct Checker : public BuiltinContext {
             sig = signature_from_symlist(def->sl);
         sig.result = def->ret_type ? type_from_constraint(def->ret_type)
                                    : type_any();
-        sig.is_async = def->is_async;
         sig.is_generator = def->is_generator;
         if (def->name)
             functions[def->name] = sig;
@@ -2872,13 +2922,6 @@ struct Checker : public BuiltinContext {
                 const TypeNode *then_type = infer(flow->tl, env);
                 const TypeNode *else_type = infer(flow->el, env);
                 return join_types(then_type, else_type);
-            }
-            case 'b': {
-                const TypeNode *value =
-                    expr->l ? infer(expr->l, env) : type_any();
-                if (value->kind == TYPE_TASK)
-                    return type_element(value, 0);
-                return type_any();
             }
             case 'w': {
                 const TypeNode *value =

@@ -32,7 +32,7 @@ enum type_constraint_kind {
     TYPE_INVALID,
     /* Static-only type variable used by builtin polymorphic signatures. */
     TYPE_VAR,
-    /* Static-only wrapper for async task results and generator streams. */
+    /* Static-only wrapper for task results and generator streams. */
     TYPE_TASK,
     TYPE_GENERATOR,
     /* Static-only opaque userdata categories. */

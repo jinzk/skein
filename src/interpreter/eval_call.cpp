@@ -152,8 +152,6 @@ static struct value_t *invoke_function_body(
         frame_column = def->code->def_column;
     }
     call_stack_guard frame_guard(frame_name.c_str(), frame_line, frame_column);
-    bool saved_allow_await = eval_ctx().allow_await;
-    eval_ctx().allow_await = def->code->is_async;
     eval_push_closure_scope(def->closure);
     int i = 0;
     bool pattern_failed = false;
@@ -199,7 +197,6 @@ static struct value_t *invoke_function_body(
             freeval(args[k]);
         args.clear();
         eval_popscope();
-        eval_ctx().allow_await = saved_allow_await;
         return NULL;
     }
     if (rest) {
@@ -244,7 +241,6 @@ static struct value_t *invoke_function_body(
     }
 
     eval_popscope();
-    eval_ctx().allow_await = saved_allow_await;
 
     if (eval_ctx().control != EVAL_CONTROL_NONE) {
         freeval(result);
@@ -508,18 +504,6 @@ static struct value_t *invoke_value(
             return NULL;
         }
         return new_generator_value(std::move(generator));
-    }
-
-    if (def->code->is_async) {
-        task_ptr task = fiber_start_async(
-            [def, owned = std::move(args)]() mutable {
-                return invoke_function_body(def, owned);
-            });
-        if (!task) {
-            free_args(args);
-            return NULL;
-        }
-        return new_task_value(std::move(task));
     }
 
     return invoke_function_body(def, args);

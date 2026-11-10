@@ -256,14 +256,14 @@ def run_cases():
         stdout="= boom",
     )
     check(
-        "async fail payload",
+        "task fail payload",
         "import std;\n"
-        "async func f() { fail \"async boom\"; }\n"
-        "let r = await std.task.catch(f());\n"
+        "func f() { fail \"task boom\"; }\n"
+        "let r = std.task.catch(launch f()).wait();\n"
         "std.result.is_err(r)\n"
         "std.error.kind(std.result.error(r))\n"
         "std.result.error(r)\n",
-        stdout_all=["= true", "= fail", "= async boom"],
+        stdout_all=["= true", "= fail", "= task boom"],
     )
     check(
         "generator error payload",
@@ -441,15 +441,15 @@ def run_cases():
         stdout_all=["= true", "= y"],
     )
     check(
-        "result on error async",
+        "result on error task",
         "import std;\n"
-        "async func bad() { fail \"async boom\"; }\n"
-        "let v = (await std.task.catch(bad())) on error(e) {\n"
-        "  print(\"async \" + str(e));\n"
+        "func bad() { fail \"task boom\"; }\n"
+        "let v = (std.task.catch(launch bad()).wait()) on error(e) {\n"
+        "  print(\"task \" + str(e));\n"
         "  recover 3;\n"
         "};\n"
         "v\n",
-        stdout_all=["async async boom", "= 3"],
+        stdout_all=["task task boom", "= 3"],
     )
     check(
         "std result capture task",
@@ -483,14 +483,14 @@ def run_cases():
         stdout_all=["= true", "= true"],
     )
     check(
-        "async catch",
+        "task catch",
         "import std;\n"
-        "async func bad() {\n"
+        "func bad() {\n"
         "  let x = 1 / 0;\n"
         "  return x;\n"
         "}\n"
-        "let t = bad();\n"
-        "let r = await std.task.catch(t);\n"
+        "let t = launch bad();\n"
+        "let r = std.task.catch(t).wait();\n"
         "std.result.is_err(r)\n"
         "std.result.error(r)\n",
         stdout_all=["= true", "= division by zero"],
@@ -776,13 +776,13 @@ def run_cases():
           stdout="true")
     check("task bounded parallel map",
           'import std;\n'
-          'async func work(x) {\n'
-          '  std.task.wait(std.task.sleep(5));\n'
+          'func work(x) {\n'
+          '  std.task.sleep(5).wait();\n'
           '  if (x == 2) { fail "bad"; }\n'
           '  return x * 2;\n'
           '}\n'
           'let r = std.task.bounded_parallel_map(\n'
-          '  [1, 2, 3], 2, func(x) { return work(x); });\n'
+          '  [1, 2, 3], 2, func(x) { return launch work(x); });\n'
           'print(len(r));\n'
           'print(std.result.value(r[0]));\n'
           'print(std.result.is_err(r[1]));\n'

@@ -51,7 +51,7 @@ cmake -S . -B build-vm-only -G Ninja -DSKEIN_VM_ONLY=ON
 cmake --build build-vm-only
 ```
 
-`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；`async` / `await` / generator 使用 Boost.Context；`std.regex` 使用 PCRE2 8-bit。例如 Debian/Ubuntu：
+`std.net` 使用 libuv 作为同步网络后端，因此构建需要 libuv 开发文件；task / generator 使用 Boost.Context；`std.regex` 使用 PCRE2 8-bit。例如 Debian/Ubuntu：
 
 ```bash
 sudo apt install libuv1-dev libboost-context-dev libpcre2-dev
@@ -556,7 +556,7 @@ t.detached() -> bool
 结构化并发：
 
 - `launch` 创建的任务默认挂到当前 task 的作用域；
-- 当前 async 函数/fiber 正常结束时，等待所有未 detach 的子任务；
+- 当前 task/fiber 正常结束时，等待所有未 detach 的子任务；
 - 子任务失败会取消同作用域其他子任务，并把首个错误传播给父任务；
 - 父任务取消会递归取消未 detach 的子任务；
 - `t.detach()` 后父作用域不再等待/取消它，但仍可 `wait()` / `cancel()`；
@@ -611,20 +611,20 @@ let r = std.http.request("DELETE", "http://127.0.0.1:8080/items/1", {
 });
 ```
 
-异步客户端：
+task-returning 客户端：
 
 ```text
 let t = std.http.get_task("http://127.0.0.1:8080/api");
-let r = await t;
+let r = t.wait();
 
 let t2 = std.http.post_task("http://127.0.0.1:8080/items", "hello");
-let r2 = await t2;
+let r2 = t2.wait();
 
 let t3 = std.http.request_task("DELETE", "http://127.0.0.1:8080/items/1");
-await t3;
+t3.wait();
 ```
 
-异步客户端返回 task，可以 `await`、`std.task.catch`、`std.task.wait` 或 `cancel`。
+task-returning 客户端返回 task，可以 `.wait()`、`std.task.catch`、`std.task.wait` 或 `cancel`。
 
 HTTPS 同步客户端：
 
@@ -638,7 +638,7 @@ let r = std.http.get("https://example.com/", {
 });
 ```
 
-`cert_file` / `key_file` 用于 mTLS；同步和 async 客户端都会透传。
+`cert_file` / `key_file` 用于 mTLS；同步和 task-returning 客户端都会透传。
 
 HTTPS 同步服务端：
 
@@ -675,17 +675,16 @@ std.http.respond(req, 200, {
 std.http.close(s);
 ```
 
-异步服务端：
+task-returning 服务端：
 
 ```text
 let s = std.http.listen("127.0.0.1", 8080);
 
-let req = await std.http.accept_task(s, 5000);
+let req = std.http.accept_task(s, 5000).wait();
 
-let sent = std.http.respond_task(req, 200, {
+std.http.respond_task(req, 200, {
   "Content-Type": "text/plain"
-}, "hello " + req["path"]);
-await sent;
+}, "hello " + req["path"]).wait();
 
 std.http.close(s);
 ```
@@ -805,7 +804,7 @@ std.http.close(s);
 
 - handler 接收 request dict；
 - 必须返回 response dict；
-- handler 可以是 `async func`，等待期间其他连接可以继续处理；
+- handler 可以是普通函数；handler 等待期间其他连接可以继续处理；
 - 同一个连接可以处理多个请求；
 - 每个客户端连接在独立 fiber 中处理，多个连接可以并发服务；
 - 请求允许 keep-alive 时继续复用；
@@ -1271,7 +1270,7 @@ print(str(a["status"]) + " " + a["protocol"]);
 print(bytes_to_string(a["body"]));
 
 let b = std.http2.post("https://example.com/echo", "payload");
-let c = await std.http2.get_task("https://example.com/async");
+let c = std.http2.get_task("https://example.com/async").wait();
 ```
 
 批量并发请求（同一连接、多个 stream）：
@@ -1283,10 +1282,10 @@ let responses = std.http2.request_many([
   {"url": "https://example.com/c", "method": "PUT", "body": "x"}
 ]);
 
-let responses2 = await std.http2.request_many_task([
+let responses2 = std.http2.request_many_task([
   {"url": "https://example.com/d"},
   {"url": "https://example.com/e", "method": "DELETE"}
-]);
+]).wait();
 ```
 
 - 所有请求必须属于同一个 origin（scheme + host + port + TLS 配置）；
@@ -1509,17 +1508,19 @@ let db = b.wait();
 - `yield` 不用于 task；主动让出使用 `std.task.yield()`；
 - 协程栈由 Boost.Context 提供，支持 Boost.Context 覆盖的平台。
 
-旧 `async` / `await` 语法仍作为 deprecated alias 保留：
+`async` / `await` 已移除：
 
 ```text
-async func old_fetch(port) {
-  return await std.net.tcp_connect_task("127.0.0.1", port, 1000);
-}
-let t = await old_fetch(8080);
-```
+// 旧写法不再解析
+// async func old_fetch(port) { return await ...; }
 
-新代码应使用普通函数 + `launch` + `.wait()`；`async` 函数仍是 task-returning，
-因此不能直接 `launch old_fetch(...)`，需要改为普通函数。
+// 新写法
+func fetch(port) {
+  return std.net.tcp_connect_task("127.0.0.1", port, 1000).wait();
+}
+let t = launch fetch(8080);
+println(t.wait());
+```
 
 生成器：
 
@@ -1574,7 +1575,6 @@ true
 - `close` 期间 `defer` 抛出的 `fail` 会传给调用方，可被 `on error` / `std.result.capture` 捕获；
 - 正在运行的生成器不能关闭自己；
 - 不提供 `std.generator.throw`；生成器内部错误使用 `fail`，调用方使用 `on error` / `std.result.capture`；
-- async 生成器暂不支持；
 - 生成器依赖 Boost.Context 提供的协程栈。
 
 向生成器发送值：
@@ -1729,11 +1729,11 @@ let v = std.result.unwrap(std.result.err("boom")) on error(e) {
 };
 ```
 
-异步错误恢复：
+task 错误恢复：
 
 ```text
 let t = std.net.tcp_connect_task("127.0.0.1", 1, 1000);
-let r = await std.task.catch(t);
+let r = std.task.catch(t).wait();
 
 if (std.result.is_err(r)) {
   print(std.result.error(r));
@@ -1769,7 +1769,7 @@ std.error.message(error)      → string
 - `capture` 不打印被捕获的错误；
 - `std.result.unwrap` 在 `err` 时通过 `fail` 抛出；
 - `std.task.catch(task)` 返回一个总是以 result 完成的 task；
-- async 函数内部使用 `await std.task.catch(task)` 恢复失败；
+- 使用 `std.task.catch(task).wait()` 恢复 task 失败；
 - `std.task.try_wait` / `try_wait_all` 是同步 result 等待；
 - `on error` 捕获显式 `fail`、运行时错误和 `result.err`，并对 `result.ok` 解包。
 
@@ -1882,12 +1882,13 @@ let cmp = std.ffi.callback(Cmp, func(a, b) {
 std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
 ```
 
-- 回调必须是同步函数；`async` 函数和生成器在 `ffi.callback` 时直接拒绝；
+- 回调必须是同步函数；生成器在 `ffi.callback` 时直接拒绝；
+- 回调不能在执行期间挂起（不要调用会挂起的 task 操作）；
 - 只允许同步、同一 OS 线程、同一 fiber、且在活动的 `ffi.call` 范围内的回调；
 - 回调里可以继续调用 `ffi.call`（受递归深度限制），也可以 `spawn` 后立即返回；
-- 回调里不能 `await` / `yield`；
+- 回调里不能 `yield`；
 - 其他线程调用 `void` 回调时，回调会投递到 event loop，在脚本下次 pump
-  （`await` / `std.task.wait` / `sleep`）时执行，C 侧立即返回默认值；
+  （`std.task.wait` / `sleep`）时执行，C 侧立即返回默认值；
 - 跨线程回调必须返回 `void`；需要返回值的回调必须在同步 `ffi.call` 内执行；
 - 回调失败不会跨 C ABI 抛异常，错误在 `ffi.call` 返回后统一报告；
 - C 侧保存函数指针时，用 `std.ffi.retain(lib, cb)` 把回调挂到库的生命周期，
@@ -3083,19 +3084,18 @@ std.thread.capabilities
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
-- `std.net.*_async` 返回 task，底层复用同一事件循环；
-- `std.http` 提供基于 llhttp 的 HTTP/1.1 客户端和服务端；客户端支持 sync 和 async；
+- `std.net.*_async` / `*_task` 返回 task，底层复用同一事件循环；
+- `std.http` 提供基于 llhttp 的 HTTP/1.1 客户端和服务端；客户端支持 sync 和 `*_task`；
 - `std.tls` 提供基于 OpenSSL 的同步 TLS 流包装（可选）；
-- 异步网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
+- task 网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
-- task 是协作式调度的，只有在 `wait` / `wait_all`、`await` 或同步网络等待运行事件循环时才推进；
+- task 是协作式调度的，只有在 `wait` / `wait_all` 或同步网络等待运行事件循环时才推进；
 - `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
-- async 函数可以挂起和恢复；普通函数仍不能通过 `spawn` 作为独立 task 启动；
+- 普通函数可以挂起和恢复；函数仍不能通过 `spawn` 作为独立 task 启动；
 - `yield` 用于生成器；生成器通过 `std.generator.next` 拉取值，`std.generator.close` 关闭并清理；
 - `std.result` 提供独立 result 值和错误捕获；
 - `std.error` 提供独立 error 值和 `kind` / `message` 访问；
 - `defer` 是块级清理语句，按 LIFO 执行；
-- 目前不支持 async 生成器；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.ffi` 使用 libffi 调用 C ABI 函数，支持整数、浮点数、`cstring`、`bytes` 输入和 `buffer` 输出；
 - `std.ffi` 的 `u64` / `usize` 返回值必须在脚本 `int` 范围内，否则报错；
@@ -3105,8 +3105,8 @@ std.thread.capabilities
 - 网络 I/O 和 FFI 错误是运行时错误，可以通过 `on error` 或 `std.result.capture` 捕获；
 - FFI 可以执行任意本地代码，默认不建议对不受信任脚本开放；
 - `std.net` 暂不支持 TLS、HTTP；
-- async/await 和生成器使用 Boost.Context 提供的有栈协程；
-- `std.result.capture` 捕获同步 `fail` 和运行时错误；async 使用 `std.task.catch`；
+- task 和生成器使用 Boost.Context 提供的有栈协程；
+- `std.result.capture` 捕获同步 `fail` 和运行时错误；task 使用 `std.task.catch`；
 - 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
@@ -3142,9 +3142,9 @@ socket 异步流：
 ```text
 let s = std.net.tcp_connect("127.0.0.1", 8080);
 
-await std.io.write_task(s, "hello", 1000);
+std.io.write_task(s, "hello", 1000).wait();
 
-let data = await std.io.read_task(s, 4096, 1000);
+let data = std.io.read_task(s, 4096, 1000).wait();
 if (data == null) {
   print("closed");
 } else {
@@ -3159,8 +3159,8 @@ std.io.close(s);
 ```text
 let f = std.fs.open("data.bin", "rb");
 
-let first = await std.io.read_task(f, 4096);
-let rest = await std.io.read_task(f, 4096);
+let first = std.io.read_task(f, 4096).wait();
+let rest = std.io.read_task(f, 4096).wait();
 
 std.io.close(f);
 ```
@@ -3168,7 +3168,7 @@ std.io.close(f);
 ```text
 let f = std.fs.open("out.bin", "w+b");
 
-let n = await std.io.write_task(f, bytes_from_string("hello"));
+let n = std.io.write_task(f, bytes_from_string("hello")).wait();
 std.io.close(f);
 ```
 
@@ -3430,8 +3430,8 @@ struct Handler {
 - `obj.method` 会生成去掉 `self` 的函数类型；
 - `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
-- async 函数的类型为 `(参数) -> task[结果]`，例如 `async func fetch(x: int): string` 的类型是 `(int) -> task[string]`；`await task[T]` 推导为 `T`；
-- `task[T]` 可用于变量、参数和返回类型；`std.task.wait` / `std.task.wait_all` 会保留任务结果类型；
+- `task[T]` 可用于变量、参数和返回类型；`launch f()` 推导为 `task[T]`；
+- task 方法有静态类型：`t.wait() -> T`、`t.try_wait() -> result[T, error]`、`t.detach() -> task[T]`；`task[T]` 采用 invariant；
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；
@@ -4127,7 +4127,7 @@ add(1, 2)      // enter / exit / 3
 ```
 
 - `@expr` 写在命名 `func` 前，可以连续写多个；多个装饰器从下往上应用；
-- 支持普通函数、`async func`、generator 函数和 `export func`；
+- 支持普通函数、generator 函数和 `export func`；
 - 装饰器表达式在函数绑定前求值，应用在函数创建后完成；
 - 装饰器是普通高阶函数，最终结果必须 callable；
 - 函数名绑定到装饰后的值，递归调用会经过装饰器；
@@ -4164,11 +4164,10 @@ Point { x: 3, y: 4 }.area()      // enter / exit / 12
 - 支持固有方法和 `impl Trait for Type` 方法；调用点、方法值提取和 trait 分派不变；
 - 默认值由生成的 wrapper 解析，装饰器看到的是补全后的参数；
 - 装饰器必须返回 callable；不支持类型声明装饰器和解构参数方法；
-- generator 方法和 async generator 方法也支持装饰器；生成的 wrapper 是普通函数，
-  直接返回装饰器链产生的 generator，是否惰性由装饰器决定；async generator 的
-  wrapper 不 `await`，迭代、发送值和 `close` / `defer` 语义保持。
+- generator 方法也支持装饰器；生成的 wrapper 是普通函数，直接返回装饰器链产生的
+  generator，是否惰性由装饰器决定；迭代、发送值和 `close` / `defer` 语义保持。
 
-async 方法：
+挂起方法：
 
 ```text
 import std;
@@ -4176,69 +4175,21 @@ import std;
 struct Client { host: string; }
 
 impl Client {
-  async func get(self, path: string) {
-    return await std.http.get_task(self.host + path);
+  func get(self, path: string) {
+    return std.http.get_task(self.host + path).wait();
   }
 }
 
 let c = Client { host: "http://127.0.0.1:8080" };
-let result = await c.get("/api");
+let result = c.get("/api");
 ```
 
-- `p.m()` 返回 task，`await p.m()` 等待结果；
-- 方法值 `let f = p.m; await f()` 同样返回 task；
-- async 方法支持默认参数、可变参数、`defer` 和递归；
+- 方法可以调用会挂起的 API；调用方在普通函数或 task 中都会在当前 fiber 挂起；
+- 方法支持默认参数、可变参数、`defer` 和递归；
 - `self` 是接收者副本；共享 userdata 句柄正常共享，普通字段修改不会回写调用方；
-- enum 方法也支持 `async func`；
-- async generator 也支持：函数体内可以 `await`，类型仍为 `generator[T]`，`next` / 迭代会驱动等待。
-
-async trait 方法：
-
-```text
-trait Service {
-  async func handle(self, request);
-}
-
-impl Service for Client {
-  async func handle(self, request) {
-    return await self.get(request["path"]);
-  }
-}
-
-async func dispatch(service: Service, request) {
-  return await service.handle(request);
-}
-```
-
-- trait 声明 `async func`，实现也必须是 async；反之亦然；
-- `impl Service for Client;` 可以适配已有的 async 方法；
-- async trait 方法可以有默认方法体；仍不能有默认参数值或可变参数；
-- `std.meta.methods` 的方法描述包含 `async` 字段。
-
-async 方法装饰器：
-
-```text
-func timed(fn) {
-  return async func(...args) {
-    print("before");
-    let result = await fn(...args);
-    print("after");
-    return result;
-  };
-}
-
-impl Client {
-  @timed
-  async func get(self, path) {
-    return await std.http.get_task(self.host + path);
-  }
-}
-```
-
-- 装饰器是普通函数，返回 async callable；
-- 生成的 wrapper 是 async，并 `await` 装饰后的方法；
-- 直接把 `async func` 当装饰器会返回 task，不是 callable；
-- 取消外层 task 不会自动取消被 await 的内层 task。
+- enum 方法和 trait 方法同样适用，不再有 async/非 async 标记；
+- 需要显式 task 句柄时使用 `launch c.get(...)`，再 `task.wait()`；
+- 装饰器包装的是普通方法；如果被包装方法会挂起，wrapper 调用它时也会在当前 fiber 挂起。
 
 枚举（带载荷变体）：
 
@@ -4331,7 +4282,7 @@ func apply(fn, x) { return fn(x); }
 apply(sqrt, 16)
 ```
 
-`std.iter.for_each(iterable, fn)` 逐个调用 `fn`，忽略返回值并返回 `null`。回调可以写 1 个或 2 个参数：1 个参数时接收元素（dict 为 key）；2 个参数时 list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；async 回调不会被自动 `await`。
+`std.iter.for_each(iterable, fn)` 逐个调用 `fn`，忽略返回值并返回 `null`。回调可以写 1 个或 2 个参数：1 个参数时接收元素（dict 为 key）；2 个参数时 list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；返回 task 的回调不会被自动等待。
 
 函数调用会先按从左到右的顺序求值参数，再检查被调用者类型和参数个数，因此参数中的副作用总会执行。
 
@@ -4558,10 +4509,10 @@ print(bytes_to_string(std.io.read(p["stdout"], 4096)));
 print(std.process.wait(p));
 ```
 
-异步形式：
+task 形式：
 
 ```text
-let data = await std.io.read_task(p["stdout"], 4096);
+let data = std.io.read_task(p["stdout"], 4096).wait();
 ```
 
 `std.io.stdin`、`std.io.stdout`、`std.io.stderr` 也作为标准流暴露，方便子进程侧实现自己的协议。

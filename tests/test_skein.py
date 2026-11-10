@@ -9,8 +9,6 @@ import os
 import harness
 
 from cases import (
-    async_errors,
-    async_methods,
     collections,
     decorators,
     diagnostics,
@@ -24,6 +22,8 @@ from cases import (
     route,
     runtime,
     stdlib_builtins,
+    task_errors,
+    task_methods,
     typecheck,
 )
 
@@ -32,13 +32,13 @@ MODULES = [
     match_types,
     meta,
     decorators,
-    async_methods,
+    task_methods,
     collections,
     paths,
     route,
     runtime,
     diagnostics,
-    async_errors,
+    task_errors,
     net,
     stdlib_builtins,
     ffi_real,

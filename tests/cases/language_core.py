@@ -813,10 +813,10 @@ def run_cases():
           'impl Box { func twice(self) -> self.v * 2; }\n'
           'let b = Box { v: 4 };\nprintln(b.twice());\n',
           stdout="8")
-    check("async expression function",
+    check("expression function",
           'import std;\n'
-          'async func inc(x) -> x + 1;\n'
-          'println(await inc(1));\n',
+          'func inc(x) -> x + 1;\n'
+          'println(inc(1));\n',
           stdout="2")
 
     check("default parameter basic",
@@ -955,10 +955,10 @@ def run_cases():
     check("default parameter trait rejected",
           'trait T { func m(self, x: int = 1); }\n',
           stderr="trait method m cannot have default parameter values")
-    check("default parameter async",
+    check("default parameter expression",
           'import std;\n'
-          'async func f(a, b = a + 1) -> b;\n'
-          'println(await f(1));\n',
+          'func f(a, b = a + 1) -> b;\n'
+          'println(f(1));\n',
           stdout="2")
     check("default parameter generator",
           'func gen(a, b = a + 1) { yield b; }\n'

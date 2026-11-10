@@ -438,7 +438,6 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             stack(count + (op == Op::IncDecIndex ? 0 : 1), 1);
             break;
         }
-        case Op::Await:
         case Op::Yield:
             need(1);
             stack(1, 1);

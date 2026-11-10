@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Async methods, async trait methods and their metadata."""
+"""Task methods, trait methods and launch/task metadata."""
 import os
 import tempfile
 
@@ -17,11 +17,10 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func get(self) { return self.x; }\n"
+        "  func get(self) { return self.x; }\n"
         "}\n"
         "let c = C { x: 7 };\n"
-        "let t = c.get();\n"
-        "println(await t);\n",
+        "println(c.get());\n",
         ["7"],
     )
 
@@ -29,14 +28,14 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func get(self) {\n"
+        "  func get(self) {\n"
         '    println("start");\n'
-        "    await std.task.sleep(1);\n"
+        "    std.task.sleep(1).wait();\n"
         '    println("end");\n'
         "    return self.x;\n"
         "  }\n"
         "}\n"
-        "println(await C { x: 8 }.get());\n",
+        "println(C { x: 8 }.get());\n",
         ["start", "end", "8"],
     )
 
@@ -44,11 +43,11 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func get(self) { return self.x; }\n"
+        "  func get(self) { return self.x; }\n"
         "}\n"
         "let c = C { x: 9 };\n"
         "let f = c.get;\n"
-        "println(await f());\n",
+        "println(f());\n",
         ["9"],
     )
 
@@ -56,12 +55,12 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func add(self, a: int = self.x, b: int = a + 1) {\n"
+        "  func add(self, a: int = self.x, b: int = a + 1) {\n"
         "    return a + b;\n"
         "  }\n"
         "}\n"
-        "println(await C { x: 3 }.add());\n"
-        "println(await C { x: 3 }.add(10));\n",
+        "println(C { x: 3 }.add());\n"
+        "println(C { x: 3 }.add(10));\n",
         ["7", "21"],
     )
 
@@ -69,13 +68,13 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func total(self, ...nums: int) {\n"
+        "  func total(self, ...nums: int) {\n"
         "    let total = self.x;\n"
         "    for (let n in nums) { total = total + n; }\n"
         "    return total;\n"
         "  }\n"
         "}\n"
-        "println(await C { x: 1 }.total(2, 3, 4));\n",
+        "println(C { x: 1 }.total(2, 3, 4));\n",
         ["10"],
     )
 
@@ -83,12 +82,12 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func get(self) {\n"
+        "  func get(self) {\n"
         '    defer println("cleanup");\n'
         "    return self.x;\n"
         "  }\n"
         "}\n"
-        "println(await C { x: 4 }.get());\n",
+        "println(C { x: 4 }.get());\n",
         ["cleanup", "4"],
     )
 
@@ -96,12 +95,12 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func fact(self, n: int) {\n"
+        "  func fact(self, n: int) {\n"
         "    if (n <= 1) { return 1; }\n"
-        "    return n * await self.fact(n - 1);\n"
+        "    return n * self.fact(n - 1);\n"
         "  }\n"
         "}\n"
-        "println(await C { x: 0 }.fact(4));\n",
+        "println(C { x: 0 }.fact(4));\n",
         ["24"],
     )
 
@@ -109,48 +108,48 @@ def run_cases():
         "import std;\n"
         "enum E { A { n: int; }; B; }\n"
         "impl E {\n"
-        "  async func value(self) { return 1; }\n"
+        "  func value(self) { return 1; }\n"
         "}\n"
-        "println(await E.A { n: 2 }.value());\n",
+        "println(E.A { n: 2 }.value());\n",
         ["1"],
     )
 
     run_case(
         "import std;\n"
-        "trait S { async func handle(self, x: int); }\n"
+        "trait S { func handle(self, x: int); }\n"
         "struct C { base: int; }\n"
         "impl S for C {\n"
-        "  async func handle(self, x: int) { return self.base + x; }\n"
+        "  func handle(self, x: int) { return self.base + x; }\n"
         "}\n"
-        "async func use(s: S) { return await s.handle(2); }\n"
-        "println(await use(C { base: 5 }));\n",
+        "func use(s: S) { return s.handle(2); }\n"
+        "println(use(C { base: 5 }));\n",
         ["7"],
     )
 
     run_case(
         "import std;\n"
-        "trait S { async func handle(self); }\n"
+        "trait S { func handle(self); }\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func handle(self) { return self.x; }\n"
+        "  func handle(self) { return self.x; }\n"
         "}\n"
         "impl S for C;\n"
-        "async func use(s: S) { return await s.handle(); }\n"
-        "println(await use(C { x: 11 }));\n",
+        "func use(s: S) { return s.handle(); }\n"
+        "println(use(C { x: 11 }));\n",
         ["11"],
     )
 
     run_case(
         "import std;\n"
         "trait S {\n"
-        "  async func handle(self);\n"
-        "  async func twice(self) { return await self.handle() * 2; }\n"
+        "  func handle(self);\n"
+        "  func twice(self) { return self.handle() * 2; }\n"
         "}\n"
         "struct C { x: int; }\n"
         "impl S for C {\n"
-        "  async func handle(self) { return self.x; }\n"
+        "  func handle(self) { return self.x; }\n"
         "}\n"
-        "println(await C { x: 11 }.twice());\n",
+        "println(C { x: 11 }.twice());\n",
         ["22"],
     )
 
@@ -158,38 +157,12 @@ def run_cases():
         "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
-        "  async func get(self) { return self.x; }\n"
+        "  func get(self) { return self.x; }\n"
         "}\n"
         "let m = std.meta.methods(\"C\")[0];\n"
         "println(m[\"name\"]);\n"
-        "println(m[\"async\"]);\n",
-        ["get", "true"],
-    )
-
-    check(
-        "async trait marker mismatch",
-        "trait S { async func handle(self); }\n"
-        "struct C { x: int; }\n"
-        "impl S for C {\n"
-        "  func handle(self) { return self.x; }\n"
-        "}\n",
-        stderr="async marker does not match",
-    )
-
-    check(
-        "sync trait marker mismatch",
-        "trait S { func handle(self); }\n"
-        "struct C { x: int; }\n"
-        "impl S for C {\n"
-        "  async func handle(self) { return self.x; }\n"
-        "}\n",
-        stderr="async marker does not match",
-    )
-
-    check(
-        "await non-task",
-        "await 42\n",
-        stderr="expected a task, got int",
+        "println(str(m[\"params\"]));\n",
+        ["get", "[]"],
     )
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -206,7 +179,7 @@ def run_cases():
             "  export struct C { x: int; }\n"
             "  export func make(x) { return C { x: x }; }\n"
             "  impl C {\n"
-            "    async func get(self) { return self.x; }\n"
+            "    func get(self) { return self.x; }\n"
             "  }\n"
             "}\n",
         )
@@ -214,7 +187,7 @@ def run_cases():
             "main.skein",
             "import aa;\n"
             "let c = aa.make(12);\n"
-            "println(await c.get());\n",
+            "println(c.get());\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -224,10 +197,10 @@ def run_cases():
     env["SKEIN_FIBER_STACK_STATS"] = "1"
     proc = run(
         "import std;\n"
-        "async func work(n) { return n + 1; }\n"
+        "func work(n) { return n + 1; }\n"
         "let total = 0;\n"
         "for (let i = 0; i < 40; i = i + 1) {\n"
-        "  total = total + await work(i);\n"
+        "  total = total + launch work(i).wait();\n"
         "}\n"
         "println(total);\n",
         env=env,
@@ -267,18 +240,18 @@ def run_cases():
     )
 
     check(
-        "suspended async task survives cycle collection",
+        "suspended task survives cycle collection",
         "import std;\n"
-        "async func hold(v) {\n"
+        "func hold(v) {\n"
         "  for (let i = 0; i < 3; i = i + 1) {\n"
-        "    await std.task.sleep(1);\n"
+        "    std.task.sleep(1).wait();\n"
         "    v = std.list.append(v, i);\n"
         "  }\n"
         "  return v;\n"
         "}\n"
-        "let t = hold([1, 2, 3]);\n"
+        "let t = launch hold([1, 2, 3]);\n"
         + "if (false) { }\n" * 80
-        + "println(await t);\n",
+        + "println(t.wait());\n",
         stdout="[1, 2, 3, 0, 1, 2]\n",
     )
 
@@ -296,9 +269,9 @@ def run_cases():
     check(
         "launch rejects statically task-returning callee",
         "import std;\n"
-        "async func add(a: int, b: int): int { return a + b; }\n"
-        "launch add(2, 3);\n",
-        stderr="launch cannot start a call that already returns task[int]",
+        "func make_task(): task[null] { return std.task.sleep(1); }\n"
+        "launch make_task();\n",
+        stderr="launch cannot start a call that already returns task[null]",
     )
 
     check(

@@ -2320,7 +2320,6 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     out.u8(proto.has_closures ? 1 : 0);
     out.u8(proto.uses_handlers ? 1 : 0);
     out.u8(proto.variadic ? 1 : 0);
-    out.u8(proto.is_async ? 1 : 0);
     out.u8(proto.is_generator ? 1 : 0);
     out.u8(proto.is_method ? 1 : 0);
     out.u32(proto.nparams);
@@ -2376,7 +2375,6 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
         out.u32((uint32_t)decl.methods.size());
         for (const skein::bc::TraitMethodMeta &method : decl.methods) {
             out.str(method.name);
-            out.u8(method.is_async ? 1 : 0);
             out.u32((uint32_t)method.params.size());
             for (const skein::bc::TraitParamMeta &param : method.params) {
                 out.str(param.name);
@@ -2789,7 +2787,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         proto->decls.push_back(std::move(decl));
     }
 
-    uint8_t flags[12] = {0};
+    uint8_t flags[11] = {0};
     for (uint8_t &flag : flags) {
         if (!in.u8(flag)) {
             error = in.error;
@@ -2805,9 +2803,8 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
     proto->has_closures = flags[6] != 0;
     proto->uses_handlers = flags[7] != 0;
     proto->variadic = flags[8] != 0;
-    proto->is_async = flags[9] != 0;
-    proto->is_generator = flags[10] != 0;
-    proto->is_method = flags[11] != 0;
+    proto->is_generator = flags[9] != 0;
+    proto->is_method = flags[10] != 0;
 
     if (!in.u32(proto->nparams) || !in.u32(proto->required_params) ||
         !in.u32(proto->nlocals) || !in.u32(proto->max_stack)) {
@@ -2913,14 +2910,11 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         decl.methods.reserve(method_count);
         for (uint32_t j = 0; j < method_count; ++j) {
             skein::bc::TraitMethodMeta method;
-            uint8_t is_async = 0;
             uint32_t param_count = 0;
-            if (!in.str(method.name) || !in.u8(is_async) ||
-                !in.count(param_count)) {
+            if (!in.str(method.name) || !in.count(param_count)) {
                 error = in.error;
                 return false;
             }
-            method.is_async = is_async != 0;
             method.params.reserve(param_count);
             for (uint32_t k = 0; k < param_count; ++k) {
                 skein::bc::TraitParamMeta param;

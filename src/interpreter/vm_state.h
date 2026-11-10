@@ -66,7 +66,6 @@ struct SavedVmState {
     int saved_handler_depth = 0;
     int caller_handler_depth = 0;
     int handler_body_depth = 0;
-    bool allow_await = false;
     size_t diag_frames = 0;
     std::string diag_module;
     std::string diag_source;

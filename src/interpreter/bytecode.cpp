@@ -82,7 +82,6 @@ const char *op_name(Op op) {
         case Op::AssignIndex: return "ASSIGN_INDEX";
         case Op::CompoundIndex: return "COMPOUND_INDEX";
         case Op::IncDecIndex: return "INCDEC_INDEX";
-        case Op::Await: return "AWAIT";
         case Op::Yield: return "YIELD";
         case Op::Fail: return "FAIL";
         case Op::Pass: return "PASS";
@@ -138,11 +137,10 @@ std::string constant_brief(const Constant &c) {
 } // namespace
 
 bool proto_may_suspend(const Proto &proto) {
-    if (proto.is_async || proto.is_generator)
+    if (proto.is_generator)
         return true;
     for (const Instr &ins : proto.code) {
-        if (ins.op == static_cast<uint8_t>(Op::Await) ||
-            ins.op == static_cast<uint8_t>(Op::Yield))
+        if (ins.op == static_cast<uint8_t>(Op::Yield))
             return true;
     }
     return false;

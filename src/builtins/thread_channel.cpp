@@ -3560,10 +3560,10 @@ struct value_t *entry_encode(const std::vector<struct value_t *> &args) {
     }
     const function_code *code = function->def->code.get();
     if (code->is_process_entry &&
-        (code->is_async || code->is_generator || code->nparams != 1 ||
+        (code->is_generator || code->nparams != 1 ||
          code->required_params != 1 || code->variadic)) {
-        yyerror("process func entry must be a sync function with one ctx "
-                "parameter");
+        yyerror("process func entry must be a non-generator function with one "
+                "ctx parameter");
         return nullptr;
     }
     thread_payload_builder builder;

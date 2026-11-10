@@ -536,18 +536,11 @@ def run_cases():
             stderr="ffi callback result",
         )
         check(
-            "std ffi callback rejects async",
-            "import std;\n"
-            'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
-            "std.ffi.callback(Cmp, async func(a, b) { return 0; })\n",
-            stderr="ffi callbacks must be synchronous functions",
-        )
-        check(
             "std ffi callback rejects generator",
             "import std;\n"
             'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
             "std.ffi.callback(Cmp, func(a, b) { yield 0; })\n",
-            stderr="ffi callbacks must be synchronous functions",
+            stderr="ffi callbacks must be non-generator functions",
         )
         manifest_spec = (
             "let spec = {\n"

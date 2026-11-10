@@ -765,7 +765,7 @@ if(BUILD_TESTING)
       # passes instead of running three ~5 minute serial jobs.
       set(SKEIN_SANITIZE_GROUPS
         "language_core,match_types,meta,decorators"
-        "async_methods,collections,diagnostics,async_errors"
+        "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
         "typecheck")
       # net/io_scripts use probe-then-bind fixed ports; run them in a single
@@ -773,7 +773,7 @@ if(BUILD_TESTING)
       # under ASan + LeakSanitizer.
       set(SKEIN_LSAN_GROUPS
         "language_core,match_types,meta,decorators"
-        "async_methods,collections,diagnostics,async_errors"
+        "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
         "typecheck,net,io_scripts")
       set(SKEIN_SANITIZE_SHARD 0)

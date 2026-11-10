@@ -726,7 +726,7 @@ struct ast *append_patternitem(struct ast *head, struct ast *node) {
 }
 
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
-                    bool exported, bool is_async, bool is_generator,
+                    bool exported, bool is_generator,
                     struct type_constraint *ret_type) {
     struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
     if (!a) {
@@ -746,20 +746,13 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->ret_type = ret_type;
     a->moved = 0;
     a->exported = exported;
-    a->is_async = is_async;
     a->is_generator = is_generator;
     a->is_thread_entry = 0;
     a->is_process_entry = 0;
     a->is_method = 0;
     a->decorated_generator_source = NULL;
-    a->decorated_generator_async = 0;
     a->method_self_type = NULL;
     return (struct ast *)a;
-}
-
-struct ast *newawait(struct ast *value) {
-    struct ast *a = newast('b', value, NULL);
-    return a;
 }
 
 struct ast *newyield(struct ast *value) {
@@ -956,7 +949,6 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     code->name = node->name ? node->name : "";
     code->is_method = node->is_method != 0;
     code->variadic = variadic;
-    code->is_async = node->is_async != 0;
     code->is_generator = node->is_generator != 0;
     code->is_thread_entry = node->is_thread_entry != 0;
     code->is_process_entry = node->is_process_entry != 0;
@@ -964,9 +956,6 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     code->def_column = node->ast ? node->ast->column : 0;
     code->module = diag_current_module_name();
     code->source = diag_current_source_name();
-    code->is_thread_entry = node->is_thread_entry != 0;
-    code->is_process_entry = node->is_process_entry != 0;
-    code->decorated_generator_async = node->decorated_generator_async != 0;
     if (node->ret_type) {
         code->ret_type =
             std::make_shared<type_constraint>(*node->ret_type);
@@ -1125,7 +1114,7 @@ struct ast *newtraitdecl(char *name, char *module,
 }
 
 struct ast *newtraitmethod(char *name, struct symlist *params,
-                           bool is_async, struct ast *func) {
+                           struct ast *func) {
     struct trait_method *a =
         (struct trait_method *)std::malloc(sizeof(struct trait_method));
     if (!a) {
@@ -1137,7 +1126,6 @@ struct ast *newtraitmethod(char *name, struct symlist *params,
     a->name = name;
     a->params = params;
     a->func = func;
-    a->is_async = is_async ? 1 : 0;
     a->next = NULL;
     return (struct ast *)a;
 }

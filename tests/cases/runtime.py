@@ -899,63 +899,56 @@ def run_cases():
         stderr="timed out",
     )
     check(
-        "async await basic",
+        "task basic",
         "import std;\n"
-        "async func answer() { return 42; }\n"
-        "let t = answer();\n"
-        "await t\n",
+        "func answer() { return 42; }\n"
+        "let t = launch answer();\n"
+        "t.wait()\n",
         stdout="= 42",
     )
     check(
-        "async defer cleanup",
+        "task defer cleanup",
         "import std;\n"
-        "async func answer() {\n"
+        "func answer() {\n"
         "  defer println(\"cleanup\");\n"
         "  return 42;\n"
         "}\n"
-        "await answer()\n",
+        "answer()\n",
         stdout_all=["cleanup", "= 42"],
     )
     check(
-        "async await concurrent",
+        "task concurrent",
         "import std;\n"
-        "async func work(n) {\n"
+        "func work(n) {\n"
         '  println("start " + str(n));\n'
-        "  await std.task.sleep(50);\n"
+        "  std.task.sleep(50).wait();\n"
         '  println("end " + str(n));\n'
         "  return n;\n"
         "}\n"
-        "let a = work(1);\n"
-        "let b = work(2);\n"
-        "let ra = await a;\n"
-        "let rb = await b;\n"
+        "let a = launch work(1);\n"
+        "let b = launch work(2);\n"
+        "let ra = a.wait();\n"
+        "let rb = b.wait();\n"
         "println(ra + rb);\n",
         stdout_all=["start 1", "start 2", "end 1", "end 2", "3"],
     )
     check(
-        "async await net",
+        "task net",
         "import std;\n"
-        "async func resolve_one() {\n"
-        '  return await std.net.resolve_task("localhost", 1000, "ipv4");\n'
+        "func resolve_one() {\n"
+        '  return std.net.resolve_task("localhost", 1000, "ipv4").wait();\n'
         "}\n"
-        "len(await resolve_one()) > 0\n",
+        "len(resolve_one()) > 0\n",
         stdout="= true",
     )
     check(
-        "await outside async",
+        "task cancellation",
         "import std;\n"
-        "func bad() { await std.task.sleep(1); }\n"
-        "bad();\n",
-        stderr="await outside async function",
-    )
-    check(
-        "async cancellation",
-        "import std;\n"
-        "async func wait_forever() {\n"
-        "  await std.task.sleep(1000);\n"
+        "func wait_forever() {\n"
+        "  std.task.sleep(1000).wait();\n"
         "  return 1;\n"
         "}\n"
-        "let t = wait_forever();\n"
+        "let t = launch wait_forever();\n"
         "std.task.cancel(t)\n"
         "std.task.wait(t);\n",
         stdout="= true",

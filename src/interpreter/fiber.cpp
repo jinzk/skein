@@ -98,7 +98,7 @@ fiber_stack_bounds bounds_of(const boost::context::stack_context &context) {
 /*
  * Guard-paged stacks from Boost.Context with a per-thread free list.  Fiber
  * creation is dominated by mmap/VirtualAlloc; reusing stacks keeps short-lived
- * async tasks and generators cheap.
+ * tasks and generators cheap.
  */
 class pooled_fiber_stack {
 public:
@@ -362,9 +362,9 @@ value_t *take_fiber_error(fiber *value, const char *fallback) {
     return normalize_error(error, "runtime");
 }
 
-value_t *await_result(const task_ptr &task) {
+value_t *wait_result(const task_ptr &task) {
     if (!task) {
-        yyerror("await expects a task");
+        yyerror("wait expects a task");
         return NULL;
     }
     switch (task_get_state(task)) {
@@ -512,7 +512,7 @@ void fiber::fiber_main() {
             freeval(result);
         } else if (!result) {
             task_fail_error(task,
-                            take_fiber_error(this, "async function failed"));
+                            take_fiber_error(this, "task function failed"));
             task_report_unobserved_failure(task);
         } else {
             task_complete(task, result);
@@ -714,7 +714,7 @@ bool generator_next_value(const generator_ptr &generator,
     switch_into(current, previous);
 
     /*
-     * An async generator may suspend on an awaited task before yielding or
+     * A generator may suspend on a task before yielding or
      * finishing.  Generator fibers are not in the task pump's ready list, so
      * resume this one directly once its awaited task completes.
      */
@@ -784,7 +784,7 @@ bool generator_close(const generator_ptr &generator) {
         return true;
     }
 
-    /* Let an async generator finish its current await before closing. */
+    /* Let a generator finish its current wait before closing. */
     current->closing = true;
     freeval(current->resume_value);
     current->resume_value = NULL;
@@ -876,7 +876,7 @@ value_t *fiber_yield_value(value_t *value) {
 
 value_t *fiber_await_task(const task_ptr &task) {
     if (!task) {
-        yyerror("await expects a task");
+        yyerror("wait expects a task");
         return NULL;
     }
 
@@ -889,7 +889,7 @@ value_t *fiber_await_task(const task_ptr &task) {
     if (task_get_state(task) == TASK_STATE_PENDING) {
         if (current_fiber) {
             fiber *value = current_fiber;
-            if (!value->check_stack("await")) {
+            if (!value->check_stack("task.wait")) {
                 value->raise_stack_error();
                 return NULL;
             }
@@ -903,7 +903,7 @@ value_t *fiber_await_task(const task_ptr &task) {
             }
         } else {
             if (!event_loop_init()) {
-                yyerror("await: cannot initialize event loop");
+                yyerror("task.wait: cannot initialize event loop");
                 return NULL;
             }
             while (task_get_state(task) == TASK_STATE_PENDING) {
@@ -915,7 +915,7 @@ value_t *fiber_await_task(const task_ptr &task) {
         }
     }
 
-    return await_result(task);
+    return wait_result(task);
 }
 
 bool fiber_wait_for(std::function<bool()> ready, long long timeout_ms) {

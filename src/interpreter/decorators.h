@@ -15,8 +15,8 @@ struct impl_node;
  *   }
  *
  * Generator methods use the same ordinary forwarder: it returns the generator
- * produced by the decorator chain.  The forwarder is never marked async or
- * generator, so async generator methods are not awaited and iteration uses the
+ * produced by the decorator chain.  The forwarder is never marked generator,
+ * so iteration uses the
  * decorator result directly.
  *
  * Returns the original impl when nothing needs lowering, otherwise an 'L'

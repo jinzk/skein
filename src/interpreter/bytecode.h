@@ -120,7 +120,6 @@ enum class Op : uint8_t {
     CompoundIndex,
     IncDecIndex,
 
-    Await,
     Yield,
     Fail,
     Pass,
@@ -333,7 +332,6 @@ struct TraitParamMeta {
 struct TraitMethodMeta {
     std::string name;
     std::vector<TraitParamMeta> params;
-    bool is_async = false;
     /* Optional default implementation compiled with the trait. */
     std::shared_ptr<function_code> code;
 };
@@ -476,7 +474,6 @@ struct Proto {
     mutable std::vector<int> stack_depth;
 
     bool variadic = false;
-    bool is_async = false;
     bool is_generator = false;
     bool is_method = false;
 
@@ -491,9 +488,9 @@ const char *op_name(Op op);
 std::string disassemble(const Proto &proto);
 
 /*
- * True when executing this proto can suspend its fiber: async/generator
- * bodies, or a proto containing AWAIT/YIELD (defensive check for malformed or
- * hand-built bytecode).  JIT compilation must reject these.
+ * True when executing this proto can suspend its fiber: generator bodies or a
+ * proto containing YIELD (defensive check for malformed or hand-built
+ * bytecode).  JIT compilation must reject these.
  */
 bool proto_may_suspend(const Proto &proto);
 

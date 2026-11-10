@@ -1288,7 +1288,7 @@ std.iter.for_each({"a": 1}, func(k, v) { println(k + "=" + str(v)); });
 - 忽略回调返回值，返回 `null`；
 - 回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；
 - 回调错误会向上传播；
-- async 回调不会被自动 `await`。
+- 返回 task 的回调不会被自动等待。
 
 ### 5.6 switch
 
@@ -1983,10 +1983,9 @@ p.area()      // enter / exit / 12
 - 装饰器可以修改参数，包括 `args[0]`（`self`），再调用原方法；
 - 调用点不变：`p.area()`、`let f = p.area; f()`、trait 分派都经过装饰器；
 - `std.meta.methods` / `std.meta.traits` 看到的方法签名不变；
-- generator 方法和 async generator 方法也支持装饰器：生成的 wrapper 是普通
-  函数，直接返回装饰器链产生的 generator；是否惰性由装饰器决定，与自由函数
-  的 generator 装饰器一致。async generator 方法的 wrapper 不 `await`，
-  `next` / `for` 仍按 generator 协议驱动。迭代、发送值和 `close` / `defer`
+- generator 方法也支持装饰器：生成的 wrapper 是普通函数，直接返回装饰器链产生的
+  generator；是否惰性由装饰器决定，与自由函数的 generator 装饰器一致。
+  `next` / `for` 仍按 generator 协议驱动，迭代、发送值和 `close` / `defer`
   语义保持。
 
 generator 方法装饰器示例：
@@ -2076,7 +2075,7 @@ let result = c.get("/api");
 - 方法内部可以使用 `defer`、默认参数和可变参数；
 - 默认值在方法体执行前求值；
 - `self` 是接收者副本；字段中的 userdata 等共享句柄正常共享，普通字段修改不会自动回写调用方；
-- enum 方法和 trait 方法同样适用，不再有 async/非 async 标记；
+- enum 方法和 trait 方法同样适用，所有方法语义一致；
 - 需要显式 task 句柄时使用 `launch c.get("/api")`，再 `task.wait()`；
 - generator 方法可以挂起后 `yield`，类型仍为 `generator[T]`。
 
@@ -2878,7 +2877,7 @@ std.io.write_task(stream, data[, timeout_ms])
 - `std.type`：`kind_of`、`name`、`module`、`source`；
 - `std.meta`：只读类型反射，查询字段、变体、方法和 trait；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
-- `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/async；
+- `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/task；
 - `std.tls`：基于 OpenSSL 的同步 TLS 流包装（可选）；
 - `std.task`：原生 task、等待、批量等待、取消和完成状态；
 - `std.generator`：生成器的 `next` / `done` / `close`；
@@ -3337,9 +3336,9 @@ status, status_text, headers, body, http_major, http_minor
 限制：
 
 - 支持 `http://` 和 `https://`；
-- `https://` 支持同步和 async 客户端/服务端；
+- `https://` 支持同步和 task-returning 客户端/服务端；
 - 只支持 HTTP/1.1；HTTP/2 使用 `std.http2`；
-- 同步和 async 客户端共用 HTTP/1.1 keep-alive 连接池；
+- 同步和 task-returning 客户端共用 HTTP/1.1 keep-alive 连接池；
 - 复用连接失败时，幂等方法（GET/HEAD/OPTIONS/TRACE）会用新连接重试一次；
 - `std.http.serve` 支持服务端 keep-alive；
 - `std.http.accept` / `respond` 仍是一次连接一个请求；
@@ -3347,7 +3346,7 @@ status, status_text, headers, body, http_major, http_minor
 - 客户端 `options` 支持 `upgrade`，用于 HTTP/1.1 协议升级；
 - `max_body_bytes` 默认 16 MiB；
 - 同名 header 只保留最后一个；
-- 客户端和服务端都支持同步和 async。
+- 客户端和服务端都支持同步和 task-returning 接口。
 
 重定向：
 
@@ -3367,7 +3366,7 @@ let r = std.http.get(url, {
 - 跨 origin 重定向会删除 `Authorization` / `Cookie`；
 - 重定向时删除 `Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Upgrade`；
 - `body_stream` 无法重放：`301/302/303` 会丢弃 body，`307/308` 会报错；
-- 同步和 async 客户端都支持。
+- 同步和 task-returning 客户端都支持。
 
 Cookie：
 
@@ -3420,7 +3419,7 @@ print(bytes_to_string(r["body"]));
 - 解码后响应带 `"decompressed": true`；
 - 删除响应 header 中的 `Content-Encoding`，并更新 `Content-Length`；
 - 不能与 `on_body` 同时使用；
-- 同步和 async 客户端都支持；
+- 同步和 task-returning 客户端都支持；
 - 构建选项 `-DSKEIN_ENABLE_COMPRESSION=OFF` 可关闭；
 - HTTP/2 单请求和 `request_many` 都支持自动解压。
 
@@ -3526,7 +3525,7 @@ std.http2.close(s);
 
 - `http://` 使用 h2c prior knowledge；
 - `https://` 通过 TLS ALPN 协商 `h2`，未协商成功会报错；
-- 支持同步和 async 客户端；
+- 支持同步和 task-returning 客户端；
 - 支持 h2c / TLS 服务端；
 - 默认整体读取 body；可用 `body_stream` / `on_body` 流式处理；
 - `max_body_bytes` 默认 16 MiB；
@@ -3534,7 +3533,7 @@ std.http2.close(s);
 - 支持 `body_stream` 生成器流式发送请求 body；
 - 支持 `on_body` 回调流式接收响应 body；
 - 服务端响应 dict 支持 `body_stream` 流式发送；
-- async 服务端 handler 可在多个 stream 之间并发执行；
+- task-returning 服务端 handler 可在多个 stream 之间并发执行；
 - 每个客户端连接在独立 fiber 中处理，多个连接可以并发服务；
 - 达到 `max_requests` 后进入 graceful drain：停止接受新连接和新 stream，已启动的 handler 会继续完成并发送响应；
 - 达到 `max_per_connection` 后关闭当前连接，未处理的 stream 由客户端按幂等规则重试；
@@ -3542,12 +3541,12 @@ std.http2.close(s);
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
-- 同步和 async 客户端共用 HTTP/2 连接池；
+- 同步和 task-returning 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
-- async 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
-- async 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
+- task-returning 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
+- task 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
 - `request_many` / `request_many_task` 在单连接上并发提交多个 stream；
-- 收到 GOAWAY 或共享连接失败时，async 幂等请求会换新连接重试一次；
+- 收到 GOAWAY 或共享连接失败时，task 幂等请求会换新连接重试一次；
 - 使用 `body_stream` / `on_body` 的请求不自动重试。
 
 HTTP/2 SETTINGS 与 flow control：
@@ -4086,7 +4085,6 @@ info["fields"][1]["has_default"]; // true
 info["methods"][0]["name"];    // "moved"
 info["methods"][0]["params"];  // ["int", "int"]，不包含 self
 info["methods"][0]["has_defaults"]; // true
-info["methods"][0]["async"];   // false
 ```
 
 `type_info` 的返回结构：

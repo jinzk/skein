@@ -115,7 +115,7 @@ sanitize 构建会把 Python 套件按模块分成 ASan/UBSan 分片和 LSan 分
 只需要 leak 检查时可以单独运行 `-R skein_vm_lsan_tests_shard`。
 
 `SKEIN_TEST_TIMEOUT` 只影响测试子进程的超时，默认 5 秒；sanitizer 构建需要放宽。
-generator / async 的 fiber 栈默认 1 MiB，带 guard page，栈按线程复用
+task / generator 的 fiber 栈默认 1 MiB，带 guard page，栈按线程复用
 （最多缓存 32 个）；可用 `SKEIN_FIBER_STACK_KB` 调整大小，sanitizer 构建建议
 8192。`SKEIN_FIBER_STACK_POOL=0` 可关闭栈池，`SKEIN_FIBER_STACK_STATS=1`
 会在 shutdown 时输出 `fiber stack pool: allocated=... reused=... pooled=...`。
@@ -565,7 +565,7 @@ t.detached() -> bool
 
 当前限制：
 
-- `launch` 是保留关键字（不要求 `f` 为 async）；
+- `launch` 是保留关键字；
 - `launch` 推导为 `task[T]`；`func f(): void` 推导为 `task[void]`；
 - 静态已知返回 `task[...]` 的调用不能 `launch`，会报
   `launch cannot start a call that already returns task[...]; call it directly and use .wait()`；
@@ -1124,9 +1124,9 @@ status, status_text, headers, body, http_major, http_minor
 限制：
 
 - 支持 `http://` 和 `https://`；
-- `https://` 支持同步和 async 客户端/服务端；
+- `https://` 支持同步和 task-returning 客户端/服务端；
 - 只支持 HTTP/1.1；HTTP/2 使用 `std.http2`；
-- 同步和 async 客户端共用 HTTP/1.1 keep-alive 连接池（空闲 30 秒后关闭）；
+- 同步和 task-returning 客户端共用 HTTP/1.1 keep-alive 连接池（空闲 30 秒后关闭）；
 - 复用连接失败时，幂等方法（GET/HEAD/OPTIONS/TRACE）会自动用新连接重试一次；
 - `std.http.serve` 支持服务端 keep-alive；
 - `std.http.accept` / `respond` 仍是一次连接一个请求；
@@ -1134,7 +1134,7 @@ status, status_text, headers, body, http_major, http_minor
 - 客户端 `options` 还支持 `upgrade`，用于发起 HTTP/1.1 协议升级；
 - `max_body_bytes` 默认 16 MiB；
 - 同名 header 在 dict 中只保留最后一个；
-- `std.http` 客户端和服务端都提供同步和 async 接口。
+- `std.http` 客户端和服务端都提供同步和 task-returning 接口。
 
 重定向：
 
@@ -1154,7 +1154,7 @@ let r = std.http.get(url, {
 - 跨 origin 重定向会删除 `Authorization` / `Cookie`；
 - 重定向时删除 `Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Upgrade`；
 - `body_stream` 无法重放：`301/302/303` 会丢弃 body，`307/308` 会报错；
-- 同步和 async 客户端都支持。
+- 同步和 task-returning 客户端都支持。
 
 Cookie：
 
@@ -1207,7 +1207,7 @@ print(bytes_to_string(r["body"]));
 - 解码后响应带 `"decompressed": true`；
 - 删除响应 header 中的 `Content-Encoding`，并更新 `Content-Length`；
 - 不能与 `on_body` 同时使用；
-- 同步和 async 客户端都支持；
+- 同步和 task-returning 客户端都支持；
 - 构建选项 `-DSKEIN_ENABLE_COMPRESSION=OFF` 可关闭；
 - HTTP/2 单请求和 `request_many` 都支持自动解压。
 
@@ -1315,7 +1315,7 @@ std.http2.close(s);
 
 - `http://` 使用 h2c prior knowledge；
 - `https://` 通过 TLS ALPN 协商 `h2`，未协商成功会报错；
-- 支持同步和 async 客户端；
+- 支持同步和 task-returning 客户端；
 - 支持 h2c / TLS 服务端；
 - flow control 由 nghttp2 管理：大 body 在 `initial_window_size` 较小时通过 WINDOW_UPDATE 推进；
 - 服务端 draining 时会等待响应 body 发送完成后再发送 GOAWAY；
@@ -1328,22 +1328,22 @@ std.http2.close(s);
 - 支持 `body_stream` 生成器流式发送请求 body；
 - 支持 `on_body` 回调流式接收响应 body；
 - 服务端响应 dict 支持 `body_stream` 流式发送；
-- async 服务端 handler 可在多个 stream 之间并发执行；
+- task-returning 服务端 handler 可在多个 stream 之间并发执行；
 - 客户端 `options` 支持 `headers`、`body`、`body_stream`、`on_body`、`timeout_ms`、`max_body_bytes`、`tls`；
 - 服务端 handler 接收 request dict，返回 response dict；
-- 每个请求在独立 fiber 中执行，async handler 可以跨 stream 并发；
+- 每个请求在独立 fiber 中执行，task-returning handler 可以跨 stream 并发；
 - 每个客户端连接也在独立 fiber 中处理，多个连接可以并发服务；
 - 达到 `max_requests` 后进入 graceful drain：停止接受新连接和新 stream，已启动的 handler 会继续完成并发送响应；
 - 达到 `max_per_connection` 后关闭当前连接，未处理的 stream 由客户端按幂等规则重试；
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
-- 同步和 async 客户端共用 HTTP/2 连接池；
+- 同步和 task-returning 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
-- async 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
-- async 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
+- task-returning 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
+- task 流式请求（`on_body` / `body_stream`）也可以共享同一连接；
 - `request_many` / `request_many_task` 在单连接上并发提交多个 stream；
-- 收到 GOAWAY 或共享连接失败时，async 幂等请求会换新连接重试一次；
+- 收到 GOAWAY 或共享连接失败时，task 幂等请求会换新连接重试一次；
 - 使用 `body_stream` / `on_body` 的请求不自动重试。
 
 HTTP/2 SETTINGS 与 flow control：
@@ -2373,7 +2373,7 @@ app.use(func(req) {
 app.dispatch({"method": "GET", "path": "/users/42"});
 ```
 
-`Router` 是可变引用句柄，复制后共享路由表；注册方法原地更新，不返回新 Router。支持 `:name` 参数、`*name` 通配、404/405、全局 middleware 和 async middleware。静态路由走精确表，动态路由走段级 trie：静态 dispatch 为 O(1)，动态 dispatch 与路由总数基本无关。`*name` 必须是最后一段，并且可以匹配 0 段。装饰器可用于包装 handler，例如 `@logged func user(req) {...}` 后再 `app.get("/users/:id", user)`。
+`Router` 是可变引用句柄，复制后共享路由表；注册方法原地更新，不返回新 Router。支持 `:name` 参数、`*name` 通配、404/405、全局 middleware 和 返回 task 的 middleware。静态路由走精确表，动态路由走段级 trie：静态 dispatch 为 O(1)，动态 dispatch 与路由总数基本无关。`*name` 必须是最后一段，并且可以匹配 0 段。装饰器可用于包装 handler，例如 `@logged func user(req) {...}` 后再 `app.get("/users/:id", user)`。
 
 `std.graph` 提供有向图和常用算法：
 
@@ -4187,7 +4187,7 @@ let result = c.get("/api");
 - 方法可以调用会挂起的 API；调用方在普通函数或 task 中都会在当前 fiber 挂起；
 - 方法支持默认参数、可变参数、`defer` 和递归；
 - `self` 是接收者副本；共享 userdata 句柄正常共享，普通字段修改不会回写调用方；
-- enum 方法和 trait 方法同样适用，不再有 async/非 async 标记；
+- enum 方法和 trait 方法同样适用，所有方法语义一致；
 - 需要显式 task 句柄时使用 `launch c.get(...)`，再 `task.wait()`；
 - 装饰器包装的是普通方法；如果被包装方法会挂起，wrapper 调用它时也会在当前 fiber 挂起。
 

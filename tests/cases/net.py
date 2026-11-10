@@ -3286,6 +3286,118 @@ def run_cases():
                         h2_mtls_server.terminate()
                         h2_mtls_server.wait(timeout=5)
 
+                import sys as sys_module
+                cluster_cert = os.path.join(rotation_dir, "cluster_cert.pem")
+                cluster_key = os.path.join(rotation_dir, "cluster_key.pem")
+                cluster_worker = os.path.join(
+                    rotation_dir, "cluster_worker.skein")
+                with open(cluster_worker, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        "func handle(req) {\n"
+                        '  return {"status": 200, "body": "cluster:" + '
+                        'req["path"]};\n'
+                        "}\n"
+                    )
+                cluster_worker_path = cluster_worker.replace("\\", "\\\\")
+
+                def reset_cluster_cert():
+                    shutil.copyfile(rot_cert_a, cluster_cert)
+                    shutil.copyfile(rot_key_a, cluster_key)
+                    os.utime(cluster_cert, None)
+                    os.utime(cluster_key, None)
+
+                def cluster_fetch_der(port):
+                    import ssl as ssl_module
+                    raw = socket.create_connection(
+                        ("127.0.0.1", port), timeout=5)
+                    context = ssl_module.SSLContext(
+                        ssl_module.PROTOCOL_TLS_CLIENT)
+                    context.check_hostname = False
+                    context.verify_mode = ssl_module.CERT_NONE
+                    wrapped = context.wrap_socket(
+                        raw, server_hostname="localhost")
+                    der = wrapped.getpeercert(binary_form=True)
+                    wrapped.sendall(
+                        b"GET /cluster HTTP/1.1\r\n"
+                        b"Host: localhost\r\n"
+                        b"Connection: close\r\n\r\n")
+                    response = b""
+                    while True:
+                        chunk = wrapped.recv(4096)
+                        if not chunk:
+                            break
+                        response += chunk
+                    wrapped.close()
+                    assert b"cluster:/cluster" in response, response
+                    return der
+
+                def check_cluster_rotation(kind, strategy):
+                    reset_cluster_cert()
+                    server_script = os.path.join(
+                        rotation_dir, f"{kind}_{strategy}_server.skein")
+                    options = '{"max_requests": 2'
+                    if strategy:
+                        options += f', "strategy": "{strategy}"'
+                    options += "}"
+                    if kind == "threads":
+                        serve = (
+                            "let ts = std.http.serve_threads(s, 2, "
+                            f"\"{cluster_worker_path}\", {options});\n"
+                            'println(s["port"]);\n'
+                            "std.io.flush(std.io.stdout);\n"
+                            'println("served=" + str(ts.join(20000)));\n'
+                        )
+                    else:
+                        serve = (
+                            "let ps = std.http.serve_workers(s, 2, "
+                            f"\"{cluster_worker_path}\", {options});\n"
+                            'println(s["port"]);\n'
+                            "std.io.flush(std.io.stdout);\n"
+                            'println("served=" + str(ps.join(20000)));\n'
+                        )
+                    with open(server_script, "w", encoding="utf-8") as handle:
+                        handle.write(
+                            "import std;\n"
+                            "let s = std.http.listen_tls("
+                            f"\"127.0.0.1\", 0, \"{cluster_cert}\", "
+                            f"\"{cluster_key}\");\n" + serve
+                        )
+                    proc = subprocess.Popen(
+                        [BIN, server_script],
+                        cwd=rotation_dir,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    try:
+                        port_line = proc.stdout.readline().strip()
+                        assert port_line.isdigit(), (
+                            kind, strategy, port_line, proc.stderr.read())
+                        assert cluster_fetch_der(int(port_line)) == der_a
+                        time.sleep(1.1)
+                        shutil.copyfile(rot_cert_b, cluster_cert)
+                        shutil.copyfile(rot_key_b, cluster_key)
+                        os.utime(cluster_cert, None)
+                        os.utime(cluster_key, None)
+                        assert cluster_fetch_der(int(port_line)) == der_b
+                        proc.wait(timeout=20)
+                        out = proc.stdout.read()
+                        err = proc.stderr.read()
+                        assert proc.returncode == 0, (kind, strategy, err)
+                        assert "served=2" in out, (kind, strategy, out, err)
+                    finally:
+                        if proc.poll() is None:
+                            proc.kill()
+                            proc.wait()
+
+                check_cluster_rotation("threads", "dispatch")
+                check_cluster_rotation("workers", "dispatch")
+                if sys_module.platform.startswith("linux"):
+                    check_cluster_rotation("threads", "reuse_port")
+                    check_cluster_rotation("workers", "reuse_port")
+
         serve_probe = socket.socket()
         serve_probe.bind(("127.0.0.1", 0))
         serve_port = serve_probe.getsockname()[1]

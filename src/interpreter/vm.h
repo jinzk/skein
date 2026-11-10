@@ -17,17 +17,30 @@ struct function_def;
 struct thread_transfer_function;
 struct thread_transfer_heap;
 struct thread_transfer_heap_node;
+struct thread_transfer_container;
 
 /* One value captured by a Proto-backed thread entry or a transferred
  * function.  `Data` values are owned data-only snapshots; `Function` values
- * point at another prepared Proto payload. */
+ * point at another prepared Proto payload.  `Container` values hold nested
+ * transfer values so containers may mix data, functions, heaps and
+ * namespaces. */
 struct thread_transfer_value {
-    enum class Kind { Null, Data, Namespace, Function, Heap };
+    enum class Kind { Null, Data, Namespace, Function, Heap, Container };
     Kind kind = Kind::Null;
     std::shared_ptr<struct value_t> data;
     std::vector<std::pair<std::string, thread_transfer_value>> fields;
     std::shared_ptr<struct thread_transfer_function> function;
     std::shared_ptr<struct thread_transfer_heap> heap;
+    std::shared_ptr<struct thread_transfer_container> container;
+};
+
+struct thread_transfer_container {
+    enum class Kind { List, Dict, Set, Deque, Lru };
+    Kind kind = Kind::List;
+    std::vector<thread_transfer_value> items;
+    std::vector<std::pair<thread_transfer_value, thread_transfer_value>>
+        entries;
+    uint64_t capacity = 0;
 };
 
 struct thread_transfer_heap_node {

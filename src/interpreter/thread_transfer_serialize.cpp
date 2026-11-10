@@ -24,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 4u;
+constexpr uint32_t kPayloadVersion = 5u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -1242,6 +1242,22 @@ bool collect_transfer_types(const thread_transfer_value &value,
                     return false;
             }
         }
+    } else if (value.kind == thread_transfer_value::Kind::Container) {
+        if (value.container) {
+            for (const thread_transfer_value &item :
+                 value.container->items) {
+                if (!collect_transfer_types(item, types, order, depth + 1,
+                                            error, context))
+                    return false;
+            }
+            for (const auto &entry : value.container->entries) {
+                if (!collect_transfer_types(entry.first, types, order,
+                                            depth + 1, error, context) ||
+                    !collect_transfer_types(entry.second, types, order,
+                                            depth + 1, error, context))
+                    return false;
+            }
+        }
     }
     return true;
 }
@@ -1720,6 +1736,36 @@ bool write_transfer(
             }
             return true;
         }
+        case thread_transfer_value::Kind::Container: {
+            if (!value.container) {
+                error = "invalid thread payload container";
+                return false;
+            }
+            out.u8(5);
+            out.u8((uint8_t)value.container->kind);
+            if (value.container->kind ==
+                    thread_transfer_container::Kind::Dict ||
+                value.container->kind ==
+                    thread_transfer_container::Kind::Lru) {
+                out.u64(value.container->capacity);
+                out.u32((uint32_t)value.container->entries.size());
+                for (const auto &entry : value.container->entries) {
+                    if (!write_transfer(out, entry.first, ids, depth + 1,
+                                        error) ||
+                        !write_transfer(out, entry.second, ids, depth + 1,
+                                        error))
+                        return false;
+                }
+            } else {
+                out.u32((uint32_t)value.container->items.size());
+                for (const thread_transfer_value &item :
+                     value.container->items) {
+                    if (!write_transfer(out, item, ids, depth + 1, error))
+                        return false;
+                }
+            }
+            return true;
+        }
     }
     error = "invalid thread payload transfer kind";
     return false;
@@ -1856,6 +1902,57 @@ bool read_transfer(
             value = thread_transfer_value();
             value.kind = thread_transfer_value::Kind::Heap;
             value.heap = std::move(heap);
+            return true;
+        }
+        case 5: {
+            uint8_t raw_kind = 0;
+            if (!in.u8(raw_kind)) {
+                error = in.error;
+                return false;
+            }
+            if (raw_kind > (uint8_t)thread_transfer_container::Kind::Lru) {
+                error = "invalid thread payload container kind";
+                return false;
+            }
+            std::shared_ptr<thread_transfer_container> container =
+                std::make_shared<thread_transfer_container>();
+            container->kind = (thread_transfer_container::Kind)raw_kind;
+            value = thread_transfer_value();
+            value.kind = thread_transfer_value::Kind::Container;
+            value.container = container;
+            if (container->kind == thread_transfer_container::Kind::Dict ||
+                container->kind == thread_transfer_container::Kind::Lru) {
+                uint64_t capacity = 0;
+                uint32_t count = 0;
+                if (!in.u64(capacity) || !in.count(count)) {
+                    error = in.error;
+                    return false;
+                }
+                container->capacity = capacity;
+                container->entries.reserve(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    thread_transfer_value key;
+                    thread_transfer_value item;
+                    if (!read_transfer(in, functions, key, depth + 1, error) ||
+                        !read_transfer(in, functions, item, depth + 1, error))
+                        return false;
+                    container->entries.emplace_back(std::move(key),
+                                                    std::move(item));
+                }
+            } else {
+                uint32_t count = 0;
+                if (!in.count(count)) {
+                    error = in.error;
+                    return false;
+                }
+                container->items.reserve(count);
+                for (uint32_t i = 0; i < count; ++i) {
+                    thread_transfer_value item;
+                    if (!read_transfer(in, functions, item, depth + 1, error))
+                        return false;
+                    container->items.push_back(std::move(item));
+                }
+            }
             return true;
         }
         default:
@@ -2496,6 +2593,25 @@ void collect_transfer(
             return;
         for (const thread_transfer_heap_node &node : value.heap->nodes) {
             collect_transfer(node.value, ids, order, depth + 1, ok, error);
+            if (!ok)
+                return;
+        }
+    } else if (value.kind == thread_transfer_value::Kind::Container) {
+        if (!value.container) {
+            error = "invalid thread payload container";
+            ok = false;
+            return;
+        }
+        for (const thread_transfer_value &item : value.container->items) {
+            collect_transfer(item, ids, order, depth + 1, ok, error);
+            if (!ok)
+                return;
+        }
+        for (const auto &entry : value.container->entries) {
+            collect_transfer(entry.first, ids, order, depth + 1, ok, error);
+            if (!ok)
+                return;
+            collect_transfer(entry.second, ids, order, depth + 1, ok, error);
             if (!ok)
                 return;
         }

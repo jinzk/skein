@@ -2579,6 +2579,7 @@ struct thread_payload_builder {
     std::unordered_set<std::string> global_names;
     std::unordered_set<std::string> module_keys;
     std::unordered_set<const void *> namespace_visiting;
+    std::unordered_set<const void *> container_visiting;
     std::string error;
 
     bool transfer_value(struct value_t *value, const char *what,
@@ -2609,11 +2610,129 @@ struct thread_payload_builder {
         struct value_t *copy =
             copy_data_value(value, visiting, copy_error);
         if (!copy) {
+            if (value->type == T_list || value->type == T_dict ||
+                value->type == T_set || value->type == T_deque ||
+                value->type == T_lru)
+                return transfer_container(value, out);
             error = std::string(what ? what : "value") + ": " + copy_error;
             return false;
         }
         out.kind = thread_transfer_value::Kind::Data;
         out.data = std::shared_ptr<struct value_t>(copy, thread_value_deleter());
+        return true;
+    }
+
+    bool transfer_container(struct value_t *value,
+                            thread_transfer_value &out) {
+        const void *identity = value_payload(value);
+        if (identity && !container_visiting.insert(identity).second) {
+            error = "cyclic container";
+            return false;
+        }
+        std::shared_ptr<thread_transfer_container> container =
+            std::make_shared<thread_transfer_container>();
+        bool ok = true;
+        switch (value->type) {
+        case T_list: {
+            container->kind = thread_transfer_container::Kind::List;
+            const struct list_value_t *list =
+                (const struct list_value_t *)value;
+            for (struct value_t *item : list->payload->items) {
+                thread_transfer_value transfer;
+                if (!transfer_value(item, "list item", transfer)) {
+                    ok = false;
+                    break;
+                }
+                container->items.push_back(std::move(transfer));
+            }
+            break;
+        }
+        case T_dict: {
+            container->kind = thread_transfer_container::Kind::Dict;
+            const struct dict_value_t *dict =
+                (const struct dict_value_t *)value;
+            for (const auto &entry : dict->payload->items) {
+                thread_transfer_value key;
+                if (!transfer_value(entry.first, "dict key", key)) {
+                    ok = false;
+                    break;
+                }
+                thread_transfer_value item;
+                if (!transfer_value(entry.second, "dict value", item)) {
+                    ok = false;
+                    break;
+                }
+                container->entries.emplace_back(std::move(key),
+                                                std::move(item));
+            }
+            break;
+        }
+        case T_set: {
+            container->kind = thread_transfer_container::Kind::Set;
+            const struct set_value_t *set =
+                (const struct set_value_t *)value;
+            std::vector<struct value_t *> keys;
+            set_values_in_order(set->payload.get(), keys);
+            for (struct value_t *key : keys) {
+                thread_transfer_value transfer;
+                if (!transfer_value(key, "set value", transfer)) {
+                    ok = false;
+                    break;
+                }
+                container->items.push_back(std::move(transfer));
+            }
+            break;
+        }
+        case T_deque: {
+            container->kind = thread_transfer_container::Kind::Deque;
+            const struct deque_value_t *deque =
+                (const struct deque_value_t *)value;
+            std::vector<struct value_t *> items;
+            deque_items_in_order(deque->payload.get(), items);
+            for (struct value_t *item : items) {
+                thread_transfer_value transfer;
+                if (!transfer_value(item, "deque item", transfer)) {
+                    ok = false;
+                    break;
+                }
+                container->items.push_back(std::move(transfer));
+            }
+            break;
+        }
+        case T_lru: {
+            container->kind = thread_transfer_container::Kind::Lru;
+            const struct lru_value_t *lru =
+                (const struct lru_value_t *)value;
+            container->capacity = lru->payload->capacity;
+            for (const auto &entry : lru->payload->items) {
+                thread_transfer_value key;
+                if (!transfer_value(entry.first, "lru key", key)) {
+                    ok = false;
+                    break;
+                }
+                thread_transfer_value item;
+                if (!transfer_value(entry.second, "lru value", item)) {
+                    ok = false;
+                    break;
+                }
+                container->entries.emplace_back(std::move(key),
+                                                std::move(item));
+            }
+            break;
+        }
+        default:
+            error = std::string("cannot transfer container ") +
+                    typename_of(value);
+            ok = false;
+            break;
+        }
+        if (identity)
+            container_visiting.erase(identity);
+        if (!ok)
+            return false;
+        out = thread_transfer_value();
+        out.kind = thread_transfer_value::Kind::Container;
+        out.container = std::move(container);
         return true;
     }
 

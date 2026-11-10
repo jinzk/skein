@@ -2998,6 +2998,97 @@ def check_extended_stdlib():
             )
             assert dec.stdout.strip() == "108:112:113:113", dec.stdout
 
+            proto3_encode = os.path.join(deadlock_tmp,
+                                         "proto3_encode_main.skein")
+            with open(proto3_encode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "func twice(x) { return x * 2; }\n"
+                    "func make_worker(box) {\n"
+                    "  thread func worker(ctx) {\n"
+                    "    let fn = box[\"fn\"];\n"
+                    "    let h = box[\"heap\"];\n"
+                    "    let nested = box[\"nested\"];\n"
+                    "    let items = box[\"list\"];\n"
+                    "    let dqh = std.deque.to_list(box[\"deque\"])[0];\n"
+                    "    let lru_fn = std.lru.get(box[\"lru\"], \"fn\")"
+                    "[\"value\"];\n"
+                    "    let lru_n = std.lru.get(box[\"lru\"], \"n\")"
+                    "[\"value\"];\n"
+                    "    let s = box[\"set\"];\n"
+                    "    return {\n"
+                    "      \"fn\": fn(5),\n"
+                    "      \"top\": std.heap.peek(h),\n"
+                    "      \"size\": std.heap.size(h),\n"
+                    "      \"nested\": nested[0][\"v\"],\n"
+                    "      \"items\": items[1] + items[2],\n"
+                    "      \"deque_top\": std.heap.peek(dqh),\n"
+                    "      \"lru\": lru_fn(lru_n),\n"
+                    "      \"set_size\": std.set.size(s),\n"
+                    "      \"set_vals\": std.set.values(s)\n"
+                    "    };\n"
+                    "  }\n"
+                    "  return worker;\n"
+                    "}\n"
+                    "let h = std.heap.from_list([3, 1, 2], "
+                    "func(a, b) { return a < b; });\n"
+                    "let dq = std.deque.from_list([h, 4, 5]);\n"
+                    "let l = std.lru.new(4);\n"
+                    "let r = std.lru.put(l, \"fn\", twice); "
+                    "l = r[\"lru\"];\n"
+                    "r = std.lru.put(l, \"n\", 6); l = r[\"lru\"];\n"
+                    "let s = std.set.from_list([1, 2, 2, 3]);\n"
+                    "let box = {\"fn\": twice, \"heap\": h, "
+                    "\"nested\": [{\"v\": 9}, [1, 2]], "
+                    "\"list\": [10, 20, 30], \"deque\": dq, "
+                    "\"lru\": l, \"set\": s};\n"
+                    'write_bytes("proto3_payload.bin", '
+                    "std.thread.encode(make_worker(box)));\n"
+                )
+            proto3_decode = os.path.join(deadlock_tmp,
+                                         "proto3_decode_main.skein")
+            with open(proto3_decode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    'let blob = read_bytes("proto3_payload.bin");\n'
+                    "let t = std.thread.spawn_encoded(blob, "
+                    "std.thread.Message.from({}));\n"
+                    "let v = t.join()[\"value\"];\n"
+                    'print("fn=" + str(v["fn"]) + "|top=" + '
+                    'str(v["top"]) + "|size=" + str(v["size"]) + '
+                    '"|nested=" + str(v["nested"]) + "|items=" + '
+                    'str(v["items"]) + "|deque_top=" + '
+                    'str(v["deque_top"]) + "|lru=" + str(v["lru"]) + '
+                    '"|set_size=" + str(v["set_size"]) + '
+                    '"|set_vals=" + str(v["set_vals"]));\n'
+                )
+            enc = subprocess.run(
+                [os.path.abspath(BIN), proto3_encode],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert enc.returncode == 0, (
+                "proto3 thread encode failed: "
+                f"{enc.stdout!r} {enc.stderr!r}"
+            )
+            dec = subprocess.run(
+                [os.path.abspath(BIN), proto3_decode],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert dec.returncode == 0, (
+                "proto3 thread decode failed: "
+                f"{dec.stdout!r} {dec.stderr!r}"
+            )
+            assert dec.stdout.strip() == (
+                "fn=10|top=1|size=3|nested=9|items=50|"
+                "deque_top=1|lru=12|set_size=3|set_vals=[1, 2, 3]"
+            ), dec.stdout
+
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)
             http_worker = os.path.join(

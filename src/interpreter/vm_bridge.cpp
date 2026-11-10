@@ -967,6 +967,113 @@ bool materialize_thread_value(
             out = (struct value_t *)heap;
             return true;
         }
+        case thread_transfer_value::Kind::Container: {
+            if (!value.container) {
+                error = "invalid transferred container";
+                return false;
+            }
+            const thread_transfer_container &source = *value.container;
+            switch (source.kind) {
+            case thread_transfer_container::Kind::List: {
+                struct list_value_t *list = newlistval();
+                for (const thread_transfer_value &item : source.items) {
+                    struct value_t *child = nullptr;
+                    if (!materialize_thread_value(context, item, child,
+                                                  error)) {
+                        freeval((struct value_t *)list);
+                        return false;
+                    }
+                    list->payload->items.push_back(child);
+                }
+                out = (struct value_t *)list;
+                return true;
+            }
+            case thread_transfer_container::Kind::Dict: {
+                struct dict_value_t *dict = newdictval();
+                for (const auto &entry : source.entries) {
+                    struct value_t *key = nullptr;
+                    struct value_t *item = nullptr;
+                    if (!materialize_thread_value(context, entry.first, key,
+                                                  error)) {
+                        freeval((struct value_t *)dict);
+                        return false;
+                    }
+                    if (!materialize_thread_value(context, entry.second, item,
+                                                  error)) {
+                        freeval(key);
+                        freeval((struct value_t *)dict);
+                        return false;
+                    }
+                    dict_append_item(dict, key, item);
+                }
+                out = (struct value_t *)dict;
+                return true;
+            }
+            case thread_transfer_container::Kind::Set: {
+                struct set_value_t *set = newsetval();
+                for (const thread_transfer_value &item : source.items) {
+                    struct value_t *key = nullptr;
+                    if (!materialize_thread_value(context, item, key,
+                                                  error)) {
+                        freeval((struct value_t *)set);
+                        return false;
+                    }
+                    bool added = false;
+                    std::shared_ptr<set_node> root =
+                        set_insert(set->payload->root, key, added);
+                    if (added) {
+                        set->payload->root = std::move(root);
+                        set->payload->order = deque_push_back_payload(
+                            set->payload->order, key);
+                        ++set->payload->size;
+                    }
+                    freeval(key);
+                }
+                out = (struct value_t *)set;
+                return true;
+            }
+            case thread_transfer_container::Kind::Deque: {
+                struct deque_value_t *deque = newdequeval();
+                for (const thread_transfer_value &item : source.items) {
+                    struct value_t *child = nullptr;
+                    if (!materialize_thread_value(context, item, child,
+                                                  error)) {
+                        freeval((struct value_t *)deque);
+                        return false;
+                    }
+                    deque->payload = deque_push_back_payload(
+                        deque->payload, child);
+                    freeval(child);
+                }
+                out = (struct value_t *)deque;
+                return true;
+            }
+            case thread_transfer_container::Kind::Lru: {
+                struct lru_value_t *lru =
+                    newlruval((std::size_t)source.capacity);
+                for (const auto &entry : source.entries) {
+                    struct value_t *key = nullptr;
+                    struct value_t *item = nullptr;
+                    if (!materialize_thread_value(context, entry.first, key,
+                                                  error)) {
+                        freeval((struct value_t *)lru);
+                        return false;
+                    }
+                    if (!materialize_thread_value(context, entry.second, item,
+                                                  error)) {
+                        freeval(key);
+                        freeval((struct value_t *)lru);
+                        return false;
+                    }
+                    lru->payload->items.emplace_back(key, item);
+                }
+                out = (struct value_t *)lru;
+                return true;
+            }
+            }
+            error = "invalid transferred container kind";
+            return false;
+        }
         case thread_transfer_value::Kind::Function:
             if (!value.function) {
                 error = "invalid transferred function value";

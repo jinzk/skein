@@ -862,6 +862,19 @@ def run_cases():
           'func f(a, cb = func() -> a) { a = 99; return cb(); }\n'
           'println(f(1));\n',
           stdout="1")
+    check("closure captures parameter value",
+          'let mk = func(v) { return func() { return v; }; };\n'
+          'let f = mk([1, 2, 3]);\n'
+          'println(f());\n',
+          stdout="[1, 2, 3]")
+    check("closure captures local value",
+          'let mk = func() {\n'
+          '  let xs = [1, 2, 3];\n'
+          '  return func() { return xs; };\n'
+          '};\n'
+          'let f = mk();\n'
+          'println(f());\n',
+          stdout="[1, 2, 3]")
     check("default parameter forward reference",
           'func f(a = b + 1, b = 2) { return a; }\nf();\n',
           stderr="parameter b is used before it is initialized")

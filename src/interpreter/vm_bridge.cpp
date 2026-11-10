@@ -40,6 +40,12 @@ struct default_cache_entry {
 
 struct function_vm_cache {
     function_code *code = nullptr;
+    /*
+     * A cached code may be shared with other threads (transferred entry
+     * functions).  Keep it alive while this cache exists so freeing the
+     * last external reference cannot leave a dangling cache entry.
+     */
+    std::shared_ptr<function_code> keepalive;
     skein::bc::ProtoPtr proto;
     std::shared_ptr<const compiled_pattern_set> param_patterns;
 #ifdef SKEIN_ENABLE_JIT
@@ -74,6 +80,7 @@ function_vm_cache *cache_for(function_code *code) {
         return static_cast<function_vm_cache *>(code->vm_cache);
     std::unique_ptr<function_vm_cache> entry(new function_vm_cache());
     entry->code = code;
+    entry->keepalive = code->shared_from_this();
     function_vm_cache *raw = entry.get();
     vm_caches.emplace(code, std::move(entry));
     code->vm_cache = raw;

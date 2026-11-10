@@ -56,11 +56,17 @@ int main() {
     const bool captured_live = !captured->syms.small.empty();
 
     gc_roots_pop(context, mark);
+    /*
+     * The cell owns its captured value once closed, so dropping the last
+     * host reference to the closure also releases the captured function.
+     */
+    cell.reset();
+    freeval(root_fn);
+    root_fn = nullptr;
+    captured_fn = nullptr;
     collect_cycles(context);
     const bool outer_cleared = outer->syms.small.empty();
 
-    freeval(root_fn);
-    freeval(captured_fn);
     donescope(context);
 
     eval_context eval;

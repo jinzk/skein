@@ -15,8 +15,9 @@ struct scope_t;
 struct symbol;
 struct value_t;
 struct type_constraint;
+struct scope_context;
 
-struct function_code {
+struct function_code : std::enable_shared_from_this<function_code> {
     struct symlist *sl;
     int nparams;
     int required_params;
@@ -57,9 +58,25 @@ struct upvalue_cell {
     struct value_t **slot = nullptr;
     struct value_t *value = nullptr;
     const struct type_constraint *type = nullptr;
+    struct scope_context *owner = nullptr;
     std::string name;
     bool is_const = false;
+
+    /*
+     * Cells are chained per thread so the cycle collector can find cells
+     * that are no longer reachable from any root.  A closed cell
+     * (slot == nullptr) owns its value.
+     */
+    uint64_t gc_epoch = 0;
+    struct upvalue_cell *gc_prev = nullptr;
+    struct upvalue_cell *gc_next = nullptr;
+
+    upvalue_cell();
+    ~upvalue_cell();
 };
+
+/* Head of the current thread's upvalue-cell registry (GC use only). */
+struct upvalue_cell *gc_cell_registry_head();
 
 struct function_def {
     std::shared_ptr<function_code> code;

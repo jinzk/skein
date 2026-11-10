@@ -32,6 +32,20 @@ static const char *literal_field_name(const struct ast *node) {
     return ((const struct string_value_t *)value->val)->value;
 }
 
+namespace {
+
+/* Release a temporary even when a native call throws through eval. */
+struct value_release_guard {
+    struct value_t *value;
+    explicit value_release_guard(struct value_t *v) : value(v) {}
+    ~value_release_guard() {
+        if (value)
+            freeval(value);
+    }
+};
+
+} // namespace
+
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
     if (g_interrupted) return NULL;
@@ -1522,8 +1536,8 @@ struct value_t *eval(struct ast *a) {
                             freeval(receiver);
                             freeval(key);
                             if (member) {
+                                value_release_guard member_guard(member);
                                 ret = callvalue(member, call->args);
-                                freeval(member);
                             }
                             break;
                         }
@@ -1531,10 +1545,16 @@ struct value_t *eval(struct ast *a) {
                         if (sv->def) {
                             auto method = sv->def->methods.find(name);
                             if (method != sv->def->methods.end()) {
-                                ret = call_method_value(receiver,
-                                                        method->second,
-                                                        call->args);
-                                called = true;
+                                try {
+                                    ret = call_method_value(receiver,
+                                                            method->second,
+                                                            call->args);
+                                    called = true;
+                                } catch (...) {
+                                    freeval(receiver);
+                                    freeval(key);
+                                    throw;
+                                }
                             }
                         }
                         if (!called) {
@@ -1553,16 +1573,16 @@ struct value_t *eval(struct ast *a) {
                 freeval(receiver);
                 freeval(key);
                 if (member) {
+                    value_release_guard member_guard(member);
                     ret = callvalue(member, call->args);
-                    freeval(member);
                 }
                 break;
             }
 
             struct value_t *callee = eval(call->callee);
             if (callee) {
+                value_release_guard callee_guard(callee);
                 ret = callvalue(callee, call->args);
-                freeval(callee);
             }
             break;
         }

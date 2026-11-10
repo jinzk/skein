@@ -375,8 +375,14 @@ static struct value_t *invoke_value(
         if (!ctx || !ctx->call_builtin) {
             yyerror("runtime is not initialized");
         } else {
-            ret = ctx->call_builtin(
-                ((struct builtin_value_t *)callee)->functype, args);
+            try {
+                ret = ctx->call_builtin(
+                    ((struct builtin_value_t *)callee)->functype, args);
+            } catch (...) {
+                /* Host callbacks (for example FFI) may throw through eval. */
+                free_args(args);
+                throw;
+            }
         }
         free_args(args);
         return ret;
@@ -385,7 +391,13 @@ static struct value_t *invoke_value(
     if (callee->type == T_native) {
         struct native_function_value *fn =
             (struct native_function_value *)callee;
-        struct value_t *ret = fn->call ? fn->call(args) : NULL;
+        struct value_t *ret = NULL;
+        try {
+            ret = fn->call ? fn->call(args) : NULL;
+        } catch (...) {
+            free_args(args);
+            throw;
+        }
         free_args(args);
         return ret;
     }
@@ -402,7 +414,12 @@ static struct value_t *invoke_value(
         struct func_value_t function;
         function.type = T_func;
         function.def = method->method;
-        return invoke_value((struct value_t *)&function, all_args);
+        try {
+            return invoke_value((struct value_t *)&function, all_args);
+        } catch (...) {
+            free_args(all_args);
+            throw;
+        }
     }
 
     if (callee->type != T_func) {
@@ -520,7 +537,12 @@ struct value_t *call_value_args(
         return NULL;
     }
     call_depth_guard depth_guard;
-    return invoke_value(callee, args);
+    try {
+        return invoke_value(callee, args);
+    } catch (...) {
+        free_args(args);
+        throw;
+    }
 }
 
 
@@ -540,9 +562,14 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
 
     std::vector<struct value_t *> args;
     struct value_t *control = NULL;
-    if (!collect_args(args_ast, args, control)) {
+    try {
+        if (!collect_args(args_ast, args, control)) {
+            free_args(args);
+            return control;
+        }
+    } catch (...) {
         free_args(args);
-        return control;
+        throw;
     }
 
     return invoke_value(callee, args);
@@ -561,9 +588,14 @@ struct value_t *call_method_value(struct value_t *receiver,
     args.reserve(8);
     args.push_back(dupval(receiver));
     struct value_t *control = NULL;
-    if (!collect_args(args_ast, args, control)) {
+    try {
+        if (!collect_args(args_ast, args, control)) {
+            free_args(args);
+            return control;
+        }
+    } catch (...) {
         free_args(args);
-        return control;
+        throw;
     }
 
     struct func_value_t callee;

@@ -23,7 +23,13 @@ struct free_depth_guard {
     free_depth_guard() { ++free_depth; }
     ~free_depth_guard() { --free_depth; }
 };
+
+thread_local struct upvalue_cell *gc_cell_head = nullptr;
 } // namespace
+
+struct upvalue_cell *gc_cell_registry_head() {
+    return gc_cell_head;
+}
 
 
 static char *dupstr(const char *s) {
@@ -340,6 +346,25 @@ struct value_t *newfuncval(
     v->def->closure = closure;
     v->def->upvalues = std::move(upvalues);
     return (struct value_t *)v;
+}
+
+upvalue_cell::upvalue_cell() {
+    gc_next = gc_cell_head;
+    gc_prev = nullptr;
+    if (gc_cell_head)
+        gc_cell_head->gc_prev = this;
+    gc_cell_head = this;
+}
+
+upvalue_cell::~upvalue_cell() {
+    if (gc_prev)
+        gc_prev->gc_next = gc_next;
+    else
+        gc_cell_head = gc_next;
+    if (gc_next)
+        gc_next->gc_prev = gc_prev;
+    if (!slot && value)
+        freeval(value);
 }
 
 struct list_value_t *newlistval() {

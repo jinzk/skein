@@ -3673,6 +3673,7 @@ private:
             std::make_shared<struct upvalue_cell>();
         cell->slot = storage;
         cell->type = type;
+        cell->owner = &active_scope_context();
         cell->name = name;
         cell->is_const = is_const;
         open_upvalues_.push_back(cell);

@@ -1,4 +1,5 @@
 #include "scopestack.h"
+#include "gc.h"
 #include "structtype.h"
 #include "symbol.h"
 
@@ -198,6 +199,7 @@ void donescope(scope_context &context) {
     context.all_scopes.clear();
     context.global_slots.clear();
     context.gc_roots.clear();
+    gc_sweep_all_cells(context);
     context.statements_since_collect = 0;
     context.scopes_at_last_collect = 0;
     ++context.global_generation;

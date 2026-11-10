@@ -1,6 +1,7 @@
 #include "structtype.h"
 
 #include <cstring>
+#include <functional>
 #include <unordered_map>
 #include <utility>
 
@@ -138,6 +139,32 @@ void structtype_shutdown() {
     logical_traits.clear();
     logical_enums.clear();
     module_aliases.clear();
+}
+
+void structtype_visit_functions(
+    const std::function<void(const std::shared_ptr<function_def> &)> &visit) {
+    if (!visit)
+        return;
+    for (auto &entry : struct_types) {
+        struct_def *def = entry.second.get();
+        for (auto &method : def->methods)
+            visit(method.second);
+        for (const field_def &field : def->fields) {
+            if (field.default_value)
+                visit(field.default_value);
+        }
+    }
+    for (auto &entry : enum_types) {
+        enum_def *def = entry.second.get();
+        for (auto &method : def->methods)
+            visit(method.second);
+        for (const variant_def &variant : def->variants) {
+            for (const field_def &field : variant.fields) {
+                if (field.default_value)
+                    visit(field.default_value);
+            }
+        }
+    }
 }
 
 struct_def *structtype_find_struct(const char *module, const char *name) {

@@ -12,6 +12,16 @@ struct scope_context;
 void collect_cycles(struct scope_context &context);
 void maybe_collect_cycles();
 
+/*
+ * Upvalue-cell reachability.  Cells live in a per-thread registry and carry
+ * a collection epoch; a reachable cell is stamped while marking.  Cells left
+ * behind by closure cycles are broken after scope sweeping.
+ */
+struct upvalue_cell;
+void gc_mark_upvalue_cell(struct upvalue_cell *cell);
+/* Tear down every closed cell owned by `context` (context shutdown). */
+void gc_sweep_all_cells(struct scope_context &context);
+
 /* Break unreachable Message/Channel/duplex userdata cycles.  Runs only when
  * no worker threads are active.  The builtins layer registers the concrete
  * collector because the runtime must not link against builtins. */

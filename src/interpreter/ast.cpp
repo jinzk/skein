@@ -947,15 +947,19 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
         }
     }
     std::shared_ptr<function_code> code(
-        new function_code{node->sl, nparams, required_params,
-                          node->name ? node->name : "",
-                          node->is_method != 0, variadic,
-                          node->is_async != 0, node->is_generator != 0,
-                          node->is_thread_entry != 0,
-                          node->ast ? node->ast->line : 0,
-                          node->ast ? node->ast->column : 0,
-                          diag_current_module_name(), {}, {}, {}},
-        free_function_code);
+        new function_code(), free_function_code);
+    code->sl = node->sl;
+    code->nparams = nparams;
+    code->required_params = required_params;
+    code->name = node->name ? node->name : "";
+    code->is_method = node->is_method != 0;
+    code->variadic = variadic;
+    code->is_async = node->is_async != 0;
+    code->is_generator = node->is_generator != 0;
+    code->is_thread_entry = node->is_thread_entry != 0;
+    code->def_line = node->ast ? node->ast->line : 0;
+    code->def_column = node->ast ? node->ast->column : 0;
+    code->module = diag_current_module_name();
     code->source = diag_current_source_name();
     code->is_thread_entry = node->is_thread_entry != 0;
     code->decorated_generator_async = node->decorated_generator_async != 0;

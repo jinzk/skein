@@ -10,11 +10,14 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <unordered_set>
 #include <vector>
 
 namespace {
+
+thread_local uint64_t gc_cell_epoch = 0;
 
 /*
  * Cycle collection works at scope granularity.  Every cycle that can occur in
@@ -43,6 +46,7 @@ struct cycle_collector {
     void mark_cell(const std::shared_ptr<struct upvalue_cell> &cell) {
         if (!cell)
             return;
+        cell->gc_epoch = gc_cell_epoch;
         if (cell->slot)
             mark_value(*cell->slot);
         else
@@ -114,7 +118,41 @@ void mark_root_value(void *ctx, value_t *value) {
 
 std::atomic<void (*)()> thread_cycle_collector{nullptr};
 
+/*
+ * Closed upvalue cells own their value.  A closure cycle such as
+ * `func f() { return f; }` is held through a cell rather than a scope, so
+ * clearing scopes alone cannot free it.  Break every cell that was not
+ * reached by the current mark pass (or every closed cell at teardown):
+ * detach the values first so freeing one cycle cannot recursively touch a
+ * cell that is still being swept, then free them.
+ */
+void sweep_cells(bool all, struct scope_context *only_context = nullptr) {
+    std::vector<value_t *> doomed;
+    for (struct upvalue_cell *cell = gc_cell_registry_head(); cell;
+         cell = cell->gc_next) {
+        if (only_context && cell->owner != only_context)
+            continue;
+        if (!all && cell->gc_epoch == gc_cell_epoch)
+            continue;
+        if (cell->slot || !cell->value)
+            continue;
+        doomed.push_back(cell->value);
+        cell->value = nullptr;
+    }
+    for (value_t *value : doomed)
+        freeval(value);
+}
+
 } // namespace
+
+void gc_mark_upvalue_cell(struct upvalue_cell *cell) {
+    if (cell)
+        cell->gc_epoch = gc_cell_epoch;
+}
+
+void gc_sweep_all_cells(scope_context &context) {
+    sweep_cells(true, &context);
+}
 
 void gc_set_thread_cycle_collector(void (*fn)()) {
     thread_cycle_collector.store(fn);
@@ -128,6 +166,7 @@ void collect_thread_cycles() {
 
 void collect_cycles(scope_context &context) {
     prune_scopes(context);
+    ++gc_cell_epoch;
 
     std::vector<std::shared_ptr<scope_t>> scopes;
     scopes.reserve(context.all_scopes.size());
@@ -142,6 +181,10 @@ void collect_cycles(scope_context &context) {
     for (auto &s : context.restore_stack)
         collector.mark_scope(s.get());
     gc_roots_visit(context, mark_root_value, &collector);
+    structtype_visit_functions(
+        [&collector](const std::shared_ptr<function_def> &def) {
+            collector.mark_function(def);
+        });
     collector.drain();
 
     for (auto &s : scopes) {
@@ -154,6 +197,7 @@ void collect_cycles(scope_context &context) {
         }
     }
 
+    sweep_cells(false, &context);
     scopes.clear();
     collect_thread_cycles();
     prune_scopes(context);

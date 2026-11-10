@@ -75,7 +75,7 @@ static bool check_field_default_names(
     if (!expr || forbidden.empty())
         return true;
 
-    struct function_code code {};
+    struct function_code code;
     code.sl = NULL;
     code.nparams = 0;
     code.required_params = 0;

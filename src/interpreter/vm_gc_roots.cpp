@@ -1,5 +1,6 @@
 #include "vm_gc_roots.h"
 
+#include "gc.h"
 #include "symbol.h"
 #include "valuetype.h"
 
@@ -26,6 +27,7 @@ void gc_mark_cells(
     for (const auto &cell : cells) {
         if (!cell)
             continue;
+        gc_mark_upvalue_cell(cell.get());
         if (cell->slot)
             gc_mark_value(mark, ctx, *cell->slot);
         else

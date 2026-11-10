@@ -89,6 +89,14 @@ struct enum_value_t {
 
 void structtype_shutdown();
 
+/*
+ * Visit long-lived function definitions owned by the type registry (impl
+ * methods and field defaults).  The cycle collector uses this to keep their
+ * upvalue cells reachable.
+ */
+void structtype_visit_functions(
+    const std::function<void(const std::shared_ptr<function_def> &)> &visit);
+
 struct_def *structtype_find_struct(const char *module, const char *name);
 struct_def *structtype_find_struct_by_name(const char *module_name,
                                            const char *name,

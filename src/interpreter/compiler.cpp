@@ -771,7 +771,7 @@ struct Compiler {
         const std::vector<std::string> &forbidden) {
         if (!expr)
             return true;
-        struct function_code code {};
+        struct function_code code;
         code.sl = NULL;
         code.nparams = 0;
         code.required_params = 0;

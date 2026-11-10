@@ -71,6 +71,18 @@ struct ast *newint(long long i) {
     return (struct ast *)a;
 }
 
+struct ast *newvalnode(value_t *value) {
+    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'V';
+    set_loc(a, 0, 0);
+    a->val = value;
+    return (struct ast *)a;
+}
+
 struct ast *newfloat(double d) {
     struct val *a = (struct val *)std::malloc(sizeof(struct val));
     if (!a) {

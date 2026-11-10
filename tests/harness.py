@@ -2931,6 +2931,73 @@ def check_extended_stdlib():
             )
             assert dec.stdout.strip() == "1:2:6:8", dec.stdout
 
+            proto1_encode = os.path.join(deadlock_tmp,
+                                         "proto1_encode_main.skein")
+            with open(proto1_encode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "let offset = 100;\n"
+                    "struct Counter { value: int; }\n"
+                    "impl Counter {\n"
+                    "  func add(self, n = 1) { "
+                    "return self.value + n + offset; }\n"
+                    "  func spread(self, ...nums: int) {\n"
+                    "    let total = self.value;\n"
+                    "    for (let n in nums) { total = total + n; }\n"
+                    "    return total + offset;\n"
+                    "  }\n"
+                    "  func pair(self, {x, y}) { "
+                    "return self.value + x * y + offset; }\n"
+                    "}\n"
+                    "func make_worker(c) {\n"
+                    "  thread func worker(ctx) {\n"
+                    "    return {\"add\": c.add(), \"add2\": c.add(5), "
+                    "\"spread\": c.spread(1, 2, 3), "
+                    "\"pair\": c.pair({\"x\": 2, \"y\": 3})};\n"
+                    "  }\n"
+                    "  return worker;\n"
+                    "}\n"
+                    'write_bytes("proto1_payload.bin", '
+                    "std.thread.encode(make_worker(Counter { value: 7 })));\n"
+                )
+            proto1_decode = os.path.join(deadlock_tmp,
+                                         "proto1_decode_main.skein")
+            with open(proto1_decode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    'let blob = read_bytes("proto1_payload.bin");\n'
+                    "let t = std.thread.spawn_encoded(blob, "
+                    "std.thread.Message.from({}));\n"
+                    "let r = t.join();\n"
+                    'print(str(r["value"]["add"]) + ":" + '
+                    'str(r["value"]["add2"]) + ":" + '
+                    'str(r["value"]["spread"]) + ":" + '
+                    'str(r["value"]["pair"]));\n'
+                )
+            enc = subprocess.run(
+                [os.path.abspath(BIN), proto1_encode],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert enc.returncode == 0, (
+                "proto1 thread encode failed: "
+                f"{enc.stdout!r} {enc.stderr!r}"
+            )
+            dec = subprocess.run(
+                [os.path.abspath(BIN), proto1_decode],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert dec.returncode == 0, (
+                "proto1 thread decode failed: "
+                f"{dec.stdout!r} {dec.stderr!r}"
+            )
+            assert dec.stdout.strip() == "108:112:113:113", dec.stdout
+
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)
             http_worker = os.path.join(

@@ -1,6 +1,10 @@
 #include "vm.h"
 
+#include "ast.h"
+#include "compiler.h"
 #include "dict.h"
+#include "eval.h"
+#include "scopestack.h"
 #include "structeval.h"
 #include "structtype.h"
 #include "symbol.h"
@@ -20,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 3u;
+constexpr uint32_t kPayloadVersion = 4u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -764,17 +768,131 @@ std::string type_identity(const std::string &module,
     return module + '\x1f' + name;
 }
 
+struct type_collect_context {
+    std::vector<std::pair<std::string, thread_transfer_value>> *globals = nullptr;
+    std::unordered_set<std::string> *global_names = nullptr;
+};
+
+void collect_used_upvalues(const skein::bc::Proto &proto,
+                           std::vector<bool> &used) {
+    for (const skein::bc::Instr &ins : proto.code) {
+        switch ((skein::bc::Op)ins.op) {
+        case skein::bc::Op::LoadUpvalue:
+        case skein::bc::Op::StoreUpvalue:
+        case skein::bc::Op::CompoundUpvalue:
+        case skein::bc::Op::IncDecUpvalue:
+            if (ins.b < used.size())
+                used[ins.b] = true;
+            break;
+        default:
+            break;
+        }
+    }
+    std::unordered_map<std::string, std::size_t> by_name;
+    for (std::size_t i = 0; i < proto.upvalues.size(); ++i)
+        by_name.emplace(proto.upvalues[i], i);
+    auto note_name = [&](const std::string &name) {
+        auto it = by_name.find(name);
+        if (it != by_name.end())
+            used[it->second] = true;
+    };
+    for (const skein::bc::Instr &ins : proto.code) {
+        switch ((skein::bc::Op)ins.op) {
+        case skein::bc::Op::LoadName:
+        case skein::bc::Op::StoreName:
+        case skein::bc::Op::CompoundName:
+        case skein::bc::Op::IncDecName:
+            if (ins.b < proto.consts.size()) {
+                const skein::bc::Constant &constant = proto.consts[ins.b];
+                if (constant.kind == skein::bc::ConstantKind::Name)
+                    note_name(constant.name);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto.index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Upvalue &&
+            index.base_index < used.size())
+            used[index.base_index] = true;
+        else if (index.base_kind == skein::bc::IndexBaseKind::Name)
+            note_name(index.base_name);
+    }
+}
+
+void collect_used_globals(const skein::bc::Proto &proto,
+                          std::vector<std::string> &names) {
+    std::unordered_set<std::string> seen;
+    auto note = [&](const std::string &name) {
+        if (name.empty() || name == "std")
+            return;
+        if (seen.insert(name).second)
+            names.push_back(name);
+    };
+    for (const skein::bc::Instr &ins : proto.code) {
+        switch ((skein::bc::Op)ins.op) {
+        case skein::bc::Op::LoadGlobal:
+        case skein::bc::Op::StoreGlobal:
+        case skein::bc::Op::CompoundGlobal:
+        case skein::bc::Op::IncDecGlobal:
+            if (ins.b < proto.consts.size()) {
+                const skein::bc::Constant &constant = proto.consts[ins.b];
+                if (constant.kind == skein::bc::ConstantKind::Name)
+                    note(constant.name);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    for (const skein::bc::IndexDesc &index : proto.index_ops) {
+        if (index.base_kind == skein::bc::IndexBaseKind::Global)
+            note(index.base_name);
+    }
+}
+
+bool data_capture_supported(const struct value_t *value) {
+    if (!value)
+        return true;
+    if (value->type == T_func || value->type == T_heap ||
+        value->type == T_native)
+        return false;
+    if (value->type == T_dict) {
+        const struct dict_value_t *dict = (const struct dict_value_t *)value;
+        if (dict->payload && dict->payload->is_namespace)
+            return false;
+    }
+    return true;
+}
+
+struct value_t *find_captured_value(const std::shared_ptr<function_def> &def,
+                                    const std::string &name, std::size_t index) {
+    struct value_t *captured = nullptr;
+    if (index < def->upvalues.size() && def->upvalues[index]) {
+        const std::shared_ptr<upvalue_cell> &cell = def->upvalues[index];
+        captured = cell->slot ? *cell->slot : cell->value;
+    }
+    if (!captured && def->closure) {
+        for (scope_t *scope = def->closure.get();
+             scope && !scope->is_global; scope = scope->parent.get()) {
+            struct symbol *sym = scope->syms.find(name);
+            if (sym) {
+                captured = sym->val;
+                break;
+            }
+        }
+    }
+    return captured;
+}
+
 bool build_simple_function(const std::shared_ptr<function_def> &def,
                            const char *what,
                            std::shared_ptr<thread_transfer_function> &out,
-                           std::string &error) {
+                           std::string &error,
+                           type_collect_context *context = nullptr) {
     if (!def || !def->code) {
         error = std::string(what) + " has no function code";
-        return false;
-    }
-    if (def->closure || !def->upvalues.empty() ||
-        !def->code->upvalues.empty()) {
-        error = std::string(what) + " captures a closure";
         return false;
     }
     skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
@@ -806,17 +924,127 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
     out = std::make_shared<thread_transfer_function>();
     out->name = def->code->name;
     out->proto = std::move(copy);
+
+    std::vector<bool> used(out->proto->upvalues.size(), false);
+    collect_used_upvalues(*out->proto, used);
+    out->captures.assign(out->proto->upvalues.size(), thread_transfer_value());
+    for (std::size_t i = 0; i < used.size(); ++i) {
+        if (!used[i])
+            continue;
+        const std::string &name = out->proto->upvalues[i];
+        struct value_t *captured = find_captured_value(def, name, i);
+        if (!captured) {
+            error = std::string(what) + " captures an unavailable value: " +
+                    name;
+            return false;
+        }
+        if (!data_capture_supported(captured)) {
+            error = std::string(what) + " captures a non-data value: " + name;
+            return false;
+        }
+        thread_transfer_value capture;
+        capture.kind = thread_transfer_value::Kind::Data;
+        capture.data = std::shared_ptr<struct value_t>(
+            dupval(captured), value_deleter());
+        out->captures[i] = std::move(capture);
+    }
+
+    out->defaults.assign(out->proto->nparams, thread_transfer_value());
+    int param_index = 0;
+    for (struct symlist *param = def->code->sl;
+         param && param_index < (int)out->proto->nparams;
+         param = param->next, ++param_index) {
+        if (!param->has_default)
+            continue;
+        struct value_t *default_value = nullptr;
+        if (!skein_vm_try_eval_default(def, param_index, default_value)) {
+            struct ast *default_ast = symlist_default_ast(param);
+            if (!default_ast) {
+                error = std::string(what) + " has an unsupported default for " +
+                        (param->sym && param->sym->name ? param->sym->name
+                                                        : "parameter");
+                return false;
+            }
+            default_value = eval(default_ast);
+        }
+        if (!default_value) {
+            error = std::string(what) + " cannot evaluate default for " +
+                    (param->sym && param->sym->name ? param->sym->name
+                                                    : "parameter");
+            return false;
+        }
+        if (!data_capture_supported(default_value)) {
+            freeval(default_value);
+            error = std::string(what) + " has a non-data default for " +
+                    (param->sym && param->sym->name ? param->sym->name
+                                                    : "parameter");
+            return false;
+        }
+        thread_transfer_value transfer;
+        transfer.kind = thread_transfer_value::Kind::Data;
+        transfer.data = std::shared_ptr<struct value_t>(
+            default_value, value_deleter());
+        out->defaults[(std::size_t)param_index] = std::move(transfer);
+    }
+
+    bool has_param_patterns = false;
+    for (struct symlist *param = def->code->sl; param; param = param->next) {
+        if (param->has_pattern) {
+            has_param_patterns = true;
+            break;
+        }
+    }
+    if (has_param_patterns) {
+        std::string pattern_error;
+        std::shared_ptr<const compiled_pattern_set> compiled =
+            skein_compile_parameter_patterns(def->code.get(),
+                                             def->code->module,
+                                             pattern_error);
+        if (!compiled || compiled->failed || !compiled->proto) {
+            error = std::string(what) + " cannot compile parameter patterns" +
+                    (pattern_error.empty() ? "" : ": " + pattern_error);
+            return false;
+        }
+        out->pattern_proto = compiled->proto;
+        out->pattern_roots = compiled->roots;
+    }
+
+    if (context && context->globals && context->global_names) {
+        std::vector<std::string> names;
+        collect_used_globals(*out->proto, names);
+        for (const std::string &name : names) {
+            if (!context->global_names->insert(name).second)
+                continue;
+            struct value_t *value = lookup_global_symbol(name.c_str());
+            if (!value)
+                continue;
+            if (!data_capture_supported(value)) {
+                error = std::string(what) + " uses a non-data global: " +
+                        name;
+                return false;
+            }
+            thread_transfer_value transfer;
+            transfer.kind = thread_transfer_value::Kind::Data;
+            transfer.data = std::shared_ptr<struct value_t>(
+                dupval(value), value_deleter());
+            context->globals->emplace_back(name, std::move(transfer));
+        }
+    }
     return true;
 }
 
-bool note_type(type_map &types, std::vector<type_record> &order,
-               const struct struct_def *def, std::string &error);
 
 bool note_type(type_map &types, std::vector<type_record> &order,
-               const struct enum_def *def, std::string &error);
+               const struct struct_def *def, std::string &error,
+               type_collect_context *context = nullptr);
 
 bool note_type(type_map &types, std::vector<type_record> &order,
-               const struct struct_def *def, std::string &error) {
+               const struct enum_def *def, std::string &error,
+               type_collect_context *context = nullptr);
+
+bool note_type(type_map &types, std::vector<type_record> &order,
+               const struct struct_def *def, std::string &error,
+               type_collect_context *context) {
     if (!def)
         return true;
     std::string key = type_identity(def->module, def->name);
@@ -831,7 +1059,7 @@ bool note_type(type_map &types, std::vector<type_record> &order,
             continue;
         std::shared_ptr<thread_transfer_function> function;
         if (!build_simple_function(field.default_value, "field default",
-                                   function, error))
+                                   function, error, context))
             return false;
         stored.field_defaults.emplace(field.name, std::move(function));
     }
@@ -839,7 +1067,8 @@ bool note_type(type_map &types, std::vector<type_record> &order,
         if (!method.second)
             continue;
         std::shared_ptr<thread_transfer_function> function;
-        if (!build_simple_function(method.second, "method", function, error))
+        if (!build_simple_function(method.second, "method", function, error,
+                                   context))
             return false;
         stored.methods.emplace_back(method.first, std::move(function));
     }
@@ -848,7 +1077,8 @@ bool note_type(type_map &types, std::vector<type_record> &order,
 }
 
 bool note_type(type_map &types, std::vector<type_record> &order,
-               const struct enum_def *def, std::string &error) {
+               const struct enum_def *def, std::string &error,
+               type_collect_context *context) {
     if (!def)
         return true;
     std::string key = type_identity(def->module, def->name);
@@ -865,7 +1095,7 @@ bool note_type(type_map &types, std::vector<type_record> &order,
                 continue;
             std::shared_ptr<thread_transfer_function> function;
             if (!build_simple_function(field.default_value, "field default",
-                                       function, error))
+                                       function, error, context))
                 return false;
             stored.field_defaults.emplace(
                 variant.name + '\x1f' + field.name, std::move(function));
@@ -875,7 +1105,8 @@ bool note_type(type_map &types, std::vector<type_record> &order,
         if (!method.second)
             continue;
         std::shared_ptr<thread_transfer_function> function;
-        if (!build_simple_function(method.second, "method", function, error))
+        if (!build_simple_function(method.second, "method", function, error,
+                                   context))
             return false;
         stored.methods.emplace_back(method.first, std::move(function));
     }
@@ -885,18 +1116,19 @@ bool note_type(type_map &types, std::vector<type_record> &order,
 
 bool collect_value_types(const struct value_t *value, type_map &types,
                          std::vector<type_record> &order, int depth,
-                         std::string &error) {
+                         std::string &error,
+                         type_collect_context *context = nullptr) {
     if (!value || depth > kMaxDepth)
         return true;
     switch (value->type) {
         case T_struct: {
             const struct struct_value_t *structure =
                 (const struct struct_value_t *)value;
-            if (!note_type(types, order, structure->def, error))
+            if (!note_type(types, order, structure->def, error, context))
                 return false;
             for (const struct value_t *field : structure->payload->fields) {
                 if (!collect_value_types(field, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -904,11 +1136,11 @@ bool collect_value_types(const struct value_t *value, type_map &types,
         case T_enum: {
             const struct enum_value_t *enumeration =
                 (const struct enum_value_t *)value;
-            if (!note_type(types, order, enumeration->def, error))
+            if (!note_type(types, order, enumeration->def, error, context))
                 return false;
             for (const struct value_t *field : enumeration->payload->fields) {
                 if (!collect_value_types(field, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -918,14 +1150,14 @@ bool collect_value_types(const struct value_t *value, type_map &types,
                 (const struct result_value_t *)value;
             return collect_value_types(
                 result->ok ? result->value : result->error, types, order,
-                depth + 1, error);
+                depth + 1, error, context);
         }
         case T_list: {
             const struct list_value_t *list =
                 (const struct list_value_t *)value;
             for (const struct value_t *item : list->payload->items) {
                 if (!collect_value_types(item, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -935,9 +1167,9 @@ bool collect_value_types(const struct value_t *value, type_map &types,
                 (const struct dict_value_t *)value;
             for (const auto &item : dict->payload->items) {
                 if (!collect_value_types(item.first, types, order, depth + 1,
-                                         error) ||
+                                         error, context) ||
                     !collect_value_types(item.second, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -946,9 +1178,9 @@ bool collect_value_types(const struct value_t *value, type_map &types,
             const struct lru_value_t *lru = (const struct lru_value_t *)value;
             for (const auto &item : lru->payload->items) {
                 if (!collect_value_types(item.first, types, order, depth + 1,
-                                         error) ||
+                                         error, context) ||
                     !collect_value_types(item.second, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -960,7 +1192,7 @@ bool collect_value_types(const struct value_t *value, type_map &types,
             deque_items_in_order(deque->payload.get(), items);
             for (const struct value_t *item : items) {
                 if (!collect_value_types(item, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -971,7 +1203,7 @@ bool collect_value_types(const struct value_t *value, type_map &types,
             set_values_in_order(set->payload.get(), items);
             for (const struct value_t *item : items) {
                 if (!collect_value_types(item, types, order, depth + 1,
-                                         error))
+                                         error, context))
                     return false;
             }
             break;
@@ -985,27 +1217,28 @@ bool collect_value_types(const struct value_t *value, type_map &types,
 bool collect_transfer_types(const thread_transfer_value &value,
                             type_map &types,
                             std::vector<type_record> &order, int depth,
-                            std::string &error) {
+                            std::string &error,
+                            type_collect_context *context = nullptr) {
     if (depth > kMaxDepth)
         return true;
     if (value.kind == thread_transfer_value::Kind::Data) {
         return collect_value_types(value.data.get(), types, order, depth + 1,
-                                   error);
+                                   error, context);
     }
     if (value.kind == thread_transfer_value::Kind::Namespace) {
         for (const auto &field : value.fields) {
             if (!collect_transfer_types(field.second, types, order, depth + 1,
-                                        error))
+                                        error, context))
                 return false;
         }
     } else if (value.kind == thread_transfer_value::Kind::Heap) {
         if (value.heap) {
             if (!collect_transfer_types(value.heap->less, types, order,
-                                        depth + 1, error))
+                                        depth + 1, error, context))
                 return false;
             for (const thread_transfer_heap_node &node : value.heap->nodes) {
                 if (!collect_transfer_types(node.value, types, order,
-                                            depth + 1, error))
+                                            depth + 1, error, context))
                     return false;
             }
         }
@@ -1015,13 +1248,14 @@ bool collect_transfer_types(const thread_transfer_value &value,
 
 bool collect_proto_types(const skein::bc::Proto &proto, type_map &types,
                          std::vector<type_record> &order, int depth,
-                         std::string &error) {
+                         std::string &error,
+                         type_collect_context *context = nullptr) {
     if (depth > kMaxDepth)
         return true;
     for (const skein::bc::Constant &constant : proto.consts) {
         if (constant.kind == skein::bc::ConstantKind::Value) {
             if (!collect_value_types(constant.value.get(), types, order,
-                                     depth + 1, error))
+                                     depth + 1, error, context))
                 return false;
         }
     }
@@ -1030,13 +1264,13 @@ bool collect_proto_types(const skein::bc::Proto &proto, type_map &types,
             if (!note_type(types, order,
                            structtype_find_struct(construct.module.c_str(),
                                                   construct.name.c_str()),
-                           error))
+                           error, context))
                 return false;
         } else {
             if (!note_type(types, order,
                            structtype_find_enum(construct.module.c_str(),
                                                 construct.name.c_str()),
-                           error))
+                           error, context))
                 return false;
         }
     }
@@ -1044,21 +1278,21 @@ bool collect_proto_types(const skein::bc::Proto &proto, type_map &types,
         if (!note_type(types, order,
                        structtype_find_struct(field.module.c_str(),
                                               field.base.c_str()),
-                       error) ||
+                       error, context) ||
             !note_type(types, order,
                        structtype_find_enum(field.module.c_str(),
                                             field.base.c_str()),
-                       error))
+                       error, context))
             return false;
     }
     for (const skein::bc::PatternDesc &pattern : proto.patterns) {
         if (pattern.literal_value &&
             !collect_value_types(pattern.literal_value.get(), types, order,
-                                 depth + 1, error))
+                                 depth + 1, error, context))
             return false;
         if (pattern.literal_expr &&
             !collect_proto_types(*pattern.literal_expr, types, order,
-                                 depth + 1, error))
+                                 depth + 1, error, context))
             return false;
     }
     return true;
@@ -2301,39 +2535,94 @@ bool skein_vm_serialize_thread_payload(
 
     type_map types;
     std::vector<type_record> type_order;
-    for (const auto &function : order) {
-        if (!collect_proto_types(*function->proto, types, type_order, 0,
-                                 error))
-            return false;
-        for (const thread_transfer_value &capture : function->captures) {
-            if (!collect_transfer_types(capture, types, type_order, 0,
-                                        error))
+    std::vector<std::pair<std::string, thread_transfer_value>> all_globals =
+        globals;
+    std::unordered_set<std::string> global_names;
+    for (const auto &item : globals)
+        global_names.insert(item.first);
+    type_collect_context context{&all_globals, &global_names};
+
+    auto collect_all_types = [&]() -> bool {
+        for (const auto &function : order) {
+            if (!collect_proto_types(*function->proto, types, type_order, 0,
+                                     error, &context))
+                return false;
+            for (const thread_transfer_value &capture :
+                 function->captures) {
+                if (!collect_transfer_types(capture, types, type_order, 0,
+                                            error, &context))
+                    return false;
+            }
+        }
+        for (std::size_t i = 0; i < all_globals.size(); ++i) {
+            if (!collect_transfer_types(all_globals[i].second, types,
+                                        type_order, 0, error, &context))
                 return false;
         }
-    }
-    for (const auto &item : globals) {
-        if (!collect_transfer_types(item.second, types, type_order, 0, error))
+        for (const auto &item : modules) {
+            if (!collect_transfer_types(item.value, types, type_order, 0,
+                                        error, &context))
+                return false;
+        }
+        for (std::size_t i = 0; i < type_order.size(); ++i) {
+            const type_record &record = type_order[i];
+            for (const auto &method : record.methods) {
+                if (!method.second)
+                    continue;
+                for (const thread_transfer_value &capture :
+                     method.second->captures) {
+                    if (!collect_transfer_types(capture, types, type_order, 0,
+                                                error, &context))
+                        return false;
+                }
+            }
+            for (const auto &field_default : record.field_defaults) {
+                if (!field_default.second)
+                    continue;
+                for (const thread_transfer_value &capture :
+                     field_default.second->captures) {
+                    if (!collect_transfer_types(capture, types, type_order, 0,
+                                                error, &context))
+                        return false;
+                }
+            }
+        }
+        return true;
+    };
+
+    std::size_t last_order = 0;
+    std::size_t last_types = 0;
+    std::size_t last_globals = 0;
+    for (int pass = 0; pass < 8; ++pass) {
+        if (!collect_all_types())
             return false;
-    }
-    for (const auto &item : modules) {
-        if (!collect_transfer_types(item.value, types, type_order, 0, error))
-            return false;
-    }
-    for (const type_record &record : type_order) {
-        thread_transfer_value wrapper;
-        wrapper.kind = thread_transfer_value::Kind::Function;
-        for (const auto &method : record.methods) {
-            wrapper.function = method.second;
-            collect_transfer(wrapper, ids, order, 0, ok, error);
+        for (const type_record &record : type_order) {
+            thread_transfer_value wrapper;
+            wrapper.kind = thread_transfer_value::Kind::Function;
+            for (const auto &method : record.methods) {
+                wrapper.function = method.second;
+                collect_transfer(wrapper, ids, order, 0, ok, error);
+                if (!ok)
+                    return false;
+            }
+            for (const auto &field_default : record.field_defaults) {
+                wrapper.function = field_default.second;
+                collect_transfer(wrapper, ids, order, 0, ok, error);
+                if (!ok)
+                    return false;
+            }
+        }
+        for (const auto &item : all_globals) {
+            collect_transfer(item.second, ids, order, 0, ok, error);
             if (!ok)
                 return false;
         }
-        for (const auto &field_default : record.field_defaults) {
-            wrapper.function = field_default.second;
-            collect_transfer(wrapper, ids, order, 0, ok, error);
-            if (!ok)
-                return false;
-        }
+        if (order.size() == last_order && type_order.size() == last_types &&
+            all_globals.size() == last_globals)
+            break;
+        last_order = order.size();
+        last_types = type_order.size();
+        last_globals = all_globals.size();
     }
 
     writer out;
@@ -2356,6 +2645,18 @@ bool skein_vm_serialize_thread_payload(
             if (!write_transfer(out, capture, ids, 0, error))
                 return false;
         }
+        out.u32((uint32_t)function->defaults.size());
+        for (const thread_transfer_value &value : function->defaults) {
+            if (!write_transfer(out, value, ids, 0, error))
+                return false;
+        }
+        out.u8(function->pattern_proto ? 1 : 0);
+        if (function->pattern_proto &&
+            !write_proto(out, *function->pattern_proto, error))
+            return false;
+        out.u32((uint32_t)function->pattern_roots.size());
+        for (uint32_t root : function->pattern_roots)
+            out.u32(root);
     }
 
     auto entry_it = ids.find(entry.get());
@@ -2365,8 +2666,8 @@ bool skein_vm_serialize_thread_payload(
     }
     out.u32(entry_it->second);
 
-    out.u32((uint32_t)globals.size());
-    for (const auto &item : globals) {
+    out.u32((uint32_t)all_globals.size());
+    for (const auto &item : all_globals) {
         out.str(item.first);
         if (!write_transfer(out, item.second, ids, 0, error))
             return false;
@@ -2444,6 +2745,43 @@ bool skein_vm_deserialize_thread_payload(
             if (!read_transfer(in, functions, capture, 0, error))
                 return false;
             functions[i]->captures.push_back(std::move(capture));
+        }
+        uint32_t default_count = 0;
+        if (!in.count(default_count)) {
+            error = in.error;
+            return false;
+        }
+        functions[i]->defaults.reserve(default_count);
+        for (uint32_t j = 0; j < default_count; ++j) {
+            thread_transfer_value value;
+            if (!read_transfer(in, functions, value, 0, error))
+                return false;
+            functions[i]->defaults.push_back(std::move(value));
+        }
+        uint8_t has_patterns = 0;
+        if (!in.u8(has_patterns)) {
+            error = in.error;
+            return false;
+        }
+        if (has_patterns) {
+            std::shared_ptr<skein::bc::Proto> pattern_proto;
+            if (!read_proto(in, pattern_proto, error))
+                return false;
+            functions[i]->pattern_proto = std::move(pattern_proto);
+        }
+        uint32_t root_count = 0;
+        if (!in.count(root_count)) {
+            error = in.error;
+            return false;
+        }
+        functions[i]->pattern_roots.reserve(root_count);
+        for (uint32_t j = 0; j < root_count; ++j) {
+            uint32_t root = 0;
+            if (!in.u32(root)) {
+                error = in.error;
+                return false;
+            }
+            functions[i]->pattern_roots.push_back(root);
         }
     }
     for (thread_transfer_type &type : types) {

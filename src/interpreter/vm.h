@@ -50,6 +50,12 @@ struct thread_transfer_function {
     skein::bc::ProtoPtr proto;
     /* Parallel to proto->upvalues. */
     std::vector<thread_transfer_value> captures;
+    /* Parallel to proto->nparams; Null entries mean the parameter is
+     * required.  Defaults are evaluated where the function is transferred. */
+    std::vector<thread_transfer_value> defaults;
+    /* Optional compiled parameter-pattern set, parallel to the symlist. */
+    skein::bc::ProtoPtr pattern_proto;
+    std::vector<uint32_t> pattern_roots;
 };
 
 struct thread_transfer_module {

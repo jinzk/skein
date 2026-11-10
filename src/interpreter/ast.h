@@ -476,6 +476,8 @@ struct ast *newincdec(struct ast *target, int delta, bool prefix);
 struct ast *newscope(struct ast *v);
 struct ast *newint(long long i);
 struct ast *newfloat(double d);
+/* Wrap an owned runtime value as a literal AST node. */
+struct ast *newvalnode(value_t *value);
 struct ast *newbool(bool b);
 struct ast *newstr(const char *s);
 struct ast *newchar(long long c);

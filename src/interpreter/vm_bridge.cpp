@@ -840,11 +840,15 @@ std::shared_ptr<function_code> make_transfer_code(
 
     struct symlist *head = nullptr;
     struct symlist *tail = nullptr;
-    for (uint32_t i = 0; i < proto.nparams; ++i) {
-        std::string name =
-            i < proto.param_names.size() ? proto.param_names[i] : "";
+    for (uint32_t i = 0; i < proto.param_names.size(); ++i) {
+        std::string name = proto.param_names[i];
         struct symbol *sym = newsym(name.empty() ? "arg" : name.c_str());
         struct symlist *node = newsymlist(sym, nullptr, nullptr);
+        if (proto.variadic && i + 1 == proto.param_names.size())
+            node->variadic = true;
+        if (i < payload.pattern_roots.size() &&
+            payload.pattern_roots[i] != UINT32_MAX)
+            node->has_pattern = true;
         if (tail)
             tail->next = node;
         else
@@ -856,6 +860,13 @@ std::shared_ptr<function_code> make_transfer_code(
     function_vm_cache &cache = *cache_for(code.get());
     cache.proto = payload.proto;
     cache.compile_failed = false;
+    if (payload.pattern_proto && !payload.pattern_roots.empty()) {
+        std::shared_ptr<compiled_pattern_set> compiled =
+            std::make_shared<compiled_pattern_set>();
+        compiled->proto = payload.pattern_proto;
+        compiled->roots = payload.pattern_roots;
+        cache.param_patterns = compiled;
+    }
     return code;
 }
 
@@ -1006,6 +1017,22 @@ bool materialize_thread_function(
         if (i < payload->proto->upvalues.size())
             cell->name = payload->proto->upvalues[i];
         function->def->upvalues[i] = std::move(cell);
+    }
+
+    struct symlist *param = code->sl;
+    for (std::size_t i = 0;
+         i < payload->defaults.size() && param &&
+         (int)i < code->nparams;
+         ++i, param = param->next) {
+        if (payload->defaults[i].kind == thread_transfer_value::Kind::Null)
+            continue;
+        struct value_t *value = nullptr;
+        if (!materialize_thread_value(context, payload->defaults[i], value,
+                                      error)) {
+            return false;
+        }
+        param->has_default = true;
+        set_symlist_default_ast(param, newvalnode(value));
     }
     out = dupval((struct value_t *)function);
     return true;

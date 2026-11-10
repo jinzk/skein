@@ -3761,6 +3761,7 @@ value_t *process_server_build_stats(process_server_state *server) {
         if (available_value && available_value->type == T_int)
             available = ((int_value_t *)available_value)->value;
         dict_set(stats, "size", newintval(workers));
+        dict_set(stats, "workers", newintval(workers));
         dict_set(stats, "ready", newintval(available));
         dict_set(stats, "alive", newintval(available));
         dict_set(stats, "dead",
@@ -3772,6 +3773,7 @@ value_t *process_server_build_stats(process_server_state *server) {
                                           : 0));
         dict_set(stats, "failed", newintval(0));
         dict_set(stats, "active", newintval(0));
+        dict_set(stats, "queued", newintval(0));
     } else {
         stats = (value_t *)newdictval();
         long long alive = joined ? 0 : workers;
@@ -4170,6 +4172,11 @@ value_t *http_serve_workers(const std::vector<value_t *> &args) {
             }
             stream_request_body =
                 ((bool_value_t *)stream_value)->value;
+        }
+        if (stream_request_body && strategy != "reuse_port") {
+            yyerror("std.http.serve_workers: stream_request_body requires "
+                    "reuse_port");
+            return NULL;
         }
         if (!read_option("h2_max_concurrent_streams",
                          h2_max_concurrent_streams))
@@ -5430,7 +5437,8 @@ value_t *thread_server_get_field(void *data, const char *name) {
         bool http2 =
             server->http && server->http->http2_enabled;
         bool stream_body =
-            server->http && server->http->stream_request_body;
+            server->strategy == "reuse_port" && server->http &&
+            server->http->stream_request_body;
         return capabilities_value(make_capabilities(
             server->strategy, server->tls, http2, stream_body));
     }

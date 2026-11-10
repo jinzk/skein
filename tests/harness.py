@@ -3493,6 +3493,24 @@ def check_extended_stdlib():
                 stderr="ThreadServer.join timed out",
             )
             check(
+                "std.http serve_threads stream body requires reuse_port",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let ts = std.http.serve_threads(s, 1, '
+                f'"{thread_worker_path}", '
+                '{"strategy": "dispatch", "stream_request_body": true});\n',
+                stderr="stream_request_body requires reuse_port",
+            )
+            check(
+                "std.http serve_workers stream body requires reuse_port",
+                "import std;\n"
+                'let s = std.http.listen("127.0.0.1", 0);\n'
+                f'let ps = std.http.serve_workers(s, 1, '
+                f'"{thread_worker_path}", '
+                '{"strategy": "dispatch", "stream_request_body": true});\n',
+                stderr="stream_request_body requires reuse_port",
+            )
+            check(
                 "std.http serve_threads shutdown",
                 "import std;\n"
                 'let s = std.http.listen("127.0.0.1", 0);\n'

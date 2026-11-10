@@ -929,12 +929,25 @@ let served = ts.join();
 | HTTP/2 | 否 | TLS ALPN `h2` / 明文 h2c prior knowledge |
 | TLS | 是 | 是 |
 | keep-alive | 是 | 是 |
-| `stream_request_body` | 否（启动失败） | 是 |
+| `stream_request_body` | 否（capability false，请求 501；`require` 启动失败） | 是 |
 | `stream_response` | 否 | 是 |
 | WebSocket | 否（501） | 是（handler 内完成） |
 | SSE | 否（501） | 是 |
 | raw socket | 否 | 否 |
 | `max_requests` | 单线程 | 全局 atomic |
+
+平台支持：
+
+- `reuse_port` 由 libuv `UV_TCP_REUSEPORT` 提供，支持 Linux / FreeBSD /
+  DragonFly / Solaris / AIX；
+- Windows、macOS 不支持 `reuse_port`：`serve_threads` / `serve_processes`
+  显式指定时立即报 `reuse_port is not supported on this platform`，
+  `strategy: "auto"` 会退回 `dispatch`；`thread_capabilities` 同样返回不支持；
+- `stream_request_body` 仅在 `reuse_port` 下可用；dispatch 下
+  capability 为 false，请求返回 501，`require` 含该能力时启动失败；
+- Windows 可以使用 `serve_processes` 的 `dispatch` 进程池，但不能使用
+  `reuse_port`；macOS 的 `reuse_port` 需要 macOS runner 验证，当前按同一
+  structured unsupported 路径处理。
 
 `require` 示例：
 

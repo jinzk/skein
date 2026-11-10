@@ -188,6 +188,17 @@ bool pump_read(tls_stream *stream, const tls_read_fn &read,
     return true;
 }
 
+void describe_handshake_failure(tls_stream *stream, std::string &error) {
+    long verify = SSL_get_verify_result(stream->ssl);
+    if (verify != X509_V_OK) {
+        error = "tls: certificate verification failed: ";
+        error += X509_verify_cert_error_string(verify);
+        ERR_clear_error();
+        return;
+    }
+    ssl_error_string(error, "tls: handshake failed");
+}
+
 bool tls_handshake_impl(tls_stream *stream, const tls_read_fn &read,
                         const tls_write_fn &write, long long timeout_ms,
                         std::string &error) {
@@ -217,7 +228,7 @@ bool tls_handshake_impl(tls_stream *stream, const tls_read_fn &read,
                 return false;
             continue;
         }
-        ssl_error_string(error, "tls: handshake failed");
+        describe_handshake_failure(stream, error);
         return false;
     }
 }
@@ -737,6 +748,39 @@ SSL_CTX *build_server_ctx(const std::string &cert_file,
         return NULL;
     }
 
+    std::string client_auth = option_string(options, "client_auth");
+    if (client_auth.empty())
+        client_auth = "none";
+    if (client_auth != "none" && client_auth != "optional" &&
+        client_auth != "required") {
+        error = "std.tls.server: client_auth must be none, optional, or "
+                "required";
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    std::string client_ca = option_string(options, "client_ca_file");
+    if (!client_ca.empty()) {
+        if (SSL_CTX_load_verify_locations(ctx, client_ca.c_str(), NULL) != 1) {
+            ssl_error_string(error, "tls: cannot load client CA file");
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+    }
+    if (client_auth == "none") {
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+    } else {
+        if (client_ca.empty()) {
+            error = "std.tls.server: client_ca_file is required when "
+                    "client_auth is optional or required";
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+        int mode = SSL_VERIFY_PEER;
+        if (client_auth == "required")
+            mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+        SSL_CTX_set_verify(ctx, mode, NULL);
+    }
+
     value_t *alpn_value = dict_get(options, "alpn");
     if (alpn_value && alpn_value->type != T_null) {
         if (alpn_value->type != T_list) {
@@ -909,6 +953,29 @@ value_t *tls_client(const std::vector<value_t *> &args) {
         }
     } else {
         SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+    }
+
+    std::string client_cert = option_string(options, "cert_file");
+    std::string client_key = option_string(options, "key_file");
+    if (client_cert.empty() != client_key.empty()) {
+        yyerror("std.tls.client: cert_file and key_file must be provided "
+                "together");
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    if (!client_cert.empty()) {
+        if (SSL_CTX_use_certificate_chain_file(ctx, client_cert.c_str()) !=
+                1 ||
+            SSL_CTX_use_PrivateKey_file(ctx, client_key.c_str(),
+                                        SSL_FILETYPE_PEM) != 1 ||
+            SSL_CTX_check_private_key(ctx) != 1) {
+            std::string error;
+            ssl_error_string(error, "tls: cannot load client certificate or "
+                                    "key");
+            yyerror("%s", error.c_str());
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
     }
 
     std::string alpn;

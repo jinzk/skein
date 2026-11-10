@@ -1384,7 +1384,9 @@ bool collect_request_headers(value_t *headers,
 }
 
 std::string h2_connection_key(const url_parts &url, bool verify,
-                              const std::string &ca_file) {
+                              const std::string &ca_file,
+                              const std::string &cert_file,
+                              const std::string &key_file) {
     std::string key = url.tls ? "h2s://" : "h2://";
     key += url.host;
     key += ":";
@@ -1395,13 +1397,21 @@ std::string h2_connection_key(const url_parts &url, bool verify,
             key += "|";
             key += ca_file;
         }
+        if (!cert_file.empty()) {
+            key += "|";
+            key += cert_file;
+            key += "|";
+            key += key_file;
+        }
     }
     return key;
 }
 
 bool open_client_connection(
     h2_connection *connection, const url_parts &url, bool async,
-    bool tls_verify, const std::string &tls_ca_file, long long timeout_ms,
+    bool tls_verify, const std::string &tls_ca_file,
+    const std::string &tls_cert_file, const std::string &tls_key_file,
+    long long timeout_ms,
     const std::vector<nghttp2_settings_entry> &settings) {
     connection->async = async;
     connection->timeout_ms = timeout_ms;
@@ -1429,6 +1439,11 @@ bool open_client_connection(
         dict_set(tls_options, "verify", newboolval(tls_verify));
         if (!tls_ca_file.empty())
             dict_set(tls_options, "ca_file", newstrval(tls_ca_file.c_str()));
+        if (!tls_cert_file.empty())
+            dict_set(tls_options, "cert_file",
+                     newstrval(tls_cert_file.c_str()));
+        if (!tls_key_file.empty())
+            dict_set(tls_options, "key_file", newstrval(tls_key_file.c_str()));
         value_t *alpn = (value_t *)newlistval();
         ((list_value_t *)alpn)->payload->items.push_back(newstrval("h2"));
         dict_set(tls_options, "alpn", alpn);
@@ -1617,6 +1632,8 @@ value_t *exchange_shared(const std::string &method, const url_parts &url,
                          const generator_ptr &body_generator,
                          bool tls_verify,
                          const std::string &tls_ca_file,
+                         const std::string &tls_cert_file,
+                         const std::string &tls_key_file,
                          long long timeout_ms,
                          const std::vector<nghttp2_settings_entry> &settings,
                          bool *used_existing) {
@@ -1632,7 +1649,8 @@ value_t *exchange_shared(const std::string &method, const url_parts &url,
     if (!collect_request_headers(headers, request_headers))
         return NULL;
 
-    std::string key = h2_connection_key(url, tls_verify, tls_ca_file);
+    std::string key = h2_connection_key(url, tls_verify, tls_ca_file,
+                                        tls_cert_file, tls_key_file);
     key += h2_settings_tag(settings);
     bool reused = false;
     h2_connection *connection = h2_pool_acquire_shared(key);
@@ -1655,6 +1673,7 @@ value_t *exchange_shared(const std::string &method, const url_parts &url,
         connection = new h2_connection();
         bool opened = open_client_connection(connection, url, true,
                                              tls_verify, tls_ca_file,
+                                             tls_cert_file, tls_key_file,
                                              timeout_ms, settings);
         if (opened) {
             connection->shared = true;
@@ -1817,6 +1836,8 @@ value_t *exchange(const std::string &method, const std::string &url_text,
 
     bool tls_verify = true;
     std::string tls_ca_file;
+    std::string tls_cert_file;
+    std::string tls_key_file;
     if (url.tls) {
         value_t *tls_options = dict_get(options, "tls");
         if (tls_options && tls_options->type != T_dict) {
@@ -1826,6 +1847,8 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         if (tls_options) {
             tls_verify = option_bool(tls_options, "verify", true);
             tls_ca_file = option_string(tls_options, "ca_file");
+            tls_cert_file = option_string(tls_options, "cert_file");
+            tls_key_file = option_string(tls_options, "key_file");
         }
     }
 
@@ -1885,7 +1908,8 @@ value_t *exchange(const std::string &method, const std::string &url_text,
     }
     std::shared_ptr<value_t> headers_holder(owned_headers, freeval);
 
-    std::string key = h2_connection_key(url, tls_verify, tls_ca_file);
+    std::string key = h2_connection_key(url, tls_verify, tls_ca_file,
+                                        tls_cert_file, tls_key_file);
     key += h2_settings_tag(settings);
     bool idempotent = method == "GET" || method == "HEAD" ||
                       method == "OPTIONS" || method == "TRACE";
@@ -1907,15 +1931,15 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         if (!idempotent || on_body || body_generator)
             return finish(exchange_shared(
                 method, url, request_headers, body, max_body_bytes, on_body,
-                body_generator, tls_verify, tls_ca_file, timeout_ms,
-                settings, NULL));
+                body_generator, tls_verify, tls_ca_file, tls_cert_file,
+                tls_key_file, timeout_ms, settings, NULL));
         bool reused = false;
         eval_capture_snapshot snapshot;
         eval_capture_begin(snapshot);
         value_t *response = exchange_shared(
             method, url, request_headers, body, max_body_bytes, on_body,
-            body_generator, tls_verify, tls_ca_file, timeout_ms, settings,
-            &reused);
+            body_generator, tls_verify, tls_ca_file, tls_cert_file,
+            tls_key_file, timeout_ms, settings, &reused);
         eval_capture_result captured = eval_capture_end(snapshot);
         if (response) {
             freeval(captured.error);
@@ -1931,8 +1955,8 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         freeval(captured.error);
         return finish(exchange_shared(
             method, url, request_headers, body, max_body_bytes, on_body,
-            body_generator, tls_verify, tls_ca_file, timeout_ms, settings,
-            NULL));
+            body_generator, tls_verify, tls_ca_file, tls_cert_file,
+            tls_key_file, timeout_ms, settings, NULL));
     }
 
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -1942,7 +1966,8 @@ value_t *exchange(const std::string &method, const std::string &url_text,
         if (!connection) {
             connection = new h2_connection();
             if (!open_client_connection(connection, url, async, tls_verify,
-                                        tls_ca_file, timeout_ms, settings)) {
+                                        tls_ca_file, tls_cert_file,
+                                        tls_key_file, timeout_ms, settings)) {
                 h2_release_connection(connection);
                 delete connection;
                 return NULL;
@@ -2020,6 +2045,8 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
 
     bool tls_verify = true;
     std::string tls_ca_file;
+    std::string tls_cert_file;
+    std::string tls_key_file;
     value_t *tls_options = dict_get(options, "tls");
     if (tls_options) {
         if (tls_options->type != T_dict) {
@@ -2028,6 +2055,8 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
         }
         tls_verify = option_bool(tls_options, "verify", true);
         tls_ca_file = option_string(tls_options, "ca_file");
+        tls_cert_file = option_string(tls_options, "cert_file");
+        tls_key_file = option_string(tls_options, "key_file");
     }
 
     std::size_t max_body_bytes = DEFAULT_MAX_BODY_BYTES;
@@ -2084,7 +2113,8 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
             return NULL;
         }
         std::string item_key =
-            h2_connection_key(url, tls_verify, tls_ca_file);
+            h2_connection_key(url, tls_verify, tls_ca_file, tls_cert_file,
+                              tls_key_file);
         if (i == 0)
             key = item_key;
         else if (item_key != key) {
@@ -2182,7 +2212,8 @@ value_t *exchange_many(value_t *requests, value_t *options, bool async) {
     if (!connection) {
         connection = new h2_connection();
         if (!open_client_connection(connection, urls[0], async, tls_verify,
-                                    tls_ca_file, timeout_ms, settings)) {
+                                    tls_ca_file, tls_cert_file, tls_key_file,
+                                    timeout_ms, settings)) {
             h2_release_connection(connection);
             delete connection;
             return NULL;
@@ -2635,28 +2666,72 @@ value_t *http2_listen(const std::vector<value_t *> &args) {
 }
 
 value_t *http2_listen_tls(const std::vector<value_t *> &args) {
-    if (args.size() < 4 || args.size() > 5 || args[0]->type != T_string ||
+    if (args.size() < 4 || args.size() > 6 || args[0]->type != T_string ||
         args[1]->type != T_int || args[2]->type != T_string ||
         args[3]->type != T_string) {
         yyerror("std.http2.listen_tls expects host, port, cert file, key "
-                "file, and optional timeout");
+                "file, optional timeout, and optional options");
         return NULL;
     }
 #ifndef SKEIN_ENABLE_TLS
     yyerror("std.http2.listen_tls: TLS is disabled");
     return NULL;
 #else
+    value_t *tls_options = NULL;
     std::vector<value_t *> listen_args;
     listen_args.push_back(dupval(args[0]));
     listen_args.push_back(dupval(args[1]));
-    if (args.size() == 5)
-        listen_args.push_back(dupval(args[4]));
+    if (args.size() > 4) {
+        if (args[4]->type == T_int) {
+            listen_args.push_back(dupval(args[4]));
+            if (args.size() == 6) {
+                if (args[5]->type != T_dict) {
+                    free_args(listen_args);
+                    yyerror("std.http2.listen_tls options must be a dict");
+                    return NULL;
+                }
+                tls_options = args[5];
+            }
+        } else if (args[4]->type == T_dict) {
+            if (args.size() == 6) {
+                free_args(listen_args);
+                yyerror("std.http2.listen_tls options must be the last "
+                        "argument");
+                return NULL;
+            }
+            tls_options = args[4];
+        } else {
+            free_args(listen_args);
+            yyerror("std.http2.listen_tls expects an optional timeout or "
+                    "options dict");
+            return NULL;
+        }
+    }
     value_t *server = http2_listen(listen_args);
     free_args(listen_args);
     if (!server)
         return NULL;
     dict_set(server, "cert", dupval(args[2]));
     dict_set(server, "key", dupval(args[3]));
+    if (tls_options) {
+        value_t *client_ca = dict_get(tls_options, "client_ca_file");
+        value_t *client_auth = dict_get(tls_options, "client_auth");
+        value_t *alpn = dict_get(tls_options, "alpn");
+        if (client_ca && client_ca->type != T_string) {
+            yyerror("std.http2.listen_tls client_ca_file must be a string");
+            return NULL;
+        }
+        if (client_auth && client_auth->type != T_string) {
+            yyerror("std.http2.listen_tls client_auth must be a string");
+            return NULL;
+        }
+        if (client_ca)
+            dict_set(server, "client_ca_file", dupval(client_ca));
+        if (client_auth)
+            dict_set(server, "client_auth", dupval(client_auth));
+        if (alpn)
+            dict_set(server, "alpn", dupval(alpn));
+    }
     return server;
 #endif
 }
@@ -3194,6 +3269,8 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
 
     std::string cert_file;
     std::string key_file;
+    std::string client_ca_file;
+    std::string client_auth;
     value_t *cert_value = dict_get(args[0], "cert");
     value_t *key_value = dict_get(args[0], "key");
     if (cert_value || key_value) {
@@ -3204,6 +3281,22 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
         }
         cert_file = ((string_value_t *)cert_value)->value;
         key_file = ((string_value_t *)key_value)->value;
+    }
+    value_t *client_ca_value = dict_get(args[0], "client_ca_file");
+    value_t *client_auth_value = dict_get(args[0], "client_auth");
+    if (client_ca_value) {
+        if (client_ca_value->type != T_string) {
+            yyerror("std.http2.serve: invalid client_ca_file");
+            return NULL;
+        }
+        client_ca_file = ((string_value_t *)client_ca_value)->value;
+    }
+    if (client_auth_value) {
+        if (client_auth_value->type != T_string) {
+            yyerror("std.http2.serve: invalid client_auth");
+            return NULL;
+        }
+        client_auth = ((string_value_t *)client_auth_value)->value;
     }
 
     value_t *on_request_body = dict_get(args[0], "on_request_body");
@@ -3269,7 +3362,8 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
 
     value_t *handler = args[1];
     task_ptr server_task = fiber_start_async(
-        [socket, handler, &state, cert_file, key_file]() {
+        [socket, handler, &state, cert_file, key_file, client_ca_file,
+         client_auth]() {
         long long next_connection_id = 1;
         std::vector<task_ptr> connections;
         for (;;) {
@@ -3338,6 +3432,12 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
                 ((list_value_t *)alpn)->payload->items.push_back(
                     newstrval("h2"));
                 dict_set(tls_options, "alpn", alpn);
+                if (!client_ca_file.empty())
+                    dict_set(tls_options, "client_ca_file",
+                             newstrval(client_ca_file.c_str()));
+                if (!client_auth.empty())
+                    dict_set(tls_options, "client_auth",
+                             newstrval(client_auth.c_str()));
                 std::vector<value_t *> tls_args;
                 tls_args.push_back(dupval(client));
                 tls_args.push_back(newstrval(cert_file.c_str()));

@@ -2908,6 +2908,384 @@ def run_cases():
                         rotation_server.terminate()
                         rotation_server.wait(timeout=5)
 
+                mtls_dir = os.path.join(tls_tmp, "mtls")
+                os.makedirs(mtls_dir, exist_ok=True)
+
+                def openssl_run(args):
+                    proc = subprocess.run(
+                        ["openssl"] + args, capture_output=True, text=True)
+                    assert proc.returncode == 0, proc.stderr
+                    return proc
+
+                ca_key = os.path.join(mtls_dir, "ca_key.pem")
+                ca_cert = os.path.join(mtls_dir, "ca_cert.pem")
+                openssl_run(["req", "-x509", "-newkey", "rsa:2048",
+                             "-nodes", "-keyout", ca_key, "-out", ca_cert,
+                             "-days", "1", "-subj", "/CN=skein-test-ca"])
+
+                def signed_cert(name, common_name, san=None):
+                    key = os.path.join(mtls_dir, name + "_key.pem")
+                    csr = os.path.join(mtls_dir, name + ".csr")
+                    cert = os.path.join(mtls_dir, name + "_cert.pem")
+                    request = ["req", "-newkey", "rsa:2048", "-nodes",
+                               "-keyout", key, "-out", csr, "-subj",
+                               f"/CN={common_name}"]
+                    if san:
+                        request.extend(
+                            ["-addext", f"subjectAltName=DNS:{san}"])
+                    openssl_run(request)
+                    sign = ["x509", "-req", "-in", csr, "-CA", ca_cert,
+                            "-CAkey", ca_key, "-CAcreateserial", "-out",
+                            cert, "-days", "1"]
+                    if san:
+                        sign.extend(["-copy_extensions", "copy"])
+                    openssl_run(sign)
+                    return cert, key
+
+                mtls_server_cert, mtls_server_key = signed_cert(
+                    "server", "localhost", "localhost")
+                mtls_client_cert, mtls_client_key = signed_cert(
+                    "client", "skein-client")
+
+                def mtls_skein_server(auth):
+                    probe = socket.socket()
+                    probe.bind(("127.0.0.1", 0))
+                    port = probe.getsockname()[1]
+                    probe.close()
+                    proc = subprocess.Popen(
+                        [BIN],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    proc.stdin.write(
+                        "import std;\n"
+                        f'let l = std.net.tcp_listen("127.0.0.1", {port}, '
+                        "1000);\n"
+                        "let c = std.net.accept(l, 5000);\n"
+                        f'let t = std.tls.server(c, "{mtls_server_cert}", '
+                        f'"{mtls_server_key}", {{"client_ca_file": '
+                        f'"{ca_cert}", "client_auth": "{auth}"}});\n'
+                        "let data = std.io.read(t, 100);\n"
+                        'std.io.write_all(t, "mtls:" + '
+                        "bytes_to_string(data));\n"
+                        "std.io.close(t);\n"
+                        "std.net.close(l);\n"
+                        'println("mtls served");\n'
+                    )
+                    proc.stdin.close()
+                    return proc, port
+
+                def mtls_python_client(port, with_cert):
+                    import ssl as ssl_module
+                    deadline = time.time() + 5
+                    raw = None
+                    while time.time() < deadline:
+                        try:
+                            raw = socket.create_connection(
+                                ("127.0.0.1", port), timeout=0.2)
+                            break
+                        except OSError:
+                            time.sleep(0.05)
+                    assert raw is not None, "mtls server did not listen"
+                    context = ssl_module.SSLContext(
+                        ssl_module.PROTOCOL_TLS_CLIENT)
+                    context.load_verify_locations(ca_cert)
+                    if with_cert:
+                        context.load_cert_chain(
+                            mtls_client_cert, mtls_client_key)
+                    wrapped = context.wrap_socket(
+                        raw, server_hostname="localhost")
+                    wrapped.sendall(b"hello")
+                    result = wrapped.recv(100)
+                    wrapped.close()
+                    return result
+
+                mtls_proc, mtls_port = mtls_skein_server("required")
+                try:
+                    assert mtls_python_client(
+                        mtls_port, True) == b"mtls:hello"
+                    mtls_proc.wait(timeout=10)
+                    assert "mtls served" in mtls_proc.stdout.read()
+                finally:
+                    if mtls_proc.poll() is None:
+                        mtls_proc.terminate()
+                        mtls_proc.wait(timeout=5)
+
+                missing_proc, missing_port = mtls_skein_server("required")
+                try:
+                    import ssl as ssl_module
+                    rejected = False
+                    try:
+                        mtls_python_client(missing_port, False)
+                    except ssl_module.SSLError:
+                        rejected = True
+                    assert rejected, "required client auth accepted no cert"
+                    missing_proc.wait(timeout=10)
+                    assert missing_proc.returncode != 0
+                finally:
+                    if missing_proc.poll() is None:
+                        missing_proc.terminate()
+                        missing_proc.wait(timeout=5)
+
+                optional_proc, optional_port = mtls_skein_server("optional")
+                try:
+                    assert mtls_python_client(
+                        optional_port, False) == b"mtls:hello"
+                    optional_proc.wait(timeout=10)
+                    assert "mtls served" in optional_proc.stdout.read()
+                finally:
+                    if optional_proc.poll() is None:
+                        optional_proc.terminate()
+                        optional_proc.wait(timeout=5)
+
+                py_probe = socket.socket()
+                py_probe.bind(("127.0.0.1", 0))
+                py_port = py_probe.getsockname()[1]
+                py_probe.close()
+                py_listener = socket.socket()
+                py_listener.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                py_listener.bind(("127.0.0.1", py_port))
+                py_listener.listen(1)
+                py_listener.settimeout(5)
+                py_seen = []
+
+                def mtls_python_server():
+                    import ssl as ssl_module
+                    context = ssl_module.SSLContext(
+                        ssl_module.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain(
+                        mtls_server_cert, mtls_server_key)
+                    context.verify_mode = ssl_module.CERT_REQUIRED
+                    context.load_verify_locations(ca_cert)
+                    try:
+                        client, _ = py_listener.accept()
+                        wrapped = context.wrap_socket(
+                            client, server_side=True)
+                        py_seen.append(wrapped.getpeercert())
+                        data = wrapped.recv(100)
+                        wrapped.sendall(b"client:" + data)
+                        wrapped.close()
+                    finally:
+                        py_listener.close()
+
+                py_thread = threading.Thread(target=mtls_python_server)
+                py_thread.start()
+                mtls_client_proc = run(
+                    "import std;\n"
+                    f'let s = std.net.tcp_connect("127.0.0.1", {py_port}, '
+                    "1000);\n"
+                    'let t = std.tls.client(s, "localhost", {\n'
+                    f'  "ca_file": "{ca_cert}",\n'
+                    f'  "cert_file": "{mtls_client_cert}",\n'
+                    f'  "key_file": "{mtls_client_key}"\n'
+                    "});\n"
+                    'std.io.write_all(t, "hello");\n'
+                    'println(bytes_to_string(std.io.read(t, 100)));\n'
+                    "std.io.close(t);\n"
+                )
+                py_thread.join(timeout=5)
+                assert mtls_client_proc.returncode == 0, (
+                    mtls_client_proc.stderr)
+                assert "client:hello" in mtls_client_proc.stdout, (
+                    mtls_client_proc.stdout)
+                assert py_seen, "python mtls server saw no client cert"
+                subject = dict(entry[0] for entry in py_seen[0]["subject"])
+                assert subject.get("commonName") == "skein-client", subject
+
+                py_https_probe = socket.socket()
+                py_https_probe.bind(("127.0.0.1", 0))
+                py_https_port = py_https_probe.getsockname()[1]
+                py_https_probe.close()
+                py_https_listener = socket.socket()
+                py_https_listener.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                py_https_listener.bind(("127.0.0.1", py_https_port))
+                py_https_listener.listen(1)
+                py_https_listener.settimeout(5)
+                py_https_seen = []
+
+                def mtls_https_python_server():
+                    import ssl as ssl_module
+                    context = ssl_module.SSLContext(
+                        ssl_module.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain(
+                        mtls_server_cert, mtls_server_key)
+                    context.verify_mode = ssl_module.CERT_REQUIRED
+                    context.load_verify_locations(ca_cert)
+                    try:
+                        client, _ = py_https_listener.accept()
+                        wrapped = context.wrap_socket(
+                            client, server_side=True)
+                        py_https_seen.append(wrapped.getpeercert())
+                        data = b""
+                        while b"\r\n\r\n" not in data:
+                            chunk = wrapped.recv(4096)
+                            if not chunk:
+                                break
+                            data += chunk
+                        wrapped.sendall(
+                            b"HTTP/1.1 200 OK\r\n"
+                            b"Content-Length: 6\r\n"
+                            b"\r\n"
+                            b"secure")
+                        wrapped.close()
+                    finally:
+                        py_https_listener.close()
+
+                py_https_thread = threading.Thread(
+                    target=mtls_https_python_server)
+                py_https_thread.start()
+                https_mtls_client = run(
+                    "import std;\n"
+                    "let r = std.http.get("
+                    f'"https://localhost:{py_https_port}/secure", '
+                    '{"tls": {'
+                    f'"ca_file": "{ca_cert}", '
+                    f'"cert_file": "{mtls_client_cert}", '
+                    f'"key_file": "{mtls_client_key}"'
+                    "}});\n"
+                    'println(r["status"]);\n'
+                    'println(bytes_to_string(r["body"]));\n'
+                )
+                py_https_thread.join(timeout=5)
+                assert https_mtls_client.returncode == 0, (
+                    https_mtls_client.stderr)
+                assert "200" in https_mtls_client.stdout, (
+                    https_mtls_client.stdout)
+                assert "secure" in https_mtls_client.stdout, (
+                    https_mtls_client.stdout)
+                assert py_https_seen, "python https server saw no client cert"
+                subject = dict(entry[0] for entry in py_https_seen[0]["subject"])
+                assert subject.get("commonName") == "skein-client", subject
+
+                serve_mtls_probe = socket.socket()
+                serve_mtls_probe.bind(("127.0.0.1", 0))
+                serve_mtls_port = serve_mtls_probe.getsockname()[1]
+                serve_mtls_probe.close()
+                serve_mtls_proc = subprocess.Popen(
+                    [BIN],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                serve_mtls_client = None
+                try:
+                    serve_mtls_proc.stdin.write(
+                        "import std;\n"
+                        f'let s = std.http.listen_tls("127.0.0.1", '
+                        f'{serve_mtls_port}, "{mtls_server_cert}", '
+                        f'"{mtls_server_key}", 0, {{"client_ca_file": '
+                        f'"{ca_cert}", "client_auth": "required"}});\n'
+                        "let n = std.http.serve(s, func(req) {\n"
+                        '  return {"status": 200, "body": "http-mtls:" + '
+                        'req["path"]};\n'
+                        "}, 1);\n"
+                        'println("served " + str(n));\n'
+                        "std.http.close(s);\n"
+                    )
+                    serve_mtls_proc.stdin.close()
+                    deadline = time.time() + 5
+                    while time.time() < deadline:
+                        try:
+                            serve_mtls_client = socket.create_connection(
+                                ("127.0.0.1", serve_mtls_port), timeout=0.2)
+                            break
+                        except OSError:
+                            time.sleep(0.05)
+                    assert serve_mtls_client is not None, (
+                        "http serve mtls listener did not start")
+                    import ssl as ssl_module
+                    context = ssl_module.SSLContext(
+                        ssl_module.PROTOCOL_TLS_CLIENT)
+                    context.load_verify_locations(ca_cert)
+                    context.load_cert_chain(
+                        mtls_client_cert, mtls_client_key)
+                    wrapped = context.wrap_socket(
+                        serve_mtls_client, server_hostname="localhost")
+                    wrapped.sendall(
+                        b"GET /secure HTTP/1.1\r\n"
+                        b"Host: localhost\r\n"
+                        b"Connection: close\r\n"
+                        b"\r\n")
+                    response = b""
+                    while True:
+                        chunk = wrapped.recv(4096)
+                        if not chunk:
+                            break
+                        response += chunk
+                    text = response.decode("utf-8", errors="replace")
+                    assert "200 OK" in text, text
+                    assert "http-mtls:/secure" in text, text
+                    wrapped.close()
+                    serve_mtls_proc.wait(timeout=10)
+                    assert "served 1" in serve_mtls_proc.stdout.read()
+                finally:
+                    if serve_mtls_client:
+                        serve_mtls_client.close()
+                    if serve_mtls_proc.poll() is None:
+                        serve_mtls_proc.terminate()
+                        serve_mtls_proc.wait(timeout=5)
+
+                h2_mtls_probe = socket.socket()
+                h2_mtls_probe.bind(("127.0.0.1", 0))
+                h2_mtls_port = h2_mtls_probe.getsockname()[1]
+                h2_mtls_probe.close()
+                h2_mtls_server = subprocess.Popen(
+                    [BIN],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                try:
+                    h2_mtls_server.stdin.write(
+                        "import std;\n"
+                        f'let s = std.http2.listen_tls("127.0.0.1", '
+                        f'{h2_mtls_port}, "{mtls_server_cert}", '
+                        f'"{mtls_server_key}", 0, {{"client_ca_file": '
+                        f'"{ca_cert}", "client_auth": "required"}});\n'
+                        "let n = std.http2.serve(s, func(req) {\n"
+                        '  return {"status": 200, "body": "h2-mtls:" + '
+                        'req["path"]};\n'
+                        "}, 1);\n"
+                        'println("served " + str(n));\n'
+                        "std.http2.close(s);\n"
+                    )
+                    h2_mtls_server.stdin.close()
+                    time.sleep(0.5)
+                    h2_mtls_client = run(
+                        "import std;\n"
+                        f'let a = std.http2.get('
+                        f'"https://localhost:{h2_mtls_port}/secure", '
+                        '{"tls": {'
+                        f'"ca_file": "{ca_cert}", '
+                        f'"cert_file": "{mtls_client_cert}", '
+                        f'"key_file": "{mtls_client_key}"'
+                        "}});\n"
+                        'println(str(a["status"]) + " " + a["protocol"]);\n'
+                        'println(bytes_to_string(a["body"]));\n',
+                        timeout=15,
+                    )
+                    assert h2_mtls_client.returncode == 0, (
+                        h2_mtls_client.stderr)
+                    assert "200 h2" in h2_mtls_client.stdout, (
+                        h2_mtls_client.stdout)
+                    assert "h2-mtls:/secure" in h2_mtls_client.stdout, (
+                        h2_mtls_client.stdout)
+                    h2_mtls_server.wait(timeout=10)
+                    assert "served 1" in h2_mtls_server.stdout.read()
+                finally:
+                    if h2_mtls_server.poll() is None:
+                        h2_mtls_server.terminate()
+                        h2_mtls_server.wait(timeout=5)
+
         serve_probe = socket.socket()
         serve_probe.bind(("127.0.0.1", 0))
         serve_port = serve_probe.getsockname()[1]

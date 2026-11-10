@@ -3230,7 +3230,7 @@ std.http.request_async(method, url[, options])
 std.http.get_async(url[, options])
 std.http.post_async(url[, body][, options])
 std.http.listen(host, port[, timeout_ms])
-std.http.listen_tls(host, port, cert_file, key_file[, timeout_ms])
+std.http.listen_tls(host, port, cert_file, key_file[, timeout_ms[, options]])
 std.http.accept(server[, timeout_ms])
 std.http.accept_async(server[, timeout_ms])
 std.http.respond(request, status[, headers[, body]])
@@ -3470,7 +3470,7 @@ std.http2.post_async(url[, body[, options]])    → task
 std.http2.request_many(requests[, options])     → list
 std.http2.request_many_async(requests[, options]) → task
 std.http2.listen(host, port[, timeout_ms])      → server
-std.http2.listen_tls(host, port, cert_file, key_file[, timeout_ms]) → server
+std.http2.listen_tls(host, port, cert_file, key_file[, timeout_ms[, options]]) → server
 std.http2.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]]) → int
 std.http2.close(server)
 ```

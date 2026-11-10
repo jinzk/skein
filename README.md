@@ -576,10 +576,14 @@ HTTPS 同步客户端：
 ```text
 let r = std.http.get("https://example.com/", {
   "tls": {
-    "ca_file": "/etc/ssl/certs/ca-certificates.crt"
+    "ca_file": "/etc/ssl/certs/ca-certificates.crt",
+    "cert_file": "client-cert.pem",
+    "key_file": "client-key.pem"
   }
 });
 ```
+
+`cert_file` / `key_file` 用于 mTLS；同步和 async 客户端都会透传。
 
 HTTPS 同步服务端：
 
@@ -589,6 +593,18 @@ let req = std.http.accept(s, 5000);
 std.http.respond(req, 200, {"Content-Type": "text/plain"}, "secure");
 std.http.close(s);
 ```
+
+mTLS 服务端可以在 `listen_tls` 的第 6 个参数传入选项：
+
+```text
+let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem", 0, {
+  "client_ca_file": "ca.pem",
+  "client_auth": "required"
+});
+```
+
+`std.http.serve` / `std.http.serve_threads` / `std.http.serve_workers` 会沿用服务端
+`client_ca_file` / `client_auth`。
 
 HTTP/1.1 服务端：
 
@@ -1165,7 +1181,7 @@ std.http2.post_async(url[, body[, options]])    → task
 std.http2.request_many(requests[, options])     → list
 std.http2.request_many_async(requests[, options]) → task
 std.http2.listen(host, port[, timeout_ms])      → server
-std.http2.listen_tls(host, port, cert, key[, timeout_ms]) → server
+std.http2.listen_tls(host, port, cert, key[, timeout_ms[, options]]) → server
 std.http2.serve(server, handler[, max_requests[, max_per_connection[, idle_timeout_ms]]]) → int
 std.http2.close(server)
 ```
@@ -1175,7 +1191,8 @@ std.http2.close(server)
 ```text
 let a = std.http2.get("https://example.com/", {
   "headers": {"Accept": "text/plain"},
-  "tls": {"verify": true, "ca_file": "/etc/ssl/certs/ca-certificates.crt"}
+  "tls": {"verify": true, "ca_file": "/etc/ssl/certs/ca-certificates.crt",
+          "cert_file": "client-cert.pem", "key_file": "client-key.pem"}
 });
 
 print(str(a["status"]) + " " + a["protocol"]);
@@ -1337,10 +1354,37 @@ std.net.close(listener);
 选项：
 
 ```text
-verify    // bool，客户端默认 true
-ca_file   // 客户端 CA 文件
-alpn      // 客户端/服务端 ALPN 协议列表
+verify          // bool，客户端默认 true
+ca_file         // 客户端 CA 文件
+cert_file       // 客户端证书（mTLS）
+key_file        // 客户端私钥（mTLS）
+client_ca_file  // 服务端用于校验客户端证书的 CA 文件
+client_auth     // 服务端客户端证书策略：none（默认）/ optional / required
+alpn            // 客户端/服务端 ALPN 协议列表
 ```
+
+mTLS：
+
+```text
+// 服务端要求客户端证书
+let tls = std.tls.server(client, "cert.pem", "key.pem", {
+  "client_ca_file": "ca.pem",
+  "client_auth": "required"
+});
+
+// 客户端提供证书
+let tls = std.tls.client(socket, "example.com", {
+  "ca_file": "ca.pem",
+  "cert_file": "client-cert.pem",
+  "key_file": "client-key.pem"
+});
+```
+
+- `client_auth = "optional"`：请求客户端证书，但客户端不提供时仍继续握手；
+- `client_auth = "required"`：客户端必须提供可验证证书，否则握手失败；
+- `client_auth` 为 `optional`/`required` 时必须提供 `client_ca_file`；
+- 客户端 `cert_file` 与 `key_file` 必须成对提供；
+- 证书校验失败会报告 `tls: certificate verification failed: ...`。
 
 `std.tls.alpn(stream)` 返回握手后协商出的协议：
 

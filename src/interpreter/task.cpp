@@ -37,7 +37,7 @@ void on_task_timer_close(uv_handle_t *handle) {
     delete (uv_timer_t *)handle;
 }
 
-struct task {
+struct task : std::enable_shared_from_this<task> {
     task_status status = TASK_PENDING;
     value_t *result = NULL;
     std::string error;
@@ -46,6 +46,10 @@ struct task {
     std::function<void()> cancel_operation;
     std::vector<std::function<void()>> waiters;
     std::vector<std::shared_ptr<task>> dependencies;
+    /* Structured concurrency: tasks launched from this task's fiber. */
+    std::vector<std::shared_ptr<task>> children;
+    std::weak_ptr<task> parent;
+    bool detached = false;
 
     task() {
         task_registry().push_back(this);
@@ -59,6 +63,11 @@ struct task {
         std::vector<task *> &tasks = task_registry();
         tasks.erase(std::remove(tasks.begin(), tasks.end(), this),
                     tasks.end());
+        for (const task_ptr &child : children) {
+            if (child && child->status == TASK_PENDING)
+                child->cancel();
+        }
+        children.clear();
         freeval(result);
         freeval(error_value);
     }
@@ -154,8 +163,50 @@ std::string task_describe(const void *data) {
     }
 }
 
+value_t *task_get_field(void *data, const char *name) {
+    task *raw = static_cast<task *>(data);
+    if (!raw || !name)
+        return NULL;
+    std::shared_ptr<task> task = raw->shared_from_this();
+    if (std::strcmp(name, "detach") == 0) {
+        return newnativeval([task](const std::vector<value_t *> &) {
+            task_detach(task);
+            return new_task_value(task);
+        });
+    }
+    if (std::strcmp(name, "detached") == 0) {
+        return newnativeval([task](const std::vector<value_t *> &) {
+            return newboolval(task_detached(task));
+        });
+    }
+    int functype = 0;
+    if (std::strcmp(name, "wait") == 0)
+        functype = B_task_wait;
+    else if (std::strcmp(name, "try_wait") == 0)
+        functype = B_task_try_wait;
+    else if (std::strcmp(name, "cancel") == 0)
+        functype = B_task_cancel;
+    else if (std::strcmp(name, "done") == 0)
+        functype = B_task_done;
+    else if (std::strcmp(name, "catch") == 0)
+        functype = B_task_catch;
+    else
+        return NULL;
+    return newnativeval([task, functype](const std::vector<value_t *> &args) {
+        std::vector<value_t *> all;
+        all.reserve(args.size() + 1);
+        value_t *task_value = new_task_value(task);
+        all.push_back(task_value);
+        for (value_t *arg : args)
+            all.push_back(arg);
+        value_t *result = call_task_builtin(functype, all);
+        freeval(task_value);
+        return result;
+    });
+}
+
 const struct native_type task_type = {
-    "task", task_describe
+    "task", task_describe, nullptr, task_get_field
 };
 
 value_t *make_task_value(std::shared_ptr<task> value) {
@@ -1022,6 +1073,55 @@ void task_visit_values(void (*visit)(void *, struct value_t *), void *ctx) {
             visit(ctx, value->result);
         if (value->error_value)
             visit(ctx, value->error_value);
+    }
+}
+
+void task_add_child(const task_ptr &parent, const task_ptr &child) {
+    if (!child)
+        return;
+    if (!parent) {
+        child->detached = true;
+        return;
+    }
+    if (parent->status == TASK_CANCELLED) {
+        child->detached = true;
+        child->cancel();
+        return;
+    }
+    child->parent = parent;
+    parent->children.push_back(child);
+}
+
+void task_detach(const task_ptr &task) {
+    if (!task || task->detached)
+        return;
+    task->detached = true;
+    task_ptr parent = task->parent.lock();
+    if (parent) {
+        std::vector<task_ptr> &children = parent->children;
+        children.erase(
+            std::remove(children.begin(), children.end(), task),
+            children.end());
+    }
+    task->parent.reset();
+}
+
+bool task_detached(const task_ptr &task) {
+    return !task || task->detached;
+}
+
+std::vector<task_ptr> task_children(const task_ptr &task) {
+    if (!task)
+        return {};
+    return task->children;
+}
+
+void task_cancel_children(const task_ptr &task) {
+    if (!task)
+        return;
+    for (const task_ptr &child : task->children) {
+        if (child && child->status == TASK_PENDING)
+            child->cancel();
     }
 }
 

@@ -172,6 +172,8 @@ struct ufncall {
     int column;
     struct ast *callee;
     struct ast *args;
+    /* `launch f(args)`: start the call on a new fiber and return its task. */
+    int launch;
 };
 
 struct flow {

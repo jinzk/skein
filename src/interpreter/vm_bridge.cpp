@@ -600,6 +600,7 @@ static void ensure_vm_host() {
         host.fn_declare_trait_meta = &declare_trait_meta;
         host.fn_declare_impl_meta = &declare_impl_meta;
         host.fn_fiber_await_task = &fiber_await_task;
+        host.fn_fiber_launch_value = &fiber_launch_value;
         host.fn_fiber_is_generator = &fiber_is_generator;
         host.fn_fiber_yield_value = &fiber_yield_value;
         host.fn_generator_next_value = &generator_next_value;

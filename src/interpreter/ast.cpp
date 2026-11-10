@@ -178,6 +178,7 @@ struct ast *newcall(struct ast *callee, struct ast *l) {
     set_loc_from(a, callee);
     a->callee = callee;
     a->args = l;
+    a->launch = 0;
     return (struct ast *)a;
 }
 

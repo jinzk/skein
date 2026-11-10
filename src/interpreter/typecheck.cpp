@@ -609,6 +609,9 @@ struct Checker : public BuiltinContext {
             const TypeNode *result = type_any();
             if (!check_call(expr, expected, env, result) || error_)
                 return false;
+            if (((struct ufncall *)expr)->launch && result &&
+                result->kind != TYPE_TASK)
+                result = type_container(TYPE_TASK, {result});
             invalidate_method_receiver(
                 ((struct ufncall *)expr)->callee, env);
             return warn_or_error(result, expected, expr->line,
@@ -2715,6 +2718,9 @@ struct Checker : public BuiltinContext {
             case 'C': {
                 const TypeNode *result = type_any();
                 check_call(expr, type_any(), env, result);
+                if (((struct ufncall *)expr)->launch && result &&
+                    result->kind != TYPE_TASK)
+                    result = type_container(TYPE_TASK, {result});
                 invalidate_method_receiver(
                     ((struct ufncall *)expr)->callee, env);
                 return result;

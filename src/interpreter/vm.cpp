@@ -176,6 +176,17 @@ void free_stack(std::vector<value_t *> &stack) {
     stack.clear();
 }
 
+value_t *fiber_launch_host(value_t *callee,
+                           std::vector<value_t *> args) {
+    if (!skein_vm_host().fn_fiber_launch_value) {
+        for (value_t *arg : args)
+            freeval(arg);
+        yyerror("launch is not available");
+        return NULL;
+    }
+    return skein_vm_host().fn_fiber_launch_value(callee, std::move(args));
+}
+
 struct vm_unwind {
     UnwindKind kind;
     value_t *value;
@@ -2473,7 +2484,10 @@ public:
                         return abort_error();
                     }
                     value_t *result =
-                        skein_vm_call_value_args(callee, std::move(args));
+                        (ins.flags & 1)
+                            ? fiber_launch_host(callee, std::move(args))
+                            : skein_vm_call_value_args(callee,
+                                                       std::move(args));
                     freeval(callee);
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
@@ -2512,6 +2526,24 @@ public:
                     if (!callee) {
                         free_args(args, argc);
                         return abort_error();
+                    }
+                    if (ins.flags & 1) {
+                        std::vector<value_t *> owned(args, args + argc);
+                        value_t *result =
+                            fiber_launch_host(callee, std::move(owned));
+                        freeval(callee);
+                        if (context_.control != EVAL_CONTROL_NONE) {
+                            freeval(result);
+                            return abort_error();
+                        }
+                        if (context_.runtime_error_count != errors_before_) {
+                            freeval(result);
+                            return abort_error();
+                        }
+                        if (result && is_control(result))
+                            return abort_control(result);
+                        push(result ? result : newnull());
+                        break;
                     }
                     FastCallResult fast = try_fast_call(callee, args, argc);
                     if (fast == FastCallResult::Pushed) {

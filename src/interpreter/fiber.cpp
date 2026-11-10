@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <string>
@@ -383,6 +384,51 @@ value_t *await_result(const task_ptr &task) {
 
 } // namespace
 
+static bool wait_child_tasks(const task_ptr &parent, value_t *&error) {
+    error = NULL;
+    if (!parent)
+        return true;
+    std::vector<task_ptr> children = task_children(parent);
+    std::vector<task_ptr> pending;
+    for (const task_ptr &child : children) {
+        if (child && !task_detached(child) &&
+            task_get_state(child) == TASK_STATE_PENDING)
+            pending.push_back(child);
+    }
+    while (!pending.empty()) {
+        for (auto it = pending.begin(); it != pending.end();) {
+            if (task_detached(*it) ||
+                task_get_state(*it) != TASK_STATE_PENDING)
+                it = pending.erase(it);
+            else
+                ++it;
+        }
+        for (const task_ptr &child : children) {
+            if (!child || task_detached(child))
+                continue;
+            if (task_get_state(child) == TASK_STATE_FAILED) {
+                error = task_error_value(child);
+                task_cancel_children(parent);
+                return false;
+            }
+        }
+        if (pending.empty())
+            break;
+        fiber_wait_for(
+            [pending]() {
+                for (const task_ptr &child : pending) {
+                    if (task_get_state(child) != TASK_STATE_PENDING)
+                        return true;
+                }
+                return false;
+            },
+            0);
+        if (current_fiber && current_fiber->canceled)
+            break;
+    }
+    return true;
+}
+
 bool fiber::check_stack(const char *where) {
     if (!stack_low || stack_usable == 0)
         return true;
@@ -426,6 +472,21 @@ void fiber::fiber_main() {
     value_t *result = body ? body() : NULL;
     body = nullptr;
 
+    if (task && !canceled) {
+        value_t *child_error = NULL;
+        if (!wait_child_tasks(task, child_error)) {
+            freeval(result);
+            if (!child_error)
+                child_error =
+                    newerrorval("runtime", "child task failed");
+            task_fail_error(task, child_error);
+            if (root_context)
+                adopt_scopes(eval.scopes, root_context->scopes);
+            state = FIBER_DONE;
+            return;
+        }
+    }
+
     if (kind == FIBER_GENERATOR) {
         bool closed = eval.control == EVAL_CONTROL_CLOSE ||
                       (closing && eval.control == EVAL_CONTROL_NONE);
@@ -468,11 +529,13 @@ bool fiber_in_fiber() {
     return current_fiber != nullptr;
 }
 
-task_ptr fiber_start_async(std::function<value_t *()> body) {
+task_ptr fiber_start_async(std::function<value_t *()> body,
+                           const task_ptr &parent) {
     ensure_fiber_gc_roots();
     task_ptr task = task_create();
     fiber *value = new fiber(std::move(body), FIBER_TASK);
     value->task = task;
+    task_add_child(parent, task);
     diag_capture(value->diagnostics);
     value->eval.scopes.global_scope =
         active_eval_context().scopes.global_scope;
@@ -484,6 +547,7 @@ task_ptr fiber_start_async(std::function<value_t *()> body) {
         if (value->state == FIBER_DONE)
             return;
         value->canceled = true;
+        task_cancel_children(value->task);
         if (value->state == FIBER_WAITING)
             make_ready(value);
     });
@@ -496,6 +560,46 @@ task_ptr fiber_start_async(std::function<value_t *()> body) {
     if (value->state == FIBER_DONE)
         remove_fiber(value);
     return task;
+}
+
+value_t *fiber_launch_value(value_t *callee, std::vector<value_t *> args) {
+    if (!callee) {
+        for (value_t *arg : args)
+            freeval(arg);
+        return NULL;
+    }
+    value_t *callee_copy = dupval(callee);
+    task_ptr parent = current_fiber ? current_fiber->task : nullptr;
+    task_ptr task = fiber_start_async(
+        [callee_copy, owned = std::move(args)]() mutable -> value_t * {
+            value_t *result = nullptr;
+            try {
+                result = call_value_args(callee_copy, std::move(owned));
+            } catch (const std::exception &error) {
+                eval_raise(newerrorval("runtime", error.what()));
+                result = nullptr;
+            } catch (...) {
+                eval_raise(newerrorval("runtime", "launch failed"));
+                result = nullptr;
+            }
+            freeval(callee_copy);
+            if (!result)
+                return nullptr;
+            if (is_task_value(result)) {
+                task_ptr inner;
+                bool ok = get_task_value(result, inner);
+                freeval(result);
+                if (!ok)
+                    return nullptr;
+                task_add_child(current_fiber ? current_fiber->task
+                                             : nullptr,
+                               inner);
+                return fiber_await_task(inner);
+            }
+            return result;
+        },
+        parent);
+    return new_task_value(task);
 }
 
 struct generator {

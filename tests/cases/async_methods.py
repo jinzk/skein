@@ -281,3 +281,116 @@ def run_cases():
         + "println(await t);\n",
         stdout="[1, 2, 3, 0, 1, 2]\n",
     )
+
+    check(
+        "launch returns a task",
+        "import std;\n"
+        "func work(n) { return n + 1; }\n"
+        "let t = launch work(41);\n"
+        "println(t.wait());\n"
+        "println(t.done());\n"
+        "println(launch work(1).wait());\n",
+        stdout="42\ntrue\n2\n",
+    )
+
+    check(
+        "launch adopts async task",
+        "import std;\n"
+        "async func add(a, b) { return a + b; }\n"
+        "let t = launch add(2, 3);\n"
+        "println(t.wait());\n",
+        stdout="5\n",
+    )
+
+    check(
+        "launch task methods",
+        "import std;\n"
+        "func work(n) { return n; }\n"
+        "let t = launch work(7);\n"
+        "println(t.detached());\n"
+        "println(t.try_wait());\n",
+        stdout="true\nok(7)\n",
+    )
+
+    check(
+        "launch task type annotation",
+        "import std;\n"
+        "func work(n) { return n + 1; }\n"
+        "let t: task[int] = launch work(41);\n"
+        "println(t.wait());\n",
+        stdout="42\n",
+    )
+
+    check(
+        "launch spread",
+        "import std;\n"
+        "func add(a, b) { return a + b; }\n"
+        "let xs = [20, 22];\n"
+        "println((launch add(...xs)).wait());\n",
+        stdout="42\n",
+    )
+
+    check(
+        "launch structured waits for children",
+        "import std;\n"
+        "async func child() {\n"
+        "  await std.task.sleep(10);\n"
+        '  println("child");\n'
+        "  return 1;\n"
+        "}\n"
+        "async func parent() {\n"
+        "  let t = launch child();\n"
+        '  println("parent-body");\n'
+        "  return 0;\n"
+        "}\n"
+        "println(await parent());\n",
+        stdout="parent-body\nchild\n0\n",
+    )
+
+    check(
+        "launch child failure cancels siblings",
+        "import std;\n"
+        "async func ok(tag) {\n"
+        "  await std.task.sleep(20);\n"
+        '  println("ok-" + tag);\n'
+        "  return tag;\n"
+        "}\n"
+        "async func bad() {\n"
+        "  await std.task.sleep(5);\n"
+        '  fail "sibling-fail";\n'
+        "}\n"
+        "async func parent() {\n"
+        '  let a = launch ok("a");\n'
+        "  let b = launch bad();\n"
+        '  let c = launch ok("c");\n'
+        "  return 0;\n"
+        "}\n"
+        "println(await parent());\n",
+        stderr="sibling-fail",
+        not_stderr="ok-a",
+    )
+
+    check(
+        "launch detach removes structured wait",
+        "import std;\n"
+        "async func child() {\n"
+        "  await std.task.sleep(10);\n"
+        '  println("child");\n'
+        "  return 1;\n"
+        "}\n"
+        "async func parent() {\n"
+        "  let t = launch child();\n"
+        "  t.detach();\n"
+        '  println("parent");\n'
+        "  return 0;\n"
+        "}\n"
+        "println(await parent());\n"
+        "await std.task.sleep(30);\n",
+        stdout="parent\n0\nchild\n",
+    )
+
+    check(
+        "launch expects a call",
+        'import std;\nlaunch 1;\n',
+        stderr="launch expects a call expression",
+    )

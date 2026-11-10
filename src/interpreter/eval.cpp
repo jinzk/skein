@@ -1506,6 +1506,14 @@ struct value_t *eval(struct ast *a) {
 
         case 'C': {
             struct ufncall *call = (struct ufncall *)a;
+            if (call->launch) {
+                struct value_t *callee = eval(call->callee);
+                if (callee) {
+                    value_release_guard callee_guard(callee);
+                    ret = launch_value(callee, call->args);
+                }
+                break;
+            }
             if (call->callee && (call->callee->nodetype == 'G' ||
                                  call->callee->nodetype == 'j')) {
                 bool field_access = call->callee->nodetype == 'j';

@@ -848,6 +848,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "thread"[ \t]+/"func" { YYRET(SKEIN_TOK_THREAD); }
 "await" { YYRET(SKEIN_TOK_AWAIT); }
 "yield" { YYRET(SKEIN_TOK_YIELD); }
+"launch" { YYRET(SKEIN_TOK_LAUNCH); }
 "defer" { YYRET(SKEIN_TOK_DEFER); }
 "package" { YYRET(SKEIN_TOK_PACKAGE); }
 "import" { YYRET(SKEIN_TOK_IMPORT); }

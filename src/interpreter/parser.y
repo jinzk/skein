@@ -852,6 +852,7 @@ static struct type_constraint *runtime_type_or_error(
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token THREAD "thread"
 %token ASYNC "async" AWAIT "await" YIELD "yield" DEFER "defer"
+%token LAUNCH "launch"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait" ENUM "enum"
 %token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
@@ -899,6 +900,7 @@ static struct type_constraint *runtime_type_or_error(
 %right INC DEC
 %precedence '['
 %precedence '.'
+%precedence LAUNCH
 %precedence '('
 %precedence ON
 %precedence NOELSE
@@ -1740,6 +1742,16 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | MATCH exp BODY_LBRACE match_arms '}'
                                            { $$ = newmatch($2, $4); }
     | AWAIT exp %prec UMINUS              { $$ = newawait($2); }
+    | LAUNCH exp %prec LAUNCH {
+        if (!$2 || $2->nodetype != 'C') {
+            yyerror("launch expects a call expression");
+            treefree($2);
+            $$ = NULL;
+        } else {
+            ((struct ufncall *)$2)->launch = 1;
+            $$ = $2;
+        }
+      }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }

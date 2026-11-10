@@ -575,6 +575,23 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     return invoke_value(callee, args);
 }
 
+struct value_t *launch_value(struct value_t *callee, struct ast *args_ast) {
+    if (!callee)
+        return NULL;
+    std::vector<struct value_t *> args;
+    struct value_t *control = NULL;
+    try {
+        if (!collect_args(args_ast, args, control)) {
+            free_args(args);
+            return control;
+        }
+    } catch (...) {
+        free_args(args);
+        throw;
+    }
+    return fiber_launch_value(callee, std::move(args));
+}
+
 struct value_t *call_method_value(struct value_t *receiver,
                                          std::shared_ptr<function_def> def,
                                          struct ast *args_ast) {

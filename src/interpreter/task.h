@@ -40,6 +40,13 @@ struct value_t *call_task_builtin(
 /* Mark result/error values of every live task on this thread. */
 void task_visit_values(void (*visit)(void *, struct value_t *), void *ctx);
 
+/* Structured concurrency bookkeeping for `launch`. */
+void task_add_child(const task_ptr &parent, const task_ptr &child);
+void task_detach(const task_ptr &task);
+bool task_detached(const task_ptr &task);
+std::vector<task_ptr> task_children(const task_ptr &task);
+void task_cancel_children(const task_ptr &task);
+
 void task_shutdown();
 
 #endif

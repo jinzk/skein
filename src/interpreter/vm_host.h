@@ -26,6 +26,7 @@ struct vm_host {
     decltype(&declare_impl_meta) fn_declare_impl_meta = nullptr;
 
     decltype(&fiber_await_task) fn_fiber_await_task = nullptr;
+    decltype(&fiber_launch_value) fn_fiber_launch_value = nullptr;
     decltype(&fiber_is_generator) fn_fiber_is_generator = nullptr;
     decltype(&fiber_yield_value) fn_fiber_yield_value = nullptr;
     decltype(&generator_next_value) fn_generator_next_value = nullptr;

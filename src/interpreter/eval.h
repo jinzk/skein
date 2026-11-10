@@ -12,6 +12,8 @@ struct scope_t;
 struct value_t *eval(struct ast *);
 struct value_t *call_value_args(
     struct value_t *callee, std::vector<struct value_t *> args);
+/* `launch callee(args)`; evaluates args left-to-right on a new fiber. */
+struct value_t *launch_value(struct value_t *callee, struct ast *args_ast);
 
 /* Suppress and record runtime errors until eval_capture_end. */
 void eval_capture_begin(struct eval_capture_snapshot &snapshot);

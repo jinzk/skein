@@ -28,7 +28,7 @@ let foo变量 = 4;
 ### 1.2 关键字
 
 ```text
-let const func async await yield defer
+let const func async await yield defer launch
 if else while do for
 switch case default
 struct impl trait
@@ -992,6 +992,23 @@ struct Handler {
   ```
 
 - `task[T]` 可用于变量、参数和返回类型；`std.task.wait` / `std.task.wait_all` 会保留任务结果类型；
+- `launch` 在当前 runtime 内启动新 fiber，返回 task：
+
+  ```text
+  func work(n) { return n + 1; }
+  let t = launch work(41);
+  t.wait()        // 42
+  t.try_wait()    // result[int]
+  t.cancel()
+  t.done()
+  t.detach()      // 不再由父作用域等待/取消
+  t.detached()
+  ```
+
+  `launch` 默认 structured：当前 async 函数/fiber 退出时等待未 detach 的子任务；
+  子任务失败会取消同作用域其他子任务并向上传播。顶层 `launch` 默认 detached。
+  `launch` 推导为 `task[T]`；callee 本身返回 task 时保持该 `task[T]`（运行时 adopt）。
+  `launch` 是保留关键字。
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_async` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；`std.task.retry` 返回 task，回调结果类型暂不精化；

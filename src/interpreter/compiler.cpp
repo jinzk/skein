@@ -3443,6 +3443,8 @@ struct Compiler {
 
     void compile_call(ast *node, bool tail = false) {
         struct ufncall *call = (struct ufncall *)node;
+        if (call->launch)
+            tail = false;
         std::vector<ast *> args;
         collect_chain(call->args, args);
 
@@ -3463,7 +3465,8 @@ struct Compiler {
                 if (!ok) return;
             }
             if (!ok) return;
-            emit(tail ? Op::TailCall : Op::Call, 0,
+            emit(tail ? Op::TailCall : Op::Call,
+                 call->launch ? 1 : 0,
                  static_cast<uint16_t>(args.size()),
                  static_cast<uint32_t>(args.size()), loc_of(node));
             return;
@@ -3482,7 +3485,8 @@ struct Compiler {
             if (!ok) return;
         }
         uint32_t descriptor = add_call_desc(std::move(spread));
-        emit(Op::CallSpread, 0, 0, descriptor, loc_of(node));
+        emit(Op::CallSpread, call->launch ? 1 : 0, 0, descriptor,
+             loc_of(node));
         if (tail)
             emit(Op::Return, 0, 0, 0, loc_of(node));
     }

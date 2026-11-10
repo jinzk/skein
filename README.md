@@ -521,6 +521,50 @@ let results = std.task.bounded_parallel_map(
 - 退出解释器时会取消剩余 task；
 - `std.net.*_async` 已经复用同一套 task 和事件循环。
 
+`launch` 在当前 runtime 内启动新 fiber：
+
+```text
+import std;
+
+func work(n) { return n + 1; }
+
+let t = launch work(41);
+println(t.wait());     // 42
+println(t.done());     // true
+
+async func fetch() { await std.task.sleep(10); return "ok"; }
+let f = launch fetch();  // async callee 在运行时 adopt，不会产生 task[task[T]]
+println(f.wait());
+```
+
+Task 方法：
+
+```text
+t.wait([timeout_ms]) -> T
+t.try_wait([timeout_ms]) -> result[T]
+t.cancel() -> bool
+t.done() -> bool
+t.detach() -> task
+t.detached() -> bool
+```
+
+结构化并发：
+
+- `launch` 创建的任务默认挂到当前 task 的作用域；
+- 当前 async 函数/fiber 正常结束时，等待所有未 detach 的子任务；
+- 子任务失败会取消同作用域其他子任务，并把首个错误传播给父任务；
+- 父任务取消会递归取消未 detach 的子任务；
+- `t.detach()` 后父作用域不再等待/取消它，但仍可 `wait()` / `cancel()`；
+- 顶层脚本没有父 task，顶层 `launch` 默认 detached，需要显式 `wait()`；
+- generator fiber 没有 task 父级，其中的 `launch` 也按 detached 处理。
+
+当前限制：
+
+- `launch` 是保留关键字（不要求 `f` 为 async）；
+- `launch` 推导为 `task[T]`；callee 已返回 task 时保持该 `task[T]`（运行时 adopt，不产生 `task[task[T]]`）；
+- 静态“禁止 launch task-returning 函数”的检查留到移除 `async` 后；
+- 跨线程不能直接 `wait` task，继续使用 Channel/Message。
+
 HTTP/1.1 客户端：
 
 ```text

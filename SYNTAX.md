@@ -2396,6 +2396,7 @@ std.worker
 std.thread
 std.type
 std.meta
+std.plugin
 std.module
 std.net
 std.http

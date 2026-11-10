@@ -1986,7 +1986,7 @@ func point_sort(base: *Point, n: usize, cmp: Compare) retains cmp;
 
 import std;
 
-let name = std.module.load("./libexample.so");
+let name = std.plugin.load("./libexample.so");
 print(name);              // example.math
 
 import example.math;
@@ -1998,8 +1998,8 @@ example.math.ANSWER;
 - `skein_api` 由 host 通过 `init` 传入，值以 opaque handle 传递；
 - `skein_api` v1 追加了 `new_list` / `new_dict` / `as_userdata`；使用新字段前
   应检查 `size`，旧 host 的 ABI 表会更短；
-- 静态绑定在启动时注册，动态插件通过 `std.module.load` 加载；
-- `std.module.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
+- 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；`std.module` 保留为 deprecated alias；
+- `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
@@ -2083,6 +2083,7 @@ std.worker
 std.thread
 std.type
 std.meta
+std.plugin
 std.module
 std.net
 std.http
@@ -2645,6 +2646,9 @@ std.meta.traits
 std.meta.implements
 std.meta.has_type
 
+std.plugin
+std.plugin.load
+std.plugin.unload
 std.module.load
 std.module.unload
 

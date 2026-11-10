@@ -2,10 +2,16 @@
 
 #include "ast.h"
 #include "async_support.h"
+#include "builtin_ids.h"
+#include "builtins_io.h"
+#include "dict.h"
 #include "event_loop.h"
+#include "platform.h"
 #include "runtime_state.h"
 #include "task.h"
+#include "thread_channel.h"
 #include "valuetype.h"
+#include "vm.h"
 
 #include <uv.h>
 
@@ -629,6 +635,9 @@ value_t *new_pipe_value(std::shared_ptr<process_resource> process,
 const char *process_name(int functype) {
     switch (functype) {
         case B_process_spawn: return "std.process.spawn";
+        case B_process_spawn_encoded: return "std.process.spawn_encoded";
+        case B_process_run_encoded: return "std.process.run_encoded";
+        case B_process_result: return "std.process.result";
         case B_process_wait: return "std.process.wait";
         case B_process_kill: return "std.process.kill";
         case B_process_close: return "std.process.close";
@@ -658,6 +667,167 @@ bool get_process(const value_t *value, std::shared_ptr<process_resource> &out) {
         }
     }
     return false;
+}
+
+void append_u32(std::string &out, uint32_t value) {
+    out.push_back((char)(value & 0xFF));
+    out.push_back((char)((value >> 8) & 0xFF));
+    out.push_back((char)((value >> 16) & 0xFF));
+    out.push_back((char)((value >> 24) & 0xFF));
+}
+
+void free_value_list(std::vector<value_t *> &values) {
+    for (value_t *value : values)
+        freeval(value);
+    values.clear();
+}
+
+value_t *process_dict_get(value_t *dict, const char *key) {
+    if (!dict || dict->type != T_dict)
+        return nullptr;
+    for (const auto &entry :
+         ((dict_value_t *)dict)->payload->items) {
+        if (entry.first->type == T_string &&
+            std::strcmp(((string_value_t *)entry.first)->value, key) == 0)
+            return entry.second;
+    }
+    return nullptr;
+}
+
+void process_dict_set(value_t *dict, const char *key, value_t *value) {
+    if (!dict || dict->type != T_dict)
+        return;
+    dict_append_item((dict_value_t *)dict, newstrval(key), value);
+}
+
+long long process_option_timeout(value_t *options) {
+    if (!options || options->type != T_dict)
+        return 0;
+    value_t *timeout = process_dict_get(options, "timeout_ms");
+    if (!timeout || timeout->type != T_int)
+        return 0;
+    return ((int_value_t *)timeout)->value;
+}
+
+value_t *spawn_encoded_process(const value_t *entry, const value_t *message,
+                               value_t *options, std::string &error) {
+    if (!entry || entry->type != T_bytes) {
+        error = "expected encoded entry bytes";
+        return nullptr;
+    }
+    value_t *payload = thread_message_payload((value_t *)message);
+    if (!payload) {
+        error = "expected a Message";
+        return nullptr;
+    }
+    std::string payload_bytes;
+    if (!skein_vm_serialize_message_payload(payload, payload_bytes, error)) {
+        freeval(payload);
+        return nullptr;
+    }
+    freeval(payload);
+
+    const std::string &entry_bytes =
+        ((const bytes_value_t *)entry)->value.read();
+    std::string request;
+    append_u32(request, 0x52504B53u); /* SKPR */
+    append_u32(request, 1u);
+    append_u32(request, (uint32_t)entry_bytes.size());
+    request += entry_bytes;
+    append_u32(request, (uint32_t)payload_bytes.size());
+    request += payload_bytes;
+
+    value_t *spawn_options = (value_t *)newdictval();
+    value_t *arguments = (value_t *)newlistval();
+    ((list_value_t *)arguments)->payload->items.push_back(
+        newstrval("--run-encoded"));
+    process_dict_set(spawn_options, "args", arguments);
+    bool has_stderr = false;
+    if (options && options->type == T_dict) {
+        const char *keys[] = {"env", "cwd", "stderr"};
+        for (const char *key : keys) {
+            value_t *value = process_dict_get(options, key);
+            if (value) {
+                if (std::strcmp(key, "stderr") == 0)
+                    has_stderr = true;
+                process_dict_set(spawn_options, key, dupval(value));
+            }
+        }
+    }
+    if (!has_stderr)
+        process_dict_set(spawn_options, "stderr", newstrval("inherit"));
+    std::string executable = platform_executable_path();
+    if (executable.empty()) {
+        freeval(spawn_options);
+        error = "cannot locate the interpreter executable";
+        return nullptr;
+    }
+    value_t *file = newstrval(executable.c_str());
+    std::vector<value_t *> spawn_args{file, spawn_options};
+    value_t *process = call_process_spawn_builtin(B_process_spawn, spawn_args);
+    free_value_list(spawn_args);
+    if (!process) {
+        error = "cannot spawn encoded process";
+        return nullptr;
+    }
+
+    value_t *stdin_pipe = process_dict_get(process, "stdin");
+    if (!stdin_pipe) {
+        value_t *kill_args[] = {dupval(process)};
+        std::vector<value_t *> kill{kill_args[0]};
+        call_process_spawn_builtin(B_process_kill, kill);
+        free_value_list(kill);
+        freeval(process);
+        error = "encoded process has no stdin pipe";
+        return nullptr;
+    }
+    std::vector<value_t *> write_args{dupval(stdin_pipe),
+                                     newbytesval(request), newintval(0)};
+    value_t *written = call_io_builtin(B_io_write_all, write_args);
+    free_value_list(write_args);
+    if (!written) {
+        std::vector<value_t *> kill{dupval(process)};
+        call_process_spawn_builtin(B_process_kill, kill);
+        free_value_list(kill);
+        freeval(process);
+        error = "cannot write encoded process request";
+        return nullptr;
+    }
+    freeval(written);
+    std::vector<value_t *> close_args{dupval(stdin_pipe)};
+    value_t *closed = call_io_builtin(B_io_close, close_args);
+    free_value_list(close_args);
+    freeval(closed);
+    return process;
+}
+
+value_t *read_process_encoded_result(value_t *process, long long timeout_ms) {
+    value_t *stdout_pipe = process_dict_get(process, "stdout");
+    if (!stdout_pipe)
+        return newerrorval("process", "process has no stdout pipe");
+    std::vector<value_t *> read_args{dupval(stdout_pipe),
+                                     newintval(64 * 1024 * 1024)};
+    value_t *data = call_io_builtin(B_io_read_all, read_args);
+    free_value_list(read_args);
+    std::vector<value_t *> wait_args{dupval(process)};
+    if (timeout_ms > 0)
+        wait_args.push_back(newintval(timeout_ms));
+    value_t *status = call_process_spawn_builtin(B_process_wait, wait_args);
+    free_value_list(wait_args);
+    if (!data || data->type != T_bytes) {
+        freeval(data);
+        freeval(status);
+        return newerrorval("process",
+                           "process did not return an encoded result");
+    }
+    std::string bytes = ((bytes_value_t *)data)->value.read();
+    freeval(data);
+    freeval(status);
+    value_t *envelope = nullptr;
+    std::string error;
+    if (!skein_vm_deserialize_message_payload(bytes, envelope, error))
+        return newerrorval("process", error.c_str());
+    return envelope;
 }
 
 }  // namespace
@@ -887,6 +1057,51 @@ value_t *call_process_spawn_builtin(
         result->payload->items.push_back(std::make_pair(
             newstrval("handle"), new_process_value(process)));
         return (value_t *)result;
+    }
+
+    if (functype == B_process_spawn_encoded ||
+        functype == B_process_run_encoded) {
+        if (args.size() < 2 || args.size() > 3 ||
+            args[0]->type != T_bytes || args[1]->type != T_userdata) {
+            yyerror("%s expects encoded bytes, Message, and optional options",
+                    name);
+            return NULL;
+        }
+        value_t *options = args.size() == 3 ? args[2] : nullptr;
+        if (options && options->type != T_dict) {
+            yyerror("%s options must be a dict", name);
+            return NULL;
+        }
+        std::string error;
+        value_t *process = spawn_encoded_process(args[0], args[1], options,
+                                                 error);
+        if (!process) {
+            yyerror("%s: %s", name, error.c_str());
+            return NULL;
+        }
+        if (functype == B_process_spawn_encoded)
+            return process;
+        value_t *envelope = read_process_encoded_result(
+            process, process_option_timeout(options));
+        freeval(process);
+        return envelope;
+    }
+
+    if (functype == B_process_result) {
+        if (args.empty() || args.size() > 2) {
+            yyerror("%s expects a process and optional timeout", name);
+            return NULL;
+        }
+        long long timeout_ms = 0;
+        if (args.size() == 2) {
+            if (args[1]->type != T_int ||
+                ((int_value_t *)args[1])->value < 0) {
+                yyerror("%s timeout must be a non-negative integer", name);
+                return NULL;
+            }
+            timeout_ms = ((int_value_t *)args[1])->value;
+        }
+        return read_process_encoded_result(args[0], timeout_ms);
     }
 
     if (functype == B_process_wait) {

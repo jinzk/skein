@@ -677,6 +677,29 @@ def check_extended_stdlib():
             stdout="hello",
         )
 
+    check(
+        "std process encoded entry",
+        "import std;\n"
+        "thread func worker(ctx) {\n"
+        '  return {"v": ctx.payload["n"] + 1};\n'
+        "}\n"
+        "let blob = std.thread.encode(worker);\n"
+        "let r = std.process.run_encoded(blob, "
+        'std.thread.Message.from({"n": 4}));\n'
+        'print(r["ok"]); print(":"); print(r["value"]["v"]); print("|");\n'
+        "let p = std.process.spawn_encoded(blob, "
+        'std.thread.Message.from({"n": 7}));\n'
+        "print(std.process.pid(p) > 0); print(\"|\");\n"
+        "let r2 = std.process.result(p, 10000);\n"
+        'print(r2["value"]["v"]); print("|");\n'
+        "thread func bad(ctx) { missing_function(); }\n"
+        "let bad_blob = std.thread.encode(bad);\n"
+        "let r3 = std.process.run_encoded(bad_blob, "
+        "std.thread.Message.from({}));\n"
+        'print(r3["ok"]); print("|");\n',
+        stdout="true:5|true|8|false|",
+    )
+
     with tempfile.TemporaryDirectory() as worker_tmp:
         worker_script = os.path.join(worker_tmp, "worker.skein")
         with open(worker_script, "w", encoding="utf-8") as handle:

@@ -201,6 +201,14 @@ bool skein_vm_serialize_thread_payload(
     const std::vector<struct thread_transfer_module> &modules,
     std::string &bytes, std::string &error);
 
+/* Serialize a data-only Message payload for process IPC. */
+bool skein_vm_serialize_message_payload(const struct value_t *value,
+                                        std::string &bytes,
+                                        std::string &error);
+bool skein_vm_deserialize_message_payload(const std::string &bytes,
+                                          struct value_t *&value,
+                                          std::string &error);
+
 /* Deserialize a thread payload previously produced by
  * skein_vm_serialize_thread_payload. */
 bool skein_vm_deserialize_thread_payload(

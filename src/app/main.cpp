@@ -29,10 +29,16 @@
 #include "source_encoding.h"
 #include "structtype.h"
 #include "task.h"
+#include "thread_channel.h"
 #include "typecheck.h"
 #include "vm.h"
 
 #include <utility>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 extern FILE *yyin;
 extern int indent_count;
@@ -125,6 +131,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> package_dirs;
     std::string source_encoding;
     bool force_interactive = false;
+    bool run_encoded = false;
 
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
@@ -192,6 +199,8 @@ int main(int argc, char **argv) {
             skein_vm_set_stats(true);
         } else if (arg == "-k" || arg == "--keep-going") {
             g_keep_going = true;
+        } else if (arg == "--run-encoded") {
+            run_encoded = true;
         } else if (arg == "-" || (!arg.empty() && arg[0] != '-')) {
             if (!script_path.empty()) {
                 print_usage(program);
@@ -205,6 +214,32 @@ int main(int argc, char **argv) {
     }
 
     source_encoding_set(source_encoding);
+    if (run_encoded) {
+        if (!script_path.empty()) {
+            print_usage(program);
+            return 2;
+        }
+#ifdef _WIN32
+        _setmode(_fileno(stdout), _O_BINARY);
+#endif
+        std::string request;
+        char buffer[65536];
+        for (;;) {
+            std::size_t count = std::fread(buffer, 1, sizeof(buffer), stdin);
+            if (count == 0)
+                break;
+            request.append(buffer, count);
+        }
+        std::string result;
+        std::string error;
+        if (!thread_run_encoded_request(request, result, error)) {
+            std::fprintf(stderr, "skein: %s\n", error.c_str());
+            return 1;
+        }
+        std::fwrite(result.data(), 1, result.size(), stdout);
+        std::fflush(stdout);
+        return 0;
+    }
     package_configure(script_path, package_dirs);
     diag_set_module_name("main");
     if (!script_path.empty() && script_path != "-")

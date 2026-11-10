@@ -3492,3 +3492,24 @@ bool skein_vm_deserialize_thread_payload(
     }
     return true;
 }
+
+bool skein_vm_serialize_message_payload(const struct value_t *value,
+                                        std::string &bytes,
+                                        std::string &error) {
+    writer out;
+    if (!write_value(out, value, 0, error))
+        return false;
+    bytes = std::move(out.data);
+    return true;
+}
+
+bool skein_vm_deserialize_message_payload(const std::string &bytes,
+                                          struct value_t *&value,
+                                          std::string &error) {
+    reader in(bytes);
+    value_owner owned;
+    if (!read_value(in, owned, 0, error))
+        return false;
+    value = owned.release();
+    return true;
+}

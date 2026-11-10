@@ -2682,6 +2682,9 @@ std.fs.file_write_bytes
 std.process.command
 std.process.status
 std.process.command_status
+std.process.spawn_encoded
+std.process.run_encoded
+std.process.result
 
 std.type.kind_of
 std.type.name
@@ -2920,6 +2923,9 @@ std.fs.path_normalize
 
 std.process.run
 std.process.spawn
+std.process.spawn_encoded
+std.process.run_encoded
+std.process.result
 std.process.wait
 std.process.kill
 std.process.close
@@ -4349,6 +4355,31 @@ import std;
 let r = std.process.run("printf hello");
 r["status"]
 bytes_to_string(r["stdout"])
+```
+
+### 编码进程入口
+
+```text
+std.process.run_encoded(blob, message[, options]) → envelope
+std.process.spawn_encoded(blob, message[, options]) → process
+std.process.result(process[, timeout_ms]) → envelope
+```
+
+- `blob` 来自 `std.thread.encode(entry)`；
+- Message payload 以 data-only 值序列化后通过 stdin 发送；
+- 子进程用 `--run-encoded` 读取请求、反序列化 Proto 入口并执行；
+- 返回值为 `{"ok": bool, ...}` envelope；
+- `options` 支持 `env`、`cwd`、`stderr`、`timeout_ms`；
+- 子进程不依赖入口源码，也不需要重新解析脚本；
+- 进程 IPC 不支持 Channel / Thread / Task handle。
+
+```skein
+thread func worker(ctx) {
+  return {"v": ctx.payload["n"] + 1};
+}
+let blob = std.thread.encode(worker);
+let r = std.process.run_encoded(blob, std.thread.Message.from({"n": 4}));
+r["value"]["v"]   // 5
 ```
 
 ### 长驻进程与管道

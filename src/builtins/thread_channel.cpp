@@ -4145,6 +4145,120 @@ void collect_thread_cycles_entry() {
 }  // namespace
 
 namespace {
+
+constexpr uint32_t kProcessRequestMagic = 0x52504B53u; /* "SKPR" */
+constexpr uint32_t kProcessRequestVersion = 1u;
+
+bool take_u32(const std::string &data, std::size_t &pos, uint32_t &value) {
+    if (pos + 4 > data.size())
+        return false;
+    value = (uint32_t)(unsigned char)data[pos] |
+            ((uint32_t)(unsigned char)data[pos + 1] << 8) |
+            ((uint32_t)(unsigned char)data[pos + 2] << 16) |
+            ((uint32_t)(unsigned char)data[pos + 3] << 24);
+    pos += 4;
+    return true;
+}
+
+} // namespace
+
+bool thread_run_encoded_blocking(const std::string &bytes,
+                                 struct value_t *message,
+                                 struct value_t *&result,
+                                 std::string &error) {
+    std::shared_ptr<thread_transfer_function> entry;
+    std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    std::vector<thread_transfer_module> modules;
+    std::vector<thread_transfer_type> types;
+    if (!skein_vm_deserialize_thread_payload(bytes, entry, globals, modules,
+                                             types, error))
+        return false;
+    struct value_t *argument = dupval(message);
+    struct value_t *thread = thread_spawn_payload(
+        std::move(entry), std::move(globals), std::move(modules),
+        std::move(types), argument, "std.process.spawn_encoded");
+    if (!thread) {
+        error = "could not start encoded process entry";
+        return false;
+    }
+    std::shared_ptr<thread_state> state = thread_state_of(thread);
+    if (!state) {
+        freeval(thread);
+        error = "invalid encoded process entry";
+        return false;
+    }
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->cv.wait(lock, [&state] { return state->done; });
+    if (!state->joined) {
+        state->joined = true;
+        lock.unlock();
+        if (state->thread.joinable())
+            state->thread.join();
+        lock.lock();
+    }
+    result = state->result ? dupval(state->result) : newnull();
+    freeval(thread);
+    return true;
+}
+
+bool thread_run_encoded_request(const std::string &request,
+                                std::string &result, std::string &error) {
+    std::size_t pos = 0;
+    uint32_t magic = 0;
+    uint32_t version = 0;
+    if (!take_u32(request, pos, magic) || !take_u32(request, pos, version)) {
+        error = "truncated process request";
+        return false;
+    }
+    if (magic != kProcessRequestMagic) {
+        error = "invalid process request header";
+        return false;
+    }
+    if (version != kProcessRequestVersion) {
+        error = "unsupported process request version";
+        return false;
+    }
+    uint32_t entry_size = 0;
+    if (!take_u32(request, pos, entry_size) ||
+        entry_size > request.size() - pos) {
+        error = "truncated process entry payload";
+        return false;
+    }
+    std::string entry_bytes = request.substr(pos, entry_size);
+    pos += entry_size;
+    uint32_t payload_size = 0;
+    if (!take_u32(request, pos, payload_size) ||
+        payload_size > request.size() - pos) {
+        error = "truncated process message payload";
+        return false;
+    }
+    std::string payload_bytes = request.substr(pos, payload_size);
+    struct value_t *payload = nullptr;
+    if (!skein_vm_deserialize_message_payload(payload_bytes, payload, error))
+        return false;
+    std::shared_ptr<message_state> message_state = make_message_state();
+    message_state->payload = payload;
+    message_state->handles = (struct value_t *)newdictval();
+    struct value_t *message = new_message_value(std::move(message_state));
+    struct value_t *envelope = nullptr;
+    bool ok = thread_run_encoded_blocking(entry_bytes, message, envelope,
+                                          error);
+    freeval(message);
+    if (!ok)
+        return false;
+    ok = skein_vm_serialize_message_payload(envelope, result, error);
+    freeval(envelope);
+    return ok;
+}
+
+struct value_t *thread_message_payload(struct value_t *message) {
+    std::shared_ptr<message_state> state;
+    if (!get_message_state(message, state))
+        return nullptr;
+    return dupval(state->payload);
+}
+
+namespace {
 thread_local std::unique_ptr<eval_context> worker_runtime_context;
 thread_local skein_context worker_runtime_hooks;
 }

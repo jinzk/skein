@@ -678,55 +678,12 @@ static std::shared_ptr<skein::bc::Proto> clone_thread_proto(
     return copy;
 }
 
-static bool is_declaration_function(const skein::bc::Proto &proto,
-                                    const function_code *code) {
-    if (!code)
-        return false;
-    for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
-        for (const skein::bc::DeclFieldMeta &field : decl.fields) {
-            if (field.default_code.get() == code)
-                return true;
-        }
-    }
-    for (const skein::bc::EnumDeclMeta &decl : proto.enum_decls) {
-        for (const skein::bc::EnumVariantMeta &variant : decl.variants) {
-            for (const skein::bc::DeclFieldMeta &field : variant.fields) {
-                if (field.default_code.get() == code)
-                    return true;
-            }
-        }
-    }
-    for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
-        for (const skein::bc::DeclMethodMeta &method : decl.methods) {
-            if (method.code.get() == code)
-                return true;
-        }
-    }
-    return false;
-}
-
 static bool validate_transferable_body(
     const skein::bc::ProtoPtr &source, const char *what,
     std::string &error) {
-    if (source->has_closures || source->uses_defers ||
-        !source->defer_protos.empty()) {
-        error = std::string(what) + " cannot use closures or defer";
-        return false;
-    }
-    for (const skein::bc::Constant &constant : source->consts) {
-        if (constant.function &&
-            !is_declaration_function(*source, constant.function.get())) {
-            error = std::string(what) + " contains a nested function";
-            return false;
-        }
-    }
-    for (const skein::bc::PatternDesc &pattern : source->patterns) {
-        if (pattern.literal_expr) {
-            error = std::string(what) +
-                    " contains a nested pattern expression";
-            return false;
-        }
-    }
+    (void)source;
+    (void)what;
+    (void)error;
     return true;
 }
 

@@ -3145,6 +3145,26 @@ def check_extended_stdlib():
             )
             assert dec.stdout.strip() == "7:1:4:5", dec.stdout
 
+            check(
+                "std.thread encode nested functions and defer",
+                "import std;\n"
+                "thread func worker(ctx) {\n"
+                "  func make_adder(n) {\n"
+                "    return func(x) { return x + n; };\n"
+                "  }\n"
+                "  let x = 42;\n"
+                '  defer print("deferred=" + str(x));\n'
+                "  let add = make_adder(10);\n"
+                '  return {"v": add(5)};\n'
+                "}\n"
+                "let blob = std.thread.encode(worker);\n"
+                "let t = std.thread.spawn_encoded(blob, "
+                "std.thread.Message.from({}));\n"
+                'let r = t.join()["value"];\n'
+                'print("result="); print(r["v"]); print("|");\n',
+                stdout_all=["deferred=42", "result=15|"],
+            )
+
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)
             http_worker = os.path.join(

@@ -4890,10 +4890,10 @@ let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
 - `std.thread.pool` 的 submit payload 和线程返回值同样支持 heap。
 
 - `thread func` 是上下文关键字，只能作为声明语句出现，可嵌套在其他函数内；
-- 入口必须是同步函数、恰好一个参数；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
+- 入口签名仍要求固定的单个参数；入口内可以使用嵌套函数和 `defer`；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
 - 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
 - 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
-- 被传递的函数不能使用默认/模式/可变参数，也不能包含嵌套函数或 defer；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；入口内新建闭包仍不支持；
+- 嵌套函数和 `defer` 以 Proto/声明元数据传递，子线程在自身栈帧上重新捕获局部变量；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
 - `std.thread.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_encoded(bytes, Message)` 可在另一个进程反序列化并启动线程：
   ```skein
@@ -4901,7 +4901,7 @@ let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
   # 另一个进程：
   let t = std.thread.spawn_encoded(read_bytes("entry.bin"), msg);
   ```
-  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` / `lru` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器。
+  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` / `lru` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器。
 
 线程入口接收一个 Message：
 

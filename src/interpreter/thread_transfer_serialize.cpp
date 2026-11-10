@@ -24,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 6u;
+constexpr uint32_t kPayloadVersion = 7u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -945,20 +945,8 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
         error = std::string("cannot compile ") + what;
         return false;
     }
-    if (source->has_closures || source->uses_defers ||
-        !source->defer_protos.empty() || !source->packages.empty()) {
-        error = std::string(what) + " uses closures, defer or packages";
-        return false;
-    }
-    for (const skein::bc::Constant &constant : source->consts) {
-        if (constant.function) {
-            error = std::string(what) + " contains a nested function";
-            return false;
-        }
-    }
-    if (!source->struct_decls.empty() || !source->enum_decls.empty() ||
-        !source->trait_decls.empty() || !source->impl_decls.empty()) {
-        error = std::string(what) + " contains type declarations";
+    if (!source->packages.empty()) {
+        error = std::string(what) + " contains nested packages";
         return false;
     }
     std::shared_ptr<skein::bc::Proto> copy =
@@ -1988,6 +1976,15 @@ bool build_decl_function(const std::shared_ptr<function_code> &code,
 bool prepare_inline_functions(const skein::bc::Proto &proto,
                               type_collect_context *context,
                               std::string &error) {
+    static thread_local std::unordered_set<const skein::bc::Proto *> visiting;
+    if (!visiting.insert(&proto).second)
+        return true;
+    struct visiting_guard {
+        std::unordered_set<const skein::bc::Proto *> &set;
+        const skein::bc::Proto *proto;
+        ~visiting_guard() { set.erase(proto); }
+    } guard{visiting, &proto};
+
     auto prepare = [&](const std::shared_ptr<function_code> &code,
                        const char *what) -> bool {
         if (!code || g_inline_function_payloads.count(code.get()))
@@ -1995,8 +1992,8 @@ bool prepare_inline_functions(const skein::bc::Proto &proto,
         std::shared_ptr<thread_transfer_function> function;
         if (!build_decl_function(code, what, function, error, context))
             return false;
-        g_inline_function_payloads.emplace(code.get(), std::move(function));
-        return true;
+        g_inline_function_payloads.emplace(code.get(), function);
+        return prepare_inline_functions(*function->proto, context, error);
     };
     for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
         for (const skein::bc::DeclFieldMeta &field : decl.fields) {
@@ -2017,6 +2014,15 @@ bool prepare_inline_functions(const skein::bc::Proto &proto,
             if (!prepare(method.code, "impl method"))
                 return false;
         }
+    }
+    for (const skein::bc::Constant &constant : proto.consts) {
+        if (!prepare(constant.function, "nested function"))
+            return false;
+    }
+    for (const std::shared_ptr<const skein::bc::Proto> &defer :
+         proto.defer_protos) {
+        if (defer && !prepare_inline_functions(*defer, context, error))
+            return false;
     }
     return true;
 }
@@ -2158,11 +2164,6 @@ bool is_declaration_function(const skein::bc::Proto &proto,
 
 bool write_proto(writer &out, const skein::bc::Proto &proto,
                  std::string &error) {
-    if (proto.has_closures || proto.uses_defers ||
-        !proto.defer_protos.empty() || !proto.defer_captures.empty()) {
-        error = "cannot serialize a Proto that uses closures or defer";
-        return false;
-    }
     if (!proto.packages.empty()) {
         error = "cannot serialize a Proto with nested packages";
         return false;
@@ -2205,8 +2206,10 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
                     out.u8(0);
                     break;
                 }
-                error = "cannot serialize a Proto with nested functions";
-                return false;
+                if (!write_inline_function(out, constant.function,
+                                           "nested function", nullptr, error))
+                    return false;
+                break;
         }
         if (constant.kind != skein::bc::ConstantKind::Type) {
             if (!write_type(out, constant.type))
@@ -2398,6 +2401,24 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
                 return false;
         }
     }
+
+    out.u32((uint32_t)proto.defer_protos.size());
+    for (const std::shared_ptr<const skein::bc::Proto> &defer :
+         proto.defer_protos) {
+        out.u8(defer ? 1 : 0);
+        if (defer && !write_proto(out, *defer, error))
+            return false;
+    }
+    out.u32((uint32_t)proto.defer_captures.size());
+    for (const std::vector<skein::bc::DeferCapture> &captures :
+         proto.defer_captures) {
+        out.u32((uint32_t)captures.size());
+        for (const skein::bc::DeferCapture &capture : captures) {
+            out.str(capture.name);
+            out.u8((uint8_t)capture.kind);
+            out.u32(capture.index);
+        }
+    }
     return true;
 }
 
@@ -2477,18 +2498,10 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
                 constant.type = type.get();
                 break;
             }
-            case skein::bc::ConstantKind::Function: {
-                uint8_t present = 0;
-                if (!in.u8(present)) {
-                    error = in.error;
+            case skein::bc::ConstantKind::Function:
+                if (!read_inline_function(in, constant.function, error))
                     return false;
-                }
-                if (present) {
-                    error = "thread payload contains a nested function";
-                    return false;
-                }
                 break;
-            }
         }
         if (constant.kind != skein::bc::ConstantKind::Type) {
             owned_type type;
@@ -2949,6 +2962,55 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             decl.methods.push_back(std::move(method));
         }
         proto->impl_decls.push_back(std::move(decl));
+    }
+
+    uint32_t defer_count = 0;
+    if (!in.count(defer_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->defer_protos.reserve(defer_count);
+    for (uint32_t i = 0; i < defer_count; ++i) {
+        uint8_t present = 0;
+        if (!in.u8(present)) {
+            error = in.error;
+            return false;
+        }
+        if (!present) {
+            proto->defer_protos.push_back(nullptr);
+            continue;
+        }
+        std::shared_ptr<skein::bc::Proto> defer;
+        if (!read_proto(in, defer, error))
+            return false;
+        proto->defer_protos.push_back(std::move(defer));
+    }
+    uint32_t defer_capture_count = 0;
+    if (!in.count(defer_capture_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->defer_captures.reserve(defer_capture_count);
+    for (uint32_t i = 0; i < defer_capture_count; ++i) {
+        uint32_t capture_count = 0;
+        if (!in.count(capture_count)) {
+            error = in.error;
+            return false;
+        }
+        std::vector<skein::bc::DeferCapture> captures;
+        captures.reserve(capture_count);
+        for (uint32_t j = 0; j < capture_count; ++j) {
+            skein::bc::DeferCapture capture;
+            uint8_t kind = 0;
+            if (!in.str(capture.name) || !in.u8(kind) ||
+                !in.u32(capture.index)) {
+                error = in.error;
+                return false;
+            }
+            capture.kind = (skein::bc::DeferCaptureKind)kind;
+            captures.push_back(std::move(capture));
+        }
+        proto->defer_captures.push_back(std::move(captures));
     }
 
     if (proto->locs.size() != proto->code.size()) {

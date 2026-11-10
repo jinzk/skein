@@ -1,6 +1,7 @@
 #include "task.h"
 
 #include "ast.h"
+#include "diagnostics.h"
 #include "eval.h"
 #include "eval_context.h"
 #include "eval_helpers.h"
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,6 +52,9 @@ struct task : std::enable_shared_from_this<task> {
     std::vector<std::shared_ptr<task>> children;
     std::weak_ptr<task> parent;
     bool detached = false;
+    /* A wait/try_wait/catch consumed the outcome of this task. */
+    bool observed = false;
+    bool failure_reported = false;
 
     task() {
         task_registry().push_back(this);
@@ -333,6 +338,7 @@ value_t *task_wait(const std::vector<value_t *> &args) {
     std::shared_ptr<task> value;
     if (!get_task_value(args[0], value))
         return NULL;
+    value->observed = true;
     long long timeout_ms = 0;
     if (!get_optional_timeout(args, 1, timeout_ms))
         return NULL;
@@ -402,6 +408,7 @@ value_t *task_wait_all(const std::vector<value_t *> &args) {
         std::shared_ptr<task> value;
         if (!get_task_value(values->payload->items[i], value))
             return NULL;
+        value->observed = true;
         tasks.push_back(std::move(value));
     }
 
@@ -591,6 +598,7 @@ static value_t *task_catch(const std::vector<value_t *> &args) {
     task_ptr source;
     if (!get_task_value(args[0], source))
         return NULL;
+    source->observed = true;
 
     task_ptr result = task_create();
     result->dependencies.push_back(source);
@@ -1136,10 +1144,30 @@ void task_detach(const task_ptr &task) {
             children.end());
     }
     task->parent.reset();
+    task_report_unobserved_failure(task);
 }
 
 bool task_detached(const task_ptr &task) {
     return !task || task->detached;
+}
+
+void task_report_unobserved_failure(const task_ptr &task) {
+    if (!task || !task->detached || task->observed ||
+        task->failure_reported || task->status != TASK_FAILED)
+        return;
+    task->failure_reported = true;
+    /*
+     * Server/worker teardown can fail many detached tasks with the same
+     * message.  Report each distinct failure once so diagnostics stay useful
+     * without flooding stderr (which can block a piped parent process).
+     */
+    static thread_local std::set<std::string> reported;
+    const std::string &error = task_error_message(task);
+    if (!reported.insert(error).second)
+        return;
+    std::string message = "detached task failed: ";
+    message += error;
+    diag_report_warning(0, 0, "detached task", message.c_str());
 }
 
 std::vector<task_ptr> task_children(const task_ptr &task) {

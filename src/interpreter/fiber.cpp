@@ -460,6 +460,7 @@ void fiber::fiber_main() {
         value_t *error = newerrorval("fiber_stack", stack_error.c_str());
         if (kind == FIBER_TASK) {
             task_fail_error(task, error);
+            task_report_unobserved_failure(task);
         } else {
             failed = true;
             error_value = error;
@@ -480,6 +481,7 @@ void fiber::fiber_main() {
                 child_error =
                     newerrorval("runtime", "child task failed");
             task_fail_error(task, child_error);
+            task_report_unobserved_failure(task);
             if (root_context)
                 adopt_scopes(eval.scopes, root_context->scopes);
             state = FIBER_DONE;
@@ -511,6 +513,7 @@ void fiber::fiber_main() {
         } else if (!result) {
             task_fail_error(task,
                             take_fiber_error(this, "async function failed"));
+            task_report_unobserved_failure(task);
         } else {
             task_complete(task, result);
         }

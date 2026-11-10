@@ -46,6 +46,8 @@ void task_detach(const task_ptr &task);
 bool task_detached(const task_ptr &task);
 std::vector<task_ptr> task_children(const task_ptr &task);
 void task_cancel_children(const task_ptr &task);
+/* Report a detached task failure that no wait/catch/try_wait observed. */
+void task_report_unobserved_failure(const task_ptr &task);
 
 void task_shutdown();
 

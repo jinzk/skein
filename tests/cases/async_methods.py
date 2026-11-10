@@ -396,6 +396,22 @@ def run_cases():
     )
 
     check(
+        "detached task failure is reported",
+        "import std;\n"
+        "func bad() {\n"
+        "  std.task.sleep(5).wait();\n"
+        '  fail "detached-boom";\n'
+        "}\n"
+        "func parent() {\n"
+        "  let t = launch bad();\n"
+        "  t.detach();\n"
+        "  std.task.sleep(20).wait();\n"
+        "}\n"
+        "parent();\n",
+        stderr="detached task failed: detached-boom",
+    )
+
+    check(
         "launch expects a call",
         'import std;\nlaunch 1;\n',
         stderr="launch expects a call expression",

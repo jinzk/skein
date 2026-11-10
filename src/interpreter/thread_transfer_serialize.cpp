@@ -24,11 +24,16 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 5u;
+constexpr uint32_t kPayloadVersion = 6u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
 constexpr int kMaxDepth = 64;
+
+thread_local std::unordered_map<
+    const function_code *,
+    std::shared_ptr<thread_transfer_function>>
+    g_inline_function_payloads;
 
 struct value_deleter {
     void operator()(struct value_t *value) const { freeval(value); }
@@ -890,10 +895,50 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
                            const char *what,
                            std::shared_ptr<thread_transfer_function> &out,
                            std::string &error,
-                           type_collect_context *context = nullptr) {
+                           type_collect_context *context = nullptr,
+                           bool allow_unresolved_upvalues = false) {
     if (!def || !def->code) {
         error = std::string(what) + " has no function code";
         return false;
+    }
+    std::vector<thread_transfer_value> defaults(
+        (std::size_t)def->code->nparams, thread_transfer_value());
+    int param_index = 0;
+    for (struct symlist *param = def->code->sl;
+         param && param_index < def->code->nparams;
+         param = param->next, ++param_index) {
+        if (!param->has_default)
+            continue;
+        struct value_t *default_value = nullptr;
+        if (!skein_vm_try_eval_default(def, param_index, default_value)) {
+            struct ast *default_ast = symlist_default_ast(param);
+            if (!default_ast) {
+                error = std::string(what) +
+                        " has an unsupported default for " +
+                        (param->sym && param->sym->name ? param->sym->name
+                                                        : "parameter");
+                return false;
+            }
+            default_value = eval(default_ast);
+        }
+        if (!default_value) {
+            error = std::string(what) + " cannot evaluate default for " +
+                    (param->sym && param->sym->name ? param->sym->name
+                                                    : "parameter");
+            return false;
+        }
+        if (!data_capture_supported(default_value)) {
+            freeval(default_value);
+            error = std::string(what) + " has a non-data default for " +
+                    (param->sym && param->sym->name ? param->sym->name
+                                                    : "parameter");
+            return false;
+        }
+        thread_transfer_value transfer;
+        transfer.kind = thread_transfer_value::Kind::Data;
+        transfer.data = std::shared_ptr<struct value_t>(
+            default_value, value_deleter());
+        defaults[(std::size_t)param_index] = std::move(transfer);
     }
     skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
     if (!source) {
@@ -924,6 +969,7 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
     out = std::make_shared<thread_transfer_function>();
     out->name = def->code->name;
     out->proto = std::move(copy);
+    out->defaults = std::move(defaults);
 
     std::vector<bool> used(out->proto->upvalues.size(), false);
     collect_used_upvalues(*out->proto, used);
@@ -934,6 +980,8 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
         const std::string &name = out->proto->upvalues[i];
         struct value_t *captured = find_captured_value(def, name, i);
         if (!captured) {
+            if (allow_unresolved_upvalues)
+                continue;
             error = std::string(what) + " captures an unavailable value: " +
                     name;
             return false;
@@ -947,44 +995,6 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
         capture.data = std::shared_ptr<struct value_t>(
             dupval(captured), value_deleter());
         out->captures[i] = std::move(capture);
-    }
-
-    out->defaults.assign(out->proto->nparams, thread_transfer_value());
-    int param_index = 0;
-    for (struct symlist *param = def->code->sl;
-         param && param_index < (int)out->proto->nparams;
-         param = param->next, ++param_index) {
-        if (!param->has_default)
-            continue;
-        struct value_t *default_value = nullptr;
-        if (!skein_vm_try_eval_default(def, param_index, default_value)) {
-            struct ast *default_ast = symlist_default_ast(param);
-            if (!default_ast) {
-                error = std::string(what) + " has an unsupported default for " +
-                        (param->sym && param->sym->name ? param->sym->name
-                                                        : "parameter");
-                return false;
-            }
-            default_value = eval(default_ast);
-        }
-        if (!default_value) {
-            error = std::string(what) + " cannot evaluate default for " +
-                    (param->sym && param->sym->name ? param->sym->name
-                                                    : "parameter");
-            return false;
-        }
-        if (!data_capture_supported(default_value)) {
-            freeval(default_value);
-            error = std::string(what) + " has a non-data default for " +
-                    (param->sym && param->sym->name ? param->sym->name
-                                                    : "parameter");
-            return false;
-        }
-        thread_transfer_value transfer;
-        transfer.kind = thread_transfer_value::Kind::Data;
-        transfer.data = std::shared_ptr<struct value_t>(
-            default_value, value_deleter());
-        out->defaults[(std::size_t)param_index] = std::move(transfer);
     }
 
     bool has_param_patterns = false;
@@ -1961,6 +1971,191 @@ bool read_transfer(
     }
 }
 
+bool build_decl_function(const std::shared_ptr<function_code> &code,
+                         const char *what,
+                         std::shared_ptr<thread_transfer_function> &out,
+                         std::string &error,
+                         type_collect_context *context) {
+    if (!code) {
+        out.reset();
+        return true;
+    }
+    std::shared_ptr<function_def> def = std::make_shared<function_def>();
+    def->code = code;
+    return build_simple_function(def, what, out, error, context, true);
+}
+
+bool prepare_inline_functions(const skein::bc::Proto &proto,
+                              type_collect_context *context,
+                              std::string &error) {
+    auto prepare = [&](const std::shared_ptr<function_code> &code,
+                       const char *what) -> bool {
+        if (!code || g_inline_function_payloads.count(code.get()))
+            return true;
+        std::shared_ptr<thread_transfer_function> function;
+        if (!build_decl_function(code, what, function, error, context))
+            return false;
+        g_inline_function_payloads.emplace(code.get(), std::move(function));
+        return true;
+    };
+    for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
+        for (const skein::bc::DeclFieldMeta &field : decl.fields) {
+            if (!prepare(field.default_code, "struct field default"))
+                return false;
+        }
+    }
+    for (const skein::bc::EnumDeclMeta &decl : proto.enum_decls) {
+        for (const skein::bc::EnumVariantMeta &variant : decl.variants) {
+            for (const skein::bc::DeclFieldMeta &field : variant.fields) {
+                if (!prepare(field.default_code, "enum field default"))
+                    return false;
+            }
+        }
+    }
+    for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
+        for (const skein::bc::DeclMethodMeta &method : decl.methods) {
+            if (!prepare(method.code, "impl method"))
+                return false;
+        }
+    }
+    return true;
+}
+
+bool write_inline_function(writer &out,
+                           const std::shared_ptr<function_code> &code,
+                           const char *what,
+                           type_collect_context *context,
+                           std::string &error) {
+    out.u8(code ? 1 : 0);
+    if (!code)
+        return true;
+    std::shared_ptr<thread_transfer_function> function;
+    auto prepared = g_inline_function_payloads.find(code.get());
+    if (prepared != g_inline_function_payloads.end())
+        function = prepared->second;
+    else if (!build_decl_function(code, what, function, error, context))
+        return false;
+    if (!write_proto(out, *function->proto, error))
+        return false;
+    std::unordered_map<const thread_transfer_function *, uint32_t> no_functions;
+    out.u32((uint32_t)function->captures.size());
+    for (const thread_transfer_value &capture : function->captures) {
+        if (!write_transfer(out, capture, no_functions, 0, error))
+            return false;
+    }
+    out.u32((uint32_t)function->defaults.size());
+    for (const thread_transfer_value &value : function->defaults) {
+        if (!write_transfer(out, value, no_functions, 0, error))
+            return false;
+    }
+    out.u8(function->pattern_proto ? 1 : 0);
+    if (function->pattern_proto &&
+        !write_proto(out, *function->pattern_proto, error))
+        return false;
+    out.u32((uint32_t)function->pattern_roots.size());
+    for (uint32_t root : function->pattern_roots)
+        out.u32(root);
+    return true;
+}
+
+bool read_inline_function(reader &in, std::shared_ptr<function_code> &code,
+                          std::string &error) {
+    uint8_t present = 0;
+    if (!in.u8(present)) {
+        error = in.error;
+        return false;
+    }
+    if (!present) {
+        code.reset();
+        return true;
+    }
+    std::shared_ptr<thread_transfer_function> function =
+        std::make_shared<thread_transfer_function>();
+    std::shared_ptr<skein::bc::Proto> proto;
+    if (!read_proto(in, proto, error))
+        return false;
+    function->proto = proto;
+    std::vector<std::shared_ptr<thread_transfer_function>> no_functions;
+    uint32_t capture_count = 0;
+    if (!in.count(capture_count)) {
+        error = in.error;
+        return false;
+    }
+    function->captures.reserve(capture_count);
+    for (uint32_t i = 0; i < capture_count; ++i) {
+        thread_transfer_value capture;
+        if (!read_transfer(in, no_functions, capture, 0, error))
+            return false;
+        function->captures.push_back(std::move(capture));
+    }
+    uint32_t default_count = 0;
+    if (!in.count(default_count)) {
+        error = in.error;
+        return false;
+    }
+    function->defaults.reserve(default_count);
+    for (uint32_t i = 0; i < default_count; ++i) {
+        thread_transfer_value value;
+        if (!read_transfer(in, no_functions, value, 0, error))
+            return false;
+        function->defaults.push_back(std::move(value));
+    }
+    uint8_t has_patterns = 0;
+    if (!in.u8(has_patterns)) {
+        error = in.error;
+        return false;
+    }
+    if (has_patterns) {
+        std::shared_ptr<skein::bc::Proto> pattern_proto;
+        if (!read_proto(in, pattern_proto, error))
+            return false;
+        function->pattern_proto = std::move(pattern_proto);
+    }
+    uint32_t root_count = 0;
+    if (!in.count(root_count)) {
+        error = in.error;
+        return false;
+    }
+    function->pattern_roots.reserve(root_count);
+    for (uint32_t i = 0; i < root_count; ++i) {
+        uint32_t root = 0;
+        if (!in.u32(root)) {
+            error = in.error;
+            return false;
+        }
+        function->pattern_roots.push_back(root);
+    }
+    code = skein_vm_make_transferred_function_code(*function, error);
+    return code != nullptr;
+}
+
+bool is_declaration_function(const skein::bc::Proto &proto,
+                             const function_code *code) {
+    if (!code)
+        return false;
+    for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
+        for (const skein::bc::DeclFieldMeta &field : decl.fields) {
+            if (field.default_code.get() == code)
+                return true;
+        }
+    }
+    for (const skein::bc::EnumDeclMeta &decl : proto.enum_decls) {
+        for (const skein::bc::EnumVariantMeta &variant : decl.variants) {
+            for (const skein::bc::DeclFieldMeta &field : variant.fields) {
+                if (field.default_code.get() == code)
+                    return true;
+            }
+        }
+    }
+    for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
+        for (const skein::bc::DeclMethodMeta &method : decl.methods) {
+            if (method.code.get() == code)
+                return true;
+        }
+    }
+    return false;
+}
+
 bool write_proto(writer &out, const skein::bc::Proto &proto,
                  std::string &error) {
     if (proto.has_closures || proto.uses_defers ||
@@ -1970,11 +2165,6 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
     if (!proto.packages.empty()) {
         error = "cannot serialize a Proto with nested packages";
-        return false;
-    }
-    if (!proto.struct_decls.empty() || !proto.enum_decls.empty() ||
-        !proto.trait_decls.empty() || !proto.impl_decls.empty()) {
-        error = "cannot serialize a Proto with type declarations";
         return false;
     }
 
@@ -2008,6 +2198,13 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
                     return false;
                 break;
             case skein::bc::ConstantKind::Function:
+                if (is_declaration_function(proto, constant.function.get())) {
+                    /* Declaration functions are serialized through the
+                     * struct/enum/impl metadata below; keep a placeholder in
+                     * the constant table so indices stay stable. */
+                    out.u8(0);
+                    break;
+                }
                 error = "cannot serialize a Proto with nested functions";
                 return false;
         }
@@ -2131,6 +2328,76 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     out.u32((uint32_t)proto.stack_depth.size());
     for (int depth : proto.stack_depth)
         out.u32((uint32_t)depth);
+
+    out.u32((uint32_t)proto.struct_decls.size());
+    for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
+        out.str(decl.module);
+        out.str(decl.name);
+        out.u8(decl.exported ? 1 : 0);
+        out.u32((uint32_t)decl.fields.size());
+        for (const skein::bc::DeclFieldMeta &field : decl.fields) {
+            out.str(field.name);
+            if (!write_type(out, &field.type))
+                return false;
+            if (!write_inline_function(out, field.default_code,
+                                       "struct field default", nullptr,
+                                       error))
+                return false;
+        }
+    }
+    out.u32((uint32_t)proto.enum_decls.size());
+    for (const skein::bc::EnumDeclMeta &decl : proto.enum_decls) {
+        out.str(decl.module);
+        out.str(decl.name);
+        out.u8(decl.exported ? 1 : 0);
+        out.u32((uint32_t)decl.variants.size());
+        for (const skein::bc::EnumVariantMeta &variant : decl.variants) {
+            out.str(variant.name);
+            out.u32((uint32_t)variant.fields.size());
+            for (const skein::bc::DeclFieldMeta &field : variant.fields) {
+                out.str(field.name);
+                if (!write_type(out, &field.type))
+                    return false;
+                if (!write_inline_function(out, field.default_code,
+                                           "enum field default", nullptr,
+                                           error))
+                    return false;
+            }
+        }
+    }
+    out.u32((uint32_t)proto.trait_decls.size());
+    for (const skein::bc::TraitDeclMeta &decl : proto.trait_decls) {
+        out.str(decl.module);
+        out.str(decl.name);
+        out.u8(decl.exported ? 1 : 0);
+        out.u32((uint32_t)decl.methods.size());
+        for (const skein::bc::TraitMethodMeta &method : decl.methods) {
+            out.str(method.name);
+            out.u8(method.is_async ? 1 : 0);
+            out.u32((uint32_t)method.params.size());
+            for (const skein::bc::TraitParamMeta &param : method.params) {
+                out.str(param.name);
+                if (!write_type(out, &param.type))
+                    return false;
+                out.u8(param.variadic ? 1 : 0);
+                out.u8(param.has_default ? 1 : 0);
+            }
+        }
+    }
+    out.u32((uint32_t)proto.impl_decls.size());
+    for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
+        out.str(decl.module);
+        out.str(decl.type_name);
+        out.str(decl.trait_name);
+        out.u8(decl.has_trait ? 1 : 0);
+        out.u32((uint32_t)decl.methods.size());
+        for (const skein::bc::DeclMethodMeta &method : decl.methods) {
+            out.str(method.name);
+            if (!write_inline_function(out, method.code, "impl method",
+                                       nullptr, error))
+                return false;
+        }
+    }
     return true;
 }
 
@@ -2210,9 +2477,18 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
                 constant.type = type.get();
                 break;
             }
-            case skein::bc::ConstantKind::Function:
-                error = "thread payload contains a nested function";
-                return false;
+            case skein::bc::ConstantKind::Function: {
+                uint8_t present = 0;
+                if (!in.u8(present)) {
+                    error = in.error;
+                    return false;
+                }
+                if (present) {
+                    error = "thread payload contains a nested function";
+                    return false;
+                }
+                break;
+            }
         }
         if (constant.kind != skein::bc::ConstantKind::Type) {
             owned_type type;
@@ -2536,6 +2812,145 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         }
         proto->stack_depth.push_back((int)(int32_t)depth);
     }
+
+    uint32_t struct_count = 0;
+    if (!in.count(struct_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->struct_decls.reserve(struct_count);
+    for (uint32_t i = 0; i < struct_count; ++i) {
+        skein::bc::StructDeclMeta decl;
+        uint8_t exported = 0;
+        uint32_t field_count = 0;
+        if (!in.str(decl.module) || !in.str(decl.name) ||
+            !in.u8(exported) || !in.count(field_count)) {
+            error = in.error;
+            return false;
+        }
+        decl.exported = exported != 0;
+        decl.fields.reserve(field_count);
+        for (uint32_t j = 0; j < field_count; ++j) {
+            skein::bc::DeclFieldMeta field;
+            if (!in.str(field.name) ||
+                !read_type_value(in, field.type, error) ||
+                !read_inline_function(in, field.default_code, error))
+                return false;
+            decl.fields.push_back(std::move(field));
+        }
+        proto->struct_decls.push_back(std::move(decl));
+    }
+    uint32_t enum_count = 0;
+    if (!in.count(enum_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->enum_decls.reserve(enum_count);
+    for (uint32_t i = 0; i < enum_count; ++i) {
+        skein::bc::EnumDeclMeta decl;
+        uint8_t exported = 0;
+        uint32_t variant_count = 0;
+        if (!in.str(decl.module) || !in.str(decl.name) ||
+            !in.u8(exported) || !in.count(variant_count)) {
+            error = in.error;
+            return false;
+        }
+        decl.exported = exported != 0;
+        decl.variants.reserve(variant_count);
+        for (uint32_t j = 0; j < variant_count; ++j) {
+            skein::bc::EnumVariantMeta variant;
+            uint32_t field_count = 0;
+            if (!in.str(variant.name) || !in.count(field_count)) {
+                error = in.error;
+                return false;
+            }
+            variant.fields.reserve(field_count);
+            for (uint32_t k = 0; k < field_count; ++k) {
+                skein::bc::DeclFieldMeta field;
+                if (!in.str(field.name) ||
+                    !read_type_value(in, field.type, error) ||
+                    !read_inline_function(in, field.default_code, error))
+                    return false;
+                variant.fields.push_back(std::move(field));
+            }
+            decl.variants.push_back(std::move(variant));
+        }
+        proto->enum_decls.push_back(std::move(decl));
+    }
+    uint32_t trait_count = 0;
+    if (!in.count(trait_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->trait_decls.reserve(trait_count);
+    for (uint32_t i = 0; i < trait_count; ++i) {
+        skein::bc::TraitDeclMeta decl;
+        uint8_t exported = 0;
+        uint32_t method_count = 0;
+        if (!in.str(decl.module) || !in.str(decl.name) ||
+            !in.u8(exported) || !in.count(method_count)) {
+            error = in.error;
+            return false;
+        }
+        decl.exported = exported != 0;
+        decl.methods.reserve(method_count);
+        for (uint32_t j = 0; j < method_count; ++j) {
+            skein::bc::TraitMethodMeta method;
+            uint8_t is_async = 0;
+            uint32_t param_count = 0;
+            if (!in.str(method.name) || !in.u8(is_async) ||
+                !in.count(param_count)) {
+                error = in.error;
+                return false;
+            }
+            method.is_async = is_async != 0;
+            method.params.reserve(param_count);
+            for (uint32_t k = 0; k < param_count; ++k) {
+                skein::bc::TraitParamMeta param;
+                uint8_t variadic = 0;
+                uint8_t has_default = 0;
+                if (!in.str(param.name) ||
+                    !read_type_value(in, param.type, error) ||
+                    !in.u8(variadic) || !in.u8(has_default)) {
+                    error = in.error;
+                    return false;
+                }
+                param.variadic = variadic != 0;
+                param.has_default = has_default != 0;
+                method.params.push_back(std::move(param));
+            }
+            decl.methods.push_back(std::move(method));
+        }
+        proto->trait_decls.push_back(std::move(decl));
+    }
+    uint32_t impl_count = 0;
+    if (!in.count(impl_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->impl_decls.reserve(impl_count);
+    for (uint32_t i = 0; i < impl_count; ++i) {
+        skein::bc::ImplDeclMeta decl;
+        uint8_t has_trait = 0;
+        uint32_t method_count = 0;
+        if (!in.str(decl.module) || !in.str(decl.type_name) ||
+            !in.str(decl.trait_name) || !in.u8(has_trait) ||
+            !in.count(method_count)) {
+            error = in.error;
+            return false;
+        }
+        decl.has_trait = has_trait != 0;
+        decl.methods.reserve(method_count);
+        for (uint32_t j = 0; j < method_count; ++j) {
+            skein::bc::DeclMethodMeta method;
+            if (!in.str(method.name) ||
+                !read_inline_function(in, method.code, error))
+                return false;
+            decl.methods.push_back(std::move(method));
+        }
+        proto->impl_decls.push_back(std::move(decl));
+    }
+
     if (proto->locs.size() != proto->code.size()) {
         error = "thread payload location table does not match bytecode";
         return false;
@@ -2629,6 +3044,10 @@ bool skein_vm_serialize_thread_payload(
         error = "invalid thread payload entry";
         return false;
     }
+    g_inline_function_payloads.clear();
+    struct inline_map_guard {
+        ~inline_map_guard() { g_inline_function_payloads.clear(); }
+    } inline_guard;
     std::unordered_map<const thread_transfer_function *, uint32_t> ids;
     std::vector<std::shared_ptr<thread_transfer_function>> order;
     thread_transfer_value entry_value;
@@ -2665,6 +3084,20 @@ bool skein_vm_serialize_thread_payload(
                 return false;
             for (const thread_transfer_value &capture :
                  function->captures) {
+                if (!collect_transfer_types(capture, types, type_order, 0,
+                                            error, &context))
+                    return false;
+            }
+        }
+        for (const auto &entry : g_inline_function_payloads) {
+            const std::shared_ptr<thread_transfer_function> &function =
+                entry.second;
+            if (!function || !function->proto)
+                continue;
+            if (!collect_proto_types(*function->proto, types, type_order, 0,
+                                     error, &context))
+                return false;
+            for (const thread_transfer_value &capture : function->captures) {
                 if (!collect_transfer_types(capture, types, type_order, 0,
                                             error, &context))
                     return false;
@@ -2710,6 +3143,18 @@ bool skein_vm_serialize_thread_payload(
     std::size_t last_types = 0;
     std::size_t last_globals = 0;
     for (int pass = 0; pass < 8; ++pass) {
+        for (const auto &function : order) {
+            if (!prepare_inline_functions(*function->proto, &context, error))
+                return false;
+        }
+        std::vector<std::shared_ptr<thread_transfer_function>> inline_functions;
+        inline_functions.reserve(g_inline_function_payloads.size());
+        for (const auto &entry : g_inline_function_payloads)
+            inline_functions.push_back(entry.second);
+        for (const auto &function : inline_functions) {
+            if (!prepare_inline_functions(*function->proto, &context, error))
+                return false;
+        }
         if (!collect_all_types())
             return false;
         for (const type_record &record : type_order) {

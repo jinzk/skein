@@ -54,6 +54,9 @@ struct value_t *skein_vm_execute_proto(
 bool skein_vm_match_pattern_proto(
     const skein::bc::Proto &proto, uint32_t index, struct value_t *value,
     std::vector<pattern_binding> &bindings);
+/* Rebuild a function_code from an inline declaration function payload. */
+std::shared_ptr<function_code> skein_vm_make_transferred_function_code(
+    const struct thread_transfer_function &payload, std::string &error);
 int skein_vm_max_depth();
 void skein_vm_ensure_stats_flags();
 

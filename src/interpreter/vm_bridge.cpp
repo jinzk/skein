@@ -678,6 +678,33 @@ static std::shared_ptr<skein::bc::Proto> clone_thread_proto(
     return copy;
 }
 
+static bool is_declaration_function(const skein::bc::Proto &proto,
+                                    const function_code *code) {
+    if (!code)
+        return false;
+    for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
+        for (const skein::bc::DeclFieldMeta &field : decl.fields) {
+            if (field.default_code.get() == code)
+                return true;
+        }
+    }
+    for (const skein::bc::EnumDeclMeta &decl : proto.enum_decls) {
+        for (const skein::bc::EnumVariantMeta &variant : decl.variants) {
+            for (const skein::bc::DeclFieldMeta &field : variant.fields) {
+                if (field.default_code.get() == code)
+                    return true;
+            }
+        }
+    }
+    for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
+        for (const skein::bc::DeclMethodMeta &method : decl.methods) {
+            if (method.code.get() == code)
+                return true;
+        }
+    }
+    return false;
+}
+
 static bool validate_transferable_body(
     const skein::bc::ProtoPtr &source, const char *what,
     std::string &error) {
@@ -687,7 +714,8 @@ static bool validate_transferable_body(
         return false;
     }
     for (const skein::bc::Constant &constant : source->consts) {
-        if (constant.function) {
+        if (constant.function &&
+            !is_declaration_function(*source, constant.function.get())) {
             error = std::string(what) + " contains a nested function";
             return false;
         }
@@ -1146,6 +1174,33 @@ bool materialize_thread_function(
 }
 
 } // namespace
+
+std::shared_ptr<function_code> skein_vm_make_transferred_function_code(
+    const struct thread_transfer_function &payload, std::string &error) {
+    ensure_vm_host();
+    if (!payload.proto) {
+        error = "invalid transferred declaration function";
+        return nullptr;
+    }
+    std::shared_ptr<function_code> code = make_transfer_code(payload);
+    std::shared_ptr<thread_transfer_context> context =
+        std::make_shared<thread_transfer_context>();
+    struct symlist *param = code->sl;
+    for (std::size_t i = 0;
+         i < payload.defaults.size() && param &&
+         (int)i < code->nparams;
+         ++i, param = param->next) {
+        if (payload.defaults[i].kind == thread_transfer_value::Kind::Null)
+            continue;
+        struct value_t *value = nullptr;
+        if (!materialize_thread_value(context, payload.defaults[i], value,
+                                      error))
+            return nullptr;
+        param->has_default = true;
+        set_symlist_default_ast(param, newvalnode(value));
+    }
+    return code;
+}
 
 std::shared_ptr<thread_transfer_context>
 skein_vm_thread_transfer_context_create() {

@@ -3089,6 +3089,62 @@ def check_extended_stdlib():
                 "deque_top=1|lru=12|set_size=3|set_vals=[1, 2, 3]"
             ), dec.stdout
 
+            proto2_encode = os.path.join(deadlock_tmp,
+                                         "proto2_encode_main.skein")
+            with open(proto2_encode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    "thread func worker(ctx) {\n"
+                    "  struct Local { x: int = 1; y: int; }\n"
+                    "  impl Local {\n"
+                    "    func sum(self, n) { "
+                    "return self.x + self.y + n; }\n"
+                    "  }\n"
+                    "  enum Kind { A { n: int = 5; }; B; }\n"
+                    "  let l = Local { y: 4 };\n"
+                    "  let k = Kind.A {};\n"
+                    "  return {\"sum\": l.sum(2), \"x\": l.x, "
+                    "\"y\": l.y, \"n\": k.n};\n"
+                    "}\n"
+                    "let blob = std.thread.encode(worker);\n"
+                    'write_bytes("proto2_payload.bin", blob);\n'
+                )
+            proto2_decode = os.path.join(deadlock_tmp,
+                                         "proto2_decode_main.skein")
+            with open(proto2_decode, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "import std;\n"
+                    'let blob = read_bytes("proto2_payload.bin");\n'
+                    "let t = std.thread.spawn_encoded(blob, "
+                    "std.thread.Message.from({}));\n"
+                    "let v = t.join()[\"value\"];\n"
+                    'print(str(v["sum"]) + ":" + str(v["x"]) + ":" + '
+                    'str(v["y"]) + ":" + str(v["n"]));\n'
+                )
+            enc = subprocess.run(
+                [os.path.abspath(BIN), proto2_encode],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert enc.returncode == 0, (
+                "proto2 thread encode failed: "
+                f"{enc.stdout!r} {enc.stderr!r}"
+            )
+            dec = subprocess.run(
+                [os.path.abspath(BIN), proto2_decode],
+                cwd=deadlock_tmp,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert dec.returncode == 0, (
+                "proto2 thread decode failed: "
+                f"{dec.stdout!r} {dec.stderr!r}"
+            )
+            assert dec.stdout.strip() == "7:1:4:5", dec.stdout
+
             http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
             os.makedirs(http_pkg_dir)
             http_worker = os.path.join(

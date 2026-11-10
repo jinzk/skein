@@ -111,9 +111,12 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 ```
 
 `SKEIN_TEST_TIMEOUT` 只影响测试子进程的超时，默认 5 秒；sanitizer 构建需要放宽。
-generator / async 的 fiber 栈默认 2 MiB，可通过 `SKEIN_FIBER_STACK_KB`
-调整（sanitizer 构建建议 8192）。AST 参考后端的调用深度可用
-`SKEIN_MAX_CALL_DEPTH` 调整（sanitizer 测试使用 128）。
+generator / async 的 fiber 栈默认 1 MiB，带 guard page，栈按线程复用
+（最多缓存 32 个）；可用 `SKEIN_FIBER_STACK_KB` 调整大小，sanitizer 构建建议
+8192。`SKEIN_FIBER_STACK_POOL=0` 可关闭栈池，`SKEIN_FIBER_STACK_STATS=1`
+会在 shutdown 时输出 `fiber stack pool: allocated=... reused=... pooled=...`。
+栈即将耗尽时会在挂起点报 `fiber_stack` 错误；越过 guard page 会立即崩溃。
+AST 参考后端的调用深度可用 `SKEIN_MAX_CALL_DEPTH` 调整（sanitizer 测试使用 128）。
 
 TSan 构建（不能与 `SKEIN_SANITIZE` 同时启用）：
 

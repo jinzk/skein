@@ -13,9 +13,13 @@
 
 #include <boost/context/fiber.hpp>
 #include <boost/context/fixedsize_stack.hpp>
+#include <boost/context/protected_fixedsize_stack.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -25,7 +29,9 @@
 
 namespace {
 
-constexpr size_t kDefaultFiberStackBytes = 2 * 1024 * 1024;
+constexpr size_t kDefaultFiberStackBytes = 1024 * 1024;
+constexpr size_t kFiberStackMarginBytes = 16 * 1024;
+constexpr size_t kMaxPooledFiberStacks = 32;
 
 size_t fiber_stack_bytes() {
     const char *configured = std::getenv("SKEIN_FIBER_STACK_KB");
@@ -36,6 +42,108 @@ size_t fiber_stack_bytes() {
     if (end == configured || *end != '\0' || kb < 64 || kb > 1024 * 1024)
         return kDefaultFiberStackBytes;
     return static_cast<size_t>(kb) * 1024;
+}
+
+bool fiber_stack_pool_enabled() {
+    const char *configured = std::getenv("SKEIN_FIBER_STACK_POOL");
+    if (!configured || !*configured)
+        return true;
+    return !(std::strcmp(configured, "0") == 0 ||
+             std::strcmp(configured, "false") == 0 ||
+             std::strcmp(configured, "off") == 0 ||
+             std::strcmp(configured, "no") == 0);
+}
+
+struct fiber_stack_bounds {
+    char *low = nullptr;
+    char *high = nullptr;
+    size_t usable = 0;
+};
+
+thread_local fiber_stack_bounds last_stack_bounds;
+
+struct fiber_stack_pool {
+    std::vector<boost::context::stack_context> free;
+    size_t allocated = 0;
+    size_t reused = 0;
+    bool enabled = fiber_stack_pool_enabled();
+
+    ~fiber_stack_pool() { clear(); }
+
+    void clear() {
+        boost::context::protected_fixedsize_stack allocator;
+        for (boost::context::stack_context &context : free)
+            allocator.deallocate(context);
+        free.clear();
+    }
+};
+
+thread_local fiber_stack_pool fiber_stacks;
+
+fiber_stack_bounds bounds_of(const boost::context::stack_context &context) {
+    fiber_stack_bounds bounds;
+    const size_t guard =
+        boost::context::stack_traits::page_size();
+    if (!context.sp || context.size <= guard)
+        return bounds;
+    bounds.high = static_cast<char *>(context.sp);
+    bounds.low = bounds.high - context.size + guard;
+    bounds.usable = static_cast<size_t>(bounds.high - bounds.low);
+    return bounds;
+}
+
+/*
+ * Guard-paged stacks from Boost.Context with a per-thread free list.  Fiber
+ * creation is dominated by mmap/VirtualAlloc; reusing stacks keeps short-lived
+ * async tasks and generators cheap.
+ */
+class pooled_fiber_stack {
+public:
+    typedef boost::context::stack_traits traits_type;
+
+    explicit pooled_fiber_stack(std::size_t size) : size_(size) {}
+
+    boost::context::stack_context allocate() {
+        if (fiber_stacks.enabled && !fiber_stacks.free.empty()) {
+            boost::context::stack_context context =
+                fiber_stacks.free.back();
+            fiber_stacks.free.pop_back();
+            ++fiber_stacks.reused;
+            last_stack_bounds = bounds_of(context);
+            return context;
+        }
+        boost::context::protected_fixedsize_stack allocator(size_);
+        boost::context::stack_context context = allocator.allocate();
+        ++fiber_stacks.allocated;
+        last_stack_bounds = bounds_of(context);
+        return context;
+    }
+
+    void deallocate(boost::context::stack_context &context) noexcept {
+        if (fiber_stacks.enabled &&
+            fiber_stacks.free.size() < kMaxPooledFiberStacks) {
+            try {
+                fiber_stacks.free.push_back(context);
+                context.sp = nullptr;
+                return;
+            } catch (...) {
+                /* Fall through and release the stack directly. */
+            }
+        }
+        boost::context::protected_fixedsize_stack allocator(size_);
+        allocator.deallocate(context);
+    }
+
+private:
+    std::size_t size_;
+};
+
+uintptr_t current_stack_pointer() {
+#if defined(__GNUC__) || defined(__clang__)
+    return reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
+#else
+    return 0;
+#endif
 }
 
 enum fiber_state {
@@ -70,17 +178,22 @@ struct fiber {
     bool canceled = false;
     bool closing = false;
     bool queued = false;
+    char *stack_low = nullptr;
+    size_t stack_usable = 0;
+    std::string stack_error;
 
     fiber(std::function<value_t *()> fn, fiber_kind fiber_type)
         : body(std::move(fn)), kind(fiber_type) {
         context = boost::context::fiber(
             std::allocator_arg,
-            boost::context::fixedsize_stack(fiber_stack_bytes()),
+            pooled_fiber_stack(fiber_stack_bytes()),
             [this](boost::context::fiber &&sink) {
                 caller = std::move(sink);
                 fiber_main();
                 return std::move(caller);
             });
+        stack_low = last_stack_bounds.low;
+        stack_usable = last_stack_bounds.usable;
     }
 
     ~fiber() {
@@ -91,6 +204,9 @@ struct fiber {
         freeval(error_value);
         error_value = NULL;
     }
+
+    bool check_stack(const char *where);
+    value_t *raise_stack_error();
 
     void fiber_main();
 };
@@ -205,7 +321,46 @@ value_t *await_result(const task_ptr &task) {
 
 } // namespace
 
+bool fiber::check_stack(const char *where) {
+    if (!stack_low || stack_usable == 0)
+        return true;
+    const uintptr_t low = reinterpret_cast<uintptr_t>(stack_low);
+    const uintptr_t high = low + stack_usable;
+    const uintptr_t sp = current_stack_pointer();
+    if (sp < low || sp > high)
+        return true;
+    const size_t remaining = static_cast<size_t>(sp - low);
+    if (remaining >= kFiberStackMarginBytes)
+        return true;
+    char message[256];
+    std::snprintf(
+        message, sizeof(message),
+        "fiber stack overflow at %s: %zu of %zu bytes left "
+        "(raise SKEIN_FIBER_STACK_KB)", where, remaining, stack_usable);
+    stack_error = message;
+    return false;
+}
+
+value_t *fiber::raise_stack_error() {
+    eval_raise(newerrorval("fiber_stack", stack_error.c_str()));
+    return NULL;
+}
+
 void fiber::fiber_main() {
+    if (!check_stack("fiber start")) {
+        body = nullptr;
+        value_t *error = newerrorval("fiber_stack", stack_error.c_str());
+        if (kind == FIBER_TASK) {
+            task_fail_error(task, error);
+        } else {
+            failed = true;
+            error_value = error;
+        }
+        if (root_context)
+            adopt_scopes(eval.scopes, root_context->scopes);
+        state = FIBER_DONE;
+        return;
+    }
     value_t *result = body ? body() : NULL;
     body = nullptr;
 
@@ -524,6 +679,10 @@ value_t *fiber_yield_value(value_t *value) {
         eval_request_close();
         return NULL;
     }
+    if (!current->check_stack("yield")) {
+        freeval(value);
+        return current->raise_stack_error();
+    }
     current->yielded_value = value;
     current->state = FIBER_YIELDED;
     current->caller = std::move(current->caller).resume();
@@ -554,6 +713,10 @@ value_t *fiber_await_task(const task_ptr &task) {
     if (task_get_state(task) == TASK_STATE_PENDING) {
         if (current_fiber) {
             fiber *value = current_fiber;
+            if (!value->check_stack("await")) {
+                value->raise_stack_error();
+                return NULL;
+            }
             value->await_task = task;
             suspend_current();
             value->await_task = nullptr;
@@ -588,6 +751,10 @@ bool fiber_wait_for(std::function<bool()> ready, long long timeout_ms) {
     }
     if (value->canceled)
         return false;
+    if (!value->check_stack("wait")) {
+        value->raise_stack_error();
+        return false;
+    }
 
     task_ptr timer;
     if (timeout_ms > 0)
@@ -654,5 +821,22 @@ void fiber_shutdown() {
         delete value;
     }
     ready_fibers.clear();
+    if (const char *stats = std::getenv("SKEIN_FIBER_STACK_STATS")) {
+        if (*stats && std::strcmp(stats, "0") != 0) {
+            std::fprintf(stderr,
+                         "fiber stack pool: allocated=%zu reused=%zu "
+                         "pooled=%zu\n",
+                         fiber_stacks.allocated, fiber_stacks.reused,
+                         fiber_stacks.free.size());
+        }
+    }
+    fiber_stacks.clear();
     shutting_down = false;
+}
+
+void fiber_stack_pool_stats(size_t &allocated, size_t &reused,
+                            size_t &pooled) {
+    allocated = fiber_stacks.allocated;
+    reused = fiber_stacks.reused;
+    pooled = fiber_stacks.free.size();
 }

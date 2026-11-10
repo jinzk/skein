@@ -29,5 +29,8 @@ bool fiber_is_generator(value_t *value);
 void fiber_pump();
 void fiber_disable_generator_warnings();
 void fiber_shutdown();
+/* Stack pool counters for diagnostics and tests. */
+void fiber_stack_pool_stats(size_t &allocated, size_t &reused,
+                            size_t &pooled);
 
 #endif

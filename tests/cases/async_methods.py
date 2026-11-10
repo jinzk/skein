@@ -219,3 +219,28 @@ def run_cases():
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["12"], proc.stdout
+
+    env = os.environ.copy()
+    env["SKEIN_FIBER_STACK_STATS"] = "1"
+    proc = run(
+        "import std;\n"
+        "async func work(n) { return n + 1; }\n"
+        "let total = 0;\n"
+        "for (let i = 0; i < 40; i = i + 1) {\n"
+        "  total = total + await work(i);\n"
+        "}\n"
+        "println(total);\n",
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "820" in proc.stdout, proc.stdout
+    stats = [
+        line for line in proc.stderr.splitlines()
+        if line.startswith("fiber stack pool:")
+    ]
+    assert stats, proc.stderr
+    fields = dict(
+        item.split("=", 1)
+        for item in stats[-1].split(": ", 1)[1].split())
+    assert int(fields["reused"]) > 0, stats[-1]
+    assert int(fields["allocated"]) <= 2, stats[-1]

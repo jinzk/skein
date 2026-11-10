@@ -365,5 +365,5 @@ struct Instr {
 - `vm_differential_test` 的随机生成程序在 AST / VM 下输出一致；
 - `tools/bench_vm.py --check` 的 VM/AST 基准回归通过；
 - ASan/UBSan 下 VM 路径无新增问题；
-- sanitizer 构建中 `skein_vm_lsan_tests` 通过；已知的非 VM 泄漏
+- sanitizer 构建中 `skein_vm_lsan_tests_shard*` 通过；已知的非 VM 泄漏
   （`freeval` 深度保护、可选 FFI 内存块）在测试环境中显式排除。

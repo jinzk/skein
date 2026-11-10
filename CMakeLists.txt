@@ -738,8 +738,6 @@ if(BUILD_TESTING)
     if(TARGET skein_ffi_shim)
       list(APPEND SKEIN_TEST_COMMAND $<TARGET_FILE:skein_ffi_shim>)
     endif()
-    add_test(NAME skein_tests COMMAND ${SKEIN_TEST_COMMAND})
-    add_test(NAME skein_vm_tests COMMAND ${SKEIN_TEST_COMMAND})
     set(SKEIN_AST_TEST_ENV "SKEIN_VM=0")
     if(SKEIN_SANITIZE)
       list(APPEND SKEIN_AST_TEST_ENV "SKEIN_TEST_TIMEOUT=120")
@@ -749,12 +747,6 @@ if(BUILD_TESTING)
       # process stack limit while still exercising the error path.
       list(APPEND SKEIN_AST_TEST_ENV "SKEIN_MAX_CALL_DEPTH=128")
     endif()
-    set_tests_properties(skein_tests PROPERTIES
-      ENVIRONMENT "${SKEIN_AST_TEST_ENV}"
-      LABELS "core"
-      RUN_SERIAL TRUE
-      TIMEOUT 600
-    )
     set(SKEIN_VM_TEST_ENV "SKEIN_VM=1")
     if(SKEIN_SANITIZE)
       # Sanitizer frames are much larger; keep deep recursion below the
@@ -762,16 +754,64 @@ if(BUILD_TESTING)
       list(APPEND SKEIN_VM_TEST_ENV "SKEIN_VM_MAX_DEPTH=128")
       list(APPEND SKEIN_VM_TEST_ENV "SKEIN_TEST_TIMEOUT=120")
       # Keep the regular sanitizer run focused on ASan/UBSan; leaks are
-      # covered by skein_vm_lsan_tests below.
+      # covered by the LSan shards below.
       list(APPEND SKEIN_VM_TEST_ENV "ASAN_OPTIONS=detect_leaks=0")
       list(APPEND SKEIN_VM_TEST_ENV "SKEIN_FIBER_STACK_KB=8192")
     endif()
-    set_tests_properties(skein_vm_tests PROPERTIES
-      ENVIRONMENT "${SKEIN_VM_TEST_ENV}"
-      LABELS "core"
-      RUN_SERIAL TRUE
-      TIMEOUT 600
-    )
+
+    if(SKEIN_SANITIZE)
+      # The Python suite is the dominant sanitizer cost.  Split it into
+      # independent module groups so ctest -j can overlap ASan/UBSan/LSan
+      # passes instead of running three ~5 minute serial jobs.
+      set(SKEIN_SANITIZE_GROUPS
+        "language_core,match_types,meta,decorators"
+        "async_methods,collections,diagnostics,async_errors"
+        "stdlib_builtins,paths,route,runtime"
+        "typecheck")
+      # net/io_scripts use probe-then-bind fixed ports; run them in a single
+      # LSan shard to avoid cross-process port races while still covering them
+      # under ASan + LeakSanitizer.
+      set(SKEIN_LSAN_GROUPS
+        "language_core,match_types,meta,decorators"
+        "async_methods,collections,diagnostics,async_errors"
+        "stdlib_builtins,paths,route,runtime"
+        "typecheck,net,io_scripts")
+      set(SKEIN_SANITIZE_SHARD 0)
+      foreach(group IN LISTS SKEIN_SANITIZE_GROUPS)
+        math(EXPR SKEIN_SANITIZE_SHARD "${SKEIN_SANITIZE_SHARD}+1")
+        add_test(NAME skein_tests_shard${SKEIN_SANITIZE_SHARD}
+                 COMMAND ${SKEIN_TEST_COMMAND})
+        set_tests_properties(skein_tests_shard${SKEIN_SANITIZE_SHARD} PROPERTIES
+          ENVIRONMENT
+            "${SKEIN_AST_TEST_ENV};SKEIN_TEST_ONLY_MODULES=${group}"
+          LABELS "core;sanitize-shard"
+          TIMEOUT 600
+        )
+        add_test(NAME skein_vm_tests_shard${SKEIN_SANITIZE_SHARD}
+                 COMMAND ${SKEIN_TEST_COMMAND})
+        set_tests_properties(skein_vm_tests_shard${SKEIN_SANITIZE_SHARD} PROPERTIES
+          ENVIRONMENT
+            "${SKEIN_VM_TEST_ENV};SKEIN_TEST_ONLY_MODULES=${group}"
+          LABELS "core;sanitize-shard"
+          TIMEOUT 600
+        )
+      endforeach()
+    else()
+      add_test(NAME skein_tests COMMAND ${SKEIN_TEST_COMMAND})
+      add_test(NAME skein_vm_tests COMMAND ${SKEIN_TEST_COMMAND})
+      set_tests_properties(skein_tests PROPERTIES
+        ENVIRONMENT "${SKEIN_AST_TEST_ENV}"
+        LABELS "core"
+        RUN_SERIAL TRUE
+        TIMEOUT 600
+      )
+      set_tests_properties(skein_vm_tests PROPERTIES
+        ENVIRONMENT "${SKEIN_VM_TEST_ENV}"
+        LABELS "core"
+        RUN_SERIAL TRUE
+        TIMEOUT 600
+      )
+    endif()
     if(NOT SKEIN_SANITIZE)
       add_test(
         NAME vm_differential_test
@@ -903,7 +943,6 @@ if(BUILD_TESTING)
       # LeakSanitizer run.  Known non-VM leaks are excluded:
       # - deep recursive struct print relies on freeval's depth guard;
       # - the optional FFI module has its own memory-block lifecycle.
-      add_test(NAME skein_vm_lsan_tests COMMAND ${SKEIN_TEST_COMMAND})
       set(SKEIN_VM_LSAN_ENV
         "SKEIN_VM=1"
         "SKEIN_VM_MAX_DEPTH=128"
@@ -915,12 +954,19 @@ if(BUILD_TESTING)
         "SKEIN_FIBER_STACK_KB=8192"
         "SKEIN_MAX_CALL_DEPTH=128"
       )
-      set_tests_properties(skein_vm_lsan_tests PROPERTIES
-        ENVIRONMENT "${SKEIN_VM_LSAN_ENV}"
-        LABELS "sanitize;lsan"
-        RUN_SERIAL TRUE
-        TIMEOUT 900
-      )
+      set(SKEIN_LSAN_SHARD 0)
+      foreach(group IN LISTS SKEIN_LSAN_GROUPS)
+        math(EXPR SKEIN_LSAN_SHARD "${SKEIN_LSAN_SHARD}+1")
+        add_test(NAME skein_vm_lsan_tests_shard${SKEIN_LSAN_SHARD}
+                 COMMAND ${SKEIN_TEST_COMMAND})
+        set_tests_properties(
+          skein_vm_lsan_tests_shard${SKEIN_LSAN_SHARD} PROPERTIES
+          ENVIRONMENT
+            "${SKEIN_VM_LSAN_ENV};SKEIN_TEST_ONLY_MODULES=${group}"
+          LABELS "sanitize;lsan"
+          TIMEOUT 600
+        )
+      endforeach()
       add_test(
         NAME thread_leak_test
         COMMAND ${Python3_EXECUTABLE}

@@ -107,8 +107,12 @@ cmake -S . -B build-asan -G Ninja -DSKEIN_SANITIZE=ON
 cmake --build build-asan
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
   SKEIN_TEST_TIMEOUT=120 \
-  ctest --test-dir build-asan --output-on-failure -E container_bench
+  ctest --test-dir build-asan --output-on-failure -j 6 -E container_bench
 ```
+
+sanitize 构建会把 Python 套件按模块分成 ASan/UBSan 分片和 LSan 分片；
+`-j 6`（或接近 CPU 核数）可让 AST/VM/LSan 三组并行，避免整份套件串行跑三遍。
+只需要 leak 检查时可以单独运行 `-R skein_vm_lsan_tests_shard`。
 
 `SKEIN_TEST_TIMEOUT` 只影响测试子进程的超时，默认 5 秒；sanitizer 构建需要放宽。
 generator / async 的 fiber 栈默认 1 MiB，带 guard page，栈按线程复用

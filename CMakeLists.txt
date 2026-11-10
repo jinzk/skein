@@ -828,6 +828,23 @@ if(BUILD_TESTING)
         TIMEOUT 300
       )
       add_test(
+        NAME memory_soak_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/soak_memory.py
+                --bin $<TARGET_FILE:${PROJECT_NAME}>
+                --mode both
+                --rounds 80
+                --http-rounds 40
+                --http-requests 5
+                --max-growth-mb 32
+                --check
+      )
+      set_tests_properties(memory_soak_test PROPERTIES
+        LABELS "bench"
+        RUN_SERIAL TRUE
+        TIMEOUT 300
+      )
+      add_test(
         NAME repl_flush_test
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/repl_flush.py

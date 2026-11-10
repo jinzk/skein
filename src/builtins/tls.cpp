@@ -1,6 +1,7 @@
 #include "tls.h"
 
 #include "ast.h"
+#include "diagnostics.h"
 #include "fiber.h"
 #include "builtins_io.h"
 #include "repl.h"
@@ -12,9 +13,13 @@
 #include <openssl/x509v3.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -79,7 +84,9 @@ struct tls_stream {
     SSL *ssl = NULL;
     BIO *rbio = NULL;
     BIO *wbio = NULL;
-    std::vector<std::string> *server_alpn = NULL;
+    /* Cached server contexts are owned by the context cache; the stream only
+     * owns the extra reference created by SSL_new. */
+    bool owns_ctx = false;
     std::string selected_alpn;
 
     bool closed = false;
@@ -89,9 +96,8 @@ struct tls_stream {
     ~tls_stream() {
         if (ssl)
             SSL_free(ssl);
-        if (ctx)
+        if (ctx && owns_ctx)
             SSL_CTX_free(ctx);
-        delete server_alpn;
         freeval(source);
     }
 };
@@ -645,6 +651,194 @@ bool build_alpn_wire(value_t *options, std::string &wire) {
     return true;
 }
 
+/* ---------------------------------------------------------------------------
+ * Server context cache.
+ *
+ * A TLS listener calls std.tls.server for every accepted connection.  Instead
+ * of rebuilding an SSL_CTX (and re-reading the certificate files) each time,
+ * we cache one context per (cert file, key file, options) tuple.  When the
+ * certificate or key file changes on disk the next connection rebuilds the
+ * context, so new connections pick up the rotated certificate while existing
+ * connections keep using the context they handshook with.
+ *
+ * If rebuilding fails (for example while a file is being replaced) the old
+ * context is kept and a diagnostic is recorded; the failing files are not
+ * retried until their timestamp changes again.
+ * ------------------------------------------------------------------------- */
+
+void alpn_ex_free(void *, void *ptr, CRYPTO_EX_DATA *, int, long, void *) {
+    delete static_cast<std::vector<std::string> *>(ptr);
+}
+
+int alpn_ex_index() {
+    static std::once_flag once;
+    static int index = -1;
+    std::call_once(once, []() {
+        index = SSL_CTX_get_ex_new_index(0, NULL, NULL, NULL, &alpn_ex_free);
+    });
+    return index;
+}
+
+bool file_mtime(const std::string &path, int64_t &mtime) {
+    std::error_code ec;
+    std::filesystem::file_time_type stamp =
+        std::filesystem::last_write_time(path, ec);
+    if (ec)
+        return false;
+    mtime = (int64_t)stamp.time_since_epoch().count();
+    return true;
+}
+
+void append_option_signature(std::string &out, const char *label,
+                             const std::string &value) {
+    out += label;
+    out.push_back('=');
+    out += std::to_string(value.size());
+    out.push_back(':');
+    out += value;
+    out.push_back(';');
+}
+
+std::string server_options_signature(value_t *options) {
+    std::string signature;
+    value_t *alpn = dict_get(options, "alpn");
+    if (alpn && alpn->type == T_list) {
+        list_value_t *list = (list_value_t *)alpn;
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            value_t *item = list->payload->items[i];
+            if (item->type == T_string)
+                append_option_signature(
+                    signature, "alpn", ((string_value_t *)item)->value);
+        }
+    }
+    append_option_signature(signature, "client_ca",
+                            option_string(options, "client_ca_file"));
+    append_option_signature(signature, "client_auth",
+                            option_string(options, "client_auth"));
+    return signature;
+}
+
+SSL_CTX *build_server_ctx(const std::string &cert_file,
+                          const std::string &key_file, value_t *options,
+                          std::string &error) {
+    ERR_clear_error();
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) {
+        ssl_error_string(error, "tls: cannot create server context");
+        return NULL;
+    }
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    if (SSL_CTX_use_certificate_chain_file(ctx, cert_file.c_str()) != 1 ||
+        SSL_CTX_use_PrivateKey_file(ctx, key_file.c_str(),
+                                    SSL_FILETYPE_PEM) != 1 ||
+        SSL_CTX_check_private_key(ctx) != 1) {
+        ssl_error_string(error, "tls: cannot load certificate or key");
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+
+    value_t *alpn_value = dict_get(options, "alpn");
+    if (alpn_value && alpn_value->type != T_null) {
+        if (alpn_value->type != T_list) {
+            error = "std.tls.server: alpn must be a list of strings";
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+        std::vector<std::string> *preferences =
+            new std::vector<std::string>();
+        list_value_t *list = (list_value_t *)alpn_value;
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            value_t *item = list->payload->items[i];
+            if (item->type != T_string) {
+                delete preferences;
+                error = "std.tls.server: alpn entries must be strings";
+                SSL_CTX_free(ctx);
+                return NULL;
+            }
+            preferences->push_back(((string_value_t *)item)->value);
+        }
+        int index = alpn_ex_index();
+        if (index >= 0)
+            SSL_CTX_set_ex_data(ctx, index, preferences);
+        /* The callback argument must stay valid for the lifetime of the
+         * context; ex-data releases it when the context is finally freed. */
+        SSL_CTX_set_alpn_select_cb(ctx, select_alpn, preferences);
+    }
+    return ctx;
+}
+
+struct server_ctx_entry {
+    std::shared_ptr<SSL_CTX> ctx;
+    int64_t cert_mtime = -1;
+    int64_t key_mtime = -1;
+    std::string last_error;
+};
+
+std::mutex g_server_ctx_mutex;
+std::map<std::string, server_ctx_entry> g_server_ctx_cache;
+
+SSL_CTX *acquire_server_ctx(const std::string &cert_file,
+                            const std::string &key_file, value_t *options,
+                            std::string &error) {
+    std::string key = cert_file;
+    key.push_back('\0');
+    key += key_file;
+    key.push_back('\0');
+    key += server_options_signature(options);
+
+    int64_t cert_time = -1;
+    int64_t key_time = -1;
+    bool cert_ok = file_mtime(cert_file, cert_time);
+    bool key_ok = file_mtime(key_file, key_time);
+    int64_t observed_cert = cert_ok ? cert_time : -1;
+    int64_t observed_key = key_ok ? key_time : -1;
+
+    std::lock_guard<std::mutex> lock(g_server_ctx_mutex);
+    auto it = g_server_ctx_cache.find(key);
+    if (it == g_server_ctx_cache.end()) {
+        std::string build_error;
+        SSL_CTX *fresh =
+            build_server_ctx(cert_file, key_file, options, build_error);
+        if (!fresh) {
+            error = build_error;
+            return NULL;
+        }
+        server_ctx_entry entry;
+        entry.ctx = std::shared_ptr<SSL_CTX>(fresh, &SSL_CTX_free);
+        entry.cert_mtime = observed_cert;
+        entry.key_mtime = observed_key;
+        it = g_server_ctx_cache.emplace(key, std::move(entry)).first;
+        return it->second.ctx.get();
+    }
+
+    server_ctx_entry &entry = it->second;
+    if (observed_cert == entry.cert_mtime &&
+        observed_key == entry.key_mtime)
+        return entry.ctx.get();
+
+    std::string build_error;
+    SSL_CTX *fresh =
+        build_server_ctx(cert_file, key_file, options, build_error);
+    entry.cert_mtime = observed_cert;
+    entry.key_mtime = observed_key;
+    if (!fresh) {
+        entry.last_error = build_error;
+        char message[512];
+        std::snprintf(message, sizeof(message),
+                      "tls: certificate reload failed for %s: %s; keeping "
+                      "previous certificate",
+                      cert_file.c_str(), build_error.c_str());
+        diag_warning(message);
+        ERR_clear_error();
+        return entry.ctx.get();
+    }
+    /* Replacing the cache reference is safe: SSL objects created from the old
+     * context keep it alive until their own references are released. */
+    entry.ctx = std::shared_ptr<SSL_CTX>(fresh, &SSL_CTX_free);
+    entry.last_error.clear();
+    return entry.ctx.get();
+}
+
 bool prepare_ssl(tls_stream *stream, SSL_CTX *ctx, SSL *ssl,
                  std::string &error) {
     BIO *rbio = BIO_new(BIO_s_mem());
@@ -752,6 +946,7 @@ value_t *tls_client(const std::vector<value_t *> &args) {
         yyerror("%s", error.c_str());
         return NULL;
     }
+    stream->owns_ctx = true;
 
     if (!tls_handshake_impl(stream.get(), sync_reader(stream.get()),
                             sync_writer(stream.get()), 0, error)) {
@@ -784,49 +979,15 @@ value_t *tls_server(const std::vector<value_t *> &args) {
     stream->source_data = source.data;
     stream->source_owner = source.owner;
 
-    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
-    if (!ctx) {
-        std::string error;
-        ssl_error_string(error, "tls: cannot create server context");
-        yyerror("%s", error.c_str());
-        return NULL;
-    }
-    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
     const char *cert_file = ((string_value_t *)args[1])->value;
     const char *key_file = ((string_value_t *)args[2])->value;
-    if (SSL_CTX_use_certificate_chain_file(ctx, cert_file) != 1 ||
-        SSL_CTX_use_PrivateKey_file(ctx, key_file,
-                                    SSL_FILETYPE_PEM) != 1 ||
-        SSL_CTX_check_private_key(ctx) != 1) {
-        std::string error;
-        ssl_error_string(error, "tls: cannot load certificate or key");
-        yyerror("%s", error.c_str());
-        SSL_CTX_free(ctx);
-        return NULL;
-    }
 
-    value_t *alpn_value = dict_get(options, "alpn");
-    if (alpn_value && alpn_value->type != T_null) {
-        if (alpn_value->type != T_list) {
-            yyerror("std.tls.server: alpn must be a list of strings");
-            SSL_CTX_free(ctx);
-            return NULL;
-        }
-        std::vector<std::string> *preferences =
-            new std::vector<std::string>();
-        list_value_t *list = (list_value_t *)alpn_value;
-        for (size_t i = 0; i < list->payload->items.size(); ++i) {
-            value_t *item = list->payload->items[i];
-            if (item->type != T_string || item->type == T_null) {
-                delete preferences;
-                yyerror("std.tls.server: alpn entries must be strings");
-                SSL_CTX_free(ctx);
-                return NULL;
-            }
-            preferences->push_back(((string_value_t *)item)->value);
-        }
-        stream->server_alpn = preferences;
-        SSL_CTX_set_alpn_select_cb(ctx, select_alpn, preferences);
+    std::string ctx_error;
+    SSL_CTX *ctx =
+        acquire_server_ctx(cert_file, key_file, options, ctx_error);
+    if (!ctx) {
+        yyerror("%s", ctx_error.c_str());
+        return NULL;
     }
 
     SSL *ssl = SSL_new(ctx);
@@ -834,17 +995,18 @@ value_t *tls_server(const std::vector<value_t *> &args) {
         std::string error;
         ssl_error_string(error, "tls: cannot create SSL");
         yyerror("%s", error.c_str());
-        SSL_CTX_free(ctx);
         return NULL;
     }
     SSL_set_accept_state(ssl);
     std::string error;
     if (!prepare_ssl(stream.get(), ctx, ssl, error)) {
         SSL_free(ssl);
-        SSL_CTX_free(ctx);
         yyerror("%s", error.c_str());
         return NULL;
     }
+    /* The context cache keeps the context alive; the stream must not free the
+     * cache reference, only the reference created by SSL_new. */
+    stream->owns_ctx = false;
 
     if (!tls_handshake_impl(stream.get(), sync_reader(stream.get()),
                             sync_writer(stream.get()), 0, error)) {

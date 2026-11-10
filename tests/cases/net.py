@@ -2800,6 +2800,114 @@ def run_cases():
                         async_https_client.close()
                     async_https_skein.wait(timeout=10)
 
+                rotation_dir = os.path.join(tls_tmp, "rotation")
+                os.makedirs(rotation_dir, exist_ok=True)
+
+                def make_rotation_cert(name):
+                    cert = os.path.join(rotation_dir, name + "_cert.pem")
+                    key = os.path.join(rotation_dir, name + "_key.pem")
+                    proc = subprocess.run(
+                        ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+                         "-nodes", "-keyout", key, "-out", cert,
+                         "-days", "1", "-subj", f"/CN={name}",
+                         "-addext", "subjectAltName=DNS:localhost"],
+                        capture_output=True, text=True)
+                    assert proc.returncode == 0, proc.stderr
+                    return cert, key
+
+                rot_cert_a, rot_key_a = make_rotation_cert("rotation-a")
+                rot_cert_b, rot_key_b = make_rotation_cert("rotation-b")
+                active_cert = os.path.join(rotation_dir, "active_cert.pem")
+                active_key = os.path.join(rotation_dir, "active_key.pem")
+                shutil.copyfile(rot_cert_a, active_cert)
+                shutil.copyfile(rot_key_a, active_key)
+
+                def cert_der(path):
+                    import ssl
+                    with open(path, "r", encoding="utf-8") as handle:
+                        pem = handle.read()
+                    return ssl.PEM_cert_to_DER_cert(pem)
+
+                der_a = cert_der(rot_cert_a)
+                der_b = cert_der(rot_cert_b)
+
+                rotation_probe = socket.socket()
+                rotation_probe.bind(("127.0.0.1", 0))
+                rotation_port = rotation_probe.getsockname()[1]
+                rotation_probe.close()
+                rotation_server = subprocess.Popen(
+                    [BIN],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                try:
+                    rotation_server.stdin.write(
+                        "import std;\n"
+                        f'let l = std.net.tcp_listen("127.0.0.1", '
+                        f"{rotation_port}, 1000);\n"
+                        "for (let i = 0; i < 3; i = i + 1) {\n"
+                        "  let c = std.net.accept(l, 5000);\n"
+                        f'  let t = std.tls.server(c, "{active_cert}", '
+                        f'"{active_key}");\n'
+                        "  let data = std.io.read(t, 100);\n"
+                        "  std.io.write_all(t, bytes_to_string(data));\n"
+                        "  std.io.close(t);\n"
+                        "}\n"
+                        "std.net.close(l);\n"
+                        'println("rotation served");\n'
+                    )
+                    rotation_server.stdin.close()
+
+                    def rotation_peer_der():
+                        import ssl
+                        deadline = time.time() + 5
+                        raw = None
+                        while time.time() < deadline:
+                            try:
+                                raw = socket.create_connection(
+                                    ("127.0.0.1", rotation_port), timeout=0.2)
+                                break
+                            except OSError:
+                                time.sleep(0.05)
+                        assert raw is not None, "rotation server did not listen"
+                        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                        context.check_hostname = False
+                        context.verify_mode = ssl.CERT_NONE
+                        wrapped = context.wrap_socket(
+                            raw, server_hostname="localhost")
+                        peer = wrapped.getpeercert(binary_form=True)
+                        wrapped.sendall(b"hello")
+                        assert wrapped.recv(100) == b"hello"
+                        wrapped.close()
+                        return peer
+
+                    assert rotation_peer_der() == der_a
+                    time.sleep(1.1)
+                    shutil.copyfile(rot_cert_b, active_cert)
+                    shutil.copyfile(rot_key_b, active_key)
+                    os.utime(active_cert, None)
+                    os.utime(active_key, None)
+                    assert rotation_peer_der() == der_b
+
+                    time.sleep(1.1)
+                    with open(active_cert, "w", encoding="utf-8") as handle:
+                        handle.write("not a certificate\n")
+                    os.utime(active_cert, None)
+                    assert rotation_peer_der() == der_b
+
+                    rotation_server.wait(timeout=10)
+                    rotation_stderr = rotation_server.stderr.read()
+                    assert "certificate reload failed" in rotation_stderr, (
+                        rotation_stderr)
+                    assert "rotation served" in rotation_server.stdout.read()
+                finally:
+                    if rotation_server.poll() is None:
+                        rotation_server.terminate()
+                        rotation_server.wait(timeout=5)
+
         serve_probe = socket.socket()
         serve_probe.bind(("127.0.0.1", 0))
         serve_port = serve_probe.getsockname()[1]

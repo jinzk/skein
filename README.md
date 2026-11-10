@@ -1356,6 +1356,10 @@ std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
 - TLS 流支持 `std.io.read_async` / `write_async`；
 - TLS 握手在 `std.tls.client/server` 包装时同步完成；
 - 服务端 ALPN 会按服务端列表选择第一个客户端也支持的协议；
+- `std.tls.server` 按证书/私钥路径和选项缓存 `SSL_CTX`；每次接受新连接时检查文件
+  时间戳，变化时重建上下文，因此新连接使用新证书，旧连接继续使用握手时的旧证书；
+- 证书/私钥重建失败时保留旧上下文并输出 `tls: certificate reload failed ...`
+  诊断，不中断监听，也不重试直到文件时间戳再次变化；
 
 async / await：
 

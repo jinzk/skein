@@ -601,6 +601,74 @@ static struct ast *new_call_with_placeholders(
                    newret(newcall(callee, args)), false, false, false);
 }
 
+/*
+ * `struct Name with Trait, pkg.Other { ... }` and the enum form lower to
+ * the declaration followed by `impl Trait for Name;` statements.  `with` is
+ * not a reserved word: it is parsed as a NAME and validated here, so code
+ * can still use `with` as an ordinary identifier elsewhere.
+ */
+static struct ast *lower_type_with(char *name, char *with_token,
+                                   char *traits, void *members,
+                                   bool is_enum, bool exported) {
+    bool with_ok =
+        with_token && std::strcmp(with_token, "with") == 0;
+    if (!with_ok) {
+        diag_set_location(g_token_line, g_token_column);
+        yyerror("expected 'with' after type name");
+    }
+    std::free(with_token);
+
+    std::vector<std::string> names;
+    if (traits) {
+        std::string text(traits);
+        std::free(traits);
+        size_t start = 0;
+        for (;;) {
+            size_t sep = text.find('\x1f', start);
+            std::string item = text.substr(
+                start, sep == std::string::npos ? std::string::npos
+                                                : sep - start);
+            if (!item.empty())
+                names.push_back(item);
+            if (sep == std::string::npos)
+                break;
+            start = sep + 1;
+        }
+    }
+
+    std::string source = diag_current_source_name();
+    struct ast *decl = NULL;
+    if (is_enum) {
+        decl = newenumdecl(copy_text(name), copy_text(source.c_str()),
+                           (struct enum_variant *)members, exported);
+    } else {
+        decl = newstructdecl(copy_text(name), copy_text(source.c_str()),
+                             (struct struct_member *)members, exported);
+    }
+    struct ast *tail = NULL;
+    for (size_t i = names.size(); i > 0; --i) {
+        struct ast *impl = newimpl(
+            copy_text(name), copy_text(names[i - 1].c_str()),
+            copy_text(source.c_str()), NULL);
+        tail = tail ? newast('L', impl, tail) : impl;
+    }
+    std::free(name);
+    if (!with_ok || !tail)
+        return decl;
+    return newast('L', decl, tail);
+}
+
+static char *concat_with_trait(char *head, char *next) {
+    std::string joined = head ? std::string(head) : std::string();
+    if (!joined.empty())
+        joined.push_back('\x1f');
+    if (next)
+        joined += next;
+    std::free(head);
+    std::free(next);
+    return copy_text(joined.c_str());
+}
+
 static struct type_constraint *type_constraint_from_builtin(int functype) {
     switch (functype) {
         case B_int: return new_type_constraint(TYPE_INT);
@@ -853,7 +921,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <sl> param symlist
 %type <type> type type_name func_ret_opt
 %type <tl> type_list
-%type <str> importref importpath fieldname impl_trait_name
+%type <str> importref importpath fieldname impl_trait_name with_trait with_traits
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
 %destructor { treefree($$); } <a>
@@ -980,6 +1048,13 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                            copy_text(diag_current_source_name().c_str()),
                            (struct struct_member *)$5, true);
       }
+    | EXPORT STRUCT NAME NAME with_traits '{' empty_body {
+        $$ = lower_type_with($3, $4, $5, NULL, false, true);
+      }
+    | EXPORT STRUCT NAME NAME with_traits '{' struct_members '}' {
+        $$ = lower_type_with($3, $4, $5,
+                             (struct struct_member *)$7, false, true);
+      }
     | EXPORT TRAIT NAME '{' empty_body   {
         $$ = newtraitdecl($3,
                           copy_text(diag_current_source_name().c_str()),
@@ -999,6 +1074,13 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
                          (struct enum_variant *)$5, true);
+      }
+    | EXPORT ENUM NAME NAME with_traits '{' empty_body {
+        $$ = lower_type_with($3, $4, $5, NULL, true, true);
+      }
+    | EXPORT ENUM NAME NAME with_traits '{' enum_variants '}' {
+        $$ = lower_type_with($3, $4, $5,
+                             (struct enum_variant *)$7, true, true);
       }
     | LABEL NAME ':' stmt                { $$ = newlabel($2, $4); }
     | struct_decl
@@ -1264,6 +1346,13 @@ struct_decl: STRUCT NAME '{' empty_body  {
                            copy_text(diag_current_source_name().c_str()),
                            (struct struct_member *)$4);
       }
+    | STRUCT NAME NAME with_traits '{' empty_body {
+        $$ = lower_type_with($2, $3, $4, NULL, false, false);
+      }
+    | STRUCT NAME NAME with_traits '{' struct_members '}' {
+        $$ = lower_type_with($2, $3, $4,
+                             (struct struct_member *)$6, false, false);
+      }
     ;
 
 enum_decl: ENUM NAME '{' empty_body      {
@@ -1275,6 +1364,13 @@ enum_decl: ENUM NAME '{' empty_body      {
         $$ = newenumdecl($2,
                          copy_text(diag_current_source_name().c_str()),
                          (struct enum_variant *)$4);
+      }
+    | ENUM NAME NAME with_traits '{' empty_body {
+        $$ = lower_type_with($2, $3, $4, NULL, true, false);
+      }
+    | ENUM NAME NAME with_traits '{' enum_variants '}' {
+        $$ = lower_type_with($2, $3, $4,
+                             (struct enum_variant *)$6, true, false);
       }
     ;
 
@@ -1421,8 +1517,64 @@ trait_methods: trait_method              { $$ = $1; }
     | trait_methods trait_method         { $$ = append_trait_method($1, $2); }
     ;
 
-trait_method: FUNC NAME '(' symlist ')' ';' { $$ = newtraitmethod($2, $4, false); }
-    | ASYNC FUNC NAME '(' symlist ')' ';' { $$ = newtraitmethod($3, $5, true); }
+/*
+ * Trait methods may be signatures (`;`) or provide a default body.  The
+ * default body is kept as a function AST and compiled with the trait; an
+ * impl that omits the method falls back to this definition.
+ */
+trait_method: funcstart NAME '(' symlist ')' ';' {
+        $$ = newtraitmethod($2, $4, false, NULL);
+        (void)finish_function();
+      }
+    | ASYNC funcstart NAME '(' symlist ')' ';' {
+        $$ = newtraitmethod($3, $5, true, NULL);
+        (void)finish_function();
+      }
+    | funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE {
+        $$ = newtraitmethod(
+            $2, NULL, false,
+            newfunc(NULL, $4, NULL, false, false, finish_function(), $6));
+      }
+    | funcstart NAME '(' symlist ')' func_ret_opt '{' list '}' {
+        $$ = newtraitmethod(
+            $2, NULL, false,
+            newfunc(NULL, $4, $8, false, false, finish_function(), $6));
+      }
+    | funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';' {
+        $$ = newtraitmethod(
+            $2, NULL, false,
+            newfunc(NULL, $4, newret($8), false, false, finish_function(),
+                    $6));
+      }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE {
+        $$ = newtraitmethod(
+            $3, NULL, true,
+            newfunc(NULL, $5, NULL, false, true, finish_function(), $7));
+      }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt '{' list '}' {
+        $$ = newtraitmethod(
+            $3, NULL, true,
+            newfunc(NULL, $5, $9, false, true, finish_function(), $7));
+      }
+    | ASYNC funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';' {
+        $$ = newtraitmethod(
+            $3, NULL, true,
+            newfunc(NULL, $5, newret($9), false, true, finish_function(),
+                    $7));
+      }
+    ;
+
+with_trait: NAME                         { $$ = $1; }
+    | NAME '.' NAME {
+        std::string qualified = std::string($1) + "." + $3;
+        free($1);
+        free($3);
+        $$ = copy_text(qualified.c_str());
+      }
+    ;
+
+with_traits: with_trait                  { $$ = $1; }
+    | with_traits ',' with_trait         { $$ = concat_with_trait($1, $3); }
     ;
 
 struct_fields: struct_field              { $$ = $1; }

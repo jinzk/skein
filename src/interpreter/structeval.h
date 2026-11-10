@@ -75,12 +75,15 @@ struct trait_method_meta {
     std::string name;
     std::vector<trait_param_meta> params;
     bool is_async = false;
+    std::shared_ptr<struct function_code> code;
 };
 
 bool declare_trait_meta(
     const char *module, const char *module_name, const char *name,
     bool exported, const std::vector<trait_method_meta> &methods,
-    std::string &error);
+    const std::shared_ptr<struct scope_t> &closure, std::string &error,
+    const std::function<std::shared_ptr<struct upvalue_cell>(
+        const std::string &)> &capture_upvalue);
 
 bool declare_impl_meta(
     const char *module, const char *module_name, const char *type_name,

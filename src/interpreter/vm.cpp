@@ -1927,6 +1927,7 @@ public:
                         trait_method_meta method_meta;
                         method_meta.name = method.name;
                         method_meta.is_async = method.is_async;
+                        method_meta.code = method.code;
                         method_meta.params.reserve(method.params.size());
                         for (const auto &param : method.params) {
                             trait_param_meta param_meta;
@@ -1939,12 +1940,17 @@ public:
                         }
                         methods.push_back(std::move(method_meta));
                     }
+                    std::shared_ptr<scope_t> closure = current_scope();
+                    if (closure && closure->is_global)
+                        closure.reset();
                     std::string error;
                     if (!declare_trait_meta(
                             meta.module.c_str(),
                             diag_current_module_name().c_str(),
                             meta.name.c_str(), meta.exported, methods,
-                            error))
+                            closure, error, [this](const std::string &name) {
+                                return capture_upvalue(name);
+                            }))
                         return abort_error();
                     push(newnull());
                     break;

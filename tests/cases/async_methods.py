@@ -142,6 +142,20 @@ def run_cases():
 
     run_case(
         "import std;\n"
+        "trait S {\n"
+        "  async func handle(self);\n"
+        "  async func twice(self) { return await self.handle() * 2; }\n"
+        "}\n"
+        "struct C { x: int; }\n"
+        "impl S for C {\n"
+        "  async func handle(self) { return self.x; }\n"
+        "}\n"
+        "println(await C { x: 11 }.twice());\n",
+        ["22"],
+    )
+
+    run_case(
+        "import std;\n"
         "struct C { x: int; }\n"
         "impl C {\n"
         "  async func get(self) { return self.x; }\n"

@@ -3967,8 +3967,11 @@ func render(x: Drawable) {
 render(p)
 ```
 
-- `trait` 只包含方法签名，不包含字段、默认方法或 trait 继承；
-- trait 方法声明不能有默认值；`impl` 方法可以额外提供默认值；
+- `trait` 可以包含方法签名和默认方法体，不包含字段或 trait 继承；
+- 没有默认体的 trait 方法仍然必须由 `impl` 提供；
+- trait 方法声明不能有默认参数值；`impl` 方法可以额外提供默认值；
+- `impl` 提供同名方法时覆盖 trait 默认方法；
+- 多个 trait 为同一类型提供同名默认方法时，必须在 `impl` 中显式覆盖，否则报冲突；
 - 接口是名义式的：只有显式写了 `impl Drawable for Point`，`Point` 才能传给 `Drawable`；
 - 如果方法已经存在于 `impl Point` 中，可以只写 `impl Drawable for Point;` 做接口适配；
 - trait 方法名不能与类型已有方法冲突；enum 上也不能与任意变体字段重名；
@@ -3979,6 +3982,36 @@ render(p)
 - 类型默认不跨包可见；`export struct` / `export trait` 后可以按包路径使用；
 - 导出的 trait 签名只能引用已导出的类型或内建类型，否则外部类型无法实现它；
 - 导入之后用 `aa.Point`、`lib.Drawable` 这样的限定名引用：
+
+默认方法示例：
+
+```text
+trait Drawable {
+  func draw(self) { print("default draw"); }
+  func area(self);
+}
+
+struct Point { x: int; }
+
+impl Drawable for Point {
+  func area(self) { return self.x; }
+  // draw 使用 trait 默认实现
+}
+
+Point { x: 3 }.draw();
+```
+
+`struct Name with Trait1, Trait2 { ... }` / `enum Name with Trait { ... }`
+是 `impl Trait for Name;` 的声明式简写，只建立接口实现关系，不是继承：
+
+```text
+trait Drawable { func draw(self) { print("draw"); } }
+struct Point with Drawable { x: int; y: int; }
+```
+
+- `with` 后面的 trait 支持限定名，如 `lib.Drawable`；
+- 多个 trait 用逗号分隔；纯签名方法仍需在类型体内或后续 `impl` 中实现；
+- `with` 只在 `struct` / `enum` 名称后识别，其他位置仍是普通标识符；
 
 ```text
 // package aa
@@ -4113,7 +4146,7 @@ async func dispatch(service: Service, request) {
 
 - trait 声明 `async func`，实现也必须是 async；反之亦然；
 - `impl Service for Client;` 可以适配已有的 async 方法；
-- async trait 方法不能有默认值或可变参数；
+- async trait 方法可以有默认方法体；仍不能有默认参数值或可变参数；
 - `std.meta.methods` 的方法描述包含 `async` 字段。
 
 async 方法装饰器：

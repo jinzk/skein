@@ -1121,7 +1121,7 @@ struct ast *newtraitdecl(char *name, char *module,
 }
 
 struct ast *newtraitmethod(char *name, struct symlist *params,
-                           bool is_async) {
+                           bool is_async, struct ast *func) {
     struct trait_method *a =
         (struct trait_method *)std::malloc(sizeof(struct trait_method));
     if (!a) {
@@ -1132,6 +1132,7 @@ struct ast *newtraitmethod(char *name, struct symlist *params,
     set_loc(a, 0, 0);
     a->name = name;
     a->params = params;
+    a->func = func;
     a->is_async = is_async ? 1 : 0;
     a->next = NULL;
     return (struct ast *)a;
@@ -1507,6 +1508,7 @@ void treefree(struct ast *a) {
         case 'q': {
             struct trait_method *m = (struct trait_method *)a;
             treefree((struct ast *)m->next);
+            treefree(m->func);
             symlistfree_full(m->params);
             std::free(m->name);
             break;

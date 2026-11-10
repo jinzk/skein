@@ -2385,6 +2385,10 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
                 out.u8(param.variadic ? 1 : 0);
                 out.u8(param.has_default ? 1 : 0);
             }
+            if (!write_inline_function(out, method.code,
+                                       "trait default method", nullptr,
+                                       error))
+                return false;
         }
     }
     out.u32((uint32_t)proto.impl_decls.size());
@@ -2932,6 +2936,8 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
                 param.has_default = has_default != 0;
                 method.params.push_back(std::move(param));
             }
+            if (!read_inline_function(in, method.code, error))
+                return false;
             decl.methods.push_back(std::move(method));
         }
         proto->trait_decls.push_back(std::move(decl));

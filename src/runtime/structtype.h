@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct field_def {
@@ -29,6 +30,8 @@ struct trait_def {
     std::string module_name;
     bool exported;
     std::vector<method_sig> methods;
+    /* Methods with a default body, keyed by method name. */
+    std::unordered_map<std::string, std::shared_ptr<function_def>> defaults;
 };
 
 struct variant_def {
@@ -49,6 +52,11 @@ struct type_def {
     std::string module_name;
     bool exported;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
+    /*
+     * Method names supplied by a trait default rather than an impl, mapped
+     * to the trait that supplied them (for conflict detection).
+     */
+    std::unordered_map<std::string, const trait_def *> default_methods;
     std::vector<const trait_def *> traits;
 };
 
@@ -174,6 +182,9 @@ bool structtype_create_enum(const char *module, const char *module_name,
                             const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error);
+bool structtype_add_trait_default(trait_def *trait, const std::string &name,
+                                  std::shared_ptr<function_def> code,
+                                  std::string &error);
 bool structtype_prepare_enum(const char *module, const char *module_name,
                              const char *name, bool exported,
                              enum_def *&out, std::string &error);

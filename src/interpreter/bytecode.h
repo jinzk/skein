@@ -334,6 +334,8 @@ struct TraitMethodMeta {
     std::string name;
     std::vector<TraitParamMeta> params;
     bool is_async = false;
+    /* Optional default implementation compiled with the trait. */
+    std::shared_ptr<function_code> code;
 };
 
 struct TraitDeclMeta {

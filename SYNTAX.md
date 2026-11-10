@@ -681,6 +681,38 @@ impl Drawable for Point {
 p is Drawable     // true
 ```
 
+trait 默认方法：
+
+```text
+trait Drawable {
+  func draw(self) { print("default"); }
+  func area(self);
+}
+
+impl Drawable for Point {
+  func area(self) { return 1; }
+  // draw 使用默认实现
+}
+```
+
+- `impl` 显式提供同名方法时覆盖默认实现；
+- 没有默认体的纯签名方法仍必须实现；
+- 多个 trait 的同名默认方法冲突时，必须在 `impl` 中显式覆盖。
+
+`with` 简写：
+
+```text
+struct Point with Drawable {
+  x: int;
+  y: int;
+}
+
+enum Event with Drawable, Serializable { ... }
+```
+
+等价于类型声明后再写 `impl Drawable for Point;`；`with` 只在
+`struct` / `enum` 名称后作为上下文关键字，其他位置仍是普通标识符。
+
 `is` 只接受类型名或 trait 名，不接受任意表达式作为右操作数。类型名按包解析，因此同名结构体不会混淆。
 
 ### 4.12 运算优先级

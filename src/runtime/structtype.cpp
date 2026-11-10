@@ -165,6 +165,10 @@ void structtype_visit_functions(
             }
         }
     }
+    for (auto &entry : trait_types) {
+        for (auto &method : entry.second->defaults)
+            visit(method.second);
+    }
 }
 
 struct_def *structtype_find_struct(const char *module, const char *name) {
@@ -806,10 +810,35 @@ bool structtype_add_method(type_def *def, const std::string &name,
         return false;
     }
     if (def->methods.count(name) != 0) {
+        /*
+         * A later explicit impl may replace a method that was supplied by a
+         * trait default.  Explicit duplicates are still rejected.
+         */
+        if (def->default_methods.erase(name) != 0) {
+            def->methods[name] = std::move(code);
+            return true;
+        }
         error = "method repeated " + name;
         return false;
     }
     def->methods.emplace(name, std::move(code));
+    return true;
+}
+
+bool structtype_add_trait_default(trait_def *trait, const std::string &name,
+                                  std::shared_ptr<function_def> code,
+                                  std::string &error) {
+    if (!trait || name.empty() || !code || !code->code) {
+        error = "invalid trait default method";
+        return false;
+    }
+    if (trait->defaults.count(name) != 0) {
+        error = "trait default method repeated " + name;
+        return false;
+    }
+    code->code->is_method = true;
+    code->code->name = name;
+    trait->defaults.emplace(name, std::move(code));
     return true;
 }
 

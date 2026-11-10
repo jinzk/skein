@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -220,6 +221,64 @@ static bool method_signature_matches(const method_sig *sig,
     return true;
 }
 
+/*
+ * Complete a trait relation: methods implemented by the impl block (or by a
+ * previous trait adapter) win; omitted methods fall back to trait defaults.
+ * Two traits providing the same default require an explicit override.
+ */
+static bool apply_trait_defaults(
+    type_def *owner, trait_def *trait,
+    const std::unordered_set<std::string> &provided, bool ok) {
+    if (!owner || !trait)
+        return ok;
+    for (const method_sig &sig : trait->methods) {
+        std::string error;
+        auto existing = owner->methods.find(sig.name);
+        if (existing == owner->methods.end()) {
+            auto fallback = trait->defaults.find(sig.name);
+            if (fallback == trait->defaults.end()) {
+                yyerror("type %s does not implement method %s required by "
+                        "trait %s", owner->name.c_str(),
+                        sig.name.c_str(), trait->name.c_str());
+                ok = false;
+                continue;
+            }
+            std::shared_ptr<function_def> code = fallback->second;
+            if (!structtype_add_method(owner, sig.name, code, error)) {
+                yyerror("%s", error.c_str());
+                ok = false;
+                continue;
+            }
+            owner->default_methods[sig.name] = trait;
+            if (!code->code ||
+                !method_signature_matches(&sig, code->code.get(), error)) {
+                yyerror("%s", error.c_str());
+                ok = false;
+            }
+            continue;
+        }
+
+        auto source = owner->default_methods.find(sig.name);
+        if (provided.count(sig.name) == 0 &&
+            source != owner->default_methods.end() &&
+            source->second != trait &&
+            trait->defaults.count(sig.name) != 0) {
+            yyerror("trait %s default method %s conflicts with another "
+                    "trait default; implement it explicitly",
+                    trait->name.c_str(), sig.name.c_str());
+            ok = false;
+            continue;
+        }
+        if (existing->second && existing->second->code &&
+            !method_signature_matches(&sig, existing->second->code.get(),
+                                      error)) {
+            yyerror("%s", error.c_str());
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 void eval_struct_decl(struct struct_node *s) {
     for (struct struct_member *m = s->members; m; m = m->next) {
         if (m->nodetype == 'm') {
@@ -295,9 +354,11 @@ bool eval_impl_decl(struct impl_node *impl) {
     }
 
     bool ok = true;
+    std::unordered_set<std::string> provided;
     for (struct struct_member *m = impl->methods; m; m = m->next) {
         if (m->nodetype != 'm')
             continue;
+        provided.insert(m->name ? m->name : "");
         if (trait) {
             const struct method_sig *sig = find_trait_method(trait, m->name);
             if (!sig) {
@@ -342,23 +403,7 @@ bool eval_impl_decl(struct impl_node *impl) {
     if (!trait)
         return ok;
 
-    for (size_t i = 0; i < trait->methods.size(); ++i) {
-        auto method = owner->methods.find(trait->methods[i].name);
-        if (method == owner->methods.end()) {
-            yyerror("type %s does not implement method %s required by trait %s",
-                    owner->name.c_str(), trait->methods[i].name.c_str(),
-                    trait->name.c_str());
-            ok = false;
-            continue;
-        }
-        std::string error;
-        if (method->second && method->second->code &&
-            !method_signature_matches(&trait->methods[i],
-                                      method->second->code.get(), error)) {
-            yyerror("%s", error.c_str());
-            ok = false;
-        }
-    }
+    ok = apply_trait_defaults(owner, trait, provided, ok);
 
     if (ok) {
         std::string error;
@@ -372,19 +417,23 @@ bool eval_impl_decl(struct impl_node *impl) {
 
 void eval_trait_decl(struct trait_node *t) {
     std::vector<method_sig> methods;
+    std::vector<std::pair<std::string, std::shared_ptr<function_def>>>
+        defaults;
     for (struct trait_method *m = t->methods; m; m = m->next) {
-        if (!m->params || std::strcmp(m->params->sym->name, "self") != 0) {
+        struct symlist *params =
+            m->func ? ((struct funcdef *)m->func)->sl : m->params;
+        if (!params || std::strcmp(params->sym->name, "self") != 0) {
             yyerror("trait method %s must start with self", m->name);
             return;
         }
-        if (m->params->type && m->params->type->kind != TYPE_ANY) {
+        if (params->type && params->type->kind != TYPE_ANY) {
             yyerror("trait method %s self must be untyped", m->name);
             return;
         }
         method_sig sig;
         sig.name = m->name;
         sig.is_async = m->is_async != 0;
-        for (struct symlist *p = m->params; p; p = p->next) {
+        for (struct symlist *p = params; p; p = p->next) {
             if (p->variadic) {
                 yyerror("trait methods cannot be variadic");
                 return;
@@ -398,15 +447,45 @@ void eval_trait_decl(struct trait_node *t) {
                 return;
             sig.params.push_back(copy_type_constraint(p->type));
         }
-        methods.push_back(sig);
+        if (m->func) {
+            struct value_t *value = eval(m->func);
+            if (!value || value->type != T_func) {
+                freeval(value);
+                yyerror("invalid trait default method %s", m->name);
+                return;
+            }
+            std::shared_ptr<function_def> definition =
+                ((struct func_value_t *)value)->def;
+            freeval(value);
+            if (!definition || !definition->code) {
+                yyerror("invalid trait default method %s", m->name);
+                return;
+            }
+            if ((definition->code->is_async != 0) != (m->is_async != 0)) {
+                yyerror("trait method %s async marker does not match its "
+                        "default body", m->name);
+                return;
+            }
+            defaults.emplace_back(m->name, std::move(definition));
+        }
+        methods.push_back(std::move(sig));
     }
 
     std::string error;
     trait_def *def = NULL;
     if (!structtype_create_trait(
             t->module, diag_current_module_name().c_str(), t->name,
-            t->exported != 0, std::move(methods), def, error))
+            t->exported != 0, std::move(methods), def, error)) {
         yyerror("%s", error.c_str());
+        return;
+    }
+    for (auto &entry : defaults) {
+        if (!structtype_add_trait_default(def, entry.first,
+                                          std::move(entry.second), error)) {
+            yyerror("%s", error.c_str());
+            return;
+        }
+    }
 }
 
 bool declare_struct_meta(
@@ -491,8 +570,12 @@ bool declare_enum_meta(
 bool declare_trait_meta(
     const char *module, const char *module_name, const char *name,
     bool exported, const std::vector<trait_method_meta> &methods,
-    std::string &error) {
+    const std::shared_ptr<scope_t> &closure, std::string &error,
+    const std::function<std::shared_ptr<struct upvalue_cell>(
+        const std::string &)> &capture_upvalue) {
     std::vector<method_sig> signatures;
+    std::vector<std::pair<std::string, std::shared_ptr<function_def>>>
+        defaults;
     for (const trait_method_meta &method : methods) {
         if (method.params.empty() ||
             method.params.front().name != "self") {
@@ -523,6 +606,31 @@ bool declare_trait_meta(
             signature.params.push_back(
                 copy_type_constraint(&param.type));
         }
+        if (method.code) {
+            std::string signature_error;
+            if (!method_signature_matches(&signature, method.code.get(),
+                                          signature_error)) {
+                yyerror("%s", signature_error.c_str());
+                return false;
+            }
+            if ((method.code->is_async != 0) != method.is_async) {
+                yyerror("trait method %s async marker does not match its "
+                        "default body", method.name.c_str());
+                return false;
+            }
+            std::shared_ptr<function_def> definition =
+                std::make_shared<function_def>();
+            definition->code = method.code;
+            definition->closure = closure;
+            if (capture_upvalue) {
+                definition->upvalues.reserve(
+                    method.code->upvalues.size());
+                for (const std::string &captured : method.code->upvalues)
+                    definition->upvalues.push_back(
+                        capture_upvalue(captured));
+            }
+            defaults.emplace_back(method.name, std::move(definition));
+        }
         signatures.push_back(std::move(signature));
     }
 
@@ -531,6 +639,13 @@ bool declare_trait_meta(
                                  std::move(signatures), def, error)) {
         yyerror("%s", error.c_str());
         return false;
+    }
+    for (auto &entry : defaults) {
+        if (!structtype_add_trait_default(def, entry.first,
+                                          std::move(entry.second), error)) {
+            yyerror("%s", error.c_str());
+            return false;
+        }
     }
     return true;
 }
@@ -563,7 +678,9 @@ bool declare_impl_meta(
     }
 
     bool ok = true;
+    std::unordered_set<std::string> provided;
     for (const auto &method : methods) {
+        provided.insert(method.first);
         std::shared_ptr<function_def> definition =
             std::make_shared<function_def>();
         definition->code = method.second;
@@ -611,25 +728,7 @@ bool declare_impl_meta(
     if (!trait)
         return ok;
 
-    for (size_t i = 0; i < trait->methods.size(); ++i) {
-        auto method = owner->methods.find(trait->methods[i].name);
-        if (method == owner->methods.end()) {
-            yyerror("type %s does not implement method %s required by "
-                    "trait %s", owner->name.c_str(),
-                    trait->methods[i].name.c_str(),
-                    trait->name.c_str());
-            ok = false;
-            continue;
-        }
-        std::string signature_error;
-        if (method->second && method->second->code &&
-            !method_signature_matches(&trait->methods[i],
-                                      method->second->code.get(),
-                                      signature_error)) {
-            yyerror("%s", signature_error.c_str());
-            ok = false;
-        }
-    }
+    ok = apply_trait_defaults(owner, trait, provided, ok);
 
     if (ok) {
         std::string trait_error;

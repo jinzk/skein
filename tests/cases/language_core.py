@@ -875,6 +875,62 @@ def run_cases():
           'let f = mk();\n'
           'println(f());\n',
           stdout="[1, 2, 3]")
+    check("trait default method",
+          'trait Drawable {\n'
+          '  func draw(self) { return "default"; }\n'
+          '  func area(self);\n'
+          '}\n'
+          'struct Point { x: int; }\n'
+          'impl Drawable for Point {\n'
+          '  func area(self) { return self.x; }\n'
+          '}\n'
+          'let p = Point { x: 3 };\n'
+          'println(p.draw());\n'
+          'println(p.area());\n',
+          stdout_all=["default", "3"])
+    check("trait default method override",
+          'trait D { func m(self) { return "trait"; } }\n'
+          'struct S { }\n'
+          'impl D for S { func m(self) { return "impl"; } }\n'
+          'println(S {}.m());\n',
+          stdout="impl")
+    check("trait default calls trait method",
+          'trait T {\n'
+          '  func a(self);\n'
+          '  func b(self) { return self.a() + 1; }\n'
+          '}\n'
+          'struct Q { }\n'
+          'impl T for Q { func a(self) { return 4; } }\n'
+          'println(Q {}.b());\n',
+          stdout="5")
+    check("trait default conflict",
+          'trait A { func m(self) { return 1; } }\n'
+          'trait B { func m(self) { return 2; } }\n'
+          'struct S { }\n'
+          'impl A for S { }\n'
+          'impl B for S { }\n',
+          stderr="conflicts with another trait default")
+    check("trait missing method still rejected",
+          'trait T { func m(self); }\n'
+          'struct S { }\n'
+          'impl T for S { }\n',
+          stderr="does not implement method m")
+    check("trait with struct shorthand",
+          'trait D { func d(self) { return "d"; } }\n'
+          'struct S with D { x: int; }\n'
+          'println(S { x: 1 }.d());\n',
+          stdout="d")
+    check("trait with enum shorthand",
+          'trait D { func d(self) { return "e"; } }\n'
+          'enum E with D { A; }\n'
+          'println(E.A.d());\n',
+          stdout="e")
+    check("with remains an identifier",
+          'let with = 7;\n'
+          'struct S { with: int; }\n'
+          'let s = S { with: 9 };\n'
+          'println(with + s.with);\n',
+          stdout="16")
     check("default parameter forward reference",
           'func f(a = b + 1, b = 2) { return a; }\nf();\n',
           stderr="parameter b is used before it is initialized")

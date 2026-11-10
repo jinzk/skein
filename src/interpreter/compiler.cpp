@@ -726,7 +726,11 @@ struct Compiler {
             skein::bc::TraitMethodMeta method_meta;
             method_meta.name = method->name ? method->name : "";
             method_meta.is_async = method->is_async != 0;
-            for (struct symlist *param = method->params; param;
+            struct symlist *params =
+                method->func
+                    ? ((struct funcdef *)method->func)->sl
+                    : method->params;
+            for (struct symlist *param = params; param;
                  param = param->next) {
                 skein::bc::TraitParamMeta param_meta;
                 param_meta.name =
@@ -737,6 +741,13 @@ struct Compiler {
                 param_meta.variadic = param->variadic;
                 param_meta.has_default = param->has_default;
                 method_meta.params.push_back(std::move(param_meta));
+            }
+            if (method->func) {
+                uint32_t function =
+                    add_function((struct funcdef *)method->func);
+                if (!ok)
+                    return 0;
+                method_meta.code = proto.consts[function].function;
             }
             meta.methods.push_back(std::move(method_meta));
         }

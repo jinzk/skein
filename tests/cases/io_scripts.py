@@ -1262,6 +1262,41 @@ def run_cases():
         assert "uses non-exported type Hidden" in proc.stderr, proc.stderr
 
     with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return path
+
+        write(
+            "app/d/d.skein",
+            "package d {\n"
+            "  func helper(x) { return x + 1; }\n"
+            "  export trait D {\n"
+            "    func d(self, x) { return helper(x); }\n"
+            "  }\n"
+            '  export trait E { func e(self) { return "e"; } }\n'
+            "  export struct P with D, E { x: int; }\n"
+            "  export func make() { return P { x: 1 }; }\n"
+            "}\n",
+        )
+        main = write(
+            "app/main.skein",
+            "import d;\n"
+            "struct S with d.D, d.E { }\n"
+            "println(S { }.d(4));\n"
+            "println(S { }.e());\n"
+            "let p = d.make();\n"
+            "println(p.d(9));\n"
+            "println(p.e());\n",
+        )
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["5", "e", "10", "e"], proc.stdout
+        assert proc.stderr == "", proc.stderr
+
+    with tempfile.TemporaryDirectory() as tmp:
         failfast = os.path.join(tmp, "failfast.skein")
         with open(failfast, "w", encoding="utf-8") as f:
             f.write('println("before");\n1/0;\nprintln("after");\n')

@@ -520,7 +520,7 @@ struct value_t *call_builtin(int functype,
         return call_http2_builtin(functype, args);
 #endif
 #ifdef SKEIN_ENABLE_TLS
-    if (functype >= B_tls_client && functype <= B_tls_alpn)
+    if (functype >= B_tls_client && functype <= B_tls_server_name)
         return call_tls_builtin(functype, args);
 #endif
     if (functype >= B_ws_connect && functype <= B_ws_close)

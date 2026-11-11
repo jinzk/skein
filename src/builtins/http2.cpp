@@ -308,6 +308,67 @@ std::string option_string(value_t *options, const char *key) {
     return ((string_value_t *)value)->value;
 }
 
+struct h2_tls_sni_cert {
+    std::string server_name;
+    std::string cert_file;
+    std::string key_file;
+};
+
+bool parse_h2_tls_certs(value_t *dict, const char *who,
+                        std::vector<h2_tls_sni_cert> &out) {
+    value_t *value = dict ? dict_get(dict, "certs") : NULL;
+    if (!value || value->type == T_null)
+        return true;
+    if (value->type != T_list) {
+        yyerror("%s certs must be a list", who);
+        return false;
+    }
+    list_value_t *list = (list_value_t *)value;
+    for (size_t i = 0; i < list->payload->items.size(); ++i) {
+        value_t *item = list->payload->items[i];
+        if (!item || item->type != T_dict) {
+            yyerror("%s certs entries must be dicts", who);
+            return false;
+        }
+        h2_tls_sni_cert entry;
+        entry.server_name = option_string(item, "server_name");
+        entry.cert_file = option_string(item, "cert_file");
+        entry.key_file = option_string(item, "key_file");
+        if (entry.server_name.empty() || entry.cert_file.empty() ||
+            entry.key_file.empty()) {
+            yyerror("%s certs entries require server_name, cert_file and "
+                    "key_file", who);
+            return false;
+        }
+        if (entry.server_name.find('*') != std::string::npos &&
+            entry.server_name.rfind("*.", 0) != 0) {
+            yyerror("%s certs wildcard server_name must start with \"*.\"",
+                    who);
+            return false;
+        }
+        for (const h2_tls_sni_cert &existing : out) {
+            if (existing.server_name == entry.server_name) {
+                yyerror("%s certs contains duplicate server_name", who);
+                return false;
+            }
+        }
+        out.push_back(std::move(entry));
+    }
+    return true;
+}
+
+value_t *h2_tls_certs_value(const std::vector<h2_tls_sni_cert> &certs) {
+    value_t *list = (value_t *)newlistval();
+    for (const h2_tls_sni_cert &cert : certs) {
+        value_t *item = (value_t *)newdictval();
+        dict_set(item, "server_name", newstrval(cert.server_name.c_str()));
+        dict_set(item, "cert_file", newstrval(cert.cert_file.c_str()));
+        dict_set(item, "key_file", newstrval(cert.key_file.c_str()));
+        ((list_value_t *)list)->payload->items.push_back(item);
+    }
+    return list;
+}
+
 bool body_value(value_t *value, std::string &out, const char *who) {
     if (!value || value->type == T_null) {
         out.clear();
@@ -2725,12 +2786,18 @@ value_t *http2_listen_tls(const std::vector<value_t *> &args) {
             yyerror("std.http2.listen_tls client_auth must be a string");
             return NULL;
         }
+        std::vector<h2_tls_sni_cert> certs;
+        if (!parse_h2_tls_certs(tls_options, "std.http2.listen_tls", certs))
+            return NULL;
         if (client_ca)
             dict_set(server, "client_ca_file", dupval(client_ca));
         if (client_auth)
             dict_set(server, "client_auth", dupval(client_auth));
         if (alpn)
             dict_set(server, "alpn", dupval(alpn));
+        value_t *certs_value = dict_get(tls_options, "certs");
+        if (certs_value)
+            dict_set(server, "certs", dupval(certs_value));
     }
     return server;
 #endif
@@ -3298,6 +3365,9 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
         }
         client_auth = ((string_value_t *)client_auth_value)->value;
     }
+    std::vector<h2_tls_sni_cert> sni_certs;
+    if (!parse_h2_tls_certs(args[0], "std.http2.serve", sni_certs))
+        return NULL;
 
     value_t *on_request_body = dict_get(args[0], "on_request_body");
     if (on_request_body && on_request_body->type == T_null)
@@ -3363,7 +3433,7 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
     value_t *handler = args[1];
     task_ptr server_task = fiber_start_async(
         [socket, handler, &state, cert_file, key_file, client_ca_file,
-         client_auth]() {
+         client_auth, sni_certs]() {
         long long next_connection_id = 1;
         std::vector<task_ptr> connections;
         for (;;) {
@@ -3438,6 +3508,9 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
                 if (!client_auth.empty())
                     dict_set(tls_options, "client_auth",
                              newstrval(client_auth.c_str()));
+                if (!sni_certs.empty())
+                    dict_set(tls_options, "certs",
+                             h2_tls_certs_value(sni_certs));
                 std::vector<value_t *> tls_args;
                 tls_args.push_back(dupval(client));
                 tls_args.push_back(newstrval(cert_file.c_str()));

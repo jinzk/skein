@@ -2440,6 +2440,186 @@ def run_cases():
                 assert "http/1.1" in tls_client_proc.stdout, (
                     tls_client_proc.stdout)
 
+                # SNI certificate selection: exact name, wildcard, default.
+                import ssl as ssl_module
+                sni_specs = {}
+                for label in ("default", "api", "wild"):
+                    cert = os.path.join(tls_tmp, f"sni-{label}-cert.pem")
+                    key = os.path.join(tls_tmp, f"sni-{label}-key.pem")
+                    generated = subprocess.run(
+                        ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+                         "-nodes", "-keyout", key, "-out", cert, "-days", "1",
+                         "-subj", f"/CN={label}.example.com"],
+                        capture_output=True, text=True)
+                    assert generated.returncode == 0, generated.stderr
+                    sni_specs[label] = (
+                        cert.replace("\\", "/"), key.replace("\\", "/"))
+                default_cert, default_key = sni_specs["default"]
+                api_cert, api_key = sni_specs["api"]
+                wild_cert, wild_key = sni_specs["wild"]
+
+                sni_server_proc = subprocess.Popen(
+                    [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                sni_source = (
+                    "import std;\n"
+                    'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+                    'let port = std.net.local_addr(listener)["port"];\n'
+                    'println("ready " + str(port));\n'
+                    "std.io.flush(std.io.stdout);\n"
+                    "let certs = [\n"
+                    '  {"server_name": "api.example.com", '
+                    f'"cert_file": "{api_cert}", "key_file": "{api_key}"}},\n'
+                    '  {"server_name": "*.wild.example.com", '
+                    f'"cert_file": "{wild_cert}", "key_file": "{wild_key}"}}\n'
+                    "];\n"
+                    "for (let i = 0; i < 3; i = i + 1) {\n"
+                    "  let s = std.net.accept_task(listener, 5000).wait();\n"
+                    f'  let t = std.tls.server(s, "{default_cert}", '
+                    f'"{default_key}", {{"certs": certs}});\n'
+                    '  println("sni=" + std.tls.server_name(t));\n'
+                    "  std.io.flush(std.io.stdout);\n"
+                    "  std.io.close(t);\n"
+                    "}\n"
+                    "std.net.close(listener);\n"
+                )
+                sni_server_proc.stdin.write(sni_source)
+                sni_server_proc.stdin.close()
+                ready = sni_server_proc.stdout.readline().strip()
+                assert ready.startswith("ready "), ready
+                sni_port = int(ready.split()[1])
+                sni_subjects = {}
+                for host in ("api.example.com", "a.wild.example.com",
+                             "other.example.com"):
+                    context = ssl_module._create_unverified_context()
+                    raw = socket.create_connection(
+                        ("127.0.0.1", sni_port), timeout=5)
+                    wrapped = context.wrap_socket(raw, server_hostname=host)
+                    der = wrapped.getpeercert(binary_form=True)
+                    sni_subjects[host] = subprocess.run(
+                        ["openssl", "x509", "-inform", "DER", "-noout",
+                         "-subject"],
+                        input=der, capture_output=True).stdout.decode()
+                    wrapped.close()
+                sni_server_proc.wait(timeout=10)
+                sni_server_out = sni_server_proc.stdout.read()
+                assert "CN=api.example.com" in sni_subjects[
+                    "api.example.com"], sni_subjects
+                assert "CN=wild.example.com" in sni_subjects[
+                    "a.wild.example.com"], sni_subjects
+                assert "CN=default.example.com" in sni_subjects[
+                    "other.example.com"], sni_subjects
+                assert "sni=api.example.com" in sni_server_out, sni_server_out
+                assert "sni=a.wild.example.com" in sni_server_out, (
+                    sni_server_out)
+                assert "sni=other.example.com" in sni_server_out, (
+                    sni_server_out)
+
+                # Server-side session reuse: the second handshake resumes.
+                session_server_proc = subprocess.Popen(
+                    [BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                session_source = (
+                    "import std;\n"
+                    'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
+                    'let port = std.net.local_addr(listener)["port"];\n'
+                    'println("ready " + str(port));\n'
+                    "std.io.flush(std.io.stdout);\n"
+                    "for (let i = 0; i < 2; i = i + 1) {\n"
+                    "  let s = std.net.accept_task(listener, 5000).wait();\n"
+                    f'  let t = std.tls.server(s, "{default_cert}", '
+                    f'"{default_key}");\n'
+                    '  println("reused=" + str(std.tls.reused(t)));\n'
+                    "  std.io.flush(std.io.stdout);\n"
+                    '  std.io.write(t, "x");\n'
+                    "  std.io.flush(t);\n"
+                    "  std.io.close(t);\n"
+                    "}\n"
+                    "std.net.close(listener);\n"
+                )
+                session_server_proc.stdin.write(session_source)
+                session_server_proc.stdin.close()
+                ready = session_server_proc.stdout.readline().strip()
+                assert ready.startswith("ready "), ready
+                session_port = int(ready.split()[1])
+                context = ssl_module._create_unverified_context()
+                raw = socket.create_connection(
+                    ("127.0.0.1", session_port), timeout=5)
+                first = context.wrap_socket(
+                    raw, server_hostname="default.example.com")
+                first.recv(1)
+                saved_session = first.session
+                first.close()
+                assert saved_session is not None
+                raw = socket.create_connection(
+                    ("127.0.0.1", session_port), timeout=5)
+                second = context.wrap_socket(
+                    raw, server_hostname="default.example.com",
+                    do_handshake_on_connect=False)
+                second.session = saved_session
+                second.do_handshake()
+                assert second.session_reused, "server did not resume session"
+                second.recv(1)
+                second.close()
+                session_server_proc.wait(timeout=10)
+                session_out = session_server_proc.stdout.read()
+                assert "reused=false" in session_out, session_out
+                assert "reused=true" in session_out, session_out
+
+                # Client-side session reuse: std.tls.client caches the session.
+                client_ctx = ssl_module.SSLContext(
+                    ssl_module.PROTOCOL_TLS_SERVER)
+                client_ctx.load_cert_chain(default_cert, default_key)
+                client_listener = socket.socket()
+                client_listener.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                client_listener.bind(("127.0.0.1", 0))
+                client_listener.listen(2)
+                client_listener.settimeout(10)
+                client_port = client_listener.getsockname()[1]
+
+                def client_session_server():
+                    try:
+                        for _ in range(2):
+                            raw, _ = client_listener.accept()
+                            conn = client_ctx.wrap_socket(
+                                raw, server_side=True)
+                            conn.sendall(b"x")
+                            try:
+                                conn.recv(1)
+                            except OSError:
+                                pass
+                            conn.close()
+                    finally:
+                        client_listener.close()
+
+                client_thread = threading.Thread(
+                    target=client_session_server)
+                client_thread.start()
+                client_proc = run(
+                    "import std;\n"
+                    f'let c1 = std.net.tcp_connect("127.0.0.1", '
+                    f"{client_port}, 2000);\n"
+                    'let t1 = std.tls.client(c1, "default.example.com", '
+                    '{"verify": false});\n'
+                    'println("first=" + str(std.tls.reused(t1)));\n'
+                    "println(len(std.io.read(t1, 1)));\n"
+                    "std.io.close(t1);\n"
+                    f'let c2 = std.net.tcp_connect("127.0.0.1", '
+                    f"{client_port}, 2000);\n"
+                    'let t2 = std.tls.client(c2, "default.example.com", '
+                    '{"verify": false});\n'
+                    'println("second=" + str(std.tls.reused(t2)));\n'
+                    "println(len(std.io.read(t2, 1)));\n"
+                    "std.io.close(t2);\n"
+                )
+                client_thread.join(timeout=15)
+                assert client_proc.returncode == 0, client_proc.stderr
+                assert "first=false" in client_proc.stdout, (
+                    client_proc.stdout)
+                assert "second=true" in client_proc.stdout, (
+                    client_proc.stdout)
+
                 h2_tls_probe = socket.socket()
                 h2_tls_probe.bind(("127.0.0.1", 0))
                 h2_tls_port = h2_tls_probe.getsockname()[1]
@@ -3405,6 +3585,121 @@ def run_cases():
                 if sys_module.platform.startswith("linux"):
                     check_cluster_rotation("threads", "reuse_port")
                     check_cluster_rotation("workers", "reuse_port")
+
+                sni_worker = os.path.join(rotation_dir, "sni_worker.skein")
+                with open(sni_worker, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "import std;\n"
+                        "func handle(req) {\n"
+                        '  return {"status": 200, "body": "sni:" + req["path"]};\n'
+                        "}\n"
+                    )
+                sni_worker_path = sni_worker.replace("\\", "\\\\")
+                sni_api_cert, sni_api_key = sni_specs["api"]
+                sni_wild_cert, sni_wild_key = sni_specs["wild"]
+                sni_default_cert, sni_default_key = sni_specs["default"]
+
+                def sni_fetch_subject(port, host):
+                    import ssl as ssl_module
+                    context = ssl_module.SSLContext(
+                        ssl_module.PROTOCOL_TLS_CLIENT)
+                    context.check_hostname = False
+                    context.verify_mode = ssl_module.CERT_NONE
+                    raw = socket.create_connection(
+                        ("127.0.0.1", port), timeout=5)
+                    wrapped = context.wrap_socket(
+                        raw, server_hostname=host)
+                    der = wrapped.getpeercert(binary_form=True)
+                    wrapped.sendall(
+                        b"GET /sni HTTP/1.1\r\nHost: "
+                        + host.encode() +
+                        b"\r\nConnection: close\r\n\r\n")
+                    response = b""
+                    while True:
+                        chunk = wrapped.recv(4096)
+                        if not chunk:
+                            break
+                        response += chunk
+                    wrapped.close()
+                    assert b"sni:/sni" in response, (host, response)
+                    return subprocess.run(
+                        ["openssl", "x509", "-inform", "DER", "-noout",
+                         "-subject"],
+                        input=der, capture_output=True).stdout.decode()
+
+                def check_sni_pool(kind, strategy):
+                    server_script = os.path.join(
+                        rotation_dir, f"sni_{kind}_{strategy}.skein")
+                    if kind == "threads":
+                        serve = (
+                            "let ts = std.http.serve_threads(s, 2, "
+                            f"\"{sni_worker_path}\", {{\"strategy\": "
+                            f"\"{strategy}\", \"max_requests\": 2}});\n"
+                            'println(s["port"]);\n'
+                            "std.io.flush(std.io.stdout);\n"
+                            'println("served=" + str(ts.join(20000)));\n'
+                        )
+                    else:
+                        serve = (
+                            "let ps = std.http.serve_processes(s, 2, "
+                            f"\"{sni_worker_path}\", {{\"strategy\": "
+                            f"\"{strategy}\", \"max_requests\": 2}});\n"
+                            'println(s["port"]);\n'
+                            "std.io.flush(std.io.stdout);\n"
+                            'println("served=" + str(ps.join(20000)));\n'
+                        )
+                    with open(server_script, "w", encoding="utf-8") as handle:
+                        handle.write(
+                            "import std;\n"
+                            "let certs = [\n"
+                            '  {"server_name": "api.example.com", '
+                            f'"cert_file": "{sni_api_cert}", '
+                            f'"key_file": "{sni_api_key}"}},\n'
+                            '  {"server_name": "*.wild.example.com", '
+                            f'"cert_file": "{sni_wild_cert}", '
+                            f'"key_file": "{sni_wild_key}"}}\n'
+                            "];\n"
+                            "let s = std.http.listen_tls("
+                            f"\"127.0.0.1\", 0, \"{sni_default_cert}\", "
+                            f"\"{sni_default_key}\", "
+                            '{"certs": certs});\n' + serve
+                        )
+                    proc = subprocess.Popen(
+                        [BIN, server_script],
+                        cwd=rotation_dir,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    try:
+                        port_line = proc.stdout.readline().strip()
+                        assert port_line.isdigit(), (
+                            kind, strategy, port_line, proc.stderr.read())
+                        port = int(port_line)
+                        api_subject = sni_fetch_subject(
+                            port, "api.example.com")
+                        wild_subject = sni_fetch_subject(
+                            port, "a.wild.example.com")
+                        assert "CN=api.example.com" in api_subject, (
+                            kind, strategy, api_subject)
+                        assert "CN=wild.example.com" in wild_subject, (
+                            kind, strategy, wild_subject)
+                        proc.wait(timeout=20)
+                        out = proc.stdout.read()
+                        err = proc.stderr.read()
+                        assert proc.returncode == 0, (kind, strategy, err)
+                        assert "served=2" in out, (kind, strategy, out, err)
+                    finally:
+                        if proc.poll() is None:
+                            proc.kill()
+                            proc.wait()
+
+                check_sni_pool("threads", "dispatch")
+                check_sni_pool("workers", "dispatch")
+                if sys_module.platform.startswith("linux"):
+                    check_sni_pool("threads", "reuse_port")
+                    check_sni_pool("workers", "reuse_port")
 
                 if sys_module.platform.startswith("linux"):
                     rp_dir = os.path.join(tls_tmp, "reuse_tls")

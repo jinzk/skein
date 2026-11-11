@@ -646,6 +646,9 @@ value_t *build_namespace_impl() {
             {"client", B_tls_client},
             {"server", B_tls_server},
             {"alpn", B_tls_alpn},
+            {"reused", B_tls_reused},
+            {"peer_subject", B_tls_peer_subject},
+            {"server_name", B_tls_server_name},
         })));
 #endif
     root->payload->items.push_back(std::make_pair(

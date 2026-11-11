@@ -3634,6 +3634,9 @@ enable_push              // 仅客户端，bool
 std.tls.client(stream, server_name[, options]) → tls_stream
 std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
 std.tls.alpn(tls_stream)                       → string
+std.tls.reused(tls_stream)                     → bool
+std.tls.peer_subject(tls_stream)               → string
+std.tls.server_name(tls_stream)                → string
 ```
 
 客户端：
@@ -3666,16 +3669,47 @@ std.net.close(listener);
 选项：
 
 ```text
-verify    // 客户端默认 true
-ca_file   // 客户端 CA 文件
-alpn      // 客户端/服务端 ALPN 列表
+verify          // 客户端默认 true
+ca_file         // 客户端 CA 文件
+cert_file       // 客户端证书（mTLS）
+key_file        // 客户端私钥（mTLS）
+client_ca_file  // 服务端校验客户端证书的 CA 文件
+client_auth     // none / optional / required
+alpn            // 客户端/服务端 ALPN 列表
+session_reuse   // 客户端会话复用，默认 true
+certs           // 服务端 SNI 证书列表
 ```
+
+服务端 SNI：
+
+```text
+let tls = std.tls.server(client, "default-cert.pem", "default-key.pem", {
+  "certs": [
+    {"server_name": "api.example.com", "cert_file": "api.pem",
+     "key_file": "api-key.pem"},
+    {"server_name": "*.example.com", "cert_file": "wild.pem",
+     "key_file": "wild-key.pem"}
+  ]
+});
+```
+
+- 精确匹配优先，其次匹配单层通配符，最后回退默认证书；
+- 证书/私钥文件变化会重建全部上下文，失败时保留旧证书；
+- `std.http.listen_tls` 使用相同的 `certs` 选项。
 
 `std.tls.alpn(tls)` 返回协商出的 ALPN：
 
 ```text
-std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
+std.tls.alpn(tls)          // "h2" / "http/1.1" / ""
+std.tls.reused(tls)        // 是否复用会话
+std.tls.peer_subject(tls)  // 对端证书 CN
+std.tls.server_name(tls)   // 服务端收到的 SNI
 ```
+
+- 服务端默认启用会话缓存和 TLS ticket；
+- 客户端进程内按 server name 缓存 resumable 会话，最多 64 条；
+- OCSP / 吊销检查遵循当前操作系统的信任库和 OpenSSL 默认策略，
+  Skein 不实现自定义 OCSP 拉取或 stapling。
 
 规则：
 

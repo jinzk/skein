@@ -2259,11 +2259,86 @@ value_t *http_listen(const std::vector<value_t *> &args) {
 }
 
 #ifdef SKEIN_ENABLE_TLS
+std::string escape_skein_string(const std::string &text);
+
+struct tls_sni_cert {
+    std::string server_name;
+    std::string cert_file;
+    std::string key_file;
+};
+
+std::string dict_string_field(value_t *dict, const char *key) {
+    value_t *value = dict ? dict_get(dict, key) : NULL;
+    if (!value || value->type != T_string)
+        return std::string();
+    return ((string_value_t *)value)->value;
+}
+
+bool parse_tls_certs(value_t *dict, const char *who,
+                     std::vector<tls_sni_cert> &out) {
+    value_t *value = dict ? dict_get(dict, "certs") : NULL;
+    if (!value || value->type == T_null)
+        return true;
+    if (value->type != T_list) {
+        yyerror("%s certs must be a list", who);
+        return false;
+    }
+    list_value_t *list = (list_value_t *)value;
+    for (size_t i = 0; i < list->payload->items.size(); ++i) {
+        value_t *item = list->payload->items[i];
+        if (!item || item->type != T_dict) {
+            yyerror("%s certs entries must be dicts", who);
+            return false;
+        }
+        tls_sni_cert entry;
+        entry.server_name = dict_string_field(item, "server_name");
+        entry.cert_file = dict_string_field(item, "cert_file");
+        entry.key_file = dict_string_field(item, "key_file");
+        if (entry.server_name.empty() || entry.cert_file.empty() ||
+            entry.key_file.empty()) {
+            yyerror("%s certs entries require server_name, cert_file and "
+                    "key_file", who);
+            return false;
+        }
+        if (entry.server_name.find('*') != std::string::npos &&
+            entry.server_name.rfind("*.", 0) != 0) {
+            yyerror("%s certs wildcard server_name must start with \"*.\"",
+                    who);
+            return false;
+        }
+        for (const tls_sni_cert &existing : out) {
+            if (existing.server_name == entry.server_name) {
+                yyerror("%s certs contains duplicate server_name", who);
+                return false;
+            }
+        }
+        out.push_back(std::move(entry));
+    }
+    return true;
+}
+
+std::string tls_certs_source(const std::vector<tls_sni_cert> &certs) {
+    std::string out = "[";
+    for (size_t i = 0; i < certs.size(); ++i) {
+        if (i > 0)
+            out += ", ";
+        out += "{\"server_name\": \"" +
+               escape_skein_string(certs[i].server_name) +
+               "\", \"cert_file\": \"" +
+               escape_skein_string(certs[i].cert_file) +
+               "\", \"key_file\": \"" +
+               escape_skein_string(certs[i].key_file) + "\"}";
+    }
+    out += "]";
+    return out;
+}
+
 value_t *build_server_tls_options(value_t *server) {
     value_t *client_ca = dict_get(server, "client_ca_file");
     value_t *client_auth = dict_get(server, "client_auth");
     value_t *alpn = dict_get(server, "alpn");
-    if (!client_ca && !client_auth && !alpn)
+    value_t *certs = dict_get(server, "certs");
+    if (!client_ca && !client_auth && !alpn && !certs)
         return NULL;
     value_t *options = (value_t *)newdictval();
     if (client_ca)
@@ -2272,7 +2347,33 @@ value_t *build_server_tls_options(value_t *server) {
         dict_set(options, "client_auth", dupval(client_auth));
     if (alpn)
         dict_set(options, "alpn", dupval(alpn));
+    if (certs)
+        dict_set(options, "certs", dupval(certs));
     return options;
+}
+
+value_t *tls_certs_value(const std::vector<tls_sni_cert> &certs) {
+    value_t *list = (value_t *)newlistval();
+    for (const tls_sni_cert &cert : certs) {
+        value_t *item = (value_t *)newdictval();
+        dict_set(item, "server_name", newstrval(cert.server_name.c_str()));
+        dict_set(item, "cert_file", newstrval(cert.cert_file.c_str()));
+        dict_set(item, "key_file", newstrval(cert.key_file.c_str()));
+        ((list_value_t *)list)->payload->items.push_back(item);
+    }
+    return list;
+}
+#else
+struct tls_sni_cert {
+    std::string server_name;
+    std::string cert_file;
+    std::string key_file;
+};
+bool parse_tls_certs(value_t *, const char *, std::vector<tls_sni_cert> &) {
+    return true;
+}
+std::string tls_certs_source(const std::vector<tls_sni_cert> &) {
+    return "[]";
 }
 #endif
 
@@ -2334,6 +2435,9 @@ value_t *http_listen_tls(const std::vector<value_t *> &args) {
             yyerror("std.http.listen_tls alpn must be a list");
             return NULL;
         }
+        std::vector<tls_sni_cert> certs;
+        if (!parse_tls_certs(tls_options, "std.http.listen_tls", certs))
+            return NULL;
     }
 
     std::vector<value_t *> listen_args;
@@ -2350,12 +2454,15 @@ value_t *http_listen_tls(const std::vector<value_t *> &args) {
         value_t *client_ca = dict_get(tls_options, "client_ca_file");
         value_t *client_auth = dict_get(tls_options, "client_auth");
         value_t *alpn = dict_get(tls_options, "alpn");
+        value_t *certs = dict_get(tls_options, "certs");
         if (client_ca)
             dict_set(server, "client_ca_file", dupval(client_ca));
         if (client_auth)
             dict_set(server, "client_auth", dupval(client_auth));
         if (alpn)
             dict_set(server, "alpn", dupval(alpn));
+        if (certs)
+            dict_set(server, "certs", dupval(certs));
     }
     return server;
 #endif
@@ -2962,12 +3069,13 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                            const std::string &client_ca_file = {},
                            const std::string &client_auth = {},
                            const std::vector<std::string> &alpn = {},
+                           const std::vector<tls_sni_cert> &sni_certs = {},
                            const http_connection_fn &connection_fn = {}) {
     value_t *socket_copy = dupval(socket);
     value_t *handler_copy = dupval(handler);
     task_ptr server_task = fiber_start_async(
         [socket_copy, handler_copy, state, cert_file, key_file, client_ca_file,
-         client_auth, alpn, connection_fn]() {
+         client_auth, alpn, sni_certs, connection_fn]() {
         std::vector<task_ptr> connections;
         auto reserve_connection = [state]() -> bool {
             if (state->max_connections <= 0)
@@ -3043,7 +3151,7 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                 tls_args.push_back(newstrval(cert_file.c_str()));
                 tls_args.push_back(newstrval(key_file.c_str()));
                 if (!alpn.empty() || !client_ca_file.empty() ||
-                    !client_auth.empty()) {
+                    !client_auth.empty() || !sni_certs.empty()) {
                     value_t *options = (value_t *)newdictval();
                     if (!alpn.empty()) {
                         value_t *protocols = (value_t *)newlistval();
@@ -3059,6 +3167,9 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                     if (!client_auth.empty())
                         dict_set(options, "client_auth",
                                  newstrval(client_auth.c_str()));
+                    if (!sni_certs.empty())
+                        dict_set(options, "certs",
+                                 tls_certs_value(sni_certs));
                     tls_args.push_back(options);
                 }
                 stream = call_tls(B_tls_server, tls_args);
@@ -3233,6 +3344,10 @@ value_t *http_serve(const std::vector<value_t *> &args) {
         client_auth = ((string_value_t *)client_auth_value)->value;
     }
 
+    std::vector<tls_sni_cert> sni_certs;
+    if (!parse_tls_certs(args[0], "std.http.serve", sni_certs))
+        return NULL;
+
     value_t *on_request_body = dict_get(args[0], "on_request_body");
     if (on_request_body && on_request_body->type == T_null)
         on_request_body = NULL;
@@ -3294,7 +3409,7 @@ value_t *http_serve(const std::vector<value_t *> &args) {
         std::make_shared<http_server_state>(state);
     task_ptr server_task =
         start_http_server(socket, handler, shared_state, cert_file, key_file,
-                          client_ca_file, client_auth);
+                          client_ca_file, client_auth, {}, sni_certs);
     if (!server_task)
         return NULL;
     return await_task_value(new_task_value(std::move(server_task)));
@@ -3443,6 +3558,7 @@ std::string make_reuse_port_bootstrap(
     bool stream_request_body, const std::string &shared_path,
     const std::string &cert_file, const std::string &key_file,
     const std::string &client_ca_file, const std::string &client_auth,
+    const std::vector<tls_sni_cert> &sni_certs,
     bool unsupported_501, const std::string &unsupported_message) {
     std::string source = "import std;\n";
     source += "let s = {\"host\": \"" + escape_skein_string(host) +
@@ -3460,6 +3576,9 @@ std::string make_reuse_port_bootstrap(
     if (!client_auth.empty()) {
         source += "s[\"client_auth\"] = \"" +
                   escape_skein_string(client_auth) + "\";\n";
+    }
+    if (!sni_certs.empty()) {
+        source += "s[\"certs\"] = " + tls_certs_source(sni_certs) + ";\n";
     }
     source += "let ts = std.http.serve_threads(s, 1, \"" +
               escape_skein_string(script) + "\", {\n";
@@ -4344,6 +4463,10 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             client_ca_file = ((string_value_t *)client_ca)->value;
         if (client_auth_value && client_auth_value->type == T_string)
             client_auth = ((string_value_t *)client_auth_value)->value;
+        std::vector<tls_sni_cert> sni_certs;
+        if (!parse_tls_certs(args[0], "std.http.serve_processes",
+                             sni_certs))
+            return NULL;
 
         std::string temp_dir;
         if (!platform_get_env("TMPDIR", temp_dir) &&
@@ -4383,7 +4506,7 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             max_per_connection, idle_timeout_ms, max_connections,
             max_header_bytes, max_headers, max_body_bytes,
             h2_max_concurrent_streams, stream_request_body, shared_path,
-            cert_file, key_file, client_ca_file, client_auth,
+            cert_file, key_file, client_ca_file, client_auth, sni_certs,
             unsupported_501, unsupported_message);
         std::string write_error;
         if (!platform_write_file(bootstrap_path, source, false,
@@ -4521,6 +4644,11 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             return NULL;
         }
         client_auth = ((string_value_t *)client_auth_value)->value;
+    }
+    std::vector<tls_sni_cert> sni_certs;
+    if (!parse_tls_certs(args[0], "std.http.serve_processes", sni_certs)) {
+        freeval(pool);
+        return NULL;
     }
 
     std::shared_ptr<process_server_state> server =
@@ -4680,7 +4808,8 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
     }
 
     task_ptr task = start_http_server(socket, handler, state, cert_file,
-                                      key_file, client_ca_file, client_auth);
+                                      key_file, client_ca_file, client_auth,
+                                      {}, sni_certs);
     freeval(handler);
     if (!task) {
         process_server_close_pool(server.get());
@@ -4751,6 +4880,7 @@ struct reuse_port_server_state
     std::string key_file;
     std::string client_ca_file;
     std::string client_auth;
+    std::vector<tls_sni_cert> certs;
     std::string script;
     std::string entry = "handle";
     bool worker_vm = false;
@@ -5035,7 +5165,8 @@ void reuse_port_worker_main(
 
     task_ptr task = start_http_server(
         listener, wrapped, state, server->cert_file, server->key_file,
-        server->client_ca_file, server->client_auth, alpn, connection_fn);
+        server->client_ca_file, server->client_auth, alpn, server->certs,
+        connection_fn);
     if (task) {
         value_t *result = fiber_await_task(task);
         freeval(result);
@@ -5051,6 +5182,7 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
     const std::string &entry, std::size_t workers, bool worker_vm,
     const std::string &cert_file, const std::string &key_file,
     const std::string &client_ca_file, const std::string &client_auth,
+    const std::vector<tls_sni_cert> &sni_certs,
     std::shared_ptr<http_server_state> config, std::string &error) {
     std::shared_ptr<reuse_port_server_state> server =
         std::make_shared<reuse_port_server_state>();
@@ -5069,6 +5201,7 @@ std::shared_ptr<reuse_port_server_state> create_reuse_port_server(
     server->key_file = key_file;
     server->client_ca_file = client_ca_file;
     server->client_auth = client_auth;
+    server->certs = sni_certs;
 
     try {
         for (std::size_t i = 0; i < workers; ++i)
@@ -5715,6 +5848,9 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
         }
         client_auth = ((string_value_t *)client_auth_value)->value;
     }
+    std::vector<tls_sni_cert> sni_certs;
+    if (!parse_tls_certs(args[0], "std.http.serve_threads", sni_certs))
+        return NULL;
 
     std::string strategy = "auto";
     value_t *strategy_value = option("strategy");
@@ -5930,7 +6066,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
         server->reuse = create_reuse_port_server(
             host, (int)port, script, entry, (std::size_t)workers,
             worker_vm, cert_file, key_file, client_ca_file, client_auth,
-            state, error);
+            sni_certs, state, error);
         if (!server->reuse) {
             yyerror("std.http.serve_threads: %s", error.c_str());
             return NULL;
@@ -5964,7 +6100,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
 
     task_ptr task =
         start_http_server(socket, handler, state, cert_file, key_file,
-                          client_ca_file, client_auth);
+                          client_ca_file, client_auth, {}, sni_certs);
     freeval(handler);
     if (!task) {
         thread_pool_link_close(pool);

@@ -88,6 +88,11 @@ struct tls_stream {
      * owns the extra reference created by SSL_new. */
     bool owns_ctx = false;
     std::string selected_alpn;
+    bool session_reused = false;
+    /* Client-side resumption bookkeeping. */
+    bool session_reuse = false;
+    bool session_saved = false;
+    std::string session_key;
 
     bool closed = false;
     bool eof = false;
@@ -138,6 +143,90 @@ void capture_alpn(tls_stream *stream) {
     SSL_get0_alpn_selected(stream->ssl, &protocol, &length);
     if (protocol && length > 0)
         stream->selected_alpn.assign((const char *)protocol, length);
+}
+
+/* ---------------------------------------------------------------------------
+ * Client session cache.
+ *
+ * TLS clients create a fresh SSL_CTX per connection, so resumption needs a
+ * process-wide cache of SSL_SESSION objects keyed by server name.  The cache
+ * is bounded and only stores sessions that OpenSSL reports as resumable; TLS
+ * 1.3 tickets arrive after the handshake, so streams also refresh the entry
+ * after their first successful read or write.
+ * ------------------------------------------------------------------------- */
+
+struct client_session_cache {
+    std::mutex mutex;
+    std::map<std::string, SSL_SESSION *> sessions;
+
+    ~client_session_cache() {
+        for (auto &entry : sessions)
+            SSL_SESSION_free(entry.second);
+        sessions.clear();
+    }
+};
+
+client_session_cache &client_sessions() {
+    static client_session_cache cache;
+    return cache;
+}
+
+SSL_SESSION *lookup_client_session(const std::string &key) {
+    client_session_cache &cache = client_sessions();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    auto it = cache.sessions.find(key);
+    if (it == cache.sessions.end())
+        return NULL;
+    /* Return an owned reference so eviction on another thread cannot free the
+     * session while the caller installs it on an SSL object. */
+    SSL_SESSION_up_ref(it->second);
+    return it->second;
+}
+
+void store_client_session(const std::string &key, SSL_SESSION *session) {
+    if (!session)
+        return;
+    client_session_cache &cache = client_sessions();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    auto it = cache.sessions.find(key);
+    if (it != cache.sessions.end()) {
+        SSL_SESSION_free(it->second);
+        it->second = session;
+        return;
+    }
+    if (cache.sessions.size() >= 64) {
+        auto oldest = cache.sessions.begin();
+        SSL_SESSION_free(oldest->second);
+        cache.sessions.erase(oldest);
+    }
+    cache.sessions.emplace(key, session);
+}
+
+void maybe_store_client_session(tls_stream *stream) {
+    if (!stream || !stream->ssl || !stream->session_reuse ||
+        stream->session_saved)
+        return;
+    SSL_SESSION *session = SSL_get1_session(stream->ssl);
+    if (!session)
+        return;
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
+    bool resumable = SSL_SESSION_is_resumable(session) == 1;
+#else
+    bool resumable = true;
+#endif
+    if (resumable) {
+        store_client_session(stream->session_key, session);
+        stream->session_saved = true;
+        return;
+    }
+    SSL_SESSION_free(session);
+}
+
+void capture_session_state(tls_stream *stream) {
+    if (!stream || !stream->ssl)
+        return;
+    stream->session_reused = SSL_session_reused(stream->ssl) == 1;
+    maybe_store_client_session(stream);
 }
 
 using tls_read_fn = std::function<bool(long long, std::string &, bool &,
@@ -451,8 +540,11 @@ bool tls_read(void *data, std::size_t max_bytes, long long timeout_ms,
         error = "stream has a pending async operation";
         return false;
     }
-    return tls_read_impl(stream, sync_reader(stream), sync_writer(stream),
-                         max_bytes, timeout_ms, out, eof, error);
+    bool ok = tls_read_impl(stream, sync_reader(stream), sync_writer(stream),
+                            max_bytes, timeout_ms, out, eof, error);
+    if (ok)
+        maybe_store_client_session(stream);
+    return ok;
 }
 
 bool tls_write(void *data, const std::string &bytes, long long timeout_ms,
@@ -462,8 +554,11 @@ bool tls_write(void *data, const std::string &bytes, long long timeout_ms,
         error = "stream has a pending async operation";
         return false;
     }
-    return tls_write_impl(stream, sync_reader(stream), sync_writer(stream),
-                          bytes, timeout_ms, written, error);
+    bool ok = tls_write_impl(stream, sync_reader(stream), sync_writer(stream),
+                             bytes, timeout_ms, written, error);
+    if (ok)
+        maybe_store_client_session(stream);
+    return ok;
 }
 
 value_t *tls_read_async(void *data, const std::shared_ptr<void> &owner,
@@ -493,6 +588,7 @@ value_t *tls_read_async(void *data, const std::shared_ptr<void> &owner,
                                              : read_error.c_str());
             return (value_t *)NULL;
         }
+        maybe_store_client_session(stream);
         if (eof)
             return newnull();
         return newbytesval(std::move(out));
@@ -663,6 +759,127 @@ bool build_alpn_wire(value_t *options, std::string &wire) {
 }
 
 /* ---------------------------------------------------------------------------
+ * SNI certificates.
+ *
+ * A server context can carry a list of additional certificates selected by
+ * the ClientHello server name.  Each entry gets its own SSL_CTX built from the
+ * same listener options, and the servername callback switches the connection
+ * to the matching context before the handshake continues.
+ * ------------------------------------------------------------------------- */
+
+struct sni_cert_spec {
+    std::string server_name;
+    std::string cert_file;
+    std::string key_file;
+};
+
+struct sni_bundle {
+    std::map<std::string, std::shared_ptr<SSL_CTX>> exact;
+    std::map<std::string, std::shared_ptr<SSL_CTX>> wildcard;
+};
+
+std::string lowercase_ascii(std::string value) {
+    for (char &ch : value)
+        if (ch >= 'A' && ch <= 'Z')
+            ch = (char)(ch - 'A' + 'a');
+    return value;
+}
+
+void sni_ex_free(void *, void *ptr, CRYPTO_EX_DATA *, int, long, void *) {
+    delete static_cast<std::shared_ptr<sni_bundle> *>(ptr);
+}
+
+int sni_ex_index() {
+    static std::once_flag once;
+    static int index = -1;
+    std::call_once(once, []() {
+        index = SSL_CTX_get_ex_new_index(0, NULL, NULL, NULL, &sni_ex_free);
+    });
+    return index;
+}
+
+int select_sni_cert(SSL *ssl, int *, void *) {
+    if (!ssl)
+        return SSL_TLSEXT_ERR_NOACK;
+    const char *raw =
+        SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+    if (!raw || !*raw)
+        return SSL_TLSEXT_ERR_OK;
+    int index = sni_ex_index();
+    if (index < 0)
+        return SSL_TLSEXT_ERR_OK;
+    SSL_CTX *base = SSL_get_SSL_CTX(ssl);
+    if (!base)
+        return SSL_TLSEXT_ERR_OK;
+    auto *holder = static_cast<std::shared_ptr<sni_bundle> *>(
+        SSL_CTX_get_ex_data(base, index));
+    if (!holder || !*holder)
+        return SSL_TLSEXT_ERR_OK;
+
+    std::string host = lowercase_ascii(raw);
+    const sni_bundle &bundle = **holder;
+    std::shared_ptr<SSL_CTX> selected;
+    auto exact = bundle.exact.find(host);
+    if (exact != bundle.exact.end())
+        selected = exact->second;
+    if (!selected) {
+        size_t dot = host.find('.');
+        if (dot != std::string::npos) {
+            auto wildcard = bundle.wildcard.find(host.substr(dot + 1));
+            if (wildcard != bundle.wildcard.end())
+                selected = wildcard->second;
+        }
+    }
+    if (selected)
+        SSL_set_SSL_CTX(ssl, selected.get());
+    return SSL_TLSEXT_ERR_OK;
+}
+
+bool parse_sni_certs(value_t *options, std::vector<sni_cert_spec> &out,
+                     std::string &error) {
+    value_t *value = dict_get(options, "certs");
+    if (!value || value->type == T_null)
+        return true;
+    if (value->type != T_list) {
+        error = "std.tls.server: certs must be a list";
+        return false;
+    }
+    list_value_t *list = (list_value_t *)value;
+    for (size_t i = 0; i < list->payload->items.size(); ++i) {
+        value_t *item = list->payload->items[i];
+        if (!item || item->type != T_dict) {
+            error = "std.tls.server: certs entries must be dicts";
+            return false;
+        }
+        sni_cert_spec spec;
+        spec.server_name =
+            lowercase_ascii(option_string(item, "server_name"));
+        spec.cert_file = option_string(item, "cert_file");
+        spec.key_file = option_string(item, "key_file");
+        if (spec.server_name.empty() || spec.cert_file.empty() ||
+            spec.key_file.empty()) {
+            error = "std.tls.server: certs entries require server_name, "
+                    "cert_file and key_file";
+            return false;
+        }
+        if (spec.server_name.find('*') != std::string::npos &&
+            spec.server_name.rfind("*.", 0) != 0) {
+            error = "std.tls.server: wildcard server_name must start with "
+                    "\"*.\"";
+            return false;
+        }
+        for (const sni_cert_spec &existing : out) {
+            if (existing.server_name == spec.server_name) {
+                error = "std.tls.server: duplicate server_name in certs";
+                return false;
+            }
+        }
+        out.push_back(std::move(spec));
+    }
+    return true;
+}
+
+/* ---------------------------------------------------------------------------
  * Server context cache.
  *
  * A TLS listener calls std.tls.server for every accepted connection.  Instead
@@ -726,12 +943,28 @@ std::string server_options_signature(value_t *options) {
                             option_string(options, "client_ca_file"));
     append_option_signature(signature, "client_auth",
                             option_string(options, "client_auth"));
+    value_t *certs = dict_get(options, "certs");
+    if (certs && certs->type == T_list) {
+        list_value_t *list = (list_value_t *)certs;
+        for (size_t i = 0; i < list->payload->items.size(); ++i) {
+            value_t *item = list->payload->items[i];
+            if (!item || item->type != T_dict)
+                continue;
+            append_option_signature(
+                signature, "sni_name",
+                lowercase_ascii(option_string(item, "server_name")));
+            append_option_signature(signature, "sni_cert",
+                                    option_string(item, "cert_file"));
+            append_option_signature(signature, "sni_key",
+                                    option_string(item, "key_file"));
+        }
+    }
     return signature;
 }
 
-SSL_CTX *build_server_ctx(const std::string &cert_file,
-                          const std::string &key_file, value_t *options,
-                          std::string &error) {
+SSL_CTX *build_base_server_ctx(const std::string &cert_file,
+                               const std::string &key_file, value_t *options,
+                               std::string &error) {
     ERR_clear_error();
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) {
@@ -739,6 +972,10 @@ SSL_CTX *build_server_ctx(const std::string &cert_file,
         return NULL;
     }
     SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER);
+    static const unsigned char session_context[] = "skein-tls";
+    SSL_CTX_set_session_id_context(
+        ctx, session_context, (unsigned int)(sizeof(session_context) - 1));
     if (SSL_CTX_use_certificate_chain_file(ctx, cert_file.c_str()) != 1 ||
         SSL_CTX_use_PrivateKey_file(ctx, key_file.c_str(),
                                     SSL_FILETYPE_PEM) != 1 ||
@@ -811,10 +1048,53 @@ SSL_CTX *build_server_ctx(const std::string &cert_file,
     return ctx;
 }
 
+SSL_CTX *build_server_ctx(const std::string &cert_file,
+                          const std::string &key_file, value_t *options,
+                          std::string &error) {
+    SSL_CTX *ctx = build_base_server_ctx(cert_file, key_file, options, error);
+    if (!ctx)
+        return NULL;
+
+    std::vector<sni_cert_spec> specs;
+    if (!parse_sni_certs(options, specs, error)) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    if (specs.empty())
+        return ctx;
+
+    std::shared_ptr<sni_bundle> bundle = std::make_shared<sni_bundle>();
+    for (const sni_cert_spec &spec : specs) {
+        SSL_CTX *child = build_base_server_ctx(
+            spec.cert_file, spec.key_file, options, error);
+        if (!child) {
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+        std::shared_ptr<SSL_CTX> child_ptr(child, &SSL_CTX_free);
+        if (spec.server_name.rfind("*.", 0) == 0)
+            bundle->wildcard[spec.server_name.substr(2)] = child_ptr;
+        else
+            bundle->exact[spec.server_name] = child_ptr;
+    }
+
+    int index = sni_ex_index();
+    if (index < 0) {
+        error = "tls: cannot register SNI context storage";
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    SSL_CTX_set_ex_data(
+        ctx, index, new std::shared_ptr<sni_bundle>(std::move(bundle)));
+    SSL_CTX_set_tlsext_servername_callback(ctx, select_sni_cert);
+    return ctx;
+}
+
 struct server_ctx_entry {
     std::shared_ptr<SSL_CTX> ctx;
-    int64_t cert_mtime = -1;
-    int64_t key_mtime = -1;
+    /* (path, mtime) for every certificate/key used by this context, including
+     * SNI entries.  A change to any of them rebuilds the whole bundle. */
+    std::vector<std::pair<std::string, int64_t>> stamps;
     std::string last_error;
 };
 
@@ -824,18 +1104,28 @@ std::map<std::string, server_ctx_entry> g_server_ctx_cache;
 SSL_CTX *acquire_server_ctx(const std::string &cert_file,
                             const std::string &key_file, value_t *options,
                             std::string &error) {
+    std::vector<sni_cert_spec> specs;
+    if (!parse_sni_certs(options, specs, error))
+        return NULL;
+
     std::string key = cert_file;
     key.push_back('\0');
     key += key_file;
     key.push_back('\0');
     key += server_options_signature(options);
 
-    int64_t cert_time = -1;
-    int64_t key_time = -1;
-    bool cert_ok = file_mtime(cert_file, cert_time);
-    bool key_ok = file_mtime(key_file, key_time);
-    int64_t observed_cert = cert_ok ? cert_time : -1;
-    int64_t observed_key = key_ok ? key_time : -1;
+    std::vector<std::pair<std::string, int64_t>> stamps;
+    auto add_stamp = [&stamps](const std::string &path) {
+        int64_t stamp = -1;
+        file_mtime(path, stamp);
+        stamps.emplace_back(path, stamp);
+    };
+    add_stamp(cert_file);
+    add_stamp(key_file);
+    for (const sni_cert_spec &spec : specs) {
+        add_stamp(spec.cert_file);
+        add_stamp(spec.key_file);
+    }
 
     std::lock_guard<std::mutex> lock(g_server_ctx_mutex);
     auto it = g_server_ctx_cache.find(key);
@@ -849,22 +1139,19 @@ SSL_CTX *acquire_server_ctx(const std::string &cert_file,
         }
         server_ctx_entry entry;
         entry.ctx = std::shared_ptr<SSL_CTX>(fresh, &SSL_CTX_free);
-        entry.cert_mtime = observed_cert;
-        entry.key_mtime = observed_key;
+        entry.stamps = std::move(stamps);
         it = g_server_ctx_cache.emplace(key, std::move(entry)).first;
         return it->second.ctx.get();
     }
 
     server_ctx_entry &entry = it->second;
-    if (observed_cert == entry.cert_mtime &&
-        observed_key == entry.key_mtime)
+    if (entry.stamps == stamps)
         return entry.ctx.get();
 
     std::string build_error;
     SSL_CTX *fresh =
         build_server_ctx(cert_file, key_file, options, build_error);
-    entry.cert_mtime = observed_cert;
-    entry.key_mtime = observed_key;
+    entry.stamps = std::move(stamps);
     if (!fresh) {
         entry.last_error = build_error;
         char message[512];
@@ -1006,6 +1293,17 @@ value_t *tls_client(const std::vector<value_t *> &args) {
     SSL_set_tlsext_host_name(ssl, server_name);
     if (verify)
         SSL_set1_host(ssl, server_name);
+
+    bool reuse = option_bool(options, "session_reuse", true);
+    stream->session_reuse = reuse;
+    stream->session_key = lowercase_ascii(server_name);
+    if (reuse) {
+        SSL_SESSION *cached = lookup_client_session(stream->session_key);
+        if (cached) {
+            SSL_set_session(ssl, cached);
+            SSL_SESSION_free(cached);
+        }
+    }
     std::string error;
     if (!prepare_ssl(stream.get(), ctx, ssl, error)) {
         SSL_free(ssl);
@@ -1021,6 +1319,7 @@ value_t *tls_client(const std::vector<value_t *> &args) {
         return NULL;
     }
     capture_alpn(stream.get());
+    capture_session_state(stream.get());
     return make_tls_value(std::move(stream));
 }
 
@@ -1081,6 +1380,7 @@ value_t *tls_server(const std::vector<value_t *> &args) {
         return NULL;
     }
     capture_alpn(stream.get());
+    capture_session_state(stream.get());
     return make_tls_value(std::move(stream));
 }
 
@@ -1104,6 +1404,77 @@ value_t *tls_alpn(const std::vector<value_t *> &args) {
     return newstrval(stream->selected_alpn.c_str());
 }
 
+value_t *tls_reused(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.tls.reused expects 1 argument");
+        return NULL;
+    }
+    value_t *value = args[0];
+    if (!value || value->type != T_userdata ||
+        ((userdata_value_t *)value)->meta != &tls_native_type) {
+        yyerror("std.tls.reused expects a TLS stream");
+        return NULL;
+    }
+    tls_stream *stream = static_cast<tls_stream *>(
+        ((userdata_value_t *)value)->data.get());
+    if (!stream) {
+        yyerror("std.tls.reused expects a TLS stream");
+        return NULL;
+    }
+    return newboolval(stream->session_reused);
+}
+
+value_t *tls_peer_subject(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.tls.peer_subject expects 1 argument");
+        return NULL;
+    }
+    value_t *value = args[0];
+    if (!value || value->type != T_userdata ||
+        ((userdata_value_t *)value)->meta != &tls_native_type) {
+        yyerror("std.tls.peer_subject expects a TLS stream");
+        return NULL;
+    }
+    tls_stream *stream = static_cast<tls_stream *>(
+        ((userdata_value_t *)value)->data.get());
+    if (!stream || !stream->ssl)
+        return newstrval("");
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    X509 *cert = SSL_get1_peer_certificate(stream->ssl);
+#else
+    X509 *cert = SSL_get_peer_certificate(stream->ssl);
+#endif
+    if (!cert)
+        return newstrval("");
+    char buffer[256];
+    int length = X509_NAME_get_text_by_NID(
+        X509_get_subject_name(cert), NID_commonName, buffer, sizeof(buffer));
+    X509_free(cert);
+    if (length <= 0)
+        return newstrval("");
+    return newstrval(buffer);
+}
+
+value_t *tls_server_name(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.tls.server_name expects 1 argument");
+        return NULL;
+    }
+    value_t *value = args[0];
+    if (!value || value->type != T_userdata ||
+        ((userdata_value_t *)value)->meta != &tls_native_type) {
+        yyerror("std.tls.server_name expects a TLS stream");
+        return NULL;
+    }
+    tls_stream *stream = static_cast<tls_stream *>(
+        ((userdata_value_t *)value)->data.get());
+    if (!stream || !stream->ssl)
+        return newstrval("");
+    const char *name =
+        SSL_get_servername(stream->ssl, TLSEXT_NAMETYPE_host_name);
+    return newstrval(name ? name : "");
+}
+
 } // namespace
 
 struct value_t *call_tls_builtin(
@@ -1115,6 +1486,12 @@ struct value_t *call_tls_builtin(
         return tls_server(args);
     case B_tls_alpn:
         return tls_alpn(args);
+    case B_tls_reused:
+        return tls_reused(args);
+    case B_tls_peer_subject:
+        return tls_peer_subject(args);
+    case B_tls_server_name:
+        return tls_server_name(args);
     default:
         yyerror("unknown tls function");
         return NULL;

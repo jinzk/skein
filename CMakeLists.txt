@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 option(SKEIN_TSAN "Build with ThreadSanitizer" OFF)
+option(SKEIN_ENABLE_NIGHTLY "Register long-running nightly soak tests" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
 option(SKEIN_ENABLE_JIT "Enable the experimental asmjit-backed JIT" OFF)
 option(SKEIN_USE_MIMALLOC "Use mimalloc for C++ allocations (Windows/Linux)" OFF)
@@ -867,6 +868,19 @@ if(BUILD_TESTING)
         LABELS "core"
         TIMEOUT 300
       )
+      if(TARGET skein_ffi_shim)
+        add_test(
+          NAME env_ffi_stress_test
+          COMMAND ${Python3_EXECUTABLE}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/env_ffi_stress.py
+                  $<TARGET_FILE:${PROJECT_NAME}>
+                  $<TARGET_FILE:skein_ffi_shim>
+        )
+        set_tests_properties(env_ffi_stress_test PROPERTIES
+          LABELS "core"
+          TIMEOUT 300
+        )
+      endif()
       add_test(
         NAME http_stress_test
         COMMAND ${Python3_EXECUTABLE}
@@ -894,6 +908,40 @@ if(BUILD_TESTING)
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
+      if(SKEIN_ENABLE_NIGHTLY)
+        add_test(
+          NAME nightly_soak_test
+          COMMAND ${Python3_EXECUTABLE}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/tools/soak_memory.py
+                  --bin $<TARGET_FILE:${PROJECT_NAME}>
+                  --mode both
+                  --rounds 600
+                  --http-rounds 300
+                  --http-requests 5
+                  --max-growth-mb 64
+                  --check
+        )
+        set_tests_properties(nightly_soak_test PROPERTIES
+          LABELS "nightly;bench"
+          RUN_SERIAL TRUE
+          TIMEOUT 3600
+        )
+        if(TARGET skein_ffi_shim)
+          add_test(
+            NAME nightly_env_ffi_test
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/env_ffi_stress.py
+                    $<TARGET_FILE:${PROJECT_NAME}>
+                    $<TARGET_FILE:skein_ffi_shim>
+          )
+          set_tests_properties(nightly_env_ffi_test PROPERTIES
+            ENVIRONMENT "SKEIN_STRESS_ROUNDS=200;SKEIN_STRESS_WORKERS=8"
+            LABELS "nightly"
+            RUN_SERIAL TRUE
+            TIMEOUT 3600
+          )
+        endif()
+      endif()
       add_test(
         NAME repl_flush_test
         COMMAND ${Python3_EXECUTABLE}
@@ -1015,6 +1063,21 @@ if(BUILD_TESTING)
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
+      if(TARGET skein_ffi_shim)
+        add_test(
+          NAME env_ffi_tsan_test
+          COMMAND ${Python3_EXECUTABLE}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/env_ffi_stress.py
+                  $<TARGET_FILE:${PROJECT_NAME}>
+                  $<TARGET_FILE:skein_ffi_shim>
+        )
+        set_tests_properties(env_ffi_tsan_test PROPERTIES
+          ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1;SKEIN_STRESS_ROUNDS=4"
+          LABELS "sanitize;tsan"
+          RUN_SERIAL TRUE
+          TIMEOUT 300
+        )
+      endif()
       add_test(NAME net_tsan_test COMMAND ${SKEIN_TEST_COMMAND})
       set_tests_properties(net_tsan_test PROPERTIES
         ENVIRONMENT

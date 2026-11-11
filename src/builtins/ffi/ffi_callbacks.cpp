@@ -18,6 +18,13 @@
 
 namespace ffi {
 
+/* libffi initializes its closure trampolines lazily; serialize creation and
+ * release so concurrent std.ffi.callback calls do not race inside libffi. */
+std::mutex &closure_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
 struct callback_handle : public std::enable_shared_from_this<callback_handle> {
     type_ptr signature;
     ffi_closure *closure = nullptr;
@@ -25,14 +32,18 @@ struct callback_handle : public std::enable_shared_from_this<callback_handle> {
     ffi_cif cif{};
     std::vector<ffi_type *> arg_types;
     struct value_t *function = nullptr;
+    /* Thread that owns the script function; callbacks must be drained there. */
+    std::thread::id owner = std::this_thread::get_id();
     std::atomic<bool> failed{false};
     std::string error;
 
     ~callback_handle() {
         if (function)
             freeval(function);
-        if (closure)
+        if (closure) {
+            std::lock_guard<std::mutex> lock(closure_mutex());
             ffi_closure_free(closure);
+        }
     }
 };
 
@@ -99,6 +110,7 @@ void record_failure(callback_handle *handle, callback_call_scope *scope,
 
 struct pending_callback {
     std::shared_ptr<callback_handle> handle;
+    std::thread::id owner;
     bool error_only = false;
     std::string error;
     std::vector<std::shared_ptr<std::vector<unsigned char>>> args;
@@ -116,6 +128,7 @@ std::deque<pending_callback> &background_queue() {
 
 struct blocking_callback_job {
     std::shared_ptr<callback_handle> handle;
+    std::thread::id owner;
     std::shared_ptr<std::atomic<bool>> failed_flag;
     std::vector<std::shared_ptr<std::vector<unsigned char>>> args;
     std::vector<unsigned char> result;
@@ -137,6 +150,7 @@ std::shared_ptr<blocking_callback_job> make_blocking_job(
     std::shared_ptr<blocking_callback_job> job =
         std::make_shared<blocking_callback_job>();
     job->handle = handle->shared_from_this();
+    job->owner = handle->owner;
     job->keep = tls_async_call ? tls_async_call->keep
                                : std::make_shared<keepalive>();
     job->failed_flag = tls_async_call ? tls_async_call->failed : nullptr;
@@ -176,6 +190,7 @@ void enqueue_background_error(callback_handle *handle,
     }
     pending_callback job;
     job.handle = std::move(owned);
+    job.owner = handle->owner;
     job.error_only = true;
     job.error = message ? message : "ffi callback failed";
     std::lock_guard<std::mutex> lock(background_mutex());
@@ -193,6 +208,7 @@ void enqueue_background_call(callback_handle *handle, void **args) {
     }
     pending_callback job;
     job.handle = std::move(owned);
+    job.owner = handle->owner;
     const std::vector<type_ptr> &params = handle->signature->params;
     job.args.reserve(params.size());
     for (size_t i = 0; i < params.size(); ++i) {
@@ -433,6 +449,42 @@ void drain_blocking_job(
     job->cv.notify_all();
 }
 
+void background_discard_owned() {
+    const std::thread::id self = std::this_thread::get_id();
+    std::deque<std::shared_ptr<blocking_callback_job>> blocking;
+    {
+        std::lock_guard<std::mutex> lock(background_mutex());
+        for (auto it = background_queue().begin();
+             it != background_queue().end();) {
+            if (it->owner != self) {
+                ++it;
+                continue;
+            }
+            it = background_queue().erase(it);
+        }
+        for (auto it = blocking_queue().begin();
+             it != blocking_queue().end();) {
+            if ((*it)->owner != self) {
+                ++it;
+                continue;
+            }
+            blocking.push_back(std::move(*it));
+            it = blocking_queue().erase(it);
+        }
+    }
+    for (const std::shared_ptr<blocking_callback_job> &job : blocking) {
+        if (job->failed_flag)
+            *job->failed_flag = true;
+        {
+            std::lock_guard<std::mutex> lock(job->mutex);
+            job->failed = true;
+            job->error = "ffi callback owner thread exited";
+            job->done = true;
+        }
+        job->cv.notify_all();
+    }
+}
+
 struct drain_guard {
     bool &flag;
     explicit drain_guard(bool &value) : flag(value) { flag = true; }
@@ -445,12 +497,29 @@ void background_drain() {
         return;
     std::deque<pending_callback> jobs;
     std::deque<std::shared_ptr<blocking_callback_job>> blocking;
+    const std::thread::id self = std::this_thread::get_id();
     {
         std::lock_guard<std::mutex> lock(background_mutex());
-        if (background_queue().empty() && blocking_queue().empty())
+        for (auto it = background_queue().begin();
+             it != background_queue().end();) {
+            if (it->owner != self) {
+                ++it;
+                continue;
+            }
+            jobs.push_back(std::move(*it));
+            it = background_queue().erase(it);
+        }
+        for (auto it = blocking_queue().begin();
+             it != blocking_queue().end();) {
+            if ((*it)->owner != self) {
+                ++it;
+                continue;
+            }
+            blocking.push_back(std::move(*it));
+            it = blocking_queue().erase(it);
+        }
+        if (jobs.empty() && blocking.empty())
             return;
-        jobs.swap(background_queue());
-        blocking.swap(blocking_queue());
     }
 
     drain_guard guard(draining);
@@ -518,12 +587,16 @@ struct value_t *new_callback_value(const type_ptr &signature,
         std::make_shared<callback_handle>();
     handle->signature = signature;
     handle->function = dupval(function);
+    handle->owner = std::this_thread::get_id();
     handle->arg_types.reserve(signature->params.size());
     for (const type_ptr &param : signature->params)
         handle->arg_types.push_back(param->cif);
 
-    handle->closure = (ffi_closure *)ffi_closure_alloc(
-        sizeof(ffi_closure), &handle->code);
+    {
+        std::lock_guard<std::mutex> lock(closure_mutex());
+        handle->closure = (ffi_closure *)ffi_closure_alloc(
+            sizeof(ffi_closure), &handle->code);
+    }
     if (!handle->closure) {
         error = "cannot allocate a callback closure";
         return NULL;

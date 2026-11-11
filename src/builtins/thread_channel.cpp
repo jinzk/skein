@@ -21,6 +21,9 @@
 #include "symbol.h"
 #include "task.h"
 #include "vm.h"
+#ifdef SKEIN_ENABLE_FFI
+#include "ffi_module.h"
+#endif
 
 #include <chrono>
 #include <condition_variable>
@@ -3314,7 +3317,11 @@ void thread_entry_main(
         pool_worker_call,
         pool_worker_call_builtin,
         runtime_error_report,
+#ifdef SKEIN_ENABLE_FFI
+        ffi::background_drain,
+#else
         nullptr,
+#endif
     };
     skein_context_set(&hooks);
     skein_vm_set_enabled(false);
@@ -3402,6 +3409,9 @@ void thread_entry_main(
 
     eval_run_root_defers();
     fiber_disable_generator_warnings();
+#ifdef SKEIN_ENABLE_FFI
+    ffi::background_discard_owned();
+#endif
     task_shutdown();
     fiber_shutdown();
     event_loop_shutdown();
@@ -4291,7 +4301,11 @@ bool thread_worker_begin(bool worker_vm, std::string &error) {
     worker_runtime_hooks.call = pool_worker_call;
     worker_runtime_hooks.call_builtin = pool_worker_call_builtin;
     worker_runtime_hooks.error = runtime_error_report;
+#ifdef SKEIN_ENABLE_FFI
+    worker_runtime_hooks.drain_background = ffi::background_drain;
+#else
     worker_runtime_hooks.drain_background = nullptr;
+#endif
     skein_context_set(&worker_runtime_hooks);
     skein_vm_set_enabled(worker_vm);
     g_interactive = false;
@@ -4306,6 +4320,9 @@ bool thread_worker_begin(bool worker_vm, std::string &error) {
 void thread_worker_end() {
     eval_run_root_defers();
     fiber_disable_generator_warnings();
+#ifdef SKEIN_ENABLE_FFI
+    ffi::background_discard_owned();
+#endif
     task_shutdown();
     fiber_shutdown();
     event_loop_shutdown();

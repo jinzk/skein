@@ -2051,6 +2051,8 @@ std.ffi.call_task(lib, "compare", "i32",
 - 回调内可以继续 `ffi.call` / `ffi.call_task`（有递归深度限制）；
 - `ffi.call_task` **不可取消，也没有超时**：当前 fiber 会一直等到 C 返回；
   每次调用创建一个 worker 线程，不适合高频短调用；
+- C 调用运行在独立 worker 线程，看到的是进程环境和进程 cwd，不继承当前线程的
+  `std.env` / `std.fs.cwd` 覆盖；需要的值请通过参数传入；
 - 对可能永久阻塞或不受信任的 C 调用，建议放到外部进程，而不是依赖进程内取消。
 
 旧名 `std.ffi.call_async` 保留为 deprecated alias，行为与 `call_task` 一致；
@@ -5710,6 +5712,9 @@ std.process.run_command(command[, options]) → dict
 ```
 
 `std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
+
+线程局部 env/cwd、FFI 回调的 owner 线程约束和 `ffi.call_task` 的环境可见性限制见
+[env-ffi-thread-safety.md](docs/env-ffi-thread-safety.md)。
 
 旧名 `std.process.run` 已移除；请使用 `run_command`。
 

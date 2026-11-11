@@ -87,6 +87,12 @@ NON_FUNCTION_EXPORTS = {
     "io": {"stdin", "stdout", "stderr"},
 }
 
+# Deprecated aliases that stay registered for one compatibility window but are
+# not documented as primary functions.  Remove entries when the alias goes away.
+DEPRECATED_ALIASES = {
+    "ffi": {"call_async"},
+}
+
 
 def function_list(readme_text):
     marker = "当前提供的函数："
@@ -141,7 +147,8 @@ def main():
 
     for module, functions in sorted(registry.items()):
         documented = listed.get(module, set())
-        missing = sorted(functions - documented)
+        aliases = DEPRECATED_ALIASES.get(module, set())
+        missing = sorted(functions - documented - aliases)
         if missing:
             fail(f"README function list missing std.{module}."
                  + f"{{{','.join(missing)}}}")

@@ -1533,7 +1533,7 @@ static value_t *perform_call(
 static value_t *run_async(prepared_call &call) {
     static thread_local int async_depth = 0;
     if (async_depth >= 4) {
-        yyerror("ffi.call_async: recursion limit exceeded");
+        yyerror("ffi.call_task: recursion limit exceeded");
         return NULL;
     }
     ++async_depth;
@@ -1543,7 +1543,7 @@ static value_t *run_async(prepared_call &call) {
     } guard{async_depth};
 
     if (!event_loop_init()) {
-        yyerror("ffi.call_async: cannot initialize the event loop");
+        yyerror("ffi.call_task: cannot initialize the event loop");
         return NULL;
     }
 
@@ -1585,7 +1585,7 @@ static value_t *run_async(prepared_call &call) {
     worker.join();
 
     if (!worker_error.empty()) {
-        yyerror("ffi.call_async: %s", worker_error.c_str());
+        yyerror("ffi.call_task: %s", worker_error.c_str());
         return NULL;
     }
     if (callback_failed->load())
@@ -1596,7 +1596,7 @@ static value_t *run_async(prepared_call &call) {
     }
     apply_ownership(call);
     return convert_result(call, (const unsigned char *)result, block,
-                          "ffi.call_async");
+                          "ffi.call_task");
 }
 
 struct ffi_bound_function {
@@ -1793,7 +1793,7 @@ static value_t *ffi_call_async(const std::vector<value_t *> &args) {
     if (!resolve_call(args, library, symbol, return_type, arg_types, values,
                       declared, error)) {
         if (!error.empty())
-            yyerror("ffi.call_async: %s", error.c_str());
+            yyerror("ffi.call_task: %s", error.c_str());
         return NULL;
     }
 
@@ -1804,7 +1804,7 @@ static value_t *ffi_call_async(const std::vector<value_t *> &args) {
         declared ? declared->calling_convention : std::string("c");
     if (!prepare_call(library, symbol, return_type, arg_types, values,
                       variadic, fixed_args, convention, call, error)) {
-        yyerror("ffi.call_async: %s", error.c_str());
+        yyerror("ffi.call_task: %s", error.c_str());
         return NULL;
     }
     call.declared = declared;

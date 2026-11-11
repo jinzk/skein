@@ -907,7 +907,15 @@ def run_cases():
             stderr="cross-thread callbacks must return void",
         )
         check(
-            "std ffi call_async",
+            "std ffi call_task",
+            "import std;\n"
+            f"let lib = std.ffi.open({shim});\n"
+            'std.ffi.call_task(lib, "shim_i32", "i32", ["i32"], [21])\n'
+            "std.ffi.close(lib);\n",
+            stdout="= 21",
+        )
+        check(
+            "std ffi call_async deprecated alias",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
             'std.ffi.call_async(lib, "shim_i32", "i32", ["i32"], [21])\n'
@@ -915,28 +923,28 @@ def run_cases():
             stdout="= 21",
         )
         check(
-            "std ffi call_async blocking callback",
+            "std ffi call_task blocking callback",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
             'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
             "let cb = std.ffi.callback(Cmp, func(a, b) { return a - b; });\n"
-            'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
+            'std.ffi.call_task(lib, "shim_apply_cmp", "i32", '
             '[Cmp, "i32", "i32"], [cb, 9, 4])\n'
             "std.ffi.close(lib);\n",
             stdout="= 5",
         )
         check(
-            "std ffi call_async callback error",
+            "std ffi call_task callback error",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
             'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
             "let cb = std.ffi.callback(Cmp, func(a, b) { return 1 / 0; });\n"
-            'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
+            'std.ffi.call_task(lib, "shim_apply_cmp", "i32", '
             '[Cmp, "i32", "i32"], [cb, 1, 2])\n',
             stderr="division by zero",
         )
         check(
-            "std ffi call_async nested ffi.call",
+            "std ffi call_task nested ffi.call",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
             'let Cmp = std.ffi.signature("i32", ["i32", "i32"]);\n'
@@ -945,7 +953,7 @@ def run_cases():
             '  return std.ffi.call(lib, "shim_apply_cmp", "i32", '
             '[Cmp, "i32", "i32"], [inner, a, b]);\n'
             "});\n"
-            'std.ffi.call_async(lib, "shim_apply_cmp", "i32", '
+            'std.ffi.call_task(lib, "shim_apply_cmp", "i32", '
             '[Cmp, "i32", "i32"], [outer, 9, 4])\n',
             stdout="= 5",
         )

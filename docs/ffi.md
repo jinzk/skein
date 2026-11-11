@@ -79,13 +79,16 @@ ABI 校验：
 
 ## 4. 异步契约
 
-`std.ffi.call_async`：
+`std.ffi.call_task`：
 
 - 在 worker 线程执行 C 调用；
 - 当前 fiber 阻塞，事件循环继续运行；
 - **不可取消，也没有超时**；
 - 每次调用创建一个 worker 线程，不适合高频短调用；
 - 可能永久阻塞或不受信任的 C 调用应放到外部进程。
+
+旧名 `ffi.call_async` 保留为 deprecated alias，行为与 `call_task` 一致；
+新代码请使用 `call_task`，后续版本会移除旧名。
 
 同步 `ffi.call` 回调仍要求同线程、同 fiber、活动调用范围内。
 
@@ -142,7 +145,7 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
 - 回调固定使用默认 ABI；
 - `returns_owned` 不支持带额外参数的 free；
 - `consumes` 后 alias/view 的安全性由调用者保证；
-- `ffi.call_async` 不可取消、无超时；
+- `ffi.call_task` 不可取消、无超时；
 - `ffi.errno` 在顶层语句之间可能被解释器内部 I/O 重置；
 - 没有 manifest/bindgen fuzz；
 - 没有自动 sidecar manifest 查找。

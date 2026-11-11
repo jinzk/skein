@@ -2031,7 +2031,7 @@ std.ffi.call(lib, "sort", "void", [Cmp, "ptr", "usize"], [cmp, data, 8]);
 - C 调用后可以用 `std.ffi.errno()` / `std.ffi.set_errno(v)` 读写当前线程的 errno；
   建议在同一个函数或表达式中紧随 C 调用读取，顶层语句边界可能被解释器内部 I/O 改变。
 
-需要从其他线程执行 C 调用并等待回调结果时，使用 `std.ffi.call_async`：
+需要从其他线程执行 C 调用并等待回调结果时，使用 `std.ffi.call_task`：
 
 ```text
 import std;
@@ -2042,16 +2042,19 @@ let cmp = std.ffi.callback(Cmp, func(a, b) { return a - b; });
 
 // C 函数在 worker 线程执行；脚本阻塞，但事件循环继续运行，
 // 回调会被投递回解释器线程并等待返回值。
-std.ffi.call_async(lib, "compare", "i32",
+std.ffi.call_task(lib, "compare", "i32",
                    [Cmp, "i32", "i32"], [cmp, 9, 4]);
 ```
 
 - 比同步 `ffi.call` 多了线程切换，适合会阻塞或回调耗时较长的 C 调用；
 - 回调仍然运行在解释器线程，可以安全访问脚本状态；
-- 回调内可以继续 `ffi.call` / `ffi.call_async`（有递归深度限制）；
-- `ffi.call_async` **不可取消，也没有超时**：当前 fiber 会一直等到 C 返回；
+- 回调内可以继续 `ffi.call` / `ffi.call_task`（有递归深度限制）；
+- `ffi.call_task` **不可取消，也没有超时**：当前 fiber 会一直等到 C 返回；
   每次调用创建一个 worker 线程，不适合高频短调用；
 - 对可能永久阻塞或不受信任的 C 调用，建议放到外部进程，而不是依赖进程内取消。
+
+旧名 `std.ffi.call_async` 保留为 deprecated alias，行为与 `call_task` 一致；
+新代码请使用 `call_task`，后续版本会移除旧名。
 
 C 函数指针（例如 C 返回的函数指针或 struct 里的 callback 字段）可以用
 `ffi.call_address` 调用：
@@ -3032,7 +3035,7 @@ std.error.message
 std.ffi.open
 std.ffi.close
 std.ffi.call
-std.ffi.call_async
+std.ffi.call_task
 std.ffi.call_address
 std.ffi.call_variadic
 std.ffi.buffer

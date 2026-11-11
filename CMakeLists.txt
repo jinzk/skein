@@ -764,7 +764,7 @@ if(BUILD_TESTING)
       # independent module groups so ctest -j can overlap ASan/UBSan/LSan
       # passes instead of running three ~5 minute serial jobs.
       set(SKEIN_SANITIZE_GROUPS
-        "language_core,match_types,meta,decorators"
+        "language_core,match_types,meta,modules,decorators"
         "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
         "typecheck")
@@ -772,7 +772,7 @@ if(BUILD_TESTING)
       # LSan shard to avoid cross-process port races while still covering them
       # under ASan + LeakSanitizer.
       set(SKEIN_LSAN_GROUPS
-        "language_core,match_types,meta,decorators"
+        "language_core,match_types,meta,modules,decorators"
         "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
         "typecheck,net,io_scripts")

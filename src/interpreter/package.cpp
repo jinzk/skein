@@ -38,7 +38,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -210,6 +213,27 @@ bool try_resolve_package_dir(const fs::path &directory,
     return true;
 }
 
+/*
+ * Module v2 also allows a package to be a plain file next to its siblings:
+ * `math/add.skein` (package add) as well as the legacy
+ * `math/add/add.skein`.  Directory packages keep precedence.
+ */
+bool try_resolve_package_file(const fs::path &parent,
+                              const std::string &last,
+                              resolved_package &resolved) {
+    std::error_code ec;
+    if (!fs::is_directory(parent, ec))
+        return false;
+    fs::path file = parent / path_from_utf8(last + ".skein");
+    if (!fs::is_regular_file(file, ec))
+        return false;
+    resolved.directory = parent;
+    resolved.file = file;
+    resolved.has_source = true;
+    resolved.key = canonical_file(file);
+    return true;
+}
+
 std::string package_cache_key(const std::string &canonical_path) {
     return std::string("\x01pkg:") + canonical_path;
 }
@@ -315,6 +339,13 @@ bool resolve_package(const std::string &dotted, resolved_package &resolved,
             directory /= path_from_utf8(part);
         if (try_resolve_package_dir(directory, last, resolved))
             return true;
+        if (parts.size() >= 1) {
+            fs::path parent = path_from_utf8(root);
+            for (size_t i = 0; i + 1 < parts.size(); ++i)
+                parent /= path_from_utf8(parts[i]);
+            if (try_resolve_package_file(parent, last, resolved))
+                return true;
+        }
     }
 
     error = "package not found";
@@ -337,11 +368,328 @@ bool resolve_package_at(const fs::path &base, const std::string &dotted,
 
     if (try_resolve_package_dir(directory, parts.back(), resolved))
         return true;
+    if (try_resolve_package_file(directory.parent_path(), parts.back(),
+                                 resolved))
+        return true;
 
     error = "package not found";
     error += "\n  searched: ";
     error += path_to_utf8(directory);
     return false;
+}
+
+/* --------------------------------------------------------------------------
+ * Module v2 manifest
+ * ------------------------------------------------------------------------ */
+
+struct module_export_spec {
+    bool is_package = false;
+    std::string path;
+    std::string alias;
+};
+
+struct module_manifest {
+    std::string name;
+    fs::path root;
+    std::string source_path;
+    std::vector<module_export_spec> exports;
+};
+
+struct module_manifest_cache_entry {
+    std::string key;
+    bool loaded = false;
+    bool ok = false;
+    std::string error;
+    module_manifest manifest;
+};
+
+std::vector<std::shared_ptr<module_manifest_cache_entry>> &
+module_manifest_cache() {
+    static thread_local std::vector<
+        std::shared_ptr<module_manifest_cache_entry>> entries;
+    return entries;
+}
+
+enum class manifest_token_kind {
+    Ident,
+    Dot,
+    LBrace,
+    RBrace,
+    Semi,
+    End
+};
+
+struct manifest_token {
+    manifest_token_kind kind = manifest_token_kind::End;
+    std::string text;
+    int line = 1;
+    int column = 1;
+};
+
+bool manifest_ident_start(unsigned char c) {
+    return std::isalpha(c) || c == '_' || c >= 0x80;
+}
+
+bool manifest_ident_continue(unsigned char c) {
+    return std::isalnum(c) || c == '_' || c >= 0x80;
+}
+
+std::vector<manifest_token> lex_module_manifest(const std::string &text,
+                                                std::string &error) {
+    std::vector<manifest_token> tokens;
+    size_t i = 0;
+    int line = 1;
+    int column = 1;
+    auto advance = [&](size_t count) {
+        for (size_t n = 0; n < count; ++n) {
+            if (i >= text.size())
+                return;
+            if (text[i] == '\n') {
+                ++line;
+                column = 1;
+            } else {
+                ++column;
+            }
+            ++i;
+        }
+    };
+    while (i < text.size()) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            advance(1);
+            continue;
+        }
+        if (c == '/' && i + 1 < text.size() && text[i + 1] == '/') {
+            while (i < text.size() && text[i] != '\n')
+                advance(1);
+            continue;
+        }
+        if (c == '/' && i + 1 < text.size() && text[i + 1] == '*') {
+            advance(2);
+            while (i + 1 < text.size() &&
+                   !(text[i] == '*' && text[i + 1] == '/'))
+                advance(1);
+            if (i + 1 >= text.size()) {
+                error = "unterminated block comment";
+                return tokens;
+            }
+            advance(2);
+            continue;
+        }
+        manifest_token token;
+        token.line = line;
+        token.column = column;
+        if (manifest_ident_start(c)) {
+            size_t start = i;
+            while (i < text.size() &&
+                   manifest_ident_continue((unsigned char)text[i]))
+                advance(1);
+            token.kind = manifest_token_kind::Ident;
+            token.text.assign(text, start, i - start);
+            tokens.push_back(std::move(token));
+            continue;
+        }
+        switch (c) {
+            case '.': token.kind = manifest_token_kind::Dot; break;
+            case '{': token.kind = manifest_token_kind::LBrace; break;
+            case '}': token.kind = manifest_token_kind::RBrace; break;
+            case ';': token.kind = manifest_token_kind::Semi; break;
+            default: {
+                error = "unexpected character in module manifest";
+                return tokens;
+            }
+        }
+        token.text.assign(1, (char)c);
+        tokens.push_back(std::move(token));
+        advance(1);
+    }
+    manifest_token end;
+    end.kind = manifest_token_kind::End;
+    end.line = line;
+    end.column = column;
+    tokens.push_back(std::move(end));
+    return tokens;
+}
+
+bool parse_module_manifest(const fs::path &root, const std::string &text,
+                           module_manifest &manifest,
+                           std::string &error) {
+    std::vector<manifest_token> tokens = lex_module_manifest(text, error);
+    if (!error.empty())
+        return false;
+    size_t pos = 0;
+    auto current = [&]() -> const manifest_token & { return tokens[pos]; };
+    auto consume = [&]() { ++pos; };
+    auto fail = [&](const std::string &message) {
+        const manifest_token &token = current();
+        error = message + " at " + std::to_string(token.line) + ":" +
+                std::to_string(token.column);
+        return false;
+    };
+    auto expect_ident = [&](const char *name) {
+        if (current().kind != manifest_token_kind::Ident ||
+            current().text != name)
+            return fail(std::string("expected '") + name + "'");
+        consume();
+        return true;
+    };
+    auto expect = [&](manifest_token_kind kind, const char *name) {
+        if (current().kind != kind)
+            return fail(std::string("expected '") + name + "'");
+        consume();
+        return true;
+    };
+
+    manifest.root = root;
+    manifest.source_path = path_to_utf8(root / "module.skein");
+    if (!expect_ident("module"))
+        return false;
+    if (current().kind != manifest_token_kind::Ident)
+        return fail("expected module name");
+    manifest.name = current().text;
+    consume();
+    if (!expect(manifest_token_kind::LBrace, "{"))
+        return false;
+
+    std::unordered_set<std::string> aliases;
+    while (current().kind != manifest_token_kind::RBrace &&
+           current().kind != manifest_token_kind::End) {
+        if (!expect_ident("export"))
+            return false;
+        module_export_spec spec;
+        if (current().kind == manifest_token_kind::Ident &&
+            current().text == "package") {
+            spec.is_package = true;
+            consume();
+        }
+        if (current().kind != manifest_token_kind::Ident)
+            return fail("expected export path");
+        std::vector<std::string> parts;
+        parts.push_back(current().text);
+        consume();
+        while (current().kind == manifest_token_kind::Dot) {
+            consume();
+            if (current().kind != manifest_token_kind::Ident)
+                return fail("expected name after '.'");
+            parts.push_back(current().text);
+            consume();
+        }
+        if (spec.is_package) {
+            spec.alias = parts.back();
+        } else {
+            if (parts.size() < 2)
+                return fail("symbol export must be <package>.<symbol>");
+            spec.alias = parts.back();
+        }
+        spec.path = parts[0];
+        for (size_t i = 1; i < parts.size(); ++i) {
+            spec.path += '.';
+            spec.path += parts[i];
+        }
+        if (current().kind == manifest_token_kind::Ident &&
+            current().text == "as") {
+            consume();
+            if (current().kind != manifest_token_kind::Ident)
+                return fail("expected alias after 'as'");
+            spec.alias = current().text;
+            consume();
+        }
+        if (!aliases.insert(spec.alias).second) {
+            error = "duplicate module export alias '" + spec.alias + "'";
+            return false;
+        }
+        if (!expect(manifest_token_kind::Semi, ";"))
+            return false;
+        manifest.exports.push_back(std::move(spec));
+    }
+    if (!expect(manifest_token_kind::RBrace, "}"))
+        return false;
+    if (current().kind != manifest_token_kind::End)
+        return fail("unexpected token after module manifest");
+    return true;
+}
+
+const module_manifest *load_module_manifest(const fs::path &root,
+                                            std::string &error) {
+    const std::string key = normalize_dir(path_to_utf8(root));
+    for (const std::shared_ptr<module_manifest_cache_entry> &entry :
+         module_manifest_cache()) {
+        if (entry->key == key) {
+            if (!entry->ok)
+                error = entry->error;
+            return entry->ok ? &entry->manifest : nullptr;
+        }
+    }
+    std::shared_ptr<module_manifest_cache_entry> entry =
+        std::make_shared<module_manifest_cache_entry>();
+    entry->key = key;
+    entry->loaded = true;
+    const fs::path path = root / "module.skein";
+    std::string source;
+    if (!load_source_file(path_to_utf8(path), source_encoding_get(), source,
+                          entry->error)) {
+        entry->error = "cannot load module manifest " + path_to_utf8(path) +
+                       ": " + entry->error;
+        module_manifest_cache().push_back(std::move(entry));
+        error = module_manifest_cache().back()->error;
+        return nullptr;
+    }
+    entry->ok = parse_module_manifest(root, source, entry->manifest,
+                                      entry->error);
+    if (entry->ok) {
+        const std::string directory_name =
+            path_to_utf8(root.filename());
+        if (entry->manifest.name != directory_name) {
+            entry->ok = false;
+            entry->error = "module name '" + entry->manifest.name +
+                           "' does not match directory '" + directory_name +
+                           "'";
+        }
+    }
+    if (!entry->ok)
+        entry->error = entry->manifest.source_path + ": " + entry->error;
+    const module_manifest *result = entry->ok ? &entry->manifest : nullptr;
+    if (!entry->ok)
+        error = entry->error;
+    module_manifest_cache().push_back(std::move(entry));
+    return result;
+}
+
+bool find_module_root(const std::string &dotted, fs::path &root,
+                      std::string &name, std::string &error) {
+    std::vector<std::string> parts = split_dotted(dotted);
+    if (parts.empty()) {
+        error = "empty package path";
+        return false;
+    }
+    if (!is_identifier(parts[0])) {
+        error = "invalid module path";
+        return false;
+    }
+    for (const std::string &search_root : search_roots) {
+        fs::path candidate = path_from_utf8(search_root) /
+                             path_from_utf8(parts[0]);
+        std::error_code ec;
+        if (fs::is_regular_file(candidate / "module.skein", ec)) {
+            root = candidate;
+            name = parts[0];
+            return true;
+        }
+    }
+    return false;
+}
+
+bool path_is_within(const fs::path &candidate, const fs::path &root) {
+    std::string child = normalize_dir(path_to_utf8(candidate));
+    std::string parent = normalize_dir(path_to_utf8(root));
+    if (child == parent)
+        return true;
+    if (child.size() <= parent.size())
+        return false;
+    if (child.compare(0, parent.size(), parent) != 0)
+        return false;
+    char separator = child[parent.size()];
+    return separator == '/' || separator == '\\';
 }
 
 bool is_loading(const std::string &key) {
@@ -394,6 +742,35 @@ value_t *import_resolved(const std::string &dotted,
         return NULL;
     }
 
+    save_global_symbol(hidden.c_str(), namespace_value);
+    return dupval(namespace_value);
+}
+
+/* Load exactly one package file, without implicitly merging child packages. */
+value_t *import_package_exact(const std::string &dotted,
+                              const resolved_package &resolved,
+                              std::string &error) {
+    if (!resolved.has_source) {
+        error = "module export target is not a package file: " + dotted;
+        return NULL;
+    }
+    if (is_loading(resolved.key)) {
+        error = "cyclic package import: " + resolved.key;
+        return NULL;
+    }
+    std::string hidden = package_cache_key(resolved.key);
+    if (value_t *cached = lookup_global_symbol(hidden.c_str()))
+        return dupval(cached);
+
+    loading_paths.push_back(resolved.key);
+    value_t *namespace_value = NULL;
+    bool ok = load_package_file(resolved, split_dotted(dotted).back(),
+                                dotted, namespace_value, error);
+    loading_paths.pop_back();
+    if (!ok) {
+        freeval(namespace_value);
+        return NULL;
+    }
     save_global_symbol(hidden.c_str(), namespace_value);
     return dupval(namespace_value);
 }
@@ -495,6 +872,161 @@ value_t *import_std_submodule(const std::string &dotted,
     return result;
 }
 
+bool resolve_module_target(const fs::path &root,
+                           const std::string &package_path,
+                           resolved_package &resolved,
+                           std::string &error) {
+    if (!resolve_package_at(root, package_path, resolved, error))
+        return false;
+    if (!resolved.has_source) {
+        error = "module export target is not a package file: " + package_path;
+        return false;
+    }
+    return true;
+}
+
+value_t *import_module_root(const std::string &module_name,
+                            const fs::path &root, std::string &error) {
+    const std::string key = canonical_file(root);
+    if (is_loading(key)) {
+        error = "cyclic module import: " + module_name;
+        return NULL;
+    }
+    const std::string hidden = package_cache_key(key);
+    if (value_t *cached = lookup_global_symbol(hidden.c_str()))
+        return dupval(cached);
+
+    const module_manifest *manifest = load_module_manifest(root, error);
+    if (!manifest)
+        return NULL;
+    if (manifest->name != module_name) {
+        error = "module name '" + manifest->name +
+                "' does not match import path '" + module_name + "'";
+        return NULL;
+    }
+
+    loading_paths.push_back(key);
+    struct dict_value_t *namespace_value = newdictval();
+    namespace_value->payload->is_namespace = true;
+    for (const module_export_spec &spec : manifest->exports) {
+        std::string package_path = spec.path;
+        std::string symbol;
+        if (!spec.is_package) {
+            size_t dot = package_path.rfind('.');
+            if (dot == std::string::npos) {
+                error = "invalid module export path: " + spec.path;
+                freeval((value_t *)namespace_value);
+                loading_paths.pop_back();
+                return NULL;
+            }
+            symbol = package_path.substr(dot + 1);
+            package_path.resize(dot);
+        }
+
+        resolved_package target;
+        std::string target_error;
+        if (!resolve_module_target(root, package_path, target, target_error)) {
+            error = "module " + module_name + " export '" + spec.alias +
+                    "': " + target_error;
+            freeval((value_t *)namespace_value);
+            loading_paths.pop_back();
+            return NULL;
+        }
+        value_t *package_namespace = import_package_exact(
+            module_name + "." + package_path, target, target_error);
+        if (!package_namespace) {
+            error = "module " + module_name + " export '" + spec.alias +
+                    "': " + target_error;
+            freeval((value_t *)namespace_value);
+            loading_paths.pop_back();
+            return NULL;
+        }
+
+        if (spec.is_package) {
+            if (dict_lookup_string(namespace_value, spec.alias)) {
+                error = "duplicate module export alias '" + spec.alias + "'";
+                freeval(package_namespace);
+                freeval((value_t *)namespace_value);
+                loading_paths.pop_back();
+                return NULL;
+            }
+            namespace_value->payload->items.push_back(std::make_pair(
+                newstrval(spec.alias.c_str()), package_namespace));
+            continue;
+        }
+
+        value_t *exported = dict_lookup_string(
+            (const dict_value_t *)package_namespace, symbol);
+        if (!exported) {
+            error = "module " + module_name + " export '" + spec.alias +
+                    "': package '" + package_path + "' does not export '" +
+                    symbol + "'";
+            freeval(package_namespace);
+            freeval((value_t *)namespace_value);
+            loading_paths.pop_back();
+            return NULL;
+        }
+        if (dict_lookup_string(namespace_value, spec.alias)) {
+            error = "duplicate module export alias '" + spec.alias + "'";
+            freeval(package_namespace);
+            freeval((value_t *)namespace_value);
+            loading_paths.pop_back();
+            return NULL;
+        }
+        namespace_value->payload->items.push_back(std::make_pair(
+            newstrval(spec.alias.c_str()), dupval(exported)));
+        freeval(package_namespace);
+    }
+    loading_paths.pop_back();
+
+    save_global_symbol(hidden.c_str(), (value_t *)namespace_value);
+    return dupval((value_t *)namespace_value);
+}
+
+bool resolve_module_public_package(const std::string &module_name,
+                                   const std::string &alias,
+                                   const fs::path &root,
+                                   resolved_package &target,
+                                   std::string &package_path,
+                                   std::string &error) {
+    const module_manifest *manifest = load_module_manifest(root, error);
+    if (!manifest)
+        return false;
+    for (const module_export_spec &spec : manifest->exports) {
+        if (!spec.is_package || spec.alias != alias)
+            continue;
+        std::string target_error;
+        if (!resolve_module_target(root, spec.path, target, target_error)) {
+            error = "module " + module_name + " package '" + alias +
+                    "': " + target_error;
+            return false;
+        }
+        package_path = spec.path;
+        return true;
+    }
+    error = "module " + module_name + " does not export package '" + alias +
+            "'";
+    return false;
+}
+
+value_t *import_module_public_package(const std::string &module_name,
+                                      const std::string &alias,
+                                      const fs::path &root,
+                                      std::string &error) {
+    resolved_package target;
+    std::string package_path;
+    if (!resolve_module_public_package(module_name, alias, root, target,
+                                       package_path, error))
+        return NULL;
+    std::string target_error;
+    value_t *result = import_package_exact(
+        module_name + "." + package_path, target, target_error);
+    if (!result)
+        error = "module " + module_name + " package '" + alias +
+                "': " + target_error;
+    return result;
+}
+
 value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                              std::string &error) {
     if (value_t *seeded = take_seeded_import(dotted_path, base_dir))
@@ -507,6 +1039,39 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
     if (is_reserved_main_package(spec.dotted)) {
         error = "package name \"main\" is reserved for the entry script";
         return NULL;
+    }
+
+    /*
+     * A top-level directory with module.skein is a module boundary.  Imports
+     * from outside the module may only use the public namespace or a package
+     * alias declared in the manifest; internal packages keep using normal
+     * physical imports.
+     */
+    if ((spec.kind == IMPORT_ABSOLUTE || spec.kind == IMPORT_PROJECT) &&
+        spec.dotted != "std") {
+        fs::path module_root;
+        std::string module_name;
+        std::string module_error;
+        if (find_module_root(spec.dotted, module_root, module_name,
+                             module_error)) {
+            std::string importer =
+                (base_dir && *base_dir) ? base_dir : import_base;
+            bool inside_module =
+                !importer.empty() &&
+                path_is_within(path_from_utf8(importer), module_root);
+            if (!inside_module) {
+                std::vector<std::string> parts =
+                    split_dotted(spec.dotted);
+                if (parts.size() == 1)
+                    return import_module_root(module_name, module_root,
+                                              error);
+                if (parts.size() == 2)
+                    return import_module_public_package(
+                        module_name, parts[1], module_root, error);
+                error = "module member is not exported: " + spec.dotted;
+                return NULL;
+            }
+        }
     }
 
     /* Only a bare `std` refers to the built-in standard library. */
@@ -964,6 +1529,40 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
     if (is_reserved_main_package(spec.dotted)) {
         error = "package name \"main\" is reserved for the entry script";
         return false;
+    }
+    if ((spec.kind == IMPORT_ABSOLUTE || spec.kind == IMPORT_PROJECT) &&
+        spec.dotted != "std") {
+        fs::path module_root;
+        std::string module_name;
+        std::string module_error;
+        if (find_module_root(spec.dotted, module_root, module_name,
+                             module_error)) {
+            std::string importer =
+                (base_dir && *base_dir) ? base_dir : import_base;
+            bool inside_module =
+                !importer.empty() &&
+                path_is_within(path_from_utf8(importer), module_root);
+            if (!inside_module) {
+                std::vector<std::string> parts =
+                    split_dotted(spec.dotted);
+                if (parts.size() == 1) {
+                    key = canonical_file(module_root);
+                    return true;
+                }
+                if (parts.size() == 2) {
+                    resolved_package target;
+                    std::string package_path;
+                    if (!resolve_module_public_package(
+                            module_name, parts[1], module_root, target,
+                            package_path, error))
+                        return false;
+                    key = target.key;
+                    return true;
+                }
+                error = "module member is not exported: " + spec.dotted;
+                return false;
+            }
+        }
     }
     if (spec.kind == IMPORT_ABSOLUTE && spec.dotted == "std") {
         key = "builtin:std";

@@ -352,6 +352,58 @@ package bb {
 }
 ```
 
+### Module（v2，可选）
+
+顶层目录包含 `module.skein` 时，该目录成为 module；没有 manifest 的旧目录继续按原 package 规则解析。
+
+```text
+math/                 # module: math
+  module.skein        # 公共导出清单
+  add.skein           # package: add
+  vector.skein        # package: vector
+  internal/
+    helpers.skein     # 子目录 package: internal.helpers
+```
+
+也兼容现有的目录包布局，例如 `math/add/add.skein`。
+
+```skein
+// math/module.skein
+module math {
+  export add.add;
+  export vector.sum as sum;
+  export internal.helpers.normalize as normalize;
+  export package internal.helpers as helpers;
+}
+```
+
+外部：
+
+```skein
+import math;
+
+math.add(1, 2);
+math.sum([1, 2]);
+math.normalize(x);
+math.helpers.normalize(x);
+
+import math.helpers as helpers;
+```
+
+规则：
+
+- module 名必须与顶层目录名一致；
+- package 名必须与文件或目录名一致；
+- 无 `export` 的符号是 package 私有；
+- package 的 `export` 只提升到 module 内部；
+- 只有 `module.skein` 中声明的符号/package 才能从外部访问；
+- `export package internal.helpers as helpers;` 把子目录 package 暴露为 `math.helpers`；
+- 外部不能通过物理路径 `import math.internal.helpers`；
+- module 内部使用普通相对导入，例如 `import .internal.helpers` 或 `import ..internal.helpers`；
+- 清单中的符号必须已在目标 package 中 `export`，否则启动报错；
+- 重复别名、缺失 package、module 名不匹配都会报错；
+- 同一个 module 只加载一次并复用缓存。
+
 ### 内置标准库 std
 
 `import std;` 会加载内置标准库，不需要文件系统目录：

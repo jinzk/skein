@@ -2356,7 +2356,43 @@ import aa.bb.cc;
 
 父目录没有源文件时，也可以作为纯子包容器。
 
-### 6.4 内置标准库 std
+### 6.4 Module（v2）
+
+顶层目录包含 `module.skein` 时成为 module；没有 manifest 的目录继续按 package 解析。
+
+```text
+math/
+  module.skein
+  add.skein
+  vector.skein
+  internal/
+    helpers.skein
+```
+
+manifest：
+
+```skein
+module math {
+  export add.add;
+  export vector.sum as sum;
+  export internal.helpers.normalize as normalize;
+  export package internal.helpers as helpers;
+}
+```
+
+- `module` 名必须匹配目录名；
+- package 名必须匹配文件或目录名；
+- `export <path>.<symbol> [as alias]` 扁平化导出符号；
+- `export package <path> [as alias]` 导出 package namespace；
+- 只有 manifest 声明的符号/package 对 module 外部可见；
+- 子目录 package 默认是 module 内部代码，必须显式提升；
+- package 私有符号不会进入 module 公共 namespace；
+- 外部不能 `import math.internal.helpers`，只能 `import math` 或使用公共 package 别名；
+- module 内部使用普通相对导入；
+- manifest 中的目标 package/符号不存在、别名重复、module 名不匹配都会报错；
+- 旧 package/import 行为保持不变。
+
+### 6.5 内置标准库 std
 
 ```text
 import std;
@@ -4614,7 +4650,7 @@ stem / ext / parts / absolute / rooted / normalized / sep`；`parts` 保留原�
 模式下只做 ASCII 大小写不敏感比较。真实文件 I/O 仍使用 `std.fs`，现有
 `std.fs.path_*` 保持宿主原生行为。
 
-### 6.5 查找路径
+### 6.6 查找路径
 
 优先级：
 

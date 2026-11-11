@@ -740,6 +740,25 @@ static bool task_callable_value(struct value_t *value, const char *name) {
     return true;
 }
 
+static value_t *task_scope(const std::vector<value_t *> &args) {
+    if (args.size() != 1 ||
+        !task_callable_value(args[0], "std.task.scope callback"))
+        return NULL;
+    value_t *task_value = fiber_launch_value(args[0], {});
+    if (!task_value)
+        return NULL;
+    task_ptr task;
+    if (!get_task_value(task_value, task)) {
+        freeval(task_value);
+        return NULL;
+    }
+    freeval(task_value);
+    /* The scope consumes the task outcome here; avoid a detached failure
+     * diagnostic before the error is re-raised to the caller. */
+    task->observed = true;
+    return fiber_await_task(task);
+}
+
 static value_t *task_retry(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2) {
         yyerror("std.task.retry expects 1 or 2 arguments");
@@ -1194,6 +1213,8 @@ struct value_t *call_task_builtin(
             return task_sleep(args);
         case B_task_yield:
             return task_yield(args);
+        case B_task_scope:
+            return task_scope(args);
         case B_task_wait:
             return task_wait(args);
         case B_task_wait_all:

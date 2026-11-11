@@ -580,6 +580,7 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"sleep", B_task_sleep},
             {"yield", B_task_yield},
+            {"scope", B_task_scope},
             {"wait", B_task_wait},
             {"wait_all", B_task_wait_all},
             {"cancel", B_task_cancel},

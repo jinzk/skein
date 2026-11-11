@@ -542,6 +542,7 @@ Task API：
 ```text
 std.task.sleep(ms)            → task
 std.task.yield()              → task
+std.task.scope(fn)            → value
 std.task.wait(task[, timeout_ms]) → result
 std.task.wait_all(tasks[, timeout_ms]) → list
 std.task.cancel(task)         → true / false
@@ -555,6 +556,23 @@ std.task.rate_limit(rate, burst) → rate_limiter
 std.task.acquire(limiter[, tokens]) → bool
 std.task.bounded_parallel_map(items, limit, fn) → list[result]
 ```
+
+`std.task.scope(fn)` 把 `fn` 放进一个子 task/fiber 中执行，并等待它以及所有未 detach 的子任务：
+
+```skein
+let v = std.task.scope(func() {
+  let a = launch work(1);
+  let b = launch work(2);
+  return a.wait() + b.wait();
+});
+```
+
+- `fn` 必须是可调用值，接收 0 个参数；
+- scope 正常结束时等待所有未 detach 子任务；
+- 子任务失败会取消同 scope 其他子任务并传播首个错误；
+- `t.detach()` 后该任务不再由 scope 等待/取消；
+- scope 可以嵌套；
+- 顶层 scope 仍会等待自己的子任务。
 
 可靠性工具：
 
@@ -2916,6 +2934,7 @@ std.websocket.close
 
 std.task.sleep
 std.task.yield
+std.task.scope
 std.task.wait
 std.task.wait_all
 std.task.cancel

@@ -186,6 +186,7 @@ enum bifs {
     B_module_unload,
     B_task_sleep,
     B_task_yield,
+    B_task_scope,
     B_task_wait,
     B_task_wait_all,
     B_task_cancel,

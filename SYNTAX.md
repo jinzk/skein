@@ -3003,6 +3003,7 @@ Task 函数：
 ```text
 sleep(ms)                  → task
 yield()                    → task
+scope(fn)                  → value
 wait(task[, timeout_ms])   → result
 wait_all(tasks[, timeout_ms]) → list
 cancel(task)               → bool
@@ -3016,6 +3017,8 @@ rate_limit(rate, burst) → rate_limiter
 acquire(limiter[, tokens]) → bool
 bounded_parallel_map(items, limit, fn) → list[result]
 ```
+
+`std.task.scope(fn)` 在子 task/fiber 中执行 `fn`，等待它和所有未 detach 的子任务，返回 `fn` 的结果；子任务失败会取消同 scope 其他任务并传播。
 
 `std.task.yield` 是函数字段；单独的 `yield` 关键字用于生成器。`wait` 超时不会自动取消 task；需要显式调用 `cancel`。
 

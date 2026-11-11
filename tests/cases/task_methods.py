@@ -310,6 +310,83 @@ def run_cases():
     )
 
     check(
+        "task scope waits for children",
+        "import std;\n"
+        "func child(n) {\n"
+        "  std.task.sleep(5).wait();\n"
+        '  println("child-" + str(n));\n'
+        "  return n;\n"
+        "}\n"
+        "let v = std.task.scope(func() {\n"
+        "  let a = launch child(1);\n"
+        "  let b = launch child(2);\n"
+        '  println("body");\n'
+        "  return a.wait() + b.wait();\n"
+        "});\n"
+        'println("scope=" + str(v));\n',
+        stdout="body\nchild-1\nchild-2\nscope=3\n",
+    )
+
+    check(
+        "task scope detach",
+        "import std;\n"
+        "func child() {\n"
+        "  std.task.sleep(10).wait();\n"
+        '  println("child");\n'
+        "  return 1;\n"
+        "}\n"
+        "let v = std.task.scope(func() {\n"
+        "  let t = launch child();\n"
+        "  t.detach();\n"
+        "  return 0;\n"
+        "});\n"
+        'println("scope=" + str(v));\n'
+        "std.task.sleep(30).wait();\n",
+        stdout="scope=0\nchild\n",
+    )
+
+    check(
+        "task scope child failure cancels siblings",
+        "import std;\n"
+        "func ok() {\n"
+        "  std.task.sleep(30).wait();\n"
+        '  println("ok");\n'
+        "  return 1;\n"
+        "}\n"
+        "func bad() {\n"
+        "  std.task.sleep(5).wait();\n"
+        '  fail "scope-child-fail";\n'
+        "}\n"
+        "std.task.scope(func() {\n"
+        "  let a = launch ok();\n"
+        "  let b = launch bad();\n"
+        "  return 0;\n"
+        "});\n",
+        stderr="scope-child-fail",
+        not_stderr="ok",
+    )
+
+    check(
+        "task scope callback failure",
+        'import std;\nstd.task.scope(func() { fail "scope-callback-fail"; });\n',
+        stderr="scope-callback-fail",
+    )
+
+    check(
+        "task scope callback must be callable",
+        "import std;\nstd.task.scope(1);\n",
+        stderr="std.task.scope callback must be callable",
+    )
+
+    check(
+        "task scope named function",
+        "import std;\n"
+        "func body() { return 7; }\n"
+        "println(str(std.task.scope(body)));\n",
+        stdout="7\n",
+    )
+
+    check(
         "launch structured waits for children",
         "import std;\n"
         "func child() {\n"

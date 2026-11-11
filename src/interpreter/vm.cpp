@@ -36,12 +36,59 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-vm_stats_data vm_stats;
+thread_local vm_stats_data vm_stats;
+
+namespace {
+std::mutex vm_stats_total_mutex;
+vm_stats_data vm_stats_total;
+thread_local bool vm_stats_merged = false;
+
+void merge_vm_stats(vm_stats_data &target, const vm_stats_data &source) {
+    target.statements_compiled += source.statements_compiled;
+    target.statements_fallback += source.statements_fallback;
+    target.functions_compiled += source.functions_compiled;
+    target.functions_fallback += source.functions_fallback;
+    target.instructions += source.instructions;
+    target.calls += source.calls;
+    target.fast_calls += source.fast_calls;
+    target.tail_calls += source.tail_calls;
+    target.fallback_calls += source.fallback_calls;
+    target.name_ic_hits += source.name_ic_hits;
+    target.name_ic_misses += source.name_ic_misses;
+    target.member_ic_hits += source.member_ic_hits;
+    target.member_ic_misses += source.member_ic_misses;
+    target.index_ic_hits += source.index_ic_hits;
+    target.index_ic_misses += source.index_ic_misses;
+    target.max_depth = std::max(target.max_depth, source.max_depth);
+    target.max_stack = std::max(target.max_stack, source.max_stack);
+    target.max_handler_depth =
+        std::max(target.max_handler_depth, source.max_handler_depth);
+    target.max_defer_depth =
+        std::max(target.max_defer_depth, source.max_defer_depth);
+    target.max_iterator_depth =
+        std::max(target.max_iterator_depth, source.max_iterator_depth);
+    target.compile_ns += source.compile_ns;
+    target.execute_ns += source.execute_ns;
+    for (const auto &entry : source.fallback_reasons)
+        target.fallback_reasons[entry.first] += entry.second;
+    for (size_t i = 0; i < source.opcodes.size(); ++i)
+        target.opcodes[i] += source.opcodes[i];
+}
+} // namespace
+
+void skein_vm_stats_merge_thread() {
+    if (vm_stats_merged)
+        return;
+    vm_stats_merged = true;
+    std::lock_guard<std::mutex> lock(vm_stats_total_mutex);
+    merge_vm_stats(vm_stats_total, vm_stats);
+}
 
 namespace {
 
@@ -5035,70 +5082,74 @@ void skein_vm_set_stats(bool enabled) {
 
 void skein_vm_stats_report() {
     ensure_stats_flags();
+    const bool enabled = vm_stats.enabled;
+    skein_vm_stats_merge_thread();
+    std::lock_guard<std::mutex> lock(vm_stats_total_mutex);
+    const vm_stats_data &stats = vm_stats_total;
     const char *coverage_path = std::getenv("SKEIN_VM_COVERAGE_FILE");
     if (coverage_path && *coverage_path) {
         FILE *out = std::fopen(coverage_path, "a");
         if (out) {
-            for (size_t i = 0; i < vm_stats.opcodes.size(); ++i) {
-                if (vm_stats.opcodes[i] == 0)
+            for (size_t i = 0; i < stats.opcodes.size(); ++i) {
+                if (stats.opcodes[i] == 0)
                     continue;
                 std::fprintf(
                     out, "%zu %s %llu\n", i,
                     skein::bc::op_name(static_cast<Op>(i)),
-                    (unsigned long long)vm_stats.opcodes[i]);
+                    (unsigned long long)stats.opcodes[i]);
             }
             std::fclose(out);
         }
     }
-    if (!vm_stats.enabled)
+    if (!enabled)
         return;
     if (read_bool_env("SKEIN_VM_STATS_QUIET", false))
         return;
     std::fprintf(stderr,
                  "[vm-stats] statements compiled=%llu fallback=%llu\n",
-                 (unsigned long long)vm_stats.statements_compiled,
-                 (unsigned long long)vm_stats.statements_fallback);
+                 (unsigned long long)stats.statements_compiled,
+                 (unsigned long long)stats.statements_fallback);
     std::fprintf(stderr,
                  "[vm-stats] functions compiled=%llu fallback=%llu\n",
-                 (unsigned long long)vm_stats.functions_compiled,
-                 (unsigned long long)vm_stats.functions_fallback);
+                 (unsigned long long)stats.functions_compiled,
+                 (unsigned long long)stats.functions_fallback);
     std::fprintf(stderr,
                  "[vm-stats] instructions=%llu calls=%llu fast=%llu "
                  "tail=%llu fallback=%llu\n",
-                 (unsigned long long)vm_stats.instructions,
-                 (unsigned long long)vm_stats.calls,
-                 (unsigned long long)vm_stats.fast_calls,
-                 (unsigned long long)vm_stats.tail_calls,
-                 (unsigned long long)vm_stats.fallback_calls);
+                 (unsigned long long)stats.instructions,
+                 (unsigned long long)stats.calls,
+                 (unsigned long long)stats.fast_calls,
+                 (unsigned long long)stats.tail_calls,
+                 (unsigned long long)stats.fallback_calls);
     std::fprintf(stderr,
                  "[vm-stats] name-ic hits=%llu misses=%llu\n",
-                 (unsigned long long)vm_stats.name_ic_hits,
-                 (unsigned long long)vm_stats.name_ic_misses);
+                 (unsigned long long)stats.name_ic_hits,
+                 (unsigned long long)stats.name_ic_misses);
     std::fprintf(stderr,
                  "[vm-stats] member-ic hits=%llu misses=%llu\n",
-                 (unsigned long long)vm_stats.member_ic_hits,
-                 (unsigned long long)vm_stats.member_ic_misses);
+                 (unsigned long long)stats.member_ic_hits,
+                 (unsigned long long)stats.member_ic_misses);
     std::fprintf(stderr,
                  "[vm-stats] index-ic hits=%llu misses=%llu\n",
-                 (unsigned long long)vm_stats.index_ic_hits,
-                 (unsigned long long)vm_stats.index_ic_misses);
+                 (unsigned long long)stats.index_ic_hits,
+                 (unsigned long long)stats.index_ic_misses);
     std::fprintf(stderr,
                  "[vm-stats] max-depth=%llu max-stack=%llu "
                  "max-handler=%llu max-defer=%llu max-iterator=%llu\n",
-                 (unsigned long long)vm_stats.max_depth,
-                 (unsigned long long)vm_stats.max_stack,
-                 (unsigned long long)vm_stats.max_handler_depth,
-                 (unsigned long long)vm_stats.max_defer_depth,
-                 (unsigned long long)vm_stats.max_iterator_depth);
+                 (unsigned long long)stats.max_depth,
+                 (unsigned long long)stats.max_stack,
+                 (unsigned long long)stats.max_handler_depth,
+                 (unsigned long long)stats.max_defer_depth,
+                 (unsigned long long)stats.max_iterator_depth);
     std::fprintf(stderr,
                  "[vm-stats] compile=%.3fms execute=%.3fms\n",
-                 (double)vm_stats.compile_ns / 1000000.0,
-                 (double)vm_stats.execute_ns / 1000000.0);
+                 (double)stats.compile_ns / 1000000.0,
+                 (double)stats.execute_ns / 1000000.0);
 
-    if (!vm_stats.fallback_reasons.empty()) {
+    if (!stats.fallback_reasons.empty()) {
         std::vector<std::pair<std::string, uint64_t>> reasons;
-        reasons.reserve(vm_stats.fallback_reasons.size());
-        for (const auto &entry : vm_stats.fallback_reasons)
+        reasons.reserve(stats.fallback_reasons.size());
+        for (const auto &entry : stats.fallback_reasons)
             reasons.push_back(entry);
         std::sort(reasons.begin(), reasons.end(),
                   [](const auto &a, const auto &b) {
@@ -5113,9 +5164,9 @@ void skein_vm_stats_report() {
     }
 
     std::vector<std::pair<uint64_t, const char *>> top;
-    for (size_t i = 0; i < vm_stats.opcodes.size(); ++i) {
-        if (vm_stats.opcodes[i] != 0)
-            top.emplace_back(vm_stats.opcodes[i],
+    for (size_t i = 0; i < stats.opcodes.size(); ++i) {
+        if (stats.opcodes[i] != 0)
+            top.emplace_back(stats.opcodes[i],
                              skein::bc::op_name(static_cast<Op>(i)));
     }
     std::sort(top.begin(), top.end(),

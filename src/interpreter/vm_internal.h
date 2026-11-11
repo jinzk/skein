@@ -45,7 +45,9 @@ struct vm_stats_data {
     std::array<uint64_t, static_cast<size_t>(skein::bc::Op::Count)> opcodes{};
 };
 
-extern vm_stats_data vm_stats;
+extern thread_local vm_stats_data vm_stats;
+/* Merge the current thread's stats into the process-wide report total. */
+void skein_vm_stats_merge_thread();
 
 /* Executor entry points used by the AST/compiler bridge. */
 struct value_t *skein_vm_execute_proto(

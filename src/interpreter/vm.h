@@ -125,6 +125,7 @@ void skein_vm_set_enabled(bool enabled);
 /* Enable/disable VM statistics and print the final report. */
 void skein_vm_set_stats(bool enabled);
 void skein_vm_stats_report();
+void skein_vm_stats_merge_thread();
 
 /*
  * Execute a top-level statement through the VM.  Falls back to eval() when

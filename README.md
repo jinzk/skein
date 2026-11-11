@@ -969,7 +969,7 @@ entry              worker 入口，默认 "handle"
 strategy           "auto" / "dispatch" / "reuse_port"，默认 "auto"
 queue              pool 队列，默认 1024 或 "unbounded"
 restart_limit      worker 重启次数，默认 0
-worker_vm          默认 false
+worker_vm          默认 false；启用后 VM/JIT（已验证并发 stress/TSAN）
 worker_timeout_ms  单请求 worker 超时，默认 30000，0 表示不超时
 max_requests       默认 0
 max_per_connection 默认 100
@@ -4989,7 +4989,7 @@ pool.stats() -> dict
 entry         默认 "handle"
 queue         默认 1024；正整数或 "unbounded"
 restart_limit 默认 0；worker 异常退出后的重启次数
-worker_vm     默认 false；实验中，启用后 worker 使用 VM/JIT
+worker_vm     默认 false；启用后 worker 使用 VM/JIT（已验证并发 stress/TSAN）
 ```
 
 worker 脚本导出 `handle(payload)`：

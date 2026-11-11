@@ -3406,6 +3406,7 @@ void thread_entry_main(
     fiber_shutdown();
     event_loop_shutdown();
     ast_thread_shutdown();
+    skein_vm_stats_merge_thread();
     skein_vm_shutdown();
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);
@@ -4309,6 +4310,7 @@ void thread_worker_end() {
     fiber_shutdown();
     event_loop_shutdown();
     ast_thread_shutdown();
+    skein_vm_stats_merge_thread();
     skein_vm_shutdown();
     set_active_eval_context(nullptr);
     skein_context_set(nullptr);

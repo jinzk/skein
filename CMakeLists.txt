@@ -858,6 +858,16 @@ if(BUILD_TESTING)
         TIMEOUT 300
       )
       add_test(
+        NAME worker_vm_stress_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker_vm_stress.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(worker_vm_stress_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 300
+      )
+      add_test(
         NAME http_stress_test
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/http_stress.py
@@ -988,6 +998,18 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:${PROJECT_NAME}>
       )
       set_tests_properties(thread_tsan_test PROPERTIES
+        ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+        LABELS "sanitize;tsan"
+        RUN_SERIAL TRUE
+        TIMEOUT 300
+      )
+      add_test(
+        NAME worker_vm_tsan_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker_vm_stress.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(worker_vm_tsan_test PROPERTIES
         ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
         LABELS "sanitize;tsan"
         RUN_SERIAL TRUE

@@ -878,6 +878,26 @@ if(BUILD_TESTING)
         LABELS "core"
         TIMEOUT 120
       )
+      add_test(
+        NAME sys_args_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/sys_args.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(sys_args_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 120
+      )
+      add_test(
+        NAME fs_helpers_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fs_helpers.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(fs_helpers_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 120
+      )
       if(TARGET skein_ffi_shim)
         add_test(
           NAME env_ffi_stress_test

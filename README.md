@@ -2346,6 +2346,7 @@ std.regex
 std.time
 std.random
 std.env
+std.sys
 std.crypto
 std.compress
 std.math
@@ -3126,6 +3127,10 @@ std.env.set
 std.env.unset
 std.env.all
 
+std.sys.args
+std.sys.script
+std.sys.executable
+
 std.crypto.sha256
 std.crypto.hmac_sha256
 
@@ -3149,6 +3154,11 @@ std.fs.path_dirname
 std.fs.path_extname
 std.fs.path_abs
 std.fs.path_normalize
+std.fs.temp_dir
+std.fs.remove_all
+std.fs.copy
+std.fs.which
+std.fs.glob
 
 std.process.run_command
 std.process.spawn_command
@@ -5723,6 +5733,23 @@ std.process.run_command(command[, options]) → dict
 线程局部 env/cwd、FFI 回调的 owner 线程约束和 `ffi.call_task` 的环境可见性限制见
 [env-ffi-thread-safety.md](docs/env-ffi-thread-safety.md)。
 
+`std.sys` 暴露脚本调用信息：
+
+```text
+std.sys.args()        → list[string]  // 脚本路径之后的参数
+std.sys.script()      → string        // 脚本路径；stdin/REPL 为空
+std.sys.executable()  → string        // 解释器可执行文件
+```
+
+解释器选项必须写在脚本路径之前；脚本路径之后的所有参数（包括以 `-` 开头的）
+都原样传给脚本。示例：
+
+```text
+skein tool.skein --bin build/skein --check "a b"
+```
+
+脚本内 `std.sys.args()` 返回 `["--bin", "build/skein", "--check", "a b"]`。
+
 旧名 `std.process.run` 已移除；请使用 `run_command`。
 
 `std.process.run_command` 的 `options` 支持：
@@ -5770,7 +5797,21 @@ std.fs.path_dirname(path)
 std.fs.path_extname(path)
 std.fs.path_abs(path)
 std.fs.path_normalize(path)
+std.fs.temp_dir([prefix])         → string
+std.fs.remove_all(path)
+std.fs.copy(src, dst)
+std.fs.which(name)                → string
+std.fs.glob(pattern)              → list[string]
 ```
+
+- `std.fs.temp_dir` 在系统临时目录下创建唯一目录；`prefix` 不能包含路径分隔符；
+- `std.fs.remove_all` 递归删除，路径不存在时视为成功；
+- `std.fs.copy` 支持文件或目录：目录目标不能已存在；文件目标已有内容时覆盖；
+  如果目标是目录，则复制到 `dst/src_name`；
+- `std.fs.which` 按当前线程的 `PATH` 查找可执行文件，Windows 会尝试 `PATHEXT`；
+  找不到返回空字符串；
+- `std.fs.glob` 只支持最后一段路径中的 `*` / `?`，返回排序后的绝对路径；
+  `std.fs.mkdir(path, true)` 可递归创建目录。
 
 `std.fs.cwd` / `std.fs.chdir` 是线程局部工作目录：相对路径的 `std.fs` 操作、`std.fs.open` / 文件读写、`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 默认使用当前线程的工作目录；不会改变进程级 OS cwd。新线程在启动时继承创建线程的工作目录。
 

@@ -175,3 +175,24 @@ std::string thread_resolve_path(const std::string &path) {
         return path;
     return (fs::u8path(base) / value).lexically_normal().u8string();
 }
+
+namespace {
+
+std::vector<std::string> g_sys_args;
+std::string g_sys_script;
+std::string g_sys_executable;
+
+}  // namespace
+
+void sys_invocation_set(std::vector<std::string> args, std::string script,
+                        std::string executable) {
+    g_sys_args = std::move(args);
+    g_sys_script = std::move(script);
+    g_sys_executable = std::move(executable);
+}
+
+const std::vector<std::string> &sys_args() { return g_sys_args; }
+
+const std::string &sys_script() { return g_sys_script; }
+
+const std::string &sys_executable() { return g_sys_executable; }

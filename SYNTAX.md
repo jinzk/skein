@@ -2418,6 +2418,7 @@ std.regex
 std.time
 std.random
 std.env
+std.sys
 std.crypto
 std.compress
 std.math
@@ -2680,9 +2681,12 @@ std.compress.deflate(bytes) / inflate(bytes)
 ```text
 std.env.get(name[, default]) / has(name) / set(name, value)
 std.env.unset(name) / all()
+std.sys.args() / script() / executable()
 
 std.fs.listdir(path) / mkdir(path[, recursive])
-std.fs.remove(path) / rename(old, new) / stat(path)
+std.fs.remove(path) / remove_all(path) / rename(old, new) / stat(path)
+std.fs.copy(src, dst) / which(name) / glob(pattern)
+std.fs.temp_dir([prefix])
 std.fs.cwd() / chdir(path)
 std.fs.path_join(parts...) / path_basename(path)
 std.fs.path_dirname(path) / path_extname(path)
@@ -2690,6 +2694,10 @@ std.fs.path_abs(path) / path_normalize(path)
 
 std.process.run_command(command[, options]) → dict
 ```
+
+解释器选项必须写在脚本路径之前；脚本路径之后的参数原样进入
+`std.sys.args()`（包括以 `-` 开头的参数）。`std.fs.which` 找不到时返回空字符串；
+`std.fs.glob` 只支持最后一段路径中的 `*` / `?`。
 
 `std.process.run_command` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
 `{"status", "stdout", "stderr"}`，其中 stdout/stderr 是 `bytes`。

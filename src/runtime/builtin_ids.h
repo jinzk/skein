@@ -346,6 +346,11 @@ enum bifs {
     B_fs_path_extname,
     B_fs_path_abs,
     B_fs_path_normalize,
+    B_fs_temp_dir,
+    B_fs_remove_all,
+    B_fs_copy,
+    B_fs_which,
+    B_fs_glob,
     B_env_get,
     B_env_has,
     B_env_set,
@@ -449,7 +454,10 @@ enum bifs {
     B_iter_enumerate,
     B_iter_collect,
     B_iter_for_each,
-    B_slice
+    B_slice,
+    B_sys_args,
+    B_sys_script,
+    B_sys_executable
 };
 
 #endif

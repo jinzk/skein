@@ -25,6 +25,7 @@
 #include "process_spawn.h"
 #include "repl.h"
 #include "runtime_context.h"
+#include "runtime_state.h"
 #include "scopestack.h"
 #include "source_encoding.h"
 #include "structtype.h"
@@ -129,6 +130,7 @@ int main(int argc, char **argv) {
 
     std::string script_path;
     std::vector<std::string> package_dirs;
+    std::vector<std::string> script_args;
     std::string source_encoding;
     bool force_interactive = false;
     bool run_entry = false;
@@ -207,11 +209,21 @@ int main(int argc, char **argv) {
                 return 2;
             }
             script_path = arg;
+            /* Everything after the script path belongs to the script. */
+            for (size_t j = i + 1; j < args.size(); ++j)
+                script_args.push_back(args[j]);
+            break;
         } else {
             print_usage(program);
             return 2;
         }
     }
+
+    std::string executable = platform_executable_path();
+    if (executable.empty())
+        executable = program;
+    sys_invocation_set(std::move(script_args), script_path,
+                       std::move(executable));
 
     source_encoding_set(source_encoding);
     if (run_entry) {

@@ -10,8 +10,7 @@
 #include <vector>
 
 struct value_t *call_env_builtin(
-    int functype, const std::vector<struct value_t *> &args) {
-    switch (functype) {
+    int functype, const std::vector<struct value_t *> &args) {    switch (functype) {
         case B_env_get: {
             if (args.empty() || args.size() > 2) {
                 yyerror("std.env.get expects 1 or 2 arguments, got %d",
@@ -90,6 +89,32 @@ struct value_t *call_env_builtin(
         }
         default:
             yyerror("unknown environment function");
+            return NULL;
+    }
+}
+
+struct value_t *call_sys_builtin(
+    int functype, const std::vector<struct value_t *> &args) {
+    if (!args.empty()) {
+        yyerror("std.sys functions expect 0 arguments, got %d",
+                (int)args.size());
+        return NULL;
+    }
+    switch (functype) {
+        case B_sys_args: {
+            struct list_value_t *result = newlistval();
+            const std::vector<std::string> &values = sys_args();
+            result->payload->items.reserve(values.size());
+            for (const std::string &value : values)
+                result->payload->items.push_back(newstrval(value.c_str()));
+            return (value_t *)result;
+        }
+        case B_sys_script:
+            return newstrval(sys_script().c_str());
+        case B_sys_executable:
+            return newstrval(sys_executable().c_str());
+        default:
+            yyerror("unknown sys function");
             return NULL;
     }
 }

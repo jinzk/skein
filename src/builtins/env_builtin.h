@@ -8,4 +8,7 @@
 struct value_t *call_env_builtin(
     int functype, const std::vector<struct value_t *> &args);
 
+struct value_t *call_sys_builtin(
+    int functype, const std::vector<struct value_t *> &args);
+
 #endif

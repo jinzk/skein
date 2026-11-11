@@ -47,4 +47,14 @@ std::shared_ptr<const thread_env_snapshot> thread_env_capture();
 void thread_env_install(
     const std::shared_ptr<const thread_env_snapshot> &snapshot);
 
+/*
+ * Script invocation metadata captured by the CLI.  Arguments after the script
+ * path belong to the script; interpreter flags before it are not included.
+ */
+void sys_invocation_set(std::vector<std::string> args, std::string script,
+                        std::string executable);
+const std::vector<std::string> &sys_args();
+const std::string &sys_script();
+const std::string &sys_executable();
+
 #endif

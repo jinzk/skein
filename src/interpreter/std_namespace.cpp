@@ -328,6 +328,11 @@ value_t *build_namespace_impl() {
             {"path_extname", B_fs_path_extname},
             {"path_abs", B_fs_path_abs},
             {"path_normalize", B_fs_path_normalize},
+            {"temp_dir", B_fs_temp_dir},
+            {"remove_all", B_fs_remove_all},
+            {"copy", B_fs_copy},
+            {"which", B_fs_which},
+            {"glob", B_fs_glob},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("env"),
@@ -337,6 +342,13 @@ value_t *build_namespace_impl() {
             {"set", B_env_set},
             {"unset", B_env_unset},
             {"all", B_env_all},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("sys"),
+        builtin_module({
+            {"args", B_sys_args},
+            {"script", B_sys_script},
+            {"executable", B_sys_executable},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("crypto"),

@@ -5,13 +5,20 @@
 #include "valuetype.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -59,6 +66,81 @@ bool require_string(const char *who, const struct value_t *value,
         return true;
     yyerror("%s expects %s string, got %s", who, what, typename_of(value));
     return false;
+}
+
+std::vector<std::string> split_path_list(const std::string &text,
+                                         char separator) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (;;) {
+        const size_t end = text.find(separator, start);
+        if (end == std::string::npos) {
+            parts.push_back(text.substr(start));
+            return parts;
+        }
+        parts.push_back(text.substr(start, end - start));
+        start = end + 1;
+    }
+}
+
+bool is_executable_file(const fs::path &path) {
+    std::error_code error;
+    if (!fs::is_regular_file(path, error) || error)
+        return false;
+#if defined(_WIN32)
+    return true;
+#else
+    return ::access(path.c_str(), X_OK) == 0;
+#endif
+}
+
+bool wildcard_match(const std::string &pattern, const std::string &text) {
+    size_t pattern_pos = 0;
+    size_t text_pos = 0;
+    size_t star = std::string::npos;
+    size_t star_text = 0;
+    while (text_pos < text.size()) {
+        if (pattern_pos < pattern.size() &&
+            (pattern[pattern_pos] == '?' ||
+             pattern[pattern_pos] == text[text_pos])) {
+            ++pattern_pos;
+            ++text_pos;
+        } else if (pattern_pos < pattern.size() &&
+                   pattern[pattern_pos] == '*') {
+            star = pattern_pos++;
+            star_text = text_pos;
+        } else if (star != std::string::npos) {
+            pattern_pos = star + 1;
+            text_pos = ++star_text;
+        } else {
+            return false;
+        }
+    }
+    while (pattern_pos < pattern.size() && pattern[pattern_pos] == '*')
+        ++pattern_pos;
+    return pattern_pos == pattern.size();
+}
+
+std::string unique_suffix() {
+    static std::atomic<unsigned long long> counter{0};
+    static std::mt19937_64 engine([]() {
+        std::random_device device;
+        const unsigned long long seed =
+            ((unsigned long long)device() << 32) ^ device();
+        return seed == 0 ? 1ULL : seed;
+    }());
+    const unsigned long long serial = counter.fetch_add(1);
+    const unsigned long long stamp =
+        (unsigned long long)std::chrono::steady_clock::now()
+            .time_since_epoch()
+            .count();
+    const unsigned long long value = engine() ^ stamp ^ (serial << 8);
+    static const char digits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(16);
+    for (int shift = 60; shift >= 0; shift -= 4)
+        out.push_back(digits[(value >> shift) & 0xF]);
+    return out;
 }
 
 }  // namespace
@@ -312,6 +394,198 @@ struct value_t *call_fs_extra_builtin(
                 result = path.lexically_normal();
             }
             return newstrval(path_text(result).c_str());
+        }
+        case B_fs_temp_dir: {
+            if (args.size() > 1) {
+                yyerror("std.fs.temp_dir expects 0 or 1 argument, got %d",
+                        (int)args.size());
+                return NULL;
+            }
+            std::string prefix = "skein-";
+            if (!args.empty()) {
+                if (!require_string("std.fs.temp_dir", args[0], "a prefix"))
+                    return NULL;
+                prefix = ((struct string_value_t *)args[0])->value;
+                if (prefix.empty())
+                    prefix = "skein-";
+                if (prefix.find('/') != std::string::npos ||
+                    prefix.find('\\') != std::string::npos) {
+                    yyerror("std.fs.temp_dir prefix must not contain path "
+                            "separators");
+                    return NULL;
+                }
+            }
+            std::error_code error;
+            std::string temp_base;
+            if (!thread_env_get("TMPDIR", temp_base) || temp_base.empty()) {
+                if (!thread_env_get("TMP", temp_base) || temp_base.empty())
+                    thread_env_get("TEMP", temp_base);
+            }
+            fs::path base;
+            if (!temp_base.empty())
+                base = resolved_path(temp_base);
+            else
+                base = fs::temp_directory_path(error);
+            if (error) {
+                yyerror("std.fs.temp_dir: %s", path_error(error).c_str());
+                return NULL;
+            }
+            for (int attempt = 0; attempt < 100; ++attempt) {
+                const fs::path candidate = base / (prefix + unique_suffix());
+                std::error_code create_error;
+                if (fs::create_directory(candidate, create_error))
+                    return newstrval(path_text(candidate).c_str());
+                if (create_error &&
+                    create_error != std::errc::file_exists) {
+                    yyerror("std.fs.temp_dir: %s",
+                            path_error(create_error).c_str());
+                    return NULL;
+                }
+            }
+            yyerror("std.fs.temp_dir: cannot create a unique directory");
+            return NULL;
+        }
+        case B_fs_remove_all: {
+            if (args.size() != 1) {
+                yyerror("std.fs.remove_all expects 1 argument, got %d",
+                        (int)args.size());
+                return NULL;
+            }
+            if (!require_string("std.fs.remove_all", args[0], "a path"))
+                return NULL;
+            std::error_code error;
+            fs::remove_all(
+                resolved_path(((struct string_value_t *)args[0])->value),
+                error);
+            if (error) {
+                yyerror("std.fs.remove_all: %s", path_error(error).c_str());
+                return NULL;
+            }
+            return newnull();
+        }
+        case B_fs_copy: {
+            if (args.size() != 2) {
+                yyerror("std.fs.copy expects 2 arguments, got %d",
+                        (int)args.size());
+                return NULL;
+            }
+            if (!require_string("std.fs.copy", args[0], "a source path") ||
+                !require_string("std.fs.copy", args[1], "a target path"))
+                return NULL;
+            const fs::path source =
+                resolved_path(((struct string_value_t *)args[0])->value);
+            fs::path target =
+                resolved_path(((struct string_value_t *)args[1])->value);
+            std::error_code error;
+            const fs::file_status status = fs::symlink_status(source, error);
+            if (error || !fs::exists(status)) {
+                yyerror("std.fs.copy: source does not exist");
+                return NULL;
+            }
+            if (fs::is_directory(status)) {
+                std::error_code exists_error;
+                if (fs::exists(target, exists_error)) {
+                    yyerror("std.fs.copy: destination already exists");
+                    return NULL;
+                }
+                fs::copy(source, target, fs::copy_options::recursive, error);
+            } else if (fs::is_regular_file(status)) {
+                std::error_code target_error;
+                if (fs::is_directory(target, target_error))
+                    target /= source.filename();
+                fs::copy_file(source, target,
+                              fs::copy_options::overwrite_existing, error);
+            } else {
+                yyerror("std.fs.copy: unsupported source type");
+                return NULL;
+            }
+            if (error) {
+                yyerror("std.fs.copy: %s", path_error(error).c_str());
+                return NULL;
+            }
+            return newnull();
+        }
+        case B_fs_which: {
+            if (args.size() != 1) {
+                yyerror("std.fs.which expects 1 argument, got %d",
+                        (int)args.size());
+                return NULL;
+            }
+            if (!require_string("std.fs.which", args[0], "a name"))
+                return NULL;
+            const std::string name =
+                ((struct string_value_t *)args[0])->value;
+            if (name.empty())
+                return newstrval("");
+            const fs::path direct = text_path(name);
+            if (direct.has_parent_path()) {
+                const fs::path resolved = resolved_path(name);
+                if (is_executable_file(resolved))
+                    return newstrval(path_text(resolved).c_str());
+                return newstrval("");
+            }
+            std::string path_env;
+            if (!thread_env_get("PATH", path_env))
+                return newstrval("");
+            std::vector<std::string> extensions;
+#if defined(_WIN32)
+            if (direct.has_extension()) {
+                extensions.push_back("");
+            } else {
+                std::string pathext;
+                if (!thread_env_get("PATHEXT", pathext) || pathext.empty())
+                    pathext = ".COM;.EXE;.BAT;.CMD";
+                extensions = split_path_list(pathext, ';');
+                extensions.push_back("");
+            }
+            const char separator = ';';
+#else
+            extensions.push_back("");
+            const char separator = ':';
+#endif
+            for (const std::string &dir : split_path_list(path_env,
+                                                          separator)) {
+                const fs::path base =
+                    dir.empty() ? fs::path(".") : text_path(dir);
+                for (const std::string &extension : extensions) {
+                    const fs::path candidate = base / (name + extension);
+                    const fs::path resolved =
+                        resolved_path(path_text(candidate));
+                    if (is_executable_file(resolved))
+                        return newstrval(path_text(resolved).c_str());
+                }
+            }
+            return newstrval("");
+        }
+        case B_fs_glob: {
+            if (args.size() != 1) {
+                yyerror("std.fs.glob expects 1 argument, got %d",
+                        (int)args.size());
+                return NULL;
+            }
+            if (!require_string("std.fs.glob", args[0], "a pattern"))
+                return NULL;
+            const fs::path pattern = text_path(thread_resolve_path(
+                ((struct string_value_t *)args[0])->value));
+            fs::path parent = pattern.parent_path();
+            if (parent.empty())
+                parent = ".";
+            const std::string name_pattern = pattern.filename().u8string();
+            std::vector<std::string> matches;
+            std::error_code error;
+            if (!name_pattern.empty() && fs::is_directory(parent, error)) {
+                fs::directory_iterator it(parent, error);
+                fs::directory_iterator end;
+                while (!error && it != end) {
+                    const std::string name =
+                        it->path().filename().u8string();
+                    if (wildcard_match(name_pattern, name))
+                        matches.push_back(path_text(it->path()));
+                    it.increment(error);
+                }
+            }
+            std::sort(matches.begin(), matches.end());
+            return make_string_list(matches);
         }
         default:
             yyerror("unknown fs function");

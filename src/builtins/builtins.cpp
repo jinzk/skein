@@ -492,10 +492,12 @@ struct value_t *call_builtin(int functype,
         return call_time_builtin(functype, args);
     if (functype >= B_random_seed && functype <= B_random_uuid)
         return call_random_builtin(functype, args);
-    if (functype >= B_fs_listdir && functype <= B_fs_path_normalize)
+    if (functype >= B_fs_listdir && functype <= B_fs_glob)
         return call_fs_extra_builtin(functype, args);
     if (functype >= B_env_get && functype <= B_env_all)
         return call_env_builtin(functype, args);
+    if (functype >= B_sys_args && functype <= B_sys_executable)
+        return call_sys_builtin(functype, args);
     if (functype == B_process_run_command)
         return call_process_builtin(functype, args);
     if ((functype >= B_process_spawn_command &&

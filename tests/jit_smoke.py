@@ -334,6 +334,48 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        native_worker = tmp_path / "native_wait_worker.skein"
+        native_worker.write_text(
+            "import std;\n"
+            "func inner(n) {\n"
+            "  let data = [n, n + 1, n + 2];\n"
+            "  std.task.sleep(1).wait();\n"
+            "  return data[0] + data[1] + data[2];\n"
+            "}\n"
+            "func handle(payload) { return {\"v\": inner(payload[\"n\"])}; }\n",
+            encoding="utf-8",
+        )
+        native_worker_text = str(native_worker).replace("\\", "\\\\")
+        native_wait = tmp_path / "native_wait.skein"
+        native_wait.write_text(
+            "import std;\n"
+            f'let pool = std.thread.pool(2, "{native_worker_text}", '
+            '{"worker_vm": true});\n'
+            "let futures = [];\n"
+            "for (let i = 0; i < 8; i = i + 1) {\n"
+            '  futures = std.list.append(futures, pool.submit({"n": i}));\n'
+            "}\n"
+            "let total = 0;\n"
+            "for (let f in futures) {\n"
+            '  let r = f.wait();\n'
+            '  if (!r["ok"]) { fail r["error"]; }\n'
+            '  total = total + r["value"]["v"];\n'
+            "}\n"
+            "pool.close();\n"
+            "pool.join();\n"
+            "println(str(total));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "native-wait", native_wait)
+        rc, out, err = run(binary, native_wait, True, debug=True)
+        if rc != 0 or "[jit] enter inner" not in err:
+            print(
+                "jit smoke: native task.wait suspension was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
     if not ok:
         return 1
     print("jit smoke passed")

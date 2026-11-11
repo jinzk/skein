@@ -212,6 +212,9 @@ void jit_debug_proto(const char *what, const skein::bc::Proto &proto) {
 }
 
 bool jit_code_may_suspend(function_code *code) {
+    /* Generators own their suspend/resume opcodes.  Ordinary functions may
+     * suspend inside native task.wait() calls; JIT slots stay in memory and
+     * are visited as fiber GC roots, so those frames are JIT-safe. */
     return code && code->is_generator;
 }
 

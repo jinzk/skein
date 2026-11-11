@@ -488,9 +488,12 @@ const char *op_name(Op op);
 std::string disassemble(const Proto &proto);
 
 /*
- * True when executing this proto can suspend its fiber: generator bodies or a
- * proto containing YIELD (defensive check for malformed or hand-built
- * bytecode).  JIT compilation must reject these.
+ * True when executing this proto contains an explicit suspension opcode
+ * (YIELD) or is a generator body.  JIT compilation rejects these.
+ *
+ * Ordinary functions may still suspend through native task.wait() calls;
+ * their JIT slots are memory-backed GC roots, so those frames can be
+ * suspended and resumed by the fiber runtime.
  */
 bool proto_may_suspend(const Proto &proto);
 

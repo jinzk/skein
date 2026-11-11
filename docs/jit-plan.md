@@ -543,15 +543,17 @@ JIT 使用 `stack_depth[pc]` 计算操作数栈的固定 frame 偏移，
 - `frame_eligible`；
 - opcode 全部在支持列表内；
 - 无 `fail` / `recover` / `defer`；
-- 无 generator / async / await / yield；
+- 无 generator / yield；
 - 无 pattern / variadic / method；
 - 无 `ControlBreak` / `ControlContinue`。
 
 `may_suspend` 统一由 `skein::bc::proto_may_suspend()` 判定：
-`is_async || is_generator || 含 AWAIT/YIELD opcode`。JIT 在
-`jit_function_eligible` 之前就拒绝可挂起函数；`SKEIN_JIT_DEBUG=1` 会输出
-`[jit] suspendable <name>`，保证普通 VM 路径执行挂起函数。v1 不做
-safepoint 挂起 JIT 帧。
+`is_generator || 含 YIELD opcode`。JIT 在 `jit_function_eligible` 之前拒绝
+这些显式挂起函数；`SKEIN_JIT_DEBUG=1` 会输出 `[jit] suspendable <name>`。
+
+普通函数通过 native `task.wait()` 挂起是允许的：JIT 的活值保存在内存
+slot 中，并作为 fiber GC roots 扫描，因此 JIT 帧可以随 fiber 挂起/恢复。
+`jit_smoke` 的 `native-wait` 用例和 `worker_vm_stress` 覆盖该路径。
 
 `fib` 的 opcode 子集：
 

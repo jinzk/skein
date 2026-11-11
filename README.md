@@ -400,9 +400,14 @@ import math.helpers as helpers;
 - `export package internal.helpers as helpers;` 把子目录 package 暴露为 `math.helpers`；
 - 外部不能通过物理路径 `import math.internal.helpers`；
 - module 内部使用普通相对导入，例如 `import .internal.helpers` 或 `import ..internal.helpers`；
+- module 内部写绝对 `import math` / `import math.helpers` 时也解析为公共 API；
+  访问未导出的内部 package 请使用相对导入；
+- module 根目录不能包含 `<module>.skein` 或 `index.skein`，package 应放在子目录；
 - 清单中的符号必须已在目标 package 中 `export`，否则启动报错；
 - 重复别名、缺失 package、module 名不匹配都会报错；
-- 同一个 module 只加载一次并复用缓存。
+- 同一个 module 只加载一次并复用缓存；
+- `python3 tools/check_modules.py <project-root>` 可以离线校验 manifest 结构和目标 package，
+  `--list` 列出公共导出；它不执行 package 代码。
 
 ### 内置标准库 std
 

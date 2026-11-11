@@ -646,6 +646,23 @@ const module_manifest *load_module_manifest(const fs::path &root,
                            "'";
         }
     }
+    if (entry->ok) {
+        std::error_code ec;
+        const std::string &module_name = entry->manifest.name;
+        if (module_name != "module" &&
+            fs::is_regular_file(root /
+                                    path_from_utf8(module_name + ".skein"),
+                                ec)) {
+            entry->ok = false;
+            entry->error = "module root cannot contain package file '" +
+                           module_name + ".skein'; move it into a package "
+                           "directory";
+        } else if (fs::is_regular_file(root / "index.skein", ec)) {
+            entry->ok = false;
+            entry->error = "module root cannot contain index.skein; move it "
+                           "into a package directory";
+        }
+    }
     if (!entry->ok)
         entry->error = entry->manifest.source_path + ": " + entry->error;
     const module_manifest *result = entry->ok ? &entry->manifest : nullptr;
@@ -677,19 +694,6 @@ bool find_module_root(const std::string &dotted, fs::path &root,
         }
     }
     return false;
-}
-
-bool path_is_within(const fs::path &candidate, const fs::path &root) {
-    std::string child = normalize_dir(path_to_utf8(candidate));
-    std::string parent = normalize_dir(path_to_utf8(root));
-    if (child == parent)
-        return true;
-    if (child.size() <= parent.size())
-        return false;
-    if (child.compare(0, parent.size(), parent) != 0)
-        return false;
-    char separator = child[parent.size()];
-    return separator == '/' || separator == '\\';
 }
 
 bool is_loading(const std::string &key) {
@@ -1054,23 +1058,14 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
         std::string module_error;
         if (find_module_root(spec.dotted, module_root, module_name,
                              module_error)) {
-            std::string importer =
-                (base_dir && *base_dir) ? base_dir : import_base;
-            bool inside_module =
-                !importer.empty() &&
-                path_is_within(path_from_utf8(importer), module_root);
-            if (!inside_module) {
-                std::vector<std::string> parts =
-                    split_dotted(spec.dotted);
-                if (parts.size() == 1)
-                    return import_module_root(module_name, module_root,
-                                              error);
-                if (parts.size() == 2)
-                    return import_module_public_package(
-                        module_name, parts[1], module_root, error);
-                error = "module member is not exported: " + spec.dotted;
-                return NULL;
-            }
+            std::vector<std::string> parts = split_dotted(spec.dotted);
+            if (parts.size() == 1)
+                return import_module_root(module_name, module_root, error);
+            if (parts.size() == 2)
+                return import_module_public_package(
+                    module_name, parts[1], module_root, error);
+            error = "module member is not exported: " + spec.dotted;
+            return NULL;
         }
     }
 
@@ -1537,31 +1532,23 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
         std::string module_error;
         if (find_module_root(spec.dotted, module_root, module_name,
                              module_error)) {
-            std::string importer =
-                (base_dir && *base_dir) ? base_dir : import_base;
-            bool inside_module =
-                !importer.empty() &&
-                path_is_within(path_from_utf8(importer), module_root);
-            if (!inside_module) {
-                std::vector<std::string> parts =
-                    split_dotted(spec.dotted);
-                if (parts.size() == 1) {
-                    key = canonical_file(module_root);
-                    return true;
-                }
-                if (parts.size() == 2) {
-                    resolved_package target;
-                    std::string package_path;
-                    if (!resolve_module_public_package(
-                            module_name, parts[1], module_root, target,
-                            package_path, error))
-                        return false;
-                    key = target.key;
-                    return true;
-                }
-                error = "module member is not exported: " + spec.dotted;
-                return false;
+            std::vector<std::string> parts = split_dotted(spec.dotted);
+            if (parts.size() == 1) {
+                key = canonical_file(module_root);
+                return true;
             }
+            if (parts.size() == 2) {
+                resolved_package target;
+                std::string package_path;
+                if (!resolve_module_public_package(
+                        module_name, parts[1], module_root, target,
+                        package_path, error))
+                    return false;
+                key = target.key;
+                return true;
+            }
+            error = "module member is not exported: " + spec.dotted;
+            return false;
         }
     }
     if (spec.kind == IMPORT_ABSOLUTE && spec.dotted == "std") {

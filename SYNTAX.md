@@ -2388,7 +2388,9 @@ module math {
 - 子目录 package 默认是 module 内部代码，必须显式提升；
 - package 私有符号不会进入 module 公共 namespace；
 - 外部不能 `import math.internal.helpers`，只能 `import math` 或使用公共 package 别名；
-- module 内部使用普通相对导入；
+- module 内部使用普通相对导入；绝对 `import math` / `import math.helpers`
+  也解析为公共 API，不能用于访问未导出的内部 package；
+- module 根目录不能包含 `<module>.skein` 或 `index.skein`；
 - manifest 中的目标 package/符号不存在、别名重复、module 名不匹配都会报错；
 - 旧 package/import 行为保持不变。
 

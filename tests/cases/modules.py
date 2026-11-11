@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Module v2: module manifests and explicit subdirectory package exports."""
 import os
+import subprocess
+import sys
 import tempfile
 
 from harness import *  # noqa: F401,F403
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CHECK_MODULES = os.path.join(ROOT, "tools", "check_modules.py")
 
 
 def write(tmp, rel, text):
@@ -134,6 +139,40 @@ def run_cases():
             "import math;\nprintln(str(math.hidden));\n",
             "key not found",
         )
+        run_module_error(
+            tmp,
+            "import math;\nprintln(str(math.helpers.hidden_helper()));\n",
+            "key not found",
+        )
+        run_module(
+            tmp,
+            "import std;\n"
+            "import math;\n"
+            "func worker(ctx) {\n"
+            '  return {"v": math.normalize(ctx.payload["x"])};\n'
+            "}\n"
+            "let blob = std.entry.encode(worker);\n"
+            "let t = std.thread.spawn_entry(blob, "
+            'std.thread.Message.from({"x": 41}));\n'
+            "let r = t.join();\n"
+            'println(str(r["ok"]));\n'
+            'println(str(r["value"]["v"]));\n',
+            ["true", "42"],
+        )
+        run_module(
+            tmp,
+            "import std;\n"
+            "import math;\n"
+            "func worker(ctx) {\n"
+            '  return {"v": math.normalize(ctx.payload["x"])};\n'
+            "}\n"
+            "let blob = std.entry.encode(worker);\n"
+            "let r = std.process.run_entry(blob, "
+            'std.thread.Message.from({"x": 41}));\n'
+            'println(str(r["ok"]));\n'
+            'println(str(r["value"]["v"]));\n',
+            ["true", "42"],
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         file_module(tmp)
@@ -205,3 +244,72 @@ def run_cases():
             "import math;\n",
             "duplicate module export alias",
         )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        write(
+            tmp,
+            "math/module.skein",
+            "module math { export loop.loop; }\n",
+        )
+        write(
+            tmp,
+            "math/loop/loop.skein",
+            "package loop {\n"
+            "  import math;\n"
+            "  export func loop() { return 1; }\n"
+            "}\n",
+        )
+        run_module_error(
+            tmp,
+            "import math;\n",
+            "cyclic module import",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        write(
+            tmp,
+            "math/module.skein",
+            "module math { export add.add; }\n",
+        )
+        write(
+            tmp,
+            "math/math.skein",
+            "package math { export func add() { return 1; } }\n",
+        )
+        write(
+            tmp,
+            "math/add/add.skein",
+            "package add { export func add(a, b) { return a + b; } }\n",
+        )
+        run_module_error(
+            tmp,
+            "import math;\n",
+            "module root cannot contain package file",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        directory_module(tmp)
+        proc = subprocess.run(
+            [sys.executable, CHECK_MODULES, tmp],
+            capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        assert "module manifests ok" in proc.stdout, proc.stdout
+
+        listing = subprocess.run(
+            [sys.executable, CHECK_MODULES, tmp, "--list"],
+            capture_output=True, text=True)
+        assert listing.returncode == 0, listing.stderr
+        assert "math.helpers\tpackage\tinternal.helpers" in listing.stdout, (
+            listing.stdout)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        write(
+            tmp,
+            "math/module.skein",
+            "module math { export missing.pkg; }\n",
+        )
+        proc = subprocess.run(
+            [sys.executable, CHECK_MODULES, tmp],
+            capture_output=True, text=True)
+        assert proc.returncode != 0, proc.stdout
+        assert "was not found" in proc.stderr, proc.stderr

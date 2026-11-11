@@ -470,7 +470,7 @@ def check_extended_stdlib():
             "import std;\n"
             'std.env.set("SKEIN_THREAD_ENV", "parent");\n'
             'let msg = std.thread.Message.from({"x": 1});\n'
-            f'let t = std.thread.spawn({skein_string(env_worker)}, msg);\n'
+            f'let t = std.thread.spawn_script({skein_string(env_worker)}, msg);\n'
             'let r = t.join();\n'
             'print("child_before=" + r["value"]["before"]);\n'
             'print("|child_after=" + r["value"]["after"]);\n'
@@ -505,7 +505,7 @@ def check_extended_stdlib():
             "let before = std.fs.cwd();\n"
             f'let msg = std.thread.Message.from({{"dir": '
             f"{skein_string(cwd_child)}}});\n"
-            f'let t = std.thread.spawn({skein_string(cwd_worker)}, msg);\n'
+            f'let t = std.thread.spawn_script({skein_string(cwd_worker)}, msg);\n'
             'let r = t.join();\n'
             'print("child_text=" + r["value"]["text"]);\n'
             'print("|child_exists=" + str(r["value"]["exists"]));\n'
@@ -531,7 +531,7 @@ def check_extended_stdlib():
             f"std.env.set(\"SKEIN_SPAWN_CWD\", "
             f"{skein_string(cwd_child)});\n"
             f"std.fs.chdir({skein_string(cwd_child)});\n"
-            f'let p = std.process.spawn('
+            f'let p = std.process.spawn_command('
             f"{skein_string(os.path.abspath(BIN))}, "
             f'{{"args": [{skein_string(spawn_child)}]}});\n'
             'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
@@ -584,17 +584,17 @@ def check_extended_stdlib():
         check(
             "std process run",
             "import std;\n"
-            'let r = std.process.run("printf hello");\n'
+            'let r = std.process.run_command("printf hello");\n'
             'print(r["status"]);\n'
             'print(bytes_to_string(r["stdout"]));\n'
-            'let r2 = std.process.run("cat", {"stdin": "abc"});\n'
+            'let r2 = std.process.run_command("cat", {"stdin": "abc"});\n'
             'print(bytes_to_string(r2["stdout"]));\n'
-            'let r3 = std.process.run("pwd", {"cwd": "/tmp"});\n'
+            'let r3 = std.process.run_command("pwd", {"cwd": "/tmp"});\n'
             'print(bytes_to_string(r3["stdout"]));\n'
-            'let r4 = std.process.run("printf %s \\"$FOO\\"", '
+            'let r4 = std.process.run_command("printf %s \\"$FOO\\"", '
             '{"env": {"FOO": "bar"}});\n'
             'print(bytes_to_string(r4["stdout"]));\n'
-            'let r5 = std.process.run("echo out; echo err >&2; exit 3");\n'
+            'let r5 = std.process.run_command("echo out; echo err >&2; exit 3");\n'
             'print(r5["status"]);\n'
             'print(bytes_to_string(r5["stdout"]));\n'
             'print(bytes_to_string(r5["stderr"]));\n',
@@ -604,7 +604,7 @@ def check_extended_stdlib():
         check(
             "std process spawn stdout",
             "import std;\n"
-            'let p = std.process.spawn("/bin/echo", {"args": ["spawn"]});\n'
+            'let p = std.process.spawn_command("/bin/echo", {"args": ["spawn"]});\n'
             'print(std.process.pid(p) > 0);\n'
             'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
             'print(std.process.wait(p));\n',
@@ -613,7 +613,7 @@ def check_extended_stdlib():
         check(
             "std process spawn stdin",
             "import std;\n"
-            'let p = std.process.spawn("/bin/cat");\n'
+            'let p = std.process.spawn_command("/bin/cat");\n'
             'std.io.write_all(p["stdin"], "abc");\n'
             'std.io.close(p["stdin"]);\n'
             'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
@@ -623,7 +623,7 @@ def check_extended_stdlib():
         check(
             "std process spawn stderr",
             "import std;\n"
-            'let p = std.process.spawn("/bin/sh", '
+            'let p = std.process.spawn_command("/bin/sh", '
             '{"args": ["-c", "echo out; echo err >&2; exit 3"]});\n'
             'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
             'print(bytes_to_string(std.io.read(p["stderr"], 4096)));\n'
@@ -633,7 +633,7 @@ def check_extended_stdlib():
         check(
             "std process spawn async",
             "import std;\n"
-            'let p = std.process.spawn("/bin/echo", {"args": ["async"]});\n'
+            'let p = std.process.spawn_command("/bin/echo", {"args": ["async"]});\n'
             'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
             'print(bytes_to_string(data));\n'
             'print(std.process.wait(p));\n',
@@ -642,7 +642,7 @@ def check_extended_stdlib():
         check(
             "std process spawn async write",
             "import std;\n"
-            'let p = std.process.spawn("/bin/cat");\n'
+            'let p = std.process.spawn_command("/bin/cat");\n'
             'print(std.io.write_task(p["stdin"], "abc").wait());\n'
             'std.io.close(p["stdin"]);\n'
             'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
@@ -667,7 +667,7 @@ def check_extended_stdlib():
             "std process spawn repeated close",
             "import std;\n"
             "for (let i = 0; i < 5; i++) {\n"
-            '  let p = std.process.spawn("/bin/true");\n'
+            '  let p = std.process.spawn_command("/bin/true");\n'
             "  std.process.wait(p);\n"
             "  std.process.close(p);\n"
             "}\n"
@@ -677,7 +677,7 @@ def check_extended_stdlib():
         check(
             "std process spawn kill",
             "import std;\n"
-            'let p = std.process.spawn("/bin/sleep", {"args": ["5"]});\n'
+            'let p = std.process.spawn_command("/bin/sleep", {"args": ["5"]});\n'
             'std.process.kill(p);\n'
             'print(std.process.wait(p) > 0);\n',
             stdout="true",
@@ -780,7 +780,7 @@ def check_extended_stdlib():
         check(
             "json lines worker over pipes",
             "import std;\n"
-            f'let p = std.process.spawn("{binary_path}", '
+            f'let p = std.process.spawn_command("{binary_path}", '
             f'{{"args": ["{worker_path}"]}});\n'
             'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
             'std.io.write_all(p["stdin"], bytes_from_string('
@@ -2888,7 +2888,7 @@ def check_extended_stdlib():
                     "    return worker;\n"
                     "}\n"
                     "let w = make_worker();\n"
-                    "let t = std.thread.spawn(w, "
+                    "let t = std.thread.spawn_function(w, "
                     'std.thread.Message.from({"n": 4}));\n'
                     "let r = t.join();\n"
                     'print(r["value"]["v"]);\n'
@@ -3475,7 +3475,7 @@ def check_extended_stdlib():
             '  return {"top": std.heap.peek(ctx.payload["heap"]), '
             '"n": ctx.payload["n"]};\n'
             '}\n'
-            'let t = std.thread.spawn(worker, msg);\n'
+            'let t = std.thread.spawn_function(worker, msg);\n'
             'let r = t.join();\n'
             'print("spawn="); print(r["value"]["top"]); print(":"); '
             'print(r["value"]["n"]); print("|");\n'
@@ -3677,7 +3677,7 @@ def check_extended_stdlib():
                 "let threads = [];\n"
                 "for (let i = 0; i < 4; i++) {\n"
                 '    let msg = std.thread.Message.from({"id": i});\n'
-                f'    let t = std.thread.spawn("{stdio_worker_path}", '
+                f'    let t = std.thread.spawn_script("{stdio_worker_path}", '
                 f'msg);\n'
                 "    threads = std.list.append(threads, t);\n"
                 "}\n"
@@ -3720,7 +3720,7 @@ def check_extended_stdlib():
                 'let ch = std.thread.Channel(1);\n'
                 f'let msg = std.thread.Message.from({{"x": 5, '
                 f'"fail": false}}, {{"signal": ch}});\n'
-                f'let t = std.thread.spawn("{spawn_worker_path}", msg);\n'
+                f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
                 'let signal = ch.recv();\n'
                 'let r = t.join();\n'
                 'print("signal="); print(signal.payload["x"]);\n'
@@ -3754,7 +3754,7 @@ def check_extended_stdlib():
                 "func worker(ctx) {\n"
                 '    return {"v": ctx.payload["n"] + 1};\n'
                 "}\n"
-                "let t = std.thread.spawn(worker, "
+                "let t = std.thread.spawn_function(worker, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r = t.join();\n"
                 'print("v=" + str(r["value"]["v"]) + "|");\n'
@@ -3770,7 +3770,7 @@ def check_extended_stdlib():
                 'ctx.payload["n"]);\n'
                 '    return {"v": items[1]};\n'
                 "}\n"
-                "let t3 = std.thread.spawn(std_worker, "
+                "let t3 = std.thread.spawn_function(std_worker, "
                 'std.thread.Message.from({"n": 9}));\n'
                 "let r3 = t3.join();\n"
                 'print("s=" + str(r3["value"]["v"]) + "|");\n'
@@ -3783,10 +3783,10 @@ def check_extended_stdlib():
                 "    return {\"v\": ctx.payload[\"n\"] * "
                 "config[\"factor\"]};\n"
                 "}\n"
-                "let t4 = std.thread.spawn(glob_worker, "
+                "let t4 = std.thread.spawn_function(glob_worker, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r4 = t4.join();\n"
-                "let t5 = std.thread.spawn(dict_worker, "
+                "let t5 = std.thread.spawn_function(dict_worker, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r5 = t5.join();\n"
                 'print("g=" + str(r4["value"]["v"]) + ":" + '
@@ -3795,7 +3795,7 @@ def check_extended_stdlib():
                 "func shadow_worker(ctx) {\n"
                 '    return {"v": ctx.payload["field_helper"] + base};\n'
                 "}\n"
-                "let t6 = std.thread.spawn(shadow_worker, "
+                "let t6 = std.thread.spawn_function(shadow_worker, "
                 'std.thread.Message.from({"field_helper": 4}));\n'
                 "let r6 = t6.join();\n"
                 'print("h=" + str(r6["value"]["v"]) + "|");\n',
@@ -3812,7 +3812,7 @@ def check_extended_stdlib():
                 "    return worker;\n"
                 "}\n"
                 "let w = make_worker(10);\n"
-                "let t = std.thread.spawn(w, "
+                "let t = std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r = t.join();\n"
                 'print("c=" + str(r["value"]["v"]) + "|");\n'
@@ -3824,7 +3824,7 @@ def check_extended_stdlib():
                 "    return worker;\n"
                 "}\n"
                 "let w2 = make_data();\n"
-                "let t2 = std.thread.spawn(w2, "
+                "let t2 = std.thread.spawn_function(w2, "
                 'std.thread.Message.from({"n": 0}));\n'
                 "let r2 = t2.join();\n"
                 'print("d=" + str(r2["value"][1]) + "|");\n'
@@ -3837,7 +3837,7 @@ def check_extended_stdlib():
                 '    return {"run": worker, "state": state};\n'
                 "}\n"
                 "let p = make_mut();\n"
-                "let t3 = std.thread.spawn(p[\"run\"], "
+                "let t3 = std.thread.spawn_function(p[\"run\"], "
                 'std.thread.Message.from({"n": 0}));\n'
                 "let r3 = t3.join();\n"
                 'print("e=" + str(r3["value"]["v"]) + ":" + '
@@ -3851,7 +3851,7 @@ def check_extended_stdlib():
                 "    return worker;\n"
                 "}\n"
                 "let w3 = make_shadow(7);\n"
-                "let t4 = std.thread.spawn(w3, "
+                "let t4 = std.thread.spawn_function(w3, "
                 'std.thread.Message.from({"n": 0}));\n'
                 "let r4 = t4.join();\n"
                 'print("f=" + str(r4["value"]["v"]) + "|");\n',
@@ -3874,7 +3874,7 @@ def check_extended_stdlib():
                 "    return worker;\n"
                 "}\n"
                 "let w = make_worker();\n"
-                "let t = std.thread.spawn(w, "
+                "let t = std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 10}));\n'
                 "let r = t.join();\n"
                 'print("two=" + str(r["value"]["v"]) + "|");\n'
@@ -3883,7 +3883,7 @@ def check_extended_stdlib():
                 "func global_worker(ctx) {\n"
                 '    return {"v": helper2(ctx.payload["n"])};\n'
                 "}\n"
-                "let t2 = std.thread.spawn(global_worker, "
+                "let t2 = std.thread.spawn_function(global_worker, "
                 'std.thread.Message.from({"n": 5}));\n'
                 "let r2 = t2.join();\n"
                 'print("chain=" + str(r2["value"]["v"]) + "|");\n'
@@ -3894,7 +3894,7 @@ def check_extended_stdlib():
                 "func parity(ctx) {\n"
                 '    return {"v": even(ctx.payload["n"])};\n'
                 "}\n"
-                "let t3 = std.thread.spawn(parity, "
+                "let t3 = std.thread.spawn_function(parity, "
                 'std.thread.Message.from({"n": 10}));\n'
                 "let r3 = t3.join();\n"
                 'print("mutual=" + str(r3["value"]["v"]) + "|");\n',
@@ -3969,7 +3969,7 @@ def check_extended_stdlib():
                 "    return worker;\n"
                 "}\n"
                 "let w = make_worker();\n"
-                "std.thread.spawn(w, "
+                "std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 10}));\n',
                 stderr="cannot transfer a function with default parameters",
             )
@@ -3990,7 +3990,7 @@ def check_extended_stdlib():
                 "import std;\n"
                 f'let msg = std.thread.Message.from({{"x": 1, '
                 f'"fail": true}});\n'
-                f'let t = std.thread.spawn("{spawn_worker_path}", msg);\n'
+                f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
                 'let r = t.join();\n'
                 'print("ok="); print(r["ok"]);\n',
                 stdout_all=["ok=false"],
@@ -4179,7 +4179,7 @@ def check_extended_stdlib():
                 'let items = [1, 2];\n'
                 'let msg = std.thread.Message.from('
                 '{"x": 1, "items": items, "body": body});\n'
-                f'let t = std.thread.spawn("{cow_worker_path}", msg);\n'
+                f'let t = std.thread.spawn_script("{cow_worker_path}", msg);\n'
                 'let r = t.join();\n'
                 'print("child="); print(r["value"]["items"]); print(":"); '
                 'print(r["value"]["body"]); print(":"); '
@@ -4210,7 +4210,7 @@ def check_extended_stdlib():
                 'let ch = std.thread.Channel(1);\n'
                 'let msg = std.thread.Message.from({"x": 0}, '
                 '{"signal": ch});\n'
-                f'let t = std.thread.spawn("{cow_result_worker_path}", '
+                f'let t = std.thread.spawn_script("{cow_result_worker_path}", '
                 f'msg);\n'
                 'let signal = ch.recv();\n'
                 'let r = t.join();\n'
@@ -4249,7 +4249,7 @@ def check_extended_stdlib():
                 'let empty = std.thread.Channel(1);\n'
                 f'let msg = std.thread.Message.from({{"x": 7, '
                 f'"fail": false}}, {{"signal": signal}});\n'
-                f'let t = std.thread.spawn("{spawn_worker_path}", msg);\n'
+                f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
                 'let r = std.thread.select([empty, signal], 1000);\n'
                 'print("index="); print(r["index"]); print(":"); '
                 'print(r["value"].payload["x"]);\n'
@@ -4292,7 +4292,7 @@ def check_extended_stdlib():
                 "    return msg.payload[\"x\"];\n"
                 "}\n"
                 'let ch = std.thread.Channel(1);\n'
-                f'let t = std.thread.spawn("{delay_worker_path}", '
+                f'let t = std.thread.spawn_script("{delay_worker_path}", '
                 f'std.thread.Message.from({{}}, {{"signal": ch}}));\n'
                 'let task = launch wait_channel(ch);\n'
                 'print("before|");\n'

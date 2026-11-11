@@ -1792,6 +1792,40 @@ def run_cases():
         stdout="= 2",
     )
     check(
+        "removed compatibility aliases are gone",
+        "import std;\n"
+        "func count_stale(module, names) {\n"
+        "  let n = 0;\n"
+        "  for (let name in names) {\n"
+        "    if (std.dict.has(module, name)) { n = n + 1; }\n"
+        "  }\n"
+        "  return n;\n"
+        "}\n"
+        "func main() {\n"
+        "  let stale = 0;\n"
+        '  stale = stale + count_stale(std.process, ["run", "spawn"]);\n'
+        "  stale = stale + count_stale(std.thread, [\"spawn\", "
+        '"spawn_with_channel", "spawn_with_duplex"]);\n'
+        '  stale = stale + count_stale(std.io, ["read_async", "write_async"]);\n'
+        "  stale = stale + count_stale(std.net, [\"tcp_connect_async\", "
+        '"tcp_listen_async", "accept_async", "send_async", "recv_async", '
+        '"resolve_async", "shutdown_async"]);\n'
+        "  stale = stale + count_stale(std.http, [\"request_async\", "
+        '"get_async", "post_async", "accept_async", "respond_async"]);\n'
+        "  stale = stale + count_stale(std.websocket, [\"connect_async\", "
+        '"send_async", "receive_async"]);\n'
+        '  println("stale=" + str(stale));\n'
+        '  println("primary=" + str(std.dict.has(std.process, "run_command")) + '
+        '"," + str(std.dict.has(std.thread, "spawn_script")) + "," + '
+        'str(std.dict.has(std.io, "read_task")) + "," + '
+        'str(std.dict.has(std.net, "accept_task")) + "," + '
+        'str(std.dict.has(std.http, "get_task")) + "," + '
+        'str(std.dict.has(std.websocket, "connect_task")));\n'
+        "}\n"
+        "main();\n",
+        stdout="stale=0\nprimary=1,1,1,1,1,1\n",
+    )
+    check(
         "std list transformations",
         "import std;\n"
         "std.list.reverse([1, 2, 3])\n"

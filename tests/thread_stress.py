@@ -38,7 +38,7 @@ def main():
             "  let ch = std.thread.Channel(1);\n"
             '  let msg = std.thread.Message.from({"n": 7}, '
             '{"signal": ch});\n'
-            f'  let t = std.thread.spawn("{worker_text}", msg);\n'
+            f'  let t = std.thread.spawn_script("{worker_text}", msg);\n'
             "  let signal = ch.recv();\n"
             "  let joined = t.join();\n"
             "  ch.close();\n"

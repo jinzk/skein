@@ -522,7 +522,7 @@ shutdown_task(socket[, timeout_ms])                  → task
 - `std.task.cancel(task)` 会取消底层网络操作；
 - 可以同时启动多个 task，再用 `std.task.wait_all` 等待；
 - `std.net.close` 仍是同步操作；
-- `*_task` 是主名称；旧 `*_async` 名称仍作为 deprecated alias 注册，行为完全一致，文档统一使用 `*_task`。
+- `*_task` 是唯一名称；旧 `*_async` 名称已移除，文档统一使用 `*_task`。
 
 Task：
 
@@ -599,7 +599,7 @@ let results = std.task.bounded_parallel_map(
 - `std.task.yield` 是函数字段；单独的 `yield` 关键字用于生成器；
 - `wait` 超时不会自动取消 task，需要显式 `cancel`；
 - 退出解释器时会取消剩余 task；
-- `std.net.*_async` 已经复用同一套 task 和事件循环。
+- `std.net.*_task` 已经复用同一套 task 和事件循环。
 
 `launch` 在当前 runtime 内启动新 fiber：
 
@@ -3166,14 +3166,14 @@ std.thread.capabilities
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；
-- `std.net.*_async` / `*_task` 返回 task，底层复用同一事件循环；
+- `std.net.*_task` 返回 task，底层复用同一事件循环；
 - `std.http` 提供基于 llhttp 的 HTTP/1.1 客户端和服务端；客户端支持 sync 和 `*_task`；
 - `std.tls` 提供基于 OpenSSL 的同步 TLS 流包装（可选）；
 - task 网络操作的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
 - `std.task` 提供原生 task 句柄、等待、批量等待、取消和完成状态；
 - task 是协作式调度的，只有在 `wait` / `wait_all` 或同步网络等待运行事件循环时才推进；
 - `std.task.wait` / `wait_all` 超时不会取消 task，剩余 task 需要显式 `cancel`；
-- 普通函数可以挂起和恢复；函数仍不能通过 `spawn` 作为独立 task 启动；
+- 普通函数可以挂起和恢复；可用 `launch` 把函数作为独立 task 启动；
 - `yield` 用于生成器；生成器通过 `std.generator.next` 拉取值，`std.generator.close` 关闭并清理；
 - `std.result` 提供独立 result 值和错误捕获；
 - `std.error` 提供独立 error 值和 `kind` / `message` 访问；
@@ -3514,7 +3514,7 @@ struct Handler {
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
 - `task[T]` 可用于变量、参数和返回类型；`launch f()` 推导为 `task[T]`；
 - task 方法有静态类型：`t.wait() -> T`、`t.try_wait() -> result[T, error]`、`t.detach() -> task[T]`；`task[T]` 采用 invariant；
-- 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_async` builtin 已返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
+- 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；
 - generator 函数的类型为 `(参数) -> generator[T]`，`T` 由函数体中的 `yield` 表达式合并得到；发送值类型可以写成 `generator[T, S]`；
@@ -4559,7 +4559,7 @@ std.process.close(process)
 std.process.pid(process)
 ```
 
-旧名 `std.process.spawn` 保留为 deprecated alias，行为与 `spawn_command` 一致。
+旧名 `std.process.spawn` 已移除；请使用 `spawn_command`。
 
 `options`：
 
@@ -4570,7 +4570,7 @@ cwd    string
 stderr "pipe"（默认）或 "inherit"
 ```
 
-`spawn` 直接执行 `file`，不经过 shell。返回：
+`spawn_command` 直接执行 `file`，不经过 shell。返回：
 
 ```text
 {
@@ -5060,7 +5060,7 @@ std.thread.spawn_function(function, message) -> thread
 std.entry.encode(function) -> bytes
 std.thread.spawn_entry(bytes, message) -> thread
 
-旧名 `std.thread.spawn` 保留为 deprecated alias，接受脚本路径或函数值。
+旧名 `std.thread.spawn` 已移除；请使用 `spawn_script`。
 
 thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
 thread.detach()
@@ -5138,7 +5138,7 @@ print(result["value"]["x"]);
 
 规则：
 
-- `spawn` 等待脚本加载和入口解析完成后返回；
+- `spawn_script` 等待脚本加载和入口解析完成后返回；
 - 子线程拥有自己的 runtime、eval context、AST/function 缓存；
 - 入口函数默认 `main`，接收一个 Message 参数；
 - `join()` 返回 `{ok, value}` 或 `{ok:false, error}`；
@@ -5645,7 +5645,7 @@ std.process.run_command(command[, options]) → dict
 
 `std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
 
-旧名 `std.process.run` 保留为 deprecated alias，行为与 `run_command` 一致。
+旧名 `std.process.run` 已移除；请使用 `run_command`。
 
 `std.process.run_command` 的 `options` 支持：
 

@@ -3481,19 +3481,19 @@ struct value_t *thread_spawn_script(
 struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
     if (args.size() < 2 || args.size() > 3 ||
         args[1]->type != T_userdata) {
-        yyerror("std.thread.spawn expects script or function, Message "
+        yyerror("std.thread.spawn_script expects script or function, Message "
                 "and optional options");
         return nullptr;
     }
     if (args[0]->type == T_func) {
         if (args.size() != 2) {
-            yyerror("std.thread.spawn function form does not accept options");
+            yyerror("std.thread.spawn_script function form does not accept options");
             return nullptr;
         }
         return thread_spawn_function(args);
     }
     if (args[0]->type != T_string) {
-        yyerror("std.thread.spawn expects script or function, Message "
+        yyerror("std.thread.spawn_script expects script or function, Message "
                 "and optional options");
         return nullptr;
     }

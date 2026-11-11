@@ -590,21 +590,21 @@ value_t *io_capability(const std::vector<value_t *> &args, int functype) {
 
 value_t *io_read_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
-        yyerror("std.io.read_async expects 2 or 3 arguments");
+        yyerror("std.io.read_task expects 2 or 3 arguments");
         return NULL;
     }
     stream_view stream;
-    if (!get_stream(args[0], stream, "std.io.read_async"))
+    if (!get_stream(args[0], stream, "std.io.read_task"))
         return NULL;
     if (!stream.ops->read_async) {
-        yyerror("std.io.read_async: stream does not support async reads");
+        yyerror("std.io.read_task: stream does not support async reads");
         return NULL;
     }
     std::size_t max_bytes = 0;
-    if (!get_size(args[1], max_bytes, false, "std.io.read_async"))
+    if (!get_size(args[1], max_bytes, false, "std.io.read_task"))
         return NULL;
     long long timeout_ms = 0;
-    if (!get_timeout(args, 2, timeout_ms, "std.io.read_async"))
+    if (!get_timeout(args, 2, timeout_ms, "std.io.read_task"))
         return NULL;
 
     std::string error;
@@ -617,21 +617,21 @@ value_t *io_read_async(const std::vector<value_t *> &args) {
 
 value_t *io_write_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
-        yyerror("std.io.write_async expects 2 or 3 arguments");
+        yyerror("std.io.write_task expects 2 or 3 arguments");
         return NULL;
     }
     stream_view stream;
-    if (!get_stream(args[0], stream, "std.io.write_async"))
+    if (!get_stream(args[0], stream, "std.io.write_task"))
         return NULL;
     if (!stream.ops->write_async) {
-        yyerror("std.io.write_async: stream does not support async writes");
+        yyerror("std.io.write_task: stream does not support async writes");
         return NULL;
     }
     std::string data;
-    if (!get_data(args[1], data, "std.io.write_async"))
+    if (!get_data(args[1], data, "std.io.write_task"))
         return NULL;
     long long timeout_ms = 0;
-    if (!get_timeout(args, 2, timeout_ms, "std.io.write_async"))
+    if (!get_timeout(args, 2, timeout_ms, "std.io.write_task"))
         return NULL;
 
     std::string error;

@@ -1216,7 +1216,7 @@ void on_resolve_async(uv_getaddrinfo_t *request, int status,
 
 value_t *net_resolve_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 3) {
-        yyerror("std.net.resolve_async expects 1 to 3 arguments");
+        yyerror("std.net.resolve_task expects 1 to 3 arguments");
         return NULL;
     }
     if (args[0]->type != T_string) {
@@ -1352,7 +1352,7 @@ void on_connect_async_resolve(uv_getaddrinfo_t *request, int status,
 
 value_t *net_tcp_connect_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 4) {
-        yyerror("std.net.tcp_connect_async expects 2 to 4 arguments");
+        yyerror("std.net.tcp_connect_task expects 2 to 4 arguments");
         return NULL;
     }
     if (args[0]->type != T_string) {
@@ -1469,7 +1469,7 @@ void on_listen_async_resolve(uv_getaddrinfo_t *request, int status,
 
 value_t *net_tcp_listen_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 5) {
-        yyerror("std.net.tcp_listen_async expects 2 to 5 arguments");
+        yyerror("std.net.tcp_listen_task expects 2 to 5 arguments");
         return NULL;
     }
     if (args[0]->type != T_string) {
@@ -1552,7 +1552,7 @@ value_t *net_tcp_listen_async(const std::vector<value_t *> &args) {
 
 value_t *net_accept_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2) {
-        yyerror("std.net.accept_async expects 1 or 2 arguments");
+        yyerror("std.net.accept_task expects 1 or 2 arguments");
         return NULL;
     }
     std::shared_ptr<net_socket> listener;
@@ -1662,7 +1662,7 @@ value_t *net_send_async_task(std::shared_ptr<net_socket> socket,
 
 value_t *net_send_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
-        yyerror("std.net.send_async expects 2 or 3 arguments");
+        yyerror("std.net.send_task expects 2 or 3 arguments");
         return NULL;
     }
     std::shared_ptr<net_socket> socket;
@@ -1763,7 +1763,7 @@ value_t *net_recv_async_task(std::shared_ptr<net_socket> socket,
 
 value_t *net_recv_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
-        yyerror("std.net.recv_async expects 2 or 3 arguments");
+        yyerror("std.net.recv_task expects 2 or 3 arguments");
         return NULL;
     }
     std::shared_ptr<net_socket> socket;
@@ -1833,7 +1833,7 @@ void on_shutdown_async(uv_shutdown_t *request, int status) {
 
 value_t *net_shutdown_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2) {
-        yyerror("std.net.shutdown_async expects 1 or 2 arguments");
+        yyerror("std.net.shutdown_task expects 1 or 2 arguments");
         return NULL;
     }
     std::shared_ptr<net_socket> socket;

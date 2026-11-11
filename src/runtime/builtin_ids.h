@@ -380,6 +380,9 @@ enum bifs {
     B_thread_channel,
     B_thread_unbounded_channel,
     B_thread_pool,
+    /* Legacy spawn alias IDs: their std.thread names were removed, but the
+     * values stay so later IDs and serialized builtin tags keep their
+     * numbering. */
     B_thread_spawn,
     B_thread_spawn_script,
     B_thread_spawn_source,
@@ -390,6 +393,7 @@ enum bifs {
     B_thread_try_broadcast,
     B_thread_broadcast,
     B_thread_duplex,
+    /* Legacy spawn alias IDs; see B_thread_spawn. */
     B_thread_spawn_with_channel,
     B_thread_spawn_with_duplex,
     B_thread_spawn_script_with_channel,

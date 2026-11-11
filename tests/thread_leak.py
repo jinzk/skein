@@ -30,7 +30,7 @@ def main():
             "pool.close();\n"
             "pool.join();\n"
             f'let msg = std.thread.Message.from({{"n": 3}});\n'
-            f'let t = std.thread.spawn('
+            f'let t = std.thread.spawn_script('
             f'"{worker.replace(chr(92), chr(92) * 2)}", msg);\n'
             "let joined = t.join();\n"
             'let src = "func main(ctx) {\\n'
@@ -42,7 +42,7 @@ def main():
             "func proto_worker(ctx) {\n"
             '    return {"v": ctx.payload["n"] + 3};\n'
             "}\n"
-            'let t3 = std.thread.spawn(proto_worker, '
+            'let t3 = std.thread.spawn_function(proto_worker, '
             'std.thread.Message.from({"n": 3}));\n'
             "let joined3 = t3.join();\n"
             "func make_worker(n) {\n"
@@ -52,7 +52,7 @@ def main():
             "    return inner;\n"
             "}\n"
             "let captured = make_worker(4);\n"
-            "let t4 = std.thread.spawn(captured, "
+            "let t4 = std.thread.spawn_function(captured, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined4 = t4.join();\n"
             "func make_data() {\n"
@@ -63,7 +63,7 @@ def main():
             "    return inner;\n"
             "}\n"
             "let captured_data = make_data();\n"
-            "let t5 = std.thread.spawn(captured_data, "
+            "let t5 = std.thread.spawn_function(captured_data, "
             'std.thread.Message.from({"n": 0}));\n'
             "let joined5 = t5.join();\n"
             "func make_adder(n) {\n"
@@ -79,7 +79,7 @@ def main():
             "    return inner;\n"
             "}\n"
             "let transfer = make_transfer(adder);\n"
-            "let t6 = std.thread.spawn(transfer, "
+            "let t6 = std.thread.spawn_function(transfer, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined6 = t6.join();\n"
             "let encoded_blob = std.entry.encode(transfer);\n"
@@ -156,7 +156,7 @@ def main():
                 "    return worker;\n"
                 "}\n"
                 "let w = make_worker();\n"
-                "let t = std.thread.spawn(w, "
+                "let t = std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r = t.join();\n"
                 'print("import=" + str(r["value"]["v"]));\n'

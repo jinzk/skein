@@ -2487,7 +2487,7 @@ value_t *http2_post(const std::vector<value_t *> &args) {
 value_t *http2_request_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3 || args[0]->type != T_string ||
         args[1]->type != T_string) {
-        yyerror("std.http2.request_async expects method, URL, and optional "
+        yyerror("std.http2.request_task expects method, URL, and optional "
                 "options");
         return NULL;
     }
@@ -2513,7 +2513,7 @@ value_t *http2_request_async(const std::vector<value_t *> &args) {
 
 value_t *http2_get_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2 || args[0]->type != T_string) {
-        yyerror("std.http2.get_async expects URL and optional options");
+        yyerror("std.http2.get_task expects URL and optional options");
         return NULL;
     }
     value_t *options = args.size() == 2 ? args[1] : NULL;
@@ -2537,7 +2537,7 @@ value_t *http2_get_async(const std::vector<value_t *> &args) {
 
 value_t *http2_post_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 3 || args[0]->type != T_string) {
-        yyerror("std.http2.post_async expects URL, optional body, and "
+        yyerror("std.http2.post_task expects URL, optional body, and "
                 "options");
         return NULL;
     }
@@ -2590,7 +2590,7 @@ value_t *http2_request_many(const std::vector<value_t *> &args) {
 
 value_t *http2_request_many_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2 || args[0]->type != T_list) {
-        yyerror("std.http2.request_many_async expects a request list and "
+        yyerror("std.http2.request_many_task expects a request list and "
                 "optional options");
         return NULL;
     }

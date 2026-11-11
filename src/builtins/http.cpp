@@ -2096,16 +2096,16 @@ value_t *do_request_async(const std::string &method,
 
 value_t *http_request_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3) {
-        yyerror("std.http.request_async expects 2 or 3 arguments");
+        yyerror("std.http.request_task expects 2 or 3 arguments");
         return NULL;
     }
     if (args[0]->type != T_string || args[1]->type != T_string) {
-        yyerror("std.http.request_async expects method and URL strings");
+        yyerror("std.http.request_task expects method and URL strings");
         return NULL;
     }
     value_t *options = args.size() == 3 ? args[2] : NULL;
     if (options && options->type != T_dict) {
-        yyerror("std.http.request_async options must be a dict");
+        yyerror("std.http.request_task options must be a dict");
         return NULL;
     }
     return do_request_async(((string_value_t *)args[0])->value,
@@ -2115,12 +2115,12 @@ value_t *http_request_async(const std::vector<value_t *> &args) {
 
 value_t *http_get_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2 || args[0]->type != T_string) {
-        yyerror("std.http.get_async expects a URL and optional options dict");
+        yyerror("std.http.get_task expects a URL and optional options dict");
         return NULL;
     }
     value_t *options = args.size() == 2 ? args[1] : NULL;
     if (options && options->type != T_dict) {
-        yyerror("std.http.get_async options must be a dict");
+        yyerror("std.http.get_task options must be a dict");
         return NULL;
     }
     return do_request_async("GET", ((string_value_t *)args[0])->value,
@@ -2129,7 +2129,7 @@ value_t *http_get_async(const std::vector<value_t *> &args) {
 
 value_t *http_post_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 3 || args[0]->type != T_string) {
-        yyerror("std.http.post_async expects a URL, body, and optional "
+        yyerror("std.http.post_task expects a URL, body, and optional "
                 "options dict");
         return NULL;
     }
@@ -2145,7 +2145,7 @@ value_t *http_post_async(const std::vector<value_t *> &args) {
         options = args[2];
     }
     if (options && options->type != T_dict) {
-        yyerror("std.http.post_async options must be a dict");
+        yyerror("std.http.post_task options must be a dict");
         return NULL;
     }
     return do_request_async("POST", ((string_value_t *)args[0])->value,
@@ -2445,13 +2445,13 @@ value_t *http_accept(const std::vector<value_t *> &args) {
 
 value_t *http_accept_async(const std::vector<value_t *> &args) {
     if (args.size() < 1 || args.size() > 2 || args[0]->type != T_dict) {
-        yyerror("std.http.accept_async expects a server handle and optional "
+        yyerror("std.http.accept_task expects a server handle and optional "
                 "timeout");
         return NULL;
     }
     value_t *socket = dict_get(args[0], "socket");
     if (!socket) {
-        yyerror("std.http.accept_async expects a std.http server");
+        yyerror("std.http.accept_task expects a std.http server");
         return NULL;
     }
     std::string cert_file;
@@ -2461,7 +2461,7 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
     if (cert_value || key_value) {
         if (!cert_value || !key_value ||
             cert_value->type != T_string || key_value->type != T_string) {
-            yyerror("std.http.accept_async: invalid TLS server certificate");
+            yyerror("std.http.accept_task: invalid TLS server certificate");
             return NULL;
         }
         cert_file = ((string_value_t *)cert_value)->value;
@@ -2477,7 +2477,7 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
     if (args.size() == 2) {
         if (args[1]->type != T_int ||
             ((int_value_t *)args[1])->value < 0) {
-            yyerror("std.http.accept_async timeout must be a non-negative "
+            yyerror("std.http.accept_task timeout must be a non-negative "
                     "integer");
             return NULL;
         }
@@ -2524,7 +2524,7 @@ value_t *http_accept_async(const std::vector<value_t *> &args) {
             }
             freeval(client);
 #else
-            yyerror("std.http.accept_async: TLS is disabled");
+            yyerror("std.http.accept_task: TLS is disabled");
             close_socket(client);
             freeval(client);
             freeval(listener);
@@ -2620,24 +2620,24 @@ value_t *http_respond(const std::vector<value_t *> &args) {
 value_t *http_respond_async(const std::vector<value_t *> &args) {
     if (args.size() < 2 || args.size() > 4 || args[0]->type != T_dict ||
         args[1]->type != T_int) {
-        yyerror("std.http.respond_async expects request, status, optional "
+        yyerror("std.http.respond_task expects request, status, optional "
                 "headers, optional body");
         return NULL;
     }
     value_t *socket = dict_get(args[0], "socket");
     if (!socket) {
-        yyerror("std.http.respond_async expects an HTTP request handle");
+        yyerror("std.http.respond_task expects an HTTP request handle");
         return NULL;
     }
     long long status = ((int_value_t *)args[1])->value;
     if (status < 100 || status > 999) {
-        yyerror("std.http.respond_async status is invalid");
+        yyerror("std.http.respond_task status is invalid");
         return NULL;
     }
 
     value_t *headers = args.size() >= 3 ? args[2] : NULL;
     if (headers && headers->type != T_dict && headers->type != T_null) {
-        yyerror("std.http.respond_async headers must be a dict or null");
+        yyerror("std.http.respond_task headers must be a dict or null");
         return NULL;
     }
     std::string body;
@@ -2648,7 +2648,7 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
             if (!get_generator_value(args[3], body_generator))
                 return NULL;
             chunked = true;
-        } else if (!body_value(args[3], body, "std.http.respond_async")) {
+        } else if (!body_value(args[3], body, "std.http.respond_task")) {
             return NULL;
         }
     }
@@ -2657,7 +2657,7 @@ value_t *http_respond_async(const std::vector<value_t *> &args) {
     std::string response =
         build_response((int)status, headers, body, false, error, chunked);
     if (response.empty()) {
-        yyerror("std.http.respond_async: %s", error.c_str());
+        yyerror("std.http.respond_task: %s", error.c_str());
         return NULL;
     }
 

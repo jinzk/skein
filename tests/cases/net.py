@@ -244,7 +244,7 @@ def run_cases():
         async_keepalive_thread.start()
         async_keepalive_proc = run(
             "import std;\n"
-            f'let a = std.http.get_async('
+            f'let a = std.http.get_task('
             f'"http://127.0.0.1:{async_keepalive_port}/a").wait();\n'
             f'let b = std.http.get_task('
             f'"http://127.0.0.1:{async_keepalive_port}/b").wait();\n'

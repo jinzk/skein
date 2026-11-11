@@ -1005,7 +1005,7 @@ struct Handler {
   `launch` 推导为 `task[T]`；静态已知 callee 返回 `task[...]` 时直接报错，
   应改为直接调用并 `.wait()`；只有 `any`/未知 callee 才允许运行时 adopt/proxy。
   `launch` 是保留关键字。
-- 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 已返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；旧 `*_async` 名称保留为 deprecated alias；其余未覆盖的异步 builtin 仍可能退化为 `any`；
+- 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；旧 `*_async` 名称已移除；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；`std.task.retry` 返回 task，回调结果类型暂不精化；
 - generator 函数的类型为 `(参数) -> generator[T]`，`T` 由函数体中的 `yield` 表达式合并得到：
@@ -2693,7 +2693,7 @@ std.process.run_command(command[, options]) → dict
 
 `std.process.run_command` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
 `{"status", "stdout", "stderr"}`，其中 stdout/stderr 是 `bytes`。
-旧名 `std.process.run` 保留为 deprecated alias。
+旧名 `std.process.run` 已移除；请使用 `run_command`。
 
 长驻进程：
 
@@ -2707,7 +2707,7 @@ std.process.pid(process)
 
 `options` 支持 `args`、`env`、`cwd`、`stderr`（`pipe` 或 `inherit`）。
 `spawn_command` 返回包含 `pid`、`stdin`、`stdout`、`stderr` 和 `handle` 的 dict；
-旧名 `std.process.spawn` 保留为 deprecated alias；
+旧名 `std.process.spawn` 已移除；请使用 `spawn_command`；
 四个流都支持 `std.io` 的同步和异步读写；`stderr = "inherit"` 时 `stderr` 为 `null`。
 
 ```text
@@ -2910,7 +2910,7 @@ std.io.write_task(stream, data[, timeout_ms])
 - `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
 - `std.io`：`print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs`：文件读写和文件句柄操作；
-- `std.process`：命令执行、`command_status` / `run` / `spawn`；
+- `std.process`：命令执行、`command_status` / `run_command` / `spawn_command`；
 - `std.worker`：JSON Lines 进程池；
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
@@ -4017,8 +4017,8 @@ std.ffi.buffer_free
 - 网络和 FFI 错误是运行时错误，可以通过 `on error` 或 `std.result.capture` 捕获；
 - Ctrl-C 或超时中断时，`accept` / `recv` 保留 socket，`connect` / `send` 关闭当前 socket；
 - `std.net` 暂不支持 TLS、HTTP；
-- `std.net.*_async` 的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
-- 普通函数可以挂起和恢复；函数仍不能通过通用 `spawn` 启动；
+- `std.net.*_task` 的 `timeout_ms` 是操作自身超时，`std.task.wait` 的超时是等待超时；
+- 普通函数可以挂起和恢复；可用 `launch` 把函数作为独立 task 启动；
 - `std.task.wait` / `wait_all` 超时不会自动取消 task，需要显式 `cancel`；
 - `std.result.capture` 捕获同步 `fail` 和运行时错误；task 使用 `std.task.catch`；
 - `defer` 只允许在函数或代码块内；

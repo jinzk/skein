@@ -268,7 +268,7 @@ def run_cases():
             f'std.io.write_task(w, "file async data").wait()\n'
             f'std.io.close(w)\n'
             f'let r = std.fs.open("{quoted_stream_copy}", "rb");\n'
-            f'bytes_to_string(std.io.read_async(r, 4).wait())\n'
+            f'bytes_to_string(std.io.read_task(r, 4).wait())\n'
             f'len(std.io.read_task(r, 100).wait())\n'
             f'std.io.read_task(r, 100).wait() == null\n'
             f'std.io.eof(r)\n'

@@ -703,9 +703,9 @@ def run_cases():
         stdout="= true",
     )
     check(
-        "std net resolve async alias",
+        "std net resolve task",
         "import std;\n"
-        'let t = std.net.resolve_async("localhost", 1000, "ipv4");\n'
+        'let t = std.net.resolve_task("localhost", 1000, "ipv4");\n'
         "len(std.task.wait(t)) > 0\n",
         stdout="= true",
     )

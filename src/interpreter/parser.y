@@ -13,6 +13,7 @@
 #include "diagnostics.h"
 #include "eval_context.h"
 #include "repl.h"
+#include "runtime_state.h"
 #include "scopestack.h"
 #include "gc.h"
 #include "eval.h"
@@ -2139,7 +2140,8 @@ top_statement: top_expression EOL {
 
         bool invalid = g_statement_invalid;
         g_statement_invalid = false;
-        bool skip_eval = invalid || (!g_interactive && g_script_stop);
+        bool skip_eval = invalid || sys_exit_requested() ||
+                         (!g_interactive && g_script_stop);
         struct value_t *rslt = NULL;
 
         if (!skip_eval) {
@@ -2183,7 +2185,8 @@ top_statement: top_expression EOL {
         if ($1) treefree($1);
         $1 = NULL;
         $$ = NULL;
-        if (g_interrupted || (!g_interactive && g_script_stop))
+        if (g_interrupted || sys_exit_requested() ||
+            (!g_interactive && g_script_stop))
             YYABORT;
     }
     | error EOL {

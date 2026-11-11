@@ -457,7 +457,8 @@ enum bifs {
     B_slice,
     B_sys_args,
     B_sys_script,
-    B_sys_executable
+    B_sys_executable,
+    B_sys_exit
 };
 
 #endif

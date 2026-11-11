@@ -7,6 +7,7 @@
 #include "eval_context.h"
 #include "gc.h"
 #include "gc_roots.h"
+#include "runtime_state.h"
 #include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
@@ -457,7 +458,12 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_
         yyerror("JIT tail call target is not installed");
         return nullptr;
     }
-    return fn(callee, args, argc);
+    value_t *result = fn(callee, args, argc);
+    if (g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
 }
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_struct(
@@ -809,7 +815,12 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **a
         yyerror("JIT call target is not installed");
         return nullptr;
     }
-    return fn(callee, args, argc);
+    value_t *result = fn(callee, args, argc);
+    if (g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
 }
 
 extern "C" SKEIN_JIT_SYSV void *skein_jit_direct_target(

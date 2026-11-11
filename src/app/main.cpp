@@ -330,7 +330,9 @@ int main(int argc, char **argv) {
 
     skein_vm_stats_report();
 
-    if (g_interactive) {
+    if (sys_exit_requested()) {
+        status = sys_exit_code();
+    } else if (g_interactive) {
         status = 0;
     } else if (g_interrupted) {
         status = 130;

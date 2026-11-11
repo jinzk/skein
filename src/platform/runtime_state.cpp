@@ -3,6 +3,7 @@
 #include "platform.h"
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -181,6 +182,7 @@ namespace {
 std::vector<std::string> g_sys_args;
 std::string g_sys_script;
 std::string g_sys_executable;
+std::atomic<int> g_sys_exit_code{-1};
 
 }  // namespace
 
@@ -196,3 +198,13 @@ const std::vector<std::string> &sys_args() { return g_sys_args; }
 const std::string &sys_script() { return g_sys_script; }
 
 const std::string &sys_executable() { return g_sys_executable; }
+
+void sys_exit_request(int code) {
+    g_sys_exit_code.store(code);
+    g_interrupted = 1;
+    g_script_stop = true;
+}
+
+bool sys_exit_requested() { return g_sys_exit_code.load() >= 0; }
+
+int sys_exit_code() { return g_sys_exit_code.load(); }

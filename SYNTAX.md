@@ -2682,6 +2682,7 @@ std.compress.deflate(bytes) / inflate(bytes)
 std.env.get(name[, default]) / has(name) / set(name, value)
 std.env.unset(name) / all()
 std.sys.args() / script() / executable()
+std.sys.exit([code])
 
 std.fs.listdir(path) / mkdir(path[, recursive])
 std.fs.remove(path) / remove_all(path) / rename(old, new) / stat(path)
@@ -2698,6 +2699,7 @@ std.process.run_command(command[, options]) → dict
 解释器选项必须写在脚本路径之前；脚本路径之后的参数原样进入
 `std.sys.args()`（包括以 `-` 开头的参数）。`std.fs.which` 找不到时返回空字符串；
 `std.fs.glob` 只支持最后一段路径中的 `*` / `?`。
+`std.sys.exit(code)` 立即停止脚本并以 `code`（0–255）退出，适合命令行工具。
 
 `std.process.run_command` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
 `{"status", "stdout", "stderr"}`，其中 stdout/stderr 是 `bytes`。

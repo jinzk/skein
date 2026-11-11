@@ -57,4 +57,12 @@ const std::vector<std::string> &sys_args();
 const std::string &sys_script();
 const std::string &sys_executable();
 
+/*
+ * Script-requested exit: g_interrupted stops evaluation, and the CLI reports
+ * the recorded code instead of the generic interrupted status.
+ */
+void sys_exit_request(int code);
+bool sys_exit_requested();
+int sys_exit_code();
+
 #endif

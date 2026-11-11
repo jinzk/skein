@@ -984,8 +984,8 @@ if(BUILD_TESTING)
       )
       add_test(
         NAME vm_bench_test
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_vm.py
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_vm.skein
                 --bin $<TARGET_FILE:${PROJECT_NAME}>
                 --check
       )

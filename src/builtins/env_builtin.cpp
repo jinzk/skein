@@ -5,6 +5,7 @@
 #include "runtime_state.h"
 #include "valuetype.h"
 
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
@@ -95,6 +96,31 @@ struct value_t *call_env_builtin(
 
 struct value_t *call_sys_builtin(
     int functype, const std::vector<struct value_t *> &args) {
+    if (functype == B_sys_exit) {
+        if (args.size() > 1) {
+            yyerror("std.sys.exit expects 0 or 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        long long code = 0;
+        if (args.size() == 1) {
+            if (args[0]->type != T_int) {
+                yyerror("std.sys.exit expects an int exit code, got %s",
+                        typename_of(args[0]));
+                return NULL;
+            }
+            code = ((struct int_value_t *)args[0])->value;
+            if (code < 0 || code > 255) {
+                yyerror("std.sys.exit code must be between 0 and 255, got "
+                        "%lld", code);
+                return NULL;
+            }
+        }
+        std::fflush(stdout);
+        std::fflush(stderr);
+        sys_exit_request((int)code);
+        return newnull();
+    }
     if (!args.empty()) {
         yyerror("std.sys functions expect 0 arguments, got %d",
                 (int)args.size());

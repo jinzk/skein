@@ -3130,6 +3130,7 @@ std.env.all
 std.sys.args
 std.sys.script
 std.sys.executable
+std.sys.exit
 
 std.crypto.sha256
 std.crypto.hmac_sha256
@@ -5739,6 +5740,7 @@ std.process.run_command(command[, options]) → dict
 std.sys.args()        → list[string]  // 脚本路径之后的参数
 std.sys.script()      → string        // 脚本路径；stdin/REPL 为空
 std.sys.executable()  → string        // 解释器可执行文件
+std.sys.exit([code])                  // 停止脚本并以 code（0–255）退出
 ```
 
 解释器选项必须写在脚本路径之前；脚本路径之后的所有参数（包括以 `-` 开头的）
@@ -5749,6 +5751,8 @@ skein tool.skein --bin build/skein --check "a b"
 ```
 
 脚本内 `std.sys.args()` 返回 `["--bin", "build/skein", "--check", "a b"]`。
+`std.sys.exit(code)` 用于命令行工具：立即停止当前脚本（不再执行后续语句），
+刷新标准流后以 `code` 退出；省略 `code` 等价于 `0`。
 
 旧名 `std.process.run` 已移除；请使用 `run_command`。
 

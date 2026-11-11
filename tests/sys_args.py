@@ -71,6 +71,49 @@ def main():
                 "script=[]" not in proc.stdout:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1
+
+        # std.sys.exit stops the script and controls the process status.
+        proc = subprocess.run(
+            [BIN],
+            input="import std;\n"
+                  'println("before-exit");\n'
+                  "std.sys.exit(3);\n"
+                  'println("after-exit");\n',
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode != 3 or "before-exit" not in proc.stdout or \
+                "after-exit" in proc.stdout:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            return 1
+
+        proc = subprocess.run(
+            [BIN],
+            input="import std;\nstd.sys.exit();\n",
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            return 1
+
+        bad_script = os.path.join(tmp, "bad_exit.skein")
+        with open(bad_script, "w", encoding="utf-8") as handle:
+            handle.write("import std;\nstd.sys.exit(256);\n")
+        proc = subprocess.run(
+            [BIN, bad_script],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode != 1 or "between 0 and 255" not in proc.stderr:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            return 1
         print("sys args test passed")
         return 0
 

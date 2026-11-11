@@ -2510,6 +2510,10 @@ public:
                             : skein_vm_call_value_args(callee,
                                                        std::move(args));
                     freeval(callee);
+                    if (g_interrupted) {
+                        freeval(result);
+                        return abort_error();
+                    }
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
                         return abort_error();
@@ -2553,6 +2557,10 @@ public:
                         value_t *result =
                             fiber_launch_host(callee, std::move(owned));
                         freeval(callee);
+                        if (g_interrupted) {
+                            freeval(result);
+                            return abort_error();
+                        }
                         if (context_.control != EVAL_CONTROL_NONE) {
                             freeval(result);
                             return abort_error();
@@ -2576,6 +2584,8 @@ public:
                                     context_.vm_call_depth;
                         }
                         freeval(callee);
+                        if (g_interrupted)
+                            return abort_error();
                         break;
                     }
                     if (fast == FastCallResult::JitFailed) {
@@ -2594,6 +2604,10 @@ public:
                     value_t *result =
                         skein_vm_call_value_args(callee, std::move(fallback));
                     freeval(callee);
+                    if (g_interrupted) {
+                        freeval(result);
+                        return abort_error();
+                    }
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
                         return abort_error();
@@ -2644,6 +2658,10 @@ public:
                     value_t *result =
                         skein_vm_call_value_args(callee, std::move(fallback));
                     freeval(callee);
+                    if (g_interrupted) {
+                        freeval(result);
+                        return abort_error();
+                    }
                     if (context_.control != EVAL_CONTROL_NONE) {
                         freeval(result);
                         return abort_error();
@@ -3283,6 +3301,10 @@ private:
                                       &jit_result)) {
                 if (!jit_result)
                     return FastCallResult::JitFailed;
+                if (g_interrupted) {
+                    freeval(jit_result);
+                    return FastCallResult::JitFailed;
+                }
                 push(jit_result);
                 return FastCallResult::Pushed;
             }

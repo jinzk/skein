@@ -18,7 +18,6 @@
  * owns compilation timing and fallback reporting.
  */
 struct vm_stats_data {
-    std::atomic<bool> enabled{false};
     uint64_t statements_compiled = 0;
     uint64_t statements_fallback = 0;
     uint64_t functions_compiled = 0;
@@ -46,6 +45,8 @@ struct vm_stats_data {
 };
 
 extern thread_local vm_stats_data vm_stats;
+/* Shared, cheap hot-path flag; counters themselves stay thread-local. */
+extern std::atomic<bool> vm_stats_enabled;
 /* Merge the current thread's stats into the process-wide report total. */
 void skein_vm_stats_merge_thread();
 

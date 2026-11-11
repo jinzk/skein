@@ -43,6 +43,7 @@
 #include <vector>
 
 thread_local vm_stats_data vm_stats;
+std::atomic<bool> vm_stats_enabled{false};
 
 namespace {
 std::mutex vm_stats_total_mutex;
@@ -160,7 +161,7 @@ bool vm_slot_pool_enabled() {
 void ensure_stats_flags() {
     if (vm_stats_state < 0)
         vm_stats_state = read_bool_env("SKEIN_VM_STATS", false) ? 1 : 0;
-    vm_stats.enabled = vm_stats_state != 0;
+    vm_stats_enabled = vm_stats_state != 0;
 }
 
 void ensure_runtime_flags() {
@@ -340,7 +341,7 @@ public:
 
             try {
             const Instr ins = proto().code[pc_];
-            if (vm_stats.enabled) {
+            if (vm_stats_enabled) {
                 ++vm_stats.instructions;
                 if (ins.op < vm_stats.opcodes.size())
                     ++vm_stats.opcodes[ins.op];
@@ -1605,7 +1606,7 @@ public:
                         }
                     }
                     state.active = true;
-                    if (vm_stats.enabled &&
+                    if (vm_stats_enabled &&
                         iterators_.size() > vm_stats.max_iterator_depth)
                         vm_stats.max_iterator_depth = iterators_.size();
                     invalidate_name_cache(desc.key_name.c_str());
@@ -2210,7 +2211,7 @@ public:
                     if (handler.capture)
                         skein_vm_eval_capture_begin(handler.snapshot);
                     handlers_.push_back(handler);
-                    if (vm_stats.enabled &&
+                    if (vm_stats_enabled &&
                         handlers_.size() > vm_stats.max_handler_depth)
                         vm_stats.max_handler_depth = handlers_.size();
                     break;
@@ -2314,7 +2315,7 @@ public:
                     }
                     defer_scopes_.back().push_back(std::move(record));
                     ++context_.vm_defer_count;
-                    if (vm_stats.enabled &&
+                    if (vm_stats_enabled &&
                         (uint64_t)context_.vm_defer_count >
                             vm_stats.max_defer_depth)
                         vm_stats.max_defer_depth =
@@ -2524,7 +2525,7 @@ public:
                 }
 
                 case Op::Call: {
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.calls;
                     uint32_t argc = ins.b;
                     std::array<value_t *, 8> inline_args;
@@ -2567,7 +2568,7 @@ public:
                     }
                     FastCallResult fast = try_fast_call(callee, args, argc);
                     if (fast == FastCallResult::Pushed) {
-                        if (vm_stats.enabled) {
+                        if (vm_stats_enabled) {
                             ++vm_stats.fast_calls;
                             if ((uint64_t)context_.vm_call_depth >
                                 vm_stats.max_depth)
@@ -2587,7 +2588,7 @@ public:
                         free_args(args, argc);
                         return abort_error();
                     }
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.fallback_calls;
                     std::vector<value_t *> fallback(args, args + argc);
                     value_t *result =
@@ -2608,7 +2609,7 @@ public:
                 }
 
                 case Op::TailCall: {
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.calls;
                     uint32_t argc = ins.b;
                     std::array<value_t *, 8> inline_args;
@@ -2632,12 +2633,12 @@ public:
                         return abort_error();
                     }
                     if (try_tail_call(callee, args, argc)) {
-                        if (vm_stats.enabled)
+                        if (vm_stats_enabled)
                             ++vm_stats.tail_calls;
                         freeval(callee);
                         break;
                     }
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.fallback_calls;
                     std::vector<value_t *> fallback(args, args + argc);
                     value_t *result =
@@ -2927,16 +2928,102 @@ private:
             (int)argc != code->nparams)
             return false;
 
+        proto = skein_vm_prepare_function_body(def);
+        if (!proto || !proto_can_frame(*proto))
+            return false;
+
         int index = 0;
         for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
-            if (sl->has_pattern || sl->variadic)
+            if (sl->variadic)
+                return false;
+            /* Destructuring parameters only run in the fast frame when the
+             * compiler bound them into slots at frame entry. */
+            if (sl->has_pattern && !proto->param_patterns_bound)
                 return false;
             if (!type_constraint_matches(sl->type, args[(size_t)index]))
                 return false;
         }
+        return true;
+    }
 
-        proto = skein_vm_prepare_function_body(def);
-        return proto && proto_can_frame(*proto);
+    static bool has_pattern_params(function_code *code) {
+        for (struct symlist *sl = code->sl; sl; sl = sl->next)
+            if (sl->has_pattern)
+                return true;
+        return false;
+    }
+
+    value_t *fast_param_value(uint32_t index) {
+        if (direct_params_)
+            return index < param_values_.size() ? param_values_[index] : NULL;
+        if (index < param_symbols_.size() && param_symbols_[index])
+            return param_symbols_[index]->val;
+        return NULL;
+    }
+
+    /*
+     * Fill the slots of destructuring parameters at frame entry.  Mirrors the
+     * MatchBind opcode so a VM frame and the AST call path bind identically.
+     */
+    bool bind_param_patterns(function_code *code) {
+        if (!proto().param_patterns_bound)
+            return true;
+
+        int index = 0;
+        for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
+            if (!sl->has_pattern)
+                continue;
+            if ((size_t)index >= proto().param_patterns.size())
+                return false;
+            uint32_t root = proto().param_patterns[(size_t)index];
+            if (root == UINT32_MAX || root >= proto().patterns.size())
+                return false;
+            value_t *subject = fast_param_value((uint32_t)index);
+            if (!subject) {
+                yyerror("parameter %d is missing", index + 1);
+                return false;
+            }
+            std::vector<pattern_binding> bindings;
+            bool matched =
+                match_pattern_proto(proto(), root, subject, bindings);
+            if (context_.runtime_error_count != errors_before_ || !matched) {
+                free_pattern_bindings(bindings);
+                if (!matched)
+                    yyerror("function parameter does not match its pattern");
+                return false;
+            }
+            for (pattern_binding &binding : bindings) {
+                if (isrepeated(binding.name.c_str())) {
+                    yyerror("symbol repeated %s", binding.name.c_str());
+                    free_pattern_bindings(bindings);
+                    return false;
+                }
+            }
+            for (pattern_binding &binding : bindings) {
+                if (direct_slots_) {
+                    value_t *bound = binding.value;
+                    binding.value = NULL;
+                    if (!assign_pattern_slot_direct(root, binding.name, bound,
+                                                    false)) {
+                        freeval(bound);
+                        free_pattern_bindings(bindings);
+                        return false;
+                    }
+                    continue;
+                }
+                struct symbol *sym = newsym(binding.name.c_str());
+                sym->val = binding.value;
+                binding.value = NULL;
+                savesym(sym);
+                assign_pattern_slot(root, binding.name, sym);
+            }
+            if (!direct_slots_) {
+                for (const pattern_binding &binding : bindings)
+                    invalidate_name_cache(binding.name.c_str());
+            }
+            bindings.clear();
+        }
+        return true;
     }
 
     static struct symbol *take_pooled_symbol(
@@ -3265,6 +3352,10 @@ private:
         ++context_.vm_call_depth;
         diag_frames_ = 1;
         diag_push_call(name, line, column);
+        /* Push the frame before binding so a pattern mismatch reports the
+         * same call context as the AST path.  Failure unwinds this frame. */
+        if (!bind_param_patterns(code))
+            return FastCallResult::Failed;
         return FastCallResult::Pushed;
     }
 
@@ -3286,6 +3377,10 @@ private:
             return false;
 
         function_code *code = def->code.get();
+        /* Destructuring parameters are bound into slots after the frame is
+         * reset below, so reuse the regular call path instead. */
+        if (has_pattern_params(code))
+            return false;
         const char *name = code->name.empty() ? "<anonymous>"
                                               : code->name.c_str();
         int line = g_error_line > 0 ? g_error_line : code->def_line;
@@ -3399,7 +3494,7 @@ private:
 
     void push(value_t *value) {
         stack_.push_back(value);
-        if (vm_stats.enabled && stack_.size() > vm_stats.max_stack)
+        if (vm_stats_enabled && stack_.size() > vm_stats.max_stack)
             vm_stats.max_stack = stack_.size();
     }
 
@@ -3426,11 +3521,11 @@ private:
             if (cache && cache->index >= 0 && cache->size == items.size() &&
                 (size_t)cache->index < items.size() &&
                 value_equals(items[(size_t)cache->index].first, index)) {
-                if (vm_stats.enabled)
+                if (vm_stats_enabled)
                     ++vm_stats.index_ic_hits;
                 return dupval(items[(size_t)cache->index].second);
             }
-            if (vm_stats.enabled)
+            if (vm_stats_enabled)
                 ++vm_stats.index_ic_misses;
             int found = dict_find_index(dict, index);
             if (found < 0) {
@@ -3460,17 +3555,17 @@ private:
             if (cache && cache->owner == sv->def) {
                 if (cache->field >= 0 && sv->payload &&
                     (size_t)cache->field < sv->payload->fields.size()) {
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.member_ic_hits;
                     return dupval(sv->payload->fields[(size_t)cache->field]);
                 }
                 if (cache->field < 0 && cache->method) {
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.member_ic_hits;
                     return newmethodval(dupval(container), cache->method);
                 }
             }
-            if (vm_stats.enabled)
+            if (vm_stats_enabled)
                 ++vm_stats.member_ic_misses;
             int field = structtype_field_index(sv->def, name);
             if (field >= 0 && sv->payload &&
@@ -3510,17 +3605,17 @@ private:
                 cache->variant == ev->variant) {
                 if (cache->field >= 0 && ev->payload &&
                     (size_t)cache->field < ev->payload->fields.size()) {
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.member_ic_hits;
                     return dupval(ev->payload->fields[(size_t)cache->field]);
                 }
                 if (cache->field < 0 && cache->method) {
-                    if (vm_stats.enabled)
+                    if (vm_stats_enabled)
                         ++vm_stats.member_ic_hits;
                     return newmethodval(dupval(container), cache->method);
                 }
             }
-            if (vm_stats.enabled)
+            if (vm_stats_enabled)
                 ++vm_stats.member_ic_misses;
             int field = structtype_variant_field_index(&variant, name);
             if (field >= 0 && ev->payload &&
@@ -3632,7 +3727,7 @@ private:
             const NameCacheEntry &entry = proto().name_ic[index];
             if (entry.sym && entry.global_owner == owner &&
                 entry.generation == generation) {
-                if (vm_stats.enabled)
+                if (vm_stats_enabled)
                     ++vm_stats.name_ic_hits;
                 if (index < name_cache_.size())
                     name_cache_[index] =
@@ -3641,7 +3736,7 @@ private:
             }
         }
 
-        if (vm_stats.enabled)
+        if (vm_stats_enabled)
             ++vm_stats.name_ic_misses;
         struct symbol *sym = lookupsym(name);
         if (sym && index < name_cache_.size())
@@ -4105,6 +4200,47 @@ private:
     }
 
 public:
+    /*
+     * The AST call path binds destructuring parameters into the enclosing
+     * scope and then runs the compiled body as a root proto.  Rebuild the
+     * parameter slots from those bindings so the body reads the same values
+     * instead of uninitialized slots.
+     */
+    bool bind_entry_param_patterns() {
+        if (!proto().param_patterns_bound)
+            return true;
+        for (uint32_t root : proto().param_patterns) {
+            if (root == UINT32_MAX || root >= proto().patterns.size())
+                continue;
+            for (const auto &binding :
+                 proto().patterns[root].binding_slots) {
+                struct symbol *sym = lookupsym(binding.name.c_str());
+                if (!sym || !sym->val) {
+                    yyerror("symbol not found %s", binding.name.c_str());
+                    return false;
+                }
+                if (direct_slots_) {
+                    if (binding.slot >= slot_values_.size()) {
+                        yyerror("invalid bytecode slot");
+                        return false;
+                    }
+                    freeval(slot_values_[binding.slot]);
+                    slot_values_[binding.slot] = dupval(sym->val);
+                    continue;
+                }
+                if (binding.slot >= slot_symbols_.size()) {
+                    yyerror("invalid bytecode slot");
+                    return false;
+                }
+                struct symbol *target = newsym(binding.name.c_str());
+                target->val = dupval(sym->val);
+                savesym(target);
+                slot_symbols_[binding.slot] = target;
+            }
+        }
+        return true;
+    }
+
     static bool match_pattern_proto(const Proto &proto, uint32_t index,
                                     value_t *value,
                                     std::vector<pattern_binding> &bindings) {
@@ -5035,6 +5171,8 @@ value_t *execute_proto(const Proto &proto,
         def && def->code ? def->code->module : std::string(),
         def && def->code ? def->code->source : std::string());
     Executor executor(proto, def);
+    if (!executor.bind_entry_param_patterns())
+        return NULL;
     return executor.run();
 }
 
@@ -5077,12 +5215,12 @@ void skein_vm_set_enabled(bool enabled) {
 void skein_vm_set_stats(bool enabled) {
     ensure_runtime_flags();
     vm_stats_state = enabled ? 1 : 0;
-    vm_stats.enabled = enabled;
+    vm_stats_enabled = enabled;
 }
 
 void skein_vm_stats_report() {
     ensure_stats_flags();
-    const bool enabled = vm_stats.enabled;
+    const bool enabled = vm_stats_enabled;
     skein_vm_stats_merge_thread();
     std::lock_guard<std::mutex> lock(vm_stats_total_mutex);
     const vm_stats_data &stats = vm_stats_total;

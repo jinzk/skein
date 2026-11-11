@@ -138,7 +138,7 @@ void record_fallback_reason(const std::string &reason,
             std::fclose(out);
         }
     }
-    if (!vm_stats.enabled)
+    if (!vm_stats_enabled)
         return;
     std::string key = reason.empty() ? "unknown" : reason;
     if (key.size() > 120)
@@ -162,10 +162,10 @@ skein::bc::ProtoPtr prepare_function_body(
     std::string error;
     skein::bc::ProtoPtr proto =
         skein_compile_function_body(code, code->module, error);
-    if (vm_stats.enabled)
+    if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
-        if (vm_stats.enabled)
+        if (vm_stats_enabled)
             ++vm_stats.functions_fallback;
         record_fallback_reason(
             error, "function " + code->name + " @" +
@@ -178,7 +178,7 @@ skein::bc::ProtoPtr prepare_function_body(
         return nullptr;
     }
     cache.proto = proto;
-    if (vm_stats.enabled)
+    if (vm_stats_enabled)
         ++vm_stats.functions_compiled;
     if (!keep_function_ast())
         clear_function_body_ast(code);
@@ -267,12 +267,9 @@ bool jit_patterns_ready(function_code *code) {
         return false;
     }
     cache->param_patterns = compiled;
-    if (!keep_function_ast()) {
-        for (struct symlist *sl = code->sl; sl; sl = sl->next) {
-            if (symlist_pattern_ast(sl))
-                set_symlist_pattern_ast(sl, NULL);
-        }
-    }
+    /* Keep the parameter pattern ASTs: the function body proto binds
+     * destructuring parameters into slots at frame entry, so it still needs
+     * them after the AST fallback has compiled its own pattern set. */
     return true;
 }
 
@@ -454,6 +451,15 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
         return 0;
     skein_vm_eval_push_closure_scope(def->closure);
 
+    std::shared_ptr<function_def> def_ref(def, [](function_def *) {});
+    /* When the compiled body binds destructuring parameters into slots, the
+     * JIT frame stores those slots directly after the parameters and the body
+     * reads them from there.  Otherwise the body resolves the bound names
+     * through scope symbols. */
+    skein::bc::ProtoPtr proto = prepare_function_body(def_ref);
+    const bool slot_mode = proto && proto->param_patterns_bound;
+    const size_t slot_base = proto ? (size_t)proto->nparams : 0;
+
     int index = 0;
     for (struct symlist *sl = def->code->sl;
          sl && !sl->variadic; sl = sl->next, ++index) {
@@ -461,8 +467,6 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
             break;
         if (sl->has_pattern) {
             std::vector<pattern_binding> bindings;
-            std::shared_ptr<function_def> def_ref(def,
-                                                  [](function_def *) {});
             ParamPatternResult native = skein_vm_match_parameter_pattern(
                 def_ref, index, values[(size_t)index], bindings);
             if (native != ParamPatternResult::Matched) {
@@ -470,11 +474,42 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
                 yyerror("function parameter does not match its pattern");
                 return 0;
             }
-            for (auto &binding : bindings) {
-                struct symbol *target = newsym(binding.name.c_str());
-                target->val = binding.value;
-                binding.value = NULL;
-                savesym(target);
+            if (slot_mode) {
+                uint32_t root =
+                    (size_t)index < proto->param_patterns.size()
+                        ? proto->param_patterns[(size_t)index]
+                        : UINT32_MAX;
+                if (root == UINT32_MAX || root >= proto->patterns.size()) {
+                    free_pattern_bindings(bindings);
+                    yyerror("function parameter pattern is not compiled");
+                    return 0;
+                }
+                const std::vector<skein::bc::PatternSlotDesc> &slots =
+                    proto->patterns[root].binding_slots;
+                for (auto &binding : bindings) {
+                    bool bound = false;
+                    for (const auto &slot : slots) {
+                        if (slot.name != binding.name ||
+                            slot.slot == UINT32_MAX)
+                            continue;
+                        values[slot_base + (size_t)slot.slot] =
+                            binding.value;
+                        binding.value = NULL;
+                        bound = true;
+                        break;
+                    }
+                    if (!bound) {
+                        freeval(binding.value);
+                        binding.value = NULL;
+                    }
+                }
+            } else {
+                for (auto &binding : bindings) {
+                    struct symbol *target = newsym(binding.name.c_str());
+                    target->val = binding.value;
+                    binding.value = NULL;
+                    savesym(target);
+                }
             }
             bindings.clear();
             freeval(values[(size_t)index]);
@@ -1381,10 +1416,10 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     std::string error;
     skein::bc::ProtoPtr proto = skein_compile_statement(
         statement, diag_current_module_name(), error);
-    if (vm_stats.enabled)
+    if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
-        if (vm_stats.enabled)
+        if (vm_stats_enabled)
             ++vm_stats.statements_fallback;
         record_fallback_reason(
             error, "statement @" +
@@ -1395,7 +1430,7 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
                          error.c_str());
         return eval(statement);
     }
-    if (vm_stats.enabled)
+    if (vm_stats_enabled)
         ++vm_stats.statements_compiled;
 #ifdef SKEIN_ENABLE_JIT
     if (skein::jit::available() && skein::jit::can_compile(*proto, true)) {
@@ -1409,7 +1444,7 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
             value_t *result =
                 skein::jit::enter(code, &ts, nullptr, nullptr, 0);
             skein::jit::release(code);
-            if (vm_stats.enabled)
+            if (vm_stats_enabled)
                 vm_stats.execute_ns += elapsed_ns(jit_start);
             if (active_eval_context().control != EVAL_CONTROL_NONE)
                 diag_set_location(0, 0);
@@ -1419,7 +1454,7 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
 #endif
     const auto execute_start = std::chrono::steady_clock::now();
     value_t *result = skein_vm_execute_proto(*proto);
-    if (vm_stats.enabled)
+    if (vm_stats_enabled)
         vm_stats.execute_ns += elapsed_ns(execute_start);
     if (active_eval_context().control != EVAL_CONTROL_NONE)
         diag_set_location(0, 0);
@@ -1509,13 +1544,9 @@ ParamPatternResult skein_vm_match_parameter_pattern(
                          code->name.empty() ? "<anonymous>"
                                             : code->name.c_str());
         }
-        if (!keep_function_ast()) {
-            for (struct symlist *param = code->sl; param;
-                 param = param->next) {
-                if (symlist_pattern_ast(param))
-                    set_symlist_pattern_ast(param, NULL);
-            }
-        }
+        /* Keep the parameter pattern ASTs: the function body proto binds
+         * destructuring parameters into slots at frame entry, so it still
+         * needs them after this pattern set has been compiled. */
     }
 
     std::shared_ptr<const compiled_pattern_set> compiled =
@@ -1561,7 +1592,7 @@ bool skein_vm_try_execute_function_body(
     }
 
     bridge_depth_guard guard(context);
-    if (vm_stats.enabled &&
+    if (vm_stats_enabled &&
         (uint64_t)context.vm_call_depth > vm_stats.max_depth)
         vm_stats.max_depth = context.vm_call_depth;
     out = skein_vm_execute_proto(*proto, def);

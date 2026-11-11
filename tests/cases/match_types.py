@@ -767,6 +767,26 @@ def run_cases():
           env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_DEBUG="1"),
           not_stderr="fallback parameter pattern")
 
+    check("function parameter patterns bind in vm frames",
+          'import std;\n'
+          'struct P { x: int; y: int; }\n'
+          'func nested([[a, b], {x, y}]) { return a + b + x + y; }\n'
+          'func rest([h, ...t]) { return h * len(t); }\n'
+          'func point(P {x, y}) { return x * y; }\n'
+          'func rec([n, acc]) {\n'
+          '  if (n <= 0) { return acc; }\n'
+          '  return rec([n - 1, acc + n]);\n'
+          '}\n'
+          'func aspat([a as whole]) { return len(whole) + a[0]; }\n'
+          'println(str(nested([[1, 2], {"x": 3, "y": 4}])));\n'
+          'println(str(rest([5, 1, 2])));\n'
+          'println(str(point(P { x: 3, y: 4 })));\n'
+          'println(str(rec([4, 0])));\n'
+          'println(str(aspat([[7]])));\n',
+          stdout_all=["10", "10", "12", "10", "8"],
+          env=dict(os.environ, SKEIN_VM="1", SKEIN_VM_STATS="1"),
+          stderr="calls=")
+
     check("match or pattern binding rollback",
           'println(match ([1, 2]) { case [a] | [a, b] => a + b; '
           'default => 0; });\n'

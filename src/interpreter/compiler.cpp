@@ -3650,9 +3650,23 @@ skein_compile_parameter_patterns(struct function_code *code,
     return compiled;
 }
 
-ProtoPtr skein_compile_function_body(struct function_code *code,
-                                     const std::string &module,
-                                     std::string &error) {
+namespace {
+
+/*
+ * Compile a function body into a VM proto.
+ *
+ * When `bind_param_patterns` is set, destructuring parameters are compiled
+ * into the proto and their bindings get slots that the VM fills at frame
+ * entry.  That keeps the call in the VM fast path instead of falling back to
+ * the AST call sequence.  Returns NULL with `pattern_abort` set when the
+ * parameter patterns cannot be represented, so the caller can retry without
+ * them.
+ */
+ProtoPtr compile_function_body_impl(struct function_code *code,
+                                    const std::string &module,
+                                    bool bind_param_patterns,
+                                    bool &pattern_abort,
+                                    std::string &error) {
     struct ast *body = function_body_ast(code);
     if (!code || !body) {
         error = "function has no body";
@@ -3691,6 +3705,48 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     compiler.proto.def_column = body->column;
     compiler.proto.param_names = compiler.param_names;
 
+    if (bind_param_patterns) {
+        bool any_pattern = false;
+        for (struct symlist *param = code->sl; param;
+             param = param->next) {
+            if (param->has_pattern) {
+                any_pattern = true;
+                break;
+            }
+        }
+        if (any_pattern && !compiler.slot_fast_path) {
+            pattern_abort = true;
+            return nullptr;
+        }
+        if (any_pattern) {
+            std::vector<uint32_t> roots((size_t)code->nparams, UINT32_MAX);
+            int index = 0;
+            for (struct symlist *param = code->sl; param;
+                 param = param->next, ++index) {
+                if (!param->has_pattern)
+                    continue;
+                struct ast *pattern = symlist_pattern_ast(param);
+                if (!pattern) {
+                    /* The AST matcher already released this pattern. */
+                    pattern_abort = true;
+                    return nullptr;
+                }
+                uint32_t root = compiler.add_pattern(pattern);
+                if (!compiler.ok || root == UINT32_MAX) {
+                    pattern_abort = true;
+                    return nullptr;
+                }
+                std::vector<std::string> bindings;
+                compiler.collect_pattern_bindings(pattern, bindings);
+                compiler.attach_pattern_slots(root, bindings, false);
+                if ((size_t)index < roots.size())
+                    roots[(size_t)index] = root;
+            }
+            compiler.proto.param_patterns = std::move(roots);
+            compiler.proto.param_patterns_bound = true;
+        }
+    }
+
     compiler.compile(body);
     if (!compiler.ok) {
         error = compiler.error.empty() ? "cannot compile function"
@@ -3700,4 +3756,23 @@ ProtoPtr skein_compile_function_body(struct function_code *code,
     if (!finalize_proto(compiler.proto, error))
         return nullptr;
     return std::make_shared<const Proto>(std::move(compiler.proto));
+}
+
+} // namespace
+
+ProtoPtr skein_compile_function_body(struct function_code *code,
+                                     const std::string &module,
+                                     std::string &error) {
+    bool pattern_abort = false;
+    std::string pattern_error;
+    ProtoPtr proto = compile_function_body_impl(
+        code, module, true, pattern_abort, pattern_error);
+    if (proto)
+        return proto;
+    if (!pattern_abort) {
+        error = pattern_error;
+        return nullptr;
+    }
+    return compile_function_body_impl(code, module, false, pattern_abort,
+                                      error);
 }

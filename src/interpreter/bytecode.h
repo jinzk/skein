@@ -442,6 +442,17 @@ struct Proto {
     std::vector<std::vector<DeferCapture>> defer_captures;
 
     std::vector<std::string> param_names;
+    /*
+     * Parallel to the parameter list: root pattern index used to destructure
+     * a parameter, or UINT32_MAX for a plain parameter.
+     */
+    std::vector<uint32_t> param_patterns;
+    /*
+     * True when every destructuring parameter is bound into slots at frame
+     * entry.  Only then may the VM enter a fast frame for the function;
+     * otherwise it uses the AST call path, which binds patterns itself.
+     */
+    bool param_patterns_bound = false;
     std::vector<std::string> upvalues;
     std::vector<SlotDesc> slots;
     std::vector<DeclDesc> decls;

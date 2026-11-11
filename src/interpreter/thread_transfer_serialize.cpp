@@ -2296,6 +2296,11 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     for (const std::string &name : proto.upvalues)
         out.str(name);
 
+    out.u8(proto.param_patterns_bound ? 1 : 0);
+    out.u32((uint32_t)proto.param_patterns.size());
+    for (uint32_t root : proto.param_patterns)
+        out.u32(root);
+
     out.u32((uint32_t)proto.slots.size());
     for (const skein::bc::SlotDesc &slot : proto.slots) {
         out.str(slot.name);
@@ -2747,6 +2752,23 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             return false;
         }
         proto->upvalues.push_back(std::move(name));
+    }
+
+    uint8_t param_patterns_bound = 0;
+    uint32_t param_pattern_count = 0;
+    if (!in.u8(param_patterns_bound) || !in.count(param_pattern_count)) {
+        error = in.error;
+        return false;
+    }
+    proto->param_patterns_bound = param_patterns_bound != 0;
+    proto->param_patterns.reserve(param_pattern_count);
+    for (uint32_t i = 0; i < param_pattern_count; ++i) {
+        uint32_t root = 0;
+        if (!in.u32(root)) {
+            error = in.error;
+            return false;
+        }
+        proto->param_patterns.push_back(root);
     }
 
     uint32_t slot_count = 0;

@@ -167,20 +167,23 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 VM 的 `match` pattern 已经编译为 `PatternDesc` 描述树，不再在运行时遍历
 pattern AST；literal pattern 的表达式会编译为独立 Proto 执行。
 
-参数 destructuring pattern 已经编译为 `PatternDesc`，由
-`skein_vm_match_parameter_pattern()` 在参数绑定时原生匹配；匹配成功后，
-对应参数的 pattern AST 会从 L2 side table 释放。
+参数 destructuring pattern 已经编译为 `PatternDesc`：函数体 Proto 在
+`param_patterns` 中记录每个参数的 pattern 根，并在编译期分配 binding
+slots。VM fast frame 和 JIT frame 进入时直接把匹配结果写入 slot；AST
+调用路径从已绑定的 scope 复制到 slot。`skein_vm_match_parameter_pattern()`
+仍负责 pattern 集合的编译与匹配。
 
 仍使用 AST 的运行时代码：
 
 - 函数体 AST（编译失败、`--no-vm` 或 `SKEIN_KEEP_AST=1` 时保留）；
 - 默认参数 AST（默认参数 Proto 编译失败时用于回退）；
-- 参数 pattern AST（编译失败或 `SKEIN_KEEP_AST=1` 时保留）。
+- 参数 pattern AST（始终保留：函数体 Proto 编译和 AST 回退都可能用到）。
 
 `function_code` 与 `symlist` 本身不再包含 AST 指针。函数体、默认参数和
 参数 pattern 的 AST 分别保存在 `ast.cpp` 的 `function_bodies` 和
-`symlist_metadata_map` side table 中；VM 成功编译后释放对应 AST，
-`symlist::has_default` / `has_pattern` 仍保留签名语义。
+`symlist_metadata_map` side table 中；函数体和默认参数编译成功后释放对应
+AST，参数 pattern AST 保留；`symlist::has_default` / `has_pattern` 仍保留
+签名语义。
 
 默认参数表达式已经编译为独立 Proto，由 `fill_default_arguments` 在调用时
 通过 VM 执行，并复用参数 fast path。
@@ -313,19 +316,19 @@ struct Instr {
   `CALL` / `TAIL_CALL` 的小参数数量使用栈内缓冲，非 fast path 调用
   仍受 C++ 递归和每帧分配拖累。
 - 常规语法结构已经全部有字节码路径，编译失败时整条语句/函数回退 AST。
-- 函数体 AST 在成功编译后释放；默认参数表达式和参数 destructuring pattern
-  成功编译后也会释放对应 AST。`function_code` / `symlist` 不再持有 AST
-  指针，回退用的 AST 保存在 L2 side table；`function_code->sl` 只保留
-  参数/trait 签名元数据。
-- fast frame 支持普通函数以及 handler、defer、iterator；generator、
-  默认参数、variadic、method 和参数 pattern 调用仍回退
-  `call_value_args` / C++ 递归。
+- 函数体 AST 在成功编译后释放；默认参数表达式成功编译后也会释放对应
+  AST。参数 destructuring pattern 的 AST 保留，供函数体 Proto 编译和 AST
+  回退使用。`function_code` / `symlist` 不再持有 AST 指针，回退用的 AST
+  保存在 L2 side table；`function_code->sl` 只保留参数/trait 签名元数据。
+- fast frame 支持普通函数以及 handler、defer、iterator，参数 pattern 在
+  编译期得到 binding slot 后同样进入 fast frame；generator、默认参数、
+  variadic 和 method 调用仍回退 `call_value_args` / C++ 递归。
 - 全局名字 IC 生效后，`fib(30)` 与 AST 基本持平；已解析的全局访问使用
   显式 `LOAD_GLOBAL` / `STORE_GLOBAL` 槽位；`obj.field` 的
   per-site 字段/方法 IC 已覆盖 struct/enum；dict 索引读取使用
   `GET_INDEX_CACHED` per-site 缓存；索引写入使用 `IndexDesc` 中已解析的
-  slot / param / upvalue / global 基址；默认参数、variadic、
-  method、参数 pattern 等非 fast path 调用仍有 per-call 分配开销。
+  slot / param / upvalue / global 基址；默认参数、variadic、method 等
+  非 fast path 调用仍有 per-call 分配开销。
 - 顶层块内函数、方法闭包仍使用名字查找；默认参数子 Proto 暂未使用
   upvalue 索引；defer 子 Proto 已改为显式 upvalue 索引。
 - TCO 当前只覆盖无 spread 的普通尾调用；有 defer / handler / iterator

@@ -53,8 +53,9 @@ Go/No-Go 标准见 §10。
 - slot 复合赋值与自增自减：`COMPOUND_SLOT` / `INCDEC_SLOT`；
 - global 复合赋值与自增自减：`COMPOUND_GLOBAL` / `INCDEC_GLOBAL`；
 - 一元运算：`NEG` / `NOT` / `BIT_NOT`；
-- pattern 参数：JIT 前绑定函数 scope 与 destructuring 名字，覆盖
-  `pattern_bench`；
+- pattern 参数：函数 body proto 在参数位置记录 PatternDesc 与 binding
+  slots，JIT / VM fast frame 进入时直接写入 frame slot；AST 调用路径从
+  已绑定的 scope 复制到 slot。覆盖 `pattern_bench`；
 - params 直接 frame 化：eligible fast frame 不再创建参数 symbol；
 - upvalue cell：captures 使用显式 open/closed `upvalue_cell`，支持直接
   param/slot 捕获，帧退出时 close；

@@ -1805,7 +1805,7 @@ def run_cases():
         "  let stale = 0;\n"
         '  stale = stale + count_stale(std.process, ["run", "spawn"]);\n'
         "  stale = stale + count_stale(std.thread, [\"spawn\", "
-        '"spawn_with_channel", "spawn_with_duplex"]);\n'
+        '"spawn_with_channel", "spawn_with_duplex", "unbounded_channel"]);\n'
         '  stale = stale + count_stale(std.io, ["read_async", "write_async"]);\n'
         "  stale = stale + count_stale(std.net, [\"tcp_connect_async\", "
         '"tcp_listen_async", "accept_async", "send_async", "recv_async", '
@@ -1823,9 +1823,11 @@ def run_cases():
         'str(std.dict.has(std.http, "get_task")) + "," + '
         'str(std.dict.has(std.websocket, "connect_task")) + "," + '
         'str(std.dict.has(std.ffi, "call_task")));\n'
+        "  let ch = std.thread.Channel.unbounded();\n"
+        '  println("unbounded=" + str(ch.capacity));\n'
         "}\n"
         "main();\n",
-        stdout="stale=0\nprimary=1,1,1,1,1,1,1\n",
+        stdout="stale=0\nprimary=1,1,1,1,1,1,1\nunbounded=-1\n",
     )
     check(
         "std list transformations",

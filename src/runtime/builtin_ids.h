@@ -381,6 +381,8 @@ enum bifs {
     B_worker_stats,
     B_thread_message_from,
     B_thread_channel,
+    /* Legacy unbounded_channel alias ID: the std.thread name was removed, but
+     * the value stays so later IDs keep their numbering. */
     B_thread_unbounded_channel,
     B_thread_pool,
     /* Legacy spawn alias IDs: their std.thread names were removed, but the

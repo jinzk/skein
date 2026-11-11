@@ -4441,7 +4441,7 @@ struct value_t *call_thread_channel_builtin(
         }
         case B_thread_unbounded_channel:
             if (!args.empty()) {
-                yyerror("std.thread.unbounded_channel expects no arguments");
+                yyerror("std.thread.Channel.unbounded expects no arguments");
                 return nullptr;
             }
             return thread_channel(-1);

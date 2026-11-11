@@ -390,7 +390,6 @@ value_t *build_namespace_impl() {
     });
     value_t *thread_module = builtin_module({
         {"Channel", B_thread_channel},
-        {"unbounded_channel", B_thread_unbounded_channel},
         {"pool", B_thread_pool},
         {"spawn_script", B_thread_spawn_script},
         {"spawn_source", B_thread_spawn_source},

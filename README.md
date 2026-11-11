@@ -3172,7 +3172,6 @@ std.worker.wait
 std.worker.shutdown
 std.worker.stats
 
-std.thread.unbounded_channel
 std.thread.pool
 std.thread.spawn_script
 std.thread.spawn_source
@@ -4987,7 +4986,6 @@ std.thread.Channel(capacity) -> channel
 std.thread.Channel.bounded(capacity) -> channel
 std.thread.Channel.new(capacity) -> channel
 std.thread.Channel.unbounded() -> channel
-std.thread.unbounded_channel() -> channel        # 兼容别名
 std.thread.Message.from(payload[, handles]) -> message
 
 channel.send(message)
@@ -5011,9 +5009,9 @@ channel.stats -> dict
 
 - `capacity >= 1` 为有界队列；`capacity == 0` 为 rendezvous；`capacity == -1`
   为无界队列；
-- `Channel.unbounded()` / `unbounded_channel()` 返回同一类无界 Channel，
-  `capacity == -1`；`Channel.bounded(n)` / `Channel.new(n)` 等价于
-  `Channel(n)`；
+- `Channel.unbounded()` 返回无界 Channel，`capacity == -1`；
+  `Channel.bounded(n)` / `Channel.new(n)` 等价于 `Channel(n)`；
+  旧名 `unbounded_channel()` 已移除；
 - Channel 只接收 `std.thread.Message`；
 - `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
 - payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；

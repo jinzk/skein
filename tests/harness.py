@@ -3365,7 +3365,7 @@ def check_extended_stdlib():
         check(
             "std.thread unbounded channel",
             "import std;\n"
-            'let ch = std.thread.unbounded_channel();\n'
+            'let ch = std.thread.Channel.unbounded();\n'
             'for (let i = 0; i < 5; i++) {\n'
             '  ch.send(std.thread.Message.from(i));\n'
             '}\n'

@@ -371,6 +371,9 @@ value_t *build_namespace_impl() {
             {"kill", B_process_kill},
             {"close", B_process_close},
             {"pid", B_process_pid},
+            {"rss", B_process_rss},
+            {"children", B_process_children},
+            {"tree_rss", B_process_tree_rss},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("worker"),

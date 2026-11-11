@@ -21,8 +21,24 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <psapi.h>
+#include <tlhelp32.h>
+#elif defined(__linux__)
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+#elif defined(__APPLE__)
+#include <libproc.h>
+#endif
 
 namespace {
 
@@ -91,6 +107,134 @@ struct process_resource {
         delete stderr_pipe;
     }
 };
+
+bool process_memory_rss(long long pid, unsigned long long &rss) {
+#if defined(_WIN32)
+    if (pid <= 0)
+        return false;
+    HANDLE handle =
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!handle)
+        return false;
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof(counters);
+    using get_info_fn =
+        BOOL(WINAPI *)(HANDLE, PROCESS_MEMORY_COUNTERS *, DWORD);
+    static get_info_fn get_info = []() -> get_info_fn {
+        HMODULE module = GetModuleHandleW(L"kernel32.dll");
+        return module ? (get_info_fn)GetProcAddress(module,
+                                                     "K32GetProcessMemoryInfo")
+                      : nullptr;
+    }();
+    const bool ok =
+        get_info &&
+        get_info(handle, &counters, (DWORD)sizeof(counters)) != 0;
+    CloseHandle(handle);
+    if (!ok)
+        return false;
+    rss = (unsigned long long)counters.WorkingSetSize;
+    return true;
+#elif defined(__linux__)
+    if (pid <= 0)
+        return false;
+    std::ifstream status("/proc/" + std::to_string(pid) + "/status");
+    if (!status)
+        return false;
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("VmRSS:", 0) != 0)
+            continue;
+        long long kb = 0;
+        if (std::sscanf(line.c_str(), "VmRSS: %lld kB", &kb) != 1)
+            return false;
+        rss = (unsigned long long)kb * 1024ULL;
+        return true;
+    }
+    return false;
+#elif defined(__APPLE__)
+    struct proc_taskinfo info;
+    const int size = proc_pidinfo((int)pid, PROC_PIDTASKINFO, 0, &info,
+                                  (int)sizeof(info));
+    if (size != (int)sizeof(info))
+        return false;
+    rss = (unsigned long long)info.pti_resident_size;
+    return true;
+#else
+    (void)pid;
+    (void)rss;
+    return false;
+#endif
+}
+
+bool process_child_pids(long long pid, std::vector<long long> &children) {
+#if defined(_WIN32)
+    if (pid <= 0)
+        return false;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return false;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if ((long long)entry.th32ParentProcessID == pid)
+                children.push_back((long long)entry.th32ProcessID);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return true;
+#elif defined(__linux__)
+    if (pid <= 0)
+        return false;
+    namespace fs = std::filesystem;
+    std::error_code error;
+    fs::directory_iterator it("/proc", error);
+    fs::directory_iterator end;
+    while (!error && it != end) {
+        const std::string name = it->path().filename().string();
+        const bool numeric =
+            !name.empty() &&
+            std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+                return std::isdigit(ch) != 0;
+            });
+        if (numeric) {
+            std::ifstream stat_file(it->path() / "stat");
+            std::string stat;
+            if (stat_file && std::getline(stat_file, stat)) {
+                const size_t close = stat.rfind(')');
+                if (close != std::string::npos && close + 2 < stat.size()) {
+                    char state = 0;
+                    long long ppid = 0;
+                    if (std::sscanf(stat.c_str() + close + 2, "%c %lld",
+                                    &state, &ppid) == 2 &&
+                        ppid == pid)
+                        children.push_back(std::stoll(name));
+                }
+            }
+        }
+        it.increment(error);
+    }
+    return true;
+#elif defined(__APPLE__)
+    if (pid <= 0)
+        return false;
+    int count = proc_listchildpids((int)pid, nullptr, 0);
+    if (count <= 0)
+        return count == 0;
+    std::vector<pid_t> pids((size_t)count);
+    const int bytes = (int)(pids.size() * sizeof(pid_t));
+    count = proc_listchildpids((int)pid, pids.data(), bytes);
+    if (count < 0)
+        return false;
+    for (int i = 0; i < count; ++i)
+        children.push_back((long long)pids[(size_t)i]);
+    return true;
+#else
+    (void)pid;
+    (void)children;
+    return false;
+#endif
+}
 
 std::vector<std::shared_ptr<process_resource>> &process_registry() {
     static thread_local std::vector<std::shared_ptr<process_resource>> registry;
@@ -644,6 +788,9 @@ const char *process_name(int functype) {
         case B_process_kill: return "std.process.kill";
         case B_process_close: return "std.process.close";
         case B_process_pid: return "std.process.pid";
+        case B_process_rss: return "std.process.rss";
+        case B_process_children: return "std.process.children";
+        case B_process_tree_rss: return "std.process.tree_rss";
         default: return "std.process";
     }
 }
@@ -668,6 +815,34 @@ bool get_process(const value_t *value, std::shared_ptr<process_resource> &out) {
             }
         }
     }
+    return false;
+}
+
+bool resolve_process_target(const value_t *value, const char *name,
+                            long long &pid, bool &exited) {
+    exited = false;
+    if (!value) {
+        yyerror("%s expects a process handle or pid", name);
+        return false;
+    }
+    if (value->type == T_int) {
+        pid = ((const int_value_t *)value)->value;
+        if (pid <= 0) {
+            yyerror("%s expects a positive pid", name);
+            return false;
+        }
+        return true;
+    }
+    if (value->type == T_dict || value->type == T_userdata) {
+        std::shared_ptr<process_resource> process;
+        if (get_process(value, process) && process &&
+            process->process_initialized) {
+            pid = (long long)process->process.pid;
+            exited = process->exited;
+            return true;
+        }
+    }
+    yyerror("%s expects a process handle or pid", name);
     return false;
 }
 
@@ -1231,6 +1406,83 @@ value_t *call_process_spawn_builtin(
             return NULL;
         }
         return newintval((long long)process->process.pid);
+    }
+
+    if (functype == B_process_rss) {
+        if (args.size() != 1) {
+            yyerror("%s expects 1 argument, got %d", name,
+                    (int)args.size());
+            return NULL;
+        }
+        long long pid = 0;
+        bool exited = false;
+        if (!resolve_process_target(args[0], name, pid, exited))
+            return NULL;
+        if (exited)
+            return newintval(0);
+        unsigned long long rss = 0;
+        if (!process_memory_rss(pid, rss)) {
+            yyerror("%s: cannot read memory for process %lld", name, pid);
+            return NULL;
+        }
+        return newintval((long long)rss);
+    }
+
+    if (functype == B_process_children) {
+        if (args.size() != 1) {
+            yyerror("%s expects 1 argument, got %d", name,
+                    (int)args.size());
+            return NULL;
+        }
+        long long pid = 0;
+        bool exited = false;
+        if (!resolve_process_target(args[0], name, pid, exited))
+            return NULL;
+        std::vector<long long> children;
+        if (!exited && !process_child_pids(pid, children)) {
+            yyerror("%s: cannot enumerate children of process %lld", name,
+                    pid);
+            return NULL;
+        }
+        struct list_value_t *list = newlistval();
+        for (long long child : children)
+            list->payload->items.push_back(newintval(child));
+        return (value_t *)list;
+    }
+
+    if (functype == B_process_tree_rss) {
+        if (args.size() != 1) {
+            yyerror("%s expects 1 argument, got %d", name,
+                    (int)args.size());
+            return NULL;
+        }
+        long long pid = 0;
+        bool exited = false;
+        if (!resolve_process_target(args[0], name, pid, exited))
+            return NULL;
+        if (exited)
+            return newintval(0);
+        unsigned long long total = 0;
+        std::vector<long long> pending{pid};
+        std::unordered_set<long long> visited;
+        while (!pending.empty()) {
+            const long long current = pending.back();
+            pending.pop_back();
+            if (!visited.insert(current).second)
+                continue;
+            if (visited.size() > 4096)
+                break;
+            unsigned long long rss = 0;
+            if (process_memory_rss(current, rss))
+                total += rss;
+            std::vector<long long> children;
+            if (process_child_pids(current, children)) {
+                for (long long child : children)
+                    if (visited.count(child) == 0)
+                        pending.push_back(child);
+            }
+        }
+        return newintval((long long)total);
     }
 
     yyerror("unknown process function");

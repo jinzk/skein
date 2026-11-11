@@ -2703,7 +2703,12 @@ std.process.wait(process[, timeout_ms]) → status
 std.process.kill(process[, signal])
 std.process.close(process)
 std.process.pid(process)
+std.process.rss(process_or_pid) → int
+std.process.children(process_or_pid) → list[int]
+std.process.tree_rss(process_or_pid) → int
 ```
+
+`rss` / `tree_rss` 返回字节数；已退出的进程句柄返回 `0`。
 
 `options` 支持 `args`、`env`、`cwd`、`stderr`（`pipe` 或 `inherit`）。
 `spawn_command` 返回包含 `pid`、`stdin`、`stdout`、`stderr` 和 `handle` 的 dict；
@@ -4777,6 +4782,9 @@ std.process.wait
 std.process.kill
 std.process.close
 std.process.pid
+std.process.rss
+std.process.children
+std.process.tree_rss
 
 std.process.run_entry(blob, message[, options]) -> envelope
 std.process.spawn_entry(blob, message[, options]) -> process

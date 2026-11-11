@@ -868,6 +868,16 @@ if(BUILD_TESTING)
         LABELS "core"
         TIMEOUT 300
       )
+      add_test(
+        NAME process_memory_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/process_memory.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(process_memory_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 120
+      )
       if(TARGET skein_ffi_shim)
         add_test(
           NAME env_ffi_stress_test

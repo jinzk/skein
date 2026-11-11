@@ -3161,6 +3161,9 @@ std.process.wait
 std.process.kill
 std.process.close
 std.process.pid
+std.process.rss
+std.process.children
+std.process.tree_rss
 
 std.worker.pool
 std.worker.call
@@ -4623,7 +4626,14 @@ std.process.wait(process[, timeout_ms]) → status
 std.process.kill(process[, signal])
 std.process.close(process)
 std.process.pid(process)
+std.process.rss(process_or_pid) → int（字节）
+std.process.children(process_or_pid) → list[int]
+std.process.tree_rss(process_or_pid) → int（字节）
 ```
+
+`rss` 返回进程当前 RSS（字节）；进程句柄已退出时返回 `0`。
+`children` 返回直接子进程 pid；`tree_rss` 汇总进程及其所有后代的 RSS，
+用于进程池内存观测。参数可以是进程句柄或正整数 pid。
 
 旧名 `std.process.spawn` 已移除；请使用 `spawn_command`。
 

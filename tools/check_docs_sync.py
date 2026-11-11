@@ -91,6 +91,7 @@ NON_FUNCTION_EXPORTS = {
 # the *_task primary names.
 DEPRECATED_ALIASES = {
     "process": {"run", "spawn"},
+    "thread": {"spawn", "spawn_with_channel", "spawn_with_duplex"},
     "io": {"read_async", "write_async"},
     "net": {"tcp_connect_async", "tcp_listen_async", "accept_async",
             "send_async", "recv_async", "resolve_async", "shutdown_async"},

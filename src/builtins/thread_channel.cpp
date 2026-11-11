@@ -3417,46 +3417,29 @@ void thread_entry_main(
 struct value_t *thread_spawn_function(
     const std::vector<struct value_t *> &args);
 
-struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
+struct value_t *thread_spawn_script(
+    const std::vector<struct value_t *> &args) {
     if (args.size() < 2 || args.size() > 3 ||
-        args[1]->type != T_userdata) {
-        yyerror("std.thread.spawn expects script or thread func, Message "
-                "and optional options");
-        return nullptr;
-    }
-    if (args[0]->type == T_func) {
-        const func_value_t *function = (const func_value_t *)args[0];
-        if (!function->def || !function->def->code ||
-            !function->def->code->is_thread_entry) {
-            yyerror("std.thread.spawn function must be declared thread func");
-            return nullptr;
-        }
-        if (args.size() != 2) {
-            yyerror("std.thread.spawn thread func does not accept options");
-            return nullptr;
-        }
-        return thread_spawn_function(args);
-    }
-    if (args[0]->type != T_string) {
-        yyerror("std.thread.spawn expects script or thread func, Message "
+        args[0]->type != T_string || args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn_script expects script, Message "
                 "and optional options");
         return nullptr;
     }
     std::shared_ptr<message_state> message;
     if (!get_message_state(args[1], message)) {
-        yyerror("std.thread.spawn expects a Message");
+        yyerror("std.thread.spawn_script expects a Message");
         return nullptr;
     }
     std::string entry = "main";
     if (args.size() == 3) {
         if (args[2]->type != T_dict) {
-            yyerror("std.thread.spawn options must be a dict");
+            yyerror("std.thread.spawn_script options must be a dict");
             return nullptr;
         }
         struct value_t *entry_value = dict_get_handle(args[2], "entry");
         if (entry_value) {
             if (entry_value->type != T_string) {
-                yyerror("std.thread.spawn entry must be a string");
+                yyerror("std.thread.spawn_script entry must be a string");
                 return nullptr;
             }
             entry = ((string_value_t *)entry_value)->value;
@@ -3473,7 +3456,7 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
                                     thread_env_capture());
     } catch (const std::exception &) {
         freeval(argument);
-        yyerror("std.thread.spawn could not start thread");
+        yyerror("std.thread.spawn_script could not start thread");
         return nullptr;
     }
 
@@ -3487,11 +3470,33 @@ struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
         lock.unlock();
         if (state->thread.joinable())
             state->thread.join();
-        yyerror("std.thread.spawn: %s", error.c_str());
+        yyerror("std.thread.spawn_script: %s", error.c_str());
         return nullptr;
     }
     lock.unlock();
     return new_thread_value(std::move(state));
+}
+
+struct value_t *thread_spawn(const std::vector<struct value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3 ||
+        args[1]->type != T_userdata) {
+        yyerror("std.thread.spawn expects script or function, Message "
+                "and optional options");
+        return nullptr;
+    }
+    if (args[0]->type == T_func) {
+        if (args.size() != 2) {
+            yyerror("std.thread.spawn function form does not accept options");
+            return nullptr;
+        }
+        return thread_spawn_function(args);
+    }
+    if (args[0]->type != T_string) {
+        yyerror("std.thread.spawn expects script or function, Message "
+                "and optional options");
+        return nullptr;
+    }
+    return thread_spawn_script(args);
 }
 
 static struct value_t *thread_spawn_payload(
@@ -3677,18 +3682,18 @@ struct value_t *thread_spawn_with_channel(
     if (args.size() < 3 || args.size() > 4 ||
         args[0]->type != T_string || args[1]->type != T_userdata ||
         args[2]->type != T_int) {
-        yyerror("std.thread.spawn_with_channel expects script, Message, "
+        yyerror("std.thread.spawn_script_with_channel expects script, Message, "
                 "capacity and optional options");
         return nullptr;
     }
     long long capacity = ((struct int_value_t *)args[2])->value;
     if (capacity <= 0) {
-        yyerror("std.thread.spawn_with_channel capacity must be >= 1");
+        yyerror("std.thread.spawn_script_with_channel capacity must be >= 1");
         return nullptr;
     }
     std::shared_ptr<message_state> message;
     if (!get_message_state(args[1], message)) {
-        yyerror("std.thread.spawn_with_channel expects a Message");
+        yyerror("std.thread.spawn_script_with_channel expects a Message");
         return nullptr;
     }
 
@@ -3725,18 +3730,18 @@ struct value_t *thread_spawn_with_duplex(
     if (args.size() < 3 || args.size() > 4 ||
         args[0]->type != T_string || args[1]->type != T_userdata ||
         args[2]->type != T_int) {
-        yyerror("std.thread.spawn_with_duplex expects script, Message, "
+        yyerror("std.thread.spawn_script_with_duplex expects script, Message, "
                 "capacity and optional options");
         return nullptr;
     }
     long long capacity = ((struct int_value_t *)args[2])->value;
     if (capacity <= 0) {
-        yyerror("std.thread.spawn_with_duplex capacity must be >= 1");
+        yyerror("std.thread.spawn_script_with_duplex capacity must be >= 1");
         return nullptr;
     }
     std::shared_ptr<message_state> message;
     if (!get_message_state(args[1], message)) {
-        yyerror("std.thread.spawn_with_duplex expects a Message");
+        yyerror("std.thread.spawn_script_with_duplex expects a Message");
         return nullptr;
     }
 
@@ -4166,14 +4171,6 @@ bool thread_entry_encode(struct value_t *value, std::string &bytes,
         error = "expected a function";
         return false;
     }
-    const function_code *code = function->def->code.get();
-    if (code->is_process_entry &&
-        (code->is_generator || code->nparams != 1 ||
-         code->required_params != 1 || code->variadic)) {
-        error = "process func entry must be a non-generator function with one "
-                "ctx parameter";
-        return false;
-    }
     thread_payload_builder builder;
     std::shared_ptr<thread_transfer_function> entry;
     std::vector<std::pair<std::string, thread_transfer_value>> globals;
@@ -4433,6 +4430,8 @@ struct value_t *call_thread_channel_builtin(
             return thread_pool(args);
         case B_thread_spawn:
             return thread_spawn(args);
+        case B_thread_spawn_script:
+            return thread_spawn_script(args);
         case B_thread_spawn_source:
             return thread_spawn_source(args);
         case B_thread_spawn_function:
@@ -4484,8 +4483,10 @@ struct value_t *call_thread_channel_builtin(
         case B_thread_duplex:
             return thread_duplex(args);
         case B_thread_spawn_with_channel:
+        case B_thread_spawn_script_with_channel:
             return thread_spawn_with_channel(args);
         case B_thread_spawn_with_duplex:
+        case B_thread_spawn_script_with_duplex:
             return thread_spawn_with_duplex(args);
         case B_thread_debug_counts:
             return thread_debug_counts(args);

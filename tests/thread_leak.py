@@ -39,14 +39,14 @@ def main():
             f'let t2 = std.thread.spawn_source(src, '
             f'std.thread.Message.from({{"n": 3}}));\n'
             "let joined2 = t2.join();\n"
-            "thread func proto_worker(ctx) {\n"
+            "func proto_worker(ctx) {\n"
             '    return {"v": ctx.payload["n"] + 3};\n'
             "}\n"
             'let t3 = std.thread.spawn(proto_worker, '
             'std.thread.Message.from({"n": 3}));\n'
             "let joined3 = t3.join();\n"
             "func make_worker(n) {\n"
-            "    thread func inner(ctx) {\n"
+            "    func inner(ctx) {\n"
             '        return {"v": ctx.payload["n"] + n};\n'
             "    }\n"
             "    return inner;\n"
@@ -57,7 +57,7 @@ def main():
             "let joined4 = t4.join();\n"
             "func make_data() {\n"
             "    let data = [1, 2, 3];\n"
-            "    thread func inner(ctx) {\n"
+            "    func inner(ctx) {\n"
             "        return data;\n"
             "    }\n"
             "    return inner;\n"
@@ -72,7 +72,7 @@ def main():
             "let adder = make_adder(3);\n"
             "func helper(x) { return x * 2; }\n"
             "func make_transfer(f) {\n"
-            "    thread func inner(ctx) {\n"
+            "    func inner(ctx) {\n"
             '        return {"v": f(ctx.payload["n"]) + '
             'helper(ctx.payload["n"])};\n'
             "    }\n"
@@ -90,7 +90,7 @@ def main():
             "impl MB { func add(self, n) { return self.x + n; } }\n"
             "let mb = MB {};\n"
             "func make_method_worker(v) {\n"
-            "    thread func inner(ctx) {\n"
+            "    func inner(ctx) {\n"
             "        let fresh = MB {};\n"
             '        return {"v": v.add(ctx.payload["n"]) + fresh.x};\n'
             "    }\n"
@@ -150,7 +150,7 @@ def main():
                 "import std;\n"
                 "import leakpkg;\n"
                 "func make_worker() {\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 '        return {"v": leakpkg.calc(ctx.payload["n"])};\n'
                 "    }\n"
                 "    return worker;\n"

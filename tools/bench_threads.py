@@ -96,7 +96,7 @@ def pool_driver_source(worker, workers, jobs, batch):
 def channel_driver_source(messages):
     return (
         "import std;\n"
-        "thread func echo(ctx) {\n"
+        "func echo(ctx) {\n"
         '  let ch = ctx.handles["ch"];\n'
         "  while (true) {\n"
         "    let m = ch.recv(10000);\n"
@@ -106,7 +106,7 @@ def channel_driver_source(messages):
         "  }\n"
         "}\n"
         "let ch = std.thread.Channel.bounded(1);\n"
-        "let worker = std.thread.spawn(echo, "
+        "let worker = std.thread.spawn_function(echo, "
         'std.thread.Message.from({"n": 0}, {"ch": ch}));\n'
         "let t0 = std.time.monotonic_ms();\n"
         f"for (let i = 0; i < {messages}; i = i + 1) {{\n"
@@ -123,13 +123,13 @@ def channel_driver_source(messages):
 def spawn_driver_source(threads):
     return (
         "import std;\n"
-        "thread func quick(ctx) {\n"
+        "func quick(ctx) {\n"
         '  return {"n": ctx.payload["n"]};\n'
         "}\n"
         "let total = 0;\n"
         "let t0 = std.time.monotonic_ms();\n"
         f"for (let i = 0; i < {threads}; i = i + 1) {{\n"
-        '  let t = std.thread.spawn(quick, '
+        '  let t = std.thread.spawn_function(quick, '
         'std.thread.Message.from({"n": i}));\n'
         "  let r = t.join();\n"
         '  if (r["ok"]) { total = total + r["value"]["n"]; }\n'

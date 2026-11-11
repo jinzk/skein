@@ -693,7 +693,7 @@ def check_extended_stdlib():
     check(
         "std process encoded entry",
         "import std;\n"
-        "thread func worker(ctx) {\n"
+        "func worker(ctx) {\n"
         '  return {"v": ctx.payload["n"] + 1};\n'
         "}\n"
         "let blob = std.entry.encode(worker);\n"
@@ -705,7 +705,7 @@ def check_extended_stdlib():
         "print(std.process.pid(p) > 0); print(\"|\");\n"
         "let r2 = std.process.result(p, 10000);\n"
         'print(r2["value"]["v"]); print("|");\n'
-        "thread func bad(ctx) { missing_function(); }\n"
+        "func bad(ctx) { missing_function(); }\n"
         "let bad_blob = std.entry.encode(bad);\n"
         "let r3 = std.process.run_entry(bad_blob, "
         "std.thread.Message.from({}));\n"
@@ -714,9 +714,9 @@ def check_extended_stdlib():
     )
 
     check(
-        "std process func entry",
+        "std process entry",
         "import std;\n"
-        "process func entry(ctx) {\n"
+        "func entry(ctx) {\n"
         '  return {"v": ctx.payload["n"] * 2};\n'
         "}\n"
         "let blob = std.entry.encode(entry);\n"
@@ -731,18 +731,17 @@ def check_extended_stdlib():
     )
 
     check(
-        "std process func entry requires one ctx parameter",
+        "std entry requires one parameter",
         "import std;\n"
-        "process func bad() { return 1; }\n"
+        "func bad() { return 1; }\n"
         "std.entry.encode(bad);\n",
-        stderr="process func entry must be a non-generator function with one "
-               "ctx parameter",
+        stderr="entry must be a non-generator function with one parameter",
     )
 
     check(
-        "std process function names",
+        "std function names",
         "import std;\n"
-        "process func entry(ctx) {\n"
+        "func entry(ctx) {\n"
         '  return {"v": ctx.payload["n"] * 2};\n'
         "}\n"
         "let r = std.process.run_function(entry, "
@@ -2838,7 +2837,7 @@ def check_extended_stdlib():
                 handle.write(
                     "package spawnpkg {\n"
                     "  import std;\n"
-                    f"  let t = std.thread.spawn(\"{spawn_worker_path}\", "
+                    f"  let t = std.thread.spawn_script(\"{spawn_worker_path}\", "
                     'std.thread.Message.from({"x": 41}));\n'
                     "  let r = t.join();\n"
                     '  export let value = r["value"]["x"];\n'
@@ -2882,7 +2881,7 @@ def check_extended_stdlib():
                     "import std;\n"
                     "import threadpkg;\n"
                     "func make_worker() {\n"
-                    "    thread func worker(ctx) {\n"
+                    "    func worker(ctx) {\n"
                     '        return {"v": threadpkg.calc('
                     'ctx.payload["n"])};\n'
                     "    }\n"
@@ -2902,7 +2901,7 @@ def check_extended_stdlib():
                 timeout=20,
             )
             assert proc.returncode == 0, (
-                "thread func with imported module failed: "
+                "func with imported module failed: "
                 f"{proc.stdout!r} {proc.stderr!r}"
             )
             assert proc.stdout.strip() == "17", proc.stdout
@@ -2913,7 +2912,7 @@ def check_extended_stdlib():
                     "import std;\n"
                     "import threadpkg;\n"
                     "func make_worker() {\n"
-                    "    thread func worker(ctx) {\n"
+                    "    func worker(ctx) {\n"
                     '        return {"v": threadpkg.calc('
                     'ctx.payload["n"])};\n'
                     "    }\n"
@@ -2970,7 +2969,7 @@ def check_extended_stdlib():
                     "let p = Point { x: 3, y: 4 };\n"
                     "let e = E.A { n: 5 };\n"
                     "func make_worker(pv, ev) {\n"
-                    "    thread func worker(ctx) {\n"
+                    "    func worker(ctx) {\n"
                     "        let q = Point {};\n"
                     "        let f = E.A { n: ev.n + 1 };\n"
                     '        return {"x": q.x, "y": q.y, "n": f.n, '
@@ -3038,7 +3037,7 @@ def check_extended_stdlib():
                     "return self.value + x * y + offset; }\n"
                     "}\n"
                     "func make_worker(c) {\n"
-                    "  thread func worker(ctx) {\n"
+                    "  func worker(ctx) {\n"
                     "    return {\"add\": c.add(), \"add2\": c.add(5), "
                     "\"spread\": c.spread(1, 2, 3), "
                     "\"pair\": c.pair({\"x\": 2, \"y\": 3})};\n"
@@ -3093,7 +3092,7 @@ def check_extended_stdlib():
                     "import std;\n"
                     "func twice(x) { return x * 2; }\n"
                     "func make_worker(box) {\n"
-                    "  thread func worker(ctx) {\n"
+                    "  func worker(ctx) {\n"
                     "    let fn = box[\"fn\"];\n"
                     "    let h = box[\"heap\"];\n"
                     "    let nested = box[\"nested\"];\n"
@@ -3182,7 +3181,7 @@ def check_extended_stdlib():
             with open(proto2_encode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    "thread func worker(ctx) {\n"
+                    "func worker(ctx) {\n"
                     "  struct Local { x: int = 1; y: int; }\n"
                     "  impl Local {\n"
                     "    func sum(self, n) { "
@@ -3236,7 +3235,7 @@ def check_extended_stdlib():
             check(
                 "std.thread encode nested functions and defer",
                 "import std;\n"
-                "thread func worker(ctx) {\n"
+                "func worker(ctx) {\n"
                 "  func make_adder(n) {\n"
                 "    return func(x) { return x + n; };\n"
                 "  }\n"
@@ -3472,7 +3471,7 @@ def check_extended_stdlib():
             'let h = std.heap.from_list([3, 1, 2], '
             'func(a, b) { return a < b; });\n'
             'let msg = std.thread.Message.from({"heap": h, "n": 5});\n'
-            'thread func worker(ctx) {\n'
+            'func worker(ctx) {\n'
             '  return {"top": std.heap.peek(ctx.payload["heap"]), '
             '"n": ctx.payload["n"]};\n'
             '}\n'
@@ -3750,9 +3749,9 @@ def check_extended_stdlib():
                 stdout_all=["v1=5|", "v2=15|"],
             )
             check(
-                "std.thread thread func proto entry",
+                "std.thread proto entry",
                 "import std;\n"
-                "thread func worker(ctx) {\n"
+                "func worker(ctx) {\n"
                 '    return {"v": ctx.payload["n"] + 1};\n'
                 "}\n"
                 "let t = std.thread.spawn(worker, "
@@ -3766,7 +3765,7 @@ def check_extended_stdlib():
                 'std.thread.Message.from({"n": 7}));\n'
                 "let r2 = t2.join();\n"
                 'print("f=" + str(r2["value"]["v"]) + "|");\n'
-                "thread func std_worker(ctx) {\n"
+                "func std_worker(ctx) {\n"
                 "    let items = std.list.append([1], "
                 'ctx.payload["n"]);\n'
                 '    return {"v": items[1]};\n'
@@ -3777,10 +3776,10 @@ def check_extended_stdlib():
                 'print("s=" + str(r3["value"]["v"]) + "|");\n'
                 "let base = 10;\n"
                 'let config = {"factor": 3};\n'
-                "thread func glob_worker(ctx) {\n"
+                "func glob_worker(ctx) {\n"
                 '    return {"v": ctx.payload["n"] + base};\n'
                 "}\n"
-                "thread func dict_worker(ctx) {\n"
+                "func dict_worker(ctx) {\n"
                 "    return {\"v\": ctx.payload[\"n\"] * "
                 "config[\"factor\"]};\n"
                 "}\n"
@@ -3793,7 +3792,7 @@ def check_extended_stdlib():
                 'print("g=" + str(r4["value"]["v"]) + ":" + '
                 'str(r5["value"]["v"]) + "|");\n'
                 "let field_helper = func() { return 1; };\n"
-                "thread func shadow_worker(ctx) {\n"
+                "func shadow_worker(ctx) {\n"
                 '    return {"v": ctx.payload["field_helper"] + base};\n'
                 "}\n"
                 "let t6 = std.thread.spawn(shadow_worker, "
@@ -3803,11 +3802,11 @@ def check_extended_stdlib():
                 stdout_all=["v=5|", "f=7|", "s=9|", "g=14:12|", "h=14|"],
             )
             check(
-                "std.thread thread func captures upvalues",
+                "std.thread captures upvalues",
                 "import std;\n"
                 "let base = 10;\n"
                 "func make_worker(n) {\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 '        return {"v": ctx.payload["n"] + n};\n'
                 "    }\n"
                 "    return worker;\n"
@@ -3819,7 +3818,7 @@ def check_extended_stdlib():
                 'print("c=" + str(r["value"]["v"]) + "|");\n'
                 "func make_data() {\n"
                 "    let data = [1, 2, 3];\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 "        return data;\n"
                 "    }\n"
                 "    return worker;\n"
@@ -3831,7 +3830,7 @@ def check_extended_stdlib():
                 'print("d=" + str(r2["value"][1]) + "|");\n'
                 "func make_mut() {\n"
                 '    let state = {"n": 1};\n'
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 '        state["n"] = state["n"] + 1;\n'
                 '        return {"v": state["n"]};\n'
                 "    }\n"
@@ -3846,7 +3845,7 @@ def check_extended_stdlib():
                 "let shadow_fn = func() { return 1; };\n"
                 "func make_shadow(n) {\n"
                 "    let shadow_fn = n + 1;\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 '        return {"v": shadow_fn + base};\n'
                 "    }\n"
                 "    return worker;\n"
@@ -3868,7 +3867,7 @@ def check_extended_stdlib():
                 "let f1 = make_adder(1);\n"
                 "let f2 = make_adder(2);\n"
                 "func make_worker() {\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 "        return {\"v\": f1(ctx.payload[\"n\"]) + "
                 "f2(ctx.payload[\"n\"])};\n"
                 "    }\n"
@@ -3881,7 +3880,7 @@ def check_extended_stdlib():
                 'print("two=" + str(r["value"]["v"]) + "|");\n'
                 "func helper(x) { return x * 2; }\n"
                 "func helper2(x) { return helper(x) + 1; }\n"
-                "thread func global_worker(ctx) {\n"
+                "func global_worker(ctx) {\n"
                 '    return {"v": helper2(ctx.payload["n"])};\n'
                 "}\n"
                 "let t2 = std.thread.spawn(global_worker, "
@@ -3892,7 +3891,7 @@ def check_extended_stdlib():
                 "return odd(n - 1); }\n"
                 "func odd(n) { if (n == 0) { return false; } "
                 "return even(n - 1); }\n"
-                "thread func parity(ctx) {\n"
+                "func parity(ctx) {\n"
                 '    return {"v": even(ctx.payload["n"])};\n'
                 "}\n"
                 "let t3 = std.thread.spawn(parity, "
@@ -3908,7 +3907,7 @@ def check_extended_stdlib():
                 "func make_adder(n) { return func(x) { return x + n; }; }\n"
                 "let f = make_adder(5);\n"
                 "func make_worker(fn) {\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 "        return {\"v\": fn(ctx.payload[\"n\"]) + "
                 "helper(ctx.payload[\"n\"])};\n"
                 "    }\n"
@@ -3934,7 +3933,7 @@ def check_extended_stdlib():
                 "let h = std.heap.from_list([3, 1, 2], "
                 "func(a, b) { return a < b; });\n"
                 "func make_worker(sv, dv, lv, hv) {\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 '        let n = ctx.payload["n"];\n'
                 "        let m = match n { case 1 => 10; "
                 "default => 20; };\n"
@@ -3964,7 +3963,7 @@ def check_extended_stdlib():
                 "import std;\n"
                 "func with_default(x, y = 2) { return x + y; }\n"
                 "func make_worker() {\n"
-                "    thread func worker(ctx) {\n"
+                "    func worker(ctx) {\n"
                 '        return {"v": with_default(ctx.payload["n"])};\n'
                 "    }\n"
                 "    return worker;\n"
@@ -3975,14 +3974,16 @@ def check_extended_stdlib():
                 stderr="cannot transfer a function with default parameters",
             )
             check(
-                "std.thread spawn plain function rejected",
+                "std.thread spawn_function accepts plain function",
                 "import std;\n"
                 "func plain(ctx) {\n"
                 '    return {"v": ctx.payload["n"]};\n'
                 "}\n"
-                "std.thread.spawn(plain, "
-                'std.thread.Message.from({"n": 7}));\n',
-                stderr="must be declared thread func",
+                "let t = std.thread.spawn_function(plain, "
+                'std.thread.Message.from({"n": 7}));\n'
+                'let r = t.join();\n'
+                'print(r["value"]["v"]);\n',
+                stdout="7",
             )
             check(
                 "std.thread spawn error join",
@@ -4054,9 +4055,9 @@ def check_extended_stdlib():
                 )
             channel_worker_path = channel_worker.replace("\\", "\\\\")
             check(
-                "std.thread spawn with duplex",
+                "std.thread spawn_script_with_duplex",
                 "import std;\n"
-                f'let t = std.thread.spawn_with_duplex('
+                f'let t = std.thread.spawn_script_with_duplex('
                 f'"{duplex_worker_path}", '
                 f'std.thread.Message.from({{"v": 41}}), 1);\n'
                 'let reply = t.link.recv(1000);\n'
@@ -4067,9 +4068,9 @@ def check_extended_stdlib():
                 stdout="reply=42|ok=true|",
             )
             check(
-                "std.thread spawn with channel",
+                "std.thread spawn_script_with_channel",
                 "import std;\n"
-                f'let t = std.thread.spawn_with_channel('
+                f'let t = std.thread.spawn_script_with_channel('
                 f'"{channel_worker_path}", '
                 f'std.thread.Message.from({{"v": 21}}), 1);\n'
                 'let reply = t.channel.recv(1000);\n'

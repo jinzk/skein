@@ -727,7 +727,7 @@ bool skein_vm_prepare_thread_proto(
     const struct value_t *function, skein::bc::ProtoPtr &proto,
     std::string &error) {
     if (!function || function->type != T_func) {
-        error = "thread entry must be a function";
+        error = "entry must be a function";
         return false;
     }
     const func_value_t *value = (const func_value_t *)function;
@@ -741,8 +741,7 @@ bool skein_vm_prepare_thread_proto(
         def->code->variadic ||
         def->code->is_generator ||
         def->code->is_method) {
-        error = "thread entry must be a synchronous function with one "
-                "parameter";
+        error = "entry must be a non-generator function with one parameter";
         return false;
     }
     populate_ast_upvalues(def);
@@ -763,12 +762,12 @@ bool skein_vm_prepare_thread_helper(
     const struct value_t *function, skein::bc::ProtoPtr &proto,
     std::string &error) {
     if (!function || function->type != T_func) {
-        error = "thread function value is not callable";
+        error = "entry function value is not callable";
         return false;
     }
     const func_value_t *value = (const func_value_t *)function;
     if (!value->def || !value->def->code) {
-        error = "thread function value has no function code";
+        error = "entry function value has no function code";
         return false;
     }
     const std::shared_ptr<function_def> &def = value->def;
@@ -793,10 +792,10 @@ bool skein_vm_prepare_thread_helper(
     populate_ast_upvalues(def);
     skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
     if (!source) {
-        error = "cannot compile thread function value";
+        error = "cannot compile entry function value";
         return false;
     }
-    if (!validate_transferable_body(source, "thread function value", error))
+    if (!validate_transferable_body(source, "entry function value", error))
         return false;
     std::shared_ptr<skein::bc::Proto> copy = clone_thread_proto(source);
     recover_ast_proto_upvalues(def, *copy);

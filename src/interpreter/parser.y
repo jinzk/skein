@@ -868,8 +868,6 @@ static struct type_constraint *runtime_type_or_error(
 %token <i> CHAR "character"
 %token EOL "end of line"
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
-%token THREAD "thread"
-%token PROCESS "process"
 %token YIELD "yield" DEFER "defer"
 %token LAUNCH "launch"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait" ENUM "enum"
@@ -1019,12 +1017,6 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newforin($2, $4, $6, newscope($8)); }
     | DEFER exp ';'                       { $$ = newdefer($2); }
     | func_decl
-    | THREAD func_decl                    { $$ = $2;
-                                            ((struct funcdef *)$2)
-                                                ->is_thread_entry = 1; }
-    | PROCESS func_decl                   { $$ = $2;
-                                            ((struct funcdef *)$2)
-                                                ->is_process_entry = 1; }
     | decorators func_decl                { $$ = lower_function_decorators($1, (struct funcdef *)$2); }
     | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
     | EXPORT LET NAME ':' type '=' exp ';' {

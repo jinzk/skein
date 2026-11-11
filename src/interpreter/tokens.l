@@ -844,8 +844,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "let" { YYRET(SKEIN_TOK_LET); }
 "const" { YYRET(SKEIN_TOK_CONST); }
 "func" { YYRET(SKEIN_TOK_FUNC); }
-"thread"[ \t]+/"func" { YYRET(SKEIN_TOK_THREAD); }
-"process"[ \t]+/"func" { YYRET(SKEIN_TOK_PROCESS); }
 "yield" { YYRET(SKEIN_TOK_YIELD); }
 "launch" { YYRET(SKEIN_TOK_LAUNCH); }
 "defer" { YYRET(SKEIN_TOK_DEFER); }

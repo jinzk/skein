@@ -25,10 +25,6 @@ struct function_code : std::enable_shared_from_this<function_code> {
     bool is_method;
     bool variadic;
     bool is_generator;
-    /* True for `thread func` declarations. */
-    bool is_thread_entry = false;
-    /* True for `process func` declarations. */
-    bool is_process_entry = false;
     int def_line = 0;
     int def_column = 0;
     /* Module that defined this function, used for lazy compilation. */

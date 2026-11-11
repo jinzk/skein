@@ -3031,14 +3031,14 @@ std.worker.stats
 
 std.thread.unbounded_channel
 std.thread.pool
-std.thread.spawn
+std.thread.spawn_script
 std.thread.spawn_source
 std.thread.spawn_function
 std.entry.encode
 std.thread.spawn_entry
 std.thread.duplex
-std.thread.spawn_with_channel
-std.thread.spawn_with_duplex
+std.thread.spawn_script_with_channel
+std.thread.spawn_script_with_duplex
 std.thread.collect
 std.thread.debug_counts
 std.thread.select
@@ -4448,7 +4448,7 @@ std.process.result(process[, timeout_ms]) → envelope
 - 进程 IPC 不支持 Channel / Thread / Task handle。
 
 ```skein
-thread func worker(ctx) {
+func worker(ctx) {
   return {"v": ctx.payload["n"] + 1};
 }
 let blob = std.entry.encode(worker);
@@ -4456,10 +4456,10 @@ let r = std.process.run_entry(blob, std.thread.Message.from({"n": 4}));
 r["value"]["v"]   // 5
 ```
 
-`process func` 是进程入口声明（与 `thread func` 平行）：
+普通单参数函数即可作为进程入口：
 
 ```skein
-process func entry(ctx) {
+func entry(ctx) {
   return {"v": ctx.payload["n"] * 2};
 }
 
@@ -4468,11 +4468,10 @@ let r = std.process.run_entry(blob, std.thread.Message.from({"n": 21}));
 r["value"]["v"]   // 42
 ```
 
-- `process func` 必须是同步、单一 `ctx` 参数，不能是 generator；
+- 入口必须是单参数、非 generator、非 variadic、非 method 的函数；
 - 通过 `std.entry.encode` 编码后用 `std.process.spawn_entry` / `run_entry` 启动，
   或直接用 `spawn_function` / `run_function`；
-- 子进程通过 `--run-entry` 反序列化执行，不依赖入口源码；
-- `process` 只在 `process func` 组合中作为上下文关键字，其他位置仍是普通标识符。
+- 子进程通过 `--run-entry` 反序列化执行，不依赖入口源码。
 
 ### 长驻进程与管道
 
@@ -4979,11 +4978,13 @@ pool.join();
 ### 单线程
 
 ```text
-std.thread.spawn(script, message[, options]) -> thread
+std.thread.spawn_script(script, message[, options]) -> thread
 std.thread.spawn_source(source, message[, options]) -> thread
 std.thread.spawn_function(function, message) -> thread
 std.entry.encode(function) -> bytes
 std.thread.spawn_entry(bytes, message) -> thread
+
+旧名 `std.thread.spawn` 保留为 deprecated alias，接受脚本路径或函数值。
 
 thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
 thread.detach()
@@ -4998,24 +4999,24 @@ thread.id
 entry     默认 "main"
 ```
 
-`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析，仍会在子线程重新解析源码。需要复用 Proto/bytecode 时使用 `thread func` 或 `std.thread.spawn_function`。
+`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析，仍会在子线程重新解析源码。需要复用 Proto/bytecode 时使用 `func` 或 `std.thread.spawn_function`。
 
 Proto 入口：
 
 ```skein
-thread func worker(ctx) {
+func worker(ctx) {
     return {"v": ctx.payload["n"] + 1};
 }
 
-let t = std.thread.spawn(worker, std.thread.Message.from({"n": 4}));
+let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
 ```
 
 - `Message.from` 的 payload 允许 `heap`，包括容器内的 heap；heap comparator 必须是不捕获闭包的函数；
 - heap 是持久化数据结构，跨线程/进程入口共享只读结构；payload 仍不允许 standalone function 值；
 - `std.thread.pool` 的 submit payload 和线程返回值同样支持 heap。
 
-- `thread func` 是上下文关键字，只能作为声明语句出现，可嵌套在其他函数内；
-- 入口签名仍要求固定的单个参数；入口内可以使用嵌套函数和 `defer`；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
+- 任何满足入口签名的函数都可以作为线程入口，不需要额外声明标记；
+- 入口签名要求固定的单个参数；入口内可以使用嵌套函数和 `defer`；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
 - 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
 - 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
 - 嵌套函数和 `defer` 以 Proto/声明元数据传递，子线程在自身栈帧上重新捕获局部变量；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；
@@ -5050,7 +5051,7 @@ let msg = std.thread.Message.from(
     {"signal": ch}
 );
 
-let t = std.thread.spawn("thread_worker.skein", msg);
+let t = std.thread.spawn_script("thread_worker.skein", msg);
 let signal = ch.recv();
 let result = t.join();
 
@@ -5086,8 +5087,8 @@ link.closed
 link.capacity
 link.length
 
-std.thread.spawn_with_channel(script, message, capacity[, options]) -> thread
-std.thread.spawn_with_duplex(script, message, capacity[, options]) -> thread
+std.thread.spawn_script_with_channel(script, message, capacity[, options]) -> thread
+std.thread.spawn_script_with_duplex(script, message, capacity[, options]) -> thread
 thread.channel
 thread.link
 ```
@@ -5098,8 +5099,8 @@ thread.link
 - `close_send` 只关闭 out 方向；对端 `recv` 排空后得到 `null`；
 - `close_recv` 只关闭 in 方向；`closed` 反映 in 方向是否关闭；
 - `select` 接受 Channel 或 duplex endpoint，endpoint 使用其 in 方向；`broadcast` 仅接受 Channel；
-- `spawn_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
-- `spawn_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
+- `spawn_script_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
+- `spawn_script_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
 - `std.thread.collect()` 主动回收不可达的 Message/Channel/duplex 环；仅在没有活动 worker 线程时执行。
 - `std.thread.debug_counts()` 返回 `messages/channels/duplexes/endpoints/collected` 诊断计数。
 

@@ -747,8 +747,6 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     a->moved = 0;
     a->exported = exported;
     a->is_generator = is_generator;
-    a->is_thread_entry = 0;
-    a->is_process_entry = 0;
     a->is_method = 0;
     a->decorated_generator_source = NULL;
     a->method_self_type = NULL;
@@ -950,8 +948,6 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     code->is_method = node->is_method != 0;
     code->variadic = variadic;
     code->is_generator = node->is_generator != 0;
-    code->is_thread_entry = node->is_thread_entry != 0;
-    code->is_process_entry = node->is_process_entry != 0;
     code->def_line = node->ast ? node->ast->line : 0;
     code->def_column = node->ast ? node->ast->column : 0;
     code->module = diag_current_module_name();

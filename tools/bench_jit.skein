@@ -8,6 +8,7 @@
 //   * fib does not reach --fib-speedup (default 2.0x).
 
 import std;
+import .bench_common;
 
 let BENCHMARKS = [
   "fib_bench",
@@ -92,77 +93,24 @@ func parse_args(argv) {
   };
 }
 
-func median(values) {
-  let ordered = std.list.sort(values);
-  let count = len(ordered);
-  if (count == 0) {
-    return 0.0;
+func run({bin, repeats, check, json, max_ratio, fib_speedup}) {
+  if (std.fs.exists(bin) == 0) {
+    die("missing binary: " + bin);
   }
-  let middle = count / 2;
-  if (count % 2 == 1) {
-    return float(ordered[middle]);
-  }
-  return (float(ordered[middle - 1]) + float(ordered[middle])) / 2.0;
-}
-
-func run_once(binary, script, jit) {
-  let started = std.time.monotonic_ms();
-  let enabled = "0";
-  if (jit) {
-    enabled = "1";
-  }
-  let child = std.process.spawn_command(binary, {
-    "args": [script],
-    "env": {
-      "SKEIN_VM": "1",
-      "SKEIN_JIT": enabled,
-      "SKEIN_JIT_THRESHOLD": "1"
-    },
-    "stderr": "inherit"
-  });
-  std.io.read_all(child["stdout"]);
-  let status = std.process.wait(child);
-  let elapsed = float(std.time.monotonic_ms() - started) / 1000.0;
-  std.process.close(child);
-  if (status != 0) {
-    die(script + " with SKEIN_JIT=" + enabled + " failed with status "
-        + str(status));
-  }
-  return elapsed;
-}
-
-func measure(binary, script, jit, repeats) {
-  run_once(binary, script, jit);
-  let times = [];
-  let i = 0;
-  while (i < repeats) {
-    times = times + [run_once(binary, script, jit)];
-    i = i + 1;
-  }
-  return median(times);
-}
-
-func run(argv) {
-  let options = parse_args(argv);
-  let binary = options["bin"];
-  if (std.fs.exists(binary) == 0) {
-    die("missing binary: " + binary);
-  }
-
-  let script_path = std.sys.script();
-  let script_dir = ".";
-  if (script_path != "") {
-    script_dir = std.fs.path_dirname(script_path);
-  }
-  let root = std.fs.path_abs(std.fs.path_normalize(
-      std.fs.path_join(script_dir, "..")));
+  let root = bench_common.script_root();
 
   let results = [];
   let failures = [];
   for name in BENCHMARKS {
     let script = std.fs.path_join(root, "benchmarks/" + name + ".skein");
-    let vm = measure(binary, script, false, options["repeats"]);
-    let jit = measure(binary, script, true, options["repeats"]);
+    let vm = bench_common.measure(
+        bin, script,
+        {"SKEIN_VM": "1", "SKEIN_JIT": "0", "SKEIN_JIT_THRESHOLD": "1"},
+        repeats, true, name + " with SKEIN_JIT=0");
+    let jit = bench_common.measure(
+        bin, script,
+        {"SKEIN_VM": "1", "SKEIN_JIT": "1", "SKEIN_JIT_THRESHOLD": "1"},
+        repeats, true, name + " with SKEIN_JIT=1");
     let ratio = 0.0;
     if (vm > 0.0) {
       ratio = jit / vm;
@@ -179,20 +127,19 @@ func run(argv) {
       "speedup": speedup
     }];
 
-    if (options["check"] && ratio > options["max_ratio"]) {
+    if (check && ratio > max_ratio) {
       failures = failures + [format(
           "{}: JIT/VM ratio {:.2f} exceeds {:.2f}",
-          name, ratio, options["max_ratio"])];
+          name, ratio, max_ratio)];
     }
-    if (options["check"] && name == "fib_bench"
-        && speedup < options["fib_speedup"]) {
+    if (check && name == "fib_bench" && speedup < fib_speedup) {
       failures = failures + [format(
           "fib: speedup {:.2f}x is below {:.2f}x",
-          speedup, options["fib_speedup"])];
+          speedup, fib_speedup)];
     }
   }
 
-  if (options["json"]) {
+  if (json) {
     println(std.json.stringify(results));
   } else {
     println(format("{:<18} {:>8} {:>8} {:>8} {:>9}",
@@ -211,9 +158,9 @@ func run(argv) {
     }
     std.sys.exit(1);
   }
-  if (options["check"]) {
+  if (check) {
     println("JIT benchmark gate passed");
   }
 }
 
-run(std.sys.args());
+run(parse_args(std.sys.args()));

@@ -6,6 +6,7 @@
 // generous absolute time budget.
 
 import std;
+import .bench_common;
 
 let BENCHMARKS = [
   {"name": "slot", "file": "slot_bench.skein", "limit": 1.5},
@@ -98,74 +99,28 @@ func selected(name, only) {
   return false;
 }
 
-func median(values) {
-  let ordered = std.list.sort(values);
-  let count = len(ordered);
-  if (count == 0) {
-    return 0.0;
+func run({bin, repeats, check, max_ratio, only}) {
+  if (std.fs.exists(bin) == 0) {
+    die("missing binary: " + bin);
   }
-  let middle = count / 2;
-  if (count % 2 == 1) {
-    return float(ordered[middle]);
-  }
-  return (float(ordered[middle - 1]) + float(ordered[middle])) / 2.0;
-}
-
-func run_once(binary, script, vm) {
-  let started = std.time.monotonic_ms();
-  let child = std.process.spawn_command(binary, {
-    "args": [script],
-    "env": {"SKEIN_VM": vm},
-    "stderr": "inherit"
-  });
-  std.io.read_all(child["stdout"]);
-  let status = std.process.wait(child);
-  let elapsed = float(std.time.monotonic_ms() - started) / 1000.0;
-  std.process.close(child);
-  if (status != 0) {
-    die(script + " with SKEIN_VM=" + vm + " failed with status "
-         + str(status));
-  }
-  return elapsed;
-}
-
-func measure(binary, script, vm, repeats) {
-  let times = [];
-  let i = 0;
-  while (i < repeats) {
-    times = times + [run_once(binary, script, vm)];
-    i = i + 1;
-  }
-  return median(times);
-}
-
-func run(argv) {
-  let options = parse_args(argv);
-  let binary = options["bin"];
-  if (std.fs.exists(binary) == 0) {
-    die("missing binary: " + binary);
-  }
-
-  let script_path = std.sys.script();
-  let script_dir = ".";
-  if (script_path != "") {
-    script_dir = std.fs.path_dirname(script_path);
-  }
-  let root = std.fs.path_abs(std.fs.path_normalize(
-      std.fs.path_join(script_dir, "..")));
+  let root = bench_common.script_root();
 
   let failures = [];
   println(format("{:<12} {:>8} {:>8} {:>8}",
                  "benchmark", "AST", "VM", "ratio"));
   for bench in BENCHMARKS {
     let name = bench["name"];
-    if (selected(name, options["only"]) == false) {
+    if (selected(name, only) == false) {
       continue;
     }
     let script = std.fs.path_join(root,
                                   "benchmarks/" + bench["file"]);
-    let ast = measure(binary, script, "0", options["repeats"]);
-    let vm = measure(binary, script, "1", options["repeats"]);
+    let ast = bench_common.measure(
+        bin, script, {"SKEIN_VM": "0"}, repeats, false,
+        name + " with SKEIN_VM=0");
+    let vm = bench_common.measure(
+        bin, script, {"SKEIN_VM": "1"}, repeats, false,
+        name + " with SKEIN_VM=1");
     let ratio = 0.0;
     if (ast > 0.0) {
       ratio = vm / ast;
@@ -174,14 +129,14 @@ func run(argv) {
                    name, ast, vm, ratio));
 
     let limit = bench["limit"];
-    if (options["max_ratio"] > 0.0) {
-      limit = options["max_ratio"];
+    if (max_ratio > 0.0) {
+      limit = max_ratio;
     }
-    if (options["check"] && ratio > limit) {
+    if (check && ratio > limit) {
       failures = failures + [format(
           "{}: VM/AST ratio {:.2f} exceeds {:.2f}", name, ratio, limit)];
     }
-    if (options["check"] && vm > 10.0) {
+    if (check && vm > 10.0) {
       failures = failures + [format(
           "{}: VM took {:.2f}s (limit 10s)", name, vm)];
     }
@@ -194,9 +149,9 @@ func run(argv) {
     }
     std.sys.exit(1);
   }
-  if (options["check"]) {
+  if (check) {
     println("vm benchmark regression check passed");
   }
 }
 
-run(std.sys.args());
+run(parse_args(std.sys.args()));

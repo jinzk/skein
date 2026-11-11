@@ -1,0 +1,70 @@
+// Shared helpers for the Skein benchmark tools.
+//
+// Kept in a relative package (`import .bench_common;`) so `bench_vm.skein` and
+// `bench_jit.skein` agree on timing, medians and failure reporting.
+
+import std;
+
+package bench_common {
+  export func median(values) {
+    let ordered = std.list.sort(values);
+    let count = len(ordered);
+    if (count == 0) {
+      return 0.0;
+    }
+    let middle = count / 2;
+    if (count % 2 == 1) {
+      return float(ordered[middle]);
+    }
+    return (float(ordered[middle - 1]) + float(ordered[middle])) / 2.0;
+  }
+
+  // Project root derived from the tool script location, so tools can run from
+  // any working directory (including the CMake build tree).
+  export func script_root() {
+    let script_path = std.sys.script();
+    let script_dir = ".";
+    if (script_path != "") {
+      script_dir = std.fs.path_dirname(script_path);
+    }
+    return std.fs.path_abs(std.fs.path_normalize(
+        std.fs.path_join(script_dir, "..")));
+  }
+
+  export func run_timed(binary, script, env, description = "") {
+    let started = std.time.monotonic_ms();
+    let child = std.process.spawn_command(binary, {
+      "args": [script],
+      "env": env,
+      "stderr": "inherit"
+    });
+    std.io.read_all(child["stdout"]);
+    let status = std.process.wait(child);
+    let elapsed = float(std.time.monotonic_ms() - started) / 1000.0;
+    std.process.close(child);
+    if (status != 0) {
+      let what = description;
+      if (what == "") {
+        what = script;
+      }
+      std.io.flush(std.io.stdout);
+      std.io.write_all(std.io.stderr, what + " failed with status "
+                       + str(status) + "\n");
+      std.sys.exit(1);
+    }
+    return elapsed;
+  }
+
+  export func measure(binary, script, env, repeats, warmup, description = "") {
+    if (warmup) {
+      run_timed(binary, script, env, description);
+    }
+    let times = [];
+    let i = 0;
+    while (i < repeats) {
+      times = times + [run_timed(binary, script, env, description)];
+      i = i + 1;
+    }
+    return median(times);
+  }
+}

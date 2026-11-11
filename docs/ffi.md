@@ -87,8 +87,7 @@ ABI 校验：
 - 每次调用创建一个 worker 线程，不适合高频短调用；
 - 可能永久阻塞或不受信任的 C 调用应放到外部进程。
 
-旧名 `ffi.call_async` 保留为 deprecated alias，行为与 `call_task` 一致；
-新代码请使用 `call_task`，后续版本会移除旧名。
+旧名 `ffi.call_async` 已移除；请使用 `call_task`。
 
 同步 `ffi.call` 回调仍要求同线程、同 fiber、活动调用范围内。
 

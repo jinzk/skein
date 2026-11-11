@@ -514,8 +514,6 @@ value_t *build_namespace_impl() {
             {"close", B_ffi_close},
             {"call", B_ffi_call},
             {"call_task", B_ffi_call_async},
-            /* Deprecated alias; remove after the compatibility window. */
-            {"call_async", B_ffi_call_async},
             {"call_address", B_ffi_call_address},
             {"call_variadic", B_ffi_call_variadic},
             {"buffer", B_ffi_buffer},

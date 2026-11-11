@@ -2055,8 +2055,7 @@ std.ffi.call_task(lib, "compare", "i32",
   `std.env` / `std.fs.cwd` 覆盖；需要的值请通过参数传入；
 - 对可能永久阻塞或不受信任的 C 调用，建议放到外部进程，而不是依赖进程内取消。
 
-旧名 `std.ffi.call_async` 保留为 deprecated alias，行为与 `call_task` 一致；
-新代码请使用 `call_task`，后续版本会移除旧名。
+旧名 `std.ffi.call_async` 已移除；请使用 `call_task`。
 
 C 函数指针（例如 C 返回的函数指针或 struct 里的 callback 字段）可以用
 `ffi.call_address` 调用：

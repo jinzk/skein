@@ -915,14 +915,6 @@ def run_cases():
             stdout="= 21",
         )
         check(
-            "std ffi call_async deprecated alias",
-            "import std;\n"
-            f"let lib = std.ffi.open({shim});\n"
-            'std.ffi.call_async(lib, "shim_i32", "i32", ["i32"], [21])\n'
-            "std.ffi.close(lib);\n",
-            stdout="= 21",
-        )
-        check(
             "std ffi call_task blocking callback",
             "import std;\n"
             f"let lib = std.ffi.open({shim});\n"
@@ -1822,16 +1814,18 @@ def run_cases():
         '"get_async", "post_async", "accept_async", "respond_async"]);\n'
         "  stale = stale + count_stale(std.websocket, [\"connect_async\", "
         '"send_async", "receive_async"]);\n'
+        '  stale = stale + count_stale(std.ffi, ["call_async"]);\n'
         '  println("stale=" + str(stale));\n'
         '  println("primary=" + str(std.dict.has(std.process, "run_command")) + '
         '"," + str(std.dict.has(std.thread, "spawn_script")) + "," + '
         'str(std.dict.has(std.io, "read_task")) + "," + '
         'str(std.dict.has(std.net, "accept_task")) + "," + '
         'str(std.dict.has(std.http, "get_task")) + "," + '
-        'str(std.dict.has(std.websocket, "connect_task")));\n'
+        'str(std.dict.has(std.websocket, "connect_task")) + "," + '
+        'str(std.dict.has(std.ffi, "call_task")));\n'
         "}\n"
         "main();\n",
-        stdout="stale=0\nprimary=1,1,1,1,1,1\n",
+        stdout="stale=0\nprimary=1,1,1,1,1,1,1\n",
     )
     check(
         "std list transformations",

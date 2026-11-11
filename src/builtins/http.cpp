@@ -4416,7 +4416,7 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             dict_set(spawn_options, "args", args_list);
             std::vector<value_t *> spawn_args{file, spawn_options};
             value_t *process = call_process_spawn_builtin(
-                B_process_spawn, spawn_args);
+                B_process_spawn_command, spawn_args);
             freeval(file);
             freeval(spawn_options);
             if (!process) {

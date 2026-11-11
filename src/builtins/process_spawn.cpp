@@ -634,9 +634,11 @@ value_t *new_pipe_value(std::shared_ptr<process_resource> process,
 
 const char *process_name(int functype) {
     switch (functype) {
-        case B_process_spawn: return "std.process.spawn";
+        case B_process_spawn_command: return "std.process.spawn_command";
         case B_process_spawn_entry: return "std.process.spawn_entry";
         case B_process_run_entry: return "std.process.run_entry";
+        case B_process_spawn_function: return "std.process.spawn_function";
+        case B_process_run_function: return "std.process.run_function";
         case B_process_result: return "std.process.result";
         case B_process_wait: return "std.process.wait";
         case B_process_kill: return "std.process.kill";
@@ -764,7 +766,7 @@ value_t *spawn_entry_process(const value_t *entry, const value_t *message,
     }
     value_t *file = newstrval(executable.c_str());
     std::vector<value_t *> spawn_args{file, spawn_options};
-    value_t *process = call_process_spawn_builtin(B_process_spawn, spawn_args);
+    value_t *process = call_process_spawn_builtin(B_process_spawn_command, spawn_args);
     free_value_list(spawn_args);
     if (!process) {
         error = "cannot spawn encoded process";
@@ -849,7 +851,7 @@ bool process_try_wait(struct value_t *value, long long &status) {
 value_t *call_process_spawn_builtin(
     int functype, const std::vector<value_t *> &args) {
     const char *name = process_name(functype);
-    if (functype == B_process_spawn) {
+    if (functype == B_process_spawn_command) {
         if (args.empty() || args.size() > 2) {
             yyerror("%s expects 1 or 2 arguments, got %d", name,
                     (int)args.size());
@@ -1085,6 +1087,38 @@ value_t *call_process_spawn_builtin(
             process, process_option_timeout(options));
         freeval(process);
         return envelope;
+    }
+
+    if (functype == B_process_run_function ||
+        functype == B_process_spawn_function) {
+        if (args.size() < 2 || args.size() > 3 ||
+            args[1]->type != T_userdata) {
+            yyerror("%s expects a function, Message, and optional options",
+                    name);
+            return NULL;
+        }
+        std::string bytes;
+        std::string error;
+        if (!thread_entry_encode(args[0], bytes, error)) {
+            yyerror("%s: %s", name, error.c_str());
+            return NULL;
+        }
+        value_t *blob = newbytesval(std::move(bytes));
+        std::vector<value_t *> entry_args{blob, dupval(args[1])};
+        if (args.size() == 3) {
+            if (args[2]->type != T_dict) {
+                yyerror("%s options must be a dict", name);
+                free_value_list(entry_args);
+                return NULL;
+            }
+            entry_args.push_back(dupval(args[2]));
+        }
+        value_t *result = call_process_spawn_builtin(
+            functype == B_process_run_function ? B_process_run_entry
+                                               : B_process_spawn_entry,
+            entry_args);
+        free_value_list(entry_args);
+        return result;
     }
 
     if (functype == B_process_result) {

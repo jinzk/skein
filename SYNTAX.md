@@ -2650,16 +2650,17 @@ std.fs.path_join(parts...) / path_basename(path)
 std.fs.path_dirname(path) / path_extname(path)
 std.fs.path_abs(path) / path_normalize(path)
 
-std.process.run(command[, options]) → dict
+std.process.run_command(command[, options]) → dict
 ```
 
-`std.process.run` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
+`std.process.run_command` 的 `options` 支持 `stdin`、`cwd`、`env`，返回
 `{"status", "stdout", "stderr"}`，其中 stdout/stderr 是 `bytes`。
+旧名 `std.process.run` 保留为 deprecated alias。
 
 长驻进程：
 
 ```text
-std.process.spawn(file[, options]) → process
+std.process.spawn_command(file[, options]) → process
 std.process.wait(process[, timeout_ms]) → status
 std.process.kill(process[, signal])
 std.process.close(process)
@@ -2667,13 +2668,14 @@ std.process.pid(process)
 ```
 
 `options` 支持 `args`、`env`、`cwd`、`stderr`（`pipe` 或 `inherit`）。
-`spawn` 返回包含 `pid`、`stdin`、`stdout`、`stderr` 和 `handle` 的 dict；
+`spawn_command` 返回包含 `pid`、`stdin`、`stdout`、`stderr` 和 `handle` 的 dict；
+旧名 `std.process.spawn` 保留为 deprecated alias；
 四个流都支持 `std.io` 的同步和异步读写；`stderr = "inherit"` 时 `stderr` 为 `null`。
 
 ```text
 import std;
 
-let p = std.process.spawn("/bin/cat");
+let p = std.process.spawn_command("/bin/cat");
 std.io.write_all(p["stdin"], "hello");
 std.io.close(p["stdin"]);
 bytes_to_string(std.io.read(p["stdout"], 4096))
@@ -4689,12 +4691,22 @@ println("b");   // 输出 a\nb\n
 ```text
 std.process.command
 std.process.command_status
-std.process.run
-std.process.spawn
+std.process.run_command
+std.process.spawn_command
+std.process.run_entry
+std.process.spawn_entry
+std.process.run_function
+std.process.spawn_function
 std.process.wait
 std.process.kill
 std.process.close
 std.process.pid
+
+std.process.run_entry(blob, message[, options]) -> envelope
+std.process.spawn_entry(blob, message[, options]) -> process
+std.process.run_function(fn, message[, options]) -> envelope
+std.process.spawn_function(fn, message[, options]) -> process
+std.entry.encode(fn) -> bytes
 
 std.worker.pool
 std.worker.call

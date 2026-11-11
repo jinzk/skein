@@ -90,6 +90,7 @@ NON_FUNCTION_EXPORTS = {
 # LANG-2 keeps the old *_async names as deprecated aliases but documents only
 # the *_task primary names.
 DEPRECATED_ALIASES = {
+    "process": {"run", "spawn"},
     "io": {"read_async", "write_async"},
     "net": {"tcp_connect_async", "tcp_listen_async", "accept_async",
             "send_async", "recv_async", "resolve_async", "shutdown_async"},

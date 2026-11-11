@@ -2766,8 +2766,12 @@ std.fs.file_write_bytes
 std.process.command
 std.process.status
 std.process.command_status
-std.process.spawn_entry
+std.process.run_command
+std.process.spawn_command
 std.process.run_entry
+std.process.spawn_entry
+std.process.run_function
+std.process.spawn_function
 std.process.result
 
 std.type.kind_of
@@ -3003,10 +3007,12 @@ std.fs.path_extname
 std.fs.path_abs
 std.fs.path_normalize
 
-std.process.run
-std.process.spawn
-std.process.spawn_entry
+std.process.run_command
+std.process.spawn_command
 std.process.run_entry
+std.process.spawn_entry
+std.process.run_function
+std.process.spawn_function
 std.process.result
 std.process.wait
 std.process.kill
@@ -4412,12 +4418,12 @@ std.process.command_status("exit $CODE", {"CODE": "3"})  → 3
 `std.process.command_status` 会直接继承标准输入/输出/错误，因此命令输出会正常显示；它返回退出码整数。
 
 如果需要同时获取 status、stdout、stderr，或控制 stdin/cwd/env，使用
-`std.process.run`：
+`std.process.run_command`：
 
 ```text
 import std;
 
-let r = std.process.run("printf hello");
+let r = std.process.run_command("printf hello");
 r["status"]
 bytes_to_string(r["stdout"])
 ```
@@ -4427,9 +4433,12 @@ bytes_to_string(r["stdout"])
 ```text
 std.process.run_entry(blob, message[, options]) → envelope
 std.process.spawn_entry(blob, message[, options]) → process
+std.process.run_function(function, message[, options]) → envelope
+std.process.spawn_function(function, message[, options]) → process
 std.process.result(process[, timeout_ms]) → envelope
 ```
 
+- `run_function` / `spawn_function` 内部先执行 `std.entry.encode(function)`；
 - `blob` 来自 `std.entry.encode(entry)`；
 - Message payload 以 data-only 值序列化后通过 stdin 发送；
 - 子进程用 `--run-entry` 读取请求、反序列化 Proto 入口并执行；
@@ -4460,19 +4469,22 @@ r["value"]["v"]   // 42
 ```
 
 - `process func` 必须是同步、单一 `ctx` 参数，不能是 generator；
-- 通过 `std.entry.encode` 编码后用 `std.process.spawn_entry` / `run_entry` 启动；
+- 通过 `std.entry.encode` 编码后用 `std.process.spawn_entry` / `run_entry` 启动，
+  或直接用 `spawn_function` / `run_function`；
 - 子进程通过 `--run-entry` 反序列化执行，不依赖入口源码；
 - `process` 只在 `process func` 组合中作为上下文关键字，其他位置仍是普通标识符。
 
 ### 长驻进程与管道
 
 ```text
-std.process.spawn(file[, options]) → process
+std.process.spawn_command(file[, options]) → process
 std.process.wait(process[, timeout_ms]) → status
 std.process.kill(process[, signal])
 std.process.close(process)
 std.process.pid(process)
 ```
+
+旧名 `std.process.spawn` 保留为 deprecated alias，行为与 `spawn_command` 一致。
 
 `options`：
 
@@ -4500,7 +4512,7 @@ stderr "pipe"（默认）或 "inherit"
 ```text
 import std;
 
-let p = std.process.spawn("/bin/cat");
+let p = std.process.spawn_command("/bin/cat");
 
 std.io.write_all(p["stdin"], "hello");
 std.io.close(p["stdin"]);
@@ -4552,7 +4564,7 @@ while (true) {
 ```text
 import std;
 
-let p = std.process.spawn("skein", {"args": ["worker.skein"]});
+let p = std.process.spawn_command("skein", {"args": ["worker.skein"]});
 std.io.write_all(p["stdin"],
                  bytes_from_string("{\"id\":1,\"params\":[2,3]}\n"));
 std.io.flush(p["stdin"]);
@@ -5551,12 +5563,14 @@ std.env.set(name, value)
 std.env.unset(name)
 std.env.all()                     → dict
 
-std.process.run(command[, options]) → dict
+std.process.run_command(command[, options]) → dict
 ```
 
-`std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn` / `std.process.run` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
+`std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
 
-`std.process.run` 的 `options` 支持：
+旧名 `std.process.run` 保留为 deprecated alias，行为与 `run_command` 一致。
+
+`std.process.run_command` 的 `options` 支持：
 
 ```text
 stdin   string / bytes，默认空
@@ -5575,10 +5589,10 @@ env     dict，覆盖子进程环境
 ```text
 import std;
 
-let r = std.process.run("printf hello");
+let r = std.process.run_command("printf hello");
 print(bytes_to_string(r["stdout"]));
 
-let r2 = std.process.run("cat", {"stdin": "abc"});
+let r2 = std.process.run_command("cat", {"stdin": "abc"});
 bytes_to_string(r2["stdout"])
 ```
 
@@ -5603,7 +5617,7 @@ std.fs.path_abs(path)
 std.fs.path_normalize(path)
 ```
 
-`std.fs.cwd` / `std.fs.chdir` 是线程局部工作目录：相对路径的 `std.fs` 操作、`std.fs.open` / 文件读写、`std.process.spawn` / `std.process.run` / `std.process.command` 默认使用当前线程的工作目录；不会改变进程级 OS cwd。新线程在启动时继承创建线程的工作目录。
+`std.fs.cwd` / `std.fs.chdir` 是线程局部工作目录：相对路径的 `std.fs` 操作、`std.fs.open` / 文件读写、`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 默认使用当前线程的工作目录；不会改变进程级 OS cwd。新线程在启动时继承创建线程的工作目录。
 
 std.compress.gzip(bytes)          → bytes
 std.compress.gunzip(bytes)        → bytes
@@ -5733,7 +5747,7 @@ f["close"]()
 | 源文件编码声明冲突或转码失败 | `2` |
 | 脚本被 Ctrl-C 中断 | `130` |
 
-外部命令的退出状态通过 `std.process.command_status()` / `std.process.run()` 返回，不会直接成为解释器退出码。
+外部命令的退出状态通过 `std.process.command_status()` / `std.process.run_command()` 返回，不会直接成为解释器退出码。
 
 ## 目录结构
 

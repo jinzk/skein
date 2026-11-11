@@ -496,9 +496,12 @@ struct value_t *call_builtin(int functype,
         return call_fs_extra_builtin(functype, args);
     if (functype >= B_env_get && functype <= B_env_all)
         return call_env_builtin(functype, args);
-    if (functype == B_process_run)
+    if (functype == B_process_run_command)
         return call_process_builtin(functype, args);
-    if (functype >= B_process_spawn && functype <= B_process_result)
+    if ((functype >= B_process_spawn_command &&
+         functype <= B_process_result) ||
+        functype == B_process_run_function ||
+        functype == B_process_spawn_function)
         return call_process_spawn_builtin(functype, args);
     if (functype >= B_worker_pool && functype <= B_worker_stats)
         return call_worker_builtin(functype, args);

@@ -3549,35 +3549,13 @@ struct value_t *thread_spawn_function(
 }
 
 struct value_t *entry_encode(const std::vector<struct value_t *> &args) {
-    if (args.size() != 1 || args[0]->type != T_func) {
+    if (args.size() != 1) {
         yyerror("std.entry.encode expects a function");
-        return nullptr;
-    }
-    const func_value_t *function = (const func_value_t *)args[0];
-    if (!function->def || !function->def->code) {
-        yyerror("std.entry.encode expects a function");
-        return nullptr;
-    }
-    const function_code *code = function->def->code.get();
-    if (code->is_process_entry &&
-        (code->is_generator || code->nparams != 1 ||
-         code->required_params != 1 || code->variadic)) {
-        yyerror("process func entry must be a non-generator function with one "
-                "ctx parameter");
-        return nullptr;
-    }
-    thread_payload_builder builder;
-    std::shared_ptr<thread_transfer_function> entry;
-    std::vector<std::pair<std::string, thread_transfer_value>> globals;
-    std::vector<thread_transfer_module> modules;
-    if (!builder.build_entry(args[0], entry, globals, modules)) {
-        yyerror("std.entry.encode: %s", builder.error.c_str());
         return nullptr;
     }
     std::string bytes;
     std::string error;
-    if (!skein_vm_serialize_thread_payload(entry, globals, modules, bytes,
-                                           error)) {
+    if (!thread_entry_encode(args[0], bytes, error)) {
         yyerror("std.entry.encode: %s", error.c_str());
         return nullptr;
     }
@@ -4174,6 +4152,39 @@ bool take_u32(const std::string &data, std::size_t &pos, uint32_t &value) {
 }
 
 } // namespace
+
+bool thread_entry_encode(struct value_t *value, std::string &bytes,
+                         std::string &error) {
+    bytes.clear();
+    error.clear();
+    if (!value || value->type != T_func) {
+        error = "expected a function";
+        return false;
+    }
+    const func_value_t *function = (const func_value_t *)value;
+    if (!function->def || !function->def->code) {
+        error = "expected a function";
+        return false;
+    }
+    const function_code *code = function->def->code.get();
+    if (code->is_process_entry &&
+        (code->is_generator || code->nparams != 1 ||
+         code->required_params != 1 || code->variadic)) {
+        error = "process func entry must be a non-generator function with one "
+                "ctx parameter";
+        return false;
+    }
+    thread_payload_builder builder;
+    std::shared_ptr<thread_transfer_function> entry;
+    std::vector<std::pair<std::string, thread_transfer_value>> globals;
+    std::vector<thread_transfer_module> modules;
+    if (!builder.build_entry(value, entry, globals, modules)) {
+        error = builder.error;
+        return false;
+    }
+    return skein_vm_serialize_thread_payload(entry, globals, modules, bytes,
+                                             error);
+}
 
 bool thread_run_entry_blocking(const std::string &bytes,
                                  struct value_t *message,

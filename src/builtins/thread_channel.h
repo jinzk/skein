@@ -10,6 +10,11 @@
 struct value_t *call_thread_channel_builtin(
     int functype, const std::vector<struct value_t *> &args);
 
+/* Encode a function value and its dependency graph as an entry blob.
+ * Shared by std.entry.encode and std.process.run_function/spawn_function. */
+bool thread_entry_encode(struct value_t *function, std::string &bytes,
+                         std::string &error);
+
 /* Run a `std.entry.encode` blob synchronously with the given Message.
  * Used by process IPC (`--run-entry`) and std.process.run_entry. */
 bool thread_run_entry_blocking(const std::string &bytes,

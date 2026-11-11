@@ -651,6 +651,19 @@ def check_extended_stdlib():
             stdout_all=["3", "abc", "0"],
         )
         check(
+            "std process command names",
+            "import std;\n"
+            'let rc = std.process.run_command("/bin/echo hi");\n'
+            'print(rc["status"]); print(":");\n'
+            'print(bytes_to_string(rc["stdout"]));\n'
+            'let p = std.process.spawn_command("/bin/echo", '
+            '{"args": ["cmd"]});\n'
+            'print(std.process.pid(p) > 0); print("|");\n'
+            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.process.wait(p));\n',
+            stdout="0:hi\ntrue|cmd\n0",
+        )
+        check(
             "std process spawn repeated close",
             "import std;\n"
             "for (let i = 0; i < 5; i++) {\n"
@@ -724,6 +737,22 @@ def check_extended_stdlib():
         "std.entry.encode(bad);\n",
         stderr="process func entry must be a non-generator function with one "
                "ctx parameter",
+    )
+
+    check(
+        "std process function names",
+        "import std;\n"
+        "process func entry(ctx) {\n"
+        '  return {"v": ctx.payload["n"] * 2};\n'
+        "}\n"
+        "let r = std.process.run_function(entry, "
+        'std.thread.Message.from({"n": 21}));\n'
+        'print(r["value"]["v"]); print("|");\n'
+        "let p = std.process.spawn_function(entry, "
+        'std.thread.Message.from({"n": 5}));\n'
+        "let r2 = std.process.result(p, 10000);\n"
+        'print(r2["value"]["v"]); print("|");\n',
+        stdout="42|10|",
     )
 
     with tempfile.TemporaryDirectory() as worker_tmp:

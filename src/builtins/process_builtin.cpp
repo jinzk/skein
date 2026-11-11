@@ -91,14 +91,14 @@ std::string quote_for_shell(const std::string &text) {
 bool collect_env(const struct value_t *value,
                  std::vector<std::pair<std::string, std::string>> &env) {
     if (value->type != T_dict) {
-        yyerror("std.process.run env must be a dict, got %s",
+        yyerror("std.process.run_command env must be a dict, got %s",
                 typename_of(value));
         return false;
     }
     struct dict_value_t *dict = (struct dict_value_t *)value;
     for (const auto &entry : dict->payload->items) {
         if (entry.first->type != T_string || entry.second->type != T_string) {
-            yyerror("std.process.run env keys and values must be strings");
+            yyerror("std.process.run_command env keys and values must be strings");
             return false;
         }
         env.push_back(std::make_pair(
@@ -112,17 +112,17 @@ bool collect_env(const struct value_t *value,
 
 struct value_t *call_process_builtin(
     int functype, const std::vector<struct value_t *> &args) {
-    if (functype != B_process_run) {
+    if (functype != B_process_run_command) {
         yyerror("unknown process function");
         return NULL;
     }
     if (args.size() < 1 || args.size() > 2) {
-        yyerror("std.process.run expects 1 or 2 arguments, got %d",
+        yyerror("std.process.run_command expects 1 or 2 arguments, got %d",
                 (int)args.size());
         return NULL;
     }
     if (args[0]->type != T_string) {
-        yyerror("std.process.run expects a command string, got %s",
+        yyerror("std.process.run_command expects a command string, got %s",
                 typename_of(args[0]));
         return NULL;
     }
@@ -132,7 +132,7 @@ struct value_t *call_process_builtin(
     std::vector<std::pair<std::string, std::string>> env;
     if (args.size() == 2) {
         if (args[1]->type != T_dict) {
-            yyerror("std.process.run options must be a dict, got %s",
+            yyerror("std.process.run_command options must be a dict, got %s",
                     typename_of(args[1]));
             return NULL;
         }
@@ -150,12 +150,12 @@ struct value_t *call_process_builtin(
                     stdin_data =
                         ((struct bytes_value_t *)entry.second)->value;
                 } else {
-                    yyerror("std.process.run stdin must be string or bytes");
+                    yyerror("std.process.run_command stdin must be string or bytes");
                     return NULL;
                 }
             } else if (key == "cwd") {
                 if (entry.second->type != T_string) {
-                    yyerror("std.process.run cwd must be a string");
+                    yyerror("std.process.run_command cwd must be a string");
                     return NULL;
                 }
                 cwd = ((struct string_value_t *)entry.second)->value;
@@ -193,13 +193,13 @@ struct value_t *call_process_builtin(
     files.error_path = temp_path("stderr");
     if (files.input.empty() || files.output_path.empty() ||
         files.error_path.empty()) {
-        yyerror("std.process.run: cannot create temporary files");
+        yyerror("std.process.run_command: cannot create temporary files");
         return NULL;
     }
 
     std::string error;
     if (!platform_write_file(files.input, stdin_data, false, error)) {
-        yyerror("std.process.run: %s", error.c_str());
+        yyerror("std.process.run_command: %s", error.c_str());
         return NULL;
     }
 
@@ -218,7 +218,7 @@ struct value_t *call_process_builtin(
 
     int status = -1;
     if (!platform_run_command_status(shell, env, status)) {
-        yyerror("std.process.run: command failed to start");
+        yyerror("std.process.run_command: command failed to start");
         return NULL;
     }
 
@@ -226,7 +226,7 @@ struct value_t *call_process_builtin(
     std::string stderr_text;
     if (!platform_read_file(files.output_path, stdout_text, error) ||
         !platform_read_file(files.error_path, stderr_text, error)) {
-        yyerror("std.process.run: %s", error.c_str());
+        yyerror("std.process.run_command: %s", error.c_str());
         return NULL;
     }
 

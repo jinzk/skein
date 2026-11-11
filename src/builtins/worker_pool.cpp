@@ -419,7 +419,7 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
 
     value_t *executable_value = newstrval(executable.c_str());
     value_t *process = call_process_spawn_builtin(
-        B_process_spawn, {executable_value, (value_t *)options});
+        B_process_spawn_command, {executable_value, (value_t *)options});
     freeval(executable_value);
     freeval((value_t *)options);
     if (!process) {

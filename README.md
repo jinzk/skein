@@ -22,6 +22,16 @@ cp -r .opencode/skills/skein ~/.config/opencode/skills/
 `std.iter.for_each`、match、struct/enum、错误处理、常见报错速查，以及到
 `SYNTAX.md` / `docs/stdlib.md` 的索引。
 
+## 编辑器支持
+
+- **Vim / Neovim**：`editors/vim`，提供 `.skein` 文件识别、语法高亮、注释、
+  缩进，以及 `:SkeinRun` / `:SkeinRepl`。安装见
+  [`editors/vim/README.md`](editors/vim/README.md)。
+- **VS Code**：`editors/vscode`，提供语法高亮、代码片段、运行当前文件和
+  REPL。安装见 [`editors/vscode/README.md`](editors/vscode/README.md)。
+
+两个插件都只做编辑器集成，不包含 LSP、语义补全或诊断。
+
 ## 设计特点
 
 ### 表达力优先的语法

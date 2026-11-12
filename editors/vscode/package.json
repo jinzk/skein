@@ -1,0 +1,104 @@
+{
+  "name": "skein",
+  "displayName": "Skein",
+  "description": "Skein language support: syntax highlighting, snippets, and run commands.",
+  "version": "0.1.0",
+  "publisher": "jinzk",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jinzk/skein.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "skein",
+    "syntax",
+    "snippets"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onLanguage:skein"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "skein",
+        "aliases": [
+          "Skein",
+          "skein"
+        ],
+        "extensions": [
+          ".skein"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "skein",
+        "scopeName": "source.skein",
+        "path": "./syntaxes/skein.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "skein",
+        "path": "./snippets/skein.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "skein.runFile",
+        "title": "Skein: Run Current File"
+      },
+      {
+        "command": "skein.openRepl",
+        "title": "Skein: Open REPL"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "skein.runFile",
+          "when": "editorLangId == skein",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Skein",
+      "properties": {
+        "skein.executablePath": {
+          "type": "string",
+          "default": "skein",
+          "description": "Path to the Skein interpreter. Relative paths are resolved from the workspace root."
+        },
+        "skein.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra arguments passed before the script path, for example [\"--typecheck=strict\"]."
+        },
+        "skein.saveBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save the current file before running it."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package"
+  }
+}

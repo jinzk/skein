@@ -1,0 +1,138 @@
+{
+  "Skein main": {
+    "prefix": "main",
+    "body": [
+      "import std;",
+      "",
+      "func main() {",
+      "\t$0",
+      "}",
+      "",
+      "main();"
+    ],
+    "description": "Program entry point"
+  },
+  "Skein function": {
+    "prefix": "fn",
+    "body": [
+      "func ${1:name}(${2}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Named function"
+  },
+  "Skein if": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If statement"
+  },
+  "Skein if/else": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:condition} {",
+      "\t${2}",
+      "} else {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If/else statement"
+  },
+  "Skein while": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "Skein C-style for": {
+    "prefix": "for",
+    "body": [
+      "for let ${1:i} = 0; $1 < ${2:n}; $1 = $1 + 1 {",
+      "\t$0",
+      "}"
+    ],
+    "description": "C-style for loop"
+  },
+  "Skein for-in": {
+    "prefix": "forin",
+    "body": [
+      "for ${1:item} in ${2:items} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate a list, string, bytes, set, deque, heap, or generator"
+  },
+  "Skein for-in dict": {
+    "prefix": "fordict",
+    "body": [
+      "for ${1:key}, ${2:value} in ${3:dict} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate a dict's key/value pairs"
+  },
+  "Skein for_each": {
+    "prefix": "foreach",
+    "body": [
+      "std.iter.for_each(${1:items}, func(${2:value}) {",
+      "\t$0",
+      "});"
+    ],
+    "description": "Functional iteration with std.iter.for_each"
+  },
+  "Skein match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\tcase ${2:pattern} => ${3:result};",
+      "\tdefault => $0;",
+      "}"
+    ],
+    "description": "Match expression"
+  },
+  "Skein struct": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "\t${2:field}: ${3:int};",
+      "}"
+    ],
+    "description": "Struct declaration"
+  },
+  "Skein impl": {
+    "prefix": "impl",
+    "body": [
+      "impl ${1:Type} {",
+      "\tfunc ${2:method}(self) {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Inherent method block"
+  },
+  "Skein enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "\t${2:Variant};",
+      "}"
+    ],
+    "description": "Enum declaration"
+  },
+  "Skein on error": {
+    "prefix": "onerror",
+    "body": [
+      "${1:expression} on error(${2:e}) {",
+      "\tprintln(str($2));",
+      "\trecover ${3:null};",
+      "}"
+    ],
+    "description": "Catch an error and recover"
+  }
+}

@@ -4,10 +4,9 @@
 - 更新日期：2026-11-06
 - 关联文档：
   - [bytecode.md](bytecode.md)
-  - [bytecode-plan.md](bytecode-plan.md)
   - [architecture.md](architecture.md)
 
-本文把 `bytecode-plan.md` 中“JIT/AOT 待决策”的部分收敛为可执行的 JIT 路线。
+本文把 `bytecode.md` 中与 JIT 相关的后续方向收敛为可执行的路线。
 Spike 已完成；后续工作按 §12 的阶段推进，GC root map 是当前主线。
 
 ---

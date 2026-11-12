@@ -132,9 +132,7 @@ def main():
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1
 
-        pkg_dir = os.path.join(tmp, "leakpkg")
-        os.makedirs(pkg_dir)
-        with open(os.path.join(pkg_dir, "leakpkg.skein"), "w",
+        with open(os.path.join(tmp, "leakpkg.skein"), "w",
                   encoding="utf-8") as handle:
             handle.write(
                 "package leakpkg {\n"

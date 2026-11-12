@@ -659,7 +659,7 @@ def run_cases():
             return path
 
         write(
-            "aa/aa.skein",
+            "aa.skein",
             "package aa {\n"
             "  export struct P { x: int; }\n"
             "  export func make(x) { return P { x: x }; }\n"
@@ -694,7 +694,7 @@ def run_cases():
             return path
 
         write(
-            "aa/aa.skein",
+            "aa.skein",
             "package aa {\n"
             "  func logged(fn) {\n"
             "    return func(...args) {\n"
@@ -724,7 +724,7 @@ def run_cases():
             return path
 
         write(
-            "aa/aa.skein",
+            "aa.skein",
             "package aa {\n"
             "  export struct P { n: int; }\n"
             "  export func make(n) { return P { n: n }; }\n"

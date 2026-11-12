@@ -316,7 +316,7 @@ def run_cases():
                 f.write(text)
             return path
 
-        write("aa/aa.skein",
+        write("aa.skein",
               "package aa { export enum E { A { n: int; }; } }\n")
         main = write(
             "main.skein",

@@ -497,7 +497,7 @@ def run_cases():
                 f.write(text)
             return path
 
-        write("app/aa/aa.skein",
+        write("app/aa.skein",
               "package aa { export struct Point { x: int; y: int; } }\n")
         main = write("app/main.skein",
               "import std;\nimport aa;\n"
@@ -650,15 +650,15 @@ def run_cases():
             return path
 
         write(
-            "app/aa/aa.skein",
+            "app/aa.skein",
             'package aa { export let root = "aa"; }\n',
         )
         write(
-            "app/aa/bb/bb.skein",
+            "app/aa/bb.skein",
             'package bb { export let name = "bb"; }\n',
         )
         write(
-            "app/aa/bb/cc/cc.skein",
+            "app/aa/bb/cc.skein",
             "package cc {\n"
             "  export let value = 42;\n"
             "  export const fixed = 7;\n"
@@ -704,7 +704,7 @@ def run_cases():
         assert proc.stderr == "", proc.stderr
 
         write(
-            "app/aa/state/state.skein",
+            "app/aa/state.skein",
             "package state {\n"
             "  let n = 0;\n"
             "  export func inc() { n = n + 1; return n; }\n"
@@ -727,8 +727,10 @@ def run_cases():
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["1", "2", "2"], proc.stdout
 
+        write("container/aa.skein", "package aa {}\n")
+        write("container/aa/bb.skein", "package bb {}\n")
         write(
-            "container/aa/bb/cc/cc.skein",
+            "container/aa/bb/cc.skein",
             'package cc { export let value = "deep"; }\n',
         )
         container_main = write(
@@ -739,34 +741,32 @@ def run_cases():
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "deep\n", repr(proc.stdout)
 
-        # Package lookup paths: source dir > CLI dirs > environment dirs.
-        write(
-            "search/app/aa/bb/cc/cc.skein",
-            'package cc { export let value = "source"; }\n',
-        )
+        # Module lookup paths: source dir > CLI dirs > environment dirs.
+        def write_module(rel_root, value):
+            write(
+                f"{rel_root}/aa/module.skein",
+                "module aa {\n  export leaf.v;\n}\n",
+            )
+            write(
+                f"{rel_root}/aa/leaf.skein",
+                'package leaf { export let v = "%s"; }\n' % value,
+            )
+
+        write_module("search/app", "source")
         search_main = write(
             "search/app/main.skein",
-            "import aa.bb.cc;\nprintln(cc.value);\n",
+            "import aa;\nprintln(aa.v);\n",
         )
-        write(
-            "search/lib1/aa/bb/cc/cc.skein",
-            'package cc { export let value = "cli1"; }\n',
-        )
-        write(
-            "search/lib2/aa/bb/cc/cc.skein",
-            'package cc { export let value = "cli2"; }\n',
-        )
-        write(
-            "search/env/aa/bb/cc/cc.skein",
-            'package cc { export let value = "env"; }\n',
-        )
+        write_module("search/lib1", "cli1")
+        write_module("search/lib2", "cli2")
+        write_module("search/env", "env")
         proc = run_file(search_main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "source\n", repr(proc.stdout)
 
         app_without_local = write(
             "search/app2/main.skein",
-            "import aa.bb.cc;\nprintln(cc.value);\n",
+            "import aa;\nprintln(aa.v);\n",
         )
         lib1 = os.path.join(tmp, "search/lib1")
         lib2 = os.path.join(tmp, "search/lib2")
@@ -828,7 +828,7 @@ def run_cases():
 
         proc = subprocess.run(
             [BIN, "-I", lib1],
-            input="import aa.bb.cc;\nprintln(cc.value);\n",
+            input="import aa;\nprintln(aa.v);\n",
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -839,7 +839,7 @@ def run_cases():
 
         # Packages are isolated from the main package's globals.
         write(
-            "isolated/aa/bb/cc/cc.skein",
+            "isolated/aa/bb/cc.skein",
             "package cc { export let leaked = main_secret; }\n",
         )
         isolated_main = write(
@@ -852,7 +852,7 @@ def run_cases():
 
         # Package names must match their containing folder.
         write(
-            "wrongname/aa/bb/cc/cc.skein",
+            "wrongname/aa/bb/cc.skein",
             "package wrong { export let value = 1; }\n",
         )
         wrong_main = write(
@@ -920,7 +920,7 @@ def run_cases():
 
         # A normal package cannot declare itself as main.
         write(
-            "reservedmain/aa/bb/bb.skein",
+            "reservedmain/aa/bb.skein",
             "package main { export let x = 1; }\n",
         )
         reserved_main = write(
@@ -933,11 +933,11 @@ def run_cases():
 
         # Cyclic imports fail cleanly instead of hanging.
         write(
-            "cycle/aa/bb/bb.skein",
+            "cycle/aa/bb.skein",
             "package bb { import aa.cc; export let x = 1; }\n",
         )
         write(
-            "cycle/aa/cc/cc.skein",
+            "cycle/aa/cc.skein",
             "package cc { import aa.bb; export let y = 2; }\n",
         )
         cycle_main = write(
@@ -956,15 +956,70 @@ def run_cases():
         assert proc.returncode == 1, proc.stderr
         assert "package not found" in proc.stderr, proc.stderr
 
+        # Directory package conventions are gone.
+        write(
+            "olddir/aa/aa.skein",
+            "package aa { export let value = 1; }\n",
+        )
+        olddir_main = write("olddir/main.skein", "import aa;\n")
+        proc = run_file(olddir_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
+        write(
+            "oldindex/aa/index.skein",
+            "package aa { export let value = 1; }\n",
+        )
+        oldindex_main = write("oldindex/main.skein", "import aa;\n")
+        proc = run_file(oldindex_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
+        write(
+            "oldsingle/aa/only.skein",
+            "package aa { export let value = 1; }\n",
+        )
+        oldsingle_main = write("oldsingle/main.skein", "import aa;\n")
+        proc = run_file(oldsingle_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
+        # Direct dotted imports are path-based and do not require parents.
+        write(
+            "direct/aa/bb/cc.skein",
+            'package cc { export let value = "direct"; }\n',
+        )
+        direct_main = write(
+            "direct/main.skein",
+            "import aa.bb.cc;\nprintln(cc.value);\n",
+        )
+        proc = run_file(direct_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "direct\n", repr(proc.stdout)
+
+        # Namespace traversal only follows real child packages.
+        write("strict/aa.skein", "package aa {}\n")
+        write(
+            "strict/aa/bb/cc/dd.skein",
+            "package dd { export let value = 1; }\n",
+        )
+        strict_main = write(
+            "strict/main.skein",
+            "import aa;\nprintln(aa.bb);\n",
+        )
+        proc = run_file(strict_main)
+        assert proc.returncode == 1, proc.stderr
+        assert "key not found" in proc.stderr, proc.stderr
+
         # Unicode package names and directories.
         write(
-            "unicode/包/包.skein",
+            "unicode/包.skein",
             "package 包 {\n"
             "  export let 值 = 42;\n"
             "}\n",
         )
         write(
-            "unicode/包/子包/子包.skein",
+            "unicode/包/子包.skein",
             "package 子包 {\n"
             "  export let 名称 = \"子\";\n"
             "}\n",
@@ -995,24 +1050,24 @@ def run_cases():
         with open(os.path.join(root, ".skeinroot"), "w", encoding="utf-8"):
             pass
 
-        write("top/pkg/pkg.skein",
+        write("top/pkg.skein",
               'package pkg { export let value = "root"; }\n')
-        write("lib/top/pkg/pkg.skein",
+        write("lib/top/pkg.skein",
               'package pkg { export let value = "global"; }\n')
-        write("src/common/common.skein",
+        write("src/common.skein",
               'package common { export let value = "common"; }\n')
-        write("src/app/local/local.skein",
+        write("src/app/local.skein",
               'package local { export let value = "local"; }\n')
-        write("src/app/sibling/sibling.skein",
+        write("src/app/sibling.skein",
               'package sibling { export let value = "sibling"; }\n')
-        write("src/app/user/helper/helper.skein",
+        write("src/app/user/helper.skein",
               'package helper { export let value = "helper"; }\n')
         write(
-            "src/app/user/user.skein",
+            "src/app/user.skein",
             "package user {\n"
             "  export func run() {\n"
-            "    import .helper;\n"
-            "    import ..sibling;\n"
+            "    import .user.helper;\n"
+            "    import .sibling;\n"
             "    import @top.pkg;\n"
             '    return helper.value + ":" + sibling.value + ":" + pkg.value;\n'
             "  }\n"
@@ -1062,7 +1117,7 @@ def run_cases():
         # Without a .skeinroot marker, @ falls back to the main script dir.
         nomarker = os.path.join(tmp, "nomarker")
         os.makedirs(os.path.join(nomarker, "local"), exist_ok=True)
-        with open(os.path.join(nomarker, "local", "local.skein"),
+        with open(os.path.join(nomarker, "local.skein"),
                   "w", encoding="utf-8") as f:
             f.write('package local { export let value = "local"; }\n')
         fallback_main = os.path.join(nomarker, "main.skein")
@@ -1073,9 +1128,9 @@ def run_cases():
         assert proc.stdout == "local\n", repr(proc.stdout)
 
         # @ never falls back to -I directories.
-        os.makedirs(os.path.join(nomarker, "lib", "top", "pkg"),
+        os.makedirs(os.path.join(nomarker, "lib", "top"),
                     exist_ok=True)
-        with open(os.path.join(nomarker, "lib", "top", "pkg", "pkg.skein"),
+        with open(os.path.join(nomarker, "lib", "top", "pkg.skein"),
                   "w", encoding="utf-8") as f:
             f.write('package pkg { export let value = "global"; }\n')
         nofallback_main = os.path.join(nomarker, "nofallback.skein")
@@ -1100,7 +1155,7 @@ def run_cases():
             return path
 
         write(
-            "app/aa/aa.skein",
+            "app/aa.skein",
             "package aa {\n"
             "  export struct P { x: int; }\n"
             "  struct Hidden { h: int; }\n"
@@ -1167,7 +1222,7 @@ def run_cases():
             return path
 
         write(
-            "app/lib/lib.skein",
+            "app/lib.skein",
             "package lib {\n"
             "  export struct P { x: int; }\n"
             "  export trait D { func d(self); }\n"
@@ -1247,7 +1302,7 @@ def run_cases():
         assert "trait lib.Secret is not exported" in proc.stderr, proc.stderr
 
         write(
-            "app/badlib/badlib.skein",
+            "app/badlib.skein",
             "package badlib {\n"
             "  struct Hidden { x: int; }\n"
             "  export trait Bad { func b(self, h: Hidden); }\n"
@@ -1270,7 +1325,7 @@ def run_cases():
             return path
 
         write(
-            "app/d/d.skein",
+            "app/d.skein",
             "package d {\n"
             "  func helper(x) { return x + 1; }\n"
             "  export trait D {\n"

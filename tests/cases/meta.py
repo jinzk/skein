@@ -183,7 +183,7 @@ def run_cases():
                 f.write(text)
             return path
 
-        write("aa/aa.skein",
+        write("aa.skein",
               "package aa {\n"
               "  import std;\n"
               "  export struct Pub { x: int; }\n"
@@ -226,7 +226,7 @@ def run_cases():
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["Pub", "false"], proc.stdout
 
-        write("bb/bb.skein",
+        write("bb.skein",
               "package bb { export struct Pub { y: int; } }\n")
         main = write("main_ambiguous.skein",
                      "import std;\n"

@@ -65,7 +65,6 @@ struct resolved_package {
     fs::path directory;
     fs::path file;
     std::string key;
-    bool has_source;
 };
 
 thread_local std::string main_source_path;
@@ -189,38 +188,8 @@ bool validate_package_parts(const std::string &dotted,
     return true;
 }
 
-bool package_file_exists(const fs::path &dir, const std::string &name,
-                         fs::path &file);
-bool directory_has_package(const fs::path &directory, int depth = 0);
-
-bool try_resolve_package_dir(const fs::path &directory,
-                             const std::string &last,
-                             resolved_package &resolved) {
-    std::error_code ec;
-    if (!fs::is_directory(directory, ec))
-        return false;
-
-    fs::path file;
-    bool has_source = package_file_exists(directory, last, file);
-    if (!has_source && !directory_has_package(directory))
-        return false;
-
-    resolved.directory = directory;
-    resolved.file = file;
-    resolved.has_source = has_source;
-    resolved.key = has_source ? canonical_file(file)
-                              : canonical_file(directory);
-    return true;
-}
-
-/*
- * Module v2 also allows a package to be a plain file next to its siblings:
- * `math/add.skein` (package add) as well as the legacy
- * `math/add/add.skein`.  Directory packages keep precedence.
- */
-bool try_resolve_package_file(const fs::path &parent,
-                              const std::string &last,
-                              resolved_package &resolved) {
+bool resolve_package_file(const fs::path &parent, const std::string &last,
+                          resolved_package &resolved) {
     std::error_code ec;
     if (!fs::is_directory(parent, ec))
         return false;
@@ -229,7 +198,6 @@ bool try_resolve_package_file(const fs::path &parent,
         return false;
     resolved.directory = parent;
     resolved.file = file;
-    resolved.has_source = true;
     resolved.key = canonical_file(file);
     return true;
 }
@@ -260,72 +228,6 @@ value_t *take_seeded_import(const char *dotted_path, const char *base_dir) {
     return NULL;
 }
 
-bool package_file_exists(const fs::path &dir, const std::string &name,
-                         fs::path &file) {
-    std::error_code ec;
-    fs::path direct = dir / path_from_utf8(name + ".skein");
-    if (fs::is_regular_file(direct, ec))
-        return file = direct, true;
-    ec.clear();
-    fs::path index = dir / "index.skein";
-    if (fs::is_regular_file(index, ec))
-        return file = index, true;
-
-    fs::path single;
-    bool found = false;
-    bool multiple = false;
-    fs::directory_iterator it(dir, ec);
-    fs::directory_iterator end;
-    if (ec)
-        return false;
-    for (; it != end; it.increment(ec)) {
-        if (ec)
-            return false;
-        if (!it->is_regular_file(ec) || ec) {
-            ec.clear();
-            continue;
-        }
-        if (it->path().extension() != ".skein")
-            continue;
-        if (found)
-            multiple = true;
-        else {
-            found = true;
-            single = it->path();
-        }
-    }
-    if (found && !multiple)
-        return file = single, true;
-    return false;
-}
-
-bool directory_has_package(const fs::path &directory, int depth) {
-    if (depth > 64)
-        return false;
-    std::error_code ec;
-    fs::directory_iterator it(directory, ec);
-    fs::directory_iterator end;
-    if (ec)
-        return false;
-    for (; it != end; it.increment(ec)) {
-        if (ec)
-            return false;
-        if (!it->is_directory(ec) || ec) {
-            ec.clear();
-            continue;
-        }
-        std::string child = path_to_utf8(it->path().filename());
-        if (!is_identifier(child))
-            continue;
-        fs::path child_file;
-        if (package_file_exists(it->path(), child, child_file))
-            return true;
-        if (directory_has_package(it->path(), depth + 1))
-            return true;
-    }
-    return false;
-}
-
 bool resolve_package(const std::string &dotted, resolved_package &resolved,
                      std::string &error) {
     std::vector<std::string> parts;
@@ -334,24 +236,20 @@ bool resolve_package(const std::string &dotted, resolved_package &resolved,
 
     const std::string &last = parts.back();
     for (const std::string &root : search_roots) {
-        fs::path directory = path_from_utf8(root);
-        for (const std::string &part : parts)
-            directory /= path_from_utf8(part);
-        if (try_resolve_package_dir(directory, last, resolved))
+        fs::path parent = path_from_utf8(root);
+        for (size_t i = 0; i + 1 < parts.size(); ++i)
+            parent /= path_from_utf8(parts[i]);
+        if (resolve_package_file(parent, last, resolved))
             return true;
-        if (parts.size() >= 1) {
-            fs::path parent = path_from_utf8(root);
-            for (size_t i = 0; i + 1 < parts.size(); ++i)
-                parent /= path_from_utf8(parts[i]);
-            if (try_resolve_package_file(parent, last, resolved))
-                return true;
-        }
     }
 
     error = "package not found";
     for (const std::string &root : search_roots) {
+        fs::path parent = path_from_utf8(root);
+        for (size_t i = 0; i + 1 < parts.size(); ++i)
+            parent /= path_from_utf8(parts[i]);
         error += "\n  searched: ";
-        error += root;
+        error += path_to_utf8(parent / path_from_utf8(last + ".skein"));
     }
     return false;
 }
@@ -362,19 +260,16 @@ bool resolve_package_at(const fs::path &base, const std::string &dotted,
     if (!validate_package_parts(dotted, parts, error))
         return false;
 
-    fs::path directory = base;
-    for (const std::string &part : parts)
-        directory /= path_from_utf8(part);
+    fs::path parent = base;
+    for (size_t i = 0; i + 1 < parts.size(); ++i)
+        parent /= path_from_utf8(parts[i]);
 
-    if (try_resolve_package_dir(directory, parts.back(), resolved))
-        return true;
-    if (try_resolve_package_file(directory.parent_path(), parts.back(),
-                                 resolved))
+    if (resolve_package_file(parent, parts.back(), resolved))
         return true;
 
     error = "package not found";
     error += "\n  searched: ";
-    error += path_to_utf8(directory);
+    error += path_to_utf8(parent / path_from_utf8(parts.back() + ".skein"));
     return false;
 }
 
@@ -706,7 +601,7 @@ bool load_package_file(const resolved_package &resolved,
                        const std::string &module_name, value_t *&result,
                        std::string &error);
 bool load_child_packages(const std::string &dotted,
-                         const fs::path &directory, value_t *namespace_value,
+                         const fs::path &package_file, value_t *namespace_value,
                          std::string &error);
 value_t *import_embedded_package(const std::string &dotted,
                                  const char *source, std::string &error);
@@ -735,7 +630,7 @@ value_t *import_resolved(const std::string &dotted,
     bool ok = load_package_file(resolved, split_dotted(dotted).back(),
                                 dotted, namespace_value, error);
     if (ok) {
-        ok = load_child_packages(dotted, resolved.directory,
+        ok = load_child_packages(dotted, resolved.file,
                                  namespace_value, error);
     }
 
@@ -754,10 +649,6 @@ value_t *import_resolved(const std::string &dotted,
 value_t *import_package_exact(const std::string &dotted,
                               const resolved_package &resolved,
                               std::string &error) {
-    if (!resolved.has_source) {
-        error = "module export target is not a package file: " + dotted;
-        return NULL;
-    }
     if (is_loading(resolved.key)) {
         error = "cyclic package import: " + resolved.key;
         return NULL;
@@ -880,13 +771,7 @@ bool resolve_module_target(const fs::path &root,
                            const std::string &package_path,
                            resolved_package &resolved,
                            std::string &error) {
-    if (!resolve_package_at(root, package_path, resolved, error))
-        return false;
-    if (!resolved.has_source) {
-        error = "module export target is not a package file: " + package_path;
-        return false;
-    }
-    return true;
+    return resolve_package_at(root, package_path, resolved, error);
 }
 
 value_t *import_module_root(const std::string &module_name,
@@ -1169,16 +1054,21 @@ bool namespace_has_key(value_t *namespace_value, const std::string &key) {
     return false;
 }
 
-bool load_child_packages(const std::string &dotted, const fs::path &directory,
+bool load_child_packages(const std::string &dotted,
+                         const fs::path &package_file,
                          value_t *namespace_value, std::string &error) {
     if (!namespace_value || namespace_value->type != T_dict) {
         error = "package namespace is not a dict";
         return false;
     }
 
+    fs::path child_root = package_file.parent_path() / package_file.stem();
     std::error_code ec;
-    std::vector<std::pair<std::string, fs::path>> children;
-    fs::directory_iterator it(directory, ec);
+    if (!fs::is_directory(child_root, ec))
+        return true;
+
+    std::vector<std::string> children;
+    fs::directory_iterator it(child_root, ec);
     fs::directory_iterator end;
     if (ec) {
         error = "cannot scan package directory: " + ec.message();
@@ -1190,39 +1080,31 @@ bool load_child_packages(const std::string &dotted, const fs::path &directory,
             error = "cannot scan package directory: " + ec.message();
             return false;
         }
-        if (!it->is_directory(ec) || ec) {
+        if (!it->is_regular_file(ec) || ec) {
             ec.clear();
             continue;
         }
-        std::string child = path_to_utf8(it->path().filename());
+        if (it->path().extension() != ".skein")
+            continue;
+        std::string child = path_to_utf8(it->path().stem());
         if (!is_identifier(child))
             continue;
-        fs::path child_file;
-        if (!package_file_exists(it->path(), child, child_file) &&
-            !directory_has_package(it->path()))
-            continue;
-        children.push_back(std::make_pair(child, it->path()));
+        children.push_back(child);
     }
     std::sort(children.begin(), children.end());
 
     struct dict_value_t *dict = (struct dict_value_t *)namespace_value;
-    for (const auto &entry : children) {
-        const std::string &child = entry.first;
-        const fs::path &child_directory = entry.second;
+    for (const std::string &child : children) {
         if (namespace_has_key(namespace_value, child)) {
             error = "package export conflicts with child package: " + child;
             return false;
         }
 
-        std::string child_path = dotted + "." + child;
         resolved_package child_resolved;
-        child_resolved.directory = child_directory;
-        child_resolved.has_source =
-            package_file_exists(child_resolved.directory, child,
-                                child_resolved.file);
-        child_resolved.key = child_resolved.has_source
-                                 ? canonical_file(child_resolved.file)
-                                 : canonical_file(child_resolved.directory);
+        if (!resolve_package_file(child_root, child, child_resolved))
+            continue;
+
+        std::string child_path = dotted + "." + child;
         value_t *child_namespace =
             import_resolved(child_path, child_resolved, error);
         if (!child_namespace)
@@ -1387,13 +1269,6 @@ bool load_package_file(const resolved_package &resolved,
                        const std::string &expected_name,
                        const std::string &module_name, value_t *&result,
                        std::string &error) {
-    if (!resolved.has_source) {
-        struct dict_value_t *namespace_value = newdictval();
-        namespace_value->payload->is_namespace = true;
-        result = (value_t *)namespace_value;
-        return true;
-    }
-
     const std::string package_path = path_to_utf8(resolved.file);
     std::string source_text;
     if (!load_source_file(package_path, source_encoding_get(),

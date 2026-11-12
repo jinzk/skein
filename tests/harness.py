@@ -2777,8 +2777,6 @@ def check_extended_stdlib():
             )
 
         with tempfile.TemporaryDirectory() as deadlock_tmp:
-            package_dir = os.path.join(deadlock_tmp, "deadlockpkg")
-            os.makedirs(package_dir)
             deadlock_worker = os.path.join(
                 deadlock_tmp, "deadlock_worker.skein")
             with open(deadlock_worker, "w", encoding="utf-8") as handle:
@@ -2787,7 +2785,7 @@ def check_extended_stdlib():
                     "func handle(payload) { return payload; }\n"
                 )
             deadlock_worker_path = deadlock_worker.replace("\\", "\\\\")
-            with open(os.path.join(package_dir, "deadlockpkg.skein"),
+            with open(os.path.join(deadlock_tmp, "deadlockpkg.skein"),
                       "w", encoding="utf-8") as handle:
                 handle.write(
                     "package deadlockpkg {\n"
@@ -2820,8 +2818,6 @@ def check_extended_stdlib():
             )
             assert proc.stdout.strip() == "7", proc.stdout
 
-            spawn_dir = os.path.join(deadlock_tmp, "spawnpkg")
-            os.makedirs(spawn_dir)
             spawn_worker = os.path.join(
                 deadlock_tmp, "deadlock_spawn_worker.skein")
             with open(spawn_worker, "w", encoding="utf-8") as handle:
@@ -2832,7 +2828,7 @@ def check_extended_stdlib():
                     "}\n"
                 )
             spawn_worker_path = spawn_worker.replace("\\", "\\\\")
-            with open(os.path.join(spawn_dir, "spawnpkg.skein"),
+            with open(os.path.join(deadlock_tmp, "spawnpkg.skein"),
                       "w", encoding="utf-8") as handle:
                 handle.write(
                     "package spawnpkg {\n"
@@ -2862,9 +2858,7 @@ def check_extended_stdlib():
             )
             assert proc.stdout.strip() == "42", proc.stdout
 
-            transfer_pkg_dir = os.path.join(deadlock_tmp, "threadpkg")
-            os.makedirs(transfer_pkg_dir)
-            with open(os.path.join(transfer_pkg_dir, "threadpkg.skein"),
+            with open(os.path.join(deadlock_tmp, "threadpkg.skein"),
                       "w", encoding="utf-8") as handle:
                 handle.write(
                     "package threadpkg {\n"
@@ -2943,7 +2937,7 @@ def check_extended_stdlib():
                 "thread encode failed: "
                 f"{enc.stdout!r} {enc.stderr!r}"
             )
-            shutil.rmtree(os.path.join(deadlock_tmp, "threadpkg"))
+            os.remove(os.path.join(deadlock_tmp, "threadpkg.skein"))
             dec = subprocess.run(
                 [os.path.abspath(BIN), decode_path],
                 cwd=deadlock_tmp,
@@ -3252,8 +3246,6 @@ def check_extended_stdlib():
                 stdout_all=["deferred=42", "result=15|"],
             )
 
-            http_pkg_dir = os.path.join(deadlock_tmp, "httpservepkg")
-            os.makedirs(http_pkg_dir)
             http_worker = os.path.join(
                 deadlock_tmp, "deadlock_http_worker.skein")
             with open(http_worker, "w", encoding="utf-8") as handle:
@@ -3264,7 +3256,7 @@ def check_extended_stdlib():
                     "}\n"
                 )
             http_worker_path = http_worker.replace("\\", "\\\\")
-            with open(os.path.join(http_pkg_dir, "httpservepkg.skein"),
+            with open(os.path.join(deadlock_tmp, "httpservepkg.skein"),
                       "w", encoding="utf-8") as handle:
                 handle.write(
                     "package httpservepkg {\n"
@@ -4591,9 +4583,8 @@ def check_source_encoding():
 
     with tempfile.TemporaryDirectory() as tmp:
         app = os.path.join(tmp, "app")
-        package = os.path.join(app, "pkg")
-        os.makedirs(package)
-        with open(os.path.join(package, "pkg.skein"), "wb") as handle:
+        os.makedirs(app)
+        with open(os.path.join(app, "pkg.skein"), "wb") as handle:
             handle.write('package pkg { export let value = "包"; }\n'
                          .encode("gbk"))
         main_path = os.path.join(app, "main.skein")

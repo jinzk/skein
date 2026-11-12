@@ -174,7 +174,7 @@ def run_cases():
             return path
 
         write(
-            "aa/aa.skein",
+            "aa.skein",
             "package aa {\n"
             "  export struct C { x: int; }\n"
             "  export func make(x) { return C { x: x }; }\n"

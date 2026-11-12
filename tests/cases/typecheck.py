@@ -1186,7 +1186,7 @@ def run_cases():
           stderr="type error: expected list, got int")
 
     with tempfile.TemporaryDirectory() as tmp:
-        pkg_dir = os.path.join(tmp, "app", "aa")
+        pkg_dir = os.path.join(tmp, "app")
         os.makedirs(pkg_dir)
         with open(os.path.join(pkg_dir, "aa.skein"), "w",
                   encoding="utf-8") as f:

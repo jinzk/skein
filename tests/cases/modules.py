@@ -46,7 +46,7 @@ def directory_module(tmp):
     )
     write(
         tmp,
-        "math/add/add.skein",
+        "math/add.skein",
         "package add {\n"
         "  export func add(a, b) { return a + b; }\n"
         "  func hidden() { return 99; }\n"
@@ -54,9 +54,9 @@ def directory_module(tmp):
     )
     write(
         tmp,
-        "math/vector/vector.skein",
+        "math/vector.skein",
         "package vector {\n"
-        "  import ..internal.helpers;\n"
+        "  import .internal.helpers;\n"
         "  export func sum(xs) {\n"
         "    return helpers.normalize(xs[0] + xs[1]);\n"
         "  }\n"
@@ -64,7 +64,7 @@ def directory_module(tmp):
     )
     write(
         tmp,
-        "math/internal/helpers/helpers.skein",
+        "math/internal/helpers.skein",
         "package helpers {\n"
         "  export func normalize(x) { return x + 1; }\n"
         "  export func tag() { return \"helpers\"; }\n"
@@ -190,11 +190,28 @@ def run_cases():
         write(
             tmp,
             "math/module.skein",
-            "module wrong { export add.add; }\n",
+            "module math { export add.add; }\n",
         )
         write(
             tmp,
             "math/add/add.skein",
+            "package add { export func add(a, b) { return a + b; } }\n",
+        )
+        run_module_error(
+            tmp,
+            "import math;\n",
+            "package not found",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        write(
+            tmp,
+            "math/module.skein",
+            "module wrong { export add.add; }\n",
+        )
+        write(
+            tmp,
+            "math/add.skein",
             "package add { export func add(a, b) { return a + b; } }\n",
         )
         run_module_error(
@@ -211,7 +228,7 @@ def run_cases():
         )
         write(
             tmp,
-            "math/add/add.skein",
+            "math/add.skein",
             "package add { export func add(a, b) { return a + b; } }\n",
         )
         run_module_error(
@@ -231,12 +248,12 @@ def run_cases():
         )
         write(
             tmp,
-            "math/add/add.skein",
+            "math/add.skein",
             "package add { export func add(a, b) { return a + b; } }\n",
         )
         write(
             tmp,
-            "math/vector/vector.skein",
+            "math/vector.skein",
             "package vector { export func sum(xs) { return 0; } }\n",
         )
         run_module_error(
@@ -253,7 +270,7 @@ def run_cases():
         )
         write(
             tmp,
-            "math/loop/loop.skein",
+            "math/loop.skein",
             "package loop {\n"
             "  import math;\n"
             "  export func loop() { return 1; }\n"
@@ -278,7 +295,7 @@ def run_cases():
         )
         write(
             tmp,
-            "math/add/add.skein",
+            "math/add.skein",
             "package add { export func add(a, b) { return a + b; } }\n",
         )
         run_module_error(

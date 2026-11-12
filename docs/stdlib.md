@@ -2049,7 +2049,7 @@ print(std.meta.has_type("int"));      // true
 的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
 `fields` / `variants` / `methods` / `traits` 对不适用的类型返回空列表。
 返回字典同时包含 `package`、`module`、`source`：
-`package` 是完整包身份，`module` 是 Module v2 容器名（普通包和入口为空字符串），
+`package` 是完整包身份，`module` 是 Module 容器名（普通包和入口为空字符串），
 `source` 是源文件路径。
 `std.meta` 不返回值默认值，只提供 `has_default` 标记。
 

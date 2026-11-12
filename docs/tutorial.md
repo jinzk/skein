@@ -226,9 +226,9 @@ package bb {
 }
 ```
 
-### Module（v2，可选）
+### Module
 
-顶层目录包含 `module.skein` 时，该目录成为 module。module 内也只使用文件包：
+Module 是唯一的模块机制；源码层不存在 Module v1 或兼容层。顶层目录包含 `module.skein` 时，该目录成为 module。module 内仍然只使用文件包：
 
 ```text
 math/                 # module: math
@@ -1343,7 +1343,7 @@ impl Drawable for Shape {
 kind_of(x)        // "int" / "list" / "struct" / ...
 type_name(x)      // "int" / "Point" / ...
 type_package(x)   // 逻辑包名：入口为 "main"，包类型为包名
-type_module_name(x) // Module v2 容器名；普通包和入口为空字符串
+type_module_name(x) // Module 容器名；普通包和入口为空字符串
 type_source(x)    // 调试用源文件路径
 
 x is int

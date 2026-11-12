@@ -627,7 +627,7 @@ x is Type
 - `kind_of(x)` 返回粗略运行时类别；
 - `type_name(x)` 返回具体类型名；
 - `type_package(x)` 返回逻辑包名：入口为 `main`，包内类型为包名；
-- `type_module_name(x)` 返回 Module v2 容器名；普通包和入口为空字符串；
+- `type_module_name(x)` 返回 Module 容器名；普通包和入口为空字符串；
 - `type_source(x)` 返回调试用源文件路径；普通值返回空字符串；
 - `is` 用类型名判断运行时值是否匹配。
 
@@ -661,7 +661,7 @@ let p = Point { x: 1 };
 kind_of(p)        // "struct"
 type_name(p)      // "Point"
 type_package(p)   // "main" 或包名，例如 "aa.bb"
-type_module_name(p) // Module v2 容器名；普通包为空
+type_module_name(p) // Module 容器名；普通包为空
 type_source(p)    // 调试用源文件路径
 
 p is Point        // true
@@ -2285,6 +2285,8 @@ export NAME = expr;
 
 ## 6. 包和导入
 
+源码层只有一种 module 机制：顶层目录中的 `module.skein`。不存在 Module v1，也没有旧目录包或兼容层。项目内的普通文件包不需要 module；需要跨项目复用时再组织成 module。
+
 ### 6.1 package
 
 ```text
@@ -2360,9 +2362,9 @@ include "shared/helpers.skein";
 - 相对路径基于当前包含文件目录，允许 `..` 和绝对路径；
 - 被包含声明继承包含者 package/module，`source` 指向被包含文件。
 
-### 6.3 目录约定
+### 6.3 文件包目录约定
 
-每个可导入包必须是真实 `.skein` 文件：
+项目内的普通文件包和 module 内的包都使用文件包布局：每个可导入包必须是真实 `.skein` 文件：
 
 ```text
 aa/
@@ -2376,14 +2378,15 @@ import aa.bb;
 ```
 
 - 包块名只写叶子名：`aa/bb/cc.skein` 写 `package cc`；
+- 项目内的普通文件包必须位于 `project_root` 内；module 内的文件包必须位于 module root 内；
 - 子包根目录 = 包文件父目录 / 包文件 stem；
 - `bb.cc` 需要 `aa/bb/cc.skein` 存在；
 - 不支持 `<name>/<name>.skein`、`index.skein`、单文件目录或隐式命名空间容器；
 - 直接 `import aa.bb.cc` 按文件路径解析，不要求中间包文件存在。
 
-### 6.4 Module（v2）
+### 6.4 Module
 
-顶层目录包含 `module.skein` 时成为 module。module 内也只使用文件包：
+Module 是唯一的模块机制；源码层不存在 Module v1 或兼容层。顶层目录包含 `module.skein` 时成为 module。module 内仍然只使用文件包：
 
 ```text
 math/

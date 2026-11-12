@@ -156,8 +156,8 @@ std.http.close(server);
 
 ### 包、模块与工程化
 
-- 文件包：`package bb {}`，包名与文件名一致，按项目根目录解析，`export` 控制可见性；
-- Module v2：`module.skein` 清单 + 公共导出，支持内部包和深导出；
+- 文件包：`package bb {}`，包名与文件名一致，`export` 控制可见性；项目内的包按 `project_root` 解析；
+- Module：唯一的模块机制，目录 + `module.skein` 清单；内部仍然是文件包，支持公共导出、内部包和深导出；源码层不存在 Module v1 或兼容层；
 - `include` 在声明层展开，适合共享常量、类型和函数声明；
 - REPL 支持历史、`:load`、`ans` / `_`；脚本支持 shebang 和 `--encoding`；
 - Unicode 标识符、UTF-8 / UTF-16 / UTF-32 BOM 自动识别、GBK / GB18030 等编码转换；

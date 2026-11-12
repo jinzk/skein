@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Module v2: module manifests and explicit subdirectory package exports."""
+"""Module: module manifests and explicit subdirectory package exports."""
 import os
 import subprocess
 import sys

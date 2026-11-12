@@ -294,7 +294,7 @@ bool resolve_package_at(const fs::path &base, const std::string &dotted,
 }
 
 /* --------------------------------------------------------------------------
- * Module v2 manifest
+ * Module manifest
  * ------------------------------------------------------------------------ */
 
 struct module_export_spec {

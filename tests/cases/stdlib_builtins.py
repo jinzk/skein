@@ -1815,6 +1815,7 @@ def run_cases():
         "  stale = stale + count_stale(std.websocket, [\"connect_async\", "
         '"send_async", "receive_async"]);\n'
         '  stale = stale + count_stale(std.ffi, ["call_async"]);\n'
+        '  stale = stale + count_stale(std.type, ["module"]);\n'
         '  println("stale=" + str(stale));\n'
         '  println("primary=" + str(std.dict.has(std.process, "run_command")) + '
         '"," + str(std.dict.has(std.thread, "spawn_script")) + "," + '
@@ -1822,12 +1823,14 @@ def run_cases():
         'str(std.dict.has(std.net, "accept_task")) + "," + '
         'str(std.dict.has(std.http, "get_task")) + "," + '
         'str(std.dict.has(std.websocket, "connect_task")) + "," + '
-        'str(std.dict.has(std.ffi, "call_task")));\n'
+        'str(std.dict.has(std.ffi, "call_task")) + "," + '
+        'str(std.dict.has(std.type, "package_name")) + "," + '
+        'str(std.dict.has(std.type, "module_name")));\n'
         "  let ch = std.thread.Channel.unbounded();\n"
         '  println("unbounded=" + str(ch.capacity));\n'
         "}\n"
         "main();\n",
-        stdout="stale=0\nprimary=1,1,1,1,1,1,1\nunbounded=-1\n",
+        stdout="stale=0\nprimary=1,1,1,1,1,1,1,1,1\nunbounded=-1\n",
     )
     check(
         "std list transformations",
@@ -2732,8 +2735,10 @@ def run_cases():
           'type_name(1)\ntype_name("x")\ntype_name(Point { x: 1 })\n'
           "type_name(null)\n",
           stdout_all=["= int", "= string", "= Point", "= null"])
-    check("runtime type_module for primitive",
-          'type_module(1) == ""\n', stdout="= true")
+    check("runtime type_package for primitive",
+          'type_package(1) == ""\n', stdout="= true")
+    check("runtime type_module_name for primitive",
+          'type_module_name(1) == ""\n', stdout="= true")
     check("is primitive types",
           "1 is int\n1 is number\n1 is string\n"
           "true is bool\n[1] is list\n{} is dict\n"

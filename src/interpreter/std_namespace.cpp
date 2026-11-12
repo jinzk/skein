@@ -435,7 +435,8 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"kind_of", B_kind_of},
             {"name", B_type_name},
-            {"module", B_type_module},
+            {"package_name", B_type_package},
+            {"module_name", B_type_module_name},
             {"source", B_type_source},
         })));
     root->payload->items.push_back(std::make_pair(

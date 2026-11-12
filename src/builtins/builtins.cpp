@@ -1000,6 +1000,8 @@ struct value_t *call_builtin(int functype,
         return call_string_builtin(functype, args);
     if (functype >= B_int && functype <= B_type_source)
         return call_convert_builtin(functype, args);
+    if (functype == B_type_package || functype == B_type_module_name)
+        return call_convert_builtin(functype, args);
     if ((functype >= B_command && functype <= B_input) ||
         (functype >= B_read_text && functype <= B_write_text))
         return call_file_builtin(functype, args);

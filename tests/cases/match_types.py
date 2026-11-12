@@ -64,7 +64,7 @@ def run_cases():
           stdout_all=["1", "x", "E.A { n: 1, s: x }"])
     check("enum type info",
           'enum E { A; }\nprintln(kind_of(E.A));\nprintln(type_name(E.A));\n'
-          'println(type_module(E.A));\n',
+          'println(type_package(E.A));\n',
           stdout_all=["enum", "E", "main"])
     check("enum type annotation",
           'enum E { A { n: int; }; }\nlet e: E = E.A { n: 1 };\nprintln(e.n);\n',

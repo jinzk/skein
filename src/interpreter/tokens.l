@@ -924,7 +924,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "byte" { yylval.fn = B_byte; YYRET(SKEIN_TOK_BUILTIN); }
 "kind_of" { yylval.fn = B_kind_of; YYRET(SKEIN_TOK_BUILTIN); }
 "type_name" { yylval.fn = B_type_name; YYRET(SKEIN_TOK_BUILTIN); }
-"type_module" { yylval.fn = B_type_module; YYRET(SKEIN_TOK_BUILTIN); }
+"type_package" { yylval.fn = B_type_package; YYRET(SKEIN_TOK_BUILTIN); }
+"type_module_name" { yylval.fn = B_type_module_name; YYRET(SKEIN_TOK_BUILTIN); }
 "type_source" { yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
 "format" { yylval.fn = B_format; YYRET(SKEIN_TOK_BUILTIN); }
 "read_file" { yylval.fn = B_read_file; YYRET(SKEIN_TOK_BUILTIN); }

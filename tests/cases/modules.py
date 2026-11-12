@@ -387,7 +387,7 @@ def run_cases():
             "app/aa/bb.skein",
             "package bb {\n"
             "  export struct T { x: int; }\n"
-            "  export func describe() { return type_module(T { x: 1 }); }\n"
+            "  export func describe() { return type_package(T { x: 1 }); }\n"
             "  export func module_of() {\n"
             "    return std.meta.type_info(T { x: 1 })[\"module\"];\n"
             "  }\n"
@@ -416,7 +416,7 @@ def run_cases():
             "import std;\n"
             "package add {\n"
             "  export struct T { x: int; }\n"
-            "  export func describe() { return type_module(T { x: 1 }); }\n"
+            "  export func describe() { return type_package(T { x: 1 }); }\n"
             "  export func module_of() {\n"
             "    return std.meta.type_info(T { x: 1 })[\"module\"];\n"
             "  }\n"

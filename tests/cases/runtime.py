@@ -834,7 +834,7 @@ def run_cases():
         "std type helpers",
         "import std;\n"
         "std.type.kind_of([])\nstd.type.name(1)\n"
-        "std.type.module(1) == \"\"\n",
+        "std.type.package_name(1) == \"\"\n",
         stdout_all=["= list", "= int", "= true"],
     )
     check(

@@ -458,7 +458,9 @@ enum bifs {
     B_sys_args,
     B_sys_script,
     B_sys_executable,
-    B_sys_exit
+    B_sys_exit,
+    B_type_package,
+    B_type_module_name
 };
 
 #endif

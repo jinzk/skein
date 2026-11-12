@@ -1028,7 +1028,8 @@ const TypeNode *builtin_function_type(int functype) {
             return builtin_sig({any_type()}, type_builtin(TYPE_BYTE));
         case B_kind_of:
         case B_type_name:
-        case B_type_module:
+        case B_type_package:
+        case B_type_module_name:
         case B_type_source:
             return builtin_sig({any_type()}, text());
         case B_string_replace:

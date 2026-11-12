@@ -2916,7 +2916,8 @@ std.process.result
 
 std.type.kind_of
 std.type.name
-std.type.module
+std.type.package_name
+std.type.module_name
 std.type.source
 
 std.meta.type_info
@@ -3241,7 +3242,7 @@ std.thread.capabilities
 - `std.io` 提供 `print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
-- `std.type` 提供 `kind_of`、`type_name`、`type_module`、`type_source`；
+- `std.type` 提供 `kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`；
 - `std.meta` 提供只读类型反射，查询字段、变体、方法和 trait；
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
@@ -4412,7 +4413,8 @@ impl Drawable for Shape {
 ```text
 kind_of(x)        // "int" / "list" / "struct" / ...
 type_name(x)      // "int" / "Point" / ...
-type_module(x)    // 逻辑包名：入口为 "main"，包类型为包名
+type_package(x)   // 逻辑包名：入口为 "main"，包类型为包名
+type_module_name(x) // Module v2 容器名；普通包和入口为空字符串
 type_source(x)    // 调试用源文件路径
 
 x is int

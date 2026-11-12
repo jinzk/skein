@@ -471,7 +471,8 @@ static const char *builtin_field_name(int functype) {
         case B_byte: return "byte";
         case B_kind_of: return "kind_of";
         case B_type_name: return "type_name";
-        case B_type_module: return "type_module";
+        case B_type_package: return "type_package";
+        case B_type_module_name: return "type_module_name";
         case B_type_source: return "type_source";
         case B_format: return "format";
         case B_command: return "command";

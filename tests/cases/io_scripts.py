@@ -1179,9 +1179,9 @@ def run_cases():
             "println(local_get(local));\n"
             "println(pkg is P);\n"
             "println(local is P);\n"
-            "println(type_module(pkg) == type_module(local));\n"
-            "println(type_module(pkg));\n"
-            "println(type_module(local));\n"
+            "println(type_package(pkg) == type_package(local));\n"
+            "println(type_package(pkg));\n"
+            "println(type_package(local));\n"
             "println(type_source(pkg) != \"\");\n"
             "println(imported.x);\n"
             "println(pkg is aa.D);\n",

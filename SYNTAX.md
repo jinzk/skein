@@ -618,14 +618,16 @@ b[1]--;
 ```text
 kind_of(x)
 type_name(x)
-type_module(x)
+type_package(x)
+type_module_name(x)
 type_source(x)
 x is Type
 ```
 
 - `kind_of(x)` 返回粗略运行时类别；
 - `type_name(x)` 返回具体类型名；
-- `type_module(x)` 返回逻辑包名：入口为 `main`，包内类型为包名；
+- `type_package(x)` 返回逻辑包名：入口为 `main`，包内类型为包名；
+- `type_module_name(x)` 返回 Module v2 容器名；普通包和入口为空字符串；
 - `type_source(x)` 返回调试用源文件路径；普通值返回空字符串；
 - `is` 用类型名判断运行时值是否匹配。
 
@@ -658,7 +660,8 @@ let p = Point { x: 1 };
 
 kind_of(p)        // "struct"
 type_name(p)      // "Point"
-type_module(p)    // "main" 或包名，例如 "aa.bb"
+type_package(p)   // "main" 或包名，例如 "aa.bb"
+type_module_name(p) // Module v2 容器名；普通包为空
 type_source(p)    // 调试用源文件路径
 
 p is Point        // true
@@ -2200,7 +2203,7 @@ let b = Event.Timeout;
 - 方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
 - `impl Trait for Event` 可以让 enum 参与 trait 接口；enum 也能用于 `is` 和类型标注；
 - 方法名不能与任意变体的字段重名；
-- `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_module(e)` → 包名；
+- `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_package(e)` → 包名；
 - 类型标注：`let e: Event = Event.UserMsg { text: "hi" };`；
 - 相等按 `def + variant + payload` 比较。
 
@@ -4763,7 +4766,7 @@ std.math.tau    // 6.283185307179586
 
 ```text
 print println list dict int float bool str format len range
-kind_of type_name type_module type_source
+kind_of type_name type_package type_module_name type_source
 ```
 
 `print` 输出后不追加换行，`println` 输出后自动追加换行符；两者都返回 `null`。

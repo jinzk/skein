@@ -27,7 +27,7 @@ package fsm {
     on_transition: any;
     kind: string;
     name: string;
-    module: string;
+    package_name: string;
   }
 
   export struct Context {
@@ -212,7 +212,7 @@ package fsm {
       on_transition: on_transition,
       kind: kind_of(initial),
       name: type_name(initial),
-      module: type_module(initial)
+      package_name: type_package(initial)
     };
   }
 
@@ -236,7 +236,7 @@ package fsm {
     if (m.kind == "enum" || m.kind == "struct") {
       if (kind_of(next) != m.kind ||
           type_name(next) != m.name ||
-          type_module(next) != m.module) {
+          type_package(next) != m.package_name) {
         fail("step must return " + m.name + ", got " +
              kind_of(next) + " " + type_name(next));
       }
@@ -262,7 +262,7 @@ package fsm {
       if (m.kind == "enum" || m.kind == "struct") {
         if (kind_of(next) != m.kind ||
             type_name(next) != m.name ||
-            type_module(next) != m.module) {
+            type_package(next) != m.package_name) {
           fail("step must return " + m.name + ", got " +
                kind_of(next) + " " + type_name(next));
         }

@@ -74,7 +74,7 @@ struct value_t *call_convert_builtin(
             ret = newstrval(typename_of(arg));
             break;
 
-        case B_type_module:
+        case B_type_package:
             if (arg && arg->type == T_struct) {
                 struct struct_value_t *sv = (struct struct_value_t *)arg;
                 ret = newstrval(
@@ -83,6 +83,19 @@ struct value_t *call_convert_builtin(
                 struct enum_value_t *ev = (struct enum_value_t *)arg;
                 ret = newstrval(
                     ev->def ? ev->def->package.c_str() : "");
+            } else {
+                ret = newstrval("");
+            }
+            break;
+        case B_type_module_name:
+            if (arg && arg->type == T_struct) {
+                struct struct_value_t *sv = (struct struct_value_t *)arg;
+                ret = newstrval(
+                    sv->def ? sv->def->module.c_str() : "");
+            } else if (arg && arg->type == T_enum) {
+                struct enum_value_t *ev = (struct enum_value_t *)arg;
+                ret = newstrval(
+                    ev->def ? ev->def->module.c_str() : "");
             } else {
                 ret = newstrval("");
             }

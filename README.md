@@ -9,13 +9,13 @@ Skein 是一个使用 Flex + Bison + C++17 实现的动态类型脚本语言。�
 
 ## AI / Agent skill
 
-仓库提供一个面向 Skein 语言使用者的 agent skill：
-[`.opencode/skills/skein/SKILL.md`](.opencode/skills/skein/SKILL.md)。OpenCode
-会自动发现它；其他工具可以直接读取该文件，或安装到全局：
+仓库提供一个面向 Skein 语言使用者的独立 agent skill：
+[`skills/skein/SKILL.md`](skills/skein/SKILL.md)。其他工具可以直接读取该文件；
+OpenCode 用户可以把它复制到全局或项目的 skills 目录：
 
 ```bash
 mkdir -p ~/.config/opencode/skills
-cp -r .opencode/skills/skein ~/.config/opencode/skills/
+cp -r skills/skein ~/.config/opencode/skills/
 ```
 
 该 skill 只覆盖「写 Skein 程序」：运行方式、换行和大括号规则、for-in、

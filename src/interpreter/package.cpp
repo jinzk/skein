@@ -65,12 +65,16 @@ struct resolved_package {
     fs::path directory;
     fs::path file;
     std::string key;
+    std::string package;
+    std::string module;
 };
 
 thread_local std::string main_source_path;
+thread_local fs::path main_directory;
 thread_local std::vector<std::string> search_roots;
 thread_local std::string import_base;
 thread_local fs::path project_root;
+thread_local bool project_root_resolved = false;
 thread_local std::vector<package_load_context> load_stack;
 thread_local std::vector<std::string> loading_paths;
 
@@ -150,8 +154,7 @@ std::string canonical_file(const fs::path &file) {
               : path_to_utf8(canonical);
 }
 
-fs::path find_project_root(const fs::path &start) {
-    std::error_code ec;
+fs::path find_project_root(const fs::path &start) {    std::error_code ec;
     fs::path directory = start;
     if (directory.is_relative())
         directory = fs::absolute(directory, ec);
@@ -173,6 +176,17 @@ fs::path find_project_root(const fs::path &start) {
         directory = parent;
     }
     return start;
+}
+
+fs::path ensure_project_root() {
+    if (!project_root_resolved) {
+        fs::path start = path_from_utf8(import_base);
+        if (start.empty())
+            start = path_from_utf8(thread_cwd());
+        project_root = find_project_root(start);
+        project_root_resolved = true;
+    }
+    return project_root;
 }
 
 bool validate_package_parts(const std::string &dotted,
@@ -567,8 +581,9 @@ const module_manifest *load_module_manifest(const fs::path &root,
     return result;
 }
 
-bool find_module_root(const std::string &dotted, fs::path &root,
-                      std::string &name, std::string &error) {
+bool find_module_root_at(const fs::path &search_root,
+                         const std::string &dotted, fs::path &root,
+                         std::string &name, std::string &error) {
     std::vector<std::string> parts = split_dotted(dotted);
     if (parts.empty()) {
         error = "empty package path";
@@ -578,15 +593,22 @@ bool find_module_root(const std::string &dotted, fs::path &root,
         error = "invalid module path";
         return false;
     }
+    fs::path candidate = search_root / path_from_utf8(parts[0]);
+    std::error_code ec;
+    if (fs::is_regular_file(candidate / "module.skein", ec)) {
+        root = candidate;
+        name = parts[0];
+        return true;
+    }
+    return false;
+}
+
+bool find_module_root(const std::string &dotted, fs::path &root,
+                      std::string &name, std::string &error) {
     for (const std::string &search_root : search_roots) {
-        fs::path candidate = path_from_utf8(search_root) /
-                             path_from_utf8(parts[0]);
-        std::error_code ec;
-        if (fs::is_regular_file(candidate / "module.skein", ec)) {
-            root = candidate;
-            name = parts[0];
+        if (find_module_root_at(path_from_utf8(search_root), dotted, root,
+                                name, error))
             return true;
-        }
     }
     return false;
 }
@@ -594,6 +616,95 @@ bool find_module_root(const std::string &dotted, fs::path &root,
 bool is_loading(const std::string &key) {
     return std::find(loading_paths.begin(), loading_paths.end(), key) !=
            loading_paths.end();
+}
+
+bool path_relative_dotted(const fs::path &root, const fs::path &file,
+                          std::string &dotted) {
+    std::error_code ec;
+    fs::path canonical_root = fs::weakly_canonical(root, ec);
+    if (ec)
+        canonical_root = root.lexically_normal();
+    ec.clear();
+    fs::path canonical_path = fs::weakly_canonical(file, ec);
+    if (ec)
+        canonical_path = file.lexically_normal();
+    fs::path relative = canonical_path.lexically_relative(canonical_root);
+    if (relative.empty())
+        return false;
+    auto first = relative.begin();
+    if (first != relative.end() && *first == "..")
+        return false;
+    relative.replace_extension();
+    dotted.clear();
+    for (const fs::path &part : relative) {
+        const std::string text = path_to_utf8(part);
+        if (text.empty() || text == "." || text == ".." ||
+            !is_identifier(text))
+            return false;
+        if (!dotted.empty())
+            dotted += ".";
+        dotted += text;
+    }
+    return !dotted.empty();
+}
+
+bool find_enclosing_module(const fs::path &file, fs::path &root,
+                           std::string &module_name, bool &found,
+                           std::string &error) {
+    found = false;
+    std::error_code ec;
+    fs::path directory = file.parent_path();
+    if (directory.empty())
+        return true;
+    for (;;) {
+        if (fs::is_regular_file(directory / "module.skein", ec)) {
+            const module_manifest *manifest =
+                load_module_manifest(directory, error);
+            if (!manifest)
+                return false;
+            root = directory;
+            module_name = manifest->name;
+            found = true;
+            return true;
+        }
+        fs::path parent = directory.parent_path();
+        if (parent.empty() || parent == directory)
+            break;
+        directory = parent;
+    }
+    return true;
+}
+
+bool finalize_package_identity(resolved_package &resolved,
+                               std::string &error) {
+    fs::path module_root;
+    std::string module_name;
+    bool found = false;
+    if (!find_enclosing_module(resolved.file, module_root, module_name, found,
+                               error))
+        return false;
+
+    std::string relative;
+    if (found) {
+        if (!path_relative_dotted(module_root, resolved.file, relative)) {
+            error = "cannot derive package path from " +
+                    path_to_utf8(resolved.file);
+            return false;
+        }
+        resolved.package = module_name + "." + relative;
+        resolved.module = module_name;
+        return true;
+    }
+
+    const fs::path root = ensure_project_root();
+    if (!path_relative_dotted(root, resolved.file, relative)) {
+        error = "ordinary packages must be under project_root: " +
+                path_to_utf8(resolved.file);
+        return false;
+    }
+    resolved.package = relative;
+    resolved.module.clear();
+    return true;
 }
 
 bool load_package_file(const resolved_package &resolved,
@@ -613,8 +724,13 @@ bool parse_package_source(const std::string &source_text,
                           std::string &error);
 
 value_t *import_resolved(const std::string &dotted,
-                         const resolved_package &resolved,
+                         resolved_package &resolved,
+                         std::string *package_out,
                          std::string &error) {
+    if (!finalize_package_identity(resolved, error))
+        return NULL;
+    if (package_out)
+        *package_out = resolved.package;
     if (is_loading(resolved.key)) {
         error = "cyclic package import: " + resolved.key;
         return NULL;
@@ -627,8 +743,9 @@ value_t *import_resolved(const std::string &dotted,
     loading_paths.push_back(resolved.key);
 
     value_t *namespace_value = NULL;
-    bool ok = load_package_file(resolved, split_dotted(dotted).back(),
-                                dotted, namespace_value, error);
+    bool ok = load_package_file(
+        resolved, split_dotted(dotted).back(), resolved.package,
+        namespace_value, error);
     if (ok) {
         ok = load_child_packages(dotted, resolved.file,
                                  namespace_value, error);
@@ -647,8 +764,13 @@ value_t *import_resolved(const std::string &dotted,
 
 /* Load exactly one package file, without implicitly merging child packages. */
 value_t *import_package_exact(const std::string &dotted,
-                              const resolved_package &resolved,
+                              resolved_package &resolved,
+                              std::string *package_out,
                               std::string &error) {
+    if (!finalize_package_identity(resolved, error))
+        return NULL;
+    if (package_out)
+        *package_out = resolved.package;
     if (is_loading(resolved.key)) {
         error = "cyclic package import: " + resolved.key;
         return NULL;
@@ -659,8 +781,9 @@ value_t *import_package_exact(const std::string &dotted,
 
     loading_paths.push_back(resolved.key);
     value_t *namespace_value = NULL;
-    bool ok = load_package_file(resolved, split_dotted(dotted).back(),
-                                dotted, namespace_value, error);
+    bool ok = load_package_file(
+        resolved, split_dotted(dotted).back(), resolved.package,
+        namespace_value, error);
     loading_paths.pop_back();
     if (!ok) {
         freeval(namespace_value);
@@ -735,7 +858,7 @@ value_t *dict_lookup_string(const dict_value_t *dict, const std::string &key) {
 value_t *import_std_submodule(const std::string &dotted,
                               const char *base_dir, std::string &error) {
     std::string std_error;
-    value_t *root = package_import("std", base_dir, std_error);
+    value_t *root = package_import("std", base_dir, nullptr, std_error);
     if (!root) {
         error = std_error;
         return NULL;
@@ -822,7 +945,7 @@ value_t *import_module_root(const std::string &module_name,
             return NULL;
         }
         value_t *package_namespace = import_package_exact(
-            module_name + "." + package_path, target, target_error);
+            module_name + "." + package_path, target, nullptr, target_error);
         if (!package_namespace) {
             error = "module " + module_name + " export '" + spec.alias +
                     "': " + target_error;
@@ -901,6 +1024,7 @@ bool resolve_module_public_package(const std::string &module_name,
 value_t *import_module_public_package(const std::string &module_name,
                                       const std::string &alias,
                                       const fs::path &root,
+                                      std::string *package_out,
                                       std::string &error) {
     resolved_package target;
     std::string package_path;
@@ -909,7 +1033,7 @@ value_t *import_module_public_package(const std::string &module_name,
         return NULL;
     std::string target_error;
     value_t *result = import_package_exact(
-        module_name + "." + package_path, target, target_error);
+        module_name + "." + package_path, target, package_out, target_error);
     if (!result)
         error = "module " + module_name + " package '" + alias +
                 "': " + target_error;
@@ -917,7 +1041,7 @@ value_t *import_module_public_package(const std::string &module_name,
 }
 
 value_t *package_import_impl(const char *dotted_path, const char *base_dir,
-                             std::string &error) {
+                             std::string *package_out, std::string &error) {
     if (value_t *seeded = take_seeded_import(dotted_path, base_dir))
         return seeded;
     import_spec spec;
@@ -941,14 +1065,22 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
         fs::path module_root;
         std::string module_name;
         std::string module_error;
-        if (find_module_root(spec.dotted, module_root, module_name,
-                             module_error)) {
+        bool module_found = false;
+        if (spec.kind == IMPORT_PROJECT) {
+            module_found = find_module_root_at(
+                ensure_project_root(), spec.dotted, module_root, module_name,
+                module_error);
+        } else {
+            module_found = find_module_root(spec.dotted, module_root,
+                                             module_name, module_error);
+        }
+        if (module_found) {
             std::vector<std::string> parts = split_dotted(spec.dotted);
             if (parts.size() == 1)
                 return import_module_root(module_name, module_root, error);
             if (parts.size() == 2)
                 return import_module_public_package(
-                    module_name, parts[1], module_root, error);
+                    module_name, parts[1], module_root, package_out, error);
             error = "module member is not exported: " + spec.dotted;
             return NULL;
         }
@@ -995,7 +1127,8 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
     resolved_package resolved;
     if (spec.kind == IMPORT_ABSOLUTE) {
         std::string resolve_error;
-        if (!resolve_package(spec.dotted, resolved, resolve_error)) {
+        if (!resolve_package_at(main_directory, spec.dotted, resolved,
+                                resolve_error)) {
             if (skein::module_registered(spec.dotted))
                 return skein::import_module(spec.dotted, error);
             if (is_std_submodule(spec.dotted))
@@ -1011,7 +1144,7 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
     } else {
         fs::path base;
         if (spec.kind == IMPORT_PROJECT) {
-            base = project_root;
+            base = ensure_project_root();
         } else {
             std::string lexical_base =
                 (base_dir && *base_dir) ? base_dir : import_base;
@@ -1038,7 +1171,7 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
             return NULL;
     }
 
-    return import_resolved(spec.dotted, resolved, error);
+    return import_resolved(spec.dotted, resolved, package_out, error);
 }
 
 bool namespace_has_key(value_t *namespace_value, const std::string &key) {
@@ -1106,7 +1239,7 @@ bool load_child_packages(const std::string &dotted,
 
         std::string child_path = dotted + "." + child;
         value_t *child_namespace =
-            import_resolved(child_path, child_resolved, error);
+            import_resolved(child_path, child_resolved, nullptr, error);
         if (!child_namespace)
             return false;
 
@@ -1323,10 +1456,11 @@ void package_configure(const std::string &source_path,
     main_source_path.clear();
     import_base.clear();
     project_root.clear();
+    project_root_resolved = false;
+    main_directory.clear();
 
     fs::path source = path_from_utf8(source_path);
     std::error_code ec;
-    std::string main_directory;
 
     if (!source_path.empty() && source_path != "-") {
         if (source.is_relative())
@@ -1335,20 +1469,21 @@ void package_configure(const std::string &source_path,
             main_source_path = path_to_utf8(source.lexically_normal());
             fs::path directory = source.parent_path();
             if (!directory.empty()) {
-                main_directory = normalize_dir(path_to_utf8(directory));
-                search_roots.push_back(main_directory);
+                main_directory =
+                    path_from_utf8(normalize_dir(path_to_utf8(directory)));
+                search_roots.push_back(path_to_utf8(main_directory));
             }
         }
     }
 
-    if (search_roots.empty()) {
+    if (main_directory.empty()) {
         const std::string cwd = thread_cwd();
-        main_directory = normalize_dir(cwd.empty() ? "." : cwd);
-        search_roots.push_back(main_directory);
+        main_directory =
+            path_from_utf8(normalize_dir(cwd.empty() ? "." : cwd));
+        search_roots.push_back(path_to_utf8(main_directory));
     }
 
-    import_base = main_directory;
-    project_root = find_project_root(path_from_utf8(import_base));
+    import_base = path_to_utf8(main_directory);
 
     for (const std::string &dir : cli_dirs) {
         if (!dir.empty())
@@ -1387,8 +1522,8 @@ const std::string &package_current_import_base() {
 }
 
 value_t *package_import(const char *dotted_path, const char *base_dir,
-                        std::string &error) {
-    return package_import_impl(dotted_path, base_dir, error);
+                        std::string *package_out, std::string &error) {
+    return package_import_impl(dotted_path, base_dir, package_out, error);
 }
 
 bool package_import_cache_key(const char *dotted_path, const char *base_dir,
@@ -1405,8 +1540,16 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
         fs::path module_root;
         std::string module_name;
         std::string module_error;
-        if (find_module_root(spec.dotted, module_root, module_name,
-                             module_error)) {
+        bool module_found = false;
+        if (spec.kind == IMPORT_PROJECT) {
+            module_found = find_module_root_at(
+                ensure_project_root(), spec.dotted, module_root, module_name,
+                module_error);
+        } else {
+            module_found = find_module_root(spec.dotted, module_root,
+                                             module_name, module_error);
+        }
+        if (module_found) {
             std::vector<std::string> parts = split_dotted(spec.dotted);
             if (parts.size() == 1) {
                 key = canonical_file(module_root);
@@ -1445,7 +1588,8 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
     resolved_package resolved;
     if (spec.kind == IMPORT_ABSOLUTE) {
         std::string resolve_error;
-        if (!resolve_package(spec.dotted, resolved, resolve_error)) {
+        if (!resolve_package_at(main_directory, spec.dotted, resolved,
+                                resolve_error)) {
             if (skein::module_registered(spec.dotted)) {
                 error = "native module imports cannot be transferred";
                 return false;
@@ -1465,7 +1609,7 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
     } else {
         fs::path base;
         if (spec.kind == IMPORT_PROJECT) {
-            base = project_root;
+            base = ensure_project_root();
         } else {
             std::string lexical_base =
                 (base_dir && *base_dir) ? base_dir : import_base;

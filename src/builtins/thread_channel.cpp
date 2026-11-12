@@ -3126,7 +3126,7 @@ struct thread_payload_builder {
                 package_import(import.path.c_str(),
                                import.base.empty() ? nullptr
                                                    : import.base.c_str(),
-                               import_error);
+                               nullptr, import_error);
             if (!namespace_value) {
                 error = "import " + import.path + ": " + import_error;
                 return false;

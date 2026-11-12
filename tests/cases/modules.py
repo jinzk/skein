@@ -330,3 +330,90 @@ def run_cases():
             capture_output=True, text=True)
         assert proc.returncode != 0, proc.stdout
         assert "was not found" in proc.stderr, proc.stderr
+
+    # -I / SKEIN_PACKAGE_PATH are module search roots only.
+    with tempfile.TemporaryDirectory() as tmp:
+        lib = os.path.join(tmp, "lib")
+        os.makedirs(lib)
+        write(tmp, "lib/aa.skein",
+              "package aa { export let v = 1; }\n")
+        plain_main = write(tmp, "app/main.skein", "import aa;\n")
+
+        proc = subprocess.run(
+            [BIN, "-I", lib, plain_main],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+        )
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
+        env = os.environ.copy()
+        env["SKEIN_PACKAGE_PATH"] = lib
+        proc = subprocess.run(
+            [BIN, plain_main],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+            env=env,
+        )
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "package not found" in proc.stderr, proc.stderr
+
+        mods = os.path.join(tmp, "mods")
+        write(tmp, "mods/aa/module.skein",
+              "module aa { export leaf.v; }\n")
+        write(tmp, "mods/aa/leaf.skein",
+              'package leaf { export let v = 7; }\n')
+        module_main = write(
+            tmp, "app2/main.skein", "import aa;\nprintln(str(aa.v));\n")
+        proc = subprocess.run(
+            [BIN, "-I", mods, module_main],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "7\n", repr(proc.stdout)
+
+    # Canonical identity is derived from the physical file, not the import path.
+    with tempfile.TemporaryDirectory() as tmp:
+        open(os.path.join(tmp, ".skeinroot"), "w", encoding="utf-8").close()
+        write(
+            tmp,
+            "app/aa/bb.skein",
+            "package bb {\n"
+            "  export struct T { x: int; }\n"
+            "  export func describe() { return type_module(T { x: 1 }); }\n"
+            "}\n",
+        )
+        main = write(
+            tmp,
+            "app/main.skein",
+            "import aa.bb;\nprintln(bb.describe());\n",
+        )
+        proc = run_file(main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "app.aa.bb\n", repr(proc.stdout)
+
+        write(tmp, "math/module.skein",
+              "module math { export add.describe; }\n")
+        write(
+            tmp,
+            "math/add.skein",
+            "package add {\n"
+            "  export struct T { x: int; }\n"
+            "  export func describe() { return type_module(T { x: 1 }); }\n"
+            "}\n",
+        )
+        module_main = write(
+            tmp,
+            "app/module_main.skein",
+            "import @math;\nprintln(math.describe());\n",
+        )
+        proc = run_file(module_main)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "math.add\n", repr(proc.stdout)

@@ -21,7 +21,7 @@ const std::string &package_current_import_base();
 /* Load a package path and return a new namespace value.  base_dir is the
  * lexical directory captured for relative imports. */
 value_t *package_import(const char *dotted_path, const char *base_dir,
-                        std::string &error);
+                        std::string *package_out, std::string &error);
 
 /* Resolve the package-cache key used by package_import for a transferable
  * import.  Returns false for native modules and std submodules, which do not

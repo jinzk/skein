@@ -2392,11 +2392,12 @@ public:
                     const skein::bc::ImportDesc &desc =
                         proto().imports[ins.a];
                     std::string error;
+                    std::string imported_package;
                     int errors_before_import = diag_error_count();
                     value_t *ns = package_import(
                         desc.path.c_str(),
                         desc.base.empty() ? NULL : desc.base.c_str(),
-                        error);
+                        &imported_package, error);
                     if (!ns) {
                         if (diag_error_count() == errors_before_import) {
                             yyerror("import %s: %s", desc.path.c_str(),
@@ -2446,7 +2447,8 @@ public:
                         }
                         structtype_register_alias(
                             diag_current_source_name().c_str(), alias,
-                            path.c_str());
+                            imported_package.empty() ? path.c_str()
+                                                     : imported_package.c_str());
                     }
                     push(newnull());
                     break;

@@ -73,8 +73,10 @@ struct value_t *eval(struct ast *a) {
         case 'J': {
             struct import_node *imp = (struct import_node *)a;
             std::string error;
+            std::string imported_package;
             int errors_before = diag_error_count();
-            struct value_t *ns = package_import(imp->path, imp->base, error);
+            struct value_t *ns = package_import(
+                imp->path, imp->base, &imported_package, error);
             if (!ns) {
                 if (diag_error_count() == errors_before)
                     yyerror("import %s: %s", imp->path, error.c_str());
@@ -100,7 +102,9 @@ struct value_t *eval(struct ast *a) {
                         alias = dot ? dot + 1 : path;
                     }
                     structtype_register_alias(
-                        diag_current_source_name().c_str(), alias, path);
+                        diag_current_source_name().c_str(), alias,
+                        imported_package.empty() ? path
+                                                 : imported_package.c_str());
                 }
             }
             break;

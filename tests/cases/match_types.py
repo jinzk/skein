@@ -134,13 +134,13 @@ def run_cases():
           stdout_all=["2", "1", "null"])
     check("struct nullable type mismatch",
           'struct Node { next: Node?; }\nNode { next: 1 }\n',
-          stderr="field next of Node expects Node?, got int")
+          stderr="type error: expected Node?, got int")
     check("nullable int",
           'let x: int? = null;\nlet y: int? = 3;\nlet z: int?;\n'
           'println(x);\nprintln(y);\nprintln(z);\n',
           stdout_all=["null", "3", "null"])
     check("nullable type mismatch",
-          'let x: int? = "s";\n', stderr="variable x expects int?, got string")
+          'let x: int? = "s";\n', stderr="type error: expected int?, got string")
     check("struct cycle rejected",
           'struct Node { value: int; next: Node?; }\n'
           'let a = Node { value: 1, next: null };\n'

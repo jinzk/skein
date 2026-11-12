@@ -134,6 +134,15 @@ std::string node_display(enum type_constraint_kind kind,
         if (nullable)
             text = "(" + text + ")?";
         return text;
+    } else if (kind == TYPE_UNION && args.size() == 2 && args[0] &&
+               args[1] &&
+               ((args[0]->kind == TYPE_NULL) !=
+                (args[1]->kind == TYPE_NULL))) {
+        const TypeNode *inner =
+            args[0]->kind == TYPE_NULL ? args[1] : args[0];
+        text = function_arg_display(inner);
+        text += '?';
+        return text;
     } else if (type_container_arity(kind) > 0 && !args.empty()) {
         text = builtin_kind_name(kind);
         text += '[';
@@ -184,6 +193,81 @@ const TypeNode *intern_type(enum type_constraint_kind kind,
     return raw;
 }
 
+/*
+ * Nullable types are normalized to union[T, null] in the static type graph.
+ * Keep the nullable flag only for internal type variables, where generic
+ * binding needs to distinguish T? from T.
+ */
+const TypeNode *strip_nullable_node(const TypeNode *type) {
+    if (!type || !type->nullable)
+        return type;
+    return intern_type(type->kind, type->name, type->source, false,
+                       type->args, type->optional_params, type->variadic,
+                       type->rest);
+}
+
+bool union_has_null(const TypeNode *type) {
+    if (!type || type->kind != TYPE_UNION)
+        return false;
+    for (const TypeNode *arg : type->args) {
+        if (arg && arg->kind == TYPE_NULL)
+            return true;
+    }
+    return false;
+}
+
+struct type_constraint *finish_union_constraint(
+    struct type_constraint *base,
+    const std::vector<const TypeNode *> &members) {
+    bool has_any = false;
+    bool has_null = false;
+    std::size_t non_null_count = 0;
+    const TypeNode *sole_non_null = nullptr;
+    for (const TypeNode *member : members) {
+        if (member->kind == TYPE_ANY)
+            has_any = true;
+        if (member->kind == TYPE_NULL) {
+            has_null = true;
+        } else {
+            ++non_null_count;
+            if (!sole_non_null)
+                sole_non_null = member;
+        }
+    }
+    if (has_any) {
+        const TypeNode *any = type_any();
+        base->kind = TYPE_ANY;
+        base->name = NULL;
+        base->source = NULL;
+        base->nullable = false;
+        base->display = any->display.c_str();
+        base->detail = any;
+        return base;
+    }
+
+    const TypeNode *node = type_container(TYPE_UNION, members, base->nullable);
+    base->display = node->display.c_str();
+    base->detail = node;
+    if (has_null) {
+        /* A union containing null is nullable: it shares the default and
+         * runtime check of T?.  For union[T, null], reduce the runtime
+         * constraint to nullable T so both spellings behave identically. */
+        base->nullable = true;
+        if (members.size() == 2 && non_null_count == 1 && sole_non_null &&
+            sole_non_null->kind != TYPE_VAR &&
+            sole_non_null->kind != TYPE_INVALID) {
+            base->kind = sole_non_null->kind;
+            base->name = sole_non_null->kind == TYPE_NAMED
+                             ? sole_non_null->name.c_str()
+                             : NULL;
+            base->source = sole_non_null->kind == TYPE_NAMED
+                               ? sole_non_null->source.c_str()
+                               : NULL;
+        }
+    }
+    return base;
+}
+
 } // namespace
 
 const TypeNode *type_any() {
@@ -222,11 +306,28 @@ const TypeNode *make_function_type(
 }
 
 const TypeNode *type_nullable(const TypeNode *type) {
-    if (!type || type->nullable)
-        return type ? type : type_any();
-    return intern_type(type->kind, type->name, type->source, true,
-                       type->args, type->optional_params, type->variadic,
-                       type->rest);
+    if (!type)
+        return type_any();
+    if (type->nullable)
+        type = strip_nullable_node(type);
+    if (type->kind == TYPE_ANY || type->kind == TYPE_NULL)
+        return type;
+    if (type->kind == TYPE_VAR) {
+        return intern_type(TYPE_VAR, type->name, type->source, true,
+                           type->args, type->optional_params, type->variadic,
+                           type->rest);
+    }
+    if (type->kind == TYPE_UNION) {
+        if (union_has_null(type))
+            return type;
+        std::vector<const TypeNode *> members = type->args;
+        members.push_back(type_builtin(TYPE_NULL));
+        return type_container(TYPE_UNION, members);
+    }
+    std::vector<const TypeNode *> members;
+    members.push_back(type);
+    members.push_back(type_builtin(TYPE_NULL));
+    return type_container(TYPE_UNION, members);
 }
 
 const TypeNode *type_from_constraint(const struct type_constraint *type) {
@@ -234,13 +335,15 @@ const TypeNode *type_from_constraint(const struct type_constraint *type) {
         return type_any();
     if (type->detail) {
         const TypeNode *node = static_cast<const TypeNode *>(type->detail);
-        if (type->nullable && !node->nullable)
+        if (type->nullable)
             return type_nullable(node);
         return node;
     }
-    return intern_type(type->kind, type->name ? type->name : "",
-                       type->source ? type->source : "", type->nullable,
-                       std::vector<const TypeNode *>());
+    const TypeNode *node =
+        intern_type(type->kind, type->name ? type->name : "",
+                    type->source ? type->source : "", false,
+                    std::vector<const TypeNode *>());
+    return type->nullable ? type_nullable(node) : node;
 }
 
 bool type_is_any(const TypeNode *type) {
@@ -406,6 +509,22 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
     free_type_constraint(arg1);
     free_type_constraint(arg2);
 
+    if (base->kind == TYPE_UNION) {
+        std::vector<const TypeNode *> members;
+        std::function<void(const TypeNode *)> append =
+            [&](const TypeNode *type) {
+                if (type && type->kind == TYPE_UNION) {
+                    for (const TypeNode *member : type->args)
+                        append(member);
+                    return;
+                }
+                members.push_back(type ? type : type_any());
+            };
+        for (const TypeNode *arg : args)
+            append(arg);
+        return finish_union_constraint(base, members);
+    }
+
     const TypeNode *node = type_container(base->kind, args, base->nullable);
     base->display = node->display.c_str();
     base->detail = node;
@@ -470,11 +589,7 @@ struct type_constraint *type_apply_generic_list(
             append(type_from_constraint(arg));
         for (struct type_constraint *arg : args)
             free_type_constraint(arg);
-        const TypeNode *node =
-            type_container(TYPE_UNION, members, base->nullable);
-        base->display = node->display.c_str();
-        base->detail = node;
-        return base;
+        return finish_union_constraint(base, members);
     }
 
     int arity = type_container_arity(base->kind);

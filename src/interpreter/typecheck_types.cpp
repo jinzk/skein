@@ -103,6 +103,30 @@ const TypeNode *strip_nullable(const TypeNode *type) {
     return type_builtin(type->kind, false);
 }
 
+const TypeNode *normalize_nullable(const TypeNode *type) {
+    if (type && type->nullable)
+        return type_nullable(type);
+    return type;
+}
+
+const TypeNode *strip_null_members(const TypeNode *type) {
+    if (!type || type->kind != TYPE_UNION)
+        return type;
+    std::vector<const TypeNode *> members;
+    for (const TypeNode *member : type->args) {
+        if (member && member->kind == TYPE_NULL)
+            continue;
+        members.push_back(member);
+    }
+    if (members.size() == type->args.size())
+        return type;
+    if (members.empty())
+        return type_builtin(TYPE_NULL);
+    if (members.size() == 1)
+        return members[0];
+    return type_container(TYPE_UNION, members);
+}
+
 bool has_concrete_container_arg(const TypeNode *type) {
     if (!type)
         return false;
@@ -195,9 +219,11 @@ bool needs_static_check(const TypeNode *type) {
 
 const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
     if (!a)
-        return b ? b : type_any();
+        return b ? normalize_nullable(b) : type_any();
     if (!b)
-        return a;
+        return normalize_nullable(a);
+    a = normalize_nullable(a);
+    b = normalize_nullable(b);
     if (a == b)
         return a;
     if (a->kind == TYPE_ANY || b->kind == TYPE_ANY)
@@ -453,10 +479,14 @@ bool lookup_named_type(const TypeNode *type,
 }
 
 MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
-    if (!expected || expected->kind == TYPE_ANY)
-        return MatchResult::Ok;
+    if (!expected)
+        expected = type_any();
     if (!actual)
         actual = type_any();
+    expected = normalize_nullable(expected);
+    actual = normalize_nullable(actual);
+    if (expected->kind == TYPE_ANY)
+        return MatchResult::Ok;
     if (actual->kind == TYPE_ANY || actual->kind == TYPE_INVALID)
         return MatchResult::Unknown;
 
@@ -688,6 +718,8 @@ bool bind_type(const TypeNode *actual, const TypeNode *pattern,
         return true;
     if (!actual)
         actual = type_any();
+    pattern = normalize_nullable(pattern);
+    actual = normalize_nullable(actual);
 
     if (pattern->kind == TYPE_VAR) {
         if (pattern->name.empty())
@@ -711,10 +743,41 @@ bool bind_type(const TypeNode *actual, const TypeNode *pattern,
     if (pattern->kind == TYPE_ANY || actual->kind == TYPE_ANY)
         return true;
 
+    if (pattern->kind == TYPE_UNION) {
+        bool pattern_has_null = false;
+        for (const TypeNode *member : pattern->args) {
+            if (member && member->kind == TYPE_NULL)
+                pattern_has_null = true;
+        }
+        if (actual->kind == TYPE_NULL)
+            return pattern_has_null;
+        if (actual->kind == TYPE_UNION) {
+            if (pattern_has_null) {
+                const TypeNode *actual_base = strip_null_members(actual);
+                const TypeNode *pattern_base = strip_null_members(pattern);
+                if (actual_base != actual || pattern_base != pattern)
+                    return bind_type(actual_base, pattern_base, bindings);
+            }
+        } else {
+            for (const TypeNode *member : pattern->args) {
+                if (!member || member->kind == TYPE_NULL ||
+                    member->kind == TYPE_ANY)
+                    continue;
+                TypeBindings trial = bindings;
+                if (bind_type(actual, member, trial)) {
+                    bindings = trial;
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     if (pattern->nullable) {
         if (actual->kind == TYPE_NULL)
             return true;
         const TypeNode *a = actual->nullable ? strip_nullable(actual) : actual;
+        a = strip_null_members(a);
         return bind_type(a, strip_nullable(pattern), bindings);
     }
     if (actual->nullable || actual->kind == TYPE_NULL)

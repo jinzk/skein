@@ -2051,7 +2051,8 @@ print(std.meta.has_type("int"));      // true
 返回字典同时包含 `package`、`module`、`source`：
 `package` 是完整包身份，`module` 是 Module 容器名（普通包和入口为空字符串），
 `source` 是源文件路径。
-`std.meta` 不返回值默认值，只提供 `has_default` 标记。
+`std.meta` 不返回值默认值，只提供 `has_default` 标记。字段信息的 `nullable`
+对 `T?` 和包含 `null` 的 `union` 都为 `true`，两者显示为同一个可空类型。
 
 `std.lru` 是 C++ 值类型，每次更新返回新 lru：
 

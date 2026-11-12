@@ -915,6 +915,40 @@ def run_cases():
           "f(true);\n",
           stderr="type error: expected union[int, string], got bool")
 
+    check("nullable union matches optional",
+          "let a: int? = null;\n"
+          "let b: union[int, null] = a;\n"
+          "let c: int? = b;\n"
+          "let d: union[int, null];\n"
+          "let e: union[int, string, null];\n"
+          "println(a); println(b); println(c); println(d); println(e);\n",
+          stdout_all=["null", "null", "null", "null", "null"],
+          not_stderr="type warning")
+
+    check("nullable union function type",
+          "func f(x: int?): int? -> x;\n"
+          "let g: (union[int, null]) -> union[int, null] = f;\n"
+          "println(g(1));\n",
+          stdout="1", not_stderr="type warning")
+
+    check("nullable union runtime check",
+          "func f(x: union[int, null]) { println(x); }\n"
+          "let a: any = true;\n"
+          "f(a);\n",
+          stderr="runtime error: function f argument 1 (x) expects int?, got bool")
+
+    check("nullable union suffix accepts null",
+          "func f(x: union[int, string]?) {\n"
+          "  if (x == null) { println(\"null\"); }\n"
+          "  else if (x is int) { println(\"int\"); }\n"
+          "  else { println(\"string\"); }\n"
+          "}\n"
+          "let y: union[int, string]?;\n"
+          "f(null); f(1); f(\"s\");\n"
+          "println(y);\n",
+          stdout_all=["null", "int", "string", "null"],
+          not_stderr="type warning")
+
     check("union is narrowing",
           "func use_int(v: int) { }\n"
           "func use_string(v: string) { }\n"

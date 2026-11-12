@@ -75,6 +75,7 @@ func add(a: int, b: int): int {
 - 可选参数 / 返回值 / 变量类型标注，运行时检查，不做隐式转换；
 - 内建容器支持 `list[T]`、`dict[K, V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T, S]`、`pair`、`tuple`、`union`；
 - `union` 支持 `is` / `match` / 稳定字段路径的类型收窄；
+- `T?` 归一化为 `union[T, null]`，两者可互换；`union[A, B]?` 等价于 `union[A, B, null]`；
 - 函数类型支持参数逆变、返回值协变；
 - 检查强度可用 `SKEIN_TYPECHECK=off|loose|warn|strict` 或 `--typecheck=...` 调整。
 

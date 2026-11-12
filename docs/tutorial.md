@@ -435,12 +435,24 @@ bytes         → 空 bytes
 list          → []
 dict          → {}
 any / null    → null
+T? / 包含 null 的 union → null
 ```
 
-- `function`、`builtin`、`callable`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`、`union` 必须提供初始值；
+- `function`、`builtin`、`callable`、`userdata`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`，以及不包含 `null` 的 `union` 必须提供初始值；
 - `const` 也可以带类型，例如 `const x: int = 1;`；
 - 普通类型标注只约束变量绑定，不约束容器内部元素，例如 `let a: list = [0]; a[0] = "x";` 仍允许；
 - `for` 的初始化部分也支持类型标注：`for (let i: int = 0; i < 3; i++)`。
+
+`T?` 等价于 `union[T, null]`：`int?` 与 `union[int, null]` 可以互相赋值，函数类型也相同；
+两者都接受 `null`，省略初始值时默认为 `null`。`union[A, B]?` 等价于
+`union[A, B, null]`。
+
+```text
+let a: int? = null;
+let b: union[int, null] = a;   // 允许
+let c: int? = b;               // 允许
+let d: union[int, string]? = null;
+```
 
 ### 容器泛型
 
@@ -513,12 +525,12 @@ struct Handler {
 - `std.iter.collect` 对 `generator[T]` 返回 `list[T]`，`std.iter.map` / `std.iter.filter` 对 generator 返回新的 generator；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
 - `pair[A, B]` 表示二元异构结构，可用 `(a, b)` 初始化；`p[0]` / `p[1]` 分别得到 `A` / `B`；`zip`、`dict.items`、`iter.enumerate` 使用 pair；
 - `tuple[A, B, C, ...]` 表示三元及以上异构结构，可用 `(a, b, c, ...)` 初始化；索引和解构按位置得到类型；
-- `union[A, B]` 表示成员之一，支持平铺多个成员，例如 `union[int, string, bool]`；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；
+- `union[A, B]` 表示成员之一，支持平铺多个成员，例如 `union[int, string, bool]`；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；`union[T, null]` 与 `T?` 完全等价，`union[A, B]?` 与 `union[A, B, null]` 等价；
 - union 支持常见控制流收窄：`if (x is T)` 的 then/else、`!`、`&&`、`match` 的 `case is T` 以及后续 `default` 分支；
 - 支持稳定字段路径收窄，例如 `if (b.value is int) { b.value + 1; }`，包括嵌套字段；
 - 对字段/变量的写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄；
 - 收窄绑定在发生赋值后回退到声明类型，避免在分支中继续使用过期的窄化类型；
-- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；
+- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查；
 - `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。

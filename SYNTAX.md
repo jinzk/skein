@@ -791,15 +791,18 @@ any int float number bool string char byte bytes
 list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair tuple union
 ```
 
-任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`：
+任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`。`T?` 是
+`union[T, null]` 的简写，两者在类型检查、赋值、函数类型和默认值上完全等价：
 
 ```text
 let a: int? = null;
-let b: int? = 3;
-let c: char?;       // 默认 null
+let b: union[int, null] = a;   // 等价，允许
+let c: int? = b;               // 反向赋值也允许
+let d: char?;                  // 默认 null
 ```
 
-可空类型接受 `null` 或对应类型的值，其它值仍会报错。
+可空类型（包括包含 `null` 的 `union`）接受 `null` 或对应成员的值，其它值仍会报错。
+二元 nullable union 在诊断中仍显示为 `T?`。
 
 默认值：
 
@@ -817,9 +820,9 @@ let c: char?;       // 默认 null
 | `deque` | 空 deque |
 | `set` | 空 set |
 | `any` / `null` | `null` |
-| `T?` | `null` |
+| `T?` / 包含 `null` 的 `union` | `null` |
 
-`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`、`union` 没有默认值，必须提供初始值。
+`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`，以及不包含 `null` 的 `union` 没有默认值，必须提供初始值。
 
 已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
@@ -851,7 +854,7 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
-- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`；
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`、`union[int, string]?`；
 - 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
@@ -1066,7 +1069,9 @@ struct Handler {
   let ys: list[union[int, string, bool]] = xs;
   ```
 
-  union 按成员进行赋值/参数检查，并支持常见控制流收窄：
+  union 按成员进行赋值/参数检查，并支持常见控制流收窄。`union[A, B, null]`
+  与 `union[A, B]?` 等价，默认为 `null`；`union[T, null]` 与 `T?` 完全等价，
+  包括运行时参数检查：
 
   ```text
   func f(x: union[int, string]) {
@@ -1090,7 +1095,7 @@ struct Handler {
 
   对字段/变量写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄。赋值后收窄会回退到声明类型。
 - `tuple[A, B, C, ...]` 表示三元及以上异构结构，值语法为 `(a, b, c, ...)`；索引和解构按位置得到类型；
-- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证。
+- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查。
 - `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`。
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 

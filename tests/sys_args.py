@@ -20,8 +20,11 @@ def main():
                 'println("script=" + std.sys.script());\n'
                 'println("exe=" + std.sys.executable());\n'
             )
+        # `--vm` works in every build; `--no-vm` is rejected by VM-only
+        # builds, where the first flag only needs to prove that interpreter
+        # flags before the script path are not forwarded as script args.
         proc = subprocess.run(
-            [BIN, "--no-vm", script, "--bin", "build/skein", "--check",
+            [BIN, "--vm", script, "--bin", "build/skein", "--check",
              "a b"],
             text=True,
             encoding="utf-8",

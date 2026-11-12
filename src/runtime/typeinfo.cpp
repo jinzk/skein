@@ -385,6 +385,7 @@ struct value_t *enum_variants(const enum_def *definition) {
 
 struct value_t *new_type_dict(const char *kind, const char *name,
                               const std::string &package,
+                              const std::string &module,
                               const std::string &source,
                               bool exported,
                               struct value_t *fields,
@@ -394,7 +395,8 @@ struct value_t *new_type_dict(const char *kind, const char *name,
     struct dict_value_t *dict = newdictval();
     dict_add(dict, "kind", newstrval(kind));
     dict_add(dict, "name", newstrval(name));
-    dict_add(dict, "module", newstrval(package.c_str()));
+    dict_add(dict, "package", newstrval(package.c_str()));
+    dict_add(dict, "module", newstrval(module.c_str()));
     dict_add(dict, "source", newstrval(source.c_str()));
     dict_add(dict, "exported", newboolval(exported));
     dict_add(dict, "fields", fields);
@@ -407,29 +409,29 @@ struct value_t *new_type_dict(const char *kind, const char *name,
 struct value_t *make_type_info(const resolved_type &type) {
     switch (type.kind) {
         case RESOLVED_BUILTIN:
-            return new_type_dict("builtin", type.builtin_name, "", "", true,
-                                 new_string_list(), new_string_list(),
+            return new_type_dict("builtin", type.builtin_name, "", "", "",
+                                 true, new_string_list(), new_string_list(),
                                  new_string_list(), new_string_list());
         case RESOLVED_STRUCT: {
             const struct_def *def = type.structure;
             return new_type_dict("struct", def->name.c_str(), def->package,
-                                 def->source, def->exported,
+                                 def->module, def->source, def->exported,
                                  struct_fields(def), new_string_list(),
                                  type_methods(def), type_traits(def));
         }
         case RESOLVED_ENUM: {
             const enum_def *def = type.enumeration;
             return new_type_dict("enum", def->name.c_str(), def->package,
-                                 def->source, def->exported, new_string_list(),
-                                 enum_variants(def), type_methods(def),
-                                 type_traits(def));
+                                 def->module, def->source, def->exported,
+                                 new_string_list(), enum_variants(def),
+                                 type_methods(def), type_traits(def));
         }
         case RESOLVED_TRAIT: {
             const trait_def *def = type.trait;
             return new_type_dict("trait", def->name.c_str(), def->package,
-                                 def->source, def->exported, new_string_list(),
-                                 new_string_list(), trait_methods(def),
-                                 new_string_list());
+                                 def->module, def->source, def->exported,
+                                 new_string_list(), new_string_list(),
+                                 trait_methods(def), new_string_list());
         }
     }
     return NULL;

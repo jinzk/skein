@@ -613,6 +613,7 @@ struct Compiler {
     uint32_t add_struct_decl(struct struct_node *node) {
         skein::bc::StructDeclMeta meta;
         meta.source = node->source ? node->source : "";
+        meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
         std::vector<std::string> forbidden;
@@ -652,6 +653,7 @@ struct Compiler {
     uint32_t add_enum_decl(struct enum_node *node) {
         skein::bc::EnumDeclMeta meta;
         meta.source = node->source ? node->source : "";
+        meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
         std::vector<std::string> forbidden;
@@ -719,6 +721,7 @@ struct Compiler {
     uint32_t add_trait_decl(struct trait_node *node) {
         skein::bc::TraitDeclMeta meta;
         meta.source = node->source ? node->source : "";
+        meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
         for (struct trait_method *method = node->methods; method;

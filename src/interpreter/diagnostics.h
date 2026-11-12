@@ -47,6 +47,8 @@ void diag_set_source_name(const std::string &name);
 const std::string &diag_current_source_name();
 void diag_set_package_name(const std::string &name);
 const std::string &diag_current_package_name();
+void diag_set_module_name(const std::string &name);
+const std::string &diag_current_module_name();
 bool diag_lexical_error_on_line(int line);
 void diag_mark_script_failure();
 
@@ -74,6 +76,7 @@ struct diag_source_checkpoint {
     int lexical_line;
     std::string source_name;
     std::string package_name;
+    std::string module_name;
     std::vector<std::string> lines;
 };
 
@@ -100,6 +103,7 @@ struct diag_state {
     int lexical_line = 0;
     std::string source_name;
     std::string package_name;
+    std::string module_name;
     std::vector<std::string> lines;
     std::vector<diag_call_frame> call_stack;
 };

@@ -524,7 +524,7 @@ bool structtype_type_exists(const char *source, const char *name) {
 }
 
 bool structtype_prepare_struct(const char *source, const char *package,
-                               const char *name, bool exported,
+                               const char *module, const char *name, bool exported,
                                struct_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
@@ -549,6 +549,7 @@ bool structtype_prepare_struct(const char *source, const char *package,
     def->name = name;
     def->source = source ? source : "";
     def->package = package ? package : def->source;
+    def->module = module ? module : "";
     def->exported = exported;
     out = def.get();
     logical_structs.emplace(logical_key, out);
@@ -600,10 +601,10 @@ void structtype_rollback_struct(struct_def *def) {
 }
 
 bool structtype_create_struct(const char *source, const char *package,
-                              const char *name, bool exported,
+                              const char *module, const char *name, bool exported,
                               std::vector<field_def> fields,
                               struct_def *&out, std::string &error) {
-    if (!structtype_prepare_struct(source, package, name, exported, out,
+    if (!structtype_prepare_struct(source, package, module, name, exported, out,
                                    error))
         return false;
     if (!structtype_finalize_struct(out, std::move(fields), error)) {
@@ -615,7 +616,7 @@ bool structtype_create_struct(const char *source, const char *package,
 }
 
 bool structtype_create_trait(const char *source, const char *package,
-                             const char *name, bool exported,
+                             const char *module, const char *name, bool exported,
                              std::vector<method_sig> methods,
                              trait_def *&out, std::string &error) {
     out = NULL;
@@ -665,6 +666,7 @@ bool structtype_create_trait(const char *source, const char *package,
     def->name = name;
     def->source = source ? source : "";
     def->package = package ? package : def->source;
+    def->module = module ? module : "";
     def->exported = exported;
     def->methods = std::move(methods);
     out = def.get();
@@ -674,7 +676,7 @@ bool structtype_create_trait(const char *source, const char *package,
 }
 
 bool structtype_prepare_enum(const char *source, const char *package,
-                             const char *name, bool exported,
+                             const char *module, const char *name, bool exported,
                              enum_def *&out, std::string &error) {
     out = NULL;
     if (!name || !*name) {
@@ -699,6 +701,7 @@ bool structtype_prepare_enum(const char *source, const char *package,
     def->name = name;
     def->source = source ? source : "";
     def->package = package ? package : def->source;
+    def->module = module ? module : "";
     def->exported = exported;
     out = def.get();
     logical_enums.emplace(logical_key, out);
@@ -768,10 +771,10 @@ void structtype_rollback_enum(enum_def *def) {
 }
 
 bool structtype_create_enum(const char *source, const char *package,
-                            const char *name, bool exported,
+                            const char *module, const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error) {
-    if (!structtype_prepare_enum(source, package, name, exported, out,
+    if (!structtype_prepare_enum(source, package, module, name, exported, out,
                                  error))
         return false;
     if (!structtype_finalize_enum(out, std::move(variants), error)) {

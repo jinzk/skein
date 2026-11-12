@@ -27,6 +27,7 @@ struct trait_def {
     std::string name;
     std::string source;
     std::string package;
+    std::string module;
     bool exported;
     std::vector<method_sig> methods;
     /* Methods with a default body, keyed by method name. */
@@ -49,6 +50,7 @@ struct type_def {
     std::string name;
     std::string source;
     std::string package;
+    std::string module;
     bool exported;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
     /*
@@ -163,29 +165,29 @@ enum structtype_lookup_status structtype_lookup_type(
     std::string &error);
 
 bool structtype_create_struct(const char *source, const char *package,
-                              const char *name, bool exported,
+                              const char *module, const char *name, bool exported,
                               std::vector<field_def> fields,
                               struct_def *&out, std::string &error);
 bool structtype_prepare_struct(const char *source, const char *package,
-                               const char *name, bool exported,
+                               const char *module, const char *name, bool exported,
                                struct_def *&out, std::string &error);
 bool structtype_finalize_struct(struct_def *def,
                                 std::vector<field_def> fields,
                                 std::string &error);
 void structtype_rollback_struct(struct_def *def);
 bool structtype_create_trait(const char *source, const char *package,
-                             const char *name, bool exported,
+                             const char *module, const char *name, bool exported,
                              std::vector<method_sig> methods,
                              trait_def *&out, std::string &error);
 bool structtype_create_enum(const char *source, const char *package,
-                            const char *name, bool exported,
+                            const char *module, const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error);
 bool structtype_add_trait_default(trait_def *trait, const std::string &name,
                                   std::shared_ptr<function_def> code,
                                   std::string &error);
 bool structtype_prepare_enum(const char *source, const char *package,
-                             const char *name, bool exported,
+                             const char *module, const char *name, bool exported,
                              enum_def *&out, std::string &error);
 bool structtype_finalize_enum(enum_def *def,
                               std::vector<variant_def> variants,

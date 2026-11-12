@@ -284,7 +284,8 @@ void eval_struct_decl(struct struct_node *s) {
     std::string error;
     struct_def *def = NULL;
     if (!structtype_prepare_struct(
-            s->source, diag_current_package_name().c_str(), s->name,
+            s->source, diag_current_package_name().c_str(), s->module,
+            s->name,
             s->exported != 0, def, error)) {
         yyerror("%s", error.c_str());
         return;
@@ -462,7 +463,8 @@ void eval_trait_decl(struct trait_node *t) {
     std::string error;
     trait_def *def = NULL;
     if (!structtype_create_trait(
-            t->source, diag_current_package_name().c_str(), t->name,
+            t->source, diag_current_package_name().c_str(), t->module,
+            t->name,
             t->exported != 0, std::move(methods), def, error)) {
         yyerror("%s", error.c_str());
         return;
@@ -477,11 +479,11 @@ void eval_trait_decl(struct trait_node *t) {
 }
 
 bool declare_struct_meta(
-    const char *source, const char *package, const char *name,
-    bool exported, const std::vector<field_meta> &fields,
+    const char *source, const char *package, const char *module,
+    const char *name, bool exported, const std::vector<field_meta> &fields,
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     struct_def *def = NULL;
-    if (!structtype_prepare_struct(source, package, name, exported, def,
+    if (!structtype_prepare_struct(source, package, module, name, exported, def,
                                    error)) {
         yyerror("%s", error.c_str());
         return false;
@@ -514,11 +516,11 @@ bool declare_struct_meta(
 }
 
 bool declare_enum_meta(
-    const char *source, const char *package, const char *name,
-    bool exported, const std::vector<variant_meta> &variants,
+    const char *source, const char *package, const char *module,
+    const char *name, bool exported, const std::vector<variant_meta> &variants,
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     enum_def *def = NULL;
-    if (!structtype_prepare_enum(source, package, name, exported, def,
+    if (!structtype_prepare_enum(source, package, module, name, exported, def,
                                  error)) {
         yyerror("%s", error.c_str());
         return false;
@@ -556,8 +558,8 @@ bool declare_enum_meta(
 }
 
 bool declare_trait_meta(
-    const char *source, const char *package, const char *name,
-    bool exported, const std::vector<trait_method_meta> &methods,
+    const char *source, const char *package, const char *module,
+    const char *name, bool exported, const std::vector<trait_method_meta> &methods,
     const std::shared_ptr<scope_t> &closure, std::string &error,
     const std::function<std::shared_ptr<struct upvalue_cell>(
         const std::string &)> &capture_upvalue) {
@@ -617,7 +619,7 @@ bool declare_trait_meta(
     }
 
     trait_def *def = NULL;
-    if (!structtype_create_trait(source, package, name, exported,
+    if (!structtype_create_trait(source, package, module, name, exported,
                                  std::move(signatures), def, error)) {
         yyerror("%s", error.c_str());
         return false;
@@ -1085,7 +1087,8 @@ void eval_enum_decl(struct enum_node *e) {
     std::string error;
     enum_def *def = NULL;
     if (!structtype_prepare_enum(
-            e->source, diag_current_package_name().c_str(), e->name,
+            e->source, diag_current_package_name().c_str(), e->module,
+            e->name,
             e->exported != 0, def, error)) {
         yyerror("%s", error.c_str());
         return;

@@ -1928,6 +1928,7 @@ public:
                     if (!declare_struct_meta(
                             meta.source.c_str(),
                             diag_current_package_name().c_str(),
+                            meta.module.c_str(),
                             meta.name.c_str(), meta.exported, fields,
                             closure, error))
                         return abort_error();
@@ -1966,6 +1967,7 @@ public:
                     if (!declare_enum_meta(
                             meta.source.c_str(),
                             diag_current_package_name().c_str(),
+                            meta.module.c_str(),
                             meta.name.c_str(), meta.exported, variants,
                             closure, error))
                         return abort_error();
@@ -2005,6 +2007,7 @@ public:
                     if (!declare_trait_meta(
                             meta.source.c_str(),
                             diag_current_package_name().c_str(),
+                            meta.module.c_str(),
                             meta.name.c_str(), meta.exported, methods,
                             closure, error, [this](const std::string &name) {
                                 return capture_upvalue(name);

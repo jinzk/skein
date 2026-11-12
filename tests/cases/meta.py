@@ -95,7 +95,7 @@ def run_cases():
         "meta builtin descriptor fields",
         'import std;\n'
         'let info = std.meta.type_info("int");\n'
-        'println(info["module"]);\n'
+        'println(info["package"]);\n'
         'println(info["source"]);\n'
         'println(info["exported"]);\n'
         'println(info["fields"]);\n'

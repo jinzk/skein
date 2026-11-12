@@ -29,6 +29,9 @@ struct function_code : std::enable_shared_from_this<function_code> {
     int def_column = 0;
     /* Package that defined this function, used for lazy compilation. */
     std::string package;
+    /* Module v2 container that defined this function; empty for ordinary
+     * packages and the entry script. */
+    std::string module;
     /* Source file that defined this function, used for import alias lookup. */
     std::string source;
     /* Optional static return type annotation; shared by function values. */

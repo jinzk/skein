@@ -55,12 +55,12 @@ struct value_t *build_enum_value(
     const std::vector<bool> &spread);
 
 bool declare_struct_meta(
-    const char *source, const char *package, const char *name,
+    const char *source, const char *package, const char *module, const char *name,
     bool exported, const std::vector<field_meta> &fields,
     const std::shared_ptr<struct scope_t> &closure, std::string &error);
 
 bool declare_enum_meta(
-    const char *source, const char *package, const char *name,
+    const char *source, const char *package, const char *module, const char *name,
     bool exported, const std::vector<variant_meta> &variants,
     const std::shared_ptr<struct scope_t> &closure, std::string &error);
 
@@ -78,7 +78,7 @@ struct trait_method_meta {
 };
 
 bool declare_trait_meta(
-    const char *source, const char *package, const char *name,
+    const char *source, const char *package, const char *module, const char *name,
     bool exported, const std::vector<trait_method_meta> &methods,
     const std::shared_ptr<struct scope_t> &closure, std::string &error,
     const std::function<std::shared_ptr<struct upvalue_cell>(

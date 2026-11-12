@@ -305,6 +305,7 @@ struct DeclMethodMeta {
 
 struct StructDeclMeta {
     std::string source;
+    std::string module;
     std::string name;
     bool exported = false;
     std::vector<DeclFieldMeta> fields;
@@ -317,6 +318,7 @@ struct EnumVariantMeta {
 
 struct EnumDeclMeta {
     std::string source;
+    std::string module;
     std::string name;
     bool exported = false;
     std::vector<EnumVariantMeta> variants;
@@ -338,6 +340,7 @@ struct TraitMethodMeta {
 
 struct TraitDeclMeta {
     std::string source;
+    std::string module;
     std::string name;
     bool exported = false;
     std::vector<TraitMethodMeta> methods;

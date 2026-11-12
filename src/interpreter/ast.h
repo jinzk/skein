@@ -330,6 +330,7 @@ struct struct_node {
     int column;
     char *name;
     char *source;
+    char *module;
     struct struct_member *members;
     int exported;
 };
@@ -361,6 +362,7 @@ struct trait_node {
     int column;
     char *name;
     char *source;
+    char *module;
     struct trait_method *methods;
     int exported;
 };
@@ -398,6 +400,7 @@ struct enum_node {
     int column;
     char *name;
     char *source;
+    char *module;
     struct enum_variant *variants;
     int exported;
 };

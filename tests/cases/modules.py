@@ -388,32 +388,47 @@ def run_cases():
             "package bb {\n"
             "  export struct T { x: int; }\n"
             "  export func describe() { return type_module(T { x: 1 }); }\n"
+            "  export func module_of() {\n"
+            "    return std.meta.type_info(T { x: 1 })[\"module\"];\n"
+            "  }\n"
+            "  import std;\n"
             "}\n",
         )
         main = write(
             tmp,
             "app/main.skein",
-            "import aa.bb;\nprintln(bb.describe());\n",
+            "import aa.bb;\n"
+            "println(bb.describe());\n"
+            "println(\"[\" + bb.module_of() + \"]\");\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout == "app.aa.bb\n", repr(proc.stdout)
+        assert proc.stdout.splitlines() == ["app.aa.bb", "[]"], proc.stdout
 
         write(tmp, "math/module.skein",
-              "module math { export add.describe; }\n")
+              "module math {\n"
+              "  export add.describe;\n"
+              "  export add.module_of;\n"
+              "}\n")
         write(
             tmp,
             "math/add.skein",
+            "import std;\n"
             "package add {\n"
             "  export struct T { x: int; }\n"
             "  export func describe() { return type_module(T { x: 1 }); }\n"
+            "  export func module_of() {\n"
+            "    return std.meta.type_info(T { x: 1 })[\"module\"];\n"
+            "  }\n"
             "}\n",
         )
         module_main = write(
             tmp,
             "app/module_main.skein",
-            "import @math;\nprintln(math.describe());\n",
+            "import @math;\n"
+            "println(math.describe());\n"
+            "println(math.module_of());\n",
         )
         proc = run_file(module_main)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout == "math.add\n", repr(proc.stdout)
+        assert proc.stdout.splitlines() == ["math.add", "math"], proc.stdout

@@ -708,8 +708,7 @@ bool finalize_package_identity(resolved_package &resolved,
 }
 
 bool load_package_file(const resolved_package &resolved,
-                       const std::string &expected_name,
-                       const std::string &module_name, value_t *&result,
+                       const std::string &expected_name, value_t *&result,
                        std::string &error);
 bool load_child_packages(const std::string &dotted,
                          const fs::path &package_file, value_t *namespace_value,
@@ -719,6 +718,7 @@ value_t *import_embedded_package(const std::string &dotted,
 bool parse_package_source(const std::string &source_text,
                           const std::string &source_name,
                           const std::string &expected_name,
+                          const std::string &package_name,
                           const std::string &module_name,
                           const std::string &base_dir, value_t *&result,
                           std::string &error);
@@ -744,8 +744,7 @@ value_t *import_resolved(const std::string &dotted,
 
     value_t *namespace_value = NULL;
     bool ok = load_package_file(
-        resolved, split_dotted(dotted).back(), resolved.package,
-        namespace_value, error);
+        resolved, split_dotted(dotted).back(), namespace_value, error);
     if (ok) {
         ok = load_child_packages(dotted, resolved.file,
                                  namespace_value, error);
@@ -782,8 +781,7 @@ value_t *import_package_exact(const std::string &dotted,
     loading_paths.push_back(resolved.key);
     value_t *namespace_value = NULL;
     bool ok = load_package_file(
-        resolved, split_dotted(dotted).back(), resolved.package,
-        namespace_value, error);
+        resolved, split_dotted(dotted).back(), namespace_value, error);
     loading_paths.pop_back();
     if (!ok) {
         freeval(namespace_value);
@@ -1097,10 +1095,10 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
         auto parse_adapter = [](const std::string &source,
                                 const std::string &source_name,
                                 const std::string &expected_name,
-                                const std::string &module_name,
+                                const std::string &package_name,
                                 value_t *&result, std::string &parse_error) {
             return parse_package_source(source, source_name, expected_name,
-                                        module_name, import_base, result,
+                                        package_name, "", import_base, result,
                                         parse_error);
         };
         std::string adapter_error;
@@ -1259,6 +1257,7 @@ void restore_parser_globals(int saved_char, const YYSTYPE &saved_lval,
 bool parse_package_source(const std::string &source_text,
                           const std::string &source_name,
                           const std::string &expected_name,
+                          const std::string &package_name,
                           const std::string &module_name,
                           const std::string &base_dir, value_t *&result,
                           std::string &error) {
@@ -1296,7 +1295,8 @@ bool parse_package_source(const std::string &source_text,
     reset_scanner_state(file);
     diag_start_source();
     diag_set_source_name(source_name);
-    diag_set_package_name(module_name);
+    diag_set_package_name(package_name);
+    diag_set_module_name(module_name);
     eval_push_isolated_scope();
 
     package_load_context context;
@@ -1399,8 +1399,7 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
 }
 
 bool load_package_file(const resolved_package &resolved,
-                       const std::string &expected_name,
-                       const std::string &module_name, value_t *&result,
+                       const std::string &expected_name, value_t *&result,
                        std::string &error) {
     const std::string package_path = path_to_utf8(resolved.file);
     std::string source_text;
@@ -1410,7 +1409,8 @@ bool load_package_file(const resolved_package &resolved,
         return false;
     }
     return parse_package_source(source_text, package_path, expected_name,
-                                module_name, path_to_utf8(resolved.directory),
+                                resolved.package, resolved.module,
+                                path_to_utf8(resolved.directory),
                                 result, error);
 }
 
@@ -1432,7 +1432,7 @@ value_t *import_embedded_package(const std::string &dotted,
     loading_paths.push_back(key);
     value_t *namespace_value = NULL;
     bool ok = parse_package_source(
-        source, "<" + dotted + ">", split_dotted(dotted).back(), dotted,
+        source, "<" + dotted + ">", split_dotted(dotted).back(), dotted, "",
         import_base, namespace_value, error);
     loading_paths.pop_back();
 

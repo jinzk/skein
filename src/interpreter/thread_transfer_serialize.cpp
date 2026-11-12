@@ -1330,6 +1330,8 @@ bool write_type_metadata(
         if (record.is_enum) {
             const struct enum_def *def = record.enumeration;
             out.str(def->source);
+            out.str(def->package);
+            out.str(def->module);
             out.str(def->name);
             out.u8(def->exported ? 1 : 0);
             out.u32((uint32_t)def->variants.size());
@@ -1350,6 +1352,8 @@ bool write_type_metadata(
         } else {
             const struct struct_def *def = record.structure;
             out.str(def->source);
+            out.str(def->package);
+            out.str(def->module);
             out.str(def->name);
             out.u8(def->exported ? 1 : 0);
             out.u32((uint32_t)def->fields.size());
@@ -1386,7 +1390,7 @@ bool read_type_metadata(reader &in,
         thread_transfer_type type;
         uint8_t is_enum = 0;
         uint8_t exported = 0;
-        if (!in.u8(is_enum) || !in.str(type.source) || !in.str(type.name) ||
+        if (!in.u8(is_enum) || !in.str(type.source) || !in.str(type.package) || !in.str(type.module) || !in.str(type.name) ||
             !in.u8(exported)) {
             error = in.error;
             return false;
@@ -1446,7 +1450,8 @@ bool read_type_metadata(reader &in,
             if (!structtype_find_enum(type.source.c_str(), type.name.c_str())) {
                 std::string declare_error;
                 if (!declare_enum_meta(type.source.c_str(),
-                                       type.source.c_str(),
+                                       type.package.c_str(),
+                                       type.module.c_str(),
                                        type.name.c_str(), type.exported,
                                        variants, nullptr, declare_error)) {
                     error = declare_error.empty()
@@ -1490,7 +1495,9 @@ bool read_type_metadata(reader &in,
                                         type.name.c_str())) {
                 std::string declare_error;
                 if (!declare_struct_meta(type.source.c_str(),
-                                         type.source.c_str(), type.name.c_str(),
+                                         type.package.c_str(),
+                                         type.module.c_str(),
+                                         type.name.c_str(),
                                          type.exported, fields, nullptr,
                                          declare_error)) {
                     error = declare_error.empty()

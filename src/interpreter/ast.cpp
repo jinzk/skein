@@ -951,6 +951,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     code->def_line = node->ast ? node->ast->line : 0;
     code->def_column = node->ast ? node->ast->column : 0;
     code->package = diag_current_package_name();
+    code->module = diag_current_module_name();
     code->source = diag_current_source_name();
     if (node->ret_type) {
         code->ret_type =
@@ -1026,6 +1027,7 @@ struct ast *newstructdecl(char *name, char *source,
     set_loc(a, 0, 0);
     a->name = name;
     a->source = source;
+    a->module = copy_string(diag_current_module_name().c_str());
     a->members = members;
     a->exported = exported;
     return (struct ast *)a;
@@ -1104,6 +1106,7 @@ struct ast *newtraitdecl(char *name, char *source,
     set_loc(a, 0, 0);
     a->name = name;
     a->source = source;
+    a->module = copy_string(diag_current_module_name().c_str());
     a->methods = methods;
     a->exported = exported;
     return (struct ast *)a;
@@ -1162,6 +1165,7 @@ struct ast *newenumdecl(char *name, char *source,
     set_loc(a, 0, 0);
     a->name = name;
     a->source = source;
+    a->module = copy_string(diag_current_module_name().c_str());
     a->variants = variants;
     a->exported = exported ? 1 : 0;
     return (struct ast *)a;
@@ -1460,6 +1464,7 @@ void treefree(struct ast *a) {
             treefree((struct ast *)s->members);
             std::free(s->name);
             std::free(s->source);
+            std::free(s->module);
             break;
         }
         case 'H': {
@@ -1475,6 +1480,7 @@ void treefree(struct ast *a) {
             treefree((struct ast *)t->methods);
             std::free(t->name);
             std::free(t->source);
+            std::free(t->module);
             break;
         }
         case 'f': {
@@ -1595,6 +1601,7 @@ void treefree(struct ast *a) {
             struct enum_node *e = (struct enum_node *)a;
             std::free(e->name);
             std::free(e->source);
+            std::free(e->module);
             treefree((struct ast *)e->variants);
             break;
         }

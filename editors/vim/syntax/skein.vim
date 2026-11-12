@@ -83,7 +83,7 @@ syntax keyword skeinBuiltin bytes_from_string bytes_to_string bytes_from_char
       \ append_bytes file_read_bytes file_write_bytes
 
 " Operators ------------------------------------------------------------------
-syntax match skeinOperator '==\|!=\|<>\|<=\|>=\|&&\|||\|++\|--\|+=\|-=\|\*=\|/=\|%=\|<<\|>>\|->\|=>\|\.\.\.\?'
+syntax match skeinOperator '|>\|==\|!=\|<>\|<=\|>=\|&&\|||\|++\|--\|+=\|-=\|\*=\|/=\|%=\|<<\|>>\|->\|=>\|\.\.\.\?'
 syntax match skeinOperator '[+\-*/%&|^~!<>=]'
 
 " Comments -------------------------------------------------------------------

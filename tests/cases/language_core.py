@@ -998,13 +998,10 @@ def run_cases():
           'println(5 |> Box { v: 10 }.add());\n',
           stdout="15")
 
-    check("pipe apply operator",
-          'func f(x, y) { return x - y; }\n'
-          'let h = x -> y -> f(x, y);\n'
-          'println(4 |>> h(3));\n'
-          'println(h(4)(3));\n'
-          'println(1 |>> (x -> x + 1));\n',
-          stdout_all=["-1", "1", "2"])
+    check("pipe apply operator removed",
+          'func h(x) { return y -> x + y; }\n'
+          'println(4 |>> h(3));\n',
+          stderr="syntax error")
     check("call placeholders",
           'func f(a, b, c) { return [a, b, c]; }\n'
           'let g = f($, $, 3);\n'
@@ -1015,9 +1012,8 @@ def run_cases():
           stdout_all=["[1, 2, 3]", "[4, 9, 0]", "3"])
     check("placeholder with pipe",
           'import std;\n'
-          'println([1, 2, 3] |> std.list.map($, x -> x * 2));\n'
-          'println([1, 2, 3] |>> std.list.map($, x -> x * 2));\n',
-          stdout_all=["[2, 4, 6]", "[2, 4, 6]"])
+          'println([1, 2, 3] |> std.list.map($, x -> x * 2));\n',
+          stdout_all=["[2, 4, 6]"])
     check("placeholder method",
           'struct Box { v: int; }\n'
           'impl Box { func add(self, x) -> self.v + x; }\n'

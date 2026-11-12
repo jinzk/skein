@@ -920,7 +920,6 @@ static struct type_constraint *runtime_type_or_error(
 %token ELLIPSIS "..."
 %token DOTDOT ".."
 %token PIPE "|>"
-%token PIPE_APPLY "|>>"
 %token PLACEHOLDER "$"
 %token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
@@ -944,7 +943,7 @@ static struct type_constraint *runtime_type_or_error(
 %left SHL SHR
 %left '+' '-'
 %left '*' '/' '%'
-%left PIPE PIPE_APPLY
+%left PIPE
 %precedence UMINUS NOT BITNOT
 %right INC DEC
 %precedence '['
@@ -1704,9 +1703,6 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         } else {
             $$ = newcall($3, newast('L', $1, NULL));
         }
-      }
-    | exp PIPE_APPLY exp                  {
-        $$ = newcall($3, newast('L', $1, NULL));
       }
     | NAME RARROW lambda_start exp         {
         $$ = newfunc(NULL, newsymlist(newsym($1), NULL, NULL),

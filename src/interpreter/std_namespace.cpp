@@ -350,6 +350,7 @@ value_t *build_namespace_impl() {
             {"script", B_sys_script},
             {"executable", B_sys_executable},
             {"exit", B_sys_exit},
+            {"is_main", B_sys_is_main},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("crypto"),

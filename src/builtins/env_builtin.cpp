@@ -1,6 +1,7 @@
 #include "env_builtin.h"
 
 #include "ast.h"
+#include "diagnostics.h"
 #include "platform.h"
 #include "runtime_state.h"
 #include "valuetype.h"
@@ -139,6 +140,8 @@ struct value_t *call_sys_builtin(
             return newstrval(sys_script().c_str());
         case B_sys_executable:
             return newstrval(sys_executable().c_str());
+        case B_sys_is_main:
+            return newboolval(diag_current_package_name() == "main");
         default:
             yyerror("unknown sys function");
             return NULL;

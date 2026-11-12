@@ -496,7 +496,7 @@ struct value_t *call_builtin(int functype,
         return call_fs_extra_builtin(functype, args);
     if (functype >= B_env_get && functype <= B_env_all)
         return call_env_builtin(functype, args);
-    if (functype >= B_sys_args && functype <= B_sys_exit)
+    if (functype >= B_sys_args && functype <= B_sys_is_main)
         return call_sys_builtin(functype, args);
     if (functype == B_process_run_command)
         return call_process_builtin(functype, args);

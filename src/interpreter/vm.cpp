@@ -3420,6 +3420,10 @@ private:
 
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
+        if (!code->package.empty())
+            diag_set_package_name(code->package);
+        if (!code->source.empty())
+            diag_set_source_name(code->source);
         param_pool_safe_ = proto->params_direct &&
                            !proto->has_closures && !proto->uses_defers &&
                            vm_param_pool_enabled();

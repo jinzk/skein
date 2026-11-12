@@ -114,6 +114,49 @@ def main():
         if proc.returncode != 1 or "between 0 and 255" not in proc.stderr:
             sys.stderr.write(proc.stdout + proc.stderr)
             return 1
+
+        helper = os.path.join(tmp, "helper.skein")
+        with open(helper, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "package helper {\n"
+                "  export func in_package() { return std.sys.is_main(); }\n"
+                "  export func call_main(fn) { return fn(); }\n"
+                "}\n"
+            )
+        main_script = os.path.join(tmp, "is_main.skein")
+        with open(main_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import helper;\n"
+                "func callback() { return std.sys.is_main(); }\n"
+                "println(str(std.sys.is_main()));\n"
+                "println(str(helper.in_package()));\n"
+                "println(str(helper.call_main(callback)));\n"
+            )
+        proc = subprocess.run(
+            [BIN, main_script],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode != 0 or proc.stdout.splitlines() != [
+                "true", "false", "true"]:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            return 1
+
+        proc = subprocess.run(
+            [BIN],
+            input="import std;\nprintln(str(std.sys.is_main()));\n",
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode != 0 or proc.stdout.strip() != "true":
+            sys.stderr.write(proc.stdout + proc.stderr)
+            return 1
         print("sys args test passed")
         return 0
 

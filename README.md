@@ -7,6 +7,21 @@ Skein 是一个使用 Flex + Bison + C++17 实现的动态类型脚本语言。�
 - 想查语法：[语法参考](SYNTAX.md)
 - 想查标准库：[标准库指南](docs/stdlib.md)
 
+## AI / Agent skill
+
+仓库提供一个面向 Skein 语言使用者的 agent skill：
+[`.opencode/skills/skein/SKILL.md`](.opencode/skills/skein/SKILL.md)。OpenCode
+会自动发现它；其他工具可以直接读取该文件，或安装到全局：
+
+```bash
+mkdir -p ~/.config/opencode/skills
+cp -r .opencode/skills/skein ~/.config/opencode/skills/
+```
+
+该 skill 只覆盖「写 Skein 程序」：运行方式、换行和大括号规则、for-in、
+`std.iter.for_each`、match、struct/enum、错误处理、常见报错速查，以及到
+`SYNTAX.md` / `docs/stdlib.md` 的索引。
+
 ## 设计特点
 
 ### 表达力优先的语法

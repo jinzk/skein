@@ -19,7 +19,7 @@ namespace typecheck {
 struct TypeNode {
     enum type_constraint_kind kind;
     std::string name;
-    std::string module;
+    std::string source;
     bool nullable;
     std::vector<const TypeNode *> args;
     /* Function types only: trailing parameters that may be omitted, a
@@ -35,7 +35,7 @@ const TypeNode *type_any();
 const TypeNode *type_from_constraint(const struct type_constraint *type);
 const TypeNode *type_builtin(enum type_constraint_kind kind,
                              bool nullable = false);
-const TypeNode *type_named(const char *module, const char *name,
+const TypeNode *type_named(const char *source, const char *name,
                            bool nullable = false);
 const TypeNode *type_variable(const char *name);
 const TypeNode *type_container(enum type_constraint_kind kind,

@@ -59,7 +59,7 @@ std::unordered_map<std::string, std::unique_ptr<TypeNode>> &type_pool() {
 }
 
 std::string node_key(enum type_constraint_kind kind, const std::string &name,
-                     const std::string &module, bool nullable,
+                     const std::string &source, bool nullable,
                      const std::vector<const TypeNode *> &args,
                      int optional_params, bool variadic,
                      const TypeNode *rest) {
@@ -67,7 +67,7 @@ std::string node_key(enum type_constraint_kind kind, const std::string &name,
     key.reserve(32);
     key += std::to_string(static_cast<int>(kind));
     key += '|';
-    key += module;
+    key += source;
     key += '|';
     key += name;
     key += nullable ? "|1" : "|0";
@@ -75,14 +75,14 @@ std::string node_key(enum type_constraint_kind kind, const std::string &name,
     key += std::to_string(optional_params);
     key += variadic ? "|v1" : "|v0";
     key += '|';
-    key += rest ? node_key(rest->kind, rest->name, rest->module,
+    key += rest ? node_key(rest->kind, rest->name, rest->source,
                            rest->nullable, rest->args,
                            rest->optional_params, rest->variadic,
                            rest->rest)
                 : std::string("-");
     for (const TypeNode *arg : args) {
         key += '|';
-        key += arg ? node_key(arg->kind, arg->name, arg->module,
+        key += arg ? node_key(arg->kind, arg->name, arg->source,
                               arg->nullable, arg->args,
                               arg->optional_params, arg->variadic,
                               arg->rest)
@@ -157,12 +157,12 @@ std::string node_display(enum type_constraint_kind kind,
 
 const TypeNode *intern_type(enum type_constraint_kind kind,
                             const std::string &name,
-                            const std::string &module, bool nullable,
+                            const std::string &source, bool nullable,
                             const std::vector<const TypeNode *> &args,
                             int optional_params = 0,
                             bool variadic = false,
                             const TypeNode *rest = nullptr) {
-    std::string key = node_key(kind, name, module, nullable, args,
+    std::string key = node_key(kind, name, source, nullable, args,
                                optional_params, variadic, rest);
     auto &pool = type_pool();
     auto it = pool.find(key);
@@ -172,7 +172,7 @@ const TypeNode *intern_type(enum type_constraint_kind kind,
     std::unique_ptr<TypeNode> node(new TypeNode());
     node->kind = kind;
     node->name = name;
-    node->module = module;
+    node->source = source;
     node->nullable = nullable;
     node->args = args;
     node->optional_params = optional_params;
@@ -195,10 +195,10 @@ const TypeNode *type_builtin(enum type_constraint_kind kind, bool nullable) {
                        std::vector<const TypeNode *>());
 }
 
-const TypeNode *type_named(const char *module, const char *name,
+const TypeNode *type_named(const char *source, const char *name,
                            bool nullable) {
     return intern_type(TYPE_NAMED, name ? name : "",
-                       module ? module : "", nullable,
+                       source ? source : "", nullable,
                        std::vector<const TypeNode *>());
 }
 
@@ -224,7 +224,7 @@ const TypeNode *make_function_type(
 const TypeNode *type_nullable(const TypeNode *type) {
     if (!type || type->nullable)
         return type ? type : type_any();
-    return intern_type(type->kind, type->name, type->module, true,
+    return intern_type(type->kind, type->name, type->source, true,
                        type->args, type->optional_params, type->variadic,
                        type->rest);
 }
@@ -239,7 +239,7 @@ const TypeNode *type_from_constraint(const struct type_constraint *type) {
         return node;
     }
     return intern_type(type->kind, type->name ? type->name : "",
-                       type->module ? type->module : "", type->nullable,
+                       type->source ? type->source : "", type->nullable,
                        std::vector<const TypeNode *>());
 }
 

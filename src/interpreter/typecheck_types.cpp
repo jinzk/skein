@@ -38,7 +38,7 @@ const TypeNode *value_static_type(const struct value_t *value) {
             const struct struct_value_t *structure =
                 (const struct struct_value_t *)value;
             if (structure->def)
-                return type_named(structure->def->module.c_str(),
+                return type_named(structure->def->source.c_str(),
                                   structure->def->name.c_str());
             return type_any();
         }
@@ -46,7 +46,7 @@ const TypeNode *value_static_type(const struct value_t *value) {
             const struct enum_value_t *enumeration =
                 (const struct enum_value_t *)value;
             if (enumeration->def)
-                return type_named(enumeration->def->module.c_str(),
+                return type_named(enumeration->def->source.c_str(),
                                   enumeration->def->name.c_str());
             return type_any();
         }
@@ -93,7 +93,7 @@ const TypeNode *strip_nullable(const TypeNode *type) {
     if (type_container_arity(type->kind) > 0)
         return type_container(type->kind, type->args, false);
     if (type->kind == TYPE_NAMED)
-        return type_named(type->module.c_str(), type->name.c_str(), false);
+        return type_named(type->source.c_str(), type->name.c_str(), false);
     if (type->kind == TYPE_VAR)
         return type_variable(type->name.c_str());
     if (type_is_function_signature(type))
@@ -210,7 +210,7 @@ const TypeNode *join_types(const TypeNode *a, const TypeNode *b) {
          b->kind == TYPE_NUMBER))
         return type_builtin(TYPE_NUMBER);
     if (a->kind == TYPE_NAMED && b->kind == TYPE_NAMED &&
-        a->name == b->name && a->module == b->module)
+        a->name == b->name && a->source == b->source)
         return a;
 
     if (a->kind == TYPE_UNION || b->kind == TYPE_UNION) {
@@ -413,9 +413,9 @@ bool lookup_named_type(const TypeNode *type,
         return false;
     out = structtype_lookup_result();
 
-    const char *logical_module = diag_current_module_name().c_str();
+    const char *logical_module = diag_current_package_name().c_str();
     struct_def *structure =
-        structtype_find_struct(type->module.c_str(), type->name.c_str());
+        structtype_find_struct(type->source.c_str(), type->name.c_str());
     if (!structure)
         structure = structtype_find_struct_by_name(
             logical_module, type->name.c_str(), NULL);
@@ -425,7 +425,7 @@ bool lookup_named_type(const TypeNode *type,
         return true;
     }
     enum_def *enumeration =
-        structtype_find_enum(type->module.c_str(), type->name.c_str());
+        structtype_find_enum(type->source.c_str(), type->name.c_str());
     if (!enumeration)
         enumeration = structtype_find_enum_by_name(
             logical_module, type->name.c_str(), NULL);
@@ -435,7 +435,7 @@ bool lookup_named_type(const TypeNode *type,
         return true;
     }
     trait_def *trait =
-        structtype_find_trait(type->module.c_str(), type->name.c_str());
+        structtype_find_trait(type->source.c_str(), type->name.c_str());
     if (!trait)
         trait = structtype_find_trait_by_name(
             logical_module, type->name.c_str(), NULL);
@@ -447,7 +447,7 @@ bool lookup_named_type(const TypeNode *type,
 
     std::string error;
     return structtype_lookup_type(
-               type->module.c_str(), diag_current_module_name().c_str(),
+               type->source.c_str(), diag_current_package_name().c_str(),
                type->name.c_str(), out, error) ==
            STRUCTTYPE_LOOKUP_FOUND;
 }
@@ -579,9 +579,9 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
         return MatchResult::Mismatch;
 
     if (actual->kind == TYPE_NAMED) {
-        if (structtype_named_types_equal(actual->module.c_str(),
+        if (structtype_named_types_equal(actual->source.c_str(),
                                          actual->name.c_str(),
-                                         expected->module.c_str(),
+                                         expected->source.c_str(),
                                          expected->name.c_str()))
             return MatchResult::Ok;
         structtype_lookup_result expected_lookup;

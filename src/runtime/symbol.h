@@ -50,7 +50,7 @@ struct type_constraint {
     enum type_constraint_kind kind;
     /* Interned; non-NULL only for TYPE_NAMED. */
     const char *name;
-    const char *module;
+    const char *source;
     bool nullable;
     /*
      * Static-checker metadata.  Both pointers are interned and non-owning;
@@ -94,7 +94,7 @@ void symlistfree(struct symlist *sl);
 
 struct type_constraint *new_type_constraint(enum type_constraint_kind kind);
 struct type_constraint *new_named_type_constraint(const char *name,
-                                                  const char *module);
+                                                  const char *source);
 void type_constraint_assign(struct type_constraint *dst,
                             const struct type_constraint *src);
 void type_constraint_set_any(struct type_constraint *dst);

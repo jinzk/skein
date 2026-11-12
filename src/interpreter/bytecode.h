@@ -201,7 +201,7 @@ struct ImportDesc {
 };
 
 struct ConstructDesc {
-    std::string module;
+    std::string source;
     std::string name;
     std::string variant;
     std::vector<std::string> fields;
@@ -209,7 +209,7 @@ struct ConstructDesc {
 };
 
 struct FieldOrEnumDesc {
-    std::string module;
+    std::string source;
     std::string base;
     std::string field;
 };
@@ -246,7 +246,7 @@ struct PatternDesc {
 
     Kind kind = Kind::Never;
     std::string name;
-    std::string module;
+    std::string source;
     std::string type_name;
     std::string variant;
     type_constraint type;
@@ -304,7 +304,7 @@ struct DeclMethodMeta {
 };
 
 struct StructDeclMeta {
-    std::string module;
+    std::string source;
     std::string name;
     bool exported = false;
     std::vector<DeclFieldMeta> fields;
@@ -316,7 +316,7 @@ struct EnumVariantMeta {
 };
 
 struct EnumDeclMeta {
-    std::string module;
+    std::string source;
     std::string name;
     bool exported = false;
     std::vector<EnumVariantMeta> variants;
@@ -337,14 +337,14 @@ struct TraitMethodMeta {
 };
 
 struct TraitDeclMeta {
-    std::string module;
+    std::string source;
     std::string name;
     bool exported = false;
     std::vector<TraitMethodMeta> methods;
 };
 
 struct ImplDeclMeta {
-    std::string module;
+    std::string source;
     std::string type_name;
     std::string trait_name;
     bool has_trait = false;
@@ -414,7 +414,7 @@ struct IndexReadCacheEntry {
  */
 struct Proto {
     std::string name;
-    std::string module;
+    std::string package;
     int def_line = 0;
     int def_column = 0;
 

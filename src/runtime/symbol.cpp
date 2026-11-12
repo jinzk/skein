@@ -23,7 +23,7 @@ struct symbol *newsym(const char *name) {
     s->val = NULL;
     s->type.kind = TYPE_ANY;
     s->type.name = NULL;
-    s->type.module = NULL;
+    s->type.source = NULL;
     s->type.nullable = false;
     s->type.display = NULL;
     s->type.detail = NULL;
@@ -80,7 +80,7 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
     }
     type->kind = kind;
     type->name = NULL;
-    type->module = NULL;
+    type->source = NULL;
     type->nullable = false;
     type->display = NULL;
     type->detail = NULL;
@@ -88,10 +88,10 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
 }
 
 struct type_constraint *new_named_type_constraint(const char *name,
-                                                  const char *module) {
+                                                  const char *source) {
     struct type_constraint *type = new_type_constraint(TYPE_NAMED);
     type->name = intern_type_name(name);
-    type->module = intern_type_name(module);
+    type->source = intern_type_name(source);
     return type;
 }
 
@@ -105,7 +105,7 @@ void type_constraint_assign(struct type_constraint *dst,
     }
     dst->kind = src->kind;
     dst->name = src->name;
-    dst->module = src->module;
+    dst->source = src->source;
     dst->nullable = src->nullable;
     dst->display = src->display;
     dst->detail = src->detail;
@@ -116,7 +116,7 @@ void type_constraint_set_any(struct type_constraint *dst) {
         return;
     dst->kind = TYPE_ANY;
     dst->name = NULL;
-    dst->module = NULL;
+    dst->source = NULL;
     dst->nullable = false;
     dst->display = NULL;
     dst->detail = NULL;
@@ -257,7 +257,7 @@ bool type_constraint_matches(const struct type_constraint *type,
         case TYPE_ERROR:
             return value->type == T_error;
         case TYPE_NAMED:
-            return named_type_matches(type->module, type->name, value);
+            return named_type_matches(type->source, type->name, value);
         case TYPE_TASK:
             return userdata_name && std::strcmp(userdata_name, "task") == 0;
         case TYPE_GENERATOR:
@@ -301,7 +301,7 @@ bool type_constraint_equal(const struct type_constraint *a,
     if (a->kind == TYPE_NAMED) {
         if (!a->name || !b->name)
             return a->name == b->name;
-        return structtype_named_types_equal(a->module, a->name, b->module,
+        return structtype_named_types_equal(a->source, a->name, b->source,
                                             b->name);
     }
     if (a->kind == TYPE_VAR)

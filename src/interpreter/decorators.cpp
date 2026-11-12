@@ -98,7 +98,7 @@ struct type_constraint *copy_type_constraint(
         return NULL;
     struct type_constraint *copy = new_type_constraint(source->kind);
     copy->name = source->name;
-    copy->module = source->module;
+    copy->source = source->source;
     copy->nullable = source->nullable;
     copy->display = source->display;
     copy->detail = source->detail;
@@ -265,7 +265,7 @@ struct ast *lower_impl_decorators(struct impl_node *impl) {
             std::strcmp(body->sl->sym->name, "self") == 0 &&
             !body->sl->type)
             body->method_self_type =
-                new_named_type_constraint(impl->type_name, impl->module);
+                new_named_type_constraint(impl->type_name, impl->source);
 
         bool body_is_generator = body->is_generator != 0;
         struct ast *wrapper_body = build_wrapper_body(

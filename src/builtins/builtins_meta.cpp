@@ -23,7 +23,7 @@ const char *meta_builtin_name(int functype) {
 struct value_t *call_meta_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     const std::string &importer_source = diag_current_source_name();
-    const std::string &importer_module = diag_current_module_name();
+    const std::string &importer_module = diag_current_package_name();
 
     if (functype == B_meta_implements) {
         if (args.size() != 2) {

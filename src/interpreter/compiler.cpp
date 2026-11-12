@@ -407,8 +407,8 @@ struct Compiler {
     bool param_fast_path = false;
     bool ok = true;
 
-    explicit Compiler(const std::string &module) {
-        proto.module = module;
+    explicit Compiler(const std::string &package) {
+        proto.package = package;
     }
 
     SourceLoc loc_of(const ast *node) const {
@@ -612,7 +612,7 @@ struct Compiler {
 
     uint32_t add_struct_decl(struct struct_node *node) {
         skein::bc::StructDeclMeta meta;
-        meta.module = node->module ? node->module : "";
+        meta.source = node->source ? node->source : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
         std::vector<std::string> forbidden;
@@ -651,7 +651,7 @@ struct Compiler {
 
     uint32_t add_enum_decl(struct enum_node *node) {
         skein::bc::EnumDeclMeta meta;
-        meta.module = node->module ? node->module : "";
+        meta.source = node->source ? node->source : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
         std::vector<std::string> forbidden;
@@ -694,7 +694,7 @@ struct Compiler {
     }
 
     uint32_t add_package(struct package_node *node) {
-        Compiler child(proto.module);
+        Compiler child(proto.package);
         child.proto.name = node->name
                                ? std::string("package ") + node->name
                                : std::string("package");
@@ -718,7 +718,7 @@ struct Compiler {
 
     uint32_t add_trait_decl(struct trait_node *node) {
         skein::bc::TraitDeclMeta meta;
-        meta.module = node->module ? node->module : "";
+        meta.source = node->source ? node->source : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
         for (struct trait_method *method = node->methods; method;
@@ -756,7 +756,7 @@ struct Compiler {
 
     uint32_t add_impl_decl(struct impl_node *node) {
         skein::bc::ImplDeclMeta meta;
-        meta.module = node->module ? node->module : "";
+        meta.source = node->source ? node->source : "";
         meta.type_name = node->type_name ? node->type_name : "";
         meta.has_trait = node->trait_name != NULL;
         meta.trait_name = node->trait_name ? node->trait_name : "";
@@ -786,10 +786,10 @@ struct Compiler {
         code.nparams = 0;
         code.required_params = 0;
         code.name = std::string("<default ") + (field ? field : "?") + ">";
-        code.module = proto.module;
+        code.package = proto.package;
         std::string error;
         if (!skein_check_default_references(&code, expr, forbidden,
-                                            proto.module, error)) {
+                                            proto.package, error)) {
             std::string message = "field ";
             message += field ? field : "?";
             message += " default: ";
@@ -816,7 +816,7 @@ struct Compiler {
         code->is_generator = false;
         code->def_line = expr->line;
         code->def_column = expr->column;
-        code->module = proto.module;
+        code->package = proto.package;
         set_function_body_ast(code.get(), newret(expr));
         return code;
     }
@@ -824,7 +824,7 @@ struct Compiler {
     uint32_t add_function(struct funcdef *node) {
         std::shared_ptr<function_code> code = get_function_code(node);
         if (code) {
-            code->module = proto.module;
+            code->package = proto.package;
             if ((inside_function || !slot_scopes.empty()) &&
                 code->upvalues.empty()) {
                 std::unordered_set<std::string> seen;
@@ -863,12 +863,12 @@ struct Compiler {
         return static_cast<uint32_t>(proto.call_descs.size() - 1);
     }
 
-    uint32_t add_construct(const char *module, const char *name,
+    uint32_t add_construct(const char *source, const char *name,
                            const char *variant,
                            std::vector<std::string> fields,
                            std::vector<bool> spread) {
         skein::bc::ConstructDesc desc;
-        desc.module = module ? module : "";
+        desc.source = source ? source : "";
         desc.name = name ? name : "";
         desc.variant = variant ? variant : "";
         desc.fields = std::move(fields);
@@ -877,10 +877,10 @@ struct Compiler {
         return static_cast<uint32_t>(proto.constructs.size() - 1);
     }
 
-    uint32_t add_field_or_enum(const char *module, const char *base,
+    uint32_t add_field_or_enum(const char *source, const char *base,
                                const char *field) {
         skein::bc::FieldOrEnumDesc desc;
-        desc.module = module ? module : "";
+        desc.source = source ? source : "";
         desc.base = base ? base : "";
         desc.field = field ? field : "";
         proto.field_or_enum.push_back(std::move(desc));
@@ -929,7 +929,7 @@ struct Compiler {
     uint32_t add_expression_proto(
         struct ast *expression, const std::string &suffix,
         const std::vector<skein::bc::DeferCapture> *captures = nullptr) {
-        Compiler child(proto.module);
+        Compiler child(proto.package);
         child.inside_function = captures ? true : inside_function;
         child.handler_body_depth = handler_body_depth;
         child.proto.name =
@@ -2425,7 +2425,7 @@ struct Compiler {
                     const char *base = ((struct symref *)node->l)->name;
                     if (base && !name_is_resolved(base)) {
                         uint32_t desc = add_field_or_enum(
-                            proto.module.c_str(), base, field);
+                            proto.package.c_str(), base, field);
                         emit(Op::GetFieldOrEnum, 0, 0, desc, here);
                         return;
                     }
@@ -2577,7 +2577,7 @@ struct Compiler {
                     spread.push_back(init->name == NULL);
                 }
                 uint32_t descriptor = add_construct(
-                    lit->module, lit->name, "", std::move(fields),
+                    lit->source, lit->name, "", std::move(fields),
                     std::move(spread));
                 emit(Op::NewStruct, 0, 0, descriptor, here);
                 return;
@@ -2599,7 +2599,7 @@ struct Compiler {
                     spread.push_back(false);
                 }
                 uint32_t descriptor = add_construct(
-                    lit->module, lit->name, lit->variant,
+                    lit->source, lit->name, lit->variant,
                     std::move(fields), std::move(spread));
                 emit(Op::NewEnum, 0, 0, descriptor, here);
                 return;
@@ -3037,8 +3037,8 @@ struct Compiler {
                            literal->nodetype == NODE_ENUM_LITERAL) {
                     struct enum_lit_node *enum_literal =
                         (struct enum_lit_node *)literal;
-                    desc.module = enum_literal->module
-                                      ? enum_literal->module
+                    desc.source = enum_literal->source
+                                      ? enum_literal->source
                                       : "";
                     desc.type_name = enum_literal->name
                                          ? enum_literal->name
@@ -3110,7 +3110,7 @@ struct Compiler {
                 break;
             case NODE_PATTERN_CONTAINER:
                 desc.kind = skein::bc::PatternDesc::Kind::Container;
-                desc.module = pattern->module ? pattern->module : "";
+                desc.source = pattern->source ? pattern->source : "";
                 desc.type_name = pattern->name ? pattern->name : "";
                 desc.variant = pattern->variant ? pattern->variant : "";
                 desc.is_dict = pattern->name == NULL &&
@@ -3491,9 +3491,9 @@ struct Compiler {
 } // namespace
 
 ProtoPtr skein_compile_statement(struct ast *statement,
-                                 const std::string &module,
+                                 const std::string &package,
                                  std::string &error) {
-    Compiler compiler(module);
+    Compiler compiler(package);
     compiler.proto.name = "<top>";
     compiler.slot_fast_path = Compiler::can_use_slots(statement);
     compiler.compile(statement);
@@ -3509,13 +3509,13 @@ ProtoPtr skein_compile_statement(struct ast *statement,
 
 ProtoPtr skein_compile_default_expression(
     struct function_code *code, struct ast *expression, int index,
-    const std::string &module, std::string &error) {
+    const std::string &package, std::string &error) {
     if (!code || !expression) {
         error = "invalid default expression";
         return nullptr;
     }
 
-    Compiler compiler(module);
+    Compiler compiler(package);
     compiler.proto.name =
         (code->name.empty() ? std::string("<anonymous>") : code->name) +
         "$default" + std::to_string(index);
@@ -3569,7 +3569,7 @@ static bool check_proto_default_references(
             continue;
         std::string compile_error;
         skein::bc::ProtoPtr nested = skein_compile_function_body(
-            const_cast<struct function_code *>(code), code->module,
+            const_cast<struct function_code *>(code), code->package,
             compile_error);
         if (!nested)
             continue;
@@ -3583,11 +3583,11 @@ static bool check_proto_default_references(
 bool skein_check_default_references(
     struct function_code *code, struct ast *expression,
     const std::vector<std::string> &forbidden,
-    const std::string &module, std::string &error) {
+    const std::string &package, std::string &error) {
     if (!code || !expression || forbidden.empty())
         return true;
 
-    Compiler compiler(module);
+    Compiler compiler(package);
     compiler.proto.name =
         (code->name.empty() ? std::string("<anonymous>") : code->name) +
         "$defaultcheck";
@@ -3613,14 +3613,14 @@ bool skein_check_default_references(
 
 std::shared_ptr<const compiled_pattern_set>
 skein_compile_parameter_patterns(struct function_code *code,
-                                 const std::string &module,
+                                 const std::string &package,
                                  std::string &error) {
     if (!code) {
         error = "invalid parameter pattern owner";
         return nullptr;
     }
 
-    Compiler compiler(module);
+    Compiler compiler(package);
     compiler.inside_function = true;
     compiler.proto.name =
         (code->name.empty() ? std::string("<anonymous>") : code->name) +
@@ -3663,7 +3663,7 @@ namespace {
  * them.
  */
 ProtoPtr compile_function_body_impl(struct function_code *code,
-                                    const std::string &module,
+                                    const std::string &package,
                                     bool bind_param_patterns,
                                     bool &pattern_abort,
                                     std::string &error) {
@@ -3673,7 +3673,7 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
         return nullptr;
     }
 
-    Compiler compiler(module);
+    Compiler compiler(package);
     compiler.inside_function = true;
     compiler.proto.name = code->name;
     for (struct symlist *param = code->sl; param; param = param->next) {
@@ -3761,18 +3761,18 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
 } // namespace
 
 ProtoPtr skein_compile_function_body(struct function_code *code,
-                                     const std::string &module,
+                                     const std::string &package,
                                      std::string &error) {
     bool pattern_abort = false;
     std::string pattern_error;
     ProtoPtr proto = compile_function_body_impl(
-        code, module, true, pattern_abort, pattern_error);
+        code, package, true, pattern_abort, pattern_error);
     if (proto)
         return proto;
     if (!pattern_abort) {
         error = pattern_error;
         return nullptr;
     }
-    return compile_function_body_impl(code, module, false, pattern_abort,
+    return compile_function_body_impl(code, package, false, pattern_abort,
                                       error);
 }

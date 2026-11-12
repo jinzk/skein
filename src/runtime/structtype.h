@@ -25,8 +25,8 @@ struct method_sig {
 
 struct trait_def {
     std::string name;
-    std::string module;
-    std::string module_name;
+    std::string source;
+    std::string package;
     bool exported;
     std::vector<method_sig> methods;
     /* Methods with a default body, keyed by method name. */
@@ -47,8 +47,8 @@ enum type_owner_kind {
 struct type_def {
     enum type_owner_kind kind;
     std::string name;
-    std::string module;
-    std::string module_name;
+    std::string source;
+    std::string package;
     bool exported;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
     /*
@@ -105,19 +105,19 @@ void structtype_visit_functions(
     const std::function<void(const std::shared_ptr<function_def> &)> &visit);
 
 struct_def *structtype_find_struct(const char *module, const char *name);
-struct_def *structtype_find_struct_by_name(const char *module_name,
+struct_def *structtype_find_struct_by_name(const char *package,
                                            const char *name,
                                            bool *ambiguous = NULL);
 type_def *structtype_find_type(const char *module, const char *name);
 trait_def *structtype_find_trait(const char *module, const char *name);
-trait_def *structtype_find_trait_by_name(const char *module_name,
+trait_def *structtype_find_trait_by_name(const char *package,
                                          const char *name,
                                          bool *ambiguous = NULL);
 trait_def *structtype_resolve_trait(const char *module, const char *name,
                                     bool require_exported,
                                     std::string &error);
 enum_def *structtype_find_enum(const char *module, const char *name);
-enum_def *structtype_find_enum_by_name(const char *module_name,
+enum_def *structtype_find_enum_by_name(const char *package,
                                        const char *name,
                                        bool *ambiguous = NULL);
 bool structtype_type_exists(const char *module, const char *name);
@@ -162,29 +162,29 @@ enum structtype_lookup_status structtype_lookup_type(
     const char *name, struct structtype_lookup_result &out,
     std::string &error);
 
-bool structtype_create_struct(const char *module, const char *module_name,
+bool structtype_create_struct(const char *source, const char *package,
                               const char *name, bool exported,
                               std::vector<field_def> fields,
                               struct_def *&out, std::string &error);
-bool structtype_prepare_struct(const char *module, const char *module_name,
+bool structtype_prepare_struct(const char *source, const char *package,
                                const char *name, bool exported,
                                struct_def *&out, std::string &error);
 bool structtype_finalize_struct(struct_def *def,
                                 std::vector<field_def> fields,
                                 std::string &error);
 void structtype_rollback_struct(struct_def *def);
-bool structtype_create_trait(const char *module, const char *module_name,
+bool structtype_create_trait(const char *source, const char *package,
                              const char *name, bool exported,
                              std::vector<method_sig> methods,
                              trait_def *&out, std::string &error);
-bool structtype_create_enum(const char *module, const char *module_name,
+bool structtype_create_enum(const char *source, const char *package,
                             const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error);
 bool structtype_add_trait_default(trait_def *trait, const std::string &name,
                                   std::shared_ptr<function_def> code,
                                   std::string &error);
-bool structtype_prepare_enum(const char *module, const char *module_name,
+bool structtype_prepare_enum(const char *source, const char *package,
                              const char *name, bool exported,
                              enum_def *&out, std::string &error);
 bool structtype_finalize_enum(enum_def *def,

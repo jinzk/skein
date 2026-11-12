@@ -27,8 +27,8 @@ struct function_code : std::enable_shared_from_this<function_code> {
     bool is_generator;
     int def_line = 0;
     int def_column = 0;
-    /* Module that defined this function, used for lazy compilation. */
-    std::string module;
+    /* Package that defined this function, used for lazy compilation. */
+    std::string package;
     /* Source file that defined this function, used for import alias lookup. */
     std::string source;
     /* Optional static return type annotation; shared by function values. */

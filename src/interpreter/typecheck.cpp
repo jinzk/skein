@@ -29,7 +29,7 @@ namespace {
 Mode g_mode = Mode::Warn;
 
 std::string generator_identity(const struct funcdef *def) {
-    std::string key = diag_current_module_name();
+    std::string key = diag_current_package_name();
     key += '|';
     if (def && def->name && *def->name) {
         key += def->name;
@@ -42,7 +42,7 @@ std::string generator_identity(const struct funcdef *def) {
 }
 
 std::string generator_identity(const struct function_code *code) {
-    std::string key = code ? code->module : "";
+    std::string key = code ? code->package : "";
     key += '|';
     if (code && !code->name.empty()) {
         key += code->name;
@@ -55,7 +55,7 @@ std::string generator_identity(const struct function_code *code) {
 }
 
 std::string generator_location_identity(const struct funcdef *def) {
-    std::string key = diag_current_module_name();
+    std::string key = diag_current_package_name();
     key += '|';
     key += std::to_string(def && def->ast ? def->ast->line : 0);
     key += ':';
@@ -64,7 +64,7 @@ std::string generator_location_identity(const struct funcdef *def) {
 }
 
 std::string generator_location_identity(const struct function_code *code) {
-    std::string key = code ? code->module : "";
+    std::string key = code ? code->package : "";
     key += '|';
     key += std::to_string(code ? code->def_line : 0);
     key += ':';
@@ -74,7 +74,7 @@ std::string generator_location_identity(const struct function_code *code) {
 
 struct Checker : public BuiltinContext {
     std::string source;
-    std::string module;
+    std::string package;
     std::unordered_map<std::string, FunctionSig> functions;
     std::unordered_map<std::string, StaticTypeInfo> static_types;
     std::vector<const TypeNode *> return_types;
@@ -110,7 +110,7 @@ struct Checker : public BuiltinContext {
 
     explicit Checker(const std::string &source_name,
                      const std::string &module_name)
-        : source(source_name), module(module_name) {}
+        : source(source_name), package(module_name) {}
 
     VarInfo lookup_var(const std::string &name, Env &env) {
         if (const VarInfo *info = env.lookup(name))
@@ -226,7 +226,7 @@ struct Checker : public BuiltinContext {
         if (type_container_arity(type->kind) > 0)
             return type_container(type->kind, type->args, false);
         if (type->kind == TYPE_NAMED)
-            return type_named(type->module.c_str(), type->name.c_str(),
+            return type_named(type->source.c_str(), type->name.c_str(),
                               false);
         return type_builtin(type->kind, false);
     }
@@ -723,7 +723,7 @@ struct Checker : public BuiltinContext {
         if (!type || type->kind != TYPE_NAMED)
             return NULL;
         auto it = static_types.find(
-            static_type_key(type->module.c_str(), type->name.c_str()));
+            static_type_key(type->source.c_str(), type->name.c_str()));
         return it == static_types.end() ? NULL : &it->second;
     }
 
@@ -1394,7 +1394,7 @@ struct Checker : public BuiltinContext {
         if (alias_it == source_it->second.end())
             return false;
 
-        std::string module = alias_it->second;
+        std::string package = alias_it->second;
         std::string rest = path.substr(dot + 1);
         std::vector<std::string> parts;
         std::size_t start = 0;
@@ -1409,7 +1409,7 @@ struct Checker : public BuiltinContext {
         }
 
         for (std::size_t split = 0; split < parts.size(); ++split) {
-            std::string candidate_module = module;
+            std::string candidate_module = package;
             for (std::size_t i = 0; i < split; ++i) {
                 candidate_module += '.';
                 candidate_module += parts[i];
@@ -1533,8 +1533,8 @@ struct Checker : public BuiltinContext {
                 assigned.type = owner == &env ? rhs : type_any();
                 assigned.declared = nullptr;
                 assigned.fixed = false;
-                if (assigned.exported && !module.empty())
-                    g_exported_types[module][name ? name : ""] = assigned;
+                if (assigned.exported && !package.empty())
+                    g_exported_types[package][name ? name : ""] = assigned;
             }
             return true;
         }
@@ -1589,7 +1589,7 @@ struct Checker : public BuiltinContext {
      * The forwarder for a decorated generator method is an ordinary function
      * returning a generator.  Recover the yield/send types from the hidden
      * method body and store them as the forwarder's static return annotation
-     * so later statements in the same module see generator[T, S].
+     * so later statements in the same source see generator[T, S].
      */
     void annotate_decorated_generator(struct funcdef *def) {
         if (!def || !def->decorated_generator_source || def->ret_type)
@@ -1889,7 +1889,7 @@ struct Checker : public BuiltinContext {
             case NODE_PATTERN_CONTAINER: {
                 if (pattern->name) {
                     const TypeNode *pattern_type =
-                        type_named(pattern->module, pattern->name);
+                        type_named(pattern->source, pattern->name);
                     structtype_lookup_result lookup;
                     ConstTypeMap *static_fields = NULL;
                     StaticTypeInfo *info =
@@ -1993,7 +1993,7 @@ struct Checker : public BuiltinContext {
 
     bool check_struct_literal(struct ast *expr, Env &env) {
         const char *name = nullptr;
-        const char *module = nullptr;
+        const char *source = nullptr;
         struct struct_init *fields = nullptr;
         struct_def *def = nullptr;
         enum_def *edef = nullptr;
@@ -2004,16 +2004,16 @@ struct Checker : public BuiltinContext {
             struct struct_lit_node *lit =
                 (struct struct_lit_node *)expr;
             name = lit->name;
-            module = lit->module;
+            source = lit->source;
             fields = lit->fields;
-            def = structtype_find_struct(module, name);
+            def = structtype_find_struct(source, name);
         } else if (expr->nodetype == '?') {
             struct enum_lit_node *lit = (struct enum_lit_node *)expr;
             name = lit->name;
-            module = lit->module;
+            source = lit->source;
             fields = lit->fields;
             variant_name = lit->variant;
-            edef = structtype_find_enum(module, name);
+            edef = structtype_find_enum(source, name);
             if (edef && lit->variant) {
                 auto it = edef->variant_index.find(lit->variant);
                 if (it != edef->variant_index.end())
@@ -2021,7 +2021,7 @@ struct Checker : public BuiltinContext {
             }
         }
 
-        const TypeNode *literal_type = type_named(module, name);
+        const TypeNode *literal_type = type_named(source, name);
         StaticTypeInfo *info = find_static_info(literal_type);
         ConstTypeMap *static_fields = NULL;
         if (info) {
@@ -2212,9 +2212,9 @@ struct Checker : public BuiltinContext {
 
     bool check_struct_decl(struct struct_node *decl, Env &env) {
         const TypeNode *self_type =
-            type_named(decl->module, decl->name);
+            type_named(decl->source, decl->name);
         StaticTypeInfo &info = static_types[
-            static_type_key(decl->module, decl->name)];
+            static_type_key(decl->source, decl->name)];
         info.is_enum = false;
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
@@ -2247,7 +2247,7 @@ struct Checker : public BuiltinContext {
 
     bool check_enum_decl(struct enum_node *decl, Env &env) {
         StaticTypeInfo &info = static_types[
-            static_type_key(decl->module, decl->name)];
+            static_type_key(decl->source, decl->name)];
         info.is_enum = true;
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {
@@ -2279,9 +2279,9 @@ struct Checker : public BuiltinContext {
 
     bool check_impl_decl(struct impl_node *impl, Env &env) {
         const TypeNode *self_type =
-            type_named(impl->module, impl->type_name);
+            type_named(impl->source, impl->type_name);
         StaticTypeInfo &info = static_types[
-            static_type_key(impl->module, impl->type_name)];
+            static_type_key(impl->source, impl->type_name)];
         for (struct struct_member *member = impl->methods; member;
              member = member->next) {
             if (member->func && member->func->nodetype == 'Z') {
@@ -2346,12 +2346,12 @@ struct Checker : public BuiltinContext {
                 env.define(name, declared, fixed);
                 if (def->exported) {
                     env.vars[name].exported = true;
-                    if (!module.empty()) {
+                    if (!package.empty()) {
                         VarInfo info;
                         info.type = declared;
                         info.fixed = fixed;
                         info.exported = true;
-                        g_exported_types[module][name] = info;
+                        g_exported_types[package][name] = info;
                     }
                 }
                 return true;
@@ -2816,13 +2816,13 @@ struct Checker : public BuiltinContext {
                 struct struct_lit_node *lit =
                     (struct struct_lit_node *)expr;
                 check_struct_literal(expr, env);
-                return type_named(lit->module, lit->name);
+                return type_named(lit->source, lit->name);
             }
             case '?': {
                 struct enum_lit_node *lit =
                     (struct enum_lit_node *)expr;
                 check_struct_literal(expr, env);
-                return type_named(lit->module, lit->name);
+                return type_named(lit->source, lit->name);
             }
             case '=': {
                 struct symasgn *asgn = (struct symasgn *)expr;
@@ -2999,7 +2999,7 @@ bool check_statement(struct ast *statement) {
     if (g_mode == Mode::Off || !statement)
         return true;
     Checker checker(diag_current_source_name(),
-                    diag_current_module_name());
+                    diag_current_package_name());
     Env env;
     auto saved = g_persistent_bindings.find(checker.source);
     if (saved != g_persistent_bindings.end())

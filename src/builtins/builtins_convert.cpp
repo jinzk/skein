@@ -78,11 +78,11 @@ struct value_t *call_convert_builtin(
             if (arg && arg->type == T_struct) {
                 struct struct_value_t *sv = (struct struct_value_t *)arg;
                 ret = newstrval(
-                    sv->def ? sv->def->module_name.c_str() : "");
+                    sv->def ? sv->def->package.c_str() : "");
             } else if (arg && arg->type == T_enum) {
                 struct enum_value_t *ev = (struct enum_value_t *)arg;
                 ret = newstrval(
-                    ev->def ? ev->def->module_name.c_str() : "");
+                    ev->def ? ev->def->package.c_str() : "");
             } else {
                 ret = newstrval("");
             }
@@ -90,10 +90,10 @@ struct value_t *call_convert_builtin(
         case B_type_source:
             if (arg && arg->type == T_struct) {
                 struct struct_value_t *sv = (struct struct_value_t *)arg;
-                ret = newstrval(sv->def ? sv->def->module.c_str() : "");
+                ret = newstrval(sv->def ? sv->def->source.c_str() : "");
             } else if (arg && arg->type == T_enum) {
                 struct enum_value_t *ev = (struct enum_value_t *)arg;
-                ret = newstrval(ev->def ? ev->def->module.c_str() : "");
+                ret = newstrval(ev->def ? ev->def->source.c_str() : "");
             } else {
                 ret = newstrval("");
             }

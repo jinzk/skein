@@ -108,20 +108,20 @@ struct call_depth_guard {
 }
 
 namespace {
-struct function_module_guard {
-    std::string previous_module;
+struct function_package_guard {
+    std::string previous_package;
     std::string previous_source;
-    function_module_guard(const std::string &module,
+    function_package_guard(const std::string &package,
                           const std::string &source)
-        : previous_module(diag_current_module_name()),
+        : previous_package(diag_current_package_name()),
           previous_source(diag_current_source_name()) {
-        if (!module.empty())
-            diag_set_module_name(module);
+        if (!package.empty())
+            diag_set_package_name(package);
         if (!source.empty())
             diag_set_source_name(source);
     }
-    ~function_module_guard() {
-        diag_set_module_name(previous_module);
+    ~function_package_guard() {
+        diag_set_package_name(previous_package);
         diag_set_source_name(previous_source);
     }
 };
@@ -130,7 +130,7 @@ struct function_module_guard {
 static struct value_t *invoke_function_body(
     const std::shared_ptr<function_def> &def,
     std::vector<struct value_t *> &args) {
-    function_module_guard module_guard(def->code->module,
+    function_package_guard package_guard(def->code->package,
                                        def->code->source);
     int nparams = def->code->nparams;
     std::string frame_name =

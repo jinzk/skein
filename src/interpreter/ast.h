@@ -238,7 +238,7 @@ struct pattern_node {
     int line;
     int column;
     char *name;
-    char *module;
+    char *source;
     char *variant;
     struct ast *literal;
     struct type_constraint *type;
@@ -329,7 +329,7 @@ struct struct_node {
     int line;
     int column;
     char *name;
-    char *module;
+    char *source;
     struct struct_member *members;
     int exported;
 };
@@ -340,7 +340,7 @@ struct impl_node {
     int column;
     char *type_name;
     char *trait_name;
-    char *module;
+    char *source;
     struct struct_member *methods;
 };
 
@@ -360,7 +360,7 @@ struct trait_node {
     int line;
     int column;
     char *name;
-    char *module;
+    char *source;
     struct trait_method *methods;
     int exported;
 };
@@ -379,7 +379,7 @@ struct struct_lit_node {
     int line;
     int column;
     char *name;
-    char *module;
+    char *source;
     struct struct_init *fields;
 };
 
@@ -397,7 +397,7 @@ struct enum_node {
     int line;
     int column;
     char *name;
-    char *module;
+    char *source;
     struct enum_variant *variants;
     int exported;
 };
@@ -407,7 +407,7 @@ struct enum_lit_node {
     int line;
     int column;
     char *name;
-    char *module;
+    char *source;
     char *variant;
     struct struct_init *fields;
 };
@@ -500,9 +500,9 @@ struct ast *newpatternor(struct ast *left, struct ast *right);
 struct ast *newpatternrange(long long start, long long end);
 struct ast *newpatterndict(struct pattern_field *fields);
 struct ast *newpatternlist(struct ast *items);
-struct ast *newpatternstruct(char *name, char *module,
+struct ast *newpatternstruct(char *name, char *source,
                              struct pattern_field *fields);
-struct ast *newpatternvariant(char *name, char *module, char *variant,
+struct ast *newpatternvariant(char *name, char *source, char *variant,
                               struct pattern_field *fields);
 struct pattern_field *newpatternfield(char *key, struct ast *pattern,
                                       struct pattern_field *next);
@@ -568,30 +568,30 @@ struct ast *newlist(struct ast *v, struct ast *l);
 struct ast *newtuple(struct ast *v, struct ast *l);
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l);
 
-struct ast *newstructdecl(char *name, char *module,
+struct ast *newstructdecl(char *name, char *source,
                           struct struct_member *members,
                           bool exported = false);
 struct ast *newstructfield(char *name, struct type_constraint *type);
 struct ast *newstructmethod(char *name, struct ast *func);
 struct ast *append_struct_member(struct ast *head, struct ast *member);
-struct ast *newimpl(char *type_name, char *trait_name, char *module,
+struct ast *newimpl(char *type_name, char *trait_name, char *source,
                     struct struct_member *methods);
-struct ast *newtraitdecl(char *name, char *module,
+struct ast *newtraitdecl(char *name, char *source,
                          struct trait_method *methods,
                          bool exported = false);
 struct ast *newtraitmethod(char *name, struct symlist *params,
                            struct ast *func = NULL);
 struct ast *append_trait_method(struct ast *head, struct ast *method);
-struct ast *newstructlit(char *name, char *module,
+struct ast *newstructlit(char *name, char *source,
                          struct struct_init *fields);
-struct ast *newenumdecl(char *name, char *module,
+struct ast *newenumdecl(char *name, char *source,
                         struct enum_variant *variants,
                         bool exported = false);
 struct ast *newenumvariant(char *name, struct struct_member *fields,
                            struct enum_variant *next);
 struct enum_variant *append_enumvariant(struct enum_variant *head,
                                         struct enum_variant *node);
-struct ast *newenumlit(char *name, char *module, char *variant,
+struct ast *newenumlit(char *name, char *source, char *variant,
                        struct struct_init *fields);
 struct ast *newstructinit(char *name, struct ast *value);
 struct ast *append_struct_init(struct ast *head, struct ast *init);

@@ -116,12 +116,12 @@ struct value_t *eval(struct ast *a) {
             else
                 eval_push_isolated_scope();
 
-            std::string saved_module_name = diag_current_module_name();
-            std::string package_module_name =
-                (saved_module_name.empty() || saved_module_name == "main")
+            std::string saved_package_name = diag_current_package_name();
+            std::string package_name =
+                (saved_package_name.empty() || saved_package_name == "main")
                     ? pkg->name
-                    : saved_module_name;
-            diag_set_module_name(package_module_name);
+                    : saved_package_name;
+            diag_set_package_name(package_name);
             struct value_t *body_ret = eval(pkg->body);
             if (body_ret &&
                 (body_ret->type == T_return || body_ret->type == T_break ||
@@ -132,7 +132,7 @@ struct value_t *eval(struct ast *a) {
             if (eval_ctx().runtime_error_count == errors_before)
                 ns = package_build_namespace(current_scope().get(), error);
             eval_popscope();
-            diag_set_module_name(saved_module_name);
+            diag_set_package_name(saved_package_name);
 
             freeval(body_ret);
 
@@ -1454,7 +1454,7 @@ struct value_t *eval(struct ast *a) {
                     std::string error;
                     structtype_lookup_status status =
                         structtype_lookup_type(
-                            nullptr, diag_current_module_name().c_str(),
+                            nullptr, diag_current_package_name().c_str(),
                             base, lookup, error);
                     if (status == STRUCTTYPE_LOOKUP_FOUND &&
                         lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
@@ -1462,7 +1462,7 @@ struct value_t *eval(struct ast *a) {
                             fields;
                         std::vector<bool> spread;
                         ret = build_enum_value(
-                            lookup.enumeration->module.c_str(),
+                            lookup.enumeration->source.c_str(),
                             lookup.enumeration->name.c_str(), field,
                             fields, spread);
                         break;

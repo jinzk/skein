@@ -1438,7 +1438,7 @@ public:
                         std::string error;
                         structtype_lookup_status status =
                             structtype_lookup_type(
-                                nullptr, desc.module.c_str(),
+                                nullptr, desc.source.c_str(),
                                 desc.base.c_str(), lookup, error);
                         if (status == STRUCTTYPE_LOOKUP_FOUND &&
                             lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
@@ -1446,7 +1446,7 @@ public:
                                 fields;
                             std::vector<bool> spread;
                             result = build_enum_value(
-                                lookup.enumeration->module.c_str(),
+                                lookup.enumeration->source.c_str(),
                                 lookup.enumeration->name.c_str(),
                                 desc.field.c_str(), fields, spread);
                         } else if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
@@ -1926,8 +1926,8 @@ public:
                         closure.reset();
                     std::string error;
                     if (!declare_struct_meta(
-                            meta.module.c_str(),
-                            diag_current_module_name().c_str(),
+                            meta.source.c_str(),
+                            diag_current_package_name().c_str(),
                             meta.name.c_str(), meta.exported, fields,
                             closure, error))
                         return abort_error();
@@ -1964,8 +1964,8 @@ public:
                         closure.reset();
                     std::string error;
                     if (!declare_enum_meta(
-                            meta.module.c_str(),
-                            diag_current_module_name().c_str(),
+                            meta.source.c_str(),
+                            diag_current_package_name().c_str(),
                             meta.name.c_str(), meta.exported, variants,
                             closure, error))
                         return abort_error();
@@ -2003,8 +2003,8 @@ public:
                         closure.reset();
                     std::string error;
                     if (!declare_trait_meta(
-                            meta.module.c_str(),
-                            diag_current_module_name().c_str(),
+                            meta.source.c_str(),
+                            diag_current_package_name().c_str(),
                             meta.name.c_str(), meta.exported, methods,
                             closure, error, [this](const std::string &name) {
                                 return capture_upvalue(name);
@@ -2032,8 +2032,8 @@ public:
                         closure.reset();
                     std::string error;
                     if (!declare_impl_meta(
-                            meta.module.c_str(),
-                            diag_current_module_name().c_str(),
+                            meta.source.c_str(),
+                            diag_current_package_name().c_str(),
                             meta.type_name.c_str(), meta.has_trait,
                             meta.trait_name.c_str(), methods, closure,
                             error, [this](const std::string &name) {
@@ -2066,10 +2066,10 @@ public:
                     }
                     value_t *result =
                         static_cast<Op>(ins.op) == Op::NewStruct
-                            ? build_struct_value(desc.module.c_str(),
+                            ? build_struct_value(desc.source.c_str(),
                                                  desc.name.c_str(),
                                                  fields, desc.spread)
-                            : build_enum_value(desc.module.c_str(),
+                            : build_enum_value(desc.source.c_str(),
                                                desc.name.c_str(),
                                                desc.variant.c_str(),
                                                fields, desc.spread);
@@ -2342,12 +2342,12 @@ public:
                     else
                         skein_vm_eval_push_isolated_scope();
 
-                    std::string saved_module = diag_current_module_name();
-                    std::string package_module_name =
-                        (saved_module.empty() || saved_module == "main")
+                    std::string saved_package = diag_current_package_name();
+                    std::string package_name =
+                        (saved_package.empty() || saved_package == "main")
                             ? desc.name
-                            : saved_module;
-                    diag_set_module_name(package_module_name);
+                            : saved_package;
+                    diag_set_package_name(package_name);
                     value_t *body_ret = execute_proto(*desc.body);
                     bool invalid_control =
                         body_ret && (body_ret->type == T_return ||
@@ -2363,7 +2363,7 @@ public:
                         ns = package_build_namespace(current_scope().get(),
                                                      error);
                     skein_vm_eval_popscope();
-                    diag_set_module_name(saved_module);
+                    diag_set_package_name(saved_package);
                     freeval(body_ret);
 
                     if (!ns) {
@@ -3328,8 +3328,8 @@ private:
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
         save_current_state();
-        if (!code->module.empty())
-            diag_set_module_name(code->module);
+        if (!code->package.empty())
+            diag_set_package_name(code->package);
         if (!code->source.empty())
             diag_set_source_name(code->source);
         current_def_ = std::move(def);
@@ -4363,7 +4363,7 @@ public:
                     struct enum_value_t *instance =
                         (struct enum_value_t *)value;
                     enum_def *def = structtype_find_enum(
-                        pattern.module.c_str(), pattern.type_name.c_str());
+                        pattern.source.c_str(), pattern.type_name.c_str());
                     if (!def || instance->def != def)
                         return false;
                     int variant_index = structtype_variant_index(
@@ -4438,7 +4438,7 @@ public:
                     struct struct_value_t *instance =
                         (struct struct_value_t *)value;
                     struct_def *def = structtype_find_struct(
-                        pattern.module.c_str(), pattern.type_name.c_str());
+                        pattern.source.c_str(), pattern.type_name.c_str());
                     if (!def || instance->def != def)
                         return false;
                     std::vector<bool> seen(def->fields.size(), false);
@@ -4586,7 +4586,7 @@ private:
                  skein::bc::PatternDesc::Kind::Literal) &&
             !pattern.variant.empty()) {
             enum_def *pattern_def = structtype_find_enum(
-                pattern.module.c_str(), pattern.type_name.c_str());
+                pattern.source.c_str(), pattern.type_name.c_str());
             if (pattern_def != def)
                 return;
             int variant = structtype_variant_index(
@@ -5172,15 +5172,15 @@ struct vm_module_guard {
     std::string previous_module;
     std::string previous_source;
     vm_module_guard(const std::string &module, const std::string &source)
-        : previous_module(diag_current_module_name()),
+        : previous_module(diag_current_package_name()),
           previous_source(diag_current_source_name()) {
         if (!module.empty())
-            diag_set_module_name(module);
+            diag_set_package_name(module);
         if (!source.empty())
             diag_set_source_name(source);
     }
     ~vm_module_guard() {
-        diag_set_module_name(previous_module);
+        diag_set_package_name(previous_module);
         diag_set_source_name(previous_source);
     }
 };
@@ -5190,7 +5190,7 @@ value_t *execute_proto(const Proto &proto,
     if (vm_trace_state)
         std::fputs(skein::bc::disassemble(proto).c_str(), stderr);
     vm_module_guard module_guard(
-        def && def->code ? def->code->module : std::string(),
+        def && def->code ? def->code->package : std::string(),
         def && def->code ? def->code->source : std::string());
     Executor executor(proto, def);
     if (!executor.bind_entry_param_patterns())

@@ -93,7 +93,7 @@ struct thread_transfer_type_variant {
 
 struct thread_transfer_type {
     bool is_enum = false;
-    std::string module;
+    std::string source;
     std::string name;
     bool exported = false;
     std::vector<thread_transfer_type_field> fields;

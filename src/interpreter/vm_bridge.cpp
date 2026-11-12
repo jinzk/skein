@@ -161,7 +161,7 @@ skein::bc::ProtoPtr prepare_function_body(
     const auto compile_start = std::chrono::steady_clock::now();
     std::string error;
     skein::bc::ProtoPtr proto =
-        skein_compile_function_body(code, code->module, error);
+        skein_compile_function_body(code, code->package, error);
     if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
@@ -258,7 +258,7 @@ bool jit_patterns_ready(function_code *code) {
         return !cache->param_patterns->failed;
     std::string error;
     std::shared_ptr<const compiled_pattern_set> compiled =
-        skein_compile_parameter_patterns(code, code->module, error);
+        skein_compile_parameter_patterns(code, code->package, error);
     if (!compiled) {
         std::shared_ptr<compiled_pattern_set> failed =
             std::make_shared<compiled_pattern_set>();
@@ -406,7 +406,7 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
     ts.tail_call = tail_call;
-    ts.root_module = diag_current_module_name();
+    ts.root_module = diag_current_package_name();
     ts.root_source = diag_current_source_name();
 
     value_t *result = nullptr;
@@ -438,7 +438,7 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     }
 
     *out = result;
-    diag_set_module_name(ts.root_module);
+    diag_set_package_name(ts.root_module);
     diag_set_source_name(ts.root_source);
     for (int i = 0; i < ts.retained_diag_frames; ++i)
         diag_pop_call();
@@ -541,7 +541,7 @@ value_t *skein_vm_build_struct(const skein::bc::ConstructDesc &desc,
         yyerror("JIT struct service is not installed");
         return nullptr;
     }
-    return fn(desc.module.c_str(), desc.name.c_str(), entries, desc.spread);
+    return fn(desc.source.c_str(), desc.name.c_str(), entries, desc.spread);
 }
 
 /* CALL helper used by generated code.  Always consumes callee and args. */
@@ -886,7 +886,7 @@ std::shared_ptr<function_code> make_transfer_code(
     code->nparams = (int)proto.nparams;
     code->required_params = (int)proto.required_params;
     code->name = proto.name.empty() ? payload.name : proto.name;
-    code->module = proto.module;
+    code->package = proto.package;
     code->is_generator = proto.is_generator;
     code->is_method = proto.is_method;
     code->variadic = proto.variadic;
@@ -1261,12 +1261,12 @@ bool skein_vm_apply_thread_types(
         struct enum_def *enumeration = nullptr;
         if (type.is_enum)
             enumeration =
-                structtype_find_enum(type.module.c_str(), type.name.c_str());
+                structtype_find_enum(type.source.c_str(), type.name.c_str());
         else
             structure =
-                structtype_find_struct(type.module.c_str(), type.name.c_str());
+                structtype_find_struct(type.source.c_str(), type.name.c_str());
         if (!structure && !enumeration) {
-            error = "thread payload type is not registered: " + type.module +
+            error = "thread payload type is not registered: " + type.source +
                     "." + type.name;
             return false;
         }
@@ -1415,7 +1415,7 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     const auto compile_start = std::chrono::steady_clock::now();
     std::string error;
     skein::bc::ProtoPtr proto = skein_compile_statement(
-        statement, diag_current_module_name(), error);
+        statement, diag_current_package_name(), error);
     if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
@@ -1483,7 +1483,7 @@ bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
                 continue;
             std::string error;
             skein::bc::ProtoPtr proto = skein_compile_default_expression(
-                code, default_ast, i, code->module, error);
+                code, default_ast, i, code->package, error);
             if (!proto) {
                 if (read_bool_env("SKEIN_VM_DEBUG", false) &&
                     !error.empty()) {
@@ -1524,7 +1524,7 @@ ParamPatternResult skein_vm_match_parameter_pattern(
             return ParamPatternResult::Unsupported;
         std::string error;
         std::shared_ptr<const compiled_pattern_set> compiled =
-            skein_compile_parameter_patterns(code, code->module, error);
+            skein_compile_parameter_patterns(code, code->package, error);
         if (!compiled) {
             std::shared_ptr<compiled_pattern_set> failed =
                 std::make_shared<compiled_pattern_set>();

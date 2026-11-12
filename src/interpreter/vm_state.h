@@ -67,7 +67,7 @@ struct SavedVmState {
     int caller_handler_depth = 0;
     int handler_body_depth = 0;
     size_t diag_frames = 0;
-    std::string diag_module;
+    std::string diag_package;
     std::string diag_source;
     uint64_t name_scope_generation = 0;
     bool param_pool_safe = false;

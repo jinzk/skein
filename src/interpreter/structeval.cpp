@@ -19,7 +19,7 @@ struct type_constraint any_type_constraint() {
     struct type_constraint type;
     type.kind = TYPE_ANY;
     type.name = NULL;
-    type.module = NULL;
+    type.source = NULL;
     type.nullable = false;
     return type;
 }
@@ -63,7 +63,7 @@ static std::shared_ptr<function_def> make_field_default(
     code->is_generator = false;
     code->def_line = expr->line;
     code->def_column = expr->column;
-    code->module = diag_current_module_name();
+    code->package = diag_current_package_name();
     code->source = diag_current_source_name();
     set_function_body_ast(code.get(), newret(expr));
     return field_default_from_code(code, closure);
@@ -82,11 +82,11 @@ static bool check_field_default_names(
     code.name = std::string("<default ") +
                 (owner ? owner : "?") + "." +
                 (field ? field : "?") + ">";
-    code.module = diag_current_module_name();
+    code.package = diag_current_package_name();
 
     std::string error;
     if (!skein_check_default_references(&code, expr, forbidden,
-                                        code.module, error)) {
+                                        code.package, error)) {
         yyerror("field %s default: %s",
                 field ? field : "?", error.c_str());
         return false;
@@ -284,7 +284,7 @@ void eval_struct_decl(struct struct_node *s) {
     std::string error;
     struct_def *def = NULL;
     if (!structtype_prepare_struct(
-            s->module, diag_current_module_name().c_str(), s->name,
+            s->source, diag_current_package_name().c_str(), s->name,
             s->exported != 0, def, error)) {
         yyerror("%s", error.c_str());
         return;
@@ -330,7 +330,7 @@ void eval_struct_decl(struct struct_node *s) {
 }
 
 bool eval_impl_decl(struct impl_node *impl) {
-    type_def *owner = structtype_find_type(impl->module, impl->type_name);
+    type_def *owner = structtype_find_type(impl->source, impl->type_name);
     if (!owner) {
         yyerror("unknown type %s", impl->type_name);
         return false;
@@ -339,7 +339,7 @@ bool eval_impl_decl(struct impl_node *impl) {
     trait_def *trait = NULL;
     if (impl->trait_name) {
         std::string trait_error;
-        trait = structtype_resolve_trait(impl->module, impl->trait_name,
+        trait = structtype_resolve_trait(impl->source, impl->trait_name,
                                          true, trait_error);
         if (!trait) {
             yyerror("%s", trait_error.c_str());
@@ -462,7 +462,7 @@ void eval_trait_decl(struct trait_node *t) {
     std::string error;
     trait_def *def = NULL;
     if (!structtype_create_trait(
-            t->module, diag_current_module_name().c_str(), t->name,
+            t->source, diag_current_package_name().c_str(), t->name,
             t->exported != 0, std::move(methods), def, error)) {
         yyerror("%s", error.c_str());
         return;
@@ -477,11 +477,11 @@ void eval_trait_decl(struct trait_node *t) {
 }
 
 bool declare_struct_meta(
-    const char *module, const char *module_name, const char *name,
+    const char *source, const char *package, const char *name,
     bool exported, const std::vector<field_meta> &fields,
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     struct_def *def = NULL;
-    if (!structtype_prepare_struct(module, module_name, name, exported, def,
+    if (!structtype_prepare_struct(source, package, name, exported, def,
                                    error)) {
         yyerror("%s", error.c_str());
         return false;
@@ -514,11 +514,11 @@ bool declare_struct_meta(
 }
 
 bool declare_enum_meta(
-    const char *module, const char *module_name, const char *name,
+    const char *source, const char *package, const char *name,
     bool exported, const std::vector<variant_meta> &variants,
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     enum_def *def = NULL;
-    if (!structtype_prepare_enum(module, module_name, name, exported, def,
+    if (!structtype_prepare_enum(source, package, name, exported, def,
                                  error)) {
         yyerror("%s", error.c_str());
         return false;
@@ -556,7 +556,7 @@ bool declare_enum_meta(
 }
 
 bool declare_trait_meta(
-    const char *module, const char *module_name, const char *name,
+    const char *source, const char *package, const char *name,
     bool exported, const std::vector<trait_method_meta> &methods,
     const std::shared_ptr<scope_t> &closure, std::string &error,
     const std::function<std::shared_ptr<struct upvalue_cell>(
@@ -617,7 +617,7 @@ bool declare_trait_meta(
     }
 
     trait_def *def = NULL;
-    if (!structtype_create_trait(module, module_name, name, exported,
+    if (!structtype_create_trait(source, package, name, exported,
                                  std::move(signatures), def, error)) {
         yyerror("%s", error.c_str());
         return false;
@@ -633,16 +633,16 @@ bool declare_trait_meta(
 }
 
 bool declare_impl_meta(
-    const char *module, const char *module_name, const char *type_name,
+    const char *source, const char *package, const char *type_name,
     bool has_trait, const char *trait_name,
     const std::vector<
         std::pair<std::string, std::shared_ptr<function_code>>> &methods,
     const std::shared_ptr<scope_t> &closure, std::string &error,
     const std::function<std::shared_ptr<struct upvalue_cell>(
         const std::string &)> &capture_upvalue) {
-    (void)module_name;
+    (void)package;
     (void)error;
-    type_def *owner = structtype_find_type(module, type_name);
+    type_def *owner = structtype_find_type(source, type_name);
     if (!owner) {
         yyerror("unknown type %s", type_name ? type_name : "");
         return false;
@@ -651,7 +651,7 @@ bool declare_impl_meta(
     trait_def *trait = NULL;
     if (has_trait) {
         std::string trait_error;
-        trait = structtype_resolve_trait(module, trait_name, true,
+        trait = structtype_resolve_trait(source, trait_name, true,
                                          trait_error);
         if (!trait) {
             yyerror("%s", trait_error.c_str());
@@ -886,7 +886,7 @@ static value_t *build_struct_from_entries(
 }
 
 struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
-    struct_def *def = structtype_find_struct(lit->module, lit->name);
+    struct_def *def = structtype_find_struct(lit->source, lit->name);
     if (!def) {
         yyerror("unknown struct type %s", lit->name);
         return NULL;
@@ -916,10 +916,10 @@ static void free_constructed_fields(
 }
 
 value_t *build_struct_value(
-    const char *module, const char *name,
+    const char *source, const char *name,
     std::vector<std::pair<std::string, value_t *>> &fields,
     const std::vector<bool> &spread) {
-    struct_def *def = structtype_find_struct(module, name);
+    struct_def *def = structtype_find_struct(source, name);
     if (!def) {
         yyerror("unknown struct type %s", name ? name : "");
         free_constructed_fields(fields);
@@ -1048,10 +1048,10 @@ static value_t *build_enum_from_entries(
 }
 
 value_t *build_enum_value(
-    const char *module, const char *name, const char *variant_name,
+    const char *source, const char *name, const char *variant_name,
     std::vector<std::pair<std::string, value_t *>> &fields,
     const std::vector<bool> &spread) {
-    enum_def *def = structtype_find_enum(module, name);
+    enum_def *def = structtype_find_enum(source, name);
     if (!def) {
         yyerror("unknown enum type %s", name ? name : "");
         free_constructed_fields(fields);
@@ -1085,7 +1085,7 @@ void eval_enum_decl(struct enum_node *e) {
     std::string error;
     enum_def *def = NULL;
     if (!structtype_prepare_enum(
-            e->module, diag_current_module_name().c_str(), e->name,
+            e->source, diag_current_package_name().c_str(), e->name,
             e->exported != 0, def, error)) {
         yyerror("%s", error.c_str());
         return;
@@ -1143,7 +1143,7 @@ struct value_t *eval_enum_lit(struct enum_lit_node *lit) {
             return NULL;
         }
     }
-    enum_def *def = structtype_find_enum(lit->module, lit->name);
+    enum_def *def = structtype_find_enum(lit->source, lit->name);
     if (!def) {
         yyerror("unknown enum type %s", lit->name);
         return NULL;

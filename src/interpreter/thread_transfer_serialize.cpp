@@ -226,7 +226,7 @@ bool write_type(writer &out, const struct type_constraint *type) {
     out.u8(1);
     out.u8((uint8_t)type->kind);
     out.str(type->name ? type->name : "");
-    out.str(type->module ? type->module : "");
+    out.str(type->source ? type->source : "");
     out.u8(type->nullable ? 1 : 0);
     out.str(type->display ? type->display : "");
     return true;
@@ -242,16 +242,16 @@ bool read_type_ptr(reader &in, owned_type &type, std::string &error) {
     }
     uint8_t kind = 0;
     std::string name;
-    std::string module;
+    std::string source;
     std::string display;
     uint8_t nullable = 0;
-    if (!in.u8(kind) || !in.str(name) || !in.str(module) ||
+    if (!in.u8(kind) || !in.str(name) || !in.str(source) ||
         !in.u8(nullable) || !in.str(display)) {
         error = in.error;
         return false;
     }
     struct type_constraint *value =
-        new_named_type_constraint(name.c_str(), module.c_str());
+        new_named_type_constraint(name.c_str(), source.c_str());
     value->kind = (enum type_constraint_kind)kind;
     value->nullable = nullable != 0;
     value->display = display.empty() ? nullptr : nullptr;
@@ -426,7 +426,7 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             const struct struct_value_t *structure =
                 (const struct struct_value_t *)value;
             out.u8((uint8_t)value_tag::Struct);
-            out.str(structure->def ? structure->def->module : "");
+            out.str(structure->def ? structure->def->source : "");
             out.str(structure->def ? structure->def->name : "");
             out.u32((uint32_t)structure->payload->fields.size());
             for (const struct value_t *field : structure->payload->fields) {
@@ -439,7 +439,7 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             const struct enum_value_t *enumeration =
                 (const struct enum_value_t *)value;
             out.u8((uint8_t)value_tag::Enum);
-            out.str(enumeration->def ? enumeration->def->module : "");
+            out.str(enumeration->def ? enumeration->def->source : "");
             out.str(enumeration->def ? enumeration->def->name : "");
             out.u32((uint32_t)enumeration->variant);
             out.u32((uint32_t)enumeration->payload->fields.size());
@@ -684,18 +684,18 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
             return true;
         }
         case value_tag::Struct: {
-            std::string module;
+            std::string source;
             std::string name;
             uint32_t count = 0;
-            if (!in.str(module) || !in.str(name) || !in.count(count)) {
+            if (!in.str(source) || !in.str(name) || !in.count(count)) {
                 error = in.error;
                 return false;
             }
             struct struct_def *def =
-                structtype_find_struct(module.c_str(), name.c_str());
+                structtype_find_struct(source.c_str(), name.c_str());
             if (!def) {
                 error = "thread payload struct type is not registered: " +
-                        module + "." + name;
+                        source + "." + name;
                 return false;
             }
             std::shared_ptr<struct_payload> payload =
@@ -711,20 +711,20 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
             return true;
         }
         case value_tag::Enum: {
-            std::string module;
+            std::string source;
             std::string name;
             uint32_t variant = 0;
             uint32_t count = 0;
-            if (!in.str(module) || !in.str(name) || !in.u32(variant) ||
+            if (!in.str(source) || !in.str(name) || !in.u32(variant) ||
                 !in.count(count)) {
                 error = in.error;
                 return false;
             }
             struct enum_def *def =
-                structtype_find_enum(module.c_str(), name.c_str());
+                structtype_find_enum(source.c_str(), name.c_str());
             if (!def) {
                 error = "thread payload enum type is not registered: " +
-                        module + "." + name;
+                        source + "." + name;
                 return false;
             }
             if (variant >= def->variants.size()) {
@@ -768,9 +768,9 @@ struct type_record {
 
 using type_map = std::unordered_map<std::string, type_record>;
 
-std::string type_identity(const std::string &module,
+std::string type_identity(const std::string &source,
                           const std::string &name) {
-    return module + '\x1f' + name;
+    return source + '\x1f' + name;
 }
 
 struct type_collect_context {
@@ -940,17 +940,17 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
             default_value, value_deleter());
         defaults[(std::size_t)param_index] = std::move(transfer);
     }
-    skein::bc::ProtoPtr source = skein_vm_prepare_function_body(def);
-    if (!source) {
+    skein::bc::ProtoPtr prepared = skein_vm_prepare_function_body(def);
+    if (!prepared) {
         error = std::string("cannot compile ") + what;
         return false;
     }
-    if (!source->packages.empty()) {
+    if (!prepared->packages.empty()) {
         error = std::string(what) + " contains nested packages";
         return false;
     }
     std::shared_ptr<skein::bc::Proto> copy =
-        std::make_shared<skein::bc::Proto>(*source);
+        std::make_shared<skein::bc::Proto>(*prepared);
     copy->name_ic.clear();
     copy->member_ic.clear();
     copy->index_read_ic.clear();
@@ -996,7 +996,7 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
         std::string pattern_error;
         std::shared_ptr<const compiled_pattern_set> compiled =
             skein_compile_parameter_patterns(def->code.get(),
-                                             def->code->module,
+                                             def->code->package,
                                              pattern_error);
         if (!compiled || compiled->failed || !compiled->proto) {
             error = std::string(what) + " cannot compile parameter patterns" +
@@ -1045,7 +1045,7 @@ bool note_type(type_map &types, std::vector<type_record> &order,
                type_collect_context *context) {
     if (!def)
         return true;
-    std::string key = type_identity(def->module, def->name);
+    std::string key = type_identity(def->source, def->name);
     if (types.count(key))
         return true;
     type_record record;
@@ -1079,7 +1079,7 @@ bool note_type(type_map &types, std::vector<type_record> &order,
                type_collect_context *context) {
     if (!def)
         return true;
-    std::string key = type_identity(def->module, def->name);
+    std::string key = type_identity(def->source, def->name);
     if (types.count(key))
         return true;
     type_record record;
@@ -1276,13 +1276,13 @@ bool collect_proto_types(const skein::bc::Proto &proto, type_map &types,
     for (const skein::bc::ConstructDesc &construct : proto.constructs) {
         if (construct.variant.empty()) {
             if (!note_type(types, order,
-                           structtype_find_struct(construct.module.c_str(),
+                           structtype_find_struct(construct.source.c_str(),
                                                   construct.name.c_str()),
                            error, context))
                 return false;
         } else {
             if (!note_type(types, order,
-                           structtype_find_enum(construct.module.c_str(),
+                           structtype_find_enum(construct.source.c_str(),
                                                 construct.name.c_str()),
                            error, context))
                 return false;
@@ -1290,11 +1290,11 @@ bool collect_proto_types(const skein::bc::Proto &proto, type_map &types,
     }
     for (const skein::bc::FieldOrEnumDesc &field : proto.field_or_enum) {
         if (!note_type(types, order,
-                       structtype_find_struct(field.module.c_str(),
+                       structtype_find_struct(field.source.c_str(),
                                               field.base.c_str()),
                        error, context) ||
             !note_type(types, order,
-                       structtype_find_enum(field.module.c_str(),
+                       structtype_find_enum(field.source.c_str(),
                                             field.base.c_str()),
                        error, context))
             return false;
@@ -1329,7 +1329,7 @@ bool write_type_metadata(
         out.u8(record.is_enum ? 1 : 0);
         if (record.is_enum) {
             const struct enum_def *def = record.enumeration;
-            out.str(def->module);
+            out.str(def->source);
             out.str(def->name);
             out.u8(def->exported ? 1 : 0);
             out.u32((uint32_t)def->variants.size());
@@ -1349,7 +1349,7 @@ bool write_type_metadata(
             }
         } else {
             const struct struct_def *def = record.structure;
-            out.str(def->module);
+            out.str(def->source);
             out.str(def->name);
             out.u8(def->exported ? 1 : 0);
             out.u32((uint32_t)def->fields.size());
@@ -1386,7 +1386,7 @@ bool read_type_metadata(reader &in,
         thread_transfer_type type;
         uint8_t is_enum = 0;
         uint8_t exported = 0;
-        if (!in.u8(is_enum) || !in.str(type.module) || !in.str(type.name) ||
+        if (!in.u8(is_enum) || !in.str(type.source) || !in.str(type.name) ||
             !in.u8(exported)) {
             error = in.error;
             return false;
@@ -1443,10 +1443,10 @@ bool read_type_metadata(reader &in,
                 variants.push_back(std::move(variant));
                 type.variants.push_back(std::move(stored_variant));
             }
-            if (!structtype_find_enum(type.module.c_str(), type.name.c_str())) {
+            if (!structtype_find_enum(type.source.c_str(), type.name.c_str())) {
                 std::string declare_error;
-                if (!declare_enum_meta(type.module.c_str(),
-                                       type.module.c_str(),
+                if (!declare_enum_meta(type.source.c_str(),
+                                       type.source.c_str(),
                                        type.name.c_str(), type.exported,
                                        variants, nullptr, declare_error)) {
                     error = declare_error.empty()
@@ -1486,11 +1486,11 @@ bool read_type_metadata(reader &in,
                 fields.push_back(std::move(field));
                 type.fields.push_back(std::move(stored_field));
             }
-            if (!structtype_find_struct(type.module.c_str(),
+            if (!structtype_find_struct(type.source.c_str(),
                                         type.name.c_str())) {
                 std::string declare_error;
-                if (!declare_struct_meta(type.module.c_str(),
-                                         type.module.c_str(), type.name.c_str(),
+                if (!declare_struct_meta(type.source.c_str(),
+                                         type.source.c_str(), type.name.c_str(),
                                          type.exported, fields, nullptr,
                                          declare_error)) {
                     error = declare_error.empty()
@@ -1532,7 +1532,7 @@ bool write_pattern(writer &out, const skein::bc::PatternDesc &pattern,
                    std::string &error) {
     out.u8((uint8_t)pattern.kind);
     out.str(pattern.name);
-    out.str(pattern.module);
+    out.str(pattern.source);
     out.str(pattern.type_name);
     out.str(pattern.variant);
     out.u8(pattern.kind == skein::bc::PatternDesc::Kind::Type ? 1 : 0);
@@ -1572,7 +1572,7 @@ bool write_pattern(writer &out, const skein::bc::PatternDesc &pattern,
 bool read_pattern(reader &in, skein::bc::PatternDesc &pattern,
                   std::string &error) {
     uint8_t kind = 0;
-    if (!in.u8(kind) || !in.str(pattern.name) || !in.str(pattern.module) ||
+    if (!in.u8(kind) || !in.str(pattern.name) || !in.str(pattern.source) ||
         !in.str(pattern.type_name) || !in.str(pattern.variant)) {
         error = in.error;
         return false;
@@ -2170,7 +2170,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
 
     out.str(proto.name);
-    out.str(proto.module);
+    out.str(proto.package);
     out.u32((uint32_t)proto.def_line);
     out.u32((uint32_t)proto.def_column);
     out.u32(proto.version);
@@ -2251,7 +2251,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
 
     out.u32((uint32_t)proto.constructs.size());
     for (const skein::bc::ConstructDesc &construct : proto.constructs) {
-        out.str(construct.module);
+        out.str(construct.source);
         out.str(construct.name);
         out.str(construct.variant);
         out.u32((uint32_t)construct.fields.size());
@@ -2263,7 +2263,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
     out.u32((uint32_t)proto.field_or_enum.size());
     for (const skein::bc::FieldOrEnumDesc &field : proto.field_or_enum) {
-        out.str(field.module);
+        out.str(field.source);
         out.str(field.base);
         out.str(field.field);
     }
@@ -2338,7 +2338,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
 
     out.u32((uint32_t)proto.struct_decls.size());
     for (const skein::bc::StructDeclMeta &decl : proto.struct_decls) {
-        out.str(decl.module);
+        out.str(decl.source);
         out.str(decl.name);
         out.u8(decl.exported ? 1 : 0);
         out.u32((uint32_t)decl.fields.size());
@@ -2354,7 +2354,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
     out.u32((uint32_t)proto.enum_decls.size());
     for (const skein::bc::EnumDeclMeta &decl : proto.enum_decls) {
-        out.str(decl.module);
+        out.str(decl.source);
         out.str(decl.name);
         out.u8(decl.exported ? 1 : 0);
         out.u32((uint32_t)decl.variants.size());
@@ -2374,7 +2374,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
     out.u32((uint32_t)proto.trait_decls.size());
     for (const skein::bc::TraitDeclMeta &decl : proto.trait_decls) {
-        out.str(decl.module);
+        out.str(decl.source);
         out.str(decl.name);
         out.u8(decl.exported ? 1 : 0);
         out.u32((uint32_t)decl.methods.size());
@@ -2396,7 +2396,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     }
     out.u32((uint32_t)proto.impl_decls.size());
     for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
-        out.str(decl.module);
+        out.str(decl.source);
         out.str(decl.type_name);
         out.str(decl.trait_name);
         out.u8(decl.has_trait ? 1 : 0);
@@ -2433,7 +2433,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
                 std::string &error) {
     proto = std::make_shared<skein::bc::Proto>();
 
-    if (!in.str(proto->name) || !in.str(proto->module))
+    if (!in.str(proto->name) || !in.str(proto->package))
         return false;
     uint32_t line = 0;
     uint32_t column = 0;
@@ -2614,7 +2614,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         skein::bc::ConstructDesc construct;
         uint32_t field_count = 0;
         uint32_t spread_count = 0;
-        if (!in.str(construct.module) || !in.str(construct.name) ||
+        if (!in.str(construct.source) || !in.str(construct.name) ||
             !in.str(construct.variant) || !in.count(field_count)) {
             error = in.error;
             return false;
@@ -2651,7 +2651,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
     proto->field_or_enum.reserve(field_or_enum_count);
     for (uint32_t i = 0; i < field_or_enum_count; ++i) {
         skein::bc::FieldOrEnumDesc field;
-        if (!in.str(field.module) || !in.str(field.base) ||
+        if (!in.str(field.source) || !in.str(field.base) ||
             !in.str(field.field)) {
             error = in.error;
             return false;
@@ -2859,7 +2859,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         skein::bc::StructDeclMeta decl;
         uint8_t exported = 0;
         uint32_t field_count = 0;
-        if (!in.str(decl.module) || !in.str(decl.name) ||
+        if (!in.str(decl.source) || !in.str(decl.name) ||
             !in.u8(exported) || !in.count(field_count)) {
             error = in.error;
             return false;
@@ -2886,7 +2886,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         skein::bc::EnumDeclMeta decl;
         uint8_t exported = 0;
         uint32_t variant_count = 0;
-        if (!in.str(decl.module) || !in.str(decl.name) ||
+        if (!in.str(decl.source) || !in.str(decl.name) ||
             !in.u8(exported) || !in.count(variant_count)) {
             error = in.error;
             return false;
@@ -2923,7 +2923,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         skein::bc::TraitDeclMeta decl;
         uint8_t exported = 0;
         uint32_t method_count = 0;
-        if (!in.str(decl.module) || !in.str(decl.name) ||
+        if (!in.str(decl.source) || !in.str(decl.name) ||
             !in.u8(exported) || !in.count(method_count)) {
             error = in.error;
             return false;
@@ -2968,7 +2968,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         skein::bc::ImplDeclMeta decl;
         uint8_t has_trait = 0;
         uint32_t method_count = 0;
-        if (!in.str(decl.module) || !in.str(decl.type_name) ||
+        if (!in.str(decl.source) || !in.str(decl.type_name) ||
             !in.str(decl.trait_name) || !in.u8(has_trait) ||
             !in.count(method_count)) {
             error = in.error;
@@ -3502,15 +3502,15 @@ bool skein_vm_deserialize_thread_payload(
     modules.clear();
     modules.reserve(module_count);
     for (uint32_t i = 0; i < module_count; ++i) {
-        thread_transfer_module module;
-        if (!in.str(module.key) || !in.str(module.path) ||
-            !in.str(module.base) ||
-            !read_transfer(in, functions, module.value, 0, error)) {
+        thread_transfer_module source;
+        if (!in.str(source.key) || !in.str(source.path) ||
+            !in.str(source.base) ||
+            !read_transfer(in, functions, source.value, 0, error)) {
             if (error.empty())
                 error = in.error;
             return false;
         }
-        modules.push_back(std::move(module));
+        modules.push_back(std::move(source));
     }
     return true;
 }

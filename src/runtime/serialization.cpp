@@ -191,7 +191,7 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
         }
     }
 
-    std::string module_name;
+    std::string package_name;
     std::string type_name;
     std::string variant_name;
     if (parts.size() == 2) {
@@ -201,9 +201,9 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
         variant_name = parts.back();
         type_name = parts[parts.size() - 2];
         for (size_t i = 0; i + 2 < parts.size(); ++i) {
-            if (!module_name.empty())
-                module_name += ".";
-            module_name += parts[i];
+            if (!package_name.empty())
+                package_name += ".";
+            package_name += parts[i];
         }
     } else {
         yyerror("invalid enum tag %s", tag.c_str());
@@ -213,15 +213,15 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
     enum_def *def = expected;
     if (def) {
         if (type_name != def->name ||
-            (!module_name.empty() && module_name != def->module_name)) {
+            (!package_name.empty() && package_name != def->package)) {
             yyerror("enum tag %s does not match expected %s.%s",
-                    tag.c_str(), def->module_name.c_str(),
+                    tag.c_str(), def->package.c_str(),
                     def->name.c_str());
             return NULL;
         }
     } else {
         def = structtype_find_enum_by_name(
-            module_name.empty() ? NULL : module_name.c_str(),
+            package_name.empty() ? NULL : package_name.c_str(),
             type_name.c_str());
         if (!def) {
             yyerror("unknown or ambiguous enum type %s", type_name.c_str());
@@ -303,7 +303,7 @@ static bool split_type_name(const std::string &text, std::string &prefix,
 static struct_def *find_named_struct(const struct type_constraint *type) {
     if (!type || type->kind != TYPE_NAMED || !type->name)
         return NULL;
-    struct_def *def = structtype_find_struct(type->module, type->name);
+    struct_def *def = structtype_find_struct(type->source, type->name);
     if (def)
         return def;
     std::string name(type->name);
@@ -317,7 +317,7 @@ static struct_def *find_named_struct(const struct type_constraint *type) {
 static enum_def *find_named_enum(const struct type_constraint *type) {
     if (!type || type->kind != TYPE_NAMED || !type->name)
         return NULL;
-    enum_def *def = structtype_find_enum(type->module, type->name);
+    enum_def *def = structtype_find_enum(type->source, type->name);
     if (def)
         return def;
     std::string name(type->name);
@@ -499,16 +499,16 @@ static struct value_t *struct_decode(struct value_t *value,
     }
 
     std::string type_name = ((struct string_value_t *)type_value)->value;
-    std::string module_name;
+    std::string package_name;
     std::string base_name;
-    if (split_type_name(type_name, module_name, base_name)) {
+    if (split_type_name(type_name, package_name, base_name)) {
         type_name = std::move(base_name);
     } else {
-        module_name.clear();
+        package_name.clear();
     }
 
     struct_def *def = structtype_find_struct_by_name(
-        module_name.empty() ? NULL : module_name.c_str(),
+        package_name.empty() ? NULL : package_name.c_str(),
         type_name.c_str());
     if (!def) {
         yyerror("unknown or ambiguous struct type %s", type_name.c_str());

@@ -31,11 +31,11 @@ struct thread_state {
     int max_depth = 0;
     int saved_handler_depth = 0;
     size_t scope_mark = 0;
-    std::string saved_module;
+    std::string saved_package;
     std::string saved_source;
     std::string root_module;
     std::string root_source;
-    bool saved_module_valid = false;
+    bool saved_package_valid = false;
     bool saved_source_valid = false;
     bool top_level = false;
     bool tail_call = false;
@@ -48,13 +48,13 @@ struct thread_state {
     struct call_save {
         int saved_handler_depth = 0;
         size_t scope_mark = 0;
-        std::string saved_module;
+        std::string saved_package;
         std::string saved_source;
         bool entered = false;
         bool depth_counted = false;
         bool diag_pushed = false;
         bool tail_call = false;
-        bool module_valid = false;
+        bool package_valid = false;
         bool source_valid = false;
     };
     std::vector<call_save> saves;

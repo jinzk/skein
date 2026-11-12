@@ -135,7 +135,7 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                     return false;
                 struct enum_value_t *instance = (struct enum_value_t *)value;
                 enum_def *def =
-                    structtype_find_enum(pattern->module, pattern->name);
+                    structtype_find_enum(pattern->source, pattern->name);
                 if (!def || instance->def != def)
                     return false;
                 int variant_index =
@@ -200,7 +200,7 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                     return false;
                 struct struct_value_t *instance = (struct struct_value_t *)value;
                 struct_def *def =
-                    structtype_find_struct(pattern->module, pattern->name);
+                    structtype_find_struct(pattern->source, pattern->name);
                 if (!def || instance->def != def)
                     return false;
                 std::vector<bool> seen(def->fields.size(), false);
@@ -334,7 +334,7 @@ static bool pattern_enum_variant(enum_def *def,
         return false;
     if (pattern->nodetype == NODE_PATTERN_CONTAINER && pattern->variant) {
         enum_def *pattern_def =
-            structtype_find_enum(pattern->module, pattern->name);
+            structtype_find_enum(pattern->source, pattern->name);
         if (pattern_def != def)
             return false;
         variant = structtype_variant_index(def, pattern->variant);
@@ -345,7 +345,7 @@ static bool pattern_enum_variant(enum_def *def,
         struct enum_lit_node *literal =
             (struct enum_lit_node *)pattern->literal;
         enum_def *pattern_def =
-            structtype_find_enum(literal->module, literal->name);
+            structtype_find_enum(literal->source, literal->name);
         if (pattern_def != def)
             return false;
         variant = structtype_variant_index(def, literal->variant);

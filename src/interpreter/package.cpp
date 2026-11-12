@@ -1163,7 +1163,7 @@ bool parse_package_source(const std::string &source_text,
     reset_scanner_state(file);
     diag_start_source();
     diag_set_source_name(source_name);
-    diag_set_module_name(module_name);
+    diag_set_package_name(module_name);
     eval_push_isolated_scope();
 
     package_load_context context;
@@ -1241,7 +1241,7 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
     reset_scanner_state(file);
     diag_start_source();
     diag_set_source_name(path);
-    diag_set_module_name("worker");
+    diag_set_package_name("worker");
 
     int status = yyparse();
 

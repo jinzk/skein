@@ -19,7 +19,7 @@ static thread_local int current_column = 1;
 static thread_local int error_count = 0;
 static thread_local int lexical_error_line = 0;
 static thread_local std::string source_name;
-static thread_local std::string module_name;
+static thread_local std::string package_name;
 static thread_local std::vector<std::string> source_lines;
 
 static thread_local std::vector<diag_call_frame> call_stack;
@@ -307,12 +307,12 @@ const std::string &diag_current_source_name() {
     return source_name;
 }
 
-void diag_set_module_name(const std::string &name) {
-    module_name = name;
+void diag_set_package_name(const std::string &name) {
+    package_name = name;
 }
 
-const std::string &diag_current_module_name() {
-    return module_name;
+const std::string &diag_current_package_name() {
+    return package_name;
 }
 
 void diag_save_source(diag_source_checkpoint &checkpoint) {
@@ -326,7 +326,7 @@ void diag_save_source(diag_source_checkpoint &checkpoint) {
     checkpoint.flow_column = g_flow_column;
     checkpoint.lexical_line = lexical_error_line;
     checkpoint.source_name = source_name;
-    checkpoint.module_name = module_name;
+    checkpoint.package_name = package_name;
     checkpoint.lines = source_lines;
 }
 
@@ -341,7 +341,7 @@ void diag_restore_source(const diag_source_checkpoint &checkpoint) {
     g_flow_column = checkpoint.flow_column;
     lexical_error_line = checkpoint.lexical_line;
     source_name = checkpoint.source_name;
-    module_name = checkpoint.module_name;
+    package_name = checkpoint.package_name;
     source_lines = checkpoint.lines;
 }
 
@@ -357,7 +357,7 @@ void diag_capture(diag_state &state) {
     state.error_count = error_count;
     state.lexical_line = lexical_error_line;
     state.source_name = source_name;
-    state.module_name = module_name;
+    state.package_name = package_name;
     state.lines = source_lines;
     state.call_stack = call_stack;
 }
@@ -374,7 +374,7 @@ void diag_restore(const diag_state &state) {
     error_count = state.error_count;
     lexical_error_line = state.lexical_line;
     source_name = state.source_name;
-    module_name = state.module_name;
+    package_name = state.package_name;
     source_lines = state.lines;
     call_stack = state.call_stack;
 }

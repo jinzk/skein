@@ -60,21 +60,21 @@ enum resolve_status {
 };
 
 bool type_def_visible(const char *importer_source,
-                      const char *importer_module,
+                      const char *importer_package,
                       const type_def *def) {
     if (!def)
         return false;
     if (def->exported)
         return true;
-    if (importer_source && def->module == importer_source)
+    if (importer_source && def->source == importer_source)
         return true;
-    if (importer_module && def->module_name == importer_module)
+    if (importer_package && def->package == importer_package)
         return true;
     return false;
 }
 
 resolve_status resolve_type_arg(const char *importer_source,
-                                const char *importer_module,
+                                const char *importer_package,
                                 struct value_t *arg, resolved_type &out,
                                 std::string &error) {
     out = resolved_type();
@@ -91,14 +91,14 @@ resolve_status resolve_type_arg(const char *importer_source,
             error = "invalid struct value";
             return RESOLVE_ERROR;
         }
-        if (!type_def_visible(importer_source, importer_module, sv->def)) {
-            error = "type " + sv->def->module_name + "." + sv->def->name +
+        if (!type_def_visible(importer_source, importer_package, sv->def)) {
+            error = "type " + sv->def->package + "." + sv->def->name +
                     " is not visible";
             return RESOLVE_NOT_VISIBLE;
         }
         out.kind = RESOLVED_STRUCT;
         out.structure = sv->def;
-        out.input_name = sv->def->module_name + "." + sv->def->name;
+        out.input_name = sv->def->package + "." + sv->def->name;
         return RESOLVE_FOUND;
     }
 
@@ -108,14 +108,14 @@ resolve_status resolve_type_arg(const char *importer_source,
             error = "invalid enum value";
             return RESOLVE_ERROR;
         }
-        if (!type_def_visible(importer_source, importer_module, ev->def)) {
-            error = "type " + ev->def->module_name + "." + ev->def->name +
+        if (!type_def_visible(importer_source, importer_package, ev->def)) {
+            error = "type " + ev->def->package + "." + ev->def->name +
                     " is not visible";
             return RESOLVE_NOT_VISIBLE;
         }
         out.kind = RESOLVED_ENUM;
         out.enumeration = ev->def;
-        out.input_name = ev->def->module_name + "." + ev->def->name;
+        out.input_name = ev->def->package + "." + ev->def->name;
         return RESOLVE_FOUND;
     }
 
@@ -144,7 +144,7 @@ resolve_status resolve_type_arg(const char *importer_source,
 
     structtype_lookup_result lookup;
     enum structtype_lookup_status status = structtype_lookup_type(
-        importer_source, importer_module, text.c_str(), lookup, error);
+        importer_source, importer_package, text.c_str(), lookup, error);
     switch (status) {
         case STRUCTTYPE_LOOKUP_FOUND:
             break;
@@ -179,7 +179,7 @@ resolve_status resolve_type_arg(const char *importer_source,
 }
 
 resolve_status resolve_trait_arg(const char *importer_source,
-                                 const char *importer_module,
+                                 const char *importer_package,
                                  struct value_t *arg, const trait_def *&out,
                                  std::string &error) {
     out = NULL;
@@ -197,7 +197,7 @@ resolve_status resolve_trait_arg(const char *importer_source,
 
     structtype_lookup_result lookup;
     enum structtype_lookup_status status = structtype_lookup_type(
-        importer_source, importer_module, text.c_str(), lookup, error);
+        importer_source, importer_package, text.c_str(), lookup, error);
     switch (status) {
         case STRUCTTYPE_LOOKUP_FOUND:
             break;
@@ -239,9 +239,9 @@ std::string type_text(const struct type_constraint *type) {
 std::string trait_name(const trait_def *trait) {
     if (!trait)
         return std::string();
-    if (trait->module_name.empty())
+    if (trait->package.empty())
         return trait->name;
-    return trait->module_name + "." + trait->name;
+    return trait->package + "." + trait->name;
 }
 
 struct value_t *field_info(const field_def &field, bool readonly) {
@@ -384,7 +384,7 @@ struct value_t *enum_variants(const enum_def *definition) {
 }
 
 struct value_t *new_type_dict(const char *kind, const char *name,
-                              const std::string &module,
+                              const std::string &package,
                               const std::string &source,
                               bool exported,
                               struct value_t *fields,
@@ -394,7 +394,7 @@ struct value_t *new_type_dict(const char *kind, const char *name,
     struct dict_value_t *dict = newdictval();
     dict_add(dict, "kind", newstrval(kind));
     dict_add(dict, "name", newstrval(name));
-    dict_add(dict, "module", newstrval(module.c_str()));
+    dict_add(dict, "module", newstrval(package.c_str()));
     dict_add(dict, "source", newstrval(source.c_str()));
     dict_add(dict, "exported", newboolval(exported));
     dict_add(dict, "fields", fields);
@@ -412,22 +412,22 @@ struct value_t *make_type_info(const resolved_type &type) {
                                  new_string_list(), new_string_list());
         case RESOLVED_STRUCT: {
             const struct_def *def = type.structure;
-            return new_type_dict("struct", def->name.c_str(), def->module_name,
-                                 def->module, def->exported,
+            return new_type_dict("struct", def->name.c_str(), def->package,
+                                 def->source, def->exported,
                                  struct_fields(def), new_string_list(),
                                  type_methods(def), type_traits(def));
         }
         case RESOLVED_ENUM: {
             const enum_def *def = type.enumeration;
-            return new_type_dict("enum", def->name.c_str(), def->module_name,
-                                 def->module, def->exported, new_string_list(),
+            return new_type_dict("enum", def->name.c_str(), def->package,
+                                 def->source, def->exported, new_string_list(),
                                  enum_variants(def), type_methods(def),
                                  type_traits(def));
         }
         case RESOLVED_TRAIT: {
             const trait_def *def = type.trait;
-            return new_type_dict("trait", def->name.c_str(), def->module_name,
-                                 def->module, def->exported, new_string_list(),
+            return new_type_dict("trait", def->name.c_str(), def->package,
+                                 def->source, def->exported, new_string_list(),
                                  new_string_list(), trait_methods(def),
                                  new_string_list());
         }
@@ -481,12 +481,12 @@ struct value_t *resolved_traits(const resolved_type &type) {
 } // namespace
 
 struct value_t *typeinfo_type_info(const char *importer_source,
-                                   const char *importer_module,
+                                   const char *importer_package,
                                    struct value_t *type_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
-                                               importer_module, type_arg,
+                                               importer_package, type_arg,
                                                type, error),
                               error))
         return NULL;
@@ -494,12 +494,12 @@ struct value_t *typeinfo_type_info(const char *importer_source,
 }
 
 struct value_t *typeinfo_fields(const char *importer_source,
-                                const char *importer_module,
+                                const char *importer_package,
                                 struct value_t *type_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
-                                               importer_module, type_arg,
+                                               importer_package, type_arg,
                                                type, error),
                               error))
         return NULL;
@@ -507,12 +507,12 @@ struct value_t *typeinfo_fields(const char *importer_source,
 }
 
 struct value_t *typeinfo_variants(const char *importer_source,
-                                  const char *importer_module,
+                                  const char *importer_package,
                                   struct value_t *type_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
-                                               importer_module, type_arg,
+                                               importer_package, type_arg,
                                                type, error),
                               error))
         return NULL;
@@ -520,12 +520,12 @@ struct value_t *typeinfo_variants(const char *importer_source,
 }
 
 struct value_t *typeinfo_methods(const char *importer_source,
-                                 const char *importer_module,
+                                 const char *importer_package,
                                  struct value_t *type_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
-                                               importer_module, type_arg,
+                                               importer_package, type_arg,
                                                type, error),
                               error))
         return NULL;
@@ -533,12 +533,12 @@ struct value_t *typeinfo_methods(const char *importer_source,
 }
 
 struct value_t *typeinfo_traits(const char *importer_source,
-                                const char *importer_module,
+                                const char *importer_package,
                                 struct value_t *type_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
-                                               importer_module, type_arg,
+                                               importer_package, type_arg,
                                                type, error),
                               error))
         return NULL;
@@ -546,20 +546,20 @@ struct value_t *typeinfo_traits(const char *importer_source,
 }
 
 struct value_t *typeinfo_implements(const char *importer_source,
-                                    const char *importer_module,
+                                    const char *importer_package,
                                     struct value_t *type_arg,
                                     struct value_t *trait_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
-                                               importer_module, type_arg,
+                                               importer_package, type_arg,
                                                type, error),
                               error))
         return NULL;
 
     const trait_def *trait = NULL;
     if (!report_resolve_error(resolve_trait_arg(importer_source,
-                                                importer_module, trait_arg,
+                                                importer_package, trait_arg,
                                                 trait, error),
                               error))
         return NULL;
@@ -571,11 +571,11 @@ struct value_t *typeinfo_implements(const char *importer_source,
 }
 
 struct value_t *typeinfo_has_type(const char *importer_source,
-                                  const char *importer_module,
+                                  const char *importer_package,
                                   struct value_t *type_arg) {
     resolved_type type;
     std::string error;
-    resolve_status status = resolve_type_arg(importer_source, importer_module,
+    resolve_status status = resolve_type_arg(importer_source, importer_package,
                                              type_arg, type, error);
     if (status == RESOLVE_FOUND)
         return newboolval(true);

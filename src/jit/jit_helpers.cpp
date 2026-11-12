@@ -850,19 +850,19 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     skein::jit::thread_state::call_save saved;
     saved.saved_handler_depth = ts->saved_handler_depth;
     saved.scope_mark = ts->scope_mark;
-    saved.saved_module = ts->saved_module;
+    saved.saved_package = ts->saved_package;
     saved.saved_source = ts->saved_source;
     saved.entered = ts->entered;
     saved.depth_counted = ts->depth_counted;
     saved.diag_pushed = ts->diag_pushed;
     saved.tail_call = ts->tail_call;
-    saved.module_valid = ts->saved_module_valid;
+    saved.package_valid = ts->saved_package_valid;
     saved.source_valid = ts->saved_source_valid;
     ts->saves.push_back(std::move(saved));
 
     ts->saved_handler_depth = context.handler_depth;
     ts->scope_mark = context.scopes.restore_stack.size();
-    ts->saved_module_valid = false;
+    ts->saved_package_valid = false;
     ts->saved_source_valid = false;
     ts->entered = true;
     if (!ts->tail_call) {
@@ -875,12 +875,12 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
 
     if (!ts->top_level) {
         if (def && def->code) {
-            const std::string &current_module = diag_current_module_name();
-            if (!def->code->module.empty() &&
-                def->code->module != current_module) {
-                ts->saved_module = current_module;
-                ts->saved_module_valid = true;
-                diag_set_module_name(def->code->module);
+            const std::string &current_package = diag_current_package_name();
+            if (!def->code->package.empty() &&
+                def->code->package != current_package) {
+                ts->saved_package = current_package;
+                ts->saved_package_valid = true;
+                diag_set_package_name(def->code->package);
             }
             const std::string &current_source = diag_current_source_name();
             if (!def->code->source.empty() &&
@@ -922,8 +922,8 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         skein_vm_eval_popscope();
     context.handler_depth = ts->saved_handler_depth;
     if (!ts->tail_pending) {
-        if (ts->saved_module_valid)
-            diag_set_module_name(ts->saved_module);
+        if (ts->saved_package_valid)
+            diag_set_package_name(ts->saved_package);
         if (ts->saved_source_valid)
             diag_set_source_name(ts->saved_source);
     }
@@ -946,18 +946,18 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         ts->saves.pop_back();
         ts->saved_handler_depth = saved.saved_handler_depth;
         ts->scope_mark = saved.scope_mark;
-        ts->saved_module = std::move(saved.saved_module);
+        ts->saved_package = std::move(saved.saved_package);
         ts->saved_source = std::move(saved.saved_source);
         ts->entered = saved.entered;
         ts->depth_counted = saved.depth_counted;
         ts->diag_pushed = saved.diag_pushed;
         ts->tail_call = saved.tail_call;
-        ts->saved_module_valid = saved.module_valid;
+        ts->saved_package_valid = saved.package_valid;
         ts->saved_source_valid = saved.source_valid;
     } else {
         ts->diag_pushed = false;
         ts->entered = false;
-        ts->saved_module_valid = false;
+        ts->saved_package_valid = false;
         ts->saved_source_valid = false;
     }
 }

@@ -13,10 +13,10 @@ std::unordered_map<std::string, std::unique_ptr<enum_def>> enum_types;
 std::unordered_map<std::string, struct_def *> logical_structs;
 std::unordered_map<std::string, trait_def *> logical_traits;
 std::unordered_map<std::string, enum_def *> logical_enums;
-std::unordered_map<std::string, std::string> module_aliases;
+std::unordered_map<std::string, std::string> source_aliases;
 
-std::string type_key(const char *module, const char *name) {
-    std::string key = module ? module : "";
+std::string type_key(const char *source, const char *name) {
+    std::string key = source ? source : "";
     key.push_back('\x1f');
     key += name ? name : "";
     return key;
@@ -54,28 +54,28 @@ bool split_qualified_name(const char *name, std::string &prefix,
 
 std::string resolve_qualified_module(const char *importer,
                                       const std::string &prefix) {
-    auto it = module_aliases.find(alias_key(importer, prefix.c_str()));
-    if (it != module_aliases.end())
+    auto it = source_aliases.find(alias_key(importer, prefix.c_str()));
+    if (it != source_aliases.end())
         return it->second;
     return prefix;
 }
 
-resolved_type resolve_named(const char *module, const char *name,
+resolved_type resolve_named(const char *source, const char *name,
                             bool require_exported) {
     resolved_type result{NULL, NULL, NULL};
     if (!name) return result;
 
-    auto sit = struct_types.find(type_key(module, name));
+    auto sit = struct_types.find(type_key(source, name));
     if (sit != struct_types.end()) {
         result.structure = sit->second.get();
         return result;
     }
-    auto tit = trait_types.find(type_key(module, name));
+    auto tit = trait_types.find(type_key(source, name));
     if (tit != trait_types.end()) {
         result.trait = tit->second.get();
         return result;
     }
-    auto eit = enum_types.find(type_key(module, name));
+    auto eit = enum_types.find(type_key(source, name));
     if (eit != enum_types.end()) {
         result.enumeration = eit->second.get();
         return result;
@@ -86,7 +86,7 @@ resolved_type resolve_named(const char *module, const char *name,
     if (!split_qualified_name(name, prefix, base))
         return result;
 
-    std::string target = resolve_qualified_module(module, prefix);
+    std::string target = resolve_qualified_module(source, prefix);
     auto lsit = logical_structs.find(type_key(target.c_str(), base.c_str()));
     if (lsit != logical_structs.end() &&
         (!require_exported || lsit->second->exported)) {
@@ -107,9 +107,9 @@ resolved_type resolve_named(const char *module, const char *name,
     return result;
 }
 
-bool named_type_visible(const char *module, const char *name) {
+bool named_type_visible(const char *source, const char *name) {
     if (!name) return false;
-    std::string key = type_key(module, name);
+    std::string key = type_key(source, name);
     auto sit = struct_types.find(key);
     if (sit != struct_types.end())
         return sit->second->exported;
@@ -119,7 +119,7 @@ bool named_type_visible(const char *module, const char *name) {
     auto eit = enum_types.find(key);
     if (eit != enum_types.end())
         return eit->second->exported;
-    resolved_type resolved = resolve_named(module, name, true);
+    resolved_type resolved = resolve_named(source, name, true);
     return resolved.structure != NULL || resolved.trait != NULL ||
            resolved.enumeration != NULL;
 }
@@ -138,7 +138,7 @@ void structtype_shutdown() {
     logical_structs.clear();
     logical_traits.clear();
     logical_enums.clear();
-    module_aliases.clear();
+    source_aliases.clear();
 }
 
 void structtype_visit_functions(
@@ -171,19 +171,19 @@ void structtype_visit_functions(
     }
 }
 
-struct_def *structtype_find_struct(const char *module, const char *name) {
+struct_def *structtype_find_struct(const char *source, const char *name) {
     if (!name) return NULL;
-    auto it = struct_types.find(type_key(module, name));
+    auto it = struct_types.find(type_key(source, name));
     return it == struct_types.end() ? NULL : it->second.get();
 }
 
-struct_def *structtype_find_struct_by_name(const char *module_name,
+struct_def *structtype_find_struct_by_name(const char *package,
                                            const char *name,
                                            bool *ambiguous) {
     if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
-    if (module_name && *module_name) {
-        auto it = logical_structs.find(type_key(module_name, name));
+    if (package && *package) {
+        auto it = logical_structs.find(type_key(package, name));
         return it == logical_structs.end() ? NULL : it->second;
     }
     struct_def *found = NULL;
@@ -199,30 +199,30 @@ struct_def *structtype_find_struct_by_name(const char *module_name,
     return found;
 }
 
-type_def *structtype_find_type(const char *module, const char *name) {
+type_def *structtype_find_type(const char *source, const char *name) {
     if (!name) return NULL;
-    auto sit = struct_types.find(type_key(module, name));
+    auto sit = struct_types.find(type_key(source, name));
     if (sit != struct_types.end())
         return sit->second.get();
-    auto eit = enum_types.find(type_key(module, name));
+    auto eit = enum_types.find(type_key(source, name));
     if (eit != enum_types.end())
         return eit->second.get();
     return NULL;
 }
 
-trait_def *structtype_find_trait(const char *module, const char *name) {
+trait_def *structtype_find_trait(const char *source, const char *name) {
     if (!name) return NULL;
-    auto it = trait_types.find(type_key(module, name));
+    auto it = trait_types.find(type_key(source, name));
     return it == trait_types.end() ? NULL : it->second.get();
 }
 
-trait_def *structtype_find_trait_by_name(const char *module_name,
+trait_def *structtype_find_trait_by_name(const char *package,
                                          const char *name,
                                          bool *ambiguous) {
     if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
-    if (module_name && *module_name) {
-        auto it = logical_traits.find(type_key(module_name, name));
+    if (package && *package) {
+        auto it = logical_traits.find(type_key(package, name));
         return it == logical_traits.end() ? NULL : it->second;
     }
     trait_def *found = NULL;
@@ -238,7 +238,7 @@ trait_def *structtype_find_trait_by_name(const char *module_name,
     return found;
 }
 
-trait_def *structtype_resolve_trait(const char *module, const char *name,
+trait_def *structtype_resolve_trait(const char *source, const char *name,
                                     bool require_exported,
                                     std::string &error) {
     error.clear();
@@ -247,15 +247,15 @@ trait_def *structtype_resolve_trait(const char *module, const char *name,
         return NULL;
     }
 
-    trait_def *local = structtype_find_trait(module, name);
+    trait_def *local = structtype_find_trait(source, name);
     if (local)
         return local;
 
-    resolved_type resolved = resolve_named(module, name, require_exported);
+    resolved_type resolved = resolve_named(source, name, require_exported);
     if (resolved.trait)
         return resolved.trait;
 
-    resolved_type any = resolve_named(module, name, false);
+    resolved_type any = resolve_named(source, name, false);
     if (any.structure || any.enumeration) {
         error = std::string("type ") + name + " is not a trait";
         return NULL;
@@ -268,19 +268,19 @@ trait_def *structtype_resolve_trait(const char *module, const char *name,
     return NULL;
 }
 
-enum_def *structtype_find_enum(const char *module, const char *name) {
+enum_def *structtype_find_enum(const char *source, const char *name) {
     if (!name) return NULL;
-    auto it = enum_types.find(type_key(module, name));
+    auto it = enum_types.find(type_key(source, name));
     return it == enum_types.end() ? NULL : it->second.get();
 }
 
-enum_def *structtype_find_enum_by_name(const char *module_name,
+enum_def *structtype_find_enum_by_name(const char *package,
                                        const char *name,
                                        bool *ambiguous) {
     if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
-    if (module_name && *module_name) {
-        auto it = logical_enums.find(type_key(module_name, name));
+    if (package && *package) {
+        auto it = logical_enums.find(type_key(package, name));
         return it == logical_enums.end() ? NULL : it->second;
     }
     enum_def *found = NULL;
@@ -297,35 +297,35 @@ enum_def *structtype_find_enum_by_name(const char *module_name,
 }
 
 static bool lookup_def_visible(const char *importer_source,
-                               const char *importer_module,
+                               const char *importer_package,
                                const type_def *def) {
     if (!def)
         return false;
     if (def->exported)
         return true;
-    if (importer_source && def->module == importer_source)
+    if (importer_source && def->source == importer_source)
         return true;
-    if (importer_module && def->module_name == importer_module)
+    if (importer_package && def->package == importer_package)
         return true;
     return false;
 }
 
 static bool lookup_trait_visible(const char *importer_source,
-                                 const char *importer_module,
+                                 const char *importer_package,
                                  const trait_def *def) {
     if (!def)
         return false;
     if (def->exported)
         return true;
-    if (importer_source && def->module == importer_source)
+    if (importer_source && def->source == importer_source)
         return true;
-    if (importer_module && def->module_name == importer_module)
+    if (importer_package && def->package == importer_package)
         return true;
     return false;
 }
 
 enum structtype_lookup_status structtype_lookup_type(
-    const char *importer_source, const char *importer_module,
+    const char *importer_source, const char *importer_package,
     const char *name, struct structtype_lookup_result &out,
     std::string &error) {
     out = structtype_lookup_result();
@@ -366,14 +366,14 @@ enum structtype_lookup_status structtype_lookup_type(
         }
 
         bool visible =
-            structure ? lookup_def_visible(importer_source, importer_module,
+            structure ? lookup_def_visible(importer_source, importer_package,
                                            structure)
                       : enumeration
                             ? lookup_def_visible(importer_source,
-                                                 importer_module,
+                                                 importer_package,
                                                  enumeration)
                             : lookup_trait_visible(importer_source,
-                                                   importer_module, trait);
+                                                   importer_package, trait);
         if (!visible) {
             error = "type " + text + " is not visible";
             return STRUCTTYPE_LOOKUP_NOT_VISIBLE;
@@ -418,14 +418,14 @@ enum structtype_lookup_status structtype_lookup_type(
         }
     }
 
-    /* Types in the caller's logical module are also local. */
-    if (importer_module && *importer_module) {
+    /* Types in the caller's logical source are also local. */
+    if (importer_package && *importer_package) {
         struct_def *structure =
-            structtype_find_struct_by_name(importer_module, name);
+            structtype_find_struct_by_name(importer_package, name);
         enum_def *enumeration =
-            structtype_find_enum_by_name(importer_module, name);
+            structtype_find_enum_by_name(importer_package, name);
         trait_def *trait =
-            structtype_find_trait_by_name(importer_module, name);
+            structtype_find_trait_by_name(importer_package, name);
         int found = (structure ? 1 : 0) + (enumeration ? 1 : 0) +
                     (trait ? 1 : 0);
         if (found > 1) {
@@ -512,18 +512,18 @@ enum structtype_lookup_status structtype_lookup_type(
     return STRUCTTYPE_LOOKUP_FOUND;
 }
 
-bool structtype_type_exists(const char *module, const char *name) {
+bool structtype_type_exists(const char *source, const char *name) {
     if (!name) return false;
-    std::string key = type_key(module, name);
+    std::string key = type_key(source, name);
     if (struct_types.count(key) != 0 || trait_types.count(key) != 0 ||
         enum_types.count(key) != 0)
         return true;
-    resolved_type resolved = resolve_named(module, name, true);
+    resolved_type resolved = resolve_named(source, name, true);
     return resolved.structure != NULL || resolved.trait != NULL ||
            resolved.enumeration != NULL;
 }
 
-bool structtype_prepare_struct(const char *module, const char *module_name,
+bool structtype_prepare_struct(const char *source, const char *package,
                                const char *name, bool exported,
                                struct_def *&out, std::string &error) {
     out = NULL;
@@ -531,28 +531,28 @@ bool structtype_prepare_struct(const char *module, const char *module_name,
         error = "invalid struct name";
         return false;
     }
-    if (structtype_type_exists(module, name)) {
+    if (structtype_type_exists(source, name)) {
         error = std::string("type repeated ") + name;
         return false;
     }
-    std::string logical_key = type_key(module_name, name);
+    std::string logical_key = type_key(package, name);
     if (logical_structs.count(logical_key) != 0 ||
         logical_traits.count(logical_key) != 0 ||
         logical_enums.count(logical_key) != 0) {
         error = std::string("type repeated ") + name +
-                " in module " + (module_name ? module_name : "");
+                " in package " + (package ? package : "");
         return false;
     }
 
     std::unique_ptr<struct_def> def(new struct_def);
     def->kind = TYPE_OWNER_STRUCT;
     def->name = name;
-    def->module = module ? module : "";
-    def->module_name = module_name ? module_name : def->module;
+    def->source = source ? source : "";
+    def->package = package ? package : def->source;
     def->exported = exported;
     out = def.get();
     logical_structs.emplace(logical_key, out);
-    struct_types.emplace(type_key(module, name), std::move(def));
+    struct_types.emplace(type_key(source, name), std::move(def));
     return true;
 }
 
@@ -599,11 +599,11 @@ void structtype_rollback_struct(struct_def *def) {
     }
 }
 
-bool structtype_create_struct(const char *module, const char *module_name,
+bool structtype_create_struct(const char *source, const char *package,
                               const char *name, bool exported,
                               std::vector<field_def> fields,
                               struct_def *&out, std::string &error) {
-    if (!structtype_prepare_struct(module, module_name, name, exported, out,
+    if (!structtype_prepare_struct(source, package, name, exported, out,
                                    error))
         return false;
     if (!structtype_finalize_struct(out, std::move(fields), error)) {
@@ -614,7 +614,7 @@ bool structtype_create_struct(const char *module, const char *module_name,
     return true;
 }
 
-bool structtype_create_trait(const char *module, const char *module_name,
+bool structtype_create_trait(const char *source, const char *package,
                              const char *name, bool exported,
                              std::vector<method_sig> methods,
                              trait_def *&out, std::string &error) {
@@ -623,15 +623,15 @@ bool structtype_create_trait(const char *module, const char *module_name,
         error = "invalid trait name";
         return false;
     }
-    if (structtype_type_exists(module, name)) {
+    if (structtype_type_exists(source, name)) {
         error = std::string("type repeated ") + name;
         return false;
     }
-    std::string logical_key = type_key(module_name, name);
+    std::string logical_key = type_key(package, name);
     if (logical_structs.count(logical_key) != 0 ||
         logical_traits.count(logical_key) != 0) {
         error = std::string("type repeated ") + name +
-                " in module " + (module_name ? module_name : "");
+                " in package " + (package ? package : "");
         return false;
     }
 
@@ -651,7 +651,7 @@ bool structtype_create_trait(const char *module, const char *module_name,
             const type_constraint &param = methods[i].params[j];
             if (param.kind != TYPE_NAMED)
                 continue;
-            if (!named_type_visible(module, param.name)) {
+            if (!named_type_visible(source, param.name)) {
                 error = "exported trait " + std::string(name) +
                         " method " + methods[i].name +
                         " uses non-exported type " +
@@ -663,17 +663,17 @@ bool structtype_create_trait(const char *module, const char *module_name,
 
     std::unique_ptr<trait_def> def(new trait_def);
     def->name = name;
-    def->module = module ? module : "";
-    def->module_name = module_name ? module_name : def->module;
+    def->source = source ? source : "";
+    def->package = package ? package : def->source;
     def->exported = exported;
     def->methods = std::move(methods);
     out = def.get();
     logical_traits.emplace(logical_key, out);
-    trait_types.emplace(type_key(module, name), std::move(def));
+    trait_types.emplace(type_key(source, name), std::move(def));
     return true;
 }
 
-bool structtype_prepare_enum(const char *module, const char *module_name,
+bool structtype_prepare_enum(const char *source, const char *package,
                              const char *name, bool exported,
                              enum_def *&out, std::string &error) {
     out = NULL;
@@ -681,28 +681,28 @@ bool structtype_prepare_enum(const char *module, const char *module_name,
         error = "invalid enum name";
         return false;
     }
-    if (structtype_type_exists(module, name)) {
+    if (structtype_type_exists(source, name)) {
         error = std::string("type repeated ") + name;
         return false;
     }
-    std::string logical_key = type_key(module_name, name);
+    std::string logical_key = type_key(package, name);
     if (logical_structs.count(logical_key) != 0 ||
         logical_traits.count(logical_key) != 0 ||
         logical_enums.count(logical_key) != 0) {
         error = std::string("type repeated ") + name +
-                " in module " + (module_name ? module_name : "");
+                " in package " + (package ? package : "");
         return false;
     }
 
     std::unique_ptr<enum_def> def(new enum_def);
     def->kind = TYPE_OWNER_ENUM;
     def->name = name;
-    def->module = module ? module : "";
-    def->module_name = module_name ? module_name : def->module;
+    def->source = source ? source : "";
+    def->package = package ? package : def->source;
     def->exported = exported;
     out = def.get();
     logical_enums.emplace(logical_key, out);
-    enum_types.emplace(type_key(module, name), std::move(def));
+    enum_types.emplace(type_key(source, name), std::move(def));
     return true;
 }
 
@@ -767,11 +767,11 @@ void structtype_rollback_enum(enum_def *def) {
     }
 }
 
-bool structtype_create_enum(const char *module, const char *module_name,
+bool structtype_create_enum(const char *source, const char *package,
                             const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error) {
-    if (!structtype_prepare_enum(module, module_name, name, exported, out,
+    if (!structtype_prepare_enum(source, package, name, exported, out,
                                  error))
         return false;
     if (!structtype_finalize_enum(out, std::move(variants), error)) {
@@ -951,21 +951,21 @@ void structtype_register_alias(const char *importer, const char *alias,
                                const char *target) {
     if (!importer || !alias || !target || !*alias || !*target)
         return;
-    module_aliases[alias_key(importer, alias)] = target;
+    source_aliases[alias_key(importer, alias)] = target;
 }
 
-bool named_type_matches(const char *module, const char *name,
+bool named_type_matches(const char *source, const char *name,
                         const struct value_t *value) {
-    if (!module || !name || !value)
+    if (!source || !name || !value)
         return false;
 
     if (value->type == T_enum) {
         const struct enum_value_t *ev = (const struct enum_value_t *)value;
         if (!ev->def)
             return false;
-        if (ev->def->module == module && ev->def->name == name)
+        if (ev->def->source == source && ev->def->name == name)
             return true;
-        resolved_type resolved = resolve_named(module, name, true);
+        resolved_type resolved = resolve_named(source, name, true);
         if (resolved.enumeration)
             return ev->def == resolved.enumeration;
         if (resolved.trait)
@@ -980,10 +980,10 @@ bool named_type_matches(const char *module, const char *name,
     if (!sv->def)
         return false;
 
-    if (sv->def->module == module && sv->def->name == name)
+    if (sv->def->source == source && sv->def->name == name)
         return true;
 
-    resolved_type resolved = resolve_named(module, name, true);
+    resolved_type resolved = resolve_named(source, name, true);
     if (resolved.structure)
         return sv->def == resolved.structure;
     if (resolved.trait)

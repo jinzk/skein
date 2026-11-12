@@ -105,7 +105,7 @@ static struct value_t *enum_tag_from_value(struct value_t *value) {
     }
     const struct variant_def &variant =
         ev->def->variants[(size_t)ev->variant];
-    std::string tag = ev->def->module_name + "." + ev->def->name + "." +
+    std::string tag = ev->def->package + "." + ev->def->name + "." +
                       variant.name;
     return newstrval(tag.c_str());
 }
@@ -113,7 +113,7 @@ static struct value_t *enum_tag_from_value(struct value_t *value) {
 /* Type hints accept both the source syntax (`module.Type`) and the
  * historical internal form (`module::Type`). */
 static void split_type_hint_name(std::string &type_name,
-                                 std::string &module_name) {
+                                 std::string &package_name) {
     size_t sep = type_name.rfind("::");
     size_t sep_len = 2;
     size_t dot = type_name.rfind('.');
@@ -124,7 +124,7 @@ static void split_type_hint_name(std::string &type_name,
     }
     if (sep == std::string::npos)
         return;
-    module_name = type_name.substr(0, sep);
+    package_name = type_name.substr(0, sep);
     type_name = type_name.substr(sep + sep_len);
 }
 
@@ -142,11 +142,11 @@ static struct value_t *enum_tag_from_name(struct value_t *type_value,
     std::string type_name = ((struct string_value_t *)type_value)->value;
     std::string variant_name =
         ((struct string_value_t *)variant_value)->value;
-    std::string module_name;
-    split_type_hint_name(type_name, module_name);
+    std::string package_name;
+    split_type_hint_name(type_name, package_name);
 
     enum_def *def = structtype_find_enum_by_name(
-        module_name.empty() ? NULL : module_name.c_str(),
+        package_name.empty() ? NULL : package_name.c_str(),
         type_name.c_str());
     if (!def) {
         yyerror("unknown or ambiguous enum type %s", type_name.c_str());
@@ -159,7 +159,7 @@ static struct value_t *enum_tag_from_name(struct value_t *type_value,
     }
 
     std::string tag =
-        def->module_name + "." + def->name + "." + variant_name;
+        def->package + "." + def->name + "." + variant_name;
     return newstrval(tag.c_str());
 }
 
@@ -197,10 +197,10 @@ static enum_def *resolve_enum_type_hint(const char *text) {
         return NULL;
     }
     std::string type_name(text);
-    std::string module_name;
-    split_type_hint_name(type_name, module_name);
+    std::string package_name;
+    split_type_hint_name(type_name, package_name);
     enum_def *def = structtype_find_enum_by_name(
-        module_name.empty() ? NULL : module_name.c_str(),
+        package_name.empty() ? NULL : package_name.c_str(),
         type_name.c_str());
     if (!def) {
         yyerror("unknown or ambiguous enum type %s", type_name.c_str());

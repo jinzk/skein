@@ -572,7 +572,7 @@ static struct pattern_node *new_pattern_node(int nodetype) {
     a->nodetype = nodetype;
     set_loc(a, 0, 0);
     a->name = NULL;
-    a->module = NULL;
+    a->source = NULL;
     a->variant = NULL;
     a->literal = NULL;
     a->type = NULL;
@@ -657,20 +657,20 @@ struct ast *newpatternlist(struct ast *items) {
     return (struct ast *)a;
 }
 
-struct ast *newpatternstruct(char *name, char *module,
+struct ast *newpatternstruct(char *name, char *source,
                              struct pattern_field *fields) {
     struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->fields = fields;
     return (struct ast *)a;
 }
 
-struct ast *newpatternvariant(char *name, char *module, char *variant,
+struct ast *newpatternvariant(char *name, char *source, char *variant,
                               struct pattern_field *fields) {
     struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->variant = variant;
     a->fields = fields;
     return (struct ast *)a;
@@ -950,7 +950,7 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     code->is_generator = node->is_generator != 0;
     code->def_line = node->ast ? node->ast->line : 0;
     code->def_column = node->ast ? node->ast->column : 0;
-    code->module = diag_current_module_name();
+    code->package = diag_current_package_name();
     code->source = diag_current_source_name();
     if (node->ret_type) {
         code->ret_type =
@@ -1014,7 +1014,7 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
     return (struct ast *)p;
 }
 
-struct ast *newstructdecl(char *name, char *module,
+struct ast *newstructdecl(char *name, char *source,
                           struct struct_member *members, bool exported) {
     struct struct_node *a =
         (struct struct_node *)std::malloc(sizeof(struct struct_node));
@@ -1025,7 +1025,7 @@ struct ast *newstructdecl(char *name, char *module,
     a->nodetype = 'Y';
     set_loc(a, 0, 0);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->members = members;
     a->exported = exported;
     return (struct ast *)a;
@@ -1075,7 +1075,7 @@ struct ast *append_struct_member(struct ast *head, struct ast *member) {
     return head;
 }
 
-struct ast *newimpl(char *type_name, char *trait_name, char *module,
+struct ast *newimpl(char *type_name, char *trait_name, char *source,
                     struct struct_member *methods) {
     struct impl_node *a =
         (struct impl_node *)std::malloc(sizeof(struct impl_node));
@@ -1087,12 +1087,12 @@ struct ast *newimpl(char *type_name, char *trait_name, char *module,
     set_loc(a, 0, 0);
     a->type_name = type_name;
     a->trait_name = trait_name;
-    a->module = module;
+    a->source = source;
     a->methods = methods;
     return (struct ast *)a;
 }
 
-struct ast *newtraitdecl(char *name, char *module,
+struct ast *newtraitdecl(char *name, char *source,
                          struct trait_method *methods, bool exported) {
     struct trait_node *a =
         (struct trait_node *)std::malloc(sizeof(struct trait_node));
@@ -1103,7 +1103,7 @@ struct ast *newtraitdecl(char *name, char *module,
     a->nodetype = 't';
     set_loc(a, 0, 0);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->methods = methods;
     a->exported = exported;
     return (struct ast *)a;
@@ -1134,7 +1134,7 @@ struct ast *append_trait_method(struct ast *head, struct ast *method) {
     return head;
 }
 
-struct ast *newstructlit(char *name, char *module,
+struct ast *newstructlit(char *name, char *source,
                          struct struct_init *fields) {
     struct struct_lit_node *a =
         (struct struct_lit_node *)std::malloc(sizeof(struct struct_lit_node));
@@ -1145,12 +1145,12 @@ struct ast *newstructlit(char *name, char *module,
     a->nodetype = 'y';
     set_loc(a, 0, 0);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->fields = fields;
     return (struct ast *)a;
 }
 
-struct ast *newenumdecl(char *name, char *module,
+struct ast *newenumdecl(char *name, char *source,
                         struct enum_variant *variants, bool exported) {
     struct enum_node *a =
         (struct enum_node *)std::malloc(sizeof(struct enum_node));
@@ -1161,7 +1161,7 @@ struct ast *newenumdecl(char *name, char *module,
     a->nodetype = NODE_ENUM_DECL;
     set_loc(a, 0, 0);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->variants = variants;
     a->exported = exported ? 1 : 0;
     return (struct ast *)a;
@@ -1193,7 +1193,7 @@ struct enum_variant *append_enumvariant(struct enum_variant *head,
     return head;
 }
 
-struct ast *newenumlit(char *name, char *module, char *variant,
+struct ast *newenumlit(char *name, char *source, char *variant,
                        struct struct_init *fields) {
     struct enum_lit_node *a =
         (struct enum_lit_node *)std::malloc(sizeof(struct enum_lit_node));
@@ -1204,7 +1204,7 @@ struct ast *newenumlit(char *name, char *module, char *variant,
     a->nodetype = NODE_ENUM_LITERAL;
     set_loc(a, 0, 0);
     a->name = name;
-    a->module = module;
+    a->source = source;
     a->variant = variant;
     a->fields = fields;
     return (struct ast *)a;
@@ -1459,7 +1459,7 @@ void treefree(struct ast *a) {
             struct struct_node *s = (struct struct_node *)a;
             treefree((struct ast *)s->members);
             std::free(s->name);
-            std::free(s->module);
+            std::free(s->source);
             break;
         }
         case 'H': {
@@ -1467,14 +1467,14 @@ void treefree(struct ast *a) {
             treefree((struct ast *)i->methods);
             std::free(i->type_name);
             std::free(i->trait_name);
-            std::free(i->module);
+            std::free(i->source);
             break;
         }
         case 't': {
             struct trait_node *t = (struct trait_node *)a;
             treefree((struct ast *)t->methods);
             std::free(t->name);
-            std::free(t->module);
+            std::free(t->source);
             break;
         }
         case 'f': {
@@ -1505,7 +1505,7 @@ void treefree(struct ast *a) {
             struct struct_lit_node *s = (struct struct_lit_node *)a;
             treefree((struct ast *)s->fields);
             std::free(s->name);
-            std::free(s->module);
+            std::free(s->source);
             break;
         }
         case 'i': {
@@ -1579,7 +1579,7 @@ void treefree(struct ast *a) {
         case NODE_PATTERN_CONTAINER: {
             struct pattern_node *p = (struct pattern_node *)a;
             std::free(p->name);
-            std::free(p->module);
+            std::free(p->source);
             std::free(p->variant);
             freepatternfields(p->fields);
             treefree(p->next);
@@ -1594,7 +1594,7 @@ void treefree(struct ast *a) {
         case NODE_ENUM_DECL: {
             struct enum_node *e = (struct enum_node *)a;
             std::free(e->name);
-            std::free(e->module);
+            std::free(e->source);
             treefree((struct ast *)e->variants);
             break;
         }
@@ -1608,7 +1608,7 @@ void treefree(struct ast *a) {
         case NODE_ENUM_LITERAL: {
             struct enum_lit_node *e = (struct enum_lit_node *)a;
             std::free(e->name);
-            std::free(e->module);
+            std::free(e->source);
             std::free(e->variant);
             treefree((struct ast *)e->fields);
             break;

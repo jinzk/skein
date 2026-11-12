@@ -51,6 +51,10 @@ extern int yychar;
 extern YYSTYPE yylval;
 extern int yynerrs;
 void parser_begin_nested_parse();
+extern thread_local bool g_include_collect;
+extern thread_local bool g_include_invalid;
+extern thread_local std::vector<struct ast *> g_include_statements;
+extern thread_local int g_include_function_depth;
 
 namespace {
 
@@ -77,6 +81,8 @@ thread_local fs::path project_root;
 thread_local bool project_root_resolved = false;
 thread_local std::vector<package_load_context> load_stack;
 thread_local std::vector<std::string> loading_paths;
+thread_local std::vector<std::string> include_stack;
+thread_local std::unordered_set<std::string> include_once_paths;
 
 struct embedded_package_source {
     const char *name;
@@ -518,6 +524,29 @@ bool parse_module_manifest(const fs::path &root, const std::string &text,
     return true;
 }
 
+bool find_nested_module_manifest(const fs::path &root, fs::path &nested) {
+    std::error_code ec;
+    fs::recursive_directory_iterator it(
+        root, fs::directory_options::skip_permission_denied, ec);
+    fs::recursive_directory_iterator end;
+    if (ec)
+        return false;
+    for (; it != end; it.increment(ec)) {
+        if (ec)
+            return false;
+        if (!it->is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+        if (it->path().filename() == "module.skein" &&
+            it->path().parent_path() != root) {
+            nested = it->path();
+            return true;
+        }
+    }
+    return false;
+}
+
 const module_manifest *load_module_manifest(const fs::path &root,
                                             std::string &error) {
     const std::string key = normalize_dir(path_to_utf8(root));
@@ -570,6 +599,14 @@ const module_manifest *load_module_manifest(const fs::path &root,
             entry->ok = false;
             entry->error = "module root cannot contain index.skein; move it "
                            "into a package directory";
+        }
+    }
+    if (entry->ok) {
+        fs::path nested;
+        if (find_nested_module_manifest(root, nested)) {
+            entry->ok = false;
+            entry->error = "nested module.skein is not supported: " +
+                           path_to_utf8(nested);
         }
     }
     if (!entry->ok)
@@ -671,6 +708,41 @@ bool find_enclosing_module(const fs::path &file, fs::path &root,
         if (parent.empty() || parent == directory)
             break;
         directory = parent;
+    }
+    return true;
+}
+
+bool path_within_root(const fs::path &root, const fs::path &path) {
+    std::error_code ec;
+    fs::path canonical_root = fs::weakly_canonical(root, ec);
+    if (ec)
+        canonical_root = root.lexically_normal();
+    ec.clear();
+    fs::path canonical_path = fs::weakly_canonical(path, ec);
+    if (ec)
+        canonical_path = path.lexically_normal();
+    fs::path relative = canonical_path.lexically_relative(canonical_root);
+    if (relative.empty())
+        return false;
+    auto first = relative.begin();
+    return first == relative.end() || *first != "..";
+}
+
+bool relative_import_allowed(const fs::path &base, std::string &error) {
+    const std::string &source = diag_current_source_name();
+    if (source.empty())
+        return true;
+    fs::path module_root;
+    std::string module_name;
+    bool found = false;
+    if (!find_enclosing_module(path_from_utf8(source), module_root,
+                               module_name, found, error))
+        return false;
+    if (!found)
+        return true;
+    if (!path_within_root(module_root, base)) {
+        error = "relative import escapes module root";
+        return false;
     }
     return true;
 }
@@ -1159,6 +1231,8 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                 }
                 base = parent;
             }
+            if (!relative_import_allowed(base, error))
+                return NULL;
         }
 
         if (base.empty()) {
@@ -1252,6 +1326,126 @@ void restore_parser_globals(int saved_char, const YYSTYPE &saved_lval,
     yychar = saved_char;
     yylval = saved_lval;
     yynerrs = saved_errs;
+}
+
+bool evaluate_include_source_impl(const char *path, std::string &error) {
+    if (!path || !*path) {
+        error = "empty include path";
+        return false;
+    }
+
+    fs::path requested = path_from_utf8(path);
+    if (requested.is_relative()) {
+        const std::string &source = diag_current_source_name();
+        fs::path base = source.empty()
+                            ? path_from_utf8(thread_cwd())
+                            : path_from_utf8(source).parent_path();
+        requested = base / requested;
+    }
+    std::error_code ec;
+    if (!fs::is_regular_file(requested, ec)) {
+        error = "include file not found: " + std::string(path);
+        return false;
+    }
+    const std::string canonical = canonical_file(requested);
+    const std::string key = diag_current_package_name() + '\x1f' +
+                            diag_current_module_name() + '\x1f' + canonical;
+    if (include_once_paths.count(key) != 0)
+        return true;
+    if (std::find(include_stack.begin(), include_stack.end(), canonical) !=
+        include_stack.end()) {
+        error = "cyclic include: " + canonical;
+        return false;
+    }
+    if (include_stack.size() >= 64) {
+        error = "include depth limit exceeded";
+        return false;
+    }
+
+    std::string source_text;
+    if (!load_source_file(canonical, source_encoding_get(), source_text,
+                          error)) {
+        error = "cannot load include file " + canonical + ": " + error;
+        return false;
+    }
+    FILE *file = source_text_file(source_text, error);
+    if (!file) {
+        error = "cannot open include file " + canonical + ": " + error;
+        return false;
+    }
+
+    std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
+    parser_lock_depth_guard depth_guard;
+
+    int saved_char = yychar;
+    YYSTYPE saved_lval = yylval;
+    int saved_errs = yynerrs;
+    FILE *saved_yyin = yyin;
+    int saved_indent = indent_count;
+    scanner_checkpoint *scan_cp = scanner_checkpoint_save();
+    diag_source_checkpoint diag_cp;
+    diag_save_source(diag_cp);
+
+    bool saved_interactive = g_interactive;
+    bool saved_invalid = g_statement_invalid;
+    int saved_runtime_errors = active_eval_context().runtime_error_count;
+    int errors_before = diag_error_count();
+    std::string saved_import_base = import_base;
+    int saved_function_depth = g_include_function_depth;
+
+    include_stack.push_back(canonical);
+    g_include_collect = true;
+    g_include_invalid = false;
+    g_include_statements.clear();
+    g_include_function_depth = 0;
+    g_interactive = false;
+    g_statement_invalid = false;
+    parser_begin_nested_parse();
+    yyin = file;
+    indent_count = 0;
+    reset_scanner_state(file);
+    diag_start_source();
+    diag_set_source_name(canonical);
+    import_base = normalize_dir(
+        path_to_utf8(path_from_utf8(canonical).parent_path()));
+
+    int status = yyparse();
+    g_include_collect = false;
+    std::fclose(file);
+
+    bool ok = status == 0 && !g_include_invalid &&
+              diag_error_count() == errors_before;
+    if (ok) {
+        for (struct ast *statement : g_include_statements) {
+            struct value_t *value = eval(statement);
+            freeval(value);
+            if (diag_error_count() != errors_before) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    for (struct ast *statement : g_include_statements)
+        treefree(statement);
+    g_include_statements.clear();
+    if (ok)
+        include_once_paths.insert(key);
+    else if (error.empty())
+        error = "include failed";
+
+    import_base = saved_import_base;
+    indent_count = saved_indent;
+    yyin = saved_yyin;
+    g_include_function_depth = saved_function_depth;
+    scanner_checkpoint_restore(scan_cp);
+    diag_restore_source(diag_cp);
+    restore_parser_globals(saved_char, saved_lval, saved_errs);
+    g_interactive = saved_interactive;
+    g_statement_invalid = saved_invalid;
+    active_eval_context().runtime_error_count = saved_runtime_errors;
+
+    include_stack.pop_back();
+    return ok;
 }
 
 bool parse_package_source(const std::string &source_text,
@@ -1446,6 +1640,10 @@ value_t *import_embedded_package(const std::string &dotted,
 
 } // namespace
 
+bool evaluate_include_source(const char *path, std::string &error) {
+    return evaluate_include_source_impl(path, error);
+}
+
 bool parse_worker_source(const std::string &path, std::string &error) {
     return parse_worker_source_impl(path, error);
 }
@@ -1626,6 +1824,8 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
                 }
                 base = parent;
             }
+            if (!relative_import_allowed(base, error))
+                return false;
         }
         if (base.empty()) {
             error = "no project root for import";

@@ -1398,6 +1398,25 @@ void skein_vm_shutdown() {
 
 struct value_t *skein_vm_eval_statement(struct ast *statement) {
     ensure_vm_host();
+    if (statement && statement->nodetype == NODE_INCLUDE)
+        return eval(statement);
+    if (statement && statement->nodetype == 'K') {
+        const struct ast *body = ((const struct package_node *)statement)->body;
+        std::vector<const struct ast *> pending;
+        pending.push_back(body);
+        while (!pending.empty()) {
+            const struct ast *node = pending.back();
+            pending.pop_back();
+            if (!node)
+                continue;
+            if (node->nodetype == NODE_INCLUDE)
+                return eval(statement);
+            if (node->nodetype == 'L') {
+                pending.push_back(node->l);
+                pending.push_back(node->r);
+            }
+        }
+    }
     std::string defer_error;
     int defer_line = 0;
     int defer_column = 0;

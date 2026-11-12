@@ -13,6 +13,7 @@ from cases import (
     decorators,
     diagnostics,
     ffi_real,
+    include_files,
     io_scripts,
     language_core,
     match_types,
@@ -44,6 +45,7 @@ MODULES = [
     net,
     stdlib_builtins,
     ffi_real,
+    include_files,
     io_scripts,
     typecheck,
 ]

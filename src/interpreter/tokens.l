@@ -849,6 +849,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "defer" { YYRET(SKEIN_TOK_DEFER); }
 "package" { YYRET(SKEIN_TOK_PACKAGE); }
 "import" { YYRET(SKEIN_TOK_IMPORT); }
+"include" { YYRET(SKEIN_TOK_INCLUDE); }
 "export" { YYRET(SKEIN_TOK_EXPORT); }
 "return" { YYRET(SKEIN_TOK_RETURN); }
 "break" { YYRET(SKEIN_TOK_BREAK); }

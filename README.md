@@ -290,55 +290,79 @@ package cc {
 
 ### 目录结构
 
-导入路径按文件夹层级解析：
+每个可导入包必须是真实存在的 `.skein` 文件：
 
 ```text
 aa/
+  bb.skein            # package bb
   bb/
+    cc.skein          # package cc
     cc/
-      cc.skein
+      dd.skein        # package dd
 ```
 
 ```text
-import aa.bb.cc;
-print(cc.value);
+import aa.bb;
+print(bb.value);
 ```
 
-也支持入口文件名为 `index.skein`：
-
-```text
-aa/bb/cc/index.skein
-```
-
-如果目录中没有 `<name>.skein` 或 `index.skein`，但只有一个 `.skein` 文件，也会把它作为入口。
+- 包块名只写叶子名：`aa/bb/cc.skein` 写 `package cc`；
+- 可导入包必须有对应文件；`<name>/<name>.skein`、`index.skein`、单文件目录都不再支持；
+- 目录只用于组织路径，不能作为包或隐式命名空间；
+- 子包默认随父包暴露：`import aa.bb` 后可用 `bb.cc`，前提是
+  `aa/bb/cc.skein` 存在；
+- `bb.cc.dd` 需要 `aa/bb/cc.skein` 和 `aa/bb/cc/dd.skein` 都存在；
+- 直接 `import aa.bb.cc.dd` 按文件路径解析，不要求中间包文件存在。
 
 ### import 规则
 
 ```text
-import aa.bb.cc;    // 绑定 cc
-import aa.bb;       // 绑定 bb；子包通过 bb.cc 访问
-import aa;          // 绑定 aa；子包通过 aa.bb.cc 访问
+import aa.bb.cc;       // 绑定 cc
+import aa.bb;          // 绑定 bb；子包通过 bb.cc 访问
+import aa;             // 绑定 aa；子包通过 aa.bb 访问
 import aa.bb.cc as c;  // 绑定到别名 c
 import std as s;       // 标准库也可使用别名
 
-import .sibling;    // 当前包目录
-import ..common;    // 上一级目录
-import @top.pkg;    // 项目根目录
+import .sibling;       // 当前文件目录
+import ..common;       // 上一级目录
+import @top.pkg;       // 项目根目录
 ```
 
-- `import aa.bb.cc` 后可以直接使用 `cc`；
-- `import aa.bb` 后使用 `bb.cc`；
-- `import aa.bb.cc as c` 后使用 `c`，不再绑定 `cc`；
-- `.name` 相对当前包目录，`..name` 相对上一级目录；
-- `@name` 只从项目根目录解析，不回退到 `-I` / 环境变量；
-- 项目根通过从主脚本目录向上查找 `.skeinroot` 文件确定；没有标记时使用主脚本目录；
+- `import aa.bb` 的普通包基准是主脚本目录；
+- `import @aa.bb` 只从项目根解析；
+- 项目根通过从主脚本目录向上查找 `.skeinroot` 确定；没有标记时使用主脚本目录；
+- `project_root` 惰性解析：单文件脚本、只 import `std`、只 import module 时不需要；
+- `-I` / `SKEIN_PACKAGE_PATH` 只作为 module 搜索路径，不解析普通文件包；
+- 普通文件包必须在 `project_root` 内；外部复用请组织成 module；
+- module 内相对 import 不能越过 module root；
 - 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
 - 别名必须是普通标识符，`as` 是保留字；
-- 父包没有自己的源文件也可以作为子包容器；
 - 同一个包只加载一次，之后复用缓存；
 - 循环导入会报错，不会递归挂起。
+
+### include 声明包含
+
+`include` 是给项目外文件留的声明级 escape hatch，行为类似 C 的声明包含：
+
+```text
+include "shared/helpers.skein";
+```
+
+- 只允许在声明层（顶层或 `package {}` 内），函数体内报错；
+- 只导入声明类语句：`import`、`include`、`func`、`struct`、`enum`、
+  `trait`、`impl`、`let` / `const`；
+- 被包含文件可以 `import std`；相对 import 以被包含文件目录为基准；
+- 被包含文件不能声明 `package` / `module`，不能包含顶层可执行代码；
+- 默认 include-once：按 `(package, module, 规范化路径)` 去重；
+- 自动检测循环并限制嵌套深度；
+- 相对路径基于当前包含文件目录；允许 `..` 和绝对路径；
+  不受 `project_root` / `-I` / `SKEIN_PACKAGE_PATH` 限制；
+- 被包含的声明继承包含者的 package/module，`source` 指向被包含文件；
+- 同一个头文件被 main 和包分别 include 会产生两份声明，身份分别属于各自包。
+
+`include` 不做命名空间隔离，不建议作为长期库接口；外部库仍应使用 module。
 
 包内也可以导入其他包，既可以放在包块内，也可以放在文件顶层：
 
@@ -354,18 +378,18 @@ package bb {
 
 ### Module（v2，可选）
 
-顶层目录包含 `module.skein` 时，该目录成为 module；没有 manifest 的旧目录继续按原 package 规则解析。
+顶层目录包含 `module.skein` 时，该目录成为 module。module 内也只使用文件包：
 
 ```text
 math/                 # module: math
   module.skein        # 公共导出清单
-  add.skein           # package: add
-  vector.skein        # package: vector
+  add.skein           # package: add      → math.add
+  vector.skein        # package: vector   → math.vector
   internal/
-    helpers.skein     # 子目录 package: internal.helpers
+    helpers.skein     # package: helpers  → math.internal.helpers
 ```
 
-也兼容现有的目录包布局，例如 `math/add/add.skein`。
+不再支持 `math/add/add.skein` 这种目录包布局。
 
 ```skein
 // math/module.skein
@@ -393,21 +417,35 @@ import math.helpers as helpers;
 规则：
 
 - module 名必须与顶层目录名一致；
-- package 名必须与文件或目录名一致；
+- package 名必须与文件名一致（只写叶子名）；
 - 无 `export` 的符号是 package 私有；
 - package 的 `export` 只提升到 module 内部；
 - 只有 `module.skein` 中声明的符号/package 才能从外部访问；
-- `export package internal.helpers as helpers;` 把子目录 package 暴露为 `math.helpers`；
+- `export package internal.helpers as helpers;` 把 `math/internal/helpers.skein`
+  暴露为 `math.helpers`；
 - 外部不能通过物理路径 `import math.internal.helpers`；
-- module 内部使用普通相对导入，例如 `import .internal.helpers` 或 `import ..internal.helpers`；
+- module 内部使用普通相对导入，例如 `import .internal.helpers`；
 - module 内部写绝对 `import math` / `import math.helpers` 时也解析为公共 API；
   访问未导出的内部 package 请使用相对导入；
-- module 根目录不能包含 `<module>.skein` 或 `index.skein`，package 应放在子目录；
+- module 内相对导入不能越过 module root；
+- module 根目录不能包含 `<module>.skein` 或 `index.skein`；
+- 禁止嵌套 `module.skein`；
+- 直接运行 module 内的文件会按独立 `main` 入口处理，不继承 module 身份；
 - 清单中的符号必须已在目标 package 中 `export`，否则启动报错；
 - 重复别名、缺失 package、module 名不匹配都会报错；
 - 同一个 module 只加载一次并复用缓存；
-- `python3 tools/check_modules.py <project-root>` 可以离线校验 manifest 结构和目标 package，
+- `python3 tools/check_modules.py <project-root>` 可以离线校验 manifest 结构，
   `--list` 列出公共导出；它不执行 package 代码。
+
+module 内类型和包的元数据：
+
+```text
+type_package(x)      // "math.add" / "math.internal.helpers"
+type_module_name(x)  // "math"
+type_source(x)       // 源文件路径
+```
+
+入口脚本和普通文件包的 `type_module_name(x)` 为空字符串。
 
 ### 内置标准库 std
 
@@ -2453,6 +2491,9 @@ print(std.meta.has_type("int"));      // true
 `std.meta` 只查询已加载且可见的类型：当前包/当前源文件的类型可见，其他包
 的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
 `fields` / `variants` / `methods` / `traits` 对不适用的类型返回空列表。
+返回字典同时包含 `package`、`module`、`source`：
+`package` 是完整包身份，`module` 是 Module v2 容器名（普通包和入口为空字符串），
+`source` 是源文件路径。
 `std.meta` 不返回值默认值，只提供 `has_default` 标记。
 
 `std.lru` 是 C++ 值类型，每次更新返回新 lru：

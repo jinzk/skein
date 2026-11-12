@@ -17,12 +17,40 @@
 #include "scopestack.h"
 #include "gc.h"
 #include "eval.h"
+#include "package.h"
 #include "vm.h"
 #include "static_type.h"
 #include "typecheck.h"
 
 extern int yylex();
 extern int yyparse();
+
+thread_local bool g_include_collect = false;
+thread_local bool g_include_invalid = false;
+thread_local std::vector<struct ast *> g_include_statements;
+thread_local int g_include_function_depth = 0;
+
+static bool include_declaration_allowed(struct ast *node) {
+    if (!node)
+        return true;
+    switch (node->nodetype) {
+        case 'Z':  /* func */
+        case 'Y':  /* struct */
+        case 'H':  /* impl */
+        case 't':  /* trait */
+        case NODE_ENUM_DECL:
+        case 'D':  /* let / const */
+        case NODE_DESTRUCTURE:
+        case 'J':  /* import */
+        case NODE_INCLUDE:
+            return true;
+        case 'L':
+            return include_declaration_allowed(node->l) &&
+                   include_declaration_allowed(node->r);
+        default:
+            return false;
+    }
+}
 
 static int flow_keyword_line = 0;
 static int flow_keyword_column = 0;
@@ -52,6 +80,8 @@ static bool finish_function() {
         !func_yield_counts.empty() && func_yield_counts.back() > 0;
     if (!func_yield_counts.empty())
         func_yield_counts.pop_back();
+    if (g_include_function_depth > 0)
+        --g_include_function_depth;
     return generator;
 }
 
@@ -885,7 +915,7 @@ static struct type_constraint *runtime_type_or_error(
 %token SHL_ASSIGN "<<=" SHR_ASSIGN ">>="
 %token NULLVAL "null" TRUE "true" FALSE "false"
 %token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
-%token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
+%token INCLUDE "include"%token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 %token INC "++" DEC "--"
 %token ELLIPSIS "..."
 %token DOTDOT ".."
@@ -1083,6 +1113,14 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
     | IMPORT importref ';'                { $$ = newimport($2, NULL); }
     | IMPORT importref AS NAME ';'        { $$ = newimport($2, $4); }
+    | INCLUDE XSTRING ';' {
+        if (g_include_function_depth > 0) {
+            yyerror("include is only allowed at declaration level");
+            $$ = NULL;
+        } else {
+            $$ = newinclude($2);
+        }
+      }
     | LET NAME '=' exp ';'                { $$ = newvar($2, $4); }
     | LET NAME ':' type '=' exp ';'       { $$ = newvar($2, $6, false, false, $4); }
     | LET NAME ':' type ';'               { $$ = newvar($2, NULL, false, false, $4); }
@@ -1809,6 +1847,7 @@ slice_bound: %empty                       { $$ = NULL; }
 
 funcstart: FUNC {
         push_func_location(g_token_line, g_token_column);
+        ++g_include_function_depth;
         start_function();
     }
     ;
@@ -2135,6 +2174,22 @@ top_statement: top_expression EOL {
         active_eval_context().runtime_error_count = 0;
         diag_set_location(0, 0);
 
+        if (g_include_collect) {
+            if ($1 && !include_declaration_allowed($1)) {
+                diag_set_location($1->line, $1->column);
+                yyerror("include file may only contain declarations");
+                g_include_invalid = true;
+            }
+            if ($1 && !g_include_invalid)
+                g_include_statements.push_back($1);
+            else if ($1)
+                treefree($1);
+            $1 = NULL;
+            $$ = NULL;
+            if (g_include_invalid)
+                YYABORT;
+        } else {
+
         if (!g_statement_invalid && $1 &&
             !skein::typecheck::check_statement($1))
             g_statement_invalid = true;
@@ -2189,6 +2244,7 @@ top_statement: top_expression EOL {
         if (g_interrupted || sys_exit_requested() ||
             (!g_interactive && g_script_stop))
             YYABORT;
+        }
     }
     | error EOL {
         yyerrok;

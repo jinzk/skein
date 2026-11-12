@@ -43,6 +43,7 @@ constexpr int NODE_DESTRUCTURE = '`';
 constexpr int NODE_ENUM_DECL = '<';
 constexpr int NODE_ENUM_VARIANT = '>';
 constexpr int NODE_ENUM_LITERAL = '?';
+constexpr int NODE_INCLUDE = 0x130;
 
 
 struct ast {
@@ -432,6 +433,13 @@ struct import_node {
     char *base;
 };
 
+struct include_node {
+    int nodetype;
+    int line;
+    int column;
+    char *path;
+};
+
 struct symref {
     int nodetype;
     int line;
@@ -539,6 +547,7 @@ struct ast *newyield(struct ast *value);
 struct ast *newdefer(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
 struct ast *newimport(char *path, char *alias);
+struct ast *newinclude(char *path);
 void push_func_location(int line, int column);
 void clear_func_locations();
 std::shared_ptr<function_code> get_function_code(struct funcdef *node);

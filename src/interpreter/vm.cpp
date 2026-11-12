@@ -2423,18 +2423,30 @@ public:
                             slot_const_[ins.b] = 0;
                     } else {
                         if (isrepeated(name)) {
-                            yyerror("import name already exists: %s", name);
+                            struct symbol *existing = lookupsym(name);
+                            bool same_namespace =
+                                existing && existing->val && ns &&
+                                existing->val->type == T_dict &&
+                                ns->type == T_dict &&
+                                ((struct dict_value_t *)existing->val)
+                                        ->payload ==
+                                    ((struct dict_value_t *)ns)->payload;
+                            if (!same_namespace) {
+                                yyerror("import name already exists: %s",
+                                        name);
+                                freeval(ns);
+                                return abort_error();
+                            }
                             freeval(ns);
-                            return abort_error();
+                        } else {
+                            struct symbol *sym = newsym(name);
+                            sym->val = ns;
+                            savesym(sym);
+                            if (ins.b != UINT32_MAX &&
+                                ins.b < slot_symbols_.size())
+                                slot_symbols_[ins.b] = sym;
+                            invalidate_name_cache(name);
                         }
-
-                        struct symbol *sym = newsym(name);
-                        sym->val = ns;
-                        savesym(sym);
-                        if (ins.b != UINT32_MAX &&
-                            ins.b < slot_symbols_.size())
-                            slot_symbols_[ins.b] = sym;
-                        invalidate_name_cache(name);
                     }
 
                     const std::string &path = desc.path;

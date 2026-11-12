@@ -792,6 +792,19 @@ struct ast *newimport(char *path, char *alias) {
     return (struct ast *)a;
 }
 
+struct ast *newinclude(char *path) {
+    struct include_node *a =
+        (struct include_node *)std::malloc(sizeof(struct include_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_INCLUDE;
+    set_loc(a, 0, 0);
+    a->path = path;
+    return (struct ast *)a;
+}
+
 struct symlist_metadata {
     struct ast *default_value = NULL;
     struct ast *pattern = NULL;
@@ -1440,6 +1453,11 @@ void treefree(struct ast *a) {
             std::free(imp->path);
             std::free(imp->alias);
             std::free(imp->base);
+            break;
+        }
+        case NODE_INCLUDE: {
+            struct include_node *inc = (struct include_node *)a;
+            std::free(inc->path);
             break;
         }
         case 'X':

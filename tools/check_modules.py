@@ -7,7 +7,7 @@ Usage:
 Checks, for every module.skein found under the root:
 - module name matches the containing directory;
 - the module root does not contain <module>.skein or index.skein;
-- every export target resolves to a package file or package directory.
+- every export target resolves to a package file.
 """
 from __future__ import annotations
 
@@ -33,15 +33,14 @@ def find_modules(root: Path):
 def target_exists(root: Path, package_path: str) -> bool:
     relative = Path(*package_path.split("."))
     file_path = root / relative.with_suffix(".skein")
-    if file_path.is_file():
-        return True
-    directory = root / relative
-    if not directory.is_dir():
-        return False
-    name = relative.name
-    return ((directory / f"{name}.skein").is_file()
-            or (directory / "index.skein").is_file()
-            or len(list(directory.glob("*.skein"))) == 1)
+    return file_path.is_file()
+
+
+def nested_modules(root: Path):
+    return sorted(
+        path for path in root.rglob("module.skein")
+        if path.parent != root
+    )
 
 
 def check_manifest(path: Path, list_only: bool):
@@ -60,6 +59,10 @@ def check_manifest(path: Path, list_only: bool):
             f"{path}: module root contains package file '{name}.skein'")
     if (root / "index.skein").is_file():
         errors.append(f"{path}: module root contains index.skein")
+    nested = nested_modules(root)
+    if nested:
+        errors.append(
+            f"{path}: nested module.skein is not supported: {nested[0]}")
 
     exports = []
     for export in EXPORT_RE.finditer(text):

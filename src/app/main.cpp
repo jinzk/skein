@@ -254,6 +254,7 @@ int main(int argc, char **argv) {
     }
     package_configure(script_path, package_dirs);
     diag_set_package_name("main");
+    diag_set_module_name("");
     if (!script_path.empty() && script_path != "-")
         diag_set_source_name(script_path);
 

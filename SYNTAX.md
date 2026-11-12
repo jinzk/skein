@@ -2327,12 +2327,16 @@ import @top.pkg;        // 项目根目录
 
 - `import aa.bb.cc;` 绑定最后一个包名 `cc`；
 - `import aa.bb;` 绑定 `bb`，子包通过 `bb.cc` 访问；
-- `import aa;` 绑定 `aa`，子包通过 `aa.bb.cc` 访问；
+- `import aa;` 绑定 `aa`，子包通过 `aa.bb` 访问；
 - `import aa.bb.cc as c;` 使用别名 `c` 绑定，后续通过 `c.value` 访问；
-- `.name` 相对于导入语句所在文件的包目录；
-- `..name` 相对于该包目录的上一级；
+- `.name` 相对于导入语句所在文件目录；
+- `..name` 相对于该目录的上一级；
+- `import aa.bb` 的普通包基准是主脚本目录；
 - `@name` 只从项目根目录解析，不回退到 `-I` 或环境变量；
 - 项目根由从主脚本目录向上查找的 `.skeinroot` 标记文件确定；没有标记时使用主脚本目录（stdin 模式使用当前目录）；
+- `project_root` 惰性解析：单文件脚本、只 import `std` 或只 import module 时不需要；
+- `-I` / `SKEIN_PACKAGE_PATH` 只用于 module，不解析普通文件包；
+- 普通文件包必须在 `project_root` 内；
 - 裸 `std` 才是内置标准库；`.std`、`..std`、`@std` 都按文件系统包路径解析；
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
@@ -2340,28 +2344,46 @@ import @top.pkg;        // 项目根目录
 - import 语句需要分号；
 - 包名绑定到当前作用域。
 
+### 6.2.1 include 声明包含
+
+```text
+include "shared/helpers.skein";
+```
+
+- 只在声明层允许（顶层或 `package {}` 内）；
+- 只导入声明：`import`、`include`、`func`、`struct`、`enum`、`trait`、
+  `impl`、`let` / `const`；
+- 被包含文件可 `import std`；相对 import 以被包含文件目录为基准；
+- 被包含文件不能声明 `package` / `module`，不能含顶层可执行代码；
+- 默认 include-once，按 `(package, module, 规范化路径)` 去重；
+- 检测循环并限制嵌套深度；
+- 相对路径基于当前包含文件目录，允许 `..` 和绝对路径；
+- 被包含声明继承包含者 package/module，`source` 指向被包含文件。
+
 ### 6.3 目录约定
+
+每个可导入包必须是真实 `.skein` 文件：
 
 ```text
 aa/
+  bb.skein
   bb/
-    cc/
-      cc.skein
+    cc.skein
 ```
-
-导入：
 
 ```text
-import aa.bb.cc;
+import aa.bb;
 ```
 
-入口文件优先使用 `<name>.skein`，其次 `index.skein`；如果目录中只有一个 `.skein` 文件，也会使用它。
-
-父目录没有源文件时，也可以作为纯子包容器。
+- 包块名只写叶子名：`aa/bb/cc.skein` 写 `package cc`；
+- 子包根目录 = 包文件父目录 / 包文件 stem；
+- `bb.cc` 需要 `aa/bb/cc.skein` 存在；
+- 不支持 `<name>/<name>.skein`、`index.skein`、单文件目录或隐式命名空间容器；
+- 直接 `import aa.bb.cc` 按文件路径解析，不要求中间包文件存在。
 
 ### 6.4 Module（v2）
 
-顶层目录包含 `module.skein` 时成为 module；没有 manifest 的目录继续按 package 解析。
+顶层目录包含 `module.skein` 时成为 module。module 内也只使用文件包：
 
 ```text
 math/
@@ -2384,7 +2406,7 @@ module math {
 ```
 
 - `module` 名必须匹配目录名；
-- package 名必须匹配文件或目录名；
+- package 名必须匹配文件名（只写叶子名）；
 - `export <path>.<symbol> [as alias]` 扁平化导出符号；
 - `export package <path> [as alias]` 导出 package namespace；
 - 只有 manifest 声明的符号/package 对 module 外部可见；
@@ -2393,9 +2415,12 @@ module math {
 - 外部不能 `import math.internal.helpers`，只能 `import math` 或使用公共 package 别名；
 - module 内部使用普通相对导入；绝对 `import math` / `import math.helpers`
   也解析为公共 API，不能用于访问未导出的内部 package；
+- module 内相对导入不能越过 module root；
 - module 根目录不能包含 `<module>.skein` 或 `index.skein`；
+- 禁止嵌套 `module.skein`；
+- 直接运行 module 内文件按独立 `main` 入口处理；
 - manifest 中的目标 package/符号不存在、别名重复、module 名不匹配都会报错；
-- 旧 package/import 行为保持不变。
+- `type_package(x)` 返回 `math.add` 等完整包身份，`type_module_name(x)` 返回 `math`。
 
 ### 6.5 内置标准库 std
 

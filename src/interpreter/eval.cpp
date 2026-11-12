@@ -88,7 +88,15 @@ struct value_t *eval(struct ast *a) {
                                    ? imp->alias
                                    : import_binding_name(imp->path);
             if (isrepeated(name)) {
-                yyerror("import name already exists: %s", name);
+                struct symbol *existing = lookupsym(name);
+                bool same_namespace =
+                    existing && existing->val && ns &&
+                    existing->val->type == T_dict && ns->type == T_dict &&
+                    ((struct dict_value_t *)existing->val)->payload ==
+                        ((struct dict_value_t *)ns)->payload;
+                if (!same_namespace) {
+                    yyerror("import name already exists: %s", name);
+                }
                 freeval(ns);
             } else {
                 struct symbol *sym = newsym(name);
@@ -106,6 +114,20 @@ struct value_t *eval(struct ast *a) {
                         imported_package.empty() ? path
                                                  : imported_package.c_str());
                 }
+            }
+            break;
+        }
+
+        case NODE_INCLUDE: {
+            struct include_node *inc = (struct include_node *)a;
+            if (diag_call_depth() > 0) {
+                yyerror("include is only allowed at declaration level");
+                break;
+            }
+            std::string include_error;
+            if (!evaluate_include_source(inc->path, include_error)) {
+                yyerror("include %s: %s", inc->path,
+                        include_error.c_str());
             }
             break;
         }

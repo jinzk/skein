@@ -379,6 +379,42 @@ def run_cases():
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "7\n", repr(proc.stdout)
 
+    # Nested modules are rejected.
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "math/module.skein",
+              "module math { export add.add; }\n")
+        write(tmp, "math/add.skein",
+              "package add { export func add(a, b) { return a + b; } }\n")
+        write(tmp, "math/sub/module.skein",
+              "module sub { export leaf.v; }\n")
+        write(tmp, "math/sub/leaf.skein",
+              "package leaf { export let v = 1; }\n")
+        run_module_error(
+            tmp,
+            "import @math;\n",
+            "nested module.skein is not supported",
+        )
+
+    # Module-relative imports may not escape the module root.
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "esc/module.skein",
+              "module esc { export add.go; }\n")
+        write(
+            tmp,
+            "esc/add.skein",
+            "package add {\n"
+            "  import ..outside;\n"
+            "  export let go = outside.value;\n"
+            "}\n",
+        )
+        write(tmp, "outside.skein",
+              'package outside { export let value = 1; }\n')
+        run_module_error(
+            tmp,
+            "import @esc;\n",
+            "relative import escapes module root",
+        )
+
     # Canonical identity is derived from the physical file, not the import path.
     with tempfile.TemporaryDirectory() as tmp:
         open(os.path.join(tmp, ".skeinroot"), "w", encoding="utf-8").close()

@@ -6,6 +6,7 @@
 
 struct value_t;
 struct scope_t;
+struct ast;
 
 /* Configure package search roots before parsing the entry source. */
 void package_configure(const std::string &source_path,
@@ -22,6 +23,11 @@ const std::string &package_current_import_base();
  * lexical directory captured for relative imports. */
 value_t *package_import(const char *dotted_path, const char *base_dir,
                         std::string *package_out, std::string &error);
+
+/* Parse and evaluate a declaration-only include file in the current
+ * package/module scope; package/module declarations and executable statements
+ * are rejected. */
+bool evaluate_include_source(const char *path, std::string &error);
 
 /* Resolve the package-cache key used by package_import for a transferable
  * import.  Returns false for native modules and std submodules, which do not

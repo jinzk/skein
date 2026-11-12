@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Keep README.md, SYNTAX.md, and the builtin registry in sync.
+"""Keep docs/stdlib.md, SYNTAX.md, and the builtin registry in sync.
 
 Checks:
-  1. README and SYNTAX expose the same std module list, in the same order.
+  1. docs/stdlib.md and SYNTAX expose the same std module list, in the same
+     order.
   2. Every embedded package listed in CMakeLists.txt is documented in both
      files and registered in package.cpp.
   3. Every builtin function registered in package.cpp or std_namespace.cpp
-     appears in the README function list.
-  4. Every README function-list entry belongs to a known module and is
+     appears in the stdlib function list.
+  4. Every stdlib function-list entry belongs to a known module and is
      actually registered.
 
 Exit status is non-zero when any check fails.
@@ -18,7 +19,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-README = ROOT / "README.md"
+STDLIB = ROOT / "docs" / "stdlib.md"
 SYNTAX = ROOT / "SYNTAX.md"
 CMAKE = ROOT / "CMakeLists.txt"
 PACKAGE = ROOT / "src/interpreter/package.cpp"
@@ -88,13 +89,13 @@ NON_FUNCTION_EXPORTS = {
 }
 
 
-def function_list(readme_text):
+def function_list(stdlib_text):
     marker = "当前提供的函数："
-    start = readme_text.find(marker)
+    start = stdlib_text.find(marker)
     if start < 0:
-        fail("README.md: cannot find the function list")
+        fail("docs/stdlib.md: cannot find the function list")
         return {}
-    block = readme_text[start:]
+    block = stdlib_text[start:]
     entries = re.findall(
         r"^std\.([a-z0-9_]+)\.([a-z0-9_]+)\s*$", block, re.M)
     listed = {}
@@ -104,36 +105,37 @@ def function_list(readme_text):
 
 
 def main():
-    readme_text = read(README)
+    stdlib_text = read(STDLIB)
     syntax_text = read(SYNTAX)
     cmake_text = read(CMAKE)
     package_text = read(PACKAGE)
     std_namespace_text = read(STD_NAMESPACE)
 
-    readme_modules = module_list(readme_text, "README.md")
+    stdlib_modules = module_list(stdlib_text, "docs/stdlib.md")
     syntax_modules = module_list(syntax_text, "SYNTAX.md")
 
-    if readme_modules != syntax_modules:
-        only_readme = [m for m in readme_modules if m not in syntax_modules]
-        only_syntax = [m for m in syntax_modules if m not in readme_modules]
-        if only_readme:
-            fail("README module list has entries missing from SYNTAX: "
-                 + ", ".join(only_readme))
+    if stdlib_modules != syntax_modules:
+        only_stdlib = [m for m in stdlib_modules if m not in syntax_modules]
+        only_syntax = [m for m in syntax_modules if m not in stdlib_modules]
+        if only_stdlib:
+            fail("docs/stdlib.md module list has entries missing from SYNTAX: "
+                 + ", ".join(only_stdlib))
         if only_syntax:
-            fail("SYNTAX module list has entries missing from README: "
+            fail("SYNTAX module list has entries missing from docs/stdlib.md: "
                  + ", ".join(only_syntax))
-        if not only_readme and not only_syntax:
-            fail("README and SYNTAX module lists are in a different order")
+        if not only_stdlib and not only_syntax:
+            fail("docs/stdlib.md and SYNTAX module lists are in a different order")
 
     registry = builtin_registry(package_text)
     for module, functions in builtin_registry(std_namespace_text).items():
         registry.setdefault(module, set()).update(functions)
-    listed = function_list(readme_text)
+    listed = function_list(stdlib_text)
 
     for package in embedded_packages(cmake_text):
         module = f"std.{package}"
-        if module not in readme_modules:
-            fail(f"embedded package {module} missing from README module list")
+        if module not in stdlib_modules:
+            fail(f"embedded package {module} missing from docs/stdlib.md "
+                 "module list")
         if module not in syntax_modules:
             fail(f"embedded package {module} missing from SYNTAX module list")
         if f'"std.{package}"' not in package_text:
@@ -143,18 +145,18 @@ def main():
         documented = listed.get(module, set())
         missing = sorted(functions - documented)
         if missing:
-            fail(f"README function list missing std.{module}."
+            fail(f"docs/stdlib.md function list missing std.{module}."
                  + f"{{{','.join(missing)}}}")
 
     for module, functions in sorted(listed.items()):
         if module not in registry:
-            fail(f"README documents unknown std module: std.{module}")
+            fail(f"docs/stdlib.md documents unknown std module: std.{module}")
             continue
         stale = sorted(
             functions - registry[module]
             - NON_FUNCTION_EXPORTS.get(module, set()))
         if stale:
-            fail(f"README documents unregistered std.{module}."
+            fail(f"docs/stdlib.md documents unregistered std.{module}."
                  + f"{{{','.join(stale)}}}")
 
     if errors:
@@ -162,7 +164,7 @@ def main():
             print(f"docs sync: {message}", file=sys.stderr)
         return 1
 
-    print("docs sync: README, SYNTAX, CMake, and package registry agree")
+    print("docs sync: docs/stdlib.md, SYNTAX, CMake, and package registry agree")
     return 0
 
 

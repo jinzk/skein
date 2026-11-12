@@ -288,9 +288,13 @@ docs/            架构、编码、FFI、Unicode、字节码与 JIT 计划文档
 lib/std/         以 Skein 编写的标准库包（构建时嵌入）
 tests/           自动化回归测试（test_skein.py + cases/）
 tools/           生成器与一致性检查脚本
-third_party/     llhttp、utf8proc
+third_party/     llhttp、utf8proc、asmjit
 cmake/           构建辅助脚本
 ```
 
 每层只向本层及以下层暴露 include 目录，配合 `tools/check_boundaries.py`
 同时约束源码包含关系和静态库符号依赖。
+
+## License
+
+Skein 以 MIT License 发布，详见 [LICENSE](LICENSE)。随仓库分发的第三方组件及其许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

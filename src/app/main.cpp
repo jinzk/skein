@@ -337,10 +337,14 @@ int main(int argc, char **argv) {
         status = 0;
     } else if (g_interrupted) {
         status = 130;
+    } else if (drain_requested()) {
+        /* A SIGTERM drain is a controlled shutdown, not a crash. */
+        status = 0;
     } else if (diag_error_count() > 0) {
         status = 1;
     } else if (status != 0) {
         status = 1;
     }
+    drain_finish();
     return status;
 }

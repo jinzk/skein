@@ -63,6 +63,12 @@ static void on_sigint(int) {
     g_interrupted = 1;
 }
 
+static void on_sigterm(int) {
+    /* Only async-signal-safe work here: request a graceful drain and let the
+     * accept/join loops observe it. */
+    g_drain_requested = 1;
+}
+
 void platform_init() {
     /* Writes to a closed worker/network pipe should return EPIPE, not kill
      * the interpreter with SIGPIPE. */
@@ -134,6 +140,14 @@ void platform_install_interrupt_handler() {
     /* No SA_RESTART: a blocking read must return so we can cancel the line. */
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, nullptr);
+
+    /* SIGTERM requests a graceful drain.  SA_RESTART keeps in-flight reads
+     * running; shutdown is driven by polling the drain flag. */
+    struct sigaction term = {};
+    term.sa_handler = on_sigterm;
+    sigemptyset(&term.sa_mask);
+    term.sa_flags = SA_RESTART;
+    sigaction(SIGTERM, &term, nullptr);
 }
 
 bool platform_run_command(

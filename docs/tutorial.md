@@ -77,6 +77,26 @@ build\skein.exe script.skein
 
 shebang 行同样会被跳过。
 
+### 生产部署与优雅关闭
+
+生产环境使用“平台滚动更新 + 运行时 SIGTERM drain”，不需要 `--watch` 或
+`reuse_port` 监听句柄交接：
+
+```bash
+SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
+```
+
+- 收到 `SIGTERM` 后停止 accept、关闭监听 socket，等待在途请求完成；
+- 超过 `SKEIN_DRAIN_TIMEOUT_MS`（默认 20000，`0` 表示不设截止时间）后强制
+  关闭剩余连接；
+- `serve_processes` 会把 `SIGTERM` 转发给 worker 并等待其退出；
+- drain 完成时退出码为 `0`；`Ctrl-C`（`SIGINT`）仍然是中断语义；
+- Kubernetes 中让 `terminationGracePeriodSeconds` 大于 drain 截止时间，
+  并用 `preStop` 留出摘流时间；readiness 探针可以直接用 `std.http` 实现。
+
+完整行为、`ProcessServer` / `ThreadServer` 的超时规则和 Kubernetes 示例见
+`docs/stdlib.md` 的“优雅关闭（SIGTERM drain）”。
+
 交互模式：
 
 - 只有 stdin 是终端时才显示 `> ` / `...> ` 提示符；管道输入不显示提示符；

@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -15,6 +18,7 @@ namespace fs = std::filesystem;
 
 volatile std::sig_atomic_t g_interrupted = 0;
 volatile std::sig_atomic_t g_stdin_eof = 0;
+volatile std::sig_atomic_t g_drain_requested = 0;
 
 thread_local bool g_interactive = true;
 thread_local bool g_show_prompt = false;
@@ -22,6 +26,80 @@ thread_local int g_package_loading = 0;
 thread_local bool g_keep_going = false;
 thread_local bool g_script_stop = false;
 thread_local bool g_statement_invalid = false;
+
+namespace {
+
+constexpr long long kDefaultDrainTimeoutMs = 20000;
+
+/* Cached SKEIN_DRAIN_TIMEOUT_MS result; -1 means "not read yet". */
+std::atomic<long long> g_drain_timeout{-1};
+/* Monotonic start of the drain deadline; 0 means "not started yet". */
+std::atomic<long long> g_drain_started_ms{0};
+/* Set once the runtime finished shutting down. */
+std::atomic<bool> g_drain_finished{false};
+
+long long monotonic_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+}  // namespace
+
+void drain_request() { g_drain_requested = 1; }
+
+bool drain_requested() { return g_drain_requested != 0; }
+
+long long drain_timeout_ms() {
+    long long cached = g_drain_timeout.load(std::memory_order_relaxed);
+    if (cached >= 0)
+        return cached;
+
+    long long value = kDefaultDrainTimeoutMs;
+    const char *env = std::getenv("SKEIN_DRAIN_TIMEOUT_MS");
+    if (env && *env) {
+        char *end = nullptr;
+        errno = 0;
+        long long parsed = std::strtoll(env, &end, 10);
+        if (errno == 0 && end && *end == '\0' && parsed >= 0)
+            value = parsed;
+    }
+    g_drain_timeout.store(value, std::memory_order_relaxed);
+    return value;
+}
+
+long long drain_remaining_ms() {
+    if (!drain_requested())
+        return -1;
+
+    const long long limit = drain_timeout_ms();
+    if (limit <= 0)
+        return -1;
+
+    const long long now = monotonic_ms();
+    long long started = g_drain_started_ms.load(std::memory_order_acquire);
+    if (started == 0) {
+        long long expected = 0;
+        if (g_drain_started_ms.compare_exchange_strong(
+                expected, now, std::memory_order_acq_rel))
+            started = now;
+        else
+            started = expected;
+    }
+
+    const long long elapsed = now > started ? now - started : 0;
+    if (elapsed >= limit)
+        return 0;
+    return limit - elapsed;
+}
+
+bool drain_expired() { return drain_remaining_ms() == 0; }
+
+void drain_finish() { g_drain_finished.store(true, std::memory_order_release); }
+
+bool drain_finished() {
+    return g_drain_finished.load(std::memory_order_acquire);
+}
 
 namespace {
 

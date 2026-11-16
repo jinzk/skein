@@ -493,8 +493,13 @@ void close_worker(worker_slot &slot, bool kill_if_running, bool force) {
                 freeval(wait_result);
         }
         if (kill_if_running) {
+            std::vector<value_t *> kill_args{slot.process};
+            if (force)
+                kill_args.push_back(newintval(9));
             value_t *kill_result = call_process_spawn_builtin(
-                B_process_kill, {slot.process});
+                B_process_kill, kill_args);
+            if (kill_args.size() > 1)
+                freeval(kill_args[1]);
             if (kill_result)
                 freeval(kill_result);
         }

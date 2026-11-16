@@ -16,6 +16,36 @@
 extern volatile std::sig_atomic_t g_interrupted;
 extern volatile std::sig_atomic_t g_stdin_eof;
 
+/*
+ * Graceful shutdown request (SIGTERM).  The signal handler only sets
+ * `g_drain_requested`; evaluation continues so that in-flight work can
+ * finish.  Use the helpers below to poll for a drain and its deadline.
+ */
+extern volatile std::sig_atomic_t g_drain_requested;
+
+void drain_request();
+bool drain_requested();
+
+/*
+ * Drain deadline in milliseconds, read from SKEIN_DRAIN_TIMEOUT_MS once.
+ * Defaults to 20000.  `0` means no deadline.
+ */
+long long drain_timeout_ms();
+/*
+ * Remaining drain time in milliseconds.  Returns -1 when no drain has been
+ * requested or when no deadline is configured, and 0 once the deadline has
+ * passed.  The first call starts the clock.
+ */
+long long drain_remaining_ms();
+bool drain_expired();
+
+/*
+ * Marks runtime shutdown as finished.  The Windows console handler waits for
+ * this before returning so the process survives long enough to drain.
+ */
+void drain_finish();
+bool drain_finished();
+
 extern thread_local bool g_interactive;
 extern thread_local bool g_show_prompt;
 extern thread_local int g_package_loading;

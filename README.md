@@ -165,6 +165,7 @@ std.http.close(server);
 ```
 
 - HTTP/1.1 和 HTTP/2 客户端 / 服务端，支持 keep-alive、cookie jar、mTLS、ALPN 和 `reuse_port`（具体能力随协议和方向不同）；
+- 生产环境支持 SIGTERM 优雅关闭：停止 accept、等待在途请求、到期强制关闭，`SKEIN_DRAIN_TIMEOUT_MS` 控制截止时间（默认 20000ms）；
 - WebSocket 客户端 / 服务端，基于 HTTP/1.1 Upgrade；
 - TLS 支持 SNI 多证书、session reuse 和 `https://`；
 - 所有主要网络操作都有同步和 task 两种形式；`close` 等仍是同步操作。

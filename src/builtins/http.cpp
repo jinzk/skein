@@ -57,6 +57,7 @@
 namespace {
 
 value_t *await_task_value(value_t *task_value);
+bool await_task_timeout(const task_ptr &task, long long timeout_ms);
 std::string http_platform_name();
 bool request_unsupported_feature(value_t *request,
                                  std::string &message, bool allow_sse,
@@ -65,6 +66,20 @@ std::shared_ptr<http_shared_state> map_shared_state_file(
     const std::string &path, bool create, std::string &error);
 
 constexpr long long kHttpShutdownForceGraceMs = 5000;
+
+#if defined(_WIN32)
+constexpr int kForceKillSignal = 9;
+#else
+constexpr int kForceKillSignal = SIGKILL;
+#endif
+
+/* Use the SIGTERM drain deadline when the caller did not provide one. */
+long long drain_effective_timeout(long long timeout_ms) {
+    if (!drain_requested() || timeout_ms > 0)
+        return timeout_ms;
+    const long long remaining = drain_remaining_ms();
+    return remaining < 0 ? 0 : remaining;
+}
 
 void free_args(std::vector<value_t *> &args) {
     for (size_t i = 0; i < args.size(); ++i)
@@ -3077,6 +3092,31 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
         [socket_copy, handler_copy, state, cert_file, key_file, client_ca_file,
          client_auth, alpn, sni_certs, connection_fn]() {
         std::vector<task_ptr> connections;
+        bool listener_closed = false;
+        auto close_listener = [&listener_closed, socket_copy, state]() {
+            state->shared->stopping.store(true);
+            if (listener_closed)
+                return;
+            listener_closed = true;
+            /* Stop accepting immediately so the kernel does not queue new
+             * connections while in-flight requests drain. */
+            close_socket(socket_copy);
+        };
+        auto pending_connections = [&connections]() -> std::size_t {
+            std::size_t pending = 0;
+            for (const task_ptr &task : connections)
+                if (task_get_state(task) == TASK_STATE_PENDING)
+                    ++pending;
+            return pending;
+        };
+        auto wait_one_connection = [&connections](long long timeout_ms) -> bool {
+            for (const task_ptr &task : connections) {
+                if (task_get_state(task) != TASK_STATE_PENDING)
+                    continue;
+                return await_task_timeout(task, timeout_ms);
+            }
+            return true;
+        };
         auto reserve_connection = [state]() -> bool {
             if (state->max_connections <= 0)
                 return true;
@@ -3094,11 +3134,13 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                 state->shared->active_connections.fetch_sub(1);
         };
         for (;;) {
-            if (state->shared->stopping.load())
+            if (state->shared->stopping.load() || drain_requested()) {
+                close_listener();
                 break;
+            }
             if (state->max_requests != 0 &&
                 state->shared->served.load() >= state->max_requests) {
-                state->shared->stopping.store(true);
+                close_listener();
                 break;
             }
             for (size_t i = 0; i < connections.size();) {
@@ -3131,17 +3173,32 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
                     timed_out =
                         message.find("timed out") != std::string::npos;
                 }
+                const bool stopping = listener_closed ||
+                                      drain_requested() ||
+                                      state->shared->stopping.load();
                 if (timed_out) {
                     freeval(captured.error);
+                    if (stopping) {
+                        close_listener();
+                        break;
+                    }
                     continue;
                 }
-                if (captured.failed && captured.error)
+                if (captured.failed && captured.error && !stopping)
                     eval_raise(captured.error);
                 else
                     freeval(captured.error);
                 break;
             }
             freeval(captured.error);
+
+            if (drain_requested() ||
+                state->shared->stopping.load()) {
+                close_socket(client);
+                freeval(client);
+                close_listener();
+                break;
+            }
 
             value_t *stream = client;
             if (!cert_file.empty()) {
@@ -3190,7 +3247,8 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
             bool reserved = false;
             if (state->max_connections > 0) {
                 while (!reserved) {
-                    if (state->shared->stopping.load())
+                    if (state->shared->stopping.load() ||
+                        drain_requested())
                         break;
                     reserved = reserve_connection();
                     if (!reserved) {
@@ -3258,16 +3316,38 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
             connections.push_back(connection_task);
         }
 
-        state->shared->stopping.store(true);
-        for (size_t i = 0; i < connections.size(); ++i) {
-            if (task_get_state(connections[i]) != TASK_STATE_PENDING)
-                continue;
-            eval_capture_snapshot snapshot;
-            eval_capture_begin(snapshot);
-            value_t *result = fiber_await_task(connections[i]);
-            eval_capture_result captured = eval_capture_end(snapshot);
-            freeval(result);
-            freeval(captured.error);
+        close_listener();
+
+        /* Drain accepted connections, bounded by the SIGTERM deadline when
+         * one is configured. */
+        while (pending_connections() != 0) {
+            long long remaining = drain_requested() ? drain_remaining_ms() : -1;
+            if (drain_requested() && remaining == 0)
+                break;
+            if (!wait_one_connection(remaining))
+                break;
+        }
+
+        if (pending_connections() != 0) {
+            /* Deadline (or interrupt) hit: close live sockets, cancel the
+             * connection tasks and give them a short grace period. */
+            state->force_stop->store(true);
+            http_close_tracked_connections(state);
+            for (const task_ptr &task : connections) {
+                if (task_get_state(task) != TASK_STATE_PENDING)
+                    continue;
+                std::vector<value_t *> cancel_args;
+                cancel_args.push_back(new_task_value(task));
+                value_t *cancelled =
+                    call_task_builtin(B_task_cancel, cancel_args);
+                freeval(cancel_args[0]);
+                freeval(cancelled);
+            }
+            for (const task_ptr &task : connections) {
+                if (task_get_state(task) != TASK_STATE_PENDING)
+                    continue;
+                await_task_timeout(task, 100);
+            }
         }
         connections.clear();
         freeval(socket_copy);
@@ -3762,39 +3842,123 @@ struct process_server_state
     ~process_server_state();
 };
 
+void process_server_signal_children(process_server_state *server,
+                                    int signal) {
+    for (value_t *process : server->children) {
+        std::vector<value_t *> args;
+        args.push_back(process);
+        args.push_back(newintval(signal));
+        value_t *result =
+            call_process_spawn_builtin(B_process_kill, args);
+        freeval(args[1]);
+        freeval(result);
+    }
+}
+
+void process_server_notify_drain(process_server_state *server) {
+    if (!server)
+        return;
+    if (server->shared)
+        server->shared->stopping.store(true);
+    /* Workers are separate processes, so they do not receive the parent's
+     * SIGTERM.  Forward it so each worker starts its own drain deadline. */
+    process_server_signal_children(server, SIGTERM);
+}
+
 bool process_server_stop_children(process_server_state *server, bool wait,
                                   long long timeout_ms = 0) {
-    if (wait && timeout_ms > 0 && !server->children.empty()) {
+    if (server->children.empty())
+        return true;
+
+    if (!wait) {
+        for (value_t *process : server->children) {
+            value_t *signal_arg = newintval(kForceKillSignal);
+            value_t *killed = call_process_spawn_builtin(
+                B_process_kill, {process, signal_arg});
+            freeval(signal_arg);
+            if (killed)
+                freeval(killed);
+            value_t *closed = call_process_spawn_builtin(
+                B_process_close, {process});
+            if (closed)
+                freeval(closed);
+            freeval(process);
+        }
+        server->children.clear();
+        return true;
+    }
+
+    bool drain_signaled = false;
+    auto poll_children = [server]() -> bool {
+        for (value_t *process : server->children) {
+            long long status = 0;
+            if (!process_try_wait(process, status))
+                return false;
+        }
+        return true;
+    };
+    auto force_kill_and_reap = [&]() {
+        process_server_signal_children(server, kForceKillSignal);
+        const auto grace_deadline = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(1000);
+        while (!poll_children() &&
+               std::chrono::steady_clock::now() < grace_deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    };
+
+    long long wait_ms = timeout_ms;
+    if (drain_requested() && wait_ms == 0) {
+        const long long remaining = drain_remaining_ms();
+        wait_ms = remaining < 0 ? 0 : remaining;
+    }
+
+    if (wait_ms > 0) {
         const auto deadline = std::chrono::steady_clock::now() +
-            std::chrono::milliseconds(timeout_ms);
+            std::chrono::milliseconds(wait_ms);
         for (;;) {
-            bool all_exited = true;
-            for (value_t *process : server->children) {
-                long long status = 0;
-                if (!process_try_wait(process, status)) {
-                    all_exited = false;
+            if (poll_children())
+                break;
+            if (drain_requested() && !drain_signaled) {
+                drain_signaled = true;
+                process_server_notify_drain(server);
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                if (drain_requested()) {
+                    /* Production shutdown: never leave workers behind. */
+                    force_kill_and_reap();
+                    break;
+                }
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    } else {
+        /* No deadline yet.  Keep polling so a SIGTERM that arrives while
+         * join() is blocked can still trigger the drain. */
+        for (;;) {
+            if (poll_children())
+                break;
+            if (drain_requested()) {
+                if (!drain_signaled) {
+                    drain_signaled = true;
+                    process_server_notify_drain(server);
+                }
+                if (drain_remaining_ms() == 0) {
+                    force_kill_and_reap();
                     break;
                 }
             }
-            if (all_exited)
-                break;
-            if (std::chrono::steady_clock::now() >= deadline)
-                return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
+
     for (value_t *process : server->children) {
-        if (wait) {
-            value_t *status = call_process_spawn_builtin(
-                B_process_wait, {process});
-            if (status)
-                freeval(status);
-        } else {
-            value_t *killed = call_process_spawn_builtin(
-                B_process_kill, {process});
-            if (killed)
-                freeval(killed);
-        }
+        value_t *timeout_arg = newintval(1000);
+        value_t *status = call_process_spawn_builtin(
+            B_process_wait, {process, timeout_arg});
+        freeval(timeout_arg);
+        if (status)
+            freeval(status);
         value_t *closed = call_process_spawn_builtin(
             B_process_close, {process});
         if (closed)
@@ -3838,8 +4002,11 @@ bool process_server_shutdown(process_server_state *server,
             return true;
         }
     }
+    timeout_ms = drain_effective_timeout(timeout_ms);
     if (server->shared)
         server->shared->stopping.store(true);
+    if (drain_requested() && !server->children.empty())
+        process_server_notify_drain(server);
     if (server->server_task) {
         bool stopped = await_task_timeout(server->server_task, timeout_ms);
         if (!stopped) {
@@ -3881,6 +4048,8 @@ bool process_server_join(process_server_state *server, long long timeout_ms,
             return true;
         }
     }
+    if (drain_requested())
+        return process_server_shutdown(server, timeout_ms, served);
     if (server->server_task) {
         if (!await_task_timeout(server->server_task, timeout_ms))
             return false;
@@ -4911,8 +5080,11 @@ struct reuse_port_server_state
     }
 
     bool wait_server(long long timeout_ms) {
-        if (timeout_ms <= 0)
+        if (timeout_ms <= 0) {
+            while (alive.load() > 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             return true;
+        }
         const auto deadline = std::chrono::steady_clock::now() +
             std::chrono::milliseconds(timeout_ms);
         while (alive.load() > 0) {
@@ -5310,6 +5482,7 @@ bool thread_server_shutdown(thread_server_state *server, long long timeout_ms,
     }
     if (server->http && server->http->shared)
         server->http->shared->stopping.store(true);
+    timeout_ms = drain_effective_timeout(timeout_ms);
     if (!thread_server_wait(server, timeout_ms)) {
         thread_server_force(server);
         if (!thread_server_wait(server, kHttpShutdownForceGraceMs))

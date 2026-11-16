@@ -922,6 +922,16 @@ if(BUILD_TESTING)
         TIMEOUT 300
       )
       add_test(
+        NAME http_drain_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/http_drain.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(http_drain_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 120
+      )
+      add_test(
         NAME memory_soak_test
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/soak_memory.py

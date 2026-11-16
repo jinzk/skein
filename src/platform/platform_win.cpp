@@ -51,6 +51,23 @@ static BOOL WINAPI on_console_ctrl(DWORD type) {
         FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
         return TRUE;
     }
+    if (type == CTRL_CLOSE_EVENT || type == CTRL_SHUTDOWN_EVENT ||
+        type == CTRL_LOGOFF_EVENT) {
+        drain_request();
+        /* Windows terminates the process when this handler returns, so wait
+         * (bounded) for the runtime to finish draining.  Close events use a
+         * shorter budget than the system shutdown events. */
+        long long limit = drain_timeout_ms();
+        const long long cap =
+            type == CTRL_CLOSE_EVENT ? 5000 : 20000;
+        if (limit <= 0 || limit > cap)
+            limit = cap;
+        const ULONGLONG deadline =
+            GetTickCount64() + (ULONGLONG)limit;
+        while (!drain_finished() && GetTickCount64() < deadline)
+            Sleep(10);
+        return TRUE;
+    }
     return FALSE;
 }
 

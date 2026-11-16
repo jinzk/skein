@@ -698,6 +698,53 @@ let ts = std.http.serve_threads(
    "require": ["http2", "stream_request_body"]});
 ```
 
+优雅关闭（SIGTERM drain）：
+
+运行时收到 `SIGTERM` 后进入 drain 状态，用于容器/滚动更新时的关机：
+
+- 立即停止 accept 并关闭监听 socket，不再接受新连接；
+- 已在执行的请求继续运行并正常返回，keep-alive 连接在空闲后关闭；
+- HTTP/2 连接发送 GOAWAY，等待已接受的 stream 完成；
+- 超过 drain 截止时间后强制关闭仍有活动的连接并取消对应 task；
+- `serve_processes` 会把 `SIGTERM` 转发给 worker 进程，并按同一截止时间
+  优雅退出；到期后强制终止剩余子进程；
+- drain 完成属于正常关机，进程退出码为 `0`；`Ctrl-C`（`SIGINT`）仍然是
+  中断语义，不会等待请求完成。
+
+截止时间由环境变量 `SKEIN_DRAIN_TIMEOUT_MS` 控制，单位为毫秒，默认
+`20000`；设为 `0` 表示不设截止时间（只等待在途请求自然结束）：
+
+```text
+SKEIN_DRAIN_TIMEOUT_MS=15000 ./server
+```
+
+`std.http.serve` / `std.http.serve_threads` / `std.http.serve_processes`
+都会遵守该行为；显式调用 `join` / `shutdown` 时，drain 截止时间会作为
+默认超时使用。`--watch` 仅是开发期的进程级重启工具，生产部署请使用
+平台滚动更新 + 运行时 SIGTERM drain；watcher 自身收到 `SIGTERM` 时会先
+停止子进程再退出。
+
+对 Skein 子进程，`std.process.kill(p)` 默认发送的 `SIGTERM` 同样表示
+drain 而不是立即终止；需要强制结束请使用 `std.process.kill(p, 9)`。
+
+Kubernetes 部署要点：
+
+- `terminationGracePeriodSeconds` 要大于 drain 截止时间，例如
+  `SKEIN_DRAIN_TIMEOUT_MS=15000` 配 `terminationGracePeriodSeconds: 30`；
+- 用 `preStop` 留出负载均衡摘除时间，例如 `preStop: sleep 5`；
+- readiness 探针直接用现有 HTTP API 实现即可，例如 `std.http.listen` +
+  `std.http.serve` 暴露 `/healthz`，在 drain 开始后返回失败以尽快摘除流量；
+- 容器内 Skein 可能作为 PID 1 运行；运行时会安装 `SIGTERM` handler，
+  因此不会因为 PID 1 的特殊信号语义而忽略关机请求。
+
+```yaml
+terminationGracePeriodSeconds: 30
+lifecycle:
+  preStop:
+    exec:
+      command: ["sh", "-c", "sleep 5"]
+```
+
 流式 body：
 
 ```text

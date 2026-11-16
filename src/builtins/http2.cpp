@@ -5,11 +5,13 @@
 #include "compression.h"
 #include "cookie.h"
 #include "eval.h"
+#include "event_loop.h"
 #include "fiber.h"
 #include "http.h"
 #include "builtins_io.h"
 #include "net.h"
 #include "repl.h"
+#include "runtime_state.h"
 #include "task.h"
 #ifdef SKEIN_ENABLE_TLS
 #include "tls.h"
@@ -68,6 +70,45 @@ void close_socket(value_t *socket) {
     value_t *result = call_io_builtin(B_io_close, args);
     free_args(args);
     freeval(result);
+}
+
+bool await_task_with_timeout(const task_ptr &task, long long timeout_ms) {
+    if (!task)
+        return true;
+    if (task_get_state(task) != TASK_STATE_PENDING) {
+        value_t *result = fiber_await_task(task);
+        freeval(result);
+        return true;
+    }
+    if (timeout_ms <= 0) {
+        value_t *result = fiber_await_task(task);
+        freeval(result);
+        return true;
+    }
+    if (fiber_in_fiber()) {
+        auto ready = [task]() {
+            return task_get_state(task) != TASK_STATE_PENDING;
+        };
+        if (!fiber_wait_for(ready, timeout_ms))
+            return false;
+        if (task_get_state(task) == TASK_STATE_PENDING)
+            return false;
+    } else {
+        if (!event_loop_init())
+            return false;
+        event_timeout timeout = make_event_timeout(timeout_ms);
+        while (task_get_state(task) == TASK_STATE_PENDING) {
+            if (g_interrupted || (drain_requested() && drain_expired()))
+                return false;
+            if (event_timeout_expired(timeout))
+                return false;
+            uv_run(event_loop_handle(), UV_RUN_ONCE);
+            fiber_pump();
+        }
+    }
+    value_t *result = fiber_await_task(task);
+    freeval(result);
+    return true;
 }
 
 void dict_set(value_t *dict, const std::string &key, value_t *value) {
@@ -3059,7 +3100,7 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
             std::chrono::steady_clock::now();
         while (connection_open) {
             if (!draining &&
-                (state->stopping_now() ||
+                (state->stopping_now() || drain_requested() ||
                  (state->max_requests != 0 &&
                   state->served_now() >= state->max_requests)))
                 draining = true;
@@ -3212,6 +3253,11 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 connection.response_streams.empty())
                 break;
 
+            /* A SIGTERM drain deadline closes lingering HTTP/2 connections
+             * (streams, SSE, WebSocket) instead of waiting forever. */
+            if (draining && drain_requested() && drain_expired())
+                break;
+
             long long read_timeout = 100;
             if (!handler_tasks.empty() || draining)
                 read_timeout = 20;
@@ -3240,7 +3286,7 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 }
             }
             if (timed_out) {
-                if (state->stopping_now())
+                if (state->stopping_now() || drain_requested())
                     draining = true;
                 if (draining && handler_tasks.empty())
                     break;
@@ -3436,12 +3482,29 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
          client_auth, sni_certs]() {
         long long next_connection_id = 1;
         std::vector<task_ptr> connections;
+        bool listener_closed = false;
+        auto close_listener = [&]() {
+            state.request_stop();
+            if (listener_closed)
+                return;
+            listener_closed = true;
+            close_socket(socket);
+        };
+        auto pending_connections = [&connections]() -> std::size_t {
+            std::size_t pending = 0;
+            for (const task_ptr &task : connections)
+                if (task_get_state(task) == TASK_STATE_PENDING)
+                    ++pending;
+            return pending;
+        };
         for (;;) {
-            if (state.stopping_now())
+            if (state.stopping_now() || drain_requested()) {
+                close_listener();
                 break;
+            }
             if (state.max_requests != 0 &&
                 state.served_now() >= state.max_requests) {
-                state.request_stop();
+                close_listener();
                 break;
             }
             for (size_t i = 0; i < connections.size();) {
@@ -3482,17 +3545,31 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
                     timed_out =
                         message.find("timed out") != std::string::npos;
                 }
+                const bool stopping = listener_closed ||
+                                      drain_requested() ||
+                                      state.stopping_now();
                 if (timed_out) {
                     freeval(captured.error);
+                    if (stopping) {
+                        close_listener();
+                        break;
+                    }
                     continue;
                 }
-                if (captured.failed && captured.error)
+                if (captured.failed && captured.error && !stopping)
                     eval_raise(captured.error);
                 else
                     freeval(captured.error);
                 break;
             }
             freeval(captured.error);
+
+            if (drain_requested() || state.stopping_now()) {
+                close_socket(client);
+                freeval(client);
+                close_listener();
+                break;
+            }
 
             value_t *stream = client;
             if (!cert_file.empty()) {
@@ -3546,16 +3623,34 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
             connections.push_back(connection_task);
         }
 
-        state.request_stop();
-        for (size_t i = 0; i < connections.size(); ++i) {
-            if (task_get_state(connections[i]) != TASK_STATE_PENDING)
-                continue;
-            eval_capture_snapshot snapshot;
-            eval_capture_begin(snapshot);
-            value_t *result = fiber_await_task(connections[i]);
-            eval_capture_result captured = eval_capture_end(snapshot);
-            freeval(result);
-            freeval(captured.error);
+        close_listener();
+        while (pending_connections() != 0) {
+            const long long remaining =
+                drain_requested() ? drain_remaining_ms() : -1;
+            if (drain_requested() && remaining == 0)
+                break;
+            bool waited = false;
+            for (const task_ptr &task : connections) {
+                if (task_get_state(task) != TASK_STATE_PENDING)
+                    continue;
+                waited = await_task_with_timeout(task, remaining);
+                break;
+            }
+            if (!waited)
+                break;
+        }
+        if (pending_connections() != 0) {
+            for (const task_ptr &task : connections) {
+                if (task_get_state(task) != TASK_STATE_PENDING)
+                    continue;
+                std::vector<value_t *> cancel_args;
+                cancel_args.push_back(new_task_value(task));
+                value_t *cancelled =
+                    call_task_builtin(B_task_cancel, cancel_args);
+                freeval(cancel_args[0]);
+                freeval(cancelled);
+                await_task_with_timeout(task, 1000);
+            }
         }
         connections.clear();
         return newintval(state.served_now());

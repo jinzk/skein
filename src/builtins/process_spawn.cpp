@@ -16,11 +16,13 @@
 #include <uv.h>
 
 #include <algorithm>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -859,6 +861,12 @@ void free_value_list(std::vector<value_t *> &values) {
     values.clear();
 }
 
+#if defined(_WIN32)
+constexpr int kForceKillSignal = 9;
+#else
+constexpr int kForceKillSignal = SIGKILL;
+#endif
+
 value_t *process_dict_get(value_t *dict, const char *key) {
     if (!dict || dict->type != T_dict)
         return nullptr;
@@ -1493,11 +1501,72 @@ void process_spawn_shutdown() {
     auto &registry = process_registry();
     if (registry.empty())
         return;
+
+    auto any_alive = [&registry]() {
+        for (const auto &process : registry) {
+            if (!process->process_initialized || process->exited)
+                continue;
+            if (uv_is_closing((uv_handle_t *)&process->process))
+                continue;
+            return true;
+        }
+        return false;
+    };
+    auto pump = []() {
+        if (event_loop_initialized())
+            uv_run(event_loop_handle(), UV_RUN_NOWAIT);
+    };
+    auto wait_until = [&any_alive, &pump](
+                          std::chrono::steady_clock::time_point deadline) {
+        while (any_alive()) {
+            pump();
+            if (deadline != std::chrono::steady_clock::time_point::max() &&
+                std::chrono::steady_clock::now() >= deadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+
     for (const auto &process : registry) {
-        if (process->process_initialized && !process->exited)
+        if (process->process_initialized && !process->exited &&
+            !uv_is_closing((uv_handle_t *)&process->process))
             uv_process_kill(&process->process, SIGTERM);
-        close_process_handles(process.get());
     }
+
+    /*
+     * Skein children treat SIGTERM as a drain request, so they may outlive a
+     * plain SIGTERM.  Wait for the drain deadline when one is configured and
+     * use a short grace period otherwise, then force-kill whatever remains.
+     */
+    constexpr long long kExitGraceMs = 500;
+    long long grace_ms = kExitGraceMs;
+    bool unbounded = false;
+    if (drain_requested()) {
+        const long long remaining = drain_remaining_ms();
+        if (remaining < 0)
+            unbounded = true;
+        else
+            grace_ms = remaining;
+    }
+    const auto deadline =
+        unbounded ? std::chrono::steady_clock::time_point::max()
+                  : std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(grace_ms);
+    wait_until(deadline);
+
+    if (any_alive()) {
+        /* Never leave child processes behind when the interpreter exits. */
+        for (const auto &process : registry) {
+            if (process->process_initialized && !process->exited &&
+                !uv_is_closing((uv_handle_t *)&process->process))
+                uv_process_kill(&process->process, kForceKillSignal);
+        }
+        wait_until(std::chrono::steady_clock::now() +
+                   std::chrono::milliseconds(1000));
+    }
+
+    for (const auto &process : registry)
+        close_process_handles(process.get());
     // Keep resources alive until the event loop is shut down; uv_close()
     // callbacks may still reference the handles.
 }

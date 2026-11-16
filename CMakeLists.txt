@@ -420,7 +420,7 @@ target_link_libraries(skein_builtins PUBLIC
   Boost::context
 )
 
-add_executable(${PROJECT_NAME} src/app/main.cpp)
+add_executable(${PROJECT_NAME} src/app/main.cpp src/app/watch.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/app
   ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins
@@ -895,6 +895,16 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:${PROJECT_NAME}>
       )
       set_tests_properties(fs_helpers_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 120
+      )
+      add_test(
+        NAME watch_mode_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/watch_mode.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(watch_mode_test PROPERTIES
         LABELS "core"
         TIMEOUT 120
       )

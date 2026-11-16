@@ -7,6 +7,7 @@
 ## 本教程内容
 
 - [脚本模式与 REPL](#脚本模式与-repl)
+- [开发期自动重启](#开发期自动重启)
 - [包与导入](#包与导入)
 - [语言概览](#语言概览)
 - [语法约定](#语法约定)
@@ -76,6 +77,27 @@ build\skein.exe script.skein
 ```
 
 shebang 行同样会被跳过。
+
+### 开发期自动重启
+
+`--watch` 用子进程方式做开发期热重启，不需要修改脚本：
+
+```bash
+./build/skein --watch server.skein
+./build/skein --watch --watch-dir ../shared server.skein
+```
+
+- 默认递归监听脚本所在目录下的 `.skein` 文件；
+- 每 200ms 轮询一次 `mtime` / `size`，不依赖平台的 inotify / FSEvents；
+- `--watch-dir DIR` / `--watch-dir=DIR` 可以增加监听目录；
+- 已有的 `-I` / `--package-path` 目录也会加入监听；
+- 文件变化后先停止旧进程，再从干净运行时启动新进程；
+- 编译或运行失败时新进程退出，watcher 保留并等待下一次文件变化；
+- `Ctrl-C` 会停止子进程并退出 watcher，`SIGTERM` 同样会先停止子进程再退出；
+- `.git`、`.cache`、`node_modules`、`build*` 等目录会被跳过。
+
+`--watch` 是进程级重启：模块状态、全局变量和内存数据都会重置。需要保留的状态请放到
+外部存储或由父进程持有。它不改变语言运行时，也不是进程内热更新。
 
 ### 生产部署与优雅关闭
 

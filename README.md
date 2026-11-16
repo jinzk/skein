@@ -237,7 +237,12 @@ build\skein.exe
 ./build/skein                 # REPL
 ./build/skein script.skein    # 脚本模式
 ./build/skein -               # 从 stdin 读取脚本
+./build/skein --watch script.skein   # 改源码后自动重启
 ```
+
+`--watch` 监听脚本目录下的 `.skein` 文件；用 `--watch-dir DIR` 增加目录，
+用 `--watch-dir=DIR` 也可以。每次变化先停止旧子进程，再从干净运行时启动新进程，
+适合开发期使用。它不是进程内热更新，模块状态和内存数据不会保留。
 
 最小的脚本：
 

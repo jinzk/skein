@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,7 @@
 #include "thread_channel.h"
 #include "typecheck.h"
 #include "vm.h"
+#include "watch.h"
 
 #include <utility>
 
@@ -59,6 +61,7 @@ static void print_usage(const char *program) {
                  "usage: %s [-i] [--vm|--no-vm] [--vm-stats] [-I dir] "
                  "[--package-path dir] [--encoding name] "
                  "[--typecheck=off|loose|warn|strict] "
+                 "[--watch [--watch-dir dir]] "
                  "[-k|--keep-going] [script|-]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
@@ -131,9 +134,12 @@ int main(int argc, char **argv) {
     std::string script_path;
     std::vector<std::string> package_dirs;
     std::vector<std::string> script_args;
+    std::vector<std::string> watch_dirs;
     std::string source_encoding;
     bool force_interactive = false;
+    bool watch_mode = false;
     bool run_entry = false;
+    std::size_t script_arg_index = args.size();
 
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
@@ -147,6 +153,21 @@ int main(int argc, char **argv) {
             package_dirs.push_back(arg.substr(2));
         } else if (arg.rfind("--package-path=", 0) == 0) {
             package_dirs.push_back(arg.substr(15));
+        } else if (arg == "--watch") {
+            watch_mode = true;
+        } else if (arg == "--watch-dir") {
+            if (i + 1 >= args.size()) {
+                print_usage(program);
+                return 2;
+            }
+            watch_dirs.push_back(args[++i]);
+        } else if (arg.rfind("--watch-dir=", 0) == 0) {
+            const std::string dir = arg.substr(12);
+            if (dir.empty()) {
+                print_usage(program);
+                return 2;
+            }
+            watch_dirs.push_back(dir);
         } else if (arg == "--encoding") {
             if (i + 1 >= args.size() || args[i + 1].empty()) {
                 print_usage(program);
@@ -209,6 +230,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
             script_path = arg;
+            script_arg_index = i;
             /* Everything after the script path belongs to the script. */
             for (size_t j = i + 1; j < args.size(); ++j)
                 script_args.push_back(args[j]);
@@ -222,6 +244,76 @@ int main(int argc, char **argv) {
     std::string executable = platform_executable_path();
     if (executable.empty())
         executable = program;
+
+    if (watch_mode) {
+        if (run_entry) {
+            std::fprintf(stderr,
+                         "%s: --watch cannot be combined with --run-entry\n",
+                         program);
+            return 2;
+        }
+        if (script_path.empty() || script_path == "-") {
+            std::fprintf(stderr, "%s: --watch requires a script file\n",
+                         program);
+            return 2;
+        }
+
+        namespace fs = std::filesystem;
+        auto absolute_path = [](const std::string &path) {
+            std::error_code error;
+            const fs::path result = fs::absolute(fs::u8path(path), error);
+            return error ? fs::u8path(path) : result;
+        };
+
+        std::vector<std::string> watch_roots;
+        auto add_root = [&watch_roots](const fs::path &path) {
+            const std::string text = path.lexically_normal().u8string();
+            for (const std::string &existing : watch_roots) {
+                if (existing == text)
+                    return;
+            }
+            watch_roots.push_back(text);
+        };
+
+        fs::path script_dir = absolute_path(script_path).parent_path();
+        if (script_dir.empty())
+            script_dir = fs::current_path();
+        add_root(script_dir);
+        for (const std::string &dir : watch_dirs)
+            add_root(absolute_path(dir));
+        for (const std::string &dir : package_dirs) {
+            std::error_code error;
+            const fs::path path = absolute_path(dir);
+            if (fs::is_directory(path, error))
+                add_root(path);
+        }
+
+        std::vector<std::string> child_args;
+        child_args.reserve(args.size());
+        for (std::size_t i = 0; i < script_arg_index; ++i) {
+            const std::string &arg = args[i];
+            if (arg == "--watch")
+                continue;
+            if (arg == "--watch-dir") {
+                ++i;
+                continue;
+            }
+            if (arg.rfind("--watch-dir=", 0) == 0)
+                continue;
+            child_args.push_back(arg);
+        }
+        for (std::size_t i = script_arg_index; i < args.size(); ++i)
+            child_args.push_back(args[i]);
+
+        watch_options options;
+        options.executable = executable;
+        options.command = std::move(child_args);
+        options.roots = std::move(watch_roots);
+        const int watch_status = run_watch_mode(options);
+        drain_finish();
+        return watch_status;
+    }
+
     sys_invocation_set(std::move(script_args), script_path,
                        std::move(executable));
 

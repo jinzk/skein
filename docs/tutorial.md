@@ -113,6 +113,10 @@ SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
   关闭剩余连接；
 - `serve_processes` 会把 `SIGTERM` 转发给 worker 并等待其退出；
 - drain 完成时退出码为 `0`；`Ctrl-C`（`SIGINT`）仍然是中断语义；
+- Windows 没有可捕获的 `SIGTERM`，drain 由控制台关闭/关机/注销事件触发
+  （关闭窗口最多等待 5 秒）；`taskkill` 不会触发 drain；
+- Windows 不支持 `reuse_port`，`serve_processes` 自动使用 `dispatch`，
+  关闭时通过关闭 worker 的 stdin 让其在完成当前请求后退出；
 - Kubernetes 中让 `terminationGracePeriodSeconds` 大于 drain 截止时间，
   并用 `preStop` 留出摘流时间；readiness 探针可以直接用 `std.http` 实现。
 

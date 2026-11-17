@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SIGTERM drain: finish in-flight requests, close the listener, exit cleanly."""
+"""HTTP drain: finish in-flight requests, close the listener, exit cleanly."""
 
 import os
 import signal
@@ -49,6 +49,29 @@ WORKER = """import std;
 func handle(req) {
     if (req["path"] == "/slow") {
         std.task.sleep(1200).wait();
+        return {"status": 200, "headers": {}, "body": "slow-ok"};
+    }
+    return {"status": 200, "headers": {}, "body": "ok"};
+}
+"""
+
+DISPATCH_SERVER = """import std;
+
+let s = std.http.listen("127.0.0.1", 0);
+let ps = std.http.serve_processes(
+    s, 2, "@WORKER@", {"strategy": "dispatch"});
+println(s["port"]);
+std.io.flush(std.io.stdout);
+std.task.sleep(1500).wait();
+let served = ps.shutdown();
+print("served=" + str(served) + "\\n");
+"""
+
+DISPATCH_WORKER = """import std;
+
+func handle(req) {
+    if (req["path"] == "/slow") {
+        std.task.sleep(3000).wait();
         return {"status": 200, "headers": {}, "body": "slow-ok"};
     }
     return {"status": 200, "headers": {}, "body": "ok"};
@@ -217,11 +240,59 @@ def process_server_drain(tmp):
             proc.communicate()
 
 
+def dispatch_shutdown(tmp):
+    """ProcessServer.shutdown drains in-flight work on every platform.
+
+    Unlike SIGTERM this path also exists on Windows, where signals cannot be
+    delivered to a console process and drain is driven by console events.
+    """
+    worker_path = os.path.join(tmp, "dispatch_worker.skein")
+    write_file(worker_path, DISPATCH_WORKER)
+    source = DISPATCH_SERVER.replace(
+        "@WORKER@", worker_path.replace("\\", "\\\\"))
+    proc = start_server(tmp, source, 8000, "dispatch_server.skein")
+    try:
+        port = read_port(proc)
+        results = []
+        client = threading.Thread(
+            target=request, args=(port, "/slow", results), daemon=True)
+        client.start()
+        client.join(timeout=15)
+        if not results:
+            raise AssertionError("in-flight request did not finish")
+        outcome = results[0]
+        if isinstance(outcome, Exception):
+            raise AssertionError(f"in-flight request failed: {outcome!r}")
+        status, body = outcome
+        if status != 200 or body != b"slow-ok":
+            raise AssertionError(f"unexpected response: {status} {body!r}")
+
+        stdout, stderr = proc.communicate(timeout=15)
+        if proc.returncode != 0:
+            raise AssertionError(
+                f"dispatch shutdown exited with {proc.returncode}\n"
+                f"{stdout}\n{stderr}")
+        if "served=" not in stdout:
+            raise AssertionError(
+                f"shutdown did not report served requests\n{stdout}\n{stderr}")
+        if "Traceback" in stderr:
+            raise AssertionError(stderr)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="skein-drain-") as tmp:
-        graceful_drain(tmp)
-    with tempfile.TemporaryDirectory(prefix="skein-drain-stuck-") as tmp:
-        drain_deadline(tmp)
+        dispatch_shutdown(tmp)
+    # Windows has no catchable SIGTERM: Popen.send_signal(SIGTERM) maps to
+    # TerminateProcess, so the signal-driven cases only run on POSIX.
+    if os.name != "nt":
+        with tempfile.TemporaryDirectory(prefix="skein-drain-sig-") as tmp:
+            graceful_drain(tmp)
+        with tempfile.TemporaryDirectory(prefix="skein-drain-stuck-") as tmp:
+            drain_deadline(tmp)
     if sys.platform.startswith("linux") or sys.platform.startswith("freebsd"):
         with tempfile.TemporaryDirectory(prefix="skein-drain-proc-") as tmp:
             process_server_drain(tmp)

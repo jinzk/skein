@@ -724,8 +724,26 @@ SKEIN_DRAIN_TIMEOUT_MS=15000 ./server
 平台滚动更新 + 运行时 SIGTERM drain；watcher 自身收到 `SIGTERM` 时会先
 停止子进程再退出。
 
-对 Skein 子进程，`std.process.kill(p)` 默认发送的 `SIGTERM` 同样表示
-drain 而不是立即终止；需要强制结束请使用 `std.process.kill(p, 9)`。
+对 Skein 子进程，POSIX 上 `std.process.kill(p)` 默认发送的 `SIGTERM`
+同样表示 drain 而不是立即终止；需要强制结束请使用
+`std.process.kill(p, 9)`。Windows 上信号不可捕获，见下面的平台差异。
+
+平台差异：
+
+- POSIX（Linux/BSD 等）用 `SIGTERM` 触发 drain；`SIGINT` 仍然是中断；
+- Windows 没有可捕获的 `SIGTERM`，drain 由控制台 `CTRL_CLOSE` /
+  `CTRL_SHUTDOWN` / `CTRL_LOGOFF` 事件触发，控制台 handler 会在返回前
+  有界等待 drain 完成（关闭窗口最多等待 5 秒）；`Ctrl-C` / `CTRL_BREAK`
+  仍然是中断；`taskkill`、任务管理器结束进程不会触发 drain；以 Windows
+  服务方式运行时未注册 SCM stop handler，`SERVICE_CONTROL_STOP` 也不会
+  触发 drain；
+- Windows 上 `uv_process_kill` 等价于 `TerminateProcess`，因此
+  `std.process.kill(p)` 总是立即终止，信号编号不影响结果；
+  `serve_processes` 的 `dispatch` 策略不依赖信号，而是关闭 worker 的
+  stdin，让 worker 完成当前请求后自然退出；
+- `reuse_port` 仅 Linux/BSD 支持；Windows 的 `strategy: "auto"` 选择
+  `dispatch`，因此不提供 `stream_response` / `stream_request_body` /
+  WebSocket 等仅 `reuse_port` 支持的能力。
 
 Kubernetes 部署要点：
 

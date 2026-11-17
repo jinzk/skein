@@ -17,6 +17,18 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <chrono>
+#endif
+
 #ifndef SIGTERM
 #define SIGTERM 15
 #endif
@@ -33,13 +45,41 @@ constexpr int kDebounceMs = 120;
 constexpr int kKillGraceMs = 2000;
 
 struct file_stamp {
-    fs::file_time_type modified{};
+    /*
+     * Modification time as 100 ns ticks on Windows and nanoseconds elsewhere.
+     * MinGW's fs::last_write_time is backed by _wstat64 and only reports whole
+     * seconds, which misses back-to-back saves of equal size, so the Windows
+     * path reads the native FILETIME instead.
+     */
+    std::int64_t modified = 0;
     std::uintmax_t size = 0;
 
     bool operator==(const file_stamp &other) const {
         return modified == other.modified && size == other.size;
     }
 };
+
+bool read_write_stamp(const fs::path &path, std::int64_t &stamp) {
+#if defined(_WIN32)
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
+        return false;
+    stamp = (static_cast<std::int64_t>(data.ftLastWriteTime.dwHighDateTime)
+             << 32) |
+            static_cast<std::int64_t>(data.ftLastWriteTime.dwLowDateTime);
+    return true;
+#else
+    std::error_code error;
+    const fs::file_time_type modified = fs::last_write_time(path, error);
+    if (error)
+        return false;
+    stamp = static_cast<std::int64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            modified.time_since_epoch())
+            .count());
+    return true;
+#endif
+}
 
 using file_snapshot = std::map<std::string, file_stamp>;
 
@@ -67,10 +107,10 @@ bool is_skein_file(const fs::path &path) {
 }
 
 void add_file(file_snapshot &snapshot, const fs::path &path) {
-    std::error_code error;
-    const fs::file_time_type modified = fs::last_write_time(path, error);
-    if (error)
+    std::int64_t modified = 0;
+    if (!read_write_stamp(path, modified))
         return;
+    std::error_code error;
     const std::uintmax_t size = fs::file_size(path, error);
     if (error)
         return;

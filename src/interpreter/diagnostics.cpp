@@ -1,4 +1,5 @@
 #include "diagnostics.h"
+#include "diag_collect.h"
 #include "runtime_state.h"
 #include "unicode_ident.h"
 
@@ -95,6 +96,42 @@ void diag_record_line(int line, const std::string &text) {
            (display.back() == '\n' || display.back() == '\r'))
         display.pop_back();
     source_lines[(size_t)line - 1] = display;
+}
+
+static void diagnostic_offsets(int line, int column, std::size_t &byte_offset,
+                               std::size_t &utf16_offset) {
+    byte_offset = 0;
+    utf16_offset = 0;
+    if (line <= 0 || (std::size_t)line > source_lines.size())
+        return;
+    const std::string &text = source_lines[(std::size_t)line - 1];
+    std::size_t pos = 0;
+    int col = 1;
+    while (pos < text.size() && col < column) {
+        unsigned char c = (unsigned char)text[pos];
+        if (c == '\n')
+            break;
+        if (c < 0x80) {
+            ++pos;
+            ++col;
+            ++utf16_offset;
+        } else {
+            unicode_ident::decode_result decoded =
+                unicode_ident::decode(text.data() + pos, text.size() - pos);
+            if (!decoded.valid) {
+                ++pos;
+                ++col;
+                ++utf16_offset;
+            } else {
+                std::size_t width =
+                    unicode_ident::display_width(decoded.codepoint);
+                pos += decoded.length;
+                col += (int)width;
+                utf16_offset += decoded.codepoint > 0xffff ? 2 : 1;
+            }
+        }
+    }
+    byte_offset = pos;
 }
 
 void diag_set_location(int line, int column) {
@@ -204,6 +241,22 @@ void diag_report(int line, int column, const char *category,
     if (column <= 0)
         column = g_token_column;
 
+    if (diag_collect_active()) {
+        diagnostic_record record;
+        record.source = source_name;
+        record.line = line;
+        record.column = column;
+        diagnostic_offsets(line, column, record.byte_offset,
+                           record.utf16_offset);
+        record.severity = DiagnosticSeverity::Error;
+        record.code = diag_code_for_category(category);
+        record.category = category ? category : "";
+        record.message = message ? message : "";
+        diag_collect_push(record);
+        if (diag_collect_suppress_text())
+            return;
+    }
+
     std::fflush(stdout);
     if (!source_name.empty()) {
         if (column > 0)
@@ -246,6 +299,22 @@ void diag_report_warning(int line, int column, const char *category,
         line = g_token_line;
     if (column <= 0)
         column = g_token_column;
+
+    if (diag_collect_active()) {
+        diagnostic_record record;
+        record.source = source_name;
+        record.line = line;
+        record.column = column;
+        diagnostic_offsets(line, column, record.byte_offset,
+                           record.utf16_offset);
+        record.severity = DiagnosticSeverity::Warning;
+        record.code = diag_code_for_category(category);
+        record.category = category && *category ? category : "warning";
+        record.message = message ? message : "";
+        diag_collect_push(record);
+        if (diag_collect_suppress_text())
+            return;
+    }
 
     std::fflush(stdout);
     const char *kind = category && *category ? category : "warning";
@@ -299,6 +368,8 @@ int diag_call_depth() { return (int)call_stack.size(); }
 int diag_error_count() {
     return error_count;
 }
+
+void diag_reset_errors() { error_count = 0; }
 
 void diag_set_source_name(const std::string &name) {
     source_name = name;

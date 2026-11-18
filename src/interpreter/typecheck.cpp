@@ -3011,5 +3011,11 @@ bool check_statement(struct ast *statement) {
     return ok && !checker.error_;
 }
 
+void forget_source(const std::string &source_name) {
+    g_import_aliases.erase(source_name);
+    g_persistent_bindings.erase(source_name);
+    g_exported_types.erase(source_name);
+}
+
 } // namespace typecheck
 } // namespace skein

@@ -22,6 +22,24 @@ void add_pattern_binding_name(std::vector<std::string> &names,
 
 } // namespace
 
+bool ast_is_declaration(const struct ast *node) {
+    if (!node)
+        return false;
+    switch (node->nodetype) {
+        case 'Z': // funcdef
+        case 'Y': // struct declaration
+        case 'H': // impl
+        case 'K': // package
+        case 'J': // import
+        case 't': // trait declaration
+        case NODE_ENUM_DECL:
+        case NODE_INCLUDE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void collect_pattern_bindings(const struct ast *node,
                               std::vector<std::string> &names) {
     if (!node)

@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "analysis_mode.h"
 #include "ast.h"
+#include "ast_analysis.h"
 #include "decorators.h"
 #include "dict.h"
 #include "diagnostics.h"
@@ -2193,7 +2195,9 @@ top_statement: top_expression EOL {
         bool invalid = g_statement_invalid;
         g_statement_invalid = false;
         bool skip_eval = invalid || sys_exit_requested() ||
-                         (!g_interactive && g_script_stop);
+                         (!g_interactive && g_script_stop) ||
+                         (g_check_only &&
+                          !skein::ast_analysis::ast_is_declaration($1));
         struct value_t *rslt = NULL;
 
         if (!skip_eval) {

@@ -10,6 +10,11 @@ struct ast;
 namespace skein {
 namespace ast_analysis {
 
+/* True for top-level statements that primarily declare symbols/types.
+ * Analysis-only modes keep evaluating these so imports, type definitions and
+ * packages can populate the symbol and type tables. */
+bool ast_is_declaration(const struct ast *node);
+
 /* Collect names bound by a match/destructuring pattern. */
 void collect_pattern_bindings(const struct ast *node,
                               std::vector<std::string> &names);

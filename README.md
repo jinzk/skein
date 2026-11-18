@@ -27,10 +27,11 @@ cp -r skills/skein ~/.config/opencode/skills/
 - **Vim / Neovim**：`editors/vim`，提供 `.skein` 文件识别、语法高亮、注释、
   缩进，以及 `:SkeinRun` / `:SkeinRepl`。安装见
   [`editors/vim/README.md`](editors/vim/README.md)。
-- **VS Code**：`editors/vscode`，提供语法高亮、代码片段、运行当前文件和
-  REPL。安装见 [`editors/vscode/README.md`](editors/vscode/README.md)。
+- **VS Code**：`editors/vscode`，提供语法高亮、代码片段、LSP 诊断/补全/格式化、
+  运行当前文件和 REPL。安装见 [`editors/vscode/README.md`](editors/vscode/README.md)。
 
-两个插件都只做编辑器集成，不包含 LSP、语义补全或诊断。
+两个插件都通过 `skein lsp --stdio` 接入语言服务器，配置细节见
+[`docs/lsp.md`](docs/lsp.md)。
 
 ## 设计特点
 
@@ -243,6 +244,14 @@ build\skein.exe
 `--watch` 监听脚本目录下的 `.skein` 文件；用 `--watch-dir DIR` 增加目录，
 用 `--watch-dir=DIR` 也可以。每次变化先停止旧子进程，再从干净运行时启动新进程，
 适合开发期使用。它不是进程内热更新，模块状态和内存数据不会保留。
+
+工具链子命令不会执行脚本：
+
+```bash
+./build/skein lint --typecheck=strict script.skein   # 静态检查，JSON 输出加 --format=json
+./build/skein fmt --check script.skein               # 检查格式；-w 原地格式化
+./build/skein lsp --stdio                            # 编辑器通过 stdio 调用的语言服务器
+```
 
 最小的脚本：
 

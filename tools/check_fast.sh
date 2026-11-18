@@ -10,6 +10,7 @@
 #   tools/check_fast.sh                 # core tests in ./build
 #   tools/check_fast.sh --vm-only       # VM suite + differential only
 #   tools/check_fast.sh --ast-only      # AST/reference suite only
+#   tools/check_fast.sh --tools         # lint / fmt / LSP tool tests only
 #   tools/check_fast.sh --bench         # core + benchmarks
 #   tools/check_fast.sh --docs          # docs / data checks
 #   tools/check_fast.sh --coverage      # opcode coverage check
@@ -70,8 +71,12 @@ while [[ $# -gt 0 ]]; do
             MODE="ast"
             shift
             ;;
+        --tools)
+            MODE="tools"
+            shift
+            ;;
         -h|--help)
-            sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -128,6 +133,11 @@ case "$MODE" in
         printf '==> AST/reference tests\n'
         ctest --test-dir "$BUILD_DIR" -j "$JOBS" --output-on-failure \
             -R '^(bytecode_verifier_test|skein_tests)$'
+        ;;
+    tools)
+        printf '==> lint / fmt / LSP tool tests\n'
+        ctest --test-dir "$BUILD_DIR" -j "$JOBS" --output-on-failure \
+            -L tools
         ;;
 esac
 

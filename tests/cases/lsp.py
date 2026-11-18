@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Scripted stdio LSP session tests for `skein lsp --stdio`."""
+
+import json
+import pathlib
+import queue
+import subprocess
+import tempfile
+import threading
+
+import harness
+
+
+class LspSession:
+    def __init__(self, *extra_args):
+        self.process = subprocess.Popen(
+            [harness.BIN, "lsp", "--stdio", *extra_args],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self._queue = queue.Queue()
+        self._pending = []
+        self._next_id = 1
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+
+    def _read_frame(self):
+        length = None
+        while True:
+            line = self.process.stdout.readline()
+            if not line:
+                return None
+            if line in (b"\r\n", b"\n"):
+                break
+            name, _, value = line.decode("ascii", "replace").partition(":")
+            if name.strip().lower() == "content-length":
+                length = int(value.strip())
+        if length is None:
+            raise RuntimeError("LSP response missing Content-Length")
+        return json.loads(self.process.stdout.read(length).decode("utf-8"))
+
+    def _read_loop(self):
+        try:
+            while True:
+                message = self._read_frame()
+                if message is None:
+                    break
+                self._queue.put(message)
+        except Exception as error:  # surfaced by wait_for
+            self._queue.put({"_reader_error": repr(error)})
+
+    def send(self, message):
+        payload = json.dumps(message, separators=(",", ":")).encode("utf-8")
+        header = f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii")
+        self.process.stdin.write(header + payload)
+        self.process.stdin.flush()
+
+    def notify(self, method, params=None):
+        message = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            message["params"] = params
+        self.send(message)
+
+    def request(self, method, params=None):
+        request_id = self._next_id
+        self._next_id += 1
+        message = {"jsonrpc": "2.0", "id": request_id, "method": method}
+        if params is not None:
+            message["params"] = params
+        self.send(message)
+        response = self.wait_for(lambda item: item.get("id") == request_id)
+        assert "error" not in response, response.get("error")
+        return response["result"]
+
+    def wait_for(self, predicate, timeout=15):
+        for _ in range(len(self._pending)):
+            message = self._pending[0]
+            if predicate(message):
+                return self._pending.pop(0)
+            self._pending.append(self._pending.pop(0))
+        while True:
+            message = self._queue.get(timeout=timeout)
+            assert "_reader_error" not in message, message
+            if predicate(message):
+                return message
+            self._pending.append(message)
+
+    def wait_for_diagnostics(self, uri):
+        return self.wait_for(
+            lambda item: item.get("method") == "textDocument/publishDiagnostics"
+            and item.get("params", {}).get("uri") == uri
+        )["params"]["diagnostics"]
+
+    def stop(self):
+        if self.process.poll() is None:
+            try:
+                self.request("shutdown")
+            except Exception:
+                pass
+            self.notify("exit")
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=10)
+        stderr = self.process.stderr.read().decode("utf-8", "replace")
+        self.process.stderr.close()
+        return stderr
+
+
+def did_change(session, uri, version, text):
+    session.notify(
+        "textDocument/didChange",
+        {
+            "textDocument": {"uri": uri, "version": version},
+            "contentChanges": [{"text": text}],
+        },
+    )
+
+
+def run_cases():
+    with tempfile.TemporaryDirectory() as temporary:
+        path = pathlib.Path(temporary) / "lsp_input.skein"
+        path.write_text("", encoding="utf-8")
+        uri = path.resolve().as_uri()
+
+        session = LspSession("--typecheck=strict")
+        try:
+            result = session.request("initialize", {"capabilities": {}})
+            assert result["capabilities"]["publishDiagnosticsProvider"] is True
+            assert result["capabilities"]["completionProvider"]["triggerCharacters"] == ["."]
+            session.notify("initialized", {})
+
+            messy = (
+                "import std;\n"
+                'println("SKEIN_LSP_SIDE_EFFECT");\n'
+                'let xs:list[int]=[1,"a"];\n'
+            )
+            session.notify(
+                "textDocument/didOpen",
+                {
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": "skein",
+                        "version": 1,
+                        "text": messy,
+                    }
+                },
+            )
+            diagnostics = session.wait_for_diagnostics(uri)
+            assert diagnostics, "expected a type diagnostic"
+            assert diagnostics[0]["code"] in ("PAR0001", "TYP0001", "TYP0002")
+
+            edits = session.request(
+                "textDocument/formatting", {"textDocument": {"uri": uri}}
+            )
+            assert len(edits) == 1, edits
+            expected = (
+                "import std;\n"
+                'println("SKEIN_LSP_SIDE_EFFECT");\n'
+                'let xs: list[int] = [1, "a"];\n'
+            )
+            assert edits[0]["newText"] == expected, repr(edits[0]["newText"])
+
+            completion_source = "import std;\nlet local:int=1;\nstd.i"
+            did_change(session, uri, 2, completion_source)
+            session.wait_for_diagnostics(uri)
+            items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 2, "character": 5},
+                },
+            )["items"]
+            labels = [item["label"] for item in items]
+            assert "io" in labels, labels
+            assert "iter" in labels, labels
+            assert "local" not in labels, labels
+
+            local_items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 7},
+                },
+            )["items"]
+            assert "local" in [item["label"] for item in local_items]
+
+            did_change(session, uri, 3, "import std;\nlet local:int=1;\nstd.io\n")
+            session.wait_for_diagnostics(uri)
+            hover = session.request(
+                "textDocument/hover",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 2, "character": 6},
+                },
+            )
+            assert "std.io" in hover["contents"]["value"], hover
+
+            did_change(session, uri, 4, "let x:int=1;\nprint(x);\n")
+            session.wait_for_diagnostics(uri)
+            symbols = session.request(
+                "textDocument/documentSymbol", {"textDocument": {"uri": uri}}
+            )
+            assert any(item["name"] == "x" for item in symbols), symbols
+            definitions = session.request(
+                "textDocument/definition",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 7},
+                },
+            )
+            assert definitions, definitions
+            assert definitions[0]["range"]["start"]["line"] == 0
+            local_hover = session.request(
+                "textDocument/hover",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 7},
+                },
+            )
+            assert "let x: int" in local_hover["contents"]["value"], local_hover
+
+            stderr = session.stop()
+            assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
+            assert session.process.returncode == 0, session.process.returncode
+        finally:
+            if session.process.poll() is None:
+                session.process.kill()
+                session.process.wait(timeout=10)

@@ -230,6 +230,7 @@ add_library(skein_value_runtime STATIC
   src/interpreter/gc.cpp
   src/interpreter/gc_roots.cpp
   src/interpreter/diagnostics.cpp
+  src/interpreter/diag_collect.cpp
 )
 set_target_properties(skein_value_runtime PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
@@ -311,10 +312,12 @@ endif()
 add_library(skein_interpreter STATIC
   ${BISON_MyParser_OUTPUTS}
   ${FLEX_MyScanner_OUTPUTS}
+  src/interpreter/analysis_mode.cpp
   src/interpreter/ast.cpp
   src/interpreter/decorators.cpp
   src/interpreter/compiler.cpp
   src/interpreter/ast_analysis.cpp
+  src/interpreter/formatter.cpp
   src/interpreter/static_type.cpp
   src/interpreter/typecheck_state.cpp
   src/interpreter/typecheck_types.cpp
@@ -420,7 +423,19 @@ target_link_libraries(skein_builtins PUBLIC
   Boost::context
 )
 
-add_executable(${PROJECT_NAME} src/app/main.cpp src/app/watch.cpp)
+add_executable(${PROJECT_NAME}
+  src/app/main.cpp
+  src/app/watch.cpp
+  src/app/tools/format_tool.cpp
+  src/app/tools/lint_tool.cpp
+  src/app/tools/lsp/json_rpc.cpp
+  src/app/tools/lsp/lsp_json.cpp
+  src/app/tools/lsp/lsp_server.cpp
+  src/app/tools/lsp/position.cpp
+  src/app/tools/lsp/document_store.cpp
+  src/app/tools/lsp_tool.cpp
+  src/app/tools/tool_analysis.cpp
+)
 target_include_directories(${PROJECT_NAME} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/app
   ${CMAKE_CURRENT_SOURCE_DIR}/src/builtins
@@ -768,7 +783,8 @@ if(BUILD_TESTING)
         "language_core,match_types,meta,modules,decorators"
         "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
-        "typecheck")
+        "typecheck"
+        "lint,fmt,lsp")
       # net/io_scripts use probe-then-bind fixed ports; run them in a single
       # LSan shard to avoid cross-process port races while still covering them
       # under ASan + LeakSanitizer.
@@ -776,7 +792,7 @@ if(BUILD_TESTING)
         "language_core,match_types,meta,modules,decorators"
         "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
-        "typecheck,net,io_scripts")
+        "typecheck,lint,fmt,lsp,net,io_scripts")
       set(SKEIN_SANITIZE_SHARD 0)
       foreach(group IN LISTS SKEIN_SANITIZE_GROUPS)
         math(EXPR SKEIN_SANITIZE_SHARD "${SKEIN_SANITIZE_SHARD}+1")
@@ -812,6 +828,22 @@ if(BUILD_TESTING)
         RUN_SERIAL TRUE
         TIMEOUT 600
       )
+    endif()
+    if(NOT SKEIN_SANITIZE)
+      foreach(tool_module IN ITEMS lint fmt lsp)
+        if(tool_module STREQUAL "fmt")
+          set(tool_test_name format_tests)
+        else()
+          set(tool_test_name ${tool_module}_tests)
+        endif()
+        add_test(NAME ${tool_test_name} COMMAND ${SKEIN_TEST_COMMAND})
+        set_tests_properties(${tool_test_name} PROPERTIES
+          ENVIRONMENT "SKEIN_TEST_ONLY_MODULES=${tool_module}"
+          LABELS "tools"
+          RUN_SERIAL TRUE
+          TIMEOUT 600
+        )
+      endforeach()
     endif()
     if(NOT SKEIN_SANITIZE)
       add_test(

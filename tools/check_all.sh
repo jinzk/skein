@@ -8,6 +8,7 @@
 #   - ASan + UBSan build (including the LSan test target)
 #   - VM-only build (default backend without the AST reference path)
 #   - runtime-only link check
+#   - lint / fmt / LSP tool tests
 #   - docs / boundary / whitespace checks
 #   - optional -D_GLIBCXX_DEBUG build
 #
@@ -132,6 +133,9 @@ build "$DEBUG_DIR" --target runtime_link_test
 step "Debug tests (benchmarks are covered by Release)"
 SKEIN_TEST_TIMEOUT=120 test_dir "$DEBUG_DIR" -E \
     'vm_bench_test|container_bench_test'
+
+step "Toolchain tests (lint / fmt / LSP)"
+SKEIN_TEST_TIMEOUT=120 test_dir "$DEBUG_DIR" -L tools
 
 step "Docs / boundary / whitespace checks"
 python3 tools/check_docs_sync.py

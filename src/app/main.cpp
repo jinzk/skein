@@ -36,6 +36,10 @@
 #include "vm.h"
 #include "watch.h"
 
+#include "tools/format_tool.h"
+#include "tools/lint_tool.h"
+#include "tools/lsp_tool.h"
+
 #include <utility>
 
 #ifdef _WIN32
@@ -63,9 +67,13 @@ static void print_usage(const char *program) {
                  "[--typecheck=off|loose|warn|strict] "
                  "[--watch [--watch-dir dir]] "
                  "[-k|--keep-going] [script|-]\n"
+                 "       %s lint [--format=text|json] [options] <file|->\n"
+                 "       %s fmt [--check|-w|--write] [options] <file...|->\n"
+                 "       %s lsp --stdio [--typecheck=off|loose|warn|strict] "
+                 "[options]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
-                 program);
+                 program, program, program, program);
 }
 
 int main(int argc, char **argv) {
@@ -130,6 +138,13 @@ int main(int argc, char **argv) {
     std::vector<std::string> args = platform_command_line_args(argc, argv);
     const char *program =
         args.empty() || args[0].empty() ? "skein" : args[0].c_str();
+
+    if (args.size() > 1 && args[1] == "lint")
+        return run_lint_tool(args, program);
+    if (args.size() > 1 && args[1] == "fmt")
+        return run_format_tool(args, program);
+    if (args.size() > 1 && args[1] == "lsp")
+        return run_lsp_tool(args, program);
 
     std::string script_path;
     std::vector<std::string> package_dirs;

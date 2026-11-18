@@ -749,6 +749,15 @@ struct value_t *json_stringify(
     return newstrval(text.c_str());
 }
 
+std::string stringify_json_value(const struct value_t *value,
+                                 std::string &error) {
+    JsonEncoder encoder;
+    std::string text = encoder.encode(value);
+    if (!encoder.error_message().empty())
+        error = encoder.error_message();
+    return text;
+}
+
 }  // namespace
 
 struct value_t *json_parse_text(const std::string &text, std::string &error) {
@@ -759,6 +768,11 @@ struct value_t *json_parse_text(const std::string &text, std::string &error) {
         return NULL;
     }
     return value;
+}
+
+std::string json_stringify_text(const struct value_t *value,
+                                std::string &error) {
+    return stringify_json_value(value, error);
 }
 
 struct value_t *call_json_builtin(

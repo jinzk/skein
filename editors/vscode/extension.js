@@ -3,6 +3,9 @@
 const path = require('path');
 const vscode = require('vscode');
 
+let languageClient = null;
+let languageClientStart = null;
+
 function configuration() {
   return vscode.workspace.getConfiguration('skein');
 }
@@ -74,14 +77,116 @@ function openRepl() {
   terminal.sendText(quote(executablePath()) + ' -i', true);
 }
 
-function activate(context) {
+async function formatDocument() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'skein') {
+    vscode.window.showErrorMessage('Skein: open a .skein file first.');
+    return;
+  }
+  await vscode.commands.executeCommand('editor.action.formatDocument');
+}
+
+function serverArgs() {
+  const args = ['lsp', '--stdio'];
+  const configured = configuration().get('packagePaths', []);
+  const paths = Array.isArray(configured) ? configured.map(String) : [];
+  for (const entry of paths) {
+    if (entry) {
+      args.push('-I', entry);
+    }
+  }
+  args.push('--typecheck=' + configuration().get('typecheck', 'warn'));
+  return args;
+}
+
+function stopLanguageClient() {
+  if (languageClientStart) {
+    languageClientStart.dispose();
+    languageClientStart = null;
+  }
+  languageClient = null;
+}
+
+function startLanguageClient() {
+  if (!configuration().get('lsp.enabled', true)) {
+    stopLanguageClient();
+    return;
+  }
+
+  let clientModule;
+  try {
+    clientModule = require('vscode-languageclient/node');
+  } catch (error) {
+    vscode.window.showWarningMessage(
+      'Skein: vscode-languageclient is not installed; LSP features are disabled.'
+    );
+    return;
+  }
+
+  const { LanguageClient, TransportKind } = clientModule;
+  const serverOptions = {
+    run: {
+      command: executablePath(),
+      args: serverArgs(),
+      transport: TransportKind.stdio,
+    },
+    debug: {
+      command: executablePath(),
+      args: serverArgs(),
+      transport: TransportKind.stdio,
+    },
+  };
+  const clientOptions = {
+    documentSelector: [
+      { scheme: 'file', language: 'skein' },
+      { scheme: 'untitled', language: 'skein' },
+    ],
+    synchronize: {
+      configurationSection: 'skein',
+      filePatterns: '**/*.skein',
+    },
+  };
+
+  languageClient = new LanguageClient(
+    'skein',
+    'Skein Language Server',
+    serverOptions,
+    clientOptions
+  );
+  languageClientStart = languageClient.start();
+}
+
+function watchConfiguration(context) {
+  const keys = [
+    'skein.lsp.enabled',
+    'skein.executablePath',
+    'skein.typecheck',
+    'skein.packagePaths',
+  ];
   context.subscriptions.push(
-    vscode.commands.registerCommand('skein.runFile', runFile),
-    vscode.commands.registerCommand('skein.openRepl', openRepl)
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (keys.some((key) => event.affectsConfiguration(key))) {
+        stopLanguageClient();
+        startLanguageClient();
+      }
+    })
   );
 }
 
-function deactivate() {}
+function activate(context) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('skein.runFile', runFile),
+    vscode.commands.registerCommand('skein.openRepl', openRepl),
+    vscode.commands.registerCommand('skein.formatDocument', formatDocument),
+    { dispose: stopLanguageClient }
+  );
+  startLanguageClient();
+  watchConfiguration(context);
+}
+
+function deactivate() {
+  stopLanguageClient();
+}
 
 module.exports = {
   activate,

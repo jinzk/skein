@@ -63,6 +63,10 @@ int diag_call_depth();
 /* Total number of reported errors. */
 int diag_error_count();
 
+/* Reset the accumulated error counter before starting an independent analysis
+ * (for example a new LSP document version in the same process). */
+void diag_reset_errors();
+
 /* Save/restore diagnostics state while parsing an imported source file. */
 struct diag_source_checkpoint {
     int current_line;

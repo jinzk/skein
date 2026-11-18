@@ -13,4 +13,9 @@ struct value_t *call_json_builtin(
  * fills `error` on failure. */
 struct value_t *json_parse_text(const std::string &text, std::string &error);
 
+/* Serialize a Skein value tree as compact JSON.  On failure `error` is filled
+ * and the returned string may be incomplete. */
+std::string json_stringify_text(const struct value_t *value,
+                                std::string &error);
+
 #endif

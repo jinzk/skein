@@ -433,6 +433,7 @@ add_executable(${PROJECT_NAME}
   src/app/tools/lsp/lsp_server.cpp
   src/app/tools/lsp/position.cpp
   src/app/tools/lsp/document_store.cpp
+  src/app/tools/lsp/workspace_index.cpp
   src/app/tools/lsp_tool.cpp
   src/app/tools/tool_analysis.cpp
 )

@@ -37,15 +37,31 @@ stdout 仅包含协议消息。Windows 下 stdin/stdout 都设为二进制模式
 | `publishDiagnosticsProvider` | `didOpen` / `didChange` / `didSave` 后发布诊断 |
 | `documentFormattingProvider` | 复用 `skein fmt` 的 token/trivia formatter，输出前做 token 等价与 parse 校验 |
 | `documentRangeFormattingProvider` | 与整文档格式化相同（MVP 忽略 range，返回整文档替换） |
-| `completionProvider` | 触发字符 `.`；提供关键字、当前可见符号、`std.*` 命名空间成员 |
-| `hoverProvider` | 返回关键字说明、局部变量类型或 `std.*` 签名 |
-| `definitionProvider` | 在当前文档内按声明名跳转 |
+| `completionProvider` | 触发字符 `.`；提供关键字、当前可见符号、`std.*` 命名空间成员，以及工作区 module 的导出符号（含 `as` 别名） |
+| `hoverProvider` | 返回关键字说明、局部变量类型、`std.*` 签名或导入模块的导出符号签名 |
+| `definitionProvider` | 先在当前文档内按声明名跳转，未命中时按 import 别名解析到工作区 module 的导出声明（跨文件） |
 | `documentSymbolProvider` | `func` / `let` / `const` / `struct` / `enum` / `trait` / `impl` 等顶层声明 |
+| `workspace.workspaceFolders` | 声明支持多根工作区；文件夹与 `-I` 路径共同构成索引根 |
 
 诊断字段映射：`source` 固定为 `skein`，`code` 为 `PAR####` / `TYP####` /
 `LNT####` 等稳定分类，`severity` 为 LSP 的 1–4。位置使用 0-based line 和
 UTF-16 code unit character；内部来自结构化诊断的 `utf16_offset`，不把显示列宽
 当作 character 偏移。
+
+### 工作区符号索引
+
+服务器在收到 `initialized` 后，一次性扫描索引根并建立 module 导出符号表；
+索引根是客户端 workspace folders 与命令行 `-I` / `--package-path` 路径的并集。
+扫描只读取 `module.skein` 清单及其导出包文件，并复用 check-only 前端分析，
+**不执行任何被索引脚本**。索引结果用于：
+
+- `textDocument/completion`：`math.` 列出 `math` module 的导出名；顶层补全
+  也会提示 module 名；`import x as y` 的别名按原路径解析。
+- `textDocument/definition`：按光标所在词的 import 限定符解析到导出声明所在
+  文件与行列，实现跨文件跳转；本地同名声明优先。
+- `textDocument/hover`：显示导入模块的导出符号签名。
+
+索引只在启动时构建一次；运行期文件变化不会重建索引，需重启语言服务器刷新。
 
 ## VS Code
 
@@ -118,8 +134,6 @@ augroup END
 ## 已知限制
 
 - 只实现了 Full document sync；频繁保存时每次都会重新分析整个文档；
-- 补全来自当前文档可见符号和 `std.*` 命名空间，不含全项目索引或用户包导出；
-- `definition` 只搜索当前文档内的声明，不跨文件跳转；
 - `rangeFormatting` 返回整个文档的替换编辑；
 - 诊断在每次文档变化时立即发布，没有 debounce；大文件可能需要客户端侧节流。
 

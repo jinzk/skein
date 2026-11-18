@@ -119,6 +119,115 @@ def did_change(session, uri, version, text):
     )
 
 
+def run_workspace_cases():
+    """Project index: cross-file definition and module/package completion."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = pathlib.Path(temporary)
+        (root / "math").mkdir()
+        (root / "math" / "module.skein").write_text(
+            "module math {\n"
+            "  export add.add;\n"
+            "  export vector.sum as total;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (root / "math" / "add.skein").write_text(
+            "package add {\n"
+            "  export func add(a, b) { return a + b; }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (root / "math" / "vector.skein").write_text(
+            "package vector {\n"
+            "  export func sum(xs) { return 0; }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        main = root / "main.skein"
+        uri = main.resolve().as_uri()
+
+        session = LspSession("-I", str(root))
+        try:
+            result = session.request("initialize", {"capabilities": {}})
+            assert result["capabilities"]["workspace"]["workspaceFolders"] is True
+            session.notify("initialized", {})
+
+            session.notify(
+                "textDocument/didOpen",
+                {
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": "skein",
+                        "version": 1,
+                        "text": "import math;\nmath.\n",
+                    }
+                },
+            )
+            session.wait_for_diagnostics(uri)
+
+            # Module members, including an `as` alias, appear in completion.
+            items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 6},
+                },
+            )["items"]
+            labels = [item["label"] for item in items]
+            assert "add" in labels, labels
+            assert "total" in labels, labels
+
+            # Top-level module name appears in bare completion.
+            bare = pathlib.Path(temporary) / "bare.skein"
+            bare_uri = bare.resolve().as_uri()
+            session.notify(
+                "textDocument/didOpen",
+                {
+                    "textDocument": {
+                        "uri": bare_uri,
+                        "languageId": "skein",
+                        "version": 1,
+                        "text": "mat\n",
+                    }
+                },
+            )
+            session.wait_for_diagnostics(bare_uri)
+            bare_labels = [
+                item["label"]
+                for item in session.request(
+                    "textDocument/completion",
+                    {
+                        "textDocument": {"uri": bare_uri},
+                        "position": {"line": 0, "character": 3},
+                    },
+                )["items"]
+            ]
+            assert "math" in bare_labels, bare_labels
+
+            # Cross-file definition resolves the real declaration, not the
+            # same-named `package add` statement.
+            did_change(session, uri, 2, "import math;\nmath.add\n")
+            session.wait_for_diagnostics(uri)
+            definitions = session.request(
+                "textDocument/definition",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 7},
+                },
+            )
+            assert len(definitions) == 1, definitions
+            target = definitions[0]
+            assert target["uri"].endswith("/math/add.skein"), target
+            assert target["range"]["start"]["line"] == 1, target
+
+            stderr = session.stop()
+            assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
+        finally:
+            if session.process.poll() is None:
+                session.process.kill()
+                session.process.wait(timeout=10)
+
+
 def run_cases():
     with tempfile.TemporaryDirectory() as temporary:
         path = pathlib.Path(temporary) / "lsp_input.skein"
@@ -229,3 +338,5 @@ def run_cases():
             if session.process.poll() is None:
                 session.process.kill()
                 session.process.wait(timeout=10)
+
+    run_workspace_cases()

@@ -1,5 +1,7 @@
 #include "http2.h"
 
+#include "net_internal.h"
+#include "text_internal.h"
 #include "runtime_context.h"
 #include "ast.h"
 #include "compression.h"
@@ -36,11 +38,7 @@ namespace {
 
 const std::size_t DEFAULT_MAX_BODY_BYTES = 16 * 1024 * 1024;
 
-void free_args(std::vector<value_t *> &args) {
-    for (size_t i = 0; i < args.size(); ++i)
-        freeval(args[i]);
-    args.clear();
-}
+using skein::builtins_internal::free_args;
 
 value_t *call_net(int functype, std::vector<value_t *> args) {
     value_t *result = call_net_builtin(functype, args);
@@ -62,15 +60,7 @@ value_t *call_tls(int functype, std::vector<value_t *> args) {
 }
 #endif
 
-void close_socket(value_t *socket) {
-    if (!socket)
-        return;
-    std::vector<value_t *> args;
-    args.push_back(dupval(socket));
-    value_t *result = call_io_builtin(B_io_close, args);
-    free_args(args);
-    freeval(result);
-}
+using skein::builtins_internal::close_socket;
 
 bool await_task_with_timeout(const task_ptr &task, long long timeout_ms) {
     if (!task)
@@ -143,7 +133,7 @@ value_t *dict_get(value_t *dict, const char *key) {
     return NULL;
 }
 
-std::string lower_ascii(std::string value);
+using skein::builtins_internal::lower_ascii;
 
 bool dict_has_header(value_t *headers, const char *name) {
     if (!headers || headers->type != T_dict)
@@ -322,13 +312,7 @@ std::string h2_settings_tag(
     return tag;
 }
 
-std::string lower_ascii(std::string value) {
-    for (size_t i = 0; i < value.size(); ++i) {
-        unsigned char c = (unsigned char)value[i];
-        value[i] = (char)std::tolower(c);
-    }
-    return value;
-}
+
 
 bool callable_value(value_t *value) {
     return value && (value->type == T_func || value->type == T_builtin ||

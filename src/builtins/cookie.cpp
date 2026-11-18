@@ -1,5 +1,6 @@
 #include "cookie.h"
 
+#include "text_internal.h"
 #include "valuetype.h"
 
 #include <algorithm>
@@ -47,11 +48,7 @@ value_t *dict_get(value_t *dict, const char *key) {
     return NULL;
 }
 
-std::string lower_ascii(std::string value) {
-    for (size_t i = 0; i < value.size(); ++i)
-        value[i] = (char)std::tolower((unsigned char)value[i]);
-    return value;
-}
+using skein::builtins_internal::lower_ascii;
 
 std::string trim_ascii_ws(const std::string &value) {
     size_t start = 0;

@@ -1,5 +1,7 @@
 #include "websocket.h"
 
+#include "net_internal.h"
+#include "text_internal.h"
 #include "ast.h"
 #include "eval.h"
 #include "fiber.h"
@@ -23,11 +25,7 @@ namespace {
 const std::size_t WS_MAX_PAYLOAD = 16 * 1024 * 1024;
 const char *WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-void free_args(std::vector<value_t *> &args) {
-    for (size_t i = 0; i < args.size(); ++i)
-        freeval(args[i]);
-    args.clear();
-}
+using skein::builtins_internal::free_args;
 
 value_t *call_io(int functype, std::vector<value_t *> args) {
     value_t *result = call_io_builtin(functype, args);
@@ -41,12 +39,7 @@ value_t *call_http(int functype, std::vector<value_t *> args) {
     return result;
 }
 
-void close_socket(value_t *socket) {
-    if (!socket)
-        return;
-    value_t *result = call_io(B_io_close, {dupval(socket)});
-    freeval(result);
-}
+using skein::builtins_internal::close_socket;
 
 value_t *await_task_value(value_t *task_value) {
     if (!task_value)
@@ -92,11 +85,7 @@ value_t *dict_get(value_t *dict, const char *key) {
     return NULL;
 }
 
-std::string lower_ascii(std::string value) {
-    for (size_t i = 0; i < value.size(); ++i)
-        value[i] = (char)std::tolower((unsigned char)value[i]);
-    return value;
-}
+using skein::builtins_internal::lower_ascii;
 
 std::string header_value(value_t *headers, const char *name) {
     if (!headers || headers->type != T_dict)

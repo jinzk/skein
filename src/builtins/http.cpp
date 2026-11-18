@@ -1,5 +1,7 @@
 #include "http.h"
 
+#include "net_internal.h"
+#include "text_internal.h"
 #include "runtime_context.h"
 #include "ast.h"
 #include "compression.h"
@@ -81,11 +83,7 @@ long long drain_effective_timeout(long long timeout_ms) {
     return remaining < 0 ? 0 : remaining;
 }
 
-void free_args(std::vector<value_t *> &args) {
-    for (size_t i = 0; i < args.size(); ++i)
-        freeval(args[i]);
-    args.clear();
-}
+using skein::builtins_internal::free_args;
 
 value_t *call_net(int functype, std::vector<value_t *> args) {
     value_t *result = call_net_builtin(functype, args);
@@ -107,15 +105,7 @@ value_t *call_tls(int functype, std::vector<value_t *> args) {
 }
 #endif
 
-void close_socket(value_t *socket) {
-    if (!socket)
-        return;
-    std::vector<value_t *> args;
-    args.push_back(dupval(socket));
-    value_t *result = call_io_builtin(B_io_close, args);
-    free_args(args);
-    freeval(result);
-}
+using skein::builtins_internal::close_socket;
 
 struct pooled_connection {
     value_t *stream = NULL;
@@ -264,13 +254,7 @@ bool callable_value(value_t *value) {
                      value->type == T_method);
 }
 
-std::string lower_ascii(std::string value) {
-    for (size_t i = 0; i < value.size(); ++i) {
-        unsigned char c = (unsigned char)value[i];
-        value[i] = (char)std::tolower(c);
-    }
-    return value;
-}
+using skein::builtins_internal::lower_ascii;
 
 bool header_exists(value_t *headers, const char *name) {
     if (!headers || headers->type != T_dict)

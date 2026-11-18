@@ -1,5 +1,7 @@
 #include "compression.h"
 
+#include "text_internal.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -30,11 +32,7 @@ std::string trim_ascii(std::string value) {
     return value.substr(start, end - start);
 }
 
-std::string lower_ascii(std::string value) {
-    for (size_t i = 0; i < value.size(); ++i)
-        value[i] = (char)std::tolower((unsigned char)value[i]);
-    return value;
-}
+using skein::builtins_internal::lower_ascii;
 
 #ifdef SKEIN_ENABLE_ZLIB
 bool zlib_decode(const std::string &input, int window_bits,

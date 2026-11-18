@@ -22,6 +22,7 @@
 #include "tools/tool_analysis.h"
 #include "typecheck_builtins.h"
 #include "valuetype.h"
+#include "workspace_index.h"
 
 namespace skein {
 namespace lsp {
@@ -127,6 +128,63 @@ std::string qualifier_before(const std::string &text, std::size_t word_start) {
         qualifier.pop_back();
     while (!qualifier.empty() && qualifier.front() == '.')
         qualifier.erase(qualifier.begin());
+    return qualifier;
+}
+
+/** Map an import alias (or bare qualifier) to its module path in a document. */
+std::string resolve_import_alias(const std::string &text,
+                                 const std::string &qualifier) {
+    if (qualifier.empty() || qualifier == "std" ||
+        starts_with(qualifier, "std."))
+        return qualifier;
+
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        const std::size_t line_end = text.find('\n', pos);
+        const std::size_t end = line_end == std::string::npos ? text.size() : line_end;
+        std::string line = text.substr(pos, end - pos);
+        pos = end + 1;
+
+        std::size_t cursor = 0;
+        while (cursor < line.size() &&
+               std::isspace((unsigned char)line[cursor]))
+            ++cursor;
+        if (line.compare(cursor, 7, "import ") != 0)
+            continue;
+        cursor += 7;
+        while (cursor < line.size() &&
+               std::isspace((unsigned char)line[cursor]))
+            ++cursor;
+        const std::size_t path_start = cursor;
+        while (cursor < line.size() &&
+               (is_ident_byte((unsigned char)line[cursor]) ||
+                line[cursor] == '.'))
+            ++cursor;
+        if (cursor == path_start)
+            continue;
+        std::string path = line.substr(path_start, cursor - path_start);
+        std::string alias = path.substr(path.rfind('.') == std::string::npos
+                                            ? 0
+                                            : path.rfind('.') + 1);
+
+        while (cursor < line.size() &&
+               std::isspace((unsigned char)line[cursor]))
+            ++cursor;
+        if (line.compare(cursor, 3, "as ") == 0) {
+            cursor += 3;
+            while (cursor < line.size() &&
+                   std::isspace((unsigned char)line[cursor]))
+                ++cursor;
+            const std::size_t alias_start = cursor;
+            while (cursor < line.size() &&
+                   is_ident_byte((unsigned char)line[cursor]))
+                ++cursor;
+            if (cursor > alias_start)
+                alias = line.substr(alias_start, cursor - alias_start);
+        }
+        if (alias == qualifier)
+            return path;
+    }
     return qualifier;
 }
 
@@ -284,6 +342,20 @@ public:
     lsp_server_impl(const lsp_options &options, FILE *output)
         : options_(options), output_(output) {
         build_std_index();
+    }
+
+    void ensure_workspace_index() {
+        if (index_built_)
+            return;
+        index_built_ = true;
+        std::vector<std::string> roots = options_.package_dirs;
+        for (const std::string &root : index_roots_) {
+            if (std::find(roots.begin(), roots.end(), root) == roots.end())
+                roots.push_back(root);
+        }
+        if (roots.empty())
+            return;
+        index_.rebuild(roots);
     }
 
     int run(FILE *input) {
@@ -458,6 +530,26 @@ private:
         send_notification("textDocument/publishDiagnostics", params);
     }
 
+    void collect_workspace_folders(const value_t *params) {
+        if (!params)
+            return;
+        const value_t *folders = json::member(params, "workspaceFolders");
+        if (!folders || folders->type != T_list)
+            return;
+        const auto &items = ((const list_value_t *)folders)->payload->items;
+        for (const value_t *item : items) {
+            const std::string uri =
+                json::string_value(json::member(item, "uri"));
+            if (uri.empty())
+                continue;
+            const std::string path = uri_to_path(uri);
+            if (!path.empty() &&
+                std::find(index_roots_.begin(), index_roots_.end(), path) ==
+                    index_roots_.end())
+                index_roots_.push_back(path);
+        }
+    }
+
     value_t *initialize_result() {
         value_t *sync = json::object();
         json::set(sync, "openClose", json::boolean(true));
@@ -485,6 +577,9 @@ private:
         json::set(capabilities, "definitionProvider", json::boolean(true));
         json::set(capabilities, "documentSymbolProvider",
                   json::boolean(true));
+        value_t *workspace = json::object();
+        json::set(workspace, "workspaceFolders", json::boolean(true));
+        json::set(capabilities, "workspace", workspace);
 
         value_t *server_info = json::object();
         json::set(server_info, "name", json::string("skein"));
@@ -518,6 +613,18 @@ private:
                 return (symbol.callable ? "func " : "let ") + word + ": " +
                        symbol.type;
             return symbol.callable ? "func " + word : "let " + word;
+        }
+
+        /* User module exports from the workspace index. */
+        if (!qualifier.empty() &&
+            !(qualifier == "std" || starts_with(qualifier, "std."))) {
+            const std::string path = resolve_import_alias(document.text, qualifier);
+            for (const index_entry &entry : index_.lookup(path + "." + word)) {
+                if (!entry.type.empty())
+                    return (entry.callable ? "func " : "let ") + word + ": " +
+                           entry.type;
+                return entry.callable ? "func " + word : "let " + word;
+            }
         }
 
         const char *keyword = keyword_detail(word);
@@ -576,6 +683,35 @@ private:
                          symbol.type.empty() ? (symbol.callable ? "function" : "variable")
                                              : symbol.type);
             add_item("std", 9, "standard library");
+            /* Top-level module names and bare import aliases. */
+            std::vector<std::string> module_names;
+            for (const index_entry &entry : index_.all()) {
+                const std::size_t dot = entry.qualified_name.find('.');
+                if (dot == std::string::npos)
+                    continue;
+                const std::string top = entry.qualified_name.substr(0, dot);
+                if (std::find(module_names.begin(), module_names.end(), top) ==
+                    module_names.end())
+                    module_names.push_back(top);
+            }
+            for (const std::string &name : module_names)
+                add_item(name, 9, "module");
+        }
+
+        /* Imported module / package members from the workspace index. */
+        if (!qualifier.empty() &&
+            !(qualifier == "std" || starts_with(qualifier, "std."))) {
+            const std::string path = resolve_import_alias(document->text, qualifier);
+            for (const index_entry &entry : index_.complete(path)) {
+                const std::size_t dot = entry.qualified_name.rfind('.');
+                const std::string label =
+                    dot == std::string::npos
+                        ? entry.qualified_name
+                        : entry.qualified_name.substr(dot + 1);
+                add_item(label, entry.callable ? 3 : 6,
+                         entry.type.empty() ? (entry.callable ? "function" : "value")
+                                            : entry.type);
+            }
         }
 
         value_t *result = json::object();
@@ -691,6 +827,7 @@ private:
         if (word.empty())
             return locations;
 
+        bool found_local = false;
         for (const doc_symbol &symbol :
              scan_document_symbols(document->text)) {
             if (symbol.name != word)
@@ -700,15 +837,33 @@ private:
                                    symbol.start_character +
                                        utf16_length(symbol.name)};
             json::push(locations, location_value(uri, start, end));
+            found_local = true;
         }
+
+        /* Cross-file definitions from imported modules. */
+        const std::string qualifier = qualifier_before(document->text, word_start);
+        if (!qualifier.empty() &&
+            !(qualifier == "std" || starts_with(qualifier, "std."))) {
+            const std::string path = resolve_import_alias(document->text, qualifier);
+            for (const index_entry &entry : index_.lookup(path + "." + word)) {
+                const lsp_position start{entry.line, entry.character};
+                const lsp_position end{entry.line,
+                                       entry.character + utf16_length(word)};
+                json::push(locations, location_value(entry.uri, start, end));
+                found_local = true;
+            }
+        }
+        (void)found_local;
         return locations;
     }
 
     void handle_notification(const std::string &method,
                              const value_t *params, bool &should_exit,
                              int &exit_code) {
-        if (method == "initialized")
+        if (method == "initialized") {
+            ensure_workspace_index();
             return;
+        }
         if (method == "exit") {
             should_exit = true;
             exit_code = shutdown_received_ ? 0 : 1;
@@ -794,6 +949,7 @@ private:
 
         value_t *result = nullptr;
         if (method == "initialize") {
+            collect_workspace_folders(params);
             result = initialize_result();
         } else if (method == "shutdown") {
             shutdown_received_ = true;
@@ -827,6 +983,9 @@ private:
     FILE *output_;
     document_store documents_;
     std::map<std::string, std_entry> std_index_;
+    workspace_index index_;
+    std::vector<std::string> index_roots_;
+    bool index_built_ = false;
     bool shutdown_received_ = false;
 };
 

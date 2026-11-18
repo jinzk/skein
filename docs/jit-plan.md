@@ -543,6 +543,8 @@ JIT 使用 `stack_depth[pc]` 计算操作数栈的固定 frame 偏移，
 - `frame_eligible`；
 - opcode 全部在支持列表内；
 - 无 `fail` / `recover` / `defer`；
+- 无 `launch`（会创建新 fiber；JIT 调用路径不处理 fiber 启动，
+  必须回退 VM，否则被 launch 函数的控制流会错误地落到调用方上下文）；
 - 无 generator / yield；
 - 无 pattern / variadic / method；
 - 无 `ControlBreak` / `ControlContinue`。

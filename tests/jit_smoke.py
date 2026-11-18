@@ -36,9 +36,9 @@ def run(binary, script, jit, threshold="1", debug=False):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def compare(binary, label, script):
-    vm = run(binary, script, False)
-    jit = run(binary, script, True)
+def compare(binary, label, script, threshold="1"):
+    vm = run(binary, script, False, threshold=threshold)
+    jit = run(binary, script, True, threshold=threshold)
     if vm != jit:
         print(f"jit smoke: {label} mismatch", file=sys.stderr)
         print(f"  vm : {vm!r}", file=sys.stderr)
@@ -371,6 +371,43 @@ def main():
         if rc != 0 or "[jit] enter inner" not in err:
             print(
                 "jit smoke: native task.wait suspension was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
+        # `launch` starts a fiber; the JIT must reject functions containing
+        # it instead of calling the callee synchronously in the caller's
+        # fiber.  A `fail` in a detached task must stay attached to the task.
+        launch_task = tmp_path / "launch_task.skein"
+        launch_task.write_text(
+            "import std;\n"
+            "func bad() {\n"
+            "  std.task.sleep(1).wait();\n"
+            '  fail "boom";\n'
+            "}\n"
+            "func parent() {\n"
+            "  let t = launch bad();\n"
+            "  t.detach();\n"
+            "  std.task.sleep(20).wait();\n"
+            "}\n"
+            "parent();\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "launch-detached-fail", launch_task,
+                      threshold="0")
+        rc, out, err = run(binary, launch_task, True, threshold="0",
+                           debug=True)
+        if rc != 0 or "detached task failed: boom" not in err:
+            print(
+                "jit smoke: detached task failure was not reported",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+        if "[jit] cannot compile parent" not in err:
+            print(
+                "jit smoke: function using launch was not rejected",
                 file=sys.stderr,
             )
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)

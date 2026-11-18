@@ -287,7 +287,21 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::JumpIfFalse:
             case skein::bc::Op::JumpIfTrue:
             case skein::bc::Op::Call:
+                /* `launch f()` uses flags & 1 to start a new fiber.  The JIT
+                 * call helpers do not implement fiber launch, so compiling
+                 * such a call would invoke the callee synchronously in the
+                 * caller's fiber and misattribute its control flow (e.g. a
+                 * `fail` would escape as an uncaught error instead of being
+                 * reported as a detached task failure). */
+                if (ins.flags & 1)
+                    return false;
+                break;
             case skein::bc::Op::TailCall:
+                /* Defensive: compile_call() never sets launch on a tail call,
+                 * but the JIT call path is synchronous either way. */
+                if (ins.flags & 1)
+                    return false;
+                break;
             case skein::bc::Op::Return:
             case skein::bc::Op::PushScope:
             case skein::bc::Op::PopScope:

@@ -17,17 +17,20 @@ cmake --build build
 [bytecode.md](bytecode.md)。JIT spike 的路线、依赖和验收标准见
 [jit-plan.md](jit-plan.md)。
 
-可选 JIT 构建使用仓库内置的 `third_party/asmjit`（固定 1.11.0，
-版本与来源见 `third_party/asmjit/VERSION.md`），无需额外安装 asmjit：
+JIT 使用仓库内置的 `third_party/asmjit`（固定 1.11.0，版本与来源见
+`third_party/asmjit/VERSION.md`），无需额外安装 asmjit。在 Linux x86-64
+上 `SKEIN_ENABLE_JIT` 默认 ON，普通配置即可编译 JIT；其他平台默认 OFF，
+可用 `-DSKEIN_ENABLE_JIT=ON` 显式开启（要求 64-bit x86）：
 
 ```bash
-cmake -S . -B build -G Ninja -DSKEIN_ENABLE_JIT=ON
+cmake -S . -B build -G Ninja
 cmake --build build
 SKEIN_JIT=1 ./build/skein benchmarks/fib_bench.skein
 ```
 
-`SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数，`SKEIN_JIT_DUMP=1`
-会输出生成的汇编。JIT/VM 对比基准：
+JIT 在运行时仍是 opt-in：必须设置 `SKEIN_JIT=1` 才会真正进入 JIT 路径；
+不设置时即使编译进了 JIT 也仍走 VM。`SKEIN_JIT_THRESHOLD` 控制首次编译前
+的调用次数，`SKEIN_JIT_DUMP=1` 会输出生成的汇编。JIT/VM 对比基准：
 
 ```bash
 python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check

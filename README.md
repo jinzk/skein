@@ -85,7 +85,8 @@ func add(a: int, b: int): int {
 同一份源码可以在 AST 解释器和字节码 VM 上运行，VM 默认启用，JIT 可选：
 
 - `--no-vm` / `SKEIN_VM=0` 回退到 AST 解释器，`--vm` 显式选择 VM；
-- 可选 asmjit JIT，`SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数；
+- Linux x86-64 默认编译 asmjit JIT，但运行时需 `SKEIN_JIT=1` 才会启用；
+  `SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数；
 - VM 暂不支持的结构会自动回退到 AST，`SKEIN_VM_DEBUG=1` 会说明回退点；
 - AST、VM 和 JIT 共用同一套测试与语义，`SKEIN_VM_TRACE=1` 可查看字节码执行过程。
 
@@ -214,13 +215,15 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
-可选 JIT 构建：
+Linux x86-64 默认会编译 JIT，运行时通过环境变量启用：
 
 ```bash
-cmake -S . -B build -G Ninja -DSKEIN_ENABLE_JIT=ON
+cmake -S . -B build -G Ninja
 cmake --build build
 SKEIN_JIT=1 ./build/skein benchmarks/fib_bench.skein
 ```
+
+其他平台默认不编译 JIT；64-bit x86 可用 `-DSKEIN_ENABLE_JIT=ON` 显式开启。
 
 Windows / MinGW：
 

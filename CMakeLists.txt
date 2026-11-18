@@ -10,7 +10,29 @@ option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 option(SKEIN_TSAN "Build with ThreadSanitizer" OFF)
 option(SKEIN_ENABLE_NIGHTLY "Register long-running nightly soak tests" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
-option(SKEIN_ENABLE_JIT "Enable the experimental asmjit-backed JIT" OFF)
+
+# The JIT backend emits x86-64 machine code unconditionally.  Default it on
+# only for Linux x86-64; other targets (including Windows, where Win64 is
+# smoke-tested but not yet a release target) keep it opt-in.  An explicit
+# -DSKEIN_ENABLE_JIT=ON on another 64-bit x86 target is still allowed.
+set(SKEIN_JIT_SUPPORTED OFF)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|x64)$")
+  set(SKEIN_JIT_SUPPORTED ON)
+endif()
+if(SKEIN_JIT_SUPPORTED AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(SKEIN_JIT_DEFAULT ON)
+else()
+  set(SKEIN_JIT_DEFAULT OFF)
+endif()
+option(SKEIN_ENABLE_JIT "Enable the experimental asmjit-backed JIT"
+       ${SKEIN_JIT_DEFAULT})
+if(SKEIN_ENABLE_JIT AND NOT SKEIN_JIT_SUPPORTED)
+  message(FATAL_ERROR
+    "SKEIN_ENABLE_JIT requires a 64-bit x86 target; "
+    "got ${CMAKE_SYSTEM_PROCESSOR} (${CMAKE_SYSTEM_NAME})")
+endif()
+
 option(SKEIN_USE_MIMALLOC "Use mimalloc for C++ allocations (Windows/Linux)" OFF)
 if(SKEIN_VM_ONLY)
   add_compile_definitions(SKEIN_VM_ONLY=1)

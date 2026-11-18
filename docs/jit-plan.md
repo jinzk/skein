@@ -909,7 +909,10 @@ SKEIN_JIT_DEBUG=1
 - 递归深度错误文本一致；
 - 类型错误一致；
 - `SKEIN_JIT_THRESHOLD=1` 全量 `fib` 通过；
-- `SKEIN_JIT=0` 与旧 VM 完全一致。
+- `SKEIN_JIT=0` 与旧 VM 完全一致；
+- JIT 编译的函数内紧循环收到 SIGINT 时在退出码 130 停止（`tests/jit_smoke.py`
+  的 `interrupt-loop` 用例）；生成代码在循环 header 与 JIT→JIT 调用返回处
+  轮询 `g_interrupted`，与 VM 的每 1024 条指令检查对齐。
 
 当前回归入口：
 

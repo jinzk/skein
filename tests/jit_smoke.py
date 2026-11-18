@@ -9,9 +9,11 @@ the full regression suite.
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +45,46 @@ def compare(binary, label, script, threshold="1"):
         print(f"jit smoke: {label} mismatch", file=sys.stderr)
         print(f"  vm : {vm!r}", file=sys.stderr)
         print(f"  jit: {jit!r}", file=sys.stderr)
+        return False
+    return True
+
+
+def check_jit_interrupt(binary, script, fn_name):
+    """A JIT-compiled tight loop must react to SIGINT like the VM does."""
+    if sys.platform == "win32":
+        return True
+    env = dict(os.environ)
+    env["SKEIN_VM"] = "1"
+    env["SKEIN_JIT"] = "1"
+    env["SKEIN_JIT_THRESHOLD"] = "0"
+    env["SKEIN_JIT_DEBUG"] = "1"
+    proc = subprocess.Popen(
+        [str(binary), str(script)],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    time.sleep(0.5)
+    if proc.poll() is not None:
+        out, err = proc.communicate()
+        print("jit smoke: interrupt loop exited before SIGINT", file=sys.stderr)
+        print(f"  rc={proc.returncode} out={out!r} err={err!r}",
+              file=sys.stderr)
+        return False
+    proc.send_signal(signal.SIGINT)
+    try:
+        out, err = proc.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        print("jit smoke: JIT loop did not react to SIGINT", file=sys.stderr)
+        print(f"  out={out!r} err={err!r}", file=sys.stderr)
+        return False
+    if proc.returncode != 130 or f"[jit] enter {fn_name}" not in err:
+        print("jit smoke: interrupt result mismatch", file=sys.stderr)
+        print(f"  rc={proc.returncode} out={out!r} err={err!r}",
+              file=sys.stderr)
         return False
     return True
 
@@ -412,6 +454,32 @@ def main():
             )
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
+
+        # A JIT-compiled loop used to ignore SIGINT because generated code
+        # only polled g_interrupted after a call helper returned.  A tight
+        # loop with no calls had to be killed with SIGKILL.
+        interrupt_loop = tmp_path / "interrupt_loop.skein"
+        interrupt_loop.write_text(
+            "func burn() {\n"
+            "  let i = 0;\n"
+            "  let total = 0;\n"
+            "  while (true) { total = total + i; i = i + 1; }\n"
+            "  return total;\n"
+            "}\n"
+            "burn();\n",
+            encoding="utf-8",
+        )
+        ok &= check_jit_interrupt(binary, interrupt_loop, "burn")
+
+        # Self tail calls jump back to pc 0 without a bytecode backedge;
+        # the same header poll must cover that path too.
+        interrupt_tail = tmp_path / "interrupt_tail.skein"
+        interrupt_tail.write_text(
+            "func spin(n) { return spin(n + 1); }\n"
+            "spin(0);\n",
+            encoding="utf-8",
+        )
+        ok &= check_jit_interrupt(binary, interrupt_tail, "spin")
 
     if not ok:
         return 1

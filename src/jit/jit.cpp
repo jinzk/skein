@@ -132,6 +132,7 @@ SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts, function_def *d
 SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
                        uint32_t count);
+SKEIN_JIT_SYSV int skein_jit_check_interrupt();
 }
 
 namespace {
@@ -454,6 +455,34 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     const asmjit::Label abort_label = a.newLabel();
     const asmjit::Label epilogue_label = a.newLabel();
 
+    /*
+     * The VM polls g_interrupted every 1024 instructions.  Generated code
+     * must do the same at loop headers, otherwise a JIT-compiled tight loop
+     * cannot be stopped with Ctrl-C.  A poll at the header (instead of at
+     * the branching instruction) also avoids clobbering flags that CmpJump
+     * carries into its conditional branch.  Self tail calls jump back to pc 0
+     * without a bytecode branch, so mark that header as well.
+     */
+    std::vector<bool> poll_at(labels.size(), false);
+    for (size_t pc = 0; pc < proto.code.size(); ++pc) {
+        const skein::bc::Instr &ins = proto.code[pc];
+        switch (static_cast<skein::bc::Op>(ins.op)) {
+            case skein::bc::Op::Jump:
+            case skein::bc::Op::CmpJump:
+            case skein::bc::Op::JumpIfFalse:
+            case skein::bc::Op::JumpIfTrue:
+                if (ins.b < labels.size() && ins.b <= pc)
+                    poll_at[ins.b] = true;
+                break;
+            case skein::bc::Op::TailCall:
+                if (!proto.code.empty())
+                    poll_at[0] = true;
+                break;
+            default:
+                break;
+        }
+    }
+
     const uint32_t value_count =
         proto.nparams + static_cast<uint32_t>(proto.slots.size()) +
         proto.max_stack;
@@ -587,6 +616,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
     for (size_t pc = 0; pc < proto.code.size(); ++pc) {
         a.bind(labels[pc]);
+        if (poll_at[pc]) {
+            call_addr(fn_address(&skein_jit_check_interrupt));
+            a.test(asmjit::x86::eax, asmjit::x86::eax);
+            a.jnz(abort_label);
+        }
         const int depth = proto.stack_depth[pc];
         if (depth < 0)
             continue;
@@ -1355,6 +1389,14 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(callee_depth)),
                       asmjit::x86::rax);
+                /* The direct JIT-to-JIT path bypasses skein_jit_invoke(),
+                 * which polls after a call; keep interrupt handling equal. */
+                call_addr(fn_address(&skein_jit_check_interrupt));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jnz(abort_label);
+                a.mov(asmjit::x86::rax,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)));
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 a.jmp(call_done);

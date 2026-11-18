@@ -37,6 +37,10 @@ using skein::jit::internal::unpack_loc;
 
 } // namespace
 
+extern "C" SKEIN_JIT_SYSV int skein_jit_check_interrupt() {
+    return g_interrupted ? 1 : 0;
+}
+
 /*
  * C helpers called from generated code.  They must not throw C++ exceptions
  * across the JIT frame.

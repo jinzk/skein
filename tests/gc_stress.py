@@ -58,7 +58,7 @@ def check(proc, label):
     return True
 
 
-proc = run({})
+proc = run({"SKEIN_JIT": "0"})
 ok = check(proc, "vm-stress")
 proc = run({"SKEIN_JIT": "1", "SKEIN_JIT_THRESHOLD": "1"})
 ok = check(proc, "jit-stress") and ok

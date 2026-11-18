@@ -870,6 +870,17 @@ if(BUILD_TESTING)
           RUN_SERIAL TRUE
           TIMEOUT 300
         )
+        add_test(
+          NAME jit_differential_test
+          COMMAND ${Python3_EXECUTABLE}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/jit_differential.py
+                  $<TARGET_FILE:${PROJECT_NAME}>
+        )
+        set_tests_properties(jit_differential_test PROPERTIES
+          LABELS "core;jit"
+          RUN_SERIAL TRUE
+          TIMEOUT 300
+        )
       endif()
       add_test(
         NAME gc_stress_test

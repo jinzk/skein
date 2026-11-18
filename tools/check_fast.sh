@@ -15,7 +15,7 @@
 #   tools/check_fast.sh --docs          # docs / data checks
 #   tools/check_fast.sh --coverage      # opcode coverage check
 #   tools/check_fast.sh --fallback      # VM fallback regression check
-#   tools/check_fast.sh --jit           # JIT smoke + VM differential
+#   tools/check_fast.sh --jit           # JIT smoke + differential + stress
 #   tools/check_fast.sh --no-build      # skip the build step
 #   tools/check_fast.sh --build-dir DIR --jobs N
 #
@@ -119,10 +119,10 @@ case "$MODE" in
             --bin "$BUILD_DIR/skein" --check
         ;;
     jit)
-        printf '==> JIT smoke + VM differential\n'
+        printf '==> JIT smoke + differential + stress\n'
         SKEIN_JIT=1 SKEIN_JIT_THRESHOLD=0 \
             ctest --test-dir "$BUILD_DIR" -j "$JOBS" --output-on-failure \
-            -R '^(skein_vm_tests|vm_differential_test|jit_smoke_test)$'
+            -R '^(skein_vm_tests|vm_differential_test|jit_smoke_test|jit_differential_test|gc_stress_test|worker_vm_stress_test|thread_stress_test)$'
         ;;
     vm)
         printf '==> VM tests + differential\n'

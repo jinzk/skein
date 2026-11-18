@@ -911,6 +911,16 @@ SKEIN_JIT_DEBUG=1
 - `SKEIN_JIT_THRESHOLD=1` 全量 `fib` 通过；
 - `SKEIN_JIT=0` 与旧 VM 完全一致。
 
+当前回归入口：
+
+- `tools/check_fast.sh --jit`：在 JIT 构建目录上一次跑完完整 `skein_vm_tests`、
+  AST/VM differential、`jit_smoke`、`jit_differential`，以及 GC/worker/thread
+  三组 stress 测试；
+- `tests/jit_differential.py`：确定性的 JIT-off / JIT-on 差分矩阵，覆盖
+  handler、`launch`/detached task、task 挂起、GC stress frame、运行时类型与
+  inline cache、global/upvalue、defer/generator/pattern 回退。每项同时断言
+  JIT 是否如预期接受或拒绝热点函数，避免"JIT 根本没介入"的假通过。
+
 ### 9.3 性能
 
 | 指标 | 目标 |

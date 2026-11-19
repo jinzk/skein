@@ -807,3 +807,61 @@ def run_cases():
         assert unsafe.returncode != 0, unsafe.stdout
         assert "refusing to clean unsafe cache root" in unsafe.stderr, (
             unsafe.stderr)
+
+        # A running script holds the cache shared while loading modules.
+        ready = os.path.join(download_project, "ready.marker")
+        ready_skein = ready.replace(os.sep, "/")
+        holder = write(
+            download_project,
+            "holder.skein",
+            'import std;\n'
+            'import "example.test/util/json";\n'
+            f'std.fs.write_text("{ready_skein}", "ready", "utf-8");\n'
+            "std.time.sleep(1200);\n"
+            "println(json.answer());\n",
+        )
+        script = subprocess.Popen(
+            [harness.BIN, holder],
+            env=download_env,
+            cwd=download_project,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            deadline = time.time() + 5.0
+            while not os.path.exists(ready) and time.time() < deadline:
+                if script.poll() is not None:
+                    break
+                time.sleep(0.05)
+            if not os.path.exists(ready):
+                script_out, script_err = script.communicate(
+                    timeout=harness.DEFAULT_TIMEOUT)
+                raise AssertionError(
+                    "runtime script did not acquire cache: " +
+                    script_out + script_err)
+            cleaner = subprocess.Popen(
+                [harness.BIN, "mod", "clean"],
+                env=download_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                time.sleep(0.4)
+                blocked = cleaner.poll() is None
+            finally:
+                script_out, script_err = script.communicate(
+                    timeout=harness.DEFAULT_TIMEOUT)
+            cleaner_out, cleaner_err = cleaner.communicate(
+                timeout=harness.DEFAULT_TIMEOUT)
+            assert blocked, cleaner_out + cleaner_err
+            assert script.returncode == 0, script_err
+            assert cleaner.returncode == 0, cleaner_err
+            assert not os.path.exists(download_env["SKEINMODCACHE"])
+        finally:
+            if script.poll() is None:
+                script.kill()
+                script.communicate(timeout=harness.DEFAULT_TIMEOUT)

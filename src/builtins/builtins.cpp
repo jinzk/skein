@@ -14,6 +14,7 @@
 #include "env_builtin.h"
 #include "eval_helpers.h"
 #include "error.h"
+#include "file_lock.h"
 #include "example_binding.h"
 #include "fs_extra.h"
 #include "generator.h"
@@ -127,6 +128,8 @@ static bool resolve_required_module(const std::string &requested,
             continue;
         path = req.path;
         version = req.version;
+        if (!acquire_runtime_cache_lock(error))
+            return false;
         return skein::modfile::verify_cached_module(root, path, version, error);
     }
     error = "module not required: " + requested + "; run 'skein get " +

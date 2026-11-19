@@ -3,6 +3,7 @@
 - 状态：JIT spike 已完成；当前下一阶段为 GC root map（Phase 3）
 - 更新日期：2026-11-06
 - 关联文档：
+  - [roadmap.md](roadmap.md)
   - [bytecode.md](bytecode.md)
   - [architecture.md](architecture.md)
 

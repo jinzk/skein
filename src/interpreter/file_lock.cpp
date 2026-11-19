@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <string>
 
 #ifdef _WIN32
@@ -158,4 +159,25 @@ bool acquire_cache_lock(file_lock &lock, lock_mode mode, std::string &error) {
         file = file.parent_path();
     file += ".lock";
     return lock.acquire(file.u8string(), "module cache lock", mode, error);
+}
+
+bool acquire_runtime_cache_lock(std::string &error) {
+    static std::mutex mutex;
+    static file_lock lock;
+    static bool acquired = false;
+    static std::string acquired_path;
+
+    std::lock_guard<std::mutex> guard(mutex);
+    const std::string current = skein::modfile::cache_dir();
+    if (acquired) {
+        if (current == acquired_path)
+            return true;
+        error = "module cache root changed after runtime lock was acquired";
+        return false;
+    }
+    if (!acquire_cache_lock(lock, lock_mode::shared, error))
+        return false;
+    acquired = true;
+    acquired_path = current;
+    return true;
 }

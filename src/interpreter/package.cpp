@@ -8,6 +8,7 @@
 #include "diagnostics.h"
 #include "eval.h"
 #include "eval_context.h"
+#include "file_lock.h"
 #include "modfile.h"
 #include "parser.hpp"
 #include "parser_lock.h"
@@ -1312,6 +1313,10 @@ value_t *import_external_module(const std::string &path,
     std::string subpath;
     if (!find_external_require(project_root, path, module, version, subpath,
                                error))
+        return NULL;
+
+    /* Keep the cache alive while this process reads module files. */
+    if (!acquire_runtime_cache_lock(error))
         return NULL;
 
     /* No implicit network access: the cache and checksum must already exist. */

@@ -271,7 +271,7 @@ SKEIN_MODULE_URL=github.com/acme/util=https://mirror.example/acme/util,example.t
 
 `{version}` 在 `@latest` 的 tag 列举阶段不可用，会直接报错并要求显式版本。模板只解决“从哪里拉取”，完整性仍由 `skein.sum` 校验。
 
-并发操作通过多层文件锁协调：`skein get` 持有项目级独占锁 `<project>/.skein/lock`，`skein build` 持有项目共享锁；两者同时持有缓存共享锁，并按 `module@version` 在缓存根 `.locks/` 下加模块锁。`skein mod clean` 获取缓存独占锁，因此会等待正在运行的 `get` / `build`，不会在下载或构建过程中删除缓存。锁随进程退出自动释放；需要等待时会在 stderr 提示。`.skein/` 是本地锁状态目录，不应提交到版本库。
+并发操作通过多层文件锁协调：`skein get` 持有项目级独占锁 `<project>/.skein/lock`，`skein build` 持有项目共享锁；两者同时持有缓存共享锁，并按 `module@version` 在缓存根 `.locks/` 下加模块锁。运行中的脚本首次加载外部 module 时也会懒获取缓存共享锁，因此 `skein mod clean` 会等待正在运行的 `get` / `build` 和脚本退出，不会在读取、下载或构建过程中删除缓存。锁随进程退出自动释放；需要等待时会在 stderr 提示。`.skein/` 是本地锁状态目录，不应提交到版本库。
 
 `skein.mod` 和 `skein.sum` 通过临时文件替换写入。`skein get` 成功时批量写入新的 `skein.sum` 条目，然后更新 `skein.mod`；如果后续模块失败，`skein.mod` 保持原样，`skein.sum` 最多保留已经完成模块的有效校验和，不会出现半写文件或未校验缓存。
 

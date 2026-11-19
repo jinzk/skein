@@ -287,9 +287,13 @@ tools/check_all.sh --clean
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/roadmap.md](docs/roadmap.md) | 总路线图、里程碑和待决策事项 |
 | [docs/tutorial.md](docs/tutorial.md) | 从脚本运行、语言基础到并发、网络和标准库的教程 |
 | [SYNTAX.md](SYNTAX.md) | 词法、语法、类型、内置函数的完整参考 |
 | [docs/stdlib.md](docs/stdlib.md) | `std` 各模块的 API、参数和行为细节 |
+| [docs/package-manager.md](docs/package-manager.md) | module、缓存、锁、信任模型和包管理计划 |
+| [docs/repl-plan.md](docs/repl-plan.md) | REPL 当前能力与后续计划 |
+| [docs/tooling-plan.md](docs/tooling-plan.md) | lint / fmt / LSP 工具链计划 |
 | [docs/building.md](docs/building.md) | 构建选项、依赖、sanitizer / TSan 和平台说明 |
 | [docs/architecture.md](docs/architecture.md) | 运行时、解释器和 builtins 的分层架构 |
 | [docs/bytecode.md](docs/bytecode.md) | 字节码 VM、指令和 AST 回退策略 |
@@ -319,7 +323,7 @@ src/
                  vm_host_calls.h、gc.*、package.*、
                  std_namespace.*、pattern.*、scopestack.*、structeval.*、fiber.*、
                  generator.*、iter.*、async_support.*、task.*、event_loop.*、
-                 repl.*、repl_ui.*、source_encoding.*
+                 file_lock.*、repl.*、repl_ui.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
                  builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
                  *_builtin.*、compression.*、cookie.*、error.*、

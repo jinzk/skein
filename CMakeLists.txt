@@ -364,6 +364,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/native_async.cpp
   src/interpreter/task.cpp
   src/interpreter/event_loop.cpp
+  src/interpreter/file_lock.cpp
   src/interpreter/repl.cpp
   src/interpreter/repl_ui.cpp
   src/interpreter/source_encoding.cpp
@@ -452,7 +453,6 @@ add_executable(${PROJECT_NAME}
   src/app/main.cpp
   src/app/watch.cpp
   src/app/tools/build_tool.cpp
-  src/app/tools/file_lock.cpp
   src/app/tools/format_tool.cpp
   src/app/tools/get_tool.cpp
   src/app/tools/lint_tool.cpp

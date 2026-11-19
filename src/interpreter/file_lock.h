@@ -37,4 +37,9 @@ bool acquire_project_lock(const std::string &root, file_lock &lock,
                           lock_mode mode, std::string &error);
 bool acquire_cache_lock(file_lock &lock, lock_mode mode, std::string &error);
 
+/* Hold a shared cache lock for the lifetime of the process.  Runtime module
+ * loading calls this lazily so `mod clean` cannot delete a cache that a
+ * running script may still read. */
+bool acquire_runtime_cache_lock(std::string &error);
+
 #endif

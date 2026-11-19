@@ -145,6 +145,16 @@ bool version_char(char c) {
            c == '+';
 }
 
+bool is_version_suffix(const std::string &part) {
+    if (part.size() < 2 || part[0] != 'v')
+        return false;
+    for (std::size_t i = 1; i < part.size(); ++i) {
+        if (part[i] < '0' || part[i] > '9')
+            return false;
+    }
+    return true;
+}
+
 std::string env_or(const char *name, const std::string &fallback) {
     std::string value;
     if (thread_env_get(name, value) && !value.empty())
@@ -208,8 +218,12 @@ bool load(const std::string &root, mod_file &out, std::string &error) {
                                                     : end - pos));
         ++line_number;
         size_t comment = line.find("//");
-        if (comment != std::string::npos)
+        bool indirect = false;
+        if (comment != std::string::npos) {
+            std::string note = trim(line.substr(comment + 2));
+            indirect = note == "indirect";
             line = trim(line.substr(0, comment));
+        }
         comment = line.find('#');
         if (comment != std::string::npos)
             line = trim(line.substr(0, comment));
@@ -246,7 +260,7 @@ bool load(const std::string &root, mod_file &out, std::string &error) {
                     }
                 }
                 if (!duplicate)
-                    out.requirements.push_back({parts[1], parts[2]});
+                    out.requirements.push_back({parts[1], parts[2], indirect});
             } else {
                 error = "unknown directive '" + parts[0] +
                         "' at skein.mod:" + std::to_string(line_number);
@@ -264,14 +278,19 @@ bool save(const std::string &root, const mod_file &mod, std::string &error) {
     std::string data;
     if (!mod.module.empty())
         data += "module " + mod.module + "\n";
-    for (const require_spec &spec : mod.requirements)
-        data += "require " + spec.path + " " + spec.version + "\n";
+    for (const require_spec &spec : mod.requirements) {
+        data += "require " + spec.path + " " + spec.version;
+        if (spec.indirect)
+            data += " // indirect";
+        data += "\n";
+    }
     return platform_write_file(text_of(path_of(root) / "skein.mod"), data,
                                false, error);
 }
 
 bool upsert_require(const std::string &root, const std::string &path,
-                    const std::string &version, std::string &error) {
+                    const std::string &version, bool indirect,
+                    std::string &error) {
     mod_file mod;
     if (!load(root, mod, error))
         return false;
@@ -279,12 +298,13 @@ bool upsert_require(const std::string &root, const std::string &path,
     for (require_spec &spec : mod.requirements) {
         if (spec.path == path) {
             spec.version = version;
+            spec.indirect = indirect;
             found = true;
             break;
         }
     }
     if (!found)
-        mod.requirements.push_back({path, version});
+        mod.requirements.push_back({path, version, indirect});
     return save(root, mod, error);
 }
 
@@ -380,6 +400,88 @@ bool is_valid_module_path(const std::string &path) {
     return segments >= 2 && host;
 }
 
+bool parse_semver(const std::string &version, std::vector<long long> &numbers,
+                  bool &prerelease) {
+    numbers.clear();
+    prerelease = false;
+    if (version.empty() || version[0] != 'v')
+        return false;
+    std::size_t end = version.find_first_of("-+");
+    std::string core = version.substr(1, end == std::string::npos
+                                             ? std::string::npos
+                                             : end - 1);
+    prerelease = end != std::string::npos && version[end] == '-';
+    if (core.empty())
+        return false;
+    std::size_t start = 0;
+    for (;;) {
+        std::size_t dot = core.find('.', start);
+        std::string part = core.substr(start, dot == std::string::npos
+                                                  ? std::string::npos
+                                                  : dot - start);
+        if (part.empty())
+            return false;
+        for (char c : part) {
+            if (c < '0' || c > '9')
+                return false;
+        }
+        try {
+            numbers.push_back(std::stoll(part));
+        } catch (...) {
+            return false;
+        }
+        if (dot == std::string::npos)
+            break;
+        start = dot + 1;
+    }
+    return true;
+}
+
+int compare_semver(const std::string &a, const std::string &b) {
+    std::vector<long long> left;
+    std::vector<long long> right;
+    bool left_pre = false;
+    bool right_pre = false;
+    if (!parse_semver(a, left, left_pre) ||
+        !parse_semver(b, right, right_pre))
+        return 0; /* caller rejects non-semver requirements separately */
+    std::size_t count = std::max(left.size(), right.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        long long l = i < left.size() ? left[i] : 0;
+        long long r = i < right.size() ? right[i] : 0;
+        if (l < r)
+            return -1;
+        if (l > r)
+            return 1;
+    }
+    if (left_pre != right_pre)
+        return left_pre ? -1 : 1;
+    return a.compare(b);
+}
+
+bool has_version_suffix(const std::string &path) {
+    std::size_t slash = path.rfind('/');
+    return slash != std::string::npos &&
+           is_version_suffix(path.substr(slash + 1));
+}
+
+std::string module_name_from_path(const std::string &path) {
+    std::size_t slash = path.rfind('/');
+    std::string name = slash == std::string::npos
+                           ? path
+                           : path.substr(slash + 1);
+    if (is_version_suffix(name) && slash != std::string::npos) {
+        std::size_t previous = path.rfind('/', slash - 1);
+        name = path.substr(previous == std::string::npos
+                               ? 0
+                               : previous + 1,
+                           slash - (previous == std::string::npos
+                                        ? 0
+                                        : previous + 1));
+    }
+    return name;
+}
+
 bool is_valid_version(const std::string &version) {
     if (version.empty())
         return false;
@@ -433,12 +535,14 @@ std::string cache_path(const std::string &path, const std::string &version) {
     const std::string parent = slash == std::string::npos
                                    ? std::string()
                                    : path.substr(0, slash);
-    const std::string name = slash == std::string::npos
-                                 ? path
-                                 : path.substr(slash + 1);
+    /* /vN paths keep the suffix in the cache path but use the underlying
+     * module name as the directory name. */
+    const std::string name = module_name_from_path(path);
     fs::path result = path_of(cache_dir());
     if (!parent.empty())
         result /= path_of(parent);
+    if (has_version_suffix(path))
+        result /= path.substr(slash + 1);
     result /= version;
     result /= name;
     return text_of(result);

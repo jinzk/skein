@@ -31,14 +31,14 @@ def git(repo, *args):
     assert proc.returncode == 0, proc.stderr
 
 
-def run_skein(args, env=None, cwd=None, stdin=None):
+def run_skein(args, env=None, cwd=None, stdin=None, timeout=None):
     return subprocess.run(
         [harness.BIN, *args],
         input=stdin,
         text=True,
         encoding="utf-8",
         capture_output=True,
-        timeout=harness.DEFAULT_TIMEOUT,
+        timeout=timeout or harness.DEFAULT_TIMEOUT,
         env=env,
         cwd=cwd,
     )
@@ -203,3 +203,118 @@ def run_cases():
         upgraded = run_skein([main], env=env, cwd=project)
         assert upgraded.returncode == 0, upgraded.stderr
         assert upgraded.stdout == "42\n", upgraded.stdout
+
+        # Diamond dependencies: A needs C v1.0.0, B needs C v1.2.0;
+        # minimal version selection must choose v1.2.0 for the whole graph.
+        diamond_root = os.path.join(root, "diamond")
+        os.makedirs(diamond_root)
+        urls = {}
+
+        def dep_repo(name, full_name, skeleton, extra=None, modfile=None):
+            repo = os.path.join(diamond_root, name)
+            os.makedirs(repo)
+            git(repo, "init", "-q")
+            git(repo, "config", "user.email", "test@example.com")
+            git(repo, "config", "user.name", "Skein Test")
+            write(repo, "module.skein", skeleton)
+            if modfile:
+                write(repo, "skein.mod", modfile)
+            if extra:
+                for rel, text in extra.items():
+                    write(repo, rel, text)
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", name)
+            urls[full_name] = os.path.abspath(repo).replace(os.sep, "/")
+            return repo
+
+        c_repo = dep_repo(
+            "c", "example.test/c",
+            "module c {\n  export package value;\n}\n",
+            {"value.skein": "package value {}\n"},
+        )
+
+        def tag_value(repo, version, value):
+            write(
+                repo,
+                "value.skein",
+                f"package value {{ export func get() {{ return {value}; }} }}\n",
+            )
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", f"value {value}")
+            git(repo, "tag", version)
+
+        tag_value(c_repo, "v1.0.0", 10)
+        tag_value(c_repo, "v1.2.0", 12)
+
+        a_repo = dep_repo(
+            "a", "example.test/a",
+            "module a {\n  export package dep;\n}\n",
+            {"dep.skein": "package dep { export func get() { return 1; } }\n"},
+            "require example.test/c v1.0.0\n",
+        )
+        git(a_repo, "tag", "v1.0.0")
+
+        b_repo = dep_repo(
+            "b", "example.test/b",
+            "module b {\n  export package dep;\n}\n",
+            {"dep.skein": "package dep { export func get() { return 2; } }\n"},
+            "require example.test/c v1.2.0\n",
+        )
+        git(b_repo, "tag", "v1.0.0")
+
+        url_map = ",".join(f"{name}={url}" for name, url in urls.items())
+        diamond_env = os.environ.copy()
+        diamond_env["SKEIN_MODULE_URL"] = url_map
+        diamond_env["SKEINMODCACHE"] = os.path.join(root, "diamond-cache")
+        diamond_project = os.path.join(root, "diamond-project")
+        os.makedirs(diamond_project)
+        run_skein(["mod", "init", "-C", diamond_project, "example.test/app"],
+                  env=diamond_env)
+        diamond_get = run_skein(
+            ["get", "-C", diamond_project,
+             "example.test/a@v1.0.0", "example.test/b@v1.0.0"],
+            env=diamond_env,
+            timeout=30,
+        )
+        assert diamond_get.returncode == 0, diamond_get.stderr
+        with open(os.path.join(diamond_project, "skein.mod"), encoding="utf-8") as handle:
+            diamond_mod = handle.read()
+        assert "require example.test/c v1.2.0 // indirect" in diamond_mod, diamond_mod
+        assert "require example.test/a v1.0.0\n" in diamond_mod, diamond_mod
+        assert "require example.test/b v1.0.0\n" in diamond_mod, diamond_mod
+
+        diamond_main = write(
+            diamond_project,
+            "main.skein",
+            'import "example.test/c/value";\nprintln(value.get());\n',
+        )
+        diamond_run = run_skein([diamond_main], env=diamond_env, cwd=diamond_project)
+        assert diamond_run.returncode == 0, diamond_run.stderr
+        assert diamond_run.stdout == "12\n", diamond_run.stdout
+
+        # A /vN module path is a distinct module and keeps its major version.
+        v2_repo = dep_repo(
+            "c-v2", "example.test/c/v2",
+            "module c {\n  export package value;\n}\n",
+            {"value.skein": "package value { export func get() { return 20; } }\n"},
+        )
+        git(v2_repo, "tag", "v2.0.0")
+        v2_env = diamond_env.copy()
+        v2_env["SKEIN_MODULE_URL"] = ",".join(
+            f"{name}={url}" for name, url in urls.items())
+        v2_get = run_skein(
+            ["get", "-C", diamond_project, "example.test/c/v2@v2.0.0"],
+            env=v2_env,
+        )
+        assert v2_get.returncode == 0, v2_get.stderr
+        with open(os.path.join(diamond_project, "skein.mod"), encoding="utf-8") as handle:
+            v2_mod = handle.read()
+        assert "require example.test/c/v2 v2.0.0\n" in v2_mod, v2_mod
+        v2_main = write(
+            diamond_project,
+            "v2main.skein",
+            'import "example.test/c/v2/value";\nprintln(value.get());\n',
+        )
+        v2_run = run_skein([v2_main], env=v2_env, cwd=diamond_project)
+        assert v2_run.returncode == 0, v2_run.stderr
+        assert v2_run.stdout == "20\n", v2_run.stdout

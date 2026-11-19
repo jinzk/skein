@@ -10,6 +10,7 @@ namespace modfile {
 struct require_spec {
     std::string path;
     std::string version;
+    bool indirect = false;
 };
 
 struct mod_file {
@@ -26,7 +27,8 @@ bool exists(const std::string &root);
 bool load(const std::string &root, mod_file &out, std::string &error);
 bool save(const std::string &root, const mod_file &mod, std::string &error);
 bool upsert_require(const std::string &root, const std::string &path,
-                    const std::string &version, std::string &error);
+                    const std::string &version, bool indirect,
+                    std::string &error);
 
 bool add_sum(const std::string &root, const std::string &path,
              const std::string &version, const std::string &hash,
@@ -40,6 +42,13 @@ bool verify_cached_module(const std::string &root, const std::string &path,
 bool is_valid_module_path(const std::string &path);
 bool is_valid_version(const std::string &version);
 bool is_valid_package_subpath(const std::string &subpath);
+
+/* Semantic-version helpers shared by `skein get` and the module resolver. */
+bool parse_semver(const std::string &version, std::vector<long long> &numbers,
+                  bool &prerelease);
+int compare_semver(const std::string &a, const std::string &b);
+bool has_version_suffix(const std::string &path);
+std::string module_name_from_path(const std::string &path);
 
 std::string cache_dir();
 std::string cache_path(const std::string &path, const std::string &version);

@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -112,64 +114,50 @@ bool parse_spec(const std::string &text, parsed_spec &out) {
     return true;
 }
 
-struct semver {
+bool is_semver(const std::string &version) {
     std::vector<long long> numbers;
     bool prerelease = false;
-};
-
-bool parse_semver(const std::string &version, semver &out) {
-    if (version.empty() || version[0] != 'v')
-        return false;
-    std::size_t end = version.find_first_of("-+");
-    std::string core = version.substr(1, end == std::string::npos
-                                             ? std::string::npos
-                                             : end - 1);
-    out.prerelease = end != std::string::npos && version[end] == '-';
-    if (core.empty())
-        return false;
-    std::size_t start = 0;
-    for (;;) {
-        std::size_t dot = core.find('.', start);
-        std::string part = core.substr(start, dot == std::string::npos
-                                                  ? std::string::npos
-                                                  : dot - start);
-        if (part.empty())
-            return false;
-        for (char c : part) {
-            if (c < '0' || c > '9')
-                return false;
-        }
-        try {
-            out.numbers.push_back(std::stoll(part));
-        } catch (...) {
-            return false;
-        }
-        if (dot == std::string::npos)
-            break;
-        start = dot + 1;
-    }
-    return true;
+    return skein::modfile::parse_semver(version, numbers, prerelease);
 }
 
-int compare_semver(const semver &a, const semver &b) {
-    std::size_t count = std::max(a.numbers.size(), b.numbers.size());
-    for (std::size_t i = 0; i < count; ++i) {
-        long long left = i < a.numbers.size() ? a.numbers[i] : 0;
-        long long right = i < b.numbers.size() ? b.numbers[i] : 0;
-        if (left < right)
-            return -1;
-        if (left > right)
-            return 1;
+/* A /vN module path requires a version whose major component equals N. */
+bool version_matches_path(const std::string &path, const std::string &version) {
+    if (!skein::modfile::has_version_suffix(path))
+        return true;
+    std::vector<long long> numbers;
+    bool prerelease = false;
+    if (!skein::modfile::parse_semver(version, numbers, prerelease) ||
+        numbers.empty())
+        return false;
+    const std::string major = path.substr(path.rfind('/') + 2);
+    try {
+        return numbers[0] == std::stoll(major);
+    } catch (...) {
+        return false;
     }
-    if (a.prerelease != b.prerelease)
-        return a.prerelease ? -1 : 1;
-    return 0;
 }
 
 std::string module_url(const std::string &module) {
     std::string override;
-    if (thread_env_get("SKEIN_MODULE_URL", override) && !override.empty())
-        return override;
+    if (thread_env_get("SKEIN_MODULE_URL", override) && !override.empty()) {
+        /* Accept either a single URL for all modules, or "path=url,..." pairs
+         * so tests and mirrors can override each module independently. */
+        std::size_t pos = 0;
+        while (pos <= override.size()) {
+            std::size_t end = override.find(',', pos);
+            std::string item = override.substr(pos, end == std::string::npos
+                                                       ? std::string::npos
+                                                       : end - pos);
+            std::size_t equals = item.find('=');
+            if (equals != std::string::npos && item.substr(0, equals) == module)
+                return item.substr(equals + 1);
+            if (end == std::string::npos)
+                break;
+            pos = end + 1;
+        }
+        if (override.find('=') == std::string::npos)
+            return override;
+    }
     return "https://" + module;
 }
 
@@ -189,7 +177,6 @@ bool resolve_latest(const std::string &module, std::string &version,
     }
 
     std::string best;
-    semver best_version;
     bool have_best = false;
     std::size_t pos = 0;
     while (pos < output.size()) {
@@ -203,12 +190,11 @@ bool resolve_latest(const std::string &module, std::string &version,
         if (tag == std::string::npos)
             continue;
         std::string candidate = line.substr(tag + prefix.size());
-        semver parsed;
-        if (!parse_semver(candidate, parsed))
+        if (!is_semver(candidate) || !version_matches_path(module, candidate))
             continue;
-        if (!have_best || compare_semver(parsed, best_version) > 0) {
+        if (!have_best ||
+            skein::modfile::compare_semver(candidate, best) > 0) {
             best = candidate;
-            best_version = parsed;
             have_best = true;
         }
     }
@@ -272,6 +258,33 @@ bool download_module(const std::string &module, const std::string &version,
     return true;
 }
 
+struct selection {
+    std::string version;
+    bool indirect = true;
+};
+
+/* Ensure a module version is downloaded and checksummed, then return its
+ * cached directory and parsed skein.mod. */
+bool prepare_module(const std::string &root, const std::string &path,
+                    const std::string &version, fs::path &directory,
+                    skein::modfile::mod_file &mod, std::string &error) {
+    directory = fs::u8path(skein::modfile::cache_path(path, version));
+    if (!skein::modfile::verify_cached_module(root, path, version, error)) {
+        if (!download_module(path, version,
+                             skein::modfile::cache_path(path, version),
+                             error))
+            return false;
+        std::string hash;
+        if (!skein::modfile::dirhash(directory.u8string(), hash, error))
+            return false;
+        if (!skein::modfile::add_sum(root, path, version, hash, error))
+            return false;
+    }
+    if (!skein::modfile::load(directory.u8string(), mod, error))
+        return false;
+    return true;
+}
+
 }  // namespace
 
 int run_get_tool(const std::vector<std::string> &args,
@@ -309,46 +322,123 @@ int run_get_tool(const std::vector<std::string> &args,
         specs.push_back(spec);
     }
 
-    for (const parsed_spec &spec : specs) {
-        std::string version = spec.version;
-        if (version.empty()) {
-            std::string error;
-            if (!resolve_latest(spec.module, version, error)) {
-                std::fprintf(stderr, "%s: %s\n", program.c_str(),
-                             error.c_str());
-                return 1;
-            }
-        }
+    skein::modfile::mod_file existing;
+    std::string error;
+    if (!skein::modfile::load(root, existing, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
 
-        const std::string destination =
-            skein::modfile::cache_path(spec.module, version);
-        std::string error;
-        if (!skein::modfile::verify_cached_module(root, spec.module, version,
-                                                  error)) {
-            if (!download_module(spec.module, version, destination, error)) {
-                std::fprintf(stderr, "%s: %s\n", program.c_str(),
-                             error.c_str());
-                return 1;
-            }
-            std::string hash;
-            if (!skein::modfile::dirhash(destination, hash, error)) {
-                std::fprintf(stderr, "%s: %s\n", program.c_str(),
-                             error.c_str());
-                return 1;
-            }
-            if (!skein::modfile::add_sum(root, spec.module, version, hash,
-                                         error)) {
+    /* Direct dependencies are: modules named on the command line, plus
+     * existing root requirements not marked indirect. */
+    std::set<std::string> direct;
+    for (const skein::modfile::require_spec &spec : existing.requirements) {
+        if (!spec.indirect)
+            direct.insert(spec.path);
+    }
+
+    std::map<std::string, selection> selected;
+    for (const skein::modfile::require_spec &spec : existing.requirements) {
+        selected[spec.path] = {spec.version, spec.indirect};
+    }
+
+    std::vector<parsed_spec> requested;
+    for (const parsed_spec &spec : specs) {
+        parsed_spec resolved = spec;
+        if (resolved.version.empty()) {
+            if (!resolve_latest(resolved.module, resolved.version, error)) {
                 std::fprintf(stderr, "%s: %s\n", program.c_str(),
                              error.c_str());
                 return 1;
             }
         }
-        if (!skein::modfile::upsert_require(root, spec.module, version,
-                                            error)) {
+        if (!is_semver(resolved.version)) {
+            std::fprintf(stderr,
+                         "%s: non-semver version '%s' for %s; "
+                         "use an explicit semver tag\n",
+                         program.c_str(), resolved.version.c_str(),
+                         resolved.module.c_str());
+            return 1;
+        }
+        if (!version_matches_path(resolved.module, resolved.version)) {
+            std::fprintf(stderr,
+                         "%s: version %s does not match module path %s\n",
+                         program.c_str(), resolved.version.c_str(),
+                         resolved.module.c_str());
+            return 1;
+        }
+        direct.insert(resolved.module);
+        auto it = selected.find(resolved.module);
+        if (it == selected.end() ||
+            skein::modfile::compare_semver(resolved.version, it->second.version) >
+                0)
+            selected[resolved.module] = {resolved.version, false};
+        else
+            it->second.indirect = false;
+        requested.push_back(resolved);
+    }
+
+    /* Minimal version selection: start from every selected root requirement
+     * and expand transitive requirements, always keeping the highest version
+     * for a given module path. Upgraded versions are queued for expansion. */
+    std::set<std::pair<std::string, std::string>> visited;
+    std::vector<std::pair<std::string, std::string>> queue;
+    for (const auto &entry : selected)
+        queue.push_back({entry.first, entry.second.version});
+    while (!queue.empty()) {
+        auto item = queue.back();
+        queue.pop_back();
+        if (!visited.insert(item).second)
+            continue;
+        fs::path directory;
+        skein::modfile::mod_file mod;
+        if (!prepare_module(root, item.first, item.second, directory, mod,
+                            error)) {
             std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
             return 1;
         }
-        std::printf("%s@%s\n", spec.module.c_str(), version.c_str());
+        for (const skein::modfile::require_spec &child : mod.requirements) {
+            if (!is_semver(child.version)) {
+                std::fprintf(stderr,
+                             "%s: %s requires non-semver version %s of %s\n",
+                             program.c_str(), item.first.c_str(),
+                             child.version.c_str(), child.path.c_str());
+                return 1;
+            }
+            if (!version_matches_path(child.path, child.version)) {
+                std::fprintf(stderr,
+                             "%s: %s requires version %s that does not "
+                             "match module path %s\n",
+                             program.c_str(), item.first.c_str(),
+                             child.version.c_str(), child.path.c_str());
+                return 1;
+            }
+            auto it = selected.find(child.path);
+            if (it == selected.end()) {
+                selected[child.path] = {child.version, true};
+                queue.push_back({child.path, child.version});
+            } else if (skein::modfile::compare_semver(child.version,
+                                                      it->second.version) > 0) {
+                it->second.version = child.version;
+                queue.push_back({child.path, child.version});
+            }
+        }
+    }
+
+    skein::modfile::mod_file updated;
+    updated.module = existing.module;
+    for (const auto &entry : selected) {
+        updated.requirements.push_back(
+            {entry.first, entry.second.version,
+             entry.second.indirect || direct.count(entry.first) == 0});
+    }
+    if (!skein::modfile::save(root, updated, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    for (const parsed_spec &spec : requested) {
+        std::printf("%s@%s\n", spec.module.c_str(), spec.version.c_str());
     }
     return 0;
 }

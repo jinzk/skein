@@ -1108,6 +1108,24 @@ std::vector<std::string> split_external_path(const std::string &path) {
     return parts;
 }
 
+bool require_matches_import(const std::string &require_path,
+                            const std::string &import_path) {
+    if (import_path == require_path)
+        return true;
+    if (import_path.size() <= require_path.size() ||
+        import_path.compare(0, require_path.size(), require_path) != 0 ||
+        import_path[require_path.size()] != '/')
+        return false;
+    /* A /vN segment after a require path is part of a versioned module path,
+     * not a package below that module. */
+    std::size_t next_slash = import_path.find('/', require_path.size() + 1);
+    std::string first = import_path.substr(
+        require_path.size() + 1,
+        next_slash == std::string::npos ? std::string::npos
+                                        : next_slash - require_path.size() - 1);
+    return !skein::modfile::has_version_suffix(first);
+}
+
 bool find_external_require(const std::string &project_root,
                            const std::string &path, std::string &module,
                            std::string &version, std::string &subpath,
@@ -1118,11 +1136,8 @@ bool find_external_require(const std::string &project_root,
 
     const skein::modfile::require_spec *best = NULL;
     for (const skein::modfile::require_spec &spec : mod.requirements) {
-        bool matches = path == spec.path ||
-                       (path.size() > spec.path.size() &&
-                        path.compare(0, spec.path.size(), spec.path) == 0 &&
-                        path[spec.path.size()] == '/');
-        if (matches && (!best || spec.path.size() > best->path.size()))
+        if (require_matches_import(spec.path, path) &&
+            (!best || spec.path.size() > best->path.size()))
             best = &spec;
     }
     if (!best) {
@@ -1208,7 +1223,8 @@ value_t *import_external_module(const std::string &path,
         return NULL;
     }
 
-    const std::string module_name = split_external_path(module).back();
+    const std::string module_name =
+        skein::modfile::module_name_from_path(module);
     if (subpath.empty())
         return import_module_root(module_name, root, error);
 
@@ -1857,7 +1873,8 @@ bool package_import_cache_key(const char *dotted_path, const char *base_dir,
             key = package_cache_key(canonical_file(root));
             return true;
         }
-        const std::string module_name = split_external_path(module).back();
+        const std::string module_name =
+        skein::modfile::module_name_from_path(module);
         std::string dotted;
         resolved_package resolved;
         if (!resolve_external_subpackage(module_name, root, subpath, dotted,

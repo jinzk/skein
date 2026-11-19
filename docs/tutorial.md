@@ -254,7 +254,7 @@ skein mod init github.com/acme/myapp
 skein get github.com/acme/util@v1.2.3
 ```
 
-`get` 通过 git 克隆仓库 tag，更新 `skein.mod` 的 `require` 与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
+`get` 通过 git 克隆仓库 tag，遍历所有依赖的 `skein.mod` 并用 MVS 选出每个 module path 的最高 semver 版本，然后写回主项目 `skein.mod`（非直接依赖标记为 `// indirect`）与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。不兼容的 major 版本使用 `/vN` 路径并存，例如 `example.com/c` 与 `example.com/c/v2` 是两个独立 module。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
 
 ### include 声明包含
 

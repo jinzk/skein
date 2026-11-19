@@ -65,6 +65,9 @@ std::size_t dedent_for_closing(std::string &line, std::size_t cursor,
 /* File/directory completions for a partial path prefix. */
 std::vector<std::string> path_completions(const std::string &prefix);
 
+/* True when a line ends with an operator/comma that implies continuation. */
+bool continues_line(const std::string &line);
+
 }  // namespace repl_ui
 }  // namespace skein
 

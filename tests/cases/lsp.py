@@ -119,6 +119,25 @@ def did_change(session, uri, version, text):
     )
 
 
+def did_change_edits(session, uri, version, edits):
+    changes = []
+    for (start, end, text) in edits:
+        changes.append({
+            "range": {
+                "start": {"line": start[0], "character": start[1]},
+                "end": {"line": end[0], "character": end[1]},
+            },
+            "text": text,
+        })
+    session.notify(
+        "textDocument/didChange",
+        {
+            "textDocument": {"uri": uri, "version": version},
+            "contentChanges": changes,
+        },
+    )
+
+
 def run_workspace_cases():
     """Project index: cross-file definition and module/package completion."""
     with tempfile.TemporaryDirectory() as temporary:
@@ -239,6 +258,7 @@ def run_cases():
             result = session.request("initialize", {"capabilities": {}})
             assert result["capabilities"]["publishDiagnosticsProvider"] is True
             assert result["capabilities"]["completionProvider"]["triggerCharacters"] == ["."]
+            assert result["capabilities"]["textDocumentSync"]["change"] == 2
             session.notify("initialized", {})
 
             messy = (
@@ -330,6 +350,24 @@ def run_cases():
                 },
             )
             assert "let x: int" in local_hover["contents"]["value"], local_hover
+
+            # Incremental edits replace UTF-16 ranges and are debounced.
+            did_change(session, uri, 5, "let x:int=1;\nprint(x);\n")
+            session.wait_for_diagnostics(uri)
+            did_change_edits(
+                session,
+                uri,
+                6,
+                [
+                    ((0, 4), (0, 5), "value"),
+                    ((1, 6), (1, 7), "value"),
+                ],
+            )
+            session.wait_for_diagnostics(uri)
+            symbols = session.request(
+                "textDocument/documentSymbol", {"textDocument": {"uri": uri}}
+            )
+            assert any(item["name"] == "value" for item in symbols), symbols
 
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr

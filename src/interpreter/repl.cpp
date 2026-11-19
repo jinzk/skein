@@ -48,6 +48,8 @@ constexpr size_t MAX_HISTORY = 1000;
 std::vector<std::string> history;
 std::deque<std::string> pending_lines;
 bool history_loaded = false;
+size_t repl_view_start = 0;
+std::string repl_previous_line;
 
 std::string trim_copy(const std::string &text) {
     size_t begin = 0;
@@ -206,11 +208,46 @@ size_t line_width(const std::string &text) {
 
 void redraw(const std::string &prompt, const std::string &line,
             size_t cursor) {
-    const std::string rendered = repl_ui::render(line, repl_color_enabled());
+    const size_t terminal = (size_t)platform_terminal_width();
+    const size_t prompt_width = line_width(prompt);
+    const size_t available =
+        terminal > prompt_width + 1 ? terminal - prompt_width - 1 : 1;
+
+    if (repl_view_start > line.size())
+        repl_view_start = line.size();
+    size_t cursor_column = line_width(line.substr(0, cursor));
+    size_t start_column = line_width(line.substr(0, repl_view_start));
+    if (cursor_column < start_column) {
+        repl_view_start = 0;
+        start_column = 0;
+    }
+    while (cursor_column >= start_column + available &&
+           repl_view_start < cursor) {
+        repl_view_start = next_utf8(line, repl_view_start);
+        start_column = line_width(line.substr(0, repl_view_start));
+    }
+
+    size_t end = repl_view_start;
+    size_t used = 0;
+    while (end < line.size()) {
+        const size_t next = next_utf8(line, end);
+        const size_t width = line_width(line.substr(end, next - end));
+        if (used + width > available)
+            break;
+        used += width;
+        end = next;
+    }
+
+    const std::string visible =
+        line.substr(repl_view_start, end - repl_view_start);
+    const std::string rendered =
+        repl_ui::render(visible, repl_color_enabled());
     std::string out = "\r" + prompt + rendered + "\x1b[K";
-    const size_t tail = line_width(line.substr(cursor));
-    if (tail > 0)
-        out += "\x1b[" + std::to_string(tail) + "D";
+    if (cursor <= end) {
+        const size_t tail = line_width(line.substr(cursor, end - cursor));
+        if (tail > 0)
+            out += "\x1b[" + std::to_string(tail) + "D";
+    }
     write_stdout(out);
 }
 
@@ -346,6 +383,7 @@ struct raw_terminal {
 repl_line_status read_edited_line(const std::string &prompt,
                                   bool continuation, std::string &line) {
     history_load_once();
+    repl_view_start = 0;
     raw_terminal terminal;
     if (!terminal.enable()) {
         write_stdout(prompt);
@@ -360,6 +398,8 @@ repl_line_status read_edited_line(const std::string &prompt,
 
     std::string current =
         continuation ? repl_ui::indentation(indent_count) : std::string();
+    if (continuation && repl_ui::continues_line(repl_previous_line))
+        current += "  ";
     size_t cursor = current.size();
     size_t history_pos = history.size();
     std::string draft;
@@ -585,6 +625,7 @@ std::string utf8_from_wchars(const wchar_t *data, int length) {
 repl_line_status read_edited_line(const std::string &prompt,
                                   bool continuation, std::string &line) {
     history_load_once();
+    repl_view_start = 0;
     console_input_guard terminal;
     if (!enable_windows_vt() || !terminal.enable()) {
         write_stdout(prompt);
@@ -599,6 +640,8 @@ repl_line_status read_edited_line(const std::string &prompt,
 
     std::string current =
         continuation ? repl_ui::indentation(indent_count) : std::string();
+    if (continuation && repl_ui::continues_line(repl_previous_line))
+        current += "  ";
     size_t cursor = current.size();
     size_t history_pos = history.size();
     std::string draft;
@@ -901,6 +944,7 @@ repl_line_status repl_read_line(std::string &line, bool continuation) {
         if (!pending_lines.empty()) {
             line = pending_lines.front();
             pending_lines.pop_front();
+            repl_previous_line = line;
             return REPL_LINE;
         }
 
@@ -942,6 +986,7 @@ repl_line_status repl_read_line(std::string &line, bool continuation) {
             continue;
         }
         history_add(line);
+        repl_previous_line = line;
         return REPL_LINE;
     }
 }

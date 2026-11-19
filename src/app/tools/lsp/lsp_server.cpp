@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <set>
@@ -31,6 +33,17 @@ namespace lsp {
 namespace {
 
 namespace json = skein::lsp::json;
+
+int lsp_debounce_ms() {
+    const char *raw = std::getenv("SKEIN_LSP_DEBOUNCE_MS");
+    if (!raw || !*raw)
+        return 75;
+    char *end = nullptr;
+    const long parsed = std::strtol(raw, &end, 10);
+    if (end == raw || parsed < 0)
+        return 75;
+    return (int)std::min<long>(parsed, 5000);
+}
 
 bool starts_with(const std::string &text, const std::string &prefix) {
     return text.size() >= prefix.size() &&
@@ -329,7 +342,7 @@ value_t *location_value(const std::string &uri, const lsp_position &start,
 class lsp_server_impl {
 public:
     lsp_server_impl(const lsp_options &options, FILE *output)
-        : options_(options), output_(output) {
+        : options_(options), output_(output), debounce_ms_(lsp_debounce_ms()) {
         build_std_index();
     }
 
@@ -349,10 +362,24 @@ public:
 
     int run(FILE *input) {
         for (;;) {
+            int timeout_ms = -1;
+            if (pending_analysis_) {
+                const auto remaining =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        pending_deadline_ - std::chrono::steady_clock::now())
+                        .count();
+                timeout_ms = remaining <= 0 ? 0 : (int)remaining;
+            }
+
             std::string payload;
             std::string error;
             json_rpc::ReadStatus status =
-                json_rpc::read_message(input, payload, error);
+                json_rpc::read_message_timeout(input, timeout_ms, payload,
+                                                error);
+            if (status == json_rpc::ReadStatus::Timeout) {
+                flush_pending_analysis();
+                continue;
+            }
             if (status == json_rpc::ReadStatus::Eof)
                 break;
             if (status == json_rpc::ReadStatus::Error) {
@@ -364,9 +391,12 @@ public:
             bool should_exit = false;
             int exit_code = 0;
             handle_payload(payload, should_exit, exit_code);
-            if (should_exit)
+            if (should_exit) {
+                flush_pending_analysis();
                 return exit_code;
+            }
         }
+        flush_pending_analysis();
         return 0;
     }
 
@@ -478,6 +508,65 @@ private:
         return result;
     }
 
+    void schedule_analysis(const std::string &uri) {
+        pending_analysis_ = true;
+        pending_uri_ = uri;
+        pending_deadline_ = std::chrono::steady_clock::now() +
+                            std::chrono::milliseconds(debounce_ms_);
+    }
+
+    void flush_pending_analysis() {
+        if (!pending_analysis_)
+            return;
+        pending_analysis_ = false;
+        const lsp_document *document = documents_.find(pending_uri_);
+        if (!document)
+            return;
+        publish_diagnostics(pending_uri_, document->version, document->text);
+    }
+
+    void apply_content_changes(std::string &text, const value_t *changes) {
+        if (!changes || changes->type != T_list)
+            return;
+        const auto &items = ((const list_value_t *)changes)->payload->items;
+        for (const value_t *change : items) {
+            if (!change)
+                continue;
+            if (change->type == T_string) {
+                text = json::string_value(change);
+                continue;
+            }
+            const std::string replacement =
+                json::string_value(json::member(change, "text"));
+            const value_t *range = json::member(change, "range");
+            if (!range || range->type != T_dict) {
+                text = replacement;
+                continue;
+            }
+            const value_t *start_value = json::member(range, "start");
+            const value_t *end_value = json::member(range, "end");
+            if (!start_value || !end_value)
+                continue;
+            lsp_position start;
+            start.line = (int)json::int_value(
+                json::member(start_value, "line"));
+            start.character = (int)json::int_value(
+                json::member(start_value, "character"));
+            lsp_position end;
+            end.line = (int)json::int_value(json::member(end_value, "line"));
+            end.character = (int)json::int_value(
+                json::member(end_value, "character"));
+            const std::size_t start_offset =
+                byte_offset_from_position(text, start);
+            const std::size_t end_offset =
+                byte_offset_from_position(text, end);
+            if (start_offset > end_offset || end_offset > text.size())
+                continue;
+            text.replace(start_offset, end_offset - start_offset,
+                         replacement);
+        }
+    }
+
     void publish_diagnostics(const std::string &uri, int version,
                              const std::string &text) {
         analysis_result result =
@@ -542,7 +631,7 @@ private:
     value_t *initialize_result() {
         value_t *sync = json::object();
         json::set(sync, "openClose", json::boolean(true));
-        json::set(sync, "change", json::integer(1)); // TextDocumentSyncKind.Full
+        json::set(sync, "change", json::integer(2)); // TextDocumentSyncKind.Incremental
         json::set(sync, "willSave", json::boolean(false));
         json::set(sync, "willSaveWaitUntil", json::boolean(false));
         json::set(sync, "save", json::boolean(true));
@@ -879,9 +968,28 @@ private:
             exit_code = shutdown_received_ ? 0 : 1;
             return;
         }
+        if (method == "textDocument/didChange") {
+            const std::string uri = document_uri(params);
+            if (uri.empty())
+                return;
+            const value_t *document = json::member(params, "textDocument");
+            const int version =
+                (int)json::int_value(json::member(document, "version"));
+            lsp_document updated;
+            const lsp_document *existing = documents_.find(uri);
+            if (existing)
+                updated = *existing;
+            updated.uri = uri;
+            updated.version = version;
+            apply_content_changes(updated.text,
+                                  json::member(params, "contentChanges"));
+            documents_.put(updated);
+            schedule_analysis(uri);
+            return;
+        }
         if (method == "textDocument/didOpen" ||
-            method == "textDocument/didChange" ||
             method == "textDocument/didSave") {
+            flush_pending_analysis();
             const std::string uri = document_uri(params);
             if (uri.empty())
                 return;
@@ -890,22 +998,6 @@ private:
             if (text.empty())
                 text = json::string_value(json::member(params, "text"));
             int version = (int)json::int_value(json::member(document, "version"));
-            if (method == "textDocument/didChange") {
-                /* LSP sends TextDocumentContentChangeEvent objects.  Accept a
-                 * bare string as well for hand-written clients. */
-                const value_t *changes = json::member(params, "contentChanges");
-                if (changes && changes->type == T_list) {
-                    const auto &items = ((const list_value_t *)changes)->payload->items;
-                    if (!items.empty()) {
-                        const value_t *change = items.back();
-                        if (change && change->type == T_string)
-                            text = json::string_value(change);
-                        else
-                            text = json::string_value(
-                                json::member(change, "text"));
-                    }
-                }
-            }
             if (method == "textDocument/didSave" && text.empty()) {
                 const lsp_document *existing = documents_.find(uri);
                 if (existing) {
@@ -920,6 +1012,8 @@ private:
             const std::string uri = document_uri(params);
             if (uri.empty())
                 return;
+            if (pending_analysis_ && pending_uri_ == uri)
+                pending_analysis_ = false;
             documents_.erase(uri);
             value_t *diagnostics = json::array();
             value_t *notification = json::object();
@@ -957,6 +1051,7 @@ private:
             return;
         }
 
+        flush_pending_analysis();
         value_t *result = nullptr;
         if (method == "initialize") {
             collect_workspace_folders(params);
@@ -997,6 +1092,10 @@ private:
     std::vector<std::string> index_roots_;
     bool index_built_ = false;
     bool shutdown_received_ = false;
+    int debounce_ms_ = 75;
+    bool pending_analysis_ = false;
+    std::string pending_uri_;
+    std::chrono::steady_clock::time_point pending_deadline_;
 };
 
 int run_lsp_server(const lsp_options &options, FILE *input, FILE *output) {

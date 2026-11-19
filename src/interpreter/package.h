@@ -47,6 +47,10 @@ value_t *package_import(const char *dotted_path, const char *base_dir,
  * are rejected. */
 bool evaluate_include_source(const char *path, std::string &error);
 
+/* Resolve an external import against skein.mod and, when cached, its manifest.
+ * This never downloads or evaluates the module. */
+bool package_validate_external_import(const char *path, std::string &error);
+
 /* Resolve the package-cache key used by package_import for a transferable
  * import.  Returns false for native modules and std submodules, which do not
  * use the package cache. */

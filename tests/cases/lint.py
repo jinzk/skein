@@ -116,3 +116,43 @@ def run_cases():
     )
     assert ffi_open.returncode == 1, ffi_open.stderr
     assert "check-only mode" in ffi_open.stderr, ffi_open.stderr
+
+    # External imports are resolved against skein.mod without downloading or
+    # evaluating the module.
+    with tempfile.TemporaryDirectory() as project:
+        main = os.path.join(project, "main.skein")
+        with open(main, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write('import "example.test/util/json";\n')
+        with open(os.path.join(project, "skein.mod"), "w",
+                  encoding="utf-8", newline="\n") as handle:
+            handle.write("module example.test/lint\n")
+        env = os.environ.copy()
+        env["SKEINMODCACHE"] = os.path.join(project, "empty-cache")
+        missing = subprocess.run(
+            [harness.BIN, "lint", main],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=harness.DEFAULT_TIMEOUT,
+        )
+        assert missing.returncode == 1, missing.stderr
+        assert "external module not required" in missing.stderr, missing.stderr
+
+        with open(os.path.join(project, "skein.mod"), "w",
+                  encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "module example.test/lint\n"
+                "require example.test/util v1.0.0\n"
+            )
+        resolved = subprocess.run(
+            [harness.BIN, "lint", main],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=harness.DEFAULT_TIMEOUT,
+        )
+        assert resolved.returncode == 0, resolved.stderr

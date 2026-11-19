@@ -114,10 +114,10 @@
 1. 共享 `completion_index`（已完成）
 2. REPL struct 字段补全（已完成）
 3. REPL `:load` 路径补全（已完成）
-4. 长行水平滚动
-5. 运算符/逗号 continuation 缩进
-6. LSP incremental sync / debounce
-7. resolution-only import 校验
+4. 长行水平滚动（已完成）
+5. 运算符/逗号 continuation 缩进（已完成）
+6. LSP incremental sync / debounce（已完成）
+7. resolution-only import 校验（已完成，基于 skein.mod + 缓存 manifest）
 
 验收：
 

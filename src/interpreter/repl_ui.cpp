@@ -292,6 +292,19 @@ std::size_t dedent_for_closing(std::string &line, std::size_t cursor,
     return cursor - remove;
 }
 
+bool continues_line(const std::string &line) {
+    std::size_t end = line.size();
+    while (end > 0 && std::isspace((unsigned char)line[end - 1]))
+        --end;
+    if (end == 0)
+        return false;
+    const char last = line[end - 1];
+    return last == '+' || last == '-' || last == '*' || last == '/' ||
+           last == '%' || last == '=' || last == ',' || last == '&' ||
+           last == '|' || last == '^' || last == '?' || last == ':' ||
+           last == '.' || last == '<' || last == '>';
+}
+
 std::vector<std::string> path_completions(const std::string &prefix) {
     namespace fs = std::filesystem;
     std::vector<std::string> out;

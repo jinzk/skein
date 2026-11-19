@@ -2309,6 +2309,18 @@ top_statement: top_expression EOL {
             !skein::typecheck::check_statement($1))
             g_statement_invalid = true;
 
+        if (g_check_only && $1 &&
+            skein::ast_analysis::ast_is_external_import($1)) {
+            const struct import_node *import =
+                (const struct import_node *)$1;
+            std::string import_error;
+            if (!package_validate_external_import(import->path,
+                                                  import_error)) {
+                diag_set_location($1->line, $1->column);
+                yyerror("%s", import_error.c_str());
+            }
+        }
+
         bool invalid = g_statement_invalid;
         g_statement_invalid = false;
         bool skip_eval = invalid || sys_exit_requested() ||

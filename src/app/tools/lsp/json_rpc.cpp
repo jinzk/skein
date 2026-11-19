@@ -2,9 +2,25 @@
 
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <thread>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <io.h>
+#else
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 #include "stdio_stream.h"
 
@@ -31,6 +47,46 @@ std::string trim(const std::string &text) {
     while (last > first && std::isspace((unsigned char)text[last - 1]))
         --last;
     return text.substr(first, last - first);
+}
+
+bool input_ready(FILE *input) {
+#ifdef _WIN32
+    const int fd = _fileno(input);
+    if (fd < 0)
+        return true;
+    const intptr_t os_handle = _get_osfhandle(fd);
+    if (os_handle == -1)
+        return true;
+    HANDLE handle = (HANDLE)os_handle;
+    DWORD available = 0;
+    if (PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr))
+        return available > 0;
+    return true;
+#else
+    struct pollfd descriptor = {};
+    descriptor.fd = fileno(input);
+    descriptor.events = POLLIN;
+    const int result = poll(&descriptor, 1, 0);
+    return result > 0;
+#endif
+}
+
+bool wait_for_input(FILE *input, int timeout_ms) {
+    if (timeout_ms < 0)
+        return true;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
+    for (;;) {
+        if (input_ready(input))
+            return true;
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+#ifdef _WIN32
+        Sleep(5);
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+#endif
+    }
 }
 
 bool append_available(FILE *input, std::string &buffer, std::string &error) {
@@ -95,8 +151,12 @@ bool parse_content_length(const std::string &headers, std::size_t &length,
 
 } // namespace
 
-ReadStatus read_message(FILE *input, std::string &payload, std::string &error) {
+ReadStatus read_message_impl(FILE *input, int timeout_ms,
+                             std::string &payload, std::string &error) {
     static thread_local std::string buffer;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(
+                              timeout_ms < 0 ? 0 : timeout_ms);
 
     for (;;) {
         std::size_t header_end = buffer.find("\r\n\r\n");
@@ -105,36 +165,53 @@ ReadStatus read_message(FILE *input, std::string &payload, std::string &error) {
             header_end = buffer.find("\n\n");
             separator_size = 2;
         }
-        if (header_end == std::string::npos) {
-            if (!append_available(input, buffer, error)) {
-                if (buffer.empty() && error.empty())
-                    return ReadStatus::Eof;
-                return error.empty() ? ReadStatus::Eof : ReadStatus::Error;
-            }
-            continue;
-        }
 
-        const std::size_t payload_start = header_end + separator_size;
         std::size_t content_length = 0;
-        if (!parse_content_length(buffer.substr(0, header_end), content_length,
-                                  error)) {
-            buffer.clear();
-            return ReadStatus::Error;
-        }
-        if (buffer.size() - payload_start < content_length) {
-            if (!append_available(input, buffer, error)) {
-                if (error.empty())
-                    error = "unexpected EOF in LSP message body";
+        std::size_t payload_start = 0;
+        bool have_header = header_end != std::string::npos;
+        if (have_header) {
+            payload_start = header_end + separator_size;
+            if (!parse_content_length(buffer.substr(0, header_end),
+                                      content_length, error)) {
+                buffer.clear();
                 return ReadStatus::Error;
             }
-            continue;
+            if (buffer.size() - payload_start >= content_length) {
+                payload = buffer.substr(payload_start, content_length);
+                buffer.erase(0, payload_start + content_length);
+                error.clear();
+                return ReadStatus::Ok;
+            }
         }
 
-        payload = buffer.substr(payload_start, content_length);
-        buffer.erase(0, payload_start + content_length);
-        error.clear();
-        return ReadStatus::Ok;
+        int remaining = -1;
+        if (timeout_ms >= 0) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return ReadStatus::Timeout;
+            remaining = (int)std::chrono::duration_cast<
+                             std::chrono::milliseconds>(
+                             deadline - std::chrono::steady_clock::now())
+                             .count();
+            if (remaining < 0)
+                remaining = 0;
+        }
+        if (!wait_for_input(input, remaining))
+            return ReadStatus::Timeout;
+        if (!append_available(input, buffer, error)) {
+            if (buffer.empty() && error.empty())
+                return ReadStatus::Eof;
+            return error.empty() ? ReadStatus::Eof : ReadStatus::Error;
+        }
     }
+}
+
+ReadStatus read_message(FILE *input, std::string &payload, std::string &error) {
+    return read_message_impl(input, -1, payload, error);
+}
+
+ReadStatus read_message_timeout(FILE *input, int timeout_ms,
+                                std::string &payload, std::string &error) {
+    return read_message_impl(input, timeout_ms, payload, error);
 }
 
 bool write_message(FILE *output, const std::string &payload,

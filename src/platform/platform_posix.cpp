@@ -7,8 +7,10 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -135,6 +137,20 @@ bool platform_stdin_is_tty() {
 
 bool platform_stdout_is_tty() {
     return isatty(fileno(stdout)) != 0;
+}
+
+int platform_terminal_width() {
+    std::string columns;
+    if (platform_get_env("COLUMNS", columns) && !columns.empty()) {
+        char *end = nullptr;
+        const long parsed = std::strtol(columns.c_str(), &end, 10);
+        if (end != columns.c_str() && parsed > 0)
+            return (int)parsed;
+    }
+    struct winsize size = {};
+    if (ioctl(fileno(stdout), TIOCGWINSZ, &size) == 0 && size.ws_col > 0)
+        return (int)size.ws_col;
+    return 80;
 }
 
 void platform_install_interrupt_handler() {

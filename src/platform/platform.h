@@ -41,6 +41,9 @@ bool platform_environ(
 bool platform_stdin_is_tty();
 bool platform_stdout_is_tty();
 
+/* Terminal width in columns, or 80 when it cannot be determined. */
+int platform_terminal_width();
+
 /* Install the Ctrl-C handler used by the REPL. */
 void platform_install_interrupt_handler();
 

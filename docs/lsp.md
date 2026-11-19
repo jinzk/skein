@@ -27,14 +27,22 @@ stdout 仅包含协议消息。Windows 下 stdin/stdout 都设为二进制模式
 输出锁序列化。EOF 会正常退出；收到 `exit` 时，若之前已收到 `shutdown` 则返回 0，
 否则返回 1。
 
+`didChange` 支持增量 range 替换，并在最后一次修改后等待
+`SKEIN_LSP_DEBOUNCE_MS` 毫秒再分析，默认 75，最大 5000。收到补全、hover 等请求
+时会先刷新待处理的分析，避免返回过期符号。
+
+check-only 模式下，外部 module import 会按 `skein.mod` 做 resolution-only 校验；
+如果 module 已缓存，还会读取 `module.skein` / 导出包结构，但始终不会下载或执行
+module 代码。
+
 ## 能力
 
 `initialize` 返回的能力：
 
 | 能力 | 说明 |
 |---|---|
-| `textDocumentSync` | `openClose: true`、`change: 1`（Full）、`save: true` |
-| `publishDiagnosticsProvider` | `didOpen` / `didChange` / `didSave` 后发布诊断 |
+| `textDocumentSync` | `openClose: true`、`change: 2`（Incremental）、`save: true` |
+| `publishDiagnosticsProvider` | `didOpen` / `didChange` / `didSave` 后发布诊断；`didChange` 使用 debounce |
 | `documentFormattingProvider` | 复用 `skein fmt` 的 token/trivia formatter，输出前做 token 等价与 parse 校验 |
 | `documentRangeFormattingProvider` | 与整文档格式化相同（MVP 忽略 range，返回整文档替换） |
 | `completionProvider` | 触发字符 `.`；提供关键字、当前可见符号、`std.*` 命名空间成员，以及工作区 module 的导出符号（含 `as` 别名） |

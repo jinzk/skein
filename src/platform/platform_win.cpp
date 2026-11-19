@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
@@ -87,6 +88,23 @@ bool platform_stdin_is_tty() {
 
 bool platform_stdout_is_tty() {
     return _isatty(_fileno(stdout)) != 0;
+}
+
+int platform_terminal_width() {
+    std::string columns;
+    if (platform_get_env("COLUMNS", columns) && !columns.empty()) {
+        char *end = nullptr;
+        const long parsed = std::strtol(columns.c_str(), &end, 10);
+        if (end != columns.c_str() && parsed > 0)
+            return (int)parsed;
+    }
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+        const int width = info.srWindow.Right - info.srWindow.Left + 1;
+        if (width > 0)
+            return width;
+    }
+    return 80;
 }
 
 void platform_install_interrupt_handler() {

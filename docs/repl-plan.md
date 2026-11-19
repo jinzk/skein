@@ -74,8 +74,8 @@ tests/test_repl_ui.cpp
 
 - struct 字段补全：`user.<Tab>`（已完成）
 - `:load` 路径补全（已完成）
-- 长行水平滚动
-- 运算符/逗号 continuation 缩进
+- 长行水平滚动（已完成）
+- 运算符/逗号 continuation 缩进（已完成）
 
 ### P2
 

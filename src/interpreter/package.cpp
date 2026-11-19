@@ -1878,6 +1878,45 @@ value_t *import_embedded_package(const std::string &dotted,
 
 } // namespace
 
+bool package_validate_external_import(const char *path, std::string &error) {
+    if (!path || path[0] != '\x02')
+        return true;
+    const std::string project_root = path_to_utf8(ensure_project_root());
+    if (project_root.empty() || !skein::modfile::exists(project_root))
+        return true;
+
+    std::string module;
+    std::string version;
+    std::string subpath;
+    if (!find_external_require(project_root, path + 1, module, version,
+                               subpath, error))
+        return false;
+
+    const fs::path root =
+        path_from_utf8(skein::modfile::cache_path(module, version));
+    std::error_code ec;
+    if (!fs::is_regular_file(root / "module.skein", ec))
+        return true;
+
+    const std::string module_name =
+        skein::modfile::module_name_from_path(module);
+    if (subpath.empty()) {
+        const module_manifest *manifest =
+            load_module_manifest(root, error);
+        return manifest != nullptr;
+    }
+
+    std::vector<std::string> parts = split_external_path(subpath);
+    if (parts.empty()) {
+        error = "empty external package path";
+        return false;
+    }
+    resolved_package ignored;
+    std::string package_path;
+    return resolve_module_public_package(module_name, parts[0], root, ignored,
+                                         package_path, error);
+}
+
 bool load_cached_module_native(const std::string &path,
                                const std::string &version,
                                module_native_spec &out, std::string &error) {

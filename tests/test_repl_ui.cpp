@@ -117,6 +117,15 @@ void test_indentation() {
     require(line == "    x", "non-leading code must stay unchanged");
 }
 
+void test_continuation_lines() {
+    require(skein::repl_ui::continues_line("let x = 1 +"),
+            "operator continuation");
+    require(skein::repl_ui::continues_line("foo(a,"),
+            "comma continuation");
+    require(!skein::repl_ui::continues_line("let x = 1"),
+            "plain line should not continue");
+}
+
 void test_path_completions() {
     namespace fs = std::filesystem;
     const auto stamp = std::chrono::steady_clock::now()
@@ -189,6 +198,7 @@ int main() {
     test_render();
     test_completion_context();
     test_indentation();
+    test_continuation_lines();
     test_path_completions();
     test_completion_index();
     test_candidates();

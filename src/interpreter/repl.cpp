@@ -1,10 +1,10 @@
 #include "repl.h"
 
+#include "completion_index.h"
 #include "platform.h"
 #include "repl_ui.h"
 #include "scopestack.h"
 #include "source_encoding.h"
-#include "structtype.h"
 #include "symbol.h"
 #include "unicode_ident.h"
 #include "valuetype.h"
@@ -41,6 +41,7 @@ extern int indent_count;
 namespace {
 
 namespace repl_ui = skein::repl_ui;
+namespace completion = skein::completion;
 
 constexpr size_t MAX_HISTORY = 1000;
 
@@ -220,95 +221,18 @@ const std::vector<std::string> &repl_commands() {
     return commands;
 }
 
-void append_global_symbols(std::vector<std::string> &out) {
+void append_global_symbols(completion::index &out) {
     for (const struct symbol *sym : active_scope_context().global_slots) {
         if (!sym || !sym->name || !sym->name[0] || sym->name[0] == '$')
             continue;
         if (std::strcmp(sym->name, "std") == 0)
             continue;
-        out.emplace_back(sym->name);
-    }
-}
-
-const value_t *std_child(const value_t *value, const std::string &name) {
-    if (!value || value->type != T_dict)
-        return nullptr;
-    const dict_value_t *dict = (const dict_value_t *)value;
-    for (const auto &entry : dict->payload->items) {
-        if (!entry.first || entry.first->type != T_string)
-            continue;
-        const string_value_t *key = (const string_value_t *)entry.first;
-        if (key->value && name == key->value)
-            return entry.second;
-    }
-    return nullptr;
-}
-
-void append_std_children(const std::string &qualifier,
-                         std::vector<std::string> &out) {
-    std::string path;
-    if (qualifier == "std")
-        path.clear();
-    else if (starts_with(qualifier, "std."))
-        path = qualifier.substr(4);
-    else
-        return;
-
-    const value_t *current = lookup_global_symbol("std");
-    std::size_t pos = 0;
-    while (pos < path.size()) {
-        const std::size_t dot = path.find('.', pos);
-        const std::string part =
-            path.substr(pos, dot == std::string::npos ? std::string::npos
-                                                       : dot - pos);
-        current = std_child(current, part);
-        if (!current)
-            return;
-        if (dot == std::string::npos)
-            break;
-        pos = dot + 1;
-    }
-    if (!current || current->type != T_dict)
-        return;
-
-    const dict_value_t *dict = (const dict_value_t *)current;
-    for (const auto &entry : dict->payload->items) {
-        if (!entry.first || entry.first->type != T_string)
-            continue;
-        const string_value_t *key = (const string_value_t *)entry.first;
-        if (!key->value || !key->value[0] || key->value[0] == '$')
-            continue;
-        std::string name = key->value;
-        if (entry.second && entry.second->type == T_dict)
-            name += ".";
-        out.push_back(std::move(name));
-    }
-}
-
-void append_value_members(const std::string &qualifier,
-                          std::vector<std::string> &out) {
-    const value_t *value = lookup_global_symbol(qualifier.c_str());
-    if (!value)
-        return;
-    if (value->type == T_struct) {
-        const struct_value_t *structure = (const struct_value_t *)value;
-        if (!structure->def)
-            return;
-        for (const field_def &field : structure->def->fields)
-            out.push_back(field.name);
-        for (const auto &method : structure->def->methods)
-            out.push_back(method.first);
-        return;
-    }
-    if (value->type == T_enum) {
-        const enum_value_t *enumeration = (const enum_value_t *)value;
-        if (!enumeration->def || enumeration->variant < 0 ||
-            (size_t)enumeration->variant >= enumeration->def->variants.size())
-            return;
-        const variant_def &variant =
-            enumeration->def->variants[(size_t)enumeration->variant];
-        for (const field_def &field : variant.fields)
-            out.push_back(field.name);
+        const bool callable =
+            sym->val && (sym->val->type == T_func ||
+                         sym->val->type == T_builtin ||
+                         sym->val->type == T_method ||
+                         sym->val->type == T_native);
+        out.add_top({sym->name, callable ? 3 : 6, "global", false});
     }
 }
 
@@ -329,18 +253,26 @@ std::vector<std::string> completion_candidates(const std::string &line,
         }
         return repl_ui::filter_and_sort(out, context.prefix);
     }
+
+    completion::index index;
     if (context.qualifier.empty()) {
-        const std::vector<std::string> &words = repl_ui::keywords();
-        out.insert(out.end(), words.begin(), words.end());
-        append_global_symbols(out);
-        out.emplace_back("std.");
+        completion::add_keywords(index);
+        append_global_symbols(index);
+        completion::add_runtime_std(index, lookup_global_symbol("std"));
     } else if (context.qualifier == "std" ||
                starts_with(context.qualifier, "std.")) {
-        append_std_children(context.qualifier, out);
+        completion::add_runtime_std(index, lookup_global_symbol("std"));
     } else {
-        append_value_members(context.qualifier, out);
+        for (completion::item item : completion::runtime_value_members(
+                 lookup_global_symbol(context.qualifier.c_str())))
+            index.add_member(context.qualifier, std::move(item));
     }
-    return repl_ui::filter_and_sort(out, context.prefix);
+
+    for (completion::item item : index.complete(context.prefix,
+                                                context.qualifier)) {
+        out.push_back(item.label + (item.append_dot ? "." : ""));
+    }
+    return out;
 }
 
 void complete_line(std::string &line, size_t &cursor,

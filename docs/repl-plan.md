@@ -53,8 +53,13 @@ Tab 补全支持：
 src/interpreter/repl.cpp
 src/interpreter/repl_ui.cpp
 src/interpreter/repl_ui.h
+src/interpreter/completion_index.cpp
+src/interpreter/completion_index.h
 tests/test_repl_ui.cpp
 ```
+
+`completion_index` 是 REPL 与 LSP 共用的数据模型：关键字、`std.*`、
+符号、struct/enum 成员都通过同一套候选过滤/排序逻辑生成。
 
 `repl_ui` 只包含无运行时依赖的逻辑：
 

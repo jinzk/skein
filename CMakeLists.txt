@@ -364,6 +364,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/async_support.cpp
   src/interpreter/native_async.cpp
   src/interpreter/task.cpp
+  src/interpreter/completion_index.cpp
   src/interpreter/event_loop.cpp
   src/interpreter/file_lock.cpp
   src/interpreter/repl.cpp
@@ -705,10 +706,12 @@ if(BUILD_TESTING)
 
   add_executable(repl_ui_test
     tests/test_repl_ui.cpp
+    src/interpreter/completion_index.cpp
     src/interpreter/repl_ui.cpp
   )
   target_include_directories(repl_ui_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
   )
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(repl_ui_test PRIVATE -Wall -Wextra)

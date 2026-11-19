@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "completion_index.h"
 #include "dict.h"
 #include "document_store.h"
 #include "formatter.h"
@@ -221,18 +222,6 @@ const char *keyword_detail(const std::string &word) {
     };
     auto it = details.find(word);
     return it == details.end() ? "keyword" : it->second;
-}
-
-std::vector<std::string> keyword_names() {
-    static const std::vector<std::string> words = {
-        "if", "else", "while", "do", "for", "in", "switch", "case",
-        "default", "match", "let", "const", "func", "struct", "enum",
-        "trait", "impl", "extern", "package", "module", "import",
-        "include", "export", "return", "break", "continue", "yield",
-        "defer", "launch", "try", "on", "error", "recover", "fail",
-        "pass", "is", "as", "label", "true", "false", "null",
-    };
-    return words;
 }
 
 struct doc_symbol {
@@ -655,34 +644,18 @@ private:
         const std::string prefix = document->text.substr(word_start, offset - word_start);
         const std::string qualifier = qualifier_before(document->text, word_start);
 
-        auto add_item = [&](const std::string &label, int kind,
-                            const std::string &detail) {
-            if (!starts_with(label, prefix))
-                return;
-            value_t *item = json::object();
-            json::set(item, "label", json::string(label));
-            json::set(item, "kind", json::integer(kind));
-            json::set(item, "detail", json::string(detail));
-            json::push(items, item);
-        };
-
-        if (qualifier.empty() || qualifier == "std" ||
-            starts_with(qualifier, "std.")) {
-            const std::string path = qualifier.empty() ? "std" : qualifier;
-            auto it = std_index_.find(path);
-            if (it != std_index_.end()) {
-                for (const std::string &child : it->second.children)
-                    add_item(child, 9, "std." + (path == "std" ? "" : path + ".") + child);
-            }
-        }
+        completion::index candidates;
         if (qualifier.empty()) {
-            for (const std::string &word : keyword_names())
-                add_item(word, 14, keyword_detail(word));
+            completion::add_keywords(candidates);
             for (const analysis_symbol &symbol : document->symbols)
-                add_item(symbol.name, symbol.callable ? 3 : 6,
-                         symbol.type.empty() ? (symbol.callable ? "function" : "variable")
-                                             : symbol.type);
-            add_item("std", 9, "standard library");
+                candidates.add_top(
+                    {symbol.name, symbol.callable ? 3 : 6,
+                     symbol.type.empty()
+                         ? (symbol.callable ? "function" : "variable")
+                         : symbol.type,
+                     false});
+            candidates.add_top({"std", 9, "standard library", true});
+
             /* Top-level module names and bare import aliases. */
             std::vector<std::string> module_names;
             for (const index_entry &entry : index_.all()) {
@@ -695,23 +668,60 @@ private:
                     module_names.push_back(top);
             }
             for (const std::string &name : module_names)
-                add_item(name, 9, "module");
+                candidates.add_top({name, 9, "module", true});
+        }
+
+        /* std members come from the same namespace index used by hover. */
+        for (const auto &std_item : std_index_) {
+            if (std_item.second.kind != std_entry::kind_t::Module)
+                continue;
+            for (const std::string &child : std_item.second.children) {
+                auto child_it = std_index_.find(std_item.first + "." + child);
+                const bool is_module =
+                    child_it != std_index_.end() &&
+                    child_it->second.kind == std_entry::kind_t::Module;
+                const bool is_function =
+                    child_it != std_index_.end() &&
+                    child_it->second.kind == std_entry::kind_t::Function;
+                const std::string detail =
+                    child_it != std_index_.end()
+                        ? child_it->second.signature
+                        : "std." + child;
+                candidates.add_member(
+                    std_item.first,
+                    {child, is_module ? 9 : (is_function ? 3 : 6), detail,
+                     is_module});
+            }
         }
 
         /* Imported module / package members from the workspace index. */
         if (!qualifier.empty() &&
             !(qualifier == "std" || starts_with(qualifier, "std."))) {
-            const std::string path = resolve_import_alias(document->text, qualifier);
+            const std::string path =
+                resolve_import_alias(document->text, qualifier);
             for (const index_entry &entry : index_.complete(path)) {
                 const std::size_t dot = entry.qualified_name.rfind('.');
                 const std::string label =
                     dot == std::string::npos
                         ? entry.qualified_name
                         : entry.qualified_name.substr(dot + 1);
-                add_item(label, entry.callable ? 3 : 6,
-                         entry.type.empty() ? (entry.callable ? "function" : "value")
-                                            : entry.type);
+                candidates.add_member(
+                    qualifier,
+                    {label, entry.callable ? 3 : 6,
+                     entry.type.empty()
+                         ? (entry.callable ? "function" : "value")
+                         : entry.type,
+                     false});
             }
+        }
+
+        for (const completion::item &candidate :
+             candidates.complete(prefix, qualifier)) {
+            value_t *item = json::object();
+            json::set(item, "label", json::string(candidate.label));
+            json::set(item, "kind", json::integer(candidate.kind));
+            json::set(item, "detail", json::string(candidate.detail));
+            json::push(items, item);
         }
 
         value_t *result = json::object();

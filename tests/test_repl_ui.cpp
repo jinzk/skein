@@ -1,3 +1,4 @@
+#include "completion_index.h"
 #include "repl_ui.h"
 
 #include <algorithm>
@@ -143,6 +144,24 @@ void test_path_completions() {
     fs::remove_all(root);
 }
 
+void test_completion_index() {
+    skein::completion::index index;
+    index.add_top({"alpha", 6, "variable", false});
+    index.add_top({"beta", 6, "variable", false});
+    index.add_member("p", {"name", 6, "field", false});
+    index.add_member("p", {"nick", 6, "field", false});
+
+    const auto top = index.complete("a", "");
+    require(top.size() == 1 && top[0].label == "alpha",
+            "top-level completion index");
+    const auto members = index.complete("n", "p");
+    require(members.size() == 2, "member completion index");
+    require(members[0].label == "name" && members[1].label == "nick",
+            "member completion order");
+    require(index.complete("x", "p").empty(),
+            "empty completion index result");
+}
+
 void test_candidates() {
     std::vector<std::string> candidates = {"std.", "string", "std", "string"};
     candidates = skein::repl_ui::filter_and_sort(candidates, "st");
@@ -171,6 +190,7 @@ int main() {
     test_completion_context();
     test_indentation();
     test_path_completions();
+    test_completion_index();
     test_candidates();
     return 0;
 }

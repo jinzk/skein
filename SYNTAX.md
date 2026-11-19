@@ -2360,7 +2360,7 @@ import "github.com/acme/util/json" as jsonutil;
 - 默认绑定最后一个 `/` 段（上例为 `json`）；非法标识符字符会替换为 `_`，也可用 `as` 指定别名；
 - 路径按最长 `require` 前缀匹配；剩余段的第一段必须是 module 的公共 package 导出别名，后续段在导出目标下按文件路径解析；没有前缀匹配时直接报错，不会联网；
 - 每个外部 module 的根目录必须有 `module.skein`，模块名与路径最后一段一致（`/vN` 路径取前一段）；
-- `skein mod init [module/path]` 创建 `skein.mod`；`skein get <module/path>@<version>` 通过 git 克隆 tag，解析完整依赖图，写入 `require` 和 `skein.sum`；`skein mod clean` 删除全局缓存，`--dry-run` 只预览；
+- `skein mod init [module/path]` 创建 `skein.mod`；`skein get <module/path>@<version>` 通过 git 克隆 tag，解析完整依赖图，写入 `require` 和 `skein.sum`；`skein mod verify` 校验缓存，`skein mod download` 预取，`skein mod tidy` 从直接依赖重算，`skein mod clean` 删除全局缓存（`--dry-run` 只预览）；`get --offline` 禁止联网；
 - `skein get` 使用 MVS（最小版本选择）：遍历所有依赖的 `skein.mod`，同一 module path 选最高 semver 版本，结果写回主项目 `skein.mod`，非直接依赖标记为 `// indirect`；`skein.mod` 是最终完整构建列表，运行时只读它；
 - `/vN`（如 `/v2`）是 module path 的一部分，用于并存不兼容 major 版本：版本 major 必须匹配 N，缓存路径与 import 都保持区分；匹配 `require` 前缀时 `/vN` 不会当作普通子包；
 - 不写版本时 `skein get` 用 `git ls-remote --tags --refs` 选择最高 semver tag；`SKEIN_MODULE_URL` 可覆盖仓库 URL（单个 URL 或 `path=url,path=url` 映射，均支持 `{path}` / `{version}` 模板，测试/镜像用）；

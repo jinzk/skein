@@ -10,5 +10,11 @@ int run_mod_init_tool(const std::vector<std::string> &args,
                       const std::string &program);
 int run_mod_clean_tool(const std::vector<std::string> &args,
                        const std::string &program);
+int run_mod_download_tool(const std::vector<std::string> &args,
+                          const std::string &program);
+int run_mod_verify_tool(const std::vector<std::string> &args,
+                        const std::string &program);
+int run_mod_tidy_tool(const std::vector<std::string> &args,
+                      const std::string &program);
 
 #endif

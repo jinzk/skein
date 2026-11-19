@@ -273,6 +273,17 @@ SKEIN_MODULE_URL=github.com/acme/util=https://mirror.example/acme/util,example.t
 
 `skein mod clean` 删除整个全局缓存根（`SKEINMODCACHE` 或默认目录），不会影响项目里的 `skein.mod` 和 `skein.sum`。`--dry-run` 只打印将要清理的目录；如果缓存根被显式设成 home 目录、当前目录或文件系统根目录，需要额外传 `--force` 才允许清理。
 
+常用维护命令：
+
+```text
+skein mod verify                 # 校验 skein.mod 中每个 require 的缓存与 skein.sum
+skein mod download               # 按 skein.mod 预取缓存，不修改 skein.mod
+skein get <module>@<version> --offline
+skein mod tidy [--offline]       # 从直接依赖重算传递依赖，移除不再使用的 // indirect
+```
+
+`--offline` 完全禁止网络：`@latest` 必须改成显式版本；缓存缺失，或缓存存在但当前项目没有校验和时，会直接失败并要求先在线执行一次 `skein get`。`mod download` 会为首次下载的模块补写 `skein.sum`，但不会改写 `skein.mod`。
+
 ### 源码形式发布的原生 module（MVP）
 
 module 可以在 `module.skein` 里声明可选的 `native { ... }` 块，随源码一起

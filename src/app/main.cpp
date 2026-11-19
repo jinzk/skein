@@ -74,15 +74,22 @@ static void print_usage(const char *program) {
                  "       %s fmt [--check|-w|--write] [options] <file...|->\n"
                  "       %s lsp --stdio [--typecheck=off|loose|warn|strict] "
                  "[options]\n"
-                 "       %s get [-C dir] [--cache dir] [--force] <module/path>[@ver] ...\n"
-                 "       %s build [-C dir] [--cache dir] [<module/path>[@ver] ...]\n"
+                 "       %s get [-C dir] [--cache dir] [--offline] [--force] "
+                 "<module/path>[@ver] ...\n"
+                 "       %s build [-C dir] [--cache dir] "
+                 "[<module/path>[@ver] ...]\n"
                  "       %s mod init [-C dir] [--force] [module/path]\n"
                  "       %s mod clean [-C dir] [--cache dir] [--dry-run] "
+                 "[--force]\n"
+                 "       %s mod download [-C dir] [--cache dir] [--offline] "
+                 "[--force]\n"
+                 "       %s mod verify [-C dir] [--cache dir]\n"
+                 "       %s mod tidy [-C dir] [--cache dir] [--offline] "
                  "[--force]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
                  program, program, program, program, program, program, program,
-                 program);
+                 program, program, program, program);
 }
 
 int main(int argc, char **argv) {
@@ -157,6 +164,12 @@ int main(int argc, char **argv) {
         return run_mod_init_tool(args, program);
     if (args.size() > 2 && args[1] == "mod" && args[2] == "clean")
         return run_mod_clean_tool(args, program);
+    if (args.size() > 2 && args[1] == "mod" && args[2] == "download")
+        return run_mod_download_tool(args, program);
+    if (args.size() > 2 && args[1] == "mod" && args[2] == "verify")
+        return run_mod_verify_tool(args, program);
+    if (args.size() > 2 && args[1] == "mod" && args[2] == "tidy")
+        return run_mod_tidy_tool(args, program);
     if (args.size() > 1 && args[1] == "mod") {
         print_usage(program);
         return 2;

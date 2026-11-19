@@ -21,7 +21,7 @@ namespace fs = std::filesystem;
 
 void print_get_usage(const std::string &program) {
     std::fprintf(stderr,
-                 "usage: %s get [-C dir] [--cache dir] [--force] "
+                 "usage: %s get [-C dir] [--cache dir] [--offline] [--force] "
                  "<module/path>[@version] ...\n",
                  program.c_str());
 }
@@ -35,6 +35,26 @@ void print_mod_init_usage(const std::string &program) {
 void print_mod_clean_usage(const std::string &program) {
     std::fprintf(stderr,
                  "usage: %s mod clean [-C dir] [--cache dir] [--dry-run] "
+                 "[--force]\n",
+                 program.c_str());
+}
+
+void print_mod_download_usage(const std::string &program) {
+    std::fprintf(stderr,
+                 "usage: %s mod download [-C dir] [--cache dir] [--offline] "
+                 "[--force]\n",
+                 program.c_str());
+}
+
+void print_mod_verify_usage(const std::string &program) {
+    std::fprintf(stderr,
+                 "usage: %s mod verify [-C dir] [--cache dir]\n",
+                 program.c_str());
+}
+
+void print_mod_tidy_usage(const std::string &program) {
+    std::fprintf(stderr,
+                 "usage: %s mod tidy [-C dir] [--cache dir] [--offline] "
                  "[--force]\n",
                  program.c_str());
 }
@@ -60,6 +80,7 @@ struct project_options {
     std::string cache;
     bool force = false;
     bool dry_run = false;
+    bool offline = false;
 };
 
 bool parse_common(const std::vector<std::string> &args, std::size_t start,
@@ -88,6 +109,8 @@ bool parse_common(const std::vector<std::string> &args, std::size_t start,
             options.force = true;
         } else if (arg == "--dry-run") {
             options.dry_run = true;
+        } else if (arg == "--offline") {
+            options.offline = true;
         } else if (!arg.empty() && arg[0] == '-') {
             usage(program);
             return false;
@@ -358,7 +381,7 @@ struct selection {
 /* Checksums are the trust root: never silently overwrite an existing entry.
  * `force` is the explicit opt-in that refreshes the cache and the sum. */
 bool prepare_module(const std::string &root, const std::string &path,
-                    const std::string &version, bool force,
+                    const std::string &version, bool force, bool offline,
                     fs::path &directory, skein::modfile::mod_file &mod,
                     std::string &hash, bool &needs_sum, std::string &error) {
     file_lock lock;
@@ -390,6 +413,18 @@ bool prepare_module(const std::string &root, const std::string &path,
      * the source and write a new checksum instead of adopting bytes written by
      * another project or process. */
     if (!cached || force || !have_sum) {
+        if (offline) {
+            if (cached) {
+                error = "module " + path + "@" + version +
+                        " is cached but has no checksum for this project; run "
+                        "'skein get " + path + "@" + version + "' online once";
+            } else {
+                error = "module " + path + "@" + version +
+                        " is not cached; run 'skein get " + path + "@" +
+                        version + "' online first or omit --offline";
+            }
+            return false;
+        }
         if (!download_module(path, version,
                              skein::modfile::cache_path(path, version),
                              error))
@@ -417,6 +452,53 @@ bool prepare_module(const std::string &root, const std::string &path,
     return true;
 }
 
+/* Expand the selected set through transitive requirements using MVS. */
+bool expand_modules(const std::string &root,
+                    std::map<std::string, selection> &selected, bool force,
+                    bool offline, pending_sums &sums, std::string &error) {
+    std::set<std::pair<std::string, std::string>> visited;
+    std::vector<std::pair<std::string, std::string>> queue;
+    for (const auto &entry : selected)
+        queue.push_back({entry.first, entry.second.version});
+    while (!queue.empty()) {
+        auto item = queue.back();
+        queue.pop_back();
+        if (!visited.insert(item).second)
+            continue;
+        fs::path directory;
+        skein::modfile::mod_file mod;
+        std::string hash;
+        bool needs_sum = false;
+        if (!prepare_module(root, item.first, item.second, force, offline,
+                            directory, mod, hash, needs_sum, error))
+            return false;
+        if (needs_sum)
+            sums.updates.push_back({item.first, item.second, hash});
+        for (const skein::modfile::require_spec &child : mod.requirements) {
+            if (!is_semver(child.version)) {
+                error = item.first + " requires non-semver version " +
+                        child.version + " of " + child.path;
+                return false;
+            }
+            if (!version_matches_path(child.path, child.version)) {
+                error = item.first + " requires version " + child.version +
+                        " that does not match module path " + child.path;
+                return false;
+            }
+            auto it = selected.find(child.path);
+            if (it == selected.end()) {
+                selected[child.path] = {child.version, true};
+                queue.push_back({child.path, child.version});
+            } else if (skein::modfile::compare_semver(child.version,
+                                                      it->second.version) > 0) {
+                it->second.version = child.version;
+                queue.push_back({child.path, child.version});
+            }
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 int run_get_tool(const std::vector<std::string> &args,
@@ -427,6 +509,11 @@ int run_get_tool(const std::vector<std::string> &args,
         return 2;
     if (options.dry_run) {
         print_get_usage(program);
+        return 2;
+    }
+    if (options.offline && options.force) {
+        std::fprintf(stderr, "%s: --force and --offline are mutually exclusive\n",
+                     program.c_str());
         return 2;
     }
     if (positional.empty()) {
@@ -493,6 +580,13 @@ int run_get_tool(const std::vector<std::string> &args,
     for (const parsed_spec &spec : specs) {
         parsed_spec resolved = spec;
         if (resolved.version.empty()) {
+            if (options.offline) {
+                error = "cannot resolve @latest in offline mode; specify an "
+                        "explicit version";
+                std::fprintf(stderr, "%s: %s\n", program.c_str(),
+                             error.c_str());
+                return 1;
+            }
             if (!resolve_latest(resolved.module, resolved.version, error)) {
                 std::fprintf(stderr, "%s: %s\n", program.c_str(),
                              error.c_str());
@@ -525,57 +619,12 @@ int run_get_tool(const std::vector<std::string> &args,
         requested.push_back(resolved);
     }
 
-    /* Minimal version selection: start from every selected root requirement
-     * and expand transitive requirements, always keeping the highest version
-     * for a given module path. Upgraded versions are queued for expansion. */
-    std::set<std::pair<std::string, std::string>> visited;
-    std::vector<std::pair<std::string, std::string>> queue;
     pending_sums sums;
     sums.root = root;
-    for (const auto &entry : selected)
-        queue.push_back({entry.first, entry.second.version});
-    while (!queue.empty()) {
-        auto item = queue.back();
-        queue.pop_back();
-        if (!visited.insert(item).second)
-            continue;
-        fs::path directory;
-        skein::modfile::mod_file mod;
-        std::string hash;
-        bool needs_sum = false;
-        if (!prepare_module(root, item.first, item.second, options.force,
-                            directory, mod, hash, needs_sum, error)) {
-            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
-            return 1;
-        }
-        if (needs_sum)
-            sums.updates.push_back({item.first, item.second, hash});
-        for (const skein::modfile::require_spec &child : mod.requirements) {
-            if (!is_semver(child.version)) {
-                std::fprintf(stderr,
-                             "%s: %s requires non-semver version %s of %s\n",
-                             program.c_str(), item.first.c_str(),
-                             child.version.c_str(), child.path.c_str());
-                return 1;
-            }
-            if (!version_matches_path(child.path, child.version)) {
-                std::fprintf(stderr,
-                             "%s: %s requires version %s that does not "
-                             "match module path %s\n",
-                             program.c_str(), item.first.c_str(),
-                             child.version.c_str(), child.path.c_str());
-                return 1;
-            }
-            auto it = selected.find(child.path);
-            if (it == selected.end()) {
-                selected[child.path] = {child.version, true};
-                queue.push_back({child.path, child.version});
-            } else if (skein::modfile::compare_semver(child.version,
-                                                      it->second.version) > 0) {
-                it->second.version = child.version;
-                queue.push_back({child.path, child.version});
-            }
-        }
+    if (!expand_modules(root, selected, options.force, options.offline, sums,
+                        error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
     }
 
     skein::modfile::mod_file updated;
@@ -601,6 +650,244 @@ int run_get_tool(const std::vector<std::string> &args,
     return 0;
 }
 
+int run_mod_download_tool(const std::vector<std::string> &args,
+                          const std::string &program) {
+    project_options options;
+    std::vector<std::string> positional;
+    if (!parse_common(args, 3, print_mod_download_usage, program, options,
+                      positional))
+        return 2;
+    if (!positional.empty() || options.dry_run) {
+        print_mod_download_usage(program);
+        return 2;
+    }
+    if (options.offline && options.force) {
+        std::fprintf(stderr, "%s: --force and --offline are mutually exclusive\n",
+                     program.c_str());
+        return 2;
+    }
+    if (!options.cache.empty())
+        platform_set_env("SKEINMODCACHE", options.cache);
+
+    const std::string start = options.directory.empty()
+                                  ? (thread_cwd().empty() ? "." : thread_cwd())
+                                  : options.directory;
+    const std::string root = skein::modfile::find_root(start);
+    if (root.empty() || !skein::modfile::exists(root)) {
+        std::fprintf(stderr,
+                     "%s: no skein.mod found; run '%s mod init' first\n",
+                     program.c_str(), program.c_str());
+        return 1;
+    }
+
+    std::string error;
+    file_lock project_guard;
+    if (!acquire_project_lock(root, project_guard, lock_mode::exclusive, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file mod;
+    if (!skein::modfile::load(root, mod, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    pending_sums sums;
+    sums.root = root;
+    for (const skein::modfile::require_spec &req : mod.requirements) {
+        if (!is_semver(req.version)) {
+            error = "module " + req.path + " has non-semver version " +
+                    req.version;
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        if (!version_matches_path(req.path, req.version)) {
+            error = "version " + req.version + " does not match module path " +
+                    req.path;
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        fs::path directory;
+        skein::modfile::mod_file dep;
+        std::string hash;
+        bool needs_sum = false;
+        if (!prepare_module(root, req.path, req.version, options.force,
+                            options.offline, directory, dep, hash, needs_sum,
+                            error)) {
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        if (needs_sum)
+            sums.updates.push_back({req.path, req.version, hash});
+        std::printf("downloaded %s@%s\n", req.path.c_str(),
+                    req.version.c_str());
+    }
+    if (!skein::modfile::update_sums(root, sums.updates, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    sums.committed = true;
+    if (mod.requirements.empty())
+        std::printf("no modules to download\n");
+    return 0;
+}
+
+int run_mod_verify_tool(const std::vector<std::string> &args,
+                        const std::string &program) {
+    project_options options;
+    std::vector<std::string> positional;
+    if (!parse_common(args, 3, print_mod_verify_usage, program, options,
+                      positional))
+        return 2;
+    if (!positional.empty() || options.dry_run || options.force) {
+        print_mod_verify_usage(program);
+        return 2;
+    }
+    if (!options.cache.empty())
+        platform_set_env("SKEINMODCACHE", options.cache);
+
+    const std::string start = options.directory.empty()
+                                  ? (thread_cwd().empty() ? "." : thread_cwd())
+                                  : options.directory;
+    const std::string root = skein::modfile::find_root(start);
+    if (root.empty() || !skein::modfile::exists(root)) {
+        std::fprintf(stderr,
+                     "%s: no skein.mod found; run '%s mod init' first\n",
+                     program.c_str(), program.c_str());
+        return 1;
+    }
+
+    std::string error;
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file mod;
+    if (!skein::modfile::load(root, mod, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    for (const skein::modfile::require_spec &req : mod.requirements) {
+        if (!is_semver(req.version)) {
+            error = "module " + req.path + " has non-semver version " +
+                    req.version;
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        if (!version_matches_path(req.path, req.version)) {
+            error = "version " + req.version + " does not match module path " +
+                    req.path;
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        file_lock module_guard;
+        if (!acquire_module_lock(req.path, req.version, module_guard,
+                                 lock_mode::shared, error)) {
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        if (!skein::modfile::verify_cached_module(root, req.path, req.version,
+                                                  error)) {
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+    }
+    std::printf("verified %zu module(s)\n", mod.requirements.size());
+    return 0;
+}
+
+int run_mod_tidy_tool(const std::vector<std::string> &args,
+                      const std::string &program) {
+    project_options options;
+    std::vector<std::string> positional;
+    if (!parse_common(args, 3, print_mod_tidy_usage, program, options,
+                      positional))
+        return 2;
+    if (!positional.empty() || options.dry_run) {
+        print_mod_tidy_usage(program);
+        return 2;
+    }
+    if (options.offline && options.force) {
+        std::fprintf(stderr, "%s: --force and --offline are mutually exclusive\n",
+                     program.c_str());
+        return 2;
+    }
+    if (!options.cache.empty())
+        platform_set_env("SKEINMODCACHE", options.cache);
+
+    const std::string start = options.directory.empty()
+                                  ? (thread_cwd().empty() ? "." : thread_cwd())
+                                  : options.directory;
+    const std::string root = skein::modfile::find_root(start);
+    if (root.empty() || !skein::modfile::exists(root)) {
+        std::fprintf(stderr,
+                     "%s: no skein.mod found; run '%s mod init' first\n",
+                     program.c_str(), program.c_str());
+        return 1;
+    }
+
+    std::string error;
+    file_lock project_guard;
+    if (!acquire_project_lock(root, project_guard, lock_mode::exclusive, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file existing;
+    if (!skein::modfile::load(root, existing, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    std::set<std::string> direct;
+    std::map<std::string, selection> selected;
+    for (const skein::modfile::require_spec &req : existing.requirements) {
+        if (!req.indirect) {
+            direct.insert(req.path);
+            selected[req.path] = {req.version, false};
+        }
+    }
+
+    pending_sums sums;
+    sums.root = root;
+    if (!expand_modules(root, selected, options.force, options.offline, sums,
+                        error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file updated;
+    updated.module = existing.module;
+    for (const auto &entry : selected) {
+        updated.requirements.push_back(
+            {entry.first, entry.second.version,
+             direct.count(entry.first) == 0});
+    }
+    if (!skein::modfile::update_sums(root, sums.updates, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    sums.committed = true;
+    if (!skein::modfile::save(root, updated, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    std::printf("tidied %zu module(s)\n", updated.requirements.size());
+    return 0;
+}
+
 int run_mod_init_tool(const std::vector<std::string> &args,
                       const std::string &program) {
     project_options options;
@@ -608,7 +895,7 @@ int run_mod_init_tool(const std::vector<std::string> &args,
     if (!parse_common(args, 3, print_mod_init_usage, program, options,
                       positional))
         return 2;
-    if (options.dry_run) {
+    if (options.dry_run || options.offline) {
         print_mod_init_usage(program);
         return 2;
     }
@@ -709,7 +996,7 @@ int run_mod_clean_tool(const std::vector<std::string> &args,
     if (!parse_common(args, 3, print_mod_clean_usage, program, options,
                       positional))
         return 2;
-    if (!positional.empty()) {
+    if (!positional.empty() || options.offline) {
         print_mod_clean_usage(program);
         return 2;
     }

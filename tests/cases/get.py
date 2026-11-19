@@ -169,6 +169,89 @@ def run_cases():
         assert alias_executed.returncode == 0, alias_executed.stderr
         assert alias_executed.stdout == "42\n", alias_executed.stdout
 
+        verified = run_skein(["mod", "verify", "-C", project], env=env)
+        assert verified.returncode == 0, verified.stderr
+        assert "verified 1 module(s)" in verified.stdout, verified.stdout
+
+        # get --offline must not touch the network once cache and sums are valid.
+        offline_env = env.copy()
+        offline_env["SKEIN_MODULE_URL"] = "Z:/missing-skein-mirror"
+        offline_get = run_skein(
+            ["get", "-C", project, f"{MODULE}@{TAG}", "--offline"],
+            env=offline_env,
+        )
+        assert offline_get.returncode == 0, offline_get.stderr
+        offline_latest = run_skein(
+            ["get", "-C", project, f"{MODULE}@latest", "--offline"],
+            env=offline_env,
+        )
+        assert offline_latest.returncode != 0, offline_latest.stdout
+        assert "cannot resolve @latest in offline mode" in offline_latest.stderr, (
+            offline_latest.stderr)
+        offline_force = run_skein(
+            ["get", "-C", project, f"{MODULE}@{TAG}", "--offline", "--force"],
+            env=offline_env,
+        )
+        assert offline_force.returncode != 0, offline_force.stdout
+        assert "mutually exclusive" in offline_force.stderr, offline_force.stderr
+
+        # mod download prefetches exact require entries without changing skein.mod.
+        download_project = os.path.join(root, "download-project")
+        os.makedirs(download_project)
+        download_mod = (
+            f"module example.test/download\nrequire {MODULE} {TAG}\n")
+        write(download_project, "skein.mod", download_mod)
+        download_env = env.copy()
+        download_env["SKEINMODCACHE"] = os.path.join(root, "download-cache")
+        downloaded = run_skein(
+            ["mod", "download", "-C", download_project], env=download_env)
+        assert downloaded.returncode == 0, downloaded.stderr
+        assert f"downloaded {MODULE}@{TAG}" in downloaded.stdout, (
+            downloaded.stdout)
+        assert os.path.exists(
+            os.path.join(download_project, "skein.sum"))
+        with open(os.path.join(download_project, "skein.mod"),
+                  encoding="utf-8") as handle:
+            assert handle.read() == download_mod
+        download_main = write(
+            download_project,
+            "main.skein",
+            'import "example.test/util/json";\nprintln(json.answer());\n',
+        )
+        download_run = run_skein(
+            [download_main], env=download_env, cwd=download_project)
+        assert download_run.returncode == 0, download_run.stderr
+        assert download_run.stdout == "42\n", download_run.stdout
+        downloaded_offline = run_skein(
+            ["mod", "download", "-C", download_project, "--offline"],
+            env=download_env,
+        )
+        assert downloaded_offline.returncode == 0, downloaded_offline.stderr
+
+        # mod tidy drops unused indirect requirements and keeps direct ones.
+        tidy_project = os.path.join(root, "tidy-project")
+        os.makedirs(tidy_project)
+        write(
+            tidy_project,
+            "skein.mod",
+            f"module example.test/tidy\n"
+            f"require {MODULE} {TAG}\n"
+            "require example.test/stale v9.9.9 // indirect\n",
+        )
+        tidied = run_skein(["mod", "tidy", "-C", tidy_project], env=env)
+        assert tidied.returncode == 0, tidied.stderr
+        with open(os.path.join(tidy_project, "skein.mod"),
+                  encoding="utf-8") as handle:
+            tidy_text = handle.read()
+        assert f"require {MODULE} {TAG}" in tidy_text, tidy_text
+        assert "example.test/stale" not in tidy_text, tidy_text
+        tidy_verify = run_skein(
+            ["mod", "verify", "-C", tidy_project], env=env)
+        assert tidy_verify.returncode == 0, tidy_verify.stderr
+        tidy_offline = run_skein(
+            ["mod", "tidy", "-C", tidy_project, "--offline"], env=env)
+        assert tidy_offline.returncode == 0, tidy_offline.stderr
+
         linted = run_skein(["lint", main], env=env, cwd=project)
         assert linted.returncode == 0, linted.stderr
 
@@ -212,6 +295,11 @@ def run_cases():
         tampered = run_skein([main], env=env, cwd=project)
         assert tampered.returncode != 0, tampered.stdout
         assert "checksum mismatch" in tampered.stderr, tampered.stderr
+        verify_tampered = run_skein(
+            ["mod", "verify", "-C", project], env=env)
+        assert verify_tampered.returncode != 0, verify_tampered.stdout
+        assert "checksum mismatch" in verify_tampered.stderr, (
+            verify_tampered.stderr)
 
         # `skein get` must not heal a checksum mismatch by rewriting skein.sum.
         with open(sum_path, encoding="utf-8") as handle:

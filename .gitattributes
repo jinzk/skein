@@ -1,0 +1,2 @@
+# Use LF everywhere: the repository stores LF, and tools/*.sh need it.
+* text=auto eol=lf

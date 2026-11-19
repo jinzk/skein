@@ -33,14 +33,14 @@ def run_cases():
     check(
         "diagnostic uncaught pass location",
         "let v = (1 / 0) on error(e) { pass e; };\n",
-        stderr="1:41: runtime error: uncaught fail: division by zero",
+        stderr="1:10: runtime error: uncaught fail: division by zero",
     )
     check(
         "diagnostic defer failure location",
         'func boom() { fail "defer boom"; }\n'
         "func f() { defer boom(); return 1; }\n"
         "f();\n",
-        stderr="3:5: runtime error: uncaught fail: defer boom",
+        stderr="1:31: runtime error: uncaught fail: defer boom",
     )
     check(
         "diagnostic parameter pattern location",
@@ -71,4 +71,51 @@ def run_cases():
         "diagnostic invalid label location",
         "label x: if (1) { print(1); }\n",
         stderr="1:14: runtime error: label must be attached to a loop or switch",
+    )
+    check(
+        "diagnostic fail trace",
+        "import std;\n"
+        'func inner() { fail "boom"; }\n'
+        "func middle() { inner(); }\n"
+        "func outer() { middle(); }\n"
+        "let value = outer() on error(e) {\n"
+        "  println(str(len(std.error.trace(e))));\n"
+        '  println(std.error.trace(e)[0]["function"]);\n'
+        '  println(str(std.error.location(e)["line"]));\n'
+        "  println(std.error.format_trace(e));\n"
+        "  recover null;\n"
+        "};\n",
+        stdout_all=[
+            "3", "inner", "2",
+            "in inner() called from line 3",
+            "in middle() called from line 4",
+            "in outer() called from line 5",
+        ],
+    )
+    check(
+        "diagnostic runtime error trace",
+        "import std;\n"
+        'func inner() { std.string.replace("a", "", "b"); }\n'
+        "func middle() { inner(); }\n"
+        "middle() on error(e) {\n"
+        "  println(std.error.kind(e));\n"
+        "  println(str(len(std.error.trace(e))));\n"
+        '  println(str(std.error.location(e)["line"]));\n'
+        "  println(std.error.format_trace(e));\n"
+        "  recover null;\n"
+        "};\n",
+        stdout_all=[
+            "runtime", "2", "2",
+            "runtime: std.string.replace search must not be empty",
+            "in inner() called from line 3",
+        ],
+    )
+    check(
+        "diagnostic user error has no trace",
+        "import std;\n"
+        'let e = std.error.new("custom", "boom");\n'
+        "println(str(std.error.location(e)));\n"
+        "println(str(len(std.error.trace(e))));\n"
+        "println(std.error.format_trace(e));\n",
+        stdout_all=["null", "0", "custom: boom"],
     )

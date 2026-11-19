@@ -877,6 +877,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     }
     context.handler_depth = 0;
 
+    const std::string caller_source = diag_current_source_name();
     if (!ts->top_level) {
         if (def && def->code) {
             const std::string &current_package = diag_current_package_name();
@@ -911,7 +912,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
             if (debug_enabled)
                 std::fprintf(stderr, "[jit] enter %s depth=%d\n", name,
                              diag_call_depth());
-            diag_push_call(name, line, column);
+            diag_push_call(name, caller_source, line, column);
             ts->diag_pushed = true;
         }
     }

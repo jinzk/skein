@@ -5,6 +5,9 @@ Extracted from the original test_skein.py main() body, lines 2888-3522.
 """
 from harness import *  # noqa: F401,F403
 
+import os
+import tempfile
+
 
 def run_cases():
     check(
@@ -376,6 +379,37 @@ def run_cases():
         "std.result.error(bad)\n",
         stdout_all=["= 5", "= true", "= division by zero"],
     )
+    check(
+        "std result capture keeps error trace",
+        "import std;\n"
+        "let r = std.result.capture(func() { return 1 / 0; });\n"
+        "let e = std.result.error(r);\n"
+        'println(str(std.error.location(e)["line"]));\n'
+        "println(str(len(std.error.trace(e))));\n"
+        "println(std.error.format_trace(e));\n",
+        stdout_all=["2", "1", "runtime: division by zero",
+                    "in <anonymous>() called from line 2"],
+    )
+    with tempfile.TemporaryDirectory() as thread_tmp:
+        thread_worker = os.path.join(thread_tmp, "worker.skein")
+        with open(thread_worker, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "import std;\n"
+                'func main(ctx) { fail "thread boom"; }\n'
+            )
+        check(
+            "thread error keeps trace",
+            "import std;\n"
+            f"let t = std.thread.spawn_script({skein_string(thread_worker)}, "
+            "std.thread.Message.from({}));\n"
+            "let r = t.join();\n"
+            'let e = r["error"];\n'
+            'println(str(std.error.location(e)["line"]));\n'
+            "println(str(len(std.error.trace(e))));\n"
+            "println(std.error.format_trace(e));\n",
+            stdout_all=["2", "1", "fail: thread boom",
+                        "in main() called from"],
+        )
     check(
         "std result capture net",
         "import std;\n"

@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "control_runtime.h"
 #include "diagnostics.h"
 #include "dict.h"
 #include "eval_context.h"
@@ -372,8 +373,9 @@ struct value_t *eval(struct ast *a) {
                 freeval(value);
                 break;
             }
-            set_eval_control(EVAL_CONTROL_FAIL,
-                             normalize_error(value, "fail"));
+            struct value_t *error = normalize_error(value, "fail");
+            eval_annotate_error(error);
+            set_eval_control(EVAL_CONTROL_FAIL, error);
             break;
         }
 
@@ -408,8 +410,9 @@ struct value_t *eval(struct ast *a) {
                 freeval(value);
                 break;
             }
-            set_eval_control(EVAL_CONTROL_FAIL,
-                             normalize_error(value, "fail"));
+            struct value_t *error = normalize_error(value, "fail");
+            eval_annotate_error(error);
+            set_eval_control(EVAL_CONTROL_FAIL, error);
             break;
         }
 

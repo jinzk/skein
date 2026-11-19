@@ -287,6 +287,26 @@ struct value_t *newerrorval(const std::string &kind,
     return (struct value_t *)v;
 }
 
+void error_set_trace(struct value_t *value, const std::string &source,
+                     int line, int column,
+                     const std::vector<error_frame> &trace) {
+    if (!value || value->type != T_error)
+        return;
+    struct error_value_t *error = (struct error_value_t *)value;
+    if (error->line > 0 || !error->trace.empty())
+        return;
+    error->source = source;
+    error->line = line;
+    error->column = column;
+    error->trace = trace;
+}
+
+bool error_has_trace(const struct value_t *value) {
+    return value && value->type == T_error &&
+           (((const struct error_value_t *)value)->line > 0 ||
+            !((const struct error_value_t *)value)->trace.empty());
+}
+
 struct value_t *newresultok(struct value_t *value) {
     struct result_value_t *v = new result_value_t;
     v->type = T_result;
@@ -849,7 +869,10 @@ struct value_t *dupval(struct value_t *v) {
         }
         case T_error: {
             struct error_value_t *src = (struct error_value_t *)v;
-            return newerrorval(src->kind, src->message);
+            struct value_t *copy = newerrorval(src->kind, src->message);
+            error_set_trace(copy, src->source, src->line, src->column,
+                            src->trace);
+            return copy;
         }
         case T_result: {
             struct result_value_t *src = (struct result_value_t *)v;

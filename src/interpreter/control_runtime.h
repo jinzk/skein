@@ -18,6 +18,13 @@ void eval_finish_statement_control();
 void eval_capture_begin(struct eval_capture_snapshot &snapshot);
 struct eval_capture_result eval_capture_end(
     const struct eval_capture_snapshot &snapshot);
+/* Build a "runtime" error from captured diagnostics state. */
+struct value_t *eval_build_error(const std::string &message,
+                                 const std::string &source, int line,
+                                 int column,
+                                 const std::vector<error_frame> &trace);
+/* Attach the current location and call stack to an error that has none. */
+void eval_annotate_error(struct value_t *error);
 void eval_raise(struct value_t *error);
 void eval_request_close();
 

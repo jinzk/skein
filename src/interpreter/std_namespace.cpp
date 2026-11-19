@@ -696,6 +696,9 @@ value_t *build_namespace_impl() {
             {"new", B_error_new},
             {"kind", B_error_kind},
             {"message", B_error_message},
+            {"trace", B_error_trace},
+            {"location", B_error_location},
+            {"format_trace", B_error_format_trace},
         })));
     return (value_t *)root;
 }

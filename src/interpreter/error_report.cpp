@@ -24,6 +24,10 @@ void runtime_error_report(const char *message) {
         if (!context.has_captured_error) {
             context.has_captured_error = true;
             context.captured_error = text;
+            context.captured_source = diag_current_source_name();
+            context.captured_line = g_error_line;
+            context.captured_column = g_error_column;
+            diag_snapshot_trace(context.captured_trace);
         }
         return;
     }

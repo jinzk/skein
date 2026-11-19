@@ -4,6 +4,10 @@
 #include <string>
 #include <vector>
 
+#include "error_info.h"
+
+struct error_value_t;
+
 /* Location of the most recently scanned token. */
 extern thread_local int g_token_line;
 extern thread_local int g_token_column;
@@ -38,6 +42,11 @@ void diag_start_input_line();
 void diag_report(int line, int column, const char *category,
                  const char *message);
 
+/* Report an error value using the location and call stack captured when it
+ * was raised.  Falls back to the live location when the error carries none. */
+void diag_report_error(const struct error_value_t &error, const char *category,
+                       const char *message);
+
 /* Print a warning without counting it as an error or stopping the script. */
 void diag_warning(const char *message);
 /* Location-aware warning used by the static type checker. */
@@ -55,10 +64,15 @@ void diag_mark_script_failure();
 /* Lexical error with printf-style formatting. */
 void diag_report_lexical(int line, int column, const char *fmt, ...);
 
-/* Runtime call stack. */
-void diag_push_call(const char *name, int line, int column);
+/* Runtime call stack.  `source` identifies the file containing the call. */
+void diag_push_call(const char *name, const std::string &source, int line,
+                    int column);
 void diag_pop_call();
 int diag_call_depth();
+
+/* Copy the live call stack into `frames`, innermost frame first. */
+void diag_snapshot_trace(std::vector<error_frame> &frames,
+                         std::size_t limit = 64);
 
 /* Total number of reported errors. */
 int diag_error_count();
@@ -89,7 +103,8 @@ void diag_restore_source(const diag_source_checkpoint &checkpoint);
 void diag_start_source();
 
 struct diag_call_frame {
-    const char *name;
+    std::string name;
+    std::string source;
     int line;
     int column;
 };

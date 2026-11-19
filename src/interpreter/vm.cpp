@@ -2,6 +2,7 @@
 #include "vm_internal.h"
 
 #include "bytecode.h"
+#include "control_runtime.h"
 #include "diagnostics.h"
 #include "dict.h"
 #include "eval_context.h"
@@ -3314,6 +3315,7 @@ private:
 
     FastCallResult try_fast_call(value_t *callee,
                                  value_t **args, size_t argc) {
+        const std::string caller_source = diag_current_source_name();
 #ifdef SKEIN_ENABLE_JIT
         if (skein_vm_host().fn_skein_vm_try_jit_call) {
             value_t *jit_result = NULL;
@@ -3393,7 +3395,7 @@ private:
         bind_fast_arguments(code, args, argc);
         ++context_.vm_call_depth;
         diag_frames_ = 1;
-        diag_push_call(name, line, column);
+        diag_push_call(name, caller_source, line, column);
         /* Push the frame before binding so a pattern mismatch reports the
          * same call context as the AST path.  Failure unwinds this frame. */
         if (!bind_param_patterns(code))
@@ -3404,6 +3406,7 @@ private:
     bool try_tail_call(value_t *callee, value_t **args, size_t argc) {
         if (saved_states_.empty())
             return false;
+        const std::string caller_source = diag_current_source_name();
         for (const std::vector<defer_record> &scope : defer_scopes_)
             if (!scope.empty())
                 return false;
@@ -3474,7 +3477,7 @@ private:
         skein_vm_eval_push_closure_scope(current_def_->closure);
         bind_fast_arguments(code, args, argc);
         if (diag_frames_ < 64) {
-            diag_push_call(name, line, column);
+            diag_push_call(name, caller_source, line, column);
             ++diag_frames_;
         }
         return true;
@@ -4824,6 +4827,7 @@ private:
 
     void raise_fail_value(value_t *value, const char *kind) {
         value_t *error = normalize_error(value, kind);
+        eval_annotate_error(error);
         if (has_handler(UnwindKind::Fail))
             throw_unwind(UnwindKind::Fail, error);
         skein_vm_eval_raise(error);
@@ -4860,12 +4864,13 @@ private:
                 }
                 if (context_.control == EVAL_CONTROL_NONE &&
                     has_handler(UnwindKind::Fail)) {
-                    std::string message =
+                    value_t *error = eval_build_error(
                         context_.has_captured_error
                             ? context_.captured_error
-                            : "runtime error";
-                    throw_unwind(UnwindKind::Fail,
-                                 newerrorval("runtime", message));
+                            : std::string("runtime error"),
+                        context_.captured_source, context_.captured_line,
+                        context_.captured_column, context_.captured_trace);
+                    throw_unwind(UnwindKind::Fail, error);
                 }
             }
             if (saved_states_.empty())

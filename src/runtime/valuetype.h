@@ -10,6 +10,8 @@
 #include <vector>
 #include <utility>
 
+#include "error_info.h"
+
 struct symlist;
 struct scope_t;
 struct symbol;
@@ -376,6 +378,14 @@ struct error_value_t {
     enum val_type type;
     std::string kind;
     std::string message;
+    /* Source location and call stack captured when the error is raised.
+     * Errors constructed by user code (for example std.error.new) leave
+     * these empty.  `trace` is ordered from the innermost frame to the
+     * outermost one. */
+    std::string source;
+    int line = 0;
+    int column = 0;
+    std::vector<error_frame> trace;
 };
 
 struct result_value_t {
@@ -402,6 +412,12 @@ struct value_t *newnativeval(
     std::shared_ptr<void> owner = nullptr);
 struct value_t *newerrorval(const std::string &kind,
                             const std::string &message);
+/* Attach a source location and call stack to an error value.  Errors that
+ * already carry a location (for example one re-raised with `pass`) keep it. */
+void error_set_trace(struct value_t *value, const std::string &source,
+                     int line, int column,
+                     const std::vector<error_frame> &trace);
+bool error_has_trace(const struct value_t *value);
 struct value_t *newresultok(struct value_t *value);
 struct value_t *newresulterr(struct value_t *error);
 struct value_t *newresulterr_message(const std::string &kind,

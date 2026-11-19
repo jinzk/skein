@@ -572,7 +572,7 @@ struct value_t *call_builtin(int functype,
         return call_generator_builtin(functype, args);
     if (functype >= B_result_ok && functype <= B_result_capture)
         return call_result_builtin(functype, args);
-    if (functype >= B_error_new && functype <= B_error_message)
+    if (functype >= B_error_new && functype <= B_error_format_trace)
         return call_error_builtin(functype, args);
     if (functype >= B_io_read && functype <= B_io_write_async)
         return call_io_builtin(functype, args);

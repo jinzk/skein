@@ -1,6 +1,7 @@
 #include "fiber.h"
 
 #include "ast.h"
+#include "control_runtime.h"
 #include "diagnostics.h"
 #include "eval.h"
 #include "eval_context.h"
@@ -355,7 +356,11 @@ value_t *take_fiber_error(fiber *value, const char *fallback) {
     }
     if (!error) {
         if (value->eval.has_captured_error)
-            error = newerrorval("runtime", value->eval.captured_error);
+            error = eval_build_error(value->eval.captured_error,
+                                     value->eval.captured_source,
+                                     value->eval.captured_line,
+                                     value->eval.captured_column,
+                                     value->eval.captured_trace);
         else
             error = newerrorval("runtime", fallback);
     }

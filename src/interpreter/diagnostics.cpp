@@ -2,6 +2,7 @@
 #include "diag_collect.h"
 #include "runtime_state.h"
 #include "unicode_ident.h"
+#include "valuetype.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -204,23 +205,29 @@ static void print_snippet(int line, int column) {
     std::fputs("^\n", stderr);
 }
 
-static void print_call_stack() {
-    if (call_stack.empty())
+static void print_trace(const std::vector<error_frame> &frames) {
+    if (frames.empty())
         return;
-    size_t shown = call_stack.size();
-    size_t first = 0;
+    size_t shown = frames.size();
     if (shown > MAX_REPORTED_FRAMES) {
-        first = shown - MAX_REPORTED_FRAMES;
-        std::fprintf(stderr, "  ... %zu more call(s)\n", first);
+        std::fprintf(stderr, "  ... %zu more call(s)\n",
+                     shown - MAX_REPORTED_FRAMES);
+        shown = MAX_REPORTED_FRAMES;
     }
-    for (size_t i = shown; i > first; --i) {
-        const diag_call_frame &frame = call_stack[i - 1];
+    for (size_t i = 0; i < shown; ++i) {
+        const error_frame &frame = frames[i];
         if (frame.line > 0)
             std::fprintf(stderr, "  in %s() called from line %d\n",
-                         frame.name, frame.line);
+                         frame.function.c_str(), frame.line);
         else
-            std::fprintf(stderr, "  in %s()\n", frame.name);
+            std::fprintf(stderr, "  in %s()\n", frame.function.c_str());
     }
+}
+
+static void print_call_stack() {
+    std::vector<error_frame> frames;
+    diag_snapshot_trace(frames);
+    print_trace(frames);
 }
 
 void diag_mark_script_failure() {
@@ -228,8 +235,9 @@ void diag_mark_script_failure() {
         g_script_stop = true;
 }
 
-void diag_report(int line, int column, const char *category,
-                 const char *message) {
+static void diag_report_at(const std::string &source, int line, int column,
+                           const char *category, const char *message,
+                           const std::vector<error_frame> &trace) {
     if (g_interrupted)
         return;
 
@@ -243,7 +251,7 @@ void diag_report(int line, int column, const char *category,
 
     if (diag_collect_active()) {
         diagnostic_record record;
-        record.source = source_name;
+        record.source = source;
         record.line = line;
         record.column = column;
         diagnostic_offsets(line, column, record.byte_offset,
@@ -258,12 +266,12 @@ void diag_report(int line, int column, const char *category,
     }
 
     std::fflush(stdout);
-    if (!source_name.empty()) {
+    if (!source.empty()) {
         if (column > 0)
-            std::fprintf(stderr, "%s:%d:%d: %s: %s\n", source_name.c_str(),
+            std::fprintf(stderr, "%s:%d:%d: %s: %s\n", source.c_str(),
                          line, column, category, message);
         else
-            std::fprintf(stderr, "%s:%d: %s: %s\n", source_name.c_str(),
+            std::fprintf(stderr, "%s:%d: %s: %s\n", source.c_str(),
                          line, category, message);
     } else if (column > 0) {
         std::fprintf(stderr, "%d:%d: %s: %s\n", line, column, category,
@@ -272,9 +280,29 @@ void diag_report(int line, int column, const char *category,
         std::fprintf(stderr, "%d: %s: %s\n", line, category, message);
     }
 
-    print_snippet(line, column);
-    print_call_stack();
+    /* The snippet belongs to the file that is currently loaded; skip it when
+       the error was raised in a different source. */
+    if (source == source_name)
+        print_snippet(line, column);
+    print_trace(trace);
     std::fflush(stderr);
+}
+
+void diag_report(int line, int column, const char *category,
+                 const char *message) {
+    std::vector<error_frame> trace;
+    diag_snapshot_trace(trace);
+    diag_report_at(source_name, line, column, category, message, trace);
+}
+
+void diag_report_error(const struct error_value_t &error, const char *category,
+                       const char *message) {
+    const bool has_location = error.line > 0;
+    const std::string &source =
+        error.source.empty() ? source_name : error.source;
+    diag_report_at(source, has_location ? error.line : g_error_line,
+                   has_location ? error.column : g_error_column, category,
+                   message, error.trace);
 }
 
 void diag_warning(const char *message) {
@@ -354,8 +382,14 @@ bool diag_lexical_error_on_line(int line) {
     return line > 0 && lexical_error_line == line;
 }
 
-void diag_push_call(const char *name, int line, int column) {
-    call_stack.push_back(diag_call_frame{name, line, column});
+void diag_push_call(const char *name, const std::string &source, int line,
+                    int column) {
+    diag_call_frame frame;
+    frame.name = name ? name : "<anonymous>";
+    frame.source = source;
+    frame.line = line;
+    frame.column = column;
+    call_stack.push_back(std::move(frame));
 }
 
 void diag_pop_call() {
@@ -364,6 +398,26 @@ void diag_pop_call() {
 }
 
 int diag_call_depth() { return (int)call_stack.size(); }
+
+void diag_snapshot_trace(std::vector<error_frame> &frames, std::size_t limit) {
+    frames.clear();
+    if (call_stack.empty())
+        return;
+    std::size_t shown = call_stack.size();
+    if (limit > 0 && shown > limit)
+        shown = limit;
+    frames.reserve(shown);
+    for (std::size_t i = call_stack.size(); i > call_stack.size() - shown;
+         --i) {
+        const diag_call_frame &frame = call_stack[i - 1];
+        error_frame entry;
+        entry.source = frame.source;
+        entry.function = frame.name;
+        entry.line = frame.line;
+        entry.column = frame.column;
+        frames.push_back(std::move(entry));
+    }
+}
 
 int diag_error_count() {
     return error_count;

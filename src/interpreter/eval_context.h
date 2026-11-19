@@ -30,6 +30,10 @@ struct eval_context {
     bool capture_errors = false;
     bool has_captured_error = false;
     std::string captured_error;
+    std::string captured_source;
+    int captured_line = 0;
+    int captured_column = 0;
+    std::vector<error_frame> captured_trace;
     std::vector<std::vector<struct ast *>> defer_stack;
     size_t gc_root_mark = 0;
 

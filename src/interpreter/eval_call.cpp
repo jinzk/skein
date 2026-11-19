@@ -132,6 +132,7 @@ static struct value_t *invoke_function_body(
     std::vector<struct value_t *> &args) {
     function_package_guard package_guard(def->code->package,
                                        def->code->source);
+    const std::string caller_source = package_guard.previous_source;
     int nparams = def->code->nparams;
     std::string frame_name =
         def->code->name.empty() ? "<anonymous>" : def->code->name;
@@ -151,7 +152,8 @@ static struct value_t *invoke_function_body(
         frame_line = def->code->def_line;
         frame_column = def->code->def_column;
     }
-    call_stack_guard frame_guard(frame_name.c_str(), frame_line, frame_column);
+    call_stack_guard frame_guard(frame_name.c_str(), caller_source,
+                                 frame_line, frame_column);
     eval_push_closure_scope(def->closure);
     int i = 0;
     bool pattern_failed = false;

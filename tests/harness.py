@@ -521,8 +521,10 @@ def check_extended_stdlib():
                 "println(\"env=\" + (std.env.get(\"SKEIN_SPAWN_ENV\") "
                 "== null ? \"null\" : "
                 "std.env.get(\"SKEIN_SPAWN_ENV\")));\n"
-                "println(\"cwd_ok=\" + str(std.fs.cwd() == "
-                "std.env.get(\"SKEIN_SPAWN_CWD\")));\n"
+                "let cwd = std.string.replace(std.fs.cwd(), \"\\\\\", \"/\");\n"
+                "let want = std.string.replace("
+                "str(std.env.get(\"SKEIN_SPAWN_CWD\")), \"\\\\\", \"/\");\n"
+                "println(\"cwd_ok=\" + str(cwd == want));\n"
             )
         check(
             "std process spawn thread env and cwd",

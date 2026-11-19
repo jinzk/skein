@@ -24,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 7u;
+constexpr uint32_t kPayloadVersion = 8u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -346,6 +346,16 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             out.u8((uint8_t)value_tag::Error);
             out.str(error_value->kind);
             out.str(error_value->message);
+            out.str(error_value->source);
+            out.u32((uint32_t)error_value->line);
+            out.u32((uint32_t)error_value->column);
+            out.u32((uint32_t)error_value->trace.size());
+            for (const struct error_frame &frame : error_value->trace) {
+                out.str(frame.source);
+                out.str(frame.function);
+                out.u32((uint32_t)frame.line);
+                out.u32((uint32_t)frame.column);
+            }
             return true;
         }
         case T_result: {
@@ -545,11 +555,37 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
         case value_tag::Error: {
             std::string kind;
             std::string message;
-            if (!in.str(kind) || !in.str(message)) {
+            std::string source;
+            uint32_t line = 0;
+            uint32_t column = 0;
+            uint32_t frame_count = 0;
+            if (!in.str(kind) || !in.str(message) || !in.str(source) ||
+                !in.u32(line) || !in.u32(column) || !in.u32(frame_count)) {
                 error = in.error;
                 return false;
             }
-            value = value_owner(newerrorval(kind, message));
+            if (frame_count > 4096) {
+                error = "error trace is too deep";
+                return false;
+            }
+            std::vector<error_frame> trace;
+            trace.reserve((size_t)frame_count);
+            for (uint32_t i = 0; i < frame_count; ++i) {
+                error_frame frame;
+                uint32_t frame_line = 0;
+                uint32_t frame_column = 0;
+                if (!in.str(frame.source) || !in.str(frame.function) ||
+                    !in.u32(frame_line) || !in.u32(frame_column)) {
+                    error = in.error;
+                    return false;
+                }
+                frame.line = (int)frame_line;
+                frame.column = (int)frame_column;
+                trace.push_back(std::move(frame));
+            }
+            struct value_t *created = newerrorval(kind, message);
+            error_set_trace(created, source, (int)line, (int)column, trace);
+            value = value_owner(created);
             return true;
         }
         case value_tag::Result: {

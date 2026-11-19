@@ -1048,6 +1048,14 @@ const TypeNode *builtin_function_type(int functype) {
         case B_string_to_upper:
         case B_unicode_casefold:
             return builtin_sig({text()}, text());
+        case B_error_trace:
+            return builtin_sig(
+                {type_builtin(TYPE_ERROR)},
+                type_container(TYPE_LIST, {any_type()}));
+        case B_error_location:
+            return builtin_sig({type_builtin(TYPE_ERROR)}, any_type());
+        case B_error_format_trace:
+            return builtin_sig({type_builtin(TYPE_ERROR)}, text());
         case B_split:
             return builtin_sig(
                 {text(), text()},

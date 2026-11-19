@@ -1552,6 +1552,9 @@ std.error.new(kind, message)  → error
 std.error.new(message)        → error(kind="error")
 std.error.kind(error)         → string
 std.error.message(error)      → string
+std.error.location(error)     → dict{source, line, column} / null
+std.error.trace(error)        → list[dict{source, function, line, column}]
+std.error.format_trace(error) → string
 ```
 
 规则：
@@ -1560,6 +1563,10 @@ std.error.message(error)      → string
 - `ok(result)` 为真，`err(result)` 为假；
 - `std.result.error(result)` 返回 `error` 值，`str(error)` 返回消息；
 - `fail` 和 `std.result.err` 会把普通值包装成 `error`；
+- `fail` 与运行时错误会在抛出点记录源位置和调用栈，捕获后仍可读取；
+- `std.error.location` 返回抛出点的 `source` / `line` / `column`，`std.error.new` 创建的错误返回 `null`；
+- `std.error.trace` 返回调用栈（最多 64 帧），最内层帧在前；每帧是 `{source, function, line, column}`；
+- `std.error.format_trace` 生成与 CLI 诊断一致的多行文本；
 - `capture` 捕获同步 `fail` 和运行时错误，并转换成 result；
 - `capture` 不打印被捕获的错误；
 - `std.result.unwrap` 在 `err` 时通过 `fail` 抛出；
@@ -2750,6 +2757,9 @@ std.result.capture
 std.error.new
 std.error.kind
 std.error.message
+std.error.location
+std.error.trace
+std.error.format_trace
 
 std.ffi.open
 std.ffi.close

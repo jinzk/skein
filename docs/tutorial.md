@@ -945,18 +945,40 @@ let n = parse_positive("0") on error(e) {
 };
 ```
 
+错误值会记录抛出点：
+
+```text
+func inner() { fail "boom"; }
+func outer() { inner(); }
+
+let v = outer() on error(e) {
+  println(std.error.format_trace(e));
+  // example.skein:1:20: fail: boom
+  //   in inner() called from line 2
+  //   in outer() called from line 3
+  let where = std.error.location(e);
+  println(str(where["line"]));    // 1
+  recover 0;
+};
+```
+
 - `fail expr;` 抛出错误，`fail;` 抛出空错误；
 - 普通值会被包装成 `error(kind="fail", message=...)`；
+- 错误会在抛出点记录源位置和调用栈，捕获后仍然可读；
+- `std.error.location(e)` 返回 `{source, line, column}`，`std.error.new` 创建的错误返回 `null`；
+- `std.error.trace(e)` 返回调用栈（最多 64 帧），最内层帧在前；
+- `std.error.format_trace(e)` 返回与 CLI 诊断格式一致的多行文本；
 - `call() on error(e) { ... }` 捕获 `fail`、运行时错误和 `result.err`；
 - `result.ok(v) on error(...)` 直接得到 `v`，不执行 handler；
 - `e` 是 `error` 值，只在 handler 作用域内有效；
 - `str(e)` 或 `std.error.message(e)` 取得消息；
 - `std.error.kind(e)` 取得错误类别；
 - `recover expr;` 结束 handler 并返回恢复值；
-- `pass e;` 把错误继续传给外层；
+- `pass e;` 把错误继续传给外层，保留原始位置和调用栈；
 - handler 必须以 `recover`、`pass` 或 `fail` 结束；
 - handler 内不能直接用 `return` / `break` / `continue` 结束；
-- 未捕获的 `fail` 在脚本顶层报错并停止脚本。
+- 未捕获的 `fail` 在抛出点报告，并打印调用栈；
+- 跨 task / thread 传递的 `error` 会保留位置和调用栈。
 
 ### 函数与闭包
 

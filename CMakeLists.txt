@@ -361,6 +361,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/fiber.cpp
   src/interpreter/generator.cpp
   src/interpreter/async_support.cpp
+  src/interpreter/native_async.cpp
   src/interpreter/task.cpp
   src/interpreter/event_loop.cpp
   src/interpreter/repl.cpp

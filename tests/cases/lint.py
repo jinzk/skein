@@ -96,3 +96,23 @@ def run_cases():
     )
     assert multiple.returncode == 1, multiple.stderr
     assert multiple.stderr.count("type error") == 2, multiple.stderr
+
+    if harness.NATIVE_MODULE:
+        plugin_load = run_lint(
+            "package p {\n"
+            "  import std;\n"
+            "  std.plugin.load(" + skein_string(harness.NATIVE_MODULE) +
+            ");\n"
+            "}\n"
+        )
+        assert plugin_load.returncode == 1, plugin_load.stderr
+        assert "check-only mode" in plugin_load.stderr, plugin_load.stderr
+
+    ffi_open = run_lint(
+        "package p {\n"
+        "  import std;\n"
+        '  std.ffi.open("/definitely/not/a/library.so");\n'
+        "}\n"
+    )
+    assert ffi_open.returncode == 1, ffi_open.stderr
+    assert "check-only mode" in ffi_open.stderr, ffi_open.stderr

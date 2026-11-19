@@ -10,6 +10,7 @@
 #include "event_loop.h"
 #include "fiber.h"
 #include "gc.h"
+#include "native_async.h"
 #include "package.h"
 #include "parser_lock.h"
 #include "platform.h"
@@ -3323,6 +3324,7 @@ void thread_entry_main(
         nullptr,
 #endif
     };
+    skein::native_async::install(&hooks);
     skein_context_set(&hooks);
     skein_vm_set_enabled(false);
     g_interactive = false;
@@ -4306,6 +4308,7 @@ bool thread_worker_begin(bool worker_vm, std::string &error) {
 #else
     worker_runtime_hooks.drain_background = nullptr;
 #endif
+    skein::native_async::install(&worker_runtime_hooks);
     skein_context_set(&worker_runtime_hooks);
     skein_vm_set_enabled(worker_vm);
     g_interactive = false;

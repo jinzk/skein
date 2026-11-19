@@ -123,18 +123,21 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
 
 ## 6. 原生模块 ABI
 
-`skein_module` v1：
+`skein_module` v1 / v2：
 
 - 纯 C ABI、opaque handle；
-- `skein_api` 只追加字段，使用新字段前检查 `size`；
-- 支持静态注册、`std.module.load` 动态加载、`std.module.unload` 延迟卸载；
+- `skein_api` 只追加字段，使用新字段前检查 `size`；v2 追加 `call_task` /
+  `task_cancelled`，用于把耗时函数导出为标准 `task`（见 `docs/stdlib.md`）；
+- v1 描述符仍可加载：`abi_version` 接受 1 和 2；
+- 支持静态注册、`std.plugin.load` 动态加载、`std.plugin.unload` 延迟卸载；
 - 绑定函数和 userdata 持有模块状态，最后一份引用释放时调用 `fini` 并 `dlclose`；
-- 静态模块不可卸载。
+- 静态模块不可卸载；
+- `std.plugin.load` / `std.ffi.open` 在 check-only 模式下被禁止。
 
 ## 7. 稳定性策略
 
 - manifest v1 冻结；破坏性变更走 v2；
-- `skein_module` ABI v1 冻结，只追加字段；
+- `skein_module` ABI v1/v2 冻结，只追加字段；
 - FFI Beta 期间允许修正边缘语义和错误信息，但避免破坏常见用法；
 - 已知限制优先修正确性，不新增 ABI 功能。
 

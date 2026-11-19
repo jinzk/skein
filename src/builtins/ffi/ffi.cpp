@@ -1,5 +1,6 @@
 #include "ffi_module.h"
 
+#include "analysis_mode.h"
 #include "ast.h"
 #include "dynamic_library.h"
 #include "eval_helpers.h"
@@ -2008,6 +2009,11 @@ struct value_t *call_ffi_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     switch (functype) {
         case B_ffi_open:
+            if (g_check_only) {
+                yyerror("std.ffi.open is disabled in check-only mode");
+                return NULL;
+            }
+            return ffi_open(args);
         case B_ffi_bind:
             return ffi_open(args);
         case B_ffi_close:

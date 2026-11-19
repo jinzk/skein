@@ -20,6 +20,7 @@
 #include "fiber.h"
 #include "http.h"
 #include "http2.h"
+#include "native_async.h"
 #include "net.h"
 #include "package.h"
 #include "platform.h"
@@ -130,6 +131,7 @@ int main(int argc, char **argv) {
     struct skein_context runtime_hooks = {runtime_call,
                                           runtime_call_builtin,
                                           runtime_error_report};
+    skein::native_async::install(&runtime_hooks);
     skein_context_set(&runtime_hooks);
 
     std::string module_error;

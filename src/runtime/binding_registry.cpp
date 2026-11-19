@@ -16,6 +16,9 @@
 #include <vector>
 
 namespace skein {
+
+thread_local std::shared_ptr<void> current_module_owner;
+
 namespace {
 
 /* -------------------------------------------------------------------------
@@ -125,20 +128,6 @@ struct c_userdata {
     ~c_userdata() {
         if (type && type->destroy)
             type->destroy(data);
-    }
-};
-
-thread_local std::shared_ptr<void> current_module_owner;
-
-struct module_owner_guard {
-    std::shared_ptr<void> previous;
-
-    explicit module_owner_guard(std::shared_ptr<void> owner)
-        : previous(std::move(current_module_owner)) {
-        current_module_owner = std::move(owner);
-    }
-    ~module_owner_guard() {
-        current_module_owner = std::move(previous);
     }
 };
 
@@ -349,6 +338,26 @@ bool api_as_userdata(const skein_value *value,
     return true;
 }
 
+skein_value *api_call_task(skein_context *ctx, skein_task_work_fn work,
+                           skein_task_finish_fn finish,
+                           skein_task_destroy_fn destroy, void *data) {
+    if (!ctx || !ctx->call_task) {
+        yyerror("native async tasks are not available");
+        return NULL;
+    }
+    return as_handle(ctx->call_task(work, finish, destroy, data));
+}
+
+bool api_task_cancelled(skein_context *ctx, skein_value *task) {
+    /* Deliberately usable from worker threads: only the task handle is read. */
+    if (!task)
+        return false;
+    skein_context *owner = ctx ? ctx : skein_context_current();
+    if (!owner || !owner->task_cancelled)
+        return false;
+    return owner->task_cancelled(as_value(task));
+}
+
 const skein_api *api_table() {
     static const skein_api api = {
         SKEIN_MODULE_ABI_VERSION,
@@ -379,6 +388,8 @@ const skein_api *api_table() {
         api_new_list,
         api_new_dict,
         api_as_userdata,
+        api_call_task,
+        api_task_cancelled,
     };
     return &api;
 }
@@ -487,7 +498,9 @@ bool register_module(const skein_module *module,
         error = "native module descriptor is null";
         return false;
     }
-    if (module->abi_version != SKEIN_MODULE_ABI_VERSION) {
+    /* v1 descriptors keep working: the v2 addition is in skein_api only. */
+    if (module->abi_version < 1 ||
+        module->abi_version > SKEIN_MODULE_ABI_VERSION) {
         error = "native module ABI version mismatch";
         return false;
     }

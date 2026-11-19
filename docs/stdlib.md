@@ -1931,6 +1931,8 @@ example.math.ANSWER;
 - `skein_api` 由 host 通过 `init` 传入，值以 opaque handle 传递；
 - `skein_api` v1 追加了 `new_list` / `new_dict` / `as_userdata`；使用新字段前
   应检查 `size`，旧 host 的 ABI 表会更短；
+- ABI v2 追加了 `call_task` / `task_cancelled`：v1 模块仍可加载，使用新字段前
+  检查 `api->size >= offsetof(skein_api, task_cancelled) + sizeof(api->task_cancelled)`；
 - 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；
 - `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；
@@ -1938,6 +1940,46 @@ example.math.ANSWER;
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
 - packed/bitfield 不进通用 FFI，由 C++ 绑定通过 `get_field`/`set_field` 处理，
   `example.math` 里的 `PackedHeader` / `PackedFlags` 是示例。
+
+#### 异步导出（ABI v2）
+
+插件可以把耗时函数导出为标准的 `task`，脚本用 `t.wait()` 或 `std.task.wait(t)`
+等待，也可以用 `std.task.cancel(t)` 取消：
+
+```c
+struct job { int64_t input, output; skein_value *task; skein_context *ctx; };
+
+static void work(void *data) {          /* 工作线程：只能处理裸 C 数据 */
+    struct job *job = data;
+    job->output = job->input * 2;
+}
+static skein_value *finish(skein_context *ctx, void *data) {
+    struct job *job = data;             /* owner 线程：可以用 skein_api */
+    return g_api->new_int(ctx, job->output);
+}
+static void destroy(void *data) { free(data); }
+
+static skein_status twice_async(skein_context *ctx,
+                                const skein_value *const *args, size_t argc,
+                                skein_value **result) {
+    struct job *job = calloc(1, sizeof(*job));
+    g_api->as_int(args[0], &job->input);
+    *result = g_api->call_task(ctx, work, finish, destroy, job);
+    job->task = g_api->dup_value(ctx, *result);
+    job->ctx = ctx;
+    return *result ? SKEIN_OK : SKEIN_ERROR;
+}
+```
+
+`work` 运行在 worker 线程，**不得调用任何 `skein_api` 函数**（值 API 不是线程
+安全的）；需要轮询取消时调用 `g_api->task_cancelled(job->ctx, job->task)`。
+`finish` 和 `destroy` 在 owner 线程执行，由事件循环泵（`fiber_pump`）驱动，
+因此 `finish` 创建的 userdata 仍持有插件引用。`call_task` 立即返回 task，
+不会阻塞调用纤维；`fini`/`dlclose` 会等到所有未完成任务结束。
+
+`std.plugin.load` 和 `std.ffi.open` 在 `lint` / `fmt` / `lsp` 的 check-only
+模式下被禁止，避免静态检查加载并执行原生库；`extern "c" lib` 的 ABI 校验
+不受影响。
 
 从 C 头文件生成 manifest：
 

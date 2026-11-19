@@ -2,6 +2,7 @@
 
 #include "binding_registry.h"
 
+#include "analysis_mode.h"
 #include "runtime_context.h"
 #include "runtime_state.h"
 #include "symbol.h"
@@ -63,6 +64,10 @@
 
 static struct value_t *module_load_builtin(
     const std::vector<struct value_t *> &args) {
+    if (g_check_only) {
+        yyerror("std.plugin.load is disabled in check-only mode");
+        return NULL;
+    }
     if (args.size() != 1 || args[0]->type != T_string) {
         yyerror("std.plugin.load expects a string path");
         return NULL;

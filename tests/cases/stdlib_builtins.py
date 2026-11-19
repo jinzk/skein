@@ -1187,6 +1187,29 @@ def run_cases():
             stdout_all=["= 7", "= 6", "= 4"],
         )
         check(
+            "native module async export",
+            "import std;\n"
+            f"std.plugin.load({native_module});\n"
+            "import test.dynamic;\n"
+            "let t = dynamic.twice_async(21);\n"
+            "type_name(t)\n"
+            "t.wait()\n"
+            "let a = dynamic.twice_async(21);\n"
+            "let b = dynamic.twice_async(4);\n"
+            "a.wait() + b.wait()\n",
+            stdout_all=["= task", "= 42", "= 50"],
+        )
+        check(
+            "native module async cancellation",
+            "import std;\n"
+            f"std.plugin.load({native_module});\n"
+            "import test.dynamic;\n"
+            "let t = dynamic.cancellable();\n"
+            "std.task.cancel(t);\n"
+            "std.task.catch(t).wait()\n",
+            stdout="= err(task was cancelled)",
+        )
+        check(
             "native module unload keeps live bindings",
             "import std;\n"
             f"std.plugin.load({native_module});\n"

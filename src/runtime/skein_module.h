@@ -15,7 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SKEIN_MODULE_ABI_VERSION 1
+#define SKEIN_MODULE_ABI_VERSION 2
 
 #if defined(_WIN32)
 #define SKEIN_MODULE_EXPORT __declspec(dllexport)
@@ -97,6 +97,11 @@ typedef struct skein_constant {
     } value;
 } skein_constant;
 
+/* ABI v2 async task callbacks.  See `skein_api::call_task` below. */
+typedef void (*skein_task_work_fn)(void *data);
+typedef skein_value *(*skein_task_finish_fn)(skein_context *ctx, void *data);
+typedef void (*skein_task_destroy_fn)(void *data);
+
 /*
  * Value API.  The table is append-only: new entries are added at the end and
  * `abi_version` is bumped; existing entries never change meaning.
@@ -156,6 +161,22 @@ typedef struct skein_api {
     /* `type` must be non-null; on success stores the module payload. */
     bool (*as_userdata)(const skein_value *value,
                         const skein_native_type *type, void **data);
+
+    /*
+     * ABI v2: asynchronous exports.
+     *
+     * `work` runs on a worker thread and must not call any skein_api function
+     * (the value API is not thread-safe).  When it returns, `finish` runs on
+     * the owner thread; its result completes a standard Skein task, which the
+     * script can wait on with `task.wait()` or `std.task.wait`.  `destroy`
+     * releases `data` on the owner thread and may be null.
+     *
+     * `task_cancelled` is safe to poll from the worker thread.
+     */
+    skein_value *(*call_task)(skein_context *ctx, skein_task_work_fn work,
+                              skein_task_finish_fn finish,
+                              skein_task_destroy_fn destroy, void *data);
+    bool (*task_cancelled)(skein_context *ctx, skein_value *task);
 } skein_api;
 
 typedef struct skein_module {

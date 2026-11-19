@@ -7,6 +7,7 @@
 #include "eval_helpers.h"
 #include "event_loop.h"
 #include "fiber.h"
+#include "native_async.h"
 #include "repl.h"
 #include "valuetype.h"
 
@@ -1117,6 +1118,7 @@ static value_t *task_bounded_parallel_map(
 }
 
 void task_shutdown() {
+    skein::native_async::shutdown();
     std::vector<task *> &tasks = task_registry();
     for (size_t i = 0; i < tasks.size(); ++i) {
         if (tasks[i]->status == TASK_PENDING)

@@ -949,6 +949,8 @@ void fiber_pump() {
     struct skein_context *runtime = skein_context_current();
     if (runtime && runtime->drain_background)
         runtime->drain_background();
+    if (runtime && runtime->drain_native_tasks)
+        runtime->drain_native_tasks();
     for (;;) {
         for (size_t i = 0; i < all_fibers.size(); ++i) {
             fiber *value = all_fibers[i];

@@ -1,6 +1,7 @@
 #ifndef SKEIN_RUNTIME_CONTEXT_H
 #define SKEIN_RUNTIME_CONTEXT_H
 
+#include "skein_module.h"
 #include "valuetype.h"
 
 #include <utility>
@@ -19,6 +20,16 @@ struct skein_context {
     /* Optional background work (for example queued FFI callbacks) drained
      * while the interpreter pumps the event loop. */
     void (*drain_background)() = nullptr;
+
+    /* ABI v2 native task hooks.  Installed by skein::native_async::install().
+     * `drain_native_tasks` is separate from `drain_background` so the FFI
+     * callback drain is not replaced. */
+    void (*drain_native_tasks)() = nullptr;
+    struct value_t *(*call_task)(skein_task_work_fn work,
+                                 skein_task_finish_fn finish,
+                                 skein_task_destroy_fn destroy,
+                                 void *data) = nullptr;
+    bool (*task_cancelled)(struct value_t *task) = nullptr;
 };
 
 struct skein_context *skein_context_current();

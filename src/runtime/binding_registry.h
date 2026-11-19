@@ -11,6 +11,21 @@ struct dynamic_library;
 
 namespace skein {
 
+/* Module owning the native call currently executing on this thread.  Async
+ * completions install it again so userdata created in a finish callback keeps
+ * the plugin library alive. */
+extern thread_local std::shared_ptr<void> current_module_owner;
+
+struct module_owner_guard {
+    std::shared_ptr<void> previous;
+
+    explicit module_owner_guard(std::shared_ptr<void> owner)
+        : previous(std::move(current_module_owner)) {
+        current_module_owner = std::move(owner);
+    }
+    ~module_owner_guard() { current_module_owner = std::move(previous); }
+};
+
 /* Register a native module.  Static bindings pass a null library. */
 bool register_module(const skein_module *module,
                      std::shared_ptr<dynamic_library> library,

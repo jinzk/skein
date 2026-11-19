@@ -26,7 +26,7 @@
 - 词法、语法、类型检查、AST/VM 双后端
 - task / generator、线程、Channel
 - HTTP/1.1、HTTP/2、WebSocket、TLS、FFI
-- Unicode 标识符、NFC、常见源文件编码
+- Unicode 标识符、NFC、归一化 quick-check、常见源文件编码
 - GBK / GB18030-2005 编解码
 
 ### 工具链
@@ -176,9 +176,8 @@
 
 - GB18030-2022
 - Big5 / Shift_JIS / EUC-JP 等旧编码后端
-- Unicode quick-check / case folding / grapheme
+- Unicode case folding / grapheme cluster
 - HTTP/2 extended CONNECT
-- `std.net` TLS / HTTP
 - vendor / workspace
 - AOT / 字节码序列化
 

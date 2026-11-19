@@ -190,7 +190,7 @@ std.http.close(server);
 - 第三方包使用字符串 import：`import "github.com/acme/util/json" as json;`；`skein mod init` 创建 `skein.mod`，`skein get module/path@version` 通过 git 下载、按 MVS 解析传递依赖并写入 `skein.sum`；`skein mod verify` 校验缓存，`skein mod download` 预取，`skein mod tidy` 清理未使用依赖，`skein mod prune` 安全裁剪未引用缓存，`skein mod clean` 清理全局缓存，`get --offline` 禁止联网；下载/构建使用项目锁、缓存锁和模块锁，支持 `SKEIN_LOCK_TIMEOUT_MS`，运行时只读校验缓存且不会隐式联网；`/vN` 路径支持不兼容 major 版本并存；
 - `include` 在声明层展开，适合共享常量、类型和函数声明；
 - REPL 支持历史、行编辑、自动缩进、词法高亮、Tab 补全（关键字 / REPL 命令 / 全局符号 / `std.*` / struct 字段 / 文件路径）、`:load`、`ans` / `_`；脚本支持 shebang 和 `--encoding`；
-- Unicode 标识符、UTF-8 / UTF-16 / UTF-32 BOM 自动识别、GBK / GB18030 等编码转换；
+- Unicode 标识符、NFC 归一化 quick-check、UTF-8 / UTF-16 / UTF-32 BOM 自动识别、GBK / GB18030 等编码转换；
 - 测试矩阵覆盖 Windows、Linux、ASan/UBSan/LSan、TSan、VM-only、JIT 和文档一致性检查。
 
 ## 快速开始
@@ -314,7 +314,8 @@ src/
                  unicode_ident.*、stdio_stream.*、runtime_context.*、runtime_error.*、
                  binding_registry.*、builtin_ids.h、skein_module.h
     data/        L1  提交到仓库的生成表：encoding_gb18030_data.inc、
-                 encoding_gbk_validity.inc、unicode_ident_data.inc
+                 encoding_gbk_validity.inc、unicode_ident_data.inc、
+                 unicode_quickcheck.inc
   interpreter/   L2  词法/语法/AST/求值/执行模型：
                  tokens.l、parser.y、ast.*、diagnostics.*、error_report.*、eval.*、
                  eval_control.*、eval_call.*、eval_assign.*、

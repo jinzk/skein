@@ -5,6 +5,7 @@
 #include "valuetype.h"
 
 #include "utf8proc.h"
+#include "unicode_quickcheck.inc"
 
 #include <cstdlib>
 #include <string>
@@ -18,6 +19,69 @@ enum class NormalizationForm {
     Nfkc,
     Nfkd,
 };
+
+enum class QuickCheck {
+    Yes,
+    No,
+    Maybe,
+};
+
+template <std::size_t N>
+QuickCheck lookup_quickcheck(const UnicodeQuickCheckRange (&ranges)[N],
+                             uint32_t codepoint) {
+    std::size_t low = 0;
+    std::size_t high = N;
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2;
+        if (ranges[middle].last < codepoint)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low < N && ranges[low].first <= codepoint)
+        return ranges[low].value == 1 ? QuickCheck::No : QuickCheck::Maybe;
+    return QuickCheck::Yes;
+}
+
+QuickCheck codepoint_quickcheck(uint32_t codepoint, NormalizationForm form) {
+    switch (form) {
+        case NormalizationForm::Nfc:
+            return lookup_quickcheck(NFC_QC_RANGES, codepoint);
+        case NormalizationForm::Nfd:
+            return lookup_quickcheck(NFD_QC_RANGES, codepoint);
+        case NormalizationForm::Nfkc:
+            return lookup_quickcheck(NFKC_QC_RANGES, codepoint);
+        case NormalizationForm::Nfkd:
+            return lookup_quickcheck(NFKD_QC_RANGES, codepoint);
+    }
+    return QuickCheck::Maybe;
+}
+
+QuickCheck quick_check_text(const std::string &input, NormalizationForm form) {
+    bool maybe = false;
+    std::size_t pos = 0;
+    int last_combining_class = 0;
+    while (pos < input.size()) {
+        std::size_t consumed = 0;
+        unsigned int codepoint = 0;
+        if (!utf8_decode_one(input.data() + pos, input.size() - pos, consumed,
+                             codepoint))
+            return QuickCheck::Maybe;
+        const QuickCheck value = codepoint_quickcheck(codepoint, form);
+        if (value == QuickCheck::No)
+            return QuickCheck::No;
+        if (value == QuickCheck::Maybe)
+            maybe = true;
+        const utf8proc_property_t *property =
+            utf8proc_get_property((utf8proc_int32_t)codepoint);
+        const int combining_class = property ? property->combining_class : 0;
+        if (combining_class != 0 && last_combining_class > combining_class)
+            return QuickCheck::No;
+        last_combining_class = combining_class;
+        pos += consumed;
+    }
+    return maybe ? QuickCheck::Maybe : QuickCheck::Yes;
+}
 
 static std::string normalize_form_name(const std::string &name) {
     std::string normalized;
@@ -73,6 +137,14 @@ static utf8proc_option_t options_for(NormalizationForm form) {
 
 static bool normalize_text(const std::string &input, NormalizationForm form,
                            std::string &output, std::string &error) {
+    if (input.find('\0') != std::string::npos) {
+        error = "normalized text contains NUL";
+        return false;
+    }
+    if (quick_check_text(input, form) == QuickCheck::Yes) {
+        output = input;
+        return true;
+    }
     utf8proc_uint8_t *result = nullptr;
     const utf8proc_ssize_t length = utf8proc_map(
         reinterpret_cast<const utf8proc_uint8_t *>(input.data()),
@@ -215,6 +287,17 @@ struct value_t *call_unicode_builtin(
         return NULL;
 
     const std::string input = ((struct string_value_t *)args[0])->value;
+    if (input.find('\0') != std::string::npos) {
+        yyerror("%s: normalized text contains NUL", name);
+        return NULL;
+    }
+    if (!is_normalize) {
+        const QuickCheck quick = quick_check_text(input, form);
+        if (quick == QuickCheck::Yes)
+            return newboolval(true);
+        if (quick == QuickCheck::No)
+            return newboolval(false);
+    }
     std::string normalized;
     std::string error;
     if (!normalize_text(input, form, normalized, error)) {

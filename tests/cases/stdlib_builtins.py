@@ -1750,6 +1750,17 @@ def run_cases():
         stdout_all=["= false", "= true", "= false"],
     )
     check(
+        "std unicode quick check",
+        "import std;\n"
+        'let plain = std.encoding.decode(bytes_from_hex("e4b8ad"), "utf-8");\n'
+        'std.unicode.is_normalized(plain, "nfc")\n'
+        'let marks = std.encoding.decode(bytes_from_hex("61cc95cc80"), "utf-8");\n'
+        'std.unicode.is_normalized(marks, "nfd")\n'
+        'let ordered = std.encoding.decode(bytes_from_hex("61cc80cc95"), "utf-8");\n'
+        'std.unicode.is_normalized(ordered, "nfd")\n',
+        stdout_all=["= true", "= false", "= true"],
+    )
+    check(
         "std unicode compatibility",
         "import std;\n"
         'let ligature = std.encoding.decode(bytes_from_hex("efac81"), "utf-8");\n'

@@ -77,8 +77,17 @@ NFKC  = UTF8PROC_STABLE | UTF8PROC_COMPOSE | UTF8PROC_COMPAT
 NFKD  = UTF8PROC_STABLE | UTF8PROC_DECOMPOSE | UTF8PROC_COMPAT
 ```
 
-`is_normalized` 首版通过“归一化后与输入比较”实现，行为简单，后续可以改为
-quick-check 优化。
+`is_normalized` 和 `normalize` 会先做 Unicode Quick_Check：
+
+- `Yes`：直接判定已归一化，不分配新字符串；
+- `No`：直接判定未归一化；
+- `Maybe`：再调用 `utf8proc_map` 做完整检查和归一化。
+
+quick-check 范围表由
+`tools/gen_unicode_quickcheck.py` 从 Unicode 16.0.0 的
+`DerivedNormalizationProps.txt` 生成到
+`src/runtime/data/unicode_quickcheck.inc`。同时检查组合字符的 canonical
+ordering，避免只依赖单码点属性造成误判。
 
 `version()` 返回 `utf8proc_unicode_version()`，当前为 `"16.0.0"`。
 
@@ -147,7 +156,6 @@ NFKC 不作为标识符默认规则。它会把 `ａ`、`Ⅳ`、`µ`、`ſ` 等�
 
 ## 6. 后续
 
-- 用 NFC/NFKC quick-check 优化 `is_normalized`。
 - 评估 case folding、grapheme cluster 等 `std.unicode` 扩展。
 - 若要升级 Unicode 版本，同时升级 `utf8proc` 和 `unicode_ident` 数据，并重新跑
   `NormalizationTest.txt`。

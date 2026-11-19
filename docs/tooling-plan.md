@@ -1,6 +1,6 @@
-# Skein 工具链实现计划：lint / format / LSP
+# Skein 工具链实现记录（历史）：lint / format / LSP
 
-> 状态：阶段 0–4 已实现：`lint`、`fmt`、`lsp --stdio` 均可用，VS Code / Vim / Neovim 接入示例与文档已完成。总路线见 [`roadmap.md`](roadmap.md)。
+> 状态：阶段 0–4 已完成，本文保留为实现记录。后续增量计划（incremental sync、共享 completion index、resolution-only import）统一见 [`roadmap.md`](roadmap.md)。
 > 适用范围：在现有 `skein` CLI 基础上新增 `lint`、`fmt`、`lsp` 三个子命令，并让 Vim / VS Code 通过 LSP 调用。  
 > 实现偏差：`diag_collect.*` 虽位于 `src/interpreter/`，但归属 `skein_value_runtime` target，以满足架构边界检查。
 

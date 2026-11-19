@@ -16,5 +16,7 @@ int run_mod_verify_tool(const std::vector<std::string> &args,
                         const std::string &program);
 int run_mod_tidy_tool(const std::vector<std::string> &args,
                       const std::string &program);
+int run_mod_prune_tool(const std::vector<std::string> &args,
+                       const std::string &program);
 
 #endif

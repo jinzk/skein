@@ -59,6 +59,13 @@ void print_mod_tidy_usage(const std::string &program) {
                  program.c_str());
 }
 
+void print_mod_prune_usage(const std::string &program) {
+    std::fprintf(stderr,
+                 "usage: %s mod prune [-C dir] [--cache dir] [--dry-run] "
+                 "[--all]\n",
+                 program.c_str());
+}
+
 std::string shell_quote(std::string text) {
     for (char &c : text) {
         if (c == '\\')
@@ -81,12 +88,14 @@ struct project_options {
     bool force = false;
     bool dry_run = false;
     bool offline = false;
+    bool all = false;
 };
 
 bool parse_common(const std::vector<std::string> &args, std::size_t start,
                   void (*usage)(const std::string &),
                   const std::string &program, project_options &options,
-                  std::vector<std::string> &positional) {
+                  std::vector<std::string> &positional,
+                  bool allow_all = false) {
     for (std::size_t i = start; i < args.size(); ++i) {
         const std::string &arg = args[i];
         if (arg == "-C" || arg == "--project") {
@@ -111,6 +120,8 @@ bool parse_common(const std::vector<std::string> &args, std::size_t start,
             options.dry_run = true;
         } else if (arg == "--offline") {
             options.offline = true;
+        } else if (arg == "--all" && allow_all) {
+            options.all = true;
         } else if (!arg.empty() && arg[0] == '-') {
             usage(program);
             return false;
@@ -308,6 +319,60 @@ bool remove_tree(const fs::path &path, std::string &error) {
 void discard_tree(const fs::path &path) {
     std::string ignored;
     remove_tree(path, ignored);
+}
+
+struct cached_module {
+    fs::path directory;
+    std::string path;
+    std::string version;
+};
+
+std::vector<cached_module> list_cached_modules(const fs::path &cache) {
+    std::vector<cached_module> modules;
+    std::error_code ec;
+    fs::recursive_directory_iterator it(
+        cache, fs::directory_options::skip_permission_denied, ec);
+    const fs::recursive_directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().u8string();
+        if (!it->is_directory(ec))
+            continue;
+        if (name == ".build" || name == ".locks" || name == ".git" ||
+            name.rfind(".tmp-", 0) == 0) {
+            it.disable_recursion_pending();
+            continue;
+        }
+        std::error_code manifest_ec;
+        if (!fs::is_regular_file(it->path() / "module.skein", manifest_ec))
+            continue;
+
+        std::error_code relative_ec;
+        const fs::path relative =
+            fs::relative(it->path(), cache, relative_ec);
+        if (relative_ec || relative.empty())
+            continue;
+        const fs::path version_path = relative.parent_path();
+        if (version_path.empty() || version_path.parent_path().empty())
+            continue;
+        const std::string version = version_path.filename().u8string();
+        const std::string module_name = relative.filename().u8string();
+        const fs::path module_parent = version_path.parent_path();
+        const std::string parent_text = module_parent.generic_u8string();
+        std::string module_path;
+        if (skein::modfile::has_version_suffix(parent_text) &&
+            skein::modfile::module_name_from_path(parent_text) == module_name) {
+            module_path = parent_text;
+        } else {
+            module_path =
+                (module_parent / relative.filename()).generic_u8string();
+        }
+        if (!skein::modfile::is_valid_module_path(module_path) ||
+            !skein::modfile::is_valid_version(version))
+            continue;
+        modules.push_back({it->path(), module_path, version});
+        it.disable_recursion_pending();
+    }
+    return modules;
 }
 
 /* Batch checksum updates so the success path writes skein.sum once.  If a
@@ -885,6 +950,94 @@ int run_mod_tidy_tool(const std::vector<std::string> &args,
         return 1;
     }
     std::printf("tidied %zu module(s)\n", updated.requirements.size());
+    return 0;
+}
+
+int run_mod_prune_tool(const std::vector<std::string> &args,
+                       const std::string &program) {
+    project_options options;
+    std::vector<std::string> positional;
+    if (!parse_common(args, 3, print_mod_prune_usage, program, options,
+                      positional, true))
+        return 2;
+    if (!positional.empty() || options.offline || options.force) {
+        print_mod_prune_usage(program);
+        return 2;
+    }
+    if (!options.cache.empty())
+        platform_set_env("SKEINMODCACHE", options.cache);
+
+    const std::string start = options.directory.empty()
+                                  ? (thread_cwd().empty() ? "." : thread_cwd())
+                                  : options.directory;
+    const std::string root = skein::modfile::find_root(start);
+    if (root.empty() || !skein::modfile::exists(root)) {
+        std::fprintf(stderr,
+                     "%s: no skein.mod found; run '%s mod init' first\n",
+                     program.c_str(), program.c_str());
+        return 1;
+    }
+
+    std::string error;
+    file_lock project_guard;
+    if (!acquire_project_lock(root, project_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::exclusive, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file mod;
+    if (!skein::modfile::load(root, mod, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    std::set<std::string> keep;
+    for (const skein::modfile::require_spec &req : mod.requirements)
+        keep.insert(req.path + "@" + req.version);
+
+    const fs::path cache = fs::u8path(skein::modfile::cache_dir());
+    const std::vector<cached_module> cached = list_cached_modules(cache);
+    std::vector<cached_module> unused;
+    for (const cached_module &entry : cached) {
+        if (!keep.count(entry.path + "@" + entry.version))
+            unused.push_back(entry);
+    }
+    if (unused.empty()) {
+        std::printf("nothing to prune\n");
+        return 0;
+    }
+
+    std::size_t removed = 0;
+    for (const cached_module &entry : unused) {
+        if (!options.all || options.dry_run) {
+            std::printf("would remove %s@%s\n", entry.path.c_str(),
+                        entry.version.c_str());
+            continue;
+        }
+        if (!remove_tree(entry.directory, error)) {
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        const fs::path native = fs::u8path(
+            skein::modfile::native_build_dir(entry.path, entry.version));
+        std::error_code ec;
+        if (fs::exists(native, ec) && !remove_tree(native, error)) {
+            std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+            return 1;
+        }
+        std::printf("removed %s@%s\n", entry.path.c_str(),
+                    entry.version.c_str());
+        ++removed;
+    }
+    if (!options.all && !options.dry_run) {
+        std::printf("pass --all to remove these cache entries\n");
+    } else if (options.all && !options.dry_run) {
+        std::printf("pruned %zu module version(s)\n", removed);
+    }
     return 0;
 }
 

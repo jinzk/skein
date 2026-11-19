@@ -89,11 +89,14 @@
    - 加载前校验 source/artifact hash
    - 编译器可用时检测版本变化
    - 编译 flags 的显式元数据仍待补充
-4. `mod prune` 安全语义：
-   - 不能按单项目误删共享缓存
-   - 引用计数或显式 `--all`
-5. 锁超时、等待诊断、可取消等待
-6. Linux/macOS `flock` 并发测试
+4. `mod prune` 安全语义（已完成）：
+   - 默认只列出未引用版本
+   - 显式 `--all` 才删除
+   - 同步清理 native `.build` 产物
+5. 锁超时与等待诊断（已完成）：
+   - `SKEIN_LOCK_TIMEOUT_MS`
+   - 等待提示和超时错误
+6. Linux/macOS `flock` 并发测试（Linux 通过 WSL 全量 35/35；macOS 暂缓）
 
 验收：
 

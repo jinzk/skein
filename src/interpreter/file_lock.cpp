@@ -1,13 +1,17 @@
 #include "file_lock.h"
 
 #include "modfile.h"
+#include "platform.h"
 
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -26,6 +30,17 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+long long lock_timeout_ms() {
+    std::string value;
+    if (!platform_get_env("SKEIN_LOCK_TIMEOUT_MS", value) || value.empty())
+        return 0;
+    char *end = nullptr;
+    const long long parsed = std::strtoll(value.c_str(), &end, 10);
+    if (end == value.c_str() || parsed <= 0)
+        return 0;
+    return parsed;
+}
 
 /* Collision only serializes unrelated modules, never causes missed locking. */
 std::string lock_file_name(const std::string &module,
@@ -69,10 +84,17 @@ bool file_lock::acquire(const std::string &file, const std::string &label,
         return false;
     }
 
-    DWORD flags = mode == lock_mode::exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0;
-    OVERLAPPED overlapped = {};
-    if (!LockFileEx(handle, flags | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0,
-                    &overlapped)) {
+    const DWORD flags =
+        mode == lock_mode::exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0;
+    const long long timeout_ms = lock_timeout_ms();
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
+    bool waiting_printed = false;
+    for (;;) {
+        OVERLAPPED overlapped = {};
+        if (LockFileEx(handle, flags | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0,
+                       &overlapped))
+            break;
         const DWORD code = GetLastError();
         if (code != ERROR_LOCK_VIOLATION) {
             error = "cannot lock " + label + ": windows error " +
@@ -80,14 +102,26 @@ bool file_lock::acquire(const std::string &file, const std::string &label,
             CloseHandle(handle);
             return false;
         }
-        std::fprintf(stderr, "skein: waiting for %s...\n", label.c_str());
-        OVERLAPPED waiting = {};
-        if (!LockFileEx(handle, flags, 0, 1, 0, &waiting)) {
-            error = "cannot lock " + label + ": windows error " +
-                    std::to_string(GetLastError());
+        if (!waiting_printed) {
+            std::fprintf(stderr, "skein: waiting for %s...\n", label.c_str());
+            waiting_printed = true;
+        }
+        if (timeout_ms <= 0) {
+            OVERLAPPED waiting = {};
+            if (!LockFileEx(handle, flags, 0, 1, 0, &waiting)) {
+                error = "cannot lock " + label + ": windows error " +
+                        std::to_string(GetLastError());
+                CloseHandle(handle);
+                return false;
+            }
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            error = "timed out waiting for " + label;
             CloseHandle(handle);
             return false;
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     handle_ = static_cast<void *>(handle);
 #else
@@ -99,20 +133,44 @@ bool file_lock::acquire(const std::string &file, const std::string &label,
     }
     const int operation =
         mode == lock_mode::exclusive ? LOCK_EX : LOCK_SH;
-    if (flock(fd_, operation | LOCK_NB) != 0) {
+    const long long timeout_ms = lock_timeout_ms();
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
+    bool waiting_printed = false;
+    for (;;) {
+        if (flock(fd_, operation | LOCK_NB) == 0)
+            break;
+        if (errno == EINTR)
+            continue;
         if (errno != EWOULDBLOCK && errno != EAGAIN) {
             error = "cannot lock " + label + ": " + std::strerror(errno);
             close(fd_);
             fd_ = -1;
             return false;
         }
-        std::fprintf(stderr, "skein: waiting for %s...\n", label.c_str());
-        if (flock(fd_, operation) != 0) {
-            error = "cannot lock " + label + ": " + std::strerror(errno);
+        if (!waiting_printed) {
+            std::fprintf(stderr, "skein: waiting for %s...\n", label.c_str());
+            waiting_printed = true;
+        }
+        if (timeout_ms <= 0) {
+            if (flock(fd_, operation) != 0) {
+                if (errno == EINTR)
+                    continue;
+                error = "cannot lock " + label + ": " +
+                        std::strerror(errno);
+                close(fd_);
+                fd_ = -1;
+                return false;
+            }
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            error = "timed out waiting for " + label;
             close(fd_);
             fd_ = -1;
             return false;
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 #endif
     locked_ = true;

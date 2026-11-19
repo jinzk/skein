@@ -1,4 +1,6 @@
-# Skein Unicode 归一化方案
+# Skein Unicode 归一化方案（首版已实现）
+
+> 当前状态与总优先级见 [`roadmap.md`](roadmap.md)。
 
 - 状态：已实现（首版）
 - 相关模块：`std.unicode`

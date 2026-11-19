@@ -86,10 +86,12 @@ static void print_usage(const char *program) {
                  "       %s mod verify [-C dir] [--cache dir]\n"
                  "       %s mod tidy [-C dir] [--cache dir] [--offline] "
                  "[--force]\n"
+                 "       %s mod prune [-C dir] [--cache dir] [--dry-run] "
+                 "[--all]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
                  program, program, program, program, program, program, program,
-                 program, program, program, program);
+                 program, program, program, program, program);
 }
 
 int main(int argc, char **argv) {
@@ -170,6 +172,8 @@ int main(int argc, char **argv) {
         return run_mod_verify_tool(args, program);
     if (args.size() > 2 && args[1] == "mod" && args[2] == "tidy")
         return run_mod_tidy_tool(args, program);
+    if (args.size() > 2 && args[1] == "mod" && args[2] == "prune")
+        return run_mod_prune_tool(args, program);
     if (args.size() > 1 && args[1] == "mod") {
         print_usage(program);
         return 2;

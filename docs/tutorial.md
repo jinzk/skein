@@ -284,9 +284,10 @@ skein mod verify                 # 校验 skein.mod 中每个 require 的缓存�
 skein mod download               # 按 skein.mod 预取缓存，不修改 skein.mod
 skein get <module>@<version> --offline
 skein mod tidy [--offline]       # 从直接依赖重算传递依赖，移除不再使用的 // indirect
+skein mod prune [--all]           # 默认只列出当前项目未引用的缓存版本
 ```
 
-`--offline` 完全禁止网络：`@latest` 必须改成显式版本；缓存缺失，或缓存存在但当前项目没有校验和时，会直接失败并要求先在线执行一次 `skein get`。`mod download` 会为首次下载的模块补写 `skein.sum`，但不会改写 `skein.mod`。
+`--offline` 完全禁止网络：`@latest` 必须改成显式版本；缓存缺失，或缓存存在但当前项目没有校验和时，会直接失败并要求先在线执行一次 `skein get`。`mod download` 会为首次下载的模块补写 `skein.sum`，但不会改写 `skein.mod`。`mod prune` 默认只预览；全局缓存可能被其他项目共享，只有显式 `--all` 才会删除未引用版本及对应 native 构建产物。锁等待默认无限；设置 `SKEIN_LOCK_TIMEOUT_MS=<毫秒>` 可让等待超时并报错。
 
 ### 源码形式发布的原生 module（MVP）
 

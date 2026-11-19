@@ -25,6 +25,7 @@ skein build
 skein mod download [--offline] [--force]
 skein mod verify
 skein mod tidy [--offline] [--force]
+skein mod prune [--dry-run] [--all]
 skein mod clean [--dry-run] [--force]
 ```
 
@@ -71,6 +72,8 @@ skein mod clean [--dry-run] [--force]
 
 运行时在第一次加载外部 module 时懒获取共享锁，因此运行中的脚本会阻止 `mod clean` 删除缓存。
 
+默认锁等待不设上限；设置 `SKEIN_LOCK_TIMEOUT_MS=<毫秒>` 后，等待超时会返回错误，而不是无限阻塞。
+
 ### 模块锁
 
 ```text
@@ -96,7 +99,21 @@ skein mod clean [--dry-run] [--force]
 - 已完成模块的有效 checksum 尽量保留
 - 不留下半写文件
 
-## 7. Native module
+## 7. 缓存裁剪
+
+```text
+skein mod prune
+skein mod prune --all
+```
+
+- 默认只列出当前项目 `skein.mod` 未引用的缓存 `module@version`，不会删除。
+- 必须显式传 `--all` 才会删除。
+- `--all` 同时清理对应的 native `.build` 产物。
+- 全局缓存可能被其他项目共享；`--all` 是显式接受该风险的操作。
+- `--dry-run` 只预览。
+- 不修改项目 `skein.mod` / `skein.sum`。
+
+## 8. Native module
 
 源码 native module 由 `skein build` 显式构建，产物位于：
 
@@ -123,15 +140,14 @@ skein mod clean [--dry-run] [--force]
 - 编译 flags 的显式元数据
 - 可复现构建
 - 交叉编译
-- `mod prune` 对 `.build` 的安全清理
 
-## 8. 后续计划
+## 9. 后续计划
 
 ### Milestone 1（当前）
 
-- native 产物完整性
-- `mod prune` 安全语义
-- 锁超时与诊断
+- native 产物完整性（已完成）
+- `mod prune` 安全语义（已完成）
+- 锁超时与诊断（已完成）
 - Linux/macOS 并发锁测试
 
 ### Milestone 3

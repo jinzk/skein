@@ -624,6 +624,24 @@ def run_cases():
             os.path.join(lock_cache, "example.test", TAG, "util",
                          "json.skein"))
 
+        # A configured timeout turns a blocked lock into a hard failure.
+        timeout_env = lock_env.copy()
+        timeout_env["SKEIN_LOCK_TIMEOUT_MS"] = "100"
+        with open(lock_path, "wb") as lock_file:
+            lock_file.write(b"0")
+            lock_file.flush()
+            lock_handle(lock_file)
+            try:
+                timed_out = run_skein(
+                    ["get", "-C", lock_project, f"{MODULE}@{TAG}"],
+                    env=timeout_env,
+                )
+            finally:
+                unlock_handle(lock_file)
+        assert timed_out.returncode != 0, timed_out.stdout
+        assert "timed out waiting for module" in timed_out.stderr, (
+            timed_out.stderr)
+
         # A second project sharing the cache must not trust bytes without its
         # own checksum; it refreshes and records its own skein.sum entry.
         shared_project = os.path.join(root, "shared-project")
@@ -807,6 +825,47 @@ def run_cases():
         assert unsafe.returncode != 0, unsafe.stdout
         assert "refusing to clean unsafe cache root" in unsafe.stderr, (
             unsafe.stderr)
+
+        # mod prune is dry-run by default and requires --all to delete shared
+        # cache entries not referenced by the current project.
+        prune_cache = os.path.join(root, "prune-cache")
+        prune_a = os.path.join(root, "prune-a")
+        prune_b = os.path.join(root, "prune-b")
+        for directory in (prune_a, prune_b):
+            os.makedirs(directory)
+        prune_env = env.copy()
+        prune_env["SKEINMODCACHE"] = prune_cache
+        init_prune_a = run_skein(
+            ["mod", "init", "-C", prune_a, "example.test/prune-a"], env=env)
+        init_prune_b = run_skein(
+            ["mod", "init", "-C", prune_b, "example.test/prune-b"], env=env)
+        assert init_prune_a.returncode == 0, init_prune_a.stderr
+        assert init_prune_b.returncode == 0, init_prune_b.stderr
+        got_a = run_skein(
+            ["get", "-C", prune_a, f"{MODULE}@{TAG}"], env=prune_env)
+        got_b = run_skein(
+            ["get", "-C", prune_b, f"{MODULE}@v1.1.0"], env=prune_env)
+        assert got_a.returncode == 0, got_a.stderr
+        assert got_b.returncode == 0, got_b.stderr
+        prune_dry = run_skein(["mod", "prune", "-C", prune_a], env=prune_env)
+        assert prune_dry.returncode == 0, prune_dry.stderr
+        assert f"would remove {MODULE}@v1.1.0" in prune_dry.stdout, (
+            prune_dry.stdout)
+        assert os.path.exists(
+            os.path.join(prune_cache, "example.test", "v1.1.0", "util"))
+
+        pruned = run_skein(
+            ["mod", "prune", "-C", prune_a, "--all"], env=prune_env)
+        assert pruned.returncode == 0, pruned.stderr
+        assert f"removed {MODULE}@v1.1.0" in pruned.stdout, pruned.stdout
+        assert not os.path.exists(
+            os.path.join(prune_cache, "example.test", "v1.1.0", "util"))
+        assert run_skein(
+            ["mod", "verify", "-C", prune_a], env=prune_env
+        ).returncode == 0
+        assert run_skein(
+            ["mod", "verify", "-C", prune_b], env=prune_env
+        ).returncode != 0
 
         # A running script holds the cache shared while loading modules.
         ready = os.path.join(download_project, "ready.marker")

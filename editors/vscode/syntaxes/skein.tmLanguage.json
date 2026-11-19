@@ -13,6 +13,7 @@
     { "include": "#std" },
     { "include": "#decorators" },
     { "include": "#labels" },
+    { "include": "#placeholders" },
     { "include": "#keywords" },
     { "include": "#constants" },
     { "include": "#types" },
@@ -162,6 +163,14 @@
             "2": { "name": "entity.name.label.skein" },
             "3": { "name": "punctuation.separator.skein" }
           }
+        }
+      ]
+    },
+    "placeholders": {
+      "patterns": [
+        {
+          "name": "variable.parameter.placeholder.skein",
+          "match": "\\$[1-9](?![0-9])|\\$(?![0-9{])"
         }
       ]
     },

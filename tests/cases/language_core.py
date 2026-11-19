@@ -1027,3 +1027,44 @@ def run_cases():
           'let value = f(inc($), 9, 0);\n'
           'println(kind_of(value));\n',
           stdout="list")
+    check("numbered placeholder repeats one argument",
+          'func add(a, b) { return a + b; }\n'
+          'let g = add($1, $1);\n'
+          'println(g(3));\n',
+          stdout="6")
+    check("numbered placeholder reorders arguments",
+          'func pair(a, b) { return [a, b]; }\n'
+          'let g = pair($2, $1);\n'
+          'println(g(1, 2));\n',
+          stdout="[2, 1]")
+    check("numbered placeholder with fixed arguments",
+          'func triple(a, b, c) { return [a, b, c]; }\n'
+          'let g = triple(9, $1, $1);\n'
+          'println(g(2));\n',
+          stdout="[9, 2, 2]")
+    check("numbered placeholder binds nearest call",
+          'func f(a, b, c) { return [a, b, c]; }\n'
+          'func inc(x) { return x + 1; }\n'
+          'let value = f(inc($1), 9, 0);\n'
+          'println(kind_of(value));\n',
+          stdout="list")
+    check("numbered placeholder rejects gaps",
+          'func f(a, b) { return a; }\n'
+          'let g = f($2);\n',
+          stderr="placeholder indices must be contiguous")
+    check("numbered placeholder rejects mixed forms",
+          'func f(a, b) { return a; }\n'
+          'let g = f($, $1);\n',
+          stderr="cannot mix bare $ and numbered")
+    check("numbered placeholder rejects zero",
+          'func f(a) { return a; }\n'
+          'let g = f($0);\n',
+          stderr="invalid placeholder $0")
+    check("numbered placeholder rejects multi-digit form",
+          'func f(a) { return a; }\n'
+          'let g = f($10);\n',
+          stderr="invalid placeholder $10")
+    check("numbered placeholder rejects braced form",
+          'func f(a) { return a; }\n'
+          'let g = f(${1});\n',
+          stderr="invalid placeholder ${1}")

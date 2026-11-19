@@ -82,6 +82,9 @@ syntax keyword skeinBuiltin bytes_from_string bytes_to_string bytes_from_char
       \ bytes_from_hex bytes_to_int int_to_bytes read_bytes write_bytes
       \ append_bytes file_read_bytes file_write_bytes
 
+" Placeholders ---------------------------------------------------------------
+syntax match skeinPlaceholder '\$[1-9]\|\$'
+
 " Operators ------------------------------------------------------------------
 syntax match skeinOperator '|>\|==\|!=\|<>\|<=\|>=\|&&\|||\|++\|--\|+=\|-=\|\*=\|/=\|%=\|<<\|>>\|->\|=>\|\.\.\.\?'
 syntax match skeinOperator '[+\-*/%&|^~!<>=]'
@@ -107,6 +110,7 @@ highlight def link skeinNull Constant
 highlight def link skeinSelf Identifier
 highlight def link skeinType Type
 highlight def link skeinBuiltin Function
+highlight def link skeinPlaceholder Special
 highlight def link skeinStdMember Function
 highlight def link skeinStdNamespace Identifier
 highlight def link skeinStdModule Identifier

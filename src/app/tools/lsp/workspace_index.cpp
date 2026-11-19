@@ -227,7 +227,11 @@ std::vector<scanned_symbol> scan_symbols(const std::string &text) {
             }
             break;
         }
-        pos = end + 1;
+        if (end < text.size() && text[end] == '\r' && end + 1 < text.size() &&
+            text[end + 1] == '\n')
+            pos = end + 2;
+        else
+            pos = end + 1;
         ++line;
     }
     return symbols;

@@ -537,6 +537,21 @@ static int make_name_token(const char *text, int len) {
     yylval.str = raw;
     return SKEIN_TOK_NAME;
 }
+
+/* Copy the full placeholder lexeme ("$", "$1"-"$9", or an invalid form that
+ * the parser will diagnose) into yylval.str. */
+static int make_placeholder_token() {
+    char *raw = (char *)std::malloc((size_t)yyleng + 1);
+    if (!raw) {
+        yyerror("out of space");
+        return 0;
+    }
+    std::memcpy(raw, yytext, (size_t)yyleng);
+    raw[yyleng] = '\0';
+    yylval.str = raw;
+    return SKEIN_TOK_PLACEHOLDER;
+}
+
 /*
  * Decide whether an opening brace introduces a block body.  Only syntactic
  * positions that always require a body are treated as blocks; everything else
@@ -635,7 +650,33 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     YYRET(yytext[0]);
 }
 
-"$" { YYRET(SKEIN_TOK_PLACEHOLDER); }
+"$"[1-9] {
+    int tok = make_placeholder_token();
+    if (tok == 0)
+        return 0;
+    YYRET(tok);
+}
+
+"$"[0-9]+ {
+    int tok = make_placeholder_token();
+    if (tok == 0)
+        return 0;
+    YYRET(tok);
+}
+
+"${"[0-9]*"}"? {
+    int tok = make_placeholder_token();
+    if (tok == 0)
+        return 0;
+    YYRET(tok);
+}
+
+"$" {
+    int tok = make_placeholder_token();
+    if (tok == 0)
+        return 0;
+    YYRET(tok);
+}
 
 "..." { YYRET(SKEIN_TOK_ELLIPSIS); }
 

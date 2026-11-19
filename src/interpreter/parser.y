@@ -567,68 +567,145 @@ static struct symlist *new_destructure_param(struct ast *pattern) {
     return params;
 }
 
-static bool is_placeholder_arg(struct ast *arg) {
-    return arg && arg->nodetype == 'N' &&
-           std::strcmp(((struct symref *)arg)->name, "$") == 0;
+struct placeholder_info {
+    bool is_placeholder = false;
+    bool invalid = false;
+    bool numbered = false;
+    int index = 0;
+    const char *text = nullptr;
+};
+
+static placeholder_info placeholder_of(const struct ast *arg) {
+    placeholder_info info;
+    if (!arg || arg->nodetype != 'N')
+        return info;
+    const char *name = ((const struct symref *)arg)->name;
+    if (!name || name[0] != '$')
+        return info;
+    info.is_placeholder = true;
+    info.text = name;
+    if (name[1] == '\0')
+        return info;
+    if (name[1] >= '1' && name[1] <= '9' && name[2] == '\0') {
+        info.numbered = true;
+        info.index = name[1] - '0';
+        return info;
+    }
+    info.invalid = true;
+    return info;
 }
 
 static struct ast *replace_single_placeholder(
-    struct ast *arg, const std::vector<std::string> &names, size_t &index) {
-    if (!is_placeholder_arg(arg))
+    struct ast *arg, const std::vector<std::string> &names,
+    size_t &auto_index, bool numbered) {
+    placeholder_info info = placeholder_of(arg);
+    if (!info.is_placeholder)
         return arg;
     treefree(arg);
-    return newref(copy_text(names[index++].c_str()));
+    const std::size_t target =
+        numbered ? (std::size_t)(info.index - 1) : auto_index++;
+    return newref(copy_text(names[target].c_str()));
 }
 
 static struct ast *replace_placeholder_args(
     struct ast *args, const std::vector<std::string> &names,
-    size_t &index) {
+    size_t &auto_index, bool numbered) {
     if (!args)
         return NULL;
     if (args->nodetype == 'L') {
         struct list_node *node = (struct list_node *)args;
         node->value = replace_single_placeholder(
-            node->value, names, index);
-        node->next = replace_placeholder_args(node->next, names, index);
+            node->value, names, auto_index, numbered);
+        node->next = replace_placeholder_args(node->next, names, auto_index,
+                                              numbered);
         return args;
     }
-    return replace_single_placeholder(args, names, index);
+    return replace_single_placeholder(args, names, auto_index, numbered);
 }
 
 static struct ast *new_call_with_placeholders(
     struct ast *callee, struct ast *args) {
-    size_t holes = 0;
+    bool saw_auto = false;
+    bool saw_numbered = false;
+    bool used[10] = {false};
+    int auto_count = 0;
+    int max_index = 0;
+    const char *invalid_text = nullptr;
+
     for (struct ast *item = args; item;) {
+        struct ast *arg = nullptr;
         if (item->nodetype == 'L') {
             struct list_node *node = (struct list_node *)item;
-            if (is_placeholder_arg(node->value))
-                ++holes;
+            arg = node->value;
             item = node->next;
         } else {
-            if (is_placeholder_arg(item))
-                ++holes;
+            arg = item;
+            item = nullptr;
+        }
+        placeholder_info info = placeholder_of(arg);
+        if (!info.is_placeholder)
+            continue;
+        if (info.invalid) {
+            invalid_text = info.text;
             break;
         }
+        if (info.numbered) {
+            saw_numbered = true;
+            used[info.index] = true;
+            if (info.index > max_index)
+                max_index = info.index;
+        } else {
+            saw_auto = true;
+            ++auto_count;
+        }
     }
-    if (holes == 0)
+
+    if (invalid_text) {
+        yyerror("syntax error invalid placeholder %s; use $ or $1-$9",
+                invalid_text);
+        treefree(callee);
+        treefree(args);
+        return NULL;
+    }
+    if (saw_auto && saw_numbered) {
+        yyerror("syntax error cannot mix bare $ and numbered $1-$9 "
+                "placeholders in one call");
+        treefree(callee);
+        treefree(args);
+        return NULL;
+    }
+    if (!saw_auto && !saw_numbered)
         return newcall(callee, args);
 
+    if (saw_numbered) {
+        for (int i = 1; i <= max_index; ++i) {
+            if (!used[i]) {
+                yyerror("syntax error placeholder indices must be contiguous "
+                        "from 1; missing $%d", i);
+                treefree(callee);
+                treefree(args);
+                return NULL;
+            }
+        }
+    }
+
+    const int arity = saw_auto ? auto_count : max_index;
     std::vector<std::string> names;
-    names.reserve(holes);
-    for (size_t i = 0; i < holes; ++i) {
+    names.reserve((std::size_t)arity);
+    for (int i = 0; i < arity; ++i) {
         char name[32];
         std::snprintf(name, sizeof(name), "#%d", ++destructure_param_id);
         names.emplace_back(name);
     }
 
-    size_t index = 0;
-    args = replace_placeholder_args(args, names, index);
+    std::size_t auto_index = 0;
+    args = replace_placeholder_args(args, names, auto_index, saw_numbered);
 
     std::vector<struct symlist *> params;
-    params.reserve(holes);
+    params.reserve((std::size_t)arity);
     for (const std::string &name : names)
         params.push_back(newsymlist(newsym(name.c_str()), NULL, NULL));
-    for (size_t i = 0; i + 1 < params.size(); ++i)
+    for (std::size_t i = 0; i + 1 < params.size(); ++i)
         params[i]->next = params[i + 1];
 
     return newfunc(NULL, params.empty() ? NULL : params[0],
@@ -922,7 +999,7 @@ static struct type_constraint *runtime_type_or_error(
 %token ELLIPSIS "..."
 %token DOTDOT ".."
 %token PIPE "|>"
-%token PLACEHOLDER "$"
+%token <str> PLACEHOLDER "$"
 %token RARROW "->"
 %token EMPTY_DICT_CLOSE "empty dictionary"
 %token EMPTY_BLOCK_CLOSE "empty block"
@@ -2051,7 +2128,7 @@ explist: %empty                            { $$ = NULL; }
 
 arg: exp                                   { $$ = $1; }
     | ELLIPSIS exp                         { $$ = newspread($2); }
-    | PLACEHOLDER                          { $$ = newref(copy_text("$")); }
+    | PLACEHOLDER                          { $$ = newref(copy_text($1)); free($1); }
     ;
 
 param: NAME {

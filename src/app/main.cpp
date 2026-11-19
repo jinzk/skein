@@ -37,6 +37,7 @@
 #include "vm.h"
 #include "watch.h"
 
+#include "tools/build_tool.h"
 #include "tools/format_tool.h"
 #include "tools/get_tool.h"
 #include "tools/lint_tool.h"
@@ -74,10 +75,10 @@ static void print_usage(const char *program) {
                  "       %s lsp --stdio [--typecheck=off|loose|warn|strict] "
                  "[options]\n"
                  "       %s get [-C dir] [--cache dir] <module/path>[@ver] ...\n"
-                 "       %s mod init [-C dir] [--force] [module/path]\n"
+                 "       %s build [-C dir] [--cache dir] [<module/path>[@ver] ...]\n" "       %s mod init [-C dir] [--force] [module/path]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
-                 program, program, program, program, program, program);
+                 program, program, program, program, program, program, program);
 }
 
 int main(int argc, char **argv) {
@@ -146,6 +147,8 @@ int main(int argc, char **argv) {
 
     if (args.size() > 1 && args[1] == "get")
         return run_get_tool(args, program);
+    if (args.size() > 1 && args[1] == "build")
+        return run_build_tool(args, program);
     if (args.size() > 2 && args[1] == "mod" && args[2] == "init")
         return run_mod_init_tool(args, program);
     if (args.size() > 1 && args[1] == "mod") {

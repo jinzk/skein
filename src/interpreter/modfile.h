@@ -52,6 +52,13 @@ std::string module_name_from_path(const std::string &path);
 
 std::string cache_dir();
 std::string cache_path(const std::string &path, const std::string &version);
+
+/* Native build artifacts live beside the source cache, never inside it, so
+ * `dirhash` and `skein.sum` still describe source only. */
+std::string native_build_dir(const std::string &path,
+                             const std::string &version);
+std::string native_library_name(const std::string &output);
+
 bool dirhash(const std::string &directory, std::string &hash,
              std::string &error);
 

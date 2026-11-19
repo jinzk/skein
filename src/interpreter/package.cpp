@@ -291,6 +291,7 @@ struct module_manifest {
     fs::path root;
     std::string source_path;
     std::vector<module_export_spec> exports;
+    module_native_spec native;
 };
 
 struct module_manifest_cache_entry {
@@ -310,6 +311,7 @@ module_manifest_cache() {
 
 enum class manifest_token_kind {
     Ident,
+    String,
     Dot,
     LBrace,
     RBrace,
@@ -387,6 +389,43 @@ std::vector<manifest_token> lex_module_manifest(const std::string &text,
             tokens.push_back(std::move(token));
             continue;
         }
+        if (c == '"') {
+            advance(1);
+            std::string value;
+            bool closed = false;
+            while (i < text.size()) {
+                unsigned char d = (unsigned char)text[i];
+                if (d == '"') {
+                    advance(1);
+                    closed = true;
+                    break;
+                }
+                if (d == '\\') {
+                    advance(1);
+                    if (i >= text.size())
+                        break;
+                    const char escaped = text[i];
+                    advance(1);
+                    if (escaped == 'n')
+                        value += '\n';
+                    else if (escaped == 't')
+                        value += '\t';
+                    else
+                        value += escaped;
+                    continue;
+                }
+                value += (char)d;
+                advance(1);
+            }
+            if (!closed) {
+                error = "unterminated string in module manifest";
+                return tokens;
+            }
+            token.kind = manifest_token_kind::String;
+            token.text = std::move(value);
+            tokens.push_back(std::move(token));
+            continue;
+        }
         switch (c) {
             case '.': token.kind = manifest_token_kind::Dot; break;
             case '{': token.kind = manifest_token_kind::LBrace; break;
@@ -438,6 +477,52 @@ bool parse_module_manifest(const fs::path &root, const std::string &text,
         return true;
     };
 
+    auto parse_native_block = [&]() {
+        consume(); /* native */
+        if (!expect(manifest_token_kind::LBrace, "{"))
+            return false;
+        manifest.native.present = true;
+        while (current().kind != manifest_token_kind::RBrace &&
+               current().kind != manifest_token_kind::End) {
+            if (current().kind != manifest_token_kind::Ident)
+                return fail("expected native build directive");
+            const std::string directive = current().text;
+            consume();
+            if (directive == "output") {
+                if (current().kind != manifest_token_kind::String)
+                    return fail("expected output name string");
+                manifest.native.output = current().text;
+                consume();
+                if (!expect(manifest_token_kind::Semi, ";"))
+                    return false;
+                continue;
+            }
+            std::vector<std::string> *target = nullptr;
+            if (directive == "sources")
+                target = &manifest.native.sources;
+            else if (directive == "includes")
+                target = &manifest.native.includes;
+            else if (directive == "defines")
+                target = &manifest.native.defines;
+            else if (directive == "libs")
+                target = &manifest.native.libs;
+            else
+                return fail("unknown native build directive '" + directive +
+                            "'");
+            size_t count = 0;
+            while (current().kind == manifest_token_kind::String) {
+                target->push_back(current().text);
+                consume();
+                ++count;
+            }
+            if (count == 0)
+                return fail("expected a string after '" + directive + "'");
+            if (!expect(manifest_token_kind::Semi, ";"))
+                return false;
+        }
+        return expect(manifest_token_kind::RBrace, "}");
+    };
+
     manifest.root = root;
     manifest.source_path = path_to_utf8(root / "module.skein");
     if (!expect_ident("module"))
@@ -452,6 +537,12 @@ bool parse_module_manifest(const fs::path &root, const std::string &text,
     std::unordered_set<std::string> aliases;
     while (current().kind != manifest_token_kind::RBrace &&
            current().kind != manifest_token_kind::End) {
+        if (current().kind == manifest_token_kind::Ident &&
+            current().text == "native") {
+            if (!parse_native_block())
+                return false;
+            continue;
+        }
         if (!expect_ident("export"))
             return false;
         module_export_spec spec;
@@ -599,6 +690,19 @@ const module_manifest *load_module_manifest(const fs::path &root,
         error = entry->error;
     module_manifest_cache().push_back(std::move(entry));
     return result;
+}
+
+bool load_cached_module_native_impl(const std::string &path,
+                                    const std::string &version,
+                                    module_native_spec &out,
+                                    std::string &error) {
+    const std::string root = skein::modfile::cache_path(path, version);
+    const module_manifest *manifest =
+        load_module_manifest(fs::u8path(root), error);
+    if (!manifest)
+        return false;
+    out = manifest->native;
+    return true;
 }
 
 bool find_module_root_at(const fs::path &search_root,
@@ -1768,6 +1872,12 @@ value_t *import_embedded_package(const std::string &dotted,
 }
 
 } // namespace
+
+bool load_cached_module_native(const std::string &path,
+                               const std::string &version,
+                               module_native_spec &out, std::string &error) {
+    return load_cached_module_native_impl(path, version, out, error);
+}
 
 bool evaluate_include_source(const char *path, std::string &error) {
     return evaluate_include_source_impl(path, error);

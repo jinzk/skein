@@ -11,6 +11,7 @@
 #include "fiber.h"
 #include "ffi_types.h"
 #include "ffi_value.h"
+#include "native_policy.h"
 #include "structtype.h"
 #include "valuetype.h"
 
@@ -2011,6 +2012,10 @@ struct value_t *call_ffi_builtin(
         case B_ffi_open:
             if (g_check_only) {
                 yyerror("std.ffi.open is disabled in check-only mode");
+                return NULL;
+            }
+            if (!skein_native_code_allowed()) {
+                yyerror("%s", skein_native_policy_error());
                 return NULL;
             }
             return ffi_open(args);

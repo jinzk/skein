@@ -548,6 +548,56 @@ std::string cache_path(const std::string &path, const std::string &version) {
     return text_of(result);
 }
 
+static const char *native_platform_key() {
+#if defined(_WIN32)
+    const char *os = "win";
+#elif defined(__linux__)
+    const char *os = "linux";
+#elif defined(__APPLE__)
+    const char *os = "macos";
+#else
+    const char *os = "other";
+#endif
+#if defined(__x86_64__) || defined(_M_X64)
+    const char *arch = "x64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    const char *arch = "arm64";
+#elif defined(__i386__) || defined(_M_IX86)
+    const char *arch = "x86";
+#else
+    const char *arch = "unknown";
+#endif
+#if defined(_MSC_VER)
+    const char *compiler = "msvc";
+#elif defined(__clang__)
+    const char *compiler = "clang";
+#elif defined(__GNUC__)
+    const char *compiler = "gcc";
+#else
+    const char *compiler = "unknown";
+#endif
+    static std::string key = std::string(os) + "-" + arch + "-" + compiler;
+    return key.c_str();
+}
+
+std::string native_build_dir(const std::string &path,
+                             const std::string &version) {
+    fs::path source = path_of(cache_path(path, version));
+    return text_of(source.parent_path() / ".build" / native_platform_key() /
+                   source.filename());
+}
+
+std::string native_library_name(const std::string &output) {
+    const std::string name = output.empty() ? "skein_native" : output;
+#if defined(_WIN32)
+    return name + ".dll";
+#elif defined(__APPLE__)
+    return "lib" + name + ".dylib";
+#else
+    return "lib" + name + ".so";
+#endif
+}
+
 bool dirhash(const std::string &directory, std::string &hash,
              std::string &error) {
     std::vector<std::pair<std::string, std::string>> files;

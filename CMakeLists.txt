@@ -450,6 +450,7 @@ target_link_libraries(skein_builtins PUBLIC
 add_executable(${PROJECT_NAME}
   src/app/main.cpp
   src/app/watch.cpp
+  src/app/tools/build_tool.cpp
   src/app/tools/format_tool.cpp
   src/app/tools/get_tool.cpp
   src/app/tools/lint_tool.cpp
@@ -856,7 +857,7 @@ if(BUILD_TESTING)
       )
     endif()
     if(NOT SKEIN_SANITIZE)
-      foreach(tool_module IN ITEMS lint fmt lsp get)
+      foreach(tool_module IN ITEMS lint fmt lsp get build)
         if(tool_module STREQUAL "fmt")
           set(tool_test_name format_tests)
         else()

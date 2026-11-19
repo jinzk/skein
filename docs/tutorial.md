@@ -256,6 +256,38 @@ skein get github.com/acme/util@v1.2.3
 
 `get` 通过 git 克隆仓库 tag，遍历所有依赖的 `skein.mod` 并用 MVS 选出每个 module path 的最高 semver 版本，然后写回主项目 `skein.mod`（非直接依赖标记为 `// indirect`）与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。不兼容的 major 版本使用 `/vN` 路径并存，例如 `example.com/c` 与 `example.com/c/v2` 是两个独立 module。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
 
+### 源码形式发布的原生 module（MVP）
+
+module 可以在 `module.skein` 里声明可选的 `native { ... }` 块，随源码一起
+发布 C/C++ 实现，由宿主显式编译成动态库：
+
+```text
+module myutil {
+  export package api;
+  native {
+    sources "native/add.cpp" "native/extra.cpp";
+    includes "native/include";
+    defines "MYUTIL_TRACE=1";
+    libs "m";
+    output "myutil";
+  }
+}
+```
+
+- `skein get` 仍然只下载、校验并登记源码；**不会**在 import 时编译；
+- `skein build [<module/path>[@version]]` 在已下载的缓存上编译，不传参数时
+  编译 `skein.mod` 中全部依赖；编译器默认取 `SKEIN_CXX`、`CXX`，否则 `c++`；
+- 产物放在源码缓存旁边的 `.build/<平台>-<架构>-<编译器>/` 目录，**不进入**
+  `skein.sum` 的源码 dirhash，因此构建不会破坏校验和；
+- Skein 封装包通过 `std.module.dir(path)` / `std.module.native(path)` 取得源码
+  目录和构建产物路径，再用 `std.plugin.load(...)` 加载；`std.ffi.open(...)`
+  同理；
+- 主脚本里的原生调用保持原行为；**第三方 module 内**的 `std.plugin.load` /
+  `std.ffi.open` 默认禁止，必须显式设置 `SKEIN_ALLOW_NATIVE=1`
+  （设为 `0` / `false` / `off` / `no` 则全局禁止）；
+- `skein_module.h` 是纯 C ABI 头，module 应自带一份，不需要链接 Skein 符号；
+  ABI v2 的异步导出规则见 `docs/stdlib.md`。
+
 ### include 声明包含
 
 `include` 是给项目外文件留的声明级 escape hatch，行为类似 C 的声明包含：

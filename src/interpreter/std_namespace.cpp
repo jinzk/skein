@@ -576,6 +576,12 @@ value_t *build_namespace_impl() {
             {"unload", B_module_unload},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("module"),
+        builtin_module({
+            {"dir", B_module_dir},
+            {"native", B_module_native},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("task"),
         builtin_module({
             {"sleep", B_task_sleep},

@@ -1937,6 +1937,11 @@ example.math.ANSWER;
 - `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
+- 源码形式发布的 module 由 `skein build` 显式编译；封装包可用
+  `std.module.dir(path)` 取得缓存源码目录、`std.module.native(path)` 取得
+  动态库路径，再交给 `std.plugin.load` / `std.ffi.open`；
+- 主脚本允许加载原生库；第三方 module 内默认禁止，需显式
+  `SKEIN_ALLOW_NATIVE=1`（`0` / `false` / `off` / `no` 全局禁止）；
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
 - packed/bitfield 不进通用 FFI，由 C++ 绑定通过 `get_field`/`set_field` 处理，
   `example.math` 里的 `PackedHeader` / `PackedFlags` 是示例。
@@ -2060,6 +2065,7 @@ std.thread
 std.type
 std.meta
 std.plugin
+std.module
 std.entry
 std.net
 std.http
@@ -2637,6 +2643,8 @@ std.meta.has_type
 std.plugin
 std.plugin.load
 std.plugin.unload
+std.module.dir
+std.module.native
 
 std.net.tcp_connect
 std.net.tcp_listen

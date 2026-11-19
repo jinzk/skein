@@ -11,6 +11,21 @@ struct ast;
 /* Prefix stored in an import AST node for quoted external module paths. */
 #define SKEIN_EXTERNAL_IMPORT_PREFIX "\x02"
 
+/* Optional `native { ... }` block of a module.skein manifest. */
+struct module_native_spec {
+    bool present = false;
+    std::vector<std::string> sources;
+    std::vector<std::string> includes;
+    std::vector<std::string> defines;
+    std::vector<std::string> libs;
+    std::string output;
+};
+
+/* Read the native build declaration of an already downloaded module. */
+bool load_cached_module_native(const std::string &path,
+                               const std::string &version,
+                               module_native_spec &out, std::string &error);
+
 /* Configure package search roots before parsing the entry source. */
 void package_configure(const std::string &source_path,
                        const std::vector<std::string> &cli_dirs);

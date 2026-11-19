@@ -22,7 +22,10 @@
 #include "websocket.h"
 #include "builtins_io.h"
 #include "json.h"
+#include "native_policy.h"
+#include "modfile.h"
 #include "net.h"
+#include "package.h"
 #include "result.h"
 #include "task.h"
 #ifdef SKEIN_ENABLE_TLS
@@ -55,6 +58,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -66,6 +70,10 @@ static struct value_t *module_load_builtin(
     const std::vector<struct value_t *> &args) {
     if (g_check_only) {
         yyerror("std.plugin.load is disabled in check-only mode");
+        return NULL;
+    }
+    if (!skein_native_code_allowed()) {
+        yyerror("%s", skein_native_policy_error());
         return NULL;
     }
     if (args.size() != 1 || args[0]->type != T_string) {
@@ -95,6 +103,111 @@ static struct value_t *module_unload_builtin(
         return NULL;
     }
     return newnull();
+}
+
+static bool resolve_required_module(const std::string &requested,
+                                    std::string &path, std::string &version,
+                                    std::string &error) {
+    const std::string cwd = thread_cwd().empty() ? "." : thread_cwd();
+    const std::string root = skein::modfile::find_root(cwd);
+    if (root.empty()) {
+        error = "no skein.mod found; run 'skein mod init' first";
+        return false;
+    }
+    skein::modfile::mod_file mod;
+    if (!skein::modfile::load(root, mod, error))
+        return false;
+    for (const skein::modfile::require_spec &req : mod.requirements) {
+        const bool match =
+            requested == req.path ||
+            (requested.size() > req.path.size() &&
+             requested.compare(0, req.path.size(), req.path) == 0 &&
+             requested[req.path.size()] == '/');
+        if (!match)
+            continue;
+        path = req.path;
+        version = req.version;
+        return skein::modfile::verify_cached_module(root, path, version, error);
+    }
+    error = "module not required: " + requested + "; run 'skein get " +
+            requested + "'";
+    return false;
+}
+
+static struct value_t *module_dir_builtin(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_string) {
+        yyerror("std.module.dir expects a module path");
+        return NULL;
+    }
+    std::string path;
+    std::string version;
+    std::string error;
+    if (!resolve_required_module(((struct string_value_t *)args[0])->value,
+                                 path, version, error)) {
+        yyerror("std.module.dir: %s", error.c_str());
+        return NULL;
+    }
+    return newstrval(skein::modfile::cache_path(path, version).c_str());
+}
+
+static struct value_t *module_native_builtin(
+    const std::vector<struct value_t *> &args) {
+    if (args.size() != 1 || args[0]->type != T_string) {
+        yyerror("std.module.native expects a module path");
+        return NULL;
+    }
+    std::string path;
+    std::string version;
+    std::string error;
+    if (!resolve_required_module(((struct string_value_t *)args[0])->value,
+                                 path, version, error)) {
+        yyerror("std.module.native: %s", error.c_str());
+        return NULL;
+    }
+    namespace fs = std::filesystem;
+    const fs::path directory =
+        fs::u8path(skein::modfile::native_build_dir(path, version));
+    module_native_spec spec;
+    std::string parse_error;
+    if (load_cached_module_native(path, version, spec, parse_error) &&
+        !spec.output.empty()) {
+        const fs::path candidate =
+            directory / skein::modfile::native_library_name(spec.output);
+        std::error_code candidate_ec;
+        if (fs::is_regular_file(candidate, candidate_ec)) {
+            std::string result = candidate.u8string();
+            return newstrval(result.c_str());
+        }
+    }
+    std::error_code ec;
+    fs::directory_iterator it(directory, ec);
+    std::string found;
+    for (const fs::directory_entry &entry : it) {
+        const std::string name = entry.path().filename().u8string();
+        auto ends_with = [&name](const char *suffix) {
+            const size_t length = std::strlen(suffix);
+            return name.size() >= length &&
+                   name.compare(name.size() - length, length, suffix) == 0;
+        };
+        const bool library =
+            ends_with(".dll") || ends_with(".so") || ends_with(".dylib");
+        if (!library || !entry.is_regular_file(ec))
+            continue;
+        if (!found.empty()) {
+            yyerror("std.module.native: multiple native artifacts in %s",
+                    directory.u8string().c_str());
+            return NULL;
+        }
+        found = entry.path().u8string();
+    }
+    if (found.empty()) {
+        yyerror("std.module.native: native module not built: %s; run 'skein "
+                "build %s'",
+                path.c_str(), path.c_str());
+        return NULL;
+    }
+    return newstrval(found.c_str());
 }
 
 static struct value_t *enum_tag_from_value(struct value_t *value) {
@@ -466,6 +579,10 @@ struct value_t *call_builtin(int functype,
         return module_load_builtin(args);
     if (functype == B_module_unload)
         return module_unload_builtin(args);
+    if (functype == B_module_dir)
+        return module_dir_builtin(args);
+    if (functype == B_module_native)
+        return module_native_builtin(args);
     if (functype >= B_net_tcp_connect && functype <= B_net_shutdown_async)
         return call_net_builtin(functype, args);
 #ifdef SKEIN_ENABLE_FFI

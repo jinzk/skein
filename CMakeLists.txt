@@ -10,6 +10,12 @@ option(SKEIN_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 option(SKEIN_TSAN "Build with ThreadSanitizer" OFF)
 option(SKEIN_ENABLE_NIGHTLY "Register long-running nightly soak tests" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
+if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+  option(SKEIN_COPY_RUNTIME_DLLS
+    "Copy dependent runtime DLLs next to the built executable" ON)
+else()
+  set(SKEIN_COPY_RUNTIME_DLLS OFF)
+endif()
 
 # The JIT backend emits x86-64 machine code unconditionally.  Default it on
 # for 64-bit x86 Linux and Windows; other targets keep it opt-in.  An explicit
@@ -482,6 +488,21 @@ if(WIN32 AND MINGW)
   # the interpreter's recursion limit.  Match the usual 8 MiB POSIX stack.
   set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY
     LINK_FLAGS " -Wl,--stack,8388608")
+endif()
+
+if(SKEIN_COPY_RUNTIME_DLLS)
+  get_filename_component(SKEIN_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  # The MSYS2 runtime and third-party DLLs are not on the default DLL search
+  # path, so copy everything the executable needs next to it.  The script
+  # skips DLLs that ship with Windows.
+  add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+      "-DBINARY=$<TARGET_FILE:${PROJECT_NAME}>"
+      "-DDESTINATION=$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+      "-DEXTRA_DIRS=${SKEIN_COMPILER_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/copy_windows_dlls.cmake"
+    COMMENT "Copying runtime DLLs next to ${PROJECT_NAME}"
+    VERBATIM)
 endif()
 
 if(SKEIN_USE_MIMALLOC)

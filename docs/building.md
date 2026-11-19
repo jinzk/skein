@@ -46,6 +46,18 @@ cmake --build build
 MinGW 下该选项会自动使用静态 libstdc++/libgcc，避免动态 libstdc++ 与
 mimalloc 的 `operator new/delete` 分配器不一致。
 
+Windows（MSYS2 / MinGW）下，构建 `skein` 后会自动把运行时依赖 DLL
+（`libstdc++-6.dll`、`libgcc_s_seh-1.dll`、`libwinpthread-1.dll`、OpenSSL、libuv、
+PCRE2 等）复制到可执行文件所在目录；System32 / SysWOW64 / WinSxS 中的系统 DLL
+不会复制。这样 build 目录可以直接运行或打包，不依赖 MSYS2 的 `PATH`。该行为由
+`SKEIN_COPY_RUNTIME_DLLS`（Windows 上默认 `ON`）控制：
+
+```bash
+cmake -S . -B build -DSKEIN_COPY_RUNTIME_DLLS=OFF
+```
+
+实现见 `tools/copy_windows_dlls.cmake`；无法解析的第三方 DLL 只警告，不中断构建。
+
 只构建 VM 后端（不支持 `--no-vm`）：
 
 ```bash

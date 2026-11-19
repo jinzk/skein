@@ -215,7 +215,7 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
-Linux x86-64 默认会编译 JIT，运行时通过环境变量启用：
+Linux / Windows 的 x86-64 默认会编译 JIT，运行时通过环境变量启用：
 
 ```bash
 cmake -S . -B build -G Ninja
@@ -223,7 +223,7 @@ cmake --build build
 SKEIN_JIT=1 ./build/skein benchmarks/fib_bench.skein
 ```
 
-其他平台默认不编译 JIT；64-bit x86 可用 `-DSKEIN_ENABLE_JIT=ON` 显式开启。
+其他架构默认不编译 JIT；64-bit x86 可用 `-DSKEIN_ENABLE_JIT=ON` 显式开启。
 
 Windows / MinGW：
 

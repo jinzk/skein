@@ -336,8 +336,8 @@ endif()
   公开 API 已改为 snake_case（`new_label`、`code_size` 等），与当前
   JIT 代码不兼容；
 - 上游没有 release tag，直接 `find_package` 无法保证拿到 1.11 API；
-- `SKEIN_ENABLE_JIT=OFF` 时不会编译 `third_party/asmjit`；Linux x86-64
-  默认构建会编译 JIT，其他平台默认 OFF，运行时仍由 `SKEIN_JIT` 控制。
+- `SKEIN_ENABLE_JIT=OFF` 时不会编译 `third_party/asmjit`；Linux / Windows
+  x86-64 默认构建会编译 JIT，其他架构默认 OFF，运行时仍由 `SKEIN_JIT` 控制。
 
 ### 5.2 asmjit 构建宏
 
@@ -1069,7 +1069,7 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 ## 13. 待确认事项
 
 1. ~~`SKEIN_ENABLE_JIT` 默认值：保持 OFF，还是 Linux 上默认 ON？~~
-   已决定：Linux x86-64 默认 ON，其他平台默认 OFF；运行时
+   已决定：Linux / Windows x86-64 默认 ON，其他架构默认 OFF；运行时
    `SKEIN_JIT` 仍默认 OFF，是否默认启用待后续验证。
 2. Windows/MinGW 是否进入正式发布范围，还是只做 beta smoke？
 3. Phase 2 是否继续使用 asmjit，还是先评估 `x86::Compiler` 的 prologue/regalloc 能力？

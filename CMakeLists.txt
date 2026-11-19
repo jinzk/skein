@@ -12,15 +12,14 @@ option(SKEIN_ENABLE_NIGHTLY "Register long-running nightly soak tests" OFF)
 option(SKEIN_VM_ONLY "Build without the AST reference backend" OFF)
 
 # The JIT backend emits x86-64 machine code unconditionally.  Default it on
-# only for Linux x86-64; other targets (including Windows, where Win64 is
-# smoke-tested but not yet a release target) keep it opt-in.  An explicit
+# for 64-bit x86 Linux and Windows; other targets keep it opt-in.  An explicit
 # -DSKEIN_ENABLE_JIT=ON on another 64-bit x86 target is still allowed.
 set(SKEIN_JIT_SUPPORTED OFF)
 if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|x64)$")
   set(SKEIN_JIT_SUPPORTED ON)
 endif()
-if(SKEIN_JIT_SUPPORTED AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(SKEIN_JIT_SUPPORTED AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32))
   set(SKEIN_JIT_DEFAULT ON)
 else()
   set(SKEIN_JIT_DEFAULT OFF)

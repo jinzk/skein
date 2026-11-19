@@ -2396,6 +2396,9 @@ public:
                         proto().imports[ins.a];
                     std::string error;
                     std::string imported_package;
+                    std::string display_path = desc.path;
+                    if (!display_path.empty() && display_path[0] == '\x02')
+                        display_path.erase(0, 1);
                     int errors_before_import = diag_error_count();
                     value_t *ns = package_import(
                         desc.path.c_str(),
@@ -2403,7 +2406,7 @@ public:
                         &imported_package, error);
                     if (!ns) {
                         if (diag_error_count() == errors_before_import) {
-                            yyerror("import %s: %s", desc.path.c_str(),
+                            yyerror("import %s: %s", display_path.c_str(),
                                     error.c_str());
                         } else {
                             diag_mark_script_failure();

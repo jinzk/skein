@@ -208,6 +208,7 @@ add_library(skein_runtime STATIC
   src/runtime/runtime_context.cpp
   src/runtime/runtime_error.cpp
   src/runtime/binding_registry.cpp
+  src/runtime/sha256.cpp
 )
 set_target_properties(skein_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skein_runtime PUBLIC
@@ -353,6 +354,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/eval_call.cpp
   src/interpreter/eval_assign.cpp
   src/interpreter/package.cpp
+  src/interpreter/modfile.cpp
   src/interpreter/std_namespace.cpp
   src/interpreter/pattern.cpp
   src/interpreter/structeval.cpp
@@ -448,6 +450,7 @@ add_executable(${PROJECT_NAME}
   src/app/main.cpp
   src/app/watch.cpp
   src/app/tools/format_tool.cpp
+  src/app/tools/get_tool.cpp
   src/app/tools/lint_tool.cpp
   src/app/tools/lsp/json_rpc.cpp
   src/app/tools/lsp/lsp_json.cpp
@@ -806,7 +809,7 @@ if(BUILD_TESTING)
         "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
         "typecheck"
-        "lint,fmt,lsp")
+        "lint,fmt,lsp,get")
       # net/io_scripts use probe-then-bind fixed ports; run them in a single
       # LSan shard to avoid cross-process port races while still covering them
       # under ASan + LeakSanitizer.
@@ -814,7 +817,7 @@ if(BUILD_TESTING)
         "language_core,match_types,meta,modules,decorators"
         "task_methods,collections,diagnostics,task_errors"
         "stdlib_builtins,paths,route,runtime"
-        "typecheck,lint,fmt,lsp,net,io_scripts")
+        "typecheck,lint,fmt,lsp,get,net,io_scripts")
       set(SKEIN_SANITIZE_SHARD 0)
       foreach(group IN LISTS SKEIN_SANITIZE_GROUPS)
         math(EXPR SKEIN_SANITIZE_SHARD "${SKEIN_SANITIZE_SHARD}+1")
@@ -852,7 +855,7 @@ if(BUILD_TESTING)
       )
     endif()
     if(NOT SKEIN_SANITIZE)
-      foreach(tool_module IN ITEMS lint fmt lsp)
+      foreach(tool_module IN ITEMS lint fmt lsp get)
         if(tool_module STREQUAL "fmt")
           set(tool_test_name format_tests)
         else()

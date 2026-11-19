@@ -40,6 +40,13 @@ bool ast_is_declaration(const struct ast *node) {
     }
 }
 
+bool ast_is_external_import(const struct ast *node) {
+    if (!node || node->nodetype != 'J')
+        return false;
+    const struct import_node *imp = (const struct import_node *)node;
+    return imp->path && imp->path[0] == '\x02';
+}
+
 void collect_pattern_bindings(const struct ast *node,
                               std::vector<std::string> &names) {
     if (!node)

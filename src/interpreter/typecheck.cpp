@@ -2569,6 +2569,8 @@ struct Checker : public BuiltinContext {
             case 'J': {
                 struct import_node *imp = (struct import_node *)stmt;
                 std::string path = imp->path ? imp->path : "";
+                if (!path.empty() && path[0] == '\x02')
+                    path.erase(0, 1);
                 std::string alias =
                     imp->alias ? imp->alias : last_path_component(path);
                 if (!alias.empty())

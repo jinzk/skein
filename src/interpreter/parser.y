@@ -20,6 +20,7 @@
 #include "gc.h"
 #include "eval.h"
 #include "package.h"
+#include "modfile.h"
 #include "vm.h"
 #include "static_type.h"
 #include "typecheck.h"
@@ -124,6 +125,36 @@ static char *copy_text(const char *text) {
     }
     std::memcpy(copy, text, len);
     return copy;
+}
+
+static char *make_external_import_path(char *raw) {
+    const std::string path = raw ? raw : "";
+    if (!skein::modfile::is_valid_module_path(path)) {
+        yyerror("invalid external module path '%s'", raw ? raw : "");
+        std::free(raw);
+        return copy_text("");
+    }
+    std::free(raw);
+    return copy_text((std::string(SKEIN_EXTERNAL_IMPORT_PREFIX) + path).c_str());
+}
+
+static char *external_import_alias(const char *path) {
+    const char *slash = std::strrchr(path, '/');
+    const char *last = slash ? slash + 1 : path;
+    if (!last || !*last)
+        return NULL;
+    std::string name;
+    for (const char *p = last; *p; ++p) {
+        unsigned char c = (unsigned char)*p;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            c == '_' || (!name.empty() && c >= '0' && c <= '9'))
+            name.push_back((char)c);
+        else
+            name.push_back('_');
+    }
+    if (name.empty())
+        name = "_";
+    return copy_text(name.c_str());
 }
 
 /* Python-style slicing is lowered to a hidden builtin call so both the AST
@@ -1191,6 +1222,15 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
     | IMPORT importref ';'                { $$ = newimport($2, NULL); }
     | IMPORT importref AS NAME ';'        { $$ = newimport($2, $4); }
+    | IMPORT XSTRING ';'                  {
+        char *alias = external_import_alias($2);
+        char *path = make_external_import_path($2);
+        $$ = newimport(path, alias);
+      }
+    | IMPORT XSTRING AS NAME ';'          {
+        char *path = make_external_import_path($2);
+        $$ = newimport(path, $4);
+      }
     | INCLUDE XSTRING ';' {
         if (g_include_function_depth > 0) {
             yyerror("include is only allowed at declaration level");
@@ -2274,7 +2314,8 @@ top_statement: top_expression EOL {
         bool skip_eval = invalid || sys_exit_requested() ||
                          (!g_interactive && g_script_stop) ||
                          (g_check_only &&
-                          !skein::ast_analysis::ast_is_declaration($1));
+                          (!skein::ast_analysis::ast_is_declaration($1) ||
+                           skein::ast_analysis::ast_is_external_import($1)));
         struct value_t *rslt = NULL;
 
         if (!skip_eval) {

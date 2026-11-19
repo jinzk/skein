@@ -8,6 +8,9 @@ struct value_t;
 struct scope_t;
 struct ast;
 
+/* Prefix stored in an import AST node for quoted external module paths. */
+#define SKEIN_EXTERNAL_IMPORT_PREFIX "\x02"
+
 /* Configure package search roots before parsing the entry source. */
 void package_configure(const std::string &source_path,
                        const std::vector<std::string> &cli_dirs);

@@ -2338,7 +2338,7 @@ import @top.pkg;        // 项目根目录
 - `..name` 相对于该目录的上一级；
 - `import aa.bb` 的普通包基准是主脚本目录；
 - `@name` 只从项目根目录解析，不回退到 `-I` 或环境变量；
-- 项目根由从主脚本目录向上查找的 `.skeinroot` 标记文件确定；没有标记时使用主脚本目录（stdin 模式使用当前目录）；
+- 项目根优先由从主脚本目录向上查找的 `skein.mod` 确定，其次兼容 `.skeinroot` 标记；都没有时使用主脚本目录（stdin 模式使用当前目录）；
 - `project_root` 惰性解析：单文件脚本、只 import `std` 或只 import module 时不需要；
 - `-I` / `SKEIN_PACKAGE_PATH` 只用于 module，不解析普通文件包；
 - 普通文件包必须在 `project_root` 内；
@@ -2349,7 +2349,24 @@ import @top.pkg;        // 项目根目录
 - import 语句需要分号；
 - 包名绑定到当前作用域。
 
-### 6.2.1 include 声明包含
+### 6.2.1 外部包（第三方 module）
+
+```text
+import "github.com/acme/util/json";
+import "github.com/acme/util/json" as jsonutil;
+```
+
+- 带引号的 import 路径只用于 `skein.mod` 中 `require` 的第三方 module；本地包和 module 仍使用点号路径；
+- 默认绑定最后一个 `/` 段（上例为 `json`）；非法标识符字符会替换为 `_`，也可用 `as` 指定别名；
+- 路径按最长 `require` 前缀匹配；剩余段的第一段必须是 module 的公共 package 导出别名，后续段在导出目标下按文件路径解析；没有前缀匹配时直接报错，不会联网；
+- 每个外部 module 的根目录必须有 `module.skein`，模块名与路径最后一段一致；只解析直接依赖，不下载传递依赖；
+- `skein mod init [module/path]` 创建 `skein.mod`；`skein get <module/path>@<version>` 通过 git 克隆 tag，写入 `require` 和 `skein.sum`；
+- 不写版本时 `skein get` 用 `git ls-remote --tags --refs` 选择最高 semver tag；`SKEIN_MODULE_URL` 可覆盖仓库 URL（测试/镜像用）；
+- 默认缓存目录为 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖；
+- `skein.sum` 使用 `h1:` dirhash（按相对路径排序的文件 SHA-256 清单再做 SHA-256/base64）；运行时校验缓存，哈希不符直接失败；
+- import 是只读的：缺少 `require`、`skein.sum`、缓存或校验失败都是硬错误，运行时不会隐式 `get`；`lint` / `fmt` / `lsp` 不下载、不执行外部包。
+
+### 6.2.2 include 声明包含
 
 ```text
 include "shared/helpers.skein";

@@ -37,6 +37,7 @@
 #include "watch.h"
 
 #include "tools/format_tool.h"
+#include "tools/get_tool.h"
 #include "tools/lint_tool.h"
 #include "tools/lsp_tool.h"
 
@@ -71,9 +72,11 @@ static void print_usage(const char *program) {
                  "       %s fmt [--check|-w|--write] [options] <file...|->\n"
                  "       %s lsp --stdio [--typecheck=off|loose|warn|strict] "
                  "[options]\n"
+                 "       %s get [-C dir] [--cache dir] <module/path>[@ver] ...\n"
+                 "       %s mod init [-C dir] [--force] [module/path]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
-                 program, program, program, program);
+                 program, program, program, program, program, program);
 }
 
 int main(int argc, char **argv) {
@@ -139,6 +142,14 @@ int main(int argc, char **argv) {
     const char *program =
         args.empty() || args[0].empty() ? "skein" : args[0].c_str();
 
+    if (args.size() > 1 && args[1] == "get")
+        return run_get_tool(args, program);
+    if (args.size() > 2 && args[1] == "mod" && args[2] == "init")
+        return run_mod_init_tool(args, program);
+    if (args.size() > 1 && args[1] == "mod") {
+        print_usage(program);
+        return 2;
+    }
     if (args.size() > 1 && args[1] == "lint")
         return run_lint_tool(args, program);
     if (args.size() > 1 && args[1] == "fmt")

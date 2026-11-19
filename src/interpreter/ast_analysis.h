@@ -14,6 +14,7 @@ namespace ast_analysis {
  * Analysis-only modes keep evaluating these so imports, type definitions and
  * packages can populate the symbol and type tables. */
 bool ast_is_declaration(const struct ast *node);
+bool ast_is_external_import(const struct ast *node);
 
 /* Collect names bound by a match/destructuring pattern. */
 void collect_pattern_bindings(const struct ast *node,

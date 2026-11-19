@@ -8,6 +8,7 @@
 #include "diagnostics.h"
 #include "eval.h"
 #include "eval_context.h"
+#include "modfile.h"
 #include "parser.hpp"
 #include "parser_lock.h"
 #include "platform.h"
@@ -160,28 +161,10 @@ std::string canonical_file(const fs::path &file) {
               : path_to_utf8(canonical);
 }
 
-fs::path find_project_root(const fs::path &start) {    std::error_code ec;
-    fs::path directory = start;
-    if (directory.is_relative())
-        directory = fs::absolute(directory, ec);
-    if (!ec) {
-        fs::path canonical = fs::weakly_canonical(directory, ec);
-        if (!ec)
-            directory = canonical;
-    }
-    if (ec)
-        return start;
-
-    for (;;) {
-        std::error_code exists_ec;
-        if (fs::exists(directory / ".skeinroot", exists_ec) && !exists_ec)
-            return directory;
-        fs::path parent = directory.parent_path();
-        if (parent.empty() || parent == directory)
-            break;
-        directory = parent;
-    }
-    return start;
+fs::path find_project_root(const fs::path &start) {
+    const std::string root =
+        skein::modfile::find_root(path_to_utf8(start));
+    return root.empty() ? start : path_from_utf8(root);
 }
 
 fs::path ensure_project_root() {
@@ -1110,8 +1093,138 @@ value_t *import_module_public_package(const std::string &module_name,
     return result;
 }
 
+std::vector<std::string> split_external_path(const std::string &path) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (;;) {
+        size_t slash = path.find('/', start);
+        parts.push_back(path.substr(start, slash == std::string::npos
+                                                ? std::string::npos
+                                                : slash - start));
+        if (slash == std::string::npos)
+            break;
+        start = slash + 1;
+    }
+    return parts;
+}
+
+bool find_external_require(const std::string &project_root,
+                           const std::string &path, std::string &module,
+                           std::string &version, std::string &subpath,
+                           std::string &error) {
+    skein::modfile::mod_file mod;
+    if (!skein::modfile::load(project_root, mod, error))
+        return false;
+
+    const skein::modfile::require_spec *best = NULL;
+    for (const skein::modfile::require_spec &spec : mod.requirements) {
+        bool matches = path == spec.path ||
+                       (path.size() > spec.path.size() &&
+                        path.compare(0, spec.path.size(), spec.path) == 0 &&
+                        path[spec.path.size()] == '/');
+        if (matches && (!best || spec.path.size() > best->path.size()))
+            best = &spec;
+    }
+    if (!best) {
+        std::vector<std::string> parts = split_external_path(path);
+        std::string suggestion;
+        const std::size_t count = std::min<std::size_t>(3, parts.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (i)
+                suggestion += "/";
+            suggestion += parts[i];
+        }
+        error = "external module not required: " + path +
+                "; run 'skein get " + suggestion + "'";
+        return false;
+    }
+
+    module = best->path;
+    version = best->version;
+    subpath = path.size() == module.size()
+                  ? std::string()
+                  : path.substr(module.size() + 1);
+    if (!skein::modfile::is_valid_package_subpath(subpath)) {
+        error = "invalid external package path: " + path;
+        return false;
+    }
+    return true;
+}
+
+bool resolve_external_subpackage(const std::string &module_name,
+                                 const fs::path &root,
+                                 const std::string &subpath,
+                                 std::string &dotted,
+                                 resolved_package &target,
+                                 std::string &error) {
+    std::vector<std::string> parts = split_external_path(subpath);
+    if (parts.empty()) {
+        error = "empty external package path";
+        return false;
+    }
+
+    resolved_package ignored;
+    std::string package_path;
+    if (!resolve_module_public_package(module_name, parts[0], root, ignored,
+                                       package_path, error))
+        return false;
+
+    dotted = package_path;
+    for (std::size_t i = 1; i < parts.size(); ++i)
+        dotted += "." + parts[i];
+    std::string resolve_error;
+    if (!resolve_module_target(root, dotted, target, resolve_error)) {
+        error = "external package not found: " + subpath + "\n  " +
+                resolve_error;
+        return false;
+    }
+    return true;
+}
+
+value_t *import_external_module(const std::string &path,
+                                std::string *package_out, std::string &error) {
+    if (path.empty()) {
+        error = "empty external import path";
+        return NULL;
+    }
+    const std::string project_root = path_to_utf8(ensure_project_root());
+    std::string module;
+    std::string version;
+    std::string subpath;
+    if (!find_external_require(project_root, path, module, version, subpath,
+                               error))
+        return NULL;
+
+    /* No implicit network access: the cache and checksum must already exist. */
+    if (!skein::modfile::verify_cached_module(project_root, module, version,
+                                              error))
+        return NULL;
+
+    const fs::path root = path_from_utf8(
+        skein::modfile::cache_path(module, version));
+    std::error_code ec;
+    if (!fs::is_regular_file(root / "module.skein", ec)) {
+        error = "external module is missing module.skein: " + module;
+        return NULL;
+    }
+
+    const std::string module_name = split_external_path(module).back();
+    if (subpath.empty())
+        return import_module_root(module_name, root, error);
+
+    std::string dotted;
+    resolved_package resolved;
+    if (!resolve_external_subpackage(module_name, root, subpath, dotted,
+                                     resolved, error))
+        return NULL;
+    return import_package_exact(module_name + "." + dotted, resolved,
+                                package_out, error);
+}
+
 value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                              std::string *package_out, std::string &error) {
+    if (dotted_path && dotted_path[0] == '\x02')
+        return import_external_module(dotted_path + 1, package_out, error);
     if (value_t *seeded = take_seeded_import(dotted_path, base_dir))
         return seeded;
     import_spec spec;
@@ -1726,6 +1839,33 @@ value_t *package_import(const char *dotted_path, const char *base_dir,
 
 bool package_import_cache_key(const char *dotted_path, const char *base_dir,
                               std::string &key, std::string &error) {
+    (void)base_dir;
+    if (dotted_path && dotted_path[0] == '\x02') {
+        const std::string path = dotted_path + 1;
+        const std::string project_root = path_to_utf8(ensure_project_root());
+        std::string module;
+        std::string version;
+        std::string subpath;
+        if (!find_external_require(project_root, path, module, version,
+                                   subpath, error) ||
+            !skein::modfile::verify_cached_module(project_root, module, version,
+                                                  error))
+            return false;
+        const fs::path root =
+            path_from_utf8(skein::modfile::cache_path(module, version));
+        if (subpath.empty()) {
+            key = package_cache_key(canonical_file(root));
+            return true;
+        }
+        const std::string module_name = split_external_path(module).back();
+        std::string dotted;
+        resolved_package resolved;
+        if (!resolve_external_subpackage(module_name, root, subpath, dotted,
+                                         resolved, error))
+            return false;
+        key = resolved.key;
+        return true;
+    }
     import_spec spec;
     if (!parse_import_spec(dotted_path, spec, error))
         return false;

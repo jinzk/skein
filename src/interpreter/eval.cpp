@@ -74,12 +74,16 @@ struct value_t *eval(struct ast *a) {
             struct import_node *imp = (struct import_node *)a;
             std::string error;
             std::string imported_package;
+            std::string display_path = imp->path ? imp->path : "";
+            if (!display_path.empty() && display_path[0] == '\x02')
+                display_path.erase(0, 1);
             int errors_before = diag_error_count();
             struct value_t *ns = package_import(
                 imp->path, imp->base, &imported_package, error);
             if (!ns) {
                 if (diag_error_count() == errors_before)
-                    yyerror("import %s: %s", imp->path, error.c_str());
+                    yyerror("import %s: %s", display_path.c_str(),
+                            error.c_str());
                 else
                     diag_mark_script_failure();
                 break;

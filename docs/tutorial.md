@@ -225,7 +225,7 @@ import @top.pkg;       // 项目根目录
 
 - `import aa.bb` 的普通包基准是主脚本目录；
 - `import @aa.bb` 只从项目根解析；
-- 项目根通过从主脚本目录向上查找 `.skeinroot` 确定；没有标记时使用主脚本目录；
+- 项目根优先通过从主脚本目录向上查找 `skein.mod` 确定，其次兼容 `.skeinroot`；都没有时使用主脚本目录；
 - `project_root` 惰性解析：单文件脚本、只 import `std`、只 import module 时不需要；
 - `-I` / `SKEIN_PACKAGE_PATH` 只作为 module 搜索路径，不解析普通文件包；
 - 普通文件包必须在 `project_root` 内；外部复用请组织成 module；
@@ -237,6 +237,24 @@ import @top.pkg;       // 项目根目录
 - 同一个包只加载一次，之后复用缓存；
 - 循环导入会报错，不会递归挂起；
 - 当前不提供通配导入。
+
+### 第三方包
+
+第三方 module 使用带引号的导入路径，和本地点号路径明确区分：
+
+```text
+import "github.com/acme/util/json";              // 默认绑定 json
+import "github.com/acme/util/json" as jsonutil;  // 显式别名
+```
+
+先初始化工程，再用 `skein get` 拉取并登记版本：
+
+```text
+skein mod init github.com/acme/myapp
+skein get github.com/acme/util@v1.2.3
+```
+
+`get` 通过 git 克隆仓库 tag，更新 `skein.mod` 的 `require` 与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
 
 ### include 声明包含
 

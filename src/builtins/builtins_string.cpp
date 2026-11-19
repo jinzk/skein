@@ -112,6 +112,26 @@ struct value_t *call_string_builtin(
             ret = newstrval(result.c_str());
             break;
         }
+        case B_string_to_lower:
+        case B_string_to_upper: {
+            const char *name = functype == B_string_to_lower
+                                   ? "std.string.to_lower"
+                                   : "std.string.to_upper";
+            if (!arg || arg->type != T_string) {
+                yyerror("%s expects a string", name);
+                break;
+            }
+            const std::string text = ((struct string_value_t *)arg)->value;
+            std::string mapped;
+            std::string error;
+            if (!case_map_text(text, functype == B_string_to_upper, mapped,
+                               error)) {
+                yyerror("%s: %s", name, error.c_str());
+                break;
+            }
+            ret = newstrval(mapped.c_str());
+            break;
+        }
         case B_string_trim_start:
         case B_string_trim_end: {
             if (arg->type != T_string) {

@@ -1805,6 +1805,108 @@ def run_cases():
         'std.unicode.normalize(1, "nfc")\n',
         stderr="expects a string",
     )
+    check(
+        "std string case mapping",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("ABC"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_upper("abc"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_upper("ß"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_upper("Straße"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_upper("ﬁ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("ẞ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("İ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("ΟΣ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("ΟΣΑ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("Σ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.string.to_lower("ΑΣ."), "utf-8")));\n'
+        'std.string.to_upper("ß") == std.string.to_upper("ss")\n'
+        'std.string.to_lower(std.string.to_upper("ß")) == "ss"\n'
+        'std.string.to_lower(std.string.to_upper("ß")) == "ß"\n'
+        'std.string.to_lower("") == ""\n',
+        stdout_all=[
+            "616263", "414243", "5353", "53545241535345", "4649",
+            "c39f", "69cc87", "cebfcf82", "cebfcf83ceb1", "cf83",
+            "ceb1cf822e",
+            "= true", "= true", "= false", "= true",
+        ],
+    )
+    check(
+        "std string case mapping final sigma context",
+        'import std;\n'
+        'let marked = std.encoding.decode(bytes_from_hex("ce91cea3cc81"), '
+        '"utf-8");\n'
+        'print(bytes_hex(std.encoding.encode(std.string.to_lower(marked), '
+        '"utf-8")));\n'
+        "print(bytes_hex(std.encoding.encode(std.string.to_lower(\"Α'Σ\"), "
+        '"utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode(std.string.to_lower("Α.Σ"), '
+        '"utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode(std.string.to_lower("ΑΣΑ"), '
+        '"utf-8")));\n',
+        stdout_all=["ceb1cf82cc81", "ceb127cf82", "ceb12ecf82",
+                    "ceb1cf83ceb1"],
+    )
+    check(
+        "std string case mapping arity",
+        "import std;\n"
+        'std.string.to_lower()\n',
+        stderr="std.string.to_lower expects 1 argument",
+        env=OFF_ENV,
+    )
+    check(
+        "std string case mapping type",
+        "import std;\n"
+        'std.string.to_upper(1)\n',
+        stderr="expects a string",
+        env=OFF_ENV,
+    )
+    check(
+        "std unicode casefold",
+        "import std;\n"
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.casefold("Straße"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.casefold("STRASSE"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.casefold("ΟΣ"), "utf-8")));\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.casefold("ς"), "utf-8")));\n'
+        'std.unicode.casefold("Straße") == std.unicode.casefold("STRASSE")\n'
+        'std.unicode.casefold("ẞ") == "ss"\n'
+        'std.unicode.casefold(std.unicode.casefold("İ")) == '
+        'std.unicode.casefold("İ")\n',
+        stdout_all=[
+            "73747261737365", "73747261737365", "cebfcf83", "cf83",
+            "= true", "= true", "= true",
+        ],
+    )
+    check(
+        "std unicode casefold leaves normalization alone",
+        "import std;\n"
+        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
+        'print(bytes_hex(std.encoding.encode('
+        'std.unicode.casefold(decomposed), "utf-8")));\n'
+        'std.unicode.casefold(decomposed) == "é"\n',
+        stdout_all=["65cc81", "= false"],
+    )
+    check(
+        "std unicode casefold arity",
+        "import std;\n"
+        'std.unicode.casefold()\n',
+        stderr="std.unicode.casefold expects 1 argument",
+        env=OFF_ENV,
+    )
     check("std join type", 'import std;\nstd.string.join([1], ",")\n',
           stderr="expects string elements")
     check("std replace empty", 'import std;\nstd.string.replace("a", "", "b")\n',

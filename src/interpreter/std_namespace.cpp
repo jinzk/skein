@@ -162,6 +162,8 @@ value_t *build_namespace_impl() {
             {"repeat", B_string_repeat},
             {"trim_start", B_string_trim_start},
             {"trim_end", B_string_trim_end},
+            {"to_lower", B_string_to_lower},
+            {"to_upper", B_string_to_upper},
             {"format", B_format},
         })));
     root->payload->items.push_back(std::make_pair(
@@ -181,6 +183,7 @@ value_t *build_namespace_impl() {
             {"normalize", B_unicode_normalize},
             {"is_normalized", B_unicode_is_normalized},
             {"version", B_unicode_version},
+            {"casefold", B_unicode_casefold},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("regex"),

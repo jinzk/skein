@@ -5,6 +5,7 @@
 #include "valuetype.h"
 
 #include "utf8proc.h"
+#include "unicode_case_data.inc"
 #include "unicode_quickcheck.inc"
 
 #include <cstdlib>
@@ -163,6 +164,157 @@ static bool normalize_text(const std::string &input, NormalizationForm form,
     return true;
 }
 
+template <std::size_t N>
+bool in_case_property(const UnicodeCasePropertyRange (&ranges)[N],
+                      uint32_t codepoint) {
+    std::size_t low = 0;
+    std::size_t high = N;
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2;
+        if (ranges[middle].last < codepoint)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    return low < N && ranges[low].first <= codepoint;
+}
+
+bool is_cased_codepoint(uint32_t codepoint) {
+    return in_case_property(UNICODE_CASE_CASED, codepoint);
+}
+
+bool is_case_ignorable_codepoint(uint32_t codepoint) {
+    return in_case_property(UNICODE_CASE_IGNORABLE, codepoint);
+}
+
+const UnicodeCaseSpecial *find_case_special(uint32_t codepoint) {
+    const std::size_t count =
+        sizeof(UNICODE_CASE_SPECIAL) / sizeof(UNICODE_CASE_SPECIAL[0]);
+    std::size_t low = 0;
+    std::size_t high = count;
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2;
+        if (UNICODE_CASE_SPECIAL[middle].codepoint < codepoint)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low < count && UNICODE_CASE_SPECIAL[low].codepoint == codepoint)
+        return &UNICODE_CASE_SPECIAL[low];
+    return nullptr;
+}
+
+/* Final_Sigma: the sigma is preceded by a cased letter (skipping
+ * case-ignorable characters) and is not followed by one. */
+bool final_sigma(const std::vector<uint32_t> &codepoints, std::size_t index) {
+    bool preceded_by_cased = false;
+    for (std::size_t i = index; i > 0; --i) {
+        const uint32_t codepoint = codepoints[i - 1];
+        if (is_case_ignorable_codepoint(codepoint))
+            continue;
+        preceded_by_cased = is_cased_codepoint(codepoint);
+        break;
+    }
+    if (!preceded_by_cased)
+        return false;
+    for (std::size_t i = index + 1; i < codepoints.size(); ++i) {
+        const uint32_t codepoint = codepoints[i];
+        if (is_case_ignorable_codepoint(codepoint))
+            continue;
+        return !is_cased_codepoint(codepoint);
+    }
+    return true;
+}
+
+}  // namespace
+
+bool case_map_text(const std::string &input, bool upper, std::string &output,
+                   std::string &error) {
+    if (input.find('\0') != std::string::npos) {
+        error = "text contains NUL";
+        return false;
+    }
+    std::vector<uint32_t> codepoints;
+    codepoints.reserve(input.size());
+    std::size_t offset = 0;
+    while (offset < input.size()) {
+        std::size_t consumed = 0;
+        unsigned int codepoint = 0;
+        if (!utf8_decode_one(input.data() + offset, input.size() - offset,
+                             consumed, codepoint)) {
+            error = utf8proc_errmsg(UTF8PROC_ERROR_INVALIDUTF8);
+            return false;
+        }
+        offset += consumed;
+        codepoints.push_back(codepoint);
+    }
+
+    output.clear();
+    output.reserve(input.size());
+    for (std::size_t index = 0; index < codepoints.size(); ++index) {
+        const uint32_t codepoint = codepoints[index];
+        const UnicodeCaseSpecial *special = find_case_special(codepoint);
+        const uint32_t *mapping = nullptr;
+        std::size_t length = 0;
+        if (special) {
+            mapping = upper ? special->upper : special->lower;
+            length = upper ? special->upper_length : special->lower_length;
+        }
+        if (mapping && length > 0) {
+            bool encoded = true;
+            for (std::size_t i = 0; i < length && encoded; ++i)
+                encoded = utf8_encode(mapping[i], output);
+            if (!encoded) {
+                error = "cannot encode case-mapped text";
+                return false;
+            }
+            continue;
+        }
+        uint32_t mapped = codepoint;
+        if (!upper && codepoint == 0x03A3 && final_sigma(codepoints, index))
+            mapped = 0x03C2;
+        else if (upper)
+            mapped = (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+        else
+            mapped = (uint32_t)utf8proc_tolower((utf8proc_int32_t)codepoint);
+        if (!utf8_encode(mapped, output)) {
+            error = "cannot encode case-mapped text";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool case_fold_text(const std::string &input, std::string &output,
+                    std::string &error) {
+    if (input.find('\0') != std::string::npos) {
+        error = "text contains NUL";
+        return false;
+    }
+    if (input.empty()) {
+        output.clear();
+        return true;
+    }
+    utf8proc_uint8_t *result = nullptr;
+    const utf8proc_ssize_t length = utf8proc_map(
+        reinterpret_cast<const utf8proc_uint8_t *>(input.data()),
+        (utf8proc_ssize_t)input.size(), &result,
+        (utf8proc_option_t)UTF8PROC_CASEFOLD);
+    if (length < 0) {
+        error = utf8proc_errmsg(length);
+        return false;
+    }
+    output.assign(reinterpret_cast<const char *>(result), (size_t)length);
+    std::free(result);
+    if (output.find('\0') != std::string::npos) {
+        error = "folded text contains NUL";
+        return false;
+    }
+    return true;
+}
+
+namespace {
+
 static bool read_form_argument(const std::vector<struct value_t *> &args,
                                const char *name, NormalizationForm &form) {
     if (args[1]->type != T_string) {
@@ -268,6 +420,28 @@ struct value_t *call_unicode_builtin(
             return NULL;
         }
         return newstrval(utf8proc_unicode_version());
+    }
+
+    if (functype == B_unicode_casefold) {
+        if (args.size() != 1) {
+            yyerror("std.unicode.casefold expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        if (args[0]->type != T_string) {
+            yyerror("std.unicode.casefold expects a string, got %s",
+                    typename_of(args[0]));
+            return NULL;
+        }
+        const std::string input =
+            ((struct string_value_t *)args[0])->value;
+        std::string folded;
+        std::string error;
+        if (!case_fold_text(input, folded, error)) {
+            yyerror("std.unicode.casefold: %s", error.c_str());
+            return NULL;
+        }
+        return newstrval(folded.c_str());
     }
 
     const bool is_normalize = functype == B_unicode_normalize;

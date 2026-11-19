@@ -583,7 +583,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_encoding_base64_encode &&
         functype <= B_encoding_url_decode)
         return call_encoding_builtin(functype, args);
-    if (functype >= B_unicode_normalize && functype <= B_unicode_version)
+    if (functype >= B_unicode_normalize && functype <= B_unicode_casefold)
         return call_unicode_builtin(functype, args);
     if (functype >= B_regex_match && functype <= B_regex_split)
         return call_regex_builtin(functype, args);
@@ -822,6 +822,14 @@ struct value_t *call_builtin(int functype,
     } else if (functype == B_string_replace) {
         if (args.size() != 3) {
             yyerror("std.string.replace expects 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_string_to_lower || functype == B_string_to_upper) {
+        if (args.size() != 1) {
+            yyerror("%s expects 1 argument, got %d",
+                    functype == B_string_to_lower ? "std.string.to_lower"
+                                                  : "std.string.to_upper",
                     (int)args.size());
             return NULL;
         }
@@ -1095,7 +1103,7 @@ struct value_t *call_builtin(int functype,
         return call_list_builtin(functype, args);
     if (functype >= B_dict_get && functype <= B_dict_merge)
         return call_dict_builtin(functype, args);
-    if (functype >= B_string_join && functype <= B_string_trim_end)
+    if (functype >= B_string_join && functype <= B_string_to_upper)
         return call_string_builtin(functype, args);
     if (functype >= B_int && functype <= B_type_source)
         return call_convert_builtin(functype, args);

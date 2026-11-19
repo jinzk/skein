@@ -1044,6 +1044,10 @@ const TypeNode *builtin_function_type(int functype) {
         case B_string_trim_end:
         case B_trim:
             return builtin_sig({text()}, text());
+        case B_string_to_lower:
+        case B_string_to_upper:
+        case B_unicode_casefold:
+            return builtin_sig({text()}, text());
         case B_split:
             return builtin_sig(
                 {text(), text()},

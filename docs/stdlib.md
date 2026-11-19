@@ -2525,6 +2525,8 @@ std.string.split_ws
 std.string.trim
 std.string.trim_start
 std.string.trim_end
+std.string.to_lower
+std.string.to_upper
 std.string.join
 std.string.replace
 std.string.starts_with
@@ -2808,6 +2810,7 @@ std.encoding.supports
 std.unicode.normalize
 std.unicode.is_normalized
 std.unicode.version
+std.unicode.casefold
 
 std.encoding.base64_encode
 std.encoding.base64_decode
@@ -2953,6 +2956,9 @@ std.thread.capabilities
 - `std.string.contains` 返回 `1` / `0`；
 - `std.string.repeat` 的次数不能为负数；
 - `std.string.trim_start` / `trim_end` 只按 ASCII 空白裁剪；
+- `std.string.to_lower` / `to_upper` 使用 Unicode 默认完整大小写映射（与 locale 无关）：`to_upper("ß")` 是 `SS`，`to_upper("ﬁ")` 是 `FI`，`to_lower("İ")` 是 `i` + `U+0307`，希腊文词尾 `Σ` 映射为 `ς`；输出长度可能变化，映射有损且不可逆；无效 UTF-8 报错；
+- `std.unicode.casefold` 是完整大小写折叠，`ß` / `ẞ` / `SS` 都折叠为 `ss`，`ς` 折叠为 `σ`；结果可能变长，仅用于大小写不敏感比较，不用于展示；
+- 大小写不敏感比较应先 NFC 归一化，再 `casefold`，再比较；`casefold` 本身不做归一化；
 - `std.math` 与全局数学函数使用同一套实现；
 - `std.io` 提供 `print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs` 提供文件读写和文件句柄操作；

@@ -2355,6 +2355,43 @@ std.unicode.version()                              // "16.0.0"
 - 输入必须是合法 UTF-8 `string`，输出也保持合法 UTF-8；
 - 归一化不会产生内嵌 NUL。
 
+### 大小写转换与大小写折叠
+
+```text
+std.string.to_lower(text)              → string
+std.string.to_upper(text)              → string
+std.unicode.casefold(text)             → string
+```
+
+`to_lower` / `to_upper` 使用 Unicode **默认完整大小写映射**（与 locale 无关），
+用于展示；`casefold` 是**完整大小写折叠**，用于大小写不敏感比较。
+
+```text
+import std;
+
+std.string.to_lower("ABC")        // "abc"
+std.string.to_upper("ß")          // "SS"
+std.string.to_upper("Straße")     // "STRASSE"
+std.string.to_upper("ﬁ")          // "FI"
+std.string.to_lower("İ")          // "i" + U+0307
+std.string.to_lower("ΟΣ")         // "ος"（词尾 ς）
+std.string.to_lower("ΟΣΑ")        // "οσα"
+
+std.unicode.casefold("Straße")    // "strasse"
+std.unicode.casefold("STRASSE")   // "strasse"
+std.unicode.casefold("ς")         // "σ"
+```
+
+规则：
+
+- 完整映射允许 `1 → N`，输出长度可能与输入不同；
+- 映射是**有损、不可逆**的：`to_upper("ß") == to_upper("ss")`，
+  且 `to_lower(to_upper("ß")) == "ss"` 而不是 `"ß"`；
+- 不要用它们做大小写不敏感比较：`"Straße"` 与 `"STRASSE"` 转换后仍不相等；
+- 比较应先 NFC，再 `casefold`，再比较；
+- `casefold` 的结果同样可能变长，仅用于比较和查找，不要直接展示；
+- 两者都拒绝非法 UTF-8，且都不会顺带做归一化。
+
 ## 正则表达式
 
 

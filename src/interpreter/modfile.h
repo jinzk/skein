@@ -18,6 +18,12 @@ struct mod_file {
     std::vector<require_spec> requirements;
 };
 
+struct sum_update {
+    std::string path;
+    std::string version;
+    std::string hash;
+};
+
 /* Nearest ancestor containing skein.mod (preferred) or legacy .skeinroot.
  * Returns an empty string when neither marker exists. */
 std::string find_root(const std::string &start);
@@ -33,9 +39,17 @@ bool upsert_require(const std::string &root, const std::string &path,
 bool add_sum(const std::string &root, const std::string &path,
              const std::string &version, const std::string &hash,
              std::string &error);
+/* Apply all checksum updates and write skein.sum once. */
+bool update_sums(const std::string &root,
+                 const std::vector<sum_update> &updates, std::string &error);
 bool find_sum(const std::string &root, const std::string &path,
               const std::string &version, std::string &hash,
               std::string &error);
+/* Like find_sum, but a missing skein.sum or entry is reported via `found`
+ * instead of an error. */
+bool find_sum_entry(const std::string &root, const std::string &path,
+                    const std::string &version, bool &found,
+                    std::string &hash, std::string &error);
 bool verify_cached_module(const std::string &root, const std::string &path,
                           const std::string &version, std::string &error);
 

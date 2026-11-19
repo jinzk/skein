@@ -451,6 +451,7 @@ add_executable(${PROJECT_NAME}
   src/app/main.cpp
   src/app/watch.cpp
   src/app/tools/build_tool.cpp
+  src/app/tools/file_lock.cpp
   src/app/tools/format_tool.cpp
   src/app/tools/get_tool.cpp
   src/app/tools/lint_tool.cpp

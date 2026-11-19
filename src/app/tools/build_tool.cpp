@@ -1,5 +1,6 @@
 #include "build_tool.h"
 
+#include "file_lock.h"
 #include "modfile.h"
 #include "package.h"
 #include "platform.h"
@@ -95,6 +96,9 @@ std::string compiler_from_env() {
 
 bool build_one(const std::string &root, const std::string &path,
                const std::string &version, std::string &error) {
+    file_lock lock;
+    if (!acquire_module_lock(path, version, lock, lock_mode::exclusive, error))
+        return false;
     if (!skein::modfile::verify_cached_module(root, path, version, error))
         return false;
 
@@ -218,8 +222,19 @@ int run_build_tool(const std::vector<std::string> &args,
         return 1;
     }
 
-    skein::modfile::mod_file mod;
     std::string error;
+    file_lock project_guard;
+    if (!acquire_project_lock(root, project_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file mod;
     if (!skein::modfile::load(root, mod, error)) {
         std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
         return 1;

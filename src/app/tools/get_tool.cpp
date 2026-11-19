@@ -1,5 +1,6 @@
 #include "get_tool.h"
 
+#include "file_lock.h"
 #include "modfile.h"
 #include "platform.h"
 #include "runtime_state.h"
@@ -20,7 +21,7 @@ namespace fs = std::filesystem;
 
 void print_get_usage(const std::string &program) {
     std::fprintf(stderr,
-                 "usage: %s get [-C dir] [--cache dir] "
+                 "usage: %s get [-C dir] [--cache dir] [--force] "
                  "<module/path>[@version] ...\n",
                  program.c_str());
 }
@@ -28,6 +29,13 @@ void print_get_usage(const std::string &program) {
 void print_mod_init_usage(const std::string &program) {
     std::fprintf(stderr,
                  "usage: %s mod init [-C dir] [--force] [module/path]\n",
+                 program.c_str());
+}
+
+void print_mod_clean_usage(const std::string &program) {
+    std::fprintf(stderr,
+                 "usage: %s mod clean [-C dir] [--cache dir] [--dry-run] "
+                 "[--force]\n",
                  program.c_str());
 }
 
@@ -51,6 +59,7 @@ struct project_options {
     std::string directory;
     std::string cache;
     bool force = false;
+    bool dry_run = false;
 };
 
 bool parse_common(const std::vector<std::string> &args, std::size_t start,
@@ -77,6 +86,8 @@ bool parse_common(const std::vector<std::string> &args, std::size_t start,
             options.cache = arg.substr(8);
         } else if (arg == "--force") {
             options.force = true;
+        } else if (arg == "--dry-run") {
+            options.dry_run = true;
         } else if (!arg.empty() && arg[0] == '-') {
             usage(program);
             return false;
@@ -137,11 +148,32 @@ bool version_matches_path(const std::string &path, const std::string &version) {
     }
 }
 
-std::string module_url(const std::string &module) {
+void replace_all(std::string &text, const std::string &from,
+                 const std::string &to) {
+    if (from.empty())
+        return;
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos) {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+/* SKEIN_MODULE_URL accepts either a single URL for every module or
+ * "path=url,..." pairs.  Both forms may use {path} and {version} templates so
+ * one setting can point all modules at a reachable mirror. */
+std::string expand_url(std::string url, const std::string &module,
+                       const std::string &version) {
+    replace_all(url, "{path}", module);
+    if (!version.empty())
+        replace_all(url, "{version}", version);
+    return url;
+}
+
+std::string module_url(const std::string &module,
+                       const std::string &version = std::string()) {
     std::string override;
     if (thread_env_get("SKEIN_MODULE_URL", override) && !override.empty()) {
-        /* Accept either a single URL for all modules, or "path=url,..." pairs
-         * so tests and mirrors can override each module independently. */
         std::size_t pos = 0;
         while (pos <= override.size()) {
             std::size_t end = override.find(',', pos);
@@ -150,21 +182,27 @@ std::string module_url(const std::string &module) {
                                                        : end - pos);
             std::size_t equals = item.find('=');
             if (equals != std::string::npos && item.substr(0, equals) == module)
-                return item.substr(equals + 1);
+                return expand_url(item.substr(equals + 1), module, version);
             if (end == std::string::npos)
                 break;
             pos = end + 1;
         }
         if (override.find('=') == std::string::npos)
-            return override;
+            return expand_url(override, module, version);
     }
     return "https://" + module;
 }
 
 bool resolve_latest(const std::string &module, std::string &version,
                     std::string &error) {
+    const std::string url = module_url(module);
+    if (url.find("{version}") != std::string::npos) {
+        error = "module URL template with {version} cannot resolve @latest "
+                "for " + module + "; use an explicit version";
+        return false;
+    }
     const std::string command =
-        "git ls-remote --tags --refs " + shell_quote(module_url(module));
+        "git ls-remote --tags --refs " + shell_quote(url);
     std::string output;
     int status = -1;
     if (!platform_run_command(command, {}, output, status)) {
@@ -214,6 +252,58 @@ std::string unique_temp_dir(const std::string &cache) {
     return (fs::path(cache) / (".tmp-" + std::to_string(stamp))).u8string();
 }
 
+/* Git checkouts contain read-only object files.  remove_all() alone cannot
+ * delete those on Windows, so clear the write bit before removing the tree. */
+bool remove_tree(const fs::path &path, std::string &error) {
+    std::error_code ec;
+    if (!fs::exists(path, ec))
+        return !ec;
+    fs::permissions(path, fs::perms::owner_write, fs::perm_options::add, ec);
+    if (!ec) {
+        fs::recursive_directory_iterator it(
+            path, fs::directory_options::skip_permission_denied, ec);
+        const fs::recursive_directory_iterator end;
+        for (; !ec && it != end; it.increment(ec)) {
+            fs::permissions(it->path(), fs::perms::owner_write,
+                            fs::perm_options::add, ec);
+        }
+    }
+    if (ec) {
+        error = "cannot prepare module cache for removal: " + path.u8string() +
+                ": " + ec.message();
+        return false;
+    }
+    fs::remove_all(path, ec);
+    if (ec) {
+        error = "cannot remove module cache: " + path.u8string() + ": " +
+                ec.message();
+        return false;
+    }
+    return true;
+}
+
+void discard_tree(const fs::path &path) {
+    std::string ignored;
+    remove_tree(path, ignored);
+}
+
+/* Batch checksum updates so the success path writes skein.sum once.  If a
+ * later module fails, keep the shared cache and best-effort persist hashes for
+ * modules that were already prepared, so a retry normally does not need
+ * --force and other projects sharing the cache are not disrupted. */
+struct pending_sums {
+    std::string root;
+    std::vector<skein::modfile::sum_update> updates;
+    bool committed = false;
+
+    ~pending_sums() {
+        if (committed || root.empty() || updates.empty())
+            return;
+        std::string ignored;
+        skein::modfile::update_sums(root, updates, ignored);
+    }
+};
+
 bool download_module(const std::string &module, const std::string &version,
                      const std::string &destination, std::string &error) {
     const fs::path cache = fs::path(destination).parent_path();
@@ -227,15 +317,15 @@ bool download_module(const std::string &module, const std::string &version,
     const std::string temp = unique_temp_dir(cache.u8string());
     const std::string command =
         "git -c advice.detachedHead=false clone --quiet --depth 1 --branch " +
-        shell_quote(version) + " " + shell_quote(module_url(module)) + " " +
-        shell_quote(temp);
+        shell_quote(version) + " " + shell_quote(module_url(module, version)) +
+        " " + shell_quote(temp);
     int status = -1;
     if (!platform_run_command_status(command, {}, status)) {
         error = "cannot run git clone; install git and retry";
         return false;
     }
     if (status != 0) {
-        fs::remove_all(temp, ec);
+        discard_tree(temp);
         error = "git clone failed for " + module + "@" + version;
         return false;
     }
@@ -243,16 +333,18 @@ bool download_module(const std::string &module, const std::string &version,
     std::error_code manifest_ec;
     if (!fs::is_regular_file(fs::path(temp) / "module.skein", manifest_ec) ||
         manifest_ec) {
-        fs::remove_all(temp, ec);
+        discard_tree(temp);
         error = "module " + module + " has no module.skein at its root";
         return false;
     }
 
-    fs::remove_all(destination, ec);
+    if (!remove_tree(destination, error))
+        return false;
     fs::rename(temp, destination, ec);
     if (ec) {
-        fs::remove_all(temp, ec);
-        error = "cannot install module into cache: " + destination;
+        discard_tree(temp);
+        error = "cannot install module into cache: " + destination + ": " +
+                ec.message();
         return false;
     }
     return true;
@@ -263,25 +355,65 @@ struct selection {
     bool indirect = true;
 };
 
-/* Ensure a module version is downloaded and checksummed, then return its
- * cached directory and parsed skein.mod. */
+/* Checksums are the trust root: never silently overwrite an existing entry.
+ * `force` is the explicit opt-in that refreshes the cache and the sum. */
 bool prepare_module(const std::string &root, const std::string &path,
-                    const std::string &version, fs::path &directory,
-                    skein::modfile::mod_file &mod, std::string &error) {
+                    const std::string &version, bool force,
+                    fs::path &directory, skein::modfile::mod_file &mod,
+                    std::string &hash, bool &needs_sum, std::string &error) {
+    file_lock lock;
+    if (!acquire_module_lock(path, version, lock, lock_mode::exclusive, error))
+        return false;
+
     directory = fs::u8path(skein::modfile::cache_path(path, version));
-    if (!skein::modfile::verify_cached_module(root, path, version, error)) {
+    const bool cached = fs::is_directory(directory);
+    bool have_sum = false;
+    std::string expected;
+    if (!skein::modfile::find_sum_entry(root, path, version, have_sum,
+                                        expected, error))
+        return false;
+
+    hash.clear();
+    needs_sum = false;
+    if (cached && !force && have_sum) {
+        if (!skein::modfile::dirhash(directory.u8string(), hash, error))
+            return false;
+        if (hash != expected) {
+            error = "checksum mismatch for " + path + "@" + version +
+                    "; refusing to overwrite skein.sum; run 'skein get "
+                    "--force " + path + "@" + version + "' to refresh";
+            return false;
+        }
+    }
+
+    /* A cache without this project's checksum is not trusted: refresh it from
+     * the source and write a new checksum instead of adopting bytes written by
+     * another project or process. */
+    if (!cached || force || !have_sum) {
         if (!download_module(path, version,
                              skein::modfile::cache_path(path, version),
                              error))
             return false;
-        std::string hash;
-        if (!skein::modfile::dirhash(directory.u8string(), hash, error))
+        if (!skein::modfile::dirhash(directory.u8string(), hash, error)) {
+            discard_tree(directory);
             return false;
-        if (!skein::modfile::add_sum(root, path, version, hash, error))
-            return false;
+        }
+        if (have_sum && !force) {
+            if (hash != expected) {
+                discard_tree(directory);
+                error = "checksum mismatch for " + path + "@" + version +
+                        "; downloaded content does not match skein.sum";
+                return false;
+            }
+        } else {
+            needs_sum = true;
+        }
     }
-    if (!skein::modfile::load(directory.u8string(), mod, error))
+    if (!skein::modfile::load(directory.u8string(), mod, error)) {
+        if (!cached || force)
+            discard_tree(directory);
         return false;
+    }
     return true;
 }
 
@@ -293,6 +425,10 @@ int run_get_tool(const std::vector<std::string> &args,
     std::vector<std::string> positional;
     if (!parse_common(args, 2, print_get_usage, program, options, positional))
         return 2;
+    if (options.dry_run) {
+        print_get_usage(program);
+        return 2;
+    }
     if (positional.empty()) {
         print_get_usage(program);
         return 2;
@@ -322,8 +458,19 @@ int run_get_tool(const std::vector<std::string> &args,
         specs.push_back(spec);
     }
 
-    skein::modfile::mod_file existing;
     std::string error;
+    file_lock project_guard;
+    if (!acquire_project_lock(root, project_guard, lock_mode::exclusive, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::shared, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+
+    skein::modfile::mod_file existing;
     if (!skein::modfile::load(root, existing, error)) {
         std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
         return 1;
@@ -383,6 +530,8 @@ int run_get_tool(const std::vector<std::string> &args,
      * for a given module path. Upgraded versions are queued for expansion. */
     std::set<std::pair<std::string, std::string>> visited;
     std::vector<std::pair<std::string, std::string>> queue;
+    pending_sums sums;
+    sums.root = root;
     for (const auto &entry : selected)
         queue.push_back({entry.first, entry.second.version});
     while (!queue.empty()) {
@@ -392,11 +541,15 @@ int run_get_tool(const std::vector<std::string> &args,
             continue;
         fs::path directory;
         skein::modfile::mod_file mod;
-        if (!prepare_module(root, item.first, item.second, directory, mod,
-                            error)) {
+        std::string hash;
+        bool needs_sum = false;
+        if (!prepare_module(root, item.first, item.second, options.force,
+                            directory, mod, hash, needs_sum, error)) {
             std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
             return 1;
         }
+        if (needs_sum)
+            sums.updates.push_back({item.first, item.second, hash});
         for (const skein::modfile::require_spec &child : mod.requirements) {
             if (!is_semver(child.version)) {
                 std::fprintf(stderr,
@@ -432,6 +585,11 @@ int run_get_tool(const std::vector<std::string> &args,
             {entry.first, entry.second.version,
              entry.second.indirect || direct.count(entry.first) == 0});
     }
+    if (!skein::modfile::update_sums(root, sums.updates, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    sums.committed = true;
     if (!skein::modfile::save(root, updated, error)) {
         std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
         return 1;
@@ -450,6 +608,10 @@ int run_mod_init_tool(const std::vector<std::string> &args,
     if (!parse_common(args, 3, print_mod_init_usage, program, options,
                       positional))
         return 2;
+    if (options.dry_run) {
+        print_mod_init_usage(program);
+        return 2;
+    }
     if (positional.size() > 1) {
         print_mod_init_usage(program);
         return 2;
@@ -464,6 +626,13 @@ int run_mod_init_tool(const std::vector<std::string> &args,
     if (ec) {
         std::fprintf(stderr, "%s: cannot create directory %s\n",
                      program.c_str(), directory.c_str());
+        return 1;
+    }
+    std::string error;
+    file_lock project_guard;
+    if (!acquire_project_lock(directory, project_guard, lock_mode::exclusive,
+                              error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
         return 1;
     }
     std::error_code exists_ec;
@@ -484,12 +653,104 @@ int run_mod_init_tool(const std::vector<std::string> &args,
         mod.module = positional[0];
     }
 
-    std::string error;
     if (!skein::modfile::save(directory, mod, error)) {
         std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
         return 1;
     }
     std::printf("created %s\n",
                 (fs::path(directory) / "skein.mod").u8string().c_str());
+    return 0;
+}
+
+bool same_path(const fs::path &left, const fs::path &right) {
+    std::error_code ec;
+    if (fs::exists(left, ec) && !ec && fs::exists(right, ec) && !ec) {
+        bool equivalent = fs::equivalent(left, right, ec);
+        if (!ec)
+            return equivalent;
+    }
+    return left == right;
+}
+
+bool matches_env_path(const fs::path &candidate, const char *name) {
+    std::string value;
+    if (!thread_env_get(name, value) || value.empty())
+        return false;
+    std::error_code ec;
+    const fs::path from_env = fs::absolute(fs::u8path(value), ec);
+    return !ec && same_path(candidate, from_env);
+}
+
+bool unsafe_cache_root(const fs::path &root) {
+    std::error_code ec;
+    const fs::path absolute = fs::absolute(root, ec);
+    if (ec || absolute.empty())
+        return true;
+    if (absolute == absolute.root_path() || absolute.parent_path() == absolute)
+        return true;
+    if (matches_env_path(absolute, "HOME") ||
+        matches_env_path(absolute, "USERPROFILE") ||
+        matches_env_path(absolute, "LOCALAPPDATA") ||
+        matches_env_path(absolute, "APPDATA"))
+        return true;
+    const std::string cwd = thread_cwd();
+    if (!cwd.empty()) {
+        const fs::path absolute_cwd = fs::absolute(fs::u8path(cwd), ec);
+        if (!ec && same_path(absolute, absolute_cwd))
+            return true;
+    }
+    return false;
+}
+
+int run_mod_clean_tool(const std::vector<std::string> &args,
+                       const std::string &program) {
+    project_options options;
+    std::vector<std::string> positional;
+    if (!parse_common(args, 3, print_mod_clean_usage, program, options,
+                      positional))
+        return 2;
+    if (!positional.empty()) {
+        print_mod_clean_usage(program);
+        return 2;
+    }
+    if (!options.cache.empty())
+        platform_set_env("SKEINMODCACHE", options.cache);
+
+    const fs::path root = fs::u8path(skein::modfile::cache_dir());
+    const std::string display = root.u8string();
+    if (!options.force && unsafe_cache_root(root)) {
+        std::fprintf(stderr,
+                     "%s: refusing to clean unsafe cache root %s; "
+                     "pass --force to override\n",
+                     program.c_str(), display.c_str());
+        return 2;
+    }
+    if (options.dry_run) {
+        std::printf("would clean %s\n", display.c_str());
+        return 0;
+    }
+
+    std::error_code ec;
+    const bool exists = fs::exists(root, ec);
+    if (ec) {
+        std::fprintf(stderr, "%s: cannot inspect cache root %s: %s\n",
+                     program.c_str(), display.c_str(), ec.message().c_str());
+        return 1;
+    }
+    if (!exists) {
+        std::printf("nothing to clean: %s\n", display.c_str());
+        return 0;
+    }
+    std::string error;
+    file_lock cache_guard;
+    if (!acquire_cache_lock(cache_guard, lock_mode::exclusive, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    if (!remove_tree(root, error)) {
+        std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
+        return 1;
+    }
+    std::printf("cleaned %s\n", display.c_str());
     return 0;
 }

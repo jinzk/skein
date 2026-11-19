@@ -92,12 +92,58 @@ bool load_sums(const std::string &root, std::vector<sum_entry> &entries,
     return true;
 }
 
+/* Write the complete file before replacing the destination.  This keeps
+ * readers from observing a truncated skein.mod or skein.sum. */
+bool write_atomic(const std::string &path, const std::string &data,
+                  std::string &error) {
+    const std::string temp = path + ".tmp";
+    if (!platform_write_file(temp, data, false, error)) {
+        std::error_code cleanup_ec;
+        fs::remove(path_of(temp), cleanup_ec);
+        return false;
+    }
+    std::error_code ec;
+    fs::rename(path_of(temp), path_of(path), ec);
+    if (!ec)
+        return true;
+    /* Windows does not replace an existing file with rename(). */
+    if (ec == std::errc::file_exists) {
+        std::error_code remove_ec;
+        fs::remove(path_of(path), remove_ec);
+        if (!remove_ec) {
+            fs::rename(path_of(temp), path_of(path), ec);
+            if (!ec)
+                return true;
+        }
+    }
+    std::error_code cleanup_ec;
+    fs::remove(path_of(temp), cleanup_ec);
+    error = "cannot replace " + path + ": " + ec.message();
+    return false;
+}
+
+bool inspect_regular_file(const fs::path &path, bool &regular,
+                          std::string &error) {
+    std::error_code ec;
+    const fs::file_status status = fs::status(path, ec);
+    if (ec) {
+        if (ec == std::errc::no_such_file_or_directory) {
+            regular = false;
+            return true;
+        }
+        error = ec.message();
+        return false;
+    }
+    regular = fs::is_regular_file(status);
+    return true;
+}
+
 bool save_sums(const std::string &root, const std::vector<sum_entry> &entries,
                std::string &error) {
     std::string data;
     for (const sum_entry &entry : entries)
         data += entry.path + " " + entry.version + " " + entry.hash + "\n";
-    return platform_write_file(sums_path(root), data, false, error);
+    return write_atomic(sums_path(root), data, error);
 }
 
 std::string base64_encode(const std::string &data) {
@@ -284,8 +330,7 @@ bool save(const std::string &root, const mod_file &mod, std::string &error) {
             data += " // indirect";
         data += "\n";
     }
-    return platform_write_file(text_of(path_of(root) / "skein.mod"), data,
-                               false, error);
+    return write_atomic(text_of(path_of(root) / "skein.mod"), data, error);
 }
 
 bool upsert_require(const std::string &root, const std::string &path,
@@ -308,26 +353,39 @@ bool upsert_require(const std::string &root, const std::string &path,
     return save(root, mod, error);
 }
 
+bool update_sums(const std::string &root,
+                 const std::vector<sum_update> &updates, std::string &error) {
+    if (updates.empty())
+        return true;
+    std::vector<sum_entry> entries;
+    bool have_sums = false;
+    std::string inspect_error;
+    if (!inspect_regular_file(path_of(sums_path(root)), have_sums,
+                              inspect_error)) {
+        error = "cannot inspect skein.sum: " + inspect_error;
+        return false;
+    }
+    if (have_sums && !load_sums(root, entries, error))
+        return false;
+    for (const sum_update &update : updates) {
+        bool found = false;
+        for (sum_entry &entry : entries) {
+            if (entry.path == update.path && entry.version == update.version) {
+                entry.hash = update.hash;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            entries.push_back({update.path, update.version, update.hash});
+    }
+    return save_sums(root, entries, error);
+}
+
 bool add_sum(const std::string &root, const std::string &path,
              const std::string &version, const std::string &hash,
              std::string &error) {
-    std::vector<sum_entry> entries;
-    std::error_code ec;
-    if (fs::is_regular_file(path_of(sums_path(root)), ec)) {
-        if (!load_sums(root, entries, error))
-            return false;
-    }
-    bool found = false;
-    for (sum_entry &entry : entries) {
-        if (entry.path == path && entry.version == version) {
-            entry.hash = hash;
-            found = true;
-            break;
-        }
-    }
-    if (!found)
-        entries.push_back({path, version, hash});
-    return save_sums(root, entries, error);
+    return update_sums(root, {{path, version, hash}}, error);
 }
 
 bool find_sum(const std::string &root, const std::string &path,
@@ -347,6 +405,34 @@ bool find_sum(const std::string &root, const std::string &path,
     error = "missing checksum for " + path + " " + version +
             "; run 'skein get " + path + "@" + version + "'";
     return false;
+}
+
+bool find_sum_entry(const std::string &root, const std::string &path,
+                    const std::string &version, bool &found,
+                    std::string &hash, std::string &error) {
+    found = false;
+    bool have_sums = false;
+    std::string inspect_error;
+    if (!inspect_regular_file(path_of(root) / "skein.sum", have_sums,
+                              inspect_error)) {
+        error = "cannot inspect skein.sum: " + inspect_error;
+        return false;
+    }
+    if (!have_sums)
+        return true;
+    std::vector<sum_entry> entries;
+    if (!load_sums(root, entries, error)) {
+        error = "cannot read skein.sum: " + error;
+        return false;
+    }
+    for (const sum_entry &entry : entries) {
+        if (entry.path == path && entry.version == version) {
+            found = true;
+            hash = entry.hash;
+            return true;
+        }
+    }
+    return true;
 }
 
 bool verify_cached_module(const std::string &root, const std::string &path,

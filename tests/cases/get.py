@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 
 import harness
 
@@ -42,6 +43,35 @@ def run_skein(args, env=None, cwd=None, stdin=None, timeout=None):
         env=env,
         cwd=cwd,
     )
+
+
+def module_lock_name(module, version):
+    digest = 0xCBF29CE484222325
+    for byte in f"{module}@{version}".encode("utf-8"):
+        digest ^= byte
+        digest = (digest * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return f"{digest:016x}.lock"
+
+
+def lock_handle(handle, shared=False):
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(
+            handle.fileno(), fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+
+
+def unlock_handle(handle):
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def make_module_repo(root):
@@ -183,6 +213,42 @@ def run_cases():
         assert tampered.returncode != 0, tampered.stdout
         assert "checksum mismatch" in tampered.stderr, tampered.stderr
 
+        # `skein get` must not heal a checksum mismatch by rewriting skein.sum.
+        with open(sum_path, encoding="utf-8") as handle:
+            good_sum = handle.read()
+        refused = run_skein(
+            ["get", "-C", project, f"{MODULE}@{TAG}"], env=env)
+        assert refused.returncode != 0, refused.stdout
+        assert "refusing to overwrite skein.sum" in refused.stderr, (
+            refused.stderr)
+        with open(sum_path, encoding="utf-8") as handle:
+            assert handle.read() == good_sum
+
+        refreshed = run_skein(
+            ["get", "-C", project, f"{MODULE}@{TAG}", "--force"], env=env)
+        assert refreshed.returncode == 0, refreshed.stderr
+        restored = run_skein([main], env=env, cwd=project)
+        assert restored.returncode == 0, restored.stderr
+
+        # A stale committed checksum must also reject freshly downloaded code.
+        cache_dir = os.path.join(root, "cache", "example.test", TAG, "util")
+        shutil.rmtree(cache_dir)
+        stale_sum = f"{MODULE} {TAG} h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+        with open(sum_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(stale_sum)
+        stale = run_skein(["get", "-C", project, f"{MODULE}@{TAG}"], env=env)
+        assert stale.returncode != 0, stale.stdout
+        assert "downloaded content does not match skein.sum" in stale.stderr, (
+            stale.stderr)
+        assert not os.path.exists(cache_dir), stale.stderr
+        with open(sum_path, encoding="utf-8") as handle:
+            assert handle.read() == stale_sum
+        with open(sum_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(good_sum)
+        re_fetched = run_skein(
+            ["get", "-C", project, f"{MODULE}@{TAG}"], env=env)
+        assert re_fetched.returncode == 0, re_fetched.stderr
+
         invalid = write(
             root,
             "invalid.skein",
@@ -318,3 +384,338 @@ def run_cases():
         v2_run = run_skein([v2_main], env=v2_env, cwd=diamond_project)
         assert v2_run.returncode == 0, v2_run.stderr
         assert v2_run.stdout == "20\n", v2_run.stdout
+
+        # A single URL template can mirror every module path.
+        mirror = os.path.join(root, "mirror")
+        mirror_repo = os.path.join(mirror, "example.test", "util")
+        os.makedirs(mirror_repo)
+        git(mirror_repo, "init", "-q")
+        git(mirror_repo, "config", "user.email", "test@example.com")
+        git(mirror_repo, "config", "user.name", "Skein Test")
+        write(
+            mirror_repo,
+            "module.skein",
+            "module util {\n  export package json;\n}\n",
+        )
+        write(
+            mirror_repo,
+            "json.skein",
+            "package json {\n  export func answer() { return 7; }\n}\n",
+        )
+        git(mirror_repo, "add", "-A")
+        git(mirror_repo, "commit", "-qm", "mirror")
+        git(mirror_repo, "tag", TAG)
+
+        template_project = os.path.join(root, "template-project")
+        os.makedirs(template_project)
+        init_template = run_skein(
+            ["mod", "init", "-C", template_project, "example.test/template"],
+            env=env,
+        )
+        assert init_template.returncode == 0, init_template.stderr
+        template_env = os.environ.copy()
+        template_env["SKEIN_MODULE_URL"] = (
+            os.path.abspath(mirror).replace(os.sep, "/") + "/{path}")
+        template_env["SKEINMODCACHE"] = os.path.join(root, "template-cache")
+        templated = run_skein(
+            ["get", "-C", template_project, f"{MODULE}@{TAG}"],
+            env=template_env,
+        )
+        assert templated.returncode == 0, templated.stderr
+        template_main = write(
+            template_project,
+            "main.skein",
+            'import "example.test/util/json";\nprintln(json.answer());\n',
+        )
+        template_run = run_skein(
+            [template_main], env=template_env, cwd=template_project)
+        assert template_run.returncode == 0, template_run.stderr
+        assert template_run.stdout == "7\n", template_run.stdout
+
+        # {version} is expanded for explicit versions.
+        version_mirror = os.path.join(root, "version-mirror")
+        shutil.copytree(
+            mirror_repo,
+            os.path.join(version_mirror, "example.test", "util", TAG),
+        )
+        version_project = os.path.join(root, "version-project")
+        os.makedirs(version_project)
+        init_version = run_skein(
+            ["mod", "init", "-C", version_project, "example.test/version"],
+            env=env,
+        )
+        assert init_version.returncode == 0, init_version.stderr
+        version_env = os.environ.copy()
+        version_env["SKEIN_MODULE_URL"] = (
+            os.path.abspath(version_mirror).replace(os.sep, "/") +
+            "/{path}/{version}")
+        version_env["SKEINMODCACHE"] = os.path.join(root, "version-cache")
+        versioned = run_skein(
+            ["get", "-C", version_project, f"{MODULE}@{TAG}"],
+            env=version_env,
+        )
+        assert versioned.returncode == 0, versioned.stderr
+        version_main = write(
+            version_project,
+            "main.skein",
+            'import "example.test/util/json";\nprintln(json.answer());\n',
+        )
+        version_run = run_skein(
+            [version_main], env=version_env, cwd=version_project)
+        assert version_run.returncode == 0, version_run.stderr
+        assert version_run.stdout == "7\n", version_run.stdout
+
+        bad_latest = run_skein(
+            ["get", "-C", version_project, f"{MODULE}@latest"],
+            env=version_env,
+        )
+        assert bad_latest.returncode != 0, bad_latest.stdout
+        assert "{version} cannot resolve @latest" in bad_latest.stderr, (
+            bad_latest.stderr)
+
+        # A per-module lock blocks a concurrent get for the same module@version.
+        lock_repo = os.path.join(root, "lock-repo")
+        os.makedirs(lock_repo)
+        git(lock_repo, "init", "-q")
+        git(lock_repo, "config", "user.email", "test@example.com")
+        git(lock_repo, "config", "user.name", "Skein Test")
+        write(
+            lock_repo,
+            "module.skein",
+            "module util {\n  export package json;\n}\n",
+        )
+        write(
+            lock_repo,
+            "json.skein",
+            "package json { export func answer() { return 9; } }\n",
+        )
+        git(lock_repo, "add", "-A")
+        git(lock_repo, "commit", "-qm", "lock")
+        git(lock_repo, "tag", TAG)
+
+        lock_project = os.path.join(root, "lock-project")
+        os.makedirs(lock_project)
+        init_lock = run_skein(
+            ["mod", "init", "-C", lock_project, "example.test/lock"], env=env)
+        assert init_lock.returncode == 0, init_lock.stderr
+        lock_cache = os.path.join(root, "lock-cache")
+        lock_env = env.copy()
+        lock_env["SKEIN_MODULE_URL"] = os.path.abspath(lock_repo).replace(
+            os.sep, "/")
+        lock_env["SKEINMODCACHE"] = lock_cache
+
+        lock_path = os.path.join(
+            lock_cache, ".locks", module_lock_name(MODULE, TAG))
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+        with open(lock_path, "wb") as lock_file:
+            lock_file.write(b"0")
+            lock_file.flush()
+            lock_handle(lock_file)
+
+            child = subprocess.Popen(
+                [harness.BIN, "get", "-C", lock_project,
+                 f"{MODULE}@{TAG}"],
+                env=lock_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                time.sleep(0.5)
+                blocked = child.poll() is None
+            finally:
+                unlock_handle(lock_file)
+
+        child_out, child_err = child.communicate(
+            timeout=harness.DEFAULT_TIMEOUT)
+        assert blocked, child_out + child_err
+        assert child.returncode == 0, child_err
+        assert os.path.exists(
+            os.path.join(lock_cache, "example.test", TAG, "util",
+                         "json.skein"))
+
+        # A second project sharing the cache must not trust bytes without its
+        # own checksum; it refreshes and records its own skein.sum entry.
+        shared_project = os.path.join(root, "shared-project")
+        os.makedirs(shared_project)
+        init_shared = run_skein(
+            ["mod", "init", "-C", shared_project, "example.test/shared"],
+            env=env,
+        )
+        assert init_shared.returncode == 0, init_shared.stderr
+        shared = run_skein(
+            ["get", "-C", shared_project, f"{MODULE}@{TAG}"], env=lock_env)
+        assert shared.returncode == 0, shared.stderr
+        assert os.path.exists(os.path.join(shared_project, "skein.sum"))
+
+        # The project lock serializes writers of skein.mod / skein.sum.
+        project_lock_path = os.path.join(lock_project, ".skein", "lock")
+        os.makedirs(os.path.dirname(project_lock_path), exist_ok=True)
+        with open(project_lock_path, "wb") as lock_file:
+            lock_file.write(b"0")
+            lock_file.flush()
+            lock_handle(lock_file)
+            child = subprocess.Popen(
+                [harness.BIN, "get", "-C", lock_project,
+                 f"{MODULE}@{TAG}"],
+                env=lock_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                time.sleep(0.5)
+                blocked = child.poll() is None
+            finally:
+                unlock_handle(lock_file)
+
+        child_out, child_err = child.communicate(
+            timeout=harness.DEFAULT_TIMEOUT)
+        assert blocked, child_out + child_err
+        assert child.returncode == 0, child_err
+
+        # get/build take the cache lock shared, so an exclusive holder blocks them.
+        cache_guard_path = lock_cache + ".lock"
+        with open(cache_guard_path, "wb") as lock_file:
+            lock_file.write(b"0")
+            lock_file.flush()
+            lock_handle(lock_file)
+            child = subprocess.Popen(
+                [harness.BIN, "get", "-C", lock_project,
+                 f"{MODULE}@{TAG}"],
+                env=lock_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                time.sleep(0.5)
+                blocked = child.poll() is None
+            finally:
+                unlock_handle(lock_file)
+
+        child_out, child_err = child.communicate(
+            timeout=harness.DEFAULT_TIMEOUT)
+        assert blocked, child_out + child_err
+        assert child.returncode == 0, child_err
+
+        # Transactional sums: a failed get must not publish earlier hashes.
+        transaction_valid = os.path.join(root, "transaction-valid")
+        os.makedirs(transaction_valid)
+        git(transaction_valid, "init", "-q")
+        git(transaction_valid, "config", "user.email", "test@example.com")
+        git(transaction_valid, "config", "user.name", "Skein Test")
+        write(
+            transaction_valid,
+            "module.skein",
+            "module z {\n  export package json;\n}\n",
+        )
+        write(
+            transaction_valid,
+            "json.skein",
+            "package json { export func answer() { return 1; } }\n",
+        )
+        git(transaction_valid, "add", "-A")
+        git(transaction_valid, "commit", "-qm", "valid")
+        git(transaction_valid, "tag", TAG)
+
+        transaction_bad = os.path.join(root, "transaction-bad")
+        os.makedirs(transaction_bad)
+        git(transaction_bad, "init", "-q")
+        git(transaction_bad, "config", "user.email", "test@example.com")
+        git(transaction_bad, "config", "user.name", "Skein Test")
+        write(transaction_bad, "README.md", "no module manifest\n")
+        git(transaction_bad, "add", "-A")
+        git(transaction_bad, "commit", "-qm", "bad")
+        git(transaction_bad, "tag", TAG)
+
+        transaction_project = os.path.join(root, "transaction-project")
+        os.makedirs(transaction_project)
+        init_transaction = run_skein(
+            ["mod", "init", "-C", transaction_project, "example.test/txn"],
+            env=env,
+        )
+        assert init_transaction.returncode == 0, init_transaction.stderr
+        transaction_env = env.copy()
+        transaction_env["SKEIN_MODULE_URL"] = (
+            "example.test/z=" +
+            os.path.abspath(transaction_valid).replace(os.sep, "/") +
+            ",example.test/a=" +
+            os.path.abspath(transaction_bad).replace(os.sep, "/"))
+        transaction_env["SKEINMODCACHE"] = os.path.join(root, "txn-cache")
+        failed = run_skein(
+            ["get", "-C", transaction_project,
+             f"example.test/z@{TAG}", f"example.test/a@{TAG}"],
+            env=transaction_env,
+        )
+        assert failed.returncode != 0, failed.stdout
+        with open(os.path.join(transaction_project, "skein.mod"),
+                  encoding="utf-8") as handle:
+            assert "require " not in handle.read()
+        transaction_sum = os.path.join(transaction_project, "skein.sum")
+        if os.path.exists(transaction_sum):
+            with open(transaction_sum, encoding="utf-8") as handle:
+                entries = handle.read()
+            assert f"example.test/z {TAG} " in entries, entries
+            assert "example.test/a " not in entries, entries
+
+        # Successful downloads keep valid checksums, so retry needs no --force.
+        retried = run_skein(
+            ["get", "-C", transaction_project, f"example.test/z@{TAG}"],
+            env=transaction_env,
+        )
+        assert retried.returncode == 0, retried.stderr
+        assert os.path.exists(
+            os.path.join(transaction_project, "skein.sum"))
+
+        # `skein mod clean` only touches the cache root.
+        clean_cache = os.path.join(root, "clean-cache")
+        marker = write(clean_cache, "stale/marker", "x")
+        clean_env = os.environ.copy()
+        clean_env["SKEINMODCACHE"] = clean_cache
+        dry = run_skein(["mod", "clean", "--dry-run"], env=clean_env)
+        assert dry.returncode == 0, dry.stderr
+        assert "would clean" in dry.stdout, dry.stdout
+        assert os.path.exists(marker)
+
+        # clean takes the cache exclusively, so it waits for active users.
+        cache_lock_path = clean_cache + ".lock"
+        with open(cache_lock_path, "wb") as lock_file:
+            lock_file.write(b"0")
+            lock_file.flush()
+            lock_handle(lock_file)
+            child = subprocess.Popen(
+                [harness.BIN, "mod", "clean"],
+                env=clean_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                time.sleep(0.5)
+                blocked = child.poll() is None
+            finally:
+                unlock_handle(lock_file)
+
+        child_out, child_err = child.communicate(
+            timeout=harness.DEFAULT_TIMEOUT)
+        assert blocked, child_out + child_err
+        assert child.returncode == 0, child_err
+        assert "cleaned" in child_out, child_out
+        assert not os.path.exists(clean_cache)
+
+        absent = run_skein(["mod", "clean"], env=clean_env)
+        assert absent.returncode == 0, absent.stderr
+        assert "nothing to clean" in absent.stdout, absent.stdout
+
+        unsafe_env = os.environ.copy()
+        unsafe_env["SKEINMODCACHE"] = os.getcwd()
+        unsafe = run_skein(["mod", "clean"], env=unsafe_env)
+        assert unsafe.returncode != 0, unsafe.stdout
+        assert "refusing to clean unsafe cache root" in unsafe.stderr, (
+            unsafe.stderr)

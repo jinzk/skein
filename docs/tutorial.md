@@ -256,6 +256,23 @@ skein get github.com/acme/util@v1.2.3
 
 `get` 通过 git 克隆仓库 tag，遍历所有依赖的 `skein.mod` 并用 MVS 选出每个 module path 的最高 semver 版本，然后写回主项目 `skein.mod`（非直接依赖标记为 `// indirect`）与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。不兼容的 major 版本使用 `/vN` 路径并存，例如 `example.com/c` 与 `example.com/c/v2` 是两个独立 module。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
 
+`skein.sum` 是校验和的唯一信任根：`skein get` **不会**在校验失败时静默重新下载并改写它。缓存内容与 `skein.sum` 不一致、或已有校验和但缓存未下载而新下载内容不匹配，都会硬失败；只有显式 `skein get --force <module>@<version>` 才会在已有校验和时刷新缓存并重写对应校验和。缓存存在但当前项目没有校验和时不会直接信任它，而是重新下载并写入新的 `h1:`。
+
+网络不可达时可用 `SKEIN_MODULE_URL` 把模块改写到镜像。它既支持单个 URL，也支持 `path=url,path=url` 映射；两种形式都支持 `{path}` 和 `{version}` 模板，例如：
+
+```text
+SKEIN_MODULE_URL=https://mirror.example/skein/{path}
+SKEIN_MODULE_URL=github.com/acme/util=https://mirror.example/acme/util,example.test/x=https://mirror.example/x
+```
+
+`{version}` 在 `@latest` 的 tag 列举阶段不可用，会直接报错并要求显式版本。模板只解决“从哪里拉取”，完整性仍由 `skein.sum` 校验。
+
+并发操作通过多层文件锁协调：`skein get` 持有项目级独占锁 `<project>/.skein/lock`，`skein build` 持有项目共享锁；两者同时持有缓存共享锁，并按 `module@version` 在缓存根 `.locks/` 下加模块锁。`skein mod clean` 获取缓存独占锁，因此会等待正在运行的 `get` / `build`，不会在下载或构建过程中删除缓存。锁随进程退出自动释放；需要等待时会在 stderr 提示。`.skein/` 是本地锁状态目录，不应提交到版本库。
+
+`skein.mod` 和 `skein.sum` 通过临时文件替换写入。`skein get` 成功时批量写入新的 `skein.sum` 条目，然后更新 `skein.mod`；如果后续模块失败，`skein.mod` 保持原样，`skein.sum` 最多保留已经完成模块的有效校验和，不会出现半写文件或未校验缓存。
+
+`skein mod clean` 删除整个全局缓存根（`SKEINMODCACHE` 或默认目录），不会影响项目里的 `skein.mod` 和 `skein.sum`。`--dry-run` 只打印将要清理的目录；如果缓存根被显式设成 home 目录、当前目录或文件系统根目录，需要额外传 `--force` 才允许清理。
+
 ### 源码形式发布的原生 module（MVP）
 
 module 可以在 `module.skein` 里声明可选的 `native { ... }` 块，随源码一起

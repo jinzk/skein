@@ -74,11 +74,15 @@ static void print_usage(const char *program) {
                  "       %s fmt [--check|-w|--write] [options] <file...|->\n"
                  "       %s lsp --stdio [--typecheck=off|loose|warn|strict] "
                  "[options]\n"
-                 "       %s get [-C dir] [--cache dir] <module/path>[@ver] ...\n"
-                 "       %s build [-C dir] [--cache dir] [<module/path>[@ver] ...]\n" "       %s mod init [-C dir] [--force] [module/path]\n"
+                 "       %s get [-C dir] [--cache dir] [--force] <module/path>[@ver] ...\n"
+                 "       %s build [-C dir] [--cache dir] [<module/path>[@ver] ...]\n"
+                 "       %s mod init [-C dir] [--force] [module/path]\n"
+                 "       %s mod clean [-C dir] [--cache dir] [--dry-run] "
+                 "[--force]\n"
                  "       the bytecode VM is enabled by default; "
                  "--no-vm selects the AST backend\n",
-                 program, program, program, program, program, program, program);
+                 program, program, program, program, program, program, program,
+                 program);
 }
 
 int main(int argc, char **argv) {
@@ -151,6 +155,8 @@ int main(int argc, char **argv) {
         return run_build_tool(args, program);
     if (args.size() > 2 && args[1] == "mod" && args[2] == "init")
         return run_mod_init_tool(args, program);
+    if (args.size() > 2 && args[1] == "mod" && args[2] == "clean")
+        return run_mod_clean_tool(args, program);
     if (args.size() > 1 && args[1] == "mod") {
         print_usage(program);
         return 2;

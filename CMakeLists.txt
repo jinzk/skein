@@ -365,6 +365,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/task.cpp
   src/interpreter/event_loop.cpp
   src/interpreter/repl.cpp
+  src/interpreter/repl_ui.cpp
   src/interpreter/source_encoding.cpp
   src/interpreter/iter.cpp
 )
@@ -700,6 +701,19 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME http1_parser_test COMMAND http1_parser_test)
   set_tests_properties(http1_parser_test PROPERTIES LABELS "core")
+
+  add_executable(repl_ui_test
+    tests/test_repl_ui.cpp
+    src/interpreter/repl_ui.cpp
+  )
+  target_include_directories(repl_ui_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(repl_ui_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME repl_ui_test COMMAND repl_ui_test)
+  set_tests_properties(repl_ui_test PROPERTIES LABELS "core")
 
   add_executable(bytecode_verifier_test
     tests/test_bytecode_verifier.cpp

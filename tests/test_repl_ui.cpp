@@ -1,0 +1,123 @@
+#include "repl_ui.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+namespace {
+
+using skein::repl_ui::completion_context;
+using skein::repl_ui::token_kind;
+using skein::repl_ui::token_span;
+
+void require(bool condition, const char *message) {
+    if (!condition) {
+        std::fprintf(stderr, "repl_ui_test: %s\n", message);
+        std::exit(1);
+    }
+}
+
+const token_span *find(const std::vector<token_span> &spans,
+                       token_kind kind, const std::string &line) {
+    for (const token_span &span : spans) {
+        if (span.kind == kind)
+            return &span;
+    }
+    (void)line;
+    return nullptr;
+}
+
+void test_tokens() {
+    const std::string line = "let x = \"hi\" // note";
+    const std::vector<token_span> spans = skein::repl_ui::tokenize(line);
+    require(find(spans, token_kind::keyword, line) != nullptr,
+            "keyword token missing");
+    require(find(spans, token_kind::string, line) != nullptr,
+            "string token missing");
+    require(find(spans, token_kind::comment, line) != nullptr,
+            "comment token missing");
+
+    const std::string unclosed = "\"unterminated";
+    const std::vector<token_span> broken =
+        skein::repl_ui::tokenize(unclosed);
+    require(find(broken, token_kind::error, unclosed) != nullptr,
+            "unclosed string should be an error token");
+
+    const std::string command = ":load demo.skein";
+    const std::vector<token_span> command_spans =
+        skein::repl_ui::tokenize(command);
+    require(command_spans.size() == 1 &&
+                command_spans[0].kind == token_kind::command,
+            "REPL command should be one command token");
+}
+
+void test_render() {
+    const std::string line = "let x = 42";
+    require(skein::repl_ui::render(line, false) == line,
+            "plain render changed the line");
+    const std::string colored = skein::repl_ui::render(line, true);
+    require(colored.find("\x1b[36m") != std::string::npos,
+            "keyword color missing");
+    require(colored.find("\x1b[33m") != std::string::npos,
+            "number color missing");
+    require(colored.find(line) == std::string::npos,
+            "colored render should not equal plain line");
+}
+
+void test_completion_context() {
+    completion_context ctx = skein::repl_ui::completion_context_at(
+        "std.str", 7);
+    require(ctx.start == 4, "qualified completion start");
+    require(ctx.prefix == "str", "qualified completion prefix");
+    require(ctx.qualifier == "std", "qualified completion qualifier");
+    require(!ctx.command, "qualified completion should not be a command");
+
+    ctx = skein::repl_ui::completion_context_at("pri", 3);
+    require(ctx.start == 0 && ctx.prefix == "pri", "bare completion");
+    require(ctx.qualifier.empty(), "bare completion should have no qualifier");
+
+    ctx = skein::repl_ui::completion_context_at(":lo", 3);
+    require(ctx.command && ctx.start == 0 && ctx.prefix == ":lo",
+            "command completion");
+
+    ctx = skein::repl_ui::completion_context_at(":load fi", 8);
+    require(ctx.command && ctx.start == 6 && ctx.prefix == "fi",
+            "command argument context");
+
+    ctx = skein::repl_ui::completion_context_at("let x = \"abc", 11);
+    require(ctx.suppressed, "completion inside string should be suppressed");
+
+    ctx = skein::repl_ui::completion_context_at("let x = 1 // note", 18);
+    require(ctx.suppressed, "completion inside comment should be suppressed");
+}
+
+void test_candidates() {
+    std::vector<std::string> candidates = {"std.", "string", "std", "string"};
+    candidates = skein::repl_ui::filter_and_sort(candidates, "st");
+    require(candidates.size() == 3, "filter should remove duplicates");
+    require(candidates[0] == "std" && candidates[1] == "std." &&
+                candidates[2] == "string",
+            "candidates should be sorted");
+
+    const std::string common =
+        skein::repl_ui::common_prefix({"std.", "string"});
+    require(common == "st", "common prefix");
+    require(skein::repl_ui::common_prefix({}).empty(),
+            "empty common prefix");
+    require(skein::repl_ui::common_prefix({"\xC3\xA9" "a", "\xC3\xA9" "b"}) ==
+                "\xC3\xA9",
+            "UTF-8 common prefix");
+    require(skein::repl_ui::common_prefix({"\xC3\xA9", "\xC3\xAA"}).empty(),
+            "common prefix must not split UTF-8");
+}
+
+}  // namespace
+
+int main() {
+    test_tokens();
+    test_render();
+    test_completion_context();
+    test_candidates();
+    return 0;
+}

@@ -189,7 +189,7 @@ std.http.close(server);
 - Module：唯一的模块机制，目录 + `module.skein` 清单；内部仍然是文件包，支持公共导出、内部包和深导出；源码层不存在 Module v1 或兼容层；
 - 第三方包使用字符串 import：`import "github.com/acme/util/json" as json;`；`skein mod init` 创建 `skein.mod`，`skein get module/path@version` 通过 git 下载、按 MVS 解析传递依赖并写入 `skein.sum`；`skein mod verify` 校验缓存，`skein mod download` 预取，`skein mod tidy` 清理未使用依赖，`skein mod clean` 清理全局缓存，`get --offline` 禁止联网；下载/构建使用项目锁、缓存锁和模块锁，运行时只读校验缓存且不会隐式联网；`/vN` 路径支持不兼容 major 版本并存；
 - `include` 在声明层展开，适合共享常量、类型和函数声明；
-- REPL 支持历史、`:load`、`ans` / `_`；脚本支持 shebang 和 `--encoding`；
+- REPL 支持历史、行编辑、词法高亮、Tab 补全（关键字 / REPL 命令 / 全局符号 / `std.*`）、`:load`、`ans` / `_`；脚本支持 shebang 和 `--encoding`；
 - Unicode 标识符、UTF-8 / UTF-16 / UTF-32 BOM 自动识别、GBK / GB18030 等编码转换；
 - 测试矩阵覆盖 Windows、Linux、ASan/UBSan/LSan、TSan、VM-only、JIT 和文档一致性检查。
 
@@ -319,7 +319,7 @@ src/
                  vm_host_calls.h、gc.*、package.*、
                  std_namespace.*、pattern.*、scopestack.*、structeval.*、fiber.*、
                  generator.*、iter.*、async_support.*、task.*、event_loop.*、
-                 repl.*、source_encoding.*
+                 repl.*、repl_ui.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
                  builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
                  *_builtin.*、compression.*、cookie.*、error.*、

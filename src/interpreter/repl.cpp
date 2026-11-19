@@ -1,9 +1,11 @@
 #include "repl.h"
 
 #include "platform.h"
+#include "repl_ui.h"
 #include "scopestack.h"
 #include "source_encoding.h"
 #include "symbol.h"
+#include "unicode_ident.h"
 #include "valuetype.h"
 
 #include <algorithm>
@@ -15,13 +17,27 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <cwchar>
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+#else
 #include <cerrno>
 #include <termios.h>
 #include <unistd.h>
 #endif
 
 namespace {
+
+namespace repl_ui = skein::repl_ui;
 
 constexpr size_t MAX_HISTORY = 1000;
 
@@ -95,7 +111,74 @@ void history_load_once() {
         history.erase(history.begin(), history.end() - MAX_HISTORY);
 }
 
-#ifndef _WIN32
+bool starts_with(const std::string &text, const std::string &prefix) {
+    return text.size() >= prefix.size() &&
+           text.compare(0, prefix.size(), prefix) == 0;
+}
+
+std::string lowercase(std::string text) {
+    for (char &c : text)
+        c = (char)std::tolower((unsigned char)c);
+    return text;
+}
+
+#ifdef _WIN32
+bool enable_windows_vt();
+#endif
+
+bool terminal_supports_color() {
+    if (!platform_stdin_is_tty() || !platform_stdout_is_tty())
+        return false;
+    std::string term;
+    if (platform_get_env("TERM", term) && lowercase(term) == "dumb")
+        return false;
+#ifdef _WIN32
+    return enable_windows_vt();
+#else
+    return true;
+#endif
+}
+
+bool repl_color_enabled() {
+    static int cached = -1;
+    if (cached >= 0)
+        return cached != 0;
+    std::string value;
+    if (platform_get_env("NO_COLOR", value)) {
+        cached = 0;
+    } else if (platform_get_env("SKEIN_REPL_COLOR", value)) {
+        value = lowercase(value);
+        cached = (value == "always" || value == "1" || value == "true" ||
+                  value == "on")
+                     ? 1
+                     : (value == "auto" && terminal_supports_color()) ? 1 : 0;
+    } else {
+        cached = terminal_supports_color() ? 1 : 0;
+    }
+    return cached != 0;
+}
+
+void write_stdout(const std::string &text) {
+    std::fflush(stdout);
+#ifdef _WIN32
+    if (!text.empty())
+        std::fwrite(text.data(), 1, text.size(), stdout);
+    std::fflush(stdout);
+#else
+    const char *data = text.data();
+    size_t remaining = text.size();
+    while (remaining > 0) {
+        ssize_t written = ::write(STDOUT_FILENO, data, remaining);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        data += written;
+        remaining -= (size_t)written;
+    }
+#endif
+}
+
 size_t previous_utf8(const std::string &text, size_t pos) {
     if (pos == 0) return 0;
     --pos;
@@ -113,30 +196,147 @@ size_t next_utf8(const std::string &text, size_t pos) {
     return pos;
 }
 
-void write_stdout(const std::string &text) {
-    std::fflush(stdout);
-    const char *data = text.data();
-    size_t remaining = text.size();
-    while (remaining > 0) {
-        ssize_t written = ::write(STDOUT_FILENO, data, remaining);
-        if (written < 0) {
-            if (errno == EINTR) continue;
-            break;
-        }
-        data += written;
-        remaining -= (size_t)written;
-    }
+size_t line_width(const std::string &text) {
+    return unicode_ident::display_width(text.data(), text.size());
 }
 
 void redraw(const std::string &prompt, const std::string &line,
             size_t cursor) {
-    std::string out = "\r" + prompt + line + "\x1b[K";
-    size_t tail = line.size() - cursor;
+    const std::string rendered = repl_ui::render(line, repl_color_enabled());
+    std::string out = "\r" + prompt + rendered + "\x1b[K";
+    const size_t tail = line_width(line.substr(cursor));
     if (tail > 0)
         out += "\x1b[" + std::to_string(tail) + "D";
     write_stdout(out);
 }
 
+const std::vector<std::string> &repl_commands() {
+    static const std::vector<std::string> commands = {
+        ":help", ":quit", ":q", ":exit", ":load", ":history",
+    };
+    return commands;
+}
+
+void append_global_symbols(std::vector<std::string> &out) {
+    for (const struct symbol *sym : active_scope_context().global_slots) {
+        if (!sym || !sym->name || !sym->name[0] || sym->name[0] == '$')
+            continue;
+        if (std::strcmp(sym->name, "std") == 0)
+            continue;
+        out.emplace_back(sym->name);
+    }
+}
+
+const value_t *std_child(const value_t *value, const std::string &name) {
+    if (!value || value->type != T_dict)
+        return nullptr;
+    const dict_value_t *dict = (const dict_value_t *)value;
+    for (const auto &entry : dict->payload->items) {
+        if (!entry.first || entry.first->type != T_string)
+            continue;
+        const string_value_t *key = (const string_value_t *)entry.first;
+        if (key->value && name == key->value)
+            return entry.second;
+    }
+    return nullptr;
+}
+
+void append_std_children(const std::string &qualifier,
+                         std::vector<std::string> &out) {
+    std::string path;
+    if (qualifier == "std")
+        path.clear();
+    else if (starts_with(qualifier, "std."))
+        path = qualifier.substr(4);
+    else
+        return;
+
+    const value_t *current = lookup_global_symbol("std");
+    std::size_t pos = 0;
+    while (pos < path.size()) {
+        const std::size_t dot = path.find('.', pos);
+        const std::string part =
+            path.substr(pos, dot == std::string::npos ? std::string::npos
+                                                       : dot - pos);
+        current = std_child(current, part);
+        if (!current)
+            return;
+        if (dot == std::string::npos)
+            break;
+        pos = dot + 1;
+    }
+    if (!current || current->type != T_dict)
+        return;
+
+    const dict_value_t *dict = (const dict_value_t *)current;
+    for (const auto &entry : dict->payload->items) {
+        if (!entry.first || entry.first->type != T_string)
+            continue;
+        const string_value_t *key = (const string_value_t *)entry.first;
+        if (!key->value || !key->value[0] || key->value[0] == '$')
+            continue;
+        std::string name = key->value;
+        if (entry.second && entry.second->type == T_dict)
+            name += ".";
+        out.push_back(std::move(name));
+    }
+}
+
+std::vector<std::string> completion_candidates(const std::string &line,
+                                               size_t cursor) {
+    const repl_ui::completion_context context =
+        repl_ui::completion_context_at(line, cursor);
+    std::vector<std::string> out;
+    if (context.suppressed)
+        return out;
+    if (context.command) {
+        if (context.start == 0)
+            out = repl_commands();
+        return repl_ui::filter_and_sort(out, context.prefix);
+    }
+    if (context.qualifier.empty()) {
+        const std::vector<std::string> &words = repl_ui::keywords();
+        out.insert(out.end(), words.begin(), words.end());
+        append_global_symbols(out);
+        out.emplace_back("std.");
+    } else if (context.qualifier == "std" ||
+               starts_with(context.qualifier, "std.")) {
+        append_std_children(context.qualifier, out);
+    }
+    return repl_ui::filter_and_sort(out, context.prefix);
+}
+
+void complete_line(std::string &line, size_t &cursor,
+                   const std::string &prompt) {
+    const repl_ui::completion_context context =
+        repl_ui::completion_context_at(line, cursor);
+    std::vector<std::string> candidates = completion_candidates(line, cursor);
+    if (candidates.empty()) {
+        if (!context.suppressed &&
+            (!context.command || context.start == 0))
+            write_stdout("\a");
+        return;
+    }
+    if (candidates.size() == 1) {
+        line.replace(context.start, cursor - context.start, candidates[0]);
+        cursor = context.start + candidates[0].size();
+        redraw(prompt, line, cursor);
+        return;
+    }
+    const std::string prefix = repl_ui::common_prefix(candidates);
+    if (prefix.size() > context.prefix.size()) {
+        line.replace(context.start, cursor - context.start, prefix);
+        cursor = context.start + prefix.size();
+        redraw(prompt, line, cursor);
+        return;
+    }
+    write_stdout("\r\n");
+    for (const std::string &candidate : candidates)
+        write_stdout("  " + candidate + "\n");
+    redraw(prompt, line, cursor);
+}
+
+#ifndef _WIN32
 int read_byte() {
     unsigned char c = 0;
     for (;;) {
@@ -180,6 +380,7 @@ repl_line_status read_edited_line(const std::string &prompt,
     history_load_once();
     raw_terminal terminal;
     if (!terminal.enable()) {
+        write_stdout(prompt);
         line.clear();
         int c;
         while ((c = std::fgetc(stdin)) != EOF) {
@@ -340,9 +541,305 @@ repl_line_status read_edited_line(const std::string &prompt,
             }
             continue;
         }
-        if (c >= 32 || c == '\t') {
+        if (c == '\t') {
+            complete_line(current, cursor, prompt);
+            continue;
+        }
+        if (c >= 32) {
             current.insert(cursor, 1, (char)c);
             cursor += 1;
+            redraw(prompt, current, cursor);
+        }
+    }
+}
+#endif
+
+#ifdef _WIN32
+bool enable_windows_vt() {
+    static int state = -1;
+    if (state >= 0)
+        return state != 0;
+    HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (handle == INVALID_HANDLE_VALUE || !GetConsoleMode(handle, &mode)) {
+        state = 0;
+        return false;
+    }
+    state = SetConsoleMode(handle,
+                           mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+                ? 1
+                : 0;
+    return state != 0;
+}
+
+struct console_input_guard {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    DWORD original = 0;
+    bool active = false;
+
+    bool enable() {
+        handle = GetStdHandle(STD_INPUT_HANDLE);
+        if (handle == INVALID_HANDLE_VALUE ||
+            !GetConsoleMode(handle, &original))
+            return false;
+        const DWORD mode =
+            original &
+            ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+        if (!SetConsoleMode(handle, mode))
+            return false;
+        active = true;
+        return true;
+    }
+
+    ~console_input_guard() {
+        if (active)
+            SetConsoleMode(handle, original);
+    }
+};
+
+std::string utf8_from_wchars(const wchar_t *data, int length) {
+    if (length <= 0)
+        return std::string();
+    const int count = WideCharToMultiByte(CP_UTF8, 0, data, length, nullptr,
+                                          0, nullptr, nullptr);
+    if (count <= 0)
+        return std::string();
+    std::string out((size_t)count, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, data, length, out.data(), count, nullptr,
+                        nullptr);
+    return out;
+}
+
+repl_line_status read_edited_line(const std::string &prompt,
+                                  bool continuation, std::string &line) {
+    (void)continuation;
+    history_load_once();
+    console_input_guard terminal;
+    if (!enable_windows_vt() || !terminal.enable()) {
+        write_stdout(prompt);
+        line.clear();
+        int c;
+        while ((c = std::fgetc(stdin)) != EOF) {
+            if (c == '\n') return REPL_LINE;
+            if (c != '\r') line.push_back((char)c);
+        }
+        return line.empty() ? REPL_EOF : REPL_LINE;
+    }
+
+    std::string current;
+    size_t cursor = 0;
+    size_t history_pos = history.size();
+    std::string draft;
+    wchar_t high_surrogate = 0;
+    write_stdout(prompt);
+
+    auto append_char = [&](wchar_t ch) {
+        wchar_t buffer[2] = {ch, 0};
+        int length = 1;
+        if (ch >= 0xD800 && ch <= 0xDBFF) {
+            high_surrogate = ch;
+            return;
+        }
+        if (ch >= 0xDC00 && ch <= 0xDFFF && high_surrogate) {
+            buffer[0] = high_surrogate;
+            buffer[1] = ch;
+            length = 2;
+            high_surrogate = 0;
+        } else {
+            high_surrogate = 0;
+        }
+        const std::string bytes = utf8_from_wchars(buffer, length);
+        if (!bytes.empty()) {
+            current.insert(cursor, bytes);
+            cursor += bytes.size();
+        }
+    };
+
+    for (;;) {
+        if (g_interrupted) {
+            g_interrupted = 1;
+            write_stdout("^C\r\n");
+            return REPL_INTERRUPTED;
+        }
+        INPUT_RECORD record;
+        DWORD count = 0;
+        if (!ReadConsoleInputW(terminal.handle, &record, 1, &count) ||
+            count == 0) {
+            if (g_interrupted) {
+                g_interrupted = 1;
+                write_stdout("^C\r\n");
+                return REPL_INTERRUPTED;
+            }
+            write_stdout("\r\n");
+            return current.empty() ? REPL_EOF : REPL_LINE;
+        }
+        if (record.EventType != KEY_EVENT || !record.Event.KeyEvent.bKeyDown)
+            continue;
+        const KEY_EVENT_RECORD &key = record.Event.KeyEvent;
+        const bool ctrl =
+            (key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) !=
+            0;
+
+        if (ctrl && key.wVirtualKeyCode == 'C') {
+            g_interrupted = 1;
+            write_stdout("^C\r\n");
+            return REPL_INTERRUPTED;
+        }
+        if (key.wVirtualKeyCode == VK_LEFT) {
+            cursor = previous_utf8(current, cursor);
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_RIGHT) {
+            cursor = next_utf8(current, cursor);
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_HOME) {
+            cursor = 0;
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_END) {
+            cursor = current.size();
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_UP) {
+            if (!history.empty()) {
+                if (history_pos == history.size())
+                    draft = current;
+                if (history_pos > 0)
+                    --history_pos;
+                current = history[history_pos];
+                cursor = current.size();
+                redraw(prompt, current, cursor);
+            }
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_DOWN) {
+            if (history_pos < history.size()) {
+                ++history_pos;
+                current = history_pos == history.size() ? draft
+                                                        : history[history_pos];
+                cursor = current.size();
+                redraw(prompt, current, cursor);
+            }
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_DELETE) {
+            if (cursor < current.size()) {
+                current.erase(cursor, next_utf8(current, cursor) - cursor);
+                redraw(prompt, current, cursor);
+            }
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_RETURN) {
+            write_stdout("\r\n");
+            line = current;
+            history_add(line);
+            return REPL_LINE;
+        }
+        if (key.wVirtualKeyCode == VK_TAB) {
+            complete_line(current, cursor, prompt);
+            continue;
+        }
+        if (key.wVirtualKeyCode == VK_BACK) {
+            if (cursor > 0) {
+                const size_t begin = previous_utf8(current, cursor);
+                current.erase(begin, cursor - begin);
+                cursor = begin;
+                redraw(prompt, current, cursor);
+            }
+            continue;
+        }
+
+        const wchar_t ch = key.uChar.UnicodeChar;
+        if (ch == 0)
+            continue;
+        if (ch == 3) {
+            g_interrupted = 1;
+            write_stdout("^C\r\n");
+            return REPL_INTERRUPTED;
+        }
+        if (ch == 4) {
+            if (current.empty()) {
+                write_stdout("\r\n");
+                return REPL_EOF;
+            }
+            if (cursor < current.size()) {
+                current.erase(cursor, next_utf8(current, cursor) - cursor);
+                redraw(prompt, current, cursor);
+            }
+            continue;
+        }
+        if (ch == 7) {
+            current.clear();
+            cursor = 0;
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 1) {
+            cursor = 0;
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 5) {
+            cursor = current.size();
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 11) {
+            current.erase(cursor);
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 21) {
+            current.erase(0, cursor);
+            cursor = 0;
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 23) {
+            size_t begin = previous_utf8(current, cursor);
+            while (begin > 0 &&
+                   std::isspace((unsigned char)current[begin - 1]))
+                begin = previous_utf8(current, begin);
+            size_t word = begin;
+            while (word > 0 &&
+                   !std::isspace((unsigned char)current[word - 1]))
+                word = previous_utf8(current, word);
+            current.erase(word, cursor - word);
+            cursor = word;
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 12) {
+            write_stdout("\x1b[2J\x1b[H");
+            redraw(prompt, current, cursor);
+            continue;
+        }
+        if (ch == 8 || ch == 127) {
+            if (cursor > 0) {
+                const size_t begin = previous_utf8(current, cursor);
+                current.erase(begin, cursor - begin);
+                cursor = begin;
+                redraw(prompt, current, cursor);
+            }
+            continue;
+        }
+        if (ch == '\r' || ch == '\n') {
+            write_stdout("\r\n");
+            line = current;
+            history_add(line);
+            return REPL_LINE;
+        }
+        if (ch == '\t') {
+            complete_line(current, cursor, prompt);
+            continue;
+        }
+        if (ch >= 32) {
+            append_char(ch);
             redraw(prompt, current, cursor);
         }
     }
@@ -438,12 +935,19 @@ repl_line_status repl_read_line(std::string &line, bool continuation) {
 
         repl_line_status status;
 #ifdef _WIN32
-        if (g_show_prompt)
-            std::printf("%s", prompt.c_str());
-        std::fflush(stdout);
-        status = read_plain_line(line);
+        if (g_show_prompt && platform_stdin_is_tty() &&
+            platform_stdout_is_tty()) {
+            status = read_edited_line(prompt, continuation, line);
+        } else {
+            if (g_show_prompt) {
+                std::printf("%s", prompt.c_str());
+                std::fflush(stdout);
+            }
+            status = read_plain_line(line);
+        }
 #else
-        if (g_show_prompt && platform_stdin_is_tty())
+        if (g_show_prompt && platform_stdin_is_tty() &&
+            platform_stdout_is_tty())
             status = read_edited_line(prompt, continuation, line);
         else {
             if (g_show_prompt) {

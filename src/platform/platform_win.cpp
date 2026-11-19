@@ -85,6 +85,10 @@ bool platform_stdin_is_tty() {
     return _isatty(_fileno(stdin)) != 0;
 }
 
+bool platform_stdout_is_tty() {
+    return _isatty(_fileno(stdout)) != 0;
+}
+
 void platform_install_interrupt_handler() {
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
                     GetCurrentProcess(), &main_thread, 0, FALSE,

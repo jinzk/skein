@@ -37,8 +37,9 @@ bool platform_unset_env(const std::string &name);
 bool platform_environ(
     std::vector<std::pair<std::string, std::string>> &entries);
 
-/* True when stdin is an interactive terminal. */
+/* True when stdin / stdout is an interactive terminal. */
 bool platform_stdin_is_tty();
+bool platform_stdout_is_tty();
 
 /* Install the Ctrl-C handler used by the REPL. */
 void platform_install_interrupt_handler();

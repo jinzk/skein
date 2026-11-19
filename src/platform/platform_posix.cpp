@@ -133,6 +133,10 @@ bool platform_stdin_is_tty() {
     return isatty(fileno(stdin)) != 0;
 }
 
+bool platform_stdout_is_tty() {
+    return isatty(fileno(stdout)) != 0;
+}
+
 void platform_install_interrupt_handler() {
     struct sigaction sa = {};
     sa.sa_handler = on_sigint;

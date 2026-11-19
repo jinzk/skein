@@ -1,0 +1,263 @@
+#include "repl_ui.h"
+
+#include <algorithm>
+#include <cctype>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+namespace skein {
+namespace repl_ui {
+namespace {
+
+bool ident_start(unsigned char c) {
+    return std::isalpha(c) || c == '_' || c >= 0x80;
+}
+
+bool ident_continue(unsigned char c) {
+    return std::isalnum(c) || c == '_' || c >= 0x80;
+}
+
+bool digit(unsigned char c) { return c >= '0' && c <= '9'; }
+
+const std::vector<std::string> &keyword_list() {
+    static const std::vector<std::string> words = {
+        "if", "else", "while", "do", "for", "in", "switch", "case",
+        "default", "match", "let", "const", "func", "struct", "enum",
+        "trait", "impl", "extern", "package", "module", "import",
+        "include", "export", "return", "break", "continue", "yield",
+        "defer", "launch", "try", "on", "error", "recover", "fail",
+        "pass", "is", "as", "label", "true", "false", "null",
+    };
+    return words;
+}
+
+const std::unordered_set<std::string> &keyword_set() {
+    static const std::unordered_set<std::string> words(keyword_list().begin(),
+                                                       keyword_list().end());
+    return words;
+}
+
+const char *color_for(token_kind kind) {
+    switch (kind) {
+        case token_kind::keyword:
+        case token_kind::command:
+            return "\x1b[36m";
+        case token_kind::string:
+            return "\x1b[32m";
+        case token_kind::comment:
+            return "\x1b[90m";
+        case token_kind::number:
+            return "\x1b[33m";
+        case token_kind::error:
+            return "\x1b[31m";
+        case token_kind::plain:
+            break;
+    }
+    return "";
+}
+
+std::size_t scan_quoted(const std::string &line, std::size_t start,
+                        char quote) {
+    std::size_t pos = start + 1;
+    while (pos < line.size()) {
+        if (line[pos] == '\\' && pos + 1 < line.size()) {
+            pos += 2;
+            continue;
+        }
+        if (line[pos] == quote)
+            return pos + 1;
+        ++pos;
+    }
+    return line.size();
+}
+
+}  // namespace
+
+const std::vector<std::string> &keywords() { return keyword_list(); }
+
+std::vector<token_span> tokenize(const std::string &line) {
+    std::vector<token_span> spans;
+    if (line.empty())
+        return spans;
+    if (line[0] == ':') {
+        spans.push_back({0, line.size(), token_kind::command});
+        return spans;
+    }
+
+    std::size_t pos = 0;
+    while (pos < line.size()) {
+        const unsigned char c = (unsigned char)line[pos];
+        if (std::isspace(c)) {
+            ++pos;
+            continue;
+        }
+        if (c == '/' && pos + 1 < line.size() && line[pos + 1] == '/') {
+            spans.push_back({pos, line.size(), token_kind::comment});
+            break;
+        }
+        if (c == '"' || c == '\'') {
+            const std::size_t end = scan_quoted(line, pos, (char)c);
+            const bool closed = end <= line.size() && end > pos + 1 &&
+                                line[end - 1] == (char)c;
+            spans.push_back(
+                {pos, end, closed ? token_kind::string : token_kind::error});
+            pos = end;
+            continue;
+        }
+        if (digit(c) || (c == '.' && pos + 1 < line.size() &&
+                         digit((unsigned char)line[pos + 1]))) {
+            const std::size_t start = pos++;
+            while (pos < line.size()) {
+                const unsigned char n = (unsigned char)line[pos];
+                if (!(std::isalnum(n) || n == '_' || n == '.'))
+                    break;
+                ++pos;
+            }
+            spans.push_back({start, pos, token_kind::number});
+            continue;
+        }
+        if (ident_start(c)) {
+            const std::size_t start = pos++;
+            while (pos < line.size() &&
+                   ident_continue((unsigned char)line[pos]))
+                ++pos;
+            const std::string word = line.substr(start, pos - start);
+            spans.push_back(
+                {start, pos, keyword_set().count(word) ? token_kind::keyword
+                                                      : token_kind::plain});
+            continue;
+        }
+        ++pos;
+    }
+    return spans;
+}
+
+std::string render(const std::string &line, bool color) {
+    if (!color || line.empty())
+        return line;
+    const std::vector<token_span> spans = tokenize(line);
+    std::string out;
+    out.reserve(line.size() + spans.size() * 5);
+    std::size_t pos = 0;
+    for (const token_span &span : spans) {
+        if (span.start > pos)
+            out.append(line, pos, span.start - pos);
+        const char *code = color_for(span.kind);
+        if (*code)
+            out += code;
+        out.append(line, span.start, span.end - span.start);
+        if (*code)
+            out += "\x1b[0m";
+        pos = span.end;
+    }
+    if (pos < line.size())
+        out.append(line, pos, line.size() - pos);
+    return out;
+}
+
+completion_context completion_context_at(const std::string &line,
+                                         std::size_t cursor) {
+    completion_context context;
+    if (cursor > line.size())
+        cursor = line.size();
+    if (!line.empty() && line[0] == ':') {
+        context.command = true;
+        const std::size_t space = line.find_first_of(" \t");
+        if (space == std::string::npos || cursor <= space) {
+            context.start = 0;
+            context.prefix = line.substr(0, cursor);
+        } else {
+            std::size_t start = cursor;
+            while (start > space &&
+                   !std::isspace((unsigned char)line[start - 1]))
+                --start;
+            context.start = start;
+            context.prefix = line.substr(start, cursor - start);
+        }
+        return context;
+    }
+
+    std::size_t start = cursor;
+    while (start > 0 && ident_continue((unsigned char)line[start - 1]))
+        --start;
+    context.start = start;
+    context.prefix = line.substr(start, cursor - start);
+
+    if (start > 0 && line[start - 1] == '.') {
+        std::size_t qualifier_start = start - 1;
+        while (qualifier_start > 0) {
+            const unsigned char c =
+                (unsigned char)line[qualifier_start - 1];
+            if (!(ident_continue(c) || c == '.'))
+                break;
+            --qualifier_start;
+        }
+        context.qualifier =
+            line.substr(qualifier_start, start - 1 - qualifier_start);
+    }
+
+    for (const token_span &span : tokenize(line)) {
+        if (span.kind == token_kind::comment || span.kind == token_kind::error)
+            context.suppressed =
+                context.suppressed || (cursor >= span.start && cursor <= span.end);
+        else if (span.kind == token_kind::string)
+            context.suppressed =
+                context.suppressed || (cursor > span.start && cursor < span.end);
+    }
+    return context;
+}
+
+std::vector<std::string> filter_and_sort(
+    const std::vector<std::string> &candidates, const std::string &prefix) {
+    std::vector<std::string> out;
+    for (const std::string &candidate : candidates) {
+        if (candidate.rfind(prefix, 0) == 0)
+            out.push_back(candidate);
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+std::string common_prefix(const std::vector<std::string> &candidates) {
+    if (candidates.empty())
+        return std::string();
+    std::string prefix = candidates.front();
+    for (std::size_t i = 1; i < candidates.size(); ++i) {
+        const std::string &candidate = candidates[i];
+        std::size_t length = 0;
+        while (length < prefix.size() && length < candidate.size() &&
+               prefix[length] == candidate[length])
+            ++length;
+        prefix.resize(length);
+        if (prefix.empty())
+            break;
+    }
+    /* Avoid returning an incomplete UTF-8 sequence. */
+    if (!prefix.empty()) {
+        std::size_t length = prefix.size();
+        const unsigned char last = (unsigned char)prefix[length - 1];
+        if (last >= 0x80) {
+            std::size_t start = length - 1;
+            while (start > 0 &&
+                   (((unsigned char)prefix[start]) & 0xC0) == 0x80)
+                --start;
+            const unsigned char lead = (unsigned char)prefix[start];
+            std::size_t needed = 1;
+            if ((lead & 0xE0) == 0xC0)
+                needed = 2;
+            else if ((lead & 0xF0) == 0xE0)
+                needed = 3;
+            else if ((lead & 0xF8) == 0xF0)
+                needed = 4;
+            if (length - start < needed)
+                length = start;
+            prefix.resize(length);
+        }
+    }
+    return prefix;
+}
+
+}  // namespace repl_ui
+}  // namespace skein

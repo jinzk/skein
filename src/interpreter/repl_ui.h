@@ -62,6 +62,9 @@ std::string indentation(int level, int width = 2);
 std::size_t dedent_for_closing(std::string &line, std::size_t cursor,
                                char closing, int width = 2);
 
+/* File/directory completions for a partial path prefix. */
+std::vector<std::string> path_completions(const std::string &prefix);
+
 }  // namespace repl_ui
 }  // namespace skein
 

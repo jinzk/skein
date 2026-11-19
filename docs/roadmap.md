@@ -112,8 +112,8 @@
 范围：
 
 1. 共享 `completion_index`
-2. REPL struct 字段补全
-3. REPL `:load` 路径补全
+2. REPL struct 字段补全（已完成）
+3. REPL `:load` 路径补全（已完成）
 4. 长行水平滚动
 5. 运算符/逗号 continuation 缩进
 6. LSP incremental sync / debounce

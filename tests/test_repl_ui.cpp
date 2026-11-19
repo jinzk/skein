@@ -1,7 +1,11 @@
 #include "repl_ui.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -112,6 +116,33 @@ void test_indentation() {
     require(line == "    x", "non-leading code must stay unchanged");
 }
 
+void test_path_completions() {
+    namespace fs = std::filesystem;
+    const auto stamp = std::chrono::steady_clock::now()
+                           .time_since_epoch()
+                           .count();
+    const fs::path root =
+        fs::temp_directory_path() /
+        ("skein-repl-ui-" + std::to_string((long long)stamp));
+    fs::create_directories(root / "alps");
+    std::ofstream(root / "alpha.skein") << "x";
+    std::ofstream(root / "alpine.txt") << "x";
+
+    const std::string prefix = (root / "al").u8string();
+    const std::vector<std::string> candidates =
+        skein::repl_ui::path_completions(prefix);
+    require(candidates.size() == 3, "path completion count");
+    require(std::is_sorted(candidates.begin(), candidates.end()),
+            "path completions should be sorted");
+    bool have_dir = false;
+    for (const std::string &candidate : candidates) {
+        if (candidate.back() == '/' || candidate.back() == '\\')
+            have_dir = true;
+    }
+    require(have_dir, "directory completion should end with a separator");
+    fs::remove_all(root);
+}
+
 void test_candidates() {
     std::vector<std::string> candidates = {"std.", "string", "std", "string"};
     candidates = skein::repl_ui::filter_and_sort(candidates, "st");
@@ -139,6 +170,7 @@ int main() {
     test_render();
     test_completion_context();
     test_indentation();
+    test_path_completions();
     test_candidates();
     return 0;
 }

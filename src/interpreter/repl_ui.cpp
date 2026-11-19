@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -289,6 +290,37 @@ std::size_t dedent_for_closing(std::string &line, std::size_t cursor,
         return cursor;
     line.erase(0, remove);
     return cursor - remove;
+}
+
+std::vector<std::string> path_completions(const std::string &prefix) {
+    namespace fs = std::filesystem;
+    std::vector<std::string> out;
+    const std::size_t separator = prefix.find_last_of("/\\");
+    const std::string directory_text =
+        separator == std::string::npos ? std::string()
+                                       : prefix.substr(0, separator + 1);
+    const std::string base_text =
+        separator == std::string::npos
+            ? std::string(".")
+            : (separator == 0 ? prefix.substr(0, 1)
+                              : prefix.substr(0, separator));
+    const std::string leaf =
+        separator == std::string::npos ? prefix : prefix.substr(separator + 1);
+
+    std::error_code ec;
+    fs::directory_iterator it(fs::u8path(base_text), ec);
+    const fs::directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().u8string();
+        if (name.rfind(leaf, 0) != 0)
+            continue;
+        std::string candidate = directory_text + name;
+        std::error_code kind_ec;
+        if (it->is_directory(kind_ec))
+            candidate += "/";
+        out.push_back(std::move(candidate));
+    }
+    return filter_and_sort(out, prefix);
 }
 
 }  // namespace repl_ui

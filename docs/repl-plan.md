@@ -30,6 +30,8 @@ Tab 补全支持：
 - REPL 命令
 - 当前全局符号
 - `std.*` 命名空间
+- struct / enum variant 字段与方法
+- `:load` 文件路径
 
 行为：
 
@@ -65,8 +67,8 @@ tests/test_repl_ui.cpp
 
 ### P1
 
-- struct 字段补全：`user.<Tab>`
-- `:load` 路径补全
+- struct 字段补全：`user.<Tab>`（已完成）
+- `:load` 路径补全（已完成）
 - 长行水平滚动
 - 运算符/逗号 continuation 缩进
 

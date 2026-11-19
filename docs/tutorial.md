@@ -134,7 +134,7 @@ SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
 - 多行输入会按当前语法层级自动缩进；行首输入 `}`、`)` 或 `]` 时自动回退一级；
 - 输入行支持词法高亮：关键字、字符串、注释、数字和 REPL 命令；
 - 高亮默认只在 stdin/stdout 都是终端时开启；`SKEIN_REPL_COLOR=always|auto|never` 可覆盖，设置 `NO_COLOR` 可强制关闭；
-- 当前补全覆盖关键字、REPL 命令、全局符号和 `std.*`；结构体字段、`:load` 路径补全以及长行水平滚动暂未实现；
+- 当前补全覆盖关键字、REPL 命令、全局符号、`std.*`、struct / enum variant 字段和 `:load` 文件路径；长行水平滚动暂未实现；
 - `Ctrl-C` 取消当前输入，或中断正在执行的程序；
 - `Ctrl-D` 退出解释器；
 - 上一次非 `null` 结果保存为 `ans`，也可以使用 `_` 引用；

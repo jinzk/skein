@@ -4,6 +4,7 @@
 #include "repl_ui.h"
 #include "scopestack.h"
 #include "source_encoding.h"
+#include "structtype.h"
 #include "symbol.h"
 #include "unicode_ident.h"
 #include "valuetype.h"
@@ -284,6 +285,33 @@ void append_std_children(const std::string &qualifier,
     }
 }
 
+void append_value_members(const std::string &qualifier,
+                          std::vector<std::string> &out) {
+    const value_t *value = lookup_global_symbol(qualifier.c_str());
+    if (!value)
+        return;
+    if (value->type == T_struct) {
+        const struct_value_t *structure = (const struct_value_t *)value;
+        if (!structure->def)
+            return;
+        for (const field_def &field : structure->def->fields)
+            out.push_back(field.name);
+        for (const auto &method : structure->def->methods)
+            out.push_back(method.first);
+        return;
+    }
+    if (value->type == T_enum) {
+        const enum_value_t *enumeration = (const enum_value_t *)value;
+        if (!enumeration->def || enumeration->variant < 0 ||
+            (size_t)enumeration->variant >= enumeration->def->variants.size())
+            return;
+        const variant_def &variant =
+            enumeration->def->variants[(size_t)enumeration->variant];
+        for (const field_def &field : variant.fields)
+            out.push_back(field.name);
+    }
+}
+
 std::vector<std::string> completion_candidates(const std::string &line,
                                                size_t cursor) {
     const repl_ui::completion_context context =
@@ -292,8 +320,13 @@ std::vector<std::string> completion_candidates(const std::string &line,
     if (context.suppressed)
         return out;
     if (context.command) {
-        if (context.start == 0)
+        if (context.start == 0) {
             out = repl_commands();
+        } else if (starts_with(line, ":load") &&
+                   (line.size() == 5 ||
+                    std::isspace((unsigned char)line[5]))) {
+            out = repl_ui::path_completions(context.prefix);
+        }
         return repl_ui::filter_and_sort(out, context.prefix);
     }
     if (context.qualifier.empty()) {
@@ -304,6 +337,8 @@ std::vector<std::string> completion_candidates(const std::string &line,
     } else if (context.qualifier == "std" ||
                starts_with(context.qualifier, "std.")) {
         append_std_children(context.qualifier, out);
+    } else {
+        append_value_members(context.qualifier, out);
     }
     return repl_ui::filter_and_sort(out, context.prefix);
 }

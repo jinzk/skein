@@ -169,6 +169,8 @@ bool write_native_artifact_metadata(const std::string &module_path,
                                     const std::string &version,
                                     const std::string &compiler,
                                     const std::string &compiler_version,
+                                    const std::string &build_flags,
+                                    const std::string &build_command_hash,
                                     const std::string &artifact,
                                     std::string &error) {
     std::string source_hash;
@@ -205,6 +207,10 @@ bool write_native_artifact_metadata(const std::string &module_path,
     data += compiler;
     data += "\ncompiler_version=";
     data += compiler_version;
+    data += "\nbuild_flags=";
+    data += build_flags;
+    data += "\nbuild_command_hash=";
+    data += build_command_hash;
     data += "\nartifact_name=";
     data += name;
     data += "\nartifact_hash=";

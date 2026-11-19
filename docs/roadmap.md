@@ -85,10 +85,12 @@
 1. 运行时模块加载持有缓存共享锁（已完成）
 2. `mod clean` 与运行中脚本协调（已完成）
 3. Native 产物完整性（已完成）：
-   - 构建时写入 source/artifact hash、编译器和编译器版本
+   - 构建时写入 source/artifact hash、编译器、编译器版本
+   - 写入构建 flags 和规范化构建命令 hash
    - 加载前校验 source/artifact hash
    - 编译器可用时检测版本变化
-   - 编译 flags 的显式元数据仍待补充
+   - GCC/Clang 路径映射、MinGW deterministic PE、MSVC `/Brepro`
+   - 相同输入连续构建产物字节一致
 4. `mod prune` 安全语义（已完成）：
    - 默认只列出未引用版本
    - 显式 `--all` 才删除

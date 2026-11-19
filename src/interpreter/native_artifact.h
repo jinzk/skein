@@ -17,6 +17,8 @@ bool write_native_artifact_metadata(const std::string &module_path,
                                     const std::string &version,
                                     const std::string &compiler,
                                     const std::string &compiler_version,
+                                    const std::string &build_flags,
+                                    const std::string &build_command_hash,
                                     const std::string &artifact,
                                     std::string &error);
 

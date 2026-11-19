@@ -131,14 +131,20 @@ skein mod prune --all
   - 产物 hash
   - 编译器
   - 编译器版本
+  - 构建 flags
+  - 规范化构建命令 hash
 - `std.module.native` 加载前校验源码 hash 与产物 hash
 - 编译器可用时，版本变化会使旧产物失效
 - 部署环境没有编译器时仍可加载已通过 hash 校验的产物
+- 可复现构建：
+  - GCC / Clang 使用 `-ffile-prefix-map`
+  - MinGW 使用 `--no-insert-timestamp`
+  - MSVC 使用 `/Brepro`
+  - 设置 `SOURCE_DATE_EPOCH=0`
+  - 相同输入连续 build 产生相同产物字节
 
 尚未完成：
 
-- 编译 flags 的显式元数据
-- 可复现构建
 - 交叉编译
 
 ## 9. 后续计划

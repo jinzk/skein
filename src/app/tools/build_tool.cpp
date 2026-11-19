@@ -6,7 +6,9 @@
 #include "package.h"
 #include "platform.h"
 #include "runtime_state.h"
+#include "sha256.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <cstdio>
 #include <string>
@@ -41,6 +43,22 @@ std::string shell_quote(const std::string &value) {
     }
     quoted += '"';
     return quoted;
+}
+
+void replace_all(std::string &text, const std::string &from,
+                 const std::string &to) {
+    if (from.empty())
+        return;
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos) {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+std::string slash_path(std::string text) {
+    std::replace(text.begin(), text.end(), '\\', '/');
+    return text;
 }
 
 bool parse_options(const std::vector<std::string> &args, size_t start,
@@ -143,17 +161,21 @@ bool build_one(const std::string &root, const std::string &path,
     const std::string compiler_name = compiler_path.filename().u8string();
     const bool msvc = compiler_name == "cl" || compiler_name == "cl.exe";
 
-    std::string command = shell_quote(compiler);
+    std::string build_flags;
     if (!msvc) {
-        command += " -std=c++17 -O2 -shared -DSKEIN_MODULE_BUILD=1";
+        build_flags = "-std=c++17 -O2 -shared -DSKEIN_MODULE_BUILD=1";
 #ifndef _WIN32
-        command += " -fPIC";
+        build_flags += " -fPIC";
 #else
-        command += " -Wl,--export-all-symbols";
+        build_flags += " -Wl,--export-all-symbols -Wl,--no-insert-timestamp";
 #endif
+        build_flags += " -ffile-prefix-map=" +
+                       shell_quote(slash_path(source_root.u8string()) + "=.");
     } else {
-        command += " /nologo /LD /EHsc /O2 /DSKEIN_MODULE_BUILD=1";
+        build_flags =
+            "/nologo /LD /EHsc /O2 /DSKEIN_MODULE_BUILD=1 /Brepro";
     }
+    std::string command = shell_quote(compiler) + " " + build_flags;
 
     if (msvc) {
         command += " /I" + shell_quote(source_root.u8string());
@@ -194,8 +216,18 @@ bool build_one(const std::string &root, const std::string &path,
                                ? " " + lib
                                : " -l" + shell_quote(lib));
 
+    std::string canonical = slash_path(command);
+    replace_all(canonical, slash_path(source_root.u8string()), "<source>");
+    replace_all(canonical, slash_path(destination.u8string()), "<build>");
+    replace_all(canonical, slash_path(artifact), "<artifact>");
+    const std::string command_hash =
+        skein_hex_encode(skein_sha256_bytes(canonical));
+
     int status = -1;
-    if (!platform_run_command_status(command, {}, status)) {
+    const std::vector<std::pair<std::string, std::string>> build_env = {
+        {"SOURCE_DATE_EPOCH", "0"},
+    };
+    if (!platform_run_command_status(command, build_env, status)) {
         error = "cannot run native compiler; set SKEIN_CXX to a C++ compiler";
         return false;
     }
@@ -207,8 +239,9 @@ bool build_one(const std::string &root, const std::string &path,
         error = "native compiler did not produce " + artifact;
         return false;
     }
-    if (!write_native_artifact_metadata(path, version, compiler,
-                                        compiler_version, artifact, error))
+    if (!write_native_artifact_metadata(
+            path, version, compiler, compiler_version, build_flags,
+            command_hash, artifact, error))
         return false;
     std::printf("built %s\n", artifact.c_str());
     return true;

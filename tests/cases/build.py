@@ -150,15 +150,22 @@ def run_cases():
         assert "source_hash=" in metadata_text, metadata_text
         assert "artifact_hash=" in metadata_text, metadata_text
         assert "compiler_version=" in metadata_text, metadata_text
+        assert "build_flags=" in metadata_text, metadata_text
+        assert "build_command_hash=" in metadata_text, metadata_text
         artifacts = glob.glob(os.path.join(build_dirs[0], "*.dll")) + \
             glob.glob(os.path.join(build_dirs[0], "*.so")) + \
             glob.glob(os.path.join(build_dirs[0], "*.dylib"))
         assert len(artifacts) == 1, artifacts
         artifact = artifacts[0]
+        with open(artifact, "rb") as handle:
+            first_bytes = handle.read()
 
-        # The source checksum still describes source only.
+        # The source checksum still describes source only, and two builds
+        # produce identical bytes.
         run_again = run_skein(["build", "-C", project], env)
         assert run_again.returncode == 0, run_again.stderr
+        with open(artifact, "rb") as handle:
+            assert handle.read() == first_bytes, "native build is not reproducible"
 
         allowed = dict(env, SKEIN_ALLOW_NATIVE="1")
         result = run_skein([main], allowed, cwd=project)

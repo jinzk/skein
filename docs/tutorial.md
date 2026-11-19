@@ -312,9 +312,13 @@ module myutil {
   编译 `skein.mod` 中全部依赖；编译器默认取 `SKEIN_CXX`、`CXX`，否则 `c++`；
 - 产物放在源码缓存旁边的 `.build/<平台>-<架构>-<编译器>/` 目录，**不进入**
   `skein.sum` 的源码 dirhash，因此构建不会破坏校验和；
-- `skein build` 会在产物旁写入 `artifact.meta`，记录源码 hash、产物 hash、编译器和
-  编译器版本；`std.module.native` 只返回通过源码 hash、产物 hash（以及可用时的
-  编译器版本）校验的产物，篡改或源码变更后必须重新 `skein build`；
+- `skein build` 会在产物旁写入 `artifact.meta`，记录源码 hash、产物 hash、编译器、
+  编译器版本、构建 flags 和规范化命令 hash；`std.module.native` 只返回通过源码
+  hash、产物 hash（以及可用时的编译器版本）校验的产物，篡改或源码变更后必须重新
+  `skein build`；
+- 构建默认启用可复现选项：GCC/Clang 使用 `-ffile-prefix-map`，MinGW 使用
+  `--no-insert-timestamp`，MSVC 使用 `/Brepro`，并设置 `SOURCE_DATE_EPOCH=0`；
+  相同输入连续构建应产生相同产物字节；
 - Skein 封装包通过 `std.module.dir(path)` / `std.module.native(path)` 取得源码
   目录和构建产物路径，再用 `std.plugin.load(...)` 加载；`std.ffi.open(...)`
   同理；

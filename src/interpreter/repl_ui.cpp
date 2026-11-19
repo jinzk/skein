@@ -259,5 +259,37 @@ std::string common_prefix(const std::vector<std::string> &candidates) {
     return prefix;
 }
 
+std::string indentation(int level, int width) {
+    if (level <= 0)
+        return std::string();
+    if (width <= 0)
+        width = 2;
+    if (level > 40)
+        level = 40;
+    return std::string((std::size_t)level * (std::size_t)width, ' ');
+}
+
+std::size_t dedent_for_closing(std::string &line, std::size_t cursor,
+                               char closing, int width) {
+    if (closing != '}' && closing != ')' && closing != ']')
+        return cursor;
+    if (cursor > line.size())
+        cursor = line.size();
+    for (std::size_t i = 0; i < cursor; ++i) {
+        if (line[i] != ' ' && line[i] != '\t')
+            return cursor;
+    }
+    if (width <= 0)
+        width = 2;
+    std::size_t remove = 0;
+    while (remove < (std::size_t)width && remove < cursor &&
+           line[remove] == ' ')
+        ++remove;
+    if (remove == 0)
+        return cursor;
+    line.erase(0, remove);
+    return cursor - remove;
+}
+
 }  // namespace repl_ui
 }  // namespace skein

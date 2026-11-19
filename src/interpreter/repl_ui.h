@@ -54,6 +54,14 @@ std::vector<std::string> filter_and_sort(
 /* Longest common prefix of all candidates. */
 std::string common_prefix(const std::vector<std::string> &candidates);
 
+/* Spaces for one or more indentation levels. */
+std::string indentation(int level, int width = 2);
+
+/* Dedent a line whose cursor is inside leading indentation when the user
+ * types a closing delimiter.  Returns the new cursor. */
+std::size_t dedent_for_closing(std::string &line, std::size_t cursor,
+                               char closing, int width = 2);
+
 }  // namespace repl_ui
 }  // namespace skein
 

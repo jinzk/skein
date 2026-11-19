@@ -131,6 +131,7 @@ SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
 - 支持上下方向键浏览历史；
 - 历史默认保存到 `~/.skein_history`，可用 `SKEIN_HISTORY` 指定路径；
 - Tab 补全支持语言关键字、REPL 命令、当前全局符号和 `std.*`；多个候选时会列出候选并扩展公共前缀；
+- 多行输入会按当前语法层级自动缩进；行首输入 `}`、`)` 或 `]` 时自动回退一级；
 - 输入行支持词法高亮：关键字、字符串、注释、数字和 REPL 命令；
 - 高亮默认只在 stdin/stdout 都是终端时开启；`SKEIN_REPL_COLOR=always|auto|never` 可覆盖，设置 `NO_COLOR` 可强制关闭；
 - 当前补全覆盖关键字、REPL 命令、全局符号和 `std.*`；结构体字段、`:load` 路径补全以及长行水平滚动暂未实现；

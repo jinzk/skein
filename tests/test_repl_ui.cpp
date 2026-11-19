@@ -92,6 +92,26 @@ void test_completion_context() {
     require(ctx.suppressed, "completion inside comment should be suppressed");
 }
 
+void test_indentation() {
+    require(skein::repl_ui::indentation(0) == "", "zero indentation");
+    require(skein::repl_ui::indentation(3) == "      ",
+            "three indentation levels");
+    require(skein::repl_ui::indentation(100).size() == 80,
+            "indentation should be capped");
+
+    std::string line = "      value";
+    std::size_t cursor = 6;
+    require(skein::repl_ui::dedent_for_closing(line, cursor, '}') == 4,
+            "closing brace should dedent");
+    require(line == "    value", "dedent should remove two spaces");
+
+    line = "    x";
+    cursor = 5;
+    require(skein::repl_ui::dedent_for_closing(line, cursor, '}') == 5,
+            "closing brace after code should not dedent");
+    require(line == "    x", "non-leading code must stay unchanged");
+}
+
 void test_candidates() {
     std::vector<std::string> candidates = {"std.", "string", "std", "string"};
     candidates = skein::repl_ui::filter_and_sort(candidates, "st");
@@ -118,6 +138,7 @@ int main() {
     test_tokens();
     test_render();
     test_completion_context();
+    test_indentation();
     test_candidates();
     return 0;
 }

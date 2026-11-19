@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+extern int indent_count;
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -73,7 +75,7 @@ std::string history_path() {
 }
 
 void history_add(const std::string &line) {
-    if (line.empty())
+    if (trim_copy(line).empty())
         return;
     if (!history.empty() && history.back() == line)
         return;
@@ -376,7 +378,6 @@ struct raw_terminal {
 
 repl_line_status read_edited_line(const std::string &prompt,
                                   bool continuation, std::string &line) {
-    (void)continuation;
     history_load_once();
     raw_terminal terminal;
     if (!terminal.enable()) {
@@ -390,8 +391,9 @@ repl_line_status read_edited_line(const std::string &prompt,
         return line.empty() ? REPL_EOF : REPL_LINE;
     }
 
-    std::string current;
-    size_t cursor = 0;
+    std::string current =
+        continuation ? repl_ui::indentation(indent_count) : std::string();
+    size_t cursor = current.size();
     size_t history_pos = history.size();
     std::string draft;
     write_stdout(prompt);
@@ -546,6 +548,9 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (c >= 32) {
+            if (c == '}' || c == ')' || c == ']')
+                cursor = repl_ui::dedent_for_closing(current, cursor,
+                                                     (char)c);
             current.insert(cursor, 1, (char)c);
             cursor += 1;
             redraw(prompt, current, cursor);
@@ -612,7 +617,6 @@ std::string utf8_from_wchars(const wchar_t *data, int length) {
 
 repl_line_status read_edited_line(const std::string &prompt,
                                   bool continuation, std::string &line) {
-    (void)continuation;
     history_load_once();
     console_input_guard terminal;
     if (!enable_windows_vt() || !terminal.enable()) {
@@ -626,8 +630,9 @@ repl_line_status read_edited_line(const std::string &prompt,
         return line.empty() ? REPL_EOF : REPL_LINE;
     }
 
-    std::string current;
-    size_t cursor = 0;
+    std::string current =
+        continuation ? repl_ui::indentation(indent_count) : std::string();
+    size_t cursor = current.size();
     size_t history_pos = history.size();
     std::string draft;
     wchar_t high_surrogate = 0;
@@ -839,6 +844,9 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (ch >= 32) {
+            if (ch == '}' || ch == ')' || ch == ']')
+                cursor = repl_ui::dedent_for_closing(current, cursor,
+                                                     (char)ch);
             append_char(ch);
             redraw(prompt, current, cursor);
         }

@@ -355,6 +355,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/eval_assign.cpp
   src/interpreter/package.cpp
   src/interpreter/modfile.cpp
+  src/interpreter/native_artifact.cpp
   src/interpreter/std_namespace.cpp
   src/interpreter/pattern.cpp
   src/interpreter/structeval.cpp

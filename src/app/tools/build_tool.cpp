@@ -2,6 +2,7 @@
 
 #include "file_lock.h"
 #include "modfile.h"
+#include "native_artifact.h"
 #include "package.h"
 #include "platform.h"
 #include "runtime_state.h"
@@ -85,13 +86,12 @@ bool safe_relative(const std::string &value) {
     return true;
 }
 
-std::string compiler_from_env() {
-    std::string value;
-    if (thread_env_get("SKEIN_CXX", value) && !value.empty())
-        return value;
-    if (thread_env_get("CXX", value) && !value.empty())
-        return value;
-    return "c++";
+bool safe_artifact_name(const std::string &value) {
+    return value.empty() ||
+           (value != "." && value != ".." &&
+            value.find('/') == std::string::npos &&
+            value.find('\\') == std::string::npos &&
+            value.find(':') == std::string::npos);
 }
 
 bool build_one(const std::string &root, const std::string &path,
@@ -111,6 +111,10 @@ bool build_one(const std::string &root, const std::string &path,
         error = "native build has no sources: " + path + "@" + version;
         return false;
     }
+    if (!safe_artifact_name(spec.output)) {
+        error = "invalid native output name: " + spec.output;
+        return false;
+    }
 
     const fs::path source_root = fs::u8path(skein::modfile::cache_path(
         path, version));
@@ -127,7 +131,14 @@ bool build_one(const std::string &root, const std::string &path,
     const std::string artifact =
         (destination / skein::modfile::native_library_name(spec.output))
             .u8string();
-    const std::string compiler = compiler_from_env();
+    const std::string compiler = native_compiler_from_env();
+    std::string compiler_version;
+    bool compiler_available = false;
+    std::string version_error;
+    native_compiler_version(compiler, compiler_version, compiler_available,
+                            version_error);
+    if (!compiler_available)
+        compiler_version = "unknown";
     const fs::path compiler_path = fs::u8path(compiler);
     const std::string compiler_name = compiler_path.filename().u8string();
     const bool msvc = compiler_name == "cl" || compiler_name == "cl.exe";
@@ -196,6 +207,9 @@ bool build_one(const std::string &root, const std::string &path,
         error = "native compiler did not produce " + artifact;
         return false;
     }
+    if (!write_native_artifact_metadata(path, version, compiler,
+                                        compiler_version, artifact, error))
+        return false;
     std::printf("built %s\n", artifact.c_str());
     return true;
 }

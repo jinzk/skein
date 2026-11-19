@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CLI tests for source-distributed native modules (`skein build`)."""
 
+import glob
 import os
 import shutil
 import subprocess
@@ -138,6 +139,23 @@ def run_cases():
         assert artifacts, built.stdout
         assert "built " in built.stdout, built.stdout
 
+        build_dirs = glob.glob(os.path.join(
+            env["SKEINMODCACHE"], "example.test", TAG, ".build", "*",
+            "nativeutil"))
+        assert build_dirs, built.stdout
+        metadata = os.path.join(build_dirs[0], "artifact.meta")
+        assert os.path.isfile(metadata), built.stdout
+        with open(metadata, encoding="utf-8") as handle:
+            metadata_text = handle.read()
+        assert "source_hash=" in metadata_text, metadata_text
+        assert "artifact_hash=" in metadata_text, metadata_text
+        assert "compiler_version=" in metadata_text, metadata_text
+        artifacts = glob.glob(os.path.join(build_dirs[0], "*.dll")) + \
+            glob.glob(os.path.join(build_dirs[0], "*.so")) + \
+            glob.glob(os.path.join(build_dirs[0], "*.dylib"))
+        assert len(artifacts) == 1, artifacts
+        artifact = artifacts[0]
+
         # The source checksum still describes source only.
         run_again = run_skein(["build", "-C", project], env)
         assert run_again.returncode == 0, run_again.stderr
@@ -146,6 +164,28 @@ def run_cases():
         result = run_skein([main], allowed, cwd=project)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "42", result.stdout
+
+        # A tampered artifact must not load, even with native allowed.
+        with open(artifact, "ab") as handle:
+            handle.write(b"tampered")
+        tampered = run_skein([main], allowed, cwd=project)
+        assert tampered.returncode == 1, tampered.stdout
+        assert "run 'skein build" in tampered.stderr, tampered.stderr
+
+        rebuilt = run_skein(["build", "-C", project, MODULE + "@" + TAG], env)
+        assert rebuilt.returncode == 0, rebuilt.stderr
+        restored = run_skein([main], allowed, cwd=project)
+        assert restored.returncode == 0, restored.stderr
+        assert restored.stdout.strip() == "42", restored.stdout
+
+        # Metadata is part of the artifact trust boundary.
+        os.remove(metadata)
+        unverified = run_skein([main], allowed, cwd=project)
+        assert unverified.returncode == 1, unverified.stdout
+        assert "run 'skein build" in unverified.stderr, unverified.stderr
+        rebuilt_again = run_skein(
+            ["build", "-C", project, MODULE + "@" + TAG], env)
+        assert rebuilt_again.returncode == 0, rebuilt_again.stderr
 
         denied = run_skein([main], env, cwd=project)
         assert denied.returncode == 1, denied.stdout

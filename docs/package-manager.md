@@ -109,13 +109,21 @@ skein mod clean [--dry-run] [--force]
 - 第三方 module 的 native 加载要求 `SKEIN_ALLOW_NATIVE=1`
 - check-only 工具不加载/执行 native
 - 产物不进入 `dirhash` / `skein.sum`
+- `skein build` 写入 `artifact.meta`：
+  - 源码 hash
+  - 产物 hash
+  - 编译器
+  - 编译器版本
+- `std.module.native` 加载前校验源码 hash 与产物 hash
+- 编译器可用时，版本变化会使旧产物失效
+- 部署环境没有编译器时仍可加载已通过 hash 校验的产物
 
 尚未完成：
 
-- 产物 hash 与加载前校验
-- 编译器版本 / flags 进入构建 key
-- 缓存产物失效重建
+- 编译 flags 的显式元数据
 - 可复现构建
+- 交叉编译
+- `mod prune` 对 `.build` 的安全清理
 
 ## 8. 后续计划
 

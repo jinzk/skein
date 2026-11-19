@@ -323,7 +323,7 @@ src/
                  vm_host_calls.h、gc.*、package.*、
                  std_namespace.*、pattern.*、scopestack.*、structeval.*、fiber.*、
                  generator.*、iter.*、async_support.*、task.*、event_loop.*、
-                 file_lock.*、repl.*、repl_ui.*、source_encoding.*
+                 file_lock.*、native_artifact.*、repl.*、repl_ui.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
                  builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
                  *_builtin.*、compression.*、cookie.*、error.*、

@@ -24,6 +24,7 @@
 #include "builtins_io.h"
 #include "json.h"
 #include "native_policy.h"
+#include "native_artifact.h"
 #include "modfile.h"
 #include "net.h"
 #include "package.h"
@@ -168,49 +169,22 @@ static struct value_t *module_native_builtin(
         yyerror("std.module.native: %s", error.c_str());
         return NULL;
     }
-    namespace fs = std::filesystem;
-    const fs::path directory =
-        fs::u8path(skein::modfile::native_build_dir(path, version));
     module_native_spec spec;
-    std::string parse_error;
-    if (load_cached_module_native(path, version, spec, parse_error) &&
-        !spec.output.empty()) {
-        const fs::path candidate =
-            directory / skein::modfile::native_library_name(spec.output);
-        std::error_code candidate_ec;
-        if (fs::is_regular_file(candidate, candidate_ec)) {
-            std::string result = candidate.u8string();
-            return newstrval(result.c_str());
-        }
-    }
-    std::error_code ec;
-    fs::directory_iterator it(directory, ec);
-    std::string found;
-    for (const fs::directory_entry &entry : it) {
-        const std::string name = entry.path().filename().u8string();
-        auto ends_with = [&name](const char *suffix) {
-            const size_t length = std::strlen(suffix);
-            return name.size() >= length &&
-                   name.compare(name.size() - length, length, suffix) == 0;
-        };
-        const bool library =
-            ends_with(".dll") || ends_with(".so") || ends_with(".dylib");
-        if (!library || !entry.is_regular_file(ec))
-            continue;
-        if (!found.empty()) {
-            yyerror("std.module.native: multiple native artifacts in %s",
-                    directory.u8string().c_str());
-            return NULL;
-        }
-        found = entry.path().u8string();
-    }
-    if (found.empty()) {
-        yyerror("std.module.native: native module not built: %s; run 'skein "
-                "build %s'",
-                path.c_str(), path.c_str());
+    if (!load_cached_module_native(path, version, spec, error)) {
+        yyerror("std.module.native: %s", error.c_str());
         return NULL;
     }
-    return newstrval(found.c_str());
+    if (!spec.present) {
+        yyerror("std.module.native: module has no native build declaration: %s",
+                path.c_str());
+        return NULL;
+    }
+    std::string artifact;
+    if (!validate_native_artifact(path, version, spec.output, artifact, error)) {
+        yyerror("std.module.native: %s", error.c_str());
+        return NULL;
+    }
+    return newstrval(artifact.c_str());
 }
 
 static struct value_t *enum_tag_from_value(struct value_t *value) {

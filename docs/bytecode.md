@@ -242,7 +242,7 @@ DECLARE_STRUCT / DECLARE_ENUM / DECLARE_TRAIT / DECLARE_IMPL
 DECLARE_PACKAGE
 CLOSURE / BIND_FUNC
 IMPORT
-CALL / CALL_SPREAD / RETURN
+CALL / CALL_METHOD / CALL_SPREAD / TAIL_CALL / RETURN
 PUSH_SCOPE / POP_SCOPE
 CONTROL_BREAK / CONTROL_CONTINUE / RUNTIME_ERROR
 ```
@@ -260,6 +260,11 @@ struct Instr {
 
 `b` 用于常量索引、跳转目标或参数个数；`Proto::locs` 为每条指令保存
 源码行列，用于保持现有诊断输出。
+
+`CALL_METHOD` 用于 `obj.method(args)`：栈上是 receiver 和实参，`a` 保存参数
+个数，`b` 保存方法名常量索引。VM 直接按 receiver 类型查找方法，并把 receiver
+作为第 0 个参数调用，不创建 bound method 值；非 struct/enum 的成员调用
+（dict、module、builtin）回退到普通成员读取 + `CALL`。
 
 每个 Proto 编译完成后会经过 `skein::bc::verify()`：
 

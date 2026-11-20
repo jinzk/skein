@@ -275,7 +275,8 @@ Windows（MinGW UCRT64，`SKEIN_ENABLE_JIT=ON`，同样方法）：
 - Win64 与 SysV 的 JIT 收益一致，**不存在平台差距**；
 - 若测得 JIT 与 VM 完全持平，先检查构建是否带 `-DSKEIN_ENABLE_JIT=ON`；
   `bench_jit.py` 现在会探测 `[jit] enter`，无 JIT 的二进制直接报错；
-- 下一步优化是 VM `method` 调用（比 AST 慢约 20–30%）和 fast-call 热路径。
+- `obj.method(args)` 改用 `CALL_METHOD` 快路径，不再创建 bound method 值；
+  VM 的 method 基准从 AST 慢 1.2x 变为快约 1.2x；
 
 另外，函数调用以前会为每帧复制函数名和源文件路径（给错误调用栈用），
 现在改为指针 + 源文件 intern，`call_bench` 的 VM 时间下降约 6%。

@@ -152,6 +152,7 @@ enum class Op : uint8_t {
     Import,
 
     Call,
+    CallMethod,
     TailCall,
     Return,
 

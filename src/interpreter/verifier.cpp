@@ -563,6 +563,16 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             need(static_cast<int>(ins.b) + 1);
             stack(static_cast<int>(ins.b) + 1, 1);
             break;
+        case Op::CallMethod:
+            if (ins.b >= proto.consts.size())
+                return fail(error, at_pc("call method name out of range", pc));
+            if (proto.consts[ins.b].kind !=
+                skein::bc::ConstantKind::Name)
+                return fail(error, at_pc("call method name is not a name",
+                                         pc));
+            need(static_cast<int>(ins.a) + 1);
+            stack(static_cast<int>(ins.a) + 1, 1);
+            break;
         case Op::TailCall:
             if (!check_count(static_cast<uint64_t>(ins.b) + 1, pc,
                              "call argument count too large", error))

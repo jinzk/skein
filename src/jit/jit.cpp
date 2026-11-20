@@ -85,6 +85,9 @@ SKEIN_JIT_SYSV void *skein_jit_direct_target(value_t *callee, value_t **args,
                                              function_def **def_out);
 SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                uint32_t argc, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
+    value_t *receiver, const char *name, value_t **args, uint32_t argc,
+    int line, int column);
 SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
                         function_def *current_def, value_t *callee,
                         value_t **params, value_t **args, uint32_t argc);
@@ -295,6 +298,12 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                  * `fail` would escape as an uncaught error instead of being
                  * reported as a detached task failure). */
                 if (ins.flags & 1)
+                    return false;
+                break;
+            case skein::bc::Op::CallMethod:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
                     return false;
                 break;
             case skein::bc::Op::TailCall:
@@ -1420,6 +1429,30 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 a.bind(call_done);
+                break;
+            }
+
+            case skein::bc::Op::CallMethod: {
+                const int argc = static_cast<int>(ins.a);
+                const int receiver_depth = depth - argc - 1;
+                const std::string &method_name = proto.consts[ins.b].name;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(receiver_depth)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::imm(fn_address(method_name.c_str())));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(argc));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_invoke_method));
+                for (int i = receiver_depth; i < depth; ++i)
+                    clear_slot(i);
+                push_reg(receiver_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
                 break;
             }
 

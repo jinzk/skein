@@ -3453,6 +3453,35 @@ struct Compiler {
             }
         }
 
+        /* `obj.method(args)` avoids materializing a bound method value.
+         * Spread, launch and tail calls keep the generic path. */
+        const char *method_name = nullptr;
+        bool member_call = false;
+        if (!tail && !call->launch && !has_spread && call->callee &&
+            call->callee->nodetype == 'j' && args.size() <= 0xFFFF) {
+            method_name = literal_string(call->callee->r);
+            if (method_name) {
+                ast *base = call->callee->l;
+                const bool unresolved_base =
+                    base && base->nodetype == 'N' &&
+                    !name_is_resolved(((struct symref *)base)->name);
+                member_call = !unresolved_base;
+            }
+        }
+        if (member_call) {
+            compile(call->callee->l);
+            if (!ok) return;
+            for (ast *arg : args) {
+                compile(arg);
+                if (!ok) return;
+            }
+            const uint32_t method_index = add_name(method_name);
+            emit(Op::CallMethod, 0,
+                 static_cast<uint16_t>(args.size()), method_index,
+                 loc_of(node));
+            return;
+        }
+
         compile(call->callee);
         if (!ok) return;
 

@@ -573,6 +573,11 @@ public:
                         value_t *value = pop_checked();
                         if (!value)
                             return abort_error();
+                        if (direct_param_is_const(ins.b)) {
+                            freeval(value);
+                            yyerror("cannot assign to constant self");
+                            return abort_error();
+                        }
                         value_t *result = assign_direct_param(ins.b, value);
                         if (!result)
                             return abort_error();
@@ -605,6 +610,11 @@ public:
                         value_t *value = pop_checked();
                         if (!value)
                             return abort_error();
+                        if (direct_param_is_const(ins.b)) {
+                            freeval(value);
+                            yyerror("cannot assign to constant self");
+                            return abort_error();
+                        }
                         value_t *result = compound_direct_param(
                             ins.b, (int)ins.flags, value);
                         if (!result)
@@ -635,6 +645,10 @@ public:
 
                 case Op::IncDecParam: {
                     if (direct_params_) {
+                        if (direct_param_is_const(ins.b)) {
+                            yyerror("cannot assign to constant self");
+                            return abort_error();
+                        }
                         value_t *result = incdec_direct_param(
                             ins.b, ins.a ? 1 : -1,
                             (ins.flags & 1) != 0);
@@ -2643,6 +2657,141 @@ public:
                     break;
                 }
 
+                case Op::CallMethod: {
+                    if (vm_stats_enabled)
+                        ++vm_stats.calls;
+                    const uint32_t argc = ins.a;
+                    const char *name = name_at(proto(), ins.b);
+                    std::array<value_t *, 8> inline_args;
+                    std::vector<value_t *> heap_args;
+                    value_t **args = inline_args.data();
+                    if (argc > inline_args.size()) {
+                        heap_args.resize(argc);
+                        args = heap_args.data();
+                    }
+                    for (uint32_t i = argc; i > 0; --i) {
+                        value_t *arg = pop_checked();
+                        if (!arg) {
+                            free_args(args, argc);
+                            return abort_error();
+                        }
+                        args[i - 1] = arg;
+                    }
+                    value_t *receiver = pop_checked();
+                    if (!receiver) {
+                        free_args(args, argc);
+                        return abort_error();
+                    }
+
+                    std::shared_ptr<function_def> method =
+                        lookup_method_cached(receiver, name,
+                                             member_cache(ins.b));
+                    if (method) {
+                        std::vector<value_t *> call_args;
+                        call_args.reserve((size_t)argc + 1);
+                        call_args.push_back(receiver);
+                        for (uint32_t i = 0; i < argc; ++i)
+                            call_args.push_back(args[i]);
+                        struct func_value_t function;
+                        function.type = T_func;
+                        function.def = method;
+                        FastCallResult fast = try_fast_call(
+                            (value_t *)&function, call_args.data(),
+                            (uint32_t)call_args.size());
+                        if (fast == FastCallResult::Pushed) {
+                            if (vm_stats_enabled) {
+                                ++vm_stats.fast_calls;
+                                if ((uint64_t)context_.vm_call_depth >
+                                    vm_stats.max_depth)
+                                    vm_stats.max_depth =
+                                        context_.vm_call_depth;
+                            }
+                            if (g_interrupted)
+                                return abort_error();
+                            break;
+                        }
+                        if (fast == FastCallResult::JitFailed)
+                            return abort_error();
+                        if (fast == FastCallResult::Failed) {
+                            free_args(call_args.data(),
+                                      (uint32_t)call_args.size());
+                            return abort_error();
+                        }
+                        if (vm_stats_enabled)
+                            ++vm_stats.fallback_calls;
+                        value_t *result = skein_vm_call_value_args(
+                            (value_t *)&function, std::move(call_args));
+                        if (g_interrupted) {
+                            freeval(result);
+                            return abort_error();
+                        }
+                        if (context_.control != EVAL_CONTROL_NONE) {
+                            freeval(result);
+                            return abort_error();
+                        }
+                        if (context_.runtime_error_count != errors_before_) {
+                            freeval(result);
+                            return abort_error();
+                        }
+                        if (result && is_control(result))
+                            return abort_control(result);
+                        push(result ? result : newnull());
+                        break;
+                    }
+
+                    value_t *callee = read_field_cached(
+                        receiver, name, member_cache(ins.b));
+                    freeval(receiver);
+                    if (!callee) {
+                        free_args(args, argc);
+                        return abort_error();
+                    }
+                    FastCallResult fast = try_fast_call(callee, args, argc);
+                    if (fast == FastCallResult::Pushed) {
+                        if (vm_stats_enabled) {
+                            ++vm_stats.fast_calls;
+                            if ((uint64_t)context_.vm_call_depth >
+                                vm_stats.max_depth)
+                                vm_stats.max_depth = context_.vm_call_depth;
+                        }
+                        freeval(callee);
+                        if (g_interrupted)
+                            return abort_error();
+                        break;
+                    }
+                    if (fast == FastCallResult::JitFailed) {
+                        freeval(callee);
+                        return abort_error();
+                    }
+                    if (fast == FastCallResult::Failed) {
+                        freeval(callee);
+                        free_args(args, argc);
+                        return abort_error();
+                    }
+                    if (vm_stats_enabled)
+                        ++vm_stats.fallback_calls;
+                    std::vector<value_t *> fallback(args, args + argc);
+                    value_t *result =
+                        skein_vm_call_value_args(callee, std::move(fallback));
+                    freeval(callee);
+                    if (g_interrupted) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (result && is_control(result))
+                        return abort_control(result);
+                    push(result ? result : newnull());
+                    break;
+                }
+
                 case Op::TailCall: {
                     if (vm_stats_enabled)
                         ++vm_stats.calls;
@@ -2962,7 +3111,7 @@ private:
         if (!def || !def->code)
             return false;
         function_code *code = def->code.get();
-        if (code->is_generator || code->is_method ||
+        if (code->is_generator ||
             code->variadic || code->required_params != code->nparams ||
             (int)argc != code->nparams)
             return false;
@@ -3141,6 +3290,11 @@ private:
         return view;
     }
 
+    bool direct_param_is_const(uint32_t index) const {
+        return index == 0 && current_def_ && current_def_->code &&
+               current_def_->code->is_method;
+    }
+
     value_t *assign_direct_param(uint32_t index, value_t *value) {
         return ::assign_direct_param(make_slot_view(), index, value);
     }
@@ -3309,6 +3463,8 @@ private:
             args[(size_t)index] = NULL;
             if (!param_pool_safe_)
                 savesym(sym);
+            if (index == 0 && code->is_method)
+                sym->is_const = true;
             param_symbols_.push_back(sym);
         }
     }
@@ -3590,6 +3746,52 @@ private:
             return dupval(items[(size_t)found].second);
         }
         return skein_vm_read_member_value(container, index, false);
+    }
+
+    std::shared_ptr<function_def> lookup_method_cached(
+        value_t *receiver, const char *name,
+        skein::bc::MemberCacheEntry *cache) {
+        if (!receiver || !name)
+            return nullptr;
+        if (receiver->type == T_struct) {
+            struct struct_value_t *sv = (struct struct_value_t *)receiver;
+            if (!sv->def)
+                return nullptr;
+            if (cache && cache->owner == sv->def && cache->field < 0 &&
+                cache->method)
+                return cache->method;
+            auto method = sv->def->methods.find(name);
+            if (method == sv->def->methods.end())
+                return nullptr;
+            if (cache) {
+                cache->owner = sv->def;
+                cache->variant = -1;
+                cache->field = -1;
+                cache->method = method->second;
+            }
+            return method->second;
+        }
+        if (receiver->type == T_enum) {
+            struct enum_value_t *ev = (struct enum_value_t *)receiver;
+            if (!ev->def || ev->variant < 0 ||
+                (size_t)ev->variant >= ev->def->variants.size())
+                return nullptr;
+            if (cache && cache->owner == ev->def &&
+                cache->variant == ev->variant && cache->field < 0 &&
+                cache->method)
+                return cache->method;
+            auto method = ev->def->methods.find(name);
+            if (method == ev->def->methods.end())
+                return nullptr;
+            if (cache) {
+                cache->owner = ev->def;
+                cache->variant = ev->variant;
+                cache->field = -1;
+                cache->method = method->second;
+            }
+            return method->second;
+        }
+        return nullptr;
     }
 
     value_t *read_field_cached(value_t *container, const char *name,

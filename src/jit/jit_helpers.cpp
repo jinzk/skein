@@ -827,6 +827,60 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **a
     return result;
 }
 
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
+    value_t *receiver, const char *name, value_t **args, uint32_t argc,
+    int line, int column) {
+    diag_set_location(line, column);
+    value_t *callee = nullptr;
+    if (receiver && name) {
+        if (receiver->type == T_struct) {
+            struct struct_value_t *sv = (struct struct_value_t *)receiver;
+            if (sv->def) {
+                auto method = sv->def->methods.find(name);
+                if (method != sv->def->methods.end())
+                    callee = newmethodval(receiver, method->second);
+            }
+        } else if (receiver->type == T_enum) {
+            struct enum_value_t *ev = (struct enum_value_t *)receiver;
+            if (ev->def) {
+                auto method = ev->def->methods.find(name);
+                if (method != ev->def->methods.end())
+                    callee = newmethodval(receiver, method->second);
+            }
+        }
+        if (!callee) {
+            struct string_value_t key;
+            key.type = T_string;
+            key.value = const_cast<char *>(name);
+            callee = skein_vm_read_member_value(receiver,
+                                                (struct value_t *)&key,
+                                                true);
+            if (callee)
+                freeval(receiver);
+        }
+    }
+    if (!callee) {
+        freeval(receiver);
+        for (uint32_t i = 0; i < argc; ++i)
+            freeval(args[i]);
+        return nullptr;
+    }
+    skein::jit::invoke_fn fn = skein::jit::invoke();
+    if (!fn) {
+        freeval(callee);
+        for (uint32_t i = 0; i < argc; ++i)
+            freeval(args[i]);
+        yyerror("JIT call target is not installed");
+        return nullptr;
+    }
+    value_t *result = fn(callee, args, argc);
+    if (g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
+}
+
 extern "C" SKEIN_JIT_SYSV void *skein_jit_direct_target(
     value_t *callee, value_t **args, uint32_t argc,
     skein::jit::thread_state *ts, function_def **def_out) {

@@ -7,7 +7,6 @@ are printed but never asserted, to avoid CI flakiness.
 """
 
 import argparse
-import statistics
 import subprocess
 import sys
 import time
@@ -241,7 +240,9 @@ def run_once(binary, source, timeout):
 def measure(binary, source, repeat, timeout):
     run_once(binary, source, timeout)  # warmup
     samples = [run_once(binary, source, timeout) for _ in range(repeat)]
-    return statistics.median(samples)
+    # Noise only ever adds time, so the fastest run is the most stable
+    # estimate for growth checks.
+    return min(samples)
 
 
 def baseline_source(imports):
@@ -253,7 +254,7 @@ def main():
     parser.add_argument("--bin", default="./build/skein",
                         help="path to the skein binary")
     parser.add_argument("--repeat", type=int, default=3,
-                        help="timed runs per size (median is used)")
+                        help="timed runs per size (fastest is used)")
     parser.add_argument("--check", action="store_true",
                         help="fail when a linear case grows quadratically")
     parser.add_argument("--json", action="store_true",

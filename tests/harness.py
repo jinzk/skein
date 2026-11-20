@@ -1497,7 +1497,7 @@ def check_extended_stdlib():
             handle.write(
                 "import std;\n"
                 "func handle(req) {\n"
-                "  std.time.sleep(300);\n"
+                "  std.time.sleep(1000);\n"
                 "  return {\"status\": 200,\n"
                 "          \"headers\": {\"Content-Type\": \"text/plain\"},\n"
                 "          \"body\": bytes_to_string(req[\"body\"])};\n"
@@ -1561,7 +1561,7 @@ def check_extended_stdlib():
             sanitized = bool(
                 os.environ.get("ASAN_OPTIONS")
                 or os.environ.get("TSAN_OPTIONS"))
-            limit = 0.9 if sanitized else 0.55
+            limit = 2.5 if sanitized else 1.6
             assert elapsed < limit, (
                 "serve_processes handled requests sequentially: "
                 f"{elapsed:.3f}s"
@@ -1657,7 +1657,7 @@ def check_extended_stdlib():
             handle.write(
                 "import std;\n"
                 "func handle(req) {\n"
-                "  std.time.sleep(300);\n"
+                "  std.time.sleep(1000);\n"
                 "  return {\"status\": 200, \"body\": req[\"path\"]};\n"
                 "}\n"
             )
@@ -1716,7 +1716,7 @@ def check_extended_stdlib():
             sanitized = bool(
                 os.environ.get("ASAN_OPTIONS")
                 or os.environ.get("TSAN_OPTIONS"))
-            limit = 0.9 if sanitized else 0.55
+            limit = 2.5 if sanitized else 1.6
             assert elapsed < limit, (
                 "serve_threads handled requests sequentially: "
                 f"{elapsed:.3f}s"

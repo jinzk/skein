@@ -1178,6 +1178,13 @@ closure/service  compiled=0  declined=1   (upvalues)
 纯计算热点收益明显，对闭包密集负载接近中性。下一步提升覆盖率的优先级
 高于 OSR/deopt：Handler JIT + 闭包/upvalue 支持。
 
+覆盖率增量评估（2026-11-20）：`can_compile` 的 `SKEIN_JIT_DEBUG` 现在会
+打印不支持的具体 opcode。实测 `route_bench` 的函数拒绝原因是
+closures / upvalues，另有 `ITER_NEW`；单纯放开 `uses_names` /
+`GetFieldOrEnum` 并不能解锁这类代码（且 `GetFieldOrEnum` 需要复制
+VM 的 base 名解析逻辑）。因此下一步应直接做**闭包 / upvalue 支持**，
+而不是 names 快赢。
+
 ### 独立决策
 
 - AOT / 字节码序列化；

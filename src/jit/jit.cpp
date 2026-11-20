@@ -446,6 +446,12 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                     return false;
                 break;
             default:
+                if (read_bool_env("SKEIN_JIT_DEBUG", false))
+                    std::fprintf(stderr, "[jit] unsupported op %s in %s\n",
+                                 skein::bc::op_name(
+                                     static_cast<skein::bc::Op>(ins.op)),
+                                 proto.name.empty() ? "<anonymous>"
+                                                    : proto.name.c_str());
                 return false;
         }
     }

@@ -369,3 +369,25 @@ std.string.builder          29 ms
      probe-then-bind 竞态和定时就绪探测
    - `thread_bench` 门槛改用多次重复中的最好成绩，基线按实测重设
 6. 长尾能力按实际需求触发。
+
+---
+
+## 6. 性能看板（优化冻结后）
+
+解释器/JIT 性能优化暂停后，用以下命令做固定回归检查：
+
+```bash
+# VM/AST 比值（所有用例 VM 应不慢于 AST）
+./build/skein tools/bench_vm.skein --bin ./build/skein
+
+# JIT 开关对比（JIT 构建）
+SKEIN_JIT=0 ./build/skein benchmarks/fib_bench.skein
+./build/skein benchmarks/fib_bench.skein
+
+# 容器增长与线程吞吐
+python tools/bench_containers.py --bin ./build/skein --check
+python tools/bench_threads.py --bin ./build/skein --check
+```
+
+重启条件：真实负载的 p50/p95 出现退化，或覆盖率 / 内存成为明确需求；
+否则不再主动做 frame / GC 级改动。

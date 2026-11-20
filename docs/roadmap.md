@@ -29,6 +29,7 @@
 - Unicode 标识符、NFC、归一化 quick-check、完整大小写映射与折叠、常见源文件编码
 - GBK / GB18030-2005 编解码
 - `error` 值保留抛出点位置与调用栈，支持 `std.error.location` / `trace` / `format_trace`
+- `std.log` 结构化日志：级别过滤、text/JSON、stderr/stdout/file、自定义 writer
 
 ### 工具链
 

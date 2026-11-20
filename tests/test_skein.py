@@ -20,6 +20,7 @@ from cases import (
     io_scripts,
     language_core,
     lint,
+    logging,
     lsp,
     match_types,
     meta,
@@ -56,6 +57,7 @@ MODULES = [
     include_files,
     io_scripts,
     lint,
+    logging,
     lsp,
     typecheck,
 ]

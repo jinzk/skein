@@ -176,7 +176,7 @@ std.http.close(server);
 
 `import std;` 即可使用内置标准库，不需要文件系统目录：
 
-- 数据：`std.json`、`std.regex`（PCRE2）、`std.crypto`、`std.compress`、`std.encoding`、`std.unicode`；
+- 数据：`std.json`、`std.regex`（PCRE2）、`std.crypto`、`std.compress`、`std.encoding`、`std.unicode`、`std.log`；
 - 系统：`std.fs`、`std.process`、`std.env`、`std.sys`、`std.time`、`std.random`；
 - 容器与工具：`std.list`、`std.dict`、`std.iter`、`std.set`、`std.deque`、`std.heap`、`std.lru`、`std.path`；
 - 元编程与接口：`std.meta`、`std.type`、`std.enum`、`std.struct`、`std.result`、`std.error`；
@@ -301,6 +301,7 @@ tools/check_all.sh --clean
 | [docs/ffi.md](docs/ffi.md) | FFI 契约、类型映射和示例 |
 | [docs/encoding.md](docs/encoding.md) | 源文件编码、转码和编码表 |
 | [docs/unicode.md](docs/unicode.md) | Unicode 标识符和归一化 |
+| [docs/logging.md](docs/logging.md) | `std.log` 的 API、格式和写入语义 |
 
 ## 项目结构
 

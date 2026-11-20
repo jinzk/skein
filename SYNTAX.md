@@ -2463,6 +2463,7 @@ std.fn
 std.iter
 std.dict
 std.json
+std.log
 std.string
 std.bytes
 std.encoding

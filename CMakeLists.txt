@@ -421,6 +421,7 @@ add_library(skein_builtins STATIC
   src/builtins/crypto_builtin.cpp
   src/builtins/env_builtin.cpp
   src/builtins/error.cpp
+  src/builtins/log.cpp
   src/builtins/filetype.cpp
   src/builtins/fs_extra.cpp
   src/builtins/http.cpp

@@ -1575,6 +1575,52 @@ std.error.format_trace(error) → string
 - `std.task.try_wait` / `try_wait_all` 是同步 result 等待；
 - `on error` 捕获显式 `fail`、运行时错误和 `result.err`，并对 `result.ok` 解包。
 
+## 日志
+
+```text
+std.log.new(options?)                 → logger
+std.log.trace/debug/info/warn/error(message[, fields])
+std.log.flush()
+std.log.set_level(level)
+
+logger.trace/debug/info/warn/error(message[, fields])
+logger.log(level, message[, fields])
+logger.with(fields)                   → logger
+logger.set_level(level)
+logger.flush()
+```
+
+`options`：
+
+```text
+level:    "trace" | "debug" | "info" | "warn" | "error"   // 默认 info
+format:   "text" | "json"                                 // 默认 text
+output:   "stderr" | "stdout" | "file"                     // 默认 stderr
+path:     string                                          // output=file 时必填
+append:   bool                                            // 默认 true
+time:     "utc" | "local"                                 // 默认 local
+name:     string                                          // 默认 ""
+fields:   dict                                            // 基础上下文字段
+flush:    bool                                            // 每条记录后 flush，默认 true
+on_error: "fail" | "warn" | "ignore"                       // 默认 fail
+writer:   func(record)                                    // 自定义输出，接收格式化后的整行
+```
+
+规则：
+
+- 模块级函数（`std.log.info` 等）写入默认 logger；`std.log.new` 创建独立 logger；
+- `logger` 是 `userdata`，`str(logger)` 返回 `logger(name)`；
+- 级别过滤在格式化之前完成，被过滤的调用不产生输出；
+- 字段是最后一个 `dict` 参数，与 `fields` 及 `with` 的上下文合并；同名键以调用时参数为准；
+- `with` 返回新的 logger，不修改原 logger，共享同一个输出目标；
+- text 格式：`2026-11-20T12:34:56.789+08:00 INFO  app: message key=value`；
+- json 格式：每行一个 JSON 对象，包含 `time` / `level` / `logger` / `message` / `fields`；
+- JSON 中的 `bytes` 编码为 `hex:...`，无法表示的值退化为字符串；
+- `output=file` 使用追加或覆盖模式打开文件，`flush` 默认每条记录后执行；
+- `writer` 接收完整记录文本，与 `output` / `path` 互斥；
+- 写入失败默认通过 `fail` 报错，可改为只警告或忽略；
+- 日志默认写 stderr，不污染普通 `print` 输出。
+
 defer：
 
 ```text
@@ -2052,6 +2098,7 @@ std.fn
 std.iter
 std.dict
 std.json
+std.log
 std.string
 std.bytes
 std.encoding
@@ -2760,6 +2807,15 @@ std.error.message
 std.error.location
 std.error.trace
 std.error.format_trace
+
+std.log.new
+std.log.trace
+std.log.debug
+std.log.info
+std.log.warn
+std.log.error
+std.log.flush
+std.log.set_level
 
 std.ffi.open
 std.ffi.close

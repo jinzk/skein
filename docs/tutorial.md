@@ -980,6 +980,75 @@ let v = outer() on error(e) {
 - 未捕获的 `fail` 在抛出点报告，并打印调用栈；
 - 跨 task / thread 传递的 `error` 会保留位置和调用栈。
 
+### 日志
+
+设计说明见 [logging.md](logging.md)。
+
+```text
+std.log.new(options?)                  → logger
+std.log.info(message[, fields])        // 默认 logger
+logger.debug / info / warn / error(message[, fields])
+logger.log(level, message[, fields])
+logger.with(fields)                    → logger
+```
+
+示例：
+
+```text
+import std;
+
+let lg = std.log.new({
+  "name": "app",
+  "level": "info",
+  "format": "text",
+  "fields": {"service": "demo"}
+});
+
+lg.info("started", {"port": 8080});
+lg.with({"request_id": "r1"}).warn("slow request", {"ms": 1200});
+lg.error("failed", {"code": 500});
+```
+
+输出：
+
+```text
+2026-11-20T12:34:56.789+08:00 INFO  app: started service=demo port=8080
+2026-11-20T12:34:57.001+08:00 WARN  app: slow request service=demo request_id=r1 ms=1200
+```
+
+JSON 输出：
+
+```text
+let lg = std.log.new({"format": "json", "time": "utc", "name": "app"});
+lg.info("done", {"ms": 12});
+```
+
+```json
+{"time":"2026-11-20T04:34:56.789Z","level":"info","logger":"app","message":"done","fields":{"ms":12}}
+```
+
+写入文件：
+
+```text
+let lg = std.log.new({
+  "output": "file",
+  "path": "logs/app.log",
+  "append": true
+});
+```
+
+规则：
+
+- 默认写 stderr，不污染 `print` 输出；
+- 级别低于 `level` 的调用不格式化、不输出；
+- 字段是最后一个 `dict` 参数，与 `with` 上下文合并，同名键以调用参数为准；
+- `with` 返回新 logger，共享输出目标；
+- `output` 支持 `stderr` / `stdout` / `file`；`writer` 可接管整行记录；
+- 写入失败默认 `fail`，可用 `on_error` 改为 `warn` / `ignore`；
+- `logger` 不能跨线程传递，`writer` 也是线程本地值。
+
+> `log` 是全局数学内置函数，示例中的 logger 变量使用 `lg`。
+
 ### 函数与闭包
 
 函数、匿名函数与闭包：

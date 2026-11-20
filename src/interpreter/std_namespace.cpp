@@ -700,6 +700,18 @@ value_t *build_namespace_impl() {
             {"location", B_error_location},
             {"format_trace", B_error_format_trace},
         })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("log"),
+        builtin_module({
+            {"new", B_log_new},
+            {"trace", B_log_trace},
+            {"debug", B_log_debug},
+            {"info", B_log_info},
+            {"warn", B_log_warn},
+            {"error", B_log_error},
+            {"flush", B_log_flush},
+            {"set_level", B_log_set_level},
+        })));
     return (value_t *)root;
 }
 

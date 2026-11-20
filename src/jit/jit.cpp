@@ -67,8 +67,9 @@ SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                              uint32_t name_index, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
     const skein::bc::FieldOrEnumDesc *desc, int line, int column);
-SKEIN_JIT_SYSV void skein_jit_fail(value_t *value);
-SKEIN_JIT_SYSV void skein_jit_runtime_error(const char *message);
+SKEIN_JIT_SYSV void skein_jit_fail(value_t *value, uint64_t loc);
+SKEIN_JIT_SYSV void skein_jit_runtime_error(const char *message,
+                                            uint64_t loc);
 SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               uint32_t name_index, value_t *value, int line,
                               int column);
@@ -126,6 +127,14 @@ SKEIN_JIT_SYSV int skein_jit_check_result(skein::jit::thread_state *ts,
 SKEIN_JIT_SYSV value_t *skein_jit_bind_name(skein::jit::thread_state *ts,
                                             value_t **slot, const char *name,
                                             int is_const, uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_bind_func(skein::jit::thread_state *ts,
+                                            value_t *value,
+                                            const skein::bc::Proto *proto,
+                                            uint32_t name_index, int exported,
+                                            uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_import(const skein::bc::Proto *proto,
+                                         uint32_t index, value_t **slot,
+                                         uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_recover(skein::jit::thread_state *ts,
                                       value_t *value, uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_pass(skein::jit::thread_state *ts,
@@ -135,6 +144,8 @@ SKEIN_JIT_SYSV int64_t skein_jit_unwind(skein::jit::thread_state *ts,
 SKEIN_JIT_SYSV value_t *skein_jit_take_unwind_value(
     skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_drop_slots(value_t **slots, uint32_t count);
+SKEIN_JIT_SYSV void skein_jit_clear_slot(skein::jit::thread_state *ts,
+                                         value_t **slot);
 SKEIN_JIT_SYSV int skein_jit_defer_push(skein::jit::thread_state *ts,
                                         const skein::bc::Proto *proto,
                                         uint32_t index, value_t **frame_values,
@@ -328,6 +339,7 @@ generator_test_fn g_generator_test = nullptr;
 generator_step_fn g_generator_step = nullptr;
 build_enum_fn g_build_enum = nullptr;
 run_defer_scope_fn g_run_defer_scope = nullptr;
+import_fn g_import = nullptr;
 
 } // namespace
 
@@ -349,6 +361,8 @@ void set_build_enum(build_enum_fn fn) { g_build_enum = fn; }
 build_enum_fn build_enum() { return g_build_enum; }
 void set_run_defer_scope(run_defer_scope_fn fn) { g_run_defer_scope = fn; }
 run_defer_scope_fn run_defer_scope() { return g_run_defer_scope; }
+void set_import(import_fn fn) { g_import = fn; }
+import_fn import() { return g_import; }
 
 bool available() {
     static int state = -1;
@@ -374,8 +388,7 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
      * would route calls through the generic (non-tail) path.
      */
     const bool frame_shape_ok =
-        proto.params_direct ||
-        (top_level && proto.uses_names && proto.nparams == 0) ||
+        proto.params_direct || (top_level && proto.nparams == 0) ||
         pattern_frame;
     if (!frame_shape_ok)
         return reject("frame shape");
@@ -458,7 +471,9 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 /* Defensive: compile_call() never sets launch on a tail call,
                  * but the JIT call path is synchronous either way. */
                 if (ins.flags & 1)
-                    return false;
+                    return reject("launch tail call");
+                if (top_level)
+                    return reject("top-level tail call");
                 break;
             case skein::bc::Op::Return:
             case skein::bc::Op::PushScope:
@@ -472,6 +487,10 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::EnterHandlerBody:
             case skein::bc::Op::LeaveHandlerBody:
             case skein::bc::Op::PopHandler:
+                if (top_level &&
+                    static_cast<skein::bc::Op>(ins.op) ==
+                        skein::bc::Op::Return)
+                    return reject("top-level return");
                 break;
             case skein::bc::Op::PushFailHandler:
             case skein::bc::Op::PushRecoverHandler:
@@ -485,6 +504,18 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                     return reject("bind name constant");
                 if (ins.a != UINT16_MAX && ins.a >= proto.slots.size())
                     return reject("bind name slot");
+                break;
+            case skein::bc::Op::BindFunc:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return reject("bind func name");
+                break;
+            case skein::bc::Op::Import:
+                if (ins.a >= proto.imports.size())
+                    return reject("import descriptor");
+                if (ins.b != UINT32_MAX && ins.b >= proto.slots.size())
+                    return reject("import slot");
                 break;
             case skein::bc::Op::RuntimeError:
                 if (ins.b >= proto.consts.size() ||
@@ -1439,12 +1470,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
             case skein::bc::Op::ClearSlot:
                 a.mov(asmjit::x86::rdi,
-                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
-                                             slot_off(ins.b)));
-                call_addr(fn_address(&skein_jit_free));
-                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
-                                             slot_off(ins.b)),
-                      asmjit::imm(0));
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(ins.b)));
+                call_addr(fn_address(&skein_jit_clear_slot));
                 break;
 
             case skein::bc::Op::BinarySlots: {
@@ -2226,6 +2256,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(value_depth)));
+                a.mov(asmjit::x86::rsi, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_fail));
                 clear_slot(value_depth);
                 a.jmp(abort_label);
@@ -2359,10 +2390,50 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 break;
             }
 
+            case skein::bc::Op::BindFunc: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::r8d,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_bind_func));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::Import: {
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.a));
+                if (ins.b != UINT32_MAX)
+                    a.lea(asmjit::x86::rdx,
+                          asmjit::x86::ptr(asmjit::x86::rbp,
+                                           slot_off(ins.b)));
+                else
+                    a.xor_(asmjit::x86::edx, asmjit::x86::edx);
+                a.mov(asmjit::x86::rcx, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_import));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
             case skein::bc::Op::RuntimeError: {
                 const std::string &message = proto.consts[ins.b].name;
                 a.mov(asmjit::x86::rdi,
                       asmjit::imm(fn_address(message.c_str())));
+                a.mov(asmjit::x86::rsi, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_runtime_error));
                 a.jmp(abort_label);
                 break;

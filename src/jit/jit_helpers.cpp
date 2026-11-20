@@ -413,7 +413,13 @@ extern "C" SKEIN_JIT_SYSV size_t skein_jit_push_roots(
         return SIZE_MAX;
     const size_t mark = gc_roots_push_array(
         ts->ctx->scopes, values, static_cast<size_t>(count));
-    if (gc_stress_enabled())
+    /*
+     * Package loading keeps freshly built namespaces in C++ locals before
+     * they are published; a collection triggered from a JIT prologue could
+     * clear their package scopes.  Leave stress collections to the VM while
+     * a package is loading.
+     */
+    if (gc_stress_enabled() && g_package_loading == 0)
         collect_cycles(ts->ctx->scopes);
     return mark;
 }
@@ -732,7 +738,12 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
     return nullptr;
 }
 
-extern "C" SKEIN_JIT_SYSV void skein_jit_fail(value_t *value) {
+extern "C" SKEIN_JIT_SYSV void skein_jit_fail(value_t *value,
+                                              uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
     if (!value) {
         yyerror("fail value is missing");
         return;
@@ -740,7 +751,12 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_fail(value_t *value) {
     skein_vm_eval_raise(value);
 }
 
-extern "C" SKEIN_JIT_SYSV void skein_jit_runtime_error(const char *message) {
+extern "C" SKEIN_JIT_SYSV void skein_jit_runtime_error(
+    const char *message, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
     yyerror("%s", message ? message : "runtime error");
 }
 
@@ -950,7 +966,6 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_close_cells(
         close_upvalue_cell(*ts->open_cells[i - 1]);
     ts->open_cells.resize(mark);
 }
-
 extern "C" SKEIN_JIT_SYSV void skein_jit_push_frame_scope(
     function_def *def) {
     skein_vm_eval_push_closure_scope(def ? def->closure : nullptr);
@@ -1236,6 +1251,111 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_bind_name(
     return 1;
 }
 
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_bind_func(
+    skein::jit::thread_state *ts, value_t *value,
+    const skein::bc::Proto *proto, uint32_t name_index, int exported,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    (void)ts;
+    if (!value || !proto || name_index >= proto->consts.size()) {
+        freeval(value);
+        yyerror("invalid bytecode function binding");
+        return nullptr;
+    }
+    const char *name = proto->consts[name_index].name.c_str();
+    if (isrepeated(name)) {
+        yyerror("symbol repeated %s", name);
+        freeval(value);
+        return nullptr;
+    }
+    struct symbol *sym = newsym(name);
+    sym->val = value;
+    sym->exported = exported != 0;
+    savesym(sym);
+    return newnull();
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_import(
+    const skein::bc::Proto *proto, uint32_t index, value_t **slot,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || index >= proto->imports.size()) {
+        yyerror("invalid bytecode import descriptor");
+        return nullptr;
+    }
+    const skein::bc::ImportDesc &desc = proto->imports[index];
+    std::string display_path = desc.path;
+    if (!display_path.empty() && display_path[0] == '\x02')
+        display_path.erase(0, 1);
+
+    skein::jit::import_fn load = skein::jit::import();
+    if (!load) {
+        yyerror("import support is not installed");
+        return nullptr;
+    }
+    std::string imported_package;
+    std::string error;
+    int errors_before = diag_error_count();
+    value_t *ns = load(desc.path.c_str(),
+                       desc.base.empty() ? nullptr : desc.base.c_str(),
+                       &imported_package, error);
+    if (!ns) {
+        if (diag_error_count() == errors_before)
+            yyerror("import %s: %s", display_path.c_str(), error.c_str());
+        else
+            diag_mark_script_failure();
+        return nullptr;
+    }
+
+    const char *name =
+        desc.alias.empty()
+            ? skein_vm_import_binding_name(desc.path.c_str())
+            : desc.alias.c_str();
+    if (slot) {
+        freeval(*slot);
+        *slot = ns;
+    } else if (isrepeated(name)) {
+        struct symbol *existing = lookupsym(name);
+        bool same_namespace =
+            existing && existing->val && ns && existing->val->type == T_dict &&
+            ns->type == T_dict &&
+            ((struct dict_value_t *)existing->val)->payload ==
+                ((struct dict_value_t *)ns)->payload;
+        if (!same_namespace) {
+            yyerror("import name already exists: %s", name);
+            freeval(ns);
+            return nullptr;
+        }
+        freeval(ns);
+    } else {
+        struct symbol *sym = newsym(name);
+        sym->val = ns;
+        savesym(sym);
+    }
+
+    const std::string &path = desc.path;
+    if (!path.empty() && path[0] != '.' && path[0] != '@') {
+        const char *alias =
+            desc.alias.empty() ? nullptr : desc.alias.c_str();
+        if (!alias) {
+            size_t dot = path.rfind('.');
+            alias = dot == std::string::npos ? path.c_str()
+                                             : path.c_str() + dot + 1;
+        }
+        structtype_register_alias(
+            diag_current_source_name().c_str(), alias,
+            imported_package.empty() ? path.c_str()
+                                     : imported_package.c_str());
+    }
+    return newnull();
+}
+
 extern "C" SKEIN_JIT_SYSV void skein_jit_recover(
     skein::jit::thread_state *ts, value_t *value, size_t mark,
     uint64_t packed_loc) {
@@ -1334,6 +1454,20 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_take_unwind_value(
     value_t *value = ts->unwind_value;
     ts->unwind_value = nullptr;
     return value;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_clear_slot(
+    skein::jit::thread_state *ts, value_t **slot) {
+    if (!slot)
+        return;
+    if (ts) {
+        for (auto &cell : ts->open_cells) {
+            if (cell && cell->slot == slot)
+                close_upvalue_cell(*cell);
+        }
+    }
+    freeval(*slot);
+    *slot = nullptr;
 }
 
 extern "C" SKEIN_JIT_SYSV void skein_jit_drop_slots(value_t **slots,

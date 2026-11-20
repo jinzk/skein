@@ -175,6 +175,12 @@ using run_defer_scope_fn = void (*)(
 void set_run_defer_scope(run_defer_scope_fn fn);
 run_defer_scope_fn run_defer_scope();
 
+/* Package loading installed by the VM bridge (top-level IMPORT). */
+using import_fn = value_t *(*)(const char *path, const char *base,
+                               std::string *package_out, std::string &error);
+void set_import(import_fn fn);
+import_fn import();
+
 /*
  * Fast-path call resolver installed by the VM bridge.  Returns a native entry
  * for an already-compiled callee, or null when the generic invoke path must

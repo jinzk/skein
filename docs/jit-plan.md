@@ -1176,10 +1176,9 @@ closure/service  compiled=0  declined=1   (upvalues)
 - GC 临时根只在真正进入 JIT 时登记，不再为每个被拒绝的调用压 root frame
 - `thread_state.root_module/root_source` 延迟到首次进入时复制
 
-覆盖率结论：JIT 覆盖纯函数、闭包访问与创建、名字模式局部变量、for-in
-迭代器、enum 变体解析、`fail`、`on error` handler 和 `defer`；仍不覆盖
-顶层 `IMPORT`/`BIND_FUNC`/`DECLARE_PACKAGE` 与顶层 handler/defer。下一步
-提升覆盖率的优先级高于 OSR/deopt。
+覆盖率结论：JIT 覆盖函数与常规顶层语句、闭包、名字模式、for-in 迭代器、
+enum、`fail`、`on error` handler 和 `defer`；仍不覆盖顶层
+handler/defer、顶层 package/struct/enum 声明与 OSR/deopt。
 
 覆盖率增量评估（2026-11-20）：`can_compile` 的 `SKEIN_JIT_DEBUG` 现在会
 打印不支持的具体 opcode 或拒绝原因。`route_bench` 的函数已全部进入 JIT，
@@ -1235,9 +1234,29 @@ closure/service  compiled=0  declined=1   (upvalues)
   enum-field-or-enum / fail-catch / upvalue-index-write，
   `tests/gc_stress.py` 的 iterator 热循环。
 
-剩余覆盖率缺口：顶层 `IMPORT` / `BIND_FUNC` / `DECLARE_PACKAGE`、顶层
-handler/defer 与非 name-mode 顶层帧，以及 OSR/deopt。下一步优先级：顶层
-语句，然后才是 OSR/deopt。
+剩余覆盖率缺口：OSR/deopt（需要 per-pc liveness）。顶层
+`DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM` 以及顶层
+handler/defer 仍走 VM。
+
+顶层语句（2026-11-20 已完成）：
+
+- 顶层语句（`nparams == 0`）不再要求 name mode；`IMPORT`、`BIND_FUNC`、
+  `DEFINE_NAME`、循环、调用等常规语句都可以 JIT；
+- 顶层仍不 push 函数 scope，定义直接写入 global scope；`IMPORT` 通过 VM
+  bridge 加载 package，并补上 `structtype_register_alias`（限定类型名）；
+- 含 `TailCall` 的函数在首次调用即编译，避免顶层 JIT 调用独立 VM 帧时
+  无法复用自身做尾递归；
+- 顶层 `RETURN` / `TAIL_CALL` 仍回退 VM（保持 “return outside function” 等
+  诊断），顶层 handler/defer 与 package/struct/enum 声明也回退 VM；
+- `CLEAR_SLOT` 现在先关闭指向该 slot 的 open cell，再释放值（此前块作用域
+  退出会清空 cell 捕获的值，`closure from block` 用例暴露）；
+- runtime error / `FAIL` 的 helper 现在带上指令位置，诊断列号与 VM 一致；
+- GC stress 在 package 加载期间不再从 JIT prologue 触发 collection（此时
+  新 namespace 还在 C++ 局部变量里）。
+
+剩余覆盖率缺口：OSR/deopt（需要 per-pc liveness）。顶层
+`DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM` 与顶层
+handler/defer 仍走 VM。
 
 Handler JIT（2026-11-20 已完成）：
 

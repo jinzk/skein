@@ -320,12 +320,16 @@ bool jit_loop_entry_enabled() {
  * A function whose body contains a backward branch can spend a long time in
  * a single call, so waiting for SKEIN_JIT_THRESHOLD calls can miss the whole
  * hot region (a helper called once with a million-iteration loop is never
- * "hot" by call count).  Compile such bodies on their first call.
+ * "hot" by call count).  Compile such bodies on their first call.  A tail
+ * call is included because recursive tail calls must enter the JIT: a
+ * standalone VM frame cannot reuse itself for a tail call.
  */
 bool proto_has_loop(const skein::bc::Proto &proto) {
     for (size_t pc = 0; pc < proto.code.size(); ++pc) {
         const skein::bc::Instr &ins = proto.code[pc];
         switch (static_cast<skein::bc::Op>(ins.op)) {
+            case skein::bc::Op::TailCall:
+                return true;
             case skein::bc::Op::Jump:
             case skein::bc::Op::JumpIfFalse:
             case skein::bc::Op::JumpIfTrue:
@@ -870,6 +874,7 @@ static void ensure_vm_host() {
         skein::jit::set_generator_step(&jit_generator_step);
         skein::jit::set_build_enum(&build_enum_value);
         skein::jit::set_run_defer_scope(&jit_run_defer_scope);
+        skein::jit::set_import(&package_import);
 #endif
         return true;
     }();
@@ -1669,6 +1674,8 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
         skein::jit::can_compile(*proto, true)) {
         skein::jit::JitCode *code = skein::jit::compile(*proto, true);
         if (code) {
+            if (read_bool_env("SKEIN_JIT_DEBUG", false))
+                std::fprintf(stderr, "[jit] top-level\n");
             const auto jit_start = std::chrono::steady_clock::now();
             skein::jit::thread_state ts;
             ts.ctx = &active_eval_context();

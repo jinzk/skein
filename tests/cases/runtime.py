@@ -12,6 +12,7 @@ def run_cases():
     default_env = dict(os.environ)
     default_env.pop("SKEIN_VM", None)
     default_env["SKEIN_VM_TRACE"] = "1"
+    default_env["SKEIN_JIT"] = "0"
     check(
         "VM is the default backend",
         "println(1 + 2);\n",

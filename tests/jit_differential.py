@@ -132,6 +132,19 @@ CASES = [
         "println(str(pat([10, 20])));\n",
     ),
     case(
+        "top-level-statements",
+        "import std;\n"
+        "func add(a, b) { return a + b; }\n"
+        "let xs = [1, 2, 3];\n"
+        "let total = 0;\n"
+        "for (let x in xs) { total = total + add(x, 1); }\n"
+        "println(str(total));\n"
+        "let i = 0;\n"
+        "while (i < 100) { total = total + add(i, 2); i = i + 1; }\n"
+        "println(str(total));\n",
+        expect_debug="[jit] top-level",
+    ),
+    case(
         "tight-loop",
         "func sum(n) {\n"
         "  let i = 0;\n"

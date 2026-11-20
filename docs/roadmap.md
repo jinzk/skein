@@ -176,6 +176,9 @@
   `BIND_NAME`、`ENTER/LEAVE_HANDLER_BODY`、`PASS`、`RECOVER`）
 - JIT 支持 `defer`（`DEFER_PUSH`、块级 defer 作用域、返回/fail/abort 时
   执行，捕获 Slot/Param/Upvalue）；顶层与 handler+defer 组合仍回退 VM
+- JIT 支持常规顶层语句（`IMPORT`、`BIND_FUNC`、循环、调用等）；
+  `DECLARE_PACKAGE`/`DECLARE_STRUCT`/`DECLARE_ENUM` 与顶层 handler/defer
+  仍回退 VM
 
 若暂不做 moving GC：
 

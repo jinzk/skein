@@ -956,6 +956,31 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # Top-level statements: import, function binding, loops and calls.
+        top_level = tmp_path / "top_level.skein"
+        top_level.write_text(
+            "import std;\n"
+            "func add(a, b) { return a + b; }\n"
+            "let xs = [1, 2, 3];\n"
+            "let total = 0;\n"
+            "for (let x in xs) { total = total + add(x, 1); }\n"
+            "println(str(total));\n"
+            "let i = 0;\n"
+            "while (i < 200) { total = total + add(i, 2); i = i + 1; }\n"
+            "println(str(total));\n"
+            "println(str(add(xs[0], xs[2])));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "top-level-statements", top_level)
+        rc, out, err = run(binary, top_level, True, debug=True)
+        if rc != 0 or "[jit] top-level" not in err:
+            print(
+                "jit smoke: top-level statement was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

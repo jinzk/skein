@@ -30,7 +30,8 @@ void recycle_frame_vectors(const VmFrameView &view) {
 
 } // namespace
 
-void save_vm_frame(const VmFrameView &view) {
+void save_vm_frame(const VmFrameView &view, bool save_package,
+                   bool save_source) {
     SavedVmState state;
     state.proto = *view.proto;
     state.pc = *view.pc;
@@ -41,13 +42,20 @@ void save_vm_frame(const VmFrameView &view) {
     state.caller_handler_depth = view.context->handler_depth;
     state.handler_body_depth = *view.handler_body_depth;
     state.diag_frames = *view.diag_frames;
-    state.diag_package = diag_current_package_name();
-    state.diag_source = diag_current_source_name();
+    state.diag_package_saved = save_package;
+    state.diag_source_saved = save_source;
+    if (save_package)
+        state.diag_package = diag_current_package_name();
+    if (save_source)
+        state.diag_source = diag_current_source_name();
     state.name_scope_generation = *view.name_scope_generation;
     state.param_pool_safe = *view.param_pool_safe;
     state.slot_pool_safe = *view.slot_pool_safe;
     state.direct_params = *view.direct_params;
     state.direct_slots = *view.direct_slots;
+    state.frame_scope_pushed = *view.frame_scope_pushed;
+    state.block_scopes = *view.block_scopes;
+    state.skipped_scopes = *view.skipped_scopes;
     state.def = std::move(*view.current_def);
     state.name_cache = std::move(*view.name_cache);
     state.param_symbols = std::move(*view.param_symbols);
@@ -71,6 +79,9 @@ void save_vm_frame(const VmFrameView &view) {
     *view.param_pool_safe = false;
     *view.direct_params = false;
     *view.direct_slots = false;
+    *view.frame_scope_pushed = true;
+    *view.block_scopes = true;
+    *view.skipped_scopes = 0;
     *view.slot_pool_safe = false;
 }
 
@@ -85,12 +96,17 @@ void restore_vm_frame(const VmFrameView &view, SavedVmState state) {
     *view.handler_body_depth = state.handler_body_depth;
     view.context->handler_depth = state.caller_handler_depth;
     *view.diag_frames = state.diag_frames;
-    diag_set_package_name(state.diag_package);
-    diag_set_source_name(state.diag_source);
+    if (state.diag_package_saved)
+        diag_set_package_name(state.diag_package);
+    if (state.diag_source_saved)
+        diag_set_source_name(state.diag_source);
     *view.name_scope_generation = state.name_scope_generation;
     *view.param_pool_safe = state.param_pool_safe;
     *view.direct_params = state.direct_params;
     *view.direct_slots = state.direct_slots;
+    *view.frame_scope_pushed = state.frame_scope_pushed;
+    *view.block_scopes = state.block_scopes;
+    *view.skipped_scopes = state.skipped_scopes;
     *view.slot_pool_safe = state.slot_pool_safe;
     *view.current_def = std::move(state.def);
     *view.name_cache = std::move(state.name_cache);

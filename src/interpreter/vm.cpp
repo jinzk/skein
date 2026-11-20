@@ -3031,6 +3031,10 @@ public:
                 }
 
                 case Op::PushScope:
+                    if (!block_scopes_) {
+                        ++skipped_scopes_;
+                        break;
+                    }
                     /*
                      * A fresh scope has no symbols yet, so it cannot shadow
                      * anything.  Cached outer-symbol pointers remain valid
@@ -3042,6 +3046,15 @@ public:
                     break;
 
                 case Op::PopScope: {
+                    if (!block_scopes_ && skipped_scopes_ > 0) {
+                        --skipped_scopes_;
+                        break;
+                    }
+                    /* Plain slot/param frames skip their function scope; the
+                     * trailing PopScope for that frame is a no-op. */
+                    if (!frame_scope_pushed_ &&
+                        context_.scopes.restore_stack.size() <= scope_mark_)
+                        break;
                     scope_t *scope = topscope();
                     bool had_symbols =
                         scope && !scope->syms.small.empty();
@@ -3134,6 +3147,11 @@ private:
     bool slot_pool_safe_ = false;
     bool direct_params_ = false;
     bool direct_slots_ = false;
+    /* True when this frame pushed the function-level closure scope. */
+    bool frame_scope_pushed_ = true;
+    /* False when block scopes are elided (PushScope/PopScope pair as no-ops). */
+    bool block_scopes_ = true;
+    int skipped_scopes_ = 0;
     bool gc_roots_registered_ = false;
     size_t gc_root_mark_ = 0;
     std::vector<struct symbol *> param_symbol_pool_;
@@ -3170,6 +3188,9 @@ private:
         view.slot_pool_safe = &slot_pool_safe_;
         view.direct_params = &direct_params_;
         view.direct_slots = &direct_slots_;
+        view.frame_scope_pushed = &frame_scope_pushed_;
+        view.block_scopes = &block_scopes_;
+        view.skipped_scopes = &skipped_scopes_;
         view.current_def = &current_def_;
         view.name_cache = &name_cache_;
         view.param_symbols = &param_symbols_;
@@ -3190,8 +3211,8 @@ private:
         return view;
     }
 
-    void save_current_state() {
-        save_vm_frame(make_frame_view());
+    void save_current_state(bool save_package = true, bool save_source = true) {
+        save_vm_frame(make_frame_view(), save_package, save_source);
     }
 
     void restore_state(SavedVmState state) {
@@ -3229,17 +3250,8 @@ private:
     }
 
     static bool proto_can_frame(const Proto &proto) {
-        for (const Instr &ins : proto.code) {
-            switch (static_cast<Op>(ins.op)) {
-                case Op::Yield:
-                case Op::ControlBreak:
-                case Op::ControlContinue:
-                    return false;
-                default:
-                    break;
-            }
-        }
-        return true;
+        /* The compiler folds the opcode scan into a single flag. */
+        return !proto.fast_frame_blocked;
     }
 
     enum class FastCallResult {
@@ -3586,6 +3598,40 @@ private:
         slot_symbols_.clear();
     }
 
+    /* A fast frame only needs a scope when something inside can observe the
+     * scope: names, closures, handlers or defers.  Plain slot/param frames
+     * skip the per-call scope allocation entirely. */
+    static bool frame_needs_scope(const Proto &proto) {
+        if (proto.is_generator || proto.uses_names || proto.has_closures ||
+            proto.uses_handlers || proto.uses_defers || proto.uses_slots)
+            return true;
+        /* Pattern binding and iterators define symbols in the frame scope. */
+        if (!proto.param_patterns.empty() || !proto.patterns.empty() ||
+            !proto.iters.empty())
+            return true;
+        return !proto.params_direct;
+    }
+
+    void setup_frame_scopes() {
+        const Proto &p = proto();
+        /* Symbol-backed params/slots (pools disabled) also need the scope. */
+        frame_scope_pushed_ =
+            frame_needs_scope(p) || !direct_params_ ||
+            (!p.slots.empty() && !direct_slots_);
+        if (frame_scope_pushed_)
+            skein_vm_eval_push_closure_scope(current_def_->closure);
+
+        /* Blocks only need a runtime scope when their locals are not direct
+         * slots (no name lookups, closures, handlers, patterns or iterators
+         * can observe it). */
+        const bool direct_frame = (direct_slots_ || p.slots.empty()) &&
+                                  direct_params_ && slot_pool_safe_;
+        block_scopes_ = !(direct_frame && !p.uses_names &&
+                          p.param_patterns.empty() && p.patterns.empty() &&
+                          p.iters.empty());
+        skipped_scopes_ = 0;
+    }
+
     void bind_fast_arguments(function_code *code,
                              value_t **args, size_t argc) {
         (void)argc;
@@ -3621,8 +3667,6 @@ private:
 
     FastCallResult try_fast_call(value_t *callee,
                                  value_t **args, size_t argc) {
-        const std::string *caller_source =
-            diag_intern_source(diag_current_source_name());
 #ifdef SKEIN_ENABLE_JIT
         if (skein_vm_host().fn_skein_vm_try_jit_call) {
             value_t *jit_result = NULL;
@@ -3656,10 +3700,20 @@ private:
         int line = g_error_line > 0 ? g_error_line : code->def_line;
         int column = g_error_line > 0 ? g_error_column : code->def_column;
 
-        save_current_state();
-        if (!code->package.empty())
+        const std::string *caller_source =
+            diag_intern_source(diag_current_source_name());
+        /* Only copy the diagnostic names when this frame actually changes
+         * them; same-module calls are the common case. */
+        const bool change_package =
+            !code->package.empty() &&
+            code->package != diag_current_package_name();
+        const bool change_source =
+            !code->source.empty() &&
+            code->source != diag_current_source_name();
+        save_current_state(change_package, change_source);
+        if (change_package)
             diag_set_package_name(code->package);
-        if (!code->source.empty())
+        if (change_source)
             diag_set_source_name(code->source);
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
@@ -3682,7 +3736,10 @@ private:
         context_.handler_depth = 0;
         scope_mark_ = context_.scopes.restore_stack.size();
         frame_stack_base_ = stack_.size();
-        name_cache_.assign(proto->consts.size(), NameCacheSlot{});
+        if (proto->uses_names)
+            name_cache_.assign(proto->consts.size(), NameCacheSlot{});
+        else
+            name_cache_.clear();
         name_scope_generation_ = 0;
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
@@ -3698,7 +3755,7 @@ private:
         if (proto->uses_defers)
             defer_scopes_.emplace_back();
 
-        skein_vm_eval_push_closure_scope(current_def_->closure);
+        setup_frame_scopes();
         bind_fast_arguments(code, args, argc);
         ++context_.vm_call_depth;
         diag_frames_ = 1;
@@ -3766,7 +3823,10 @@ private:
         errors_before_ = context_.runtime_error_count;
         handler_body_depth_ = 0;
         context_.handler_depth = 0;
-        name_cache_.assign(proto->consts.size(), NameCacheSlot{});
+        if (proto->uses_names)
+            name_cache_.assign(proto->consts.size(), NameCacheSlot{});
+        else
+            name_cache_.clear();
         name_scope_generation_ = 0;
         param_symbols_.clear();
         param_symbols_.reserve((size_t)code->nparams);
@@ -3782,7 +3842,7 @@ private:
         if (proto->uses_defers)
             defer_scopes_.emplace_back();
 
-        skein_vm_eval_push_closure_scope(current_def_->closure);
+        setup_frame_scopes();
         bind_fast_arguments(code, args, argc);
         if (diag_frames_ < 64) {
             diag_push_call(name, caller_source, line, column);
@@ -4064,6 +4124,25 @@ private:
         return &proto().member_ic[index];
     }
 
+    /*
+     * Global/namespace names were resolved lexically at compile time.  Look
+     * them up from the function's defining scope instead of the dynamic
+     * caller chain, so a fast frame without its own scope still sees module
+     * imports.
+     */
+    struct symbol *lookup_lexical_global(const char *name) {
+        if (!name || !*name)
+            return NULL;
+        scope_t *scope = current_def_ ? current_def_->closure.get() : NULL;
+        if (!scope)
+            scope = active_scope_context().global_scope.get();
+        for (; scope; scope = scope->parent.get()) {
+            if (struct symbol *sym = scope->syms.find(name))
+                return sym;
+        }
+        return NULL;
+    }
+
     struct symbol *global_symbol(uint16_t slot, uint32_t name_index) {
         scope_context &scope = active_scope_context();
         const char *name = name_at(proto(), name_index);
@@ -4072,7 +4151,23 @@ private:
             if (sym && sym->name && std::strcmp(sym->name, name) == 0)
                 return sym;
         }
-        return cached_symbol(name_index);
+        if (name_index < name_cache_.size()) {
+            const NameCacheSlot &entry = name_cache_[name_index];
+            if (entry.sym && entry.generation == name_scope_generation_)
+                return entry.sym;
+        }
+        struct symbol *sym = lookup_lexical_global(name);
+        if (!sym)
+            sym = cached_symbol(name_index);
+        if (sym) {
+            /* Size the cache lazily: frames without name ops start empty and
+             * only pay for it when a global/namespace name is resolved. */
+            if (name_cache_.size() <= name_index)
+                name_cache_.assign(proto().consts.size(), NameCacheSlot{});
+            name_cache_[name_index] =
+                NameCacheSlot{sym, name_scope_generation_};
+        }
+        return sym;
     }
 
     struct symbol *global_symbol(uint16_t slot, const char *name) {
@@ -4302,17 +4397,26 @@ private:
         return !direct_slots_ || !direct_params_;
     }
 
+    /* A local of the current function shadows any inherited capture with the
+     * same name.  Walk only the function's own scopes (block scopes up to the
+     * function scope); the closure parent is a different function. */
+    struct symbol *local_symbol_for_capture(const char *name) {
+        if (!name || !*name)
+            return NULL;
+        for (scope_t *s = active_scope_context().current.get(); s;
+             s = s->parent.get()) {
+            if (s->is_global)
+                break;
+            if (struct symbol *sym = s->syms.find(name))
+                return sym;
+            if (s->is_function)
+                break;
+        }
+        return NULL;
+    }
+
     std::shared_ptr<struct upvalue_cell> capture_upvalue(
         const std::string &name) {
-        if (current_def_) {
-            for (size_t i = 0; i < proto().upvalues.size() &&
-                               i < current_def_->upvalues.size();
-                 ++i) {
-                if (proto().upvalues[i] == name &&
-                    current_def_->upvalues[i])
-                    return current_def_->upvalues[i];
-            }
-        }
         if (direct_params_) {
             for (size_t i = 0; i < proto().param_names.size(); ++i) {
                 if (proto().param_names[i] != name)
@@ -4331,6 +4435,18 @@ private:
                     &slot_values_[i], &slot.type, name,
                     slot.is_const ||
                         (i < slot_const_.size() && slot_const_[i]));
+            }
+        }
+        if (struct symbol *local = local_symbol_for_capture(name.c_str()))
+            return open_cell(&local->val, &local->type, name,
+                             local->is_const);
+        if (current_def_) {
+            for (size_t i = 0; i < proto().upvalues.size() &&
+                               i < current_def_->upvalues.size();
+                 ++i) {
+                if (proto().upvalues[i] == name &&
+                    current_def_->upvalues[i])
+                    return current_def_->upvalues[i];
             }
         }
         struct symbol *sym = lookupsym(name.c_str());

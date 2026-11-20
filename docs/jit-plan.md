@@ -571,6 +571,21 @@ bool frame_eligible =
   模式下保留 `symbol*` 兼容路径；
 - JIT 始终使用自己的 frame slots。
 
+VM fast frame 的后续收尾（已完成）：
+
+- `Proto::fast_frame_blocked` 由编译器在 `emit()` 中维护，调用路径不再
+  每次扫描整段字节码；
+- `frame_setup` 只在需要时创建函数 scope（`uses_names` / closure /
+  handler / defer / 参数或 slot 非 direct）；纯 slot 帧直接跳过；
+- 块作用域在帧内没有任何可观察符号时成对跳过 `PUSH_SCOPE`/`POP_SCOPE`
+  （`block_scopes_` + `skipped_scopes_`）；
+- `LOAD_GLOBAL`/`STORE_GLOBAL` 的模块名回退从函数 closure 作用域解析，
+  不依赖动态调用链；解析结果进入 frame-local name cache；
+- 诊断 package/source 仅在真正变化时保存与恢复，避免每调用复制字符串；
+- `capture_upvalue` 的优先级修正为：参数、本地 slot、当前函数作用域
+  符号，然后是 `def->upvalues` 中的继承 cell（同名参数不再被外层捕获
+  覆盖）。
+
 ### 7.3 Verifier 元数据
 
 `verify()` 已经计算 CFG 栈深度。需要把它保存到 `Proto`：

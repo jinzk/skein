@@ -80,6 +80,49 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1"),
     )
     check(
+        "loop block shadows without leaking",
+        "let x = 100;\n"
+        "func f() {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < 3) {\n"
+        "    let x = i;\n"
+        "    total = total + x;\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return total;\n"
+        "}\n"
+        "println(f());\n"
+        "println(x);\n",
+        stdout_all=["3", "100"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
+        "for loop variable shadows without leaking",
+        "let x = 5;\n"
+        "let total = 0;\n"
+        "for (let x in [1, 2, 3]) { total = total + x; }\n"
+        "println(total);\n"
+        "println(x);\n",
+        stdout_all=["6", "5"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
+        "nested closure params capture per call",
+        "import std;\n"
+        "func build(n) {\n"
+        "  let make = func(i) { return func() { return i; }; };\n"
+        "  let out = [];\n"
+        "  let i = 0;\n"
+        "  while (i < n) { out = std.list.append(out, make(i)); i = i + 1; }\n"
+        "  return out;\n"
+        "}\n"
+        "let fs = build(3);\n"
+        "println(str(fs[0]() + fs[1]() + fs[2]()));\n",
+        stdout_all=["3"],
+        env=dict(os.environ, SKEIN_VM="1"),
+    )
+    check(
         "index cache key and mutation",
         "let d = {\"a\": 1, \"b\": 2};\n"
         "func get(k) { return d[k]; }\n"

@@ -69,11 +69,22 @@ struct SavedVmState {
     size_t diag_frames = 0;
     std::string diag_package;
     std::string diag_source;
+    bool diag_package_saved = false;
+    bool diag_source_saved = false;
     uint64_t name_scope_generation = 0;
     bool param_pool_safe = false;
     bool slot_pool_safe = false;
     bool direct_params = false;
     bool direct_slots = false;
+    /* Whether the frame pushed a closure scope (plain slot frames skip it). */
+    bool frame_scope_pushed = true;
+    /*
+     * Whether block scopes are materialized at runtime.  Frames whose locals
+     * all live in direct slots do not need them; PushScope/PopScope are then
+     * paired no-ops.
+     */
+    bool block_scopes = true;
+    int skipped_scopes = 0;
     std::shared_ptr<function_def> def;
     std::vector<NameCacheSlot> name_cache;
     std::vector<struct symbol *> param_symbols;

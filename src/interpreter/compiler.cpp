@@ -427,6 +427,9 @@ struct Compiler {
             case Op::StoreName:
             case Op::CompoundName:
             case Op::IncDecName:
+            /* A name-based definition also lives in the current scope, so
+             * the frame still needs one. */
+            case Op::DefineName:
                 proto.uses_names = true;
                 break;
             case Op::LoadParam:
@@ -444,6 +447,24 @@ struct Compiler {
             case Op::PushFailHandler:
             case Op::PushRecoverHandler:
                 proto.uses_handlers = true;
+                break;
+            case Op::Yield:
+            case Op::ControlBreak:
+            case Op::ControlContinue:
+                proto.fast_frame_blocked = true;
+                break;
+            /* These resolve a base name through the live scope chain. */
+            case Op::GetFieldOrEnum:
+            case Op::Import:
+                proto.uses_names = true;
+                break;
+            /* These define or capture symbols in the current block scope. */
+            case Op::BindFunc:
+            case Op::DeclareStruct:
+            case Op::DeclareEnum:
+            case Op::DeclareTrait:
+            case Op::DeclareImpl:
+                proto.uses_names = true;
                 break;
             case Op::DefineSlot:
             case Op::LoadSlot:
@@ -602,6 +623,8 @@ struct Compiler {
                 }
             }
         }
+        if (kind == skein::bc::IndexBaseKind::Name)
+            proto.uses_names = true;
         return add_index(base_name, fields, kind, index);
     }
 

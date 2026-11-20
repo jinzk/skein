@@ -166,8 +166,49 @@
 若暂不做 moving GC：
 
 - 只做 GC root 边界审计（已完成，见下）
-- 继续优化 frame 分配与热点 opcode
+- 继续优化 frame 分配与热点 opcode（已完成，见下）
 - per-pc liveness 不阻塞主线
+
+#### 热点 opcode / frame 分配（已完成）
+
+VM fast frame 的每调用开销：
+
+- `proto_can_frame` 从“每次调用扫描整段字节码”改为编译器写入的
+  `fast_frame_blocked` 标志
+- 纯 slot/param 帧不再分配函数级 scope；块作用域在没有名字、闭包、
+  handler、defer、pattern、iterator 时也不物化（`PushScope`/`PopScope`
+  成对跳过）
+- `LoadGlobal` 的模块名回退改为从函数定义时的 closure 作用域解析，
+  不再依赖动态调用链，从而允许更多帧省略 scope；全局/名字查找增加
+  frame-local IC
+- 只在 package/source 真正变化时保存/恢复诊断名字，避免每次调用复制
+  两个 `std::string`
+- `caller_source` 的 intern 查找移到确认进入 fast frame 之后
+
+顺带修复：嵌套闭包内同名参数捕获错误。VM 的 `capture_upvalue` 优先返回
+`def->upvalues` 中的继承 cell，导致同名参数被外层变量替换；现在参数、
+本地 slot 与当前函数作用域内的符号优先于继承 cell。
+
+实测（Windows，`bench_min` min-of-9，数值随机器状态有 ±5% 波动）：
+
+```text
+fib        约 1.16s → 约 0.75s
+call       约 1.21s → 约 0.72s
+
+bench_vm VM（改前 → 改后，约值）
+slot 0.371→0.205   fib 1.149→0.78   call 1.180→0.74
+field 0.569→0.42   method 0.420→0.30  global 0.389→0.26
+index 0.537→0.40   index_write 0.421→0.32  scope 0.353→0.21
+pattern 0.735→0.67
+```
+
+VM 现在在所有 `bench_vm` 用例上都快于 AST（VM/AST ratio 0.36–0.90）。
+
+测试补充：`tests/cases/runtime.py` 增加循环块作用域遮蔽、`for` 循环变量
+遮蔽、嵌套闭包参数按调用捕获。
+
+已知（既有问题，不在测试矩阵内）：`SKEIN_VM_SLOT_POOL=0` 与嵌套闭包组合时
+VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受影响。
 
 #### GC root 边界审计（已完成）
 
@@ -317,8 +358,9 @@ std.string.builder          29 ms
 1. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
 2. Milestone 2 已完成。
 3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
-4. Milestone 4 先做决策（moving GC / AOT / JIT 默认开启），当前优先：
-   - 热点 opcode 与 frame 分配
+4. Milestone 4 的 GC root 审计与热点 opcode / frame 分配已完成；剩余是
+   moving GC / AOT / JIT 默认开启的决策，以及决策后才会启动的
+   per-pc liveness / OSR / deopt。
 5. 测试稳定性已完成：
    - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉
      probe-then-bind 竞态和定时就绪探测

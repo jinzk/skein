@@ -30,6 +30,9 @@ struct VmFrameView {
     bool *slot_pool_safe = nullptr;
     bool *direct_params = nullptr;
     bool *direct_slots = nullptr;
+    bool *frame_scope_pushed = nullptr;
+    bool *block_scopes = nullptr;
+    int *skipped_scopes = nullptr;
     std::shared_ptr<function_def> *current_def = nullptr;
     std::vector<NameCacheSlot> *name_cache = nullptr;
     std::vector<struct symbol *> *param_symbols = nullptr;
@@ -49,7 +52,8 @@ struct VmFrameView {
     std::vector<std::vector<value_t *>> *slot_values_pool = nullptr;
 };
 
-void save_vm_frame(const VmFrameView &view);
+void save_vm_frame(const VmFrameView &view, bool save_package = true,
+                   bool save_source = true);
 void restore_vm_frame(const VmFrameView &view, SavedVmState state);
 
 #endif

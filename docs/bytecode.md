@@ -129,6 +129,10 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - 函数调用（普通函数、builtin、方法值、spread 参数）
 - VM fast frame（普通函数直接压帧，支持 handler / defer / iterator；
   `RETURN` 恢复调用者帧，不再创建 `Executor`）
+- fast frame 作用域省略：`params_direct`/`slots_direct_safe` 且没有名字、
+  闭包、handler、defer、pattern、iterator 的帧跳过函数级 scope；块作用域
+  同样在没有可观察符号时成对跳过 `PUSH_SCOPE`/`POP_SCOPE`
+  （`SKEIN_VM_PARAM_POOL=0` / `SKEIN_VM_SLOT_POOL=0` 时保持完整作用域）
 - 尾调用优化（`TAIL_CALL`：无 spread 的 `return f(args)` 复用当前
   fast frame；有 defer/handler/iterator 时回退普通调用）
 - list / dict 字面量

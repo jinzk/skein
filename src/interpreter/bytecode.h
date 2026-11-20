@@ -478,6 +478,12 @@ struct Proto {
     bool has_closures = false;
     /* True when the body installs fail/recover handlers. */
     bool uses_handlers = false;
+    /*
+     * True when the body emits YIELD / break / continue, which disqualifies
+     * it from the VM fast-frame path.  Set by the compiler so the call path
+     * does not have to scan the code array on every call.
+     */
+    bool fast_frame_blocked = false;
 
     uint32_t nparams = 0;
     uint32_t required_params = 0;

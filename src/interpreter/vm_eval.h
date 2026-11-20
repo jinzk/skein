@@ -48,6 +48,13 @@ struct value_t *take_eval_control(enum eval_control_kind kind);
 
 struct value_t *skein_vm_call_value_args(
     struct value_t *callee, std::vector<struct value_t *> args);
+/*
+ * Try a JIT call from the generic evaluator path.  Returns true when the JIT
+ * consumed `args`; `*out` then holds the result.  On false, args are untouched.
+ */
+bool skein_vm_try_jit_call_args(struct value_t *callee,
+                                std::vector<struct value_t *> &args,
+                                struct value_t **out);
 struct value_t *skein_vm_read_member_value(
     struct value_t *container, struct value_t *index,
     bool field_access = false);

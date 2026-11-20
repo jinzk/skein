@@ -791,6 +791,31 @@ value_t *skein_vm_jit_tail_invoke(value_t *callee, value_t **args,
 
 } // namespace
 
+bool skein_vm_try_jit_call_args(value_t *callee,
+                                std::vector<value_t *> &args,
+                                value_t **out) {
+#ifdef SKEIN_ENABLE_JIT
+    if (!skein_vm_enabled())
+        return false;
+    if (args.empty()) {
+        if (!skein_vm_try_jit_call_impl(callee, nullptr, 0, out, false))
+            return false;
+        return true;
+    }
+    if (!skein_vm_try_jit_call_impl(callee, args.data(),
+                                    static_cast<uint32_t>(args.size()), out,
+                                    false))
+        return false;
+    args.clear();
+    return true;
+#else
+    (void)callee;
+    (void)args;
+    (void)out;
+    return false;
+#endif
+}
+
 #ifdef SKEIN_ENABLE_JIT
 /*
  * Fast-path resolver called from generated CALL code.  It only returns an

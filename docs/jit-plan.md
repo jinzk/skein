@@ -1258,6 +1258,20 @@ handler/defer 仍走 VM。
 `DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM` 与顶层
 handler/defer 仍走 VM。
 
+通用调用路径接入 JIT（2026-11-20 已完成）：
+
+- `eval_call.cpp` 的 `invoke_value` 在进入 VM/AST 解释前先尝试
+  `skein_vm_try_jit_call_args`；builtin 回调（map/filter/sort/reduce、
+  compose、task body 等）不再绕过 JIT；
+- `skein_vm_try_jit_call_args` 只在 VM 模式下尝试，避免 AST 后端重复探测；
+- 实测回调内自带长循环：map 149ms → 50ms（约 3x），sort 93ms → 41ms
+  （约 2.3x），并确认 `[jit] enter heavy` / `[jit] enter cmp`；
+- 这一步也降低了 OSR 的收益预期：此前“回调绕过 JIT”是 OSR 的主要目标之一。
+
+剩余覆盖率缺口：OSR/deopt（需要 per-pc liveness）。顶层
+`DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM` 与顶层
+handler/defer 仍走 VM。
+
 Handler JIT（2026-11-20 已完成）：
 
 - `PUSH_FAIL/RECOVER_HANDLER`、`POP_HANDLER`、`CHECK_RESULT`、

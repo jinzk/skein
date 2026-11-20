@@ -400,6 +400,19 @@ static struct value_t *invoke_value(
         return ret;
     }
 
+#ifdef SKEIN_ENABLE_JIT
+    /*
+     * The generic evaluator path (builtin callbacks, map/filter/sort/compose,
+     * task bodies) bypasses the VM fast-call bridge.  Try the JIT first so
+     * eligible callbacks do not run interpreted for their whole lifetime.
+     */
+    if (callee->type == T_func || callee->type == T_method) {
+        value_t *jit_result = nullptr;
+        if (skein_vm_try_jit_call_args(callee, args, &jit_result))
+            return jit_result;
+    }
+#endif
+
     if (callee->type == T_method) {
         struct method_value_t *method = (struct method_value_t *)callee;
         std::vector<struct value_t *> all_args;

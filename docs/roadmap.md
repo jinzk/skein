@@ -179,6 +179,8 @@
 - JIT 支持常规顶层语句（`IMPORT`、`BIND_FUNC`、循环、调用等）；
   `DECLARE_PACKAGE`/`DECLARE_STRUCT`/`DECLARE_ENUM` 与顶层 handler/defer
   仍回退 VM
+- builtin 回调（map/filter/sort/reduce/compose/task）通过 `invoke_value`
+  直接进入 JIT，不再因为通用调用路径绕过 JIT
 
 若暂不做 moving GC：
 

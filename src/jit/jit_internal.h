@@ -43,7 +43,16 @@ inline symbol *resolve_global_symbol(uint32_t slot, const char *name) {
             std::strcmp(candidate->name, name) == 0)
             return candidate;
     }
-    return lookupsym(name);
+    if (symbol *found = lookupsym(name))
+        return found;
+    /*
+     * Fibers/tasks may run with an isolated current scope whose chain does
+     * not reach the script globals.  LOAD_GLOBAL names still have to resolve
+     * against the global scope in that case.
+     */
+    if (scope.global_scope)
+        return scope.global_scope->syms.find(name);
+    return nullptr;
 }
 
 inline symbol *resolve_global_symbol(const skein::bc::Proto *proto,

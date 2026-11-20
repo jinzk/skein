@@ -981,6 +981,47 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # Builtin callbacks (map/filter/sort) go through the generic invoke
+        # path; eligible callbacks must still enter the JIT, including when
+        # they contain the hot loop themselves.
+        callback_jit = tmp_path / "callback_jit.skein"
+        callback_jit.write_text(
+            "import std;\n"
+            "func heavy(x) {\n"
+            "  let i = 0;\n"
+            "  let t = 0;\n"
+            "  while (i < 20000) { t = t + i; i = i + 1; }\n"
+            "  return x + t;\n"
+            "}\n"
+            "func cmp(a, b) {\n"
+            "  let i = 0;\n"
+            "  let t = 0;\n"
+            "  while (i < 5000) { t = t + i; i = i + 1; }\n"
+            "  return a - b;\n"
+            "}\n"
+            "func pred(x) {\n"
+            "  let i = 0;\n"
+            "  while (i < 5000) { i = i + 1; }\n"
+            "  return x > 0;\n"
+            "}\n"
+            "let mapped = std.list.map([1, 2, 3], heavy);\n"
+            "println(str(std.list.len(mapped)));\n"
+            "println(str(std.list.filter([1, 2, 3], pred)));\n"
+            "println(str(std.list.sort([3, 1, 2], cmp)));\n"
+            "println(str(std.list.reduce([1, 2, 3],\n"
+            "                            func(a, b) { return heavy(a) + b; }, 0)));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "callback-jit", callback_jit)
+        rc, out, err = run(binary, callback_jit, True, debug=True)
+        if rc != 0 or "[jit] enter heavy" not in err:
+            print(
+                "jit smoke: builtin callback was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

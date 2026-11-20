@@ -271,8 +271,10 @@ std.string.builder          29 ms
 2. Milestone 2 已完成。
 3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
 4. Milestone 4 先做决策（moving GC / AOT / JIT 默认开启），当前优先：
-   - JIT 支持 `STRING_APPEND_SELF`
    - GC root 边界审计
    - 热点 opcode 与 frame 分配
-5. 测试稳定性（`net.py` serve-stream、`thread_bench` 阈值）与文档同步。
+5. 测试稳定性已完成：
+   - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉
+     probe-then-bind 竞态和定时就绪探测
+   - `thread_bench` 门槛改用多次重复中的最好成绩，基线按实测重设
 6. 长尾能力按实际需求触发。

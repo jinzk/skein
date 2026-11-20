@@ -65,7 +65,8 @@ RSS 为 server 进程树（父进程 + 所有 worker）在 ready 后与请求高
 
 - `tests/harness.py` 的 `serve_threads` / `serve_processes` 崩溃用例验证 502 与重启；
 - `memory_soak_test` 验证两种模式的 RSS 趋势；
-- `http_dispatch_bench_test` / `thread_bench_test` 固定基线与回归阈值。
+- `http_dispatch_bench_test` / `thread_bench_test` 固定基线与回归阈值；
+  `thread_bench` 以多次重复中的最好成绩过门槛，避免调度噪声造成误报。
 
 ## 结论
 

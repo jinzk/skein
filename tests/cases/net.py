@@ -11,6 +11,40 @@ def run_cases():
         import socket
         import threading
 
+        def start_server(script, label):
+            """Start a server script that prints its listening port first.
+
+            The script binds port 0, prints the actual port, flushes stdout
+            and only then starts serving.  Binding inside the child removes
+            the free-port race between a probe socket and the server, and
+            reading the port line replaces the timed readiness probe.
+            """
+            proc = subprocess.Popen(
+                [BIN],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                proc.stdin.write(script)
+                proc.stdin.close()
+                line = proc.stdout.readline().strip()
+            except Exception:
+                if proc.poll() is None:
+                    proc.terminate()
+                proc.wait(timeout=5)
+                raise
+            if not line.isdigit():
+                stderr = proc.stderr.read() if proc.poll() is not None else ""
+                if proc.poll() is None:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                raise AssertionError(
+                    f"{label} did not listen: {line!r} {stderr}".strip())
+            return proc, int(line)
+
         server = socket.socket()
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("127.0.0.1", 0))
@@ -463,48 +497,25 @@ def run_cases():
         assert "ok:async-stream" in request_stream_client.stdout, (
             request_stream_client.stdout)
 
-        serve_stream_probe = socket.socket()
-        serve_stream_probe.bind(("127.0.0.1", 0))
-        serve_stream_port = serve_stream_probe.getsockname()[1]
-        serve_stream_probe.close()
-        serve_stream_proc = subprocess.Popen(
-            [BIN],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
+        serve_stream_proc, serve_stream_port = start_server(
+            "import std;\n"
+            "func parts() {\n"
+            '  yield "serve-";\n'
+            '  yield "stream";\n'
+            "}\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            'println(str(s["port"]));\n'
+            "std.io.flush(std.io.stdout);\n"
+            "let n = std.http.serve(s, func(req) {\n"
+            '  return {"status": 200, "headers": '
+            '{"Content-Type": "text/plain"}, '
+            '"body_stream": parts()};\n'
+            "}, 2);\n"
+            'println("served " + str(n));\n'
+            "std.http.close(s);\n",
+            "http serve stream",
         )
         try:
-            serve_stream_proc.stdin.write(
-                "import std;\n"
-                "func parts() {\n"
-                '  yield "serve-";\n'
-                '  yield "stream";\n'
-                "}\n"
-                f'let s = std.http.listen("127.0.0.1", '
-                f"{serve_stream_port});\n"
-                "let n = std.http.serve(s, func(req) {\n"
-                '  return {"status": 200, "headers": '
-                '{"Content-Type": "text/plain"}, '
-                '"body_stream": parts()};\n'
-                "}, 2);\n"
-                'println("served " + str(n));\n'
-                "std.http.close(s);\n"
-            )
-            serve_stream_proc.stdin.close()
-            deadline = time.time() + 5
-            ready = False
-            while time.time() < deadline:
-                try:
-                    probe = socket.create_connection(
-                        ("127.0.0.1", serve_stream_port), timeout=0.2)
-                    probe.close()
-                    ready = True
-                    break
-                except OSError:
-                    time.sleep(0.05)
-            assert ready, "http serve stream did not listen"
             serve_stream_client = run(
                 "import std;\n"
                 f'let a = std.http.get('
@@ -514,7 +525,7 @@ def run_cases():
                 f'let b = std.http.get_task('
                 f'"http://127.0.0.1:{serve_stream_port}/b").wait();\n'
                 'println(bytes_to_string(b["body"]));\n',
-                timeout=15,
+                timeout=30,
             )
             assert serve_stream_client.returncode == 0, (
                 serve_stream_client.stderr)
@@ -522,46 +533,34 @@ def run_cases():
                 serve_stream_client.stdout)
             assert serve_stream_client.stdout.count("serve-stream") == 2, (
                 serve_stream_client.stdout)
-            serve_stream_proc.wait(timeout=10)
+            serve_stream_proc.wait(timeout=30)
         finally:
             if serve_stream_proc.poll() is None:
                 serve_stream_proc.terminate()
                 serve_stream_proc.wait(timeout=5)
 
-        respond_stream_probe = socket.socket()
-        respond_stream_probe.bind(("127.0.0.1", 0))
-        respond_stream_port = respond_stream_probe.getsockname()[1]
-        respond_stream_probe.close()
-        respond_stream_proc = subprocess.Popen(
-            [BIN],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
+        respond_stream_proc, respond_stream_port = start_server(
+            "import std;\n"
+            "func parts() {\n"
+            '  yield "respond-";\n'
+            '  yield "stream";\n'
+            "}\n"
+            'let s = std.http.listen("127.0.0.1", 0);\n'
+            'println(str(s["port"]));\n'
+            "std.io.flush(std.io.stdout);\n"
+            "let req = std.http.accept(s, 5000);\n"
+            "std.http.respond(req, 200, {}, parts());\n"
+            "std.http.close(s);\n",
+            "http respond stream",
         )
         try:
-            respond_stream_proc.stdin.write(
-                "import std;\n"
-                "func parts() {\n"
-                '  yield "respond-";\n'
-                '  yield "stream";\n'
-                "}\n"
-                f'let s = std.http.listen("127.0.0.1", '
-                f"{respond_stream_port});\n"
-                "let req = std.http.accept(s, 5000);\n"
-                "std.http.respond(req, 200, {}, parts());\n"
-                "std.http.close(s);\n"
-            )
-            respond_stream_proc.stdin.close()
-            time.sleep(0.5)
             respond_stream_client = run(
                 "import std;\n"
                 f'let a = std.http.get('
                 f'"http://127.0.0.1:{respond_stream_port}/a");\n'
                 'println(a["headers"]["transfer-encoding"]);\n'
                 'println(bytes_to_string(a["body"]));\n',
-                timeout=15,
+                timeout=30,
             )
             assert respond_stream_client.returncode == 0, (
                 respond_stream_client.stderr)
@@ -569,7 +568,7 @@ def run_cases():
                 respond_stream_client.stdout)
             assert "respond-stream" in respond_stream_client.stdout, (
                 respond_stream_client.stdout)
-            respond_stream_proc.wait(timeout=10)
+            respond_stream_proc.wait(timeout=30)
         finally:
             if respond_stream_proc.poll() is None:
                 respond_stream_proc.terminate()

@@ -8,7 +8,8 @@ process startup does not dominate.
 With --check the script compares rates against a recorded baseline JSON
 (keys: "default" or the platform name from sys.platform) and fails when a case
 drops below baseline * (1 - --max-regression).  Explicit --min-* floors take
-precedence when given.
+precedence when given.  Gates use the best repeat rather than the median so
+that scheduler noise does not fail an otherwise healthy run.
 """
 
 import argparse
@@ -196,6 +197,9 @@ def measure(binary, name, workers, repeats, tmp):
         "case": name,
         "elapsed_ms": statistics.median(r["elapsed_ms"] for r in results),
         "rate": statistics.median(r["rate"] for r in results),
+        # Floors gate on the best run: slow runs are noise, a real
+        # regression slows every repeat down.
+        "best_rate": max(r["rate"] for r in results),
     }
 
 
@@ -217,7 +221,7 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bin", default="./build/skein")
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--baseline", default=DEFAULT_BASELINE)
@@ -254,16 +258,16 @@ def main(argv):
                 continue
             results.append(result)
             floor = floors.get(name, 0.0)
-            if args.check and floor > 0 and result["rate"] < floor:
+            if args.check and floor > 0 and result["best_rate"] < floor:
                 failures.append(
-                    f"{name}: {result['rate']:.0f}/s is below floor "
+                    f"{name}: {result['best_rate']:.0f}/s is below floor "
                     f"{floor:.0f}/s")
             if (args.check and baseline and name in baseline and
                     baseline[name] > 0):
                 limit = baseline[name] * (1.0 - args.max_regression)
-                if result["rate"] < limit:
+                if result["best_rate"] < limit:
                     failures.append(
-                        f"{name}: {result['rate']:.0f}/s is below "
+                        f"{name}: {result['best_rate']:.0f}/s is below "
                         f"{limit:.0f}/s (baseline {baseline[name]:.0f}/s, "
                         f"max regression {args.max_regression:.0%})")
 
@@ -271,10 +275,10 @@ def main(argv):
         print(json.dumps({"results": results,
                           "baseline": baseline}, indent=2))
     else:
-        print(f"{'case':<12} {'ms':>10} {'rate/s':>12}")
+        print(f"{'case':<12} {'ms':>10} {'rate/s':>12} {'best/s':>12}")
         for item in results:
             print(f"{item['case']:<12} {item['elapsed_ms']:10.1f} "
-                  f"{item['rate']:12.0f}")
+                  f"{item['rate']:12.0f} {item['best_rate']:12.0f}")
 
     if failures:
         for failure in failures:

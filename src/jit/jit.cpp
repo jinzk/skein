@@ -58,12 +58,33 @@ SKEIN_JIT_SYSV value_t *skein_jit_incdec_global(const skein::bc::Proto *proto,
                                  int delta, int prefix, uint64_t loc);
 SKEIN_JIT_SYSV value_t *skein_jit_neg(value_t *value, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_not(value_t *value, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_compare_value(int op, value_t *left,
+                                                value_t *right, int line,
+                                                int column);
 SKEIN_JIT_SYSV value_t *skein_jit_bitnot(value_t *value, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                              uint32_t name_index, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               uint32_t name_index, value_t *value, int line,
                               int column);
+SKEIN_JIT_SYSV value_t *skein_jit_compound_name(const skein::bc::Proto *proto,
+                                uint32_t name_index, value_t *value, int op,
+                                uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_incdec_name(const skein::bc::Proto *proto,
+                              uint32_t name_index, int delta, int prefix,
+                              uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_define_name(const skein::bc::Proto *proto,
+                              uint32_t decl_index, value_t *value,
+                              uint64_t loc);
+SKEIN_JIT_SYSV int skein_jit_check_redefine(const skein::bc::Proto *proto,
+                            uint32_t name_index, uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_iter_new(value_t **slot, uint64_t *state,
+                           const skein::bc::IterDesc *desc,
+                           value_t *iterable, uint64_t loc);
+SKEIN_JIT_SYSV int skein_jit_iter_next(value_t **slot, uint64_t *state,
+                       value_t **dest_key, value_t **dest_value,
+                       const skein::bc::IterDesc *desc, uint64_t loc);
+SKEIN_JIT_SYSV void skein_jit_iter_end(value_t **slot, uint64_t *state);
 SKEIN_JIT_SYSV value_t *skein_jit_load_upvalue(function_def *def,
                                uint32_t index, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_store_upvalue(function_def *def,
@@ -79,12 +100,14 @@ SKEIN_JIT_SYSV size_t skein_jit_push_cell_mark(skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_close_cells(skein::jit::thread_state *ts,
                            size_t mark);
 SKEIN_JIT_SYSV void skein_jit_push_frame_scope(function_def *def);
+SKEIN_JIT_SYSV void skein_jit_frame_scope_pushed(
+    skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV value_t *skein_jit_closure(
     skein::jit::thread_state *ts, function_def *def,
     const skein::bc::Proto *proto, uint32_t const_index,
     value_t **frame_values, uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_push_scope();
-SKEIN_JIT_SYSV void skein_jit_pop_scope();
+SKEIN_JIT_SYSV void skein_jit_pop_scope(skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
                             int column);
 SKEIN_JIT_SYSV value_t *skein_jit_new_dict(value_t **items, uint32_t count, int line,
@@ -157,7 +180,8 @@ SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
     skein::bc::IndexReadCacheEntry *cache, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
                                 value_t **indices, uint32_t count,
-                                value_t *value, int line, int column);
+                                value_t *value, value_t **base_slot,
+                                uint64_t packed_loc);
 SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
 SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
@@ -253,6 +277,8 @@ invoke_fn g_tail_invoke = nullptr;
 construct_fn g_build_struct = nullptr;
 bind_frame_fn g_bind_frame = nullptr;
 direct_fn g_direct = nullptr;
+generator_test_fn g_generator_test = nullptr;
+generator_step_fn g_generator_step = nullptr;
 
 } // namespace
 
@@ -266,6 +292,10 @@ void set_bind_frame(bind_frame_fn fn) { g_bind_frame = fn; }
 bind_frame_fn bind_frame() { return g_bind_frame; }
 void set_direct(direct_fn fn) { g_direct = fn; }
 direct_fn direct() { return g_direct; }
+void set_generator_test(generator_test_fn fn) { g_generator_test = fn; }
+generator_test_fn generator_test() { return g_generator_test; }
+void set_generator_step(generator_step_fn fn) { g_generator_step = fn; }
+generator_step_fn generator_step() { return g_generator_step; }
 
 bool available() {
     static int state = -1;
@@ -276,25 +306,44 @@ bool available() {
 
 bool can_compile(const skein::bc::Proto &proto, bool top_level,
                  bool pattern_frame) {
-    const bool name_mode =
+    auto reject = [&](const char *why) {
+        if (read_bool_env("SKEIN_JIT_DEBUG", false))
+            std::fprintf(stderr, "[jit] reject %s: %s\n",
+                         proto.name.empty() ? "<anonymous>"
+                                            : proto.name.c_str(),
+                         why);
+        return false;
+    };
+    /*
+     * Name-based locals are compiled through scope helpers, and the prologue
+     * binds direct parameters into the frame.  A top-level statement has no
+     * parameters; only its name-mode form is compiled because the plain form
+     * would route calls through the generic (non-tail) path.
+     */
+    const bool frame_shape_ok =
+        proto.params_direct ||
         (top_level && proto.uses_names && proto.nparams == 0) ||
-        (pattern_frame && proto.uses_names);
-    if ((!proto.params_direct && !name_mode) ||
-        (proto.uses_names && !name_mode) ||
-        proto.uses_defers || proto.uses_handlers ||
-        proto_may_suspend(proto) ||
-        proto.variadic)
-        return false;
+        pattern_frame;
+    if (!frame_shape_ok)
+        return reject("frame shape");
+    if (proto.uses_defers)
+        return reject("defer");
+    if (proto.uses_handlers)
+        return reject("handler");
+    if (proto_may_suspend(proto))
+        return reject("suspend");
+    if (proto.variadic)
+        return reject("variadic");
     if (proto.nparams != proto.required_params)
-        return false;
+        return reject("default parameters");
     if (proto.stack_depth.size() < proto.code.size())
-        return false;
+        return reject("stack depth");
 
     const uint64_t value_count =
         static_cast<uint64_t>(proto.nparams) + proto.slots.size() +
-        proto.max_stack;
+        proto.max_stack + proto.iters.size();
     if (value_count > 512)
-        return false;
+        return reject("frame too large");
 
     for (size_t pc = 0; pc < proto.code.size(); ++pc) {
         const skein::bc::Instr &ins = proto.code[pc];
@@ -312,13 +361,20 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::BitXor:
             case skein::bc::Op::Shl:
             case skein::bc::Op::Shr:
-            case skein::bc::Op::CmpJump:
             case skein::bc::Op::Neg:
             case skein::bc::Op::Not:
             case skein::bc::Op::BitNot:
             case skein::bc::Op::Jump:
             case skein::bc::Op::JumpIfFalse:
             case skein::bc::Op::JumpIfTrue:
+            case skein::bc::Op::CmpJump:
+            case skein::bc::Op::CmpEq:
+            case skein::bc::Op::CmpNe:
+            case skein::bc::Op::CmpLt:
+            case skein::bc::Op::CmpLe:
+            case skein::bc::Op::CmpGt:
+            case skein::bc::Op::CmpGe:
+                break;
             case skein::bc::Op::Call:
                 /* `launch f()` uses flags & 1 to start a new fiber.  The JIT
                  * call helpers do not implement fiber launch, so compiling
@@ -327,13 +383,13 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                  * `fail` would escape as an uncaught error instead of being
                  * reported as a detached task failure). */
                 if (ins.flags & 1)
-                    return false;
+                    return reject("fiber launch call");
                 break;
             case skein::bc::Op::CallMethod:
                 if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
-                    return false;
+                    return reject("call-method constant");
                 break;
             case skein::bc::Op::ListAppendSelf:
             case skein::bc::Op::ListConcatSelf:
@@ -349,20 +405,21 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::PushScope:
             case skein::bc::Op::PopScope:
             case skein::bc::Op::Pop:
+            case skein::bc::Op::Dup:
                 break;
             case skein::bc::Op::LoadConst:
                 if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Value ||
                     !proto.consts[ins.b].value)
-                    return false;
+                    return reject("load-const");
                 break;
             case skein::bc::Op::LoadGlobal:
             case skein::bc::Op::StoreGlobal:
                 if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
-                    return false;
+                    return reject("global constant");
                 break;
             case skein::bc::Op::CompoundGlobal:
                 if (ins.b >= proto.consts.size() ||
@@ -396,13 +453,13 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Function ||
                     !proto.consts[ins.b].function)
-                    return false;
+                    return reject("closure constant");
                 break;
             case skein::bc::Op::LoadSlot:
             case skein::bc::Op::StoreSlot:
             case skein::bc::Op::ClearSlot:
                 if (ins.b >= proto.slots.size())
-                    return false;
+                    return reject("slot index");
                 break;
             case skein::bc::Op::CompoundSlot:
                 if (ins.b >= proto.slots.size() ||
@@ -415,7 +472,7 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 break;
             case skein::bc::Op::DefineSlot:
                 if (ins.b >= proto.slots.size() || (ins.flags & 1) == 0)
-                    return false;
+                    return reject("define slot");
                 break;
             case skein::bc::Op::BinarySlots: {
                 const uint32_t left = ins.a;
@@ -463,30 +520,81 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
-                    return false;
+                    return reject("field-name constant");
                 break;
             case skein::bc::Op::GetIndexCached:
                 if (ins.b >= proto.index_read_ic.size())
-                    return false;
+                    return reject("index-read descriptor");
                 break;
             case skein::bc::Op::AssignIndex: {
                 if (ins.b >= proto.index_ops.size())
-                    return false;
+                    return reject("index-write descriptor");
                 const skein::bc::IndexDesc &desc =
                     proto.index_ops[ins.b];
-                if (desc.fields.empty() ||
-                    (desc.base_kind != skein::bc::IndexBaseKind::Global &&
-                     desc.base_kind != skein::bc::IndexBaseKind::Name))
-                    return false;
+                if (desc.fields.empty())
+                    return reject("index-write fields");
+                using skein::bc::IndexBaseKind;
+                if (desc.base_kind == IndexBaseKind::Slot ||
+                    desc.base_kind == IndexBaseKind::Param) {
+                    const size_t limit =
+                        desc.base_kind == IndexBaseKind::Slot
+                            ? proto.slots.size()
+                            : proto.nparams;
+                    if (desc.base_index >= limit)
+                        return reject("index-write base slot");
+                } else if (desc.base_kind != IndexBaseKind::Global &&
+                           desc.base_kind != IndexBaseKind::Name) {
+                    return reject("index-write base kind");
+                }
                 break;
             }
             case skein::bc::Op::LoadName:
             case skein::bc::Op::StoreName:
-                if (!name_mode || ins.b >= proto.consts.size() ||
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return reject("name constant");
+                break;
+            case skein::bc::Op::CompoundName:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name ||
+                    !is_binary_op_char(ins.flags))
+                    return false;
+                break;
+            case skein::bc::Op::IncDecName:
+            case skein::bc::Op::CheckRedefine:
+                if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
                     return false;
                 break;
+            case skein::bc::Op::DefineName:
+                if (ins.b >= proto.decls.size() || (ins.flags & 1) == 0)
+                    return false;
+                break;
+            case skein::bc::Op::IterNew:
+            case skein::bc::Op::IterEnd: {
+                if (ins.a >= proto.iters.size())
+                    return reject("iterator index");
+                const skein::bc::IterDesc &desc = proto.iters[ins.a];
+                if (desc.key_slot >= proto.slots.size())
+                    return reject("iterator key slot");
+                if (desc.two_vars && desc.value_slot >= proto.slots.size())
+                    return reject("iterator value slot");
+                break;
+            }
+            case skein::bc::Op::IterNext: {
+                if (ins.a >= proto.iters.size() ||
+                    ins.b > proto.code.size())
+                    return reject("iterator target");
+                const skein::bc::IterDesc &desc = proto.iters[ins.a];
+                if (desc.key_slot >= proto.slots.size())
+                    return reject("iterator key slot");
+                if (desc.two_vars && desc.value_slot >= proto.slots.size())
+                    return reject("iterator value slot");
+                break;
+            }
             default:
                 if (read_bool_env("SKEIN_JIT_DEBUG", false))
                     std::fprintf(stderr, "[jit] unsupported op %s in %s\n",
@@ -552,11 +660,16 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         }
     }
 
+    const uint32_t iter_count =
+        static_cast<uint32_t>(proto.iters.size());
+    /* 32 bytes per iterator: index, count, flags, padding. */
+    const int iter_stride = 32;
+    const int iter_bytes = static_cast<int>(iter_count) * iter_stride;
     const uint32_t value_count =
         proto.nparams + static_cast<uint32_t>(proto.slots.size()) +
-        proto.max_stack;
+        proto.max_stack + iter_count;
     const int values_low =
-        kHeaderSize + static_cast<int>(value_count) * 8;
+        kHeaderSize + iter_bytes + static_cast<int>(value_count) * 8;
     const int frame_size = (values_low + 15) & ~15;
 #if defined(_WIN32)
     /* Windows stack probing is only needed for large frames; fall back to VM. */
@@ -577,6 +690,15 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         return value_off(proto.nparams +
                          static_cast<uint32_t>(proto.slots.size()) +
                          static_cast<uint32_t>(depth));
+    };
+    /*
+     * Iterator state lives in the frame header, directly below the fixed
+     * header fields; the iterable value itself is kept in a hidden value slot
+     * (see `stack_off(max_stack + index)`) so the existing frame root covers
+     * it.
+     */
+    auto iter_state_off = [&](uint32_t index) -> int {
+        return -(kHeaderSize + static_cast<int>(index) * iter_stride + 8);
     };
     auto target_label = [&](uint32_t target) -> asmjit::Label {
         return target < labels.size() ? labels[target] : end_label;
@@ -645,6 +767,10 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                      value_off(i)),
               asmjit::x86::rax);
+    for (uint32_t i = 0; i < iter_count * 4; ++i)
+        a.mov(asmjit::x86::qword_ptr(
+                  asmjit::x86::rbp, -(kHeaderSize + 8 + (int)i * 8)),
+              asmjit::x86::rax);
     for (uint32_t i = 0; i < proto.nparams; ++i) {
 #if defined(_WIN32)
         a.mov(asmjit::x86::rax,
@@ -674,12 +800,19 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         call_addr(fn_address(&skein_jit_bind_patterns));
         a.test(asmjit::x86::eax, asmjit::x86::eax);
         a.jz(abort_label);
-    } else if (proto.has_closures && !top_level) {
-        /* Closure creation resolves the defining scope from the live scope
-         * chain, so such frames need their own (empty) closure scope. */
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+        call_addr(fn_address(&skein_jit_frame_scope_pushed));
+    } else if ((proto.has_closures || proto.uses_names) && !top_level) {
+        /* Name-based locals and closure creation both resolve through the
+         * live scope chain, so such frames need their own scope.  Top-level
+         * code deliberately runs in the global scope. */
         a.mov(asmjit::x86::rdi,
               asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
         call_addr(fn_address(&skein_jit_push_frame_scope));
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+        call_addr(fn_address(&skein_jit_frame_scope_pushed));
     }
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
@@ -820,6 +953,131 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.jz(abort_label);
                 break;
             }
+
+            case skein::bc::Op::CompoundName: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_compound_name));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IncDecName:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.a ? 1 : -1));
+                a.mov(asmjit::x86::ecx,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_incdec_name));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
+            case skein::bc::Op::CheckRedefine:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rdx, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_check_redefine));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jz(abort_label);
+                break;
+
+            case skein::bc::Op::DefineName: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::rcx, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_define_name));
+                clear_slot(value_depth);
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IterNew: {
+                const int value_depth = depth - 1;
+                const uint32_t desc_index = ins.a;
+                a.lea(asmjit::x86::rdi,
+                      asmjit::x86::ptr(
+                          asmjit::x86::rbp,
+                          stack_off(static_cast<int>(proto.max_stack) +
+                                    static_cast<int>(desc_index))));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       iter_state_off(desc_index)));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::imm(fn_address(&proto.iters[desc_index])));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_iter_new));
+                clear_slot(value_depth);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IterNext: {
+                const uint32_t desc_index = ins.a;
+                const skein::bc::IterDesc &desc = proto.iters[desc_index];
+                a.lea(asmjit::x86::rdi,
+                      asmjit::x86::ptr(
+                          asmjit::x86::rbp,
+                          stack_off(static_cast<int>(proto.max_stack) +
+                                    static_cast<int>(desc_index))));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       iter_state_off(desc_index)));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       slot_off(desc.key_slot)));
+                if (desc.two_vars)
+                    a.lea(asmjit::x86::rcx,
+                          asmjit::x86::ptr(asmjit::x86::rbp,
+                                           slot_off(desc.value_slot)));
+                else
+                    a.xor_(asmjit::x86::ecx, asmjit::x86::ecx);
+                a.mov(asmjit::x86::r8,
+                      asmjit::imm(fn_address(&desc)));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_iter_next));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.js(abort_label);
+                a.jnz(target_label(ins.b));
+                break;
+            }
+
+            case skein::bc::Op::IterEnd:
+                a.lea(asmjit::x86::rdi,
+                      asmjit::x86::ptr(
+                          asmjit::x86::rbp,
+                          stack_off(static_cast<int>(proto.max_stack) +
+                                    static_cast<int>(ins.a))));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       iter_state_off(ins.a)));
+                call_addr(fn_address(&skein_jit_iter_end));
+                break;
 
             case skein::bc::Op::StoreGlobal: {
                 const int value_depth = depth - 1;
@@ -1218,8 +1476,22 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::rcx,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(value_depth)));
-                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
-                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                switch (desc.base_kind) {
+                    case skein::bc::IndexBaseKind::Slot:
+                        a.lea(asmjit::x86::r8,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               slot_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Param:
+                        a.lea(asmjit::x86::r8,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               param_off(desc.base_index)));
+                        break;
+                    default:
+                        a.xor_(asmjit::x86::r8d, asmjit::x86::r8d);
+                        break;
+                }
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_assign_index));
                 for (int i = value_depth; i < depth; ++i)
                     clear_slot(i);
@@ -1250,6 +1522,54 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 call_addr(fn);
                 clear_slot(value_depth);
                 push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::Dup: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                call_addr(fn_address(&skein_jit_dup));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::CmpEq:
+            case skein::bc::Op::CmpNe:
+            case skein::bc::Op::CmpLt:
+            case skein::bc::Op::CmpLe:
+            case skein::bc::Op::CmpGt:
+            case skein::bc::Op::CmpGe: {
+                const int left_depth = depth - 2;
+                const int right_depth = depth - 1;
+                int op = 4;
+                switch (static_cast<skein::bc::Op>(ins.op)) {
+                    case skein::bc::Op::CmpGt: op = 1; break;
+                    case skein::bc::Op::CmpLt: op = 2; break;
+                    case skein::bc::Op::CmpNe: op = 3; break;
+                    case skein::bc::Op::CmpEq: op = 4; break;
+                    case skein::bc::Op::CmpGe: op = 5; break;
+                    case skein::bc::Op::CmpLe: op = 6; break;
+                    default: break;
+                }
+                a.mov(asmjit::x86::rdi, asmjit::imm(op));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(left_depth)));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(right_depth)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_compare_value));
+                clear_slot(left_depth);
+                clear_slot(right_depth);
+                push_reg(left_depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
@@ -1678,26 +1998,30 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 const int callee_depth = depth - argc - 1;
                 const asmjit::Label slow_tail = a.newLabel();
 
-                /* Reuse the current frame when tail-calling this same code. */
-                a.mov(asmjit::x86::rdi,
-                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
-                a.mov(asmjit::x86::rsi,
-                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
-                a.mov(asmjit::x86::rdx,
-                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
-                                             stack_off(callee_depth)));
-                a.lea(asmjit::x86::rcx,
-                      asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
-                a.lea(asmjit::x86::r8,
-                      asmjit::x86::ptr(asmjit::x86::rbp,
-                                       stack_off(depth - argc)));
-                a.mov(asmjit::x86::r9d, asmjit::imm(argc));
-                call_addr(fn_address(&skein_jit_tail_self));
-                a.test(asmjit::x86::eax, asmjit::x86::eax);
-                a.jz(slow_tail);
-                for (int i = callee_depth; i < depth; ++i)
-                    clear_slot(i);
-                a.jmp(proto.code.empty() ? end_label : labels[0]);
+                /* Reuse the current frame when tail-calling this same code.
+                 * An active iterator holds per-frame state, so skip the
+                 * reuse then; the slow path keeps the VM's behaviour. */
+                if (proto.iters.empty()) {
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                    a.mov(asmjit::x86::rsi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                    a.mov(asmjit::x86::rdx,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 stack_off(callee_depth)));
+                    a.lea(asmjit::x86::rcx,
+                          asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
+                    a.lea(asmjit::x86::r8,
+                          asmjit::x86::ptr(asmjit::x86::rbp,
+                                           stack_off(depth - argc)));
+                    a.mov(asmjit::x86::r9d, asmjit::imm(argc));
+                    call_addr(fn_address(&skein_jit_tail_self));
+                    a.test(asmjit::x86::eax, asmjit::x86::eax);
+                    a.jz(slow_tail);
+                    for (int i = callee_depth; i < depth; ++i)
+                        clear_slot(i);
+                    a.jmp(proto.code.empty() ? end_label : labels[0]);
+                }
 
                 a.bind(slow_tail);
                 a.mov(asmjit::x86::rdi,
@@ -1738,8 +2062,12 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 break;
 
             case skein::bc::Op::PopScope:
-                if (proto.uses_names)
+                if (proto.uses_names) {
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 -kTsOff));
                     call_addr(fn_address(&skein_jit_pop_scope));
+                }
                 break;
 
             default:

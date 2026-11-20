@@ -1165,7 +1165,7 @@ hello / 顶层脚本  off ≈ on（约 12ms，无明显冷启动开销）
 ```text
 call_bench       compiled=1  declined=0   calls≈2.0M
 fib_bench        compiled=1  declined=0
-route_bench      compiled=0  declined=12  (names 5, upvalues 4, closures 1, other 2)
+route_bench      compiled=10 declined=6   (names 2, upvalues 2, other 2)
 closure/service  compiled=0  declined=1   (upvalues)
 ```
 
@@ -1176,16 +1176,14 @@ closure/service  compiled=0  declined=1   (upvalues)
 - GC 临时根只在真正进入 JIT 时登记，不再为每个被拒绝的调用压 root frame
 - `thread_state.root_module/root_source` 延迟到首次进入时复制
 
-覆盖率结论：JIT 覆盖纯函数、闭包访问与闭包创建；仍不覆盖 handler、
-defer、动态名字（`uses_names`）。`route_bench` 的主要剩余缺口是
-`ITER_NEW` 与顶层 `CHECK_REDEFINE`/`IMPORT`。下一步提升覆盖率的优先级
-高于 OSR/deopt。
+覆盖率结论：JIT 覆盖纯函数、闭包访问与创建、名字模式局部变量和
+for-in 迭代器；仍不覆盖 handler/defer、显式 `fail`、`GetFieldOrEnum`
+与顶层 `IMPORT`/`BIND_FUNC`。下一步提升覆盖率的优先级高于 OSR/deopt。
 
 覆盖率增量评估（2026-11-20）：`can_compile` 的 `SKEIN_JIT_DEBUG` 现在会
-打印不支持的具体 opcode。实测 `route_bench` 的函数拒绝原因是
-closures / upvalues，另有 `ITER_NEW`；单纯放开 `uses_names` /
-`GetFieldOrEnum` 并不能解锁这类代码（且 `GetFieldOrEnum` 需要复制
-VM 的 base 名解析逻辑）。
+打印不支持的具体 opcode 或拒绝原因。名字模式与迭代器支持完成后，
+`route_bench` 的剩余拒绝是含 `FAIL` 的函数；`GetFieldOrEnum` 仍需复制
+VM 的 base 名解析逻辑。
 
 闭包 / upvalue 访问（2026-11-20 已完成）：
 
@@ -1211,9 +1209,30 @@ VM 的 base 名解析逻辑）。
 - 测试：创建闭包热路径、共享 cell（inc/get）、嵌套闭包、参数捕获、
   `SKEIN_GC_STRESS` 下的 open/closed cell。
 
-剩余覆盖率缺口：handler / defer、动态名字（`uses_names`）、`ITER_NEW`、
-顶层 `CHECK_REDEFINE`/`IMPORT`。下一步优先级：Handler JIT，然后才是
-OSR/deopt。
+名字模式与迭代器（2026-11-20 已完成）：
+
+- `uses_names` 帧可以编译：`LOAD/STORE/COMPOUND/INCDEC_NAME`、
+  `DEFINE_NAME`（带初始化器）和 `CHECK_REDEFINE` 走共享的 scope 语义；
+  这类帧在 prologue push 函数 scope，`POP_SCOPE` 关闭指向被弹出 scope
+  符号的 open cell；
+- `CLOSURE` 捕获顺序与 VM 一致：参数 → slot → 当前函数的块作用域名字
+  符号 → 继承 upvalue；
+- `ITER_NEW` / `ITER_NEXT` / `ITER_END`：迭代器状态放在 JIT 帧头，iterable
+  存在隐藏 value slot（随现有 frame roots 被 GC 标记）；支持 list / dict /
+  string / bytes / deque / heap / set / generator，以及双变量 dict 迭代；
+- 同时放开 `ASSIGN_INDEX`（Slot/Param base）、`CMP_EQ/NE/LT/LE/GT/GE`、
+  `DUP`；
+- 修正 `CMP_JUMP` 被误用于 `CALL` 的 `flags & 1`（fiber launch）检查：
+  比较操作码为奇数时整个函数会被拒绝编译；
+- 自尾调用保留帧自身 scope（`frame_scope_mark`）；帧内有活跃迭代器时
+  不做 self-tail 复用；
+- 实测 `route_bench`：compiled 2 → 10、declined 11 → 6，`_walk` /
+  `_split_path` 等进入 JIT；
+- 测试：`tests/jit_smoke.py` 的 iterators / name-mode / route-dispatch，
+  `tests/gc_stress.py` 的 iterator 热循环。
+
+剩余覆盖率缺口：handler / defer、显式 `fail`、`GetFieldOrEnum`、顶层
+`IMPORT` / `BIND_FUNC`。下一步优先级：Handler JIT，然后才是 OSR/deopt。
 
 循环感知首调编译（2026-11-20 已完成）：
 

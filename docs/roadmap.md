@@ -168,6 +168,10 @@
   `SKEIN_JIT_LOOPS=0` 可关闭该策略
 - JIT 支持闭包 / upvalue 访问（`LOAD/STORE/COMPOUND/INCDEC_UPVALUE`）
   与闭包创建（`CLOSURE` + cell 生命周期）；handler/defer 仍回退 VM
+- JIT 支持名字模式局部变量（`*_NAME`、`DEFINE_NAME`、`CHECK_REDEFINE`）
+  与 `for-in` 迭代器（`ITER_NEW/NEXT/END`，含 list/dict/string/bytes/
+  deque/heap/set/generator），并放开 Slot/Param base 的 `ASSIGN_INDEX`、
+  值比较与 `DUP`
 
 若暂不做 moving GC：
 

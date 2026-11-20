@@ -528,6 +528,189 @@ def main():
                   file=sys.stderr)
             ok = False
 
+        # for-in over the container kinds the JIT lowers directly, including
+        # two-variable dict iteration, nested loops and early exits.
+        iterators = tmp_path / "iterators.skein"
+        iterators.write_text(
+            "import std;\n"
+            "import std.deque;\n"
+            "import std.heap;\n"
+            "import std.set;\n"
+            "func sum_list(n) {\n"
+            "  let xs = [];\n"
+            "  let i = 0;\n"
+            "  while (i < n) { xs = std.list.append(xs, i); i = i + 1; }\n"
+            "  let total = 0;\n"
+            "  for (let x in xs) { total = total + x; }\n"
+            "  return total;\n"
+            "}\n"
+            "func sum_dict() {\n"
+            "  let total = 0;\n"
+            "  for (let k, v in {\"a\": 1, \"b\": 2, \"c\": 3}) {\n"
+            "    total = total + len(k) + v;\n"
+            "  }\n"
+            "  return total;\n"
+            "}\n"
+            "func sum_text() {\n"
+            "  let total = 0;\n"
+            "  for (let ch in \"hello\") { total = total + 1; }\n"
+            "  return total;\n"
+            "}\n"
+            "func sum_deque() {\n"
+            "  let total = 0;\n"
+            "  for (let x in std.deque.from_list([1, 2, 3])) {\n"
+            "    total = total + x;\n"
+            "  }\n"
+            "  return total;\n"
+            "}\n"
+            "func sum_heap() {\n"
+            "  let less = func(a, b) { return a < b; };\n"
+            "  let h = std.heap.from_list([4, 1, 3], less);\n"
+            "  let total = 0;\n"
+            "  for (let x in h) { total = total + x; }\n"
+            "  return total;\n"
+            "}\n"
+            "func sum_set() {\n"
+            "  let total = 0;\n"
+            "  for (let x in std.set.from_list([1, 2, 3])) {\n"
+            "    total = total + x;\n"
+            "  }\n"
+            "  return total;\n"
+            "}\n"
+            "func gen(n) {\n"
+            "  let i = 0;\n"
+            "  while (i < n) { yield i; i = i + 1; }\n"
+            "}\n"
+            "func sum_gen(n) {\n"
+            "  let total = 0;\n"
+            "  for (let x in gen(n)) { total = total + x; }\n"
+            "  return total;\n"
+            "}\n"
+            "func nested() {\n"
+            "  let total = 0;\n"
+            "  for (let a in [1, 2, 3]) {\n"
+            "    for (let b in [10, 20]) {\n"
+            "      if (a == 2) { break; }\n"
+            "      total = total + a * b;\n"
+            "    }\n"
+            "  }\n"
+            "  return total;\n"
+            "}\n"
+            "func early_exit() {\n"
+            "  let total = 0;\n"
+            "  for (let k, v in {\"a\": 1, \"b\": 2, \"c\": 3}) {\n"
+            "    total = total + v;\n"
+            "    if (total > 1) { return total; }\n"
+            "  }\n"
+            "  return total;\n"
+            "}\n"
+            "println(str(sum_list(5)));\n"
+            "println(str(sum_dict()));\n"
+            "println(str(sum_text()));\n"
+            "println(str(sum_deque()));\n"
+            "println(str(sum_heap()));\n"
+            "println(str(sum_set()));\n"
+            "println(str(sum_gen(6)));\n"
+            "println(str(nested()));\n"
+            "println(str(early_exit()));\n"
+            "let i = 0;\n"
+            "while (i < 200) {\n"
+            "  sum_list(4);\n"
+            "  sum_dict();\n"
+            "  sum_gen(4);\n"
+            "  i = i + 1;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "iterators", iterators)
+        rc, out, err = run(binary, iterators, True, debug=True)
+        if rc != 0 or "[jit] enter sum_gen" not in err:
+            print(
+                "jit smoke: iterator loop was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
+        # Name-mode locals: a package read/modify/compound-updates an exported
+        # binding through LOAD_NAME/STORE_NAME/COMPOUND_NAME.
+        pkg_dir = tmp_path / "name_mode_pkg"
+        pkg_dir.mkdir()
+        (pkg_dir / "demo.skein").write_text(
+            "package demo {\n"
+            "  export let value = 41;\n"
+            "  export func bump() {\n"
+            "    value = value + 1;\n"
+            "    return value;\n"
+            "  }\n"
+            "  export func add(n) {\n"
+            "    value += n;\n"
+            "    return value;\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        name_main = pkg_dir / "main.skein"
+        name_main.write_text(
+            "import demo;\n"
+            "let i = 0;\n"
+            "let last = 0;\n"
+            "while (i < 200) { last = demo.bump(); i = i + 1; }\n"
+            "println(str(last));\n"
+            "println(str(demo.add(10)));\n"
+            "println(str(demo.value));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "name-mode", name_main)
+        rc, out, err = run(binary, name_main, True, debug=True)
+        if rc != 0 or "[jit] enter bump" not in err:
+            print(
+                "jit smoke: name-mode function was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
+        # Route dispatch exercises name-mode recursion, string splitting with
+        # for-in, index assignment into a dict and value comparisons.
+        route_jit = tmp_path / "route_jit.skein"
+        route_jit.write_text(
+            "import std;\n"
+            "import std.route;\n"
+            "let app = route.new();\n"
+            "app.get(\"/static\", func(req) {\n"
+            "  return {\"status\": 200, \"body\": \"static\"};\n"
+            "});\n"
+            "app.get(\"/users/:id\", func(req) {\n"
+            "  return {\"status\": 200, \"body\": req[\"params\"][\"id\"]};\n"
+            "});\n"
+            "let i = 0;\n"
+            "let sum = 0;\n"
+            "while (i < 300) {\n"
+            "  let r = app.dispatch({\"method\": \"GET\",\n"
+            "                        \"path\": \"/users/\" + str(i % 7)});\n"
+            "  sum = sum + len(r[\"body\"]);\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(str(sum));\n"
+            "println(str(app.dispatch({\"method\": \"GET\", \"path\": \"/static\"})"
+            "[\"body\"]));\n"
+            "println(str(app.dispatch({\"method\": \"POST\", \"path\": \"/static\"})"
+            "[\"status\"]));\n"
+            "println(str(app.dispatch({\"method\": \"GET\", \"path\": \"/missing\"})"
+            "[\"status\"]));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "route-dispatch", route_jit)
+        rc, out, err = run(binary, route_jit, True, debug=True)
+        if rc != 0 or "[jit] enter _walk" not in err:
+            print(
+                "jit smoke: route name-mode recursion was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

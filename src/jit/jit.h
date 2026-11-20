@@ -31,6 +31,8 @@ struct thread_state {
     int max_depth = 0;
     int saved_handler_depth = 0;
     size_t scope_mark = 0;
+    /* Scope depth after the frame's own (prologue) scope was pushed. */
+    size_t frame_scope_mark = 0;
     std::string saved_package;
     std::string saved_source;
     std::string root_module;
@@ -49,6 +51,7 @@ struct thread_state {
     struct call_save {
         int saved_handler_depth = 0;
         size_t scope_mark = 0;
+        size_t frame_scope_mark = 0;
         std::string saved_package;
         std::string saved_source;
         bool entered = false;
@@ -108,6 +111,17 @@ void set_construct(construct_fn fn);
 construct_fn construct();
 void set_bind_frame(bind_frame_fn fn);
 bind_frame_fn bind_frame();
+
+/*
+ * Generator hooks installed by the VM bridge.  `step` advances a generator
+ * value and returns false on error; `done` reports exhaustion.
+ */
+using generator_test_fn = bool (*)(value_t *value);
+using generator_step_fn = bool (*)(value_t *value, value_t *&out, bool &done);
+void set_generator_test(generator_test_fn fn);
+generator_test_fn generator_test();
+void set_generator_step(generator_step_fn fn);
+generator_step_fn generator_step();
 
 /*
  * Fast-path call resolver installed by the VM bridge.  Returns a native entry

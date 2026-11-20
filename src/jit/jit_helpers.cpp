@@ -14,6 +14,7 @@
 #include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
+#include "unicode.h"
 #include "value_ops.h"
 #include "value_runtime.h"
 #include "vm_eval.h"
@@ -24,6 +25,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
@@ -31,6 +33,9 @@
 #else
 #define SKEIN_JIT_SYSV
 #endif
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_pop_scope(
+    skein::jit::thread_state *ts);
 
 namespace {
 
@@ -443,8 +448,8 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
             return 0;
     }
 
-    while (ts->ctx->scopes.restore_stack.size() > ts->scope_mark)
-        skein_vm_eval_popscope();
+    while (ts->ctx->scopes.restore_stack.size() > ts->frame_scope_mark)
+        skein_jit_pop_scope(ts);
     for (uint32_t i = 0; i < argc; ++i) {
         freeval(params[i]);
         params[i] = args[i];
@@ -590,6 +595,21 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_not(value_t *value, int line, int c
     return result;
 }
 
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compare_value(
+    int op, value_t *left, value_t *right, int line, int column) {
+    diag_set_location(line, column);
+    if (!left || !right) {
+        freeval(left);
+        freeval(right);
+        yyerror("symbol not found");
+        return nullptr;
+    }
+    value_t *result = skein_vm_do_compare(op, left, right);
+    freeval(left);
+    freeval(right);
+    return result;
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_bitnot(value_t *value, int line, int column) {
     diag_set_location(line, column);
     if (!value)
@@ -678,6 +698,103 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *
         return nullptr;
     }
     return assign_symbol_value(proto->consts[name_index].name.c_str(), value);
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compound_name(
+    const skein::bc::Proto *proto, uint32_t name_index, value_t *value,
+    int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size() || !value) {
+        freeval(value);
+        yyerror("invalid bytecode constant");
+        return nullptr;
+    }
+    const char *name = proto->consts[name_index].name.c_str();
+    symbol *sym = lookupsym(name);
+    if (!sym) {
+        yyerror("symbol not found %s", name);
+        freeval(value);
+        return nullptr;
+    }
+    return compound_symbol_direct(sym, op, value);
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_name(
+    const skein::bc::Proto *proto, uint32_t name_index, int delta, int prefix,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        return nullptr;
+    }
+    const char *name = proto->consts[name_index].name.c_str();
+    symbol *sym = lookupsym(name);
+    if (!sym) {
+        yyerror("symbol not found %s", name);
+        return nullptr;
+    }
+    return increment_symbol_direct(sym, delta, prefix != 0);
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_check_redefine(
+    const skein::bc::Proto *proto, uint32_t name_index, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || name_index >= proto->consts.size()) {
+        yyerror("invalid bytecode constant");
+        return 0;
+    }
+    const char *name = proto->consts[name_index].name.c_str();
+    if (isrepeated(name)) {
+        yyerror("symbol repeated %s", name ? name : "");
+        return 0;
+    }
+    return 1;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_define_name(
+    const skein::bc::Proto *proto, uint32_t decl_index, value_t *value,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || decl_index >= proto->decls.size() || !value) {
+        freeval(value);
+        yyerror("invalid bytecode declaration");
+        return nullptr;
+    }
+    const skein::bc::DeclDesc &decl = proto->decls[decl_index];
+    if (isrepeated(decl.name.c_str())) {
+        yyerror("symbol repeated %s", decl.name.c_str());
+        freeval(value);
+        return nullptr;
+    }
+    if (!validate_type_constraint(&decl.type)) {
+        freeval(value);
+        return nullptr;
+    }
+    if (!type_constraint_matches(&decl.type, value)) {
+        yyerror("variable %s expects %s, got %s", decl.name.c_str(),
+                type_constraint_name(&decl.type), typename_of(value));
+        freeval(value);
+        return nullptr;
+    }
+    symbol *sym = newsym(decl.name.c_str());
+    sym->val = value;
+    type_constraint_assign(&sym->type, &decl.type);
+    sym->exported = decl.exported;
+    sym->is_const = decl.is_const;
+    savesym(sym);
+    return newnull();
 }
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_upvalue(
@@ -810,6 +927,22 @@ std::shared_ptr<upvalue_cell> jit_capture_upvalue(
         return jit_open_cell(ts, &frame_values[proto->nparams + i],
                              &slot.type, name, slot.is_const);
     }
+    /*
+     * Name-based locals live in this function's block scopes.  Walk only up
+     * to the function boundary: the closure parent belongs to another
+     * function, and inherited captures are resolved below through
+     * `def->upvalues`.
+     */
+    for (scope_t *s = active_scope_context().current.get(); s;
+         s = s->parent.get()) {
+        if (s->is_global)
+            break;
+        if (struct symbol *local = s->syms.find(std::string_view(name)))
+            return jit_open_cell(ts, &local->val, &local->type, name,
+                                 local->is_const);
+        if (s->is_function)
+            break;
+    }
     if (def) {
         for (size_t i = 0; i < proto->upvalues.size() &&
                            i < def->upvalues.size();
@@ -858,7 +991,232 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_closure(
 }
 
 extern "C" SKEIN_JIT_SYSV void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
-extern "C" SKEIN_JIT_SYSV void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_frame_scope_pushed(
+    skein::jit::thread_state *ts) {
+    if (ts && ts->ctx)
+        ts->frame_scope_mark = ts->ctx->scopes.restore_stack.size();
+}
+
+namespace {
+
+constexpr uint64_t jit_iter_active = 1;
+constexpr uint64_t jit_iter_generator = 2;
+
+} // namespace
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_iter_new(
+    value_t **slot, uint64_t *state, const skein::bc::IterDesc *desc,
+    value_t *iterable, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!slot || !state || !desc || !iterable) {
+        freeval(iterable);
+        yyerror("invalid bytecode iterator");
+        return nullptr;
+    }
+    freeval(*slot);
+    *slot = nullptr;
+    state[0] = 0;
+    state[1] = 0;
+    state[2] = 0;
+
+    if (skein::jit::generator_test() &&
+        skein::jit::generator_test()(iterable)) {
+        if (desc->two_vars) {
+            yyerror("two-variable for-in requires dict, got generator");
+            freeval(iterable);
+            return nullptr;
+        }
+        *slot = iterable;
+        state[2] = jit_iter_active | jit_iter_generator;
+        return newnull();
+    }
+
+    if (iterable->type == T_deque || iterable->type == T_heap ||
+        iterable->type == T_set) {
+        struct list_value_t *materialized = newlistval();
+        std::vector<value_t *> items;
+        if (iterable->type == T_deque) {
+            deque_items_in_order(
+                ((struct deque_value_t *)iterable)->payload.get(), items);
+        } else if (iterable->type == T_heap) {
+            heap_items_level_order(
+                ((struct heap_value_t *)iterable)->payload.get(), items);
+        } else {
+            set_values_in_order(
+                ((struct set_value_t *)iterable)->payload.get(), items);
+        }
+        materialized->payload->items.reserve(items.size());
+        for (value_t *item : items)
+            materialized->payload->items.push_back(dupval(item));
+        freeval(iterable);
+        iterable = (value_t *)materialized;
+    }
+
+    size_t count = 0;
+    if (iterable->type == T_list) {
+        count = ((struct list_value_t *)iterable)->payload->items.size();
+    } else if (iterable->type == T_dict) {
+        count = ((struct dict_value_t *)iterable)->payload->items.size();
+    } else if (iterable->type == T_string) {
+        count = utf8_length(((struct string_value_t *)iterable)->value);
+    } else if (iterable->type == T_bytes) {
+        count = ((struct bytes_value_t *)iterable)->value.size();
+    } else {
+        yyerror("cannot iterate %s", typename_of(iterable));
+        freeval(iterable);
+        return nullptr;
+    }
+
+    if (desc->two_vars && iterable->type != T_dict) {
+        yyerror("two-variable for-in requires dict, got %s",
+                typename_of(iterable));
+        freeval(iterable);
+        return nullptr;
+    }
+    if (desc->two_vars && desc->key_name == desc->value_name) {
+        yyerror("loop variable repeated: %s", desc->key_name.c_str());
+        freeval(iterable);
+        return nullptr;
+    }
+
+    *slot = iterable;
+    state[1] = count;
+    state[2] = jit_iter_active;
+    return newnull();
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_iter_next(
+    value_t **slot, uint64_t *state, value_t **dest_key,
+    value_t **dest_value, const skein::bc::IterDesc *desc,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!slot || !state || !desc || !dest_key) {
+        yyerror("invalid bytecode iterator");
+        return -1;
+    }
+    if (!(state[2] & jit_iter_active) || !*slot)
+        return 1;
+
+    if (state[2] & jit_iter_generator) {
+        skein::jit::generator_step_fn step = skein::jit::generator_step();
+        if (!step) {
+            yyerror("generator support is not installed");
+            return -1;
+        }
+        value_t *item = nullptr;
+        bool done = false;
+        if (!step(*slot, item, done)) {
+            freeval(item);
+            return -1;
+        }
+        if (done) {
+            freeval(item);
+            return 1;
+        }
+        freeval(*dest_key);
+        *dest_key = item;
+        ++state[0];
+        return 0;
+    }
+
+    const size_t index = (size_t)state[0];
+    if (index >= (size_t)state[1])
+        return 1;
+
+    value_t *item = nullptr;
+    value_t *second = nullptr;
+    if ((*slot)->type == T_list) {
+        item = dupval(((struct list_value_t *)*slot)->payload->items[index]);
+    } else if ((*slot)->type == T_dict) {
+        struct dict_value_t *dict = (struct dict_value_t *)*slot;
+        item = dupval(dict->payload->items[index].first);
+        if (desc->two_vars)
+            second = dupval(dict->payload->items[index].second);
+    } else if ((*slot)->type == T_string) {
+        std::string ch;
+        if (!utf8_char_at(((struct string_value_t *)*slot)->value, index,
+                          ch)) {
+            yyerror("invalid UTF-8 string iteration");
+            return -1;
+        }
+        size_t consumed = 0;
+        unsigned int codepoint = 0;
+        if (!utf8_decode_one(ch.data(), ch.size(), consumed, codepoint)) {
+            yyerror("invalid UTF-8 string iteration");
+            return -1;
+        }
+        item = newcharval(codepoint);
+    } else if ((*slot)->type == T_bytes) {
+        item = newintval((unsigned char)((struct bytes_value_t *)*slot)
+                             ->value[index]);
+    } else {
+        yyerror("cannot iterate %s", typename_of(*slot));
+        return -1;
+    }
+
+    freeval(*dest_key);
+    *dest_key = item;
+    if (desc->two_vars && dest_value) {
+        freeval(*dest_value);
+        *dest_value = second;
+    } else {
+        freeval(second);
+    }
+    ++state[0];
+    return 0;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_iter_end(value_t **slot,
+                                                  uint64_t *state) {
+    if (slot) {
+        freeval(*slot);
+        *slot = nullptr;
+    }
+    if (state) {
+        state[0] = 0;
+        state[1] = 0;
+        state[2] = 0;
+    }
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_pop_scope(
+    skein::jit::thread_state *ts) {
+    /*
+     * A block scope owns the symbols declared inside it.  Close any cells the
+     * JIT opened on those values before the scope (and its symbols) is freed.
+     */
+    scope_t *scope = topscope();
+    if (ts && scope) {
+        for (auto &cell : ts->open_cells) {
+            if (!cell || !cell->slot)
+                continue;
+            bool closed = false;
+            for (symbol *sym : scope->syms.small) {
+                if (sym && cell->slot == &sym->val) {
+                    close_upvalue_cell(*cell);
+                    closed = true;
+                    break;
+                }
+            }
+            if (closed)
+                continue;
+            for (auto &entry : scope->syms.index) {
+                if (entry.second && cell->slot == &entry.second->val) {
+                    close_upvalue_cell(*cell);
+                    break;
+                }
+            }
+        }
+    }
+    skein_vm_eval_popscope();
+}
 
 extern "C" SKEIN_JIT_SYSV int skein_jit_bind_patterns(function_def *def, value_t **values,
                                        uint32_t argc) {
@@ -967,7 +1325,10 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     const skein::bc::IndexDesc *desc, value_t **indices, uint32_t count,
-    value_t *value, int line, int column) {
+    value_t *value, value_t **base_slot, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
     diag_set_location(line, column);
     if (!desc || !indices || !value || desc->fields.empty() ||
         count != desc->fields.size()) {
@@ -977,16 +1338,38 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
         return nullptr;
     }
 
+    using skein::bc::IndexBaseKind;
+    struct symbol view {};
     symbol *base = nullptr;
-    if (desc->base_kind == skein::bc::IndexBaseKind::Global)
+    if (desc->base_kind == IndexBaseKind::Slot ||
+        desc->base_kind == IndexBaseKind::Param) {
+        if (!base_slot || !*base_slot) {
+            yyerror("symbol not found %s", desc->base_name.c_str());
+            freeval(value);
+            return nullptr;
+        }
+        view.name = const_cast<char *>(desc->base_name.c_str());
+        view.name_len = desc->base_name.size();
+        view.val = *base_slot;
+        view.type.kind = TYPE_ANY;
+        base = &view;
+    } else if (desc->base_kind == IndexBaseKind::Global) {
         base = resolve_global_symbol(desc->base_index,
                                      desc->base_name.c_str());
-    else if (desc->base_kind == skein::bc::IndexBaseKind::Name)
+    } else if (desc->base_kind == IndexBaseKind::Name) {
         base = lookupsym(desc->base_name.c_str());
+    }
 
     std::vector<value_t *> args(indices, indices + count);
-    return assign_index_symbol(base, desc->base_name.c_str(), args,
-                               desc->fields, value);
+    value_t *result =
+        assign_index_symbol(base, desc->base_name.c_str(), args,
+                            desc->fields, value);
+    if (base == &view && *base_slot != view.val) {
+        freeval(*base_slot);
+        *base_slot = view.val;
+        view.val = nullptr;
+    }
+    return result;
 }
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **args,
@@ -1169,6 +1552,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     skein::jit::thread_state::call_save saved;
     saved.saved_handler_depth = ts->saved_handler_depth;
     saved.scope_mark = ts->scope_mark;
+    saved.frame_scope_mark = ts->frame_scope_mark;
     saved.saved_package = ts->saved_package;
     saved.saved_source = ts->saved_source;
     saved.entered = ts->entered;
@@ -1181,6 +1565,8 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
 
     ts->saved_handler_depth = context.handler_depth;
     ts->scope_mark = context.scopes.restore_stack.size();
+    /* Updated by the prologue when the frame pushes its own scope. */
+    ts->frame_scope_mark = ts->scope_mark;
     ts->saved_package_valid = false;
     ts->saved_source_valid = false;
     ts->entered = true;
@@ -1267,6 +1653,7 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         ts->saves.pop_back();
         ts->saved_handler_depth = saved.saved_handler_depth;
         ts->scope_mark = saved.scope_mark;
+        ts->frame_scope_mark = saved.frame_scope_mark;
         ts->saved_package = std::move(saved.saved_package);
         ts->saved_source = std::move(saved.saved_source);
         ts->entered = saved.entered;

@@ -668,6 +668,13 @@ value_t *skein_vm_build_struct(const skein::bc::ConstructDesc &desc,
     return fn(desc.source.c_str(), desc.name.c_str(), entries, desc.spread);
 }
 
+static bool jit_generator_step(value_t *value, value_t *&out, bool &done) {
+    generator_ptr generator;
+    if (!get_generator_value(value, generator))
+        return false;
+    return generator_next_value(generator, nullptr, out, done);
+}
+
 /* CALL helper used by generated code.  Always consumes callee and args. */
 value_t *skein_vm_jit_invoke(value_t *callee, value_t **args, uint32_t argc) {
     value_t *out = nullptr;
@@ -783,6 +790,8 @@ static void ensure_vm_host() {
         skein::jit::set_tail_invoke(&skein_vm_jit_tail_invoke);
         skein::jit::set_construct(&skein_vm_build_struct);
         skein::jit::set_bind_frame(&skein_vm_bind_pattern_frame);
+        skein::jit::set_generator_test(&fiber_is_generator);
+        skein::jit::set_generator_step(&jit_generator_step);
 #endif
         return true;
     }();

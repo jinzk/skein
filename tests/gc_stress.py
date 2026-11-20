@@ -127,6 +127,21 @@ while (m < 200) {
 }
 println("make " + str(made));
 
+/* Iterator state keeps the iterable reachable for the loop's lifetime. */
+func iter_total(n) {
+  let xs = [];
+  let i = 0;
+  while (i < n) { xs = std.list.append(xs, i); i = i + 1; }
+  let total = 0;
+  for (let x in xs) { total = total + x; }
+  for (let k, v in {"a": 1, "b": 2}) { total = total + len(k) + v; }
+  return total;
+}
+let iter_sum = 0;
+let it = 0;
+while (it < 200) { iter_sum = iter_sum + iter_total(4); it = it + 1; }
+println("iter " + str(iter_sum));
+
 /* Lazy iterators and generator parameters live in C++ state until the
  * generator runs; they must be registered on the generator value. */
 func make_adder(n) {
@@ -165,6 +180,7 @@ EXPECTED = [
     "closure 20100",
     "open 5050",
     "make 20100",
+    "iter 2200",
     "lazy 336",
     "generator 5",
     "churn true",

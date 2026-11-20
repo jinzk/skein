@@ -60,6 +60,13 @@ struct thread_state {
     };
     std::vector<call_save> saves;
 
+    /*
+     * Cells opened by JIT frames on this thread.  Each generated frame keeps
+     * a mark (header slot) and closes the cells it created before freeing its
+     * frame values.
+     */
+    std::vector<std::shared_ptr<struct upvalue_cell>> open_cells;
+
     /* Pending trampoline request produced by a non-self TAIL_CALL. */
     value_t *tail_callee = nullptr;
     std::vector<value_t *> tail_args;

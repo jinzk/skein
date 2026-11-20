@@ -4264,11 +4264,7 @@ private:
     }
 
     static void close_upvalue(struct upvalue_cell &cell) {
-        if (!cell.slot)
-            return;
-        cell.value = *cell.slot;
-        *cell.slot = NULL;
-        cell.slot = NULL;
+        close_upvalue_cell(cell);
     }
 
     void close_upvalues() {

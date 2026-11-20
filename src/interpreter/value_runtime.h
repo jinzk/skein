@@ -57,6 +57,8 @@ struct value_t *upvalue_compound(struct upvalue_cell *cell, int op,
                                  struct value_t *value);
 struct value_t *upvalue_incdec(struct upvalue_cell *cell, int delta,
                                bool prefix);
+/* Detach an open cell from its frame slot, moving the value into the cell. */
+void close_upvalue_cell(struct upvalue_cell &cell);
 
 bool switch_value_supported(const struct value_t *value);
 bool validate_function_params(const char *name, struct symlist *params);

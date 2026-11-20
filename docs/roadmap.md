@@ -164,8 +164,8 @@
 - `std.list.builder` / `std.string.builder`，以及 `xs = std.list.append(xs, v)` 的 COW 原地增长
 - JIT 运行时默认启用（`SKEIN_JIT=0` 可关闭；`SKEIN_JIT_TOP_LEVEL=0`
   关闭顶层语句 JIT；`SKEIN_JIT_THRESHOLD` 默认 100 次调用）
-- JIT 支持闭包 / upvalue 访问（`LOAD/STORE/COMPOUND/INCDEC_UPVALUE`）；
-  创建闭包（`has_closures`）与 handler/defer 仍回退 VM
+- JIT 支持闭包 / upvalue 访问（`LOAD/STORE/COMPOUND/INCDEC_UPVALUE`）
+  与闭包创建（`CLOSURE` + cell 生命周期）；handler/defer 仍回退 VM
 
 若暂不做 moving GC：
 
@@ -393,3 +393,12 @@ python tools/bench_threads.py --bin ./build/skein --check
 
 重启条件：真实负载的 p50/p95 出现退化，或覆盖率 / 内存成为明确需求；
 否则不再主动做 frame / GC 级改动。
+
+已知既有问题（不是本次 JIT 闭包支持引入）：在单条顶层语句内的长循环中创建
+闭包时，`scope ↔ closure` 环只能等 cycle collector 在语句边界回收，循环
+期间 `all_scopes` 持续增长。`register_scope` 原先固定在 4096 触发全量 prune，
+导致每次 push 都扫描整个列表，表现为二次复杂度（40k 次闭包创建约 2.2s）。
+现已把 prune 触发阈值改为几何增长（每次扫描后取 `max(4096, size * 2)`），
+40k 次闭包创建降到约 36ms，10k/20k/40k 呈线性（VM 与 AST 相同）。
+残留：单条语句内的峰值内存仍随累计闭包数线性增长，后续可在循环回边加入
+低频 cycle collection 来收敛。

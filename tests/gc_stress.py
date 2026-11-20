@@ -113,6 +113,20 @@ func open_cell_total() {
 }
 println("open " + str(open_cell_total()));
 
+func make_many(start) {
+  let n = start;
+  func bump() { n = n + 1; return n; }
+  return bump;
+}
+let made = 0;
+let m = 0;
+while (m < 200) {
+  let c = make_many(m);
+  made = made + c();
+  m = m + 1;
+}
+println("make " + str(made));
+
 /* Lazy iterators and generator parameters live in C++ state until the
  * generator runs; they must be registered on the generator value. */
 func make_adder(n) {
@@ -150,6 +164,7 @@ EXPECTED = [
     "capture 9",
     "closure 20100",
     "open 5050",
+    "make 20100",
     "lazy 336",
     "generator 5",
     "churn true",

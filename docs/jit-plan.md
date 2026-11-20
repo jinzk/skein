@@ -1173,10 +1173,10 @@ closure/service  compiled=0  declined=1   (upvalues)
 - GC 临时根只在真正进入 JIT 时登记，不再为每个被拒绝的调用压 root frame
 - `thread_state.root_module/root_source` 延迟到首次进入时复制
 
-覆盖率结论：JIT 现在覆盖纯函数与**闭包访问**（upvalue 读写），但仍不
-覆盖创建闭包的函数、handler、defer、动态名字；真实服务代码
-（`std.route`）覆盖率仍为 0。默认启用对纯计算热点收益明显，对闭包密集
-负载接近中性。下一步提升覆盖率的优先级高于 OSR/deopt。
+覆盖率结论：JIT 覆盖纯函数、闭包访问与闭包创建；仍不覆盖 handler、
+defer、动态名字（`uses_names`）。`route_bench` 的主要剩余缺口是
+`ITER_NEW` 与顶层 `CHECK_REDEFINE`/`IMPORT`。下一步提升覆盖率的优先级
+高于 OSR/deopt。
 
 覆盖率增量评估（2026-11-20）：`can_compile` 的 `SKEIN_JIT_DEBUG` 现在会
 打印不支持的具体 opcode。实测 `route_bench` 的函数拒绝原因是
@@ -1191,15 +1191,31 @@ VM 的 base 名解析逻辑）。
   （COW 字符串缓存、const、类型约束、`string_refresh_cache`）；
 - `def->upvalues` 的 cell 在调用期间由 callee func value 保持可达，
   open/closed cell 都通过 `upvalue_cell_value` 读取；
-- 只创建闭包（`has_closures`）的函数仍回退；`route_bench` 的剩余拒绝
-  是闭包创建与 `ITER_NEW`（顶层还有 `CHECK_REDEFINE`/`IMPORT`）。
+- 实测（1M 次闭包调用，闭包内 `n = n + 1`）：VM 约 483ms →
+  JIT 约 430ms（~11%）。
 
-实测（1M 次闭包调用，闭包内 `n = n + 1`）：VM 约 483ms → JIT 约 430ms
-（~11%）；差异主要来自每次 upvalue 读写的 helper 调用。后续如需继续
-优化，可在 JIT prologue 缓存 cell 指针并内联 interned 值的快速路径。
+闭包创建（2026-11-20 已完成）：
 
-下一步：闭包创建（`Op::Closure` + cell 生命周期）与 Handler JIT
-（handler table + landing pad），之后再考虑 OSR/deopt。
+- `Op::Closure` 进入 JIT：创建帧捕获参数、slot 和继承的 upvalue cell，
+  `has_closures` 帧在 prologue push 函数 scope，`current_scope()` 作为新
+  闭包的父作用域；
+- cell 生命周期：每帧在 prologue 记录 `thread_state.open_cells` 的 mark，
+  epilogue 在释放 frame slot 之前把该帧创建的 open cell 全部 close
+  （`cell->value = *cell->slot`），嵌套帧按 mark LIFO 关闭；
+- 同一 slot 被多个闭包捕获时复用同一个 cell（与 VM 一致）；
+- 无法解析的捕获名保留 VM 的 null-cell 行为，由首次 `LOAD_UPVALUE`
+  报错；
+- 测试：创建闭包热路径、共享 cell（inc/get）、嵌套闭包、参数捕获、
+  `SKEIN_GC_STRESS` 下的 open/closed cell。
+
+剩余覆盖率缺口：handler / defer、动态名字（`uses_names`）、`ITER_NEW`、
+顶层 `CHECK_REDEFINE`/`IMPORT`。下一步优先级：Handler JIT，然后才是
+OSR/deopt。
+
+注意：闭包在长循环内频繁创建时，`scope ↔ closure` 环仍依赖 cycle
+collector 在语句边界回收，峰值内存随迭代数增长；`all_scopes` 的 prune 已改为
+几何阈值，闭包创建本身是线性的（roadmap 已记录）。后续可在循环回边加入
+低频 cycle collection。
 
 ### 独立决策
 

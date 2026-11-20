@@ -46,6 +46,8 @@ struct scope_context {
     std::shared_ptr<scope_t> global_scope;
     std::vector<std::shared_ptr<scope_t>> restore_stack;
     std::vector<std::weak_ptr<scope_t>> all_scopes;
+    /* Size at which all_scopes is scanned for expired entries next. */
+    std::size_t prune_threshold = 4096;
     /* Stable index table for global symbols, used by LOAD_GLOBAL et al. */
     std::vector<struct symbol *> global_slots;
     int statements_since_collect = 0;

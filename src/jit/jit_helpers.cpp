@@ -742,6 +742,121 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_upvalue(
     return upvalue_incdec(cell, delta, prefix != 0);
 }
 
+extern "C" SKEIN_JIT_SYSV size_t skein_jit_push_cell_mark(
+    skein::jit::thread_state *ts) {
+    return ts ? ts->open_cells.size() : SIZE_MAX;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_close_cells(
+    skein::jit::thread_state *ts, size_t mark) {
+    if (!ts || mark == SIZE_MAX || mark > ts->open_cells.size())
+        return;
+    for (size_t i = ts->open_cells.size(); i > mark; --i)
+        close_upvalue_cell(*ts->open_cells[i - 1]);
+    ts->open_cells.resize(mark);
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_push_frame_scope(
+    function_def *def) {
+    skein_vm_eval_push_closure_scope(def ? def->closure : nullptr);
+}
+
+namespace {
+
+std::shared_ptr<upvalue_cell> jit_open_cell(
+    skein::jit::thread_state *ts, value_t **storage,
+    const struct type_constraint *type, const std::string &name, bool is_const) {
+    if (ts) {
+        for (const auto &cell : ts->open_cells)
+            if (cell->slot == storage)
+                return cell;
+    }
+    std::shared_ptr<upvalue_cell> cell = std::make_shared<upvalue_cell>();
+    cell->slot = storage;
+    cell->type = type;
+    cell->owner = &active_scope_context();
+    cell->name = name;
+    cell->is_const = is_const;
+    if (ts)
+        ts->open_cells.push_back(cell);
+    return cell;
+}
+
+const struct type_constraint *jit_param_type(function_def *def, uint32_t index) {
+    if (!def || !def->code)
+        return nullptr;
+    uint32_t current = 0;
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++current) {
+        if (current == index)
+            return sl->type;
+    }
+    return nullptr;
+}
+
+std::shared_ptr<upvalue_cell> jit_capture_upvalue(
+    skein::jit::thread_state *ts, function_def *def,
+    const skein::bc::Proto *proto, value_t **frame_values,
+    const std::string &name) {
+    for (uint32_t i = 0; i < proto->param_names.size(); ++i) {
+        if (proto->param_names[i] != name)
+            continue;
+        return jit_open_cell(ts, &frame_values[i],
+                             jit_param_type(def, i), name, false);
+    }
+    for (uint32_t i = 0; i < proto->slots.size(); ++i) {
+        const skein::bc::SlotDesc &slot = proto->slots[i];
+        if (slot.name != name)
+            continue;
+        return jit_open_cell(ts, &frame_values[proto->nparams + i],
+                             &slot.type, name, slot.is_const);
+    }
+    if (def) {
+        for (size_t i = 0; i < proto->upvalues.size() &&
+                           i < def->upvalues.size();
+             ++i) {
+            if (proto->upvalues[i] == name)
+                return def->upvalues[i];
+        }
+    }
+    /* The VM stores a null cell for names that cannot be captured; leave
+     * the runtime error to the first LOAD_UPVALUE, matching its behavior. */
+    return nullptr;
+}
+
+} // namespace
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_closure(
+    skein::jit::thread_state *ts, function_def *def,
+    const skein::bc::Proto *proto, uint32_t const_index,
+    value_t **frame_values, uint64_t loc) {
+    int line = 0;
+    int column = 0;
+    skein::jit::internal::unpack_loc(loc, line, column);
+    diag_set_location(line, column);
+    if (!proto || const_index >= proto->consts.size() || !frame_values) {
+        yyerror("invalid bytecode function");
+        return nullptr;
+    }
+    const skein::bc::Constant &constant = proto->consts[const_index];
+    if (constant.kind != skein::bc::ConstantKind::Function ||
+        !constant.function) {
+        yyerror("invalid bytecode function");
+        return nullptr;
+    }
+    if (!validate_function_params(constant.function->name.c_str(),
+                                  constant.function->sl))
+        return nullptr;
+    std::shared_ptr<scope_t> closure = current_scope();
+    if (closure && closure->is_global)
+        closure.reset();
+    std::vector<std::shared_ptr<upvalue_cell>> upvalues;
+    upvalues.reserve(constant.function->upvalues.size());
+    for (const std::string &name : constant.function->upvalues)
+        upvalues.push_back(
+            jit_capture_upvalue(ts, def, proto, frame_values, name));
+    return newfuncval(constant.function, closure, std::move(upvalues));
+}
+
 extern "C" SKEIN_JIT_SYSV void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
 extern "C" SKEIN_JIT_SYSV void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
 

@@ -90,11 +90,20 @@ void prune_scopes(scope_context &context) {
                            return w.expired();
                        }),
         context.all_scopes.end());
+    /*
+     * A scan is O(size).  Scopes can stay alive until the next statement when
+     * a loop creates closures (scope <-> closure cycles are reclaimed
+     * between statements), so a fixed trigger would rescan the whole list on
+     * every push and turn closure creation inside a loop quadratic.  Scan
+     * again only after the list has roughly doubled.
+     */
+    context.prune_threshold =
+        std::max<std::size_t>(4096, context.all_scopes.size() * 2);
 }
 
 static void register_scope(scope_context &context,
                            const std::shared_ptr<scope_t> &s) {
-    if (context.all_scopes.size() > 4096)
+    if (context.all_scopes.size() > context.prune_threshold)
         prune_scopes(context);
     context.all_scopes.push_back(s);
 }
@@ -197,6 +206,7 @@ void donescope(scope_context &context) {
     context.current.reset();
     context.global_scope.reset();
     context.all_scopes.clear();
+    context.prune_threshold = 4096;
     context.global_slots.clear();
     context.gc_roots.clear();
     gc_sweep_all_cells(context);

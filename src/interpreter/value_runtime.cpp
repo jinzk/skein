@@ -805,6 +805,14 @@ struct value_t *upvalue_cell_value(const struct upvalue_cell *cell) {
     return cell->slot ? *cell->slot : cell->value;
 }
 
+void close_upvalue_cell(struct upvalue_cell &cell) {
+    if (!cell.slot)
+        return;
+    cell.value = *cell.slot;
+    *cell.slot = NULL;
+    cell.slot = nullptr;
+}
+
 struct value_t *upvalue_load(const struct upvalue_cell *cell) {
     struct value_t *value = upvalue_cell_value(cell);
     return value ? dupval(value) : NULL;

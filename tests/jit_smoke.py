@@ -430,6 +430,48 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # Closure creation inside a JIT frame: params, slots and inherited
+        # upvalues are captured into cells and closed when the frame returns.
+        closure_create = tmp_path / "closure_create.skein"
+        closure_create.write_text(
+            "func make_adder(x) {\n"
+            "  func add(y) { return x + y; }\n"
+            "  return add;\n"
+            "}\n"
+            "func make_pair() {\n"
+            "  let n = 0;\n"
+            "  func inc() { n = n + 1; return n; }\n"
+            "  func get() { return n; }\n"
+            "  return [inc, get];\n"
+            "}\n"
+            "let i = 0;\n"
+            "let total = 0;\n"
+            "while (i < 300) {\n"
+            "  let add = make_adder(i);\n"
+            "  total = total + add(1);\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(str(total));\n"
+            "let k = 0;\n"
+            "while (k < 200) {\n"
+            "  let pair = make_pair();\n"
+            "  let a = pair[0]();\n"
+            "  let b = pair[0]();\n"
+            "  if (k == 0) { println(str(a) + str(b) + str(pair[1]())); }\n"
+            "  k = k + 1;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "closure-creation", closure_create)
+        rc, out, err = run(binary, closure_create, True, debug=True)
+        if rc != 0 or "[jit] enter make_adder" not in err:
+            print(
+                "jit smoke: closure creation was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

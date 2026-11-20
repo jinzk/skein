@@ -75,6 +75,14 @@ SKEIN_JIT_SYSV value_t *skein_jit_compound_upvalue(function_def *def,
 SKEIN_JIT_SYSV value_t *skein_jit_incdec_upvalue(function_def *def,
                                  uint32_t index, int delta, int prefix,
                                  int line, int column);
+SKEIN_JIT_SYSV size_t skein_jit_push_cell_mark(skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_close_cells(skein::jit::thread_state *ts,
+                           size_t mark);
+SKEIN_JIT_SYSV void skein_jit_push_frame_scope(function_def *def);
+SKEIN_JIT_SYSV value_t *skein_jit_closure(
+    skein::jit::thread_state *ts, function_def *def,
+    const skein::bc::Proto *proto, uint32_t const_index,
+    value_t **frame_values, uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_push_scope();
 SKEIN_JIT_SYSV void skein_jit_pop_scope();
 SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
@@ -185,11 +193,13 @@ constexpr int kSavedRdiOff = 40;
 constexpr int kSavedRsiOff = 48;
 constexpr int kRootMarkOff = 56;
 constexpr int kDirectDefOff = 64;
-constexpr int kHeaderSize = 72;
+constexpr int kCellMarkOff = 72;
+constexpr int kHeaderSize = 80;
 #else
 constexpr int kRootMarkOff = 40;
 constexpr int kDirectDefOff = 48;
-constexpr int kHeaderSize = 56;
+constexpr int kCellMarkOff = 56;
+constexpr int kHeaderSize = 64;
 #endif
 
 int slot_op_char(uint8_t opcode) {
@@ -270,7 +280,7 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         (top_level && proto.uses_names && proto.nparams == 0) ||
         (pattern_frame && proto.uses_names);
     if ((!proto.params_direct && !name_mode) ||
-        (proto.uses_names && !name_mode) || proto.has_closures ||
+        (proto.uses_names && !name_mode) ||
         proto.uses_defers || proto.uses_handlers ||
         proto_may_suspend(proto) ||
         proto.variadic)
@@ -379,6 +389,13 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 break;
             case skein::bc::Op::IncDecUpvalue:
                 if (ins.b >= proto.upvalues.size())
+                    return false;
+                break;
+            case skein::bc::Op::Closure:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Function ||
+                    !proto.consts[ins.b].function)
                     return false;
                 break;
             case skein::bc::Op::LoadSlot:
@@ -621,6 +638,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
           asmjit::imm(0));
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kRootMarkOff),
           asmjit::imm(static_cast<int64_t>(-1)));
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kCellMarkOff),
+          asmjit::imm(static_cast<int64_t>(-1)));
     a.xor_(asmjit::x86::eax, asmjit::x86::eax);
     for (uint32_t i = 0; i < value_count; ++i)
         a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -655,7 +674,18 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         call_addr(fn_address(&skein_jit_bind_patterns));
         a.test(asmjit::x86::eax, asmjit::x86::eax);
         a.jz(abort_label);
+    } else if (proto.has_closures && !top_level) {
+        /* Closure creation resolves the defining scope from the live scope
+         * chain, so such frames need their own (empty) closure scope. */
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+        call_addr(fn_address(&skein_jit_push_frame_scope));
     }
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+    call_addr(fn_address(&skein_jit_push_cell_mark));
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kCellMarkOff),
+          asmjit::x86::rax);
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     a.lea(asmjit::x86::rsi,
@@ -844,6 +874,24 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
+
+            case skein::bc::Op::Closure: {
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(ins.b));
+                a.lea(asmjit::x86::r8,
+                      asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_closure));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
 
             case skein::bc::Op::LoadUpvalue:
                 a.mov(asmjit::x86::rdi,
@@ -1738,6 +1786,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     a.mov(asmjit::x86::rsi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kRootMarkOff));
     call_addr(fn_address(&skein_jit_pop_roots));
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+    a.mov(asmjit::x86::rsi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kCellMarkOff));
+    call_addr(fn_address(&skein_jit_close_cells));
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     a.lea(asmjit::x86::rsi,

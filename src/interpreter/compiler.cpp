@@ -1845,6 +1845,15 @@ struct Compiler {
         return ((struct string_value_t *)literal->val)->value;
     }
 
+    static bool literal_text(ast *node) {
+        if (!node || node->nodetype != 'V')
+            return false;
+        struct val *literal = (struct val *)node;
+        return literal->val &&
+               (literal->val->type == T_string ||
+                literal->val->type == T_char);
+    }
+
     /* Conservative purity check for the extra expression in
      * `xs = std.list.append(xs, expr)`: it must not be able to reassign
      * or free `xs` while the receiver is still on the stack. */
@@ -2082,6 +2091,21 @@ struct Compiler {
                         compile(asgn->v->r);
                         if (!ok) return;
                         emit(Op::ListConcatSelf, 0, 0, 0, loc_of(asgn->v));
+                        grown = true;
+                    } else if (asgn->v && asgn->v->nodetype == '+' &&
+                               asgn->v->l &&
+                               asgn->v->l->nodetype == 'N' && ref->name &&
+                               ((struct symref *)asgn->v->l)->name &&
+                               std::strcmp(
+                                   ((struct symref *)asgn->v->l)->name,
+                                   ref->name) == 0 &&
+                               literal_text(asgn->v->r)) {
+                        compile(asgn->v->l);
+                        if (!ok) return;
+                        compile(asgn->v->r);
+                        if (!ok) return;
+                        emit(Op::StringAppendSelf, 0, 0, 0,
+                             loc_of(asgn->v));
                         grown = true;
                     } else if (asgn->v && asgn->v->nodetype == 'C') {
                         struct ufncall *call = (struct ufncall *)asgn->v;

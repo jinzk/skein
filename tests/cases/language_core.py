@@ -1068,3 +1068,32 @@ def run_cases():
           'func f(a) { return a; }\n'
           'let g = f(${1});\n',
           stderr="invalid placeholder ${1}")
+    check("string append reuses buffer",
+          "import std;\n"
+          "func build(n) {\n"
+          "  let s = \"\";\n"
+          "  let i = 0;\n"
+          "  while (i < n) { s = s + \"x\"; i = i + 1; }\n"
+          "  return s;\n"
+          "}\n"
+          "println(str(len(build(3))));\n"
+          "println(str(len(build(5))));\n"
+          "println(build(3));\n",
+          stdout_all=["3", "5", "xxx"])
+    check("string append keeps aliases",
+          "import std;\n"
+          "let a = \"ab\";\n"
+          "let b = a;\n"
+          "a = a + \"cd\";\n"
+          "println(a);\n"
+          "println(b);\n"
+          "let c = \"\";\n"
+          "c = c + \"x\";\n"
+          "c = c + 'y';\n"
+          "println(c);\n",
+          stdout_all=["abcd", "ab", "xy"])
+    check("string append keeps error message",
+          "import std;\n"
+          "let s = \"a\";\n"
+          "s = s + 1;\n",
+          stderr="cannot add string and int")

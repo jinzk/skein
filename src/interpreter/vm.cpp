@@ -2,6 +2,7 @@
 #include "vm_internal.h"
 
 #include "list_grow.h"
+#include "string_grow.h"
 #include "bytecode.h"
 #include "builtin_ids.h"
 #include "control_runtime.h"
@@ -2911,6 +2912,38 @@ public:
                     break;
                 }
 
+                case Op::StringAppendSelf: {
+                    value_t *right = pop_checked();
+                    value_t *left = pop_checked();
+                    if (!left || !right) {
+                        freeval(left);
+                        freeval(right);
+                        return abort_error();
+                    }
+                    if (string_append_in_place(left, right, 1)) {
+                        freeval(right);
+                        push(left);
+                        break;
+                    }
+                    const int errors_before_append =
+                        context_.runtime_error_count;
+                    value_t *result =
+                        skein_vm_apply_binary_value('+', left, right);
+                    freeval(left);
+                    freeval(right);
+                    if (!result)
+                        return abort_error();
+                    if (context_.runtime_error_count !=
+                        errors_before_append) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
                 case Op::TailCall: {
                     uint32_t argc = ins.b;
                     std::array<value_t *, 8> inline_args;
@@ -4392,6 +4425,7 @@ private:
         if (value->type == T_return || value->type == T_break ||
             value->type == T_continue)
             return value;
+        string_refresh_cache(cell_value(cell), value);
         if (cell->is_const) {
             yyerror("cannot assign to constant %s", cell->name.c_str());
             freeval(value);

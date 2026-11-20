@@ -242,7 +242,7 @@ DECLARE_STRUCT / DECLARE_ENUM / DECLARE_TRAIT / DECLARE_IMPL
 DECLARE_PACKAGE
 CLOSURE / BIND_FUNC
 IMPORT
-CALL / CALL_METHOD / CALL_SPREAD / LIST_APPEND_SELF / LIST_CONCAT_SELF / TAIL_CALL / RETURN
+CALL / CALL_METHOD / CALL_SPREAD / LIST_APPEND_SELF / LIST_CONCAT_SELF / STRING_APPEND_SELF / TAIL_CALL / RETURN
 PUSH_SCOPE / POP_SCOPE
 CONTROL_BREAK / CONTROL_CONTINUE / RUNTIME_ERROR
 ```
@@ -277,6 +277,12 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
 
 两条指令在 JIT 中通过 `skein_jit_list_append_self` /
 `skein_jit_list_concat_self` helper 执行。
+
+`STRING_APPEND_SELF` 用于 `s = s + <string|char 字面量>`：栈上是左右操作数。
+运行时在目标是 string 且 buffer 没有额外别名时原地 `append` 并刷新缓存的
+`value` 指针；有别名则先按 COW 复制。存储赋值 helper 会同步旧值的 `value`
+缓存，避免重新分配后悬空。非 string 操作数回退到普通 `+`。该指令目前未进入
+JIT，包含它的函数回退 VM。
 
 每个 Proto 编译完成后会经过 `skein::bc::verify()`：
 

@@ -182,11 +182,11 @@
 - JIT/VM 差分测试稳定
 - 有明确性能回归门槛
 
-#### 字符串增量拼接（已列入计划，未实施）
+#### 字符串增量拼接（路线 1，已完成）
 
-目标：让 `s = s + expr` 在 VM/JIT 下也变成 O(1) 摊销，语义与现在完全一致。
+目标：让 `s = s + expr` 在 VM/JIT 下变成 O(1) 摊销，语义保持不变。
 
-现状：
+原问题：
 
 ```cpp
 struct string_value_t {
@@ -195,41 +195,39 @@ struct string_value_t {
 };
 ```
 
-`storage` 是不可变、可共享的；追加后 `c_str()` 可能重新分配。只更新栈上的
-副本会让另一个变量持有悬空 `value` 指针，因此不能像 list 那样简单地
-“`use_count <= 2` 就原地改”。
+原 `storage` 不可变且可共享；追加后 `c_str()` 可能重新分配，只更新栈上的
+副本会让另一个变量持有悬空 `value` 指针。
+
+实现（路线 1）：
+
+- `storage` 改为可写 `shared_ptr<std::string>`，`value` 仍指向 `storage->data()`
+- 新增 `STRING_APPEND_SELF`：目标是 string 且 buffer 无额外别名时原地
+  `append`；有别名时先 COW 复制
+- 赋值 helper（symbol / slot / param / upvalue）在释放旧值前同步旧值的
+  `value` 缓存，避免重新分配后悬空
+- AST 后端实现等价路径（只对 symbol 目标生效，COW 阈值相应收紧）
+- JIT 暂时对该指令回退 VM（VM 已是 O(1)）
 
 实测（100k 次）：
 
 ```text
-s = s + "x"                 680 ms
-std.string.builder + push    29 ms
+改前 s = s + "x"           680 ms
+改后 VM / AST              20–26 ms
+std.string.builder          29 ms
 ```
 
-可选路线：
+后续可选：
 
-1. **可变 storage + COW + 符号感知 opcode**
-   - 新增 `STRING_APPEND_SELF`，带目标存储描述（slot / param / global / name）
-   - 追加后同时刷新目标符号和栈副本的 `value`
-   - 需要处理别名、跨闭包捕获、错误位置；AST 后端也要实现
-2. **rope / 分块字符串表示**
-   - 追加 O(1)，但 `len` / 下标 / `find` / 序列化 / FFI 边界全部要改
-   - 改动面大于收益，除非同时计划 moving GC / 值表示重构
-3. **维持 builder-only（当前状态）**
-   - `std.string.builder` 已覆盖推荐用法
-   - 透明加速只在有明确大字符串构建需求时再启动
+- **rope / 分块字符串表示**：能让所有拼接/切片 O(1)，但会波及 `len`、下标、
+  `find`、序列化、FFI 和 Unicode 索引；除非同时规划 moving GC / 值表示重构，
+  否则不做。
+- JIT 直接支持 `STRING_APPEND_SELF` helper。
 
-前置条件与验收：
+风险与约束：
 
-- 有真实的 100k–1M 级字符串构建负载作为基准
-- 别名共享、闭包捕获、char/string 混合、错误信息完全保持
-- AST / VM / JIT 输出与性能一致
-- 不与 moving GC / 字符串驻留（interning）方案冲突
-
-风险：
-
-- `value` 是缓存指针，任何原地修改都必须同步所有共享者
+- `value` 是缓存指针；任何原地修改都必须同步所有已知共享者
 - 字符串会进入序列化、FFI 和跨线程边界，表示变更影响面大
+- AST 的 COW 阈值与 VM 不同（无栈副本时只允许 1 个 owner）
 
 ### Milestone 5：长尾能力
 
@@ -253,7 +251,7 @@ std.string.builder + push    29 ms
 5. Windows/MinGW 是否进入正式发布范围？
 6. 是否支持 vendor 和多模块 workspace？
 7. 私有模块认证与 proxy 鉴权做到什么程度？
-8. 是否为透明字符串拼接改造字符串表示（可变 storage / rope，见 Milestone 4 的字符串增量拼接）？
+8. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
 
 ---
 
@@ -264,7 +262,7 @@ std.string.builder + push    29 ms
 - GC root map 稳定前，不做 Handler JIT / OSR / deopt。
 - 没有实际用户需求前，不扩展旧编码后端。
 - 未确认公共生态前，不先做 vendor / workspace。
-- 没有明确的大字符串构建需求前，不做透明 `s = s + x` 加速；优先使用 `std.string.builder`。
+- 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明 `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
 
 ---
 

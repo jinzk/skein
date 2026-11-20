@@ -8,6 +8,7 @@
 #include "valuetype.h"
 #include "value_ops.h"
 #include "value_runtime.h"
+#include "string_grow.h"
 
 #include "builtin_ids.h"
 
@@ -804,13 +805,14 @@ struct value_t *assign_symbol_direct(struct symbol *s,
         freeval(value);
         return NULL;
     }
+    if (!value)
+        return NULL;
+    string_refresh_cache(s->val, value);
     if (s->is_const) {
         yyerror("cannot assign to constant %s", s->name);
         freeval(value);
         return NULL;
     }
-    if (!value)
-        return NULL;
     if (value->type == T_return || value->type == T_break ||
         value->type == T_continue)
         return value;

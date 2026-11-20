@@ -1,6 +1,7 @@
 #include "vm_slots.h"
 
 #include "symbol.h"
+#include "string_grow.h"
 #include "value_ops.h"
 #include "value_runtime.h"
 
@@ -93,6 +94,7 @@ value_t *assign_direct_param(const VmSlotView &view, uint32_t index,
     if (value->type == T_return || value->type == T_break ||
         value->type == T_continue)
         return value;
+    string_refresh_cache((*view.param_values)[index], value);
     if (!check_direct_param(view, index, value)) {
         freeval(value);
         return NULL;
@@ -154,6 +156,7 @@ value_t *assign_direct_slot(const VmSlotView &view, uint32_t index,
     if (value->type == T_return || value->type == T_break ||
         value->type == T_continue)
         return value;
+    string_refresh_cache((*view.slot_values)[index], value);
     if (!check_direct_slot(view, index, value, true)) {
         freeval(value);
         return NULL;

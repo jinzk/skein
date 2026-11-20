@@ -2134,7 +2134,9 @@ let text = sb.build();
 
 - `push` / `extend` 是 O(1) 摊销，`build()` 每次返回独立值；
 - `std.list.append(xs, v)` 在 `xs = std.list.append(xs, v)` 形式下（VM/JIT 后端）使用 COW 原地增长；
-- 其他调用形式仍保持“返回新 list，不修改参数”的语义；
+- `s = s + "x"` / `s = s + 'c'` 在 VM 与 AST 下使用 COW 原地追加，别名仍保留旧值；
+- 复杂拼接（例如 `s + str(i)`）仍建议使用 `std.string.builder`；
+- 其他调用形式仍保持“返回新 list / 新字符串，不修改参数”的语义；
 - builder 是可变对象，赋值会共享同一个 builder。
 
 ## 控制台输入

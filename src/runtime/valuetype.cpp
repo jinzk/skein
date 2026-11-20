@@ -183,8 +183,8 @@ struct value_t *newboolval(bool b) {
 struct value_t *newstrval(const char *s) {
     struct string_value_t *v = new string_value_t;
     v->type = T_string;
-    v->storage = std::make_shared<const std::string>(s ? s : "");
-    v->value = const_cast<char *>(v->storage->c_str());
+    v->storage = std::make_shared<std::string>(s ? s : "");
+    v->value = v->storage->data();
     return (struct value_t *)v;
 }
 

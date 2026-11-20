@@ -3003,6 +3003,7 @@ std.thread.capabilities
 - `std.dict.get` 缺少键时返回 `null` 或提供的默认值；
 - `std.list.reverse` / `std.list.sort` / `std.list.sort_by` / `std.list.append` 返回新 list，不修改参数；
 - `std.list.append(xs, v)` 在 `xs = std.list.append(xs, v)` 形式下（VM/JIT 后端）使用 COW 原地增长，避免复制整个 list；`xs = xs + [v]` 同样处理；
+- `s = s + "..."` / `s = s + 'c'` 在 VM 与 AST 下使用 COW 原地追加（100k 次约 20–26ms，改前约 680ms）；
 - `std.list.builder()` 提供 O(1) 摊销的 `push` / `extend`，`build()` 每次返回独立 list；
 - `std.string.builder()` 提供 O(1) 摊销的字符串拼接，`push` 接受 string 或 char；
 - 排序稳定；`std.list.sort(xs)` 接受全数字、全字符串或全 `char`；`std.list.sort(xs, cmp)` 接受自定义比较器；

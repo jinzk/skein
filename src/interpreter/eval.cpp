@@ -504,8 +504,25 @@ struct value_t *eval(struct ast *a) {
 
         case '=': {
             struct symasgn *asgn = (struct symasgn *)a;
-            if (asgn->target->nodetype == 'N')
-                ret = assign_name((struct symref *)asgn->target, asgn->v);
+            if (asgn->target->nodetype == 'N') {
+                struct symref *target = (struct symref *)asgn->target;
+                if (asgn->v && asgn->v->nodetype == '+' && asgn->v->l &&
+                    asgn->v->l->nodetype == 'N' && asgn->v->r &&
+                    asgn->v->r->nodetype == 'V') {
+                    struct val *literal = (struct val *)asgn->v->r;
+                    struct symref *base =
+                        (struct symref *)asgn->v->l;
+                    if (literal->val &&
+                        (literal->val->type == T_string ||
+                         literal->val->type == T_char) &&
+                        base->name && target->name &&
+                        std::strcmp(base->name, target->name) == 0) {
+                        ret = string_append_name(target, asgn->v->r);
+                        break;
+                    }
+                }
+                ret = assign_name(target, asgn->v);
+            }
             else if (asgn->target->nodetype == 'G' ||
                      asgn->target->nodetype == 'j')
                 ret = assign_index(asgn->target, asgn->v);

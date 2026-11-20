@@ -10,6 +10,8 @@
 #include "cycle.h"
 #include "platform.h"
 #include "repl.h"
+#include "string_grow.h"
+#include "value_ops.h"
 #include "runtime_context.h"
 #include "scopestack.h"
 #include "structeval.h"
@@ -414,6 +416,42 @@ struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     freeval(s->val);
     s->val = v;
     return dupval(v);
+}
+
+value_t *string_append_name(struct symref *ref, struct ast *literal) {
+    struct symbol *s = lookupsym(ref->name);
+    if (!s) {
+        yyerror("symbol not found %s", ref->name);
+        return NULL;
+    }
+    if (s->is_const) {
+        yyerror("cannot assign to constant %s", ref->name);
+        return NULL;
+    }
+    value_t *rhs = eval(literal);
+    if (!rhs)
+        return NULL;
+    if (s->val && s->val->type == T_string &&
+        (rhs->type == T_string || rhs->type == T_char)) {
+        string_append_in_place(s->val, rhs);
+        freeval(rhs);
+        return dupval(s->val);
+    }
+    value_t *left = dupval(s->val);
+    value_t *result = apply_binary_value('+', left, rhs);
+    freeval(left);
+    freeval(rhs);
+    if (!result)
+        return NULL;
+    if (!type_constraint_matches(&s->type, result)) {
+        yyerror("variable %s expects %s, got %s", s->name,
+                type_constraint_name(&s->type), typename_of(result));
+        freeval(result);
+        return NULL;
+    }
+    freeval(s->val);
+    s->val = result;
+    return dupval(result);
 }
 
 struct value_t *increment_name(struct symref *ref, int delta,

@@ -141,11 +141,12 @@ struct bool_value_t {
 
 struct string_value_t {
     enum val_type type;
-    /* `value` points at `storage->c_str()` when storage is set.  Borrowed
+    /* `value` points at `storage->data()` when storage is set.  Borrowed
      * names (VM member lookups) leave storage null and point `value` at
-     * caller-owned memory that outlives the temporary value. */
+     * caller-owned memory that outlives the temporary value.  The buffer is
+     * mutable so STRING_APPEND_SELF can grow it when uniquely owned. */
     char *value = nullptr;
-    std::shared_ptr<const std::string> storage;
+    std::shared_ptr<std::string> storage;
 };
 
 struct char_value_t {

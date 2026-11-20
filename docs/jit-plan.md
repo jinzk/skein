@@ -385,7 +385,8 @@ endif()
   JIT 代码不兼容；
 - 上游没有 release tag，直接 `find_package` 无法保证拿到 1.11 API；
 - `SKEIN_ENABLE_JIT=OFF` 时不会编译 `third_party/asmjit`；Linux / Windows
-  x86-64 默认构建会编译 JIT，其他架构默认 OFF，运行时仍由 `SKEIN_JIT` 控制。
+  x86-64 默认构建会编译 JIT，其他架构默认 OFF。运行时默认启用，
+  `SKEIN_JIT=0` 可关闭；`SKEIN_JIT_TOP_LEVEL=0` 只关闭顶层语句的 JIT。
 
 ### 5.2 asmjit 构建宏
 
@@ -1142,6 +1143,41 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 - 类型特化 / unboxed int / 单态字段与调用缓存内联；
 - 如仍有收益，再评估 tracing。
 
+### JIT 默认启用评估（2026-11-20，已完成）
+
+决策：**JIT 构建上运行时默认启用**，保留 `SKEIN_JIT=0`、
+`SKEIN_JIT_TOP_LEVEL=0` 两个开关；函数编译阈值仍为 100 次调用。
+
+评估数据（Windows，`build_msys2-jit`）：
+
+```text
+fib_bench      off 约 0.77s  → on 约 0.21s   (~3.6x)
+call_bench     off 约 0.73s  → on 约 0.69s   (~6%)
+route_bench    off 约 0.53s  → on 约 0.535s  (~中性，无函数被编译)
+hello / 顶层脚本  off ≈ on（约 12ms，无明显冷启动开销）
+```
+
+覆盖率（`SKEIN_VM_STATS=1` 的 `[vm-stats] jit`）：
+
+```text
+call_bench       compiled=1  declined=0   calls≈2.0M
+fib_bench        compiled=1  declined=0
+route_bench      compiled=0  declined=12  (names 5, upvalues 4, closures 1, other 2)
+closure/service  compiled=0  declined=1   (upvalues)
+```
+
+为避免“启用 JIT 反而变慢”，默认启用前做了三项热路径修正：
+
+- `jit_resolve_and_enter` 先查 per-function cache / `jit_failed` / 命中阈值，
+  再做参数与资格校验（未命中函数不再每次调用付参数检查）
+- GC 临时根只在真正进入 JIT 时登记，不再为每个被拒绝的调用压 root frame
+- `thread_state.root_module/root_source` 延迟到首次进入时复制
+
+覆盖率结论：当前 JIT 只覆盖无闭包 / 无 handler / 无 defer / 无名字的
+函数，真实服务代码（`std.route`、闭包 handler）覆盖率为 0。默认启用对
+纯计算热点收益明显，对闭包密集负载接近中性。下一步提升覆盖率的优先级
+高于 OSR/deopt：Handler JIT + 闭包/upvalue 支持。
+
 ### 独立决策
 
 - AOT / 字节码序列化；
@@ -1155,8 +1191,11 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 ## 13. 待确认事项
 
 1. ~~`SKEIN_ENABLE_JIT` 默认值：保持 OFF，还是 Linux 上默认 ON？~~
-   已决定：Linux / Windows x86-64 默认 ON，其他架构默认 OFF；运行时
-   `SKEIN_JIT` 仍默认 OFF，是否默认启用待后续验证。
+   已决定：Linux / Windows x86-64 默认 ON，其他架构默认 OFF。
+   ~~运行时 `SKEIN_JIT` 仍默认 OFF，是否默认启用待后续验证。~~
+   已决定：运行时**默认启用**；`SKEIN_JIT=0` 关闭，
+   `SKEIN_JIT_TOP_LEVEL=0` 关闭顶层语句 JIT，`SKEIN_JIT_THRESHOLD`
+   控制函数编译阈值（默认 100 次调用）。
 2. Windows/MinGW 是否进入正式发布范围，还是只做 beta smoke？
 3. Phase 2 是否继续使用 asmjit，还是先评估 `x86::Compiler` 的 prologue/regalloc 能力？
 4. 是否把本文链接加入 `README.md` 的文档列表？

@@ -25,12 +25,13 @@ JIT 使用仓库内置的 `third_party/asmjit`（固定 1.11.0，版本与来源
 ```bash
 cmake -S . -B build -G Ninja
 cmake --build build
-SKEIN_JIT=1 ./build/skein benchmarks/fib_bench.skein
+./build/skein benchmarks/fib_bench.skein
 ```
 
-JIT 在运行时仍是 opt-in：必须设置 `SKEIN_JIT=1` 才会真正进入 JIT 路径；
-不设置时即使编译进了 JIT 也仍走 VM。`SKEIN_JIT_THRESHOLD` 控制首次编译前
-的调用次数，`SKEIN_JIT_DUMP=1` 会输出生成的汇编。JIT/VM 对比基准：
+JIT 在运行时默认启用；`SKEIN_JIT=0` 关闭 JIT、回到纯 VM，
+`SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数，
+`SKEIN_JIT_TOP_LEVEL=0` 只关闭顶层语句的 JIT，
+`SKEIN_JIT_DUMP=1` 会输出生成的汇编。JIT/VM 对比基准：
 
 ```bash
 python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check

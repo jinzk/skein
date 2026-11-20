@@ -249,7 +249,7 @@ direct_fn direct() { return g_direct; }
 bool available() {
     static int state = -1;
     if (state < 0)
-        state = read_bool_env("SKEIN_JIT", false) ? 1 : 0;
+        state = read_bool_env("SKEIN_JIT", true) ? 1 : 0;
     return state != 0;
 }
 

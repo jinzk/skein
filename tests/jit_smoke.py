@@ -492,6 +492,41 @@ def main():
         )
         ok &= check_jit_interrupt(binary, interrupt_tail, "spin")
 
+    # Default-on: without SKEIN_JIT in the environment the JIT must run.
+    # SKEIN_JIT=0 remains the kill switch.
+    with tempfile.TemporaryDirectory(prefix="skein-jit-default-") as tmp:
+        default_probe = Path(tmp) / "default_probe.skein"
+        default_probe.write_text(
+            "func ping(n) { return n + 1; }\n"
+            "let i = 0;\n"
+            "let total = 0;\n"
+            "while (i < 20) { total = ping(total); i = i + 1; }\n"
+            "println(total);\n",
+            encoding="utf-8",
+        )
+        default_env = dict(os.environ)
+        default_env["SKEIN_VM"] = "1"
+        default_env.pop("SKEIN_JIT", None)
+        default_env["SKEIN_JIT_THRESHOLD"] = "1"
+        default_env["SKEIN_JIT_DEBUG"] = "1"
+        proc = subprocess.run(
+            [str(binary), str(default_probe)],
+            env=default_env, text=True, capture_output=True, timeout=120)
+        if proc.returncode != 0 or "[jit] enter ping" not in proc.stderr:
+            print("jit smoke: JIT is not enabled by default", file=sys.stderr)
+            print(f"  rc={proc.returncode} err={proc.stderr!r}", file=sys.stderr)
+            ok = False
+
+        default_env["SKEIN_JIT"] = "0"
+        proc = subprocess.run(
+            [str(binary), str(default_probe)],
+            env=default_env, text=True, capture_output=True, timeout=120)
+        if proc.returncode != 0 or "[jit]" in proc.stderr:
+            print("jit smoke: SKEIN_JIT=0 did not disable the JIT",
+                  file=sys.stderr)
+            print(f"  rc={proc.returncode} err={proc.stderr!r}", file=sys.stderr)
+            ok = False
+
     if not ok:
         return 1
     print("jit smoke passed")

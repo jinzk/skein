@@ -22,6 +22,15 @@ struct vm_stats_data {
     uint64_t statements_fallback = 0;
     uint64_t functions_compiled = 0;
     uint64_t functions_fallback = 0;
+    /* JIT coverage: distinct functions compiled / declined, and calls run
+     * by compiled code.  Used when deciding whether JIT-on-by-default pays
+     * off for real workloads. */
+    uint64_t jit_functions_compiled = 0;
+    uint64_t jit_functions_declined = 0;
+    uint64_t jit_compile_failures = 0;
+    uint64_t jit_calls = 0;
+    /* Why functions were declined, one entry per distinct function. */
+    std::unordered_map<std::string, uint64_t> jit_decline_reasons;
     uint64_t instructions = 0;
     uint64_t calls = 0;
     uint64_t fast_calls = 0;

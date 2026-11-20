@@ -162,6 +162,8 @@
 - JIT 在 Linux 与 Windows 上收益一致（fib 约 5x，overall 1.5–3.5x）
 - `obj.method(args)` 使用 `CALL_METHOD` 快路径，VM 的 method 调用已快于 AST
 - `std.list.builder` / `std.string.builder`，以及 `xs = std.list.append(xs, v)` 的 COW 原地增长
+- JIT 运行时默认启用（`SKEIN_JIT=0` 可关闭；`SKEIN_JIT_TOP_LEVEL=0`
+  关闭顶层语句 JIT；`SKEIN_JIT_THRESHOLD` 默认 100 次调用）
 
 若暂不做 moving GC：
 
@@ -334,7 +336,8 @@ std.string.builder          29 ms
 1. 是否把 Skein 包生态做成公共生态？
 2. 是否引入 moving / compacting GC？
 3. 是否需要 AOT 或字节码磁盘缓存？
-4. `SKEIN_JIT` 运行时是否默认开启？
+4. ~~`SKEIN_JIT` 运行时是否默认开启？~~ 已决定：默认开启（JIT 构建），
+   `SKEIN_JIT=0` 保留 kill switch。
 5. Windows/MinGW 是否进入正式发布范围？
 6. 是否支持 vendor 和多模块 workspace？
 7. 私有模块认证与 proxy 鉴权做到什么程度？
@@ -358,9 +361,9 @@ std.string.builder          29 ms
 1. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
 2. Milestone 2 已完成。
 3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
-4. Milestone 4 的 GC root 审计与热点 opcode / frame 分配已完成；剩余是
-   moving GC / AOT / JIT 默认开启的决策，以及决策后才会启动的
-   per-pc liveness / OSR / deopt。
+4. Milestone 4 的 GC root 审计、热点 opcode / frame 分配与 JIT 默认启用
+   已完成；剩余是 moving GC / AOT / 字节码缓存的决策，以及移动 GC 决策后
+   才会启动的 per-pc liveness / OSR / deopt。
 5. 测试稳定性已完成：
    - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉
      probe-then-bind 竞态和定时就绪探测

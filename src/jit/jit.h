@@ -35,6 +35,7 @@ struct thread_state {
     std::string saved_source;
     std::string root_module;
     std::string root_source;
+    bool root_set = false;
     bool saved_package_valid = false;
     bool saved_source_valid = false;
     bool top_level = false;

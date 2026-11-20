@@ -59,6 +59,12 @@ void merge_vm_stats(vm_stats_data &target, const vm_stats_data &source) {
     target.statements_fallback += source.statements_fallback;
     target.functions_compiled += source.functions_compiled;
     target.functions_fallback += source.functions_fallback;
+    target.jit_functions_compiled += source.jit_functions_compiled;
+    target.jit_functions_declined += source.jit_functions_declined;
+    target.jit_compile_failures += source.jit_compile_failures;
+    target.jit_calls += source.jit_calls;
+    for (const auto &entry : source.jit_decline_reasons)
+        target.jit_decline_reasons[entry.first] += entry.second;
     target.instructions += source.instructions;
     target.calls += source.calls;
     target.fast_calls += source.fast_calls;
@@ -5773,6 +5779,29 @@ void skein_vm_stats_report() {
                  "[vm-stats] functions compiled=%llu fallback=%llu\n",
                  (unsigned long long)stats.functions_compiled,
                  (unsigned long long)stats.functions_fallback);
+    std::fprintf(stderr,
+                 "[vm-stats] jit compiled=%llu declined=%llu failed=%llu "
+                 "calls=%llu\n",
+                 (unsigned long long)stats.jit_functions_compiled,
+                 (unsigned long long)stats.jit_functions_declined,
+                 (unsigned long long)stats.jit_compile_failures,
+                 (unsigned long long)stats.jit_calls);
+    if (!stats.jit_decline_reasons.empty()) {
+        std::vector<std::pair<std::string, uint64_t>> reasons(
+            stats.jit_decline_reasons.begin(),
+            stats.jit_decline_reasons.end());
+        std::sort(reasons.begin(), reasons.end(),
+                  [](const std::pair<std::string, uint64_t> &a,
+                     const std::pair<std::string, uint64_t> &b) {
+                      return a.second > b.second;
+                  });
+        std::fprintf(stderr, "[vm-stats] jit declines");
+        const size_t shown = std::min<size_t>(reasons.size(), 6);
+        for (size_t i = 0; i < shown; ++i)
+            std::fprintf(stderr, " %s=%llu", reasons[i].first.c_str(),
+                         (unsigned long long)reasons[i].second);
+        std::fprintf(stderr, "\n");
+    }
     std::fprintf(stderr,
                  "[vm-stats] instructions=%llu calls=%llu fast=%llu "
                  "tail=%llu fallback=%llu\n",

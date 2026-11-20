@@ -53,6 +53,8 @@ struct function_vm_cache {
     skein::jit::JitCode *jit = nullptr;
     uint32_t jit_hits = 0;
     bool jit_failed = false;
+    /* Whether the compiled entry takes a destructuring parameter frame. */
+    bool jit_pattern_frame = false;
 #endif
     bool compile_failed = false;
 };
@@ -227,6 +229,29 @@ void jit_debug_suspendable(function_code *code) {
                                              : code->name.c_str());
 }
 
+/* Short reason string for stats: why can_compile declined this proto. */
+const char *jit_decline_reason(const skein::bc::Proto &proto) {
+    if (proto.uses_handlers)
+        return "handlers";
+    if (proto.uses_defers)
+        return "defers";
+    if (proto.has_closures)
+        return "closures";
+    if (skein::bc::proto_may_suspend(proto))
+        return "suspend";
+    if (proto.variadic)
+        return "variadic";
+    if (!proto.upvalues.empty())
+        return "upvalues";
+    if (!proto.params_direct)
+        return "params";
+    if (proto.uses_names)
+        return "names";
+    if (proto.nparams != proto.required_params)
+        return "defaults";
+    return "other";
+}
+
 bool jit_function_eligible(function_code *code) {
     return code && !code->is_generator &&
            !code->variadic && code->required_params == code->nparams;
@@ -302,37 +327,39 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
     std::vector<value_t *> heap_args;
     value_t **call_args = args;
     uint32_t call_argc = argc;
-    bool pattern_frame = false;
 
     if (callee->type == T_func) {
         struct func_value_t *fv = (struct func_value_t *)callee;
-        if (!fv->def || !fv->def->code)
-            return false;
-        if (fv->def->code->is_method)
+        if (!fv->def || !fv->def->code || fv->def->code->is_method)
             return false;
         def = fv->def;
         code = def->code.get();
-        if (jit_code_may_suspend(code)) {
-            jit_debug_suspendable(code);
-            return false;
-        }
-        pattern_frame = jit_params_have_patterns(code);
-        if (!jit_function_eligible(code) ||
-            !jit_args_match(code, call_args, call_argc, pattern_frame))
-            return false;
     } else if (callee->type == T_method) {
         method = (struct method_value_t *)callee;
         if (!method->method || !method->method->code)
             return false;
         def = method->method;
         code = def->code.get();
-        if (jit_code_may_suspend(code)) {
-            jit_debug_suspendable(code);
+        if (!code->is_method)
             return false;
-        }
-        if (!code->is_method || !jit_function_eligible(code) ||
-            jit_params_have_patterns(code))
-            return false;
+    } else {
+        return false;
+    }
+
+    /*
+     * Hot path: only touch the per-function cache until the callee is
+     * compiled or hot enough to attempt compilation.  Argument and
+     * eligibility checks must not run on every call of functions that will
+     * never be compiled.
+     */
+    function_vm_cache *cache = cache_for(code);
+    if (cache->jit_failed)
+        return false;
+    if (!cache->jit && cache->jit_hits++ < jit_threshold())
+        return false;
+
+    bool pattern_frame = cache->jit_pattern_frame;
+    if (method) {
         call_argc = argc + 1;
         if ((int)call_argc != code->nparams)
             return false;
@@ -345,22 +372,32 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
         call_args[0] = method->receiver ? method->receiver : newnull();
         for (uint32_t i = 0; i < argc; ++i)
             call_args[i + 1] = args[i];
-        if (!jit_args_match(code, call_args, call_argc, false))
-            return false;
-    } else {
-        return false;
     }
 
-    if (pattern_frame && !jit_patterns_ready(code))
-        return false;
-
-    function_vm_cache *cache = cache_for(code);
-    if (cache->jit_failed)
-        return false;
     if (!cache->jit) {
         if (!skein_vm_enabled())
             return false;
-        if (cache->jit_hits++ < jit_threshold())
+        if (jit_code_may_suspend(code)) {
+            jit_debug_suspendable(code);
+            cache->jit_failed = true;
+            if (vm_stats_enabled) {
+                ++vm_stats.jit_functions_declined;
+                ++vm_stats.jit_decline_reasons["suspend"];
+            }
+            return false;
+        }
+        pattern_frame = jit_params_have_patterns(code);
+        if (!jit_function_eligible(code) || (method && pattern_frame)) {
+            cache->jit_failed = true;
+            if (vm_stats_enabled) {
+                ++vm_stats.jit_functions_declined;
+                ++vm_stats.jit_decline_reasons["other"];
+            }
+            return false;
+        }
+        if (pattern_frame && !jit_patterns_ready(code))
+            return false;
+        if (!jit_args_match(code, call_args, call_argc, pattern_frame))
             return false;
         skein::bc::ProtoPtr proto = prepare_function_body(def);
         if (proto)
@@ -371,6 +408,10 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
                              code->name.empty() ? "<anonymous>"
                                                 : code->name.c_str());
             cache->jit_failed = true;
+            if (vm_stats_enabled) {
+                ++vm_stats.jit_functions_declined;
+                ++vm_stats.jit_decline_reasons["suspend"];
+            }
             return false;
         }
         if (!proto ||
@@ -380,19 +421,48 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
                              code->name.empty() ? "<anonymous>"
                                                  : code->name.c_str());
             cache->jit_failed = true;
+            if (vm_stats_enabled) {
+                ++vm_stats.jit_functions_declined;
+                ++vm_stats.jit_decline_reasons[proto
+                                                   ? jit_decline_reason(*proto)
+                                                   : "no-proto"];
+            }
             return false;
         }
         cache->jit = skein::jit::compile(*proto, false, pattern_frame);
         if (!cache->jit) {
             cache->jit_failed = true;
+            if (vm_stats_enabled)
+                ++vm_stats.jit_compile_failures;
             return false;
         }
+        cache->jit_pattern_frame = pattern_frame;
+        if (vm_stats_enabled)
+            ++vm_stats.jit_functions_compiled;
+    } else if (!jit_args_match(code, call_args, call_argc, pattern_frame)) {
+        return false;
     }
 
     if (method)
         method->receiver = nullptr;
+    /*
+     * Root the callee and arguments only now: this is the first point where
+     * the JIT will run user code and a collection could happen.  Doing it
+     * earlier would charge every declined call for a root frame.
+     */
+    gc_root_scope roots(active_eval_context().scopes);
+    roots.add(callee);
+    for (uint32_t i = 0; i < call_argc; ++i)
+        roots.add(call_args[i]);
+    if (!ts->root_set) {
+        ts->root_module = diag_current_package_name();
+        ts->root_source = diag_current_source_name();
+        ts->root_set = true;
+    }
     *out = skein::jit::enter(cache->jit, ts, def.get(), call_args,
                              call_argc);
+    if (vm_stats_enabled)
+        ++vm_stats.jit_calls;
     return true;
 }
 
@@ -407,20 +477,10 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     ts.ctx = &active_eval_context();
     ts.max_depth = skein_vm_max_depth();
     ts.tail_call = tail_call;
-    ts.root_module = diag_current_package_name();
-    ts.root_source = diag_current_source_name();
 
     value_t *result = nullptr;
-    {
-        /* The callee and arguments are only reachable from this C++ frame
-         * until the JIT prologue registers its slots. */
-        gc_root_scope roots(active_eval_context().scopes);
-        roots.add(callee);
-        for (uint32_t i = 0; i < argc; ++i)
-            roots.add(args[i]);
-        if (!jit_resolve_and_enter(callee, args, argc, &ts, &result))
-            return false;
-    }
+    if (!jit_resolve_and_enter(callee, args, argc, &ts, &result))
+        return false;
 
     while (ts.tail_pending) {
         value_t *next_callee = ts.tail_callee;
@@ -1469,7 +1529,10 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     if (vm_stats_enabled)
         ++vm_stats.statements_compiled;
 #ifdef SKEIN_ENABLE_JIT
-    if (skein::jit::available() && skein::jit::can_compile(*proto, true)) {
+    static const bool top_level_jit =
+        read_bool_env("SKEIN_JIT_TOP_LEVEL", true);
+    if (top_level_jit && skein::jit::available() &&
+        skein::jit::can_compile(*proto, true)) {
         skein::jit::JitCode *code = skein::jit::compile(*proto, true);
         if (code) {
             const auto jit_start = std::chrono::steady_clock::now();

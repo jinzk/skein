@@ -74,9 +74,10 @@ int main() {
     }
     {
         Proto proto;
-        proto.code.push_back(make(Op::PushFailHandler, 0, 0, 2));
+        proto.code.push_back(make(Op::PushFailHandler, 0, 0, 4));
         proto.code.push_back(make(Op::PopHandler));
         proto.code.push_back(make(Op::LoadNull));
+        proto.code.push_back(make(Op::Return));
         proto.code.push_back(make(Op::Return));
         std::string error;
         expect(skein::bc::verify(proto, error), "balanced handler accepted");

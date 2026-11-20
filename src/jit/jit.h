@@ -3,6 +3,7 @@
 
 #include "bytecode.h"
 #include "valuetype.h"
+#include "vm_eval.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -31,9 +32,11 @@ struct thread_state {
     eval_context *ctx = nullptr;
     int max_depth = 0;
     int saved_handler_depth = 0;
+    int handler_body_depth = 0;
     size_t scope_mark = 0;
     /* Scope depth after the frame's own (prologue) scope was pushed. */
     size_t frame_scope_mark = 0;
+    value_t *unwind_value = nullptr;
     std::string saved_package;
     std::string saved_source;
     std::string root_module;
@@ -51,6 +54,7 @@ struct thread_state {
     /* Nested direct JIT calls reuse this state; save one entry per call. */
     struct call_save {
         int saved_handler_depth = 0;
+        int handler_body_depth = 0;
         size_t scope_mark = 0;
         size_t frame_scope_mark = 0;
         std::string saved_package;
@@ -70,6 +74,23 @@ struct thread_state {
      * frame values.
      */
     std::vector<std::shared_ptr<struct upvalue_cell>> open_cells;
+
+    /*
+     * Handlers pushed by JIT frames on this thread.  Each frame stores a mark
+     * in its header and discards the entries it created on exit.  Captured
+     * snapshots are plain state (not values) and are ended in LIFO order.
+     */
+    struct handler_state {
+        int kind = 0; /* 0 = fail, 1 = recover */
+        int32_t target = -1;
+        int32_t stack_depth = 0;
+        size_t scope_depth = 0;
+        int body_depth = 0;
+        int eval_handler_depth = 0;
+        bool capture = false;
+        eval_capture_snapshot snapshot;
+    };
+    std::vector<handler_state> handlers;
 
     /* Pending trampoline request produced by a non-self TAIL_CALL. */
     value_t *tail_callee = nullptr;

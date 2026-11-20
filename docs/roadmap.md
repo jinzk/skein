@@ -172,6 +172,9 @@
   与 `for-in` 迭代器（`ITER_NEW/NEXT/END`，含 list/dict/string/bytes/
   deque/heap/set/generator），并放开 Slot/Param/Upvalue base 的
   `ASSIGN_INDEX`、值比较、`DUP`、`GET_FIELD_OR_ENUM` 与 `FAIL`
+- JIT 支持 `on error` handler（`PUSH/POP_HANDLER`、`CHECK_RESULT`、
+  `BIND_NAME`、`ENTER/LEAVE_HANDLER_BODY`、`PASS`、`RECOVER`）；`defer`
+  仍回退 VM
 
 若暂不做 moving GC：
 

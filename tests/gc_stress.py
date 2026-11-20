@@ -142,6 +142,22 @@ let it = 0;
 while (it < 200) { iter_sum = iter_sum + iter_total(4); it = it + 1; }
 println("iter " + str(iter_sum));
 
+/* Handlers keep the captured error and recover value alive across unwinds. */
+func handler_fail(n) {
+  if (n > 0) { fail "handler boom"; }
+  return n;
+}
+func handler_total(n) {
+  let total = 0;
+  let i = 0;
+  while (i < n) {
+    total = total + (handler_fail(i) on error(e) { recover 1; });
+    i = i + 1;
+  }
+  return total;
+}
+println("handler " + str(handler_total(50)));
+
 /* Lazy iterators and generator parameters live in C++ state until the
  * generator runs; they must be registered on the generator value. */
 func make_adder(n) {
@@ -181,6 +197,7 @@ EXPECTED = [
     "open 5050",
     "make 20100",
     "iter 2200",
+    "handler 49",
     "lazy 336",
     "generator 5",
     "churn true",

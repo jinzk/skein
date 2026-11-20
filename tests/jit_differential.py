@@ -42,7 +42,7 @@ CASES = [
         "println(str(risky(2)));\n"
         "println(str(risky(0)));\n"
         "println(str(risky(5)));\n",
-        expect_debug="cannot compile risky",
+        expect_debug="[jit] enter risky",
     ),
     case(
         "detached-task-fail",

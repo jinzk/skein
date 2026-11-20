@@ -705,6 +705,21 @@ bool verify_single(const Proto &proto, std::string &error,
         if (next > static_cast<int>(maximum))
             maximum = static_cast<uint32_t>(next);
 
+        /*
+         * A handler body is entered with the raised value pushed on the
+         * stack.  That edge is not a normal conditional jump: the
+         * fallthrough keeps `current`, while the target starts at
+         * `current + 1`.
+         */
+        const Op opcode = static_cast<Op>(ins.op);
+        if (opcode == Op::PushFailHandler ||
+            opcode == Op::PushRecoverHandler) {
+            if (!reach(ins.b, current + 1))
+                return false;
+            if (current + 1 > static_cast<int>(maximum))
+                maximum = static_cast<uint32_t>(current + 1);
+        }
+
         if (effect.terminal)
             continue;
         if (static_cast<Op>(ins.op) == Op::Jump) {

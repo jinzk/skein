@@ -4,6 +4,7 @@
 
 #include "diagnostics.h"
 #include "dict.h"
+#include "control_runtime.h"
 #include "eval_context.h"
 #include "gc.h"
 #include "gc_roots.h"
@@ -728,6 +729,10 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_fail(value_t *value) {
     skein_vm_eval_raise(value);
 }
 
+extern "C" SKEIN_JIT_SYSV void skein_jit_runtime_error(const char *message) {
+    yyerror("%s", message ? message : "runtime error");
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                                         uint32_t name_index, int line,
                                         int column) {
@@ -1058,6 +1063,276 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_frame_scope_pushed(
     skein::jit::thread_state *ts) {
     if (ts && ts->ctx)
         ts->frame_scope_mark = ts->ctx->scopes.restore_stack.size();
+}
+
+namespace {
+
+int jit_handler_index(skein::jit::thread_state *ts, size_t mark, int kind) {
+    if (!ts)
+        return -1;
+    for (size_t i = ts->handlers.size(); i > mark; --i) {
+        if (ts->handlers[i - 1].kind == kind)
+            return static_cast<int>(i - 1);
+    }
+    return -1;
+}
+
+value_t *jit_end_handler_capture(skein::jit::thread_state::handler_state &h) {
+    if (!h.capture)
+        return nullptr;
+    h.capture = false;
+    eval_capture_result result = skein_vm_eval_capture_end(h.snapshot);
+    return result.error;
+}
+
+} // namespace
+
+extern "C" SKEIN_JIT_SYSV size_t skein_jit_push_handler_mark(
+    skein::jit::thread_state *ts) {
+    return ts ? ts->handlers.size() : SIZE_MAX;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_discard_handlers(
+    skein::jit::thread_state *ts, size_t mark) {
+    if (!ts || mark > ts->handlers.size())
+        return;
+    while (ts->handlers.size() > mark) {
+        value_t *error = jit_end_handler_capture(ts->handlers.back());
+        freeval(error);
+        ts->handlers.pop_back();
+    }
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_push_handler(
+    skein::jit::thread_state *ts, int kind, int32_t target,
+    int32_t stack_depth, int flags, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!ts || !ts->ctx) {
+        yyerror("handler state is not installed");
+        return 0;
+    }
+    skein::jit::thread_state::handler_state handler;
+    handler.kind = kind;
+    handler.target = target;
+    handler.stack_depth = stack_depth;
+    handler.scope_depth = ts->ctx->scopes.restore_stack.size();
+    if (kind == 1 && (flags & 1) != 0 && handler.scope_depth > 0)
+        --handler.scope_depth;
+    handler.body_depth = ts->handler_body_depth;
+    handler.eval_handler_depth = ts->ctx->handler_depth;
+    handler.capture = kind == 0 && (flags & 1) != 0;
+    if (handler.capture)
+        skein_vm_eval_capture_begin(handler.snapshot);
+    ts->handlers.push_back(std::move(handler));
+    return 1;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_pop_handler(
+    skein::jit::thread_state *ts, size_t mark) {
+    if (!ts || ts->handlers.size() <= mark) {
+        yyerror("internal bytecode handler underflow");
+        return;
+    }
+    value_t *error = jit_end_handler_capture(ts->handlers.back());
+    freeval(error);
+    ts->handlers.pop_back();
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_enter_handler_body(
+    skein::jit::thread_state *ts) {
+    if (!ts || !ts->ctx)
+        return;
+    ++ts->handler_body_depth;
+    ++ts->ctx->handler_depth;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_leave_handler_body(
+    skein::jit::thread_state *ts) {
+    if (!ts || !ts->ctx)
+        return;
+    if (ts->handler_body_depth > 0)
+        --ts->handler_body_depth;
+    if (ts->ctx->handler_depth > ts->saved_handler_depth)
+        --ts->ctx->handler_depth;
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_check_result(
+    skein::jit::thread_state *ts, value_t **slot, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!slot || !*slot) {
+        yyerror("internal bytecode stack underflow");
+        return -1;
+    }
+    value_t *value = *slot;
+    *slot = nullptr;
+    if (value->type != T_result) {
+        *slot = value;
+        return 0;
+    }
+    struct result_value_t *result = (struct result_value_t *)value;
+    if (result->ok) {
+        value_t *inner = dupval(result->value);
+        freeval(value);
+        *slot = inner ? inner : newnull();
+        return 0;
+    }
+    value_t *error = dupval(result->error);
+    freeval(value);
+    if (!error)
+        error = newerrorval("fail", "");
+    set_eval_control(EVAL_CONTROL_FAIL, error);
+    (void)ts;
+    return 1;
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_bind_name(
+    skein::jit::thread_state *ts, value_t *value, value_t **slot,
+    const char *name, int is_const, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    (void)ts;
+    if (!value) {
+        yyerror("symbol not found %s", name ? name : "");
+        return 0;
+    }
+    if (slot) {
+        freeval(*slot);
+        *slot = value;
+        return 1;
+    }
+    if (!name) {
+        yyerror("invalid bytecode name");
+        freeval(value);
+        return 0;
+    }
+    if (isrepeated(name)) {
+        yyerror("symbol repeated %s", name);
+        freeval(value);
+        return 0;
+    }
+    struct symbol *sym = newsym(name);
+    sym->val = value;
+    sym->is_const = is_const != 0;
+    savesym(sym);
+    return 1;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_recover(
+    skein::jit::thread_state *ts, value_t *value, size_t mark,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!value) {
+        yyerror("recover value is missing");
+        return;
+    }
+    if (jit_handler_index(ts, mark, 1) < 0) {
+        yyerror("recover outside error handler");
+        freeval(value);
+        return;
+    }
+    set_eval_control(EVAL_CONTROL_RECOVER, value);}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_pass(
+    skein::jit::thread_state *ts, value_t *value, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!value) {
+        yyerror("pass value is missing");
+        return;
+    }
+    if (!ts || ts->handler_body_depth <= 0) {
+        yyerror("pass outside error handler");
+        freeval(value);
+        return;
+    }
+    skein_vm_eval_raise(value);
+}
+
+extern "C" SKEIN_JIT_SYSV int64_t skein_jit_unwind(
+    skein::jit::thread_state *ts, size_t mark) {
+    if (!ts || !ts->ctx)
+        return -1;
+    eval_context &context = *ts->ctx;
+    if (context.control == EVAL_CONTROL_CLOSE)
+        return -1;
+
+    int kind = 0;
+    if (context.control == EVAL_CONTROL_RECOVER)
+        kind = 1;
+    else if (context.control != EVAL_CONTROL_NONE &&
+             context.control != EVAL_CONTROL_FAIL)
+        return -1;
+
+    const int index = jit_handler_index(ts, mark, kind);
+    if (index < 0)
+        return -1;
+
+    value_t *value = nullptr;
+    if (context.control == EVAL_CONTROL_FAIL)
+        value = take_eval_control(EVAL_CONTROL_FAIL);
+    else if (context.control == EVAL_CONTROL_RECOVER)
+        value = take_eval_control(EVAL_CONTROL_RECOVER);
+
+    for (size_t i = ts->handlers.size(); i > (size_t)index + 1; --i) {
+        value_t *error = jit_end_handler_capture(ts->handlers[i - 1]);
+        freeval(error);
+    }
+    skein::jit::thread_state::handler_state handler =
+        ts->handlers[(size_t)index];
+    value_t *captured = jit_end_handler_capture(ts->handlers[(size_t)index]);
+    ts->handlers.resize((size_t)index);
+    if (!value)
+        value = captured;
+    else
+        freeval(captured);
+    if (!value) {
+        value = eval_build_error(
+            context.has_captured_error ? context.captured_error
+                                       : std::string("runtime error"),
+            context.captured_source, context.captured_line,
+            context.captured_column, context.captured_trace);
+    }
+    if (!value)
+        value = newerrorval("runtime", "runtime error");
+
+    while (context.scopes.restore_stack.size() > handler.scope_depth)
+        skein_jit_pop_scope(ts);
+    ts->handler_body_depth = handler.body_depth;
+    context.handler_depth = handler.eval_handler_depth;
+    ts->unwind_value = value;
+    return handler.target;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_take_unwind_value(
+    skein::jit::thread_state *ts) {
+    if (!ts)
+        return nullptr;
+    value_t *value = ts->unwind_value;
+    ts->unwind_value = nullptr;
+    return value;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_drop_slots(value_t **slots,
+                                                    uint32_t count) {
+    if (!slots)
+        return;
+    for (uint32_t i = 0; i < count; ++i) {
+        freeval(slots[i]);
+        slots[i] = nullptr;
+    }
 }
 
 namespace {
@@ -1651,6 +1926,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
      */
     skein::jit::thread_state::call_save saved;
     saved.saved_handler_depth = ts->saved_handler_depth;
+    saved.handler_body_depth = ts->handler_body_depth;
     saved.scope_mark = ts->scope_mark;
     saved.frame_scope_mark = ts->frame_scope_mark;
     saved.saved_package = ts->saved_package;
@@ -1664,6 +1940,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     ts->saves.push_back(std::move(saved));
 
     ts->saved_handler_depth = context.handler_depth;
+    ts->handler_body_depth = 0;
     ts->scope_mark = context.scopes.restore_stack.size();
     /* Updated by the prologue when the frame pushes its own scope. */
     ts->frame_scope_mark = ts->scope_mark;
@@ -1752,6 +2029,7 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         skein::jit::thread_state::call_save saved = std::move(ts->saves.back());
         ts->saves.pop_back();
         ts->saved_handler_depth = saved.saved_handler_depth;
+        ts->handler_body_depth = saved.handler_body_depth;
         ts->scope_mark = saved.scope_mark;
         ts->frame_scope_mark = saved.frame_scope_mark;
         ts->saved_package = std::move(saved.saved_package);
@@ -1765,6 +2043,7 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
     } else {
         ts->diag_pushed = false;
         ts->entered = false;
+        ts->handler_body_depth = 0;
         ts->saved_package_valid = false;
         ts->saved_source_valid = false;
     }

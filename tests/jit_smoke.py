@@ -811,6 +811,75 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # Handlers: nested on-error, pass to an outer handler, runtime errors
+        # inside a handler body and Result unwrapping (CHECK_RESULT).
+        handler_ops = tmp_path / "handler_ops.skein"
+        handler_ops.write_text(
+            "import std;\n"
+            "func risky(n) {\n"
+            "  if (n > 0) { fail \"bad \" + str(n); }\n"
+            "  return n;\n"
+            "}\n"
+            "func nested(n) {\n"
+            "  return risky(n) on error(e) {\n"
+            "    let inner = risky(n + 1) on error(e2) { recover 5; };\n"
+            "    recover inner;\n"
+            "  };\n"
+            "}\n"
+            "func pass_outer() {\n"
+            "  return (risky(1) on error(e) { pass e; })\n"
+            "    on error(e2) { recover 7; };\n"
+            "}\n"
+            "func handler_throws() {\n"
+            "  return risky(1) on error(e) {\n"
+            "    recover (risky(2) on error(e2) { recover 9; });\n"
+            "  };\n"
+            "}\n"
+            "func outer_catches_error() {\n"
+            "  return (risky(1) on error(e) { recover 1 / 0; })\n"
+            "    on error(e2) { recover 8; };\n"
+            "}\n"
+            "func captured(n) {\n"
+            "  return std.result.capture(func() {\n"
+            "    if (n > 0) { fail \"boom\"; }\n"
+            "    return n * 2;\n"
+            "  });\n"
+            "}\n"
+            "func use_result(n) {\n"
+            "  return captured(n) on error(e) { recover -1; };\n"
+            "}\n"
+            "func boxed(n) {\n"
+            "  return risky(n) on error(e) {\n"
+            "    recover {\"message\": std.error.message(e)};\n"
+            "  };\n"
+            "}\n"
+            "println(str(nested(1)));\n"
+            "println(str(pass_outer()));\n"
+            "println(str(handler_throws()));\n"
+            "println(str(outer_catches_error()));\n"
+            "println(str(use_result(0)));\n"
+            "println(str(use_result(5)));\n"
+            "println(boxed(1)[\"message\"]);\n"
+            "let i = 0;\n"
+            "let total = 0;\n"
+            "while (i < 200) {\n"
+            "  total = total + nested(1) + pass_outer() +\n"
+            "          handler_throws() + outer_catches_error();\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(str(total));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "handler-ops", handler_ops)
+        rc, out, err = run(binary, handler_ops, True, debug=True)
+        if rc != 0 or "[jit] enter nested" not in err:
+            print(
+                "jit smoke: handler function was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

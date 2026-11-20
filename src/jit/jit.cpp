@@ -16,6 +16,7 @@
 
 #include <asmjit/asmjit.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -67,6 +68,7 @@ SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
 SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
     const skein::bc::FieldOrEnumDesc *desc, int line, int column);
 SKEIN_JIT_SYSV void skein_jit_fail(value_t *value);
+SKEIN_JIT_SYSV void skein_jit_runtime_error(const char *message);
 SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               uint32_t name_index, value_t *value, int line,
                               int column);
@@ -105,6 +107,34 @@ SKEIN_JIT_SYSV void skein_jit_close_cells(skein::jit::thread_state *ts,
 SKEIN_JIT_SYSV void skein_jit_push_frame_scope(function_def *def);
 SKEIN_JIT_SYSV void skein_jit_frame_scope_pushed(
     skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV size_t skein_jit_push_handler_mark(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_discard_handlers(
+    skein::jit::thread_state *ts, size_t mark);
+SKEIN_JIT_SYSV int skein_jit_push_handler(skein::jit::thread_state *ts,
+                                          int kind, int32_t target,
+                                          int32_t stack_depth, int flags,
+                                          uint64_t loc);
+SKEIN_JIT_SYSV void skein_jit_pop_handler(skein::jit::thread_state *ts,
+                                          size_t mark);
+SKEIN_JIT_SYSV void skein_jit_enter_handler_body(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_leave_handler_body(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV int skein_jit_check_result(skein::jit::thread_state *ts,
+                                          value_t **slot, uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_bind_name(skein::jit::thread_state *ts,
+                                            value_t **slot, const char *name,
+                                            int is_const, uint64_t loc);
+SKEIN_JIT_SYSV void skein_jit_recover(skein::jit::thread_state *ts,
+                                      value_t *value, uint64_t loc);
+SKEIN_JIT_SYSV void skein_jit_pass(skein::jit::thread_state *ts,
+                                   value_t *value, uint64_t loc);
+SKEIN_JIT_SYSV int64_t skein_jit_unwind(skein::jit::thread_state *ts,
+                                        size_t mark);
+SKEIN_JIT_SYSV value_t *skein_jit_take_unwind_value(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_drop_slots(value_t **slots, uint32_t count);
 SKEIN_JIT_SYSV value_t *skein_jit_closure(
     skein::jit::thread_state *ts, function_def *def,
     const skein::bc::Proto *proto, uint32_t const_index,
@@ -221,12 +251,14 @@ constexpr int kSavedRsiOff = 48;
 constexpr int kRootMarkOff = 56;
 constexpr int kDirectDefOff = 64;
 constexpr int kCellMarkOff = 72;
-constexpr int kHeaderSize = 80;
+constexpr int kHandlerMarkOff = 80;
+constexpr int kHeaderSize = 88;
 #else
 constexpr int kRootMarkOff = 40;
 constexpr int kDirectDefOff = 48;
 constexpr int kCellMarkOff = 56;
-constexpr int kHeaderSize = 64;
+constexpr int kHandlerMarkOff = 64;
+constexpr int kHeaderSize = 72;
 #endif
 
 int slot_op_char(uint8_t opcode) {
@@ -334,8 +366,10 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         return reject("frame shape");
     if (proto.uses_defers)
         return reject("defer");
-    if (proto.uses_handlers)
-        return reject("handler");
+    /* Top-level statements execute in the global scope; keep handler
+     * statements on the VM path. */
+    if (top_level && proto.uses_handlers)
+        return reject("top-level handler");
     if (proto_may_suspend(proto))
         return reject("suspend");
     if (proto.variadic)
@@ -413,6 +447,31 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::Pop:
             case skein::bc::Op::Dup:
             case skein::bc::Op::Fail:
+            case skein::bc::Op::Pass:
+            case skein::bc::Op::Recover:
+            case skein::bc::Op::CheckResult:
+            case skein::bc::Op::EnterHandlerBody:
+            case skein::bc::Op::LeaveHandlerBody:
+            case skein::bc::Op::PopHandler:
+                break;
+            case skein::bc::Op::PushFailHandler:
+            case skein::bc::Op::PushRecoverHandler:
+                if (ins.b >= proto.code.size())
+                    return reject("handler target");
+                break;
+            case skein::bc::Op::BindName:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return reject("bind name constant");
+                if (ins.a != UINT16_MAX && ins.a >= proto.slots.size())
+                    return reject("bind name slot");
+                break;
+            case skein::bc::Op::RuntimeError:
+                if (ins.b >= proto.consts.size() ||
+                    proto.consts[ins.b].kind !=
+                        skein::bc::ConstantKind::Name)
+                    return reject("runtime-error message");
                 break;
             case skein::bc::Op::LoadConst:
                 if (ins.b >= proto.consts.size() ||
@@ -646,6 +705,28 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     const asmjit::Label abort_label = a.newLabel();
     const asmjit::Label epilogue_label = a.newLabel();
 
+    /* Bytecode targets of PUSH_*_HANDLER, used by the abort trampoline. */
+    std::vector<uint32_t> handler_targets;
+    std::vector<int> handler_depths;
+    std::vector<asmjit::Label> handler_dispatch;
+    for (size_t pc = 0; pc < proto.code.size(); ++pc) {
+        const skein::bc::Instr &ins = proto.code[pc];
+        const skein::bc::Op op = static_cast<skein::bc::Op>(ins.op);
+        if (op != skein::bc::Op::PushFailHandler &&
+            op != skein::bc::Op::PushRecoverHandler)
+            continue;
+        if (std::find(handler_targets.begin(), handler_targets.end(),
+                      ins.b) != handler_targets.end())
+            continue;
+        handler_targets.push_back(ins.b);
+        /* The handler is entered with the raised value on the stack; the
+         * verifier does not model that edge, so derive the depth from the
+         * push site instead of stack_depth[target]. */
+        handler_depths.push_back(
+            pc < proto.stack_depth.size() ? proto.stack_depth[pc] + 1 : 0);
+        handler_dispatch.push_back(a.newLabel());
+    }
+
     /*
      * The VM polls g_interrupted every 1024 instructions.  Generated code
      * must do the same at loop headers, otherwise a JIT-compiled tight loop
@@ -776,6 +857,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
           asmjit::imm(static_cast<int64_t>(-1)));
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kCellMarkOff),
           asmjit::imm(static_cast<int64_t>(-1)));
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kHandlerMarkOff),
+          asmjit::imm(static_cast<int64_t>(-1)));
     a.xor_(asmjit::x86::eax, asmjit::x86::eax);
     for (uint32_t i = 0; i < value_count; ++i)
         a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -817,7 +900,9 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         a.mov(asmjit::x86::rdi,
               asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
         call_addr(fn_address(&skein_jit_frame_scope_pushed));
-    } else if ((proto.has_closures || proto.uses_names) && !top_level) {
+    } else if ((proto.has_closures || proto.uses_names ||
+                proto.uses_handlers) &&
+               !top_level) {
         /* Name-based locals and closure creation both resolve through the
          * live scope chain, so such frames need their own scope.  Top-level
          * code deliberately runs in the global scope. */
@@ -832,6 +917,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     call_addr(fn_address(&skein_jit_push_cell_mark));
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kCellMarkOff),
+          asmjit::x86::rax);
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+    call_addr(fn_address(&skein_jit_push_handler_mark));
+    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kHandlerMarkOff),
           asmjit::x86::rax);
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
@@ -2087,6 +2177,125 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 break;
             }
 
+            case skein::bc::Op::Pass: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::rdx, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_pass));
+                clear_slot(value_depth);
+                a.jmp(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::Recover: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kHandlerMarkOff));
+                a.mov(asmjit::x86::rcx, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_recover));
+                clear_slot(value_depth);
+                a.jmp(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::PushFailHandler:
+            case skein::bc::Op::PushRecoverHandler: {
+                const bool fail =
+                    static_cast<skein::bc::Op>(ins.op) ==
+                    skein::bc::Op::PushFailHandler;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(fail ? 0 : 1));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::ecx, asmjit::imm(depth));
+                a.mov(asmjit::x86::r8d, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_push_handler));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::PopHandler:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             -kHandlerMarkOff));
+                call_addr(fn_address(&skein_jit_pop_handler));
+                break;
+
+            case skein::bc::Op::EnterHandlerBody:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                call_addr(fn_address(&skein_jit_enter_handler_body));
+                break;
+
+            case skein::bc::Op::LeaveHandlerBody:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                call_addr(fn_address(&skein_jit_leave_handler_body));
+                break;
+
+            case skein::bc::Op::CheckResult: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(value_depth)));
+                a.mov(asmjit::x86::rdx, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_check_result));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jnz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::BindName: {
+                const int value_depth = depth - 1;
+                const std::string &name = proto.consts[ins.b].name;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                if (ins.a != UINT16_MAX)
+                    a.lea(asmjit::x86::rdx,
+                          asmjit::x86::ptr(asmjit::x86::rbp,
+                                           slot_off(ins.a)));
+                else
+                    a.xor_(asmjit::x86::edx, asmjit::x86::edx);
+                a.mov(asmjit::x86::rcx,
+                      asmjit::imm(fn_address(name.c_str())));
+                a.mov(asmjit::x86::r8d,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_bind_name));
+                clear_slot(value_depth);
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::RuntimeError: {
+                const std::string &message = proto.consts[ins.b].name;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(message.c_str())));
+                call_addr(fn_address(&skein_jit_runtime_error));
+                a.jmp(abort_label);
+                break;
+            }
+
             case skein::bc::Op::Return: {
                 const int value_depth = depth - 1;
                 a.mov(asmjit::x86::rax,
@@ -2101,12 +2310,12 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             }
 
             case skein::bc::Op::PushScope:
-                if (proto.uses_names)
+                if (proto.uses_names || proto.uses_handlers)
                     call_addr(fn_address(&skein_jit_push_scope));
                 break;
 
             case skein::bc::Op::PopScope:
-                if (proto.uses_names) {
+                if (proto.uses_names || proto.uses_handlers) {
                     a.mov(asmjit::x86::rdi,
                           asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                                  -kTsOff));
@@ -2149,6 +2358,52 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     a.jmp(epilogue_label);
 
     a.bind(abort_label);
+    if (proto.uses_handlers) {
+        const asmjit::Label no_handler = a.newLabel();
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+        a.mov(asmjit::x86::rsi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kHandlerMarkOff));
+        call_addr(fn_address(&skein_jit_unwind));
+        a.cmp(asmjit::x86::rax, asmjit::imm(-1));
+        a.je(no_handler);
+        for (size_t i = 0; i < handler_targets.size(); ++i) {
+            a.cmp(asmjit::x86::rax, asmjit::imm(handler_targets[i]));
+            a.je(handler_dispatch[i]);
+        }
+        a.jmp(no_handler);
+
+        for (size_t i = 0; i < handler_targets.size(); ++i) {
+            a.bind(handler_dispatch[i]);
+            const uint32_t target = handler_targets[i];
+            const int target_depth = handler_depths[i];
+            const int start = target_depth - 1;
+            if (target < labels.size() && start >= 0 &&
+                start < static_cast<int>(proto.max_stack)) {
+                const uint32_t count =
+                    proto.max_stack - static_cast<uint32_t>(start);
+                a.lea(asmjit::x86::rdi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(start)));
+                a.mov(asmjit::x86::esi, asmjit::imm(count));
+                call_addr(fn_address(&skein_jit_drop_slots));
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                call_addr(fn_address(&skein_jit_take_unwind_value));
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(start)),
+                      asmjit::x86::rax);
+            } else {
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                call_addr(fn_address(&skein_jit_take_unwind_value));
+                a.mov(asmjit::x86::rdi, asmjit::x86::rax);
+                call_addr(fn_address(&skein_jit_free));
+            }
+            a.jmp(target < labels.size() ? labels[target] : end_label);
+        }
+        a.bind(no_handler);
+    }
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kResultOff),
           asmjit::imm(0));
 
@@ -2163,6 +2418,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     a.mov(asmjit::x86::rsi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kCellMarkOff));
     call_addr(fn_address(&skein_jit_close_cells));
+    a.mov(asmjit::x86::rdi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+    a.mov(asmjit::x86::rsi,
+          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kHandlerMarkOff));
+    call_addr(fn_address(&skein_jit_discard_handlers));
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     a.lea(asmjit::x86::rsi,

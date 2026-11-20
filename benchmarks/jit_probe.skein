@@ -1,0 +1,7 @@
+func ping(n) {
+  return n + 1;
+}
+
+ping(1);
+ping(2);
+print(ping(3));

@@ -47,6 +47,23 @@ def parse_elapsed(stdout):
     raise RuntimeError("benchmark did not report SKEIN_BENCH_MS")
 
 
+def jit_active(binary):
+    """Return True when the binary was built with JIT support and enters it."""
+    env = dict(os.environ)
+    env["SKEIN_VM"] = "1"
+    env["SKEIN_JIT"] = "1"
+    env["SKEIN_JIT_THRESHOLD"] = "1"
+    env["SKEIN_JIT_DEBUG"] = "1"
+    proc = subprocess.run(
+        [str(binary), str(ROOT / "benchmarks" / "jit_probe.skein")],
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    return proc.returncode == 0 and "[jit] enter" in proc.stderr
+
+
 def run_once(binary, script, jit):
     env = dict(os.environ)
     env["SKEIN_VM"] = "1"
@@ -93,6 +110,10 @@ def main():
         return 2
     if args.repeats < 1:
         print("--repeats must be positive", file=sys.stderr)
+        return 2
+    if not jit_active(binary):
+        print(f"{binary} does not enter JIT code; rebuild with "
+              "-DSKEIN_ENABLE_JIT=ON (check CMakeCache.txt)", file=sys.stderr)
         return 2
 
     results = []

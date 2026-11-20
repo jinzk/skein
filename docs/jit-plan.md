@@ -255,22 +255,27 @@ Linux（WSL，`-O2`，3 次中位数）：
 | index_write | 0.269s | 0.137s | **1.97x** |
 | pattern | 0.566s | 0.304s | **1.86x** |
 
-Windows（MinGW UCRT64，同样的稳态方法）：
+Windows（MinGW UCRT64，`SKEIN_ENABLE_JIT=ON`，同样方法）：
 
 | 基准 | VM | JIT | 加速 |
 |---|---:|---:|---:|
-| fib | 1.196s | 1.178s | 1.02x |
-| call | 1.245s | 1.245s | 1.00x |
-| method | 0.621s | 0.729s | 0.85x |
-| global | 0.400s | 0.456s | 0.88x |
-| 其余 | — | — | 0.98–1.23x |
+| fib | 1.077s | 0.211s | **5.10x** |
+| call | 1.107s | 0.259s | **4.28x** |
+| scope | 0.368s | 0.105s | **3.51x** |
+| global | 0.416s | 0.131s | **3.19x** |
+| method | 0.579s | 0.198s | **2.93x** |
+| slot | 0.319s | 0.119s | **2.68x** |
+| index | 0.480s | 0.234s | **2.05x** |
+| field | 0.548s | 0.270s | **2.03x** |
+| index_write | 0.364s | 0.218s | **1.67x** |
+| pattern | 0.704s | 0.469s | **1.50x** |
 
 结论：
 
-- 同一份 JIT 在 SysV x86-64 上收益符合预期；
-- **Win64 路径没有产生收益**，`method` / `global` 甚至更慢；
-- 因此下一步不是继续调 SysV 代码，而是先定位 Win64 的进入/调用路径；
-- `bench_jit.py --check` 在 Windows 上目前会失败，Linux 上应通过。
+- Win64 与 SysV 的 JIT 收益一致，**不存在平台差距**；
+- 若测得 JIT 与 VM 完全持平，先检查构建是否带 `-DSKEIN_ENABLE_JIT=ON`；
+  `bench_jit.py` 现在会探测 `[jit] enter`，无 JIT 的二进制直接报错；
+- 下一步优化是 VM `method` 调用（比 AST 慢约 20–30%）和 fast-call 热路径。
 
 另外，函数调用以前会为每帧复制函数名和源文件路径（给错误调用栈用），
 现在改为指针 + 源文件 intern，`call_bench` 的 VM 时间下降约 6%。

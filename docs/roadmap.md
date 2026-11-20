@@ -159,7 +159,7 @@
 
 - benchmark 改为进程内稳态计时（`SKEIN_BENCH_MS`），排除启动和 JIT 编译
 - 函数调用帧不再复制函数名/源路径（改为 intern 指针）
-- **Win64 JIT 没有收益**：Linux 2–5.5x，Windows 约 1.0x，`method` / `global` 更慢
+- JIT 在 Linux 与 Windows 上收益一致（fib 约 5x，overall 1.5–3.5x）
 - VM `method` 调用比 AST 慢约 20–30%，需要 inline cache
 
 若暂不做 moving GC：

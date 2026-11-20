@@ -37,8 +37,9 @@ python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check
 ```
 
 基准脚本在进程内预热后只对工作负载计时，并输出 `SKEIN_BENCH_MS=`，因此不包含
-进程启动和 JIT 编译时间。`--check` 目前只在 Linux/SysV 上通过；Windows 的
-Win64 JIT 收益仍约 1.0x，是已知差距，见 [jit-plan.md](jit-plan.md#23-2026-11-稳态复测)。
+进程启动和 JIT 编译时间。工具会先探测目标二进制是否真正进入 JIT；如果构建时
+`SKEIN_ENABLE_JIT=OFF`，会直接报错而不是给出误导性的 1.0x 数据。
+各平台收益见 [jit-plan.md](jit-plan.md#23-2026-11-稳态复测)。
 
 Windows 上可选用 mimalloc 降低小对象分配开销：
 

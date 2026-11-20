@@ -135,6 +135,18 @@ SKEIN_JIT_SYSV int64_t skein_jit_unwind(skein::jit::thread_state *ts,
 SKEIN_JIT_SYSV value_t *skein_jit_take_unwind_value(
     skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_drop_slots(value_t **slots, uint32_t count);
+SKEIN_JIT_SYSV int skein_jit_defer_push(skein::jit::thread_state *ts,
+                                        const skein::bc::Proto *proto,
+                                        uint32_t index, value_t **frame_values,
+                                        function_def *def, uint64_t loc);
+SKEIN_JIT_SYSV void skein_jit_push_defer_scope(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_pop_defer_scope(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV void skein_jit_enter_defer_frame(
+    skein::jit::thread_state *ts);
+SKEIN_JIT_SYSV int skein_jit_run_frame_defers(
+    skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV value_t *skein_jit_closure(
     skein::jit::thread_state *ts, function_def *def,
     const skein::bc::Proto *proto, uint32_t const_index,
@@ -315,6 +327,7 @@ direct_fn g_direct = nullptr;
 generator_test_fn g_generator_test = nullptr;
 generator_step_fn g_generator_step = nullptr;
 build_enum_fn g_build_enum = nullptr;
+run_defer_scope_fn g_run_defer_scope = nullptr;
 
 } // namespace
 
@@ -334,6 +347,8 @@ void set_generator_step(generator_step_fn fn) { g_generator_step = fn; }
 generator_step_fn generator_step() { return g_generator_step; }
 void set_build_enum(build_enum_fn fn) { g_build_enum = fn; }
 build_enum_fn build_enum() { return g_build_enum; }
+void set_run_defer_scope(run_defer_scope_fn fn) { g_run_defer_scope = fn; }
+run_defer_scope_fn run_defer_scope() { return g_run_defer_scope; }
 
 bool available() {
     static int state = -1;
@@ -364,8 +379,12 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         pattern_frame;
     if (!frame_shape_ok)
         return reject("frame shape");
-    if (proto.uses_defers)
-        return reject("defer");
+    if (proto.uses_defers) {
+        if (proto.uses_handlers)
+            return reject("handler + defer");
+        if (top_level)
+            return reject("top-level defer");
+    }
     /* Top-level statements execute in the global scope; keep handler
      * statements on the VM path. */
     if (top_level && proto.uses_handlers)
@@ -472,6 +491,10 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
                     return reject("runtime-error message");
+                break;
+            case skein::bc::Op::DeferPush:
+                if (ins.b >= proto.defer_protos.size())
+                    return reject("defer descriptor");
                 break;
             case skein::bc::Op::LoadConst:
                 if (ins.b >= proto.consts.size() ||
@@ -923,6 +946,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     call_addr(fn_address(&skein_jit_push_handler_mark));
     a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kHandlerMarkOff),
           asmjit::x86::rax);
+    if (proto.uses_defers) {
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+        call_addr(fn_address(&skein_jit_enter_defer_frame));
+    }
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     a.lea(asmjit::x86::rsi,
@@ -2121,6 +2149,33 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 const int callee_depth = depth - argc - 1;
                 const asmjit::Label slow_tail = a.newLabel();
 
+                /*
+                 * Deferred expressions must run after the callee returns.
+                 * A tail request exits this frame first, so use a regular
+                 * call and then leave when the function has defers.
+                 */
+                if (proto.uses_defers) {
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 stack_off(callee_depth)));
+                    a.lea(asmjit::x86::rsi,
+                          asmjit::x86::ptr(asmjit::x86::rbp,
+                                           stack_off(depth - argc)));
+                    a.mov(asmjit::x86::edx, asmjit::imm(argc));
+                    a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                    a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                    call_addr(fn_address(&skein_jit_invoke));
+                    for (int i = callee_depth; i < depth; ++i)
+                        clear_slot(i);
+                    a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 -kResultOff),
+                          asmjit::x86::rax);
+                    a.test(asmjit::x86::rax, asmjit::x86::rax);
+                    a.jz(abort_label);
+                    a.jmp(epilogue_label);
+                    break;
+                }
+
                 /* Reuse the current frame when tail-calling this same code.
                  * An active iterator holds per-frame state, so skip the
                  * reuse then; the slow path keeps the VM's behaviour. */
@@ -2287,6 +2342,23 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 break;
             }
 
+            case skein::bc::Op::DeferPush: {
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::imm(fn_address(&proto)));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.b));
+                a.lea(asmjit::x86::rcx,
+                      asmjit::x86::ptr(asmjit::x86::rbp, -values_low));
+                a.mov(asmjit::x86::r8,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_defer_push));
+                a.test(asmjit::x86::eax, asmjit::x86::eax);
+                a.jz(abort_label);
+                break;
+            }
+
             case skein::bc::Op::RuntimeError: {
                 const std::string &message = proto.consts[ins.b].name;
                 a.mov(asmjit::x86::rdi,
@@ -2312,9 +2384,19 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::PushScope:
                 if (proto.uses_names || proto.uses_handlers)
                     call_addr(fn_address(&skein_jit_push_scope));
+                if (proto.uses_defers) {
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                    call_addr(fn_address(&skein_jit_push_defer_scope));
+                }
                 break;
 
             case skein::bc::Op::PopScope:
+                if (proto.uses_defers) {
+                    a.mov(asmjit::x86::rdi,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+                    call_addr(fn_address(&skein_jit_pop_defer_scope));
+                }
                 if (proto.uses_names || proto.uses_handlers) {
                     a.mov(asmjit::x86::rdi,
                           asmjit::x86::qword_ptr(asmjit::x86::rbp,
@@ -2408,6 +2490,17 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
           asmjit::imm(0));
 
     a.bind(epilogue_label);
+    {
+        const asmjit::Label defer_done = a.newLabel();
+        a.mov(asmjit::x86::rdi,
+              asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
+        call_addr(fn_address(&skein_jit_run_frame_defers));
+        a.test(asmjit::x86::eax, asmjit::x86::eax);
+        a.jz(defer_done);
+        a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp, -kResultOff),
+              asmjit::imm(0));
+        a.bind(defer_done);
+    }
     a.mov(asmjit::x86::rdi,
           asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
     a.mov(asmjit::x86::rsi,

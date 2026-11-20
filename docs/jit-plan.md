@@ -1177,9 +1177,9 @@ closure/service  compiled=0  declined=1   (upvalues)
 - `thread_state.root_module/root_source` 延迟到首次进入时复制
 
 覆盖率结论：JIT 覆盖纯函数、闭包访问与创建、名字模式局部变量、for-in
-迭代器、enum 变体解析、`fail` 和 `on error` handler；仍不覆盖 `defer`
-和顶层 `IMPORT`/`BIND_FUNC`/`DECLARE_PACKAGE`。下一步提升覆盖率的优先级
-高于 OSR/deopt。
+迭代器、enum 变体解析、`fail`、`on error` handler 和 `defer`；仍不覆盖
+顶层 `IMPORT`/`BIND_FUNC`/`DECLARE_PACKAGE` 与顶层 handler/defer。下一步
+提升覆盖率的优先级高于 OSR/deopt。
 
 覆盖率增量评估（2026-11-20）：`can_compile` 的 `SKEIN_JIT_DEBUG` 现在会
 打印不支持的具体 opcode 或拒绝原因。`route_bench` 的函数已全部进入 JIT，
@@ -1235,9 +1235,9 @@ closure/service  compiled=0  declined=1   (upvalues)
   enum-field-or-enum / fail-catch / upvalue-index-write，
   `tests/gc_stress.py` 的 iterator 热循环。
 
-剩余覆盖率缺口：`defer`、顶层 `IMPORT` / `BIND_FUNC` / `DECLARE_PACKAGE`
-与非 name-mode 顶层帧。下一步优先级：顶层语句与 defer，然后才是
-OSR/deopt。
+剩余覆盖率缺口：顶层 `IMPORT` / `BIND_FUNC` / `DECLARE_PACKAGE`、顶层
+handler/defer 与非 name-mode 顶层帧，以及 OSR/deopt。下一步优先级：顶层
+语句，然后才是 OSR/deopt。
 
 Handler JIT（2026-11-20 已完成）：
 
@@ -1253,7 +1253,20 @@ Handler JIT（2026-11-20 已完成）：
 - 测试覆盖嵌套 on-error、`pass` 重抛、handler 内运行期错误、`Result`
   解包（CHECK_RESULT）、容器 recover 值和 GC stress；
 - 顶层语句中的 handler 仍走 VM（顶层帧没有函数 scope，避免语义差异）；
-- `defer` 仍回退 VM（handler + defer 的组合也暂不支持）。
+- `defer` 见下一节；handler + defer 组合仍回退 VM。
+
+Defer JIT（2026-11-20 已完成）：
+
+- `DEFER_PUSH`、块级 defer 作用域、函数返回 / `fail` / abort 时的 defer
+  执行进入 JIT；
+- defer 记录保存在 `thread_state.defer_scopes`，每帧记录 mark；块级
+  `PUSH_SCOPE`/`POP_SCOPE` 与 defer 作用域成对 push/pop；
+- 捕获类型 `Slot`/`Param`/`Upvalue` 复用 open cell 机制；defer body 仍以
+  普通字节码函数执行（VM bridge 复刻 `run_defer_scope`，含 eval-control
+  与错误处理）；
+- 函数含 defer 时 `TAIL_CALL` 改为普通调用后再离开帧，保证 defer 在
+  callee 返回之后执行；
+- 顶层 defer 与 handler + defer 组合仍回退 VM。
 
 循环感知首调编译（2026-11-20 已完成）：
 

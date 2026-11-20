@@ -675,6 +675,82 @@ static bool jit_generator_step(value_t *value, value_t *&out, bool &done) {
     return generator_next_value(generator, nullptr, out, done);
 }
 
+/*
+ * Mirrors Executor::run_defer_scope for JIT frames.  Deferred bodies run as
+ * regular bytecode functions with the captured cells as upvalues.
+ */
+static void jit_run_defer_scope(
+    std::vector<skein::jit::thread_state::defer_record> &records) {
+    if (records.empty())
+        return;
+    eval_context &context = active_eval_context();
+    std::vector<skein::jit::thread_state::defer_record> defers =
+        std::move(records);
+    records.clear();
+
+    eval_control_kind saved_control = context.control;
+    value_t *saved_value = context.control_value;
+    context.control = EVAL_CONTROL_NONE;
+    context.control_value = NULL;
+
+    bool saved_capture = context.capture_errors;
+    if (saved_control != EVAL_CONTROL_NONE)
+        context.capture_errors = false;
+
+    eval_control_kind pending_control = EVAL_CONTROL_NONE;
+    value_t *pending_value = NULL;
+
+    for (size_t i = defers.size(); i > 0; --i) {
+        value_t *result = nullptr;
+        if (defers[i - 1].proto) {
+            std::shared_ptr<function_def> def =
+                std::make_shared<function_def>();
+            def->upvalues = defers[i - 1].upvalues;
+            result = skein_vm_execute_proto(*defers[i - 1].proto, def);
+        }
+        freeval(result);
+        if (context.control == EVAL_CONTROL_NONE)
+            continue;
+
+        if (pending_control != EVAL_CONTROL_NONE ||
+            (saved_control != EVAL_CONTROL_NONE &&
+             saved_control != EVAL_CONTROL_CLOSE)) {
+            if (context.control == EVAL_CONTROL_FAIL) {
+                yyerror("error in defer: %s",
+                        error_message_of(context.control_value).c_str());
+            } else {
+                yyerror("error in defer: recover outside error handler");
+            }
+            freeval(context.control_value);
+            context.control_value = NULL;
+            context.control = EVAL_CONTROL_NONE;
+            continue;
+        }
+
+        pending_control = context.control;
+        pending_value = context.control_value;
+        context.control = EVAL_CONTROL_NONE;
+        context.control_value = NULL;
+        context.capture_errors = false;
+    }
+
+    if (saved_control == EVAL_CONTROL_CLOSE &&
+        pending_control == EVAL_CONTROL_FAIL) {
+        freeval(saved_value);
+        context.control = pending_control;
+        context.control_value = pending_value;
+    } else if (saved_control != EVAL_CONTROL_NONE) {
+        freeval(pending_value);
+        context.control = saved_control;
+        context.control_value = saved_value;
+    } else if (pending_control != EVAL_CONTROL_NONE) {
+        context.control = pending_control;
+        context.control_value = pending_value;
+    }
+
+    context.capture_errors = saved_capture;
+}
+
 /* CALL helper used by generated code.  Always consumes callee and args. */
 value_t *skein_vm_jit_invoke(value_t *callee, value_t **args, uint32_t argc) {
     value_t *out = nullptr;
@@ -793,6 +869,7 @@ static void ensure_vm_host() {
         skein::jit::set_generator_test(&fiber_is_generator);
         skein::jit::set_generator_step(&jit_generator_step);
         skein::jit::set_build_enum(&build_enum_value);
+        skein::jit::set_run_defer_scope(&jit_run_defer_scope);
 #endif
         return true;
     }();

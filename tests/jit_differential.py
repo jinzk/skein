@@ -109,14 +109,14 @@ CASES = [
         expect_debug="[jit] enter bump",
     ),
     case(
-        "defer-fallback",
+        "defer",
         "func f(n) {\n"
         "  defer print(\"defer;\");\n"
         "  return n * 2;\n"
         "}\n"
         "println(str(f(1)));\n"
         "println(str(f(2)));\n",
-        expect_debug="cannot compile f",
+        expect_debug="[jit] enter f",
     ),
     case(
         "generator-fallback",

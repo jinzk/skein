@@ -57,6 +57,7 @@ struct thread_state {
         int handler_body_depth = 0;
         size_t scope_mark = 0;
         size_t frame_scope_mark = 0;
+        size_t frame_defer_mark = 0;
         std::string saved_package;
         std::string saved_source;
         bool entered = false;
@@ -91,6 +92,18 @@ struct thread_state {
         eval_capture_snapshot snapshot;
     };
     std::vector<handler_state> handlers;
+
+    /*
+     * Deferred expressions per scope.  A JIT frame records its base depth and
+     * runs every scope above it on exit; block PushScope/PopScope add/remove
+     * one vector each.
+     */
+    struct defer_record {
+        skein::bc::ProtoPtr proto;
+        std::vector<std::shared_ptr<struct upvalue_cell>> upvalues;
+    };
+    std::vector<std::vector<defer_record>> defer_scopes;
+    size_t frame_defer_mark = 0;
 
     /* Pending trampoline request produced by a non-self TAIL_CALL. */
     value_t *tail_callee = nullptr;
@@ -152,6 +165,15 @@ using build_enum_fn = value_t *(
        const std::vector<bool> &spread);
 void set_build_enum(build_enum_fn fn);
 build_enum_fn build_enum();
+
+/*
+ * Runs a scope's deferred expressions (LIFO) installed by the VM bridge.  The
+ * callback mirrors the VM's run_defer_scope, including eval-control handling.
+ */
+using run_defer_scope_fn = void (*)(
+    std::vector<thread_state::defer_record> &records);
+void set_run_defer_scope(run_defer_scope_fn fn);
+run_defer_scope_fn run_defer_scope();
 
 /*
  * Fast-path call resolver installed by the VM bridge.  Returns a native entry

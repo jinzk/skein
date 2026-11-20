@@ -449,8 +449,19 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
             return 0;
     }
 
+    /*
+     * A reused frame cannot run defers: refuse the fast path when any scope
+     * still has pending deferred work (the generic tail path exits cleanly).
+     */
+    for (size_t i = ts->frame_defer_mark; i < ts->defer_scopes.size(); ++i) {
+        if (!ts->defer_scopes[i].empty())
+            return 0;
+    }
+
     while (ts->ctx->scopes.restore_stack.size() > ts->frame_scope_mark)
         skein_jit_pop_scope(ts);
+    while (ts->defer_scopes.size() > ts->frame_defer_mark)
+        ts->defer_scopes.pop_back();
     for (uint32_t i = 0; i < argc; ++i) {
         freeval(params[i]);
         params[i] = args[i];
@@ -1335,6 +1346,119 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_drop_slots(value_t **slots,
     }
 }
 
+extern "C" SKEIN_JIT_SYSV void skein_jit_enter_defer_frame(
+    skein::jit::thread_state *ts) {
+    if (!ts)
+        return;
+    ts->frame_defer_mark = ts->defer_scopes.size();
+    ts->defer_scopes.emplace_back();
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_push_defer_scope(
+    skein::jit::thread_state *ts) {
+    if (ts)
+        ts->defer_scopes.emplace_back();
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_pop_defer_scope(
+    skein::jit::thread_state *ts) {
+    if (!ts || ts->defer_scopes.size() <= ts->frame_defer_mark)
+        return;
+    std::vector<skein::jit::thread_state::defer_record> records =
+        std::move(ts->defer_scopes.back());
+    ts->defer_scopes.pop_back();
+    skein::jit::run_defer_scope_fn run = skein::jit::run_defer_scope();
+    if (run)
+        run(records);
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_run_frame_defers(
+    skein::jit::thread_state *ts) {
+    if (!ts || !ts->ctx)
+        return 0;
+    eval_context &context = *ts->ctx;
+    const int errors_before = context.runtime_error_count;
+    skein::jit::run_defer_scope_fn run = skein::jit::run_defer_scope();
+    while (ts->defer_scopes.size() > ts->frame_defer_mark) {
+        std::vector<skein::jit::thread_state::defer_record> records =
+            std::move(ts->defer_scopes.back());
+        ts->defer_scopes.pop_back();
+        if (run)
+            run(records);
+    }
+    return context.runtime_error_count != errors_before ||
+                   context.control != EVAL_CONTROL_NONE
+               ? 1
+               : 0;
+}
+
+extern "C" SKEIN_JIT_SYSV int skein_jit_defer_push(
+    skein::jit::thread_state *ts, const skein::bc::Proto *proto,
+    uint32_t index, value_t **frame_values, function_def *def,
+    uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!ts || !proto || !frame_values || !def ||
+        index >= proto->defer_protos.size() || !proto->defer_protos[index] ||
+        ts->defer_scopes.empty()) {
+        yyerror("invalid bytecode defer descriptor");
+        return 0;
+    }
+
+    skein::jit::thread_state::defer_record record;
+    record.proto = proto->defer_protos[index];
+    if (index < proto->defer_captures.size()) {
+        for (const skein::bc::DeferCapture &capture :
+             proto->defer_captures[index]) {
+            std::shared_ptr<upvalue_cell> cell;
+            switch (capture.kind) {
+                case skein::bc::DeferCaptureKind::Slot: {
+                    if (capture.index >= proto->slots.size()) {
+                        yyerror("invalid defer slot capture %s",
+                                capture.name.c_str());
+                        return 0;
+                    }
+                    const skein::bc::SlotDesc &slot =
+                        proto->slots[capture.index];
+                    cell = jit_open_cell(
+                        ts, &frame_values[proto->nparams + capture.index],
+                        &slot.type, capture.name, slot.is_const);
+                    break;
+                }
+                case skein::bc::DeferCaptureKind::Param: {
+                    if (capture.index >= proto->nparams) {
+                        yyerror("invalid defer parameter capture %s",
+                                capture.name.c_str());
+                        return 0;
+                    }
+                    cell = jit_open_cell(
+                        ts, &frame_values[capture.index],
+                        jit_param_type(def, capture.index), capture.name,
+                        false);
+                    break;
+                }
+                case skein::bc::DeferCaptureKind::Upvalue: {
+                    if (capture.index >= def->upvalues.size() ||
+                        !def->upvalues[capture.index]) {
+                        yyerror("upvalue %s is not captured by a frame slot",
+                                capture.name.c_str());
+                        return 0;
+                    }
+                    cell = def->upvalues[capture.index];
+                    break;
+                }
+            }
+            if (!cell)
+                return 0;
+            record.upvalues.push_back(std::move(cell));
+        }
+    }
+    ts->defer_scopes.back().push_back(std::move(record));
+    return 1;
+}
+
 namespace {
 
 constexpr uint64_t jit_iter_active = 1;
@@ -1929,6 +2053,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     saved.handler_body_depth = ts->handler_body_depth;
     saved.scope_mark = ts->scope_mark;
     saved.frame_scope_mark = ts->frame_scope_mark;
+    saved.frame_defer_mark = ts->frame_defer_mark;
     saved.saved_package = ts->saved_package;
     saved.saved_source = ts->saved_source;
     saved.entered = ts->entered;
@@ -1944,6 +2069,7 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     ts->scope_mark = context.scopes.restore_stack.size();
     /* Updated by the prologue when the frame pushes its own scope. */
     ts->frame_scope_mark = ts->scope_mark;
+    ts->frame_defer_mark = ts->defer_scopes.size();
     ts->saved_package_valid = false;
     ts->saved_source_valid = false;
     ts->entered = true;
@@ -2032,6 +2158,7 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         ts->handler_body_depth = saved.handler_body_depth;
         ts->scope_mark = saved.scope_mark;
         ts->frame_scope_mark = saved.frame_scope_mark;
+        ts->frame_defer_mark = saved.frame_defer_mark;
         ts->saved_package = std::move(saved.saved_package);
         ts->saved_source = std::move(saved.saved_source);
         ts->entered = saved.entered;

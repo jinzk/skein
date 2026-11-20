@@ -158,6 +158,18 @@ func handler_total(n) {
 }
 println("handler " + str(handler_total(50)));
 
+/* Deferred assignments capture slots; their cells must stay rooted. */
+func defer_total(n) {
+  let total = 0;
+  let i = 0;
+  while (i < n) {
+    defer total = total + i;
+    i = i + 1;
+  }
+  return total;
+}
+println("defer " + str(defer_total(50)));
+
 /* Lazy iterators and generator parameters live in C++ state until the
  * generator runs; they must be registered on the generator value. */
 func make_adder(n) {
@@ -198,6 +210,7 @@ EXPECTED = [
     "make 20100",
     "iter 2200",
     "handler 49",
+    "defer 1275",
     "lazy 336",
     "generator 5",
     "churn true",

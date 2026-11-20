@@ -880,6 +880,82 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # defer: LIFO order, block scopes, captures, early return and a
+        # deferred fail propagating to the caller's handler.
+        defer_ops = tmp_path / "defer_ops.skein"
+        defer_ops.write_text(
+            "import std;\n"
+            "func basic(n) {\n"
+            "  defer print(\"d1:\" + str(n) + \";\");\n"
+            "  defer print(\"d2;\");\n"
+            "  return n * 2;\n"
+            "}\n"
+            "func block(n) {\n"
+            "  let total = 0;\n"
+            "  let i = 0;\n"
+            "  while (i < n) {\n"
+            "    defer print(\"iter\" + str(i) + \";\");\n"
+            "    total = total + i;\n"
+            "    i = i + 1;\n"
+            "  }\n"
+            "  return total;\n"
+            "}\n"
+            "func captured() {\n"
+            "  let x = 1;\n"
+            "  defer print(\"x=\" + str(x) + \";\");\n"
+            "  x = 9;\n"
+            "  return x;\n"
+            "}\n"
+            "func outer() {\n"
+            "  let y = 1;\n"
+            "  func inner() {\n"
+            "    defer print(\"y=\" + str(y) + \";\");\n"
+            "    y = y + 1;\n"
+            "    return y;\n"
+            "  }\n"
+            "  return inner();\n"
+            "}\n"
+            "func early(n) {\n"
+            "  defer print(\"early;\");\n"
+            "  if (n > 0) { return 1; }\n"
+            "  return 2;\n"
+            "}\n"
+            "func failing() {\n"
+            "  defer print(\"cleanup;\");\n"
+            "  fail \"boom\";\n"
+            "}\n"
+            "func caller() {\n"
+            "  return failing() on error(e) {\n"
+            "    print(\"caught;\");\n"
+            "    recover 1;\n"
+            "  };\n"
+            "}\n"
+            "println(str(basic(3)));\n"
+            "println(str(block(3)));\n"
+            "println(str(captured()));\n"
+            "println(str(outer()));\n"
+            "println(str(early(1)));\n"
+            "println(str(early(0)));\n"
+            "println(str(caller()));\n"
+            "let i = 0;\n"
+            "while (i < 100) {\n"
+            "  basic(1);\n"
+            "  block(2);\n"
+            "  captured();\n"
+            "  i = i + 1;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "defer-ops", defer_ops)
+        rc, out, err = run(binary, defer_ops, True, debug=True)
+        if rc != 0 or "[jit] enter basic" not in err:
+            print(
+                "jit smoke: defer function was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

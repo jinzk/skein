@@ -173,8 +173,9 @@
   deque/heap/set/generator），并放开 Slot/Param/Upvalue base 的
   `ASSIGN_INDEX`、值比较、`DUP`、`GET_FIELD_OR_ENUM` 与 `FAIL`
 - JIT 支持 `on error` handler（`PUSH/POP_HANDLER`、`CHECK_RESULT`、
-  `BIND_NAME`、`ENTER/LEAVE_HANDLER_BODY`、`PASS`、`RECOVER`）；`defer`
-  仍回退 VM
+  `BIND_NAME`、`ENTER/LEAVE_HANDLER_BODY`、`PASS`、`RECOVER`）
+- JIT 支持 `defer`（`DEFER_PUSH`、块级 defer 作用域、返回/fail/abort 时
+  执行，捕获 Slot/Param/Upvalue）；顶层与 handler+defer 组合仍回退 VM
 
 若暂不做 moving GC：
 

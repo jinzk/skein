@@ -3315,7 +3315,8 @@ private:
 
     FastCallResult try_fast_call(value_t *callee,
                                  value_t **args, size_t argc) {
-        const std::string caller_source = diag_current_source_name();
+        const std::string *caller_source =
+            diag_intern_source(diag_current_source_name());
 #ifdef SKEIN_ENABLE_JIT
         if (skein_vm_host().fn_skein_vm_try_jit_call) {
             value_t *jit_result = NULL;
@@ -3406,7 +3407,8 @@ private:
     bool try_tail_call(value_t *callee, value_t **args, size_t argc) {
         if (saved_states_.empty())
             return false;
-        const std::string caller_source = diag_current_source_name();
+        const std::string *caller_source =
+            diag_intern_source(diag_current_source_name());
         for (const std::vector<defer_record> &scope : defer_scopes_)
             if (!scope.empty())
                 return false;

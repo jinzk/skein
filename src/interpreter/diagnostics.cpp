@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <vector>
 
 thread_local int g_token_line = 1;
@@ -27,6 +28,19 @@ static thread_local std::vector<std::string> source_lines;
 
 static thread_local std::vector<diag_call_frame> call_stack;
 static const size_t MAX_REPORTED_FRAMES = 8;
+
+/* Source paths are interned so call frames only store a pointer.  std::deque
+ * keeps addresses stable as more files are loaded. */
+static thread_local std::deque<std::string> interned_sources;
+
+const std::string *diag_intern_source(const std::string &source) {
+    for (const std::string &existing : interned_sources) {
+        if (existing == source)
+            return &existing;
+    }
+    interned_sources.push_back(source);
+    return &interned_sources.back();
+}
 
 void diag_scan_token(const char *text, int length) {
     g_token_line = current_line;
@@ -224,12 +238,6 @@ static void print_trace(const std::vector<error_frame> &frames) {
     }
 }
 
-static void print_call_stack() {
-    std::vector<error_frame> frames;
-    diag_snapshot_trace(frames);
-    print_trace(frames);
-}
-
 void diag_mark_script_failure() {
     if (!g_interactive && !g_keep_going && g_package_loading == 0)
         g_script_stop = true;
@@ -382,14 +390,14 @@ bool diag_lexical_error_on_line(int line) {
     return line > 0 && lexical_error_line == line;
 }
 
-void diag_push_call(const char *name, const std::string &source, int line,
+void diag_push_call(const char *name, const std::string *source, int line,
                     int column) {
     diag_call_frame frame;
     frame.name = name ? name : "<anonymous>";
     frame.source = source;
     frame.line = line;
     frame.column = column;
-    call_stack.push_back(std::move(frame));
+    call_stack.push_back(frame);
 }
 
 void diag_pop_call() {
@@ -411,8 +419,8 @@ void diag_snapshot_trace(std::vector<error_frame> &frames, std::size_t limit) {
          --i) {
         const diag_call_frame &frame = call_stack[i - 1];
         error_frame entry;
-        entry.source = frame.source;
-        entry.function = frame.name;
+        entry.source = frame.source ? *frame.source : std::string();
+        entry.function = frame.name ? frame.name : "<anonymous>";
         entry.line = frame.line;
         entry.column = frame.column;
         frames.push_back(std::move(entry));

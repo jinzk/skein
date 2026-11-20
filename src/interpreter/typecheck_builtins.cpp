@@ -809,7 +809,6 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         path == "std.generator.close")
         return poly_builtin({poly_generator(T)}, bool_type);
 
-    const TypeNode *userdata_type = type_builtin(TYPE_USERDATA);
     const TypeNode *socket_type = type_builtin(TYPE_SOCKET);
     const TypeNode *listener_type = type_builtin(TYPE_LISTENER);
     const TypeNode *websocket_type = type_builtin(TYPE_WEBSOCKET);

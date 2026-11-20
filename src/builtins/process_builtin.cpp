@@ -54,6 +54,7 @@ std::string temp_path(const char *suffix) {
     return (directory / fs::u8path(name)).u8string();
 }
 
+#ifndef _WIN32
 std::string quote_posix(const std::string &text) {
     std::string result = "'";
     for (char c : text) {
@@ -66,7 +67,7 @@ std::string quote_posix(const std::string &text) {
     return result;
 }
 
-#ifdef _WIN32
+#else
 std::string quote_windows(const std::string &text) {
     std::string result = "\"";
     for (char c : text) {

@@ -2,9 +2,9 @@
 """Run the VM benchmark suite against the AST backend.
 
 Each benchmark is executed several times with SKEIN_VM=0 and SKEIN_VM=1.
-The reported number is the median wall-clock time.  In --check mode the
-script fails when the VM is unexpectedly slower than AST or exceeds a
-generous absolute time budget.
+The benchmark reports its own steady-state time (`SKEIN_BENCH_MS=`), and the
+median of the runs is compared.  In --check mode the script fails when the VM
+is unexpectedly slower than AST or exceeds a generous absolute time budget.
 """
 
 import argparse
@@ -12,7 +12,6 @@ import os
 import statistics
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,21 +32,22 @@ BENCHMARKS = [
 def run_once(binary, script, vm):
     env = dict(os.environ)
     env["SKEIN_VM"] = vm
-    start = time.perf_counter()
     proc = subprocess.run(
         [str(binary), str(script)],
         env=env,
         text=True,
         capture_output=True,
-        timeout=60,
+        timeout=120,
     )
-    elapsed = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(
             f"{script.name} with SKEIN_VM={vm} failed: "
             f"{proc.stderr.strip()}"
         )
-    return elapsed
+    for line in proc.stdout.splitlines():
+        if line.startswith("SKEIN_BENCH_MS="):
+            return int(line[len("SKEIN_BENCH_MS="):].strip()) / 1000.0
+    raise RuntimeError(f"{script.name} did not report SKEIN_BENCH_MS")
 
 
 def measure(binary, script, vm, repeats):

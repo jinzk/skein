@@ -1,14 +1,29 @@
+import std;
+
 func add([a, b]) {
   return a + b;
 }
+
 func pair({x, y}) {
   return x + y;
 }
-let total = 0;
-let i = 0;
-while (i < 200000) {
-  total = total + add([i, 1]);
-  total = total + pair({"x": i, "y": 2});
-  i = i + 1;
+
+func run(n) {
+  let total = 0;
+  let i = 0;
+  while (i < n) {
+    total = total + add([i, 1]);
+    total = total + pair({"x": i, "y": 2});
+    i = i + 1;
+  }
+  return total;
 }
-print(total);
+
+run(1000);
+run(1000);
+let started = std.time.monotonic_ms();
+let result = run(400000);
+let elapsed = std.time.monotonic_ms() - started;
+print(result);
+println("");
+println("SKEIN_BENCH_MS=" + str(elapsed));

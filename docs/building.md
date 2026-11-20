@@ -36,6 +36,10 @@ JIT 在运行时仍是 opt-in：必须设置 `SKEIN_JIT=1` 才会真正进入 JI
 python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check
 ```
 
+基准脚本在进程内预热后只对工作负载计时，并输出 `SKEIN_BENCH_MS=`，因此不包含
+进程启动和 JIT 编译时间。`--check` 目前只在 Linux/SysV 上通过；Windows 的
+Win64 JIT 收益仍约 1.0x，是已知差距，见 [jit-plan.md](jit-plan.md#23-2026-11-稳态复测)。
+
 Windows 上可选用 mimalloc 降低小对象分配开销：
 
 ```bash

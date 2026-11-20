@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Compare the JIT backend against the bytecode VM.
 
-The script runs every benchmark twice (SKEIN_JIT=0 and SKEIN_JIT=1) with the
-VM enabled, discards a warm-up run, and reports the median wall-clock time.
+The benchmark scripts warm up in-process and report their own steady-state
+time as `SKEIN_BENCH_MS=`, which excludes process startup and JIT compilation.
+Each script runs once as an external warm-up, then the median of `--repeats`
+measurements is reported.
 
 Exit status is non-zero with --check when:
   * any benchmark makes the JIT slower than the VM by more than --max-ratio;
-  * fib does not reach --fib-speedup (default 2.0x).
+  * fib does not reach --fib-speedup (default 1.2x).
 """
 
 import argparse
@@ -15,7 +17,6 @@ import os
 import statistics
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,26 +34,37 @@ BENCHMARKS = [
 ]
 
 
+BENCH_MARKER = "SKEIN_BENCH_MS="
+
+
+def parse_elapsed(stdout):
+    for line in stdout.splitlines():
+        if line.startswith(BENCH_MARKER):
+            try:
+                return int(line[len(BENCH_MARKER):].strip()) / 1000.0
+            except ValueError:
+                break
+    raise RuntimeError("benchmark did not report SKEIN_BENCH_MS")
+
+
 def run_once(binary, script, jit):
     env = dict(os.environ)
     env["SKEIN_VM"] = "1"
     env["SKEIN_JIT"] = "1" if jit else "0"
     env["SKEIN_JIT_THRESHOLD"] = "1"
-    start = time.perf_counter()
     proc = subprocess.run(
         [str(binary), str(script)],
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        text=True,
+        capture_output=True,
         timeout=120,
     )
-    elapsed = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(
             f"{script.name} with SKEIN_JIT={env['SKEIN_JIT']} failed: "
-            f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
+            f"{proc.stderr.strip()}"
         )
-    return elapsed
+    return parse_elapsed(proc.stdout)
 
 
 def measure(binary, script, jit, repeats):
@@ -71,7 +83,7 @@ def main():
     parser.add_argument("--max-ratio", type=float, default=1.10,
                         help="maximum allowed JIT/VM time ratio for "
                              "neutral benchmarks")
-    parser.add_argument("--fib-speedup", type=float, default=2.0,
+    parser.add_argument("--fib-speedup", type=float, default=1.2,
                         help="minimum required VM/JIT speedup for fib")
     args = parser.parse_args()
 

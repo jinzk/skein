@@ -1,3 +1,5 @@
+import std;
+
 let mapping = {"key": 3, "other": 5};
 
 func read(n) {
@@ -10,4 +12,11 @@ func read(n) {
   return total;
 }
 
-print(read(1000000));
+read(1000);
+read(1000);
+let started = std.time.monotonic_ms();
+let result = read(2000000);
+let elapsed = std.time.monotonic_ms() - started;
+print(result);
+println("");
+println("SKEIN_BENCH_MS=" + str(elapsed));

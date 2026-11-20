@@ -64,8 +64,10 @@ void diag_mark_script_failure();
 /* Lexical error with printf-style formatting. */
 void diag_report_lexical(int line, int column, const char *fmt, ...);
 
-/* Runtime call stack.  `source` identifies the file containing the call. */
-void diag_push_call(const char *name, const std::string &source, int line,
+/* Runtime call stack.  `source` identifies the file containing the call and
+ * must be interned with diag_intern_source(). */
+const std::string *diag_intern_source(const std::string &source);
+void diag_push_call(const char *name, const std::string *source, int line,
                     int column);
 void diag_pop_call();
 int diag_call_depth();
@@ -103,8 +105,8 @@ void diag_restore_source(const diag_source_checkpoint &checkpoint);
 void diag_start_source();
 
 struct diag_call_frame {
-    std::string name;
-    std::string source;
+    const char *name;
+    const std::string *source;
     int line;
     int column;
 };

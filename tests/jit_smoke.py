@@ -38,10 +38,21 @@ def run(binary, script, jit, threshold="1", debug=False):
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def normalize_output(text):
+    """Drop the self-reported timing line so VM/JIT outputs stay comparable."""
+    return "\n".join(
+        line for line in text.splitlines()
+        if not line.startswith("SKEIN_BENCH_MS=")
+    )
+
+
 def compare(binary, label, script, threshold="1"):
     vm = run(binary, script, False, threshold=threshold)
     jit = run(binary, script, True, threshold=threshold)
-    if vm != jit:
+    normalized = (
+        vm[0], normalize_output(vm[1]), vm[2],
+    )
+    if normalized != (jit[0], normalize_output(jit[1]), jit[2]):
         print(f"jit smoke: {label} mismatch", file=sys.stderr)
         print(f"  vm : {vm!r}", file=sys.stderr)
         print(f"  jit: {jit!r}", file=sys.stderr)

@@ -84,7 +84,8 @@ struct log_state : std::enable_shared_from_this<log_state> {
 
     log_state() = default;
     log_state(const log_state &other)
-        : sink(other.sink),
+        : std::enable_shared_from_this<log_state>(),
+          sink(other.sink),
           level(other.level.load(std::memory_order_relaxed)),
           json(other.json),
           utc(other.utc),

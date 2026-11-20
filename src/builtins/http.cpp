@@ -2316,6 +2316,7 @@ bool parse_tls_certs(value_t *dict, const char *who,
     return true;
 }
 
+#if SKEIN_HAS_REUSE_PORT
 std::string tls_certs_source(const std::vector<tls_sni_cert> &certs) {
     std::string out = "[";
     for (size_t i = 0; i < certs.size(); ++i) {
@@ -2331,6 +2332,7 @@ std::string tls_certs_source(const std::vector<tls_sni_cert> &certs) {
     out += "]";
     return out;
 }
+#endif
 
 value_t *build_server_tls_options(value_t *server) {
     value_t *client_ca = dict_get(server, "client_ca_file");
@@ -2371,9 +2373,11 @@ struct tls_sni_cert {
 bool parse_tls_certs(value_t *, const char *, std::vector<tls_sni_cert> &) {
     return true;
 }
+#if SKEIN_HAS_REUSE_PORT
 std::string tls_certs_source(const std::vector<tls_sni_cert> &) {
     return "[]";
 }
+#endif
 #endif
 
 value_t *http_listen_tls(const std::vector<value_t *> &args) {

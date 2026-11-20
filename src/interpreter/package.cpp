@@ -232,32 +232,6 @@ value_t *take_seeded_import(const char *dotted_path, const char *base_dir) {
     return NULL;
 }
 
-bool resolve_package(const std::string &dotted, resolved_package &resolved,
-                     std::string &error) {
-    std::vector<std::string> parts;
-    if (!validate_package_parts(dotted, parts, error))
-        return false;
-
-    const std::string &last = parts.back();
-    for (const std::string &root : search_roots) {
-        fs::path parent = path_from_utf8(root);
-        for (size_t i = 0; i + 1 < parts.size(); ++i)
-            parent /= path_from_utf8(parts[i]);
-        if (resolve_package_file(parent, last, resolved))
-            return true;
-    }
-
-    error = "package not found";
-    for (const std::string &root : search_roots) {
-        fs::path parent = path_from_utf8(root);
-        for (size_t i = 0; i + 1 < parts.size(); ++i)
-            parent /= path_from_utf8(parts[i]);
-        error += "\n  searched: ";
-        error += path_to_utf8(parent / path_from_utf8(last + ".skein"));
-    }
-    return false;
-}
-
 bool resolve_package_at(const fs::path &base, const std::string &dotted,
                         resolved_package &resolved, std::string &error) {
     std::vector<std::string> parts;

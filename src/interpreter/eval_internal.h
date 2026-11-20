@@ -35,7 +35,7 @@ struct eval_location_guard {
 };
 
 struct call_stack_guard {
-    call_stack_guard(const char *name, const std::string &source, int line,
+    call_stack_guard(const char *name, const std::string *source, int line,
                      int column) {
         diag_push_call(name, source, line, column);
     }

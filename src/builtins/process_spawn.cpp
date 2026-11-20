@@ -124,9 +124,15 @@ bool process_memory_rss(long long pid, unsigned long long &rss) {
         BOOL(WINAPI *)(HANDLE, PROCESS_MEMORY_COUNTERS *, DWORD);
     static get_info_fn get_info = []() -> get_info_fn {
         HMODULE module = GetModuleHandleW(L"kernel32.dll");
-        return module ? (get_info_fn)GetProcAddress(module,
-                                                     "K32GetProcessMemoryInfo")
-                      : nullptr;
+        FARPROC address = module
+                              ? GetProcAddress(module,
+                                               "K32GetProcessMemoryInfo")
+                              : nullptr;
+        get_info_fn function = nullptr;
+        static_assert(sizeof(function) == sizeof(address),
+                      "function pointer size mismatch");
+        std::memcpy(&function, &address, sizeof(function));
+        return function;
     }();
     const bool ok =
         get_info &&

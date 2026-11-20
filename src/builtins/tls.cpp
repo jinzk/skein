@@ -1292,7 +1292,7 @@ value_t *tls_client(const std::vector<value_t *> &args) {
     const char *server_name = ((string_value_t *)args[1])->value;
     SSL_set_tlsext_host_name(ssl, server_name);
     if (verify)
-        SSL_set1_host(ssl, server_name);
+        X509_VERIFY_PARAM_set1_host(SSL_get0_param(ssl), server_name, 0);
 
     bool reuse = option_bool(options, "session_reuse", true);
     stream->session_reuse = reuse;
@@ -1446,13 +1446,27 @@ value_t *tls_peer_subject(const std::vector<value_t *> &args) {
 #endif
     if (!cert)
         return newstrval("");
-    char buffer[256];
-    int length = X509_NAME_get_text_by_NID(
-        X509_get_subject_name(cert), NID_commonName, buffer, sizeof(buffer));
+    std::string common_name;
+    const X509_NAME *subject = X509_get_subject_name(cert);
+    const int name_index =
+        subject ? X509_NAME_get_index_by_NID(subject, NID_commonName, -1) : -1;
+    if (name_index >= 0) {
+        const X509_NAME_ENTRY *entry =
+            X509_NAME_get_entry(subject, name_index);
+        const ASN1_STRING *data =
+            entry ? X509_NAME_ENTRY_get_data(entry) : nullptr;
+        unsigned char *utf8 = nullptr;
+        const int length =
+            data ? ASN1_STRING_to_UTF8(&utf8, data) : -1;
+        if (length > 0) {
+            common_name.assign((const char *)utf8, (size_t)length);
+            OPENSSL_free(utf8);
+        }
+    }
     X509_free(cert);
-    if (length <= 0)
+    if (common_name.empty())
         return newstrval("");
-    return newstrval(buffer);
+    return newstrval(common_name.c_str());
 }
 
 value_t *tls_server_name(const std::vector<value_t *> &args) {

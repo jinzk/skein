@@ -155,6 +155,13 @@
 
 前提：先决定 moving GC、AOT、字节码序列化是否在目标范围内。
 
+已确认的优化点：
+
+- benchmark 改为进程内稳态计时（`SKEIN_BENCH_MS`），排除启动和 JIT 编译
+- 函数调用帧不再复制函数名/源路径（改为 intern 指针）
+- **Win64 JIT 没有收益**：Linux 2–5.5x，Windows 约 1.0x，`method` / `global` 更慢
+- VM `method` 调用比 AST 慢约 20–30%，需要 inline cache
+
 若暂不做 moving GC：
 
 - 只做 GC root 边界审计

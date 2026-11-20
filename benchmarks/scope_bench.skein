@@ -1,3 +1,5 @@
+import std;
+
 func run(n) {
   let total = 0;
   let i = 0;
@@ -12,4 +14,11 @@ func run(n) {
   return total;
 }
 
-print(run(500000));
+run(1000);
+run(1000);
+let started = std.time.monotonic_ms();
+let result = run(1000000);
+let elapsed = std.time.monotonic_ms() - started;
+print(result);
+println("");
+println("SKEIN_BENCH_MS=" + str(elapsed));

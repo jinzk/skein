@@ -877,7 +877,8 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     }
     context.handler_depth = 0;
 
-    const std::string caller_source = diag_current_source_name();
+    const std::string *caller_source =
+        diag_intern_source(diag_current_source_name());
     if (!ts->top_level) {
         if (def && def->code) {
             const std::string &current_package = diag_current_package_name();

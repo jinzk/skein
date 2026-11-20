@@ -1,3 +1,5 @@
+import std;
+
 let mapping = {"key": 0};
 
 func bump(n) {
@@ -9,4 +11,11 @@ func bump(n) {
   return mapping["key"];
 }
 
-print(bump(500000));
+bump(1000);
+bump(1000);
+let started = std.time.monotonic_ms();
+let result = bump(1000000);
+let elapsed = std.time.monotonic_ms() - started;
+print(result);
+println("");
+println("SKEIN_BENCH_MS=" + str(elapsed));

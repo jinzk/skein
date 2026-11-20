@@ -132,10 +132,11 @@ static struct value_t *invoke_function_body(
     std::vector<struct value_t *> &args) {
     function_package_guard package_guard(def->code->package,
                                        def->code->source);
-    const std::string caller_source = package_guard.previous_source;
+    const std::string *caller_source =
+        diag_intern_source(package_guard.previous_source);
     int nparams = def->code->nparams;
-    std::string frame_name =
-        def->code->name.empty() ? "<anonymous>" : def->code->name;
+    const char *frame_name =
+        def->code->name.empty() ? "<anonymous>" : def->code->name.c_str();
 
     struct symlist *rest = NULL;
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next) {
@@ -152,7 +153,7 @@ static struct value_t *invoke_function_body(
         frame_line = def->code->def_line;
         frame_column = def->code->def_column;
     }
-    call_stack_guard frame_guard(frame_name.c_str(), caller_source,
+    call_stack_guard frame_guard(frame_name, caller_source,
                                  frame_line, frame_column);
     eval_push_closure_scope(def->closure);
     int i = 0;
@@ -278,7 +279,6 @@ static bool fill_default_arguments(
 
     std::vector<struct symbol *> temp_syms;
     temp_syms.reserve((size_t)nparams + 1);
-    int index = 0;
     for (struct symlist *sl = def->code->sl; sl; sl = sl->next) {
         struct symbol *s = newsym(sl->sym->name);
         s->val = NULL;
@@ -294,7 +294,6 @@ static bool fill_default_arguments(
         temp_syms.push_back(s);
         if (sl->variadic)
             break;
-        ++index;
     }
 
     int i = 0;

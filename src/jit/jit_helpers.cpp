@@ -8,6 +8,7 @@
 #include "gc.h"
 #include "gc_roots.h"
 #include "list_grow.h"
+#include "string_grow.h"
 #include "builtin_ids.h"
 #include "runtime_state.h"
 #include "scopestack.h"
@@ -163,6 +164,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_slot(const skein::bc::SlotDes
         yyerror("invalid bytecode slot");
         return nullptr;
     }
+    string_refresh_cache(*dest, value);
     if (desc->is_const) {
         yyerror("cannot assign to constant %s", desc->name.c_str());
         freeval(value);
@@ -933,6 +935,30 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_list_concat_self(
     freeval(left);
     freeval(right);
     if (!result || g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_string_append_self(
+    value_t *left, value_t *right, int line, int column) {
+    diag_set_location(line, column);
+    if (!left || !right) {
+        freeval(left);
+        freeval(right);
+        return nullptr;
+    }
+    if (string_append_in_place(left, right, 1)) {
+        freeval(right);
+        return left;
+    }
+    const int errors_before = active_eval_context().runtime_error_count;
+    value_t *result = skein_vm_apply_binary_value('+', left, right);
+    freeval(left);
+    freeval(right);
+    if (!result || g_interrupted ||
+        active_eval_context().runtime_error_count != errors_before) {
         freeval(result);
         return nullptr;
     }

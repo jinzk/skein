@@ -206,7 +206,7 @@ struct string_value_t {
 - 赋值 helper（symbol / slot / param / upvalue）在释放旧值前同步旧值的
   `value` 缓存，避免重新分配后悬空
 - AST 后端实现等价路径（只对 symbol 目标生效，COW 阈值相应收紧）
-- JIT 暂时对该指令回退 VM（VM 已是 O(1)）
+- JIT 通过 `skein_jit_string_append_self` helper 支持该指令
 
 实测（100k 次）：
 
@@ -221,7 +221,6 @@ std.string.builder          29 ms
 - **rope / 分块字符串表示**：能让所有拼接/切片 O(1)，但会波及 `len`、下标、
   `find`、序列化、FFI 和 Unicode 索引；除非同时规划 moving GC / 值表示重构，
   否则不做。
-- JIT 直接支持 `STRING_APPEND_SELF` helper。
 
 风险与约束：
 
@@ -268,8 +267,12 @@ std.string.builder          29 ms
 
 ## 5. 推荐执行顺序
 
-1. 完成 Milestone 1 的 native 产物完整性与 `mod prune` 安全设计。
-2. 推进 Milestone 2 的共享补全索引与 LSP incremental sync。
-3. 明确包生态目标，再决定 Milestone 3 的范围。
-4. 明确 GC/AOT 决策，再进入 Milestone 4。
-5. 长尾能力按需求触发。
+1. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
+2. Milestone 2 已完成。
+3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
+4. Milestone 4 先做决策（moving GC / AOT / JIT 默认开启），当前优先：
+   - JIT 支持 `STRING_APPEND_SELF`
+   - GC root 边界审计
+   - 热点 opcode 与 frame 分配
+5. 测试稳定性（`net.py` serve-stream、`thread_bench` 阈值）与文档同步。
+6. 长尾能力按实际需求触发。

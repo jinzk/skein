@@ -281,8 +281,8 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
 `STRING_APPEND_SELF` 用于 `s = s + <string|char 字面量>`：栈上是左右操作数。
 运行时在目标是 string 且 buffer 没有额外别名时原地 `append` 并刷新缓存的
 `value` 指针；有别名则先按 COW 复制。存储赋值 helper 会同步旧值的 `value`
-缓存，避免重新分配后悬空。非 string 操作数回退到普通 `+`。该指令目前未进入
-JIT，包含它的函数回退 VM。
+缓存，避免重新分配后悬空。非 string 操作数回退到普通 `+`。JIT 通过
+`skein_jit_string_append_self` helper 执行。
 
 每个 Proto 编译完成后会经过 `skein::bc::verify()`：
 

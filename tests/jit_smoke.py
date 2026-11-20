@@ -472,6 +472,62 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # A body with a backward branch is compiled on its first call even
+        # when the call-count threshold is not reached: one call can still
+        # run a hot loop.  Loopless helpers must stay interpreted.
+        loop_first = tmp_path / "loop_first.skein"
+        loop_first.write_text(
+            "func count(n) {\n"
+            "  let total = 0;\n"
+            "  let i = 0;\n"
+            "  while (i < n) { total = total + i; i = i + 1; }\n"
+            "  return total;\n"
+            "}\n"
+            "func flat(n) { return n + 1; }\n"
+            "println(str(count(10)));\n"
+            "println(str(flat(1)));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "loop-first-call", loop_first, threshold="100")
+        loop_env = dict(os.environ)
+        loop_env.update({
+            "SKEIN_VM": "1",
+            "SKEIN_JIT": "1",
+            "SKEIN_JIT_THRESHOLD": "100",
+            "SKEIN_JIT_DEBUG": "1",
+        })
+        proc = subprocess.run(
+            [str(binary), str(loop_first)],
+            env=loop_env, text=True, capture_output=True, timeout=120,
+        )
+        if proc.returncode != 0 or "[jit] enter count" not in proc.stderr:
+            print(
+                "jit smoke: loop function was not compiled on first call",
+                file=sys.stderr,
+            )
+            print(f"  rc={proc.returncode} err={proc.stderr!r}",
+                  file=sys.stderr)
+            ok = False
+        if "[jit] enter flat" in proc.stderr:
+            print(
+                "jit smoke: loopless helper was compiled before the threshold",
+                file=sys.stderr,
+            )
+            ok = False
+        loop_env["SKEIN_JIT_LOOPS"] = "0"
+        proc = subprocess.run(
+            [str(binary), str(loop_first)],
+            env=loop_env, text=True, capture_output=True, timeout=120,
+        )
+        if proc.returncode != 0 or "[jit] enter count" in proc.stderr:
+            print(
+                "jit smoke: SKEIN_JIT_LOOPS=0 did not disable loop entry",
+                file=sys.stderr,
+            )
+            print(f"  rc={proc.returncode} err={proc.stderr!r}",
+                  file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

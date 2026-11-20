@@ -29,7 +29,8 @@ cmake --build build
 ```
 
 JIT 在运行时默认启用；`SKEIN_JIT=0` 关闭 JIT、回到纯 VM，
-`SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数，
+`SKEIN_JIT_THRESHOLD` 控制首次编译前的调用次数（默认 100），
+`SKEIN_JIT_LOOPS=0` 关闭「含循环的函数首次调用即编译」，
 `SKEIN_JIT_TOP_LEVEL=0` 只关闭顶层语句的 JIT，
 `SKEIN_JIT_DUMP=1` 会输出生成的汇编。JIT/VM 对比基准：
 

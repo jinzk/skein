@@ -22,6 +22,7 @@
 #endif
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -53,6 +54,8 @@ struct function_vm_cache {
     skein::jit::JitCode *jit = nullptr;
     uint32_t jit_hits = 0;
     bool jit_failed = false;
+    /* -1 unknown, 0 no loop, 1 body contains a backward branch. */
+    int8_t jit_loops = -1;
     /* Whether the compiled entry takes a destructuring parameter frame. */
     bool jit_pattern_frame = false;
 #endif
@@ -306,6 +309,46 @@ uint32_t jit_threshold() {
     return (uint32_t)threshold;
 }
 
+bool jit_loop_entry_enabled() {
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = read_bool_env("SKEIN_JIT_LOOPS", true) ? 1 : 0;
+    return enabled != 0;
+}
+
+/*
+ * A function whose body contains a backward branch can spend a long time in
+ * a single call, so waiting for SKEIN_JIT_THRESHOLD calls can miss the whole
+ * hot region (a helper called once with a million-iteration loop is never
+ * "hot" by call count).  Compile such bodies on their first call.
+ */
+bool proto_has_loop(const skein::bc::Proto &proto) {
+    for (size_t pc = 0; pc < proto.code.size(); ++pc) {
+        const skein::bc::Instr &ins = proto.code[pc];
+        switch (static_cast<skein::bc::Op>(ins.op)) {
+            case skein::bc::Op::Jump:
+            case skein::bc::Op::JumpIfFalse:
+            case skein::bc::Op::JumpIfTrue:
+            case skein::bc::Op::CmpJump:
+                if (ins.b <= pc)
+                    return true;
+                break;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
+bool function_has_loop(const std::shared_ptr<function_def> &def,
+                       function_vm_cache *cache) {
+    if (cache->jit_loops >= 0)
+        return cache->jit_loops != 0;
+    skein::bc::ProtoPtr proto = prepare_function_body(def);
+    cache->jit_loops = proto && proto_has_loop(*proto) ? 1 : 0;
+    return cache->jit_loops != 0;
+}
+
 /*
  * Try a direct JIT call.  Returns true when the JIT handled the call and
  * consumed the argument pointers; `out` is then the result (or null on
@@ -355,8 +398,12 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
     function_vm_cache *cache = cache_for(code);
     if (cache->jit_failed)
         return false;
-    if (!cache->jit && cache->jit_hits++ < jit_threshold())
-        return false;
+    if (!cache->jit) {
+        const bool hot = cache->jit_hits++ >= jit_threshold();
+        if (!hot &&
+            !(jit_loop_entry_enabled() && function_has_loop(def, cache)))
+            return false;
+    }
 
     bool pattern_frame = cache->jit_pattern_frame;
     if (method) {

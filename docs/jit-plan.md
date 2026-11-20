@@ -840,7 +840,7 @@ opcode helper 返回 NULL / 设置 runtime_error_count
 
 ```text
 hits++
-  → 达到 SKEIN_JIT_THRESHOLD
+  → 达到 SKEIN_JIT_THRESHOLD  或  函数体含回边（SKEIN_JIT_LOOPS）
   → jit_compile(proto)
   → JitRuntime::add
   → function_vm_cache->jit
@@ -849,6 +849,8 @@ hits++
 
 - `SKEIN_JIT_THRESHOLD` 默认 100；
 - `SKEIN_JIT_THRESHOLD=1` 用于测试；
+- 含回边的函数首次调用即编译（`SKEIN_JIT_LOOPS=0` 关闭），避免“调用次数
+  少但单次循环很久”的函数永远不编译；仍从函数入口进入，不需要 OSR；
 - 编译失败置 `compile_failed`，永久回退 VM；
 - 代码缓存设总大小上限，超限停止编译；
 - `JitRuntime::add/release` 用全局 mutex 保护；
@@ -1146,7 +1148,8 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 ### JIT 默认启用评估（2026-11-20，已完成）
 
 决策：**JIT 构建上运行时默认启用**，保留 `SKEIN_JIT=0`、
-`SKEIN_JIT_TOP_LEVEL=0` 两个开关；函数编译阈值仍为 100 次调用。
+`SKEIN_JIT_TOP_LEVEL=0` 两个开关；函数编译阈值 100 次调用，含回边的
+函数首次调用即编译（`SKEIN_JIT_LOOPS=0` 关闭）。
 
 评估数据（Windows，`build_msys2-jit`）：
 
@@ -1212,6 +1215,21 @@ VM 的 base 名解析逻辑）。
 顶层 `CHECK_REDEFINE`/`IMPORT`。下一步优先级：Handler JIT，然后才是
 OSR/deopt。
 
+循环感知首调编译（2026-11-20 已完成）：
+
+- 只按调用次数判定热度会漏掉「辅助函数只调用几次、但单次跑百万次循环」
+  的函数：`field/index/index_write/global/slot/scope/method` 等基准此前
+  `compiled=0`；
+- 现在函数体含回边（`JUMP*` / `CMP_JUMP` 的目标 `<=` 当前 pc）时首次调用
+  即编译，仍从函数入口进入，不需要 OSR/deopt；无循环的冷函数保持原阈值
+  行为；
+- `SKEIN_JIT_LOOPS=0` 关闭该策略；
+- 实测（默认阈值 100，Windows）：field 398→283ms、index 382→246ms、
+  index_write 330→217ms、global 232→126ms、slot 185→108ms、
+  scope 187→99ms、method 299→224ms；`hello` 等无循环脚本仍为 0 编译；
+- 测试：`tests/jit_smoke.py` 覆盖首次调用编译、无循环函数不提前编译、
+  `SKEIN_JIT_LOOPS=0` 回退。
+
 注意：闭包在长循环内频繁创建时，`scope ↔ closure` 环仍依赖 cycle
 collector 在语句边界回收，峰值内存随迭代数增长；`all_scopes` 的 prune 已改为
 几何阈值，闭包创建本身是线性的（roadmap 已记录）。后续可在循环回边加入
@@ -1234,7 +1252,8 @@ collector 在语句边界回收，峰值内存随迭代数增长；`all_scopes` 
    ~~运行时 `SKEIN_JIT` 仍默认 OFF，是否默认启用待后续验证。~~
    已决定：运行时**默认启用**；`SKEIN_JIT=0` 关闭，
    `SKEIN_JIT_TOP_LEVEL=0` 关闭顶层语句 JIT，`SKEIN_JIT_THRESHOLD`
-   控制函数编译阈值（默认 100 次调用）。
+   控制函数编译阈值（默认 100 次调用），含回边的函数首次调用即编译
+   （`SKEIN_JIT_LOOPS=0` 关闭）。
 2. Windows/MinGW 是否进入正式发布范围，还是只做 beta smoke？
 3. Phase 2 是否继续使用 asmjit，还是先评估 `x86::Compiler` 的 prologue/regalloc 能力？
 4. 是否把本文链接加入 `README.md` 的文档列表？

@@ -161,6 +161,7 @@
 - 函数调用帧不再复制函数名/源路径（改为 intern 指针）
 - JIT 在 Linux 与 Windows 上收益一致（fib 约 5x，overall 1.5–3.5x）
 - `obj.method(args)` 使用 `CALL_METHOD` 快路径，VM 的 method 调用已快于 AST
+- `std.list.builder` / `std.string.builder`，以及 `xs = std.list.append(xs, v)` 的 COW 原地增长
 
 若暂不做 moving GC：
 

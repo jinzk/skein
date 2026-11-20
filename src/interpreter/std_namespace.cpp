@@ -53,6 +53,7 @@ value_t *build_namespace_impl() {
         {"zip", B_list_zip},
         {"top_k", B_list_top_k},
         {"binary_search", B_list_binary_search},
+        {"builder", B_list_builder},
     });
     value_t *fn_module = builtin_module({
         {"compose", B_fn_compose},
@@ -164,6 +165,7 @@ value_t *build_namespace_impl() {
             {"trim_end", B_string_trim_end},
             {"to_lower", B_string_to_lower},
             {"to_upper", B_string_to_upper},
+            {"builder", B_string_builder},
             {"format", B_format},
         })));
     root->payload->items.push_back(std::make_pair(

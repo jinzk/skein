@@ -229,6 +229,8 @@ enum bifs {
     B_log_error,
     B_log_flush,
     B_log_set_level,
+    B_list_builder,
+    B_string_builder,
     B_io_read,
     B_io_write,
     B_io_write_all,

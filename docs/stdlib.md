@@ -2495,6 +2495,7 @@ std.list.window
 std.list.zip
 std.list.top_k
 std.list.binary_search
+std.list.builder
 
 std.fn.compose
 std.fn.pipe
@@ -2581,6 +2582,7 @@ std.string.trim_start
 std.string.trim_end
 std.string.to_lower
 std.string.to_upper
+std.string.builder
 std.string.join
 std.string.replace
 std.string.starts_with
@@ -3000,6 +3002,9 @@ std.thread.capabilities
 - `std.list.index` 找不到时返回 `-1`，`std.list.contains` 返回 `1` / `0`；
 - `std.dict.get` 缺少键时返回 `null` 或提供的默认值；
 - `std.list.reverse` / `std.list.sort` / `std.list.sort_by` / `std.list.append` 返回新 list，不修改参数；
+- `std.list.append(xs, v)` 在 `xs = std.list.append(xs, v)` 形式下（VM/JIT 后端）使用 COW 原地增长，避免复制整个 list；`xs = xs + [v]` 同样处理；
+- `std.list.builder()` 提供 O(1) 摊销的 `push` / `extend`，`build()` 每次返回独立 list；
+- `std.string.builder()` 提供 O(1) 摊销的字符串拼接，`push` 接受 string 或 char；
 - 排序稳定；`std.list.sort(xs)` 接受全数字、全字符串或全 `char`；`std.list.sort(xs, cmp)` 接受自定义比较器；
 - 默认排序和 `sort_by` 中，`NaN` 永远排在最后；`char` / `byte` 按码点 / 数值排序；
 - `std.list.sort_by(xs, key[, {"desc": true}])` 的 key 每个元素只调用一次；

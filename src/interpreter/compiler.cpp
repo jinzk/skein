@@ -1845,6 +1845,51 @@ struct Compiler {
         return ((struct string_value_t *)literal->val)->value;
     }
 
+    /* Conservative purity check for the extra expression in
+     * `xs = std.list.append(xs, expr)`: it must not be able to reassign
+     * or free `xs` while the receiver is still on the stack. */
+    static bool grow_pure(ast *node) {
+        if (!node)
+            return true;
+        switch (node->nodetype) {
+            case 'V':
+            case 'N':
+                return true;
+            case 'l': {
+                for (ast *item = node; item;
+                     item = ((struct list_node *)item)->next) {
+                    if (!grow_pure(((struct list_node *)item)->value))
+                        return false;
+                }
+                return true;
+            }
+            case 'G':
+            case 'j':
+                return grow_pure(node->l) && grow_pure(node->r);
+            default:
+                return false;
+        }
+    }
+
+    static bool is_std_list_append(ast *callee) {
+        if (!callee || callee->nodetype != 'j')
+            return false;
+        const char *field = literal_string(callee->r);
+        if (!field || std::strcmp(field, "append") != 0)
+            return false;
+        ast *module = callee->l;
+        if (!module || module->nodetype != 'j')
+            return false;
+        const char *module_name = literal_string(module->r);
+        if (!module_name || std::strcmp(module_name, "list") != 0)
+            return false;
+        ast *root = module->l;
+        if (!root || root->nodetype != 'N')
+            return false;
+        const char *root_name = ((struct symref *)root)->name;
+        return root_name && std::strcmp(root_name, "std") == 0;
+    }
+
     value_t *fold_node(ast *node) {
         if (!node)
             return NULL;
@@ -2023,8 +2068,47 @@ struct Compiler {
                 struct symasgn *asgn = (struct symasgn *)node;
                 if (asgn->target && asgn->target->nodetype == 'N') {
                     struct symref *ref = (struct symref *)asgn->target;
-                    compile(asgn->v);
-                    if (!ok) return;
+                    bool grown = false;
+                    if (asgn->v && asgn->v->nodetype == '+' &&
+                        asgn->v->l && asgn->v->l->nodetype == 'N' &&
+                        asgn->v->r && asgn->v->r->nodetype == 'l' &&
+                        ref->name &&
+                        ((struct symref *)asgn->v->l)->name &&
+                        std::strcmp(((struct symref *)asgn->v->l)->name,
+                                    ref->name) == 0 &&
+                        grow_pure(asgn->v->r)) {
+                        compile(asgn->v->l);
+                        if (!ok) return;
+                        compile(asgn->v->r);
+                        if (!ok) return;
+                        emit(Op::ListConcatSelf, 0, 0, 0, loc_of(asgn->v));
+                        grown = true;
+                    } else if (asgn->v && asgn->v->nodetype == 'C') {
+                        struct ufncall *call = (struct ufncall *)asgn->v;
+                        std::vector<ast *> grow_args;
+                        collect_chain(call->args, grow_args);
+                        if (!call->launch && grow_args.size() == 2 &&
+                            is_std_list_append(call->callee) &&
+                            grow_args[0] &&
+                            grow_args[0]->nodetype == 'N' && ref->name &&
+                            ((struct symref *)grow_args[0])->name &&
+                            std::strcmp(((struct symref *)grow_args[0])->name,
+                                        ref->name) == 0 &&
+                            grow_pure(grow_args[1])) {
+                            compile(call->callee);
+                            if (!ok) return;
+                            compile(grow_args[0]);
+                            if (!ok) return;
+                            compile(grow_args[1]);
+                            if (!ok) return;
+                            emit(Op::ListAppendSelf, 0, 1, 0, loc_of(asgn->v));
+                            grown = true;
+                        }
+                    }
+                    if (!grown) {
+                        compile(asgn->v);
+                        if (!ok) return;
+                    }
                     int slot = slot_fast_path ? find_slot(ref->name) : -1;
                     if (slot >= 0) {
                         emit(Op::StoreSlot, 0, 0,

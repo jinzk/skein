@@ -242,7 +242,7 @@ DECLARE_STRUCT / DECLARE_ENUM / DECLARE_TRAIT / DECLARE_IMPL
 DECLARE_PACKAGE
 CLOSURE / BIND_FUNC
 IMPORT
-CALL / CALL_METHOD / CALL_SPREAD / TAIL_CALL / RETURN
+CALL / CALL_METHOD / CALL_SPREAD / LIST_APPEND_SELF / LIST_CONCAT_SELF / TAIL_CALL / RETURN
 PUSH_SCOPE / POP_SCOPE
 CONTROL_BREAK / CONTROL_CONTINUE / RUNTIME_ERROR
 ```
@@ -265,6 +265,17 @@ struct Instr {
 个数，`b` 保存方法名常量索引。VM 直接按 receiver 类型查找方法，并把 receiver
 作为第 0 个参数调用，不创建 bound method 值；非 struct/enum 的成员调用
 （dict、module、builtin）回退到普通成员读取 + `CALL`。
+
+`LIST_APPEND_SELF` 用于 `xs = std.list.append(xs, expr)`：栈上是 callee、
+list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.list.append`
+并且 list 是 `list` 时，按 COW 原地增长（额外别名存在时复制一次 payload）；
+否则回退到普通调用。
+
+`LIST_CONCAT_SELF` 用于 `xs = xs + [literal]`：栈上是 left 和 list 字面量。
+两边都是 list 时按 COW 原地扩展 left；字面量元素直接转移，非 list 操作数
+回退到普通 `+`。右侧不是 list 字面量时保持普通 `+` 编译，避免影响数值循环。
+
+包含上述指令的函数暂时不进入 JIT。
 
 每个 Proto 编译完成后会经过 `skein::bc::verify()`：
 

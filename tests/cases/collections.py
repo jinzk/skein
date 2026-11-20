@@ -910,3 +910,64 @@ def run_cases():
           'import std;\nimport std.graph;\n'
           'println(graph.shortest_path(graph.new(), 1, 2));\n',
           stdout="{ok: false, error: node not found}")
+    check("list builder",
+          "import std;\n"
+          "let b = std.list.builder();\n"
+          "b.push(1);\n"
+          "b.extend([2, 3]);\n"
+          "println(str(b.len()));\n"
+          "println(str(b.build()));\n"
+          "println(str(b.build()));\n",
+          stdout_all=["3", "[1, 2, 3]", "[1, 2, 3]"])
+    check("string builder",
+          "import std;\n"
+          "let b = std.string.builder();\n"
+          'b.push("ab");\n'
+          "b.push('c');\n"
+          "println(str(b.len()));\n"
+          "println(b.build());\n",
+          stdout_all=["3", "abc"])
+    check("list append keeps aliases",
+          "import std;\n"
+          "let a = [1];\n"
+          "let b = a;\n"
+          "a = std.list.append(a, 2);\n"
+          "println(str(a));\n"
+          "println(str(b));\n"
+          "let xs = [];\n"
+          "for (let i in range(5)) { xs = std.list.append(xs, i); }\n"
+          "println(str(xs));\n",
+          stdout_all=["[1, 2]", "[1]", "[0, 1, 2, 3, 4]"])
+    check("list append fallback path",
+          "import std;\n"
+          "let c = [1];\n"
+          "c = std.list.append(c, str(len(c)));\n"
+          "println(str(c));\n"
+          'println(c[1] + "x");\n',
+          stdout_all=["[1, 1]", "1x"])
+    check("list append keeps error message",
+          "import std;\n"
+          "let d = 1;\n"
+          "d = std.list.append(d, 2);\n",
+          stderr="std.list.append expects a list, got int")
+    check("list concat keeps aliases",
+          "import std;\n"
+          "let a = [1];\n"
+          "let b = a;\n"
+          "a = a + [2];\n"
+          "println(str(a));\n"
+          "println(str(b));\n"
+          "let ys = [9];\n"
+          "let xs = [1];\n"
+          "xs = xs + ys;\n"
+          "println(str(xs));\n"
+          "println(str(ys));\n"
+          "let z = [];\n"
+          "for (let i in range(5)) { z = z + [i]; }\n"
+          "println(str(z));\n",
+          stdout_all=["[1, 2]", "[1]", "[1, 9]", "[9]", "[0, 1, 2, 3, 4]"])
+    check("list concat keeps error message",
+          "import std;\n"
+          "let n = 1;\n"
+          "n = n + [2];\n",
+          stderr="cannot add int and list")

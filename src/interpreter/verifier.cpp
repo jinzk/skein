@@ -573,6 +573,14 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             need(static_cast<int>(ins.a) + 1);
             stack(static_cast<int>(ins.a) + 1, 1);
             break;
+        case Op::ListAppendSelf:
+            need(static_cast<int>(ins.a) + 2);
+            stack(static_cast<int>(ins.a) + 2, 1);
+            break;
+        case Op::ListConcatSelf:
+            need(2);
+            stack(2, 1);
+            break;
         case Op::TailCall:
             if (!check_count(static_cast<uint64_t>(ins.b) + 1, pc,
                              "call argument count too large", error))

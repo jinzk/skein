@@ -153,6 +153,8 @@ enum class Op : uint8_t {
 
     Call,
     CallMethod,
+    ListAppendSelf,
+    ListConcatSelf,
     TailCall,
     Return,
 

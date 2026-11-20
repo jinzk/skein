@@ -7,6 +7,7 @@
 #include "runtime_state.h"
 #include "symbol.h"
 #include "builtin_ids.h"
+#include "builders.h"
 #include "compress_builtin.h"
 #include "crypto_builtin.h"
 #include "dict.h"
@@ -577,6 +578,8 @@ struct value_t *call_builtin(int functype,
         return call_error_builtin(functype, args);
     if (functype >= B_log_new && functype <= B_log_set_level)
         return call_log_builtin(functype, args);
+    if (functype >= B_list_builder && functype <= B_string_builder)
+        return call_builder_builtin(functype, args);
     if (functype >= B_io_read && functype <= B_io_write_async)
         return call_io_builtin(functype, args);
     if (functype >= B_json_parse && functype <= B_json_stringify)

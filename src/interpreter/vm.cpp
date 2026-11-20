@@ -2,6 +2,7 @@
 #include "vm_internal.h"
 
 #include "bytecode.h"
+#include "builtin_ids.h"
 #include "control_runtime.h"
 #include "diagnostics.h"
 #include "dict.h"
@@ -2792,9 +2793,186 @@ public:
                     break;
                 }
 
-                case Op::TailCall: {
+                case Op::ListAppendSelf: {
                     if (vm_stats_enabled)
                         ++vm_stats.calls;
+                    const uint32_t argc = ins.a;
+                    std::array<value_t *, 8> inline_args;
+                    std::vector<value_t *> heap_args;
+                    value_t **args = inline_args.data();
+                    if (argc > inline_args.size()) {
+                        heap_args.resize(argc);
+                        args = heap_args.data();
+                    }
+                    for (uint32_t i = argc; i > 0; --i) {
+                        value_t *arg = pop_checked();
+                        if (!arg) {
+                            free_args(args, argc);
+                            return abort_error();
+                        }
+                        args[i - 1] = arg;
+                    }
+                    value_t *list = pop_checked();
+                    value_t *callee = pop_checked();
+                    if (!list || !callee) {
+                        free_args(args, argc);
+                        freeval(list);
+                        freeval(callee);
+                        return abort_error();
+                    }
+                    bool grown = false;
+                    if (list->type == T_list && callee->type == T_builtin &&
+                        ((struct builtin_value_t *)callee)->functype ==
+                            B_list_append) {
+                        struct list_value_t *target =
+                            (struct list_value_t *)list;
+                        if (target->payload) {
+                            /* One reference is the source variable and one is
+                             * the receiver on the stack.  Any extra alias must
+                             * observe the old list, so only the two-reference
+                             * case grows the payload in place. */
+                            if (target->payload.use_count() <= 2) {
+                                for (uint32_t i = 0; i < argc; ++i) {
+                                    target->payload->items.push_back(args[i]);
+                                    args[i] = NULL;
+                                }
+                            } else {
+                                auto copy =
+                                    std::make_shared<struct list_payload>();
+                                copy->items.reserve(
+                                    target->payload->items.size() + argc);
+                                for (value_t *item :
+                                     target->payload->items)
+                                    copy->items.push_back(dupval(item));
+                                for (uint32_t i = 0; i < argc; ++i) {
+                                    copy->items.push_back(args[i]);
+                                    args[i] = NULL;
+                                }
+                                target->payload = copy;
+                            }
+                            grown = true;
+                        }
+                    }
+                    if (grown) {
+                        value_t *result = dupval(list);
+                        freeval(callee);
+                        freeval(list);
+                        push(result);
+                        break;
+                    }
+                    std::vector<value_t *> call_args;
+                    call_args.reserve((size_t)argc + 1);
+                    call_args.push_back(list);
+                    for (uint32_t i = 0; i < argc; ++i)
+                        call_args.push_back(args[i]);
+                    FastCallResult fast = try_fast_call(
+                        callee, call_args.data(),
+                        (uint32_t)call_args.size());
+                    if (fast == FastCallResult::Pushed) {
+                        freeval(callee);
+                        if (g_interrupted)
+                            return abort_error();
+                        break;
+                    }
+                    if (fast == FastCallResult::JitFailed) {
+                        freeval(callee);
+                        return abort_error();
+                    }
+                    if (fast == FastCallResult::Failed) {
+                        free_args(call_args.data(),
+                                  (uint32_t)call_args.size());
+                        freeval(callee);
+                        return abort_error();
+                    }
+                    value_t *result = skein_vm_call_value_args(
+                        callee, std::move(call_args));
+                    freeval(callee);
+                    if (g_interrupted) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (result && is_control(result))
+                        return abort_control(result);
+                    push(result ? result : newnull());
+                    break;
+                }
+
+                case Op::ListConcatSelf: {
+                    value_t *right = pop_checked();
+                    value_t *left = pop_checked();
+                    if (!left || !right) {
+                        freeval(left);
+                        freeval(right);
+                        return abort_error();
+                    }
+                    if (left->type == T_list && right->type == T_list) {
+                        struct list_value_t *target =
+                            (struct list_value_t *)left;
+                        struct list_value_t *extra =
+                            (struct list_value_t *)right;
+                        if (target->payload && extra->payload) {
+                            /* A freshly built literal is uniquely owned and
+                             * its items can be moved.  A variable operand is
+                             * shared with its symbol and must be copied. */
+                            const bool take_extra =
+                                extra->payload.use_count() == 1;
+                            if (target->payload.use_count() <= 2) {
+                                for (value_t *item :
+                                     extra->payload->items)
+                                    target->payload->items.push_back(
+                                        take_extra ? item : dupval(item));
+                            } else {
+                                auto copy =
+                                    std::make_shared<struct list_payload>();
+                                copy->items.reserve(
+                                    target->payload->items.size() +
+                                    extra->payload->items.size());
+                                for (value_t *item :
+                                     target->payload->items)
+                                    copy->items.push_back(dupval(item));
+                                for (value_t *item :
+                                     extra->payload->items)
+                                    copy->items.push_back(
+                                        take_extra ? item : dupval(item));
+                                target->payload = copy;
+                            }
+                            if (take_extra)
+                                extra->payload->items.clear();
+                            freeval(right);
+                            value_t *result = dupval(left);
+                            freeval(left);
+                            push(result);
+                            break;
+                        }
+                    }
+                    const int errors_before_concat =
+                        context_.runtime_error_count;
+                    value_t *result = skein_vm_apply_binary_value(
+                        '+', left, right);
+                    freeval(left);
+                    freeval(right);
+                    if (!result)
+                        return abort_error();
+                    if (context_.runtime_error_count !=
+                        errors_before_concat) {
+                        freeval(result);
+                        return abort_error();
+                    }
+                    if (is_control(result))
+                        return abort_control(result);
+                    push(result);
+                    break;
+                }
+
+                case Op::TailCall: {
                     uint32_t argc = ins.b;
                     std::array<value_t *, 8> inline_args;
                     std::vector<value_t *> heap_args;

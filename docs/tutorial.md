@@ -2110,6 +2110,33 @@ let b = int(parts[1]);
 print(a + b);
 ```
 
+### 构建器
+
+频繁追加时使用 builder，避免每次复制整个 list / string：
+
+```text
+import std;
+
+let lb = std.list.builder();
+for (let i in range(1000)) {
+  lb.push(i);
+}
+let xs = lb.build();
+
+let sb = std.string.builder();
+for (let i in range(1000)) {
+  sb.push("x");
+}
+let text = sb.build();
+```
+
+规则：
+
+- `push` / `extend` 是 O(1) 摊销，`build()` 每次返回独立值；
+- `std.list.append(xs, v)` 在 `xs = std.list.append(xs, v)` 形式下（VM/JIT 后端）使用 COW 原地增长；
+- 其他调用形式仍保持“返回新 list，不修改参数”的语义；
+- builder 是可变对象，赋值会共享同一个 builder。
+
 ## 控制台输入
 
 `input([prompt])` 从 stdin 读取一行：

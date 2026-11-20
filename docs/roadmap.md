@@ -170,8 +170,8 @@
   与闭包创建（`CLOSURE` + cell 生命周期）；handler/defer 仍回退 VM
 - JIT 支持名字模式局部变量（`*_NAME`、`DEFINE_NAME`、`CHECK_REDEFINE`）
   与 `for-in` 迭代器（`ITER_NEW/NEXT/END`，含 list/dict/string/bytes/
-  deque/heap/set/generator），并放开 Slot/Param base 的 `ASSIGN_INDEX`、
-  值比较与 `DUP`
+  deque/heap/set/generator），并放开 Slot/Param/Upvalue base 的
+  `ASSIGN_INDEX`、值比较、`DUP`、`GET_FIELD_OR_ENUM` 与 `FAIL`
 
 若暂不做 moving GC：
 

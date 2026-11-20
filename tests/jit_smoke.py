@@ -711,6 +711,106 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # Enum variants are resolved through GET_FIELD_OR_ENUM.
+        enum_ops = tmp_path / "enum_ops.skein"
+        enum_ops.write_text(
+            "import std;\n"
+            "enum Color { Red; Green; Blue; }\n"
+            "func pick(n) {\n"
+            "  if (n == 0) { return Color.Red; }\n"
+            "  if (n == 1) { return Color.Green; }\n"
+            "  return Color.Blue;\n"
+            "}\n"
+            "func name_of(n) {\n"
+            "  let c = pick(n);\n"
+            "  if (c == Color.Red) { return \"r\"; }\n"
+            "  if (c == Color.Green) { return \"g\"; }\n"
+            "  return \"b\";\n"
+            "}\n"
+            "let i = 0;\n"
+            "let total = 0;\n"
+            "while (i < 300) {\n"
+            "  if (name_of(i % 3) == \"r\") { total = total + 1; }\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(str(total));\n"
+            "println(str(name_of(1)));\n"
+            "println(str(pick(2)));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "enum-field-or-enum", enum_ops)
+        rc, out, err = run(binary, enum_ops, True, debug=True)
+        if rc != 0 or "[jit] enter pick" not in err:
+            print(
+                "jit smoke: enum field resolution was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
+        # Index assignment whose base is a captured (upvalue) container.
+        upvalue_index = tmp_path / "upvalue_index.skein"
+        upvalue_index.write_text(
+            "func make() {\n"
+            "  let store = {\"n\": 0};\n"
+            "  func bump(k) {\n"
+            "    store[k] = store[k] + 1;\n"
+            "    return store[k];\n"
+            "  }\n"
+            "  return bump;\n"
+            "}\n"
+            "let bump = make();\n"
+            "let i = 0;\n"
+            "let total = 0;\n"
+            "while (i < 300) { total = total + bump(\"n\"); i = i + 1; }\n"
+            "println(str(total));\n"
+            "println(str(bump(\"n\")));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "upvalue-index-write", upvalue_index)
+        rc, out, err = run(binary, upvalue_index, True, debug=True)
+        if rc != 0 or "[jit] enter bump" not in err:
+            print(
+                "jit smoke: upvalue index write was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
+        # `fail` inside a compiled function propagates to a VM handler.
+        fail_probe = tmp_path / "fail_probe.skein"
+        fail_probe.write_text(
+            "import std;\n"
+            "func boom(n) {\n"
+            "  if (n > 0) { fail \"bad \" + str(n); }\n"
+            "  return n;\n"
+            "}\n"
+            "func maybe(n) { return boom(n); }\n"
+            "let i = 0;\n"
+            "let hits = 0;\n"
+            "while (i < 300) {\n"
+            "  let v = maybe(1) on error(e) { recover 7; };\n"
+            "  hits = hits + v;\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(str(hits));\n"
+            "println(str(maybe(0)));\n"
+            "let caught = maybe(5) on error(e) {\n"
+            "  recover std.error.message(e);\n"
+            "};\n"
+            "println(caught);\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "fail-catch", fail_probe)
+        rc, out, err = run(binary, fail_probe, True, debug=True)
+        if rc != 0 or "[jit] enter boom" not in err:
+            print(
+                "jit smoke: fail path was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
             "func make_const() {\n"

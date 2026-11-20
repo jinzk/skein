@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct eval_context;
@@ -122,6 +123,14 @@ void set_generator_test(generator_test_fn fn);
 generator_test_fn generator_test();
 void set_generator_step(generator_step_fn fn);
 generator_step_fn generator_step();
+
+/* Enum construction (field-or-enum resolution) installed by the VM bridge. */
+using build_enum_fn = value_t *(
+    *)(const char *source, const char *name, const char *variant,
+       std::vector<std::pair<std::string, value_t *>> &fields,
+       const std::vector<bool> &spread);
+void set_build_enum(build_enum_fn fn);
+build_enum_fn build_enum();
 
 /*
  * Fast-path call resolver installed by the VM bridge.  Returns a native entry

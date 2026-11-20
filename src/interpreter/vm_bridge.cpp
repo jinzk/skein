@@ -792,6 +792,7 @@ static void ensure_vm_host() {
         skein::jit::set_bind_frame(&skein_vm_bind_pattern_frame);
         skein::jit::set_generator_test(&fiber_is_generator);
         skein::jit::set_generator_step(&jit_generator_step);
+        skein::jit::set_build_enum(&build_enum_value);
 #endif
         return true;
     }();

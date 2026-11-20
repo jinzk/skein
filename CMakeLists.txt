@@ -1154,6 +1154,7 @@ if(BUILD_TESTING)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_threads.py
                 --bin $<TARGET_FILE:${PROJECT_NAME}>
                 --check
+                --max-regression 0.6
       )
       set_tests_properties(thread_bench_test PROPERTIES
         LABELS "bench"

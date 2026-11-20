@@ -666,6 +666,68 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_global(
     return increment_symbol_direct(sym, delta, prefix != 0);
 }
 
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
+    const skein::bc::FieldOrEnumDesc *desc, int line, int column) {
+    diag_set_location(line, column);
+    if (!desc) {
+        yyerror("invalid field-or-enum descriptor");
+        return nullptr;
+    }
+
+    struct symbol *base = lookupsym(desc->base.c_str());
+    if (base) {
+        if (base->is_uninitialized) {
+            yyerror("parameter %s is used before it is initialized",
+                    desc->base.c_str());
+            return nullptr;
+        }
+        value_t *container = dupval(base->val);
+        if (!container)
+            return nullptr;
+        struct string_value_t key;
+        key.type = T_string;
+        key.value = const_cast<char *>(desc->field.c_str());
+        value_t *result =
+            skein_vm_read_member_value(container, (value_t *)&key, true);
+        freeval(container);
+        return result;
+    }
+
+    structtype_lookup_result lookup;
+    std::string error;
+    structtype_lookup_status status = structtype_lookup_type(
+        nullptr, desc->source.c_str(), desc->base.c_str(), lookup, error);
+    if (status == STRUCTTYPE_LOOKUP_FOUND &&
+        lookup.kind == STRUCTTYPE_LOOKUP_ENUM && lookup.enumeration) {
+        skein::jit::build_enum_fn build = skein::jit::build_enum();
+        if (!build) {
+            yyerror("enum construction is not installed");
+            return nullptr;
+        }
+        std::vector<std::pair<std::string, value_t *>> fields;
+        std::vector<bool> spread;
+        return build(lookup.enumeration->source.c_str(),
+                     lookup.enumeration->name.c_str(), desc->field.c_str(),
+                     fields, spread);
+    }
+    if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
+        status == STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
+        status == STRUCTTYPE_LOOKUP_ERROR) {
+        yyerror("%s", error.c_str());
+    } else {
+        yyerror("symbol not found %s", desc->base.c_str());
+    }
+    return nullptr;
+}
+
+extern "C" SKEIN_JIT_SYSV void skein_jit_fail(value_t *value) {
+    if (!value) {
+        yyerror("fail value is missing");
+        return;
+    }
+    skein_vm_eval_raise(value);
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                                         uint32_t name_index, int line,
                                         int column) {
@@ -1341,6 +1403,9 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     using skein::bc::IndexBaseKind;
     struct symbol view {};
     symbol *base = nullptr;
+    upvalue_cell *upvalue = nullptr;
+    value_t *upvalue_before = nullptr;
+    value_t **base_slot_ptr = nullptr;
     if (desc->base_kind == IndexBaseKind::Slot ||
         desc->base_kind == IndexBaseKind::Param) {
         if (!base_slot || !*base_slot) {
@@ -1348,11 +1413,39 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
             freeval(value);
             return nullptr;
         }
+        base_slot_ptr = base_slot;
         view.name = const_cast<char *>(desc->base_name.c_str());
         view.name_len = desc->base_name.size();
         view.val = *base_slot;
         view.type.kind = TYPE_ANY;
         base = &view;
+    } else if (desc->base_kind == IndexBaseKind::Upvalue) {
+        function_def *def = reinterpret_cast<function_def *>(base_slot);
+        if (!def || desc->base_index >= def->upvalues.size()) {
+            yyerror("invalid bytecode upvalue");
+            freeval(value);
+            return nullptr;
+        }
+        upvalue = def->upvalues[desc->base_index].get();
+        view.name = const_cast<char *>(desc->base_name.c_str());
+        view.name_len = desc->base_name.size();
+        view.type.kind = TYPE_ANY;
+        if (upvalue) {
+            upvalue_before = upvalue_cell_value(upvalue);
+            view.val = upvalue_before;
+            base = &view;
+        } else {
+            symbol *sym = lookupsym(desc->base_name.c_str());
+            scope_context &scopes = active_scope_context();
+            if (!sym || !scopes.global_scope ||
+                scopes.global_scope->syms.find(desc->base_name) != sym) {
+                yyerror("upvalue %s is not captured by a frame slot",
+                        desc->base_name.c_str());
+                freeval(value);
+                return nullptr;
+            }
+            base = sym;
+        }
     } else if (desc->base_kind == IndexBaseKind::Global) {
         base = resolve_global_symbol(desc->base_index,
                                      desc->base_name.c_str());
@@ -1364,9 +1457,16 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     value_t *result =
         assign_index_symbol(base, desc->base_name.c_str(), args,
                             desc->fields, value);
-    if (base == &view && *base_slot != view.val) {
-        freeval(*base_slot);
-        *base_slot = view.val;
+    if (base == &view && view.val != upvalue_before && upvalue) {
+        if (upvalue->slot)
+            *upvalue->slot = view.val;
+        else
+            upvalue->value = view.val;
+        freeval(upvalue_before);
+        view.val = nullptr;
+    } else if (base == &view && base_slot_ptr && *base_slot_ptr != view.val) {
+        freeval(*base_slot_ptr);
+        *base_slot_ptr = view.val;
         view.val = nullptr;
     }
     return result;

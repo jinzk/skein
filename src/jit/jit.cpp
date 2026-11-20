@@ -64,6 +64,9 @@ SKEIN_JIT_SYSV value_t *skein_jit_compare_value(int op, value_t *left,
 SKEIN_JIT_SYSV value_t *skein_jit_bitnot(value_t *value, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
                              uint32_t name_index, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
+    const skein::bc::FieldOrEnumDesc *desc, int line, int column);
+SKEIN_JIT_SYSV void skein_jit_fail(value_t *value);
 SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               uint32_t name_index, value_t *value, int line,
                               int column);
@@ -279,6 +282,7 @@ bind_frame_fn g_bind_frame = nullptr;
 direct_fn g_direct = nullptr;
 generator_test_fn g_generator_test = nullptr;
 generator_step_fn g_generator_step = nullptr;
+build_enum_fn g_build_enum = nullptr;
 
 } // namespace
 
@@ -296,6 +300,8 @@ void set_generator_test(generator_test_fn fn) { g_generator_test = fn; }
 generator_test_fn generator_test() { return g_generator_test; }
 void set_generator_step(generator_step_fn fn) { g_generator_step = fn; }
 generator_step_fn generator_step() { return g_generator_step; }
+void set_build_enum(build_enum_fn fn) { g_build_enum = fn; }
+build_enum_fn build_enum() { return g_build_enum; }
 
 bool available() {
     static int state = -1;
@@ -406,6 +412,7 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::PopScope:
             case skein::bc::Op::Pop:
             case skein::bc::Op::Dup:
+            case skein::bc::Op::Fail:
                 break;
             case skein::bc::Op::LoadConst:
                 if (ins.b >= proto.consts.size() ||
@@ -522,6 +529,10 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                         skein::bc::ConstantKind::Name)
                     return reject("field-name constant");
                 break;
+            case skein::bc::Op::GetFieldOrEnum:
+                if (ins.b >= proto.field_or_enum.size())
+                    return reject("field-or-enum descriptor");
+                break;
             case skein::bc::Op::GetIndexCached:
                 if (ins.b >= proto.index_read_ic.size())
                     return reject("index-read descriptor");
@@ -542,6 +553,9 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                             : proto.nparams;
                     if (desc.base_index >= limit)
                         return reject("index-write base slot");
+                } else if (desc.base_kind == IndexBaseKind::Upvalue) {
+                    if (desc.base_index >= proto.upvalues.size())
+                        return reject("index-write upvalue");
                 } else if (desc.base_kind != IndexBaseKind::Global &&
                            desc.base_kind != IndexBaseKind::Name) {
                     return reject("index-write base kind");
@@ -1436,6 +1450,20 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 break;
             }
 
+            case skein::bc::Op::GetFieldOrEnum: {
+                const skein::bc::FieldOrEnumDesc &desc =
+                    proto.field_or_enum[ins.b];
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&desc)));
+                a.mov(asmjit::x86::esi, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_get_field_or_enum));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
             case skein::bc::Op::GetIndexCached: {
                 const int container_depth = depth - 2;
                 const int index_depth = depth - 1;
@@ -1486,6 +1514,11 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                         a.lea(asmjit::x86::r8,
                               asmjit::x86::ptr(asmjit::x86::rbp,
                                                param_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Upvalue:
+                        a.mov(asmjit::x86::r8,
+                              asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                     -kDefOff));
                         break;
                     default:
                         a.xor_(asmjit::x86::r8d, asmjit::x86::r8d);
@@ -2040,6 +2073,17 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                                              -kResultOff),
                       asmjit::imm(0));
                 a.jmp(epilogue_label);
+                break;
+            }
+
+            case skein::bc::Op::Fail: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                call_addr(fn_address(&skein_jit_fail));
+                clear_slot(value_depth);
+                a.jmp(abort_label);
                 break;
             }
 

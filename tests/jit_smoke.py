@@ -387,6 +387,67 @@ def main():
             print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
             ok = False
 
+        # Closures read/write captured locals through upvalue cells.  Only the
+        # inner closure is JIT-compiled; the outer function still creates it.
+        closure_ops = tmp_path / "closure_ops.skein"
+        closure_ops.write_text(
+            "func make_counter(start) {\n"
+            "  let n = start;\n"
+            "  func step() {\n"
+            "    let before = n;\n"
+            "    let a = n++;\n"
+            "    let b = ++n;\n"
+            "    n += 1;\n"
+            "    return before * 10000 + a * 100 + b + n;\n"
+            "  }\n"
+            "  return step;\n"
+            "}\n"
+            "let c = make_counter(0);\n"
+            "let i = 0;\n"
+            "while (i < 300) {\n"
+            "  let r = c();\n"
+            "  if (i == 0) { println(r); }\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(str(i));\n"
+            "func make_tail(base) {\n"
+            "  func step(n) {\n"
+            "    if (n <= 0) { return base; }\n"
+            "    return step(n - 1);\n"
+            "  }\n"
+            "  return step;\n"
+            "}\n"
+            "println(str(make_tail(7)(100000)));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "closure-upvalues", closure_ops)
+        rc, out, err = run(binary, closure_ops, True, debug=True)
+        if rc != 0 or "[jit] enter step" not in err:
+            print(
+                "jit smoke: closure/upvalue function was not JIT-compiled",
+                file=sys.stderr,
+            )
+            print(f"  rc={rc} out={out!r} err={err!r}", file=sys.stderr)
+            ok = False
+
+        closure_const = tmp_path / "closure_const.skein"
+        closure_const.write_text(
+            "func make_const() {\n"
+            "  const c = 5;\n"
+            "  func set() { c = 9; return c; }\n"
+            "  return set;\n"
+            "}\n"
+            "let f = make_const();\n"
+            "let i = 0;\n"
+            "while (i < 3) {\n"
+            "  let r = f() on error(e) { recover 0; };\n"
+            "  i = i + 1;\n"
+            "}\n"
+            "println(\"ok\");\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "closure-const-error", closure_const)
+
         native_worker = tmp_path / "native_wait_worker.skein"
         native_worker.write_text(
             "import std;\n"

@@ -680,6 +680,68 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *
     return assign_symbol_value(proto->consts[name_index].name.c_str(), value);
 }
 
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_load_upvalue(
+    function_def *def, uint32_t index, int line, int column) {
+    diag_set_location(line, column);
+    upvalue_cell *cell =
+        def && index < def->upvalues.size() ? def->upvalues[index].get()
+                                            : nullptr;
+    if (!cell) {
+        yyerror("invalid bytecode upvalue");
+        return nullptr;
+    }
+    value_t *value = upvalue_load(cell);
+    if (!value) {
+        yyerror("invalid bytecode upvalue");
+        return nullptr;
+    }
+    return value;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_upvalue(
+    function_def *def, uint32_t index, value_t *value, int line,
+    int column) {
+    diag_set_location(line, column);
+    upvalue_cell *cell =
+        def && index < def->upvalues.size() ? def->upvalues[index].get()
+                                            : nullptr;
+    if (!cell) {
+        freeval(value);
+        yyerror("invalid bytecode upvalue");
+        return nullptr;
+    }
+    return upvalue_store(cell, value);
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compound_upvalue(
+    function_def *def, uint32_t index, int op, value_t *value, int line,
+    int column) {
+    diag_set_location(line, column);
+    upvalue_cell *cell =
+        def && index < def->upvalues.size() ? def->upvalues[index].get()
+                                            : nullptr;
+    if (!cell) {
+        freeval(value);
+        yyerror("invalid bytecode upvalue");
+        return nullptr;
+    }
+    return upvalue_compound(cell, op, value);
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_upvalue(
+    function_def *def, uint32_t index, int delta, int prefix, int line,
+    int column) {
+    diag_set_location(line, column);
+    upvalue_cell *cell =
+        def && index < def->upvalues.size() ? def->upvalues[index].get()
+                                            : nullptr;
+    if (!cell) {
+        yyerror("invalid bytecode upvalue");
+        return nullptr;
+    }
+    return upvalue_incdec(cell, delta, prefix != 0);
+}
+
 extern "C" SKEIN_JIT_SYSV void skein_jit_push_scope() { skein_vm_eval_pushscope(); }
 extern "C" SKEIN_JIT_SYSV void skein_jit_pop_scope() { skein_vm_eval_popscope(); }
 

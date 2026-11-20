@@ -164,6 +164,8 @@
 - `std.list.builder` / `std.string.builder`，以及 `xs = std.list.append(xs, v)` 的 COW 原地增长
 - JIT 运行时默认启用（`SKEIN_JIT=0` 可关闭；`SKEIN_JIT_TOP_LEVEL=0`
   关闭顶层语句 JIT；`SKEIN_JIT_THRESHOLD` 默认 100 次调用）
+- JIT 支持闭包 / upvalue 访问（`LOAD/STORE/COMPOUND/INCDEC_UPVALUE`）；
+  创建闭包（`has_closures`）与 handler/defer 仍回退 VM
 
 若暂不做 moving GC：
 

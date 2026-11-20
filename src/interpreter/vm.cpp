@@ -4542,106 +4542,17 @@ private:
 
     value_t *assign_upvalue_cell(struct upvalue_cell *cell,
                                  value_t *value) {
-        if (!cell || !value)
-            return NULL;
-        if (value->type == T_return || value->type == T_break ||
-            value->type == T_continue)
-            return value;
-        string_refresh_cache(cell_value(cell), value);
-        if (cell->is_const) {
-            yyerror("cannot assign to constant %s", cell->name.c_str());
-            freeval(value);
-            return NULL;
-        }
-        if (cell->type && !validate_type_constraint(cell->type)) {
-            freeval(value);
-            return NULL;
-        }
-        if (cell->type && !type_constraint_matches(cell->type, value)) {
-            yyerror("variable %s expects %s, got %s", cell->name.c_str(),
-                    type_constraint_name(cell->type), typename_of(value));
-            freeval(value);
-            return NULL;
-        }
-        freeval(cell_value(cell));
-        if (cell->slot)
-            *cell->slot = value;
-        else
-            cell->value = value;
-        return dupval(value);
+        return upvalue_store(cell, value);
     }
 
     value_t *compound_upvalue_cell(struct upvalue_cell *cell, int op,
                                    value_t *value) {
-        if (!cell || !value) {
-            freeval(value);
-            return NULL;
-        }
-        value_t *result = apply_binary_value(op, cell_value(cell), value);
-        freeval(value);
-        if (!result)
-            return NULL;
-        if (cell->is_const) {
-            yyerror("cannot assign to constant %s", cell->name.c_str());
-            freeval(result);
-            return NULL;
-        }
-        if (cell->type && !validate_type_constraint(cell->type)) {
-            freeval(result);
-            return NULL;
-        }
-        if (cell->type && !type_constraint_matches(cell->type, result)) {
-            yyerror("variable %s expects %s, got %s", cell->name.c_str(),
-                    type_constraint_name(cell->type), typename_of(result));
-            freeval(result);
-            return NULL;
-        }
-        freeval(cell_value(cell));
-        if (cell->slot)
-            *cell->slot = result;
-        else
-            cell->value = result;
-        return dupval(result);
+        return upvalue_compound(cell, op, value);
     }
 
     value_t *incdec_upvalue_cell(struct upvalue_cell *cell, int delta,
                                  bool prefix) {
-        if (!cell) {
-            yyerror("invalid bytecode upvalue");
-            return NULL;
-        }
-        value_t *old = cell_value(cell);
-        if (!old) {
-            yyerror("invalid bytecode upvalue");
-            return NULL;
-        }
-        value_t *delta_value = newintval(delta);
-        value_t *result = apply_binary_value('+', old, delta_value);
-        freeval(delta_value);
-        if (!result)
-            return NULL;
-        if (cell->is_const) {
-            yyerror("cannot assign to constant %s", cell->name.c_str());
-            freeval(result);
-            return NULL;
-        }
-        if (cell->type && !validate_type_constraint(cell->type)) {
-            freeval(result);
-            return NULL;
-        }
-        if (cell->type && !type_constraint_matches(cell->type, result)) {
-            yyerror("variable %s expects %s, got %s", cell->name.c_str(),
-                    type_constraint_name(cell->type), typename_of(result));
-            freeval(result);
-            return NULL;
-        }
-        value_t *ret = prefix ? dupval(result) : dupval(old);
-        freeval(old);
-        if (cell->slot)
-            *cell->slot = result;
-        else
-            cell->value = result;
-        return ret;
+        return upvalue_incdec(cell, delta, prefix);
     }
 
     void invalidate_name_cache() {

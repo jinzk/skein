@@ -90,6 +90,29 @@ let captured = std.result.capture(func() {
 });
 println("capture " + str(std.result.value(captured)()));
 
+/* Closure upvalue cells: closed after the creator returns, and open while
+ * the creator frame is still running. */
+func make_counter(start) {
+  let n = start;
+  func step() { n = n + 1; return n; }
+  return step;
+}
+let counter = make_counter(0);
+let counter_total = 0;
+let k = 0;
+while (k < 200) { counter_total = counter_total + counter(); k = k + 1; }
+println("closure " + str(counter_total));
+
+func open_cell_total() {
+  let n = 0;
+  func step() { n = n + 1; return n; }
+  let total = 0;
+  let i = 0;
+  while (i < 100) { total = total + step(); i = i + 1; }
+  return total;
+}
+println("open " + str(open_cell_total()));
+
 /* Lazy iterators and generator parameters live in C++ state until the
  * generator runs; they must be registered on the generator value. */
 func make_adder(n) {
@@ -125,6 +148,8 @@ EXPECTED = [
     "groups 2",
     "compose 301",
     "capture 9",
+    "closure 20100",
+    "open 5050",
     "lazy 336",
     "generator 5",
     "churn true",

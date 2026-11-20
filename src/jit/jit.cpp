@@ -64,6 +64,17 @@ SKEIN_JIT_SYSV value_t *skein_jit_load_name(const skein::bc::Proto *proto,
 SKEIN_JIT_SYSV value_t *skein_jit_store_name(const skein::bc::Proto *proto,
                               uint32_t name_index, value_t *value, int line,
                               int column);
+SKEIN_JIT_SYSV value_t *skein_jit_load_upvalue(function_def *def,
+                               uint32_t index, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_store_upvalue(function_def *def,
+                                uint32_t index, value_t *value, int line,
+                                int column);
+SKEIN_JIT_SYSV value_t *skein_jit_compound_upvalue(function_def *def,
+                                   uint32_t index, int op, value_t *value,
+                                   int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_incdec_upvalue(function_def *def,
+                                 uint32_t index, int delta, int prefix,
+                                 int line, int column);
 SKEIN_JIT_SYSV void skein_jit_push_scope();
 SKEIN_JIT_SYSV void skein_jit_pop_scope();
 SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
@@ -262,7 +273,7 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         (proto.uses_names && !name_mode) || proto.has_closures ||
         proto.uses_defers || proto.uses_handlers ||
         proto_may_suspend(proto) ||
-        proto.variadic || !proto.upvalues.empty())
+        proto.variadic)
         return false;
     if (proto.nparams != proto.required_params)
         return false;
@@ -354,6 +365,20 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 if (ins.b >= proto.consts.size() ||
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
+                    return false;
+                break;
+            case skein::bc::Op::LoadUpvalue:
+            case skein::bc::Op::StoreUpvalue:
+                if (ins.b >= proto.upvalues.size())
+                    return false;
+                break;
+            case skein::bc::Op::CompoundUpvalue:
+                if (ins.b >= proto.upvalues.size() ||
+                    !is_binary_op_char(ins.flags))
+                    return false;
+                break;
+            case skein::bc::Op::IncDecUpvalue:
+                if (ins.b >= proto.upvalues.size())
                     return false;
                 break;
             case skein::bc::Op::LoadSlot:
@@ -815,6 +840,70 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                       asmjit::imm((ins.flags & 1) ? 1 : 0));
                 a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_incdec_global));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
+            case skein::bc::Op::LoadUpvalue:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_load_upvalue));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
+            case skein::bc::Op::StoreUpvalue: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_store_upvalue));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::CompoundUpvalue: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::rcx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_compound_upvalue));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IncDecUpvalue:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::edx, asmjit::imm(ins.a ? 1 : -1));
+                a.mov(asmjit::x86::ecx,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_incdec_upvalue));
                 push_reg(depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);

@@ -1173,17 +1173,33 @@ closure/service  compiled=0  declined=1   (upvalues)
 - GC 临时根只在真正进入 JIT 时登记，不再为每个被拒绝的调用压 root frame
 - `thread_state.root_module/root_source` 延迟到首次进入时复制
 
-覆盖率结论：当前 JIT 只覆盖无闭包 / 无 handler / 无 defer / 无名字的
-函数，真实服务代码（`std.route`、闭包 handler）覆盖率为 0。默认启用对
-纯计算热点收益明显，对闭包密集负载接近中性。下一步提升覆盖率的优先级
-高于 OSR/deopt：Handler JIT + 闭包/upvalue 支持。
+覆盖率结论：JIT 现在覆盖纯函数与**闭包访问**（upvalue 读写），但仍不
+覆盖创建闭包的函数、handler、defer、动态名字；真实服务代码
+（`std.route`）覆盖率仍为 0。默认启用对纯计算热点收益明显，对闭包密集
+负载接近中性。下一步提升覆盖率的优先级高于 OSR/deopt。
 
 覆盖率增量评估（2026-11-20）：`can_compile` 的 `SKEIN_JIT_DEBUG` 现在会
 打印不支持的具体 opcode。实测 `route_bench` 的函数拒绝原因是
 closures / upvalues，另有 `ITER_NEW`；单纯放开 `uses_names` /
 `GetFieldOrEnum` 并不能解锁这类代码（且 `GetFieldOrEnum` 需要复制
-VM 的 base 名解析逻辑）。因此下一步应直接做**闭包 / upvalue 支持**，
-而不是 names 快赢。
+VM 的 base 名解析逻辑）。
+
+闭包 / upvalue 访问（2026-11-20 已完成）：
+
+- JIT 支持 `LoadUpvalue` / `StoreUpvalue` / `CompoundUpvalue` /
+  `IncDecUpvalue`，共享 `value_runtime` 的 cell 读写语义
+  （COW 字符串缓存、const、类型约束、`string_refresh_cache`）；
+- `def->upvalues` 的 cell 在调用期间由 callee func value 保持可达，
+  open/closed cell 都通过 `upvalue_cell_value` 读取；
+- 只创建闭包（`has_closures`）的函数仍回退；`route_bench` 的剩余拒绝
+  是闭包创建与 `ITER_NEW`（顶层还有 `CHECK_REDEFINE`/`IMPORT`）。
+
+实测（1M 次闭包调用，闭包内 `n = n + 1`）：VM 约 483ms → JIT 约 430ms
+（~11%）；差异主要来自每次 upvalue 读写的 helper 调用。后续如需继续
+优化，可在 JIT prologue 缓存 cell 指针并内联 interned 值的快速路径。
+
+下一步：闭包创建（`Op::Closure` + cell 生命周期）与 Handler JIT
+（handler table + landing pad），之后再考虑 OSR/deopt。
 
 ### 独立决策
 

@@ -198,6 +198,7 @@ endif()
 
 add_library(skein_runtime STATIC
   src/runtime/valuetype.cpp
+  src/runtime/list_grow.cpp
   src/runtime/value_ops.cpp
   src/runtime/dict.cpp
   src/runtime/structtype.cpp

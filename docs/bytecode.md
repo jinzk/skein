@@ -275,7 +275,8 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
 两边都是 list 时按 COW 原地扩展 left；字面量元素直接转移，非 list 操作数
 回退到普通 `+`。右侧不是 list 字面量时保持普通 `+` 编译，避免影响数值循环。
 
-包含上述指令的函数暂时不进入 JIT。
+两条指令在 JIT 中通过 `skein_jit_list_append_self` /
+`skein_jit_list_concat_self` helper 执行。
 
 每个 Proto 编译完成后会经过 `skein::bc::verify()`：
 

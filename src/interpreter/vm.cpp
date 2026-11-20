@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "vm_internal.h"
 
+#include "list_grow.h"
 #include "bytecode.h"
 #include "builtin_ids.h"
 #include "control_runtime.h"
@@ -2820,42 +2821,13 @@ public:
                         freeval(callee);
                         return abort_error();
                     }
-                    bool grown = false;
-                    if (list->type == T_list && callee->type == T_builtin &&
+                    const bool append_builtin =
+                        callee->type == T_builtin &&
                         ((struct builtin_value_t *)callee)->functype ==
-                            B_list_append) {
-                        struct list_value_t *target =
-                            (struct list_value_t *)list;
-                        if (target->payload) {
-                            /* One reference is the source variable and one is
-                             * the receiver on the stack.  Any extra alias must
-                             * observe the old list, so only the two-reference
-                             * case grows the payload in place. */
-                            if (target->payload.use_count() <= 2) {
-                                for (uint32_t i = 0; i < argc; ++i) {
-                                    target->payload->items.push_back(args[i]);
-                                    args[i] = NULL;
-                                }
-                            } else {
-                                auto copy =
-                                    std::make_shared<struct list_payload>();
-                                copy->items.reserve(
-                                    target->payload->items.size() + argc);
-                                for (value_t *item :
-                                     target->payload->items)
-                                    copy->items.push_back(dupval(item));
-                                for (uint32_t i = 0; i < argc; ++i) {
-                                    copy->items.push_back(args[i]);
-                                    args[i] = NULL;
-                                }
-                                target->payload = copy;
-                            }
-                            grown = true;
-                        }
-                    }
-                    if (grown) {
-                        value_t *result = dupval(list);
+                            B_list_append;
+                    if (append_builtin && list_grow_append(list, args, argc)) {
                         freeval(callee);
+                        value_t *result = dupval(list);
                         freeval(list);
                         push(result);
                         break;
@@ -2899,7 +2871,7 @@ public:
                         freeval(result);
                         return abort_error();
                     }
-                    if (result && is_control(result))
+                    if (is_control(result))
                         return abort_control(result);
                     push(result ? result : newnull());
                     break;
@@ -2913,50 +2885,17 @@ public:
                         freeval(right);
                         return abort_error();
                     }
-                    if (left->type == T_list && right->type == T_list) {
-                        struct list_value_t *target =
-                            (struct list_value_t *)left;
-                        struct list_value_t *extra =
-                            (struct list_value_t *)right;
-                        if (target->payload && extra->payload) {
-                            /* A freshly built literal is uniquely owned and
-                             * its items can be moved.  A variable operand is
-                             * shared with its symbol and must be copied. */
-                            const bool take_extra =
-                                extra->payload.use_count() == 1;
-                            if (target->payload.use_count() <= 2) {
-                                for (value_t *item :
-                                     extra->payload->items)
-                                    target->payload->items.push_back(
-                                        take_extra ? item : dupval(item));
-                            } else {
-                                auto copy =
-                                    std::make_shared<struct list_payload>();
-                                copy->items.reserve(
-                                    target->payload->items.size() +
-                                    extra->payload->items.size());
-                                for (value_t *item :
-                                     target->payload->items)
-                                    copy->items.push_back(dupval(item));
-                                for (value_t *item :
-                                     extra->payload->items)
-                                    copy->items.push_back(
-                                        take_extra ? item : dupval(item));
-                                target->payload = copy;
-                            }
-                            if (take_extra)
-                                extra->payload->items.clear();
-                            freeval(right);
-                            value_t *result = dupval(left);
-                            freeval(left);
-                            push(result);
-                            break;
-                        }
+                    if (list_grow_concat(left, right)) {
+                        freeval(right);
+                        value_t *result = dupval(left);
+                        freeval(left);
+                        push(result);
+                        break;
                     }
                     const int errors_before_concat =
                         context_.runtime_error_count;
-                    value_t *result = skein_vm_apply_binary_value(
-                        '+', left, right);
+                    value_t *result =
+                        skein_vm_apply_binary_value('+', left, right);
                     freeval(left);
                     freeval(right);
                     if (!result)

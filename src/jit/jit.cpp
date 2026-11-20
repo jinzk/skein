@@ -88,6 +88,12 @@ SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
 SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
     value_t *receiver, const char *name, value_t **args, uint32_t argc,
     int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_list_append_self(
+    value_t *callee, value_t *list, value_t **args, uint32_t argc,
+    int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_list_concat_self(value_t *left,
+                                                   value_t *right,
+                                                   int line, int column);
 SKEIN_JIT_SYSV int skein_jit_tail_self(skein::jit::thread_state *ts,
                         function_def *current_def, value_t *callee,
                         value_t **params, value_t **args, uint32_t argc);
@@ -305,6 +311,9 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                     proto.consts[ins.b].kind !=
                         skein::bc::ConstantKind::Name)
                     return false;
+                break;
+            case skein::bc::Op::ListAppendSelf:
+            case skein::bc::Op::ListConcatSelf:
                 break;
             case skein::bc::Op::TailCall:
                 /* Defensive: compile_call() never sets launch on a tail call,
@@ -1451,6 +1460,49 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 for (int i = receiver_depth; i < depth; ++i)
                     clear_slot(i);
                 push_reg(receiver_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::ListAppendSelf: {
+                const int argc = static_cast<int>(ins.a);
+                const int callee_depth = depth - argc - 2;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(callee_depth + 1)));
+                a.lea(asmjit::x86::rdx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(depth - argc)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(argc));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r9d, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_list_append_self));
+                for (int i = callee_depth; i < depth; ++i)
+                    clear_slot(i);
+                push_reg(callee_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::ListConcatSelf: {
+                const int left_depth = depth - 2;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(left_depth)));
+                a.mov(asmjit::x86::rsi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(left_depth + 1)));
+                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_list_concat_self));
+                clear_slot(left_depth);
+                clear_slot(left_depth + 1);
+                push_reg(left_depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;

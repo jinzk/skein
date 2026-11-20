@@ -7,6 +7,8 @@
 #include "eval_context.h"
 #include "gc.h"
 #include "gc_roots.h"
+#include "list_grow.h"
+#include "builtin_ids.h"
 #include "runtime_state.h"
 #include "scopestack.h"
 #include "structtype.h"
@@ -875,6 +877,62 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
     }
     value_t *result = fn(callee, args, argc);
     if (g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_list_append_self(
+    value_t *callee, value_t *list, value_t **args, uint32_t argc,
+    int line, int column) {
+    diag_set_location(line, column);
+    const bool append_builtin =
+        callee && callee->type == T_builtin &&
+        ((builtin_value_t *)callee)->functype == B_list_append;
+    if (append_builtin && list_grow_append(list, args, argc)) {
+        freeval(callee);
+        value_t *result = dupval(list);
+        freeval(list);
+        return result;
+    }
+    std::vector<value_t *> call_args;
+    call_args.reserve((size_t)argc + 1);
+    call_args.push_back(list);
+    for (uint32_t i = 0; i < argc; ++i)
+        call_args.push_back(args[i]);
+    skein::jit::invoke_fn fn = skein::jit::invoke();
+    if (!fn) {
+        freeval(callee);
+        freeval(list);
+        for (uint32_t i = 0; i < argc; ++i)
+            freeval(args[i]);
+        yyerror("JIT call target is not installed");
+        return nullptr;
+    }
+    value_t *result =
+        fn(callee, call_args.data(), (uint32_t)call_args.size());
+    if (g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_list_concat_self(
+    value_t *left, value_t *right, int line, int column) {
+    diag_set_location(line, column);
+    if (left && right && left->type == T_list && right->type == T_list &&
+        list_grow_concat(left, right)) {
+        freeval(right);
+        value_t *result = dupval(left);
+        freeval(left);
+        return result;
+    }
+    value_t *result = skein_vm_apply_binary_value('+', left, right);
+    freeval(left);
+    freeval(right);
+    if (!result || g_interrupted) {
         freeval(result);
         return nullptr;
     }

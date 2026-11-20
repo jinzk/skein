@@ -167,7 +167,7 @@
 - 含回边（循环）的函数在首次调用即编译，不再等调用次数阈值；
   `SKEIN_JIT_LOOPS=0` 可关闭该策略
 - JIT 支持闭包 / upvalue 访问（`LOAD/STORE/COMPOUND/INCDEC_UPVALUE`）
-  与闭包创建（`CLOSURE` + cell 生命周期）；handler/defer 仍回退 VM
+  与闭包创建（`CLOSURE` + cell 生命周期）
 - JIT 支持名字模式局部变量（`*_NAME`、`DEFINE_NAME`、`CHECK_REDEFINE`）
   与 `for-in` 迭代器（`ITER_NEW/NEXT/END`，含 list/dict/string/bytes/
   deque/heap/set/generator），并放开 Slot/Param/Upvalue base 的
@@ -281,7 +281,7 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
 - per-pc liveness
 - safepoint 表
 - frame reuse
-- Handler JIT / OSR / deopt
+- OSR / deopt（Handler JIT 已完成）
 
 验收：
 
@@ -366,7 +366,8 @@ std.string.builder          29 ms
 
 - 没有可信镜像运营方前，不先做完整 proxy。
 - 没有明确性能目标前，不引入 moving GC。
-- GC root map 稳定前，不做 Handler JIT / OSR / deopt。
+- JIT 优化已暂停（2026-11-20，见第 6 节），Handler JIT 已完成；
+  OSR/deopt、per-pc liveness 与顶层声明类 JIT 等明确场景再重启。
 - 没有实际用户需求前，不扩展旧编码后端。
 - 未确认公共生态前，不先做 vendor / workspace。
 - 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明 `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
@@ -406,8 +407,44 @@ python tools/bench_containers.py --bin ./build/skein --check
 python tools/bench_threads.py --bin ./build/skein --check
 ```
 
-重启条件：真实负载的 p50/p95 出现退化，或覆盖率 / 内存成为明确需求；
-否则不再主动做 frame / GC 级改动。
+### JIT 优化暂停（2026-11-20）
+
+JIT 覆盖率 / 性能工作暂时冻结，遇到具体场景再重启。
+
+冻结时状态：
+
+- JIT 默认开启；`SKEIN_JIT=0` 可完全关闭
+- 测试基线：Windows JIT 35/35、Windows 非 JIT 33/33、WSL 35/35，0 警告
+- 已覆盖：函数、闭包 / upvalue、名字模式、`for-in` 迭代器、enum、
+  `fail`、`on error` handler、`defer`、常规顶层语句（`IMPORT` /
+  `BIND_FUNC` / 循环 / 调用）、builtin 回调（map/filter/sort/reduce/
+  compose/task）
+- 明确保留 VM、不再主动实现：
+  - 顶层 `DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM`
+  - 顶层 handler / defer
+  - variadic / generator 等边缘函数
+  - OSR / deopt、per-pc liveness
+
+  理由：声明与顶层 handler/defer 都是一次性元数据 / 初始化操作，没有热
+  路径；JIT 编译成本高于执行收益，且顶层 `global scope` 与 handler 记账
+  更容易引入语义回归。
+
+重启条件（满足其一）：
+
+- 真实负载的 p50/p95 明确退化，且 profiling 指向 JIT 覆盖或生成代码；
+- 具体程序的热点落在只有 OSR 才能覆盖的 VM 帧；
+- 内存 / 延迟成为明确需求；
+- 决定引入精确 / 移动 GC 或类型特化，需要 per-pc liveness / deopt。
+
+重启时先量化再写代码：
+
+```bash
+SKEIN_VM_STATS=1 SKEIN_JIT_DEBUG=1 ./build/skein <script>
+```
+
+关注 `[vm-stats] jit compiled/declined`、`jit declines` 原因、
+`[jit] unsupported op` / `reject` 与 `statements compiled`，再对照
+`docs/jit-plan.md` 的覆盖表决定是否值得投入。
 
 已知既有问题（不是本次 JIT 闭包支持引入）：在单条顶层语句内的长循环中创建
 闭包时，`scope ↔ closure` 环只能等 cycle collector 在语句边界回收，循环

@@ -614,8 +614,18 @@ struct generator {
     fiber *value = NULL;
     bool started = false;
     bool done = false;
+    /*
+     * Values captured by the generator body in C++ state (lazy iterator
+     * arguments, generator parameters).  The generator holds its own
+     * references so the collector can reach them while the generator value
+     * is reachable; they are released with the generator.
+     */
+    std::vector<value_t *> extra_roots;
 
     ~generator() {
+        for (struct value_t *root : extra_roots)
+            freeval(root);
+        extra_roots.clear();
         if (value) {
             if (generator_warnings_enabled && !shutting_down &&
                 started && !done && value->state == FIBER_YIELDED) {
@@ -651,11 +661,34 @@ std::string generator_describe(const void *data) {
     return value->done ? "<generator done>" : "<generator>";
 }
 
+void generator_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *)> &fn) {
+    const generator *value = (const generator *)data;
+    if (!value)
+        return;
+    for (struct value_t *root : value->extra_roots) {
+        if (root)
+            fn(root);
+    }
+}
+
 const struct native_type generator_type = {
-    "generator", generator_describe
+    "generator", generator_describe, nullptr, nullptr, nullptr,
+    generator_for_each_child
 };
 
 } // namespace
+
+void generator_attach_roots(const generator_ptr &generator,
+                            const std::vector<value_t *> &values) {
+    if (!generator)
+        return;
+    for (value_t *value : values) {
+        if (value)
+            generator->extra_roots.push_back(dupval(value));
+    }
+}
 
 generator_ptr generator_create(std::function<value_t *()> body) {
     if (!fiber_available())

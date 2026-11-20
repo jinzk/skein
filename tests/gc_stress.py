@@ -7,11 +7,34 @@ import sys
 BIN = sys.argv[1]
 
 SOURCE = """
+import std;
 func boom() { fail "boom"; }
 func make(n) {
   let x = n;
   func f() { return x; }
   return f;
+}
+func slow_make(v) {
+  let t = 0;
+  for (let i in range(2000)) { t = t + i; }
+  return make(v);
+}
+func slow_true(v) {
+  let t = 0;
+  for (let i in range(2000)) { t = t + i; }
+  return true;
+}
+func slow_key(v) {
+  let t = 0;
+  for (let i in range(2000)) { t = t + i; }
+  return v;
+}
+func slow_cmp(a, b) {
+  let t = 0;
+  for (let i in range(2000)) { t = t + i; }
+  if (a < b) { return -1; }
+  if (a > b) { return 1; }
+  return 0;
 }
 let i = 0;
 let total = 0;
@@ -27,8 +50,85 @@ while (i < 2000) {
   total = total + v();
   i = i + 1;
 }
-println(total);
+println("loop " + str(total));
+
+/* Builtin accumulators keep user values only in C++ locals while the
+ * callback runs; they must be registered as GC roots. */
+let mapped = std.list.map([1, 2, 3], slow_make);
+let map_total = 0;
+for (let f in mapped) { map_total = map_total + f(); }
+println("map " + str(map_total));
+
+let kept = std.list.filter([1, 2, 3], slow_true);
+println("filter " + str(std.list.len(kept)));
+
+println("reduce " + str(std.list.reduce([1, 2, 3], func(a, b) { return a + b; }, 0)));
+
+let uniq = std.list.unique_by([1, 1, 2, 3], slow_key);
+println("unique " + str(std.list.len(uniq)));
+
+let sorted = std.list.sort([3, 1, 2], slow_cmp);
+println("sort " + str(sorted));
+
+let top = std.list.top_k([5, 4, 3], 2, slow_cmp);
+println("top " + str(top));
+
+let groups = std.list.group_by([1, 2, 3], func(v) { return v % 2; });
+println("groups " + str(std.list.len(std.dict.keys(groups))));
+
+func stage(n) {
+  let x = n;
+  return func(f) { return func() { return f() + x; }; };
+}
+let chain = std.fn.compose(stage(100), stage(200));
+let chained = chain(func() { return 1; })();
+println("compose " + str(chained));
+
+let captured = std.result.capture(func() {
+  let x = 9;
+  return func() { return x; };
+});
+println("capture " + str(std.result.value(captured)()));
+
+/* Lazy iterators and generator parameters live in C++ state until the
+ * generator runs; they must be registered on the generator value. */
+func make_adder(n) {
+  let x = n + 100;
+  return func(v) { return v + x; };
+}
+let lazy = std.iter.map([1, 2, 3], make_adder(10));
+let lazy_total = 0;
+std.iter.for_each(lazy, func(v) { lazy_total = lazy_total + v; });
+println("lazy " + str(lazy_total));
+
+func gen_echo(v) {
+  yield v;
+  v = null;
+  yield 1;
+}
+let gen = gen_echo(slow_make(5));
+let gen_first = std.generator.next(gen);
+println("generator " + str(gen_first["value"]()));
+std.generator.next(gen);
+let churn = slow_true(0);
+println("churn " + str(churn));
 """
+
+EXPECTED = [
+    "loop 5997000",
+    "map 6",
+    "filter 3",
+    "reduce 6",
+    "unique 3",
+    "sort [1, 2, 3]",
+    "top [3, 4]",
+    "groups 2",
+    "compose 301",
+    "capture 9",
+    "lazy 336",
+    "generator 5",
+    "churn true",
+]
 
 
 def run(extra):
@@ -52,8 +152,11 @@ def check(proc, label):
     if proc.returncode != 0:
         sys.stderr.write(f"{label}: exit {proc.returncode}\n{proc.stderr}")
         return False
-    if "5997000" not in proc.stdout:
-        sys.stderr.write(f"{label}: unexpected stdout\n{proc.stdout}\n")
+    missing = [line for line in EXPECTED if line not in proc.stdout]
+    if missing:
+        sys.stderr.write(
+            f"{label}: missing {missing}\nstdout:\n{proc.stdout}\n"
+            f"stderr:\n{proc.stderr}\n")
         return False
     return True
 

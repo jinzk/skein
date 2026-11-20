@@ -53,3 +53,31 @@ void gc_roots_visit(struct scope_context &context, gc_mark_fn mark,
             frame.visit(frame.ctx, mark, mark_ctx);
     }
 }
+
+gc_root_scope::gc_root_scope(struct scope_context &context)
+    : context_(&context) {
+    mark_ = gc_roots_push_visitor(context, this, &gc_root_scope::visit);
+}
+
+gc_root_scope::~gc_root_scope() {
+    if (context_)
+        gc_roots_pop(*context_, mark_);
+}
+
+void gc_root_scope::visit(void *ctx, gc_mark_fn mark, void *mark_ctx) {
+    if (!ctx || !mark)
+        return;
+    gc_root_scope *self = static_cast<gc_root_scope *>(ctx);
+    for (struct value_t *value : self->values_) {
+        if (value)
+            mark(mark_ctx, value);
+    }
+    for (std::vector<struct value_t *> *values : self->vectors_) {
+        if (!values)
+            continue;
+        for (struct value_t *value : *values) {
+            if (value)
+                mark(mark_ctx, value);
+        }
+    }
+}

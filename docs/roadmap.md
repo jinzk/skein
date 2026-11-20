@@ -165,9 +165,51 @@
 
 若暂不做 moving GC：
 
-- 只做 GC root 边界审计
+- 只做 GC root 边界审计（已完成，见下）
 - 继续优化 frame 分配与热点 opcode
 - per-pc liveness 不阻塞主线
+
+#### GC root 边界审计（已完成）
+
+根来源清单：
+
+- scope 树：`global_scope`、`current`、`restore_stack`、`scope->ret`
+- `eval_context.control_value`
+- VM frame：operand stack、param/slot 符号与直接值、open upvalue cell、
+  `current_def` 的 upvalue、iterator、defer scope、快帧 `SavedVmState`
+- JIT frame：整个 value slot 数组（`skein_jit_push_roots`）
+- 挂起 fiber：scope 树、其 `gc_roots`、yield/final/error/resume 值
+- task 注册表、struct 方法表、FFI callback / logger userdata
+- 显式 `gc_root_scope`（C++ 局部值的临时根）
+
+审计修复：
+
+- 新增 `gc_root_scope`：builtin 在回调期间只存在于 C++ 局部变量里的值必须
+  显式登记，否则 cycle collector 会清掉其闭包 scope
+- `call_value_args` 统一把 callee 与实参登记为根，覆盖 compose/pipe/partial、
+  `std.result.capture`、log writer、heap comparator 等回调入口
+- `std.list.map/filter/reduce/unique_by/group_by/sort_by/top_k/sort` 的累加器
+  与 key 缓存登记为根（`result` list、accumulator、keys、working copy）
+- lazy iterator / generator 参数这类只存在于 C++ 捕获里的值通过
+  `generator_attach_roots` 挂到 generator 值上（持有引用，generator 销毁时
+  释放），覆盖 `std.iter.map/filter` 与生成器实参
+
+验证：
+
+- `tests/test_gc_roots.cpp`：guard 存在时闭包 scope 存活，guard 销毁后可回收
+- `tests/gc_stress.py`：在 `SKEIN_GC_STRESS=1` 下覆盖 map/filter/reduce/
+  unique_by/sort/top_k/group_by/compose/capture、lazy iterator 与 generator
+  实参，VM 与 JIT 各跑一遍
+
+剩余边界（已知且明确）：
+
+- 只被 C++ `std::function` 捕获长期持有的值（fiber body、服务 handler、
+  thread pool handler）在两次调用之间不可见；每次调用会经 `call_value_args`
+  重新登记，值为引用计数持有，不会悬空，但压力模式下其闭包 scope 可能在
+  调用间隙被清理
+- `thread.Message` / Channel 载荷跨线程序列化，不允许函数值，因此不需要主
+  collector 遍历通道缓冲
+- per-pc liveness / safepoint 表仍未做，属于 moving GC 前置工作
 
 若计划 moving GC 或 OSR/deopt：
 
@@ -271,7 +313,6 @@ std.string.builder          29 ms
 2. Milestone 2 已完成。
 3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
 4. Milestone 4 先做决策（moving GC / AOT / JIT 默认开启），当前优先：
-   - GC root 边界审计
    - 热点 opcode 与 frame 分配
 5. 测试稳定性已完成：
    - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉

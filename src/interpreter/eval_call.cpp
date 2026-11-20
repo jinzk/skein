@@ -6,6 +6,7 @@
 #include "eval_helpers.h"
 #include "fiber.h"
 #include "format.h"
+#include "gc_roots.h"
 #include "package.h"
 #include "pattern.h"
 #include "cycle.h"
@@ -504,6 +505,9 @@ static struct value_t *invoke_value(
         if (!generator) {
             return NULL;
         }
+        /* Parameters stay in `owned` until the body binds them; keep them
+         * reachable if the generator is stepped after a collection. */
+        generator_attach_roots(generator, *owned);
         return new_generator_value(std::move(generator));
     }
 
@@ -521,10 +525,20 @@ struct value_t *call_value_args(
         free_args(args);
         return NULL;
     }
+    /*
+     * Builtins call back into the interpreter with values that only live in
+     * C++ locals (composed callables, mapped results, pending tail calls).
+     * Root the callee and arguments for the duration of the call so cycle
+     * collection cannot clear their captured scopes.
+     */
+    gc_root_scope roots(active_scope_context());
+    roots.add(callee);
+    roots.add_all(args);
     call_depth_guard depth_guard;
     try {
         return invoke_value(callee, args);
     } catch (...) {
+        roots.reset();
         free_args(args);
         throw;
     }

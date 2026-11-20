@@ -1061,11 +1061,12 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 - 单态 inline cache；
 - 覆盖 `slot` / `field` / `index` / `global` 基准。
 
-### Phase 3：GC root map 与 frame roots（第一版已落地，继续收尾）
+### Phase 3：GC root map 与 frame roots（第一版已落地，边界审计已完成）
 
 目标是先保证 GC 能“看见”所有 live value，不追求立即移动对象。
 第一版已覆盖 VM/JIT frame roots、upvalue cell、defer/iterator 和
-`SKEIN_GC_STRESS`；剩余工作是审计边界情况并补 per-pc liveness。
+`SKEIN_GC_STRESS`；边界审计已补齐 C++ 局部值这一类漏根，per-pc liveness
+仍属于 Phase 4。
 
 - 定义统一的 `frame root map` 元数据：
   - param / slot / operand stack；
@@ -1078,15 +1079,33 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 - 扩展 `for_each_value_child` / collector 遍历 `upvalue_cell`、defer、
   iterator 和 handler state；
 - 增加 `SKEIN_GC_STRESS`：每个语句/分配后强制收集；
+- **C++ 局部值的临时根**：`gc_root_scope`（`gc_roots.h`）把只在 builtin
+  C++ 栈上存活、但跨用户回调的值登记到 root 表；`call_value_args` 统一登记
+  callee 与实参，list/string/heap/result/fn 等回调入口的累加器按需登记；
+- **generator 的 C++ 捕获**：lazy iterator 的参数与生成器实参通过
+  `generator_attach_roots` 挂到 generator 值上，由 generator 值可达性决定
+  其生命周期；
 - 测试：
   - direct slot 中的容器 ↔ closure 环；
   - closed upvalue cell 中的环；
   - defer/iterator/handler 捕获形成的环；
   - JIT frame 持有容器/闭包时的回收与可达性；
-  - 现有 reachable-closure 集合在 stress 模式下不回归。
+  - 现有 reachable-closure 集合在 stress 模式下不回归；
+  - `gc_stress_test`：map/filter/reduce/unique_by/sort/top_k/group_by/
+    compose/capture、lazy iterator、generator 实参在 VM 与 JIT 下的
+    stress 运行。
 
 验收：GC roots 完整；可达 closure/scope 不被误清；cell/JIT frame
 相关环可被识别或明确记录为待处理。
+
+不变量（新增代码必须遵守）：
+
+- 任何跨“调用用户代码”仍需要访问的值，要么在 scope / VM frame / JIT frame
+  中，要么放进 `gc_root_scope`；generator 的 C++ 捕获挂到 generator 值上
+- 只被 `std::function` 捕获长期持有的 callable（例如 http serve handler、
+  thread pool handler）在两次调用之间不可见；调用入口会重新登记，引用计数
+  保证不悬空，但不要依赖其闭包 scope 在间隙中保持原样
+- 通道/Message 载荷跨线程序列化，不允许函数值
 
 ### Phase 4：per-pc liveness / moving GC 准备（3–4 周）
 

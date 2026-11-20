@@ -1,5 +1,8 @@
 #include "builtins_internal.h"
 
+#include "gc_roots.h"
+#include "scopestack.h"
+
 static struct value_t *dict_get_own(struct dict_value_t *dict,
                                     const char *key) {
     if (!dict || !key)
@@ -103,6 +106,12 @@ static struct value_t *list_sort_with_cmp(struct list_value_t *list,
     for (struct value_t *item : list->payload->items)
         out->payload->items.push_back(dupval(item));
 
+    /* The working copy is only reachable through this frame while the
+     * comparator runs. */
+    gc_root_scope roots(active_scope_context());
+    roots.add(cmp_fn);
+    roots.add((struct value_t *)out);
+
     bool failed = false;
     std::stable_sort(
         out->payload->items.begin(), out->payload->items.end(),
@@ -131,6 +140,7 @@ static struct value_t *list_sort_with_cmp(struct list_value_t *list,
         });
 
     if (failed) {
+        roots.reset();
         freeval((struct value_t *)out);
         return NULL;
     }
@@ -153,6 +163,12 @@ static struct value_t *list_top_k_impl(struct list_value_t *list, long long k,
     for (struct value_t *item : list->payload->items)
         items.push_back(dupval(item));
 
+    /* `items` is a C++ copy of the source list; keep it visible while the
+     * comparator runs. */
+    gc_root_scope roots(active_scope_context());
+    roots.add(cmp_fn);
+    roots.add_vector(&items);
+
     bool failed = false;
     if (!cmp_fn) {
         bool numeric = true;
@@ -160,6 +176,7 @@ static struct value_t *list_top_k_impl(struct list_value_t *list, long long k,
         bool bytes = false;
         if (!list_sort_kind(list, numeric, chars, bytes)) {
             yyerror("%s expects all numbers, strings, chars, or bytes", name);
+            roots.reset();
             for (struct value_t *item : items)
                 freeval(item);
             return NULL;
@@ -194,6 +211,7 @@ static struct value_t *list_top_k_impl(struct list_value_t *list, long long k,
                 return order < 0;
             });
         if (failed) {
+            roots.reset();
             for (struct value_t *item : items)
                 freeval(item);
             return NULL;
@@ -228,16 +246,22 @@ static struct value_t *list_sort_by_key(struct list_value_t *list,
                                         const char *name) {
     std::vector<keyed_item> items;
     items.reserve(list->payload->items.size());
+    /* Keys are produced by user code and must stay reachable until the
+     * sort finishes. */
+    gc_root_scope roots(active_scope_context());
+    roots.add(key_fn);
 
     for (struct value_t *item : list->payload->items) {
         std::vector<struct value_t *> call_args;
         call_args.push_back(dupval(item));
         struct value_t *key = skein_call_function(key_fn, std::move(call_args));
         if (!key) {
+            roots.reset();
             free_keyed_items(items, true);
             return NULL;
         }
         items.push_back(keyed_item{key, dupval(item)});
+        roots.add(key);
     }
 
     bool numeric = true;
@@ -256,6 +280,7 @@ static struct value_t *list_sort_by_key(struct list_value_t *list,
     }
     if (!numeric && !strings && !chars && !bytes) {
         yyerror("%s key must return numbers, strings, chars, or bytes", name);
+        roots.reset();
         free_keyed_items(items, true);
         return NULL;
     }
@@ -298,6 +323,7 @@ static struct value_t *list_sort_by_key(struct list_value_t *list,
         out->payload->items.push_back(item.value);
         item.value = NULL;
     }
+    roots.reset();
     free_keyed_items(items, true);
     return (struct value_t *)out;
 }
@@ -383,6 +409,10 @@ static struct value_t *list_unique_impl(struct list_value_t *list,
     out->payload->items.reserve(list->payload->items.size());
     std::vector<struct value_t *> keys;
     keys.reserve(list->payload->items.size());
+    /* Keys are user-produced and accumulate across key_fn calls. */
+    gc_root_scope roots(active_scope_context());
+    roots.add((struct value_t *)out);
+    roots.add_vector(&keys);
 
     bool failed = false;
     for (struct value_t *item : list->payload->items) {
@@ -402,11 +432,16 @@ static struct value_t *list_unique_impl(struct list_value_t *list,
     }
 
     if (failed) {
+        roots.reset();
         for (struct value_t *entry : keys)
             freeval(entry);
         freeval((struct value_t *)out);
         return NULL;
     }
+
+    /* No user code runs below; keys are freed as they are consumed, so stop
+     * marking them. */
+    roots.reset();
 
     bool hashable = true;
     for (struct value_t *key : keys) {
@@ -459,18 +494,24 @@ static struct value_t *list_group_by_impl(struct list_value_t *list,
                                           struct value_t *key_fn,
                                           const char *name) {
     struct dict_value_t *out = newdictval();
+    /* Buckets and user keys live in `out` while key_fn runs. */
+    gc_root_scope roots(active_scope_context());
+    roots.add(key_fn);
+    roots.add((struct value_t *)out);
 
     for (struct value_t *item : list->payload->items) {
         std::vector<struct value_t *> call_args;
         call_args.push_back(dupval(item));
         struct value_t *key = skein_call_function(key_fn, std::move(call_args));
         if (!key) {
+            roots.reset();
             freeval((struct value_t *)out);
             return NULL;
         }
         if (!dict_key_allowed(key)) {
             yyerror("%s key: %s", name, dict_key_error());
             freeval(key);
+            roots.reset();
             freeval((struct value_t *)out);
             return NULL;
         }
@@ -841,6 +882,9 @@ struct value_t *call_list_builtin(
                     acc = dupval(list->payload->items[0]);
                     index = 1;
                 }
+                gc_root_scope roots(active_scope_context());
+                roots.add(fn);
+                roots.add(acc);
                 for (; index < list->payload->items.size(); ++index) {
                     std::vector<struct value_t *> call_args;
                     call_args.push_back(dupval(acc));
@@ -849,12 +893,16 @@ struct value_t *call_list_builtin(
                     struct value_t *next =
                         skein_call_function(fn, std::move(call_args));
                     if (!next) {
+                        roots.reset();
                         freeval(acc);
                         acc = NULL;
                         break;
                     }
                     freeval(acc);
                     acc = next;
+                    roots.reset();
+                    roots.add(fn);
+                    roots.add(acc);
                 }
                 ret = acc;
                 break;
@@ -862,12 +910,22 @@ struct value_t *call_list_builtin(
 
             struct list_value_t *out = newlistval();
             out->payload->items.reserve(list->payload->items.size());
+            /*
+             * `out` only lives in this C++ frame while the callback runs;
+             * without a root the collector would clear captured scopes of
+             * closures already stored in it.
+             */
+            gc_root_scope roots(active_scope_context());
+            roots.add(args[0]);
+            roots.add(fn);
+            roots.add((struct value_t *)out);
             for (value_t *item : list->payload->items) {
                 std::vector<struct value_t *> call_args;
                 call_args.push_back(dupval(item));
                 struct value_t *result =
                     skein_call_function(fn, std::move(call_args));
                 if (!result) {
+                    roots.reset();
                     freeval((struct value_t *)out);
                     out = NULL;
                     break;

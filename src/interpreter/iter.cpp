@@ -167,6 +167,9 @@ struct value_t *lazy_iter(const std::vector<struct value_t *> &args,
         yyerror("generators are not available");
         return NULL;
     }
+    /* The body captures the iterator arguments in C++; make them visible to
+     * the cycle collector while this generator value is reachable. */
+    generator_attach_roots(generator, capture->values);
     return new_generator_value(generator);
 }
 

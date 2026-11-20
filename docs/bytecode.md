@@ -363,6 +363,8 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
   task result/error 也通过 thread-level root visitor 标记；
   cycle collector 会把它们纳入可达性分析；
   `SKEIN_GC_STRESS` 可在 VM/JIT safepoint 强制收集。
+  边界审计补上了 C++ 局部值的临时根（`gc_root_scope`）：跨用户回调仍需
+  访问的 builtin 累加器、以及 `call_value_args` 的 callee/实参都会登记。
   尚未实现 per-pc liveness / moving GC，见
   [jit-plan.md](jit-plan.md)；AOT、字节码序列化与磁盘缓存待决策。
 

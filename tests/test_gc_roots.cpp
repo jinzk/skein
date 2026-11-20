@@ -11,6 +11,7 @@
 #include "valuetype.h"
 
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -82,8 +83,36 @@ int main() {
     collect_cycles(eval.scopes);
     const bool control_cleared = control_scope->syms.small.empty();
 
+    /*
+     * C++-held values (builtin accumulators) are only visible through an
+     * explicit gc_root_scope.  Without the guard the collector clears the
+     * closure scope; with it the scope survives, and it is cleared again
+     * once the guard is gone.
+     */
+    scope_context guarded_context;
+    initscope(guarded_context);
+    std::shared_ptr<scope_t> guarded_scope =
+        make_scope(guarded_context.current);
+    add_symbol(guarded_context, guarded_scope, "guarded", newintval(11));
+    value_t *guarded_fn = newfuncval(nullptr, guarded_scope, {});
+    std::vector<value_t *> live_values;
+    live_values.push_back(guarded_fn);
+    {
+        gc_root_scope roots(guarded_context);
+        roots.add_vector(&live_values);
+        collect_cycles(guarded_context);
+    }
+    const bool guard_live = !guarded_scope->syms.small.empty();
+    live_values.clear();
+    freeval(guarded_fn);
+    guarded_fn = nullptr;
+    collect_cycles(guarded_context);
+    const bool guard_cleared = guarded_scope->syms.small.empty();
+    donescope(guarded_context);
+
     return outer_live && captured_live && outer_cleared &&
-                   control_live && control_cleared
+                   control_live && control_cleared && guard_live &&
+                   guard_cleared
                ? 0
                : 1;
 }

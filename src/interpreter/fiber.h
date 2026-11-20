@@ -23,6 +23,14 @@ value_t *fiber_yield_value(value_t *value);
 
 generator_ptr generator_create(std::function<value_t *()> body);
 value_t *new_generator_value(generator_ptr generator);
+/*
+ * Register values that the generator body keeps in C++ state (lazy
+ * iterator arguments, generator parameters).  The generator takes its own
+ * reference and releases it on destruction, so the values stay reachable
+ * for as long as the generator value is alive.
+ */
+void generator_attach_roots(const generator_ptr &generator,
+                            const std::vector<value_t *> &values);
 bool get_generator_value(value_t *value, generator_ptr &generator);
 bool generator_next_value(const generator_ptr &generator,
                           value_t *send_value,

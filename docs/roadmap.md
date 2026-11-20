@@ -182,6 +182,55 @@
 - JIT/VM 差分测试稳定
 - 有明确性能回归门槛
 
+#### 字符串增量拼接（已列入计划，未实施）
+
+目标：让 `s = s + expr` 在 VM/JIT 下也变成 O(1) 摊销，语义与现在完全一致。
+
+现状：
+
+```cpp
+struct string_value_t {
+    char *value;                              // 指向 storage->c_str()
+    std::shared_ptr<const std::string> storage;
+};
+```
+
+`storage` 是不可变、可共享的；追加后 `c_str()` 可能重新分配。只更新栈上的
+副本会让另一个变量持有悬空 `value` 指针，因此不能像 list 那样简单地
+“`use_count <= 2` 就原地改”。
+
+实测（100k 次）：
+
+```text
+s = s + "x"                 680 ms
+std.string.builder + push    29 ms
+```
+
+可选路线：
+
+1. **可变 storage + COW + 符号感知 opcode**
+   - 新增 `STRING_APPEND_SELF`，带目标存储描述（slot / param / global / name）
+   - 追加后同时刷新目标符号和栈副本的 `value`
+   - 需要处理别名、跨闭包捕获、错误位置；AST 后端也要实现
+2. **rope / 分块字符串表示**
+   - 追加 O(1)，但 `len` / 下标 / `find` / 序列化 / FFI 边界全部要改
+   - 改动面大于收益，除非同时计划 moving GC / 值表示重构
+3. **维持 builder-only（当前状态）**
+   - `std.string.builder` 已覆盖推荐用法
+   - 透明加速只在有明确大字符串构建需求时再启动
+
+前置条件与验收：
+
+- 有真实的 100k–1M 级字符串构建负载作为基准
+- 别名共享、闭包捕获、char/string 混合、错误信息完全保持
+- AST / VM / JIT 输出与性能一致
+- 不与 moving GC / 字符串驻留（interning）方案冲突
+
+风险：
+
+- `value` 是缓存指针，任何原地修改都必须同步所有共享者
+- 字符串会进入序列化、FFI 和跨线程边界，表示变更影响面大
+
 ### Milestone 5：长尾能力
 
 按实际需求推进：
@@ -204,6 +253,7 @@
 5. Windows/MinGW 是否进入正式发布范围？
 6. 是否支持 vendor 和多模块 workspace？
 7. 私有模块认证与 proxy 鉴权做到什么程度？
+8. 是否为透明字符串拼接改造字符串表示（可变 storage / rope，见 Milestone 4 的字符串增量拼接）？
 
 ---
 
@@ -214,6 +264,7 @@
 - GC root map 稳定前，不做 Handler JIT / OSR / deopt。
 - 没有实际用户需求前，不扩展旧编码后端。
 - 未确认公共生态前，不先做 vendor / workspace。
+- 没有明确的大字符串构建需求前，不做透明 `s = s + x` 加速；优先使用 `std.string.builder`。
 
 ---
 

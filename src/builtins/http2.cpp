@@ -9,6 +9,7 @@
 #include "eval.h"
 #include "event_loop.h"
 #include "fiber.h"
+#include "gc_roots.h"
 #include "http.h"
 #include "builtins_io.h"
 #include "net.h"
@@ -3464,6 +3465,10 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
     task_ptr server_task = fiber_start_async(
         [socket, handler, &state, cert_file, key_file, client_ca_file,
          client_auth, sni_certs]() {
+        /* Keep the server handler reachable for the task lifetime. */
+        gc_root_scope roots(active_scope_context());
+        roots.add(handler);
+        roots.add(state.on_request_body);
         long long next_connection_id = 1;
         std::vector<task_ptr> connections;
         bool listener_closed = false;

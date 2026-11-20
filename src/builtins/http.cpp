@@ -8,6 +8,7 @@
 #include "cookie.h"
 #include "eval.h"
 #include "fiber.h"
+#include "gc_roots.h"
 #include "event_loop.h"
 #include "http1_parser.h"
 #include "builtins_io.h"
@@ -3079,6 +3080,14 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
     task_ptr server_task = fiber_start_async(
         [socket_copy, handler_copy, state, cert_file, key_file, client_ca_file,
          client_auth, alpn, sni_certs, connection_fn]() {
+        /*
+         * The server task owns the handler outside any interpreter frame.
+         * Root it (and the body callback) for the task lifetime so a cycle
+         * collection between requests cannot clear their captured scopes.
+         */
+        gc_root_scope roots(active_scope_context());
+        roots.add(handler_copy);
+        roots.add(state->on_request_body);
         std::vector<task_ptr> connections;
         bool listener_closed = false;
         auto close_listener = [&listener_closed, socket_copy, state]() {
@@ -3338,6 +3347,7 @@ task_ptr start_http_server(value_t *socket, value_t *handler,
             }
         }
         connections.clear();
+        roots.reset();
         freeval(socket_copy);
         freeval(handler_copy);
         return newintval(state->shared->served.load());

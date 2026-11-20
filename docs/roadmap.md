@@ -193,6 +193,9 @@
 - lazy iterator / generator 参数这类只存在于 C++ 捕获里的值通过
   `generator_attach_roots` 挂到 generator 值上（持有引用，generator 销毁时
   释放），覆盖 `std.iter.map/filter` 与生成器实参
+- http / http2 serve 任务与 thread pool worker 在任务 / worker 生命周期内
+  登记 handler 与 `on_request_body`
+- JIT 尾调用 trampoline 在每次进入 callee 前登记 pending callee 与实参
 
 验证：
 
@@ -203,10 +206,12 @@
 
 剩余边界（已知且明确）：
 
-- 只被 C++ `std::function` 捕获长期持有的值（fiber body、服务 handler、
-  thread pool handler）在两次调用之间不可见；每次调用会经 `call_value_args`
-  重新登记，值为引用计数持有，不会悬空，但压力模式下其闭包 scope 可能在
-  调用间隙被清理
+- 长期存活的 builtin 回调（http / http2 serve handler、thread pool worker）
+  在任务 / worker 生命周期内由 `gc_root_scope` 登记，调用间隙也不会被清理
+- JIT 尾调用 trampoline 在进入下一个 callee 前登记 pending callee 与实参
+- FFI callback 仍然要求脚本保持 callback 值存活（既有生命周期契约）；
+  userdata 的 `for_each_child` 会标记其中的脚本函数
+- 新增“C++ 长期持有脚本值”的代码必须显式登记，不能依赖调用时临时根
 - `thread.Message` / Channel 载荷跨线程序列化，不允许函数值，因此不需要主
   collector 遍历通道缓冲
 - per-pc liveness / safepoint 表仍未做，属于 moving GC 前置工作

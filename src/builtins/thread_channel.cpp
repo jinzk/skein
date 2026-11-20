@@ -9,6 +9,7 @@
 #include "eval_context.h"
 #include "event_loop.h"
 #include "fiber.h"
+#include "gc_roots.h"
 #include "gc.h"
 #include "native_async.h"
 #include "package.h"
@@ -1752,6 +1753,12 @@ void worker_thread_main(
     }
     pool->cv.notify_all();
 
+    /* The worker loop owns the handler outside any interpreter frame.  Tear
+     * the guard down explicitly before thread_worker_end() destroys this
+     * thread's eval context. */
+    auto roots = std::make_unique<gc_root_scope>(active_scope_context());
+    roots->add(handler);
+
     if (loaded) {
         for (;;) {
             struct value_t *job = channel_recv_value(pool->jobs, 0);
@@ -1908,6 +1915,7 @@ void worker_thread_main(
         }
     }
 
+    roots.reset();
     thread_worker_end();
 
     if (restart) {

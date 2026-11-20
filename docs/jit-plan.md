@@ -1085,6 +1085,9 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 - **generator 的 C++ 捕获**：lazy iterator 的参数与生成器实参通过
   `generator_attach_roots` 挂到 generator 值上，由 generator 值可达性决定
   其生命周期；
+- **长期存活回调**：http / http2 serve 任务与 thread pool worker 在任务 /
+  worker 生命周期内登记 handler；JIT 尾调用 trampoline 在进入 callee 前
+  登记 pending callee 与实参；
 - 测试：
   - direct slot 中的容器 ↔ closure 环；
   - closed upvalue cell 中的环；
@@ -1102,9 +1105,10 @@ computed goto、unboxed slot，这些本身可带来 1.5–2x。
 
 - 任何跨“调用用户代码”仍需要访问的值，要么在 scope / VM frame / JIT frame
   中，要么放进 `gc_root_scope`；generator 的 C++ 捕获挂到 generator 值上
-- 只被 `std::function` 捕获长期持有的 callable（例如 http serve handler、
-  thread pool handler）在两次调用之间不可见；调用入口会重新登记，引用计数
-  保证不悬空，但不要依赖其闭包 scope 在间隙中保持原样
+- 长期存活的 builtin 回调（serve handler、worker loop）在任务/worker 生命
+  周期内自行登记；新增这类状态必须显式登记
+- JIT 尾调用 trampoline 在进入下一个 callee 前登记 pending callee/实参
+- FFI callback 要求脚本保持 callback 值存活；userdata 遍历覆盖其中的函数
 - 通道/Message 载荷跨线程序列化，不允许函数值
 
 ### Phase 4：per-pc liveness / moving GC 准备（3–4 周）

@@ -8,6 +8,7 @@
 #include "eval.h"
 #include "eval_context.h"
 #include "eval_internal.h"
+#include "gc_roots.h"
 #include "pattern.h"
 #include "scopestack.h"
 #include "structtype.h"
@@ -410,8 +411,16 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     ts.root_source = diag_current_source_name();
 
     value_t *result = nullptr;
-    if (!jit_resolve_and_enter(callee, args, argc, &ts, &result))
-        return false;
+    {
+        /* The callee and arguments are only reachable from this C++ frame
+         * until the JIT prologue registers its slots. */
+        gc_root_scope roots(active_eval_context().scopes);
+        roots.add(callee);
+        for (uint32_t i = 0; i < argc; ++i)
+            roots.add(args[i]);
+        if (!jit_resolve_and_enter(callee, args, argc, &ts, &result))
+            return false;
+    }
 
     while (ts.tail_pending) {
         value_t *next_callee = ts.tail_callee;
@@ -423,8 +432,16 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
         ts.tail_call = false;
 
         value_t *next_out = nullptr;
-        if (!jit_resolve_and_enter(next_callee, next_args.data(), next_argc,
-                                   &ts, &next_out)) {
+        bool entered = false;
+        {
+            gc_root_scope roots(active_eval_context().scopes);
+            roots.add(next_callee);
+            for (value_t *arg : next_args)
+                roots.add(arg);
+            entered = jit_resolve_and_enter(next_callee, next_args.data(),
+                                            next_argc, &ts, &next_out);
+        }
+        if (!entered) {
             value_t *vm_result = skein_vm_call_value_args(
                 next_callee, std::move(next_args));
             freeval(next_callee);

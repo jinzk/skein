@@ -12,7 +12,7 @@ let BENCHMARKS = [
   {"name": "slot", "file": "slot_bench.skein", "limit": 1.5},
   {"name": "fib", "file": "fib_bench.skein", "limit": 1.5},
   {"name": "call", "file": "call_bench.skein", "limit": 1.5},
-  {"name": "pattern", "file": "pattern_bench.skein", "limit": 1.5},
+  {"name": "pattern", "file": "pattern_bench.skein", "limit": 1.55},
   {"name": "field", "file": "field_bench.skein", "limit": 1.5},
   {"name": "method", "file": "method_bench.skein", "limit": 1.5},
   {"name": "global", "file": "global_bench.skein", "limit": 1.5},

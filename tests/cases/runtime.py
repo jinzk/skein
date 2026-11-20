@@ -478,41 +478,41 @@ def run_cases():
     check("utf8 string index second", '"你好"[1]\n', stdout="= 好")
     check("utf8 string index out of range", '"你好"[2]\n',
           stderr="out of range")
-    check("string trim", 'trim("  hi\\t\\n")\n', stdout="= hi")
-    check("string split", 'split("a,b,c", ",")\n', stdout="= [a, b, c]")
-    check("string split empty fields", 'split(",a,", ",")\n',
+    check("string trim", 'std.string.trim("  hi\\t\\n")\n', stdout="= hi")
+    check("string split", 'std.string.split("a,b,c", ",")\n', stdout="= [a, b, c]")
+    check("string split empty fields", 'std.string.split(",a,", ",")\n',
           stdout="= [, a, ]")
-    check("string split no match", 'split("abc", ",")\n', stdout="= [abc]")
-    check("string split empty text", 'split("", ",") == [""]\n',
+    check("string split no match", 'std.string.split("abc", ",")\n', stdout="= [abc]")
+    check("string split empty text", 'std.string.split("", ",") == [""]\n',
           stdout="= true")
-    check("string split empty separator", 'split("a,b", "")\n',
+    check("string split empty separator", 'std.string.split("a,b", "")\n',
           stderr="split separator must not be empty")
-    check("string split whitespace", 'split_ws("  a  b\\tc\\n d ")\n',
+    check("string split whitespace", 'std.string.split_ws("  a  b\\tc\\n d ")\n',
           stdout="= [a, b, c, d]")
-    check("string split whitespace empty", 'split_ws("")\n',
+    check("string split whitespace empty", 'std.string.split_ws("")\n',
           stdout="= []")
-    check("string find", 'find("hello", "ll")\n', stdout="= 2")
-    check("string find missing", 'find("hello", "x")\n', stdout="= -1")
-    check("string find empty needle", 'find("hello", "")\n', stdout="= 0")
-    check("string find utf8", 'find("你好世界", "世界")\n', stdout="= 2")
-    check("string substr", 'substr("hello", 1, 3)\n', stdout="= ell")
-    check("string substr to end", 'substr("hello", 2)\n', stdout="= llo")
-    check("string substr past end", 'substr("hello", 10)\n', stdout="= ")
-    check("string substr clamps length", 'substr("hello", 1, 100)\n',
+    check("string find", 'std.string.find("hello", "ll")\n', stdout="= 2")
+    check("string find missing", 'std.string.find("hello", "x")\n', stdout="= -1")
+    check("string find empty needle", 'std.string.find("hello", "")\n', stdout="= 0")
+    check("string find utf8", 'std.string.find("你好世界", "世界")\n', stdout="= 2")
+    check("string substr", 'std.string.substr("hello", 1, 3)\n', stdout="= ell")
+    check("string substr to end", 'std.string.substr("hello", 2)\n', stdout="= llo")
+    check("string substr past end", 'std.string.substr("hello", 10)\n', stdout="= ")
+    check("string substr clamps length", 'std.string.substr("hello", 1, 100)\n',
           stdout="= ello")
-    check("string substr utf8", 'substr("你好世界", 1, 2)\n',
+    check("string substr utf8", 'std.string.substr("你好世界", 1, 2)\n',
           stdout="= 好世")
-    check("string substr negative start", 'substr("hello", -1)\n',
+    check("string substr negative start", 'std.string.substr("hello", -1)\n',
           stderr="substr start must be a non-negative integer")
-    check("string substr negative length", 'substr("hello", 1, -1)\n',
+    check("string substr negative length", 'std.string.substr("hello", 1, -1)\n',
           stderr="substr length must be a non-negative integer")
-    check("string split type", 'split(1, ",")\n',
+    check("string split type", 'std.string.split(1, ",")\n',
           stderr="type error: expected string, got int")
-    check("string split arity", 'split("a")\n',
+    check("string split arity", 'std.string.split("a")\n',
           stderr="split expects 2 arguments")
-    check("string find arity", 'find("a")\n',
+    check("string find arity", 'std.string.find("a")\n',
           stderr="find expects 2 arguments")
-    check("string substr arity", 'substr("a")\n',
+    check("string substr arity", 'std.string.substr("a")\n',
           stderr="substr expects 2 or 3 arguments")
 
     check("list expression", "[1+2, 3*4]\n", stdout="= [3, 12]")
@@ -547,11 +547,11 @@ def run_cases():
     )
     check(
         "bytes alias copy on write",
-        'let a = bytes_from_string("ab");\n'
+        'let a = std.bytes.from_string("ab");\n'
         'let b = a;\n'
         'b[0] = 65;\n'
-        'print(bytes_to_string(a));\n'
-        'print(bytes_to_string(b));\n',
+        'print(std.bytes.to_string(a));\n'
+        'print(std.bytes.to_string(b));\n',
         stdout_all=["ab", "Ab"],
     )
     check(
@@ -599,7 +599,7 @@ def run_cases():
         'let p = {"a": {"b": 2}};\np["a"]["b"] = 3;\np\n',
         stdout="{a: {b: 3}}",
     )
-    check("dict key callable", 'let d = {"f": sqrt};\nd["f"](9)\n',
+    check("dict key callable", 'let d = {"f": std.math.sqrt};\nd["f"](9)\n',
           stdout="= 3.0")
     check("dict key missing", 'let p = {"x": 1};\np["y"]\n',
           stderr="key not found")
@@ -722,7 +722,7 @@ def run_cases():
     check("len empty list", "len([])\n", stdout="= 0")
     check("len dict", 'len({"a": 1, "b": 2})\n', stdout="= 2")
     check("len utf8 string", 'len("你好a")\n', stdout="= 3")
-    check("len bytes", 'len(bytes_from_hex("00ff"))\n', stdout="= 2")
+    check("len bytes", 'len(std.bytes.from_hex("00ff"))\n', stdout="= 2")
     check("len invalid type", "len(1)\n",
           stderr="len expects string, bytes, list, dict, deque, heap, or set")
     check(
@@ -743,7 +743,7 @@ def run_cases():
     )
     check(
         "for in bytes",
-        'for (let b in bytes_from_hex("00ff")) { println(b); }\n',
+        'for (let b in std.bytes.from_hex("00ff")) { println(b); }\n',
         stdout="0\n255\n",
     )
     check(
@@ -783,7 +783,7 @@ def run_cases():
     )
     check(
         "for in two variables requires dict bytes",
-        'for (let i, b in bytes_from_hex("00ff")) { println(b); }\n',
+        'for (let i, b in std.bytes.from_hex("00ff")) { println(b); }\n',
         stderr="two-variable for-in requires dict, got bytes",
     )
     check("for in duplicate loop variables",

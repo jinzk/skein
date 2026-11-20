@@ -91,8 +91,8 @@ func selected(name, only) {
   if (only == "") {
     return true;
   }
-  for part in split(only, ",") {
-    if (trim(part) == name) {
+  for part in std.string.split(only, ",") {
+    if (std.string.trim(part) == name) {
       return true;
     }
   }
@@ -106,7 +106,7 @@ func run({bin, repeats, check, max_ratio, only}) {
   let root = bench_common.script_root();
 
   let failures = [];
-  println(format("{:<12} {:>8} {:>8} {:>8}",
+  println(std.string.format("{:<12} {:>8} {:>8} {:>8}",
                  "benchmark", "AST", "VM", "ratio"));
   for bench in BENCHMARKS {
     let name = bench["name"];
@@ -125,7 +125,7 @@ func run({bin, repeats, check, max_ratio, only}) {
     if (ast > 0.0) {
       ratio = vm / ast;
     }
-    println(format("{:<12} {:>8.3f} {:>8.3f} {:>8.2f}",
+    println(std.string.format("{:<12} {:>8.3f} {:>8.3f} {:>8.2f}",
                    name, ast, vm, ratio));
 
     let limit = bench["limit"];
@@ -133,11 +133,11 @@ func run({bin, repeats, check, max_ratio, only}) {
       limit = max_ratio;
     }
     if (check && ratio > limit) {
-      failures = failures + [format(
+      failures = failures + [std.string.format(
           "{}: VM/AST ratio {:.2f} exceeds {:.2f}", name, ratio, limit)];
     }
     if (check && vm > 10.0) {
-      failures = failures + [format(
+      failures = failures + [std.string.format(
           "{}: VM took {:.2f}s (limit 10s)", name, vm)];
     }
   }

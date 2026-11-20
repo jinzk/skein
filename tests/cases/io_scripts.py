@@ -11,39 +11,39 @@ def run_cases():
         path = os.path.join(tmp, "io.txt")
         quoted = path.replace("\\", "\\\\").replace('"', '\\"')
         check("write and read file",
-              f'write_file("{quoted}", "hello");\nread_file("{quoted}")\n',
+              f'std.fs.write_file("{quoted}", "hello");\nstd.fs.read_file("{quoted}")\n',
               stdout="= hello")
         check("append file",
-              f'append_file("{quoted}", " world");\nread_file("{quoted}")\n',
+              f'std.fs.append_file("{quoted}", " world");\nstd.fs.read_file("{quoted}")\n',
               stdout="= hello world")
         check("write file truncates",
-              f'write_file("{quoted}", "reset");\nread_file("{quoted}")\n',
+              f'std.fs.write_file("{quoted}", "reset");\nstd.fs.read_file("{quoted}")\n',
               stdout="= reset")
-        check("file exists", f'file_exists("{quoted}")\n', stdout="= 1")
+        check("file exists", f'std.fs.exists("{quoted}")\n', stdout="= 1")
         check("file does not exist",
-              f'file_exists("{quoted}.missing")\n', stdout="= 0")
-        check("read missing file", f'read_file("{quoted}.missing")\n',
+              f'std.fs.exists("{quoted}.missing")\n', stdout="= 0")
+        check("read missing file", f'std.fs.read_file("{quoted}.missing")\n',
               stderr="read_file:")
         missing_dir = os.path.join(tmp, "missing", "file.txt")
         quoted_missing = missing_dir.replace("\\", "\\\\")
         check("write missing directory",
-              f'write_file("{quoted_missing}", "x")\n',
+              f'std.fs.write_file("{quoted_missing}", "x")\n',
               stderr="write_file:")
 
         empty = os.path.join(tmp, "empty.txt")
         quoted_empty = empty.replace("\\", "\\\\")
         check("empty file",
-              f'write_file("{quoted_empty}", "");\nread_file("{quoted_empty}")\n',
+              f'std.fs.write_file("{quoted_empty}", "");\nstd.fs.read_file("{quoted_empty}")\n',
               stdout="= ")
 
         nul_file = os.path.join(tmp, "nul.bin")
         with open(nul_file, "wb") as f:
             f.write(b"a\0b")
         quoted_nul = nul_file.replace("\\", "\\\\")
-        check("read file with NUL", f'read_file("{quoted_nul}")\n',
+        check("read file with NUL", f'std.fs.read_file("{quoted_nul}")\n',
               stderr="contains NUL byte")
         check("read_bytes keeps NUL",
-              f'bytes_hex(read_bytes("{quoted_nul}"))\n',
+              f'std.bytes.hex(std.fs.read_bytes("{quoted_nul}"))\n',
               stdout="= 610062")
 
         text_path = os.path.join(tmp, "text-encoding.txt")
@@ -52,7 +52,7 @@ def run_cases():
             "std.fs read_text/write_text gbk",
             "import std;\n"
             f'std.fs.write_text("{quoted_text}", "中国", "gbk");\n'
-            f'print(bytes_hex(std.fs.read_bytes("{quoted_text}")));\n'
+            f'print(std.bytes.hex(std.fs.read_bytes("{quoted_text}")));\n'
             f'print(std.fs.read_text("{quoted_text}", "gbk"));\n',
             stdout_all=["d6d0b9fa", "中国"],
         )
@@ -60,7 +60,7 @@ def run_cases():
             "std.fs read_text/write_text utf16",
             "import std;\n"
             f'std.fs.write_text("{quoted_text}", "中", "utf-16");\n'
-            f'print(bytes_hex(std.fs.read_bytes("{quoted_text}")));\n'
+            f'print(std.bytes.hex(std.fs.read_bytes("{quoted_text}")));\n'
             f'print(std.fs.read_text("{quoted_text}", "utf-16"));\n',
             stdout_all=["fffe2d4e", "中"],
         )
@@ -68,7 +68,7 @@ def run_cases():
             "std.fs write_text errors replace",
             "import std;\n"
             f'std.fs.write_text("{quoted_text}", "é", "ascii", "replace");\n'
-            f'bytes_hex(std.fs.read_bytes("{quoted_text}"))\n',
+            f'std.bytes.hex(std.fs.read_bytes("{quoted_text}"))\n',
             stdout="= 3f",
         )
         invalid_text = os.path.join(tmp, "invalid-text.bin")
@@ -115,39 +115,39 @@ def run_cases():
         binary_file = os.path.join(tmp, "binary.bin")
         quoted_binary = binary_file.replace("\\", "\\\\")
         check("write and read bytes",
-              f'write_bytes("{quoted_binary}", bytes_from_hex("00ff10"));\n'
-              f'bytes_hex(read_bytes("{quoted_binary}"))\n',
+              f'std.fs.write_bytes("{quoted_binary}", std.bytes.from_hex("00ff10"));\n'
+              f'std.bytes.hex(std.fs.read_bytes("{quoted_binary}"))\n',
               stdout="= 00ff10")
         check("append bytes",
-              f'append_bytes("{quoted_binary}", bytes_from_hex("20"));\n'
-              f'bytes_hex(read_bytes("{quoted_binary}"))\n',
+              f'std.fs.append_bytes("{quoted_binary}", std.bytes.from_hex("20"));\n'
+              f'std.bytes.hex(std.fs.read_bytes("{quoted_binary}"))\n',
               stdout="= 00ff1020")
         check("read missing bytes",
-              f'read_bytes("{quoted_binary}.missing")\n',
+              f'std.fs.read_bytes("{quoted_binary}.missing")\n',
               stderr="read_bytes:")
         check(
             "file handle binary seek/write",
-            f'let h = file_open("{quoted_binary}", "w+b");\n'
-            f'file_write_bytes(h, bytes_from_hex("01020304"));\n'
-            f'file_seek(h, 1);\n'
-            f'file_write_bytes(h, bytes_from_hex("ff"));\n'
-            f'file_close(h);\n'
-            f'bytes_hex(read_bytes("{quoted_binary}"))\n',
+            f'let h = std.fs.open("{quoted_binary}", "w+b");\n'
+            f'std.fs.file_write_bytes(h, std.bytes.from_hex("01020304"));\n'
+            f'std.fs.seek(h, 1);\n'
+            f'std.fs.file_write_bytes(h, std.bytes.from_hex("ff"));\n'
+            f'std.fs.close(h);\n'
+            f'std.bytes.hex(std.fs.read_bytes("{quoted_binary}"))\n',
             stdout="= 01ff0304",
         )
         check(
             "file handle read bytes",
-            f'let h = file_open("{quoted_binary}", "rb");\n'
-            f'bytes_hex(file_read_bytes(h, 2));\n'
-            f'file_tell(h);\n'
-            f'bytes_hex(file_read_bytes(h));\n'
-            f'file_close(h);\n',
+            f'let h = std.fs.open("{quoted_binary}", "rb");\n'
+            f'std.bytes.hex(std.fs.file_read_bytes(h, 2));\n'
+            f'std.fs.tell(h);\n'
+            f'std.bytes.hex(std.fs.file_read_bytes(h));\n'
+            f'std.fs.close(h);\n',
             stdout_all=["= 01ff", "= 2", "= 0304"],
         )
         check(
             "file handle read bytes keeps NUL",
-            f'let h = file_open("{quoted_nul}", "rb");\n'
-            f'bytes_hex(file_read_bytes(h))\n',
+            f'let h = std.fs.open("{quoted_nul}", "rb");\n'
+            f'std.bytes.hex(std.fs.file_read_bytes(h))\n',
             stdout="= 610062",
         )
         stream_path = os.path.join(tmp, "stream.bin")
@@ -164,14 +164,14 @@ def run_cases():
             f'std.io.write_all(f, "hello\\nworld\\n")\n'
             f'std.io.flush(f)\n'
             f'std.fs.seek(f, 0, 0)\n'
-            f'bytes_to_string(std.io.read(f, 5))\n'
+            f'std.bytes.to_string(std.io.read(f, 5))\n'
             f'std.fs.seek(f, 6, 0)\n'
-            f'bytes_to_string(std.io.read_line(f))\n'
+            f'std.bytes.to_string(std.io.read_line(f))\n'
             f'std.fs.seek(f, 0, 0)\n'
             f'len(std.io.read_all(f, 100))\n'
             f'std.io.eof(f)\n'
             f'std.fs.seek(f, 0, 0)\n'
-            f'bytes_to_string(std.io.read_exact(f, 5))\n'
+            f'std.bytes.to_string(std.io.read_exact(f, 5))\n'
             f'std.io.close(f)\n'
             f'std.io.close(f)\n',
             stdout_all=[
@@ -199,7 +199,7 @@ def run_cases():
             f'std.io.close(dst)\n'
             f'std.io.close(src)\n'
             f'let check = std.fs.open("{quoted_stream_copy}", "rb");\n'
-            f'bytes_to_string(std.io.read_all(check, 100)) == "hello\\nworld\\n"\n'
+            f'std.bytes.to_string(std.io.read_all(check, 100)) == "hello\\nworld\\n"\n'
             f'std.io.close(check)\n',
             stdout_all=["= 12", "= true", "= true", "= true", "= true"],
         )
@@ -208,12 +208,12 @@ def run_cases():
             f'import std;\n'
             f'let f = std.fs.open("{quoted_stream}", "rb");\n'
             f'let r = std.io.buffered(f, 4);\n'
-            f'bytes_hex(std.io.read(r, 2))\n'
-            f'bytes_hex(std.io.read(r, 2))\n'
-            f'bytes_hex(std.io.read(r, 2))\n'
-            f'bytes_hex(std.io.read(r, 2))\n'
-            f'bytes_hex(std.io.read(r, 2))\n'
-            f'bytes_hex(std.io.read(r, 2))\n'
+            f'std.bytes.hex(std.io.read(r, 2))\n'
+            f'std.bytes.hex(std.io.read(r, 2))\n'
+            f'std.bytes.hex(std.io.read(r, 2))\n'
+            f'std.bytes.hex(std.io.read(r, 2))\n'
+            f'std.bytes.hex(std.io.read(r, 2))\n'
+            f'std.bytes.hex(std.io.read(r, 2))\n'
             f'std.io.read(r, 2) == null\n'
             f'std.io.eof(r)\n'
             f'std.io.close(r)\n',
@@ -230,7 +230,7 @@ def run_cases():
             f'std.io.write_all(w, "buffered data")\n'
             f'std.io.close(w)\n'
             f'let check = std.fs.open("{quoted_stream_copy}", "rb");\n'
-            f'bytes_to_string(std.io.read_all(check, 100))\n'
+            f'std.bytes.to_string(std.io.read_all(check, 100))\n'
             f'std.io.close(check)\n',
             stdout_all=["= 13", "= true", "= buffered data", "= true"],
         )
@@ -241,7 +241,7 @@ def run_cases():
             f'std.io.tell(f)\n'
             f'std.io.seek(f, 6, 0)\n'
             f'std.io.tell(f)\n'
-            f'bytes_to_string(std.io.read_exact(f, 1))\n'
+            f'std.bytes.to_string(std.io.read_exact(f, 1))\n'
             f'std.io.seek(f, 0, 0)\n'
             f'std.io.tell(f)\n'
             f'std.io.close(f)\n',
@@ -253,11 +253,11 @@ def run_cases():
             f'let f = std.fs.open("{quoted_stream}", "rb");\n'
             f'let b = std.io.buffered(f, 4);\n'
             f'std.io.tell(b)\n'
-            f'bytes_to_string(std.io.read(b, 2))\n'
+            f'std.bytes.to_string(std.io.read(b, 2))\n'
             f'std.io.tell(b)\n'
             f'std.io.seek(b, 6, 0)\n'
             f'std.io.tell(b)\n'
-            f'bytes_to_string(std.io.read_exact(b, 1))\n'
+            f'std.bytes.to_string(std.io.read_exact(b, 1))\n'
             f'std.io.close(b)\n',
             stdout_all=["= 0", "= he", "= 2", "= 6", "= 6", "= w", "= true"],
         )
@@ -268,7 +268,7 @@ def run_cases():
             f'std.io.write_task(w, "file async data").wait()\n'
             f'std.io.close(w)\n'
             f'let r = std.fs.open("{quoted_stream_copy}", "rb");\n'
-            f'bytes_to_string(std.io.read_task(r, 4).wait())\n'
+            f'std.bytes.to_string(std.io.read_task(r, 4).wait())\n'
             f'len(std.io.read_task(r, 100).wait())\n'
             f'std.io.read_task(r, 100).wait() == null\n'
             f'std.io.eof(r)\n'
@@ -291,64 +291,64 @@ def run_cases():
             "import std;\nstd.io.read(42, 10)\n",
             stderr="std.io.read expects a stream",
         )
-        check("file_read_bytes arity", "file_read_bytes()\n",
+        check("file_read_bytes arity", "std.fs.file_read_bytes()\n",
               stderr="file_read_bytes expects 1 or 2 arguments")
-        check("file_read_bytes type", "file_read_bytes(1)\n",
+        check("file_read_bytes type", "std.fs.file_read_bytes(1)\n",
               stderr="file_read_bytes expects a file")
         check("file_write_bytes type",
-              f'let h = file_open("{quoted_binary}", "wb");\n'
-              f'file_write_bytes(h, "x")\n',
+              f'let h = std.fs.open("{quoted_binary}", "wb");\n'
+              f'std.fs.file_write_bytes(h, "x")\n',
               stderr="file_write_bytes expects bytes data")
 
         handle_path = os.path.join(tmp, "handle.txt")
         quoted_handle = handle_path.replace("\\", "\\\\")
         check(
             "file handle write/seek/read/tell",
-            f'let h = file_open("{quoted_handle}", "w+");\n'
-            f'file_write(h, "hello world");\n'
-            f'file_seek(h, 0);\n'
-            f'file_read(h, 5);\n'
-            f'file_tell(h);\n'
-            f'file_close(h);\n',
+            f'let h = std.fs.open("{quoted_handle}", "w+");\n'
+            f'std.fs.write(h, "hello world");\n'
+            f'std.fs.seek(h, 0);\n'
+            f'std.fs.read(h, 5);\n'
+            f'std.fs.tell(h);\n'
+            f'std.fs.close(h);\n',
             stdout_all=["= hello", "= 5"],
         )
         check(
             "file handle read all and eof",
-            f'let h = file_open("{quoted_handle}", "r");\n'
-            f'file_read(h);\n'
-            f'file_eof(h);\n'
-            f'file_close(h);\n',
+            f'let h = std.fs.open("{quoted_handle}", "r");\n'
+            f'std.fs.read(h);\n'
+            f'std.fs.eof(h);\n'
+            f'std.fs.close(h);\n',
             stdout_all=["= hello world", "= 1"],
         )
         check(
             "file handle seek from end",
-            f'let h = file_open("{quoted_handle}", "r");\n'
-            f'file_seek(h, -1, 2);\n'
-            f'file_read(h, 1)\n',
+            f'let h = std.fs.open("{quoted_handle}", "r");\n'
+            f'std.fs.seek(h, -1, 2);\n'
+            f'std.fs.read(h, 1)\n',
             stdout="= d",
         )
         check(
             "file handle NUL",
-            f'let h = file_open("{quoted_nul}", "r");\n'
-            f'file_read(h)\n',
+            f'let h = std.fs.open("{quoted_nul}", "r");\n'
+            f'std.fs.read(h)\n',
             stderr="contains NUL byte",
         )
         check(
             "file handle close and copy",
-            f'let h = file_open("{quoted_handle}", "r");\n'
+            f'let h = std.fs.open("{quoted_handle}", "r");\n'
             f'let g = h;\n'
-            f'file_close(h);\n'
-            f'file_read(g, 1)\n',
+            f'std.fs.close(h);\n'
+            f'std.fs.read(g, 1)\n',
             stderr="file is closed",
         )
         check(
             "file handle factory",
             f'func open_file(path, mode) {{\n'
-            f'  let h = file_open(path, mode);\n'
-            f'  func read(n) {{ return file_read(h, n); }}\n'
-            f'  func write(s) {{ return file_write(h, s); }}\n'
-            f'  func seek(n) {{ return file_seek(h, n); }}\n'
-            f'  func close() {{ return file_close(h); }}\n'
+            f'  let h = std.fs.open(path, mode);\n'
+            f'  func read(n) {{ return std.fs.read(h, n); }}\n'
+            f'  func write(s) {{ return std.fs.write(h, s); }}\n'
+            f'  func seek(n) {{ return std.fs.seek(h, n); }}\n'
+            f'  func close() {{ return std.fs.close(h); }}\n'
             f'  return {{"read": read, "write": write, '
             f'"seek": seek, "close": close}};\n'
             f'}}\n'
@@ -359,25 +359,25 @@ def run_cases():
             f'f["close"]();\n',
             stdout="= abc",
         )
-        check("file_open invalid mode", 'file_open("x", "bad")\n',
+        check("file_open invalid mode", 'std.fs.open("x", "bad")\n',
               stderr="invalid file mode")
-        check("file_open arity", 'file_open("x")\n',
+        check("file_open arity", 'std.fs.open("x")\n',
               stderr="file_open expects 2 arguments")
-        check("file_read arity", "file_read()\n",
+        check("file_read arity", "std.fs.read()\n",
               stderr="file_read expects 1 or 2 arguments")
-        check("file_write arity", 'file_write("x")\n',
+        check("file_write arity", 'std.fs.write("x")\n',
               stderr="file_write expects 2 arguments")
-        check("file_seek arity", "file_seek(1)\n",
+        check("file_seek arity", "std.fs.seek(1)\n",
               stderr="file_seek expects 2 or 3 arguments")
-        check("file_read type", "file_read(1)\n",
+        check("file_read type", "std.fs.read(1)\n",
               stderr="file_read expects a file")
         check("file_read size type",
-              f'let h = file_open("{quoted_handle}", "r");\n'
-              f'file_read(h, "x")\n',
+              f'let h = std.fs.open("{quoted_handle}", "r");\n'
+              f'std.fs.read(h, "x")\n',
               stderr="file_read size must be a non-negative integer")
         check("file_seek whence type",
-              f'let h = file_open("{quoted_handle}", "r");\n'
-              f'file_seek(h, 0, "x")\n',
+              f'let h = std.fs.open("{quoted_handle}", "r");\n'
+              f'std.fs.seek(h, 0, "x")\n',
               stderr="file_seek whence must be an integer")
 
     proc = run("func bad() { 1/0; }\nbad() + 1\n")
@@ -410,34 +410,34 @@ def run_cases():
     check("int conversion from int64 string",
           'int("9223372036854775807")\n', stdout="= 9223372036854775807")
 
-    check("format basic", 'format("x = {}", 3)\n', stdout="= x = 3")
-    check("format multiple", 'format("{} + {} = {}", 1, 2, 3)\n',
+    check("format basic", 'std.string.format("x = {}", 3)\n', stdout="= x = 3")
+    check("format multiple", 'std.string.format("{} + {} = {}", 1, 2, 3)\n',
           stdout="= 1 + 2 = 3")
-    check("format positional", 'format("{1} {0}", "a", "b")\n',
+    check("format positional", 'std.string.format("{1} {0}", "a", "b")\n',
           stdout="= b a")
-    check("format escaped braces", 'format("{{}} = {}", 1)\n',
+    check("format escaped braces", 'std.string.format("{{}} = {}", 1)\n',
           stdout="= {} = 1")
-    check("format float precision", 'format("{:.2f}", 1.5)\n',
+    check("format float precision", 'std.string.format("{:.2f}", 1.5)\n',
           stdout="= 1.50")
-    check("format integer type", 'format("{:d}", 42)\n', stdout="= 42")
-    check("format hex", 'format("{:x} {:X}", 255, 255)\n', stdout="= ff FF")
-    check("format width", 'format("[{:>6}]", "hi")\n', stdout="= [    hi]")
-    check("format center", 'format("[{:*^8}]", "hi")\n', stdout="= [***hi***]")
-    check("format zero padding", 'format("{:08}", -42)\n', stdout="= -0000042")
-    check("format utf8 width", 'format("[{:4}]", "你")\n', stdout="= [你   ]")
-    check("format utf8 precision", 'format("{:.2s}", "你好ab")\n',
+    check("format integer type", 'std.string.format("{:d}", 42)\n', stdout="= 42")
+    check("format hex", 'std.string.format("{:x} {:X}", 255, 255)\n', stdout="= ff FF")
+    check("format width", 'std.string.format("[{:>6}]", "hi")\n', stdout="= [    hi]")
+    check("format center", 'std.string.format("[{:*^8}]", "hi")\n', stdout="= [***hi***]")
+    check("format zero padding", 'std.string.format("{:08}", -42)\n', stdout="= -0000042")
+    check("format utf8 width", 'std.string.format("[{:4}]", "你")\n', stdout="= [你   ]")
+    check("format utf8 precision", 'std.string.format("{:.2s}", "你好ab")\n',
           stdout="= 你好")
-    check("format extra args ignored", 'format("{}", 1, 2)\n', stdout="= 1")
-    check("format too few args", 'format("{} {}", 1)\n',
+    check("format extra args ignored", 'std.string.format("{}", 1, 2)\n', stdout="= 1")
+    check("format too few args", 'std.string.format("{} {}", 1)\n',
           stderr="out of range")
-    check("format mixed numbering", 'format("{} {0}", 1)\n',
+    check("format mixed numbering", 'std.string.format("{} {0}", 1)\n',
           stderr="cannot mix")
-    check("format unmatched brace", 'format("{")\n', stderr="unmatched")
-    check("format unknown type", 'format("{:q}", 1)\n',
+    check("format unmatched brace", 'std.string.format("{")\n', stderr="unmatched")
+    check("format unknown type", 'std.string.format("{:q}", 1)\n',
           stderr="unknown format type")
-    check("format type mismatch", 'format("{:d}", "x")\n',
+    check("format type mismatch", 'std.string.format("{:d}", "x")\n',
           stderr="requires an integer")
-    check("format precision requires type", 'format("{:.2}", 1.5)\n',
+    check("format precision requires type", 'std.string.format("{:.2}", 1.5)\n',
           stderr="precision requires")
     check("print formatting", 'print("x = {}", 3)\n', stdout="x = 3")
     check("print raw single argument", 'print("{{}}")\n', stdout="{{}}")
@@ -459,7 +459,7 @@ def run_cases():
           stderr="first argument must be a string")
     check("std.io println", 'import std;\nstd.io.println("io")\n',
           stdout="io\n")
-    check("builtin arity", "sqrt(4,9)\n", stderr="expects 1 argument")
+    check("builtin arity", "std.math.sqrt(4,9)\n", stderr="expects 1 argument")
     check("return outside", "return 5;\n", stderr="return outside function")
     check("break outside", "break;\n", stderr="break outside loop")
     check("mystery character", "1 ` 2\n",

@@ -41,7 +41,7 @@ package import export as
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
-内置函数名也会被词法器识别为函数值，因此不能用作普通变量名，例如 `sqrt`、`print`、`println`、`read_file`。
+核心内置函数名（`print`、`println`、`len`、`range`、`input`、`list`、`dict` 和类型转换名等）由词法器识别为函数值，不能用作普通变量名。`std.*` 中的函数是普通模块成员，不是保留字。
 
 ### 1.3 注释
 
@@ -142,7 +142,7 @@ package import export as
 - 字符串下标和 `for ... in` 字符串返回 `char`；
 - `char` 可以与 `string` 拼接，例如 `'a' + "bc"`；
 - `int(char)` 得到码点，`str(char)` 得到单字符字符串，`char(int)` / `char(string)` 构造字符；
-- `bytes_from_char(c)` 得到 UTF-8 字节，`char_from_bytes(b)` / `char(b)` 从恰好一个 UTF-8 字符还原；
+- `std.bytes.from_char(c)` 得到 UTF-8 字节，`std.bytes.to_char(b)` / `char(b)` 从恰好一个 UTF-8 字符还原；
 - JSON 编码为单字符字符串。
 
 ### 2.5 字节值 byte
@@ -161,7 +161,7 @@ byte(255)
 - `byte(int)` 超出范围报错；
 - `byte` 可以作 dict key、`switch` 值；
 - JSON 编码为整数；
-- `bytes[i]` / `bytes_get` 仍返回 `int`，需要时用 `byte(int)` 转换。
+- `bytes[i]` / `std.bytes.get` 仍返回 `int`，需要时用 `byte(int)` 转换。
 
 ### 2.6 null
 
@@ -230,9 +230,9 @@ int / bool / string / char / byte / bytes / null
 `bytes` 没有字面量，通过内置函数创建：
 
 ```text
-bytes_from_string("abc")
-bytes_from_hex("00ff10")
-read_bytes("data.bin")
+std.bytes.from_string("abc")
+std.bytes.from_hex("00ff10")
+std.fs.read_bytes("data.bin")
 ```
 
 `bytes` 可以包含任意字节，包括 `0x00`。
@@ -415,7 +415,7 @@ let xs = [0, 1, 2, 3, 4];
 xs[1:4]       // [1, 2, 3]
 xs[::-1]      // [4, 3, 2, 1, 0]
 "你好世界"[1:3] // "好世"
-bytes_from_string("abcd")[1:3] // 两个字节 "bc"
+std.bytes.from_string("abcd")[1:3] // 两个字节 "bc"
 ```
 
 ### 4.7 函数调用
@@ -607,7 +607,7 @@ a[0]++;
 let d = {"n": 1};
 d["n"]++;
 
-let b = bytes_from_hex("00ff");
+let b = std.bytes.from_hex("00ff");
 b[1]--;
 ```
 
@@ -956,7 +956,7 @@ struct Handler {
   ```
 
 - 参数按逆变、返回值按协变比较；`any` 仍然作为渐进边界；
-- 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名，例如 `let f: (number) -> number = sqrt;` 可以直接通过；
+- 常见 math / string / bytes / 转换 / 文件 builtin 已有函数签名，例如 `import std; let f: (number) -> number = std.math.sqrt;` 可以直接通过；
 - 可变参数 builtin 仍退化为 `callable`，部分带可选参数的容器 builtin 保留末尾可选参数信息；
 - 静态检查会拒绝多传参数：
 
@@ -1367,8 +1367,8 @@ switch (x) {
 示例：
 
 ```text
-switch (bytes_from_hex("00ff")) {
-  case bytes_from_hex("00ff") => print("bytes match");
+switch (std.bytes.from_hex("00ff")) {
+  case std.bytes.from_hex("00ff") => print("bytes match");
 }
 
 switch (null) {
@@ -1666,11 +1666,13 @@ list dict deque heap set function builtin callable null userdata result error ta
 示例：
 
 ```text
+import std;
+
 func apply(fn: callable, x: int) {
   return fn(x);
 }
 
-apply(sqrt, 16)
+apply(std.math.sqrt, 16)
 ```
 
 默认参数：
@@ -1792,7 +1794,7 @@ sum(1, 2, 3)    // 6
 - 没有额外参数时是 `[]`；
 - 类型标注作用于每个额外参数；
 - 固定参数不足会报错；
-- 方法中 `self` 仍是第一个固定参数，例如 `func log(self, ...items)`；
+- 方法中 `self` 仍是第一个固定参数，例如 `func std.math.log(self, ...items)`；
 - trait 方法暂不支持可变参数。
 
 调用点展开：
@@ -1891,7 +1893,7 @@ struct Point {
 
 impl Point {
   func length(self) {
-    return sqrt(self.x * self.x + self.y * self.y);
+    return std.math.sqrt(self.x * self.x + self.y * self.y);
   }
 
   func moved(self, dx: int, dy: int) {
@@ -2526,7 +2528,7 @@ std.time.format(0, "%Y-%m-%d", true)
 std.random.uuid()
 std.env.get("HOME")
 std.crypto.sha256("abc")
-std.compress.gzip(bytes_from_string("x"))
+std.compress.gzip(std.bytes.from_string("x"))
 std.process.command_status("true")
 std.type.name(1)
 std.net.resolve("localhost")
@@ -2571,8 +2573,8 @@ std.string.starts_with("hello", "he")
 std.string.contains("hello", "ell")
 std.string.repeat("ab", 2)
 std.string.trim_start("  x")
-std.bytes.hex(bytes_from_hex("00ff"))
-std.encoding.decode(bytes_from_hex("d6d0"), "gbk")
+std.bytes.hex(std.bytes.from_hex("00ff"))
+std.encoding.decode(std.bytes.from_hex("d6d0"), "gbk")
 std.encoding.encode("中国", "gbk")
 std.encoding.supports("gb18030")
 std.unicode.normalize("é", "nfc")
@@ -2647,12 +2649,12 @@ std.encoding.supports(encoding)                 → bool
 ```text
 import std;
 
-let s = std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk");
+let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
 print(s);                                      // 中国
 
-bytes_hex(std.encoding.encode("中国", "gbk"))  // d6d0b9fa
-bytes_hex(std.encoding.encode("€", "gbk"))     // 80
-bytes_hex(std.encoding.encode("€", "gb18030")) // a2e3
+std.bytes.hex(std.encoding.encode("中国", "gbk"))  // d6d0b9fa
+std.bytes.hex(std.encoding.encode("€", "gbk"))     // 80
+std.bytes.hex(std.encoding.encode("€", "gb18030")) // a2e3
 ```
 
 Unicode 归一化：
@@ -2669,9 +2671,9 @@ std.unicode.version()                  → string
 ```text
 import std;
 
-let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");
+let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");
 let composed = std.unicode.normalize(decomposed, "nfc");
-bytes_hex(std.encoding.encode(composed, "utf-8"))  // c3a9
+std.bytes.hex(std.encoding.encode(composed, "utf-8"))  // c3a9
 
 std.unicode.is_normalized(decomposed, "nfc")       // false
 std.unicode.is_normalized(composed, "nfc")         // true
@@ -2788,7 +2790,7 @@ import std;
 let p = std.process.spawn_command("/bin/cat");
 std.io.write_all(p["stdin"], "hello");
 std.io.close(p["stdin"]);
-bytes_to_string(std.io.read(p["stdout"], 4096))
+std.bytes.to_string(std.io.read(p["stdout"], 4096))
 std.process.wait(p)
 std.process.close(p)
 ```
@@ -2813,19 +2815,19 @@ worker 脚本使用 JSON Lines 协议，并先发送 ready 帧：
 import std;
 
 std.io.write_all(std.io.stdout,
-                 bytes_from_string("{\"ready\":true,\"version\":1}\n"));
+                 std.bytes.from_string("{\"ready\":true,\"version\":1}\n"));
 std.io.flush(std.io.stdout);
 
 while (true) {
   let line = std.io.read_line(std.io.stdin);
   if (line == null) { break; }
 
-  let request = std.json.parse(bytes_to_string(line));
+  let request = std.json.parse(std.bytes.to_string(line));
   let result = request["params"][0] + request["params"][1];
   let response = {"id": request["id"], "ok": true, "result": result};
 
   std.io.write_all(std.io.stdout,
-                   bytes_from_string(std.json.stringify(response) + "\n"));
+                   std.bytes.from_string(std.json.stringify(response) + "\n"));
   std.io.flush(std.io.stdout);
 }
 ```
@@ -2979,8 +2981,8 @@ std.io.write_task(stream, data[, timeout_ms])
 
 新增模块说明：
 
-- `std.math`：数学函数，和全局 `sqrt`、`sin`、`min` 等共用实现；
-- `std.io`：`print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
+- `std.math`：数学函数与常量；
+- `std.io`：`print`、`println`、`input`、`std.string.format` 的镜像，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs`：文件读写和文件句柄操作；
 - `std.process`：命令执行、`command_status` / `run_command` / `spawn_command`；
 - `std.worker`：JSON Lines 进程池；
@@ -3005,7 +3007,7 @@ import std;
 let s = std.net.tcp_connect("127.0.0.1", 8080);
 std.net.send(s, "hello");
 let data = std.net.recv(s, 4096);
-print(bytes_to_string(data));
+print(std.bytes.to_string(data));
 std.net.close(s);
 ```
 
@@ -3137,7 +3139,7 @@ let r = std.http.get("http://127.0.0.1:8080/api");
 
 r["status"]
 r["headers"]["content-type"]
-bytes_to_string(r["body"])
+std.bytes.to_string(r["body"])
 ```
 
 带 headers / timeout：
@@ -3220,7 +3222,7 @@ let r = std.http.get(url, {
 
 if (r["upgraded"]) {
   std.io.write_all(r["socket"], "hello");
-  bytes_to_string(std.io.read(r["socket"], 4096));
+  std.bytes.to_string(std.io.read(r["socket"], 4096));
   std.io.close(r["socket"]);
 }
 ```
@@ -3232,7 +3234,7 @@ let req = std.http.accept(s, 5000);
 let stream = std.http.upgrade(req, {"X-Test": "yes"});
 
 std.io.write_all(stream, "hello");
-bytes_to_string(std.io.read(stream, 4096));
+std.bytes.to_string(std.io.read(stream, 4096));
 std.io.close(stream);
 ```
 
@@ -3363,7 +3365,7 @@ let sent = std.http.post(url, {"body_stream": parts()});
 
 let received = std.http.get(url, {
   "on_body": func(chunk) {
-    print(bytes_to_string(chunk));
+    print(std.bytes.to_string(chunk));
   }
 });
 ```
@@ -3398,7 +3400,7 @@ let served = std.http.serve(s, func(req) {
 ```text
 let s = std.http.listen("127.0.0.1", 8080);
 s["on_request_body"] = func(chunk) {
-  print(bytes_to_string(chunk));
+  print(std.bytes.to_string(chunk));
 };
 ```
 
@@ -3417,7 +3419,7 @@ let served = std.http.serve(s, func(req) {
   let body = "";
   let chunk = std.http.read_body(req);
   while (chunk != null) {
-    body = body + bytes_to_string(chunk);
+    body = body + std.bytes.to_string(chunk);
     chunk = std.http.read_body(req);
   }
   return {"status": 200, "body": body};
@@ -3524,7 +3526,7 @@ host_only
 
 ```text
 let r = std.http.get(url, {"decompress": true});
-print(bytes_to_string(r["body"]));
+print(std.bytes.to_string(r["body"]));
 ```
 
 - `decompress` 默认 `false`；
@@ -3593,7 +3595,7 @@ let a = std.http2.get("https://example.com/", {
 });
 
 print(str(a["status"]) + " " + a["protocol"]);
-print(bytes_to_string(a["body"]));
+print(std.bytes.to_string(a["body"]));
 
 let b = std.http2.post("https://example.com/echo", "payload");
 let c = std.http2.get_task("https://example.com/async").wait();
@@ -3722,7 +3724,7 @@ let tls = std.tls.client(socket, "example.com", {
 });
 
 std.io.write_all(tls, "hello");
-bytes_to_string(std.io.read(tls, 4096));
+std.bytes.to_string(std.io.read(tls, 4096));
 std.io.close(tls);
 ```
 
@@ -4008,8 +4010,8 @@ defer：
 
 ```text
 func work() {
-  let h = file_open("x");
-  defer file_close(h);
+  let h = std.fs.open("x");
+  defer std.fs.close(h);
   ...
 }
 ```
@@ -4783,13 +4785,37 @@ POSIX 使用 `:`，Windows 使用 `;`。
 
 ## 7. 内置函数
 
+全局内置函数（无需 `import`）：
+
+```text
+len range print println input
+list dict int float bool str char byte
+kind_of type_name type_package type_module_name type_source
+```
+
+`list` / `dict` / `int` / `float` / `bool` / `str` / `char` / `byte` 同时是类型名和转换函数。
+
+数学、字符串、格式化、文件与 bytes 函数位于标准库命名空间，使用前需要 `import std;`：
+
+```text
+std.math.*       数学函数与常量
+std.string.*     字符串与格式化
+std.fs.*         文件与 bytes I/O
+std.bytes.*      bytes 操作
+```
+
 ### 数学
 
 ```text
-sqrt exp log abs sin cos tan asin acos atan atan2
-pow floor ceil round trunc log2 log10 hypot min max
-sign clamp fmod mod is_nan is_inf is_finite cbrt
-gcd lcm degrees radians
+std.math.sqrt std.math.exp std.math.log std.math.abs
+std.math.sin std.math.cos std.math.tan
+std.math.asin std.math.acos std.math.atan std.math.atan2
+std.math.pow std.math.floor std.math.ceil std.math.round std.math.trunc
+std.math.log2 std.math.log10 std.math.hypot
+std.math.min std.math.max std.math.sign std.math.clamp
+std.math.fmod std.math.mod std.math.is_nan std.math.is_inf
+std.math.is_finite std.math.cbrt std.math.gcd std.math.lcm
+std.math.degrees std.math.radians
 ```
 
 常量：
@@ -4802,24 +4828,25 @@ std.math.tau    // 6.283185307179586
 
 规则：
 
-- `sqrt`、`exp`、`log`、三角函数、`pow`、`log2`、`log10`、`hypot` 返回 `float`；
-- `floor`、`ceil`、`round`、`trunc` 返回 `int`，超出整数范围会报错；
-- `round` 按远离零的方向处理半值，例如 `round(-1.5) == -2`；
-- `min` / `max` 至少需要一个数值参数；全为 `int` 时返回 `int`，否则返回 `float`；
-- `sqrt(-1)`、`log(0)`、`log2(0)`、`log10(<=0)` 返回 `nan`；
-- `sign(x)` 返回 `-1` / `0` / `1`；`sign(nan)` 返回 `nan`；
-- `clamp(x, lo, hi)` 要求 `lo <= hi`，全为 `int` 时返回 `int`，否则返回 `float`；
-- `fmod` 始终返回 `float`，`mod` 的结果符号跟随除数；
-- `is_nan` / `is_inf` / `is_finite` 返回 `bool`；
-- `gcd` / `lcm` 只接受整数并返回非负值，`lcm(0, x) == 0`；
-- `degrees` / `radians` 返回 `float`；
-- `atan2(y, x)` 返回 `atan(y / x)` 的角度；
+- `std.math.sqrt`、`std.math.exp`、`std.math.log`、三角函数、`std.math.pow`、`std.math.log2`、`std.math.log10`、`std.math.hypot` 返回 `float`；
+- `std.math.floor`、`std.math.ceil`、`std.math.round`、`std.math.trunc` 返回 `int`，超出整数范围会报错；
+- `std.math.round` 按远离零的方向处理半值，例如 `std.math.round(-1.5) == -2`；
+- `std.math.min` / `std.math.max` 至少需要一个数值参数；全为 `int` 时返回 `int`，否则返回 `float`；
+- `std.math.sqrt(-1)`、`std.math.log(0)`、`std.math.log2(0)`、`std.math.log10(<=0)` 返回 `nan`；
+- `std.math.sign(x)` 返回 `-1` / `0` / `1`；`std.math.sign(nan)` 返回 `nan`；
+- `std.math.clamp(x, lo, hi)` 要求 `lo <= hi`，全为 `int` 时返回 `int`，否则返回 `float`；
+- `std.math.fmod` 始终返回 `float`，`std.math.mod` 的结果符号跟随除数；
+- `std.math.is_nan` / `std.math.is_inf` / `std.math.is_finite` 返回 `bool`；
+- `std.math.gcd` / `std.math.lcm` 只接受整数并返回非负值，`std.math.lcm(0, x) == 0`；
+- `std.math.degrees` / `std.math.radians` 返回 `float`；
+- `std.math.atan2(y, x)` 返回 `std.math.atan(y / x)` 的角度；
 - 所有数学函数的参数必须是数值，不做隐式转换。
 
 ### 输出和转换
 
 ```text
-print println list dict int float bool str format len range
+print println list dict int float bool str char byte
+len range input
 kind_of type_name type_package type_module_name type_source
 ```
 
@@ -4831,6 +4858,8 @@ print("b");     // 输出 ab
 println("a");
 println("b");   // 输出 a\nb\n
 ```
+
+字符串格式化使用 `std.string.format`（需要 `import std;`）。
 
 ### 进程
 
@@ -4871,27 +4900,28 @@ std.worker.stats
 ### 文件
 
 ```text
-read_file write_file append_file file_exists
-file_open file_read file_write
-file_seek file_tell file_eof file_close file_flush
+std.fs.read_file std.fs.write_file std.fs.append_file std.fs.exists
+std.fs.open std.fs.read std.fs.write
+std.fs.seek std.fs.tell std.fs.eof std.fs.close std.fs.flush
 ```
 
 ### 控制台和字符串
 
 ```text
 input
-split split_ws trim find substr
+std.string.split std.string.split_ws std.string.trim
+std.string.find std.string.substr
 ```
 
 ### bytes
 
 ```text
-bytes_from_string bytes_to_string
-bytes_len bytes_get bytes_slice bytes_concat
-bytes_hex bytes_from_hex
-bytes_to_int int_to_bytes
-read_bytes write_bytes append_bytes
-file_read_bytes file_write_bytes
+std.bytes.from_string std.bytes.to_string
+std.bytes.len std.bytes.get std.bytes.slice std.bytes.concat
+std.bytes.hex std.bytes.from_hex
+std.bytes.to_int std.bytes.from_int
+std.fs.read_bytes std.fs.write_bytes std.fs.append_bytes
+std.fs.file_read_bytes std.fs.file_write_bytes
 ```
 
 ### 常用示例
@@ -4899,10 +4929,10 @@ file_read_bytes file_write_bytes
 ```text
 print("hello");
 print("x = {}", 3);
-let s = format("{:.2}", 1.234);
+let s = std.string.format("{:.2}", 1.234);
 let n = int("42");
-let b = read_bytes("data.bin");
-let h = file_open("data.bin", "rb");
+let b = std.fs.read_bytes("data.bin");
+let h = std.fs.open("data.bin", "rb");
 ```
 
 ### range

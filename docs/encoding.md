@@ -10,7 +10,7 @@
 ## 1. 背景与目标
 
 Skein 当前的 `string` 是 UTF-8 文本，二进制数据使用独立的 `bytes` 类型。
-现有的 `bytes_to_string` 只接受合法 UTF-8，并且拒绝 NUL 字节；这满足内部一致性，
+现有的 `std.bytes.to_string` 只接受合法 UTF-8，并且拒绝 NUL 字节；这满足内部一致性，
 但无法处理 GBK、GB18030 等常见中文编码。
 
 本方案新增 `std.encoding` 模块，提供显式的解码/编码能力：
@@ -22,7 +22,7 @@ Skein 当前的 `string` 是 UTF-8 文本，二进制数据使用独立的 `byte
 
 1. GBK 内置码表，跨平台行为一致，不依赖 iconv 或 Windows 代码页。
 2. GB18030 内置码表，跨平台行为一致。
-3. 不改变现有 `bytes_to_string` / `bytes_from_string` 的严格 UTF-8 语义。
+3. 不改变现有 `std.bytes.to_string` / `std.bytes.from_string` 的严格 UTF-8 语义。
 4. 对非法输入提供确定的错误处理策略。
 5. 不引入新的强制第三方依赖。
 
@@ -73,13 +73,13 @@ GBK 和 GB18030 都不依赖平台后端，因此 `std.encoding.supports("gbk")`
 
 ### 3.2 与现有 API 的关系
 
-- `bytes_to_string(bytes)` 保持严格 UTF-8，等价于：
+- `std.bytes.to_string(bytes)` 保持严格 UTF-8，等价于：
 
   ```text
   std.encoding.decode(bytes, "utf-8", "strict")
   ```
 
-- `bytes_from_string(string)` 保持现有行为。
+- `std.bytes.from_string(string)` 保持现有行为。
 - 首版已补充严格 UTF-8 的别名：
 
   ```text
@@ -90,7 +90,7 @@ GBK 和 GB18030 都不依赖平台后端，因此 `std.encoding.supports("gbk")`
   这两个别名只做严格 UTF-8，不参与 GBK / GB18030 转换。
 
 - GBK / GB18030 文本统一走 `std.encoding`。
-- 任意二进制仍然使用 `bytes`、`bytes_hex`，不进入 `string`。
+- 任意二进制仍然使用 `bytes`、`std.bytes.hex`，不进入 `string`。
 
 ## 4. 公开 API
 
@@ -152,16 +152,16 @@ GBK 是 GB2312 的超集，编码时可能生成 GB2312 范围外的字符。如
 ```text
 import std;
 
-let s = std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk");
+let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
 print(s);                                      // 中国
 
 let b = std.encoding.encode("中国", "gbk");
-print(bytes_hex(b));                           // d6d0b9fa
+print(std.bytes.hex(b));                           // d6d0b9fa
 
 print(std.encoding.supports("gbk"));           // 1 / true
 print(std.encoding.supports("gb18030"));       // 1 / true
 
-let e = std.encoding.decode(bytes_from_hex("ff"), "utf-8", "replace");
+let e = std.encoding.decode(std.bytes.from_hex("ff"), "utf-8", "replace");
 print(e);                                      // U+FFFD
 ```
 
@@ -657,9 +657,9 @@ U+10000    90 30 81 30
 check(
     "gbk roundtrip",
     'import std;\n'
-    'let s = std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk");\n'
+    'let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");\n'
     'print(s);\n'
-    'print(bytes_hex(std.encoding.encode(s, "gbk")));\n',
+    'print(std.bytes.hex(std.encoding.encode(s, "gbk")));\n',
     stdout_all=["= 中国", "= d6d0b9fa"],
 )
 ```
@@ -701,7 +701,7 @@ GB18030 用例类似，并测试 `std.encoding.supports("gb18030")`。
 - RLE 解码结果与未压缩规范表逐项一致。
 - 非法输入在 `strict` 下报错，在 `replace` / `ignore` 下行为确定。
 - 解码结果含 NUL 时始终报错。
-- `bytes_to_string` 行为不变。
+- `std.bytes.to_string` 行为不变。
 - 不新增强制第三方依赖。
 - Linux 与 MinGW 构建通过，现有测试无回归。
 - 文档与实现一致。

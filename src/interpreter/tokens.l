@@ -916,31 +916,11 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "true" { YYRET(SKEIN_TOK_TRUE); }
 "false" { YYRET(SKEIN_TOK_FALSE); }
 
-"sqrt" { yylval.fn = B_sqrt; YYRET(SKEIN_TOK_BUILTIN); }
-"exp" { yylval.fn = B_exp; YYRET(SKEIN_TOK_BUILTIN); }
-"log" { yylval.fn = B_log; YYRET(SKEIN_TOK_BUILTIN); }
-"abs" { yylval.fn = B_abs; YYRET(SKEIN_TOK_BUILTIN); }
-"sin" { yylval.fn = B_sin; YYRET(SKEIN_TOK_BUILTIN); }
-"cos" { yylval.fn = B_cos; YYRET(SKEIN_TOK_BUILTIN); }
-"tan" { yylval.fn = B_tan; YYRET(SKEIN_TOK_BUILTIN); }
-"asin" { yylval.fn = B_asin; YYRET(SKEIN_TOK_BUILTIN); }
-"acos" { yylval.fn = B_acos; YYRET(SKEIN_TOK_BUILTIN); }
-"atan" { yylval.fn = B_atan; YYRET(SKEIN_TOK_BUILTIN); }
-"atan2" { yylval.fn = B_atan2; YYRET(SKEIN_TOK_BUILTIN); }
-"pow" { yylval.fn = B_pow; YYRET(SKEIN_TOK_BUILTIN); }
-"floor" { yylval.fn = B_floor; YYRET(SKEIN_TOK_BUILTIN); }
-"ceil" { yylval.fn = B_ceil; YYRET(SKEIN_TOK_BUILTIN); }
-"round" { yylval.fn = B_round; YYRET(SKEIN_TOK_BUILTIN); }
-"trunc" { yylval.fn = B_trunc; YYRET(SKEIN_TOK_BUILTIN); }
-"log2" { yylval.fn = B_log2; YYRET(SKEIN_TOK_BUILTIN); }
-"log10" { yylval.fn = B_log10; YYRET(SKEIN_TOK_BUILTIN); }
-"hypot" { yylval.fn = B_hypot; YYRET(SKEIN_TOK_BUILTIN); }
-"min" { yylval.fn = B_min; YYRET(SKEIN_TOK_BUILTIN); }
-"max" { yylval.fn = B_max; YYRET(SKEIN_TOK_BUILTIN); }
 "len" { yylval.fn = B_len; YYRET(SKEIN_TOK_BUILTIN); }
 "range" { yylval.fn = B_range; YYRET(SKEIN_TOK_BUILTIN); }
 "print" { yylval.fn = B_print; YYRET(SKEIN_TOK_BUILTIN); }
 "println" { yylval.fn = B_println; YYRET(SKEIN_TOK_BUILTIN); }
+"input" { yylval.fn = B_input; YYRET(SKEIN_TOK_BUILTIN); }
 "list"/"." {
     int token = make_name_token("list", 4);
     if (token)
@@ -968,42 +948,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "type_package" { yylval.fn = B_type_package; YYRET(SKEIN_TOK_BUILTIN); }
 "type_module_name" { yylval.fn = B_type_module_name; YYRET(SKEIN_TOK_BUILTIN); }
 "type_source" { yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
-"format" { yylval.fn = B_format; YYRET(SKEIN_TOK_BUILTIN); }
-"read_file" { yylval.fn = B_read_file; YYRET(SKEIN_TOK_BUILTIN); }
-"write_file" { yylval.fn = B_write_file; YYRET(SKEIN_TOK_BUILTIN); }
-"append_file" { yylval.fn = B_append_file; YYRET(SKEIN_TOK_BUILTIN); }
-"file_exists" { yylval.fn = B_file_exists; YYRET(SKEIN_TOK_BUILTIN); }
-"file_open" { yylval.fn = B_file_open; YYRET(SKEIN_TOK_BUILTIN); }
-"file_read" { yylval.fn = B_file_read; YYRET(SKEIN_TOK_BUILTIN); }
-"file_write" { yylval.fn = B_file_write; YYRET(SKEIN_TOK_BUILTIN); }
-"file_seek" { yylval.fn = B_file_seek; YYRET(SKEIN_TOK_BUILTIN); }
-"file_tell" { yylval.fn = B_file_tell; YYRET(SKEIN_TOK_BUILTIN); }
-"file_eof" { yylval.fn = B_file_eof; YYRET(SKEIN_TOK_BUILTIN); }
-"file_close" { yylval.fn = B_file_close; YYRET(SKEIN_TOK_BUILTIN); }
-"file_flush" { yylval.fn = B_file_flush; YYRET(SKEIN_TOK_BUILTIN); }
-"input" { yylval.fn = B_input; YYRET(SKEIN_TOK_BUILTIN); }
-"split" { yylval.fn = B_split; YYRET(SKEIN_TOK_BUILTIN); }
-"split_ws" { yylval.fn = B_split_ws; YYRET(SKEIN_TOK_BUILTIN); }
-"trim" { yylval.fn = B_trim; YYRET(SKEIN_TOK_BUILTIN); }
-"find" { yylval.fn = B_find; YYRET(SKEIN_TOK_BUILTIN); }
-"substr" { yylval.fn = B_substr; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_from_string" { yylval.fn = B_bytes_from_string; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_to_string" { yylval.fn = B_bytes_to_string; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_from_char" { yylval.fn = B_bytes_from_char; YYRET(SKEIN_TOK_BUILTIN); }
-"char_from_bytes" { yylval.fn = B_char_from_bytes; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_len" { yylval.fn = B_bytes_len; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_get" { yylval.fn = B_bytes_get; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_slice" { yylval.fn = B_bytes_slice; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_concat" { yylval.fn = B_bytes_concat; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_hex" { yylval.fn = B_bytes_hex; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_from_hex" { yylval.fn = B_bytes_from_hex; YYRET(SKEIN_TOK_BUILTIN); }
-"bytes_to_int" { yylval.fn = B_bytes_to_int; YYRET(SKEIN_TOK_BUILTIN); }
-"int_to_bytes" { yylval.fn = B_int_to_bytes; YYRET(SKEIN_TOK_BUILTIN); }
-"read_bytes" { yylval.fn = B_read_bytes; YYRET(SKEIN_TOK_BUILTIN); }
-"write_bytes" { yylval.fn = B_write_bytes; YYRET(SKEIN_TOK_BUILTIN); }
-"append_bytes" { yylval.fn = B_append_bytes; YYRET(SKEIN_TOK_BUILTIN); }
-"file_read_bytes" { yylval.fn = B_file_read_bytes; YYRET(SKEIN_TOK_BUILTIN); }
-"file_write_bytes" { yylval.fn = B_file_write_bytes; YYRET(SKEIN_TOK_BUILTIN); }
 
 {ASCII_NAME} {
     int tok = make_name_token(yytext, yyleng);

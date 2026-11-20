@@ -128,7 +128,7 @@ def run_cases():
     check("for in without let string",
           'for c in "ab" { println(c); }\n', stdout="a\nb\n")
     check("for in without let bytes",
-          'for b in bytes_from_hex("00ff") { println(b); }\n',
+          'for b in std.bytes.from_hex("00ff") { println(b); }\n',
           stdout="0\n255\n")
     check("for in without let generator",
           "func gen() { yield 1; yield 2; }\n"
@@ -270,7 +270,7 @@ def run_cases():
     check("std.iter.for_each string and bytes",
           "import std;\n"
           'std.iter.for_each("ab", func(c) { print(c); })\n'
-          'std.iter.for_each(bytes_from_hex("00ff"), func(b) { print(b); })\n'
+          'std.iter.for_each(std.bytes.from_hex("00ff"), func(b) { print(b); })\n'
           'println("");\n',
           stdout="ab0255\n")
     check("std.iter.for_each generator",
@@ -373,7 +373,7 @@ def run_cases():
           'let d = {"x": 5};\nd["x"]++;\n++d["x"];\nd\n',
           stdout_all=["= 5", "= 7", "= {x: 7}"])
     check("increment bytes element",
-          'let b = bytes_from_hex("00ff");\nb[0]++;\nb[1]--;\nb\n',
+          'let b = std.bytes.from_hex("00ff");\nb[0]++;\nb[1]--;\nb\n',
           stdout_all=["= 0", "= 255", "= <bytes: 2>"])
     check("increment evaluates index once",
           "let i = 0;\nlet a = [10];\na[i++]++;\ni\na\n",
@@ -493,8 +493,8 @@ def run_cases():
           'println("你好世界"[::-1]);\n',
           stdout_all=["好世", "界世好你"])
     check("bytes slice uses byte indices",
-          'println(bytes_hex(bytes_from_string("abcd")[1:3]));\n'
-          'println(bytes_hex(bytes_from_string("abcd")[::-1]));\n',
+          'println(std.bytes.hex(std.bytes.from_string("abcd")[1:3]));\n'
+          'println(std.bytes.hex(std.bytes.from_string("abcd")[::-1]));\n',
           stdout_all=["6263", "64636261"])
     check("slice step zero",
           "println([1, 2, 3][::0]);\n",
@@ -516,7 +516,7 @@ def run_cases():
     check("logical result is bool",
           "func f(x: bool) { return x; }\nf(1 && 2)\nf(!0)\n",
           stdout_all=["= true", "= true"])
-    check("logical result format", 'format("{}", true && false)\n',
+    check("logical result format", 'std.string.format("{}", true && false)\n',
           stdout="= false")
     check("bitwise and", "1 & 3\n", stdout="= 1")
     check("bitwise rejects bool", "1 & (1 == 1)\n",
@@ -557,7 +557,7 @@ def run_cases():
           stdout_all=["= false", "= true", "= false", "= true",
                       "= false", "= false"])
     check("bool as value", "let f = bool;\nf(1)\n", stdout="= true")
-    check("bool format", 'format("{}", true)\n', stdout="= true")
+    check("bool format", 'std.string.format("{}", true)\n', stdout="= true")
     check("bool arithmetic error", "true + 1\n",
           stderr="cannot add bool and int")
 
@@ -617,8 +617,8 @@ def run_cases():
           'switch (null) { case null => println("null"); }\n',
           stdout="null")
     check("switch bytes",
-          'switch (bytes_from_hex("00ff")) { '
-          'case bytes_from_hex("00ff") => println("bytes"); }\n',
+          'switch (std.bytes.from_hex("00ff")) { '
+          'case std.bytes.from_hex("00ff") => println("bytes"); }\n',
           stdout="bytes")
     check("switch no fallthrough",
           'switch (1) { case 1 => println("one"); '
@@ -667,7 +667,7 @@ def run_cases():
           'switch (1) { case [1] => println("bad"); }\n',
           stderr="switch does not support list case value")
     check("switch builtin case",
-          'switch (1) { case sqrt => println("bad"); }\n',
+          'switch (1) { case std.math.sqrt => println("bad"); }\n',
           stderr="switch does not support builtin case value")
     check("switch type name is not pattern",
           'switch (1) { case int => println("bad"); }\n',

@@ -16,7 +16,7 @@ std.dict.get({"a": 1}, "a")
 std.json.parse("{\"a\": 1}")
 std.json.stringify({"a": 1})
 std.string.join(["a", "b"], ",")
-std.bytes.hex(bytes_from_hex("00ff"))
+std.bytes.hex(std.bytes.from_hex("00ff"))
 std.math.sqrt(9)
 std.fs.read_file("data.txt")
 std.process.command_status("true")
@@ -38,7 +38,7 @@ std.math.degrees(std.math.pi)  // 180.0
 std.math.is_nan(float("nan"))  // true
 ```
 
-`sqrt(-1)`、`log(0)`、`log2(0)`、`log10(负数)` 返回 `nan`。`round` 的半值向远离零方向，例如 `round(-1.5) == -2`。`fmod` 始终返回 `float`；`mod` 的结果符号跟随除数。`gcd` / `lcm` 只接受整数并返回非负值。
+`std.math.sqrt(-1)`、`std.math.log(0)`、`std.math.log2(0)`、`std.math.log10(负数)` 返回 `nan`。`std.math.round` 的半值向远离零方向，例如 `std.math.round(-1.5) == -2`。`std.math.fmod` 始终返回 `float`；`std.math.mod` 的结果符号跟随除数。`std.math.gcd` / `std.math.lcm` 只接受整数并返回非负值。
 
 TCP：
 
@@ -48,7 +48,7 @@ import std;
 let s = std.net.tcp_connect("127.0.0.1", 8080);
 std.net.send(s, "hello");
 let data = std.net.recv(s, 4096);
-print(bytes_to_string(data));
+print(std.bytes.to_string(data));
 std.net.close(s);
 ```
 
@@ -252,7 +252,7 @@ let r = std.http.get("http://127.0.0.1:8080/api");
 
 r["status"]                         // 200
 r["headers"]["content-type"]        // text/plain
-bytes_to_string(r["body"])
+std.bytes.to_string(r["body"])
 ```
 
 带 headers 和 timeout：
@@ -387,7 +387,7 @@ let r = std.http.get(url, {
 
 if (r["upgraded"]) {
   std.io.write_all(r["socket"], "hello");
-  bytes_to_string(std.io.read(r["socket"], 4096));
+  std.bytes.to_string(std.io.read(r["socket"], 4096));
   std.io.close(r["socket"]);
 }
 ```
@@ -399,7 +399,7 @@ let req = std.http.accept(s, 5000);
 let stream = std.http.upgrade(req, {"X-Test": "yes"});
 
 std.io.write_all(stream, "hello");
-bytes_to_string(std.io.read(stream, 4096));
+std.bytes.to_string(std.io.read(stream, 4096));
 std.io.close(stream);
 ```
 
@@ -778,7 +778,7 @@ let sent = std.http.post(url, {
 
 let received = std.http.get(url, {
   "on_body": func(chunk) {
-    print("chunk: " + bytes_to_string(chunk));
+    print("chunk: " + std.bytes.to_string(chunk));
   }
 });
 ```
@@ -819,7 +819,7 @@ let served = std.http.serve(s, func(req) {
 let s = std.http.listen("127.0.0.1", 8080);
 
 s["on_request_body"] = func(chunk) {
-  print(bytes_to_string(chunk));
+  print(std.bytes.to_string(chunk));
 };
 ```
 
@@ -839,7 +839,7 @@ let served = std.http.serve(s, func(req) {
   let body = "";
   let chunk = std.http.read_body(req);
   while (chunk != null) {
-    body = body + bytes_to_string(chunk);
+    body = body + std.bytes.to_string(chunk);
     chunk = std.http.read_body(req);
   }
   return {"status": 200, "body": "read " + body};
@@ -948,7 +948,7 @@ host_only
 
 ```text
 let r = std.http.get(url, {"decompress": true});
-print(bytes_to_string(r["body"]));
+print(std.bytes.to_string(r["body"]));
 ```
 
 - `decompress` 默认 `false`；
@@ -1018,7 +1018,7 @@ let a = std.http2.get("https://example.com/", {
 });
 
 print(str(a["status"]) + " " + a["protocol"]);
-print(bytes_to_string(a["body"]));
+print(std.bytes.to_string(a["body"]));
 
 let b = std.http2.post("https://example.com/echo", "payload");
 let c = std.http2.get_task("https://example.com/async").wait();
@@ -1156,7 +1156,7 @@ let tls = std.tls.client(socket, "example.com", {
 });
 
 std.io.write_all(tls, "hello");
-bytes_to_string(std.io.read(tls, 4096));
+std.bytes.to_string(std.io.read(tls, 4096));
 std.io.close(tls);
 ```
 
@@ -1625,8 +1625,8 @@ defer：
 
 ```text
 func work() {
-  let h = file_open("x");
-  defer file_close(h);
+  let h = std.fs.open("x");
+  defer std.fs.close(h);
 
   ...
 }
@@ -1662,14 +1662,14 @@ std.ffi.close(lib)
 import std;
 
 let lib = std.ffi.open("libc.so.6");
-let data = bytes_from_string("hello");
+let data = std.bytes.from_string("hello");
 
 let buf = std.ffi.buffer(8);
 std.ffi.call(lib, "memcpy", "void",
              ["buffer", "bytes", "usize"],
              [buf, data, 5]);
 
-print(bytes_to_string(std.ffi.buffer_bytes(buf, 5)));
+print(std.bytes.to_string(std.ffi.buffer_bytes(buf, 5)));
 std.ffi.buffer_free(buf);
 std.ffi.close(lib);
 ```
@@ -2870,6 +2870,8 @@ std.bytes.to_int
 std.bytes.from_int
 std.bytes.to_string
 std.bytes.from_string
+std.bytes.from_char
+std.bytes.to_char
 
 std.encoding.decode
 std.encoding.encode
@@ -2995,7 +2997,7 @@ std.thread.capabilities
 - `std` 是内置包，不参与文件系统查找，也不需要满足目录名规则；
 - `std` 名称保留，不能通过源码包覆盖；
 - 使用 `import std;` 后通过 `std.list`、`std.string` 等方式访问；
-- 原有全局函数（`find`、`substr`、`split`、`trim`、`bytes_*` 等）保持可用；
+- 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
 - 新函数只通过 `std.*` 提供，不再增加全局函数名；
 - `std.list.slice` 的 `start` / `length` 不能为负数；
@@ -3089,7 +3091,7 @@ std.io.seek(f, 0, 0)
 std.io.tell(f)
 
 let buffered = std.io.buffered(f, 8192);
-bytes_to_string(std.io.read(buffered, 4096))
+std.bytes.to_string(std.io.read(buffered, 4096))
 std.io.close(buffered)
 ```
 
@@ -3104,7 +3106,7 @@ let data = std.io.read_task(s, 4096, 1000).wait();
 if (data == null) {
   print("closed");
 } else {
-  print(bytes_to_string(data));
+  print(std.bytes.to_string(data));
 }
 
 std.io.close(s);
@@ -3124,7 +3126,7 @@ std.io.close(f);
 ```text
 let f = std.fs.open("out.bin", "w+b");
 
-let n = std.io.write_task(f, bytes_from_string("hello")).wait();
+let n = std.io.write_task(f, std.bytes.from_string("hello")).wait();
 std.io.close(f);
 ```
 

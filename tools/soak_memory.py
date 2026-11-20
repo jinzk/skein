@@ -93,9 +93,10 @@ def thread_worker_source():
 
 def http_worker_source():
     return (
+        "import std;\n"
         "func handle(req) {\n"
         '    return {"status": 200, "headers": {"Content-Type": "text/plain"},\n'
-        '            "body": bytes_from_string("ok")};\n'
+        '            "body": std.bytes.from_string("ok")};\n'
         "}\n"
     )
 

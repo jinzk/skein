@@ -128,12 +128,12 @@ func run({bin, repeats, check, json, max_ratio, fib_speedup}) {
     }];
 
     if (check && ratio > max_ratio) {
-      failures = failures + [format(
+      failures = failures + [std.string.format(
           "{}: JIT/VM ratio {:.2f} exceeds {:.2f}",
           name, ratio, max_ratio)];
     }
     if (check && name == "fib_bench" && speedup < fib_speedup) {
-      failures = failures + [format(
+      failures = failures + [std.string.format(
           "fib: speedup {:.2f}x is below {:.2f}x",
           speedup, fib_speedup)];
     }
@@ -142,10 +142,10 @@ func run({bin, repeats, check, json, max_ratio, fib_speedup}) {
   if (json) {
     println(std.json.stringify(results));
   } else {
-    println(format("{:<18} {:>8} {:>8} {:>8} {:>9}",
+    println(std.string.format("{:<18} {:>8} {:>8} {:>8} {:>9}",
                    "benchmark", "VM", "JIT", "ratio", "speedup"));
     for item in results {
-      println(format("{:<18} {:>8.3f} {:>8.3f} {:>8.2f} {:>8.2f}x",
+      println(std.string.format("{:<18} {:>8.3f} {:>8.3f} {:>8.2f} {:>8.2f}x",
                      item["benchmark"], item["vm"], item["jit"],
                      item["ratio"], item["speedup"]));
     }

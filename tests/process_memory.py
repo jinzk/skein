@@ -34,7 +34,7 @@ def main():
             "import std;\n"
             f'let parent = std.process.spawn_command("{skein_path(BIN)}", '
             '{"args": ["' + skein_path(parent) + '"]});\n'
-            'let leaf_pid = int(bytes_to_string('
+            'let leaf_pid = int(std.bytes.to_string('
             'std.io.read_line(parent["stdout"])));\n'
             "std.task.sleep(300).wait();\n"
             'println("parent_rss=" + str(std.process.rss(parent) > 0));\n'

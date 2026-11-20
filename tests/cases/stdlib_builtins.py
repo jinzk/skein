@@ -25,14 +25,14 @@ def run_cases():
                 f'std.ffi.call(m, "cos", "f64", ["f64"], [0.0])\n'
                 f'let c = std.ffi.open("{libc}");\n'
                 f'std.ffi.call(c, "strlen", "i64", ["cstring"], ["hello"])\n'
-                f'let x = bytes_from_string("hello");\n'
-                f'let y = bytes_from_string("hello");\n'
+                f'let x = std.bytes.from_string("hello");\n'
+                f'let y = std.bytes.from_string("hello");\n'
                 f'std.ffi.call(c, "memcmp", "i32", '
                 f'["bytes", "bytes", "usize"], [x, y, 5])\n'
                 f'let buf = std.ffi.buffer(8);\n'
                 f'std.ffi.call(c, "memcpy", "void", '
                 f'["buffer", "bytes", "usize"], [buf, x, 5]);\n'
-                f'bytes_to_string(std.ffi.buffer_bytes(buf, 5))\n'
+                f'std.bytes.to_string(std.ffi.buffer_bytes(buf, 5))\n'
                 f'std.ffi.buffer_len(buf)\n'
                 f'std.ffi.buffer_free(buf);\n'
                 f'std.ffi.close(m);\nstd.ffi.close(c);\n',
@@ -129,7 +129,7 @@ def run_cases():
             "let buf = std.ffi.buffer(8);\n"
             'std.ffi.call(lib, "shim_buffer_write", "i32", '
             '["buffer", "usize"], [buf, 8])\n'
-            "bytes_to_string(std.ffi.buffer_bytes(buf, 5))\n"
+            "std.bytes.to_string(std.ffi.buffer_bytes(buf, 5))\n"
             "std.ffi.buffer_len(buf)\n"
             "std.ffi.buffer_free(buf);\n"
             "std.ffi.close(lib);\n",
@@ -1576,7 +1576,7 @@ def run_cases():
     check(
         "std container adapter defaults",
         "import std;\n"
-        'bytes_to_string(std.bytes.slice(bytes_from_string("abc"), 1))\n'
+        'std.bytes.to_string(std.bytes.slice(std.bytes.from_string("abc"), 1))\n'
         "kind_of(std.list.sort)\n"
         "kind_of(std.list.reduce)\n"
         "kind_of(std.dict.get)\n"
@@ -1632,66 +1632,66 @@ def run_cases():
     check(
         "std bytes aliases",
         "import std;\n"
-        'std.bytes.hex(bytes_from_hex("00ff"))\n'
-        'std.bytes.len(bytes_from_hex("00ff"))\n',
+        'std.bytes.hex(std.bytes.from_hex("00ff"))\n'
+        'std.bytes.len(std.bytes.from_hex("00ff"))\n',
         stdout_all=["= 00ff", "= 2"],
     )
     check(
         "std bytes string aliases",
         "import std;\n"
         'std.bytes.to_string(std.bytes.from_string("abc"))\n'
-        'std.bytes.to_string(bytes_from_hex("ff"))\n',
+        'std.bytes.to_string(std.bytes.from_hex("ff"))\n',
         stdout_all=["= abc"],
         stderr="not valid UTF-8",
     )
     check(
         "std encoding gbk roundtrip",
         "import std;\n"
-        'print(std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk"));\n'
-        'print(bytes_hex(std.encoding.encode("中国", "gbk")));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk"));\n'
+        'print(std.bytes.hex(std.encoding.encode("中国", "gbk")));\n'
         'std.encoding.supports("gbk")\n',
         stdout_all=["中国", "d6d0b9fa", "= true"],
     )
     check(
         "std encoding gbk euro",
         "import std;\n"
-        'print(bytes_hex(std.encoding.encode("€", "gbk")));\n'
-        'print(std.encoding.decode(bytes_from_hex("80"), "gbk"));\n',
+        'print(std.bytes.hex(std.encoding.encode("€", "gbk")));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("80"), "gbk"));\n',
         stdout_all=["80", "€"],
     )
     check(
         "std encoding gb18030 vectors",
         "import std;\n"
-        'print(std.encoding.decode(bytes_from_hex("d6d0"), "gb18030"));\n'
-        'print(bytes_hex(std.encoding.encode("€", "gb18030")));\n'
-        'let s = std.encoding.decode(bytes_from_hex("90308130"), "gb18030");\n'
-        'print(bytes_hex(std.encoding.encode(s, "gb18030")));\n'
-        'print(bytes_hex(std.encoding.encode("😀", "gb18030")));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("d6d0"), "gb18030"));\n'
+        'print(std.bytes.hex(std.encoding.encode("€", "gb18030")));\n'
+        'let s = std.encoding.decode(std.bytes.from_hex("90308130"), "gb18030");\n'
+        'print(std.bytes.hex(std.encoding.encode(s, "gb18030")));\n'
+        'print(std.bytes.hex(std.encoding.encode("😀", "gb18030")));\n'
         'std.encoding.supports("gb18030")\n',
         stdout_all=["中", "a2e3", "90308130", "9439fc36", "= true"],
     )
     check(
         "std encoding gb18030 invalid byte",
         "import std;\n"
-        'std.encoding.decode(bytes_from_hex("80"), "gb18030")\n',
+        'std.encoding.decode(std.bytes.from_hex("80"), "gb18030")\n',
         stderr="invalid gb18030",
     )
     check(
         "std encoding utf16 bom",
         "import std;\n"
-        'print(bytes_hex(std.encoding.encode("中", "utf-16")));\n'
-        'print(std.encoding.decode(bytes_from_hex("fffe2d4e"), "utf-16"));\n',
+        'print(std.bytes.hex(std.encoding.encode("中", "utf-16")));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("fffe2d4e"), "utf-16"));\n',
         stdout_all=["fffe2d4e", "中"],
     )
     check(
         "std encoding utf32",
         "import std;\n"
-        'print(bytes_hex(std.encoding.encode("中", "utf-32le")));\n'
-        'print(bytes_hex(std.encoding.encode("中", "utf-32be")));\n'
-        'print(bytes_hex(std.encoding.encode("中", "utf-32")));\n'
-        'print(std.encoding.decode(bytes_from_hex("2d4e0000"), "utf-32le"));\n'
-        'print(std.encoding.decode(bytes_from_hex("00004e2d"), "utf-32be"));\n'
-        'print(std.encoding.decode(bytes_from_hex("fffe00002d4e0000"), '
+        'print(std.bytes.hex(std.encoding.encode("中", "utf-32le")));\n'
+        'print(std.bytes.hex(std.encoding.encode("中", "utf-32be")));\n'
+        'print(std.bytes.hex(std.encoding.encode("中", "utf-32")));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("2d4e0000"), "utf-32le"));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("00004e2d"), "utf-32be"));\n'
+        'print(std.encoding.decode(std.bytes.from_hex("fffe00002d4e0000"), '
         '"utf-32"));\n',
         stdout_all=["2d4e0000", "00004e2d", "fffe00002d4e0000",
                     "中", "中", "中"],
@@ -1699,22 +1699,22 @@ def run_cases():
     check(
         "std encoding error modes",
         "import std;\n"
-        'print(std.encoding.decode(bytes_from_hex("ff"), "utf-8", "replace"));\n'
-        'print(bytes_hex(std.encoding.encode("é", "ascii", "replace")));\n'
-        'bytes_len(std.encoding.encode("é", "ascii", "ignore"))\n',
+        'print(std.encoding.decode(std.bytes.from_hex("ff"), "utf-8", "replace"));\n'
+        'print(std.bytes.hex(std.encoding.encode("é", "ascii", "replace")));\n'
+        'std.bytes.len(std.encoding.encode("é", "ascii", "ignore"))\n',
         stdout_all=["�", "3f", "= 0"],
     )
     check(
         "std encoding nul rejected",
         "import std;\n"
-        'std.encoding.decode(bytes_from_hex("0000"), "utf-16le")\n',
+        'std.encoding.decode(std.bytes.from_hex("0000"), "utf-16le")\n',
         stderr="NUL",
     )
     check(
         "std encoding unknown name",
         "import std;\n"
         'std.encoding.supports("not-an-encoding")\n'
-        'std.encoding.decode(bytes_from_hex("00"), "not-an-encoding")\n',
+        'std.encoding.decode(std.bytes.from_hex("00"), "not-an-encoding")\n',
         stdout_all=["= false"],
         stderr="unknown encoding",
     )
@@ -1727,13 +1727,13 @@ def run_cases():
     check(
         "std unicode normalization forms",
         "import std;\n"
-        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(decomposed, "nfc"), "utf-8")));\n'
-        'let composed = std.encoding.decode(bytes_from_hex("c3a9"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let composed = std.encoding.decode(std.bytes.from_hex("c3a9"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(composed, "nfd"), "utf-8")));\n'
-        'let circled = std.encoding.decode(bytes_from_hex("e291a0"), "utf-8");\n'
+        'let circled = std.encoding.decode(std.bytes.from_hex("e291a0"), "utf-8");\n'
         'print(std.unicode.normalize(circled, "nfkc"));\n'
         'print(std.unicode.normalize(circled, "nfkd"));\n'
         'std.unicode.version()\n',
@@ -1742,8 +1742,8 @@ def run_cases():
     check(
         "std unicode is normalized",
         "import std;\n"
-        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
-        'let composed = std.encoding.decode(bytes_from_hex("c3a9"), "utf-8");\n'
+        'let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");\n'
+        'let composed = std.encoding.decode(std.bytes.from_hex("c3a9"), "utf-8");\n'
         'std.unicode.is_normalized(decomposed, "nfc")\n'
         'std.unicode.is_normalized(composed, "nfc")\n'
         'std.unicode.is_normalized(composed, "nfd")\n',
@@ -1752,44 +1752,44 @@ def run_cases():
     check(
         "std unicode quick check",
         "import std;\n"
-        'let plain = std.encoding.decode(bytes_from_hex("e4b8ad"), "utf-8");\n'
+        'let plain = std.encoding.decode(std.bytes.from_hex("e4b8ad"), "utf-8");\n'
         'std.unicode.is_normalized(plain, "nfc")\n'
-        'let marks = std.encoding.decode(bytes_from_hex("61cc95cc80"), "utf-8");\n'
+        'let marks = std.encoding.decode(std.bytes.from_hex("61cc95cc80"), "utf-8");\n'
         'std.unicode.is_normalized(marks, "nfd")\n'
-        'let ordered = std.encoding.decode(bytes_from_hex("61cc80cc95"), "utf-8");\n'
+        'let ordered = std.encoding.decode(std.bytes.from_hex("61cc80cc95"), "utf-8");\n'
         'std.unicode.is_normalized(ordered, "nfd")\n',
         stdout_all=["= true", "= false", "= true"],
     )
     check(
         "std unicode compatibility",
         "import std;\n"
-        'let ligature = std.encoding.decode(bytes_from_hex("efac81"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let ligature = std.encoding.decode(std.bytes.from_hex("efac81"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(ligature, "nfc"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(ligature, "nfkc"), "utf-8")));\n'
-        'let fullwidth = std.encoding.decode(bytes_from_hex("efbc91"), "utf-8");\n'
+        'let fullwidth = std.encoding.decode(std.bytes.from_hex("efbc91"), "utf-8");\n'
         'print(std.unicode.normalize(fullwidth, "nfkc"));\n',
         stdout_all=["efac81", "6669", "1"],
     )
     check(
         "std unicode hangul",
         "import std;\n"
-        'let jamo = std.encoding.decode(bytes_from_hex("e18480e185a1"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let jamo = std.encoding.decode(std.bytes.from_hex("e18480e185a1"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(jamo, "nfc"), "utf-8")));\n',
         stdout_all=["eab080"],
     )
     check(
         "std unicode canonical order",
         "import std;\n"
-        'let angstrom = std.encoding.decode(bytes_from_hex("e284ab"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let angstrom = std.encoding.decode(std.bytes.from_hex("e284ab"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(angstrom, "nfc"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(angstrom, "nfd"), "utf-8")));\n'
-        'let marks = std.encoding.decode(bytes_from_hex("61cc95cc80"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let marks = std.encoding.decode(std.bytes.from_hex("61cc95cc80"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(marks, "nfd"), "utf-8")));\n',
         stdout_all=["c385", "41cc8a", "61cc80cc95"],
     )
@@ -1808,27 +1808,27 @@ def run_cases():
     check(
         "std string case mapping",
         "import std;\n"
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ABC"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("abc"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("ß"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("Straße"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("ﬁ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ẞ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("İ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ΟΣ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ΟΣΑ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("Σ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ΑΣ."), "utf-8")));\n'
         'std.string.to_upper("ß") == std.string.to_upper("ss")\n'
         'std.string.to_lower(std.string.to_upper("ß")) == "ss"\n'
@@ -1844,15 +1844,15 @@ def run_cases():
     check(
         "std string case mapping final sigma context",
         'import std;\n'
-        'let marked = std.encoding.decode(bytes_from_hex("ce91cea3cc81"), '
+        'let marked = std.encoding.decode(std.bytes.from_hex("ce91cea3cc81"), '
         '"utf-8");\n'
-        'print(bytes_hex(std.encoding.encode(std.string.to_lower(marked), '
+        'print(std.bytes.hex(std.encoding.encode(std.string.to_lower(marked), '
         '"utf-8")));\n'
-        "print(bytes_hex(std.encoding.encode(std.string.to_lower(\"Α'Σ\"), "
+        "print(std.bytes.hex(std.encoding.encode(std.string.to_lower(\"Α'Σ\"), "
         '"utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode(std.string.to_lower("Α.Σ"), '
+        'print(std.bytes.hex(std.encoding.encode(std.string.to_lower("Α.Σ"), '
         '"utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode(std.string.to_lower("ΑΣΑ"), '
+        'print(std.bytes.hex(std.encoding.encode(std.string.to_lower("ΑΣΑ"), '
         '"utf-8")));\n',
         stdout_all=["ceb1cf82cc81", "ceb127cf82", "ceb12ecf82",
                     "ceb1cf83ceb1"],
@@ -1874,13 +1874,13 @@ def run_cases():
     check(
         "std unicode casefold",
         "import std;\n"
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("Straße"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("STRASSE"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("ΟΣ"), "utf-8")));\n'
-        'print(bytes_hex(std.encoding.encode('
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("ς"), "utf-8")));\n'
         'std.unicode.casefold("Straße") == std.unicode.casefold("STRASSE")\n'
         'std.unicode.casefold("ẞ") == "ss"\n'
@@ -1894,8 +1894,8 @@ def run_cases():
     check(
         "std unicode casefold leaves normalization alone",
         "import std;\n"
-        'let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");\n'
-        'print(bytes_hex(std.encoding.encode('
+        'let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");\n'
+        'print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold(decomposed), "utf-8")));\n'
         'std.unicode.casefold(decomposed) == "é"\n',
         stdout_all=["65cc81", "= false"],
@@ -1918,7 +1918,7 @@ def run_cases():
     check("std dict get type", 'import std;\nstd.dict.get([], "a")\n',
           stderr="std.dict.get expects a dict")
     check("std import missing module", "std.list.len([1])\n",
-          stderr="symbol not found std")
+          stderr="symbol not found std", std_prelude=False)
     check(
         "std namespace copy is isolated",
         "import std;\n"
@@ -2105,7 +2105,7 @@ def run_cases():
     check(
         "std json parse bytes",
         'import std;\n'
-        'std.json.parse(bytes_from_string("{\\"a\\": 7}"))["a"]\n',
+        'std.json.parse(std.bytes.from_string("{\\"a\\": 7}"))["a"]\n',
         stdout="= 7",
     )
     check(
@@ -2115,7 +2115,7 @@ def run_cases():
     )
     check(
         "std json parse invalid utf8",
-        'import std;\nstd.json.parse(bytes_from_hex("ff"))\n',
+        'import std;\nstd.json.parse(std.bytes.from_hex("ff"))\n',
         stderr="not valid UTF-8",
     )
     check(
@@ -2125,7 +2125,7 @@ def run_cases():
     )
     check(
         "std json stringify unsupported",
-        'import std;\nstd.json.stringify({"a": bytes_from_hex("00")})\n',
+        'import std;\nstd.json.stringify({"a": std.bytes.from_hex("00")})\n',
         stderr="cannot encode bytes as JSON",
     )
 
@@ -2355,7 +2355,7 @@ def run_cases():
           stderr="cannot add null and int")
     check("null is not callable", "null()\n", stderr="cannot call null")
     check("str null", "str(null)\n", stdout="= null")
-    check("format null", 'format("{}", null)\n', stdout="= null")
+    check("format null", 'std.string.format("{}", null)\n', stdout="= null")
 
     check("typed parameter ok",
           "func f(x: int) { return x + 1; }\nf(2)\n", stdout="= 3")
@@ -2389,12 +2389,12 @@ def run_cases():
     check("typed string",
           'func f(x: string) { return x; }\nf("a")\n', stdout="= a")
     check("typed bytes",
-          'func f(x: bytes) { return bytes_len(x); }\n'
-          'f(bytes_from_hex("00ff"))\n',
+          'func f(x: bytes) { return std.bytes.len(x); }\n'
+          'f(std.bytes.from_hex("00ff"))\n',
           stdout="= 2")
     check("typed callable",
           "func apply(fn: callable, x: int) { return fn(x); }\n"
-          "apply(sqrt, 9)\n",
+          "apply(std.math.sqrt, 9)\n",
           stdout="= 3.0")
     check("typed function",
           "func apply(fn: function, x: int) { return fn(x); }\n"
@@ -2403,13 +2403,13 @@ def run_cases():
           stdout="= 6")
     check("typed builtin",
           "func apply(fn: builtin, x: int) { return fn(x); }\n"
-          "apply(sqrt, 16)\n",
+          "apply(std.math.sqrt, 16)\n",
           stdout="= 4.0")
     check("typed callable rejects int",
           "func apply(fn: callable) { return fn; }\napply(1)\n",
           stderr="type error: expected callable, got int")
     check("typed function rejects builtin",
-          "func apply(fn: function) { return fn; }\napply(sqrt)\n",
+          "func apply(fn: function) { return fn; }\napply(std.math.sqrt)\n",
           stderr="type error: expected function, got (number) -> number")
     check("typed builtin rejects function",
           "func apply(fn: builtin) { return fn; }\n"
@@ -2460,9 +2460,9 @@ def run_cases():
           "let f: function = func(x) { return x + 1; };\nf(2)\n",
           stdout="= 3")
     check("typed variable builtin",
-          "let f: builtin = sqrt;\nf(16)\n", stdout="= 4.0")
+          "let f: builtin = std.math.sqrt;\nf(16)\n", stdout="= 4.0")
     check("typed variable callable",
-          "let f: callable = sqrt;\nf(9)\n", stdout="= 3.0")
+          "let f: callable = std.math.sqrt;\nf(9)\n", stdout="= 3.0")
     check("typed variable requires initializer for function",
           "let f: function;\n",
           stderr="variable f of type function requires an initializer")
@@ -2487,7 +2487,7 @@ def run_cases():
           "let by: bytes;\n"
           "let a: any;\n"
           's == "" && i == 0 && f == 0.0 && !b && len(l) == 0 && '
-          "len(d) == 0 && bytes_len(by) == 0 && a == null\n",
+          "len(d) == 0 && std.bytes.len(by) == 0 && a == null\n",
           stdout="= true")
     check("typed variable is shallow",
           'let a: list = [0];\na[0] = "x";\na\n', stdout='= [x]')
@@ -2507,7 +2507,7 @@ def run_cases():
           "}\n"
           "impl Point {\n"
           "  func length(self) {\n"
-          "    return sqrt(self.x * self.x + self.y * self.y);\n"
+          "    return std.math.sqrt(self.x * self.x + self.y * self.y);\n"
           "  }\n"
           "}\n"
           "Point { x: 3, y: 4 }.length()\n",
@@ -2862,7 +2862,7 @@ def run_cases():
           "kind_of([1])\n"
           "kind_of({})\n"
           "kind_of(func() { return 1; })\n"
-          "kind_of(sqrt)\n"
+          "kind_of(std.math.sqrt)\n"
           "kind_of(null)\n",
           stdout_all=["= int", "= float", "= bool", "= string", "= list",
                       "= dict", "= function", "= builtin", "= null"])
@@ -2914,22 +2914,25 @@ def run_cases():
     check("non-callable evaluates arguments", "1(print(7))\n",
           stdout="7", stderr="cannot call int")
 
-    check("builtin as value", "let f = sqrt;\nf(9)\n", stdout="= 3.0")
+    check("builtin as value", "let f = std.math.sqrt;\nf(9)\n", stdout="= 3.0")
     check("builtin as callback",
-          "func apply(f, x) { return f(x); }\napply(sqrt, 16)\n",
+          "func apply(f, x) { return f(x); }\napply(std.math.sqrt, 16)\n",
           stdout="= 4.0")
-    check("builtin in list", "let fs = [sqrt, abs];\nfs[0](25)\n",
+    check("builtin in list",
+          "let fs = [std.math.sqrt, std.math.abs];\nfs[0](25)\n",
           stdout="= 5.0")
-    check("builtin equality", "sqrt == sqrt\nsqrt == abs\n",
+    check("builtin equality",
+          "std.math.sqrt == std.math.sqrt\nstd.math.sqrt == std.math.abs\n",
           stdout_all=["= true", "= false"])
     check("print as value", 'let p = print;\np("ok")\n', stdout="ok")
-    check("format as value", 'let f = format;\nf("{} + {}", 1, 2)\n',
+    check("format as value",
+          'let f = std.string.format;\nf("{} + {}", 1, 2)\n',
           stdout="= 1 + 2")
-    check("builtin string form", "str(sqrt)\n", stdout="= <builtin>")
+    check("builtin string form", "str(std.math.sqrt)\n", stdout="= <builtin>")
     check("command output", 'import std;\nstd.process.command("echo hi")\n',
           stdout="= hi")
     check("command in format",
-          'import std;\nformat("{}", std.process.command("echo hi"))\n',
+          'import std;\nstd.string.format("{}", std.process.command("echo hi"))\n',
           stdout="= hi")
     check("command as value",
           'import std;\nlet run = std.process.command;\nrun("echo ok")\n',
@@ -3013,163 +3016,163 @@ def run_cases():
           stderr="input expects 0 or 1 arguments")
     check("input as value", 'let f = input;\nf("> ")\nvalue\n',
           stdout_all=["> ", "= value"])
-    check("read_file type error", "read_file(1)\n",
+    check("read_file type error", "std.fs.read_file(1)\n",
           stderr="type error: expected string, got int")
-    check("write_file type error", 'write_file("x", 1)\n',
+    check("write_file type error", 'std.fs.write_file("x", 1)\n',
           stderr="type error: expected string, got int")
-    check("write_file arity error", 'write_file("x")\n',
+    check("write_file arity error", 'std.fs.write_file("x")\n',
           stderr="write_file expects 2 arguments")
-    check("append_file arity error", 'append_file("x")\n',
+    check("append_file arity error", 'std.fs.append_file("x")\n',
           stderr="append_file expects 2 arguments")
-    check("file_exists type error", "file_exists(1)\n",
+    check("file_exists type error", "std.fs.exists(1)\n",
           stderr="type error: expected string, got int")
-    check("bytes_from_string display", 'bytes_from_string("abc")\n',
+    check("bytes_from_string display", 'std.bytes.from_string("abc")\n',
           stdout="= <bytes: 3>")
-    check("bytes_len", 'bytes_len(bytes_from_string("abc"))\n', stdout="= 3")
-    check("bytes_get", 'bytes_get(bytes_from_string("abc"), 1)\n',
+    check("bytes_len", 'std.bytes.len(std.bytes.from_string("abc"))\n', stdout="= 3")
+    check("bytes_get", 'std.bytes.get(std.bytes.from_string("abc"), 1)\n',
           stdout="= 98")
     check("bytes_get out of range",
-          'bytes_get(bytes_from_string("a"), 5)\n',
+          'std.bytes.get(std.bytes.from_string("a"), 5)\n',
           stderr="bytes_get index 5 out of range")
-    check("bytes_get type", 'bytes_get("x", 0)\n',
+    check("bytes_get type", 'std.bytes.get("x", 0)\n',
           stderr="type error: expected bytes, got string")
-    check("bytes_slice", 'bytes_hex(bytes_slice('
-          'bytes_from_string("abcdef"), 1, 3))\n', stdout="= 626364")
+    check("bytes_slice", 'std.bytes.hex(std.bytes.slice('
+          'std.bytes.from_string("abcdef"), 1, 3))\n', stdout="= 626364")
     check("bytes_slice past end",
-          'bytes_len(bytes_slice(bytes_from_string("abc"), 10))\n',
+          'std.bytes.len(std.bytes.slice(std.bytes.from_string("abc"), 10))\n',
           stdout="= 0")
     check("bytes_slice clamps length",
-          'bytes_hex(bytes_slice(bytes_from_string("abc"), 1, 100))\n',
+          'std.bytes.hex(std.bytes.slice(std.bytes.from_string("abc"), 1, 100))\n',
           stdout="= 6263")
-    check("bytes_concat", 'bytes_hex(bytes_concat('
-          'bytes_from_string("ab"), bytes_from_string("cd")))\n',
+    check("bytes_concat", 'std.bytes.hex(std.bytes.concat('
+          'std.bytes.from_string("ab"), std.bytes.from_string("cd")))\n',
           stdout="= 61626364")
-    check("bytes_hex", 'bytes_hex(bytes_from_hex("00ff10"))\n',
+    check("bytes_hex", 'std.bytes.hex(std.bytes.from_hex("00ff10"))\n',
           stdout="= 00ff10")
-    check("bytes_from_hex odd", 'bytes_from_hex("0")\n',
+    check("bytes_from_hex odd", 'std.bytes.from_hex("0")\n',
           stderr="even number of hex digits")
-    check("bytes_from_hex invalid", 'bytes_from_hex("zz")\n',
+    check("bytes_from_hex invalid", 'std.bytes.from_hex("zz")\n',
           stderr="invalid hex digit")
-    check("bytes_from_hex type", "bytes_from_hex(1)\n",
+    check("bytes_from_hex type", "std.bytes.from_hex(1)\n",
           stderr="type error: expected string, got int")
-    check("bytes_to_string", 'bytes_to_string(bytes_from_hex("68656c6c6f"))\n',
+    check("bytes_to_string", 'std.bytes.to_string(std.bytes.from_hex("68656c6c6f"))\n',
           stdout="= hello")
-    check("bytes_to_string NUL", 'bytes_to_string(bytes_from_hex("00"))\n',
+    check("bytes_to_string NUL", 'std.bytes.to_string(std.bytes.from_hex("00"))\n',
           stderr="bytes contain NUL byte")
     check("bytes_to_string invalid utf8",
-          'bytes_to_string(bytes_from_hex("ff"))\n',
+          'std.bytes.to_string(std.bytes.from_hex("ff"))\n',
           stderr="not valid UTF-8")
     check("bytes_to_string overlong utf8",
-          'bytes_to_string(bytes_from_hex("c080"))\n',
+          'std.bytes.to_string(std.bytes.from_hex("c080"))\n',
           stderr="not valid UTF-8")
     check("bytes_to_string surrogate utf8",
-          'bytes_to_string(bytes_from_hex("eda080"))\n',
+          'std.bytes.to_string(std.bytes.from_hex("eda080"))\n',
           stderr="not valid UTF-8")
     check("bytes_to_string utf8 roundtrip",
-          'bytes_to_string(bytes_from_string("你好"))\n',
+          'std.bytes.to_string(std.bytes.from_string("你好"))\n',
           stdout="= 你好")
     check("bytes_to_string emoji roundtrip",
-          'bytes_to_string(bytes_from_string("😀"))\n',
+          'std.bytes.to_string(std.bytes.from_string("😀"))\n',
           stdout="= 😀")
     check("bytes_to_int little",
-          'bytes_to_int(bytes_from_hex("78563412"), 4, "little")\n',
+          'std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "little")\n',
           stdout="= 305419896")
     check("bytes_to_int big",
-          'bytes_to_int(bytes_from_hex("78563412"), 4, "big")\n',
+          'std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "big")\n',
           stdout="= 2018915346")
     check("bytes_to_int signed 16",
-          'bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 1)\n',
+          'std.bytes.to_int(std.bytes.from_hex("ffff"), 2, "little", 0, 1)\n',
           stdout="= -1")
     check("bytes_to_int unsigned 16",
-          'bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 0)\n',
+          'std.bytes.to_int(std.bytes.from_hex("ffff"), 2, "little", 0, 0)\n',
           stdout="= 65535")
     check("bytes_to_int signed 8",
-          'bytes_to_int(bytes_from_hex("80"), 1, "big", 0, 1)\n',
+          'std.bytes.to_int(std.bytes.from_hex("80"), 1, "big", 0, 1)\n',
           stdout="= -128")
     check("bytes_to_int offset",
-          'bytes_to_int(bytes_from_hex("00ff80"), 2, "big", 1)\n',
+          'std.bytes.to_int(std.bytes.from_hex("00ff80"), 2, "big", 1)\n',
           stdout="= 65408")
     check("bytes_to_int signed 64",
-          'bytes_to_int(bytes_from_hex("ffffffffffffffff"), 8, "little", 0, 1)\n',
+          'std.bytes.to_int(std.bytes.from_hex("ffffffffffffffff"), 8, "little", 0, 1)\n',
           stdout="= -1")
     check("bytes_to_int unsigned 64 overflow",
-          'bytes_to_int(bytes_from_hex("ffffffffffffffff"), 8, "little")\n',
+          'std.bytes.to_int(std.bytes.from_hex("ffffffffffffffff"), 8, "little")\n',
           stderr="unsigned 64-bit value is too large")
     check("bytes_to_int truncated",
-          'bytes_to_int(bytes_from_hex("0102"), 4, "little")\n',
+          'std.bytes.to_int(std.bytes.from_hex("0102"), 4, "little")\n',
           stderr="need 4 bytes at offset 0, got 2")
     check("bytes_to_int size range",
-          'bytes_to_int(bytes_from_hex("01"), 0, "little")\n',
+          'std.bytes.to_int(std.bytes.from_hex("01"), 0, "little")\n',
           stderr="size must be between 1 and 8")
     check("bytes_to_int byteorder",
-          'bytes_to_int(bytes_from_hex("01"), 1, "middle")\n',
+          'std.bytes.to_int(std.bytes.from_hex("01"), 1, "middle")\n',
           stderr='byteorder must be "little" or "big"')
     check("bytes_to_int negative offset",
-          'bytes_to_int(bytes_from_hex("01"), 1, "little", -1)\n',
+          'std.bytes.to_int(std.bytes.from_hex("01"), 1, "little", -1)\n',
           stderr="offset must be a non-negative integer")
-    check("bytes_to_int type", 'bytes_to_int("x", 1, "little")\n',
+    check("bytes_to_int type", 'std.bytes.to_int("x", 1, "little")\n',
           stderr="bytes_to_int expects bytes")
     check("bytes_to_int arity",
-          'bytes_to_int(bytes_from_hex("01"))\n',
+          'std.bytes.to_int(std.bytes.from_hex("01"))\n',
           stderr="bytes_to_int expects 3 to 5 arguments")
     check("int_to_bytes little",
-          'bytes_hex(int_to_bytes(305419896, 4, "little"))\n',
+          'std.bytes.hex(std.bytes.from_int(305419896, 4, "little"))\n',
           stdout="= 78563412")
     check("int_to_bytes big",
-          'bytes_hex(int_to_bytes(305419896, 4, "big"))\n',
+          'std.bytes.hex(std.bytes.from_int(305419896, 4, "big"))\n',
           stdout="= 12345678")
     check("int_to_bytes negative",
-          'bytes_hex(int_to_bytes(-1, 2, "little"))\n', stdout="= ffff")
+          'std.bytes.hex(std.bytes.from_int(-1, 2, "little"))\n', stdout="= ffff")
     check("int_to_bytes negative big",
-          'bytes_hex(int_to_bytes(-2, 4, "big"))\n', stdout="= fffffffe")
+          'std.bytes.hex(std.bytes.from_int(-2, 4, "big"))\n', stdout="= fffffffe")
     check("int_to_bytes unsigned 32",
-          'bytes_hex(int_to_bytes(4294967295, 4, "little"))\n',
+          'std.bytes.hex(std.bytes.from_int(4294967295, 4, "little"))\n',
           stdout="= ffffffff")
     check("int_to_bytes range high",
-          'int_to_bytes(256, 1, "little")\n',
+          'std.bytes.from_int(256, 1, "little")\n',
           stderr="does not fit in 1 bytes")
     check("int_to_bytes range low",
-          'int_to_bytes(-129, 1, "little")\n',
+          'std.bytes.from_int(-129, 1, "little")\n',
           stderr="does not fit in 1 bytes")
     check("int_to_bytes size range",
-          'int_to_bytes(1, 9, "little")\n',
+          'std.bytes.from_int(1, 9, "little")\n',
           stderr="size must be between 1 and 8")
     check("int_to_bytes byteorder",
-          'int_to_bytes(1, 4, "middle")\n',
+          'std.bytes.from_int(1, 4, "middle")\n',
           stderr='byteorder must be "little" or "big"')
-    check("int_to_bytes type", 'int_to_bytes("x", 4, "little")\n',
+    check("int_to_bytes type", 'std.bytes.from_int("x", 4, "little")\n',
           stderr="type error: expected int, got string")
-    check("int_to_bytes arity", 'int_to_bytes(1, 4)\n',
+    check("int_to_bytes arity", 'std.bytes.from_int(1, 4)\n',
           stderr="int_to_bytes expects 3 arguments")
     check("bytes/int roundtrip",
-          'bytes_to_int(int_to_bytes(-123456789, 8, "big"), '
+          'std.bytes.to_int(std.bytes.from_int(-123456789, 8, "big"), '
           '8, "big", 0, 1)\n',
           stdout="= -123456789")
-    check("bytes index read", 'bytes_from_string("hello")[1]\n',
+    check("bytes index read", 'std.bytes.from_string("hello")[1]\n',
           stdout="= 101")
-    check("bytes index out of range", 'bytes_from_string("a")[5]\n',
+    check("bytes index out of range", 'std.bytes.from_string("a")[5]\n',
           stderr="bytes index 5 out of range")
     check("bytes index assignment",
-          'let b = bytes_from_string("abc");\n'
+          'let b = std.bytes.from_string("abc");\n'
           'b[1] = 255;\n'
-          'bytes_hex(b)\n',
+          'std.bytes.hex(b)\n',
           stdout="= 61ff63")
     check("bytes index assignment range",
-          'let b = bytes_from_string("abc");\n'
+          'let b = std.bytes.from_string("abc");\n'
           'b[0] = 256;\n',
           stderr="bytes value 256 out of range")
     check("bytes equality",
-          'bytes_from_string("ab") == bytes_from_hex("6162")\n',
+          'std.bytes.from_string("ab") == std.bytes.from_hex("6162")\n',
           stdout="= true")
-    check("bytes arity", "bytes_len()\n",
+    check("bytes arity", "std.bytes.len()\n",
           stderr="built-in function expects 1 argument")
-    check("bytes_slice arity", "bytes_slice(bytes_from_string(\"a\"))\n",
-          stderr="bytes_slice expects 2 or 3 arguments")
-    check("read_bytes type", "read_bytes(1)\n",
+    check("bytes_slice arity", "std.bytes.slice(std.bytes.from_string(\"a\"))\n",
+          stderr="expects at least 2 argument(s)")
+    check("read_bytes type", "std.fs.read_bytes(1)\n",
           stderr="type error: expected string, got int")
-    check("write_bytes type", 'write_bytes("x", "text")\n',
+    check("write_bytes type", 'std.fs.write_bytes("x", "text")\n',
           stderr="type error: expected bytes, got string")
-    check("bytes hex roundtrip type", "bytes_hex(1)\n",
+    check("bytes hex roundtrip type", "std.bytes.hex(1)\n",
           stderr="type error: expected bytes, got int")
 
     check("std.fn compose",

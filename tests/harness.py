@@ -5,6 +5,7 @@ import base64
 import hashlib
 import os
 import random
+import re
 import shutil
 import signal
 import socket
@@ -44,7 +45,26 @@ def skein_string(value):
     return f'"{escaped}"'
 
 
-def run(source, timeout=None, env=None):
+_STD_REFERENCE = re.compile(r"(?<![A-Za-z0-9_.])std\.")
+_STD_IMPORT = re.compile(r"\bimport\s+std\b")
+
+
+def with_std_prelude(source):
+    """Add `import std;` to snippets that use std.* without importing it.
+
+    The language requires the import.  Most test cases are short snippets
+    focused on one behavior, so the harness supplies the import instead of
+    repeating it in every case.  Tests that exercise the missing-import path
+    pass std_prelude=False.
+    """
+    if _STD_REFERENCE.search(source) and not _STD_IMPORT.search(source):
+        return "import std;\n" + source
+    return source
+
+
+def run(source, timeout=None, env=None, std_prelude=True):
+    if std_prelude:
+        source = with_std_prelude(source)
     if timeout is None:
         timeout = DEFAULT_TIMEOUT
     try:
@@ -92,14 +112,14 @@ TEST_SKIP_SOURCE = os.environ.get("SKEIN_TEST_SKIP_SOURCE", "")
 
 
 def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
-          not_stderr=None, code=0, env=None):
+          not_stderr=None, code=0, env=None, std_prelude=True):
     if name in TEST_SKIP:
         return
     if TEST_SKIP_PREFIXES and name.startswith(TEST_SKIP_PREFIXES):
         return
     if TEST_SKIP_SOURCE and TEST_SKIP_SOURCE in source:
         return
-    proc = run(source, env=env)
+    proc = run(source, env=env, std_prelude=std_prelude)
     combined = proc.stdout + proc.stderr
     assert "Segmentation fault" not in combined, f"{name}: crashed"
     assert proc.returncode == code, (
@@ -263,8 +283,8 @@ def check_encoding_two_byte_tables():
                     continue
                 hex_data = data.hex()
                 lines.append(
-                    f'bytes_hex(std.encoding.encode('
-                    f'std.encoding.decode(bytes_from_hex("{hex_data}"), '
+                    f'std.bytes.hex(std.encoding.encode('
+                    f'std.encoding.decode(std.bytes.from_hex("{hex_data}"), '
                     f'"{encoding}"), "{encoding}"))'
                 )
                 expected.append("= " + hex_data)
@@ -301,11 +321,11 @@ def check_unicode_normalization_samples():
         hex_data = sample.encode("utf-8").hex()
         lines.append(
             f'let sample{index} = std.encoding.decode('
-            f'bytes_from_hex("{hex_data}"), "utf-8");'
+            f'std.bytes.from_hex("{hex_data}"), "utf-8");'
         )
         for form in forms:
             lines.append(
-                f'bytes_hex(std.encoding.encode('
+                f'std.bytes.hex(std.encoding.encode('
                 f'std.unicode.normalize(sample{index}, "{form}"), "utf-8"))'
             )
             expected.append(
@@ -410,7 +430,7 @@ def check_extended_stdlib():
         'std.random.int(5, 5)\n'
         'let f = std.random.float();\n'
         'print(f >= 0.0 && f < 1.0);\n'
-        'bytes_len(std.random.bytes(8))\n'
+        'std.bytes.len(std.random.bytes(8))\n'
         'std.random.choice([7])\n'
         'len(std.random.shuffle([1, 2, 3]))\n'
         'len(std.random.uuid())\n',
@@ -425,8 +445,8 @@ def check_extended_stdlib():
     check(
         "std encoding base64 and url",
         "import std;\n"
-        'std.encoding.base64_encode(bytes_from_string("hello"))\n'
-        'bytes_to_string(std.encoding.base64_decode("aGVsbG8="))\n'
+        'std.encoding.base64_encode(std.bytes.from_string("hello"))\n'
+        'std.bytes.to_string(std.encoding.base64_decode("aGVsbG8="))\n'
         'std.encoding.url_encode("a b/中")\n'
         'std.encoding.url_decode("a%20b%2F%E4%B8%AD")\n',
         stdout_all=["= aGVsbG8=", "= hello", "= a%20b%2F%E4%B8%AD",
@@ -536,8 +556,8 @@ def check_extended_stdlib():
             f'let p = std.process.spawn_command('
             f"{skein_string(os.path.abspath(BIN))}, "
             f'{{"args": [{skein_string(spawn_child)}]}});\n'
-            'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
-            'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
+            'print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
+            'print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
             "std.process.wait(p);\n",
             stdout_all=["env=from-thread", "cwd_ok=true"],
         )
@@ -588,18 +608,18 @@ def check_extended_stdlib():
             "import std;\n"
             'let r = std.process.run_command("printf hello");\n'
             'print(r["status"]);\n'
-            'print(bytes_to_string(r["stdout"]));\n'
+            'print(std.bytes.to_string(r["stdout"]));\n'
             'let r2 = std.process.run_command("cat", {"stdin": "abc"});\n'
-            'print(bytes_to_string(r2["stdout"]));\n'
+            'print(std.bytes.to_string(r2["stdout"]));\n'
             'let r3 = std.process.run_command("pwd", {"cwd": "/tmp"});\n'
-            'print(bytes_to_string(r3["stdout"]));\n'
+            'print(std.bytes.to_string(r3["stdout"]));\n'
             'let r4 = std.process.run_command("printf %s \\"$FOO\\"", '
             '{"env": {"FOO": "bar"}});\n'
-            'print(bytes_to_string(r4["stdout"]));\n'
+            'print(std.bytes.to_string(r4["stdout"]));\n'
             'let r5 = std.process.run_command("echo out; echo err >&2; exit 3");\n'
             'print(r5["status"]);\n'
-            'print(bytes_to_string(r5["stdout"]));\n'
-            'print(bytes_to_string(r5["stderr"]));\n',
+            'print(std.bytes.to_string(r5["stdout"]));\n'
+            'print(std.bytes.to_string(r5["stderr"]));\n',
             stdout_all=["0", "hello", "abc", "/tmp", "bar", "3", "out",
                         "err"],
         )
@@ -608,7 +628,7 @@ def check_extended_stdlib():
             "import std;\n"
             'let p = std.process.spawn_command("/bin/echo", {"args": ["spawn"]});\n'
             'print(std.process.pid(p) > 0);\n'
-            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["true", "spawn", "0"],
         )
@@ -618,7 +638,7 @@ def check_extended_stdlib():
             'let p = std.process.spawn_command("/bin/cat");\n'
             'std.io.write_all(p["stdin"], "abc");\n'
             'std.io.close(p["stdin"]);\n'
-            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["abc", "0"],
         )
@@ -627,8 +647,8 @@ def check_extended_stdlib():
             "import std;\n"
             'let p = std.process.spawn_command("/bin/sh", '
             '{"args": ["-c", "echo out; echo err >&2; exit 3"]});\n'
-            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
-            'print(bytes_to_string(std.io.read(p["stderr"], 4096)));\n'
+            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.bytes.to_string(std.io.read(p["stderr"], 4096)));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["out", "err", "3"],
         )
@@ -637,7 +657,7 @@ def check_extended_stdlib():
             "import std;\n"
             'let p = std.process.spawn_command("/bin/echo", {"args": ["async"]});\n'
             'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
-            'print(bytes_to_string(data));\n'
+            'print(std.bytes.to_string(data));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["async", "0"],
         )
@@ -648,7 +668,7 @@ def check_extended_stdlib():
             'print(std.io.write_task(p["stdin"], "abc").wait());\n'
             'std.io.close(p["stdin"]);\n'
             'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
-            'print(bytes_to_string(data));\n'
+            'print(std.bytes.to_string(data));\n'
             'print(std.process.wait(p));\n',
             stdout_all=["3", "abc", "0"],
         )
@@ -657,11 +677,11 @@ def check_extended_stdlib():
             "import std;\n"
             'let rc = std.process.run_command("/bin/echo hi");\n'
             'print(rc["status"]); print(":");\n'
-            'print(bytes_to_string(rc["stdout"]));\n'
+            'print(std.bytes.to_string(rc["stdout"]));\n'
             'let p = std.process.spawn_command("/bin/echo", '
             '{"args": ["cmd"]});\n'
             'print(std.process.pid(p) > 0); print("|");\n'
-            'print(bytes_to_string(std.io.read(p["stdout"], 4096)));\n'
+            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
             'print(std.process.wait(p));\n',
             stdout="0:hi\ntrue|cmd\n0",
         )
@@ -761,18 +781,18 @@ def check_extended_stdlib():
         with open(worker_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
-                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
                 "std.io.flush(std.io.stdout);\n"
                 "while (true) {\n"
                 "  let line = std.io.read_line(std.io.stdin);\n"
                 "  if (line == null) { break; }\n"
-                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let request = std.json.parse(std.bytes.to_string(line));\n"
                 "  let result = request[\"params\"][0] + "
                 "request[\"params\"][1];\n"
                 "  let response = {\"id\": request[\"id\"], "
                 "\"ok\": true, \"result\": result};\n"
-                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "  std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "std.json.stringify(response) + \"\\n\"));\n"
                 "  std.io.flush(std.io.stdout);\n"
                 "}\n"
@@ -784,12 +804,12 @@ def check_extended_stdlib():
             "import std;\n"
             f'let p = std.process.spawn_command("{binary_path}", '
             f'{{"args": ["{worker_path}"]}});\n'
-            'print(bytes_to_string(std.io.read_line(p["stdout"])));\n'
-            'std.io.write_all(p["stdin"], bytes_from_string('
+            'print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
+            'std.io.write_all(p["stdin"], std.bytes.from_string('
             '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
             'std.io.flush(p["stdin"]);\n'
             'let line = std.io.read_line(p["stdout"]);\n'
-            'print(bytes_to_string(line));\n'
+            'print(std.bytes.to_string(line));\n'
             'std.io.close(p["stdin"]);\n'
             'print(std.process.wait(p));\n',
             stdout_all=['{"ready":true,"version":1}',
@@ -810,13 +830,13 @@ def check_extended_stdlib():
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
-                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "\"{\\\"ready\\\":true,\\\"version\\\":1}\\n\"));\n"
                 "std.io.flush(std.io.stdout);\n"
                 "while (true) {\n"
                 "  let line = std.io.read_line(std.io.stdin);\n"
                 "  if (line == null) { break; }\n"
-                "  let request = std.json.parse(bytes_to_string(line));\n"
+                "  let request = std.json.parse(std.bytes.to_string(line));\n"
                 "  let method = request[\"method\"];\n"
                 "  if (method == \"die\") { break; }\n"
                 "  if (method == \"slow\") { std.time.sleep(500); }\n"
@@ -824,7 +844,7 @@ def check_extended_stdlib():
                 "request[\"params\"][1];\n"
                 "  let response = {\"id\": request[\"id\"], "
                 "\"ok\": true, \"result\": result};\n"
-                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "  std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "std.json.stringify(response) + \"\\n\"));\n"
                 "  std.io.flush(std.io.stdout);\n"
                 "}\n"
@@ -865,15 +885,15 @@ def check_extended_stdlib():
         with open(hybrid_script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
-                "std.io.write_all(std.io.stdout, bytes_from_string("
+                "std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "\"{\\\"ready\\\":true,\\\"version\\\":1,"
                 "\\\"protocol\\\":\\\"hybrid\\\"}\\n\"));\n"
                 "std.io.flush(std.io.stdout);\n"
                 "while (true) {\n"
                 "  let line = std.io.read_line(std.io.stdin);\n"
                 "  if (line == null) { break; }\n"
-                "  let request = std.json.parse(bytes_to_string(line));\n"
-                "  let body = bytes_from_string(\"\");\n"
+                "  let request = std.json.parse(std.bytes.to_string(line));\n"
+                "  let body = std.bytes.from_string(\"\");\n"
                 "  if (request[\"body_len\"] > 0) {\n"
                 "    body = std.io.read_exact(std.io.stdin, "
                 "request[\"body_len\"]);\n"
@@ -881,7 +901,7 @@ def check_extended_stdlib():
                 "  let response = {\"id\": request[\"id\"], "
                 "\"ok\": true, \"result\": request[\"params\"][0], "
                 "\"body_len\": len(body)};\n"
-                "  std.io.write_all(std.io.stdout, bytes_from_string("
+                "  std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "std.json.stringify(response) + \"\\n\"));\n"
                 "  std.io.write_all(std.io.stdout, body);\n"
                 "  std.io.flush(std.io.stdout);\n"
@@ -894,9 +914,9 @@ def check_extended_stdlib():
             f'let pool = std.worker.pool(1, "{hybrid_path}", '
             '{"protocol": "hybrid"});\n'
             'let reply = std.result.unwrap(std.worker.call_bytes('
-            'pool, "echo", [7], bytes_from_string("raw-body-123")));\n'
+            'pool, "echo", [7], std.bytes.from_string("raw-body-123")));\n'
             'print(reply["value"]);\n'
-            'print(bytes_to_string(reply["body"]));\n'
+            'print(std.bytes.to_string(reply["body"]));\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["7", "raw-body-123"],
         )
@@ -906,10 +926,10 @@ def check_extended_stdlib():
             f'let pool = std.worker.pool(1, "{hybrid_path}", '
             '{"protocol": "hybrid"});\n'
             'let job = std.worker.submit_bytes('
-            'pool, "echo", [9], bytes_from_string("two"));\n'
+            'pool, "echo", [9], std.bytes.from_string("two"));\n'
             'let reply = std.result.unwrap(std.worker.wait(job));\n'
             'print(reply["value"]);\n'
-            'print(bytes_to_string(reply["body"]));\n'
+            'print(std.bytes.to_string(reply["body"]));\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["9", "two"],
         )
@@ -925,7 +945,7 @@ def check_extended_stdlib():
                 "                      \"X-Major\": str(req[\"http_major\"]),\n"
                 "                      \"X-Keep\": str(req[\"keep_alive\"]),\n"
                 "                      \"X-Remote\": str(req[\"remote_addr\"])},\n"
-                "          \"body\": bytes_to_string(req[\"body\"])};\n"
+                "          \"body\": std.bytes.to_string(req[\"body\"])};\n"
                 "}\n"
             )
         serve_worker_path = serve_worker_script.replace("\\", "\\\\")
@@ -1320,7 +1340,7 @@ def check_extended_stdlib():
                     "  let out = \"\";\n"
                     "  let chunk = std.http.read_body(req);\n"
                     "  while (chunk != null) {\n"
-                    "    out = out + bytes_to_string(chunk);\n"
+                    "    out = out + std.bytes.to_string(chunk);\n"
                     "    chunk = std.http.read_body(req);\n"
                     "  }\n"
                     "  return {\"status\": 200, \"body\": \"pull=\" + out};\n"
@@ -1500,7 +1520,7 @@ def check_extended_stdlib():
                 "  std.time.sleep(1000);\n"
                 "  return {\"status\": 200,\n"
                 "          \"headers\": {\"Content-Type\": \"text/plain\"},\n"
-                "          \"body\": bytes_to_string(req[\"body\"])};\n"
+                "          \"body\": std.bytes.to_string(req[\"body\"])};\n"
                 "}\n"
             )
         slow_path = slow_script.replace("\\", "\\\\")
@@ -1580,7 +1600,7 @@ def check_extended_stdlib():
             handle.write(
                 "import std;\n"
                 "func handle(req) {\n"
-                "  let body = bytes_to_string(req[\"body\"]);\n"
+                "  let body = std.bytes.to_string(req[\"body\"]);\n"
                 "  return {\"status\": 200,\n"
                 "          \"headers\": {\n"
                 "            \"X-Has-Socket\": "
@@ -2244,7 +2264,7 @@ def check_extended_stdlib():
                     "  let out = \"\";\n"
                     "  let chunk = std.http.read_body(req);\n"
                     "  while (chunk != null) {\n"
-                    "    out = out + bytes_to_string(chunk);\n"
+                    "    out = out + std.bytes.to_string(chunk);\n"
                     "    chunk = std.http.read_body(req);\n"
                     "  }\n"
                     "  return {\"status\": 200, \"body\": \"pull=\" + out};\n"
@@ -2612,11 +2632,11 @@ def check_extended_stdlib():
                         f'"http://127.0.0.1:{port_text}/h2");\n'
                         'println(str(a["status"]) + " " + '
                         'a["protocol"]);\n'
-                        'println(bytes_to_string(a["body"]));\n'
+                        'println(std.bytes.to_string(a["body"]));\n'
                         f'let b = std.http.get('
                         f'"http://127.0.0.1:{port_text}/h1");\n'
                         'println(str(b["status"]));\n'
-                        'println(bytes_to_string(b["body"]));\n',
+                        'println(std.bytes.to_string(b["body"]));\n',
                         timeout=20,
                     )
                     assert client.returncode == 0, client.stderr
@@ -2688,12 +2708,12 @@ def check_extended_stdlib():
                         '{"tls": {"verify": false}});\n'
                         'println(str(a["status"]) + " " + '
                         'a["protocol"]);\n'
-                        'println(bytes_to_string(a["body"]));\n'
+                        'println(std.bytes.to_string(a["body"]));\n'
                         f'let b = std.http.get('
                         f'"https://127.0.0.1:{port_text}/h1", '
                         '{"tls": {"verify": false}});\n'
                         'println(str(b["status"]));\n'
-                        'println(bytes_to_string(b["body"]));\n',
+                        'println(std.bytes.to_string(b["body"]));\n',
                         timeout=20,
                     )
                     assert client.returncode == 0, client.stderr
@@ -2750,12 +2770,12 @@ def check_extended_stdlib():
                         '{"tls": {"verify": false}});\n'
                         'println(str(a["status"]) + " " + '
                         'a["protocol"]);\n'
-                        'println(bytes_to_string(a["body"]));\n'
+                        'println(std.bytes.to_string(a["body"]));\n'
                         f'let b = std.http.get('
                         f'"https://127.0.0.1:{port_text}/h1", '
                         '{"tls": {"verify": false}});\n'
                         'println(str(b["status"]));\n'
-                        'println(bytes_to_string(b["body"]));\n',
+                        'println(std.bytes.to_string(b["body"]));\n',
                         timeout=30,
                     )
                     assert client.returncode == 0, client.stderr
@@ -2914,7 +2934,7 @@ def check_extended_stdlib():
                     "    }\n"
                     "    return worker;\n"
                     "}\n"
-                    'write_bytes("thread_payload.bin", '
+                    'std.fs.write_bytes("thread_payload.bin", '
                     "std.entry.encode(make_worker()));\n"
                     'print("encoded");\n'
                 )
@@ -2922,7 +2942,7 @@ def check_extended_stdlib():
             with open(decode_path, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    'let blob = read_bytes("thread_payload.bin");\n'
+                    'let blob = std.fs.read_bytes("thread_payload.bin");\n'
                     "let t = std.thread.spawn_entry(blob, "
                     'std.thread.Message.from({"n": 4}));\n'
                     "let r = t.join();\n"
@@ -2973,7 +2993,7 @@ def check_extended_stdlib():
                     "    }\n"
                     "    return worker;\n"
                     "}\n"
-                    'write_bytes("typed_payload.bin", '
+                    'std.fs.write_bytes("typed_payload.bin", '
                     "std.entry.encode(make_worker(p, e)));\n"
                 )
             typed_decode = os.path.join(deadlock_tmp,
@@ -2981,7 +3001,7 @@ def check_extended_stdlib():
             with open(typed_decode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    'let blob = read_bytes("typed_payload.bin");\n'
+                    'let blob = std.fs.read_bytes("typed_payload.bin");\n'
                     "let t = std.thread.spawn_entry(blob, "
                     'std.thread.Message.from({"n": 0}));\n'
                     "let r = t.join();\n"
@@ -3040,7 +3060,7 @@ def check_extended_stdlib():
                     "  }\n"
                     "  return worker;\n"
                     "}\n"
-                    'write_bytes("proto1_payload.bin", '
+                    'std.fs.write_bytes("proto1_payload.bin", '
                     "std.entry.encode(make_worker(Counter { value: 7 })));\n"
                 )
             proto1_decode = os.path.join(deadlock_tmp,
@@ -3048,7 +3068,7 @@ def check_extended_stdlib():
             with open(proto1_decode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    'let blob = read_bytes("proto1_payload.bin");\n'
+                    'let blob = std.fs.read_bytes("proto1_payload.bin");\n'
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let r = t.join();\n"
@@ -3125,7 +3145,7 @@ def check_extended_stdlib():
                     "\"nested\": [{\"v\": 9}, [1, 2]], "
                     "\"list\": [10, 20, 30], \"deque\": dq, "
                     "\"lru\": l, \"set\": s};\n"
-                    'write_bytes("proto3_payload.bin", '
+                    'std.fs.write_bytes("proto3_payload.bin", '
                     "std.entry.encode(make_worker(box)));\n"
                 )
             proto3_decode = os.path.join(deadlock_tmp,
@@ -3133,7 +3153,7 @@ def check_extended_stdlib():
             with open(proto3_decode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    'let blob = read_bytes("proto3_payload.bin");\n'
+                    'let blob = std.fs.read_bytes("proto3_payload.bin");\n'
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let v = t.join()[\"value\"];\n"
@@ -3190,14 +3210,14 @@ def check_extended_stdlib():
                     "\"y\": l.y, \"n\": k.n};\n"
                     "}\n"
                     "let blob = std.entry.encode(worker);\n"
-                    'write_bytes("proto2_payload.bin", blob);\n'
+                    'std.fs.write_bytes("proto2_payload.bin", blob);\n'
                 )
             proto2_decode = os.path.join(deadlock_tmp,
                                          "proto2_decode_main.skein")
             with open(proto2_decode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
-                    'let blob = read_bytes("proto2_payload.bin");\n'
+                    'let blob = std.fs.read_bytes("proto2_payload.bin");\n'
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let v = t.join()[\"value\"];\n"
@@ -3328,14 +3348,14 @@ def check_extended_stdlib():
         check(
             "std.thread message copy on write",
             "import std;\n"
-            'let body = bytes_from_string("ab");\n'
+            'let body = std.bytes.from_string("ab");\n'
             'let items = [1, 2];\n'
             'let msg = std.thread.Message.from('
             '{"x": 1, "items": items, "body": body});\n'
             'items[0] = 9;\n'
             'body[0] = 65;\n'
             'print("items="); print(msg.payload["items"][0]);\n'
-            'print("body="); print(bytes_to_string(msg.payload["body"]));\n'
+            'print("body="); print(std.bytes.to_string(msg.payload["body"]));\n'
             'let view = msg.payload;\n'
             'view["items"][0] = 7;\n'
             'print("view="); print(msg.payload["items"][0]);\n',
@@ -4161,7 +4181,7 @@ def check_extended_stdlib():
                     "    let copy = ctx.payload;\n"
                     "    copy[\"x\"] = 42;\n"
                     "    return {\"items\": items[0], "
-                    "\"body\": bytes_to_string(body), "
+                    "\"body\": std.bytes.to_string(body), "
                     "\"x\": copy[\"x\"]};\n"
                     "}\n"
                 )
@@ -4169,7 +4189,7 @@ def check_extended_stdlib():
             check(
                 "std.thread message cross-thread copy on write",
                 "import std;\n"
-                'let body = bytes_from_string("ab");\n'
+                'let body = std.bytes.from_string("ab");\n'
                 'let items = [1, 2];\n'
                 'let msg = std.thread.Message.from('
                 '{"x": 1, "items": items, "body": body});\n'
@@ -4180,7 +4200,7 @@ def check_extended_stdlib():
                 'print(r["value"]["x"]);\n'
                 'let view = msg.payload;\n'
                 'print("parent="); print(view["items"][0]); print(":"); '
-                'print(bytes_to_string(view["body"])); print(":"); '
+                'print(std.bytes.to_string(view["body"])); print(":"); '
                 'print(view["x"]);\n',
                 stdout_all=["child=99:Zb:42", "parent=1:ab:1"],
             )
@@ -4497,18 +4517,18 @@ def check_extended_stdlib():
                     stderr="thread.pool_failed",
                 )
 
-    probe = run('import std;\nstd.compress.gzip(bytes_from_string("x"))\n')
+    probe = run('import std;\nstd.compress.gzip(std.bytes.from_string("x"))\n')
     if "zlib support is disabled" not in probe.stderr:
         check(
             "std compress roundtrips",
             "import std;\n"
-            'let b = bytes_from_string("hello hello hello");\n'
-            'print(bytes_hex(bytes_slice(std.compress.gzip(b), 0, 2)));\n'
-            'print(bytes_to_string(std.compress.gunzip('
+            'let b = std.bytes.from_string("hello hello hello");\n'
+            'print(std.bytes.hex(std.bytes.slice(std.compress.gzip(b), 0, 2)));\n'
+            'print(std.bytes.to_string(std.compress.gunzip('
             'std.compress.gzip(b))));\n'
-            'print(bytes_to_string(std.compress.unzlib('
+            'print(std.bytes.to_string(std.compress.unzlib('
             'std.compress.zlib(b))));\n'
-            'print(bytes_to_string(std.compress.inflate('
+            'print(std.bytes.to_string(std.compress.inflate('
             'std.compress.deflate(b))));\n',
             stdout_all=["1f8b", "hello hello hello", "hello hello hello",
                         "hello hello hello"],

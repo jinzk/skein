@@ -92,6 +92,8 @@ value_t *build_namespace_impl() {
         {"from_int", B_int_to_bytes},
         {"to_string", B_bytes_to_string},
         {"from_string", B_bytes_from_string},
+        {"from_char", B_bytes_from_char},
+        {"to_char", B_char_from_bytes},
     });
     value_t *lru_module = builtin_module({
         {"new", B_lru_new},

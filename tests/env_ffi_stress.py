@@ -180,8 +180,8 @@ def child_process_worker(tmp):
             "  let status = std.process.wait(p);\n"
             "  std.io.close(p[\"stdout\"]);\n"
             "  std.io.close(p[\"stderr\"]);\n"
-            "  return {\"out\": bytes_to_string(out),\n"
-            "          \"err\": bytes_to_string(err),\n"
+            "  return {\"out\": std.bytes.to_string(out),\n"
+            "          \"err\": std.bytes.to_string(err),\n"
             "          \"status\": str(status)};\n"
             "}\n"
         )

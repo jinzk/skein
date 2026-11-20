@@ -630,9 +630,9 @@ def run_cases():
           "default => println(\"no\"); }\n",
           stdout_all=["char", "byte"])
     check("char bytes roundtrip",
-          "import std;\nprintln(bytes_hex(bytes_from_char('你')));\n"
-          "println(char_from_bytes(bytes_from_char('你')));\n"
-          "println(char(bytes_from_char('a')));\n",
+          "import std;\nprintln(std.bytes.hex(std.bytes.from_char('你')));\n"
+          "println(std.bytes.to_char(std.bytes.from_char('你')));\n"
+          "println(char(std.bytes.from_char('a')));\n",
           stdout_all=["e4bda0", "你", "a"])
     check("byte int conversions",
           "println(byte(65));\nprintln(int(byte(255)));\n"
@@ -645,7 +645,7 @@ def run_cases():
     check("byte range error",
           "byte(256)\n", stderr="byte() value out of range")
     check("char from bytes error",
-          'char_from_bytes(bytes_from_string("ab"))\n',
+          'std.bytes.to_char(std.bytes.from_string("ab"))\n',
           stderr="char_from_bytes expects exactly one UTF-8 character")
     check("byte struct json",
           "import std;\nstruct S { b: byte; c: char; }\n"
@@ -667,9 +667,9 @@ def run_cases():
     check("dict scalar keys",
           "import std;\n"
           "let d = {1: 'i', true: 'b', 's': 's', 'a': 'c', "
-          "byte(65): 'y', bytes_from_hex(\"00\"): 'x', null: 'n'};\n"
+          "byte(65): 'y', std.bytes.from_hex(\"00\"): 'x', null: 'n'};\n"
           "println(d[1]); println(d[true]); println(d['s']); println(d['a']);\n"
-          "println(d[byte(65)]); println(d[bytes_from_hex(\"00\")]); println(d[null]);\n",
+          "println(d[byte(65)]); println(d[std.bytes.from_hex(\"00\")]); println(d[null]);\n",
           stdout_all=["i", "b", "s", "c", "y", "x", "n"])
     check("dict float key rejected",
           "{1.5: 1}\n",

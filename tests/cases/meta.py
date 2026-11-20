@@ -77,7 +77,7 @@ def run_cases():
         'println(std.meta.type_info("func")["name"]);\n'
         'println(std.meta.type_info(1)["kind"]);\n'
         'println(std.meta.type_info([1])["name"]);\n'
-        'println(std.meta.type_info(sqrt)["name"]);\n'
+        'println(std.meta.type_info(std.math.sqrt)["name"]);\n'
         'println(std.meta.type_info(null)["name"]);\n'
         'println(std.meta.has_type("list"));\n'
         'println(std.meta.has_type("nope"));\n'

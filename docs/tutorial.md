@@ -735,6 +735,8 @@ let empty_dict_alt = dict();
 切片使用 Python 风格的 `start:stop:step`，支持 list、string 和 bytes：
 
 ```text
+import std;
+
 let xs = [0, 1, 2, 3, 4];
 xs[1:4]        // [1, 2, 3]
 xs[:3]         // [0, 1, 2]
@@ -745,7 +747,7 @@ xs[::2]        // [0, 2, 4]
 xs[::-1]       // [4, 3, 2, 1, 0]
 xs[4:0:-2]     // [4, 2]
 "你好世界"[1:3] // "好世"
-bytes_from_string("abcd")[1:3] // 两个字节 "bc"
+std.bytes.from_string("abcd")[1:3] // 两个字节 "bc"
 ```
 
 - `stop` 不包含在结果中；`step` 省略时为 `1`，不能为 `0`；
@@ -1047,7 +1049,7 @@ let lg = std.log.new({
 - 写入失败默认 `fail`，可用 `on_error` 改为 `warn` / `ignore`；
 - `logger` 不能跨线程传递，`writer` 也是线程本地值。
 
-> `log` 是全局数学内置函数，示例中的 logger 变量使用 `lg`。
+> 数学函数 `log` 位于 `std.math`（需要 `import std;`），示例中的 logger 变量使用 `lg`。
 
 ### 函数与闭包
 
@@ -1086,11 +1088,13 @@ c()
 参数可以带可选的类型约束：
 
 ```text
+import std;
+
 func apply(fn: callable, x: int) {
   return fn(x);
 }
 
-apply(sqrt, 16)
+apply(std.math.sqrt, 16)
 ```
 
 - 语法为 `参数名: 类型`，不写类型表示 `any`；
@@ -1272,6 +1276,8 @@ sum(0, ...xs)    // 6
 结构体、`impl` 与 `trait`：
 
 ```text
+import std;
+
 struct Point {
   x: int;
   y: int;
@@ -1279,7 +1285,7 @@ struct Point {
 
 impl Point {
   func length(self) {
-    return sqrt(self.x * self.x + self.y * self.y);
+    return std.math.sqrt(self.x * self.x + self.y * self.y);
   }
 
   func moved(self, dx: int, dy: int) {
@@ -1605,14 +1611,16 @@ for (let value in values) {
 
 ### 内置函数
 
-内置函数：`sqrt`、`exp`、`log`、`abs`、`sin`、`cos`、`tan`、`asin`、`acos`、`atan`、`atan2`、`pow`、`floor`、`ceil`、`round`、`trunc`、`log2`、`log10`、`hypot`、`min`、`max`、`len`、`range`、`print`、`println`、`list`、`dict`、`int`、`float`、`bool`、`str`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`、`format`、`read_file`、`write_file`、`append_file`、`file_exists`、`file_open`、`file_read`、`file_write`、`file_seek`、`file_tell`、`file_eof`、`file_close`、`file_flush`、`input`、`split`、`split_ws`、`trim`、`find`、`substr`、`bytes_from_string`、`bytes_to_string`、`bytes_len`、`bytes_get`、`bytes_slice`、`bytes_concat`、`bytes_hex`、`bytes_from_hex`、`bytes_to_int`、`int_to_bytes`、`read_bytes`、`write_bytes`、`append_bytes`、`file_read_bytes`、`file_write_bytes`。内置函数同样是一等值：
+内置函数（无需 `import`）：`len`、`range`、`print`、`println`、`input`、`list`、`dict`、`int`、`float`、`bool`、`str`、`char`、`byte`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
 
 ```text
-let f = sqrt;
+import std;
+
+let f = std.math.sqrt;
 f(9)
 
 func apply(fn, x) { return fn(x); }
-apply(sqrt, 16)
+apply(std.math.sqrt, 16)
 ```
 
 `std.iter.for_each(iterable, fn)` 逐个调用 `fn`，忽略返回值并返回 `null`。回调可以写 1 个或 2 个参数：1 个参数时接收元素（dict 为 key）；2 个参数时 list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；返回 task 的回调不会被自动等待。
@@ -1650,7 +1658,7 @@ apply(sqrt, 16)
 - `bool` 类型有 `true` / `false` 两个字面量；`bool(x)` 按真值规则转换。
 - 真值规则：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典、空 deque、空 heap、空 set 为假；其余值（包括 `true`、函数和内置函数）为真。
 - `str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
-- `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` / `println` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `format("{}", null)` 输出。
+- `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` / `println` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `std.string.format("{}", null)` 输出。
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
 - `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
@@ -1677,7 +1685,7 @@ apply(sqrt, 16)
 
 ## 格式化
 
-`format(fmt, ...)` 返回格式化后的字符串；`print` 支持两种参数形式：
+`std.string.format(fmt, ...)` 返回格式化后的字符串（需要 `import std;`）；`print` 支持两种参数形式：
 
 - `print(x)`：直接打印一个值；
 - `print(fmt, ...)`：第一个参数是格式串，其余参数用于格式化；
@@ -1686,10 +1694,12 @@ apply(sqrt, 16)
 示例：
 
 ```text
-format("x = {}", 3)
-format("{} + {} = {}", 1, 2, 3)
-format("{1} {0}", "a", "b")
-format("{{}} = {}", 1)
+import std;
+
+std.string.format("x = {}", 3)
+std.string.format("{} + {} = {}", 1, 2, 3)
+std.string.format("{1} {0}", "a", "b")
+std.string.format("{{}} = {}", 1)
 print("x = {:.2f}", 1.5)
 ```
 
@@ -1752,7 +1762,7 @@ import std;
 
 let r = std.process.run_command("printf hello");
 r["status"]
-bytes_to_string(r["stdout"])
+std.bytes.to_string(r["stdout"])
 ```
 
 ### 编码进程入口
@@ -1775,6 +1785,8 @@ std.process.result(process[, timeout_ms]) → envelope
 - 进程 IPC 不支持 Channel / Thread / Task handle。
 
 ```skein
+import std;
+
 func worker(ctx) {
   return {"v": ctx.payload["n"] + 1};
 }
@@ -1786,6 +1798,8 @@ r["value"]["v"]   // 5
 普通单参数函数即可作为进程入口：
 
 ```skein
+import std;
+
 func entry(ctx) {
   return {"v": ctx.payload["n"] * 2};
 }
@@ -1850,7 +1864,7 @@ let p = std.process.spawn_command("/bin/cat");
 std.io.write_all(p["stdin"], "hello");
 std.io.close(p["stdin"]);
 
-print(bytes_to_string(std.io.read(p["stdout"], 4096)));
+print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));
 print(std.process.wait(p));
 ```
 
@@ -1882,12 +1896,12 @@ while (true) {
   let line = std.io.read_line(std.io.stdin);
   if (line == null) { break; }
 
-  let request = std.json.parse(bytes_to_string(line));
+  let request = std.json.parse(std.bytes.to_string(line));
   let result = request["params"][0] + request["params"][1];
   let response = {"id": request["id"], "ok": true, "result": result};
 
   std.io.write_all(std.io.stdout,
-                   bytes_from_string(std.json.stringify(response) + "\n"));
+                   std.bytes.from_string(std.json.stringify(response) + "\n"));
   std.io.flush(std.io.stdout);
 }
 ```
@@ -1899,10 +1913,10 @@ import std;
 
 let p = std.process.spawn_command("skein", {"args": ["worker.skein"]});
 std.io.write_all(p["stdin"],
-                 bytes_from_string("{\"id\":1,\"params\":[2,3]}\n"));
+                 std.bytes.from_string("{\"id\":1,\"params\":[2,3]}\n"));
 std.io.flush(p["stdin"]);
 
-print(bytes_to_string(std.io.read_line(p["stdout"])));
+print(std.bytes.to_string(std.io.read_line(p["stdout"])));
 std.io.close(p["stdin"]);
 print(std.process.wait(p));
 ```
@@ -1971,9 +1985,11 @@ std.worker.submit_bytes(pool, method, args, body) -> job
 worker 脚本读取 hybrid 请求：
 
 ```text
+import std;
+
 let line = std.io.read_line(std.io.stdin);
-let request = std.json.parse(bytes_to_string(line));
-let body = bytes_from_string("");
+let request = std.json.parse(std.bytes.to_string(line));
+let body = std.bytes.from_string("");
 if (request["body_len"] > 0) {
   body = std.io.read_exact(std.io.stdin, request["body_len"]);
 }
@@ -1985,7 +2001,7 @@ let response = {
   "body_len": len(body)
 };
 std.io.write_all(std.io.stdout,
-                 bytes_from_string(std.json.stringify(response) + "\n"));
+                 std.bytes.from_string(std.json.stringify(response) + "\n"));
 std.io.write_all(std.io.stdout, body);
 std.io.flush(std.io.stdout);
 ```
@@ -2008,19 +2024,19 @@ worker 脚本约定使用 JSON Lines，并在启动后先发送 ready 帧：
 import std;
 
 std.io.write_all(std.io.stdout,
-                 bytes_from_string("{\"ready\":true,\"version\":1}\n"));
+                 std.bytes.from_string("{\"ready\":true,\"version\":1}\n"));
 std.io.flush(std.io.stdout);
 
 while (true) {
   let line = std.io.read_line(std.io.stdin);
   if (line == null) { break; }
 
-  let request = std.json.parse(bytes_to_string(line));
+  let request = std.json.parse(std.bytes.to_string(line));
   let result = request["params"][0] + request["params"][1];
   let response = {"id": request["id"], "ok": true, "result": result};
 
   std.io.write_all(std.io.stdout,
-                   bytes_from_string(std.json.stringify(response) + "\n"));
+                   std.bytes.from_string(std.json.stringify(response) + "\n"));
   std.io.flush(std.io.stdout);
 }
 ```
@@ -2072,39 +2088,45 @@ Windows/MinGW 下命令使用 `CreateProcessW` 传递 Unicode 命令行和 Unico
 ## 字符串处理
 
 ```text
-trim(text)                  → 去掉首尾空白
-split(text, separator)      → list<string>
-split_ws(text)              → list<string>
-find(text, substring)       → 码点下标 / -1
-substr(text, start[, length]) → string
+import std;
+
+std.string.trim(text)                     → 去掉首尾空白
+std.string.split(text, separator)         → list<string>
+std.string.split_ws(text)                 → list<string>
+std.string.find(text, substring)          → 码点下标 / -1
+std.string.substr(text, start[, length])  → string
 ```
 
 示例：
 
 ```text
-trim("  hello\t\n")          → "hello"
-split("a,b,c", ",")          → ["a", "b", "c"]
-split(",a,", ",")            → ["", "a", ""]
-split_ws("  a  b\tc ")       → ["a", "b", "c"]
-find("hello", "ll")          → 2
-find("hello", "x")           → -1
-substr("hello", 1, 3)        → "ell"
-substr("你好世界", 1, 2)      → "好世"
+import std;
+
+std.string.trim("  hello\t\n")          → "hello"
+std.string.split("a,b,c", ",")          → ["a", "b", "c"]
+std.string.split(",a,", ",")            → ["", "a", ""]
+std.string.split_ws("  a  b\tc ")       → ["a", "b", "c"]
+std.string.find("hello", "ll")          → 2
+std.string.find("hello", "x")           → -1
+std.string.substr("hello", 1, 3)        → "ell"
+std.string.substr("你好世界", 1, 2)      → "好世"
 ```
 
 规则：
 
-- `trim` 和 `split_ws` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
-- `split` 使用非重叠匹配，保留首尾空字段；
-- `split` 的分隔符不能为空字符串；
-- `find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
-- `substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
+- `std.string.trim` 和 `std.string.split_ws` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
+- `std.string.split` 使用非重叠匹配，保留首尾空字段；
+- `std.string.split` 的分隔符不能为空字符串；
+- `std.string.find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
+- `std.string.substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
 - `start` 和 `length` 不能为负数。
 
 组合使用：
 
 ```text
-let parts = split_ws(input("请输入两个数: "));
+import std;
+
+let parts = std.string.split_ws(input("请输入两个数: "));
 let a = int(parts[0]);
 let b = int(parts[1]);
 print(a + b);
@@ -2149,7 +2171,7 @@ print("hello " + name);
 ```
 
 - 返回的字符串不包含末尾换行；
-- 可选的 `prompt` 会原样输出到 stdout，不经过 `format`；
+- 可选的 `prompt` 会原样输出到 stdout，不经过 `std.string.format`；
 - 读到 EOF 时返回 `null`；
 - 空行返回空字符串；
 - CRLF 会被处理，末尾 `\r\n` 不会进入结果；
@@ -2165,37 +2187,43 @@ read("> ")
 示例：
 
 ```text
+import std;
+
 let name = input("Name: ");
-print(format("hello {}", name));
+print(std.string.format("hello {}", name));
 ```
 
 ## 文件读写
 
 ```text
-read_file(path)          → 文件全部内容
-write_file(path, text)   → null，覆盖写入
-append_file(path, text)  → null，追加写入
-file_exists(path)        → 1 / 0
+std.fs.read_file(path)          → 文件全部内容
+std.fs.write_file(path, text)   → null，覆盖写入
+std.fs.append_file(path, text)  → null，追加写入
+std.fs.exists(path)             → 1 / 0
 ```
+
+需要 `import std;`。
 
 示例：
 
 ```text
-write_file("out.txt", "hello\n");
-append_file("out.txt", "world\n");
-print(read_file("out.txt"));
+import std;
 
-file_exists("out.txt")
+std.fs.write_file("out.txt", "hello\n");
+std.fs.append_file("out.txt", "world\n");
+print(std.fs.read_file("out.txt"));
+
+std.fs.exists("out.txt")
 ```
 
 规则：
 
-- `read_file` 读取整个文件并返回字符串；空文件返回空字符串；
-- `write_file` 创建或截断文件；
-- `append_file` 创建或追加；
+- `std.fs.read_file` 读取整个文件并返回字符串；空文件返回空字符串；
+- `std.fs.write_file` 创建或截断文件；
+- `std.fs.append_file` 创建或追加；
 - 文件以二进制模式打开，不会自动转换 CRLF，也不会去掉末尾换行；
 - 读写内容按 UTF-8 文本处理；
-- `read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；读取二进制请使用 `read_bytes`；
+- `std.fs.read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；读取二进制请使用 `std.fs.read_bytes`；
 - 不会自动创建父目录；
 - 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
 - Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
@@ -2233,22 +2261,22 @@ std.fs.read_text("out-utf16.txt", "utf-16")     // 中
 - 解码结果包含 `U+0000` 时报错；
 - `utf-16` / `utf-32` 会按 BOM 规则处理；显式字节序版本不自动剥离 BOM；
 - `utf-8` 不自动剥离 UTF-8 BOM，BOM 会作为 `U+FEFF` 保留；
-- 原有的 `read_file` / `write_file` / `file_read` / `file_write` 仍然只按 UTF-8 字节处理；
-- 文件句柄 API 不携带编码，需要其它编码时使用 `read_bytes` / `write_bytes` 或 `std.fs.read_text` / `write_text`。
+- `std.fs.read_file` / `std.fs.write_file` / `std.fs.read` / `std.fs.write` 仍然只按 UTF-8 字节处理；
+- 文件句柄 API 不携带编码，需要其它编码时使用 `std.fs.read_bytes` / `std.fs.write_bytes` 或 `std.fs.read_text` / `write_text`。
 
 ### 文件句柄
 
 需要多次操作同一个文件时，可以使用低层文件句柄：
 
 ```text
-file_open(path, mode)       → file handle
-file_read(handle[, n])      → string
-file_write(handle, text)    → null
-file_seek(handle, offset[, whence]) → null
-file_tell(handle)           → int
-file_eof(handle)            → 1 / 0
-file_close(handle)          → null
-file_flush(handle)          → null
+std.fs.open(path, mode)              → file handle
+std.fs.read(handle[, n])             → string
+std.fs.write(handle, text)           → null
+std.fs.seek(handle, offset[, whence]) → null
+std.fs.tell(handle)                  → int
+std.fs.eof(handle)                   → 1 / 0
+std.fs.close(handle)                 → null
+std.fs.flush(handle)                 → null
 ```
 
 `mode` 支持 `r`、`w`、`a`、`r+`、`w+`、`a+`，也接受带 `b`/`t` 的写法；内部统一按二进制模式打开。
@@ -2256,19 +2284,21 @@ file_flush(handle)          → null
 示例：
 
 ```text
-let h = file_open("data.txt", "w+");
-file_write(h, "hello world");
-file_seek(h, 0);
-file_read(h, 5)
-file_close(h)
+import std;
+
+let h = std.fs.open("data.txt", "w+");
+std.fs.write(h, "hello world");
+std.fs.seek(h, 0);
+std.fs.read(h, 5)
+std.fs.close(h)
 ```
 
 - 文件句柄是不可打印底层指针的资源对象，打印显示为 `<file: path>`；
 - 句柄复制会共享同一个底层文件，关闭其中一个会影响所有副本；
-- `file_read(h)` 读取剩余全部内容，`file_read(h, n)` 最多读取 n 字节；`n = 0` 等价于读取全部；
-- `file_seek` 的 `whence`：`0` 文件开头、`1` 当前位置、`2` 文件末尾；
+- `std.fs.read(h)` 读取剩余全部内容，`std.fs.read(h, n)` 最多读取 n 字节；`n = 0` 等价于读取全部；
+- `std.fs.seek` 的 `whence`：`0` 文件开头、`1` 当前位置、`2` 文件末尾；
 - 关闭后继续读写会报 `file is closed`；
-- `file_read` 读取到 NUL 字节会报错；读取二进制请使用 `file_read_bytes`；
+- `std.fs.read` 读取到 NUL 字节会报错；读取二进制请使用 `std.fs.file_read_bytes`；
 - 最终未关闭的句柄会随进程退出关闭。
 
 ## 字符、字节与编码
@@ -2288,7 +2318,7 @@ file_close(h)
 - 字符串下标和 `for ... in` 字符串返回 `char`；
 - `int('A') == 65`，`str('A') == "A"`，`char(65) == 'A'`；
 - `char` 可与字符串拼接：`'a' + "bc"`；
-- `bytes_from_char(c)` / `char_from_bytes(b)` / `char(b)` 做 UTF-8 字节互转；
+- `std.bytes.from_char(c)` / `std.bytes.to_char(b)` / `char(b)` 做 UTF-8 字节互转；
 - JSON 编码为单字符字符串；
 - 空、多字符、代理区、超过 `0x10FFFF` 报错。
 
@@ -2306,73 +2336,77 @@ byte(255)
 - `byte(int)` 超出范围报错；
 - `byte` 可以作 dict key、`switch` 值；
 - JSON 编码为整数；
-- `bytes[i]` / `bytes_get` 仍返回 `int`。
+- `bytes[i]` / `std.bytes.get` 仍返回 `int`。
 
 ### 二进制 buffer
 
 文本字符串按 UTF-8 处理，不能保存任意字节。二进制数据使用独立的 `bytes` 类型：
 
 ```text
-bytes_from_string(text)        → bytes
-bytes_to_string(bytes)         → string
-bytes_len(bytes)               → int
-bytes_get(bytes, index)        → 0..255
-bytes_slice(bytes, start[, length]) → bytes
-bytes_concat(a, b)             → bytes
-bytes_hex(bytes)               → 十六进制字符串
-bytes_from_hex(text)           → bytes
-bytes_to_int(bytes, size, byteorder[, offset[, signed]]) → int
-int_to_bytes(value, size, byteorder) → bytes
-read_bytes(path)               → bytes
-write_bytes(path, bytes)       → null，覆盖写入
-append_bytes(path, bytes)      → null，追加写入
-file_read_bytes(handle[, n])   → bytes
-file_write_bytes(handle, bytes) → null
-bytes[index]                   → 0..255
+std.bytes.from_string(text)        → bytes
+std.bytes.to_string(bytes)         → string
+std.bytes.len(bytes)               → int
+std.bytes.get(bytes, index)        → 0..255
+std.bytes.slice(bytes, start[, length]) → bytes
+std.bytes.concat(a, b)             → bytes
+std.bytes.hex(bytes)               → 十六进制字符串
+std.bytes.from_hex(text)            → bytes
+std.bytes.to_int(bytes, size, byteorder[, offset[, signed]]) → int
+std.bytes.from_int(value, size, byteorder) → bytes
+std.fs.read_bytes(path)            → bytes
+std.fs.write_bytes(path, bytes)    → null，覆盖写入
+std.fs.append_bytes(path, bytes)   → null，追加写入
+std.fs.file_read_bytes(handle[, n]) → bytes
+std.fs.file_write_bytes(handle, bytes) → null
+bytes[index]                       → 0..255
 bytes[index] = 0..255
 ```
+
+需要 `import std;`。
 
 示例：
 
 ```text
-let b = bytes_from_hex("00ff10");
-bytes_len(b)          → 3
-bytes_hex(b)          → "00ff10"
-bytes_get(b, 1)       → 255
-bytes_hex(bytes_slice(b, 1, 2)) → "ff10"
+import std;
 
-let c = bytes_from_string("abc");
+let b = std.bytes.from_hex("00ff10");
+std.bytes.len(b)                     → 3
+std.bytes.hex(b)                     → "00ff10"
+std.bytes.get(b, 1)                  → 255
+std.bytes.hex(std.bytes.slice(b, 1, 2)) → "ff10"
+
+let c = std.bytes.from_string("abc");
 c[1] = 255;
-bytes_hex(c)          → "61ff63"
+std.bytes.hex(c)                     → "61ff63"
 
-bytes_to_int(bytes_from_hex("78563412"), 4, "little")
-                      → 305419896
-bytes_to_int(bytes_from_hex("78563412"), 4, "big")
-                      → 2018915346
-bytes_to_int(bytes_from_hex("ffff"), 2, "little", 0, 1)
-                      → -1
-bytes_hex(int_to_bytes(305419896, 4, "little"))
-                      → "78563412"
-bytes_hex(int_to_bytes(-1, 2, "little"))
-                      → "ffff"
+std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "little")
+                                     → 305419896
+std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "big")
+                                     → 2018915346
+std.bytes.to_int(std.bytes.from_hex("ffff"), 2, "little", 0, 1)
+                                     → -1
+std.bytes.hex(std.bytes.from_int(305419896, 4, "little"))
+                                     → "78563412"
+std.bytes.hex(std.bytes.from_int(-1, 2, "little"))
+                                     → "ffff"
 ```
 
 规则：
 
 - `bytes` 可以保存任意字节，包括 `0x00`，长度由字节数决定；
-- 直接打印 `bytes` 时显示为 `<bytes: N>`，不会把原始二进制写到终端；需要查看内容时使用 `bytes_hex`；
-- `bytes_len`、`bytes_get`、`bytes_slice`、索引和 `file_seek` 都使用**字节下标**，不是 UTF-8 码点；
+- 直接打印 `bytes` 时显示为 `<bytes: N>`，不会把原始二进制写到终端；需要查看内容时使用 `std.bytes.hex`；
+- `std.bytes.len`、`std.bytes.get`、`std.bytes.slice`、索引和 `std.fs.seek` 都使用**字节下标**，不是 UTF-8 码点；
 - 索引读取返回 `0..255` 的整数，索引赋值只接受 `0..255`；
-- `bytes_slice` 的 `start` / `length` 不能为负数，越界会截断；
-- `bytes_from_hex` 只接受偶数个十六进制数字，大小写均可；
-- `bytes_to_int` 的 `size` 为 1..8，`byteorder` 支持 `"little"` / `"big"`（也接受 `"le"` / `"be"`）；
-- `bytes_to_int` 的 `offset` 默认 0，`signed` 默认 0；`offset + size` 超出 buffer 会报错，不会静默截断；
-- `bytes_to_int(..., signed = 1)` 按二补码解释；无符号 64 位值超过 `int64` 上限时会报错；
-- `int_to_bytes` 的 `size` 为 1..8；值可以落在有符号下限到无符号上限之间，按低 `size` 字节编码；
-- 负数写入使用二补码，例如 `int_to_bytes(-1, 2, "little")` 得到 `ff ff`；
-- `bytes_to_string` 要求内容是合法 UTF-8 且不含 NUL，否则报错；
-- `read_bytes` / `write_bytes` / `append_bytes` 不做文本 NUL 检查；
-- `file_read_bytes(h)` 读取剩余全部内容，`file_read_bytes(h, n)` 最多读取 n 字节；
+- `std.bytes.slice` 的 `start` / `length` 不能为负数，越界会截断；
+- `std.bytes.from_hex` 只接受偶数个十六进制数字，大小写均可；
+- `std.bytes.to_int` 的 `size` 为 1..8，`byteorder` 支持 `"little"` / `"big"`（也接受 `"le"` / `"be"`）；
+- `std.bytes.to_int` 的 `offset` 默认 0，`signed` 默认 0；`offset + size` 超出 buffer 会报错，不会静默截断；
+- `std.bytes.to_int(..., signed = 1)` 按二补码解释；无符号 64 位值超过 `int64` 上限时会报错；
+- `std.bytes.from_int` 的 `size` 为 1..8；值可以落在有符号下限到无符号上限之间，按低 `size` 字节编码；
+- 负数写入使用二补码，例如 `std.bytes.from_int(-1, 2, "little")` 得到 `ff ff`；
+- `std.bytes.to_string` 要求内容是合法 UTF-8 且不含 NUL，否则报错；
+- `std.fs.read_bytes` / `std.fs.write_bytes` / `std.fs.append_bytes` 不做文本 NUL 检查；
+- `std.fs.file_read_bytes(h)` 读取剩余全部内容，`std.fs.file_read_bytes(h, n)` 最多读取 n 字节；
 - `bytes` 是值类型，赋值和复制都会复制内容。
 
 ### 编码转换
@@ -2410,16 +2444,16 @@ gb18030
 ```text
 import std;
 
-let s = std.encoding.decode(bytes_from_hex("d6d0b9fa"), "gbk");
+let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
 print(s);                                      // 中国
 
-print(bytes_hex(std.encoding.encode("中国", "gbk")));
+print(std.bytes.hex(std.encoding.encode("中国", "gbk")));
                                                // d6d0b9fa
 
-print(bytes_hex(std.encoding.encode("€", "gbk")));
+print(std.bytes.hex(std.encoding.encode("€", "gbk")));
                                                // 80
 
-print(bytes_hex(std.encoding.encode("€", "gb18030")));
+print(std.bytes.hex(std.encoding.encode("€", "gb18030")));
                                                // a2e3
 
 std.encoding.supports("gbk")                   // true
@@ -2433,7 +2467,7 @@ std.encoding.supports("gb18030")               // true
 - `std.encoding` 的 `utf-16` / `utf-32` 要求 BOM，显式字节序版本不自动处理 BOM；
 - `utf-16` / `utf-32` 编码固定输出 BOM + 小端；
 - 解码结果包含 `U+0000` 时始终报错，因为 `string` 不能保存内嵌 NUL；
-- `bytes_to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
+- `std.bytes.to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
 
 ### Unicode 归一化
 
@@ -2455,14 +2489,14 @@ std.unicode.version()                  → string
 ```text
 import std;
 
-let decomposed = std.encoding.decode(bytes_from_hex("65cc81"), "utf-8");
+let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");
 let composed = std.unicode.normalize(decomposed, "nfc");
-bytes_hex(std.encoding.encode(composed, "utf-8"))  // c3a9
+std.bytes.hex(std.encoding.encode(composed, "utf-8"))  // c3a9
 
 std.unicode.is_normalized(decomposed, "nfc")       // false
 std.unicode.is_normalized(composed, "nfc")         // true
 
-let circled = std.encoding.decode(bytes_from_hex("e291a0"), "utf-8");
+let circled = std.encoding.decode(std.bytes.from_hex("e291a0"), "utf-8");
 std.unicode.normalize(circled, "nfkc")             // "1"
 std.unicode.version()                              // "16.0.0"
 ```
@@ -2660,10 +2694,10 @@ env     dict，覆盖子进程环境
 import std;
 
 let r = std.process.run_command("printf hello");
-print(bytes_to_string(r["stdout"]));
+print(std.bytes.to_string(r["stdout"]));
 
 let r2 = std.process.run_command("cat", {"stdin": "abc"});
-bytes_to_string(r2["stdout"])
+std.bytes.to_string(r2["stdout"])
 ```
 
 注意：当前实现通过 shell 重定向捕获输出，不提供超时和流式读写。
@@ -2723,21 +2757,21 @@ std.compress.inflate(bytes)       → bytes
 二进制文件读写：
 
 ```text
-let h = file_open("data.bin", "r+b");
-file_seek(h, 8);
-file_write_bytes(h, bytes_from_hex("00ff"));
-file_seek(h, 0);
-bytes_hex(file_read_bytes(h, 16))
-file_close(h)
+let h = std.fs.open("data.bin", "r+b");
+std.fs.seek(h, 8);
+std.fs.file_write_bytes(h, std.bytes.from_hex("00ff"));
+std.fs.seek(h, 0);
+std.bytes.hex(std.fs.file_read_bytes(h, 16))
+std.fs.close(h)
 ```
 
 读取固定宽度整数：
 
 ```text
-let h = file_open("data.bin", "rb");
-let magic = bytes_to_int(file_read_bytes(h, 4), 4, "big");
-let length = bytes_to_int(file_read_bytes(h, 4), 4, "little");
-file_close(h);
+let h = std.fs.open("data.bin", "rb");
+let magic = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "big");
+let length = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "little");
+std.fs.close(h);
 ```
 
 ## 用 dict + 闭包封装文件对象
@@ -2747,11 +2781,11 @@ file_close(h);
 
 ```text
 func open_file(path) {
-  let h = file_open(path, "r");
+  let h = std.fs.open(path, "r");
 
-  func read(n) { return file_read(h, n); }
-  func seek(n) { return file_seek(h, n); }
-  func close() { return file_close(h); }
+  func read(n) { return std.fs.read(h, n); }
+  func seek(n) { return std.fs.seek(h, n); }
+  func close() { return std.fs.close(h); }
 
   return {"read": read, "seek": seek, "close": close};
 }
@@ -2952,9 +2986,9 @@ let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
 - `std.entry.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_entry(bytes, Message)` 可在另一个进程反序列化并启动线程：
   ```skein
-  write_bytes("entry.bin", std.entry.encode(worker));
+  std.fs.write_bytes("entry.bin", std.entry.encode(worker));
   # 另一个进程：
-  let t = std.thread.spawn_entry(read_bytes("entry.bin"), msg);
+  let t = std.thread.spawn_entry(std.fs.read_bytes("entry.bin"), msg);
   ```
   当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` / `lru` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器。
 

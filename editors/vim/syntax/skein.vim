@@ -69,18 +69,8 @@ syntax keyword skeinType userdata result error task generator socket listener
 syntax keyword skeinType websocket stream pair tuple union
 
 " Builtins ------------------------------------------------------------------
-syntax keyword skeinBuiltin sqrt exp log abs sin cos tan asin acos atan atan2
-      \ pow floor ceil round trunc log2 log10 hypot min max sign clamp fmod mod
-      \ is_nan is_inf is_finite cbrt gcd lcm degrees radians
-syntax keyword skeinBuiltin len range print println str kind_of type_name
-      \ type_package type_module_name type_source format
-syntax keyword skeinBuiltin read_file write_file append_file file_exists
-      \ file_open file_read file_write file_seek file_tell file_eof file_close
-      \ file_flush input split split_ws trim find substr
-syntax keyword skeinBuiltin bytes_from_string bytes_to_string bytes_from_char
-      \ char_from_bytes bytes_len bytes_get bytes_slice bytes_concat bytes_hex
-      \ bytes_from_hex bytes_to_int int_to_bytes read_bytes write_bytes
-      \ append_bytes file_read_bytes file_write_bytes
+syntax keyword skeinBuiltin len range print println input str kind_of type_name
+      \ type_package type_module_name type_source
 
 " Placeholders ---------------------------------------------------------------
 syntax match skeinPlaceholder '\$[1-9]\|\$'

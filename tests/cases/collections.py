@@ -551,38 +551,38 @@ def run_cases():
 
     check("unary minus", "-3+5\n", stdout="= 2")
     check("unary minus alone", "-3\n", stdout="= -3")
-    check("abs negative", "abs(-3)\n", stdout="= 3")
-    check("abs overflow", "abs(-9223372036854775807 - 1)\n",
+    check("abs negative", "std.math.abs(-3)\n", stdout="= 3")
+    check("abs overflow", "std.math.abs(-9223372036854775807 - 1)\n",
           stderr="integer overflow")
     check("trig functions",
-          "sin(0)\ncos(0)\ntan(0)\n"
-          "asin(1)\nacos(1)\natan(1)\natan2(1, 1)\n",
+          "std.math.sin(0)\nstd.math.cos(0)\nstd.math.tan(0)\n"
+          "std.math.asin(1)\nstd.math.acos(1)\nstd.math.atan(1)\nstd.math.atan2(1, 1)\n",
           stdout_all=["= 0.0", "= 1.0", "= 0.0", "= 1.5707963267948966",
                       "= 0.0", "= 0.7853981633974483",
                       "= 0.7853981633974483"])
     check("math power and logs",
-          "pow(2, 10)\nlog2(8)\nlog10(100)\nhypot(3, 4)\n",
+          "std.math.pow(2, 10)\nstd.math.log2(8)\nstd.math.log10(100)\nstd.math.hypot(3, 4)\n",
           stdout_all=["= 1024.0", "= 3.0", "= 2.0", "= 5.0"])
     check("math rounding",
-          "floor(1.9)\nceil(1.1)\nround(-1.5)\ntrunc(-1.9)\n",
+          "std.math.floor(1.9)\nstd.math.ceil(1.1)\nstd.math.round(-1.5)\nstd.math.trunc(-1.9)\n",
           stdout_all=["= 1", "= 2", "= -2", "= -1"])
     check("math min max",
-          "min(3, 1, 2)\nmax(2.5, 1)\nmin(1)\nmax(1, 2.0)\n",
+          "std.math.min(3, 1, 2)\nstd.math.max(2.5, 1)\nstd.math.min(1)\nstd.math.max(1, 2.0)\n",
           stdout_all=["= 1", "= 2.5", "= 1", "= 2.0"])
     check("math type error",
-          'sin("x")\n', stderr="type error: expected number, got string")
+          'std.math.sin("x")\n', stderr="type error: expected number, got string")
     check("math arity error",
-          "atan2(1)\n", stderr="atan2 expects 2 arguments, got 1")
+          "std.math.atan2(1)\n", stderr="atan2 expects 2 arguments, got 1")
     check("math variadic arity",
-          "min()\n", stderr="min expects at least 1 argument")
+          "std.math.min()\n", stderr="min expects at least 1 argument")
     check("math rounding overflow",
-          "floor(1e100)\n", stderr="floor result out of integer range")
+          "std.math.floor(1e100)\n", stderr="floor result out of integer range")
 
-    check("nan equality is false", "sqrt(-1) == 1\n", stdout="= false")
-    check("nan inequality is true", "sqrt(-1) != 1\n", stdout="= true")
-    check("nan is not equal to itself", "sqrt(-1) == sqrt(-1)\n",
+    check("nan equality is false", "std.math.sqrt(-1) == 1\n", stdout="= false")
+    check("nan inequality is true", "std.math.sqrt(-1) != 1\n", stdout="= true")
+    check("nan is not equal to itself", "std.math.sqrt(-1) == std.math.sqrt(-1)\n",
           stdout="= false")
-    check("nan ordering is false", "sqrt(-1) >= 1\n", stdout="= false")
+    check("nan ordering is false", "std.math.sqrt(-1) >= 1\n", stdout="= false")
 
     check("divide by zero int", "1/0\n", stderr="division by zero")
     check("divide by zero float", "1.0/0\n", stderr="division by zero")

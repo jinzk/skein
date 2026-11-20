@@ -3513,15 +3513,15 @@ std::string make_worker_bootstrap(const std::string &script,
     std::string source = R"(import std;
 
 let pool = std.thread.pool(1, "@SCRIPT@", {"entry": "@ENTRY@"});
-std.io.write_all(std.io.stdout, bytes_from_string(
+std.io.write_all(std.io.stdout, std.bytes.from_string(
     "{\"ready\":true,\"version\":1,\"protocol\":\"hybrid\"}\n"));
 std.io.flush(std.io.stdout);
 
 while (true) {
     let line = std.io.read_line(std.io.stdin);
     if (line == null) { break; }
-    let request = std.json.parse(bytes_to_string(line));
-    let body = bytes_from_string("");
+    let request = std.json.parse(std.bytes.to_string(line));
+    let body = std.bytes.from_string("");
     if (request["body_len"] > 0) {
         body = std.io.read_exact(std.io.stdin, request["body_len"]);
     }
@@ -3556,18 +3556,18 @@ while (true) {
     if (result["ok"]) {
         let response = result["value"];
         let body_value = response["body"];
-        let response_body = bytes_from_string("");
+        let response_body = std.bytes.from_string("");
         if (std.type.name(body_value) == "bytes") {
             response_body = body_value;
         } else if (body_value != null) {
-            response_body = bytes_from_string(str(body_value));
+            response_body = std.bytes.from_string(str(body_value));
         }
         let reply = {"id": request["id"], "ok": true,
                      "result": {"status": response["status"],
                                 "headers": response["headers"]},
                      "body_len": len(response_body)};
         std.io.write_all(std.io.stdout,
-            bytes_from_string(std.json.stringify(reply) + "\n"));
+            std.bytes.from_string(std.json.stringify(reply) + "\n"));
         std.io.write_all(std.io.stdout, response_body);
         std.io.flush(std.io.stdout);
     } else {
@@ -3578,7 +3578,7 @@ while (true) {
         let reply = {"id": request["id"], "ok": false,
                      "error": error_text};
         std.io.write_all(std.io.stdout,
-            bytes_from_string(std.json.stringify(reply) + "\n"));
+            std.bytes.from_string(std.json.stringify(reply) + "\n"));
         std.io.flush(std.io.stdout);
     }
 }

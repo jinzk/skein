@@ -291,7 +291,7 @@ def run_cases():
           env=WARN_ENV)
 
     check("return annotation callable accepts builtin",
-          "func get_fn(): callable { return sqrt; }\n"
+          "func get_fn(): callable { return std.math.sqrt; }\n"
           "println(get_fn()(9));\n",
           stdout_all=["3"])
 
@@ -319,23 +319,23 @@ def run_cases():
           stdout_all=["4", "5"])
 
     check("function type accepts builtin",
-          "let f: (number) -> number = sqrt;\n"
+          "let f: (number) -> number = std.math.sqrt;\n"
           "println(f(9));\n",
           not_stderr="type warning",
           stdout_all=["3"])
 
     check("builtin function signatures",
           "import std;\n"
-          "let f: (number) -> int = floor;\n"
+          "let f: (number) -> int = std.math.floor;\n"
           "let g: (int, int) -> int = std.math.gcd;\n"
-          "let h: (string) -> string = trim;\n"
+          "let h: (string) -> string = std.string.trim;\n"
           "println(f(2.9));\n"
           "println(g(12, 18));\n"
           "println(h(\"  x  \"));\n",
           stdout_all=["2", "6", "x"])
 
     check("builtin signature argument check",
-          'sqrt("x");\n',
+          'std.math.sqrt("x");\n',
           stderr="type error: expected number, got string")
 
     check("function type assignment and call",

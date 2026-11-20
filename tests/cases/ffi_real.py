@@ -153,7 +153,7 @@ def _zlib_cases(directory):
         "import std;\n"
         f"let lib = std.ffi.open({skein_string(library)}, "
         f"{skein_string(manifest)});\n"
-        'let source = bytes_from_string("hello hello hello");\n'
+        'let source = std.bytes.from_string("hello hello hello");\n'
         "let source_len = std.bytes.len(source);\n"
         'let bound = std.ffi.call(lib, "compressBound", [source_len]);\n'
         "let dest = std.ffi.buffer(bound);\n"
@@ -169,7 +169,7 @@ def _zlib_cases(directory):
         'let unpack_rc = std.ffi.call(lib, "uncompress", '
         "[out, out_len, compressed, compressed_len]);\n"
         "compressed_rc == 0 && unpack_rc == 0\n"
-        "bytes_to_string(std.ffi.buffer_bytes(out, source_len))\n"
+        "std.bytes.to_string(std.ffi.buffer_bytes(out, source_len))\n"
         'std.string.len(std.ffi.call(lib, "zlibVersion", [])) > 0\n'
         "std.ffi.close(lib);\n",
         stdout_all=["= true", "= hello hello hello", "= true"],

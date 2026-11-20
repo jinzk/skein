@@ -47,8 +47,8 @@ str(logger)       // "logger(app)" 或 "logger"
 
 模块级函数写入默认 logger（stderr、`info`、文本格式）。
 
-> `log` 同时是全局数学内置函数，因此示例中的 logger 变量使用 `lg`，
-> 避免与 `log(...)` 冲突。
+> 数学函数 `std.math.log`（需要 `import std;`）与 logger 概念容易混淆，
+> 示例中的 logger 变量使用 `lg`。
 
 ## 3. 选项
 

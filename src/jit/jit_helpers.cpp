@@ -1823,10 +1823,12 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_bind_patterns(function_def *def, value_t
     return fn(def, values, argc);
 }
 
-extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count,
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items,
+                                       uint32_t count, uint32_t frozen,
                                        int line, int column) {
     diag_set_location(line, column);
-    struct list_value_t *list = newlistval();
+    struct list_value_t *list =
+        frozen ? newtupleval() : newlistval();
     for (uint32_t i = 0; i < count; ++i) {
         list->payload->items.push_back(items[i]);
         items[i] = nullptr;

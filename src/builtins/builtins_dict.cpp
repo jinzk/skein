@@ -66,7 +66,7 @@ struct value_t *call_dict_builtin(
             struct list_value_t *out = newlistval();
             out->payload->items.reserve(dict->payload->items.size());
             for (auto &entry : dict->payload->items) {
-                struct list_value_t *pair = newlistval();
+                struct list_value_t *pair = newtupleval();
                 pair->payload->items.push_back(dupval(entry.first));
                 pair->payload->items.push_back(dupval(entry.second));
                 out->payload->items.push_back((struct value_t *)pair);

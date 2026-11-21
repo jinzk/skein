@@ -673,16 +673,73 @@ def run_cases():
           stdout_all=["i", "b", "s", "c", "y", "x", "n"])
     check("dict float key rejected",
           "{1.5: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got float")
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct, got float")
     check("dict list key rejected",
           "{[1]: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got list")
-    check("dict struct key rejected",
-          "struct P { x: int; }\n{P { x: 1 }: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got P")
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct, got list")
+    check("dict struct key",
+          "struct P { x: int; }\n"
+          "let d = {P { x: 1 }: 'a'};\n"
+          "println(d[P { x: 1 }]);\n",
+          stdout_all=["a"])
+    check("dict nested struct key",
+          "struct Inner { id: int; }\n"
+          "struct Outer { inner: Inner; tag: string; }\n"
+          'let k = Outer { inner: Inner { id: 1 }, tag: "x" };\n'
+          "let d = {k: true};\n"
+          'println(d[Outer { inner: Inner { id: 1 }, tag: "x" }]);\n',
+          stdout_all=["true"])
+    check("dict struct key snapshot after mutation",
+          "import std;\n"
+          "struct Key { id: int; }\n"
+          "let k = Key { id: 1 };\n"
+          "let d = {k: 42};\n"
+          "k.id = 2;\n"
+          "println(d[Key { id: 1 }]);\n"
+          "println(std.dict.has(d, k));\n",
+          stdout_all=["42", "0"])
+    check("dict struct with mutable field rejected",
+          "struct P { xs: list[int]; }\n"
+          "{P { xs: [1] }: 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct")
     check("dict enum key rejected",
           "enum E { A; }\n{E.A: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, or null, got E")
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct, got E")
+    check("dict tuple keys",
+          "let d = {(1, 'a'): 10, (2, 'b'): 20};\n"
+          "println(d[(1, 'a')]);\n"
+          "d[(3, 'c')] = 30;\n"
+          "println(d[(3, 'c')]);\n"
+          "println(len(d));\n",
+          stdout_all=["10", "30", "3"])
+    check("dict nested tuple keys",
+          "let d = {((1, 2), 'x'): true};\n"
+          "println(d[((1, 2), 'x')]);\n",
+          stdout_all=["true"])
+    check("dict large tuple keys",
+          "let d = {};\n"
+          "let i = 0;\n"
+          "while (i < 40) { d[(i, i + 1)] = i; i = i + 1; }\n"
+          "println(d[(20, 21)]);\n"
+          "println(len(d));\n"
+          "println(d[(39, 40)]);\n",
+          stdout_all=["20", "40", "39"])
+    check("dict tuple mutable element rejected",
+          "{(1, [2]): 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct")
+    check("dict tuple float element rejected",
+          "{(1, 2.0): 1}\n",
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct")
+    check("tuple index assignment rejected",
+          "let t = (1, 2);\nt[0] = 9;\n",
+          stderr="cannot modify an immutable tuple")
+    check("tuple concatenation remains hashable",
+          "let a = (1, 2);\nlet b = (3, 4);\nlet c = a + b;\n"
+          "println({c: true}[(1, 2, 3, 4)]);\n"
+          "let xs = [1, 2];\nlet ys = [3, 4];\nlet zs = xs + ys;\n"
+          "zs[0] = 9;\nprintln(zs);\n"
+          "let mixed = [0] + (1, 2);\nprintln(mixed);\nprintln(a);\n",
+          stdout_all=["true", "[9, 2, 3, 4]", "[0, 1, 2]", "[1, 2]"])
 
     check("match type pattern",
           'println(match (5) { case is int => "int"; '

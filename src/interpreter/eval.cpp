@@ -561,7 +561,8 @@ struct value_t *eval(struct ast *a) {
         case 'l':
         case NODE_TUPLE: {
             struct list_node *p = (struct list_node *)a;
-            struct list_value_t *v = newlistval();
+            struct list_value_t *v =
+                a->nodetype == NODE_TUPLE ? newtupleval() : newlistval();
             while (p != NULL) {
                 if (p->value) {
                     struct value_t *item = eval(p->value);

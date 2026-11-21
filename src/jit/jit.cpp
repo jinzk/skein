@@ -164,8 +164,8 @@ SKEIN_JIT_SYSV value_t *skein_jit_closure(
     value_t **frame_values, uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_push_scope();
 SKEIN_JIT_SYSV void skein_jit_pop_scope(skein::jit::thread_state *ts);
-SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count, int line,
-                            int column);
+SKEIN_JIT_SYSV value_t *skein_jit_new_list(value_t **items, uint32_t count,
+                            uint32_t frozen, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_new_dict(value_t **items, uint32_t count, int line,
                             int column);
 SKEIN_JIT_SYSV int skein_jit_bind_patterns(function_def *def, value_t **values,
@@ -1532,8 +1532,10 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                       asmjit::x86::ptr(asmjit::x86::rbp,
                                        stack_off(first)));
                 a.mov(asmjit::x86::esi, asmjit::imm(count));
-                a.mov(asmjit::x86::edx, asmjit::imm(loc.line));
-                a.mov(asmjit::x86::ecx, asmjit::imm(loc.column));
+                a.mov(asmjit::x86::edx,
+                      asmjit::imm(static_cast<uint32_t>(ins.flags & 1)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
                 call_addr(fn_address(&skein_jit_new_list));
                 for (int i = first; i < depth; ++i)
                     clear_slot(i);

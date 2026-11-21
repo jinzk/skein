@@ -2537,8 +2537,11 @@ struct Compiler {
             }
 
             case 'l':
-        case NODE_TUPLE:
-                compile_list(node);
+                compile_list(node, false);
+                return;
+
+            case NODE_TUPLE:
+                compile_list(node, true);
                 return;
 
             case 'd':
@@ -3530,7 +3533,7 @@ struct Compiler {
             target->continue_patches.push_back(patch_at);
     }
 
-    void compile_list(ast *node) {
+    void compile_list(ast *node, bool frozen) {
         struct list_node *item = (struct list_node *)node;
         std::vector<ast *> values;
         for (; item; item = (struct list_node *)item->next) {
@@ -3545,7 +3548,8 @@ struct Compiler {
             compile(value);
             if (!ok) return;
         }
-        emit(Op::NewList, 0, static_cast<uint16_t>(values.size()),
+        emit(Op::NewList, frozen ? 1 : 0,
+             static_cast<uint16_t>(values.size()),
              static_cast<uint32_t>(values.size()), loc_of(node));
     }
 

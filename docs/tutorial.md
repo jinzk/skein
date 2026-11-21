@@ -665,7 +665,9 @@ struct Handler {
 - 支持稳定字段路径收窄，例如 `if (b.value is int) { b.value + 1; }`，包括嵌套字段；
 - 对字段/变量的写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄；
 - 收窄绑定在发生赋值后回退到声明类型，避免在分支中继续使用过期的窄化类型；
-- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查；
+- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，但 tuple/pair 字面量以及 `zip`、`dict.items`、`iter.enumerate` 产生的 pair 是不可变 list，不能索引赋值；`union` 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查；
+- tuple/pair 可以作为 `dict` key 或 `set` 元素，前提是所有元素递归地属于合法 key 类型（`int/bool/string/char/byte/bytes/null` 或嵌套 tuple/pair）；含可变 list/dict、float、enum 等元素的 tuple 不能作为 key；
+- struct 也可以作为 `dict` key 或 `set` 元素，前提是所有字段递归地属于合法 key 类型；含可变 list/dict、float、enum 等字段的 struct 不能作为 key；
 - `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。
@@ -1306,6 +1308,7 @@ let q = p.moved(1, 2);
 - 默认值在定义包的作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
 - `std.struct.decode` 不自动填充默认值，缺失字段仍然报错；
 - 字段可以读写：`p.x`、`p.x = 5`；
+- 所有字段递归可哈希时，结构体可以作 `dict` key 或 `set` 元素；key 保存插入时的字段快照，之后修改原变量不会改变已插入的 key；
 - 方法第一个参数必须是显式 `self`；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
 - `struct` 只声明字段；所有方法必须写在 `impl Type` 中；

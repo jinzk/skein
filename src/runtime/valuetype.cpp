@@ -394,6 +394,12 @@ struct list_value_t *newlistval() {
     return v;
 }
 
+struct list_value_t *newtupleval() {
+    struct list_value_t *v = newlistval();
+    v->payload->frozen = true;
+    return v;
+}
+
 struct dict_value_t *newdictval() {
     struct dict_value_t *v = new dict_value_t;
     v->type = T_dict;

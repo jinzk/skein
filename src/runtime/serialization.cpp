@@ -123,7 +123,9 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
 
     if (value->type == T_list) {
         struct list_value_t *list = (struct list_value_t *)value;
-        struct list_value_t *out = newlistval();
+        struct list_value_t *out =
+            list->payload && list->payload->frozen ? newtupleval()
+                                                   : newlistval();
         for (struct value_t *item : list->payload->items) {
             struct value_t *decoded = decode_nested_value(
                 item, depth + 1, path, defaults);

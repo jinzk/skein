@@ -24,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 9u;
+constexpr uint32_t kPayloadVersion = 10u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -287,11 +287,9 @@ enum class value_tag : uint8_t {
     Dict = 11,
     Set = 12,
     Deque = 13,
-    /* Slot kept reserved; native std.lru was removed.  Do not reuse. */
-    ReservedLru = 14,
-    Builtin = 15,
-    Struct = 16,
-    Enum = 17,
+    Builtin = 14,
+    Struct = 15,
+    Enum = 16,
 };
 
 bool write_value(writer &out, const struct value_t *value, int depth,
@@ -371,6 +369,7 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             const struct list_value_t *list =
                 (const struct list_value_t *)value;
             out.u8((uint8_t)value_tag::List);
+            out.u8(list->payload->frozen ? 1 : 0);
             out.u32((uint32_t)list->payload->items.size());
             for (const struct value_t *item : list->payload->items) {
                 if (!write_value(out, item, depth + 1, error))
@@ -592,12 +591,14 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
             return true;
         }
         case value_tag::List: {
+            uint8_t frozen = 0;
             uint32_t count = 0;
-            if (!in.count(count)) {
+            if (!in.u8(frozen) || !in.count(count)) {
                 error = in.error;
                 return false;
             }
-            struct list_value_t *list = newlistval();
+            struct list_value_t *list =
+                frozen ? newtupleval() : newlistval();
             value = value_owner((struct value_t *)list);
             for (uint32_t i = 0; i < count; ++i) {
                 value_owner item;
@@ -673,9 +674,6 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
             deque->payload = std::move(payload);
             return true;
         }
-        case value_tag::ReservedLru:
-            error = "thread payload contains a removed lru value";
-            return false;
         case value_tag::Builtin: {
             uint32_t functype = 0;
             if (!in.u32(functype)) {

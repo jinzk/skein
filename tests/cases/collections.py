@@ -377,6 +377,21 @@ def run_cases():
     check("lru json encoding",
           'import std;\nstd.json.stringify(lru.new(2));\n',
           stdout='= {"cap":2,"map":{},"order":[]}')
+    check("lru tuple keys",
+          'import std;\n'
+          'let l = lru.new(2);\n'
+          'let r = lru.put(l, (1, 2), "x"); l = r["lru"];\n'
+          'println(lru.get(l, (1, 2))["value"]);\n'
+          'println(lru.has(l, (1, 2)));\n',
+          stdout_all=["x", "true"])
+    check("lru struct keys",
+          'import std;\n'
+          'struct Key { id: int; }\n'
+          'let l = lru.new(2);\n'
+          'let r = lru.put(l, Key { id: 1 }, "x"); l = r["lru"];\n'
+          'println(lru.get(l, Key { id: 1 })["value"]);\n'
+          'println(lru.has(l, Key { id: 1 }));\n',
+          stdout_all=["x", "true"])
 
     check("list unique and group_by",
           'import std;\n'
@@ -396,6 +411,43 @@ def run_cases():
           'println(len(std.list.unique(ys)));\n'
           'println(std.list.unique([[1], [1], [2]]));\n',
           stdout_all=["20000", "1000", "[[1], [2]]"])
+    check("list unique tuple keys",
+          'import std;\n'
+          'println(std.list.unique([(1, 2), (1, 2), (3, 4)]));\n',
+          stdout_all=["[[1, 2], [3, 4]]"])
+    check("list group_by tuple keys",
+          'import std;\n'
+          'println(std.list.group_by([1, 2, 3], '
+          'func(x) { return (x % 2, x > 1); }));\n',
+          stdout_all=["{[1, false]: [1], [0, true]: [2], [1, true]: [3]}"])
+    check("set tuple elements",
+          'import std;\nimport std.set;\n'
+          'let s = set.from_list([(1, 2), (1, 2), (3, 4)]);\n'
+          'println(set.size(s));\nprintln(set.values(s));\n',
+          stdout_all=["2", "[[1, 2], [3, 4]]"])
+    check("set struct elements",
+          'import std;\nimport std.set;\n'
+          'struct Key { id: int; tag: string; }\n'
+          'let s = set.from_list([Key { id: 1, tag: "a" }, '
+          'Key { id: 1, tag: "a" }, Key { id: 2, tag: "b" }]);\n'
+          'println(set.size(s));\nprintln(set.values(s));\n',
+          stdout_all=["2", "[Key { id: 1, tag: a }, Key { id: 2, tag: b }]"])
+    check("list unique struct keys",
+          'import std;\n'
+          'struct Key { id: int; }\n'
+          'println(std.list.unique([Key { id: 1 }, Key { id: 1 }, '
+          'Key { id: 2 }]));\n',
+          stdout_all=["[Key { id: 1 }, Key { id: 2 }]"])
+    check("pair producers create hashable pairs",
+          'import std;\n'
+          'let z = std.list.zip([1], ["a"]);\n'
+          'println({z[0]: 1}[(1, "a")]);\n'
+          'let d = {1: "a"};\n'
+          'let p = std.dict.items(d)[0];\n'
+          'println({p: 1}[(1, "a")]);\n'
+          'let e = std.iter.collect(std.iter.enumerate(["a"]))[0];\n'
+          'println({e: 1}[(0, "a")]);\n',
+          stdout_all=["1", "1", "1"])
     check("dict equality large",
           'import std;\n'
           'let a = {};\nlet b = {};\nlet i = 0;\n'

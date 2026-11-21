@@ -598,7 +598,7 @@ static struct value_t *list_zip_impl(
     struct list_value_t *out = newlistval();
     out->payload->items.reserve(shortest);
     for (size_t i = 0; i < shortest; ++i) {
-        struct list_value_t *row = newlistval();
+        struct list_value_t *row = newtupleval();
         row->payload->items.reserve(lists.size());
         for (struct value_t *value : lists) {
             struct list_value_t *list = (struct list_value_t *)value;

@@ -10,7 +10,7 @@ bool list_grow_append(struct value_t *list, struct value_t **args,
     if (!list || list->type != T_list)
         return false;
     struct list_value_t *target = (struct list_value_t *)list;
-    if (!target->payload)
+    if (!target->payload || target->payload->frozen)
         return false;
     if (target->payload.use_count() <= 2) {
         for (uint32_t i = 0; i < argc; ++i) {
@@ -38,9 +38,12 @@ bool list_grow_concat(struct value_t *left, struct value_t *right) {
     struct list_value_t *extra = (struct list_value_t *)right;
     if (!target->payload || !extra->payload)
         return false;
+    if (target->payload->frozen)
+        return false;
     /* A freshly built literal is uniquely owned and its items can be moved.
      * A variable operand is shared with its symbol and must be copied. */
-    const bool take_extra = extra->payload.use_count() == 1;
+    const bool take_extra =
+        extra->payload.use_count() == 1 && !extra->payload->frozen;
     if (target->payload.use_count() <= 2) {
         for (struct value_t *item : extra->payload->items)
             target->payload->items.push_back(take_extra ? item

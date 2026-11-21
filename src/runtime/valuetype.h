@@ -184,6 +184,13 @@ struct bytes_value_t {
 
 struct list_payload {
     std::vector<value_t *> items;
+    /* Tuple/pair literals and pair-producing builtins create immutable
+     * payloads.  Ordinary list literals remain mutable. */
+    bool frozen = false;
+    /* Cached structural hash for frozen list payloads used as dict/set
+     * keys.  Frozen payloads never change, so the cache stays valid. */
+    mutable std::uint64_t hash = 0;
+    mutable bool hash_valid = false;
     ~list_payload();
 };
 
@@ -427,6 +434,7 @@ struct value_t *dupval(struct value_t *v);
 /* Release thread-local value free lists before a worker runtime exits. */
 void value_runtime_thread_shutdown();
 struct list_value_t *newlistval();
+struct list_value_t *newtupleval();
 struct dict_value_t *newdictval();
 struct deque_value_t *newdequeval();
 /* Takes ownership of `less`. */

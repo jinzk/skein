@@ -1336,7 +1336,8 @@ public:
                         }
                         items[i - 1] = item;
                     }
-                    struct list_value_t *list = newlistval();
+                    struct list_value_t *list =
+                        (ins.flags & 1) ? newtupleval() : newlistval();
                     for (value_t *item : items)
                         list->payload->items.push_back(item);
                     push((value_t *)list);

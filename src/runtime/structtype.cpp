@@ -940,8 +940,10 @@ void ensure_unique_struct(struct struct_value_t *value) {
         value->payload = std::make_shared<struct_payload>();
         return;
     }
-    if (value->payload.use_count() == 1)
+    if (value->payload.use_count() == 1) {
+        value->payload->hash_valid = false;
         return;
+    }
 
     std::shared_ptr<struct_payload> copy = std::make_shared<struct_payload>();
     copy->fields.reserve(value->payload->fields.size());

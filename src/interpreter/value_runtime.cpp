@@ -117,9 +117,12 @@ struct value_t *apply_binary_value(int op, struct value_t *l,
             return newstrval(s.c_str());
         }
         if (l->type == T_list && r->type == T_list) {
-            struct list_value_t *lv = newlistval();
             struct list_value_t *ll = (struct list_value_t *)l;
             struct list_value_t *rl = (struct list_value_t *)r;
+            const bool frozen = ll->payload && rl->payload &&
+                                ll->payload->frozen && rl->payload->frozen;
+            struct list_value_t *lv =
+                frozen ? newtupleval() : newlistval();
             lv->payload->items.reserve(ll->payload->items.size() +
                                        rl->payload->items.size());
             for (size_t i = 0; i < ll->payload->items.size(); ++i)
@@ -218,6 +221,9 @@ static void ensure_unique_list(struct list_value_t *list) {
         return;
 
     std::shared_ptr<list_payload> copy = std::make_shared<list_payload>();
+    copy->frozen = list->payload->frozen;
+    copy->hash = list->payload->hash;
+    copy->hash_valid = list->payload->hash_valid;
     copy->items.reserve(list->payload->items.size());
     for (size_t i = 0; i < list->payload->items.size(); ++i)
         copy->items.push_back(dupval(list->payload->items[i]));
@@ -304,6 +310,16 @@ static bool reject_enum_payload_write(struct value_t *container) {
     return false;
 }
 
+static bool reject_frozen_list_write(struct value_t *container) {
+    if (container && container->type == T_list &&
+        ((struct list_value_t *)container)->payload &&
+        ((struct list_value_t *)container)->payload->frozen) {
+        yyerror("cannot modify an immutable tuple");
+        return true;
+    }
+    return false;
+}
+
 /*
  * Resolve the container that owns the final index of a write path.  Every
  * intermediate container is made unique before its child is inspected, so a
@@ -315,7 +331,8 @@ static bool resolve_write_container(
     std::vector<const void *> *path_payloads = NULL,
     std::vector<struct value_t *> *holds = NULL) {
     container = s ? s->val : NULL;
-    if (reject_enum_payload_write(container))
+    if (reject_enum_payload_write(container) ||
+        reject_frozen_list_write(container))
         return false;
     if (path_payloads)
         path_payloads->push_back(value_payload(container));
@@ -340,6 +357,8 @@ static bool resolve_write_container(
                 path_payloads->push_back(value_payload(container));
             continue;
         }
+        if (reject_frozen_list_write(container))
+            return false;
         ensure_unique_container(container);
         if (fields[k] && container->type == T_dict &&
             !((struct dict_value_t *)container)->payload->is_namespace) {
@@ -371,7 +390,8 @@ static struct value_t *write_member_value(struct value_t *container,
                                           bool field_access) {
     struct value_t *ret = NULL;
 
-    if (reject_enum_payload_write(container))
+    if (reject_enum_payload_write(container) ||
+        reject_frozen_list_write(container))
         return NULL;
 
     if (container->type == T_list) {
@@ -490,7 +510,8 @@ static struct value_t *increment_member_value(struct value_t *container,
                                               bool prefix, bool field_access) {
     struct value_t *ret = NULL;
 
-    if (reject_enum_payload_write(container))
+    if (reject_enum_payload_write(container) ||
+        reject_frozen_list_write(container))
         return NULL;
 
     if (container->type == T_list) {

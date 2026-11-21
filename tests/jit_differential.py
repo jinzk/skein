@@ -98,6 +98,30 @@ CASES = [
         expect_debug="[jit] enter add",
     ),
     case(
+        "tuple-dict-keys",
+        "func roundtrip(i) {\n"
+        "  let d = {(1, 'a'): i, (2, 'b'): i + 1};\n"
+        "  d[(3, 'c')] = i + 2;\n"
+        "  return d[(1, 'a')] + d[(2, 'b')] + d[(3, 'c')];\n"
+        "}\n"
+        "let i = 0;\n"
+        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        expect_debug="[jit] enter roundtrip",
+    ),
+    case(
+        "struct-dict-keys",
+        "struct Key { id: int; tag: string; }\n"
+        "func roundtrip(i) {\n"
+        '  let d = {Key { id: 1, tag: "a" }: i};\n'
+        '  d[Key { id: 2, tag: "b" }] = i + 1;\n'
+        '  return d[Key { id: 1, tag: "a" }] + '
+        'd[Key { id: 2, tag: "b" }];\n'
+        "}\n"
+        "let i = 0;\n"
+        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        expect_debug="[jit] enter roundtrip",
+    ),
+    case(
         "globals-and-upvalues",
         "let g = 0;\n"
         "func bump() { g = g + 1; return g; }\n"

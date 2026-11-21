@@ -73,6 +73,11 @@ struct struct_def : type_def {
 
 struct struct_payload {
     std::vector<value_t *> fields;
+    /* Cached structural hash for structs used as dict/set keys.  Struct
+     * values use copy-on-write, so the payload stored in a dict key never
+     * changes in place. */
+    mutable std::uint64_t hash = 0;
+    mutable bool hash_valid = false;
     ~struct_payload();
 };
 

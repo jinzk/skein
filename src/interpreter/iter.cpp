@@ -266,7 +266,7 @@ struct value_t *iter_enumerate_body(
     struct value_t *item = NULL;
     long long index = 0;
     while (source.next(item)) {
-        struct list_value_t *pair = newlistval();
+        struct list_value_t *pair = newtupleval();
         pair->payload->items.push_back(newintval(index));
         pair->payload->items.push_back(item);
         if (!yield_owned((struct value_t *)pair))

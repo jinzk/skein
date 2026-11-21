@@ -1,12 +1,15 @@
 #include "dict.h"
 
+#include "structtype.h"
 #include "value_ops.h"
 
 #include <cstring>
+#include <vector>
 
 namespace {
 
 constexpr std::size_t kDictIndexThreshold = 16;
+constexpr std::size_t kMaxKeyDepth = 512;
 
 std::uint64_t mix_hash(std::uint64_t hash, std::uint64_t value) {
     hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
@@ -35,9 +38,7 @@ void rebuild_index(struct dict_payload *payload) {
     payload->index_size = payload->items.size();
 }
 
-} // namespace
-
-bool dict_key_allowed(const struct value_t *key) {
+bool scalar_key_allowed(const struct value_t *key) {
     if (!key)
         return false;
     switch (key->type) {
@@ -54,12 +55,76 @@ bool dict_key_allowed(const struct value_t *key) {
     }
 }
 
-const char *dict_key_error() {
-    return "dict key must be int, bool, string, char, byte, bytes, or null";
+bool key_allowed_inner(
+    const struct value_t *key, std::vector<const void *> &stack,
+    std::size_t depth) {
+    if (!key || depth > kMaxKeyDepth)
+        return false;
+    if (scalar_key_allowed(key))
+        return true;
+
+    const void *identity = NULL;
+    if (key->type == T_list) {
+        const struct list_value_t *list = (const struct list_value_t *)key;
+        if (!list->payload || !list->payload->frozen)
+            return false;
+        identity = list->payload.get();
+    } else if (key->type == T_struct) {
+        const struct struct_value_t *structure =
+            (const struct struct_value_t *)key;
+        if (!structure->def || !structure->payload)
+            return false;
+        identity = structure->payload.get();
+    } else {
+        return false;
+    }
+
+    for (const void *parent : stack)
+        if (parent == identity)
+            return false;
+    stack.push_back(identity);
+
+    bool ok = true;
+    if (key->type == T_list) {
+        const struct list_value_t *list = (const struct list_value_t *)key;
+        for (const struct value_t *item : list->payload->items) {
+            if (!key_allowed_inner(item, stack, depth + 1)) {
+                ok = false;
+                break;
+            }
+        }
+    } else {
+        const struct struct_value_t *structure =
+            (const struct struct_value_t *)key;
+        for (const struct value_t *field : structure->payload->fields) {
+            if (!key_allowed_inner(field, stack, depth + 1)) {
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    stack.pop_back();
+    return ok;
 }
 
-std::uint64_t dict_key_hash(const struct value_t *key) {
-    if (!key)
+std::uint64_t hash_string(std::uint64_t hash,
+                          const std::string &text) {
+    return mix_hash(hash, fnv1a(text.data(), text.size()));
+}
+
+std::uint64_t struct_type_hash(const struct_def *def) {
+    std::uint64_t hash = 0x9;
+    if (!def)
+        return hash;
+    hash = hash_string(hash, def->source);
+    return hash_string(hash, def->name);
+}
+
+std::uint64_t hash_key_inner(
+    const struct value_t *key, std::vector<const void *> &stack,
+    std::size_t depth) {
+    if (!key || depth > kMaxKeyDepth)
         return 0;
     switch (key->type) {
         case T_int:
@@ -84,9 +149,70 @@ std::uint64_t dict_key_hash(const struct value_t *key) {
         }
         case T_null:
             return 0x7;
+        case T_list: {
+            const struct list_value_t *list =
+                (const struct list_value_t *)key;
+            if (!list->payload || !list->payload->frozen)
+                return 0;
+            if (list->payload->hash_valid)
+                return list->payload->hash;
+            const void *identity = list->payload.get();
+            for (const void *parent : stack)
+                if (parent == identity)
+                    return 0;
+            stack.push_back(identity);
+            std::uint64_t hash =
+                mix_hash(0x8, (std::uint64_t)list->payload->items.size());
+            for (const struct value_t *item : list->payload->items)
+                hash = mix_hash(hash, hash_key_inner(item, stack, depth + 1));
+            stack.pop_back();
+            list->payload->hash = hash;
+            list->payload->hash_valid = true;
+            return hash;
+        }
+        case T_struct: {
+            const struct struct_value_t *structure =
+                (const struct struct_value_t *)key;
+            if (!structure->def || !structure->payload)
+                return 0;
+            if (structure->payload->hash_valid)
+                return structure->payload->hash;
+            const void *identity = structure->payload.get();
+            for (const void *parent : stack)
+                if (parent == identity)
+                    return 0;
+            stack.push_back(identity);
+            std::uint64_t hash = mix_hash(0xA,
+                                          struct_type_hash(structure->def));
+            hash = mix_hash(hash,
+                            (std::uint64_t)structure->payload->fields.size());
+            for (const struct value_t *field : structure->payload->fields)
+                hash = mix_hash(hash, hash_key_inner(field, stack, depth + 1));
+            stack.pop_back();
+            structure->payload->hash = hash;
+            structure->payload->hash_valid = true;
+            return hash;
+        }
         default:
             return 0;
     }
+}
+
+} // namespace
+
+bool dict_key_allowed(const struct value_t *key) {
+    std::vector<const void *> stack;
+    return key_allowed_inner(key, stack, 0);
+}
+
+const char *dict_key_error() {
+    return "dict key must be int, bool, string, char, byte, bytes, null, "
+           "an immutable tuple of these, or a hashable struct";
+}
+
+std::uint64_t dict_key_hash(const struct value_t *key) {
+    std::vector<const void *> stack;
+    return hash_key_inner(key, stack, 0);
 }
 
 int dict_find_index(const struct dict_value_t *dict,

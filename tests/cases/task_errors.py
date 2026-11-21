@@ -410,6 +410,50 @@ def run_cases():
             stdout_all=["2", "1", "fail: thread boom",
                         "in main() called from"],
         )
+    with tempfile.TemporaryDirectory() as tuple_thread_tmp:
+        tuple_worker = os.path.join(tuple_thread_tmp, "worker.skein")
+        with open(tuple_worker, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "import std;\n"
+                "func main(ctx) {\n"
+                '  let d = ctx.payload["d"];\n'
+                '  return d[(1, "a")];\n'
+                "}\n"
+            )
+        check(
+            "thread payload preserves tuple dict keys",
+            "import std;\n"
+            'let d = {(1, "a"): 42};\n'
+            f"let t = std.thread.spawn_script({skein_string(tuple_worker)}, "
+            'std.thread.Message.from({"d": d}));\n'
+            "let r = t.join();\n"
+            'println(str(r["ok"]));\n'
+            'println(str(r["value"]));\n',
+            stdout_all=["true", "42"],
+        )
+        struct_worker = os.path.join(tuple_thread_tmp, "struct_worker.skein")
+        with open(struct_worker, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "import std;\n"
+                "func main(ctx) {\n"
+                '  let d = ctx.payload["d"];\n'
+                '  let k = ctx.payload["k"];\n'
+                "  return d[k];\n"
+                "}\n"
+            )
+        check(
+            "thread payload preserves struct dict keys",
+            "import std;\n"
+            'struct Key { id: int; tag: string; }\n'
+            'let k = Key { id: 1, tag: "a" };\n'
+            "let d = {k: 42};\n"
+            f"let t = std.thread.spawn_script({skein_string(struct_worker)}, "
+            'std.thread.Message.from({"d": d, "k": k}));\n'
+            "let r = t.join();\n"
+            'println(str(r["ok"]));\n'
+            'println(str(r["value"]));\n',
+            stdout_all=["true", "42"],
+        )
     check(
         "std result capture net",
         "import std;\n"

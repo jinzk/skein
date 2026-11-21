@@ -102,7 +102,9 @@ cmake --build build
 ctest --test-dir build -R mysql_plugin_test --output-on-failure
 ```
 
-找不到客户端开发文件时该目标自动跳过。构建、脚本封装和环境变量见 [`contrib/mysql/README.md`](../contrib/mysql/README.md)。
+找不到客户端开发文件时该目标自动跳过。测试覆盖 ABI、源码 native module 构建和
+ABI v2 异步查询；构建、脚本封装和环境变量见
+[`contrib/mysql/README.md`](../contrib/mysql/README.md)。
 
 `std.net` 提供同步 API 和 task 形式的异步 API；libuv 只在内部驱动 socket、DNS 和 `std.task`，不向脚本暴露事件循环对象。
 

@@ -109,6 +109,17 @@ def test_abi():
         stdout="runtime",
     )
     check(
+        "mysql plugin async export",
+        "import std;\n"
+        f"std.plugin.load({skein_string(os.path.abspath(PLUGIN))});\n"
+        "import skein.mysql as native;\n"
+        "native.query_task(1) on error(e) {\n"
+        "  println(std.error.kind(e));\n"
+        "  recover null;\n"
+        "}\n",
+        stdout="runtime",
+    )
+    check(
         "mysql plugin unload keeps live bindings",
         "import std;\n"
         "import mysql;\n"
@@ -176,6 +187,19 @@ def test_integration(config):
         "println(rows[0][\"name\"]);\n"
         "println(rows[0][\"note\"] == null);\n"
         "println(type_name(rows[0][\"payload\"]));\n"
+        "let at = c.query_task(\"SELECT 42 AS answer\");\n"
+        "println(type_name(at));\n"
+        "let ar = mysql.wrap_result(at);\n"
+        "println(ar.rows()[0][\"answer\"]);\n"
+        "ar.close();\n"
+        "let failed = c.query_task(\"SELECT * FROM skein_missing_table\");\n"
+        "let caught = std.task.catch(failed).wait();\n"
+        "println(std.result.is_err(caught));\n"
+        "println(c.last_error() != \"\");\n"
+        "let cancelled = c.query_task(\"SELECT 1\");\n"
+        "std.task.cancel(cancelled);\n"
+        "let ccaught = std.task.catch(cancelled).wait();\n"
+        "println(std.result.is_err(ccaught));\n"
         "c.execute(\"SELECT * FROM skein_missing_table\") on error(e) {\n"
         "  println(std.error.kind(e));\n"
         "  recover null;\n"
@@ -190,7 +214,8 @@ def test_integration(config):
         source,
         stdout_all=[
             "true", "1", "[id, name, note, payload]", "1",
-            "O'Reilly", "true", "bytes", "runtime", "true",
+            "O'Reilly", "true", "bytes", "task", "42", "runtime",
+            "true",
         ],
     )
 
@@ -280,6 +305,7 @@ def test_source_module():
                 'import "skein.contrib/mysql" as mysql;\n'
                 "println(mysql.VERSION);\n"
                 'println(mysql.library_version() != "");\n'
+                "println(mysql.wrap_result != null);\n"
             )
 
         denied = cli(main)
@@ -287,7 +313,8 @@ def test_source_module():
         assert "SKEIN_ALLOW_NATIVE" in denied.stderr, denied.stderr
         allowed = cli(main, extra={"SKEIN_ALLOW_NATIVE": "1"})
         assert allowed.returncode == 0, allowed.stderr
-        assert allowed.stdout.splitlines() == ["0.1.0", "true"], allowed.stdout
+        assert allowed.stdout.splitlines() == ["0.1.0", "true", "true"], (
+            allowed.stdout)
 
     print("mysql source module check passed")
 

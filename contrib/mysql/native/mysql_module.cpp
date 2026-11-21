@@ -8,11 +8,15 @@
 #include "skein_module.h"
 #include "mysql_headers.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -30,10 +34,27 @@ struct result_set {
     skein_value *connection_ref = nullptr;
 };
 
+struct async_query_job {
+    connection *conn = nullptr;
+    std::string sql;
+    std::string error;
+    MYSQL_RES *mysql_result = nullptr;
+    std::atomic<skein_value *> task{nullptr};
+    bool owns_task = false;
+    skein_value *connection_ref = nullptr;
+    skein_context *ctx = nullptr;
+};
+
 bool has_value_helpers() {
     return g_api &&
            g_api->size >= offsetof(skein_api, as_userdata) +
                               sizeof(g_api->as_userdata);
+}
+
+bool has_async_api() {
+    return g_api &&
+           g_api->size >= offsetof(skein_api, task_cancelled) +
+                               sizeof(g_api->task_cancelled);
 }
 
 skein_status fail(skein_context *ctx, const std::string &message) {
@@ -417,7 +438,21 @@ skein_status query(skein_context *ctx, const skein_value *const *args,
 }
 
 bool is_binary_field(const MYSQL_FIELD *field) {
-    return field->charsetnr == 63;
+    /* Numeric columns also use charsetnr 63 in MySQL; only actual binary
+     * string types should become bytes. */
+    switch (field->type) {
+    case MYSQL_TYPE_BLOB:
+    case MYSQL_TYPE_TINY_BLOB:
+    case MYSQL_TYPE_MEDIUM_BLOB:
+    case MYSQL_TYPE_LONG_BLOB:
+    case MYSQL_TYPE_BIT:
+        return true;
+    case MYSQL_TYPE_STRING:
+    case MYSQL_TYPE_VAR_STRING:
+        return field->charsetnr == 63;
+    default:
+        return false;
+    }
 }
 
 skein_status fetch_all(skein_context *ctx, const skein_value *const *args,
@@ -535,6 +570,133 @@ skein_status close_result(skein_context *ctx, const skein_value *const *args,
     return *result ? SKEIN_OK : SKEIN_ERROR;
 }
 
+struct mysql_thread_guard {
+    mysql_thread_guard() { mysql_thread_init(); }
+    ~mysql_thread_guard() { mysql_thread_end(); }
+};
+
+void async_query_work(void *data) {
+    async_query_job *job = static_cast<async_query_job *>(data);
+    mysql_thread_guard thread_guard;
+
+    /* call_task starts the thread before returning the task value, so wait
+     * until the owner thread has published a handle for cancellation. */
+    while (!job->task.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    skein_value *task = job->task.load();
+    if (g_api->task_cancelled(job->ctx, task))
+        return;
+
+    /* The worker owns the connection for the duration of the statement.
+     * Synchronous methods on the same connection block on this mutex. */
+    std::lock_guard<std::mutex> lock(job->conn->mutex);
+    if (g_api->task_cancelled(job->ctx, task))
+        return;
+    MYSQL *raw = job->conn->mysql;
+    if (!raw) {
+        job->error = "query_task: connection is closed";
+        return;
+    }
+    if (mysql_real_query(raw, job->sql.data(),
+                         static_cast<unsigned long>(job->sql.size())) != 0) {
+        job->error = connection_error(job->conn, "query_task");
+        return;
+    }
+    if (mysql_field_count(raw) == 0) {
+        MYSQL_RES *unused = mysql_store_result(raw);
+        if (unused)
+            mysql_free_result(unused);
+        job->error = "query_task: statement returned no result set";
+        return;
+    }
+    job->mysql_result = mysql_store_result(raw);
+    if (!job->mysql_result)
+        job->error = connection_error(job->conn, "query_task");
+}
+
+skein_value *async_query_finish(skein_context *ctx, void *data) {
+    async_query_job *job = static_cast<async_query_job *>(data);
+    (void)ctx;
+    /* Returning null fails the standard task.  The MySQL message remains
+     * available through Connection.last_error(); raising it here would throw
+     * at wait() and bypass std.task.catch. */
+    if (!job->error.empty() || !job->mysql_result)
+        return nullptr;
+
+    result_set *result = new result_set();
+    result->mysql_result = job->mysql_result;
+    job->mysql_result = nullptr;
+    result->connection_ref = job->connection_ref;
+    job->connection_ref = nullptr;
+    skein_value *value = g_api->new_userdata(ctx, &result_type, result);
+    if (!value) {
+        result_destroy(result);
+        return nullptr;
+    }
+    return value;
+}
+
+void async_query_destroy(void *data) {
+    async_query_job *job = static_cast<async_query_job *>(data);
+    if (job->mysql_result) {
+        mysql_free_result(job->mysql_result);
+        job->mysql_result = nullptr;
+    }
+    if (job->connection_ref) {
+        g_api->free_value(job->ctx, job->connection_ref);
+        job->connection_ref = nullptr;
+    }
+    skein_value *task = job->task.load();
+    if (task && job->owns_task)
+        g_api->free_value(job->ctx, task);
+    delete job;
+}
+
+skein_status query_task(skein_context *ctx, const skein_value *const *args,
+                        size_t argc, skein_value **result) {
+    if (!has_async_api())
+        return fail(ctx, "native async API is unavailable");
+    if (argc != 2)
+        return fail(ctx, "query_task expects 2 arguments");
+    connection *conn = nullptr;
+    std::string sql;
+    if (!get_connection(args[0], &conn))
+        return fail(ctx, "query_task expects a MysqlConnection");
+    if (!get_string(args[1], "sql", &sql))
+        return fail(ctx, "query_task expects a string SQL statement");
+    {
+        std::lock_guard<std::mutex> lock(conn->mutex);
+        if (!conn->mysql)
+            return fail_connection(ctx, conn, "query_task");
+    }
+
+    skein_value *connection_ref = g_api->dup_value(ctx, args[0]);
+    if (!connection_ref)
+        return fail(ctx, "query_task: cannot retain connection reference");
+
+    async_query_job *job = new async_query_job();
+    job->conn = conn;
+    job->sql = std::move(sql);
+    job->ctx = ctx;
+    job->connection_ref = connection_ref;
+
+    *result = g_api->call_task(ctx, async_query_work, async_query_finish,
+                               async_query_destroy, job);
+    if (!*result) {
+        async_query_destroy(job);
+        return SKEIN_ERROR;
+    }
+    skein_value *task_ref = g_api->dup_value(ctx, *result);
+    if (task_ref) {
+        job->task.store(task_ref);
+        job->owns_task = true;
+    } else {
+        /* The worker only reads this handle; do not free a borrowed value. */
+        job->task.store(*result);
+    }
+    return SKEIN_OK;
+}
+
 const skein_function functions[] = {
     {"library_version", library_version},
     {"connect", connect},
@@ -548,6 +710,7 @@ const skein_function functions[] = {
     {"escape_string", escape_string},
     {"execute", execute},
     {"query", query},
+    {"query_task", query_task},
     {"fetch_all", fetch_all},
     {"row_count", row_count},
     {"field_names", field_names},

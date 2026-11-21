@@ -81,8 +81,10 @@ export SKEIN_TEST_MYSQL_DATABASE=skein_test
 mysql.VERSION
 mysql.library_version()
 mysql.connect(host, user, password, database, port = 3306) -> client.Connection
+mysql.wrap_result(task)              -> client.Result
 
 client.Connection.query(sql)        -> client.Result
+client.Connection.query_task(sql)   -> task[userdata]
 client.Connection.execute(sql)      -> null
 client.Connection.ping()            -> true
 client.Connection.close()           -> null
@@ -102,9 +104,31 @@ client.Result.close()               -> null
 原生插件导出模块名 `skein.mysql`，函数都是同步的；错误通过
 `skein_api.error` 返回，Skein 侧看到 `runtime` 错误类别。
 
-`fetch_all` 的转换规则：SQL `NULL` → `null`，文本列 → `string`，二进制列
-（charsetnr 63）→ `bytes`。结果对象持有连接 userdata 的引用，连接不会在
-结果仍存活时被释放。
+`fetch_all` 的转换规则：SQL `NULL` → `null`，文本/数值列 → `string`，
+BLOB/BINARY/VARBINARY/BIT 列 → `bytes`。结果对象持有连接 userdata 的引用，
+连接不会在结果仍存活时被释放。
+
+## 异步查询（ABI v2）
+
+`query_task` 使用 `skein_api.call_task` 在 worker 线程执行 SQL，返回标准
+Skein task。task 的结果是需要包装的 native userdata，用 `mysql.wrap_result`
+转成 `client.Result`：
+
+```text
+let t = conn.query_task("SELECT 42 AS answer");
+let result = mysql.wrap_result(t);
+println(result.rows()[0]["answer"]);
+result.close();
+```
+
+- `std.task.cancel(t)` 是协作式取消：worker 在进入 SQL 前和取得连接后检查
+  取消状态；已经在执行的 MySQL 语句不会被强制中断；
+- 同一连接上的同步方法会在 mutex 上等待异步语句结束，不应把同一连接当作
+  并发查询通道；
+- SQL 失败让 task 失败（`native task failed`），具体信息保留在
+  `conn.last_error()`；
+- `finish` / `destroy` 在 owner 线程运行，异步任务持有连接 userdata 和模块
+  引用，`std.plugin.unload` 后仍可安全完成。
 
 ## 测试
 
@@ -112,15 +136,16 @@ client.Result.close()               -> null
 ctest --test-dir build -R mysql_plugin_test --output-on-failure
 ```
 
-未配置数据库时测试 ABI、源码 native module 打包路径、错误传播、参数校验、
-`std.plugin.unload` 后已有绑定继续可用。设置
+未配置数据库时测试 ABI、源码 native module 打包路径、异步导出存在性、错误
+传播、参数校验、`std.plugin.unload` 后已有绑定继续可用。设置
 `SKEIN_TEST_MYSQL_HOST/USER/PASSWORD/DATABASE` 和可选的
-`SKEIN_TEST_MYSQL_PORT` 后，还会跑建表、插入、查询、NULL/BLOB、错误恢复、
-unload 后继续使用 userdata、资源关闭等真实集成用例。
+`SKEIN_TEST_MYSQL_PORT` 后，还会跑建表、插入、同步查询、NULL/BLOB、
+异步查询、task 失败与取消、错误恢复、unload 后继续使用 userdata、资源关闭
+等真实集成用例。
 
 ## 当前范围与限制
 
-- 只覆盖同步 API；ABI v2 的 `call_task` 异步导出（`query_task`）留到第三阶段；
+- 异步只覆盖 `query_task`；`execute_task`、prepared statement 的异步版本尚未提供；
 - 不支持 prepared statement、事务封装、连接池、unix socket；
 - `Connection` 是 copy-on-write struct，但里面的 userdata 是共享句柄：
   复制出来的多个 `Connection` 指向同一个 MySQL 连接；

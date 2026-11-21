@@ -48,6 +48,10 @@ package mysql {
       return Result { handle: native.query(self.handle, sql) };
     }
 
+    func query_task(self, sql: string) {
+      return native.query_task(self.handle, sql);
+    }
+
     func execute(self, sql: string) {
       return native.execute(self.handle, sql);
     }
@@ -83,6 +87,10 @@ package mysql {
     func last_error(self) {
       return native.error(self.handle);
     }
+  }
+
+  export func wrap_result(task) {
+    return Result { handle: task.wait() };
   }
 
   export func library_version() {

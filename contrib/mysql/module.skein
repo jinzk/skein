@@ -3,6 +3,7 @@ module mysql {
 
   export api.mysql.VERSION as VERSION;
   export api.mysql.connect as connect;
+  export api.mysql.wrap_result as wrap_result;
   export api.mysql.library_version as library_version;
 
   native {

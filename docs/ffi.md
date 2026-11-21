@@ -137,8 +137,9 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
   `0` / `false` / `off` / `no` 会全局禁用原生加载。源码形式发布的 module
   用 `skein build` 显式编译，详见 `docs/tutorial.md`；
 - `contrib/mysql` 是用真实 MySQL C client 验证上述 ABI 的可选示例插件，
-  也演示源码形式 native module 的 `skein get` / `skein build` 流程，
-  见 [`contrib/mysql/README.md`](../contrib/mysql/README.md)。
+  也演示源码形式 native module 的 `skein get` / `skein build` 流程和
+  ABI v2 异步 `query_task`，见
+  [`contrib/mysql/README.md`](../contrib/mysql/README.md)。
 
 ## 7. 稳定性策略
 

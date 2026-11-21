@@ -1,0 +1,206 @@
+import std;
+include "_support.skein";
+
+struct MatchStructP {
+  x: int;
+  y: int;
+}
+
+struct MatchTypeP {
+  x: int;
+}
+
+func lang_match_return(x) {
+  let y = match (x) {
+    case 1 => {
+      return 10;
+    }
+    default => 0;
+  };
+  return y + 1;
+}
+
+ts_test("match int default", func() {
+  ts_eq(match (2) {
+    case 1 => "one";
+    case 2 => "two";
+    default => "other";
+  }, "two");
+});
+
+ts_test("match default", func() {
+  ts_eq(match (9) {
+    case 1 => "one";
+    default => "other";
+  }, "other");
+});
+
+ts_test("match binding", func() {
+  ts_eq(match (42) {
+    case n => n + 1;
+  }, 43);
+});
+
+ts_test("match guard", func() {
+  ts_eq(match (5) {
+    case n if n > 10 => "big";
+    case n if n > 3 => "mid";
+    default => "small";
+  }, "mid");
+});
+
+ts_test("match guard falls through", func() {
+  ts_eq(match (1) {
+    case n if n > 3 => "big";
+    default => "small";
+  }, "small");
+});
+
+ts_test("match wildcard", func() {
+  ts_eq(match (1) {
+    case _ => "wild";
+  }, "wild");
+});
+
+ts_test("match dict open", func() {
+  let e = {"kind": "tool", "ok": true, "data": [1, 2]};
+  ts_eq(match (e) {
+    case {kind: "tool", ok: true, data: d} => d;
+    default => null;
+  }, [1, 2]);
+});
+
+ts_test("match dict ignores extra keys", func() {
+  ts_eq(match ({"a": 1, "b": 2}) {
+    case {a} => a;
+    default => 0;
+  }, 1);
+});
+
+ts_test("match dict rest", func() {
+  ts_eq(match ({"a": 1, "b": 2, "c": 3}) {
+    case {a, ...rest} => rest;
+    default => null;
+  }, {"b": 2, "c": 3});
+});
+
+ts_test("match dict missing key falls through", func() {
+  ts_eq(match ({"a": 1}) {
+    case {b} => "b";
+    default => "no b";
+  }, "no b");
+});
+
+ts_test("match nested dict", func() {
+  ts_eq(match ({"a": {"b": 2}}) {
+    case {a: {b}} => b;
+    default => 0;
+  }, 2);
+});
+
+ts_test("match list exact", func() {
+  ts_eq(match ([1, 2]) {
+    case [a] => "one";
+    case [a, b] => "two";
+    default => "other";
+  }, "two");
+});
+
+ts_test("match list rest", func() {
+  ts_eq(match ([1, 2, 3]) {
+    case [h, ...t] => t;
+    default => null;
+  }, [2, 3]);
+});
+
+ts_test("match list ignore rest", func() {
+  ts_eq(match ([1, 2, 3]) {
+    case [h, ...] => h;
+    default => 0;
+  }, 1);
+});
+
+ts_test("match empty list", func() {
+  ts_eq(match ([]) {
+    case [] => "empty";
+    default => "no";
+  }, "empty");
+});
+
+ts_test("match struct pattern", func() {
+  let p = MatchStructP { x: 1, y: 2 };
+  ts_eq(match (p) {
+    case MatchStructP {x, y} => x + y;
+    default => 0;
+  }, 3);
+});
+
+ts_test("match struct type only", func() {
+  ts_eq(match (MatchTypeP { x: 1 }) {
+    case MatchTypeP {} => "is P";
+    default => "no";
+  }, "is P");
+});
+
+ts_test("match dict type only", func() {
+  ts_eq(match ({"a": 1}) {
+    case {...} => "dict";
+    default => "no";
+  }, "dict");
+});
+
+ts_test("match expression value", func() {
+  let x = match (1) {
+    case 1 => {"ok": true};
+    default => {"ok": false};
+  };
+  ts_true(x["ok"]);
+});
+
+ts_test("match nested", func() {
+  ts_eq(match (1) {
+    case 1 => match (2) {
+      case 2 => "nested";
+      default => "no";
+    };
+    default => "no";
+  }, "nested");
+});
+
+ts_test("match no fallthrough", func() {
+  ts_eq(match (1) {
+    case 1 => "one";
+    case 2 => "two";
+  }, "one");
+});
+
+ts_test("match return", func() {
+  ts_eq(lang_match_return(1), 10);
+  ts_eq(lang_match_return(2), 1);
+});
+
+ts_test("match break outer loop", func() {
+  let out = [];
+  for (let i in [1, 2, 3]) {
+    let x = match (i) {
+      case 2 => {
+        break;
+      }
+      default => i;
+    };
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1]);
+});
+
+ts_test("match keeps std.regex.match", func() {
+  ts_true(std.regex.match("a+", "aaa"));
+});
+
+ts_test("match as pattern", func() {
+  ts_eq(match (1) {
+    case 1 as x => x;
+  }, 1);
+});
+
+ts_finish();

@@ -1,0 +1,221 @@
+import std;
+include "_support.skein";
+
+func lang_operators_bool_id(x: bool) {
+  return x;
+}
+
+ts_test("logical and", func() {
+  ts_true(1 && 2);
+});
+
+ts_test("logical and short-circuit", func() {
+  ts_false(0 && (1 / 0));
+});
+
+ts_test("logical or", func() {
+  ts_true(0 || 2);
+});
+
+ts_test("logical or short-circuit", func() {
+  ts_true(1 || (1 / 0));
+});
+
+ts_test("logical or false", func() {
+  ts_false(0 || 0);
+});
+
+ts_test("logical not", func() {
+  ts_true(!0);
+});
+
+ts_test("logical not true", func() {
+  ts_false(!true);
+});
+
+ts_test("logical not string", func() {
+  ts_true(!"");
+});
+
+ts_test("logical result is bool", func() {
+  ts_true(lang_operators_bool_id(1 && 2));
+  ts_true(lang_operators_bool_id(!0));
+});
+
+ts_test("logical result format", func() {
+  ts_eq(std.string.format("{}", true && false), "false");
+});
+
+ts_test("bitwise and", func() {
+  ts_eq(1 & 3, 1);
+});
+
+ts_test("bitwise rejects bool", func() {
+  ts_error(func() {
+    return 1 & (1 == 1);
+  }, "bitwise operator expects ints");
+});
+
+ts_test("bitwise or", func() {
+  ts_eq(1 | 2, 3);
+});
+
+ts_test("bitwise xor", func() {
+  ts_eq(5 ^ 3, 6);
+});
+
+ts_test("bitwise not", func() {
+  ts_eq(~0, -1);
+});
+
+ts_test("shift left", func() {
+  ts_eq(1 << 4, 16);
+});
+
+ts_test("shift right", func() {
+  ts_eq(16 >> 2, 4);
+});
+
+ts_test("int64 shift", func() {
+  ts_eq(1 << 62, 4611686018427387904);
+});
+
+ts_test("shift count out of range", func() {
+  ts_error(func() {
+    return 1 << 64;
+  }, "shift count 64 out of range");
+});
+
+ts_test("arithmetic vs equality precedence", func() {
+  ts_true(1 + 2 == 3);
+});
+
+ts_test("equality result is bool", func() {
+  ts_true(lang_operators_bool_id(1 < 2));
+});
+
+ts_test("bool true literal", func() {
+  ts_true(true);
+});
+
+ts_test("bool false literal", func() {
+  ts_false(false);
+});
+
+ts_test("bool truthiness", func() {
+  let seen = "";
+  if (true) {
+    seen = "yes";
+  } else {
+    seen = "no";
+  }
+  ts_eq(seen, "yes");
+});
+
+ts_test("bool false truthiness", func() {
+  let seen = "";
+  if (false) {
+    seen = "yes";
+  } else {
+    seen = "no";
+  }
+  ts_eq(seen, "no");
+});
+
+ts_test("bool equality", func() {
+  ts_true(true == true);
+  ts_false(true == false);
+  ts_true(true != false);
+});
+
+ts_test("bool is distinct from int", func() {
+  ts_false(true == 1);
+  ts_true(true != 1);
+});
+
+ts_test("bool conversions", func() {
+  ts_eq(str(true), "true");
+  ts_eq(int(true), 1);
+  ts_eq(int(false), 0);
+  ts_same(float(true), 1.0);
+});
+
+ts_test("bool conversion builtin", func() {
+  ts_false(bool(0));
+  ts_true(bool(1));
+  ts_false(bool(""));
+  ts_true(bool("x"));
+  ts_false(bool(null));
+  ts_false(bool([]));
+});
+
+ts_test("bool as value", func() {
+  let f = bool;
+  ts_true(f(1));
+});
+
+ts_test("bool format", func() {
+  ts_eq(std.string.format("{}", true), "true");
+});
+
+ts_test("bool arithmetic error", func() {
+  ts_error(func() {
+    return true + 1;
+  }, "cannot add bool and int");
+});
+
+ts_test("ternary true", func() {
+  ts_eq(1 ? 2 : 3, 2);
+});
+
+ts_test("ternary false", func() {
+  ts_eq(0 ? 2 : 3, 3);
+});
+
+ts_test("ternary string", func() {
+  ts_eq(true ? "yes" : "no", "yes");
+});
+
+ts_test("ternary short-circuit then", func() {
+  ts_eq(1 ? 5 : 1 / 0, 5);
+});
+
+ts_test("ternary short-circuit else", func() {
+  ts_eq(0 ? 1 / 0 : 5, 5);
+});
+
+ts_test("ternary right associative", func() {
+  ts_eq(0 ? 1 : 0 ? 2 : 3, 3);
+});
+
+ts_test("ternary nested then", func() {
+  ts_eq(1 ? 0 ? 2 : 3 : 4, 3);
+});
+
+ts_test("ternary comparison condition", func() {
+  ts_eq(1 < 2 ? "a" : "b", "a");
+});
+
+ts_test("ternary assignment", func() {
+  let x = 0;
+  let y = x ? 10 : 20;
+  ts_eq(y, 20);
+});
+
+ts_test("ternary list element", func() {
+  ts_eq([0 ? 1 : 2, 3], [2, 3]);
+});
+
+ts_test("ternary dict value", func() {
+  ts_eq({"a": 0 ? 1 : 2}, {"a": 2});
+});
+
+ts_test("ternary dict key", func() {
+  ts_eq({1 ? "a" : "b": 2}, {"a": 2});
+});
+
+ts_test("ternary bool result", func() {
+  ts_true(lang_operators_bool_id(1 < 2 ? true : false));
+});
+
+ts_finish();

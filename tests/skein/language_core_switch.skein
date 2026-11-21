@@ -1,0 +1,193 @@
+import std;
+include "_support.skein";
+
+func lang_switch_return(x) {
+  switch (x) {
+    case 1 => return 10;
+    default => return 20;
+  }
+}
+
+ts_test("switch int", func() {
+  let out = "";
+  switch (2) {
+    case 1 => out = "one";
+    case 2, 3 => out = "two or three";
+    default => out = "other";
+  }
+  ts_eq(out, "two or three");
+});
+
+ts_test("switch prefixed integer", func() {
+  let out = "";
+  switch (0xff) {
+    case 0b1111_1111 => out = "match";
+    default => out = "other";
+  }
+  ts_eq(out, "match");
+});
+
+ts_test("switch default", func() {
+  let out = "";
+  switch (9) {
+    case 1 => out = "one";
+    default => out = "other";
+  }
+  ts_eq(out, "other");
+});
+
+ts_test("switch no match no default", func() {
+  let hits = 0;
+  switch (9) {
+    case 1 => hits = hits + 1;
+  }
+  ts_eq(hits, 0);
+});
+
+ts_test("switch empty body", func() {
+  let hits = 0;
+  switch (1) {}
+  ts_eq(hits, 0);
+});
+
+ts_test("switch empty body spaced", func() {
+  let hits = 0;
+  switch (1) { }
+  ts_eq(hits, 0);
+});
+
+ts_test("switch single statement", func() {
+  let x = 0;
+  switch (1) {
+    case 1 => x = 10;
+  }
+  ts_eq(x, 10);
+});
+
+ts_test("switch block", func() {
+  let out = [];
+  switch (1) {
+    case 1 => {
+      out = std.list.append(out, 1);
+      out = std.list.append(out, 2);
+    }
+  }
+  ts_eq(out, [1, 2]);
+});
+
+ts_test("switch string", func() {
+  let out = "";
+  switch ("a") {
+    case "b" => out = "bad";
+    case "a" => out = "ok";
+  }
+  ts_eq(out, "ok");
+});
+
+ts_test("switch bool", func() {
+  let out = "";
+  switch (true) {
+    case false => out = "bad";
+    case true => out = "ok";
+  }
+  ts_eq(out, "ok");
+});
+
+ts_test("switch null", func() {
+  let out = "";
+  switch (null) {
+    case null => out = "null";
+  }
+  ts_eq(out, "null");
+});
+
+ts_test("switch bytes", func() {
+  let out = "";
+  switch (std.bytes.from_hex("00ff")) {
+    case std.bytes.from_hex("00ff") => out = "bytes";
+  }
+  ts_eq(out, "bytes");
+});
+
+ts_test("switch no fallthrough", func() {
+  let out = "";
+  switch (1) {
+    case 1 => out = "one";
+    case 2 => out = "two";
+  }
+  ts_eq(out, "one");
+});
+
+ts_test("switch logical selector", func() {
+  let out = "";
+  switch (1 < 2) {
+    case true => out = "ok";
+  }
+  ts_eq(out, "ok");
+});
+
+ts_test("switch break exits switch", func() {
+  let hits = 0;
+  while (true) {
+    switch (1) {
+      case 1 => break;
+    }
+    hits = hits + 1;
+    if (hits == 2) {
+      break;
+    }
+  }
+  ts_eq(hits, 2);
+});
+
+ts_test("switch continue outer loop", func() {
+  let out = "";
+  for (let i in [0, 1, 2]) {
+    switch (i) {
+      case 1 => continue;
+    }
+    out = out + str(i);
+  }
+  ts_eq(out, "02");
+});
+
+ts_test("switch return", func() {
+  ts_eq(lang_switch_return(1), 10);
+  ts_eq(lang_switch_return(2), 20);
+});
+
+ts_test("switch nested", func() {
+  let out = "";
+  switch (1) {
+    case 1 => switch (1) {
+      case 1 => out = "nested";
+    }
+  }
+  ts_eq(out, "nested");
+});
+
+ts_test("switch default only", func() {
+  let out = "";
+  switch (1) {
+    default => out = "only";
+  }
+  ts_eq(out, "only");
+});
+
+ts_test("switch empty case block", func() {
+  let hits = 0;
+  switch (1) {
+    case 1 => {}
+  }
+  ts_eq(hits, 0);
+});
+
+ts_test("switch empty statement case", func() {
+  let hits = 0;
+  switch (1) {
+    case 1 => ;
+  }
+  ts_eq(hits, 0);
+});
+
+ts_finish();

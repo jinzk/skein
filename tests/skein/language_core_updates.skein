@@ -1,0 +1,197 @@
+import std;
+include "_support.skein";
+
+struct UpdateFieldP {
+  x: int;
+}
+
+func lang_const_scale() {
+  const A = 2;
+  const B = A * 3 + 1;
+  return B;
+}
+
+func lang_const_shadow() {
+  const A = 1;
+  let out = [];
+  {
+    const A = 5;
+    out = std.list.append(out, A);
+  }
+  {
+    let A = 9;
+    out = std.list.append(out, A);
+  }
+  out = std.list.append(out, A);
+  return out;
+}
+
+func lang_const_string() {
+  const S = "a" + "b";
+  return S;
+}
+
+func lang_const_container() {
+  const L = [1];
+  L[0] = 2;
+  return L[0];
+}
+
+ts_test("increment float", func() {
+  let x = 1.5;
+  x++;
+  ts_same(x, 2.5);
+  ++x;
+  ts_same(x, 3.5);
+});
+
+ts_test("increment list element", func() {
+  let a = [1, 2];
+  a[0]++;
+  ++a[1];
+  ts_eq(a, [2, 3]);
+});
+
+ts_test("increment nested index", func() {
+  let a = [[1]];
+  a[0][0]++;
+  ts_eq(a, [[2]]);
+});
+
+ts_test("increment dict element", func() {
+  let d = {"x": 5};
+  d["x"]++;
+  ++d["x"];
+  ts_eq(d, {"x": 7});
+});
+
+ts_test("increment bytes element", func() {
+  let b = std.bytes.from_hex("00ff");
+  b[0]++;
+  b[1]--;
+  ts_eq(b[0], 1);
+  ts_eq(b[1], 254);
+});
+
+ts_test("increment evaluates index once", func() {
+  let i = 0;
+  let a = [10];
+  a[i++]++;
+  ts_eq(i, 1);
+  ts_eq(a, [11]);
+});
+
+ts_test("increment const container element", func() {
+  const a = [1];
+  a[0]++;
+  ts_eq(a, [2]);
+});
+
+ts_test("increment precedence with unary minus", func() {
+  let x = 5;
+  let y = -x++;
+  ts_eq(y, -5);
+  ts_eq(x, 6);
+});
+
+ts_test("compound assignment operators", func() {
+  let x = 10;
+  x += 5;
+  ts_eq(x, 15);
+  x -= 3;
+  ts_eq(x, 12);
+  x *= 2;
+  ts_eq(x, 24);
+  x /= 4;
+  ts_eq(x, 6);
+  x %= 4;
+  ts_eq(x, 2);
+  x &= 3;
+  ts_eq(x, 2);
+  x |= 4;
+  ts_eq(x, 6);
+  x ^= 1;
+  ts_eq(x, 7);
+  x <<= 2;
+  ts_eq(x, 28);
+  x >>= 1;
+  ts_eq(x, 14);
+});
+
+ts_test("compound string and list", func() {
+  let s = "a";
+  s += "b";
+  ts_eq(s, "ab");
+  let a = [1];
+  a += [2, 3];
+  ts_eq(a, [1, 2, 3]);
+});
+
+ts_test("compound index and field", func() {
+  let a = [10];
+  let i = 0;
+  a[i++] += 5;
+  ts_eq(i, 1);
+  ts_eq(a, [15]);
+  let p = {"x": 1};
+  p["x"] += 2;
+  ts_eq(p, {"x": 3});
+  let q = UpdateFieldP { x: 1 };
+  q.x += 4;
+  ts_eq(q.x, 5);
+});
+
+ts_test("const scalar propagation", func() {
+  ts_eq(lang_const_scale(), 7);
+});
+
+ts_test("const propagation shadowing", func() {
+  ts_eq(lang_const_shadow(), [5, 9, 1]);
+});
+
+ts_test("const string concatenation", func() {
+  ts_eq(lang_const_string(), "ab");
+});
+
+ts_test("const container is not propagated", func() {
+  ts_eq(lang_const_container(), 2);
+});
+
+ts_test("list slice", func() {
+  let xs = [0, 1, 2, 3, 4];
+  ts_eq(xs[1:4], [1, 2, 3]);
+  ts_eq(xs[:2], [0, 1]);
+  ts_eq(xs[2:], [2, 3, 4]);
+  ts_eq(xs[:], [0, 1, 2, 3, 4]);
+});
+
+ts_test("list slice negative indices", func() {
+  let xs = [0, 1, 2, 3, 4];
+  ts_eq(xs[-2:], [3, 4]);
+  ts_eq(xs[:-1], [0, 1, 2, 3]);
+  ts_eq(xs[-100:100], [0, 1, 2, 3, 4]);
+  ts_eq(xs[100:-100], []);
+});
+
+ts_test("list slice step", func() {
+  let xs = [0, 1, 2, 3, 4];
+  let i = 1;
+  let j = 2;
+  ts_eq(xs[::2], [0, 2, 4]);
+  ts_eq(xs[1::2], [1, 3]);
+  ts_eq(xs[i::j], [1, 3]);
+  ts_eq(xs[4:0:-2], [4, 2]);
+  ts_eq(xs[::-1], [4, 3, 2, 1, 0]);
+});
+
+ts_test("string slice uses codepoints", func() {
+  ts_eq("你好世界"[1:3], "好世");
+  ts_eq("你好世界"[::-1], "界世好你");
+});
+
+ts_test("bytes slice uses byte indices", func() {
+  ts_eq(std.bytes.hex(std.bytes.from_string("abcd")[1:3]), "6263");
+  ts_eq(std.bytes.hex(std.bytes.from_string("abcd")[::-1]), "64636261");
+});
+
+ts_finish();

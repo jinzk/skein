@@ -27,6 +27,7 @@ thread_local std::unordered_map<
     const type_def *,
     std::unordered_map<std::string, std::shared_ptr<function_def>>>
     thread_methods;
+thread_local uint64_t thread_method_generation = 0;
 
 /* Registry mutations are rare and recursive; method lookups are hot. */
 std::recursive_mutex type_registry_mutex;
@@ -901,6 +902,11 @@ void structtype_set_thread_method(const type_def *def, const std::string &name,
     if (!def || !method)
         return;
     thread_methods[def][name] = std::move(method);
+    ++thread_method_generation;
+}
+
+uint64_t structtype_method_generation() {
+    return thread_method_generation;
 }
 
 std::shared_ptr<function_def> structtype_trait_default(

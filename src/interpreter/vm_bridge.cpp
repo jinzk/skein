@@ -16,10 +16,20 @@
 #include "symbol.h"
 #include "valuetype.h"
 #include "runtime_context.h"
+#include "runtime_state.h"
 #include "vm_host.h"
 
 #ifdef SKEIN_ENABLE_JIT
 #include "jit.h"
+
+#if defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
+#define SKEIN_VM_JIT_SYSV __attribute__((sysv_abi))
+#else
+#define SKEIN_VM_JIT_SYSV
+#endif
+
+/* Returned by the cached method helper when the generic path must run. */
+extern "C" char skein_jit_method_fallback_marker = 0;
 #endif
 
 #include <chrono>
@@ -116,6 +126,7 @@ function_vm_cache *cache_for(function_code *code) {
             entry->proto->name_ic.clear();
             entry->proto->member_ic.clear();
             entry->proto->index_read_ic.clear();
+            entry->proto->call_method_ic.clear();
             entry->param_patterns = source->param_patterns;
             entry->compile_failed = source->compile_failed;
         }
@@ -868,6 +879,92 @@ bool skein_vm_try_jit_call_args(value_t *callee,
 }
 
 #ifdef SKEIN_ENABLE_JIT
+/*
+ * Cached method dispatch used by generated CALL_METHOD sites.  The cache is
+ * per Proto call site and is cleared whenever a Proto crosses threads.
+ */
+extern "C" SKEIN_VM_JIT_SYSV value_t *skein_jit_invoke_method_cached(
+    value_t *receiver, const char *name, value_t **args, uint32_t argc,
+    skein::bc::MethodCallCacheEntry *cache,
+    skein::jit::thread_state *ts) {
+    auto fallback = []() {
+        return reinterpret_cast<value_t *>(
+            &skein_jit_method_fallback_marker);
+    };
+    if (!cache || !ts || !receiver || !name)
+        return fallback();
+    if (cache->valid && cache->argc != argc)
+        cache->valid = false;
+
+    const void *owner = nullptr;
+    if (receiver->type == T_struct) {
+        struct struct_value_t *sv = (struct struct_value_t *)receiver;
+        if (sv->def)
+            owner = sv->def;
+    } else if (receiver->type == T_enum) {
+        struct enum_value_t *ev = (struct enum_value_t *)receiver;
+        if (ev->def)
+            owner = ev->def;
+    }
+    if (!owner)
+        return fallback();
+
+    const uint64_t generation = structtype_method_generation();
+    std::shared_ptr<function_def> method;
+    if (cache->valid && cache->owner == owner && cache->argc == argc &&
+        cache->method_generation == generation && cache->method) {
+        method = cache->method;
+    } else {
+        method = structtype_method((const type_def *)owner, name);
+        if (method) {
+            cache->owner = owner;
+            cache->method = method;
+            cache->argc = argc;
+            cache->method_generation = generation;
+            cache->valid = true;
+        }
+    }
+    if (!method)
+        return fallback();
+
+    function_code *code = method->code.get();
+    if (!code || !jit_function_eligible(code) || code->is_generator ||
+        code->variadic || code->required_params != code->nparams ||
+        (uint32_t)code->nparams != argc + 1) {
+        return fallback();
+    }
+    function_vm_cache *vm = cache_for(code);
+    if (!vm->jit || !vm->proto || vm->jit_pattern_frame)
+        return fallback();
+    if (cache->tail_calls < 0) {
+        cache->tail_calls = 0;
+        for (const skein::bc::Instr &ins : vm->proto->code) {
+            if (static_cast<skein::bc::Op>(ins.op) ==
+                skein::bc::Op::TailCall) {
+                cache->tail_calls = 1;
+                break;
+            }
+        }
+    }
+    if (cache->tail_calls != 0)
+        return fallback();
+
+    value_t **method_args = args - 1;
+    if (!jit_args_match(code, method_args, argc + 1, false))
+        return fallback();
+
+    using raw_entry = value_t *(*)(skein::jit::thread_state *, function_def *,
+                                   value_t **, uint32_t);
+    raw_entry entry =
+        reinterpret_cast<raw_entry>(skein::jit::entry(vm->jit));
+    value_t *result = entry(ts, method.get(), method_args, argc + 1);
+    if (g_interrupted) {
+        freeval(result);
+        return nullptr;
+    }
+    return result;
+}
+
 /*
  * Fast-path resolver called from generated CALL code.  It only returns an
  * entry when the callee is already compiled and its arguments match; the

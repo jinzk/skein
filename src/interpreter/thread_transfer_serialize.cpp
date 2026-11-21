@@ -954,6 +954,7 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
     copy->name_ic.clear();
     copy->member_ic.clear();
     copy->index_read_ic.clear();
+    copy->call_method_ic.clear();
     out = std::make_shared<thread_transfer_function>();
     out->name = def->code->name;
     out->proto = std::move(copy);

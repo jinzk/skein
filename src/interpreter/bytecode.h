@@ -413,6 +413,20 @@ struct IndexReadCacheEntry {
 };
 
 /*
+ * Per-call-site cache for `receiver.method(...)` on struct and enum values.
+ * The owner pointer identifies the type definition and the generation catches
+ * thread-local method-table overrides installed after the cache was filled.
+ */
+struct MethodCallCacheEntry {
+    const void *owner = nullptr;
+    std::shared_ptr<function_def> method;
+    uint32_t argc = 0;
+    uint64_t method_generation = 0;
+    int8_t tail_calls = -1;
+    bool valid = false;
+};
+
+/*
  * A compiled function or top-level chunk.
  *
  * `locs` is parallel to `code`: one source location per instruction.  This is
@@ -430,6 +444,7 @@ struct Proto {
     mutable std::vector<NameCacheEntry> name_ic;
     mutable std::vector<MemberCacheEntry> member_ic;
     mutable std::vector<IndexReadCacheEntry> index_read_ic;
+    mutable std::vector<MethodCallCacheEntry> call_method_ic;
     std::vector<SourceLoc> locs;
     std::vector<IterDesc> iters;
     std::vector<IndexDesc> index_ops;

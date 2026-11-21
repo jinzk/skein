@@ -364,6 +364,8 @@ void optimize_proto(Proto &proto) {
 
 bool finalize_proto(Proto &proto, std::string &error) {
     optimize_proto(proto);
+    proto.call_method_ic.assign(proto.code.size(),
+                                skein::bc::MethodCallCacheEntry{});
     uint32_t max_stack = 0;
     if (!skein::bc::verify(proto, error, &max_stack))
         return false;

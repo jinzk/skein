@@ -646,6 +646,10 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
                 def_ref, index, values[(size_t)index], bindings);
             if (native != ParamPatternResult::Matched) {
                 free_pattern_bindings(bindings);
+                int call_line = 0;
+                int call_column = 0;
+                if (diag_current_call_site(call_line, call_column))
+                    diag_set_location(call_line, call_column);
                 yyerror("function parameter does not match its pattern");
                 return 0;
             }
@@ -868,7 +872,8 @@ bool skein_vm_try_jit_call_args(value_t *callee,
  * Fast-path resolver called from generated CALL code.  It only returns an
  * entry when the callee is already compiled and its arguments match; the
  * generic invoke path remains responsible for compiling, methods, builtins,
- * pattern bindings, and VM fallbacks.
+ * and VM fallbacks.  Pattern-frame entries bind their parameters in the
+ * callee prologue, so they can use the direct path once compiled.
  */
 static void *jit_resolve_direct_target(value_t *callee, value_t **args,
                                        uint32_t argc,
@@ -892,12 +897,13 @@ static void *jit_resolve_direct_target(value_t *callee, value_t **args,
         return nullptr;
     if ((uint32_t)code->nparams != argc)
         return nullptr;
-    if (jit_params_have_patterns(code))
-        return nullptr;
-    if (!jit_args_match(code, args, argc, false))
+    const bool pattern_frame = jit_params_have_patterns(code);
+    if (!jit_args_match(code, args, argc, pattern_frame))
         return nullptr;
     function_vm_cache *cache = cache_for(code);
     if (!cache->jit || !cache->proto)
+        return nullptr;
+    if (cache->jit_pattern_frame != pattern_frame)
         return nullptr;
     for (const skein::bc::Instr &ins : cache->proto->code) {
         if (static_cast<skein::bc::Op>(ins.op) == skein::bc::Op::TailCall)

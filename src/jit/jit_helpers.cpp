@@ -2009,6 +2009,11 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     return result;
 }
 
+extern "C" SKEIN_JIT_SYSV void skein_jit_set_call_location(int line,
+                                                            int column) {
+    diag_set_location(line, column);
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **args,
                                      uint32_t argc, int line, int column) {
     diag_set_location(line, column);
@@ -2200,9 +2205,13 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     saved.depth_counted = ts->depth_counted;
     saved.diag_pushed = ts->diag_pushed;
     saved.tail_call = ts->tail_call;
+    saved.top_level = ts->top_level;
     saved.package_valid = ts->saved_package_valid;
     saved.source_valid = ts->saved_source_valid;
     ts->saves.push_back(std::move(saved));
+
+    if (def)
+        ts->top_level = false;
 
     ts->saved_handler_depth = context.handler_depth;
     ts->handler_body_depth = 0;
@@ -2305,11 +2314,13 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         ts->depth_counted = saved.depth_counted;
         ts->diag_pushed = saved.diag_pushed;
         ts->tail_call = saved.tail_call;
+        ts->top_level = saved.top_level;
         ts->saved_package_valid = saved.package_valid;
         ts->saved_source_valid = saved.source_valid;
     } else {
         ts->diag_pushed = false;
         ts->entered = false;
+        ts->top_level = false;
         ts->handler_body_depth = 0;
         ts->saved_package_valid = false;
         ts->saved_source_valid = false;

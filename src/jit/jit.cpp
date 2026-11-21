@@ -181,6 +181,7 @@ SKEIN_JIT_SYSV void *skein_jit_direct_target(value_t *callee, value_t **args,
                                              uint32_t argc,
                                              skein::jit::thread_state *ts,
                                              function_def **def_out);
+SKEIN_JIT_SYSV void skein_jit_set_call_location(int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                uint32_t argc, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
@@ -2002,6 +2003,9 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                  * invoke -> VM bridge -> enter round trip on every call.
                  * The resolver does not consume callee or arguments.
                  */
+                a.mov(asmjit::x86::edi, asmjit::imm(loc.line));
+                a.mov(asmjit::x86::esi, asmjit::imm(loc.column));
+                call_addr(fn_address(&skein_jit_set_call_location));
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(callee_depth)));

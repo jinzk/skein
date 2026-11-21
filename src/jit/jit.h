@@ -64,6 +64,7 @@ struct thread_state {
         bool depth_counted = false;
         bool diag_pushed = false;
         bool tail_call = false;
+        bool top_level = false;
         bool package_valid = false;
         bool source_valid = false;
     };

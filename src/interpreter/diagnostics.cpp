@@ -407,6 +407,15 @@ void diag_pop_call() {
 
 int diag_call_depth() { return (int)call_stack.size(); }
 
+bool diag_current_call_site(int &line, int &column) {
+    if (call_stack.empty())
+        return false;
+    const diag_call_frame &frame = call_stack.back();
+    line = frame.line;
+    column = frame.column;
+    return true;
+}
+
 void diag_snapshot_trace(std::vector<error_frame> &frames, std::size_t limit) {
     frames.clear();
     if (call_stack.empty())

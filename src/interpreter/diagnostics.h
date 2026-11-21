@@ -71,6 +71,8 @@ void diag_push_call(const char *name, const std::string *source, int line,
                     int column);
 void diag_pop_call();
 int diag_call_depth();
+/* Innermost call's source location (the caller's site). */
+bool diag_current_call_site(int &line, int &column);
 
 /* Copy the live call stack into `frames`, innermost frame first. */
 void diag_snapshot_trace(std::vector<error_frame> &frames,

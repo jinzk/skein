@@ -1061,14 +1061,15 @@ bool note_type(type_map &types, std::vector<type_record> &order,
             return false;
         stored.field_defaults.emplace(field.name, std::move(function));
     }
-    for (const auto &method : def->methods) {
-        if (!method.second)
+    for (const std::string &name : structtype_method_names(def)) {
+        std::shared_ptr<function_def> method = structtype_method(def, name);
+        if (!method)
             continue;
         std::shared_ptr<thread_transfer_function> function;
-        if (!build_simple_function(method.second, "method", function, error,
+        if (!build_simple_function(method, "method", function, error,
                                    context))
             return false;
-        stored.methods.emplace_back(method.first, std::move(function));
+        stored.methods.emplace_back(name, std::move(function));
     }
     order.push_back(stored);
     return true;
@@ -1099,14 +1100,15 @@ bool note_type(type_map &types, std::vector<type_record> &order,
                 variant.name + '\x1f' + field.name, std::move(function));
         }
     }
-    for (const auto &method : def->methods) {
-        if (!method.second)
+    for (const std::string &name : structtype_method_names(def)) {
+        std::shared_ptr<function_def> method = structtype_method(def, name);
+        if (!method)
             continue;
         std::shared_ptr<thread_transfer_function> function;
-        if (!build_simple_function(method.second, "method", function, error,
+        if (!build_simple_function(method, "method", function, error,
                                    context))
             return false;
-        stored.methods.emplace_back(method.first, std::move(function));
+        stored.methods.emplace_back(name, std::move(function));
     }
     order.push_back(stored);
     return true;

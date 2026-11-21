@@ -330,6 +330,32 @@ def run_cases():
     )
 
     check(
+        "parallel worker method attachment",
+        "import std;\n"
+        "struct User { id: int; }\n"
+        "impl User {\n"
+        "  func describe(self) { return \"user:\" + str(self.id); }\n"
+        "}\n"
+        "func worker(ctx) {\n"
+        '  return ctx.payload["u"].describe();\n'
+        "}\n"
+        "let tasks = [];\n"
+        "let i = 0;\n"
+        "while (i < 4) {\n"
+        "  let blob = std.entry.encode(worker);\n"
+        '  let t = std.thread.spawn_entry(blob, '
+        'std.thread.Message.from({"u": User { id: i }}));\n'
+        "  tasks = std.list.append(tasks, t);\n"
+        "  i = i + 1;\n"
+        "}\n"
+        "for (let t in tasks) {\n"
+        "  let r = t.join();\n"
+        '  println(str(r["value"]));\n'
+        "}\n",
+        stdout_all=["user:0", "user:1", "user:2", "user:3"],
+    )
+
+    check(
         "key custom hash and KeyEq across entry threads",
         USER_KEYEQ +
         'func worker(ctx) {\n'

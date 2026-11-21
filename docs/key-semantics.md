@@ -174,8 +174,8 @@ by_id[user.id]
 - `spawn_script` / `spawn_source` 会在父线程尽量预编译消息值触达类型的方法体，
   使 AST worker 也能调用；`dict_hash` / `key_eq` 编译失败会终止启动，其他方法
   失败则忽略，由实际调用时报错
-- `spawn_entry` / `spawn_function` / 进程传输会为接收端缺少可用方法体的类型
-  附加传输过来的方法；类型方法表的附加操作已串行化
+- `spawn_entry` / `spawn_function` / 进程传输会把传输方法安装为接收线程的
+  方法覆盖，不修改进程共享的类型方法表；嵌套传输和反射会看到这些覆盖
 
 ## 9. 错误速查
 

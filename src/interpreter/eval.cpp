@@ -1587,11 +1587,11 @@ struct value_t *eval(struct ast *a) {
                         }
                         bool called = false;
                         if (sv->def) {
-                            auto method = sv->def->methods.find(name);
-                            if (method != sv->def->methods.end()) {
+                            std::shared_ptr<function_def> method =
+                                structtype_method(sv->def, name);
+                            if (method) {
                                 try {
-                                    ret = call_method_value(receiver,
-                                                            method->second,
+                                    ret = call_method_value(receiver, method,
                                                             call->args);
                                     called = true;
                                 } catch (...) {

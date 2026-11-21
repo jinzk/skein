@@ -1,5 +1,6 @@
 #include "structtype.h"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <unordered_map>
@@ -14,6 +15,16 @@ std::unordered_map<std::string, struct_def *> logical_structs;
 std::unordered_map<std::string, trait_def *> logical_traits;
 std::unordered_map<std::string, enum_def *> logical_enums;
 std::unordered_map<std::string, std::string> source_aliases;
+
+/*
+ * Methods attached by a thread payload are thread-local overrides.  Keeping
+ * them out of the shared type definition avoids mutating process-global method
+ * tables after worker threads have started.
+ */
+thread_local std::unordered_map<
+    const type_def *,
+    std::unordered_map<std::string, std::shared_ptr<function_def>>>
+    thread_methods;
 
 std::string type_key(const char *source, const char *name) {
     std::string key = source ? source : "";
@@ -167,6 +178,10 @@ void structtype_visit_functions(
     }
     for (auto &entry : trait_types) {
         for (auto &method : entry.second->defaults)
+            visit(method.second);
+    }
+    for (auto &entry : thread_methods) {
+        for (auto &method : entry.second)
             visit(method.second);
     }
 }
@@ -826,6 +841,48 @@ bool structtype_add_method(type_def *def, const std::string &name,
     }
     def->methods.emplace(name, std::move(code));
     return true;
+}
+
+std::shared_ptr<function_def> structtype_method(const type_def *def,
+                                                const std::string &name) {
+    if (!def)
+        return NULL;
+    auto type = thread_methods.find(def);
+    if (type != thread_methods.end()) {
+        auto method = type->second.find(name);
+        if (method != type->second.end())
+            return method->second;
+    }
+    auto method = def->methods.find(name);
+    return method == def->methods.end() ? NULL : method->second;
+}
+
+void structtype_set_thread_method(const type_def *def, const std::string &name,
+                                  std::shared_ptr<function_def> method) {
+    if (!def || !method)
+        return;
+    thread_methods[def][name] = std::move(method);
+}
+
+std::vector<std::string> structtype_method_names(const type_def *def) {
+    std::vector<std::string> names;
+    if (!def)
+        return names;
+    names.reserve(def->methods.size());
+    for (const auto &method : def->methods)
+        if (method.second)
+            names.push_back(method.first);
+    auto overrides = thread_methods.find(def);
+    if (overrides != thread_methods.end()) {
+        for (const auto &method : overrides->second) {
+            if (!method.second)
+                continue;
+            if (std::find(names.begin(), names.end(), method.first) ==
+                names.end())
+                names.push_back(method.first);
+        }
+    }
+    return names;
 }
 
 bool structtype_add_trait_default(trait_def *trait, const std::string &name,

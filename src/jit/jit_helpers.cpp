@@ -536,10 +536,11 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
             freeval(container);
             return result;
         }
-        auto method = sv->def->methods.find(name);
-        if (method != sv->def->methods.end()) {
+        std::shared_ptr<function_def> method =
+            structtype_method(sv->def, name);
+        if (method) {
             value_t *result =
-                newmethodval(dupval(container), method->second);
+                newmethodval(dupval(container), method);
             freeval(container);
             return result;
         }
@@ -565,10 +566,11 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
             freeval(container);
             return result;
         }
-        auto method = ev->def->methods.find(name);
-        if (method != ev->def->methods.end()) {
+        std::shared_ptr<function_def> method =
+            structtype_method(ev->def, name);
+        if (method) {
             value_t *result =
-                newmethodval(dupval(container), method->second);
+                newmethodval(dupval(container), method);
             freeval(container);
             return result;
         }
@@ -2035,16 +2037,18 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
         if (receiver->type == T_struct) {
             struct struct_value_t *sv = (struct struct_value_t *)receiver;
             if (sv->def) {
-                auto method = sv->def->methods.find(name);
-                if (method != sv->def->methods.end())
-                    callee = newmethodval(receiver, method->second);
+                std::shared_ptr<function_def> method =
+                    structtype_method(sv->def, name);
+                if (method)
+                    callee = newmethodval(receiver, method);
             }
         } else if (receiver->type == T_enum) {
             struct enum_value_t *ev = (struct enum_value_t *)receiver;
             if (ev->def) {
-                auto method = ev->def->methods.find(name);
-                if (method != ev->def->methods.end())
-                    callee = newmethodval(receiver, method->second);
+                std::shared_ptr<function_def> method =
+                    structtype_method(ev->def, name);
+                if (method)
+                    callee = newmethodval(receiver, method);
             }
         }
         if (!callee) {

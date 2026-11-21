@@ -28,7 +28,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1473,12 +1472,6 @@ bool skein_vm_apply_thread_types(
     const std::shared_ptr<thread_transfer_context> &context,
     const std::vector<struct thread_transfer_type> &types,
     std::string &error) {
-    /*
-     * Struct/enum definitions are process-global.  Serialize method
-     * attachment so concurrent workers cannot race on the same method table.
-     */
-    static std::mutex type_attach_mutex;
-    std::lock_guard<std::mutex> type_attach_lock(type_attach_mutex);
     if (!context) {
         error = "missing thread transfer context";
         return false;
@@ -1505,10 +1498,6 @@ bool skein_vm_apply_thread_types(
                 error = "thread payload method is missing: " + method.first;
                 return false;
             }
-            auto existing = definition->methods.find(method.first);
-            if (existing != definition->methods.end() && existing->second &&
-                skein_vm_function_body_available(existing->second))
-                continue;
             struct value_t *function_value = nullptr;
             thread_transfer_value transfer;
             transfer.kind = thread_transfer_value::Kind::Function;
@@ -1523,26 +1512,14 @@ bool skein_vm_apply_thread_types(
             }
             const func_value_t *function =
                 (const func_value_t *)function_value;
-            std::shared_ptr<function_def> method_def =
-                function->def;
+            std::shared_ptr<function_def> method_def = function->def;
             freeval(function_value);
             if (!method_def) {
                 error = "thread payload method has no function definition";
                 return false;
             }
-            if (existing != definition->methods.end()) {
-                existing->second = std::move(method_def);
-            } else {
-                std::string method_error;
-                if (!structtype_add_method(definition, method.first,
-                                           std::move(method_def),
-                                           method_error)) {
-                    error = method_error.empty()
-                                ? "cannot attach thread payload method"
-                                : method_error;
-                    return false;
-                }
-            }
+            structtype_set_thread_method(definition, method.first,
+                                         std::move(method_def));
         }
         auto attach_default = [&](struct field_def &field,
                                   const thread_transfer_type_field &source) {
@@ -1823,15 +1800,6 @@ ParamPatternResult skein_vm_match_parameter_pattern(
                    : ParamPatternResult::NotMatched;
 }
 
-bool skein_vm_function_body_available(
-    const std::shared_ptr<function_def> &def) {
-    if (!def || !def->code)
-        return false;
-    if (function_body_ast(def->code.get()))
-        return true;
-    return cache_for(def->code.get())->proto != NULL;
-}
-
 static bool prepare_value_methods_inner(
     const struct value_t *value, std::unordered_set<const type_def *> &types,
     std::unordered_set<const void *> &visiting) {
@@ -1843,12 +1811,13 @@ static bool prepare_value_methods_inner(
     else if (value->type == T_enum)
         def = ((const struct enum_value_t *)value)->def;
     if (def && types.insert(def).second) {
-        for (const auto &method : def->methods) {
-            if (!method.second)
+        for (const std::string &name : structtype_method_names(def)) {
+            std::shared_ptr<function_def> method =
+                structtype_method(def, name);
+            if (!method)
                 continue;
-            bool prepared = prepare_function_body(method.second) != nullptr;
-            if (!prepared &&
-                (method.first == "dict_hash" || method.first == "key_eq"))
+            bool prepared = prepare_function_body(method) != nullptr;
+            if (!prepared && (name == "dict_hash" || name == "key_eq"))
                 return false;
         }
     }

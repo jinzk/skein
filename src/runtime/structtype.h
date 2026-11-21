@@ -201,6 +201,11 @@ void structtype_rollback_enum(enum_def *def);
 bool structtype_add_method(type_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,
                            std::string &error);
+std::shared_ptr<function_def> structtype_method(const type_def *def,
+                                                const std::string &name);
+void structtype_set_thread_method(const type_def *def, const std::string &name,
+                                  std::shared_ptr<function_def> method);
+std::vector<std::string> structtype_method_names(const type_def *def);
 bool structtype_add_trait(type_def *def, trait_def *trait,
                           std::string &error);
 

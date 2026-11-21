@@ -3977,16 +3977,17 @@ private:
             if (cache && cache->owner == sv->def && cache->field < 0 &&
                 cache->method)
                 return cache->method;
-            auto method = sv->def->methods.find(name);
-            if (method == sv->def->methods.end())
+            std::shared_ptr<function_def> method =
+                structtype_method(sv->def, name);
+            if (!method)
                 return nullptr;
             if (cache) {
                 cache->owner = sv->def;
                 cache->variant = -1;
                 cache->field = -1;
-                cache->method = method->second;
+                cache->method = method;
             }
-            return method->second;
+            return method;
         }
         if (receiver->type == T_enum) {
             struct enum_value_t *ev = (struct enum_value_t *)receiver;
@@ -3997,16 +3998,17 @@ private:
                 cache->variant == ev->variant && cache->field < 0 &&
                 cache->method)
                 return cache->method;
-            auto method = ev->def->methods.find(name);
-            if (method == ev->def->methods.end())
+            std::shared_ptr<function_def> method =
+                structtype_method(ev->def, name);
+            if (!method)
                 return nullptr;
             if (cache) {
                 cache->owner = ev->def;
                 cache->variant = ev->variant;
                 cache->field = -1;
-                cache->method = method->second;
+                cache->method = method;
             }
-            return method->second;
+            return method;
         }
         return nullptr;
     }
@@ -4048,15 +4050,16 @@ private:
                 }
                 return dupval(sv->payload->fields[(size_t)field]);
             }
-            auto method = sv->def->methods.find(name);
-            if (method != sv->def->methods.end()) {
+            std::shared_ptr<function_def> method =
+                structtype_method(sv->def, name);
+            if (method) {
                 if (cache) {
                     cache->owner = sv->def;
                     cache->variant = -1;
                     cache->field = -1;
-                    cache->method = method->second;
+                    cache->method = method;
                 }
-                return newmethodval(dupval(container), method->second);
+                return newmethodval(dupval(container), method);
             }
             yyerror("field %s not found in %s", name, sv->def->name.c_str());
             return NULL;
@@ -4098,15 +4101,16 @@ private:
                 }
                 return dupval(ev->payload->fields[(size_t)field]);
             }
-            auto method = ev->def->methods.find(name);
-            if (method != ev->def->methods.end()) {
+            std::shared_ptr<function_def> method =
+                structtype_method(ev->def, name);
+            if (method) {
                 if (cache) {
                     cache->owner = ev->def;
                     cache->variant = ev->variant;
                     cache->field = -1;
-                    cache->method = method->second;
+                    cache->method = method;
                 }
-                return newmethodval(dupval(container), method->second);
+                return newmethodval(dupval(container), method);
             }
             yyerror("field %s not found in %s.%s", name,
                     ev->def->name.c_str(), variant.name.c_str());

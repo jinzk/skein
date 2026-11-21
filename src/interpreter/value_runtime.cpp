@@ -1173,9 +1173,10 @@ struct value_t *read_member_value(struct value_t *container,
         if (field >= 0 && sv->payload &&
             (size_t)field < sv->payload->fields.size())
             return dupval(sv->payload->fields[(size_t)field]);
-        auto method = sv->def->methods.find(name);
-        if (method != sv->def->methods.end())
-            return newmethodval(dupval(container), method->second);
+        std::shared_ptr<function_def> method =
+            structtype_method(sv->def, name);
+        if (method)
+            return newmethodval(dupval(container), method);
         yyerror("field %s not found in %s", name, sv->def->name.c_str());
         return NULL;
     }
@@ -1199,9 +1200,10 @@ struct value_t *read_member_value(struct value_t *container,
         if (field >= 0 && ev->payload &&
             (size_t)field < ev->payload->fields.size())
             return dupval(ev->payload->fields[(size_t)field]);
-        auto method = ev->def->methods.find(name);
-        if (method != ev->def->methods.end())
-            return newmethodval(dupval(container), method->second);
+        std::shared_ptr<function_def> method =
+            structtype_method(ev->def, name);
+        if (method)
+            return newmethodval(dupval(container), method);
         yyerror("field %s not found in %s.%s", name,
                 ev->def->name.c_str(), variant.name.c_str());
         return NULL;

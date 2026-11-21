@@ -70,9 +70,9 @@ std::shared_ptr<function_def> custom_method(const struct type_def *def,
                                            const char *name) {
     if (!def || !name)
         return NULL;
-    auto method = def->methods.find(name);
-    if (method != def->methods.end() && method->second)
-        return method->second;
+    std::shared_ptr<function_def> method = structtype_method(def, name);
+    if (method)
+        return method;
     for (const trait_def *trait : def->traits) {
         if (!trait)
             continue;

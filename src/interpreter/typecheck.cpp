@@ -782,13 +782,12 @@ struct Checker : public BuiltinContext {
                     ? static_cast<const type_def *>(lookup.structure)
                     : static_cast<const type_def *>(lookup.enumeration);
             if (def) {
-                auto it = def->methods.find(name);
-                if (it != def->methods.end() && it->second &&
-                    it->second->code) {
-                    FunctionSig sig = method_signature_from_code(
-                        it->second->code.get());
-                    adjust_generator_result(sig, NULL,
-                                            it->second->code.get());
+                std::shared_ptr<function_def> method =
+                    structtype_method(def, name);
+                if (method && method->code) {
+                    FunctionSig sig =
+                        method_signature_from_code(method->code.get());
+                    adjust_generator_result(sig, NULL, method->code.get());
                     return function_type_from_sig(sig);
                 }
             }
@@ -957,12 +956,11 @@ struct Checker : public BuiltinContext {
                     ? static_cast<const type_def *>(lookup.structure)
                     : static_cast<const type_def *>(lookup.enumeration);
             if (def) {
-                auto it = def->methods.find(method_name);
-                if (it != def->methods.end() && it->second &&
-                    it->second->code) {
-                    sig = method_signature_from_code(
-                        it->second->code.get());
-                    method_code = it->second->code.get();
+                std::shared_ptr<function_def> method =
+                    structtype_method(def, method_name);
+                if (method && method->code) {
+                    sig = method_signature_from_code(method->code.get());
+                    method_code = method->code.get();
                     found = true;
                 }
             }

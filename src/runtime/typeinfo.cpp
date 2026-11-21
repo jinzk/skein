@@ -311,19 +311,15 @@ struct value_t *type_methods(const type_def *definition) {
     if (!definition)
         return (struct value_t *)methods;
 
-    std::vector<std::string> names;
-    names.reserve(definition->methods.size());
-    for (const auto &entry : definition->methods) {
-        if (entry.second)
-            names.push_back(entry.first);
-    }
+    std::vector<std::string> names = structtype_method_names(definition);
     std::sort(names.begin(), names.end());
 
     for (const std::string &name : names) {
-        auto it = definition->methods.find(name);
-        if (it == definition->methods.end() || !it->second)
+        std::shared_ptr<function_def> method =
+            structtype_method(definition, name);
+        if (!method)
             continue;
-        list_add(methods, method_info_from_code(name, it->second.get()));
+        list_add(methods, method_info_from_code(name, method.get()));
     }
     return (struct value_t *)methods;
 }

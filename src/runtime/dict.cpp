@@ -84,6 +84,44 @@ std::shared_ptr<function_def> custom_hash_method(const struct type_def *def) {
 
 thread_local bool g_custom_hash_active = false;
 
+/*
+ * Key validation/hashing only recurses through tuple, struct, and enum
+ * payloads.  Typical keys are shallow, so keep the first levels inline and
+ * fall back to a vector only for unusually deep keys.
+ */
+struct key_stack {
+    static constexpr std::size_t kInline = 32;
+    const void *inline_items[kInline];
+    std::vector<const void *> overflow;
+    std::size_t depth = 0;
+
+    bool contains(const void *item) const {
+        const std::size_t inline_count =
+            depth < kInline ? depth : kInline;
+        for (std::size_t i = 0; i < inline_count; ++i)
+            if (inline_items[i] == item)
+                return true;
+        for (const void *entry : overflow)
+            if (entry == item)
+                return true;
+        return false;
+    }
+
+    void push(const void *item) {
+        if (depth < kInline)
+            inline_items[depth] = item;
+        else
+            overflow.push_back(item);
+        ++depth;
+    }
+
+    void pop() {
+        --depth;
+        if (depth >= kInline)
+            overflow.pop_back();
+    }
+};
+
 bool call_custom_hash(const struct value_t *value, std::uint64_t &out) {
     const struct type_def *def = value_type_def(value);
     std::shared_ptr<function_def> method = custom_hash_method(def);
@@ -121,8 +159,7 @@ bool call_custom_hash(const struct value_t *value, std::uint64_t &out) {
 }
 
 bool key_allowed_inner(
-    const struct value_t *key, std::vector<const void *> &stack,
-    std::size_t depth) {
+    const struct value_t *key, key_stack &stack, std::size_t depth) {
     if (!key || depth > kMaxKeyDepth)
         return false;
     if (scalar_key_allowed(key))
@@ -158,10 +195,9 @@ bool key_allowed_inner(
         return false;
     }
 
-    for (const void *parent : stack)
-        if (parent == identity)
-            return false;
-    stack.push_back(identity);
+    if (stack.contains(identity))
+        return false;
+    stack.push(identity);
 
     bool ok = true;
     for (const struct value_t *child : *children) {
@@ -171,7 +207,7 @@ bool key_allowed_inner(
         }
     }
 
-    stack.pop_back();
+    stack.pop();
     return ok;
 }
 
@@ -189,8 +225,7 @@ std::uint64_t type_hash(const struct type_def *def) {
 }
 
 std::uint64_t hash_key_inner(
-    const struct value_t *key, std::vector<const void *> &stack,
-    std::size_t depth) {
+    const struct value_t *key, key_stack &stack, std::size_t depth) {
     if (!key || depth > kMaxKeyDepth)
         return 0;
     switch (key->type) {
@@ -224,15 +259,14 @@ std::uint64_t hash_key_inner(
             if (list->payload->hash_valid)
                 return list->payload->hash;
             const void *identity = list->payload.get();
-            for (const void *parent : stack)
-                if (parent == identity)
-                    return 0;
-            stack.push_back(identity);
+            if (stack.contains(identity))
+                return 0;
+            stack.push(identity);
             std::uint64_t hash =
                 mix_hash(0x8, (std::uint64_t)list->payload->items.size());
             for (const struct value_t *item : list->payload->items)
                 hash = mix_hash(hash, hash_key_inner(item, stack, depth + 1));
-            stack.pop_back();
+            stack.pop();
             list->payload->hash = hash;
             list->payload->hash_valid = true;
             return hash;
@@ -255,16 +289,15 @@ std::uint64_t hash_key_inner(
                 return hash;
             }
             const void *identity = structure->payload.get();
-            for (const void *parent : stack)
-                if (parent == identity)
-                    return 0;
-            stack.push_back(identity);
+            if (stack.contains(identity))
+                return 0;
+            stack.push(identity);
             std::uint64_t hash = mix_hash(0xA, type_hash(structure->def));
             hash = mix_hash(hash,
                             (std::uint64_t)structure->payload->fields.size());
             for (const struct value_t *field : structure->payload->fields)
                 hash = mix_hash(hash, hash_key_inner(field, stack, depth + 1));
-            stack.pop_back();
+            stack.pop();
             structure->payload->hash = hash;
             structure->payload->hash_valid = true;
             return hash;
@@ -287,17 +320,16 @@ std::uint64_t hash_key_inner(
                 return hash;
             }
             const void *identity = enumeration->payload.get();
-            for (const void *parent : stack)
-                if (parent == identity)
-                    return 0;
-            stack.push_back(identity);
+            if (stack.contains(identity))
+                return 0;
+            stack.push(identity);
             std::uint64_t hash = mix_hash(0xB, type_hash(enumeration->def));
             hash = mix_hash(hash, (std::uint64_t)enumeration->variant);
             hash = mix_hash(hash,
                             (std::uint64_t)enumeration->payload->fields.size());
             for (const struct value_t *field : enumeration->payload->fields)
                 hash = mix_hash(hash, hash_key_inner(field, stack, depth + 1));
-            stack.pop_back();
+            stack.pop();
             enumeration->payload->hash = hash;
             enumeration->payload->hash_valid = true;
             return hash;
@@ -310,7 +342,7 @@ std::uint64_t hash_key_inner(
 } // namespace
 
 bool dict_key_allowed(const struct value_t *key) {
-    std::vector<const void *> stack;
+    key_stack stack;
     return key_allowed_inner(key, stack, 0);
 }
 
@@ -320,7 +352,7 @@ const char *dict_key_error() {
 }
 
 std::uint64_t dict_key_hash(const struct value_t *key) {
-    std::vector<const void *> stack;
+    key_stack stack;
     return hash_key_inner(key, stack, 0);
 }
 

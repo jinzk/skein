@@ -101,6 +101,86 @@ print(std.set.size(s));
 """,
     },
     {
+        "name": "dict.tuple_key.insert",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std",),
+        "src": """
+let d = {};
+let i = 0;
+while (i < {n}) { d[(i, i + 1)] = i; i = i + 1; }
+print(len(d));
+""",
+    },
+    {
+        "name": "dict.tuple_key.read",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std",),
+        "src": """
+let d = {};
+let i = 0;
+while (i < {n}) { d[(i, i + 1)] = i; i = i + 1; }
+let s = 0; i = 0;
+while (i < 4 * {n}) { s = s + d[(i % {n}, i % {n} + 1)]; i = i + 1; }
+print(s);
+""",
+    },
+    {
+        "name": "dict.struct_key.insert",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std",),
+        "src": """
+struct Key { id: int; tag: string; }
+let d = {};
+let i = 0;
+while (i < {n}) { d[Key { id: i, tag: "x" }] = i; i = i + 1; }
+print(len(d));
+""",
+    },
+    {
+        "name": "dict.enum_key.insert",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std",),
+        "src": """
+enum Key { Item { id: int; }; }
+let d = {};
+let i = 0;
+while (i < {n}) { d[Key.Item { id: i }] = i; i = i + 1; }
+print(len(d));
+""",
+    },
+    {
+        "name": "dict.custom_key.insert",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std", "std.dict_key"),
+        "src": """
+struct Key { id: int; cache: list[int]; }
+impl dict_key.DictKey for Key {
+  func dict_hash(self) { return self.id; }
+}
+let d = {};
+let i = 0;
+while (i < {n}) { d[Key { id: i, cache: [] }] = i; i = i + 1; }
+print(len(d));
+""",
+    },
+    {
+        "name": "set.tuple",
+        "sizes": (20000, 40000),
+        "expect": "nlog",
+        "imports": ("std", "std.set"),
+        "src": """
+let s = std.set.new();
+let i = 0;
+while (i < {n}) { s = std.set.add(s, (i, i + 1)); i = i + 1; }
+print(std.set.size(s));
+""",
+    },
+    {
         "name": "set.from_list",
         "sizes": (20000, 40000),
         "expect": "nlog",

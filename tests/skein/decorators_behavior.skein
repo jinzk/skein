@@ -1,0 +1,482 @@
+import std;
+include "_support.skein";
+
+let dec_log = [];
+let dec_counted_calls = 0;
+
+func dec_reset() {
+  dec_log = [];
+}
+
+func dec_trace(fn) {
+  return func(...args) {
+    dec_log = std.list.append(dec_log, "enter");
+    let r = fn(...args);
+    dec_log = std.list.append(dec_log, "exit");
+    return r;
+  };
+}
+
+func dec_around(name) {
+  return func(fn) {
+    return func(...args) {
+      dec_log = std.list.append(dec_log, "enter " + name);
+      let r = fn(...args);
+      dec_log = std.list.append(dec_log, "exit " + name);
+      return r;
+    };
+  };
+}
+
+func dec_show_args(fn) {
+  return func(...args) {
+    dec_log = std.list.append(dec_log, str(args[1]));
+    dec_log = std.list.append(dec_log, str(args[2]));
+    return fn(...args);
+  };
+}
+
+func dec_count_args(fn) {
+  return func(...args) {
+    dec_log = std.list.append(dec_log, str(len(args)));
+    return fn(...args);
+  };
+}
+
+struct DecBumpP {
+  x: int;
+}
+
+func dec_bump(fn) {
+  return func(...args) {
+    args[0] = DecBumpP { x: 99 };
+    args[1] = args[1] + 1;
+    return fn(...args);
+  };
+}
+
+func dec_counted(fn) {
+  dec_counted_calls = dec_counted_calls + 1;
+  return func(...args) {
+    return fn(...args);
+  };
+}
+
+func dec_make(prefix) {
+  return func(fn) {
+    return func(...args) {
+      dec_log = std.list.append(dec_log, prefix);
+      return fn(...args);
+    };
+  };
+}
+
+func dec_before_after(fn) {
+  return func(...args) {
+    dec_log = std.list.append(dec_log, "before");
+    let r = fn(...args);
+    dec_log = std.list.append(dec_log, "after");
+    return r;
+  };
+}
+
+func dec_task_timed(fn) {
+  return func(...args) {
+    dec_log = std.list.append(dec_log, "before");
+    std.task.sleep(1).wait();
+    let r = fn(...args);
+    dec_log = std.list.append(dec_log, "after");
+    return r;
+  };
+}
+
+struct DecBasicP {
+  x: int;
+}
+
+impl DecBasicP {
+  @dec_trace
+  func get(self, n: int = 1) {
+    return self.x * n;
+  }
+}
+
+struct DecAroundP {
+  x: int;
+}
+
+impl DecAroundP {
+  @dec_around("outer")
+  @dec_around("inner")
+  func get(self) {
+    dec_log = std.list.append(dec_log, "body");
+    return self.x;
+  }
+}
+
+struct DecArgsP {
+  x: int;
+}
+
+impl DecArgsP {
+  @dec_show_args
+  func add(self, a: int = self.x, b: int = a + 1) {
+    return a + b;
+  }
+}
+
+struct DecCountP {
+  x: int;
+}
+
+impl DecCountP {
+  @dec_count_args
+  func total(self, ...nums: int) {
+    let sum = self.x;
+    for (let n in nums) {
+      sum = sum + n;
+    }
+    return sum;
+  }
+}
+
+struct DecBumpUseP {
+  x: int;
+}
+
+impl DecBumpUseP {
+  @dec_bump
+  func get(self, n: int) {
+    return self.x + n;
+  }
+}
+
+struct DecFactP {
+  x: int;
+}
+
+impl DecFactP {
+  @dec_trace
+  func fact(self, n: int) {
+    if (n <= 1) {
+      return 1;
+    }
+    return n * self.fact(n - 1);
+  }
+}
+
+struct DecCountedP {
+  x: int;
+}
+
+impl DecCountedP {
+  @dec_counted
+  func get(self) {
+    return self.x;
+  }
+}
+
+struct DecAnonP {
+  x: int;
+}
+
+impl DecAnonP {
+  @(func(fn) {
+    return func(...args) {
+      dec_log = std.list.append(dec_log, "anon");
+      return fn(...args);
+    };
+  })
+  func get(self) {
+    return self.x;
+  }
+}
+
+struct DecMakeP {
+  x: int;
+}
+
+impl DecMakeP {
+  @dec_make("hello")
+  func get(self) {
+    return self.x;
+  }
+}
+
+func dec_make_local() {
+  struct DecLocalP {
+    x: int;
+  }
+  impl DecLocalP {
+    @dec_trace
+    func get(self) {
+      return self.x;
+    }
+  }
+  return DecLocalP { x: 4 };
+}
+
+@dec_trace
+func dec_add(a, b) {
+  return a + b;
+}
+
+@dec_around("outer")
+@dec_around("inner")
+func dec_f() {
+  dec_log = std.list.append(dec_log, "body");
+  return 1;
+}
+
+@dec_trace
+func dec_fact(n) {
+  if (n <= 1) {
+    return 1;
+  }
+  return n * dec_fact(n - 1);
+}
+
+func dec_outer() {
+  @dec_make("outer dec")
+  func dec(x) {
+    return x;
+  }
+  return dec(1);
+}
+
+@dec_before_after
+func dec_get() {
+  return 7;
+}
+
+struct DecTimedP {
+  x: int;
+}
+
+impl DecTimedP {
+  @dec_task_timed
+  func get(self) {
+    return self.x;
+  }
+}
+
+trait DecTraitS {
+  func handle(self);
+}
+
+struct DecTraitC {
+  x: int;
+}
+
+impl DecTraitS for DecTraitC {
+  @dec_before_after
+  func handle(self) {
+    return self.x;
+  }
+}
+
+func dec_use(s: DecTraitS) {
+  return s.handle();
+}
+
+enum DecEnum {
+  A { n: int; }
+  B;
+}
+
+impl DecEnum {
+  @dec_trace
+  func value(self) {
+    return 1;
+  }
+}
+
+trait DecDraw {
+  func draw(self);
+}
+
+struct DecDrawP {
+  x: int;
+}
+
+impl DecDraw for DecDrawP {
+  @dec_trace
+  func draw(self) {
+    return "P" + str(self.x);
+  }
+}
+
+func dec_render(x: DecDraw) {
+  return x.draw();
+}
+
+trait DecAdapterD {
+  func draw(self);
+}
+
+struct DecAdapterP {
+  x: int;
+}
+
+impl DecAdapterP {
+  @dec_trace
+  func draw(self) {
+    return "P" + str(self.x);
+  }
+}
+
+impl DecAdapterD for DecAdapterP;
+
+func dec_adapter_render(x: DecAdapterD) {
+  return x.draw();
+}
+
+struct DecMetaP {
+  x: int;
+}
+
+impl DecMetaP {
+  @dec_trace
+  func area(self, scale: int = 1) {
+    return self.x * scale;
+  }
+}
+
+ts_test("decorator basic", func() {
+  dec_reset();
+  let p = DecBasicP { x: 3 };
+  ts_eq(p.get(), 3);
+  ts_eq(p.get(2), 6);
+  let f = p.get;
+  ts_eq(f(4), 12);
+  ts_eq(dec_log, ["enter", "exit", "enter", "exit", "enter", "exit"]);
+});
+
+ts_test("decorator around nested", func() {
+  dec_reset();
+  ts_eq(DecAroundP { x: 1 }.get(), 1);
+  ts_eq(dec_log, ["enter outer", "enter inner", "body",
+                  "exit inner", "exit outer"]);
+});
+
+ts_test("decorator show args", func() {
+  dec_reset();
+  ts_eq(DecArgsP { x: 3 }.add(), 7);
+  ts_eq(DecArgsP { x: 3 }.add(10), 21);
+  ts_eq(dec_log, ["3", "4", "10", "11"]);
+});
+
+ts_test("decorator count args", func() {
+  dec_reset();
+  ts_eq(DecCountP { x: 1 }.total(), 1);
+  ts_eq(DecCountP { x: 1 }.total(2, 3, 4), 10);
+  ts_eq(dec_log, ["1", "4"]);
+});
+
+ts_test("decorator bump args", func() {
+  dec_reset();
+  ts_eq(DecBumpUseP { x: 1 }.get(2), 102);
+});
+
+ts_test("decorator recursive fact", func() {
+  dec_reset();
+  ts_eq(DecFactP { x: 1 }.fact(3), 6);
+  ts_eq(dec_log, ["enter", "enter", "enter", "exit", "exit", "exit"]);
+});
+
+ts_test("decorator counted once", func() {
+  dec_reset();
+  ts_eq(dec_counted_calls, 1);
+  ts_eq(DecCountedP { x: 1 }.get(), 1);
+  ts_eq(DecCountedP { x: 2 }.get(), 2);
+  ts_eq(dec_counted_calls, 1);
+});
+
+ts_test("decorator anonymous", func() {
+  dec_reset();
+  ts_eq(DecAnonP { x: 9 }.get(), 9);
+  ts_eq(dec_log, ["anon"]);
+});
+
+ts_test("decorator make prefix", func() {
+  dec_reset();
+  ts_eq(DecMakeP { x: 2 }.get(), 2);
+  ts_eq(dec_log, ["hello"]);
+});
+
+ts_test("decorator local struct", func() {
+  dec_reset();
+  ts_eq(dec_make_local().get(), 4);
+  ts_eq(dec_log, ["enter", "exit"]);
+});
+
+ts_test("decorator function", func() {
+  dec_reset();
+  ts_eq(dec_add(1, 2), 3);
+  ts_eq(dec_log, ["enter", "exit"]);
+});
+
+ts_test("decorator around function", func() {
+  dec_reset();
+  ts_eq(dec_f(), 1);
+  ts_eq(dec_log, ["enter outer", "enter inner", "body",
+                  "exit inner", "exit outer"]);
+});
+
+ts_test("decorator recursive function", func() {
+  dec_reset();
+  ts_eq(dec_fact(3), 6);
+  ts_eq(dec_log, ["enter", "enter", "enter", "exit", "exit", "exit"]);
+});
+
+ts_test("decorator local shadowing", func() {
+  dec_reset();
+  ts_eq(dec_outer(), 1);
+  ts_eq(dec_log, ["outer dec"]);
+});
+
+ts_test("decorator before after function", func() {
+  dec_reset();
+  ts_eq(dec_get(), 7);
+  ts_eq(dec_log, ["before", "after"]);
+});
+
+ts_test("decorator timed method", func() {
+  dec_reset();
+  ts_eq(DecTimedP { x: 7 }.get(), 7);
+  ts_eq(dec_log, ["before", "after"]);
+});
+
+ts_test("decorator timed trait method", func() {
+  dec_reset();
+  ts_eq(dec_use(DecTraitC { x: 5 }), 5);
+  ts_eq(dec_log, ["before", "after"]);
+});
+
+ts_test("decorator enum method", func() {
+  dec_reset();
+  ts_eq(DecEnum.A { n: 2 }.value(), 1);
+  ts_eq(dec_log, ["enter", "exit"]);
+});
+
+ts_test("decorator trait method", func() {
+  dec_reset();
+  ts_eq(dec_render(DecDrawP { x: 7 }), "P7");
+  ts_eq(dec_log, ["enter", "exit"]);
+});
+
+ts_test("decorator trait adapter", func() {
+  dec_reset();
+  ts_eq(dec_adapter_render(DecAdapterP { x: 8 }), "P8");
+  ts_eq(dec_log, ["enter", "exit"]);
+});
+
+ts_test("decorator meta signature unchanged", func() {
+  let m = std.meta.methods("DecMetaP")[0];
+  ts_eq(m["name"], "area");
+  ts_eq(m["params"], ["int"]);
+  ts_false(m["variadic"]);
+  ts_true(m["has_defaults"]);
+});
+
+ts_finish();

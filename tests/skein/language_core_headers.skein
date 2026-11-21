@@ -1,0 +1,131 @@
+import std;
+include "_support.skein";
+
+ts_test("if without condition parens", func() {
+  let x = true;
+  let seen = "";
+  if x {
+    seen = "yes";
+  }
+  ts_eq(seen, "yes");
+});
+
+ts_test("if else without condition parens", func() {
+  let x = false;
+  let seen = "";
+  if x {
+    seen = "a";
+  } else {
+    seen = "b";
+  }
+  ts_eq(seen, "b");
+});
+
+ts_test("else if without condition parens", func() {
+  let x = 2;
+  let seen = "";
+  if x == 1 {
+    seen = "a";
+  } else if x == 2 {
+    seen = "b";
+  } else {
+    seen = "c";
+  }
+  ts_eq(seen, "b");
+});
+
+ts_test("while without condition parens", func() {
+  let i = 0;
+  let out = "";
+  while i < 2 {
+    out = out + str(i);
+    i = i + 1;
+  }
+  ts_eq(out, "01");
+});
+
+ts_test("switch without condition parens", func() {
+  let x = 1;
+  let out = "";
+  switch x {
+    case 1 => out = "one";
+    default => out = "other";
+  }
+  ts_eq(out, "one");
+});
+
+ts_test("match without condition parens", func() {
+  let x = 1;
+  let y = match x {
+    case 1 => 10;
+    default => 0;
+  };
+  ts_eq(y, 10);
+});
+
+ts_test("do while without condition parens", func() {
+  let i = 0;
+  do {
+    i = i + 1;
+  } while i < 2;
+  ts_eq(i, 2);
+});
+
+ts_test("c for without header parens", func() {
+  let out = "";
+  for let i = 0; i < 3; i = i + 1 {
+    out = out + str(i);
+  }
+  ts_eq(out, "012");
+});
+
+ts_test("c for without header parens uses existing variable", func() {
+  let i = 0;
+  let out = "";
+  for i = 0; i < 2; i = i + 1 {
+    out = out + str(i);
+  }
+  ts_eq(out, "01");
+});
+
+ts_test("if condition composite literal in parens", func() {
+  let d = {"a": 1};
+  let seen = "";
+  if (d == {"a": 1}) {
+    seen = "yes";
+  }
+  ts_eq(seen, "yes");
+});
+
+ts_test("nested match in if condition", func() {
+  let x = 1;
+  let seen = "";
+  if match x {
+    case 1 => true;
+    default => false;
+  } {
+    seen = "yes";
+  }
+  ts_eq(seen, "yes");
+});
+
+ts_test("parenthesized headers still work", func() {
+  let out = [];
+  if (true) {
+    out = std.list.append(out, "if");
+  }
+  let i = 0;
+  while (i < 1) {
+    out = std.list.append(out, "while");
+    i = i + 1;
+  }
+  switch (1) {
+    case 1 => out = std.list.append(out, "switch");
+  }
+  for (let j = 0; j < 1; j = j + 1) {
+    out = std.list.append(out, "for");
+  }
+  ts_eq(out, ["if", "while", "switch", "for"]);
+});
+
+ts_finish();

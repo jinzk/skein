@@ -1,0 +1,97 @@
+import std;
+include "_support.skein";
+
+ts_test("string concat", func() {
+  ts_eq("a" + "b", "ab");
+});
+
+ts_test("string compare", func() {
+  ts_true("a" < "b");
+});
+
+ts_test("string equality", func() {
+  ts_true("a" == "a");
+});
+
+ts_test("string escape", func() {
+  ts_eq(len("a\nb"), 3);
+  ts_eq("a\nb"[1], char(10));
+});
+
+ts_test("string index", func() {
+  ts_eq(str("hello"[1]), "e");
+});
+
+ts_test("utf8 string index first", func() {
+  ts_eq(str("你好"[0]), "你");
+});
+
+ts_test("utf8 string index second", func() {
+  ts_eq(str("你好"[1]), "好");
+});
+
+ts_test("string trim", func() {
+  ts_eq(std.string.trim("  hi\t\n"), "hi");
+});
+
+ts_test("string split", func() {
+  ts_eq(std.string.split("a,b,c", ","), ["a", "b", "c"]);
+});
+
+ts_test("string split empty fields", func() {
+  ts_eq(std.string.split(",a,", ","), ["", "a", ""]);
+});
+
+ts_test("string split no match", func() {
+  ts_eq(std.string.split("abc", ","), ["abc"]);
+});
+
+ts_test("string split empty text", func() {
+  ts_true(std.string.split("", ",") == [""]);
+});
+
+ts_test("string split whitespace", func() {
+  ts_eq(std.string.split_ws("  a  b\tc\n d "), ["a", "b", "c", "d"]);
+});
+
+ts_test("string split whitespace empty", func() {
+  ts_eq(std.string.split_ws(""), []);
+});
+
+ts_test("string find", func() {
+  ts_eq(std.string.find("hello", "ll"), 2);
+});
+
+ts_test("string find missing", func() {
+  ts_eq(std.string.find("hello", "x"), -1);
+});
+
+ts_test("string find empty needle", func() {
+  ts_eq(std.string.find("hello", ""), 0);
+});
+
+ts_test("string find utf8", func() {
+  ts_eq(std.string.find("你好世界", "世界"), 2);
+});
+
+ts_test("string substr", func() {
+  ts_eq(std.string.substr("hello", 1, 3), "ell");
+});
+
+ts_test("string substr to end", func() {
+  ts_eq(std.string.substr("hello", 2), "llo");
+});
+
+ts_test("string substr past end", func() {
+  ts_eq(std.string.substr("hello", 10), "");
+});
+
+ts_test("string substr clamps length", func() {
+  ts_eq(std.string.substr("hello", 1, 100), "ello");
+});
+
+ts_test("string substr utf8", func() {
+  ts_eq(std.string.substr("你好世界", 1, 2), "好世");
+});
+
+ts_finish();

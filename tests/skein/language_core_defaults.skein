@@ -1,0 +1,141 @@
+import std;
+include "_support.skein";
+
+struct DefaultParamS {
+  v: int;
+}
+
+impl DefaultParamS {
+  func add(self, x: int = self.v + 1) -> self.v + x;
+}
+
+func dp_basic(a, b = a + 1) {
+  return b;
+}
+
+func dp_chain(a, b = a + 1, c = b + 1) {
+  return c;
+}
+
+func dp_literals(a = 1, b = 2, c = 3) {
+  return a + b + c;
+}
+
+func dp_typed(a: int, b: int = a + 1) {
+  return b;
+}
+
+func dp_nullable(x: int? = null) {
+  return x;
+}
+
+func dp_variadic(a, b = a + 1, ...rest) {
+  return [a, b, rest];
+}
+
+func dp_fresh(xs = []) {
+  xs = std.list.append(xs, 1);
+  return xs;
+}
+
+func dp_closure(a, cb = func() -> a) {
+  a = 99;
+  return cb();
+}
+
+func dp_expr(a, b = a + 1) -> b;
+
+func dp_gen(a, b = a + 1) {
+  yield b;
+}
+
+func dp_spread(a, b = a + 1) {
+  return b;
+}
+
+ts_test("default parameter basic", func() {
+  ts_eq(dp_basic(10), 11);
+  ts_eq(dp_basic(10, 3), 3);
+});
+
+ts_test("default parameter chain", func() {
+  ts_eq(dp_chain(1), 3);
+});
+
+ts_test("default parameter multiple literals", func() {
+  ts_eq(dp_literals(), 6);
+  ts_eq(dp_literals(10), 15);
+});
+
+ts_test("default parameter typed", func() {
+  ts_eq(dp_typed(2), 3);
+});
+
+ts_test("default parameter nullable", func() {
+  ts_eq(dp_nullable(), null);
+  ts_eq(dp_nullable(5), 5);
+});
+
+ts_test("default parameter method self", func() {
+  ts_eq(DefaultParamS { v: 10 }.add(), 21);
+});
+
+ts_test("default parameter anonymous", func() {
+  let inc = func(x = 0) -> x + 1;
+  ts_eq(inc(), 1);
+  ts_eq(inc(10), 11);
+});
+
+ts_test("default parameter variadic", func() {
+  ts_eq(dp_variadic(1), [1, 2, []]);
+  ts_eq(dp_variadic(1, 3, 4, 5), [1, 3, [4, 5]]);
+});
+
+ts_test("default parameter fresh per call", func() {
+  ts_eq(dp_fresh(), [1]);
+  ts_eq(dp_fresh(), [1]);
+});
+
+ts_test("default parameter closure snapshot", func() {
+  ts_eq(dp_closure(1), 1);
+});
+
+ts_test("closure captures parameter value", func() {
+  let mk = func(v) {
+    return func() {
+      return v;
+    };
+  };
+  let f = mk([1, 2, 3]);
+  ts_eq(f(), [1, 2, 3]);
+});
+
+ts_test("closure captures local value", func() {
+  let mk = func() {
+    let xs = [1, 2, 3];
+    return func() {
+      return xs;
+    };
+  };
+  let f = mk();
+  ts_eq(f(), [1, 2, 3]);
+});
+
+ts_test("default parameter expression", func() {
+  ts_eq(dp_expr(1), 2);
+});
+
+ts_test("default parameter generator", func() {
+  let out = [];
+  for (let x in dp_gen(3)) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [4]);
+});
+
+ts_test("default parameter spread", func() {
+  let xs = [10];
+  ts_eq(dp_spread(...xs), 11);
+});
+
+ts_finish();

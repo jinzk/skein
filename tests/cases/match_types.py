@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Pattern matching, enums, structs, char and byte.
 
-Extracted from the original test_skein.py main() body, lines 1100-1699.
+Sorting cases live in tests/skein/match_types_sorting.skein.  Char and byte
+cases live in tests/skein/match_types_char_byte.skein.  Enum/struct decode cases
+live in tests/skein/match_types_decode.skein.
 """
 import os
 import tempfile
@@ -10,6 +12,32 @@ from harness import *  # noqa: F401,F403
 
 
 def run_cases():
+    run_skein("match_types_sorting.skein")
+    run_skein("match_types_char_byte.skein")
+    run_skein("match_types_decode.skein")
+    check(
+        "list sort golden output",
+        "import std;\n"
+        "println(std.list.sort([3, 1, 2]));\n",
+        stdout="[1, 2, 3]",
+    )
+    check(
+        "char golden output",
+        "let c = 'a';\n"
+        "println(c);\n"
+        "println(kind_of(c));\n",
+        stdout_all=["a", "char"],
+    )
+    check(
+        "decode golden output",
+        "import std;\n"
+        "struct D { x: int; }\n"
+        "let d = std.struct.decode({\"x\": 1}, \"D\");\n"
+        "println(d.x);\n",
+        stdout="1",
+    )
+
+
     check("match as whole value",
           'match ({"a": 1}) { case {a} as whole => '
           'println(whole["a"] + a); }\n',
@@ -260,47 +288,9 @@ def run_cases():
           'println(std.regex.match("a+", "a"));\n'
           'println(fsm.initial(fsm.define(5, func(ctx, ev) { return ctx; })));\n',
           stdout_all=["true", "5"])
-    check("std.enum.decode",
-          'import std;\nenum E { A { n: int; }; B; }\n'
-          'let s = std.json.stringify(E.A { n: 1 });\n'
-          'let e = std.enum.decode(std.json.parse(s));\n'
-          'println(e);\nprintln(kind_of(e));\n'
-          'println(match (e) { case E.A {n} => n; default => 0; });\n',
-          stdout_all=["E.A { n: 1 }", "enum", "1"])
-    check("std.enum.decode nested",
-          'import std;\nenum Inner { A { n: int; }; }\n'
-          'enum Outer { X { inner: Inner; }; }\n'
-          'let o = Outer.X { inner: Inner.A { n: 2 } };\n'
-          'let o2 = std.enum.decode(std.json.parse(std.json.stringify(o)));\n'
-          'println(match (o2) { case Outer.X {inner} => '
-          'match (inner) { case Inner.A {n} => n; default => 0; }; '
-          'default => 0; });\n',
-          stdout="2")
     check("std.enum.decode rejects non-enum",
           'import std;\nstd.enum.decode({"a": 1});\n',
           stderr="std.enum.decode expects an enum object")
-    check("std.enum.tag",
-          'import std;\nenum E { A { n: int; }; B; }\n'
-          'println(std.enum.tag(E.A { n: 1 }));\n'
-          'println(std.enum.tag(E.A { n: 2 }));\n'
-          'println(std.enum.tag(E.B));\n',
-          stdout_all=["main.E.A", "main.E.A", "main.E.B"])
-    check("std.enum.tag cross enum",
-          'import std;\nenum E1 { A; }\nenum E2 { A; }\n'
-          'println(std.enum.tag(E1.A) == std.enum.tag(E2.A));\n'
-          'println(std.enum.tag(E1.A));\n',
-          stdout_all=["false", "main.E1.A"])
-    check("std.enum.tag by name",
-          'import std;\nenum E { A; }\n'
-          'println(std.enum.tag("E", "A"));\n',
-          stdout="main.E.A")
-    check("std.enum.tag as dict key",
-          'import std;\nenum E { A { n: int; }; }\n'
-          'let counts = {};\n'
-          'counts[std.enum.tag(E.A { n: 1 })] = 1;\n'
-          'counts[std.enum.tag(E.A { n: 2 })] = 2;\n'
-          'println(counts[std.enum.tag(E.A { n: 3 })]);\n',
-          stdout="2")
     check("std.enum.tag errors",
           'import std;\nenum E { A; }\nstd.enum.tag(1);\n',
           stderr="std.enum.tag expects an enum value")
@@ -333,30 +323,6 @@ def run_cases():
             "aa.E.A",
         ], proc.stdout
 
-    check("std.struct.decode",
-          'import std;\nstruct P { x: int; y: int; }\n'
-          'let p = std.struct.decode({"x": 1, "y": 2}, "P");\n'
-          'println(p);\nprintln(kind_of(p));\nprintln(p.x);\n',
-          stdout_all=["P { x: 1, y: 2 }", "struct", "1"])
-    check("std.struct.decode nested",
-          'import std;\nstruct P { x: int; }\n'
-          'struct L { a: P; b: P; }\n'
-          'let l = std.struct.decode({"a": {"x": 1}, "b": {"x": 2}}, "L");\n'
-          'println(l.a.x + l.b.x);\n',
-          stdout="3")
-    check("std.struct.decode enum field",
-          'import std;\nenum E { A { n: int; }; }\n'
-          'struct S { e: E; }\n'
-          'let s = std.struct.decode('
-          '{"e": {"$enum": "E.A", "payload": {"n": 7}}}, "S");\n'
-          'println(match (s.e) { case E.A {n} => n; default => 0; });\n',
-          stdout="7")
-    check("std.struct.decode recursive",
-          'import std;\nstruct Node { value: int; next: Node?; }\n'
-          'let n = std.struct.decode('
-          '{"value": 1, "next": {"value": 2, "next": null}}, "Node");\n'
-          'println(n.next.value);\n',
-          stdout="2")
     check("std.struct.decode missing field",
           'import std;\nstruct P { x: int; }\n'
           'std.struct.decode({}, "P");\n',
@@ -369,37 +335,10 @@ def run_cases():
           'import std;\nstruct P { x: int; }\n'
           'std.struct.decode({"x": "s"}, "P");\n',
           stderr="P.x expects int, got string")
-    check("std.struct.decode defaults",
-          'import std;\n'
-          'struct C { host: string = "localhost"; port: int = 80; }\n'
-          'let c = std.struct.decode({"port": 8080}, "C", '
-          '{"defaults": true});\n'
-          'println(c.host);\nprintln(c.port);\n',
-          stdout_all=["localhost", "8080"])
-    check("std.struct.decode nested defaults",
-          'import std;\n'
-          'struct I { n: int = 7; }\n'
-          'struct O { inner: I; label_text: string = "x"; }\n'
-          'let o = std.struct.decode({"inner": {}}, "O", '
-          '{"defaults": true});\n'
-          'println(o.inner.n);\nprintln(o.label_text);\n',
-          stdout_all=["7", "x"])
     check("std.struct.decode unknown option",
           'import std;\nstruct C { x: int = 1; }\n'
           'std.struct.decode({}, "C", {"default": true});\n',
           stderr="unknown option default")
-    check("std.enum.decode defaults",
-          'import std;\nenum E { A { n: int = 3; }; }\n'
-          'let e = std.enum.decode({"$enum": "E.A", "payload": {}}, '
-          '"E", {"defaults": true});\n'
-          'println(e);\n',
-          stdout="E.A { n: 3 }")
-    check("std.enum.decode options only",
-          'import std;\nenum E { A { n: int = 3; }; }\n'
-          'let e = std.enum.decode({"$enum": "E.A", "payload": {}}, '
-          '{"defaults": true});\n'
-          'println(e);\n',
-          stdout="E.A { n: 3 }")
     check("std.enum.decode type hint mismatch",
           'import std;\nenum E { A { n: int; }; }\n'
           'enum F { A { n: int; }; }\n'
@@ -470,63 +409,6 @@ def run_cases():
           'func(v) { return std.struct.decode(v, "S"); });\n'
           'println(ctx2.state.n);\nprintln(fsm.history(ctx2));\n',
           stdout_all=["6", "[S { n: 0 }, S { n: 1 }, S { n: 3 }, S { n: 6 }]"])
-    check("list sort numbers",
-          'import std;\nprintln(std.list.sort([3, 1, 2]));\n',
-          stdout="[1, 2, 3]")
-    check("list sort strings",
-          'import std;\nprintln(std.list.sort(["b", "a", "c"]));\n',
-          stdout="[a, b, c]")
-    check("list sort desc",
-          'import std;\nprintln(std.list.sort_desc([3, 1, 2]));\n',
-          stdout="[3, 2, 1]")
-    check("list sort comparator",
-          'import std;\nstruct P { n: int; }\n'
-          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
-          'println(std.list.sort(xs, func(a, b) { return a.n - b.n; }));\n',
-          stdout="[P { n: 1 }, P { n: 2 }, P { n: 3 }]")
-    check("list sort_by",
-          'import std;\nstruct P { n: int; }\n'
-          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
-          'println(std.list.sort_by(xs, func(p) { return p.n; }));\n',
-          stdout="[P { n: 1 }, P { n: 2 }, P { n: 3 }]")
-    check("list sort_by desc",
-          'import std;\nstruct P { n: int; }\n'
-          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
-          'println(std.list.sort_by(xs, func(p) { return p.n; }, '
-          '{"desc": true}));\n',
-          stdout="[P { n: 3 }, P { n: 2 }, P { n: 1 }]")
-    check("list sort_by stable",
-          'import std;\nstruct Q { k: int; v: string; }\n'
-          'let qs = [Q { k: 1, v: "a" }, Q { k: 1, v: "b" }, '
-          'Q { k: 0, v: "c" }];\n'
-          'println(std.list.sort_by(qs, func(q) { return q.k; }));\n'
-          'println(std.list.sort_by(qs, func(q) { return q.k; }, '
-          '{"desc": true}));\n',
-          stdout_all=[
-              "[Q { k: 0, v: c }, Q { k: 1, v: a }, Q { k: 1, v: b }]",
-              "[Q { k: 1, v: a }, Q { k: 1, v: b }, Q { k: 0, v: c }]",
-          ])
-    check("list sort_by key called once",
-          'import std;\nstruct P { n: int; }\n'
-          'let xs = [P { n: 3 }, P { n: 1 }, P { n: 2 }];\n'
-          'let calls = 0;\n'
-          'func key(p) { calls = calls + 1; return p.n; }\n'
-          'std.list.sort_by(xs, key);\n'
-          'println(calls);\n',
-          stdout="3")
-    check("list sort does not mutate input",
-          'import std;\nlet xs = [3, 1, 2];\n'
-          'let ys = std.list.sort(xs);\n'
-          'println(xs);\nprintln(ys);\n',
-          stdout_all=["[3, 1, 2]", "[1, 2, 3]"])
-    check("list is_sorted",
-          'import std;\n'
-          'println(std.list.is_sorted([1, 2, 3]));\n'
-          'println(std.list.is_sorted([1, 3, 2]));\n'
-          'println(std.list.is_sorted([1, 3, 2], '
-          'func(a, b) { return a - b; }));\n'
-          'println(std.list.is_sorted([], func(a, b) { return a - b; }));\n',
-          stdout_all=["true", "false", "false", "true"])
     check("list sort mixed types rejected",
           'import std;\nstd.list.sort([1, "a"]);\n',
           stderr="std.list.sort expects all numbers, strings, chars, or bytes")
@@ -534,63 +416,6 @@ def run_cases():
           'import std;\nstd.list.sort([1, 2], '
           'func(a, b) { return "x"; });\n',
           stderr="std.list.sort comparator must return int, got string")
-    check("list sort nan last",
-          'import std;\nlet n = float("nan");\n'
-          'println(std.list.sort([2.0, n, 1.0]));\n'
-          'println(std.list.sort_desc([2.0, n, 1.0]));\n',
-          stdout_all=["[1.0, 2.0, nan]", "[2.0, 1.0, nan]"])
-    check("list sort_by nan last",
-          'import std;\nlet n = float("nan");\n'
-          'struct P { k: float; }\n'
-          'let xs = [P { k: 2.0 }, P { k: n }, P { k: 1.0 }];\n'
-          'println(std.list.sort_by(xs, func(p) { return p.k; }));\n'
-          'println(std.list.sort_by(xs, func(p) { return p.k; }, '
-          '{"desc": true}));\n',
-          stdout_all=[
-              "[P { k: 1.0 }, P { k: 2.0 }, P { k: nan }]",
-              "[P { k: 2.0 }, P { k: 1.0 }, P { k: nan }]",
-          ])
-    check("list is_sorted nan last",
-          'import std;\nlet n = float("nan");\n'
-          'println(std.list.is_sorted([1.0, 2.0, n]));\n'
-          'println(std.list.is_sorted([1.0, n, 2.0]));\n'
-          'println(std.list.is_sorted([n, n]));\n',
-          stdout_all=["true", "false", "true"])
-    check("char literal",
-          "let c = 'a';\nprintln(c);\nprintln(kind_of(c));\n"
-          "println(type_name(c));\nprintln(len(c));\n",
-          stdout_all=["a", "char", "char", "1"])
-    check("char conversions",
-          "println(int('A'));\nprintln(str('你'));\n"
-          "println(char(65));\nprintln(char(\"你\"));\n",
-          stdout_all=["65", "你", "A", "你"])
-    check("char unicode escape",
-          "println('\\u{1F600}');\nprintln('\\u0041');\n",
-          stdout_all=["😀", "A"])
-    check("char escapes",
-          "println('\\n' == char(10));\nprintln('\\'');\nprintln('\\\\');\n",
-          stdout_all=["true", "'", "\\"])
-    check("char compare",
-          "println('a' < 'b');\nprintln('a' == 'a');\nprintln('b' > 'a');\n",
-          stdout_all=["true", "true", "true"])
-    check("char concat",
-          "println('a' + \"bc\");\nprintln(\"x\" + 'y');\nprintln('a' + 'b');\n",
-          stdout_all=["abc", "xy", "ab"])
-    check("string index char",
-          'let s = "你好";\nprintln(s[0]);\nprintln(kind_of(s[0]));\nprintln(s[1]);\n',
-          stdout_all=["你", "char", "好"])
-    check("string iteration char",
-          'let out = "";\nfor (let ch in "ab") { out = out + ch; }\nprintln(out);\n',
-          stdout="ab")
-    check("char match",
-          "println(match ('a') { case 'a' => \"a\"; default => \"no\"; });\n",
-          stdout="a")
-    check("char switch",
-          "switch ('b') { case 'a' => println(\"a\"); case 'b' => println(\"b\"); }\n",
-          stdout="b")
-    check("char type annotation",
-          "let c: char = 'z';\nprintln(c);\nlet n: char? = null;\nprintln(n);\n",
-          stdout_all=["z", "null"])
     check("char invalid empty",
           "''\n", stderr="empty character literal")
     check("char invalid multi",
@@ -601,63 +426,11 @@ def run_cases():
           r"'\u{110000}'" + "\n", stderr="not a Unicode scalar value")
     check("char conversion error",
           "char(\"ab\")\n", stderr="char() expects exactly one UTF-8 character")
-    check("char struct json",
-          "import std;\nstruct C { ch: char; }\n"
-          "let j = std.json.stringify(C { ch: 'a' });\nprintln(j);\n"
-          "let c = std.struct.decode(std.json.parse(j), \"C\");\n"
-          "println(c.ch);\nprintln(kind_of(c.ch));\n",
-          stdout_all=['{"ch":"a"}', "a", "char"])
-    check("char enum json",
-          "import std;\nenum E { A { ch: char; }; }\n"
-          "let e = std.enum.decode(std.json.parse("
-          "std.json.stringify(E.A { ch: '你' })));\n"
-          "println(e);\nprintln(kind_of(e.ch));\n",
-          stdout_all=["E.A { ch: 你 }", "char"])
-    check("char sort",
-          "import std;\nprintln(std.list.sort(['c', 'a', 'b']));\n"
-          "println(std.list.sort_desc(['c', 'a', 'b']));\n"
-          "println(std.list.is_sorted(['a', 'b', 'c']));\n",
-          stdout_all=["[a, b, c]", "[c, b, a]", "true"])
-    check("char dict key",
-          "let d = {'a': 1};\nprintln(d['a']);\nprintln(d[char(97)]);\n",
-          stdout_all=["1", "1"])
-    check("byte dict key",
-          "let d = {byte(65): 1};\nprintln(d[byte(65)]);\n",
-          stdout="1")
-    check("char byte switch",
-          "switch ('a') { case 'a' => println(\"char\"); default => println(\"no\"); }\n"
-          "switch (byte(65)) { case byte(65) => println(\"byte\"); "
-          "default => println(\"no\"); }\n",
-          stdout_all=["char", "byte"])
-    check("char bytes roundtrip",
-          "import std;\nprintln(std.bytes.hex(std.bytes.from_char('你')));\n"
-          "println(std.bytes.to_char(std.bytes.from_char('你')));\n"
-          "println(char(std.bytes.from_char('a')));\n",
-          stdout_all=["e4bda0", "你", "a"])
-    check("byte int conversions",
-          "println(byte(65));\nprintln(int(byte(255)));\n"
-          "println(kind_of(byte(1)));\nprintln(len(byte(1)));\n",
-          stdout_all=["65", "255", "byte", "1"])
-    check("byte type annotation",
-          "let b: byte = byte(1);\nprintln(b);\n"
-          "let n: byte? = null;\nprintln(n);\n",
-          stdout_all=["1", "null"])
     check("byte range error",
           "byte(256)\n", stderr="byte() value out of range")
     check("char from bytes error",
           'std.bytes.to_char(std.bytes.from_string("ab"))\n',
           stderr="char_from_bytes expects exactly one UTF-8 character")
-    check("byte struct json",
-          "import std;\nstruct S { b: byte; c: char; }\n"
-          "let j = std.json.stringify(S { b: byte(255), c: 'a' });\n"
-          "println(j);\n"
-          "let s = std.struct.decode(std.json.parse(j), \"S\");\n"
-          "println(s.b);\nprintln(kind_of(s.b));\nprintln(s.c);\n",
-          stdout_all=['{"b":255,"c":"a"}', "255", "byte", "a"])
-    check("byte sort",
-          "import std;\n"
-          "println(std.list.sort([byte(3), byte(1), byte(2)]));\n",
-          stdout="[1, 2, 3]")
     check("dict large lookup and order",
           "import std;\nlet d = {};\n"
           "for (let i in range(200)) { d[i] = i * 2; }\n"

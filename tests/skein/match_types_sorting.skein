@@ -1,0 +1,118 @@
+import std;
+include "_support.skein";
+
+struct SortP {
+  n: int;
+}
+
+struct SortQ {
+  k: int;
+  v: string;
+}
+
+struct SortFloatP {
+  k: float;
+}
+
+ts_test("list sort numbers", func() {
+  ts_eq(std.list.sort([3, 1, 2]), [1, 2, 3]);
+});
+
+ts_test("list sort strings", func() {
+  ts_eq(std.list.sort(["b", "a", "c"]), ["a", "b", "c"]);
+});
+
+ts_test("list sort desc", func() {
+  ts_eq(std.list.sort_desc([3, 1, 2]), [3, 2, 1]);
+});
+
+ts_test("list sort comparator", func() {
+  let xs = [SortP { n: 3 }, SortP { n: 1 }, SortP { n: 2 }];
+  ts_eq(std.list.sort(xs, func(a, b) { return a.n - b.n; }),
+        [SortP { n: 1 }, SortP { n: 2 }, SortP { n: 3 }]);
+});
+
+ts_test("list sort_by", func() {
+  let xs = [SortP { n: 3 }, SortP { n: 1 }, SortP { n: 2 }];
+  ts_eq(std.list.sort_by(xs, func(p) { return p.n; }),
+        [SortP { n: 1 }, SortP { n: 2 }, SortP { n: 3 }]);
+});
+
+ts_test("list sort_by desc", func() {
+  let xs = [SortP { n: 3 }, SortP { n: 1 }, SortP { n: 2 }];
+  ts_eq(std.list.sort_by(xs, func(p) { return p.n; }, {"desc": true}),
+        [SortP { n: 3 }, SortP { n: 2 }, SortP { n: 1 }]);
+});
+
+ts_test("list sort_by stable", func() {
+  let qs = [SortQ { k: 1, v: "a" }, SortQ { k: 1, v: "b" },
+            SortQ { k: 0, v: "c" }];
+  ts_eq(std.list.sort_by(qs, func(q) { return q.k; }),
+        [SortQ { k: 0, v: "c" }, SortQ { k: 1, v: "a" },
+         SortQ { k: 1, v: "b" }]);
+  ts_eq(std.list.sort_by(qs, func(q) { return q.k; }, {"desc": true}),
+        [SortQ { k: 1, v: "a" }, SortQ { k: 1, v: "b" },
+         SortQ { k: 0, v: "c" }]);
+});
+
+ts_test("list sort_by key called once", func() {
+  let xs = [SortP { n: 3 }, SortP { n: 1 }, SortP { n: 2 }];
+  let calls = 0;
+  let key = func(p) {
+    calls = calls + 1;
+    return p.n;
+  };
+  std.list.sort_by(xs, key);
+  ts_eq(calls, 3);
+});
+
+ts_test("list sort does not mutate input", func() {
+  let xs = [3, 1, 2];
+  let ys = std.list.sort(xs);
+  ts_eq(xs, [3, 1, 2]);
+  ts_eq(ys, [1, 2, 3]);
+});
+
+ts_test("list is_sorted", func() {
+  ts_true(std.list.is_sorted([1, 2, 3]));
+  ts_false(std.list.is_sorted([1, 3, 2]));
+  ts_false(std.list.is_sorted([1, 3, 2],
+                              func(a, b) { return a - b; }));
+  ts_true(std.list.is_sorted([], func(a, b) { return a - b; }));
+});
+
+ts_test("list sort nan last", func() {
+  let n = float("nan");
+  let asc = std.list.sort([2.0, n, 1.0]);
+  ts_same(asc[0], 1.0);
+  ts_same(asc[1], 2.0);
+  ts_true(std.math.is_nan(asc[2]));
+  let desc = std.list.sort_desc([2.0, n, 1.0]);
+  ts_same(desc[0], 2.0);
+  ts_same(desc[1], 1.0);
+  ts_true(std.math.is_nan(desc[2]));
+});
+
+ts_test("list sort_by nan last", func() {
+  let n = float("nan");
+  let xs = [SortFloatP { k: 2.0 }, SortFloatP { k: n },
+            SortFloatP { k: 1.0 }];
+  let asc = std.list.sort_by(xs, func(p) { return p.k; });
+  ts_eq(asc[0].k, 1.0);
+  ts_eq(asc[1].k, 2.0);
+  ts_true(std.math.is_nan(asc[2].k));
+  let desc = std.list.sort_by(xs, func(p) { return p.k; },
+                              {"desc": true});
+  ts_eq(desc[0].k, 2.0);
+  ts_eq(desc[1].k, 1.0);
+  ts_true(std.math.is_nan(desc[2].k));
+});
+
+ts_test("list is_sorted nan last", func() {
+  let n = float("nan");
+  ts_true(std.list.is_sorted([1.0, 2.0, n]));
+  ts_false(std.list.is_sorted([1.0, n, 2.0]));
+  ts_true(std.list.is_sorted([n, n]));
+});
+
+ts_finish();

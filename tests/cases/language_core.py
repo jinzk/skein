@@ -8,7 +8,11 @@ ternary cases live in tests/skein/language_core_operators.skein.  Switch
 cases live in tests/skein/language_core_switch.skein.  Pattern matching cases
 live in tests/skein/language_core_match.skein.  Increment, compound assignment,
 const propagation, and slice cases live in
-tests/skein/language_core_updates.skein.
+tests/skein/language_core_updates.skein.  Default-parameter and closure cases
+live in tests/skein/language_core_defaults.skein.  Lambda, pipe, placeholder,
+string-append, and trait cases live in tests/skein/language_core_functions.skein
+and tests/skein/language_core_traits.skein.  Control-flow header forms live in
+tests/skein/language_core_headers.skein.
 """
 import os
 
@@ -22,6 +26,10 @@ def run_cases():
     run_skein("language_core_switch.skein")
     run_skein("language_core_match.skein")
     run_skein("language_core_updates.skein")
+    run_skein("language_core_defaults.skein")
+    run_skein("language_core_functions.skein")
+    run_skein("language_core_traits.skein")
+    run_skein("language_core_headers.skein")
     check(
         "numeric golden output",
         "1.5*2\n"
@@ -56,6 +64,31 @@ def run_cases():
         "x += 2;\n"
         "x\n",
         stdout="= 3",
+    )
+    check(
+        "defaults golden output",
+        "func f(a, b = a + 1) { return b; }\n"
+        "println(f(10));\n",
+        stdout="11",
+    )
+    check(
+        "functions golden output",
+        "func f(x) -> x * 2;\n"
+        "println(f(21));\n",
+        stdout="42",
+    )
+    check(
+        "traits golden output",
+        "trait G { func d(self) { return \"g\"; } }\n"
+        "struct S with G { x: int; }\n"
+        "println(S { x: 1 }.d());\n",
+        stdout="g",
+    )
+    check(
+        "headers golden output",
+        "let x = true;\n"
+        "if x { println(\"yes\"); }\n",
+        stdout="yes",
     )
 
     check("addition", "1+2\n", stdout="= 3")
@@ -96,65 +129,10 @@ def run_cases():
     check("for in without let rejects three variables",
           'for a, b, c in ({"a": 1}) { println(a); }\n',
           stderr="syntax error")
-    check("if without condition parens",
-          'let x = true;\nif x { println("yes"); }\n', stdout="yes\n")
-    check("if else without condition parens",
-          'let x = false;\n'
-          'if x { println("a"); } else { println("b"); }\n',
-          stdout="b\n")
-    check("else if without condition parens",
-          'let x = 2;\n'
-          'if x == 1 { println("a"); } '
-          'else if x == 2 { println("b"); } else { println("c"); }\n',
-          stdout="b\n")
-    check("while without condition parens",
-          "let i = 0;\n"
-          "while i < 2 { print(i); i = i + 1; }\n"
-          'println("");\n',
-          stdout="01\n")
-    check("switch without condition parens",
-          'let x = 1;\n'
-          'switch x { case 1 => println("one"); default => println("other"); }\n',
-          stdout="one\n")
-    check("match without condition parens",
-          "let x = 1;\n"
-          "let y = match x { case 1 => 10; default => 0; };\n"
-          "println(y);\n",
-          stdout="10\n")
-    check("do while without condition parens",
-          "let i = 0;\n"
-          "do { i = i + 1; } while i < 2;\n"
-          "println(i);\n",
-          stdout="2\n")
-    check("c for without header parens",
-          "for let i = 0; i < 3; i = i + 1 { print(i); }\n"
-          'println("");\n',
-          stdout="012\n")
-    check("c for without header parens uses existing variable",
-          "let i = 0;\n"
-          "for i = 0; i < 2; i = i + 1 { print(i); }\n"
-          'println("");\n',
-          stdout="01\n")
     check("if condition composite literal needs parens",
           'let d = {"a": 1};\n'
           'if d == {"a": 1} { println("yes"); }\n',
           stderr="syntax error")
-    check("if condition composite literal in parens",
-          'let d = {"a": 1};\n'
-          'if (d == {"a": 1}) { println("yes"); }\n',
-          stdout="yes\n")
-    check("nested match in if condition",
-          "let x = 1;\n"
-          "if match x { case 1 => true; default => false; } { "
-          'println("yes"); }\n',
-          stdout="yes\n")
-    check("parenthesized headers still work",
-          'if (true) { println("if"); }\n'
-          "let i = 0;\n"
-          'while (i < 1) { println("while"); i = i + 1; }\n'
-          'switch (1) { case 1 => println("switch"); }\n'
-          'for (let j = 0; j < 1; j = j + 1) { println("for"); }\n',
-          stdout_all=["if\n", "while\n", "switch\n", "for\n"])
     check("std.iter.for_each requires callable",
           "import std;\nstd.iter.for_each([1], 42)\n",
           stderr="std.iter.for_each expects a callable")
@@ -302,123 +280,7 @@ def run_cases():
           'match (1) { default => "d"; case 1 => "one"; }\n',
           stderr="default must be the last match arm")
 
-    check("expression lambda",
-          'import std;\n'
-          'println(std.list.map([1, 2, 3], func(x) -> x * 2));\n'
-          'println(std.list.filter([1, 2, 3], func(x) -> x % 2 == 1));\n'
-          'println(std.list.reduce([1, 2, 3], func(a, b) -> a + b));\n',
-          stdout_all=["[2, 4, 6]", "[1, 3]", "6"])
-    check("expression lambda precedence",
-          'let f = func(x) -> x * 2 + 1;\nprintln(f(3));\n',
-          stdout="7")
-    check("nested expression lambdas",
-          'let add = func(x) -> func(y) -> x + y;\nprintln(add(2)(3));\n',
-          stdout="5")
-    check("named expression function",
-          'func double(x) -> x * 2;\nprintln(double(21));\n',
-          stdout="42")
-    check("expression lambda with match",
-          'let describe = func(x) -> match (x) {\n'
-          '  case 0 => "zero";\n'
-          '  default => "other";\n'
-          '};\n'
-          'println(describe(0));\nprintln(describe(2));\n',
-          stdout_all=["zero", "other"])
-    check("method expression body",
-          'struct Box { v: int; }\n'
-          'impl Box { func twice(self) -> self.v * 2; }\n'
-          'let b = Box { v: 4 };\nprintln(b.twice());\n',
-          stdout="8")
-    check("expression function",
-          'import std;\n'
-          'func inc(x) -> x + 1;\n'
-          'println(inc(1));\n',
-          stdout="2")
 
-    check("default parameter basic",
-          'func f(a, b = a + 1) { return b; }\n'
-          'println(f(10));\nprintln(f(10, 3));\n',
-          stdout_all=["11", "3"])
-    check("default parameter chain",
-          'func f(a, b = a + 1, c = b + 1) { return c; }\n'
-          'println(f(1));\n',
-          stdout="3")
-    check("default parameter multiple literals",
-          'func f(a = 1, b = 2, c = 3) { return a + b + c; }\n'
-          'println(f());\nprintln(f(10));\n',
-          stdout_all=["6", "15"])
-    check("default parameter typed",
-          'func f(a: int, b: int = a + 1) { return b; }\n'
-          'println(f(2));\n',
-          stdout="3")
-    check("default parameter nullable",
-          'func f(x: int? = null) { return x; }\n'
-          'println(f());\nprintln(f(5));\n',
-          stdout_all=["null", "5"])
-    check("default parameter method self",
-          'struct S { v: int; }\n'
-          'impl S { func add(self, x: int = self.v + 1) '
-          '-> self.v + x; }\n'
-          'println(S { v: 10 }.add());\n',
-          stdout="21")
-    check("default parameter anonymous",
-          'let inc = func(x = 0) -> x + 1;\n'
-          'println(inc());\nprintln(inc(10));\n',
-          stdout_all=["1", "11"])
-    check("default parameter variadic",
-          'func f(a, b = a + 1, ...rest) { return [a, b, rest]; }\n'
-          'println(f(1));\nprintln(f(1, 3, 4, 5));\n',
-          stdout_all=["[1, 2, []]", "[1, 3, [4, 5]]"])
-    check("default parameter fresh per call",
-          'import std;\n'
-          'func f(xs = []) { xs = std.list.append(xs, 1); return xs; }\n'
-          'println(f());\nprintln(f());\n',
-          stdout_all=["[1]", "[1]"])
-    check("default parameter closure snapshot",
-          'func f(a, cb = func() -> a) { a = 99; return cb(); }\n'
-          'println(f(1));\n',
-          stdout="1")
-    check("closure captures parameter value",
-          'let mk = func(v) { return func() { return v; }; };\n'
-          'let f = mk([1, 2, 3]);\n'
-          'println(f());\n',
-          stdout="[1, 2, 3]")
-    check("closure captures local value",
-          'let mk = func() {\n'
-          '  let xs = [1, 2, 3];\n'
-          '  return func() { return xs; };\n'
-          '};\n'
-          'let f = mk();\n'
-          'println(f());\n',
-          stdout="[1, 2, 3]")
-    check("trait default method",
-          'trait Drawable {\n'
-          '  func draw(self) { return "default"; }\n'
-          '  func area(self);\n'
-          '}\n'
-          'struct Point { x: int; }\n'
-          'impl Drawable for Point {\n'
-          '  func area(self) { return self.x; }\n'
-          '}\n'
-          'let p = Point { x: 3 };\n'
-          'println(p.draw());\n'
-          'println(p.area());\n',
-          stdout_all=["default", "3"])
-    check("trait default method override",
-          'trait D { func m(self) { return "trait"; } }\n'
-          'struct S { }\n'
-          'impl D for S { func m(self) { return "impl"; } }\n'
-          'println(S {}.m());\n',
-          stdout="impl")
-    check("trait default calls trait method",
-          'trait T {\n'
-          '  func a(self);\n'
-          '  func b(self) { return self.a() + 1; }\n'
-          '}\n'
-          'struct Q { }\n'
-          'impl T for Q { func a(self) { return 4; } }\n'
-          'println(Q {}.b());\n',
-          stdout="5")
     check("trait default conflict",
           'trait A { func m(self) { return 1; } }\n'
           'trait B { func m(self) { return 2; } }\n'
@@ -431,22 +293,6 @@ def run_cases():
           'struct S { }\n'
           'impl T for S { }\n',
           stderr="does not implement method m")
-    check("trait with struct shorthand",
-          'trait D { func d(self) { return "d"; } }\n'
-          'struct S with D { x: int; }\n'
-          'println(S { x: 1 }.d());\n',
-          stdout="d")
-    check("trait with enum shorthand",
-          'trait D { func d(self) { return "e"; } }\n'
-          'enum E with D { A; }\n'
-          'println(E.A.d());\n',
-          stdout="e")
-    check("with remains an identifier",
-          'let with = 7;\n'
-          'struct S { with: int; }\n'
-          'let s = S { with: 9 };\n'
-          'println(with + s.with);\n',
-          stdout="16")
     check("default parameter forward reference",
           'func f(a = b + 1, b = 2) { return a; }\nf();\n',
           stderr="parameter b is used before it is initialized")
@@ -471,99 +317,17 @@ def run_cases():
     check("default parameter trait rejected",
           'trait T { func m(self, x: int = 1); }\n',
           stderr="trait method m cannot have default parameter values")
-    check("default parameter expression",
-          'import std;\n'
-          'func f(a, b = a + 1) -> b;\n'
-          'println(f(1));\n',
-          stdout="2")
-    check("default parameter generator",
-          'func gen(a, b = a + 1) { yield b; }\n'
-          'for (let x in gen(3)) { println(x); }\n',
-          stdout="4")
-    check("default parameter spread",
-          'func f(a, b = a + 1) { return b; }\n'
-          'let xs = [10];\nprintln(f(...xs));\n',
-          stdout="11")
 
     check("export expression function",
           'package p { export func twice(x) -> x * 2; }\n'
           'println(p.twice(21));\n',
           stdout="42")
 
-    check("lambda shorthand",
-          'let inc = x -> x + 1;\n'
-          'let add = (a, b) -> a + b;\n'
-          'let zero = () -> 7;\n'
-          'println(inc(2));\nprintln(add(3, 4));\nprintln(zero());\n',
-          stdout_all=["3", "7", "7"])
-    check("lambda shorthand expression body",
-          'import std;\n'
-          'println([1, 2, 3] |> std.list.map(x -> x * 2));\n',
-          stdout="[2, 4, 6]")
-    check("pipe operator",
-          'import std;\n'
-          'println(range(0, 6) '
-          '|> std.iter.filter(x -> x % 2 == 0) '
-          '|> std.iter.collect());\n'
-          'println([1, 2, 3] |> std.list.len);\n'
-          'println(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len);\n',
-          stdout_all=["[0, 2, 4]", "3", "3"])
-    check("pipe struct method",
-          'struct Box { v: int; }\n'
-          'impl Box { func add(self, x) -> self.v + x; }\n'
-          'println(5 |> Box { v: 10 }.add());\n',
-          stdout="15")
 
     check("pipe apply operator removed",
           'func h(x) { return y -> x + y; }\n'
           'println(4 |>> h(3));\n',
           stderr="syntax error")
-    check("call placeholders",
-          'func f(a, b, c) { return [a, b, c]; }\n'
-          'let g = f($, $, 3);\n'
-          'println(g(1, 2));\n'
-          'println(f($, 9, 0)(4));\n'
-          'func add(a, b) { return a + b; }\n'
-          'println(add($, 2)(1));\n',
-          stdout_all=["[1, 2, 3]", "[4, 9, 0]", "3"])
-    check("placeholder with pipe",
-          'import std;\n'
-          'println([1, 2, 3] |> std.list.map($, x -> x * 2));\n',
-          stdout_all=["[2, 4, 6]"])
-    check("placeholder method",
-          'struct Box { v: int; }\n'
-          'impl Box { func add(self, x) -> self.v + x; }\n'
-          'let b = Box { v: 10 };\n'
-          'let m = b.add($);\n'
-          'println(m(2));\n',
-          stdout="12")
-    check("placeholder nearest call",
-          'func f(a, b, c) { return [a, b, c]; }\n'
-          'func inc(x) { return x + 1; }\n'
-          'let value = f(inc($), 9, 0);\n'
-          'println(kind_of(value));\n',
-          stdout="list")
-    check("numbered placeholder repeats one argument",
-          'func add(a, b) { return a + b; }\n'
-          'let g = add($1, $1);\n'
-          'println(g(3));\n',
-          stdout="6")
-    check("numbered placeholder reorders arguments",
-          'func pair(a, b) { return [a, b]; }\n'
-          'let g = pair($2, $1);\n'
-          'println(g(1, 2));\n',
-          stdout="[2, 1]")
-    check("numbered placeholder with fixed arguments",
-          'func triple(a, b, c) { return [a, b, c]; }\n'
-          'let g = triple(9, $1, $1);\n'
-          'println(g(2));\n',
-          stdout="[9, 2, 2]")
-    check("numbered placeholder binds nearest call",
-          'func f(a, b, c) { return [a, b, c]; }\n'
-          'func inc(x) { return x + 1; }\n'
-          'let value = f(inc($1), 9, 0);\n'
-          'println(kind_of(value));\n',
-          stdout="list")
     check("numbered placeholder rejects gaps",
           'func f(a, b) { return a; }\n'
           'let g = f($2);\n',
@@ -584,30 +348,6 @@ def run_cases():
           'func f(a) { return a; }\n'
           'let g = f(${1});\n',
           stderr="invalid placeholder ${1}")
-    check("string append reuses buffer",
-          "import std;\n"
-          "func build(n) {\n"
-          "  let s = \"\";\n"
-          "  let i = 0;\n"
-          "  while (i < n) { s = s + \"x\"; i = i + 1; }\n"
-          "  return s;\n"
-          "}\n"
-          "println(str(len(build(3))));\n"
-          "println(str(len(build(5))));\n"
-          "println(build(3));\n",
-          stdout_all=["3", "5", "xxx"])
-    check("string append keeps aliases",
-          "import std;\n"
-          "let a = \"ab\";\n"
-          "let b = a;\n"
-          "a = a + \"cd\";\n"
-          "println(a);\n"
-          "println(b);\n"
-          "let c = \"\";\n"
-          "c = c + \"x\";\n"
-          "c = c + 'y';\n"
-          "println(c);\n",
-          stdout_all=["abcd", "ab", "xy"])
     check("string append keeps error message",
           "import std;\n"
           "let s = \"a\";\n"

@@ -1,0 +1,57 @@
+import std;
+include "_support.skein";
+
+func runtime_empty() {
+}
+
+ts_test("const declaration", func() {
+  const x = 3;
+  ts_eq(x, 3);
+});
+
+ts_test("const binding is shallow", func() {
+  const a = [1, 2];
+  a[0] = 9;
+  ts_eq(a, [9, 2]);
+});
+
+ts_test("list read value semantics", func() {
+  let a = [[1]];
+  let b = a[0];
+  b[0] = 9;
+  ts_eq(a, [[1]]);
+  ts_eq(b, [9]);
+});
+
+ts_test("dict read value semantics", func() {
+  let d = {"x": [1, 2]};
+  let e = d["x"];
+  e[0] = 9;
+  ts_eq(d, {"x": [1, 2]});
+});
+
+ts_test("empty dict inside block statement", func() {
+  {
+    {};
+  }
+  ts_true(true);
+});
+
+ts_test("multi-line empty if block", func() {
+  if (1) {
+  }
+  ts_true(true);
+});
+
+ts_test("comment-only empty if block", func() {
+  if (1) { // comment
+  }
+  ts_true(true);
+});
+
+ts_test("multi-line empty func body", func() {
+  runtime_empty();
+  ts_true(true);
+});
+
+ts_finish();

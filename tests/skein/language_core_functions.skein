@@ -1,0 +1,160 @@
+import std;
+include "_support.skein";
+
+struct FunctionBox {
+  v: int;
+}
+
+impl FunctionBox {
+  func twice(self) -> self.v * 2;
+  func add(self, x) -> self.v + x;
+}
+
+func function_double(x) -> x * 2;
+
+func function_inc(x) -> x + 1;
+
+func function_triple(a, b, c) {
+  return [a, b, c];
+}
+
+func function_add(a, b) {
+  return a + b;
+}
+
+func function_pair(a, b) {
+  return [a, b];
+}
+
+func function_build(n) {
+  let s = "";
+  let i = 0;
+  while (i < n) {
+    s = s + "x";
+    i = i + 1;
+  }
+  return s;
+}
+
+ts_test("expression lambda", func() {
+  ts_eq(std.list.map([1, 2, 3], func(x) -> x * 2), [2, 4, 6]);
+  ts_eq(std.list.filter([1, 2, 3], func(x) -> x % 2 == 1), [1, 3]);
+  ts_eq(std.list.reduce([1, 2, 3], func(a, b) -> a + b), 6);
+});
+
+ts_test("expression lambda precedence", func() {
+  let f = func(x) -> x * 2 + 1;
+  ts_eq(f(3), 7);
+});
+
+ts_test("nested expression lambdas", func() {
+  let add = func(x) -> func(y) -> x + y;
+  ts_eq(add(2)(3), 5);
+});
+
+ts_test("named expression function", func() {
+  ts_eq(function_double(21), 42);
+});
+
+ts_test("expression lambda with match", func() {
+  let describe = func(x) -> match (x) {
+    case 0 => "zero";
+    default => "other";
+  };
+  ts_eq(describe(0), "zero");
+  ts_eq(describe(2), "other");
+});
+
+ts_test("method expression body", func() {
+  ts_eq(FunctionBox { v: 4 }.twice(), 8);
+});
+
+ts_test("expression function", func() {
+  ts_eq(function_inc(1), 2);
+});
+
+ts_test("lambda shorthand", func() {
+  let inc = x -> x + 1;
+  let add = (a, b) -> a + b;
+  let zero = () -> 7;
+  ts_eq(inc(2), 3);
+  ts_eq(add(3, 4), 7);
+  ts_eq(zero(), 7);
+});
+
+ts_test("lambda shorthand expression body", func() {
+  ts_eq([1, 2, 3] |> std.list.map(x -> x * 2), [2, 4, 6]);
+});
+
+ts_test("pipe operator", func() {
+  ts_eq(range(0, 6) |> std.iter.filter(x -> x % 2 == 0) |>
+        std.iter.collect(), [0, 2, 4]);
+  ts_eq([1, 2, 3] |> std.list.len, 3);
+  ts_eq(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len, 3);
+});
+
+ts_test("pipe struct method", func() {
+  ts_eq(5 |> FunctionBox { v: 10 }.add(), 15);
+});
+
+ts_test("call placeholders", func() {
+  let g = function_triple($, $, 3);
+  ts_eq(g(1, 2), [1, 2, 3]);
+  ts_eq(function_triple($, 9, 0)(4), [4, 9, 0]);
+  ts_eq(function_add($, 2)(1), 3);
+});
+
+ts_test("placeholder with pipe", func() {
+  ts_eq([1, 2, 3] |> std.list.map($, x -> x * 2), [2, 4, 6]);
+});
+
+ts_test("placeholder method", func() {
+  let b = FunctionBox { v: 10 };
+  let m = b.add($);
+  ts_eq(m(2), 12);
+});
+
+ts_test("placeholder nearest call", func() {
+  let value = function_triple(function_inc($), 9, 0);
+  ts_eq(kind_of(value), "list");
+});
+
+ts_test("numbered placeholder repeats one argument", func() {
+  let g = function_add($1, $1);
+  ts_eq(g(3), 6);
+});
+
+ts_test("numbered placeholder reorders arguments", func() {
+  let g = function_pair($2, $1);
+  ts_eq(g(1, 2), [2, 1]);
+});
+
+ts_test("numbered placeholder with fixed arguments", func() {
+  let g = function_triple(9, $1, $1);
+  ts_eq(g(2), [9, 2, 2]);
+});
+
+ts_test("numbered placeholder binds nearest call", func() {
+  let value = function_triple(function_inc($1), 9, 0);
+  ts_eq(kind_of(value), "list");
+});
+
+ts_test("string append reuses buffer", func() {
+  ts_eq(len(function_build(3)), 3);
+  ts_eq(len(function_build(5)), 5);
+  ts_eq(function_build(3), "xxx");
+});
+
+ts_test("string append keeps aliases", func() {
+  let a = "ab";
+  let b = a;
+  a = a + "cd";
+  ts_eq(a, "abcd");
+  ts_eq(b, "ab");
+  let c = "";
+  c = c + "x";
+  c = c + 'y';
+  ts_eq(c, "xy");
+});
+
+ts_finish();

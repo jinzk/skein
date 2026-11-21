@@ -1,0 +1,95 @@
+import std;
+include "_support.skein";
+
+ts_test("list expression", func() {
+  ts_eq([1 + 2, 3 * 4], [3, 12]);
+});
+
+ts_test("empty list", func() {
+  ts_eq([], []);
+});
+
+ts_test("list index", func() {
+  ts_eq([1, 2][1], 2);
+});
+
+ts_test("nested list read", func() {
+  let a = [[1, 2], [3, 4]];
+  ts_eq(a[0][1], 2);
+});
+
+ts_test("len list", func() {
+  ts_eq(len([1, 2, 3]), 3);
+});
+
+ts_test("len empty list", func() {
+  ts_eq(len([]), 0);
+});
+
+ts_test("len dict", func() {
+  ts_eq(len({"a": 1, "b": 2}), 2);
+});
+
+ts_test("len utf8 string", func() {
+  ts_eq(len("你好a"), 3);
+});
+
+ts_test("len bytes", func() {
+  ts_eq(len(std.bytes.from_hex("00ff")), 2);
+});
+
+ts_test("std math constants and helpers", func() {
+  ts_true(std.math.pi > 3.14 && std.math.pi < 3.15);
+  ts_true(std.math.e > 2.71 && std.math.e < 2.72);
+  ts_true(std.math.tau > 6.28 && std.math.tau < 6.29);
+  ts_eq(std.math.sign(-3), -1);
+  ts_eq(std.math.sign(2.5), 1);
+  ts_eq(std.math.clamp(5, 1, 3), 3);
+  ts_same(std.math.clamp(1.5, 0, 2), 1.5);
+  ts_same(std.math.cbrt(-8), -2.0);
+});
+
+ts_test("std math remainder variants", func() {
+  ts_same(std.math.fmod(7, 3), 1.0);
+  ts_same(std.math.fmod(-7, 3), -1.0);
+  ts_eq(std.math.mod(7, 3), 1);
+  ts_eq(std.math.mod(-7, 3), 2);
+  ts_eq(std.math.mod(7, -3), -2);
+});
+
+ts_test("std math float classification", func() {
+  let nan = float("nan");
+  let inf = float("inf");
+  ts_true(std.math.is_nan(nan));
+  ts_true(std.math.is_inf(inf));
+  ts_true(std.math.is_finite(1));
+  ts_false(std.math.is_finite(inf));
+  ts_true(std.math.is_nan(std.math.sign(nan)));
+});
+
+ts_test("std math gcd and lcm", func() {
+  ts_eq(std.math.gcd(12, 18), 6);
+  ts_eq(std.math.gcd(-12, 18), 6);
+  ts_eq(std.math.lcm(4, 6), 12);
+  ts_eq(std.math.lcm(0, 5), 0);
+  ts_eq(std.math.lcm(-4, 6), 12);
+});
+
+ts_test("std math angle conversion", func() {
+  ts_same(std.math.degrees(std.math.pi), 180.0);
+  ts_same(std.math.radians(180), 3.141592653589793);
+});
+
+ts_test("std math domain errors are nan", func() {
+  ts_true(std.math.is_nan(std.math.sqrt(-1)));
+  ts_true(std.math.is_nan(std.math.log(0)));
+  ts_true(std.math.is_nan(std.math.log2(0)));
+  ts_true(std.math.is_nan(std.math.log10(-1)));
+});
+
+ts_test("std math round negative halves down", func() {
+  ts_eq(std.math.round(-1.5), -2);
+  ts_eq(std.math.round(-1.4), -1);
+});
+
+ts_finish();

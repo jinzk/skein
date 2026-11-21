@@ -1,0 +1,160 @@
+import std;
+import std.arena;
+include "_support.skein";
+
+ts_test("arena add get set remove", func() {
+  let s = arena.new();
+  let r = arena.add(s, "a");
+  s = r["arena"];
+  let a = r["id"];
+  r = arena.add(s, "b");
+  s = r["arena"];
+  let b = r["id"];
+  ts_eq(arena.size(s), 2);
+  ts_eq(arena.values(s), ["a", "b"]);
+  ts_eq(arena.get(s, a)["value"], "a");
+  r = arena.set(s, a, "A");
+  s = r["arena"];
+  ts_true(r["ok"]);
+  r = arena.remove(s, b);
+  s = r["arena"];
+  ts_true(r["removed"]);
+  ts_eq(arena.size(s), 1);
+  ts_false(arena.has(s, b));
+  r = arena.add(s, "c");
+  s = r["arena"];
+  let c = r["id"];
+  ts_eq(arena.capacity(s), 2);
+  ts_eq(arena.values(s), ["A", "c"]);
+  ts_true(arena.has(s, c));
+  ts_false(arena.has(s, b));
+});
+
+ts_test("arena stale handle after reuse", func() {
+  let s = arena.new();
+  let r = arena.add(s, 1);
+  s = r["arena"];
+  let a = r["id"];
+  r = arena.remove(s, a);
+  s = r["arena"];
+  r = arena.add(s, 2);
+  s = r["arena"];
+  ts_false(arena.has(s, a));
+  ts_false(arena.get(s, a)["ok"]);
+  ts_eq(arena.values(s), [2]);
+});
+
+ts_test("arena from_list", func() {
+  let s = arena.from_list(["a", "b", "c"]);
+  ts_eq(arena.size(s), 3);
+  ts_eq(arena.capacity(s), 3);
+  ts_eq(arena.values(s), ["a", "b", "c"]);
+  let ids = arena.ids(s);
+  ts_eq(arena.get(s, ids[1])["value"], "b");
+});
+
+ts_test("arena value semantics", func() {
+  let s0 = arena.new();
+  let r = arena.add(s0, 1);
+  let s1 = r["arena"];
+  let a = r["id"];
+  ts_eq(arena.size(s0), 0);
+  ts_eq(arena.size(s1), 1);
+  let r2 = arena.remove(s1, a);
+  ts_eq(arena.size(s1), 1);
+  ts_eq(arena.size(r2["arena"]), 0);
+});
+
+ts_test("arena clear", func() {
+  let s = arena.new();
+  let r = arena.add(s, 1);
+  s = r["arena"];
+  s = arena.clear(s);
+  ts_eq(arena.size(s), 0);
+  ts_eq(arena.values(s), []);
+});
+
+ts_test("list builder", func() {
+  let b = std.list.builder();
+  b.push(1);
+  b.extend([2, 3]);
+  ts_eq(b.len(), 3);
+  ts_eq(b.build(), [1, 2, 3]);
+  ts_eq(b.build(), [1, 2, 3]);
+});
+
+ts_test("string builder", func() {
+  let b = std.string.builder();
+  b.push("ab");
+  b.push('c');
+  ts_eq(b.len(), 3);
+  ts_eq(b.build(), "abc");
+});
+
+ts_test("list append keeps aliases", func() {
+  let a = [1];
+  let b = a;
+  a = std.list.append(a, 2);
+  ts_eq(a, [1, 2]);
+  ts_eq(b, [1]);
+  let xs = [];
+  for (let i in range(5)) {
+    xs = std.list.append(xs, i);
+  }
+  ts_eq(xs, [0, 1, 2, 3, 4]);
+});
+
+ts_test("list append fallback path", func() {
+  let c = [1];
+  c = std.list.append(c, str(len(c)));
+  ts_eq(c, [1, "1"]);
+  ts_eq(c[1] + "x", "1x");
+});
+
+ts_test("list concat keeps aliases", func() {
+  let a = [1];
+  let b = a;
+  a = a + [2];
+  ts_eq(a, [1, 2]);
+  ts_eq(b, [1]);
+  let ys = [9];
+  let xs = [1];
+  xs = xs + ys;
+  ts_eq(xs, [1, 9]);
+  ts_eq(ys, [9]);
+  let z = [];
+  for (let i in range(5)) {
+    z = z + [i];
+  }
+  ts_eq(z, [0, 1, 2, 3, 4]);
+});
+
+ts_test("pair producers create hashable pairs", func() {
+  let z = std.list.zip([1], ["a"]);
+  let d = {z[0]: 1};
+  ts_eq(d[(1, "a")], 1);
+  let items = std.dict.items({1: "a"});
+  let p = items[0];
+  let d2 = {p: 1};
+  ts_eq(d2[(1, "a")], 1);
+  let e = std.iter.collect(std.iter.enumerate(["a"]))[0];
+  let d3 = {e: 1};
+  ts_eq(d3[(0, "a")], 1);
+});
+
+ts_test("dict equality large", func() {
+  let a = {};
+  let b = {};
+  let i = 0;
+  while (i < 20000) {
+    a[i] = i;
+    b[i] = i;
+    i = i + 1;
+  }
+  ts_true(a == b);
+  let c = b;
+  c[19999] = -1;
+  ts_false(a == c);
+});
+
+ts_finish();

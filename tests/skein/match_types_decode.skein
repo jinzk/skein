@@ -1,0 +1,164 @@
+import std;
+include "_support.skein";
+
+enum EnumDecodeE {
+  A { n: int; }
+  B;
+}
+
+enum EnumInner {
+  A { n: int; }
+}
+
+enum EnumOuter {
+  X { inner: EnumInner; }
+}
+
+enum EnumDecodeDefault {
+  A { n: int = 3; }
+}
+
+struct StructDecodeP {
+  x: int;
+}
+
+struct StructDecodeXY {
+  x: int;
+  y: int;
+}
+
+struct StructDecodeL {
+  a: StructDecodeP;
+  b: StructDecodeP;
+}
+
+enum StructDecodeEnum {
+  A { n: int; }
+}
+
+struct StructDecodeS {
+  e: StructDecodeEnum;
+}
+
+struct StructDecodeNode {
+  value: int;
+  next: StructDecodeNode?;
+}
+
+struct StructDecodeC {
+  host: string = "localhost";
+  port: int = 80;
+}
+
+struct StructDecodeI {
+  n: int = 7;
+}
+
+struct StructDecodeO {
+  inner: StructDecodeI;
+  label_text: string = "x";
+}
+
+ts_test("std.enum.decode", func() {
+  let s = std.json.stringify(EnumDecodeE.A { n: 1 });
+  let e = std.enum.decode(std.json.parse(s));
+  ts_eq(str(e), "EnumDecodeE.A { n: 1 }");
+  ts_eq(kind_of(e), "enum");
+  ts_eq(match (e) {
+    case EnumDecodeE.A {n} => n;
+    default => 0;
+  }, 1);
+});
+
+ts_test("std.enum.decode nested", func() {
+  let o = EnumOuter.X { inner: EnumInner.A { n: 2 } };
+  let o2 = std.enum.decode(std.json.parse(std.json.stringify(o)));
+  ts_eq(match (o2) {
+    case EnumOuter.X {inner} => match (inner) {
+      case EnumInner.A {n} => n;
+      default => 0;
+    };
+    default => 0;
+  }, 2);
+});
+
+ts_test("std.enum.tag", func() {
+  ts_eq(std.enum.tag(EnumDecodeE.A { n: 1 }), "main.EnumDecodeE.A");
+  ts_eq(std.enum.tag(EnumDecodeE.A { n: 2 }), "main.EnumDecodeE.A");
+  ts_eq(std.enum.tag(EnumDecodeE.B), "main.EnumDecodeE.B");
+});
+
+ts_test("std.enum.tag cross enum", func() {
+  ts_false(std.enum.tag(EnumDecodeE.A { n: 1 }) ==
+           std.enum.tag(EnumInner.A { n: 1 }));
+  ts_eq(std.enum.tag(EnumDecodeE.A { n: 1 }), "main.EnumDecodeE.A");
+});
+
+ts_test("std.enum.tag by name", func() {
+  ts_eq(std.enum.tag("EnumDecodeE", "A"), "main.EnumDecodeE.A");
+});
+
+ts_test("std.enum.tag as dict key", func() {
+  let counts = {};
+  counts[std.enum.tag(EnumDecodeE.A { n: 1 })] = 1;
+  counts[std.enum.tag(EnumDecodeE.A { n: 2 })] = 2;
+  ts_eq(counts[std.enum.tag(EnumDecodeE.A { n: 3 })], 2);
+});
+
+ts_test("std.enum.decode defaults", func() {
+  let e = std.enum.decode({"$enum": "EnumDecodeDefault.A", "payload": {}},
+                          "EnumDecodeDefault", {"defaults": true});
+  ts_eq(str(e), "EnumDecodeDefault.A { n: 3 }");
+});
+
+ts_test("std.enum.decode options only", func() {
+  let e = std.enum.decode({"$enum": "EnumDecodeDefault.A", "payload": {}},
+                          {"defaults": true});
+  ts_eq(str(e), "EnumDecodeDefault.A { n: 3 }");
+});
+
+ts_test("std.struct.decode", func() {
+  let p = std.struct.decode({"x": 1, "y": 2}, "StructDecodeXY");
+  ts_eq(str(p), "StructDecodeXY { x: 1, y: 2 }");
+  ts_eq(kind_of(p), "struct");
+  ts_eq(p.x, 1);
+});
+
+ts_test("std.struct.decode nested", func() {
+  let l = std.struct.decode({"a": {"x": 1}, "b": {"x": 2}},
+                            "StructDecodeL");
+  ts_eq(l.a.x + l.b.x, 3);
+});
+
+ts_test("std.struct.decode enum field", func() {
+  let s = std.struct.decode(
+    {"e": {"$enum": "StructDecodeEnum.A", "payload": {"n": 7}}},
+    "StructDecodeS");
+  ts_eq(match (s.e) {
+    case StructDecodeEnum.A {n} => n;
+    default => 0;
+  }, 7);
+});
+
+ts_test("std.struct.decode recursive", func() {
+  let n = std.struct.decode(
+    {"value": 1, "next": {"value": 2, "next": null}},
+    "StructDecodeNode");
+  ts_eq(n.next.value, 2);
+});
+
+ts_test("std.struct.decode defaults", func() {
+  let c = std.struct.decode({"port": 8080}, "StructDecodeC",
+                            {"defaults": true});
+  ts_eq(c.host, "localhost");
+  ts_eq(c.port, 8080);
+});
+
+ts_test("std.struct.decode nested defaults", func() {
+  let o = std.struct.decode({"inner": {}}, "StructDecodeO",
+                            {"defaults": true});
+  ts_eq(o.inner.n, 7);
+  ts_eq(o.label_text, "x");
+});
+
+ts_finish();

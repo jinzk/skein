@@ -1,0 +1,104 @@
+import std;
+include "_support.skein";
+
+trait TraitDrawable {
+  func draw(self) {
+    return "default";
+  }
+
+  func area(self);
+}
+
+struct TraitPoint {
+  x: int;
+}
+
+impl TraitDrawable for TraitPoint {
+  func area(self) {
+    return self.x;
+  }
+}
+
+trait TraitD {
+  func m(self) {
+    return "trait";
+  }
+}
+
+struct TraitS {}
+
+impl TraitD for TraitS {
+  func m(self) {
+    return "impl";
+  }
+}
+
+trait TraitT {
+  func a(self);
+
+  func b(self) {
+    return self.a() + 1;
+  }
+}
+
+struct TraitQ {}
+
+impl TraitT for TraitQ {
+  func a(self) {
+    return 4;
+  }
+}
+
+trait TraitShorthand {
+  func d(self) {
+    return "d";
+  }
+}
+
+struct TraitShorthandS with TraitShorthand {
+  x: int;
+}
+
+trait TraitEnumShorthand {
+  func d(self) {
+    return "e";
+  }
+}
+
+enum TraitEnumE with TraitEnumShorthand {
+  A;
+}
+
+struct TraitWithS {
+  with: int;
+}
+
+ts_test("trait default method", func() {
+  let p = TraitPoint { x: 3 };
+  ts_eq(p.draw(), "default");
+  ts_eq(p.area(), 3);
+});
+
+ts_test("trait default method override", func() {
+  ts_eq(TraitS {}.m(), "impl");
+});
+
+ts_test("trait default calls trait method", func() {
+  ts_eq(TraitQ {}.b(), 5);
+});
+
+ts_test("trait with struct shorthand", func() {
+  ts_eq(TraitShorthandS { x: 1 }.d(), "d");
+});
+
+ts_test("trait with enum shorthand", func() {
+  ts_eq(TraitEnumE.A.d(), "e");
+});
+
+ts_test("with remains an identifier", func() {
+  let with = 7;
+  let s = TraitWithS { with: 9 };
+  ts_eq(with + s.with, 16);
+});
+
+ts_finish();

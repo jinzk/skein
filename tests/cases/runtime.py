@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Strings, closures, loops, generators and async.
 
-Extracted from the original test_skein.py main() body, lines 2304-2887.
+String cases live in tests/skein/runtime_strings.skein.  Range cases live in
+tests/skein/runtime_range.skein.  List/dict copy-on-write cases live in
+tests/skein/runtime_collections.skein.  Len/list/math cases live in
+tests/skein/runtime_values.skein.  Loop/control-flow cases live in
+tests/skein/runtime_control.skein.  Const/value-semantics cases live in
+tests/skein/runtime_misc.skein.
 """
 import os
 
@@ -9,6 +14,49 @@ from harness import *  # noqa: F401,F403
 
 
 def run_cases():
+    run_skein("runtime_strings.skein")
+    run_skein("runtime_range.skein")
+    run_skein("runtime_collections.skein")
+    run_skein("runtime_values.skein")
+    run_skein("runtime_control.skein")
+    run_skein("runtime_misc.skein")
+    check(
+        "strings golden output",
+        "\"a\" + \"b\"\n"
+        "std.string.trim(\"  x  \")\n",
+        stdout_all=["= ab", "= x"],
+    )
+    check(
+        "range golden output",
+        "range(3)\n",
+        stdout="= [0, 1, 2]",
+    )
+    check(
+        "collections golden output",
+        "let a = [1, 2];\n"
+        "let d = {\"x\": 1};\n"
+        "a\n"
+        "d\n",
+        stdout_all=["= [1, 2]", "{x: 1}"],
+    )
+    check(
+        "values golden output",
+        "len([1, 2, 3])\n"
+        "std.math.gcd(12, 18)\n",
+        stdout_all=["= 3", "= 6"],
+    )
+    check(
+        "control golden output",
+        "for (let i = 0; i < 2; i = i + 1) { println(i); }\n",
+        stdout="0\n1\n",
+    )
+    check(
+        "misc golden output",
+        "const x = 3;\n"
+        "x\n",
+        stdout="= 3",
+    )
+
     default_env = dict(os.environ)
     default_env.pop("SKEIN_VM", None)
     default_env["SKEIN_VM_TRACE"] = "1"
@@ -455,7 +503,6 @@ def run_cases():
     )
     check("unicode error column", "let 变量 = ;\n",
           stderr="1:12: syntax error")
-    check("const declaration", "const x = 3;\nx\n", stdout="= 3")
     check("const reassignment", "const x = 1;\nx = 2;\n",
           stderr="cannot assign to constant x")
     check(
@@ -463,45 +510,11 @@ def run_cases():
         "const x = 1;\nfunc f() { x = 2; }\nf();\n",
         stderr="cannot assign to constant x",
     )
-    check(
-        "const binding is shallow",
-        "const a = [1, 2];\na[0] = 9;\na\n",
-        stdout="= [9, 2]",
-    )
 
-    check("string concat", '"a" + "b"\n', stdout="= ab")
-    check("string compare", '"a" < "b"\n', stdout="= true")
-    check("string equality", '"a" == "a"\n', stdout="= true")
-    check("string escape", 'print("a\\nb")\n', stdout="a\nb")
-    check("string index", '"hello"[1]\n', stdout="= e")
-    check("utf8 string index first", '"你好"[0]\n', stdout="= 你")
-    check("utf8 string index second", '"你好"[1]\n', stdout="= 好")
     check("utf8 string index out of range", '"你好"[2]\n',
           stderr="out of range")
-    check("string trim", 'std.string.trim("  hi\\t\\n")\n', stdout="= hi")
-    check("string split", 'std.string.split("a,b,c", ",")\n', stdout="= [a, b, c]")
-    check("string split empty fields", 'std.string.split(",a,", ",")\n',
-          stdout="= [, a, ]")
-    check("string split no match", 'std.string.split("abc", ",")\n', stdout="= [abc]")
-    check("string split empty text", 'std.string.split("", ",") == [""]\n',
-          stdout="= true")
     check("string split empty separator", 'std.string.split("a,b", "")\n',
           stderr="split separator must not be empty")
-    check("string split whitespace", 'std.string.split_ws("  a  b\\tc\\n d ")\n',
-          stdout="= [a, b, c, d]")
-    check("string split whitespace empty", 'std.string.split_ws("")\n',
-          stdout="= []")
-    check("string find", 'std.string.find("hello", "ll")\n', stdout="= 2")
-    check("string find missing", 'std.string.find("hello", "x")\n', stdout="= -1")
-    check("string find empty needle", 'std.string.find("hello", "")\n', stdout="= 0")
-    check("string find utf8", 'std.string.find("你好世界", "世界")\n', stdout="= 2")
-    check("string substr", 'std.string.substr("hello", 1, 3)\n', stdout="= ell")
-    check("string substr to end", 'std.string.substr("hello", 2)\n', stdout="= llo")
-    check("string substr past end", 'std.string.substr("hello", 10)\n', stdout="= ")
-    check("string substr clamps length", 'std.string.substr("hello", 1, 100)\n',
-          stdout="= ello")
-    check("string substr utf8", 'std.string.substr("你好世界", 1, 2)\n',
-          stdout="= 好世")
     check("string substr negative start", 'std.string.substr("hello", -1)\n',
           stderr="substr start must be a non-negative integer")
     check("string substr negative length", 'std.string.substr("hello", 1, -1)\n',
@@ -515,92 +528,6 @@ def run_cases():
     check("string substr arity", 'std.string.substr("a")\n',
           stderr="substr expects 2 or 3 arguments")
 
-    check("list expression", "[1+2, 3*4]\n", stdout="= [3, 12]")
-    check("empty list", "[]\n", stdout="= []")
-    check("list index", "[1,2][1]\n", stdout="= 2")
-    check("nested list read", "let a = [[1,2],[3,4]];\na[0][1]\n",
-          stdout="= 2")
-    check(
-        "list read value semantics",
-        "let a = [[1]];\nlet b = a[0];\nb[0] = 9;\na\nb\n",
-        stdout_all=["= [[1]]", "= [9]"],
-    )
-    check(
-        "dict read value semantics",
-        'let d = {"x": [1,2]};\nlet e = d["x"];\ne[0] = 9;\nd\n',
-        stdout="{x: [1, 2]}",
-    )
-    check(
-        "list alias copy on write",
-        "let a = [1, 2];\nlet b = a;\nb[0] = 9;\na\nb\n",
-        stdout_all=["= [1, 2]", "= [9, 2]"],
-    )
-    check(
-        "dict alias copy on write",
-        'let d = {"x": 1};\nlet e = d;\ne["x"] = 9;\nd\ne\n',
-        stdout_all=["{x: 1}", "{x: 9}"],
-    )
-    check(
-        "dict alias insert copy on write",
-        'let d = {"a": 1};\nlet e = d;\ne["b"] = 2;\nd\ne\n',
-        stdout_all=["{a: 1}", "{a: 1, b: 2}"],
-    )
-    check(
-        "bytes alias copy on write",
-        'let a = std.bytes.from_string("ab");\n'
-        'let b = a;\n'
-        'b[0] = 65;\n'
-        'print(std.bytes.to_string(a));\n'
-        'print(std.bytes.to_string(b));\n',
-        stdout_all=["ab", "Ab"],
-    )
-    check(
-        "nested list alias copy on write",
-        "let a = [[1], [2]];\nlet b = a;\nb[0][0] = 9;\na\nb\n",
-        stdout_all=["= [[1], [2]]", "= [[9], [2]]"],
-    )
-    check(
-        "function argument copy on write",
-        "func mutate(x) { x[0] = 9; return x; }\n"
-        "let a = [1, 2];\n"
-        "mutate(a)\n"
-        "a\n",
-        stdout_all=["= [9, 2]", "= [1, 2]"],
-    )
-    check(
-        "closure capture copy on write",
-        "func make() {\n"
-        "  let a = [1];\n"
-        "  func get() { return a; }\n"
-        "  return [a, get];\n"
-        "}\n"
-        "let pair = make();\n"
-        "let x = pair[0];\n"
-        "x[0] = 9;\n"
-        "pair[0]\n"
-        "pair[1]()\n",
-        stdout_all=["= [1]", "= [1]"],
-    )
-    check(
-        "index side effect falls back to copy",
-        "let a = [10,20,30];\n"
-        "func f() { a[0] = 99; return 0; }\n"
-        "a[f()]\n",
-        stdout="= 10",
-    )
-    check("list equality", "[1,2] == [1,2]\n", stdout="= true")
-    check("dict index", '{1:2, 3:4}[3]\n', stdout="= 4")
-    check("dict key read", 'let p = {"x": 1, "y": 2};\np["x"] + p["y"]\n',
-          stdout="= 3")
-    check("dict key assignment", 'let p = {"x": 1};\np["x"] = 5;\np\n',
-          stdout="{x: 5}")
-    check(
-        "nested dict key assignment",
-        'let p = {"a": {"b": 2}};\np["a"]["b"] = 3;\np\n',
-        stdout="{a: {b: 3}}",
-    )
-    check("dict key callable", 'let d = {"f": std.math.sqrt};\nd["f"](9)\n',
-          stdout="= 3.0")
     check("dict key missing", 'let p = {"x": 1};\np["y"]\n',
           stderr="key not found")
     check("dict dot access rejected", 'let p = {"x": 1};\np.x\n',
@@ -609,48 +536,14 @@ def run_cases():
           stderr='cannot access dict key with \'.\'')
     check("dict dot increment rejected", 'let p = {"x": 1};\np.x++;\n',
           stderr='cannot access dict key with \'.\'')
-    check("float literals unaffected by dot", ".5 + 1\n", stdout="= 1.5")
-    check("dict equality", "{1:2} == {1:2}\n", stdout="= true")
-    check("dict literal duplicate key last wins", '{1: "a", 1: "b"}\n',
-          stdout="{1: b}")
     check("dict float key rejected",
           '{1: "a", 1.0: "b"}\n',
           stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got float")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
-    check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
-    check("empty dict literal", "{}\n", stdout="= {}")
-    check("empty list literal", "[]\n", stdout="= []")
-    check("empty dict literal assignment", "let d = {};\nd\n", stdout="= {}")
-    check("empty list literal assignment", "let l = [];\nl\n", stdout="= []")
-    check("empty dict builtin", "dict()\n", stdout="= {}")
-    check("empty list builtin", "list()\n", stdout="= []")
-    check("multi-line empty dict", "let d = {\n};\nd\n", stdout="= {}")
-    check("comment-only empty dict", "let d = { // comment\n};\nd\n",
-          stdout="= {}")
-    check("multi-line comment-only empty dict",
-          "let d = {\n  // comment\n\n};\nd\n", stdout="= {}")
     check("dict key container rejected", "let d = {{}: 1};\n",
           stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got dict")
-    check("empty dict inside block statement", "{ {}; }\n", code=0)
-    check("multi-line empty if block", "if (1) {\n}\n", code=0)
-    check("comment-only empty if block", "if (1) { // comment\n}\n", code=0)
-    check("multi-line empty func body", "func f() {\n}\nf()\n", code=0)
     check("multi-line empty package body", "package p {\n}\n", code=0)
 
-    check("list index assignment", "let a = [1,2,3];\na[0] = 9;\na\n",
-          stdout="= [9, 2, 3]")
-    check("dict insert by assignment", "let d = {1:2};\nd[2] = 5;\nd\n",
-          stdout="= {1: 2, 2: 5}")
-    check(
-        "nested index assignment",
-        "let a = [[1,2],[3,4]];\na[0][1] = 99;\na\n",
-        stdout="= [[1, 99], [3, 4]]",
-    )
-    check(
-        "nested dict assignment",
-        'let d = {"a": dict()};\nd["a"]["b"] = 42;\nd\n',
-        stdout="{a: {b: 42}}",
-    )
     check("index assignment out of range", "let a = [1];\na[3] = 9;\n",
           stderr="out of range")
     check("index assignment to string", 'let s = "abc";\ns[0] = "z";\n',
@@ -686,91 +579,12 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1", SKEIN_KEEP_AST="1"),
     )
 
-    check(
-        "for loop",
-        "for (let i = 0; i < 3; i = i + 1) { println(i); }\n",
-        stdout="0\n1\n2\n",
-    )
-    check(
-        "for loop sum",
-        "let s = 0;\n"
-        "for (let i = 1; i <= 4; i = i + 1) { s = s + i; }\n"
-        "s\n",
-        stdout="= 10",
-    )
-    check(
-        "for loop break",
-        "for (let i = 0; i < 5; i = i + 1) { "
-        "if (i == 2) { break; } println(i); }\n",
-        stdout="0\n1\n",
-    )
-    check(
-        "for loop continue",
-        "for (let i = 0; i < 4; i = i + 1) { "
-        "if (i == 1) { continue; } println(i); }\n",
-        stdout="0\n2\n3\n",
-    )
-    check(
-        "return inside for",
-        "func f(a) {\n"
-        "  for (let i = 0; i < 10; i = i + 1) { return a; }\n"
-        "}\n"
-        "f(7)\n",
-        stdout="= 7",
-    )
-    check("len list", "len([1, 2, 3])\n", stdout="= 3")
-    check("len empty list", "len([])\n", stdout="= 0")
-    check("len dict", 'len({"a": 1, "b": 2})\n', stdout="= 2")
-    check("len utf8 string", 'len("你好a")\n', stdout="= 3")
-    check("len bytes", 'len(std.bytes.from_hex("00ff"))\n', stdout="= 2")
     check("len invalid type", "len(1)\n",
           stderr="len expects string, bytes, list, dict, deque, heap, or set")
-    check(
-        "for in list",
-        "for (let x in [1, 2, 3]) { println(x); }\n",
-        stdout="1\n2\n3\n",
-    )
-    check(
-        "for in dict keys",
-        'let d = {"a": 1, "b": 2};\n'
-        "for (let k in d) { println(k + \"=\" + str(d[k])); }\n",
-        stdout="a=1\nb=2\n",
-    )
-    check(
-        "for in utf8 string",
-        'for (let ch in "你好") { println(ch); }\n',
-        stdout="你\n好\n",
-    )
-    check(
-        "for in bytes",
-        'for (let b in std.bytes.from_hex("00ff")) { println(b); }\n',
-        stdout="0\n255\n",
-    )
-    check(
-        "for in break continue",
-        "for (let x in [1, 2, 3, 4]) {\n"
-        "  if (x == 2) { continue; }\n"
-        "  if (x == 4) { break; }\n"
-        "  println(x);\n"
-        "}\n",
-        stdout="1\n3\n",
-    )
-    check(
-        "for in snapshot",
-        "let a = [1, 2];\n"
-        "for (let x in a) { a[0] = 9; println(x); }\n",
-        stdout="1\n2\n",
-    )
     check("for in invalid type", "for (let x in 1) { println(x); }\n",
           stderr="cannot iterate int")
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
           stderr="symbol not found x")
-    check(
-        "for in dict key value",
-        'for (let k, v in {"a": 1, "b": 2}) { '
-        'println(k + "=" + str(v)); }\n',
-        stdout="a=1\nb=2\n",
-    )
     check(
         "for in two variables requires dict list",
         "for (let i, v in [10, 20]) { println(v); }\n",
@@ -793,45 +607,9 @@ def run_cases():
           'for (let k, v in {"a": 1}) { }\nk\n',
           stderr="symbol not found k")
 
-    check("do while executes once",
-          "let i = 0;\ndo { i = i + 1; } while (0);\ni\n",
-          stdout="= 1")
-    check("do while condition",
-          "let i = 0;\ndo { i = i + 1; } while (i < 3);\ni\n",
-          stdout="= 3")
-    check("do while single statement",
-          "let i = 0;\ndo i = i + 1; while (i < 2);\ni\n",
-          stdout="= 2")
     check("do while while on next line rejected",
           "let i = 0;\ndo {\n  i = i + 1;\n}\nwhile (i < 2);\ni\n",
           stderr="while must be on the same line as the preceding '}'")
-    check(
-        "do while break continue",
-        "let i = 0;\n"
-        "do {\n"
-        "  i = i + 1;\n"
-        "  if (i == 2) { continue; }\n"
-        "  if (i == 4) { break; }\n"
-        "  println(i);\n"
-        "} while (i < 10);\n",
-        stdout="1\n3\n",
-    )
-    check("do while return",
-          "func f(a) {\n  do { return a; } while (1);\n}\nf(7)\n",
-          stdout="= 7")
-    check("do while empty body", "do {} while (0);\n", code=0)
-    check("do while no trailing semicolon", "do {} while (0)\n", code=0)
-    check("range length only", "range(5)\n", stdout="= [0, 1, 2, 3, 4]")
-    check("range start and length", "range(-2, 3)\n", stdout="= [-2, -1, 0]")
-    check("range positive step", "range(5, 3, 2)\n", stdout="= [5, 7, 9]")
-    check("range negative step", "range(5, 3, -2)\n", stdout="= [5, 3, 1]")
-    check("range empty", "range(10, 0)\n", stdout="= []")
-    check("range len", "len(range(0, 7, 2))\n", stdout="= 7")
-    check(
-        "for in range",
-        "for (let x in range(1, 3)) { println(x); }\n",
-        stdout="1\n2\n3\n",
-    )
     check("range negative length", "range(0, -1)\n",
           stderr="range length must be non-negative")
     check("range zero step", "range(0, 3, 0)\n",
@@ -1020,60 +798,6 @@ def run_cases():
         ],
     )
 
-    check("std math constants and helpers",
-          'import std;\n'
-          'println(std.math.pi > 3.14 && std.math.pi < 3.15);\n'
-          'println(std.math.e > 2.71 && std.math.e < 2.72);\n'
-          'println(std.math.tau > 6.28 && std.math.tau < 6.29);\n'
-          'println(std.math.sign(-3));\n'
-          'println(std.math.sign(2.5));\n'
-          'println(std.math.clamp(5, 1, 3));\n'
-          'println(std.math.clamp(1.5, 0, 2));\n'
-          'println(std.math.cbrt(-8));\n',
-          stdout_all=["true", "true", "true", "-1", "1", "3", "1.5", "-2.0"])
-    check("std math remainder variants",
-          'import std;\n'
-          'println(std.math.fmod(7, 3));\n'
-          'println(std.math.fmod(-7, 3));\n'
-          'println(std.math.mod(7, 3));\n'
-          'println(std.math.mod(-7, 3));\n'
-          'println(std.math.mod(7, -3));\n',
-          stdout_all=["1.0", "-1.0", "1", "2", "-2"])
-    check("std math float classification",
-          'import std;\n'
-          'let nan = float("nan");\n'
-          'let inf = float("inf");\n'
-          'println(std.math.is_nan(nan));\n'
-          'println(std.math.is_inf(inf));\n'
-          'println(std.math.is_finite(1));\n'
-          'println(std.math.is_finite(inf));\n'
-          'println(std.math.sign(nan));\n',
-          stdout_all=["true", "true", "true", "false", "nan"])
-    check("std math gcd and lcm",
-          'import std;\n'
-          'println(std.math.gcd(12, 18));\n'
-          'println(std.math.gcd(-12, 18));\n'
-          'println(std.math.lcm(4, 6));\n'
-          'println(std.math.lcm(0, 5));\n'
-          'println(std.math.lcm(-4, 6));\n',
-          stdout_all=["6", "6", "12", "0", "12"])
-    check("std math angle conversion",
-          'import std;\n'
-          'println(std.math.degrees(std.math.pi));\n'
-          'println(std.math.radians(180));\n',
-          stdout_all=["180.0", "3.141592653589793"])
-    check("std math domain errors are nan",
-          'import std;\n'
-          'println(std.math.is_nan(std.math.sqrt(-1)));\n'
-          'println(std.math.is_nan(std.math.log(0)));\n'
-          'println(std.math.is_nan(std.math.log2(0)));\n'
-          'println(std.math.is_nan(std.math.log10(-1)));\n',
-          stdout_all=["true", "true", "true", "true"])
-    check("std math round negative halves down",
-          'import std;\n'
-          'println(std.math.round(-1.5));\n'
-          'println(std.math.round(-1.4));\n',
-          stdout_all=["-2", "-1"])
     check("std math min rejects non-numbers",
           'import std;\nstd.math.min(1, "x");\n',
           stderr="min expects numbers")

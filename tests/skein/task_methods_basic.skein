@@ -1,0 +1,185 @@
+import std;
+include "_support.skein";
+
+let task_log = [];
+
+func task_note(text) {
+  task_log = std.list.append(task_log, text);
+}
+
+struct TaskMethodC {
+  x: int;
+}
+
+impl TaskMethodC {
+  func get(self) {
+    return self.x;
+  }
+
+  func sleepy(self) {
+    task_note("start");
+    std.task.sleep(1).wait();
+    task_note("end");
+    return self.x;
+  }
+
+  func add(self, a: int = self.x, b: int = a + 1) {
+    return a + b;
+  }
+
+  func total(self, ...nums: int) {
+    let total = self.x;
+    for (let n in nums) {
+      total = total + n;
+    }
+    return total;
+  }
+
+  func deferred(self) {
+    defer task_note("cleanup");
+    return self.x;
+  }
+
+  func fact(self, n: int) {
+    if (n <= 1) {
+      return 1;
+    }
+    return n * self.fact(n - 1);
+  }
+}
+
+enum TaskMethodE {
+  A { n: int; }
+  B;
+}
+
+impl TaskMethodE {
+  func value(self) {
+    return 1;
+  }
+}
+
+trait TaskMethodS {
+  func handle(self, x: int);
+}
+
+struct TaskTraitC {
+  base: int;
+}
+
+impl TaskMethodS for TaskTraitC {
+  func handle(self, x: int) {
+    return self.base + x;
+  }
+}
+
+func task_use(s: TaskMethodS) {
+  return s.handle(2);
+}
+
+trait TaskAdapterS {
+  func handle(self);
+}
+
+struct TaskAdapterC {
+  x: int;
+}
+
+impl TaskAdapterC {
+  func handle(self) {
+    return self.x;
+  }
+}
+
+impl TaskAdapterS for TaskAdapterC;
+
+func task_adapter_use(s: TaskAdapterS) {
+  return s.handle();
+}
+
+trait TaskDefaultS {
+  func handle(self);
+
+  func twice(self) {
+    return self.handle() * 2;
+  }
+}
+
+struct TaskDefaultC {
+  x: int;
+}
+
+impl TaskDefaultS for TaskDefaultC {
+  func handle(self) {
+    return self.x;
+  }
+}
+
+struct TaskMetaC {
+  x: int;
+}
+
+impl TaskMetaC {
+  func get(self) {
+    return self.x;
+  }
+}
+
+ts_test("method get", func() {
+  ts_eq(TaskMethodC { x: 7 }.get(), 7);
+});
+
+ts_test("method task sleep", func() {
+  task_log = [];
+  ts_eq(TaskMethodC { x: 8 }.sleepy(), 8);
+  ts_eq(task_log, ["start", "end"]);
+});
+
+ts_test("method value", func() {
+  let c = TaskMethodC { x: 9 };
+  let f = c.get;
+  ts_eq(f(), 9);
+});
+
+ts_test("method defaults", func() {
+  ts_eq(TaskMethodC { x: 3 }.add(), 7);
+  ts_eq(TaskMethodC { x: 3 }.add(10), 21);
+});
+
+ts_test("method variadic", func() {
+  ts_eq(TaskMethodC { x: 1 }.total(2, 3, 4), 10);
+});
+
+ts_test("method defer", func() {
+  task_log = [];
+  ts_eq(TaskMethodC { x: 4 }.deferred(), 4);
+  ts_eq(task_log, ["cleanup"]);
+});
+
+ts_test("method recursive fact", func() {
+  ts_eq(TaskMethodC { x: 0 }.fact(4), 24);
+});
+
+ts_test("enum method", func() {
+  ts_eq(TaskMethodE.A { n: 2 }.value(), 1);
+});
+
+ts_test("trait method", func() {
+  ts_eq(task_use(TaskTraitC { base: 5 }), 7);
+});
+
+ts_test("trait adapter", func() {
+  ts_eq(task_adapter_use(TaskAdapterC { x: 11 }), 11);
+});
+
+ts_test("trait default method", func() {
+  ts_eq(TaskDefaultC { x: 11 }.twice(), 22);
+});
+
+ts_test("meta methods", func() {
+  let m = std.meta.methods("TaskMetaC")[0];
+  ts_eq(m["name"], "get");
+  ts_eq(m["params"], []);
+});
+
+ts_finish();

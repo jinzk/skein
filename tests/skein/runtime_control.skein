@@ -1,0 +1,183 @@
+import std;
+include "_support.skein";
+
+func rc_return_for(a) {
+  for (let i = 0; i < 10; i = i + 1) {
+    return a;
+  }
+}
+
+func rc_do_return(a) {
+  do {
+    return a;
+  } while (1);
+}
+
+ts_test("for loop", func() {
+  let out = [];
+  for (let i = 0; i < 3; i = i + 1) {
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [0, 1, 2]);
+});
+
+ts_test("for loop sum", func() {
+  let s = 0;
+  for (let i = 1; i <= 4; i = i + 1) {
+    s = s + i;
+  }
+  ts_eq(s, 10);
+});
+
+ts_test("for loop break", func() {
+  let out = [];
+  for (let i = 0; i < 5; i = i + 1) {
+    if (i == 2) {
+      break;
+    }
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [0, 1]);
+});
+
+ts_test("for loop continue", func() {
+  let out = [];
+  for (let i = 0; i < 4; i = i + 1) {
+    if (i == 1) {
+      continue;
+    }
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [0, 2, 3]);
+});
+
+ts_test("return inside for", func() {
+  ts_eq(rc_return_for(7), 7);
+});
+
+ts_test("for in list", func() {
+  let out = [];
+  for (let x in [1, 2, 3]) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+});
+
+ts_test("for in dict keys", func() {
+  let d = {"a": 1, "b": 2};
+  let out = [];
+  for (let k in d) {
+    out = std.list.append(out, k + "=" + str(d[k]));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("for in utf8 string", func() {
+  let out = [];
+  for (let ch in "你好") {
+    out = std.list.append(out, str(ch));
+  }
+  ts_eq(out, ["你", "好"]);
+});
+
+ts_test("for in bytes", func() {
+  let out = [];
+  for (let b in std.bytes.from_hex("00ff")) {
+    out = std.list.append(out, b);
+  }
+  ts_eq(out, [0, 255]);
+});
+
+ts_test("for in break continue", func() {
+  let out = [];
+  for (let x in [1, 2, 3, 4]) {
+    if (x == 2) {
+      continue;
+    }
+    if (x == 4) {
+      break;
+    }
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 3]);
+});
+
+ts_test("for in snapshot", func() {
+  let a = [1, 2];
+  let out = [];
+  for (let x in a) {
+    a[0] = 9;
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2]);
+});
+
+ts_test("for in dict key value", func() {
+  let out = [];
+  for (let k, v in {"a": 1, "b": 2}) {
+    out = std.list.append(out, k + "=" + str(v));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("for in range", func() {
+  let out = [];
+  for (let x in range(1, 3)) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+});
+
+ts_test("do while executes once", func() {
+  let i = 0;
+  do {
+    i = i + 1;
+  } while (0);
+  ts_eq(i, 1);
+});
+
+ts_test("do while condition", func() {
+  let i = 0;
+  do {
+    i = i + 1;
+  } while (i < 3);
+  ts_eq(i, 3);
+});
+
+ts_test("do while single statement", func() {
+  let i = 0;
+  do i = i + 1; while (i < 2);
+  ts_eq(i, 2);
+});
+
+ts_test("do while break continue", func() {
+  let i = 0;
+  let out = [];
+  do {
+    i = i + 1;
+    if (i == 2) {
+      continue;
+    }
+    if (i == 4) {
+      break;
+    }
+    out = std.list.append(out, i);
+  } while (i < 10);
+  ts_eq(out, [1, 3]);
+});
+
+ts_test("do while return", func() {
+  ts_eq(rc_do_return(7), 7);
+});
+
+ts_test("do while empty body", func() {
+  do {} while (0);
+  ts_true(true);
+});
+
+ts_test("do while no trailing semicolon", func() {
+  do {} while (0)
+  ts_true(true);
+});
+
+ts_finish();

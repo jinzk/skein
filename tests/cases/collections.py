@@ -3,6 +3,8 @@
 
 Set/deque/heap cases live in tests/skein/collections_containers.skein.
 Graph, lru, and list utility cases live in tests/skein/collections_more.skein.
+Arena, builder, append/concat, pair producer, and large-dict equality cases
+live in tests/skein/collections_mutation.skein.
 """
 from harness import *  # noqa: F401,F403
 
@@ -10,6 +12,7 @@ from harness import *  # noqa: F401,F403
 def run_cases():
     run_skein("collections_containers.skein")
     run_skein("collections_more.skein")
+    run_skein("collections_mutation.skein")
     check(
         "collections containers golden",
         "import std;\n"
@@ -33,6 +36,15 @@ def run_cases():
         stdout_all=["{ok: true, path: [1, 2]}",
                     '{"cap":2,"map":{},"order":[]}'],
     )
+    check(
+        "collections mutation golden",
+        "import std;\n"
+        "import std.arena;\n"
+        "let s = arena.from_list([1, 2]);\n"
+        "println(arena.values(s));\n",
+        stdout="[1, 2]",
+    )
+
 
     check("dict delete reinsert order",
           "import std;\n"
@@ -247,81 +259,7 @@ def run_cases():
           'let s = std.set.from_list([E.A { xs: [] }, E.A { xs: [] }]);\n'
           'println(std.set.size(s));\n',
           stdout_all=["a", "0", "1"])
-    check("pair producers create hashable pairs",
-          'import std;\n'
-          'let z = std.list.zip([1], ["a"]);\n'
-          'println({z[0]: 1}[(1, "a")]);\n'
-          'let d = {1: "a"};\n'
-          'let p = std.dict.items(d)[0];\n'
-          'println({p: 1}[(1, "a")]);\n'
-          'let e = std.iter.collect(std.iter.enumerate(["a"]))[0];\n'
-          'println({e: 1}[(0, "a")]);\n',
-          stdout_all=["1", "1", "1"])
-    check("dict equality large",
-          'import std;\n'
-          'let a = {};\nlet b = {};\nlet i = 0;\n'
-          'while (i < 20000) { a[i] = i; b[i] = i; i = i + 1; }\n'
-          'println(a == b);\n'
-          'let c = b;\n'
-          'c[19999] = -1;\n'
-          'println(a == c);\n',
-          stdout_all=["true", "false"])
 
-    check("arena add get set remove",
-          'import std;\nimport std.arena;\n'
-          'let s = arena.new();\n'
-          'let r = arena.add(s, "a"); s = r["arena"]; let a = r["id"];\n'
-          'r = arena.add(s, "b"); s = r["arena"]; let b = r["id"];\n'
-          'println(arena.size(s));\n'
-          'println(arena.values(s));\n'
-          'println(arena.get(s, a)["value"]);\n'
-          'r = arena.set(s, a, "A"); s = r["arena"];\n'
-          'println(r["ok"]);\n'
-          'r = arena.remove(s, b); s = r["arena"];\n'
-          'println(r["removed"]);\n'
-          'println(arena.size(s));\n'
-          'println(arena.has(s, b));\n'
-          'r = arena.add(s, "c"); s = r["arena"]; let c = r["id"];\n'
-          'println(arena.capacity(s));\n'
-          'println(arena.values(s));\n'
-          'println(arena.has(s, c));\n'
-          'println(arena.has(s, b));\n',
-          stdout_all=["2", "[a, b]", "a", "true", "true", "1",
-                      "false", "2", "[A, c]", "true", "false"])
-    check("arena stale handle after reuse",
-          'import std;\nimport std.arena;\n'
-          'let s = arena.new();\n'
-          'let r = arena.add(s, 1); s = r["arena"]; let a = r["id"];\n'
-          'r = arena.remove(s, a); s = r["arena"];\n'
-          'r = arena.add(s, 2); s = r["arena"];\n'
-          'println(arena.has(s, a));\n'
-          'println(arena.get(s, a)["ok"]);\n'
-          'println(arena.values(s));\n',
-          stdout_all=["false", "false", "[2]"])
-    check("arena from_list",
-          'import std;\nimport std.arena;\n'
-          'let s = arena.from_list(["a", "b", "c"]);\n'
-          'println(arena.size(s));\nprintln(arena.capacity(s));\n'
-          'println(arena.values(s));\n'
-          'let ids = arena.ids(s);\n'
-          'println(arena.get(s, ids[1])["value"]);\n',
-          stdout_all=["3", "3", "[a, b, c]", "b"])
-    check("arena value semantics",
-          'import std;\nimport std.arena;\n'
-          'let s0 = arena.new();\n'
-          'let r = arena.add(s0, 1);\n'
-          'let s1 = r["arena"]; let a = r["id"];\n'
-          'println(arena.size(s0));\nprintln(arena.size(s1));\n'
-          'let r2 = arena.remove(s1, a);\n'
-          'println(arena.size(s1));\nprintln(arena.size(r2["arena"]));\n',
-          stdout_all=["0", "1", "1", "0"])
-    check("arena clear",
-          'import std;\nimport std.arena;\n'
-          'let s = arena.new();\n'
-          'let r = arena.add(s, 1); s = r["arena"];\n'
-          's = arena.clear(s);\n'
-          'println(arena.size(s));\nprintln(arena.values(s));\n',
-          stdout_all=["0", "[]"])
     check("arena handle must be int",
           'import std;\nimport std.arena;\n'
           'arena.get(arena.new(), "x");\n',
@@ -670,62 +608,11 @@ def run_cases():
           + 'println(f());\n',
           stdout="42")
 
-    check("list builder",
-          "import std;\n"
-          "let b = std.list.builder();\n"
-          "b.push(1);\n"
-          "b.extend([2, 3]);\n"
-          "println(str(b.len()));\n"
-          "println(str(b.build()));\n"
-          "println(str(b.build()));\n",
-          stdout_all=["3", "[1, 2, 3]", "[1, 2, 3]"])
-    check("string builder",
-          "import std;\n"
-          "let b = std.string.builder();\n"
-          'b.push("ab");\n'
-          "b.push('c');\n"
-          "println(str(b.len()));\n"
-          "println(b.build());\n",
-          stdout_all=["3", "abc"])
-    check("list append keeps aliases",
-          "import std;\n"
-          "let a = [1];\n"
-          "let b = a;\n"
-          "a = std.list.append(a, 2);\n"
-          "println(str(a));\n"
-          "println(str(b));\n"
-          "let xs = [];\n"
-          "for (let i in range(5)) { xs = std.list.append(xs, i); }\n"
-          "println(str(xs));\n",
-          stdout_all=["[1, 2]", "[1]", "[0, 1, 2, 3, 4]"])
-    check("list append fallback path",
-          "import std;\n"
-          "let c = [1];\n"
-          "c = std.list.append(c, str(len(c)));\n"
-          "println(str(c));\n"
-          'println(c[1] + "x");\n',
-          stdout_all=["[1, 1]", "1x"])
     check("list append keeps error message",
           "import std;\n"
           "let d = 1;\n"
           "d = std.list.append(d, 2);\n",
           stderr="std.list.append expects a list, got int")
-    check("list concat keeps aliases",
-          "import std;\n"
-          "let a = [1];\n"
-          "let b = a;\n"
-          "a = a + [2];\n"
-          "println(str(a));\n"
-          "println(str(b));\n"
-          "let ys = [9];\n"
-          "let xs = [1];\n"
-          "xs = xs + ys;\n"
-          "println(str(xs));\n"
-          "println(str(ys));\n"
-          "let z = [];\n"
-          "for (let i in range(5)) { z = z + [i]; }\n"
-          "println(str(z));\n",
-          stdout_all=["[1, 2]", "[1]", "[1, 9]", "[9]", "[0, 1, 2, 3, 4]"])
     check("list concat keeps error message",
           "import std;\n"
           "let n = 1;\n"

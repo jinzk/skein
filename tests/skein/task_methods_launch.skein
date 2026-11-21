@@ -1,0 +1,109 @@
+import std;
+include "_support.skein";
+
+let task_log = [];
+
+func task_note(text) {
+  task_log = std.list.append(task_log, text);
+}
+
+func task_work(n) {
+  return n + 1;
+}
+
+func task_id(n) {
+  return n;
+}
+
+func task_add(a, b) {
+  return a + b;
+}
+
+func task_child(n) {
+  std.task.sleep(5).wait();
+  task_note("child-" + str(n));
+  return n;
+}
+
+func task_body() {
+  return 7;
+}
+
+func task_child2() {
+  std.task.sleep(10).wait();
+  task_note("child");
+  return 1;
+}
+
+func task_parent() {
+  let t = launch task_child2();
+  task_note("parent-body");
+  return 0;
+}
+
+func task_child3() {
+  std.task.sleep(10).wait();
+  task_note("child");
+  return 1;
+}
+
+func task_parent3() {
+  let t = launch task_child3();
+  t.detach();
+  task_note("parent");
+  return 0;
+}
+
+ts_test("launch returns a task", func() {
+  let t = launch task_work(41);
+  ts_eq(t.wait(), 42);
+  ts_true(t.done());
+  ts_eq(launch task_work(1).wait(), 2);
+});
+
+ts_test("launch task methods", func() {
+  let t = launch task_id(7);
+  ts_true(t.detached());
+  ts_eq(str(t.try_wait()), "ok(7)");
+});
+
+ts_test("launch task type annotation", func() {
+  let t: task[int] = launch task_work(41) as task[int];
+  ts_eq(t.wait(), 42);
+});
+
+ts_test("launch spread", func() {
+  let xs = [20, 22];
+  ts_eq((launch task_add(...xs)).wait(), 42);
+});
+
+ts_test("task scope waits for children", func() {
+  task_log = [];
+  let v = std.task.scope(func() {
+    let a = launch task_child(1);
+    let b = launch task_child(2);
+    task_note("body");
+    return a.wait() + b.wait();
+  });
+  ts_eq(v, 3);
+  ts_eq(task_log, ["body", "child-1", "child-2"]);
+});
+
+ts_test("task scope named function", func() {
+  ts_eq(std.task.scope(task_body), 7);
+});
+
+ts_test("launch structured waits for children", func() {
+  task_log = [];
+  ts_eq(launch task_parent().wait(), 0);
+  ts_eq(task_log, ["parent-body", "child"]);
+});
+
+ts_test("launch detach removes structured wait", func() {
+  task_log = [];
+  ts_eq(launch task_parent3().wait(), 0);
+  std.task.sleep(30).wait();
+  ts_eq(task_log, ["parent", "child"]);
+});
+
+ts_finish();

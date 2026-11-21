@@ -1,0 +1,28 @@
+import std;
+include "_support.skein";
+
+ts_test("range length only", func() {
+  ts_eq(range(5), [0, 1, 2, 3, 4]);
+});
+
+ts_test("range start and length", func() {
+  ts_eq(range(-2, 3), [-2, -1, 0]);
+});
+
+ts_test("range positive step", func() {
+  ts_eq(range(5, 3, 2), [5, 7, 9]);
+});
+
+ts_test("range negative step", func() {
+  ts_eq(range(5, 3, -2), [5, 3, 1]);
+});
+
+ts_test("range empty", func() {
+  ts_eq(range(10, 0), []);
+});
+
+ts_test("range len", func() {
+  ts_eq(len(range(0, 7, 2)), 7);
+});
+
+ts_finish();

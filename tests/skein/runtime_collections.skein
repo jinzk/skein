@@ -1,0 +1,199 @@
+import std;
+include "_support.skein";
+
+func rc_mutate(x) {
+  x[0] = 9;
+  return x;
+}
+
+func rc_make() {
+  let a = [1];
+  func get() {
+    return a;
+  }
+  return [a, get];
+}
+
+ts_test("list alias copy on write", func() {
+  let a = [1, 2];
+  let b = a;
+  b[0] = 9;
+  ts_eq(a, [1, 2]);
+  ts_eq(b, [9, 2]);
+});
+
+ts_test("dict alias copy on write", func() {
+  let d = {"x": 1};
+  let e = d;
+  e["x"] = 9;
+  ts_eq(d, {"x": 1});
+  ts_eq(e, {"x": 9});
+});
+
+ts_test("dict alias insert copy on write", func() {
+  let d = {"a": 1};
+  let e = d;
+  e["b"] = 2;
+  ts_eq(d, {"a": 1});
+  ts_eq(e, {"a": 1, "b": 2});
+});
+
+ts_test("bytes alias copy on write", func() {
+  let a = std.bytes.from_string("ab");
+  let b = a;
+  b[0] = 65;
+  ts_eq(std.bytes.to_string(a), "ab");
+  ts_eq(std.bytes.to_string(b), "Ab");
+});
+
+ts_test("nested list alias copy on write", func() {
+  let a = [[1], [2]];
+  let b = a;
+  b[0][0] = 9;
+  ts_eq(a, [[1], [2]]);
+  ts_eq(b, [[9], [2]]);
+});
+
+ts_test("function argument copy on write", func() {
+  let a = [1, 2];
+  ts_eq(rc_mutate(a), [9, 2]);
+  ts_eq(a, [1, 2]);
+});
+
+ts_test("closure capture copy on write", func() {
+  let pair = rc_make();
+  let x = pair[0];
+  x[0] = 9;
+  ts_eq(pair[0], [1]);
+  ts_eq(pair[1](), [1]);
+});
+
+ts_test("index side effect falls back to copy", func() {
+  let a = [10, 20, 30];
+  let f = func() {
+    a[0] = 99;
+    return 0;
+  };
+  ts_eq(a[f()], 10);
+});
+
+ts_test("list equality", func() {
+  ts_true([1, 2] == [1, 2]);
+});
+
+ts_test("dict index", func() {
+  ts_eq({1: 2, 3: 4}[3], 4);
+});
+
+ts_test("dict key read", func() {
+  let p = {"x": 1, "y": 2};
+  ts_eq(p["x"] + p["y"], 3);
+});
+
+ts_test("dict key assignment", func() {
+  let p = {"x": 1};
+  p["x"] = 5;
+  ts_eq(p, {"x": 5});
+});
+
+ts_test("nested dict key assignment", func() {
+  let p = {"a": {"b": 2}};
+  p["a"]["b"] = 3;
+  ts_eq(p, {"a": {"b": 3}});
+});
+
+ts_test("dict key callable", func() {
+  let d = {"f": std.math.sqrt};
+  ts_same(d["f"](9), 3.0);
+});
+
+ts_test("float literals unaffected by dot", func() {
+  ts_same(.5 + 1, 1.5);
+});
+
+ts_test("dict equality", func() {
+  ts_true({1: 2} == {1: 2});
+});
+
+ts_test("dict literal duplicate key last wins", func() {
+  ts_eq({1: "a", 1: "b"}, {1: "b"});
+});
+
+ts_test("multiline list", func() {
+  let a = [1,
+           2,
+           3];
+  ts_eq(a[2], 3);
+});
+
+ts_test("empty dict literal", func() {
+  ts_eq({}, {});
+});
+
+ts_test("empty list literal", func() {
+  ts_eq([], []);
+});
+
+ts_test("empty dict literal assignment", func() {
+  let d = {};
+  ts_eq(d, {});
+});
+
+ts_test("empty list literal assignment", func() {
+  let l = [];
+  ts_eq(l, []);
+});
+
+ts_test("empty dict builtin", func() {
+  ts_eq(dict(), {});
+});
+
+ts_test("empty list builtin", func() {
+  ts_eq(list(), []);
+});
+
+ts_test("multi-line empty dict", func() {
+  let d = {
+  };
+  ts_eq(d, {});
+});
+
+ts_test("comment-only empty dict", func() {
+  let d = { // comment
+  };
+  ts_eq(d, {});
+});
+
+ts_test("multi-line comment-only empty dict", func() {
+  let d = {
+    // comment
+
+  };
+  ts_eq(d, {});
+});
+
+ts_test("list index assignment", func() {
+  let a = [1, 2, 3];
+  a[0] = 9;
+  ts_eq(a, [9, 2, 3]);
+});
+
+ts_test("dict insert by assignment", func() {
+  let d = {1: 2};
+  d[2] = 5;
+  ts_eq(d, {1: 2, 2: 5});
+});
+
+ts_test("nested index assignment", func() {
+  let a = [[1, 2], [3, 4]];
+  a[0][1] = 99;
+  ts_eq(a, [[1, 99], [3, 4]]);
+});
+
+ts_test("nested dict assignment", func() {
+  let d = {"a": dict()};
+  d["a"]["b"] = 42;
+  ts_eq(d, {"a": {"b": 42}});
+});
+
+ts_finish();

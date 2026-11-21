@@ -2242,7 +2242,7 @@ API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `s
 
 `Lru` 是普通 struct（字段 `cap` / `map` / `order`），保持值语义：每次更新返回新值，旧值不变。因为不再是原生不透明类型，`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程传输按普通 struct 处理，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输。单次更新 O(n)。
 
-`std.dict_key` 是内嵌 Skein 源码包（`lib/std/dict_key.skein`），定义自定义 struct/enum key hash 接口：
+`std.dict_key` 是内嵌 Skein 源码包（`lib/std/dict_key.skein`），定义自定义 struct/enum key hash 接口。完整的 key 规则见 [key-semantics.md](key-semantics.md)：
 
 ```text
 import std.dict_key;

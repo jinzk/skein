@@ -413,7 +413,6 @@ add_library(skein_builtins STATIC
   src/builtins/builtins_bytes.cpp
   src/builtins/builtins_fn.cpp
   src/builtins/builtins_meta.cpp
-  src/builtins/builtins_lru.cpp
   src/builtins/builtins_deque.cpp
   src/builtins/builtins_heap.cpp
   src/builtins/builtins_set.cpp
@@ -551,6 +550,7 @@ set(SKEIN_EMBEDDED_SOURCES
   graph.skein:kStdGraphSource:std_graph_source.inc
   arena.skein:kStdArenaSource:std_arena_source.inc
   path.skein:kStdPathSource:std_path_source.inc
+  lru.skein:kStdLruSource:std_lru_source.inc
 )
 set(SKEIN_EMBEDDED_OUTPUTS)
 foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)

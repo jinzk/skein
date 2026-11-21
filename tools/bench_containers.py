@@ -172,12 +172,27 @@ print(ctx.state);
         "name": "lru.put",
         "sizes": (2000, 4000),
         "expect": "quadratic",
-        "imports": ("std",),
+        "imports": ("std", "std.lru"),
         "src": """
-let l = std.lru.new({n});
+let l = lru.new({n});
 let i = 0;
-while (i < {n}) { let r = std.lru.put(l, i, i); l = r["lru"]; i = i + 1; }
-print(std.lru.len(l));
+while (i < {n}) { let r = lru.put(l, i, i); l = r["lru"]; i = i + 1; }
+print(lru.size(l));
+""",
+    },
+    {
+        "name": "lru.get (cap=64)",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std", "std.lru"),
+        "src": """
+let l = lru.new(64);
+let i = 0;
+while (i < 64) { let r = lru.put(l, i, i); l = r["lru"]; i = i + 1; }
+i = 0;
+let sum = 0;
+while (i < {n}) { let r = lru.get(l, i % 64); l = r["lru"]; sum = sum + r["value"]; i = i + 1; }
+print(sum);
 """,
     },
     {

@@ -95,19 +95,6 @@ value_t *build_namespace_impl() {
         {"from_char", B_bytes_from_char},
         {"to_char", B_char_from_bytes},
     });
-    value_t *lru_module = builtin_module({
-        {"new", B_lru_new},
-        {"get", B_lru_get},
-        {"peek", B_lru_peek},
-        {"put", B_lru_put},
-        {"delete", B_lru_delete},
-        {"has", B_lru_has},
-        {"keys", B_lru_keys},
-        {"values", B_lru_values},
-        {"len", B_lru_len},
-        {"capacity", B_lru_capacity},
-        {"clear", B_lru_clear},
-    });
     auto copy_module = [](value_t *module) -> value_t * {
         value_t *copy = (value_t *)newdictval();
         ((dict_value_t *)copy)->payload->is_namespace = true;
@@ -125,8 +112,6 @@ value_t *build_namespace_impl() {
         newstrval("dict"), copy_module(dict_module)));
     raw->payload->items.push_back(std::make_pair(
         newstrval("bytes"), copy_module(bytes_module)));
-    raw->payload->items.push_back(std::make_pair(
-        newstrval("lru"), copy_module(lru_module)));
     root->payload->items.push_back(std::make_pair(
         newstrval("list"), list_module));
     root->payload->items.push_back(std::make_pair(
@@ -137,8 +122,6 @@ value_t *build_namespace_impl() {
         newstrval("dict"), dict_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("bytes"), bytes_module));
-    root->payload->items.push_back(std::make_pair(
-        newstrval("lru"), lru_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("raw"), (value_t *)raw));
     root->payload->items.push_back(std::make_pair(
@@ -738,8 +721,6 @@ const std_adapter_binding kStdAdapterBindings[] = {
     {"list", "binary_search", "adapter_list_binary_search"},
     {"list", "reduce", "adapter_list_reduce"},
     {"dict", "get", "adapter_dict_get"},
-    {"lru", "get", "adapter_lru_get"},
-    {"lru", "peek", "adapter_lru_peek"},
     {"bytes", "slice", "adapter_bytes_slice"},
 };
 

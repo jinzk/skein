@@ -274,23 +274,24 @@ bool read_type_value(reader &in, struct type_constraint &type,
 
 enum class value_tag : uint8_t {
     Null = 0,
-    Bool,
-    Int,
-    Float,
-    Char,
-    Byte,
-    String,
-    Bytes,
-    Error,
-    Result,
-    List,
-    Dict,
-    Set,
-    Deque,
-    Lru,
-    Builtin,
-    Struct,
-    Enum,
+    Bool = 1,
+    Int = 2,
+    Float = 3,
+    Char = 4,
+    Byte = 5,
+    String = 6,
+    Bytes = 7,
+    Error = 8,
+    Result = 9,
+    List = 10,
+    Dict = 11,
+    Set = 12,
+    Deque = 13,
+    /* Slot kept reserved; native std.lru was removed.  Do not reuse. */
+    ReservedLru = 14,
+    Builtin = 15,
+    Struct = 16,
+    Enum = 17,
 };
 
 bool write_value(writer &out, const struct value_t *value, int depth,
@@ -411,18 +412,6 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             out.u32((uint32_t)items.size());
             for (const struct value_t *item : items) {
                 if (!write_value(out, item, depth + 1, error))
-                    return false;
-            }
-            return true;
-        }
-        case T_lru: {
-            const struct lru_value_t *lru = (const struct lru_value_t *)value;
-            out.u8((uint8_t)value_tag::Lru);
-            out.u64((uint64_t)lru->payload->capacity);
-            out.u32((uint32_t)lru->payload->items.size());
-            for (const auto &item : lru->payload->items) {
-                if (!write_value(out, item.first, depth + 1, error) ||
-                    !write_value(out, item.second, depth + 1, error))
                     return false;
             }
             return true;
@@ -684,32 +673,9 @@ bool read_value_inner(reader &in, value_owner &value, int depth,
             deque->payload = std::move(payload);
             return true;
         }
-        case value_tag::Lru: {
-            uint64_t capacity = 0;
-            uint32_t count = 0;
-            if (!in.u64(capacity) || !in.count(count)) {
-                error = in.error;
-                return false;
-            }
-            if (count > capacity) {
-                error = "thread payload LRU item count exceeds capacity";
-                return false;
-            }
-            struct lru_value_t *lru =
-                newlruval((std::size_t)capacity);
-            value = value_owner((struct value_t *)lru);
-            for (uint32_t i = 0; i < count; ++i) {
-                value_owner key;
-                value_owner item;
-                if (!read_value(in, key, depth + 1, error) ||
-                    !read_value(in, item, depth + 1, error)) {
-                    return false;
-                }
-                lru->payload->items.emplace_back(key.release(),
-                                                 item.release());
-            }
-            return true;
-        }
+        case value_tag::ReservedLru:
+            error = "thread payload contains a removed lru value";
+            return false;
         case value_tag::Builtin: {
             uint32_t functype = 0;
             if (!in.u32(functype)) {
@@ -1200,17 +1166,6 @@ bool collect_value_types(const struct value_t *value, type_map &types,
             const struct dict_value_t *dict =
                 (const struct dict_value_t *)value;
             for (const auto &item : dict->payload->items) {
-                if (!collect_value_types(item.first, types, order, depth + 1,
-                                         error, context) ||
-                    !collect_value_types(item.second, types, order, depth + 1,
-                                         error, context))
-                    return false;
-            }
-            break;
-        }
-        case T_lru: {
-            const struct lru_value_t *lru = (const struct lru_value_t *)value;
-            for (const auto &item : lru->payload->items) {
                 if (!collect_value_types(item.first, types, order, depth + 1,
                                          error, context) ||
                     !collect_value_types(item.second, types, order, depth + 1,
@@ -1785,9 +1740,7 @@ bool write_transfer(
             out.u8(5);
             out.u8((uint8_t)value.container->kind);
             if (value.container->kind ==
-                    thread_transfer_container::Kind::Dict ||
-                value.container->kind ==
-                    thread_transfer_container::Kind::Lru) {
+                thread_transfer_container::Kind::Dict) {
                 out.u64(value.container->capacity);
                 out.u32((uint32_t)value.container->entries.size());
                 for (const auto &entry : value.container->entries) {
@@ -1951,7 +1904,7 @@ bool read_transfer(
                 error = in.error;
                 return false;
             }
-            if (raw_kind > (uint8_t)thread_transfer_container::Kind::Lru) {
+            if (raw_kind > (uint8_t)thread_transfer_container::Kind::Deque) {
                 error = "invalid thread payload container kind";
                 return false;
             }
@@ -1961,8 +1914,7 @@ bool read_transfer(
             value = thread_transfer_value();
             value.kind = thread_transfer_value::Kind::Container;
             value.container = container;
-            if (container->kind == thread_transfer_container::Kind::Dict ||
-                container->kind == thread_transfer_container::Kind::Lru) {
+            if (container->kind == thread_transfer_container::Kind::Dict) {
                 uint64_t capacity = 0;
                 uint32_t count = 0;
                 if (!in.u64(capacity) || !in.count(count)) {

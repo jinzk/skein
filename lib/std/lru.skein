@@ -1,0 +1,148 @@
+package lru {
+  import std;
+
+  // Persistent LRU cache.  Updates return a new Lru value; the old value is
+  // never modified.  `order` is oldest-to-newest and `map` holds the values.
+  export struct Lru {
+    cap: int;
+    map: dict;
+    order: list;
+  }
+
+  func _check_cap(cap) {
+    if (kind_of(cap) != "int") {
+      fail("std.lru.new expects an int capacity, got " + kind_of(cap));
+    }
+    if (cap < 1) {
+      fail("std.lru.new capacity must be at least 1");
+    }
+  }
+
+  func _check_key(key) {
+    let kind = kind_of(key);
+    if (kind == "int" || kind == "bool" || kind == "string" ||
+        kind == "char" || kind == "byte" || kind == "bytes" ||
+        kind == "null") {
+      return;
+    }
+    fail("std.lru key: dict key must be int, bool, string, char, byte, bytes, or null");
+  }
+
+  func _index(order, key) {
+    let i = 0;
+    while (i < std.list.len(order)) {
+      if (order[i] == key) {
+        return i;
+      }
+      i = i + 1;
+    }
+    return -1;
+  }
+
+  func _drop(order, index) {
+    return std.list.slice(order, 0, index) +
+           std.list.slice(order, index + 1);
+  }
+
+  func _make(cap, map, order) {
+    return Lru { cap: cap, map: map, order: order };
+  }
+
+  export func new(cap) {
+    _check_cap(cap);
+    return _make(cap, {}, []);
+  }
+
+  export func get(l, key, fallback = null) {
+    _check_key(key);
+    let map = l.map;
+    if (!std.dict.has(map, key)) {
+      return {"lru": l, "found": false, "value": fallback};
+    }
+    let value = map[key];
+    let order = l.order;
+    let index = _index(order, key);
+    if (index >= 0) {
+      order = _drop(order, index);
+    }
+    order = std.list.append(order, key);
+    return {"lru": _make(l.cap, map, order),
+            "found": true, "value": value};
+  }
+
+  export func peek(l, key, fallback = null) {
+    _check_key(key);
+    if (!std.dict.has(l.map, key)) {
+      return {"lru": l, "found": false, "value": fallback};
+    }
+    return {"lru": l, "found": true, "value": l.map[key]};
+  }
+
+  export func put(l, key, value) {
+    _check_key(key);
+    let map = l.map;
+    let order = l.order;
+    let existed = std.dict.has(map, key);
+    map[key] = value;
+    if (existed) {
+      let index = _index(order, key);
+      if (index >= 0) {
+        order = _drop(order, index);
+      }
+    }
+    order = std.list.append(order, key);
+
+    let evicted = null;
+    if (std.list.len(order) > l.cap) {
+      let old_key = order[0];
+      evicted = {"key": old_key, "value": map[old_key]};
+      order = std.list.slice(order, 1);
+      map = std.dict.delete(map, old_key);
+    }
+    return {"lru": _make(l.cap, map, order), "evicted": evicted};
+  }
+
+  export func delete(l, key) {
+    _check_key(key);
+    let map = l.map;
+    let order = l.order;
+    let removed = std.dict.has(map, key) != 0;
+    if (removed) {
+      map = std.dict.delete(map, key);
+      let index = _index(order, key);
+      if (index >= 0) {
+        order = _drop(order, index);
+      }
+    }
+    return {"lru": _make(l.cap, map, order), "removed": removed};
+  }
+
+  export func has(l, key) {
+    _check_key(key);
+    return std.dict.has(l.map, key) != 0;
+  }
+
+  export func keys(l) {
+    return l.order;
+  }
+
+  export func values(l) {
+    let out = [];
+    for (let key in l.order) {
+      out = std.list.append(out, l.map[key]);
+    }
+    return out;
+  }
+
+  export func size(l) {
+    return std.list.len(l.order);
+  }
+
+  export func capacity(l) {
+    return l.cap;
+  }
+
+  export func clear(l) {
+    return new(l.cap);
+  }
+}

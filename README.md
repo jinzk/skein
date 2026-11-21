@@ -329,7 +329,7 @@ src/
                  generator.*、iter.*、async_support.*、task.*、event_loop.*、
                  file_lock.*、native_artifact.*、completion_index.*、repl.*、repl_ui.*、source_encoding.*
   builtins/      L3  内置函数与宿主模块：
-                 builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/lru/deque/heap/set）、
+                 builtins.*、builtins_*.cpp（math/meta/list/dict/string/convert/file/text/bytes/deque/heap/set）、
                  *_builtin.*、compression.*、cookie.*、error.*、
                  filetype.*、fs_extra.*、http.*、http1_parser.*、http2.*、io.*、
                  net.*、process_*.*、result.*、tls.*、websocket.*、worker_pool.*、

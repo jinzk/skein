@@ -48,7 +48,6 @@ static const char *kind_of_value(const struct value_t *v) {
         case T_error: return "error";
         case T_struct: return "struct";
         case T_enum: return "enum";
-        case T_lru: return "lru";
         case T_deque: return "deque";
         case T_heap: return "heap";
         case T_set: return "set";

@@ -473,25 +473,6 @@ bool validate_data_value(struct value_t *value,
                 visiting.erase(payload);
             return true;
         }
-        case T_lru: {
-            const void *payload = value_payload(value);
-            if (payload && !visiting.insert(payload).second) {
-                error = "Message payload contains a cycle";
-                return false;
-            }
-            struct lru_value_t *lru = (struct lru_value_t *)value;
-            for (const auto &entry : lru->payload->items) {
-                if (!validate_data_value(entry.first, visiting, error) ||
-                    !validate_data_value(entry.second, visiting, error)) {
-                    if (payload)
-                        visiting.erase(payload);
-                    return false;
-                }
-            }
-            if (payload)
-                visiting.erase(payload);
-            return true;
-        }
         case T_deque: {
             const void *payload = value_payload(value);
             if (payload && !visiting.insert(payload).second) {
@@ -2666,24 +2647,6 @@ bool contains_transfer_special(
             visiting.erase(identity);
         return false;
     }
-    case T_lru: {
-        const struct lru_value_t *lru = (const struct lru_value_t *)value;
-        const void *identity = value_payload(value);
-        if (identity && !visiting.insert(identity).second)
-            return false;
-        for (const auto &entry : lru->payload->items) {
-            if (contains_transfer_special(entry.first, visiting, depth + 1) ||
-                contains_transfer_special(entry.second, visiting,
-                                          depth + 1)) {
-                if (identity)
-                    visiting.erase(identity);
-                return true;
-            }
-        }
-        if (identity)
-            visiting.erase(identity);
-        return false;
-    }
     case T_deque: {
         const struct deque_value_t *deque =
             (const struct deque_value_t *)value;
@@ -2805,8 +2768,7 @@ struct thread_payload_builder {
             std::unordered_set<const void *> special_visiting;
             if (contains_transfer_special(value, special_visiting)) {
                 if (value->type == T_list || value->type == T_dict ||
-                    value->type == T_set || value->type == T_deque ||
-                    value->type == T_lru)
+                    value->type == T_set || value->type == T_deque)
                     return transfer_container(value, out);
                 error = std::string(what ? what : "value") +
                         " contains a heap/function but is not a container";
@@ -2819,8 +2781,7 @@ struct thread_payload_builder {
             copy_data_value(value, visiting, copy_error);
         if (!copy) {
             if (value->type == T_list || value->type == T_dict ||
-                value->type == T_set || value->type == T_deque ||
-                value->type == T_lru)
+                value->type == T_set || value->type == T_deque)
                 return transfer_container(value, out);
             error = std::string(what ? what : "value") + ": " + copy_error;
             return false;
@@ -2904,27 +2865,6 @@ struct thread_payload_builder {
                     break;
                 }
                 container->items.push_back(std::move(transfer));
-            }
-            break;
-        }
-        case T_lru: {
-            container->kind = thread_transfer_container::Kind::Lru;
-            const struct lru_value_t *lru =
-                (const struct lru_value_t *)value;
-            container->capacity = lru->payload->capacity;
-            for (const auto &entry : lru->payload->items) {
-                thread_transfer_value key;
-                if (!transfer_value(entry.first, "lru key", key)) {
-                    ok = false;
-                    break;
-                }
-                thread_transfer_value item;
-                if (!transfer_value(entry.second, "lru value", item)) {
-                    ok = false;
-                    break;
-                }
-                container->entries.emplace_back(std::move(key),
-                                                std::move(item));
             }
             break;
         }

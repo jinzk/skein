@@ -47,19 +47,24 @@ def skein_string(value):
 
 _STD_REFERENCE = re.compile(r"(?<![A-Za-z0-9_.])std\.")
 _STD_IMPORT = re.compile(r"\bimport\s+std\b")
+_LRU_REFERENCE = re.compile(r"(?<![A-Za-z0-9_.])lru\.")
+_LRU_IMPORT = re.compile(r"\bimport\s+std\.lru\b")
 
 
 def with_std_prelude(source):
-    """Add `import std;` to snippets that use std.* without importing it.
+    """Add imports for std.* / lru.* used by short test snippets.
 
-    The language requires the import.  Most test cases are short snippets
-    focused on one behavior, so the harness supplies the import instead of
-    repeating it in every case.  Tests that exercise the missing-import path
+    The language requires explicit imports.  Most test cases are short
+    snippets focused on one behavior, so the harness supplies them instead of
+    repeating them in every case.  Tests that exercise the missing-import path
     pass std_prelude=False.
     """
+    prelude = ""
     if _STD_REFERENCE.search(source) and not _STD_IMPORT.search(source):
-        return "import std;\n" + source
-    return source
+        prelude += "import std;\n"
+    if _LRU_REFERENCE.search(source) and not _LRU_IMPORT.search(source):
+        prelude += "import std.lru;\n"
+    return prelude + source
 
 
 def run(source, timeout=None, env=None, std_prelude=True):
@@ -3106,6 +3111,7 @@ def check_extended_stdlib():
             with open(proto3_encode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
+                    "import std.lru;\n"
                     "func twice(x) { return x * 2; }\n"
                     "func make_worker(box) {\n"
                     "  func worker(ctx) {\n"
@@ -3114,10 +3120,7 @@ def check_extended_stdlib():
                     "    let nested = box[\"nested\"];\n"
                     "    let items = box[\"list\"];\n"
                     "    let dqh = std.deque.to_list(box[\"deque\"])[0];\n"
-                    "    let lru_fn = std.lru.get(box[\"lru\"], \"fn\")"
-                    "[\"value\"];\n"
-                    "    let lru_n = std.lru.get(box[\"lru\"], \"n\")"
-                    "[\"value\"];\n"
+                    "    let lru_n = box[\"lru\"].map[\"n\"];\n"
                     "    let s = box[\"set\"];\n"
                     "    return {\n"
                     "      \"fn\": fn(5),\n"
@@ -3126,7 +3129,7 @@ def check_extended_stdlib():
                     "      \"nested\": nested[0][\"v\"],\n"
                     "      \"items\": items[1] + items[2],\n"
                     "      \"deque_top\": std.heap.peek(dqh),\n"
-                    "      \"lru\": lru_fn(lru_n),\n"
+                    "      \"lru\": fn(lru_n),\n"
                     "      \"set_size\": std.set.size(s),\n"
                     "      \"set_vals\": std.set.values(s)\n"
                     "    };\n"
@@ -3136,10 +3139,9 @@ def check_extended_stdlib():
                     "let h = std.heap.from_list([3, 1, 2], "
                     "func(a, b) { return a < b; });\n"
                     "let dq = std.deque.from_list([h, 4, 5]);\n"
-                    "let l = std.lru.new(4);\n"
-                    "let r = std.lru.put(l, \"fn\", twice); "
+                    "let l = lru.new(4);\n"
+                    "let r = lru.put(l, \"n\", 6); "
                     "l = r[\"lru\"];\n"
-                    "r = std.lru.put(l, \"n\", 6); l = r[\"lru\"];\n"
                     "let s = std.set.from_list([1, 2, 2, 3]);\n"
                     "let box = {\"fn\": twice, \"heap\": h, "
                     "\"nested\": [{\"v\": 9}, [1, 2]], "
@@ -3153,6 +3155,7 @@ def check_extended_stdlib():
             with open(proto3_decode, "w", encoding="utf-8") as handle:
                 handle.write(
                     "import std;\n"
+                    "import std.lru;\n"
                     'let blob = std.fs.read_bytes("proto3_payload.bin");\n'
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
@@ -3613,9 +3616,9 @@ def check_extended_stdlib():
                 "import std;\n"
                 "struct P { x: int; text: string; }\n"
                 "enum E { A; B { n: int; }; }\n"
-                'let l = std.lru.new(4);\n'
-                'l = std.lru.put(l, "a", 1)["lru"];\n'
-                'l = std.lru.put(l, "b", 2)["lru"];\n'
+                'let l = lru.new(4);\n'
+                'l = lru.put(l, "a", 1)["lru"];\n'
+                'l = lru.put(l, "b", 2)["lru"];\n'
                 'let d = std.deque.from_list([1, 2, 3]);\n'
                 'let s = std.set.from_list([7, 8, 9]);\n'
                 'let payload = {"p": P { x: 42, text: "hi" },\n'
@@ -3629,10 +3632,10 @@ def check_extended_stdlib():
                 'let en = match (v["e"]) { case E.B { n } => n; '
                 'default => 0; };\n'
                 'print("e="); print(en); print("|");\n'
-                'let lr = std.lru.get(v["l"], "a");\n'
+                'let lr = lru.get(v["l"], "a");\n'
                 'print("l="); print(lr["found"]); print(":"); '
                 'print(lr["value"]); print(":"); '
-                'print(std.lru.len(v["l"])); print("|");\n'
+                'print(lru.size(v["l"])); print("|");\n'
                 'print("d="); print(std.deque.size(v["d"])); print(":"); '
                 'print(std.deque.to_list(v["d"])[2]); print("|");\n'
                 'print("s="); print(std.set.size(v["s"])); print(":"); '
@@ -3939,10 +3942,10 @@ def check_extended_stdlib():
                 "import std;\n"
                 "let s = std.set.from_list([1, 2, 3]);\n"
                 "let d = std.deque.from_list([4, 5]);\n"
-                "let l = std.lru.new(2);\n"
-                'let r0 = std.lru.put(l, "a", 7);\n'
+                "let l = lru.new(2);\n"
+                'let r0 = lru.put(l, "a", 7);\n'
                 'l = r0["lru"];\n'
-                'r0 = std.lru.put(l, "b", 8);\n'
+                'r0 = lru.put(l, "b", 8);\n'
                 'l = r0["lru"];\n'
                 "let h = std.heap.from_list([3, 1, 2], "
                 "func(a, b) { return a < b; });\n"
@@ -3951,11 +3954,11 @@ def check_extended_stdlib():
                 '        let n = ctx.payload["n"];\n'
                 "        let m = match n { case 1 => 10; "
                 "default => 20; };\n"
-                '        let got = std.lru.get(lv, "a");\n'
+                '        let got = lv.map["a"];\n'
                 '        let popped = std.heap.pop(hv);\n'
                 '        return {"s": std.set.values(sv), '
                 '"d": std.deque.to_list(dv), '
-                '"l": got["value"], "m": m, '
+                '"l": got, "m": m, '
                 '"h": popped["value"], '
                 '"hs": std.heap.size(popped["heap"])};\n'
                 "    }\n"

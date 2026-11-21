@@ -2497,7 +2497,6 @@ std.result
 std.error
 std.enum
 std.struct
-std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
 std.set（原生实现）
@@ -2507,6 +2506,7 @@ std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
+std.lru（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -4292,7 +4292,7 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
   `string` / `char` / `byte` / `bytes` / `list` / `dict` / `deque` / `heap` /
   `set` / `function` / `builtin` / `callable` / `null` / `userdata` /
   `result` / `error`；
-- `lru` / `method` / `native` / `class` / `struct` / `enum` 是运行时 kind，
+- `method` / `native` / `class` / `struct` / `enum` 是运行时 kind，
   不是类型名；
 - `has_type` 对未知类型返回 `false`；其他函数对未知类型报错；
 - `implements` 要求 trait 名已知，未知 trait 报错；
@@ -4404,37 +4404,39 @@ print(c.port);     // 8080
 
 ### std.lru
 
+`std.lru` 是内嵌 Skein 源码包（`lib/std/lru.skein`），需要 `import std.lru;`：
+
 ```text
-std.lru.new(capacity)              -> lru
-std.lru.get(lru, key[, default])   -> {lru, found, value}
-std.lru.peek(lru, key[, default])  -> {lru, found, value}
-std.lru.put(lru, key, value)       -> {lru, evicted}
-std.lru.delete(lru, key)           -> {lru, removed}
-std.lru.has(lru, key)              -> bool
-std.lru.keys(lru)                  -> list
-std.lru.values(lru)                -> list
-std.lru.len(lru)                   -> int
-std.lru.capacity(lru)              -> int
-std.lru.clear(lru)                 -> lru
+lru.new(capacity)              -> Lru
+lru.get(lru, key[, default])   -> {lru, found, value}
+lru.peek(lru, key[, default])  -> {lru, found, value}
+lru.put(lru, key, value)       -> {lru, evicted}
+lru.delete(lru, key)           -> {lru, removed}
+lru.has(lru, key)              -> bool
+lru.keys(lru)                  -> list
+lru.values(lru)                -> list
+lru.size(lru)                  -> int
+lru.capacity(lru)              -> int
+lru.clear(lru)                 -> Lru
 ```
 
-`std.lru` 是 C++ 值类型，具有值语义（每次更新返回新 lru）：
+`Lru` 是普通 struct（字段 `cap` / `map` / `order`），保持值语义（每次更新返回新值）：
 
 ```text
-import std;
+import std.lru;
 
-let l = std.lru.new(2);
-let r = std.lru.put(l, "a", 1);
+let l = lru.new(2);
+let r = lru.put(l, "a", 1);
 l = r["lru"];
 
-r = std.lru.put(l, "b", 2);
+r = lru.put(l, "b", 2);
 l = r["lru"];
 
-r = std.lru.get(l, "a");       // a 变成最近使用
+r = lru.get(l, "a");       // a 变成最近使用
 l = r["lru"];
 
-r = std.lru.put(l, "c", 3);    // 淘汰最久未使用的 b
-print(r["evicted"]);           // {key: b, value: 2}
+r = lru.put(l, "c", 3);    // 淘汰最久未使用的 b
+print(r["evicted"]);       // {key: b, value: 2}
 ```
 
 规则：
@@ -4447,9 +4449,10 @@ print(r["evicted"]);           // {key: b, value: 2}
 - `put` 返回被淘汰的 `{key, value}`，没有淘汰时 `evicted` 为 `null`；
 - `delete` 返回 `{lru, removed}`；
 - `clear` 保留 capacity；
-- lru 目前不能 JSON 序列化。
+- 每次更新为 O(n)，适合小容量缓存；
+- 不再是原生不透明类型：`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程按普通 struct 传输，函数 / heap 等特殊值不能嵌套在 LRU 字段中。
 
-性能提示：`put` / `get` 每次都会为值语义 clone 整个 lru，O(n)/次；适合小容量缓存。
+性能提示：脚本版 `put` / `get` 每次都会复制 dict / list 以保持值语义，O(n)/次；比原 C++ 实现慢 2–10x。
 
 ### std.set / std.deque / std.heap
 
@@ -4497,7 +4500,7 @@ d = r["deque"];
 
 `pop_front` / `pop_back` 返回 `{ok, deque, value}`；空队列返回 `{ok: false, error: "empty deque", deque}`。
 
-`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `std.lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。`len(d)`、`for ... in d`、JSON 编码（数组）和类型标注 `deque` 均支持。
+`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。`len(d)`、`for ... in d`、JSON 编码（数组）和类型标注 `deque` 均支持。
 
 #### std.heap
 
@@ -5008,7 +5011,7 @@ c()             // 2
 - 闭包按引用捕获定义处的作用域，局部变量在闭包存活期间继续存在；
 - 运行时有一个**作用域粒度的标记式环回收器**：从全局作用域、当前作用域链和恢复栈出发标记可达 scope，再清理不可达 scope 的符号表；
 - 每 64 个顶层语句或 scope 数量明显增长时触发，只在顶层语句边界执行；
-- 标记遍历覆盖 `list` / `dict` / `struct` / `enum` / `lru` / `result` / `method`；
+- 标记遍历覆盖 `list` / `dict` / `struct` / `enum` / `result` / `method`；
 - 它不是完整的逐值 tracing GC：值本身仍由引用计数管理，没有压缩、移动或 finalizer；
 - 单个超长顶层语句内部产生的闭包环，可能要到该语句结束后才会被回收。
 

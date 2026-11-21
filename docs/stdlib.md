@@ -2130,7 +2130,6 @@ std.result
 std.error
 std.enum
 std.struct
-std.lru
 std.ffi（可选）
 std.fsm（内嵌 Skein 源码包）
 std.set（原生实现）
@@ -2140,6 +2139,7 @@ std.route（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
+std.lru（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -2221,23 +2221,25 @@ print(std.meta.has_type("int"));      // true
 `std.meta` 不返回值默认值，只提供 `has_default` 标记。字段信息的 `nullable`
 对 `T?` 和包含 `null` 的 `union` 都为 `true`，两者显示为同一个可空类型。
 
-`std.lru` 是 C++ 值类型，每次更新返回新 lru：
+`std.lru` 是内嵌 Skein 源码包（`lib/std/lru.skein`），需要 `import std.lru;`：
 
 ```text
-import std;
+import std.lru;
 
-let l = std.lru.new(2);
-let r = std.lru.put(l, "a", 1);
+let l = lru.new(2);
+let r = lru.put(l, "a", 1);
 l = r["lru"];
-r = std.lru.put(l, "b", 2);
+r = lru.put(l, "b", 2);
 l = r["lru"];
-r = std.lru.get(l, "a");       // a 变成最近使用
+r = lru.get(l, "a");       // a 变成最近使用
 l = r["lru"];
-r = std.lru.put(l, "c", 3);    // 淘汰 b
-r["evicted"]                   // {key: b, value: 2}
+r = lru.put(l, "c", 3);    // 淘汰 b
+r["evicted"]               // {key: b, value: 2}
 ```
 
-API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `len` / `capacity` / `clear`。key 必须是合法 dict key；`keys` / `values` 从最久未使用到最近使用排列。
+API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `size` / `capacity` / `clear`。key 必须是合法 dict key；`keys` / `values` 从最久未使用到最近使用排列。
+
+`Lru` 是普通 struct（字段 `cap` / `map` / `order`），保持值语义：每次更新返回新值，旧值不变。因为不再是原生不透明类型，`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程传输按普通 struct 处理，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输。单次更新 O(n)。
 
 `std.set` / `std.deque` / `std.heap` 是原生实现（`import std.set` / `import std.deque` / `import std.heap` 仍然可用，也可以直接使用对应的 `std.*`）：
 
@@ -2428,7 +2430,7 @@ std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 
 `zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
 
-`std.list` / `std.dict` / `std.bytes` / `std.lru` 由内部适配层提供，原生入口保留在 `std.raw.list` / `std.raw.dict` / `std.raw.bytes` / `std.raw.lru`；当前使用语言级默认参数的有 `list.slice`、`list.sort`、`list.sort_by`、`list.is_sorted`、`list.top_k`、`list.binary_search`、`list.reduce`、`dict.get`、`lru.get`、`lru.peek` 和 `bytes.slice`，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
+`std.list` / `std.dict` / `std.bytes` 由内部适配层提供，原生入口保留在 `std.raw.list` / `std.raw.dict` / `std.raw.bytes`；当前使用语言级默认参数的有 `list.slice`、`list.sort`、`list.sort_by`、`list.is_sorted`、`list.top_k`、`list.binary_search`、`list.reduce`、`dict.get` 和 `bytes.slice`，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
 
 `std.fn` 提供函数组合与部分应用：
 
@@ -2524,18 +2526,6 @@ std.enum.decode
 std.enum.tag
 
 std.struct.decode
-
-std.lru.new
-std.lru.get
-std.lru.peek
-std.lru.put
-std.lru.delete
-std.lru.has
-std.lru.keys
-std.lru.values
-std.lru.len
-std.lru.capacity
-std.lru.clear
 
 std.deque.new
 std.deque.from_list

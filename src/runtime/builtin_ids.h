@@ -308,6 +308,8 @@ enum bifs {
     B_meta_traits,
     B_meta_implements,
     B_meta_has_type,
+    /* Removed: std.lru is now the script package lib/std/lru.skein.  Keep
+       these slots so serialized builtin ids keep their numeric identity. */
     B_lru_new,
     B_lru_get,
     B_lru_peek,

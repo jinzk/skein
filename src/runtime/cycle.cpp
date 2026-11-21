@@ -14,8 +14,6 @@ const void *value_payload(const struct value_t *v) {
             return ((const struct struct_value_t *)v)->payload.get();
         case T_enum:
             return ((const struct enum_value_t *)v)->payload.get();
-        case T_lru:
-            return ((const struct lru_value_t *)v)->payload.get();
         case T_deque:
             return ((const struct deque_value_t *)v)->payload.get();
         case T_heap:
@@ -60,14 +58,6 @@ void for_each_value_child(
             const struct enum_value_t *ev = (const struct enum_value_t *)v;
             for (struct value_t *field : ev->payload->fields)
                 fn(field);
-            break;
-        }
-        case T_lru: {
-            const struct lru_value_t *lv = (const struct lru_value_t *)v;
-            for (const auto &entry : lv->payload->items) {
-                fn(entry.first);
-                fn(entry.second);
-            }
             break;
         }
         case T_deque: {

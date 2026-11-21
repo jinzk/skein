@@ -130,7 +130,6 @@ bool truthy(const struct value_t *v) {
         case T_list: return !((struct list_value_t *)v)->payload->items.empty();
         case T_dict: return !((struct dict_value_t *)v)->payload->items.empty();
         case T_struct: return true;
-        case T_lru: return !((struct lru_value_t *)v)->payload->items.empty();
         case T_deque:
             return ((struct deque_value_t *)v)->payload->front_size +
                        ((struct deque_value_t *)v)->payload->back_size >
@@ -276,22 +275,6 @@ bool value_equals(struct value_t *a, struct value_t *b) {
                 if (!value_equals(ea->payload->fields[i],
                                   eb->payload->fields[i]))
                     return false;
-            return true;
-        }
-        case T_lru: {
-            struct lru_value_t *la = (struct lru_value_t *)a;
-            struct lru_value_t *lb = (struct lru_value_t *)b;
-            if (la->payload == lb->payload) return true;
-            if (la->payload->capacity != lb->payload->capacity) return false;
-            if (la->payload->items.size() != lb->payload->items.size())
-                return false;
-            for (size_t i = 0; i < la->payload->items.size(); ++i) {
-                if (!value_equals(la->payload->items[i].first,
-                                  lb->payload->items[i].first) ||
-                    !value_equals(la->payload->items[i].second,
-                                  lb->payload->items[i].second))
-                    return false;
-            }
             return true;
         }
         case T_deque: {

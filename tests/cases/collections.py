@@ -335,48 +335,48 @@ def run_cases():
 
     check("lru basics",
           'import std;\n'
-          'let l = std.lru.new(2);\n'
-          'let r = std.lru.put(l, "a", 1); l = r["lru"];\n'
-          'r = std.lru.put(l, "b", 2); l = r["lru"];\n'
-          'println(std.lru.keys(l));\n'
-          'r = std.lru.get(l, "a"); l = r["lru"];\n'
-          'println(std.lru.keys(l));\n'
-          'r = std.lru.put(l, "c", 3); l = r["lru"];\n'
+          'let l = lru.new(2);\n'
+          'let r = lru.put(l, "a", 1); l = r["lru"];\n'
+          'r = lru.put(l, "b", 2); l = r["lru"];\n'
+          'println(lru.keys(l));\n'
+          'r = lru.get(l, "a"); l = r["lru"];\n'
+          'println(lru.keys(l));\n'
+          'r = lru.put(l, "c", 3); l = r["lru"];\n'
           'println(r["evicted"]["key"]);\n'
-          'println(std.lru.keys(l));\n'
-          'let p = std.lru.peek(l, "a")["lru"];\n'
-          'println(std.lru.keys(p));\n'
-          'r = std.lru.delete(l, "a"); l = r["lru"];\n'
+          'println(lru.keys(l));\n'
+          'let p = lru.peek(l, "a")["lru"];\n'
+          'println(lru.keys(p));\n'
+          'r = lru.delete(l, "a"); l = r["lru"];\n'
           'println(r["removed"]);\n'
-          'println(std.lru.len(l));\n'
-          'println(std.lru.capacity(l));\n'
-          'println(std.lru.clear(l));\n',
+          'println(lru.size(l));\n'
+          'println(lru.capacity(l));\n'
+          'println(lru.keys(lru.clear(l)));\n',
           stdout_all=["[a, b]", "[b, a]", "b", "[a, c]", "[a, c]",
-                      "true", "1", "2", "lru(0/2, {})"])
+                      "true", "1", "2", "[]"])
     check("lru get default",
           'import std;\n'
-          'let l = std.lru.new(2);\n'
-          'let r = std.lru.get(l, "missing", 42);\n'
+          'let l = lru.new(2);\n'
+          'let r = lru.get(l, "missing", 42);\n'
           'println(r["found"]);\nprintln(r["value"]);\n',
           stdout_all=["false", "42"])
     check("lru value semantics",
           'import std;\n'
-          'let a = std.lru.new(2);\n'
-          'let r = std.lru.put(a, 1, "x");\n'
+          'let a = lru.new(2);\n'
+          'let r = lru.put(a, 1, "x");\n'
           'let b = r["lru"];\n'
-          'println(std.lru.len(a));\nprintln(std.lru.len(b));\n'
-          'let r2 = std.lru.put(a, 1, "x");\n'
+          'println(lru.size(a));\nprintln(lru.size(b));\n'
+          'let r2 = lru.put(a, 1, "x");\n'
           'println(b == r2["lru"]);\n',
           stdout_all=["0", "1", "true"])
     check("lru capacity must be positive",
-          'import std;\nstd.lru.new(0);\n',
+          'import std;\nlru.new(0);\n',
           stderr="std.lru.new capacity must be at least 1")
     check("lru key restrictions",
-          'import std;\nlet l = std.lru.new(2);\nstd.lru.get(l, 1.5);\n',
+          'import std;\nlet l = lru.new(2);\nlru.get(l, 1.5);\n',
           stderr="std.lru key: dict key must be")
-    check("lru json encode rejected",
-          'import std;\nstd.json.stringify(std.lru.new(2));\n',
-          stderr="cannot encode lru as JSON")
+    check("lru json encoding",
+          'import std;\nstd.json.stringify(lru.new(2));\n',
+          stdout='= {"cap":2,"map":{},"order":[]}')
 
     check("list unique and group_by",
           'import std;\n'
@@ -838,13 +838,13 @@ def run_cases():
           'import std;\n'
           'func make() {\n'
           '  let n = 41;\n'
-          '  let l = std.lru.new(1);\n'
-          '  let r = std.lru.put(l, "f", func() { return n + 1; });\n'
+          '  let l = lru.new(1);\n'
+          '  let r = lru.put(l, "f", func() { return n + 1; });\n'
           '  return r["lru"];\n'
           '}\n'
           'let l = make();\n'
           + repeated_lets()
-          + 'let f = std.lru.get(l, "f")["value"];\n'
+          + 'let f = lru.get(l, "f")["value"];\n'
           + 'println(f());\n',
           stdout="42")
     check("result closure survives cycle collection",

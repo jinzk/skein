@@ -35,7 +35,7 @@ struct thread_transfer_value {
 };
 
 struct thread_transfer_container {
-    enum class Kind { List, Dict, Set, Deque, Lru };
+    enum class Kind { List, Dict, Set, Deque };
     Kind kind = Kind::List;
     std::vector<thread_transfer_value> items;
     std::vector<std::pair<thread_transfer_value, thread_transfer_value>>

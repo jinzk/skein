@@ -1580,7 +1580,7 @@ def run_cases():
         "kind_of(std.list.sort)\n"
         "kind_of(std.list.reduce)\n"
         "kind_of(std.dict.get)\n"
-        "kind_of(std.lru.get)\n"
+        "kind_of(lru.get)\n"
         "kind_of(std.bytes.slice)\n",
         stdout_all=["= bc", "= function", "= function", "= function",
                     "= function", "= function"],
@@ -1596,8 +1596,8 @@ def run_cases():
         "kind_of(std.list.binary_search)\n"
         "kind_of(std.list.reduce)\n"
         "kind_of(std.dict.get)\n"
-        "kind_of(std.lru.get)\n"
-        "kind_of(std.lru.peek)\n"
+        "kind_of(lru.get)\n"
+        "kind_of(lru.peek)\n"
         "kind_of(std.bytes.slice)\n"
         "kind_of(std.raw.list.slice)\n",
         stdout_all=["= function"] * 11 + ["= builtin"],

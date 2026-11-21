@@ -1679,7 +1679,7 @@ apply(std.math.sqrt, 16)
 - 闭包按引用捕获定义处的作用域，因此局部变量会在闭包存活期间继续存在；
 - 运行时使用**作用域粒度的标记式环回收器**（`gc.cpp`）：从全局作用域、当前作用域链和恢复栈出发，标记可达 scope，再清理不可达 scope 的符号表；
 - 回收每 64 个顶层语句或 scope 数量明显增长时执行，只在顶层语句边界进行；
-- 值遍历覆盖 `list` / `dict` / `struct` / `enum` / `lru` / `result` / `method`，所以闭包即使只被 enum、LRU 或 result 持有，也不会被误回收；
+- 值遍历覆盖 `list` / `dict` / `struct` / `enum` / `result` / `method`，所以闭包即使只被 enum、LRU（struct）或 result 持有，也不会被误回收；
 - 这不是完整的逐值 tracing GC：值本身仍由引用计数管理，没有压缩、移动或 finalizer；
 - 如果未来原生资源也能保存语言值，需要扩展回收器的遍历规则。
 
@@ -2836,7 +2836,7 @@ channel.stats -> dict
   旧名 `unbounded_channel()` 已移除；
 - Channel 只接收 `std.thread.Message`；
 - `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
-- payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；
+- payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；LRU 现在是普通 struct，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输；
 - `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
 - `send` 在队列满时阻塞；rendezvous（capacity 0）下阻塞到有接收者等待；
   `try_send` 不阻塞，无空间/无接收者时返回 `false`；
@@ -2990,7 +2990,7 @@ let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
   # 另一个进程：
   let t = std.thread.spawn_entry(std.fs.read_bytes("entry.bin"), msg);
   ```
-  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque/lru、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` / `lru` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器。
+  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器；LRU 是普通 struct，遵循 struct 的传输规则，不能嵌套函数 / heap 等特殊值。
 
 线程入口接收一个 Message：
 

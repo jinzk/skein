@@ -1345,28 +1345,6 @@ bool materialize_thread_value(
                 out = (struct value_t *)deque;
                 return true;
             }
-            case thread_transfer_container::Kind::Lru: {
-                struct lru_value_t *lru =
-                    newlruval((std::size_t)source.capacity);
-                for (const auto &entry : source.entries) {
-                    struct value_t *key = nullptr;
-                    struct value_t *item = nullptr;
-                    if (!materialize_thread_value(context, entry.first, key,
-                                                  error)) {
-                        freeval((struct value_t *)lru);
-                        return false;
-                    }
-                    if (!materialize_thread_value(context, entry.second, item,
-                                                  error)) {
-                        freeval(key);
-                        freeval((struct value_t *)lru);
-                        return false;
-                    }
-                    lru->payload->items.emplace_back(key, item);
-                }
-                out = (struct value_t *)lru;
-                return true;
-            }
             }
             error = "invalid transferred container kind";
             return false;

@@ -62,20 +62,6 @@ package container_adapter {
     return std.raw.dict.get(mapping, key, fallback);
   }
 
-  export func adapter_lru_get(mapping, key, fallback = null) {
-    if (fallback == null) {
-      return std.raw.lru.get(mapping, key);
-    }
-    return std.raw.lru.get(mapping, key, fallback);
-  }
-
-  export func adapter_lru_peek(mapping, key, fallback = null) {
-    if (fallback == null) {
-      return std.raw.lru.peek(mapping, key);
-    }
-    return std.raw.lru.peek(mapping, key, fallback);
-  }
-
   export func adapter_bytes_slice(values, start, count = null) {
     if (count == null) {
       return std.raw.bytes.slice(values, start);

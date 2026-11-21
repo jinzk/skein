@@ -401,14 +401,6 @@ struct dict_value_t *newdictval() {
     return v;
 }
 
-struct lru_value_t *newlruval(std::size_t capacity) {
-    struct lru_value_t *v = new lru_value_t;
-    v->type = T_lru;
-    v->payload = std::make_shared<lru_payload>();
-    v->payload->capacity = capacity;
-    return v;
-}
-
 struct deque_value_t *newdequeval() {
     struct deque_value_t *v = new deque_value_t;
     v->type = T_deque;
@@ -441,13 +433,6 @@ dict_payload::~dict_payload() {
     for (size_t i = 0; i < items.size(); ++i) {
         freeval(items[i].first);
         freeval(items[i].second);
-    }
-}
-
-lru_payload::~lru_payload() {
-    for (auto &entry : items) {
-        freeval(entry.first);
-        freeval(entry.second);
     }
 }
 
@@ -897,13 +882,6 @@ struct value_t *dupval(struct value_t *v) {
             dst->payload = src->payload;
             return (struct value_t *)dst;
         }
-        case T_lru: {
-            struct lru_value_t *src = (struct lru_value_t *)v;
-            struct lru_value_t *dst = new lru_value_t;
-            dst->type = T_lru;
-            dst->payload = src->payload;
-            return (struct value_t *)dst;
-        }
         case T_deque: {
             struct deque_value_t *src = (struct deque_value_t *)v;
             struct deque_value_t *dst = new deque_value_t;
@@ -1020,9 +998,6 @@ void freeval(struct value_t *v) {
         case T_enum:
             delete (struct enum_value_t *)v;
             break;
-        case T_lru:
-            delete (struct lru_value_t *)v;
-            break;
         case T_deque:
             delete (struct deque_value_t *)v;
             break;
@@ -1084,7 +1059,6 @@ const char *typename_of(const struct value_t *v) {
             const struct enum_value_t *e = (const struct enum_value_t *)v;
             return e->def ? e->def->name.c_str() : "enum";
         }
-        case T_lru: return "lru";
         case T_deque: return "deque";
         case T_heap: return "heap";
         case T_set: return "set";
@@ -1228,21 +1202,6 @@ std::string value_to_string(const struct value_t *v) {
                            : "null";
             }
             out += " }";
-            return out;
-        }
-        case T_lru: {
-            const struct lru_value_t *l = (const struct lru_value_t *)v;
-            std::string out = "lru(" +
-                              std::to_string(l->payload->items.size()) +
-                              "/" + std::to_string(l->payload->capacity) +
-                              ", {";
-            for (size_t i = 0; i < l->payload->items.size(); ++i) {
-                if (i) out += ", ";
-                out += value_to_string(l->payload->items[i].first);
-                out += ": ";
-                out += value_to_string(l->payload->items[i].second);
-            }
-            out += "})";
             return out;
         }
         case T_deque: {

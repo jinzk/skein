@@ -987,39 +987,6 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
-    } else if (functype == B_lru_new) {
-        if (args.size() != 1) {
-            yyerror("std.lru.new expects 1 argument, got %d",
-                    (int)args.size());
-            return NULL;
-        }
-    } else if (functype == B_lru_get || functype == B_lru_peek) {
-        if (args.size() < 2 || args.size() > 3) {
-            yyerror("%s expects 2 or 3 arguments, got %d",
-                    functype == B_lru_get ? "std.lru.get" : "std.lru.peek",
-                    (int)args.size());
-            return NULL;
-        }
-    } else if (functype == B_lru_put) {
-        if (args.size() != 3) {
-            yyerror("std.lru.put expects 3 arguments, got %d",
-                    (int)args.size());
-            return NULL;
-        }
-    } else if (functype == B_lru_delete || functype == B_lru_has) {
-        if (args.size() != 2) {
-            yyerror("%s expects 2 arguments, got %d",
-                    functype == B_lru_delete ? "std.lru.delete"
-                                             : "std.lru.has",
-                    (int)args.size());
-            return NULL;
-        }
-    } else if (functype >= B_lru_keys && functype <= B_lru_clear) {
-        if (args.size() != 1) {
-            yyerror("std.lru function expects 1 argument, got %d",
-                    (int)args.size());
-            return NULL;
-        }
     } else if (functype == B_deque_new) {
         if (!args.empty()) {
             yyerror("std.deque.new expects 0 arguments, got %d",
@@ -1122,8 +1089,6 @@ struct value_t *call_builtin(int functype,
         return call_text_builtin(functype, args);
     if (functype >= B_bytes_from_string && functype <= B_file_write_bytes)
         return call_bytes_builtin(functype, args);
-    if (functype >= B_lru_new && functype <= B_lru_clear)
-        return call_lru_builtin(functype, args);
     if (functype >= B_deque_new && functype <= B_deque_to_list)
         return call_deque_builtin(functype, args);
     if (functype >= B_heap_new && functype <= B_heap_to_list)

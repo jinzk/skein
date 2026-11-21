@@ -30,6 +30,7 @@
 #include "std_graph_source.inc"
 #include "std_arena_source.inc"
 #include "std_path_source.inc"
+#include "std_lru_source.inc"
 
 #include <chrono>
 
@@ -100,6 +101,7 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.graph", kStdGraphSource},
     {"std.arena", kStdArenaSource},
     {"std.path", kStdPathSource},
+    {"std.lru", kStdLruSource},
 };
 
 const char *find_embedded_source(const std::string &dotted) {

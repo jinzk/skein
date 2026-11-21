@@ -71,6 +71,8 @@ thread_local std::unordered_map<function_code *, default_cache_entry> default_ca
  */
 thread_local std::unordered_map<function_code *, std::unique_ptr<function_vm_cache>>
     vm_caches;
+/* Protects the shared function_code::vm_cache handoff between threads. */
+std::mutex cache_transfer_mutex;
 
 void release_jit_code(function_vm_cache *cache) {
 #ifdef SKEIN_ENABLE_JIT
@@ -83,15 +85,47 @@ void release_jit_code(function_vm_cache *cache) {
 #endif
 }
 
+thread_local function_code *last_cache_code = nullptr;
+thread_local function_vm_cache *last_cache = nullptr;
+
 function_vm_cache *cache_for(function_code *code) {
-    if (code->vm_cache)
-        return static_cast<function_vm_cache *>(code->vm_cache);
+    if (last_cache_code == code && last_cache)
+        return last_cache;
+    auto existing = vm_caches.find(code);
+    if (existing != vm_caches.end()) {
+        last_cache_code = code;
+        last_cache = existing->second.get();
+        return last_cache;
+    }
+
+    /*
+     * Code transferred from another thread may carry a cache with a compiled
+     * proto.  Clone the proto so each thread owns its mutable inline caches;
+     * never share the cache object itself across threads.
+     */
     std::unique_ptr<function_vm_cache> entry(new function_vm_cache());
     entry->code = code;
     entry->keepalive = code->shared_from_this();
+    {
+        std::lock_guard<std::mutex> lock(cache_transfer_mutex);
+        function_vm_cache *source = code->vm_cache
+            ? static_cast<function_vm_cache *>(code->vm_cache)
+            : nullptr;
+        if (source && source->proto) {
+            entry->proto = std::make_shared<skein::bc::Proto>(*source->proto);
+            entry->proto->name_ic.clear();
+            entry->proto->member_ic.clear();
+            entry->proto->index_read_ic.clear();
+            entry->param_patterns = source->param_patterns;
+            entry->compile_failed = source->compile_failed;
+        }
+    }
     function_vm_cache *raw = entry.get();
     vm_caches.emplace(code, std::move(entry));
-    code->vm_cache = raw;
+    if (!code->vm_cache)
+        code->vm_cache = raw;
+    last_cache_code = code;
+    last_cache = raw;
     return raw;
 }
 
@@ -99,8 +133,15 @@ void release_vm_cache(function_vm_cache *cache) {
     if (!cache)
         return;
     release_jit_code(cache);
-    if (cache->code)
-        cache->code->vm_cache = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(cache_transfer_mutex);
+        if (cache->code && cache->code->vm_cache == cache)
+            cache->code->vm_cache = nullptr;
+    }
+    if (last_cache == cache) {
+        last_cache = nullptr;
+        last_cache_code = nullptr;
+    }
 }
 
 bool read_bool_env(const char *name, bool fallback) {

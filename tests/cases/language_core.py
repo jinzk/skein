@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Core language: literals, operators, control flow, switch.
 
-Extracted from the original test_skein.py main() body, lines 710-1099.
+Numeric literal and operator cases live in
+tests/skein/language_core_numbers.skein.
 """
 import os
 
@@ -9,56 +10,20 @@ from harness import *  # noqa: F401,F403
 
 
 def run_cases():
+    run_skein("language_core_numbers.skein")
+    check(
+        "numeric golden output",
+        "1.5*2\n"
+        "0.1 + 0.2\n",
+        stdout_all=["= 3.0", "= 0.30000000000000004"],
+    )
+
     check("addition", "1+2\n", stdout="= 3")
     check("pipe mode has no REPL prompt", "1+2\n", stdout="= 3")
     assert "> " not in run("1+2\n").stdout
     check("ans and underscore reference last result",
           "1 + 2\nans * 4\n_\n_ + 1\n",
           stdout_all=["= 3", "= 12", "= 12", "= 13"])
-    check("float", "1.5*2\n", stdout="= 3.0")
-    check("float keeps type in output", "1.0\n", stdout="= 1.0")
-    check("float shortest round-trip", "1.23456\n", stdout="= 1.23456")
-    check("float binary rounding", "0.1 + 0.2\n",
-          stdout="= 0.30000000000000004")
-    check("integer division", "10/4\n", stdout="= 2")
-    check("float division", "10/4.0\n", stdout="= 2.5")
-    check("integer division truncates toward zero", "-7 / 4\n", stdout="= -1")
-    check("int64 addition", "2147483647 + 1\n", stdout="= 2147483648")
-    check("int64 maximum", "9223372036854775807\n",
-          stdout="= 9223372036854775807")
-    check("integer overflow", "9223372036854775807 + 1\n",
-          stderr="integer overflow")
-    check("integer multiplication boundary",
-          "3037000499 * 3037000499\n", stdout="= 9223372030926249001")
-    check("integer multiplication overflow",
-          "3037000500 * 3037000500\n", stderr="integer overflow")
-    check("INT64_MIN times -1", "(-9223372036854775807 - 1) * -1\n",
-          stderr="integer overflow")
-    check("out-of-range integer literal becomes float",
-          "9223372036854775808\n", stdout="= 9.223372036854776e+18")
-    check("integer literal underscores", "1_000_000\n", stdout="= 1000000")
-    check("integer literal underscores near int64 max",
-          "9_223_372_036_854_775_807\n",
-          stdout="= 9223372036854775807")
-    check("out-of-range integer literal with underscores becomes float",
-          "9_223_372_036_854_775_808\n",
-          stdout="= 9.223372036854776e+18")
-    check("hex integer literal", "0xff\n", stdout="= 255")
-    check("uppercase hex integer literal", "0XFF\n", stdout="= 255")
-    check("hex integer literal mixed case", "0xDeAdBeEf\n",
-          stdout="= 3735928559")
-    check("hex integer literal underscores", "0xFF_FF\n", stdout="= 65535")
-    check("binary integer literal", "0b1010\n", stdout="= 10")
-    check("uppercase binary integer literal", "0B1111\n", stdout="= 15")
-    check("binary integer literal underscores", "0b1010_0101\n",
-          stdout="= 165")
-    check("octal integer literal", "0o17\n", stdout="= 15")
-    check("uppercase octal integer literal", "0O777\n", stdout="= 511")
-    check("octal integer literal underscores", "0o7_7\n", stdout="= 63")
-    check("prefixed literals in arithmetic",
-          "0x10 + 0b10 + 0o10\n", stdout="= 26")
-    check("hex int64 maximum", "0x7FFFFFFFFFFFFFFF\n",
-          stdout="= 9223372036854775807")
     check("hex integer literal out of range", "0x8000000000000000\n",
           stderr="hexadecimal integer literal out of range")
     check("invalid binary digit", "0b102\n",
@@ -73,38 +38,8 @@ def run_cases():
           stderr="invalid hexadecimal integer literal")
     check("consecutive integer underscores", "1__0\n",
           stderr="invalid numeric literal")
-    check("scientific notation", "1e3\n", stdout="= 1000.0")
-    check("scientific notation uppercase", "1E+3\n", stdout="= 1000.0")
-    check("scientific notation negative exponent", "1e-3\n",
-          stdout="= 0.001")
-    check("scientific notation with dot and no fraction", "1.e2\n",
-          stdout="= 100.0")
-    check("scientific notation leading dot", ".5e2\n", stdout="= 50.0")
-    check("float literal underscores", "1_000.5_5\n", stdout="= 1000.55")
-    check("scientific notation exponent underscores", "1.5e1_0\n",
-          stdout="= 15000000000.0")
-    check("INT64_MIN division overflow",
-          "(-9223372036854775807 - 1) / -1\n", stderr="integer overflow")
-    check("int64 exact mixed comparison",
-          "9007199254740993 == 9007199254740992.0\n", stdout="= false")
 
-    check("modulo", "7 % 4\n", stdout="= 3")
-    check("float modulo", "7.5 % 2\n", stdout="= 1.5")
-    check("modulo sign follows dividend", "-7 % 4\n", stdout="= -3")
-    check("modulo negative divisor", "7 % -4\n", stdout="= 3")
-    check("modulo by zero", "1 % 0\n", stderr="modulo by zero")
 
-    check("postfix increment returns old value",
-          "let x = 1;\nlet a = x++;\na\nx\n", stdout_all=["= 1", "= 2"])
-    check("prefix increment returns new value",
-          "let x = 1;\nlet a = ++x;\na\nx\n", stdout_all=["= 2", "= 2"])
-    check("postfix decrement returns old value",
-          "let x = 2;\nlet a = x--;\na\nx\n", stdout_all=["= 2", "= 1"])
-    check("prefix decrement returns new value",
-          "let x = 2;\nlet a = --x;\na\nx\n", stdout_all=["= 1", "= 1"])
-    check("increment in for loop",
-          "let n = 0;\nfor (let i = 0; i < 3; i++) { n = n + i; }\nn\n",
-          stdout="= 3")
     check("for in without let over list",
           "for x in [1, 2, 3] { println(x); }\n",
           stdout="1\n2\n3\n")

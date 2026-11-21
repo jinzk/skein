@@ -1,0 +1,231 @@
+import std;
+include "_support.skein";
+
+ts_test("float", func() {
+  ts_same(1.5 * 2, 3.0);
+  ts_eq(str(1.5 * 2), "3.0");
+});
+
+ts_test("float keeps type in output", func() {
+  ts_eq(str(1.0), "1.0");
+});
+
+ts_test("float shortest round-trip", func() {
+  ts_eq(str(1.23456), "1.23456");
+});
+
+ts_test("float binary rounding", func() {
+  ts_same(0.1 + 0.2, 0.30000000000000004);
+  ts_eq(str(0.1 + 0.2), "0.30000000000000004");
+});
+
+ts_test("integer division", func() {
+  ts_eq(10 / 4, 2);
+});
+
+ts_test("float division", func() {
+  ts_same(10 / 4.0, 2.5);
+});
+
+ts_test("integer division truncates toward zero", func() {
+  ts_eq(-7 / 4, -1);
+});
+
+ts_test("int64 addition", func() {
+  ts_eq(2147483647 + 1, 2147483648);
+});
+
+ts_test("int64 maximum", func() {
+  ts_eq(9223372036854775807, 9223372036854775807);
+});
+
+ts_test("integer overflow", func() {
+  ts_error(func() {
+    return 9223372036854775807 + 1;
+  }, "integer overflow");
+});
+
+ts_test("integer multiplication boundary", func() {
+  ts_eq(3037000499 * 3037000499, 9223372030926249001);
+});
+
+ts_test("integer multiplication overflow", func() {
+  ts_error(func() {
+    return 3037000500 * 3037000500;
+  }, "integer overflow");
+});
+
+ts_test("INT64_MIN times -1", func() {
+  ts_error(func() {
+    return (-9223372036854775807 - 1) * -1;
+  }, "integer overflow");
+});
+
+ts_test("out-of-range integer literal becomes float", func() {
+  ts_same(9223372036854775808, 9.223372036854776e+18);
+});
+
+ts_test("integer literal underscores", func() {
+  ts_eq(1_000_000, 1000000);
+});
+
+ts_test("integer literal underscores near int64 max", func() {
+  ts_eq(9_223_372_036_854_775_807, 9223372036854775807);
+});
+
+ts_test("out-of-range integer literal with underscores becomes float", func() {
+  ts_same(9_223_372_036_854_775_808, 9.223372036854776e+18);
+});
+
+ts_test("hex integer literal", func() {
+  ts_eq(0xff, 255);
+});
+
+ts_test("uppercase hex integer literal", func() {
+  ts_eq(0XFF, 255);
+});
+
+ts_test("hex integer literal mixed case", func() {
+  ts_eq(0xDeAdBeEf, 3735928559);
+});
+
+ts_test("hex integer literal underscores", func() {
+  ts_eq(0xFF_FF, 65535);
+});
+
+ts_test("binary integer literal", func() {
+  ts_eq(0b1010, 10);
+});
+
+ts_test("uppercase binary integer literal", func() {
+  ts_eq(0B1111, 15);
+});
+
+ts_test("binary integer literal underscores", func() {
+  ts_eq(0b1010_0101, 165);
+});
+
+ts_test("octal integer literal", func() {
+  ts_eq(0o17, 15);
+});
+
+ts_test("uppercase octal integer literal", func() {
+  ts_eq(0O777, 511);
+});
+
+ts_test("octal integer literal underscores", func() {
+  ts_eq(0o7_7, 63);
+});
+
+ts_test("prefixed literals in arithmetic", func() {
+  ts_eq(0x10 + 0b10 + 0o10, 26);
+});
+
+ts_test("hex int64 maximum", func() {
+  ts_eq(0x7FFFFFFFFFFFFFFF, 9223372036854775807);
+});
+
+ts_test("scientific notation", func() {
+  ts_same(1e3, 1000.0);
+  ts_eq(str(1e3), "1000.0");
+});
+
+ts_test("scientific notation uppercase", func() {
+  ts_same(1E+3, 1000.0);
+  ts_eq(str(1E+3), "1000.0");
+});
+
+ts_test("scientific notation negative exponent", func() {
+  ts_same(1e-3, 0.001);
+  ts_eq(str(1e-3), "0.001");
+});
+
+ts_test("scientific notation with dot and no fraction", func() {
+  ts_same(1.e2, 100.0);
+  ts_eq(str(1.e2), "100.0");
+});
+
+ts_test("scientific notation leading dot", func() {
+  ts_same(.5e2, 50.0);
+  ts_eq(str(.5e2), "50.0");
+});
+
+ts_test("float literal underscores", func() {
+  ts_same(1_000.5_5, 1000.55);
+  ts_eq(str(1_000.5_5), "1000.55");
+});
+
+ts_test("scientific notation exponent underscores", func() {
+  ts_same(1.5e1_0, 15000000000.0);
+  ts_eq(str(1.5e1_0), "15000000000.0");
+});
+
+ts_test("INT64_MIN division overflow", func() {
+  ts_error(func() {
+    return (-9223372036854775807 - 1) / -1;
+  }, "integer overflow");
+});
+
+ts_test("int64 exact mixed comparison", func() {
+  ts_false(9007199254740993 == 9007199254740992.0);
+});
+
+ts_test("modulo", func() {
+  ts_eq(7 % 4, 3);
+});
+
+ts_test("float modulo", func() {
+  ts_same(7.5 % 2, 1.5);
+});
+
+ts_test("modulo sign follows dividend", func() {
+  ts_eq(-7 % 4, -3);
+});
+
+ts_test("modulo negative divisor", func() {
+  ts_eq(7 % -4, 3);
+});
+
+ts_test("modulo by zero", func() {
+  ts_error(func() {
+    return 1 % 0;
+  }, "modulo by zero");
+});
+
+ts_test("postfix increment returns old value", func() {
+  let x = 1;
+  let a = x++;
+  ts_eq(a, 1);
+  ts_eq(x, 2);
+});
+
+ts_test("prefix increment returns new value", func() {
+  let x = 1;
+  let a = ++x;
+  ts_eq(a, 2);
+  ts_eq(x, 2);
+});
+
+ts_test("postfix decrement returns old value", func() {
+  let x = 2;
+  let a = x--;
+  ts_eq(a, 2);
+  ts_eq(x, 1);
+});
+
+ts_test("prefix decrement returns new value", func() {
+  let x = 2;
+  let a = --x;
+  ts_eq(a, 1);
+  ts_eq(x, 1);
+});
+
+ts_test("increment in for loop", func() {
+  let n = 0;
+  for (let i = 0; i < 3; i++) {
+    n = n + i;
+  }
+  ts_eq(n, 3);
+});
+
+ts_finish();

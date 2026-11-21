@@ -31,6 +31,7 @@
 #include "std_arena_source.inc"
 #include "std_path_source.inc"
 #include "std_lru_source.inc"
+#include "std_dict_key_source.inc"
 
 #include <chrono>
 
@@ -102,6 +103,7 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.arena", kStdArenaSource},
     {"std.path", kStdPathSource},
     {"std.lru", kStdLruSource},
+    {"std.dict_key", kStdDictKeySource},
 };
 
 const char *find_embedded_source(const std::string &dotted) {

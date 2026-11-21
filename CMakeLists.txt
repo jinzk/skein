@@ -551,6 +551,7 @@ set(SKEIN_EMBEDDED_SOURCES
   arena.skein:kStdArenaSource:std_arena_source.inc
   path.skein:kStdPathSource:std_path_source.inc
   lru.skein:kStdLruSource:std_lru_source.inc
+  dict_key.skein:kStdDictKeySource:std_dict_key_source.inc
 )
 set(SKEIN_EMBEDDED_OUTPUTS)
 foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)

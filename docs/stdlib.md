@@ -2140,6 +2140,7 @@ std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
 std.lru（内嵌 Skein 源码包）
+std.dict_key（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -2237,9 +2238,28 @@ r = lru.put(l, "c", 3);    // 淘汰 b
 r["evicted"]               // {key: b, value: 2}
 ```
 
-API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `size` / `capacity` / `clear`。key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希的 struct）；`keys` / `values` 从最久未使用到最近使用排列。
+API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `size` / `capacity` / `clear`。key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictKey` 的 struct）；`keys` / `values` 从最久未使用到最近使用排列。
 
 `Lru` 是普通 struct（字段 `cap` / `map` / `order`），保持值语义：每次更新返回新值，旧值不变。因为不再是原生不透明类型，`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程传输按普通 struct 处理，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输。单次更新 O(n)。
+
+`std.dict_key` 是内嵌 Skein 源码包（`lib/std/dict_key.skein`），定义自定义 struct key hash 接口：
+
+```text
+import std.dict_key;
+
+struct User {
+  id: int;
+  cache: list[int];
+}
+
+impl dict_key.DictKey for User {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+```
+
+`dict_hash` 必须是纯函数、确定性、无副作用，并且与 struct 的结构相等一致：相等的 struct 必须返回相同的 hash。实现后该 struct 可以跳过字段递归可哈希检查，直接作为 `dict` key 或 `set` 元素；其余字段仍参与相等比较，hash 相同但字段不同的 struct 只会在同一个桶里冲突。hash 期间禁止重入 dict/set key hash。
 
 `std.set` / `std.deque` / `std.heap` 是原生实现（`import std.set` / `import std.deque` / `import std.heap` 仍然可用，也可以直接使用对应的 `std.*`）：
 
@@ -2260,7 +2280,7 @@ let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
 heap.peek(h)         // 1
 ```
 
-`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`，或由这些类型递归组成的 tuple/pair，或所有字段递归可哈希的 struct）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
+`set` 元素必须是合法 dict key（`int/bool/string/char/byte/bytes/null`，或由这些类型递归组成的 tuple/pair，或所有字段递归可哈希的 struct，或实现 `std.dict_key.DictKey` 的 struct）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
 
 `std.route` 是显式注册的 Web 路由：
 
@@ -2428,7 +2448,7 @@ std.list.top_k([5, 1, 4, 2, 3], 3)      // [1, 2, 3]
 std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 ```
 
-`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希的 struct）。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
+`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictKey` 的 struct）。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
 
 `std.list` / `std.dict` / `std.bytes` 由内部适配层提供，原生入口保留在 `std.raw.list` / `std.raw.dict` / `std.raw.bytes`；当前使用语言级默认参数的有 `list.slice`、`list.sort`、`list.sort_by`、`list.is_sorted`、`list.top_k`、`list.binary_search`、`list.reduce`、`dict.get` 和 `bytes.slice`，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
 

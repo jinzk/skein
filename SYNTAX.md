@@ -2507,6 +2507,7 @@ std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
 std.lru（内嵌 Skein 源码包）
+std.dict_key（内嵌 Skein 源码包）
 ```
 
 常用示例：
@@ -2612,7 +2613,7 @@ std.list.binary_search(xs, value, cmp = null) -> {found, index}
 ```
 
 - `unique` / `unique_by` 保留第一次出现的元素；
-- `group_by` 的 key 必须是合法 dict key，结果 dict 保持首次出现顺序；
+- `group_by` 的 key 必须是合法 dict key（包括 tuple/pair、字段递归可哈希的 struct 或实现 `std.dict_key.DictKey` 的 struct），结果 dict 保持首次出现顺序；
 - `chunk` / `window` 的 `n` 必须 >= 1，`window` 的 `step` 必须 >= 1；
 - `chunk` 最后一块可以不满；`window` 只返回完整窗口；
 - `zip` 以最短输入为准，多余元素丢弃；
@@ -4442,7 +4443,7 @@ print(r["evicted"]);       // {key: b, value: 2}
 规则：
 
 - `capacity` 必须 >= 1；
-- key 必须是合法 dict key（`int/bool/string/char/byte/bytes/null`）；
+- key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希的 struct，或实现 `std.dict_key.DictKey` 的 struct）；
 - 顺序从最久未使用到最近使用：`keys` / `values` 按此顺序返回；
 - `get` 命中时把 key 移到最近使用端，`peek` 不改变顺序；
 - 未命中时返回 `found: false`，`value` 是第三个参数或 `null`；
@@ -4453,6 +4454,27 @@ print(r["evicted"]);       // {key: b, value: 2}
 - 不再是原生不透明类型：`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程按普通 struct 传输，函数 / heap 等特殊值不能嵌套在 LRU 字段中。
 
 性能提示：脚本版 `put` / `get` 每次都会复制 dict / list 以保持值语义，O(n)/次；比原 C++ 实现慢 2–10x。
+
+### std.dict_key
+
+`std.dict_key` 是内嵌 Skein 源码包（`lib/std/dict_key.skein`），定义 struct 自定义 dict/set key hash 接口：
+
+```text
+import std.dict_key;
+
+struct User {
+  id: int;
+  cache: list[int];
+}
+
+impl dict_key.DictKey for User {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+```
+
+`dict_hash` 必须返回 `int`，并且是纯函数、确定性、无副作用；相等的 struct 必须返回相同的 hash。实现后 struct 可以跳过字段递归可哈希检查直接作为 key，但其余字段仍参与结构相等比较。hash 期间禁止重入 dict/set key hash。
 
 ### std.set / std.deque / std.heap
 
@@ -4475,7 +4497,7 @@ set.difference(a, b)
 set.is_subset(a, b)
 ```
 
-元素必须是合法 dict key：`int / bool / string / char / byte / bytes / null`。
+元素必须是合法 dict key：`int / bool / string / char / byte / bytes / null`、由这些类型递归组成的 tuple/pair、字段递归可哈希的 struct，或实现 `std.dict_key.DictKey` 的 struct。
 
 `std.set` 是 C++ 原生持久化集合（哈希 treap + 插入日志），具有值语义：`add` / `remove` 返回新 set，不修改原 set。`add` / `remove` / `has` 为 O(log n)，`from_list` 为 O(n log n)，`values` 为 O(n log n) 并保持插入顺序（删除后重新添加会排到末尾）。也可以只 `import std;` 然后使用 `std.set.*`。`len(s)`、`for ... in s`、JSON 编码（数组）和类型标注 `set` 均支持；`set` 默认值为空集合。
 

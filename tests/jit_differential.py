@@ -122,6 +122,23 @@ CASES = [
         expect_debug="[jit] enter roundtrip",
     ),
     case(
+        "custom-struct-hash",
+        "import std.dict_key;\n"
+        "struct Key { id: int; cache: list[int]; }\n"
+        "impl dict_key.DictKey for Key {\n"
+        "  func dict_hash(self) { return self.id; }\n"
+        "}\n"
+        "func roundtrip(i) {\n"
+        "  let d = {Key { id: 1, cache: [] }: i};\n"
+        "  d[Key { id: 2, cache: [] }] = i + 1;\n"
+        "  return d[Key { id: 1, cache: [] }] + "
+        "d[Key { id: 2, cache: [] }];\n"
+        "}\n"
+        "let i = 0;\n"
+        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        expect_debug="[jit] enter roundtrip",
+    ),
+    case(
         "globals-and-upvalues",
         "let g = 0;\n"
         "func bump() { g = g + 1; return g; }\n"

@@ -438,6 +438,77 @@ def run_cases():
           'println(std.list.unique([Key { id: 1 }, Key { id: 1 }, '
           'Key { id: 2 }]));\n',
           stdout_all=["[Key { id: 1 }, Key { id: 2 }]"])
+    check("custom struct dict hash",
+          'import std;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'let u = User { id: 1, cache: [] };\n'
+          'let d = {u: "x"};\n'
+          'println(d[User { id: 1, cache: [] }]);\n'
+          'println(std.dict.has(d, User { id: 1, cache: [1] }));\n'
+          'let s = std.set.from_list([u, User { id: 1, cache: [] }]);\n'
+          'println(std.set.size(s));\n',
+          stdout_all=["x", "0", "1"])
+    check("custom struct dict hash large",
+          'import std;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'let d = {};\n'
+          'let i = 0;\n'
+          'while (i < 40) { d[User { id: i, cache: [] }] = i; i = i + 1; }\n'
+          'println(d[User { id: 20, cache: [] }]);\n'
+          'println(len(d));\n'
+          'println(std.dict.has(d, User { id: 39, cache: [1] }));\n',
+          stdout_all=["20", "40", "0"])
+    check("custom struct dict hash snapshot",
+          'import std;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'let u = User { id: 1, cache: [] };\n'
+          'let d = {u: 42};\n'
+          'u.id = 2;\n'
+          'println(d[User { id: 1, cache: [] }]);\n'
+          'println(std.dict.has(d, User { id: 2, cache: [] }));\n',
+          stdout_all=["42", "0"])
+    check("custom struct dict hash return type",
+          'import std.dict_key;\n'
+          'struct Bad { id: int; }\n'
+          'impl dict_key.DictKey for Bad {\n'
+          '  func dict_hash(self) { return "x"; }\n'
+          '}\n'
+          '{Bad { id: 1 }: 1}\n',
+          stderr="dict_hash must return an int")
+    check("custom struct dict hash reentrancy",
+          'import std.dict_key;\n'
+          'struct A { id: int; }\n'
+          'struct B { id: int; }\n'
+          'impl dict_key.DictKey for A {\n'
+          '  func dict_hash(self) {\n'
+          '    let m = {B { id: 1 }: 1};\n'
+          '    return self.id;\n'
+          '  }\n'
+          '}\n'
+          'impl dict_key.DictKey for B {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          '{A { id: 1 }: 1}\n',
+          stderr="dict_hash must not re-enter dict/set key hashing")
+    check("lru custom struct hash keys",
+          'import std;\nimport std.lru;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'let l = lru.new(2);\n'
+          'let r = lru.put(l, User { id: 1, cache: [] }, "x"); l = r["lru"];\n'
+          'println(lru.get(l, User { id: 1, cache: [] })["value"]);\n',
+          stdout_all=["x"])
     check("pair producers create hashable pairs",
           'import std;\n'
           'let z = std.list.zip([1], ["a"]);\n'

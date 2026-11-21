@@ -1,5 +1,6 @@
 #include "dict.h"
 
+#include "runtime_context.h"
 #include "structtype.h"
 #include "value_ops.h"
 
@@ -55,6 +56,63 @@ bool scalar_key_allowed(const struct value_t *key) {
     }
 }
 
+std::shared_ptr<function_def> custom_hash_method(const struct_def *def) {
+    if (!def)
+        return NULL;
+    auto method = def->methods.find("dict_hash");
+    if (method != def->methods.end() && method->second)
+        return method->second;
+    for (const trait_def *trait : def->traits) {
+        if (!trait)
+            continue;
+        auto fallback = trait->defaults.find("dict_hash");
+        if (fallback != trait->defaults.end() && fallback->second)
+            return fallback->second;
+    }
+    return NULL;
+}
+
+thread_local bool g_custom_hash_active = false;
+
+bool call_custom_hash(const struct_value_t *structure,
+                      std::uint64_t &out) {
+    if (!structure || !structure->def)
+        return false;
+    std::shared_ptr<function_def> method =
+        custom_hash_method(structure->def);
+    if (!method)
+        return false;
+    if (g_custom_hash_active) {
+        yyerror("dict_hash must not re-enter dict/set key hashing");
+        return false;
+    }
+    if (!skein_context_current() || !skein_context_current()->call) {
+        yyerror("dict_hash requires an interpreter context");
+        return false;
+    }
+
+    struct custom_hash_guard {
+        custom_hash_guard() { g_custom_hash_active = true; }
+        ~custom_hash_guard() { g_custom_hash_active = false; }
+    } guard;
+
+    struct value_t *callee =
+        newmethodval(dupval((struct value_t *)structure), method);
+    struct value_t *result =
+        callee ? skein_call_function(callee, {}) : NULL;
+    freeval(callee);
+    if (!result)
+        return false;
+    if (result->type != T_int) {
+        yyerror("dict_hash must return an int");
+        freeval(result);
+        return false;
+    }
+    out = (std::uint64_t)((struct int_value_t *)result)->value;
+    freeval(result);
+    return true;
+}
+
 bool key_allowed_inner(
     const struct value_t *key, std::vector<const void *> &stack,
     std::size_t depth) {
@@ -74,6 +132,8 @@ bool key_allowed_inner(
             (const struct struct_value_t *)key;
         if (!structure->def || !structure->payload)
             return false;
+        if (custom_hash_method(structure->def))
+            return true;
         identity = structure->payload.get();
     } else {
         return false;
@@ -177,6 +237,16 @@ std::uint64_t hash_key_inner(
                 return 0;
             if (structure->payload->hash_valid)
                 return structure->payload->hash;
+            std::shared_ptr<function_def> custom =
+                custom_hash_method(structure->def);
+            if (custom) {
+                std::uint64_t hash = 0;
+                if (!call_custom_hash(structure, hash))
+                    return 0;
+                structure->payload->hash = hash;
+                structure->payload->hash_valid = true;
+                return hash;
+            }
             const void *identity = structure->payload.get();
             for (const void *parent : stack)
                 if (parent == identity)
@@ -254,9 +324,15 @@ void dict_append_item(struct dict_value_t *dict, struct value_t *key,
         return;
     struct dict_payload *payload = dict->payload.get();
     std::size_t index = payload->items.size();
+    const bool allowed = dict_key_allowed(key);
+    const bool custom_struct =
+        key && key->type == T_struct &&
+        custom_hash_method(((const struct struct_value_t *)key)->def);
+    if (allowed && (custom_struct ||
+                    (payload->index_valid && payload->index_size == index)))
+        dict_key_hash(key);
     payload->items.push_back(std::make_pair(key, value));
-    if (payload->index_valid && payload->index_size == index &&
-        dict_key_allowed(key)) {
+    if (payload->index_valid && payload->index_size == index && allowed) {
         payload->index[dict_key_hash(key)].push_back(index);
         payload->index_size = index + 1;
     }

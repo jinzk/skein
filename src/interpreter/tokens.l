@@ -129,14 +129,30 @@ static bool pending_decl_skip = false;
 static std::vector<int> do_stack;
 
 /*
- * A `do { ... } on error ...` expression uses the `do` keyword but is not a
- * do-while statement.  Drop its lexer bookkeeping once the parser has
- * accepted the construct; otherwise a later `while` at the same indent would
- * be mistaken for the tail of a do-while loop.
+ * A `do { ... }` block expression has been accepted by the parser.  Release
+ * the do-while bookkeeping so a later `while` at the same indent is not
+ * mistaken for its tail.
  */
 void skein_lexer_finish_do_expression() {
     if (!do_stack.empty() && do_stack.back() == indent_count)
         do_stack.pop_back();
+}
+
+/* How a `while` token relates to a preceding `do`. */
+enum class while_kind { Normal, DoWhile, InvalidDoWhile };
+
+static while_kind classify_while() {
+    if (!do_stack.empty() && do_stack.back() == indent_count) {
+        do_stack.pop_back();
+        if (last_token_line != 0 && g_token_line != last_token_line) {
+            report_same_line_error(
+                "while must be on the same line as the preceding '}'");
+            /* Keep parsing the do-while so only one diagnostic is produced. */
+            return while_kind::InvalidDoWhile;
+        }
+        return while_kind::DoWhile;
+    }
+    return while_kind::Normal;
 }
 
 static void start_header_context(int kind) {
@@ -815,8 +831,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     YYRET(SKEIN_TOK_ELSE);
 }
 "while" {
-    if (!do_stack.empty() && do_stack.back() == indent_count) {
-        do_stack.pop_back();
+    while_kind kind = classify_while();
+    if (kind != while_kind::Normal) {
         pending_do_while_paren = true;
         pending_do_while_skip = true;
     } else {
@@ -1136,7 +1152,13 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 \n {
     if (indent_count == 0) {
         reset_for_header_state();
-        YYRET(SKEIN_TOK_EOL);
+        /*
+         * A top-level `do` may still be waiting for its `while`.  Swallow
+         * the newline so the parser can see the tail; otherwise a block
+         * expression statement needs an explicit `;`.
+         */
+        if (do_stack.empty() || do_stack.back() != 0)
+            YYRET(SKEIN_TOK_EOL);
     }
 }
 

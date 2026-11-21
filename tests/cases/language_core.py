@@ -167,6 +167,47 @@ def run_cases():
           "}\n"
           "f();\n",
           stderr="else must be on the same line as the preceding token")
+    check("do block expression value",
+          "let v = do { 1; 2; };\nv\n",
+          stdout="= 2")
+    check("do block expression declaration and empty",
+          "let a = do { let x = 5; };\n"
+          "let b = do { };\n"
+          "print(\"a=\" + str(a));\n"
+          "print(\"b=\" + str(b));\n",
+          stdout_all=["a=null", "b=null"])
+    check("do block expression in expression context",
+          "let v = 1 + do { 3; };\nv\n",
+          stdout="= 4")
+    check("do block expression return",
+          "func f() {\n"
+          "  let v = do { return 5; };\n"
+          "  return v + 1;\n"
+          "}\n"
+          "f()\n",
+          stdout="= 5")
+    check("do block expression break continue",
+          "let i = 0;\n"
+          "let total = 0;\n"
+          "while (i < 5) {\n"
+          "  let v = do {\n"
+          "    i = i + 1;\n"
+          "    if (i == 2) { continue; }\n"
+          "    if (i == 4) { break; }\n"
+          "    i * 10;\n"
+          "  };\n"
+          "  total = total + v;\n"
+          "}\n"
+          "print(total);\n"
+          "print(i);\n",
+          stdout_all=["40", "4"])
+    check("do block expression then while",
+          "let v = do { 7; };\n"
+          "let i = 0;\n"
+          "while (i < 2) { i = i + 1; }\n"
+          "print(v);\n"
+          "print(i);\n",
+          stdout_all=["7", "2"])
     check("do while must share closing brace line",
           'do {\n  print("x");\n}\nwhile (false);\n',
           stderr="while must be on the same line as the preceding '}'")

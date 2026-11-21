@@ -1211,7 +1211,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::rcx, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_define_name));
                 clear_slot(value_depth);
-                push_reg(depth, asmjit::x86::rax);
+                push_reg(value_depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;
@@ -1446,7 +1446,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::r8d, asmjit::imm(loc.column));
                 call_addr(fn_address(&skein_jit_define_slot));
                 clear_slot(value_depth);
-                push_reg(depth, asmjit::x86::rax);
+                push_reg(value_depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;

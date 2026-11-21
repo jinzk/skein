@@ -669,12 +669,12 @@ def run_cases():
         stdout_all=["deferred", "1", "deferred", "2"],
     )
     check(
-        "do block requires on error",
+        "do block expression statement",
         "import std;\n"
         "do {\n"
-        "  1;\n"
+        "  print(\"x\");\n"
         "};\n",
-        stderr="syntax error",
+        stdout="x",
     )
     check(
         "do block keeps statement semicolons",

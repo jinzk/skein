@@ -62,16 +62,6 @@ static int flow_keyword_line = 0;
 static int flow_keyword_column = 0;
 static std::vector<int> func_yield_counts;
 
-extern int prev_token_line;
-
-static void check_do_while_line() {
-    if (prev_token_line != 0 && g_token_line != prev_token_line) {
-        diag_set_location(g_token_line, g_token_column);
-        yyerror("syntax error while must be on the same line as the "
-                "preceding '}'");
-    }
-}
-
 static void start_function() {
     func_yield_counts.push_back(0);
 }
@@ -1130,10 +1120,12 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newflow('W', $2, newscope(NULL), NULL); }
     | WHILE exp BODY_LBRACE list '}'
                                            { $$ = newflow('W', $2, newscope($4), NULL); }
-    | DO scope eols do_while_start WHILE DO_WHILE_LPAREN exp ')'
-                                           { $$ = newflow('E', $7, $2, NULL); }
-    | DO scope eols do_while_start WHILE exp ';'
-                                           { $$ = newflow('E', $6, $2, NULL); }
+    | DO scope WHILE DO_WHILE_LPAREN exp ')' {
+        $$ = newflow('E', $5, $2, NULL);
+      }
+    | DO scope WHILE exp ';' {
+        $$ = newflow('E', $4, $2, NULL);
+      }
     | SWITCH HEADER_LPAREN exp ')' '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newswitch($3, NULL); }
     | SWITCH HEADER_LPAREN exp ')' '{' switch_body '}'
@@ -1799,8 +1791,6 @@ do_block: '{' EMPTY_BLOCK_CLOSE           { $$ = newscope(NULL); }
         | '{' list '}'                    { $$ = newscope($2); }
         ;
 
-do_while_start: %empty { check_do_while_line(); };
-
 list: %empty                              { $$ = NULL; }
     | scope list {
         if ($2 == NULL)
@@ -1880,17 +1870,13 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
     /*
-     * A `do` block expression.  It currently only exists together with an
-     * error handler, so it cannot be confused with a do-while statement:
-     * `while` keeps the statement form, `on` selects this expression.
+     * A `do` block expression.  `do { ... } while (...)` stays a statement:
+     * the lexer keeps a following `while` on the same logical line, so this
+     * expression is only reduced when no do-while tail follows.
      */
-    | DO do_block ON ERROR '(' NAME ')' '{' empty_body {
+    | DO do_block {
         skein_lexer_finish_do_expression();
-        $$ = newonerror($2, $6, NULL);
-      }
-    | DO do_block ON ERROR '(' NAME ')' '{' list '}' {
-        skein_lexer_finish_do_expression();
-        $$ = newonerror($2, $6, $9);
+        $$ = $2;
       }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }

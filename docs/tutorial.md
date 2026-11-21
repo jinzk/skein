@@ -985,7 +985,18 @@ let v = outer() on error(e) {
 - 未捕获的 `fail` 在抛出点报告，并打印调用栈；
 - 跨 task / thread 传递的 `error` 会保留位置和调用栈。
 
-需要保护一段语句时使用 `do { ... } on error`：
+`do { ... }` 是块表达式，值为最后一个语句的值：
+
+```text
+let v = do {
+  let a = 1;
+  a + 1;
+};                                  // v = 2
+```
+
+块内语句必须写分号；声明、循环和空块的值是 `null`。
+
+配合 `on error` 使用：
 
 ```text
 let n = do {
@@ -997,10 +1008,7 @@ let n = do {
 };
 ```
 
-- `do { ... }` 只能和 `on error` 一起使用；
-- 块的值是最后一个语句的值：表达式/赋值取该值，声明、循环和空块为 `null`；
-- 块内语句仍然必须写分号；
-- `return` / `break` / `continue` 直接穿出受保护块，不经过 handler。
+`return` / `break` / `continue` 会直接穿出块。`do { ... } while (...)` 仍是 do-while 语句，`while` 必须和 `}` 同一行；如果要写“块表达式后接 while 循环”，用分号分开。
 
 ### 日志
 

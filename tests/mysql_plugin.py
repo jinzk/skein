@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""Integration tests for the optional MySQL native plugin example.
+
+The no-server checks validate the native module ABI itself (load, constants,
+errors, unload).  When SKEIN_TEST_MYSQL_* is set, the same wrapper is also
+exercised against a real MySQL/MariaDB server.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+BIN = os.path.abspath(sys.argv[1])
+PLUGIN = os.path.abspath(sys.argv[2])
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+WRAPPER = os.path.join(ROOT, "contrib", "mysql", "mysql.skein")
+
+
+def skein_string(value):
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def mysql_env(base=None, with_plugin=True):
+    env = dict(os.environ if base is None else base)
+    env.pop("SKEIN_TEST_SKIP", None)
+    if with_plugin:
+        env["SKEIN_MYSQL_PLUGIN"] = os.path.abspath(PLUGIN)
+    else:
+        env.pop("SKEIN_MYSQL_PLUGIN", None)
+    return env
+
+
+def run(name, source, *, with_plugin=True):
+    with tempfile.TemporaryDirectory() as root:
+        shutil.copyfile(WRAPPER, os.path.join(root, "mysql.skein"))
+        main = os.path.join(root, "main.skein")
+        with open(main, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(source)
+        proc = subprocess.run(
+            [BIN, main],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            cwd=root,
+            env=mysql_env(with_plugin=with_plugin),
+            timeout=30,
+        )
+        proc.stdout = proc.stdout.replace("\r\n", "\n")
+        proc.stderr = proc.stderr.replace("\r\n", "\n")
+        return proc
+
+
+def check(name, source, *, with_plugin=True, code=0, stdout=None,
+          stdout_all=None, stderr=None):
+    proc = run(name, source, with_plugin=with_plugin)
+    assert "Segmentation fault" not in proc.stdout + proc.stderr, (
+        f"{name}: crashed\n{proc.stdout}\n{proc.stderr}")
+    assert proc.returncode == code, (
+        f"{name}: expected exit {code}, got {proc.returncode}\n"
+        f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
+    if stdout is not None:
+        assert stdout in proc.stdout, (
+            f"{name}: missing {stdout!r}\n{proc.stdout}\n{proc.stderr}")
+    if stdout_all is not None:
+        for expected in stdout_all:
+            assert expected in proc.stdout, (
+                f"{name}: missing {expected!r}\n{proc.stdout}\n{proc.stderr}")
+    if stderr is not None:
+        assert stderr in proc.stderr, (
+            f"{name}: missing {stderr!r}\n{proc.stdout}\n{proc.stderr}")
+    return proc
+
+
+def test_abi():
+    check(
+        "mysql plugin version",
+        "import mysql;\n"
+        "println(mysql.VERSION);\n"
+        "println(mysql.library_version());\n",
+        stdout_all=["0.1.0"],
+    )
+    check(
+        "mysql plugin connect error",
+        "import std;\n"
+        "import mysql;\n"
+        'mysql.connect("127.0.0.1", "nobody", "wrong", "missing", 1) '
+        "on error(e) {\n"
+        "  println(std.error.kind(e));\n"
+        "  recover null;\n"
+        "}\n",
+        stdout="runtime",
+    )
+    check(
+        "mysql plugin argument error",
+        "import std;\n"
+        f"std.plugin.load({skein_string(os.path.abspath(PLUGIN))});\n"
+        "import skein.mysql as native;\n"
+        "native.connect(1, 2, 3, 4) on error(e) {\n"
+        "  println(std.error.kind(e));\n"
+        "  recover null;\n"
+        "}\n",
+        stdout="runtime",
+    )
+    check(
+        "mysql plugin unload keeps live bindings",
+        "import std;\n"
+        "import mysql;\n"
+        "println(mysql.VERSION);\n"
+        'std.plugin.unload("skein.mysql");\n'
+        "println(mysql.library_version());\n",
+        stdout="0.1.0",
+    )
+    check(
+        "mysql wrapper requires plugin path",
+        "import mysql;\n",
+        with_plugin=False,
+        code=1,
+        stderr="SKEIN_MYSQL_PLUGIN is not set",
+    )
+
+
+def integration_config():
+    names = (
+        "SKEIN_TEST_MYSQL_HOST",
+        "SKEIN_TEST_MYSQL_USER",
+        "SKEIN_TEST_MYSQL_PASSWORD",
+        "SKEIN_TEST_MYSQL_DATABASE",
+    )
+    if any(name not in os.environ for name in names):
+        return None
+    return {
+        "host": os.environ["SKEIN_TEST_MYSQL_HOST"],
+        "user": os.environ["SKEIN_TEST_MYSQL_USER"],
+        "password": os.environ["SKEIN_TEST_MYSQL_PASSWORD"],
+        "database": os.environ["SKEIN_TEST_MYSQL_DATABASE"],
+        "port": int(os.environ.get("SKEIN_TEST_MYSQL_PORT", "3306")),
+    }
+
+
+def test_integration(config):
+    connect_args = ", ".join([
+        skein_string(config["host"]),
+        skein_string(config["user"]),
+        skein_string(config["password"]),
+        skein_string(config["database"]),
+        str(config["port"]),
+    ])
+    source = (
+        "import std;\n"
+        "import mysql;\n"
+        f"let c = mysql.connect({connect_args});\n"
+        "println(c.ping());\n"
+        "c.execute(\"DROP TABLE IF EXISTS skein_plugin_test\");\n"
+        "c.execute(\"CREATE TABLE skein_plugin_test ("
+        "id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(64), "
+        "note VARCHAR(64), payload BLOB) CHARACTER SET utf8mb4\");\n"
+        "let quoted = c.quote(\"O'Reilly\");\n"
+        "c.execute(\"INSERT INTO skein_plugin_test (name, note, payload) "
+        "VALUES ('\" + quoted + \"', NULL, X'0102FF')\");\n"
+        "println(c.affected_rows());\n"
+        "println(c.insert_id());\n"
+        "let r = c.query(\"SELECT id, name, note, payload "
+        "FROM skein_plugin_test\");\n"
+        "std.plugin.unload(\"skein.mysql\");\n"
+        "println(r.fields());\n"
+        "println(r.count());\n"
+        "let rows = r.rows();\n"
+        "println(r.count());\n"
+        "println(rows[0][\"name\"]);\n"
+        "println(rows[0][\"note\"] == null);\n"
+        "println(type_name(rows[0][\"payload\"]));\n"
+        "c.execute(\"SELECT * FROM skein_missing_table\") on error(e) {\n"
+        "  println(std.error.kind(e));\n"
+        "  recover null;\n"
+        "}\n"
+        "println(c.last_error() != \"\");\n"
+        "c.execute(\"DROP TABLE skein_plugin_test\");\n"
+        "r.close();\n"
+        "c.close();\n"
+    )
+    check(
+        "mysql plugin integration",
+        source,
+        stdout_all=[
+            "true", "1", "[id, name, note, payload]", "1",
+            "O'Reilly", "true", "bytes", "runtime", "true",
+        ],
+    )
+
+
+def main():
+    if not os.path.exists(PLUGIN):
+        raise SystemExit(f"plugin not found: {PLUGIN}")
+    test_abi()
+    config = integration_config()
+    if config:
+        test_integration(config)
+        print(f"mysql plugin integration passed for {config['host']}")
+    else:
+        print("mysql plugin ABI checks passed (set SKEIN_TEST_MYSQL_* "
+              "for database integration)")
+
+
+if __name__ == "__main__":
+    main()

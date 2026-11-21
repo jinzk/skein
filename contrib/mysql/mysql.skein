@@ -1,0 +1,95 @@
+// Thin Skein wrapper around the optional native plugin in native/mysql_module.cpp.
+//
+// Set SKEIN_MYSQL_PLUGIN to the built shared library before importing this
+// package.  The native plugin exports only unboxed functions and opaque
+// userdata; the friendly Connection/Result API lives here.
+package mysql {
+  import std;
+
+  let plugin_path = std.env.get("SKEIN_MYSQL_PLUGIN", "");
+  if (plugin_path == "") {
+    fail "SKEIN_MYSQL_PLUGIN is not set; build contrib/mysql and set it to the plugin path";
+  }
+  std.plugin.load(plugin_path);
+  import skein.mysql as native;
+
+  export let VERSION = native.VERSION;
+
+  export struct Result {
+    handle: userdata;
+  }
+
+  impl Result {
+    func rows(self) {
+      return native.fetch_all(self.handle);
+    }
+
+    func count(self) {
+      return native.row_count(self.handle);
+    }
+
+    func fields(self) {
+      return native.field_names(self.handle);
+    }
+
+    func close(self) {
+      return native.close_result(self.handle);
+    }
+  }
+
+  export struct Connection {
+    handle: userdata;
+  }
+
+  impl Connection {
+    func query(self, sql: string) {
+      return Result { handle: native.query(self.handle, sql) };
+    }
+
+    func execute(self, sql: string) {
+      return native.execute(self.handle, sql);
+    }
+
+    func ping(self) {
+      return native.ping(self.handle);
+    }
+
+    func close(self) {
+      return native.close(self.handle);
+    }
+
+    func select_db(self, database: string) {
+      return native.select_db(self.handle, database);
+    }
+
+    func set_charset(self, charset: string) {
+      return native.set_charset(self.handle, charset);
+    }
+
+    func quote(self, text: string) {
+      return native.escape_string(self.handle, text);
+    }
+
+    func affected_rows(self) {
+      return native.affected_rows(self.handle);
+    }
+
+    func insert_id(self) {
+      return native.insert_id(self.handle);
+    }
+
+    func last_error(self) {
+      return native.error(self.handle);
+    }
+  }
+
+  export func library_version() {
+    return native.library_version();
+  }
+
+  export func connect(host: string, user: string, password: string,
+                      database: string, port: int = 3306) {
+    return Connection { handle: native.connect(host, user, password,
+                                               database, port) };
+  }
+}

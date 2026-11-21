@@ -94,6 +94,16 @@ sudo apt install libssl-dev
 cmake -S . -B build -G Ninja -DSKEIN_ENABLE_FFI=OFF
 ```
 
+用于验证 native module / plugin ABI 的 MySQL 示例插件是可选的独立目标，默认不构建。需要 MySQL/MariaDB 客户端头文件与库：
+
+```bash
+cmake -S . -B build -G Ninja -DSKEIN_BUILD_MYSQL_PLUGIN=ON
+cmake --build build
+ctest --test-dir build -R mysql_plugin_test --output-on-failure
+```
+
+找不到客户端开发文件时该目标自动跳过。构建、脚本封装和环境变量见 [`contrib/mysql/README.md`](../contrib/mysql/README.md)。
+
 `std.net` 提供同步 API 和 task 形式的异步 API；libuv 只在内部驱动 socket、DNS 和 `std.task`，不向脚本暴露事件循环对象。
 
 运行测试：

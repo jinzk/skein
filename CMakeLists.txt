@@ -38,6 +38,9 @@ if(SKEIN_ENABLE_JIT AND NOT SKEIN_JIT_SUPPORTED)
     "got ${CMAKE_SYSTEM_PROCESSOR} (${CMAKE_SYSTEM_NAME})")
 endif()
 
+option(SKEIN_BUILD_MYSQL_PLUGIN
+  "Build the example MySQL native module when client headers are available" OFF)
+
 option(SKEIN_USE_MIMALLOC "Use mimalloc for C++ allocations (Windows/Linux)" OFF)
 if(SKEIN_VM_ONLY)
   add_compile_definitions(SKEIN_VM_ONLY=1)
@@ -696,6 +699,37 @@ if(SKEIN_ENABLE_FFI)
   endif()
 endif()
 
+# Optional example native module used to validate the plugin ABI against a
+# real C library.  It is never required to build or run Skein itself.
+set(SKEIN_MYSQL_PLUGIN_FOUND OFF)
+if(SKEIN_BUILD_MYSQL_PLUGIN AND UNIX)
+  find_path(MYSQL_INCLUDE_DIR NAMES mysql.h PATH_SUFFIXES mysql mariadb)
+  find_library(MYSQL_CLIENT_LIBRARY NAMES mysqlclient mariadb libmysql)
+  if(MYSQL_INCLUDE_DIR AND MYSQL_CLIENT_LIBRARY)
+    add_library(skein_mysql_module SHARED
+      contrib/mysql/native/mysql_module.cpp
+    )
+    target_include_directories(skein_mysql_module PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+      ${MYSQL_INCLUDE_DIR}
+    )
+    target_link_libraries(skein_mysql_module PRIVATE ${MYSQL_CLIENT_LIBRARY})
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(skein_mysql_module PRIVATE -Wall -Wextra)
+    endif()
+    set_target_properties(skein_mysql_module PROPERTIES
+      OUTPUT_NAME skein_mysql_module
+    )
+    set(SKEIN_MYSQL_PLUGIN_FOUND ON)
+    message(STATUS "MySQL example plugin enabled (${MYSQL_CLIENT_LIBRARY})")
+  else()
+    message(WARNING
+      "SKEIN_BUILD_MYSQL_PLUGIN is ON but MySQL client headers/library "
+      "were not found; the example plugin and its test are disabled")
+  endif()
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   foreach(skein_target skein_platform skein_runtime skein_bytecode
                        skein_value_runtime skein_interpreter skein_builtins
@@ -1034,6 +1068,19 @@ if(BUILD_TESTING)
         set_tests_properties(env_ffi_stress_test PROPERTIES
           LABELS "core"
           TIMEOUT 300
+        )
+      endif()
+      if(SKEIN_MYSQL_PLUGIN_FOUND)
+        add_test(
+          NAME mysql_plugin_test
+          COMMAND ${Python3_EXECUTABLE}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/mysql_plugin.py
+                  $<TARGET_FILE:${PROJECT_NAME}>
+                  $<TARGET_FILE:skein_mysql_module>
+        )
+        set_tests_properties(mysql_plugin_test PROPERTIES
+          LABELS "plugin"
+          TIMEOUT 120
         )
       endif()
       add_test(

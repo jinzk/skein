@@ -341,7 +341,7 @@ def run_cases():
         "}\n"
         "let tasks = [];\n"
         "let i = 0;\n"
-        "while (i < 4) {\n"
+        "while (i < 8) {\n"
         "  let blob = std.entry.encode(worker);\n"
         '  let t = std.thread.spawn_entry(blob, '
         'std.thread.Message.from({"u": User { id: i }}));\n'
@@ -352,7 +352,7 @@ def run_cases():
         "  let r = t.join();\n"
         '  println(str(r["value"]));\n'
         "}\n",
-        stdout_all=["user:0", "user:1", "user:2", "user:3"],
+        stdout_all=[f"user:{i}" for i in range(8)],
     )
 
     check(

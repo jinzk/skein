@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -304,16 +305,20 @@ bool jit_patterns_ready(function_code *code) {
 }
 
 uint32_t jit_threshold() {
-    static int threshold = -1;
-    if (threshold < 0)
+    static int threshold = 100;
+    static std::once_flag once;
+    std::call_once(once, [] {
         threshold = read_int_env("SKEIN_JIT_THRESHOLD", 100);
+    });
     return (uint32_t)threshold;
 }
 
 bool jit_loop_entry_enabled() {
-    static int enabled = -1;
-    if (enabled < 0)
+    static int enabled = 1;
+    static std::once_flag once;
+    std::call_once(once, [] {
         enabled = read_bool_env("SKEIN_JIT_LOOPS", true) ? 1 : 0;
+    });
     return enabled != 0;
 }
 

@@ -1217,6 +1217,14 @@ if(BUILD_TESTING)
         RUN_SERIAL TRUE
         TIMEOUT 300
       )
+      add_test(NAME key_semantics_tsan_test COMMAND ${SKEIN_TEST_COMMAND})
+      set_tests_properties(key_semantics_tsan_test PROPERTIES
+        ENVIRONMENT
+          "SKEIN_TEST_ONLY_MODULES=key_semantics;TSAN_OPTIONS=halt_on_error=1"
+        LABELS "sanitize;tsan"
+        RUN_SERIAL TRUE
+        TIMEOUT 300
+      )
       add_test(
         NAME worker_vm_tsan_test
         COMMAND ${Python3_EXECUTABLE}

@@ -3,15 +3,10 @@
  *
  * This file only uses the public native module ABI from skein_module.h.  The
  * MySQL client is behind opaque userdata handles; script code talks to the
- * Skein wrapper in contrib/mysql/mysql.skein.
+ * Skein wrapper in contrib/mysql/api/mysql.skein.
  */
 #include "skein_module.h"
-
-#if __has_include(<mysql/mysql.h>)
-#include <mysql/mysql.h>
-#else
-#include <mysql.h>
-#endif
+#include "mysql_headers.h"
 
 #include <cstddef>
 #include <cstdint>

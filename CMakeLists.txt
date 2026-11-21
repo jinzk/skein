@@ -1081,6 +1081,7 @@ if(BUILD_TESTING)
         set_tests_properties(mysql_plugin_test PROPERTIES
           LABELS "plugin"
           TIMEOUT 120
+          ENVIRONMENT "SKEIN_TEST_MYSQL_INCLUDE_DIR=${MYSQL_INCLUDE_DIR}"
         )
       endif()
       add_test(

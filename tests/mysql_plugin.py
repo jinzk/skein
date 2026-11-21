@@ -2,8 +2,9 @@
 """Integration tests for the optional MySQL native plugin example.
 
 The no-server checks validate the native module ABI itself (load, constants,
-errors, unload).  When SKEIN_TEST_MYSQL_* is set, the same wrapper is also
-exercised against a real MySQL/MariaDB server.
+errors, unload) and the source-native module packaging path (`skein get` /
+`skein build` / `std.module.native`).  When SKEIN_TEST_MYSQL_* is set, the
+wrapper is also exercised against a real MySQL/MariaDB server.
 """
 
 import os
@@ -15,7 +16,10 @@ import tempfile
 BIN = os.path.abspath(sys.argv[1])
 PLUGIN = os.path.abspath(sys.argv[2])
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-WRAPPER = os.path.join(ROOT, "contrib", "mysql", "mysql.skein")
+MODULE_ROOT = os.path.join(ROOT, "contrib", "mysql")
+WRAPPER = os.path.join(MODULE_ROOT, "api", "mysql.skein")
+MODULE_PATH = "skein.contrib/mysql"
+MODULE_TAG = "v0.1.0"
 
 
 def skein_string(value):
@@ -114,11 +118,11 @@ def test_abi():
         stdout="0.1.0",
     )
     check(
-        "mysql wrapper requires plugin path",
+        "mysql wrapper requires plugin path or module",
         "import mysql;\n",
         with_plugin=False,
         code=1,
-        stderr="SKEIN_MYSQL_PLUGIN is not set",
+        stderr="std.module.native",
     )
 
 
@@ -191,10 +195,109 @@ def test_integration(config):
     )
 
 
+def test_vendored_abi_header():
+    with open(os.path.join(ROOT, "src", "runtime", "skein_module.h"),
+              encoding="utf-8") as handle:
+        expected = handle.read()
+    with open(os.path.join(MODULE_ROOT, "native", "skein_module.h"),
+              encoding="utf-8") as handle:
+        actual = handle.read()
+    assert actual == expected, "contrib/mysql/native/skein_module.h is stale"
+
+
+def test_source_module():
+    compiler = os.environ.get("SKEIN_CXX") or (
+        shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
+    if not compiler or shutil.which("git") is None:
+        print("mysql source module check skipped (git or C++ compiler missing)")
+        return
+
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        shutil.copytree(MODULE_ROOT, repo)
+
+        # CMake may discover headers in a non-default include directory.  Add
+        # a source-local shim so `skein build` uses the same client headers.
+        include_dir = os.environ.get("SKEIN_TEST_MYSQL_INCLUDE_DIR", "")
+        if include_dir:
+            shim_dir = os.path.join(repo, "native", "include", "mysql")
+            os.makedirs(shim_dir)
+            header = os.path.join(include_dir, "mysql.h").replace("\\", "/")
+            with open(os.path.join(shim_dir, "mysql.h"), "w",
+                      encoding="utf-8", newline="\n") as handle:
+                handle.write(f'#include "{header}"\n')
+            manifest = os.path.join(repo, "module.skein")
+            with open(manifest, encoding="utf-8") as handle:
+                text = handle.read()
+            text = text.replace(
+                '    sources "native/mysql_module.cpp";\n',
+                '    includes "native/include";\n'
+                '    sources "native/mysql_module.cpp";\n',
+            )
+            with open(manifest, "w", encoding="utf-8",
+                      newline="\n") as handle:
+                handle.write(text)
+
+        def git(*args):
+            proc = subprocess.run(["git", "-C", repo, *args], text=True,
+                                  capture_output=True, timeout=120)
+            assert proc.returncode == 0, proc.stderr
+
+        git("init", "-q")
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "Skein Test")
+        git("add", "-A")
+        git("commit", "-qm", "initial")
+        git("tag", MODULE_TAG)
+
+        project = os.path.join(root, "project")
+        os.makedirs(project)
+        env = dict(os.environ)
+        env.pop("SKEIN_TEST_SKIP", None)
+        env.pop("SKEIN_MYSQL_PLUGIN", None)
+        env.pop("SKEIN_ALLOW_NATIVE", None)
+        env["SKEIN_MODULE_URL"] = repo
+        env["SKEINMODCACHE"] = os.path.join(root, "cache")
+        env["SKEIN_CXX"] = compiler
+        spec = f"{MODULE_PATH}@{MODULE_TAG}"
+
+        def cli(*args, extra=None):
+            return subprocess.run([BIN, *args], text=True, encoding="utf-8",
+                                  capture_output=True, cwd=project,
+                                  env=dict(env, **(extra or {})), timeout=120)
+
+        init = cli("mod", "init", "-C", project, "example.test/app")
+        assert init.returncode == 0, init.stderr
+        fetched = cli("get", "-C", project, spec)
+        assert fetched.returncode == 0, fetched.stderr
+        built = cli("build", "-C", project, spec)
+        assert built.returncode == 0, built.stderr
+        assert "built " in built.stdout, built.stdout
+
+        main = os.path.join(project, "main.skein")
+        with open(main, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                'import "skein.contrib/mysql" as mysql;\n'
+                "println(mysql.VERSION);\n"
+                'println(mysql.library_version() != "");\n'
+            )
+
+        denied = cli(main)
+        assert denied.returncode == 1, denied.stdout
+        assert "SKEIN_ALLOW_NATIVE" in denied.stderr, denied.stderr
+        allowed = cli(main, extra={"SKEIN_ALLOW_NATIVE": "1"})
+        assert allowed.returncode == 0, allowed.stderr
+        assert allowed.stdout.splitlines() == ["0.1.0", "true"], allowed.stdout
+
+    print("mysql source module check passed")
+
+
 def main():
     if not os.path.exists(PLUGIN):
         raise SystemExit(f"plugin not found: {PLUGIN}")
     test_abi()
+    test_vendored_abi_header()
+    test_source_module()
     config = integration_config()
     if config:
         test_integration(config)

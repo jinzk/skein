@@ -1,0 +1,13 @@
+module mysql {
+  export package api.mysql as client;
+
+  export api.mysql.VERSION as VERSION;
+  export api.mysql.connect as connect;
+  export api.mysql.library_version as library_version;
+
+  native {
+    sources "native/mysql_module.cpp";
+    libs "mysqlclient";
+    output "skein_mysql_module";
+  }
+}

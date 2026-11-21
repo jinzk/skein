@@ -377,6 +377,42 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             need(2);
             stack(2, 1);
             break;
+        case Op::GetIndexBaseCached: {
+            if (ins.b >= proto.index_ops.size())
+                return fail(error, at_pc("index descriptor out of range", pc));
+            const IndexDesc &desc = proto.index_ops[ins.b];
+            if (desc.fields.size() != 1)
+                return fail(error, at_pc("index descriptor arity", pc));
+            if (desc.base_kind == IndexBaseKind::Slot ||
+                desc.base_kind == IndexBaseKind::Param) {
+                const size_t limit =
+                    desc.base_kind == IndexBaseKind::Slot
+                        ? proto.slots.size()
+                        : proto.param_names.size();
+                if (desc.base_index >= limit)
+                    return fail(error,
+                                at_pc("index base out of range", pc));
+            } else if (desc.base_kind == IndexBaseKind::Global) {
+                if (desc.base_index > UINT16_MAX)
+                    return fail(error,
+                                at_pc("index base out of range", pc));
+            } else {
+                return fail(error, at_pc("invalid index base", pc));
+            }
+            if (desc.read_cache != UINT32_MAX &&
+                desc.read_cache >= proto.index_read_ic.size())
+                return fail(error,
+                            at_pc("index cache descriptor out of range", pc));
+            if (desc.const_key != UINT32_MAX) {
+                if (!check_constant(proto, desc.const_key, pc, error))
+                    return false;
+                stack(0, 1);
+            } else {
+                need(1);
+                stack(1, 1);
+            }
+            break;
+        }
         case Op::GetFieldName:
             if (!check_constant(proto, ins.b, pc, error, true,
                                 ConstantKind::Name))

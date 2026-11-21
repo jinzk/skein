@@ -595,11 +595,11 @@ struct Compiler {
         return static_cast<uint32_t>(proto.index_ops.size() - 1);
     }
 
-    uint32_t add_index_for_base(const char *base_name,
-                                const std::vector<bool> &fields) {
+    skein::bc::IndexBaseKind classify_index_base(const char *base_name,
+                                                 uint32_t &index) {
         using skein::bc::IndexBaseKind;
         IndexBaseKind kind = IndexBaseKind::Name;
-        uint32_t index = UINT32_MAX;
+        index = UINT32_MAX;
         int slot = slot_fast_path ? find_slot(base_name) : -1;
         if (slot >= 0) {
             kind = IndexBaseKind::Slot;
@@ -627,6 +627,14 @@ struct Compiler {
         }
         if (kind == skein::bc::IndexBaseKind::Name)
             proto.uses_names = true;
+        return kind;
+    }
+
+    uint32_t add_index_for_base(const char *base_name,
+                                const std::vector<bool> &fields) {
+        uint32_t index = UINT32_MAX;
+        skein::bc::IndexBaseKind kind =
+            classify_index_base(base_name, index);
         return add_index(base_name, fields, kind, index);
     }
 
@@ -2550,13 +2558,49 @@ struct Compiler {
                 compile_dict(node);
                 return;
 
-            case 'G':
+            case 'G': {
+                /*
+                 * `name[key]` with a compile-time key avoids reloading and
+                 * duplicating both the container and the key on every
+                 * evaluation.  Only direct frame/global bases are fused; the
+                 * key must be side-effect free, which folding guarantees.
+                 */
+                if (node->l && node->l->nodetype == 'N') {
+                    const char *base_name =
+                        ((struct symref *)node->l)->name;
+                    if (base_name && !find_const(base_name)) {
+                        uint32_t base_index = UINT32_MAX;
+                        skein::bc::IndexBaseKind kind =
+                            classify_index_base(base_name, base_index);
+                        if (kind == skein::bc::IndexBaseKind::Slot ||
+                            kind == skein::bc::IndexBaseKind::Param ||
+                            kind == skein::bc::IndexBaseKind::Global) {
+                            value_t *key = fold_node(node->r);
+                            if (key) {
+                                std::vector<bool> fields;
+                                fields.push_back(false);
+                                uint32_t desc =
+                                    add_index(base_name, fields, kind,
+                                              base_index);
+                                proto.index_ops[desc].read_cache =
+                                    add_index_read_cache();
+                                proto.index_ops[desc].const_key =
+                                    add_value(key);
+                                freeval(key);
+                                emit(Op::GetIndexBaseCached, 0, 0, desc,
+                                     here);
+                                return;
+                            }
+                        }
+                    }
+                }
                 compile(node->l);
                 compile(node->r);
                 if (!ok) return;
                 emit(Op::GetIndexCached, 0, 0, add_index_read_cache(),
                      here);
                 return;
+            }
 
             case 'j': {
                 const char *field = literal_string(node->r);

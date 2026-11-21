@@ -2236,6 +2236,8 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
             out.u8(field ? 1 : 0);
         out.u8((uint8_t)index.base_kind);
         out.u32(index.base_index);
+        out.u32(index.read_cache);
+        out.u32(index.const_key);
     }
 
     out.u32((uint32_t)proto.imports.size());
@@ -2456,18 +2458,6 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         }
         proto->code.push_back(ins);
     }
-    uint32_t index_cache_slots = 0;
-    for (const skein::bc::Instr &ins : proto->code) {
-        if ((skein::bc::Op)ins.op != skein::bc::Op::GetIndexCached)
-            continue;
-        if (ins.b >= kMaxCount) {
-            error = "thread payload index cache is too large";
-            return false;
-        }
-        index_cache_slots = std::max(index_cache_slots, ins.b + 1);
-    }
-    proto->index_read_ic.assign(index_cache_slots, {});
-
     uint32_t const_count = 0;
     if (!in.count(const_count)) {
         error = in.error;
@@ -2577,13 +2567,43 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             }
             index.fields.push_back(field != 0);
         }
-        if (!in.u8(kind) || !in.u32(index.base_index)) {
+        if (!in.u8(kind) || !in.u32(index.base_index) ||
+            !in.u32(index.read_cache) || !in.u32(index.const_key)) {
             error = in.error;
             return false;
         }
         index.base_kind = (skein::bc::IndexBaseKind)kind;
         proto->index_ops.push_back(std::move(index));
     }
+
+    /*
+     * Index-read caches are rebuilt from the deserialized code and
+     * descriptors; the payload never carries the mutable caches themselves.
+     */
+    uint32_t index_cache_slots = 0;
+    for (const skein::bc::Instr &ins : proto->code) {
+        const skein::bc::Op op = (skein::bc::Op)ins.op;
+        uint32_t slot = UINT32_MAX;
+        if (op == skein::bc::Op::GetIndexCached) {
+            slot = ins.b;
+        } else if (op == skein::bc::Op::GetIndexBaseCached) {
+            if (ins.b >= proto->index_ops.size()) {
+                error = "thread payload index descriptor is invalid";
+                return false;
+            }
+            slot = proto->index_ops[ins.b].read_cache;
+            if (slot == UINT32_MAX)
+                continue;
+        } else {
+            continue;
+        }
+        if (slot >= kMaxCount) {
+            error = "thread payload index cache is too large";
+            return false;
+        }
+        index_cache_slots = std::max(index_cache_slots, slot + 1);
+    }
+    proto->index_read_ic.assign(index_cache_slots, {});
 
     uint32_t import_count = 0;
     if (!in.count(import_count)) {

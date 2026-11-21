@@ -1421,6 +1421,70 @@ public:
                     break;
                 }
 
+                case Op::GetIndexBaseCached: {
+                    if (ins.b >= proto().index_ops.size()) {
+                        yyerror("invalid bytecode index descriptor");
+                        return abort_error();
+                    }
+                    const skein::bc::IndexDesc &desc =
+                        proto().index_ops[ins.b];
+                    if (desc.fields.size() != 1) {
+                        yyerror("invalid bytecode index descriptor");
+                        return abort_error();
+                    }
+                    struct symbol *base = index_base_symbol(desc);
+                    if (!base) {
+                        yyerror("symbol not found %s",
+                                desc.base_name.c_str());
+                        return abort_error();
+                    }
+                    if (base->is_uninitialized) {
+                        yyerror("parameter %s is used before it is "
+                                "initialized",
+                                desc.base_name.c_str());
+                        return abort_error();
+                    }
+                    if (!base->val) {
+                        if (desc.base_kind ==
+                            skein::bc::IndexBaseKind::Param)
+                            yyerror("parameter %s is used before it is "
+                                    "initialized",
+                                    desc.base_name.c_str());
+                        else
+                            yyerror("symbol not found %s",
+                                    desc.base_name.c_str());
+                        return abort_error();
+                    }
+                    value_t *key = NULL;
+                    bool owns_key = false;
+                    if (desc.const_key != UINT32_MAX) {
+                        if (desc.const_key >= proto().consts.size() ||
+                            proto().consts[desc.const_key].kind !=
+                                skein::bc::ConstantKind::Value ||
+                            !proto().consts[desc.const_key].value) {
+                            yyerror("invalid bytecode constant");
+                            return abort_error();
+                        }
+                        key = proto().consts[desc.const_key].value.get();
+                    } else {
+                        key = pop_checked();
+                        if (!key)
+                            return abort_error();
+                        owns_key = true;
+                    }
+                    skein::bc::IndexReadCacheEntry *cache = NULL;
+                    if (desc.read_cache < proto().index_read_ic.size())
+                        cache = &proto().index_read_ic[desc.read_cache];
+                    value_t *result =
+                        read_index_cached(base->val, key, cache);
+                    if (owns_key)
+                        freeval(key);
+                    if (!result)
+                        return abort_error();
+                    push(result);
+                    break;
+                }
+
                 case Op::GetFieldName: {
                     value_t *container = pop_checked();
                     if (!container)

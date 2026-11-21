@@ -240,6 +240,9 @@ SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container, const char *name
 SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
     value_t *container, value_t *index,
     skein::bc::IndexReadCacheEntry *cache, int line, int column);
+SKEIN_JIT_SYSV value_t *skein_jit_get_index_base_cached(
+    const skein::bc::IndexDesc *desc, value_t **base_slot, value_t *key,
+    skein::bc::IndexReadCacheEntry *cache, uint64_t packed_loc);
 SKEIN_JIT_SYSV value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
                                 value_t **indices, value_t *value,
                                 value_t **base_slot, uint64_t packed_loc);
@@ -655,6 +658,37 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 if (ins.b >= proto.index_read_ic.size())
                     return reject("index-read descriptor");
                 break;
+            case skein::bc::Op::GetIndexBaseCached: {
+                if (ins.b >= proto.index_ops.size())
+                    return reject("index-read-base descriptor");
+                const skein::bc::IndexDesc &desc =
+                    proto.index_ops[ins.b];
+                if (desc.fields.size() != 1)
+                    return reject("index-read-base fields");
+                using skein::bc::IndexBaseKind;
+                if (desc.base_kind == IndexBaseKind::Slot ||
+                    desc.base_kind == IndexBaseKind::Param) {
+                    const size_t limit =
+                        desc.base_kind == IndexBaseKind::Slot
+                            ? proto.slots.size()
+                            : proto.param_names.size();
+                    if (desc.base_index >= limit)
+                        return reject("index-read-base slot");
+                } else if (desc.base_kind != IndexBaseKind::Global) {
+                    return reject("index-read-base kind");
+                }
+                if (desc.read_cache != UINT32_MAX &&
+                    desc.read_cache >= proto.index_read_ic.size())
+                    return reject("index-read-base cache");
+                if (desc.const_key != UINT32_MAX) {
+                    if (desc.const_key >= proto.consts.size() ||
+                        proto.consts[desc.const_key].kind !=
+                            skein::bc::ConstantKind::Value ||
+                        !proto.consts[desc.const_key].value)
+                        return reject("index-read-base key");
+                }
+                break;
+            }
             case skein::bc::Op::AssignIndex: {
                 if (ins.b >= proto.index_ops.size())
                     return reject("index-write descriptor");
@@ -1616,6 +1650,57 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::edx, asmjit::imm(loc.column));
                 call_addr(fn_address(&skein_jit_get_field_or_enum));
                 push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::GetIndexBaseCached: {
+                const skein::bc::IndexDesc &desc =
+                    proto.index_ops[ins.b];
+                const bool const_key = desc.const_key != UINT32_MAX;
+                const int key_depth = depth - 1;
+                const int result_depth = const_key ? depth : key_depth;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&desc)));
+                switch (desc.base_kind) {
+                    case skein::bc::IndexBaseKind::Slot:
+                        a.lea(asmjit::x86::rsi,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               slot_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Param:
+                        a.lea(asmjit::x86::rsi,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               param_off(desc.base_index)));
+                        break;
+                    default:
+                        a.xor_(asmjit::x86::esi, asmjit::x86::esi);
+                        break;
+                }
+                if (const_key) {
+                    a.mov(asmjit::x86::rdx,
+                          asmjit::imm(fn_address(
+                              proto.consts[desc.const_key].value.get())));
+                } else {
+                    a.mov(asmjit::x86::rdx,
+                          asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                 stack_off(key_depth)));
+                }
+                if (desc.read_cache < proto.index_read_ic.size()) {
+                    a.mov(asmjit::x86::rcx,
+                          asmjit::imm(fn_address(
+                              &proto.index_read_ic[desc.read_cache])));
+                } else {
+                    a.xor_(asmjit::x86::ecx, asmjit::x86::ecx);
+                }
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_get_index_base_cached));
+                if (!const_key)
+                    clear_slot(key_depth);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(result_depth)),
+                      asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);
                 break;

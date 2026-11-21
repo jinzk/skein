@@ -102,6 +102,7 @@ enum class Op : uint8_t {
     NewDict,
     GetIndex,
     GetIndexCached,
+    GetIndexBaseCached,
     GetField,
     GetFieldName,
     GetFieldOrEnum,
@@ -196,6 +197,13 @@ struct IndexDesc {
     /* Resolved base used to avoid a name lookup on every write. */
     IndexBaseKind base_kind = IndexBaseKind::Name;
     uint32_t base_index = UINT32_MAX;
+    /*
+     * Read fusion: `read_cache` selects the threaded inline cache and
+     * `const_key` names the constant used as the index.  Both are only set
+     * for descriptors referenced by GetIndexBaseCached.
+     */
+    uint32_t read_cache = UINT32_MAX;
+    uint32_t const_key = UINT32_MAX;
 };
 
 struct ImportDesc {

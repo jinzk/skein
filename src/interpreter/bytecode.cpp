@@ -68,6 +68,7 @@ const char *op_name(Op op) {
         case Op::NewDict: return "NEW_DICT";
         case Op::GetIndex: return "GET_INDEX";
         case Op::GetIndexCached: return "GET_INDEX_CACHED";
+        case Op::GetIndexBaseCached: return "GET_INDEX_BASE_CACHED";
         case Op::GetField: return "GET_FIELD";
         case Op::GetFieldName: return "GET_FIELD_NAME";
         case Op::GetFieldOrEnum: return "GET_FIELD_OR_ENUM";
@@ -197,7 +198,7 @@ std::string disassemble(const Proto &proto) {
             out << ")";
         }
         if ((op == Op::AssignIndex || op == Op::CompoundIndex ||
-             op == Op::IncDecIndex) &&
+             op == Op::IncDecIndex || op == Op::GetIndexBaseCached) &&
             ins.b < proto.index_ops.size()) {
             out << " index=" << ins.b << "("
                 << proto.index_ops[ins.b].base_name << ","
@@ -205,6 +206,9 @@ std::string disassemble(const Proto &proto) {
         }
         if (op == Op::GetIndexCached)
             out << " cache=" << ins.b;
+        if (op == Op::GetIndexBaseCached && ins.b < proto.index_ops.size())
+            out << " cache=" << proto.index_ops[ins.b].read_cache
+                << " key=" << proto.index_ops[ins.b].const_key;
         if (op == Op::BinarySlots) {
             out << " slots=" << ins.a << "," << (ins.b & 0xffffu)
                 << "->" << (ins.b >> 16);

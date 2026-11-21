@@ -1872,22 +1872,16 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_new_dict(value_t **items, uint32_t 
     return (value_t *)dict;
 }
 
-extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
-    value_t *container, value_t *index,
-    skein::bc::IndexReadCacheEntry *cache, int line, int column) {
-    diag_set_location(line, column);
-    if (!container || !index) {
-        freeval(container);
-        freeval(index);
-        return nullptr;
-    }
-
+/*
+ * Index read that borrows both operands.  `container` and `index` must stay
+ * alive for the duration of the call; the returned value is a new reference.
+ */
+static value_t *read_index_borrowed(value_t *container, value_t *index,
+                                    skein::bc::IndexReadCacheEntry *cache) {
     if (container->type == T_dict && ((dict_value_t *)container)->payload) {
         struct dict_value_t *dict = (struct dict_value_t *)container;
         if (!dict_key_allowed(index)) {
             yyerror("%s, got %s", dict_key_error(), typename_of(index));
-            freeval(container);
-            freeval(index);
             return nullptr;
         }
         const auto &items = dict->payload->items;
@@ -1900,8 +1894,6 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
             found = dict_find_index(dict, index);
             if (found < 0) {
                 yyerror("key not found");
-                freeval(container);
-                freeval(index);
                 return nullptr;
             }
             if (cache) {
@@ -1909,16 +1901,83 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
                 cache->index = found;
             }
         }
-        value_t *result = dupval(items[(size_t)found].second);
+        return dupval(items[(size_t)found].second);
+    }
+    return skein_vm_read_member_value(container, index, false);
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
+    value_t *container, value_t *index,
+    skein::bc::IndexReadCacheEntry *cache, int line, int column) {
+    diag_set_location(line, column);
+    if (!container || !index) {
         freeval(container);
         freeval(index);
-        return result;
+        return nullptr;
     }
-
-    value_t *result =
-        skein_vm_read_member_value(container, index, false);
+    value_t *result = read_index_borrowed(container, index, cache);
     freeval(container);
     freeval(index);
+    return result;
+}
+
+/*
+ * Fused `name[key]` read.  The base is resolved directly from its frame or
+ * global slot and the key may be borrowed from the proto constants, so
+ * neither operand needs a reference-counted copy.
+ */
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_base_cached(
+    const skein::bc::IndexDesc *desc, value_t **base_slot, value_t *key,
+    skein::bc::IndexReadCacheEntry *cache, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    const bool owns_key = desc && desc->const_key == UINT32_MAX;
+    if (!desc || !key) {
+        if (owns_key)
+            freeval(key);
+        return nullptr;
+    }
+
+    using skein::bc::IndexBaseKind;
+    value_t *container = nullptr;
+    if (desc->base_kind == IndexBaseKind::Slot ||
+        desc->base_kind == IndexBaseKind::Param) {
+        if (!base_slot || !*base_slot) {
+            if (desc->base_kind == IndexBaseKind::Param)
+                yyerror("parameter %s is used before it is initialized",
+                        desc->base_name.c_str());
+            else
+                yyerror("symbol not found %s", desc->base_name.c_str());
+        } else {
+            container = *base_slot;
+        }
+    } else if (desc->base_kind == IndexBaseKind::Global) {
+        symbol *sym = resolve_global_symbol(desc->base_index,
+                                            desc->base_name.c_str());
+        if (!sym) {
+            yyerror("symbol not found %s", desc->base_name.c_str());
+        } else if (sym->is_uninitialized) {
+            yyerror("parameter %s is used before it is initialized",
+                    desc->base_name.c_str());
+        } else if (!sym->val) {
+            yyerror("symbol not found %s", desc->base_name.c_str());
+        } else {
+            container = sym->val;
+        }
+    } else {
+        yyerror("invalid bytecode index descriptor");
+    }
+
+    if (!container) {
+        if (owns_key)
+            freeval(key);
+        return nullptr;
+    }
+    value_t *result = read_index_borrowed(container, key, cache);
+    if (owns_key)
+        freeval(key);
     return result;
 }
 

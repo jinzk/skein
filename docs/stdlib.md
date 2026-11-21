@@ -1516,6 +1516,20 @@ let n = parse(input) on error(e) {
 - `on error` 不会自动解包嵌套在普通表达式里的 result；
 - 如果只想拿到 result 本身，不要对它使用 `on error`。
 
+需要保护一段语句时使用 `do { ... } on error`：
+
+```text
+let n = do {
+  let a = parse(input);
+  a * 2;
+} on error(e) {
+  print(str(e));
+  recover 0;
+};
+```
+
+块的值是最后一个语句的值；声明、循环和空块为 `null`。块内语句仍然必须写分号，`return` / `break` / `continue` 会直接穿出受保护块。
+
 `std.result.unwrap` 在 `err` 时通过 `fail` 抛出，因此可以被 `on error` 捕获：
 
 ```text

@@ -2945,6 +2945,28 @@ struct Checker : public BuiltinContext {
                 if (expr->l)
                     infer(expr->l, env);
                 return type_any();
+            case 'X':
+                check_stmt(((struct nscope *)expr)->ast, env);
+                return type_any();
+            case 'o': {
+                struct on_error_node *handler =
+                    (struct on_error_node *)expr;
+                /*
+                 * Check a protected do-block.  Plain expression handlers keep
+                 * their existing lax treatment, but a statement block should
+                 * still report type errors in its body.
+                 */
+                if (handler->call && handler->call->nodetype == 'X') {
+                    check_expr(handler->call, type_any(), env, false,
+                               false);
+                    Env child;
+                    child.parent = &env;
+                    child.define(handler->name ? handler->name : "",
+                                 type_any());
+                    check_stmt(handler->body, child);
+                }
+                return type_any();
+            }
             case 'L':
                 return type_any();
             default:

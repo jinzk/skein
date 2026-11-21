@@ -985,6 +985,23 @@ let v = outer() on error(e) {
 - 未捕获的 `fail` 在抛出点报告，并打印调用栈；
 - 跨 task / thread 传递的 `error` 会保留位置和调用栈。
 
+需要保护一段语句时使用 `do { ... } on error`：
+
+```text
+let n = do {
+  let a = parse_positive(input);
+  a * 2;
+} on error(e) {
+  print("bad input: " + str(e));
+  recover 0;
+};
+```
+
+- `do { ... }` 只能和 `on error` 一起使用；
+- 块的值是最后一个语句的值：表达式/赋值取该值，声明、循环和空块为 `null`；
+- 块内语句仍然必须写分号；
+- `return` / `break` / `continue` 直接穿出受保护块，不经过 handler。
+
 ### 日志
 
 设计说明见 [logging.md](logging.md)。

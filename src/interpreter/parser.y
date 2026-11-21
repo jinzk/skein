@@ -28,6 +28,9 @@
 extern int yylex();
 extern int yyparse();
 
+/* Defined by the lexer; see tokens.l. */
+extern void skein_lexer_finish_do_expression();
+
 thread_local bool g_include_collect = false;
 thread_local bool g_include_invalid = false;
 thread_local std::vector<struct ast *> g_include_statements;
@@ -1063,7 +1066,7 @@ static struct type_constraint *runtime_type_or_error(
 %precedence NOELSE
 %precedence ELSE
 
-%type <a> exp value stmt list scope explist arg top_expression top_statement line valuelist pairlist
+%type <a> exp value stmt list scope do_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
@@ -1791,6 +1794,11 @@ scope: stmt                               { $$ = $1; }
      | '{' list '}'                       { $$ = newscope($2); }
      ;
 
+/* The protected block of `do { ... } on error ...`. */
+do_block: '{' EMPTY_BLOCK_CLOSE           { $$ = newscope(NULL); }
+        | '{' list '}'                    { $$ = newscope($2); }
+        ;
+
 do_while_start: %empty { check_do_while_line(); };
 
 list: %empty                              { $$ = NULL; }
@@ -1871,6 +1879,19 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
       }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }
+    /*
+     * A `do` block expression.  It currently only exists together with an
+     * error handler, so it cannot be confused with a do-while statement:
+     * `while` keeps the statement form, `on` selects this expression.
+     */
+    | DO do_block ON ERROR '(' NAME ')' '{' empty_body {
+        skein_lexer_finish_do_expression();
+        $$ = newonerror($2, $6, NULL);
+      }
+    | DO do_block ON ERROR '(' NAME ')' '{' list '}' {
+        skein_lexer_finish_do_expression();
+        $$ = newonerror($2, $6, $9);
+      }
     | '-' exp %prec UMINUS                { $$ = newast('M', $2, NULL); }
     | '!' exp %prec NOT                   { $$ = newast('!', $2, NULL); }
     | '~' exp %prec BITNOT                { $$ = newast('~', $2, NULL); }

@@ -496,9 +496,18 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'X': {
+            int errors_before = eval_ctx().runtime_error_count;
             eval_pushscope();
             ret = eval(((struct nscope *)a)->ast);
             eval_popscope();
+            /*
+             * A block used as an expression yields null when its last
+             * statement is a declaration, or when it is empty.  The VM
+             * already pushes null for those statements.
+             */
+            if (!ret && eval_ctx().runtime_error_count == errors_before &&
+                eval_ctx().control == EVAL_CONTROL_NONE)
+                ret = newnull();
             break;
         }
 

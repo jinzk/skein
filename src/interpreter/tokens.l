@@ -128,6 +128,17 @@ static int pending_decl_kind = 0;
 static bool pending_decl_skip = false;
 static std::vector<int> do_stack;
 
+/*
+ * A `do { ... } on error ...` expression uses the `do` keyword but is not a
+ * do-while statement.  Drop its lexer bookkeeping once the parser has
+ * accepted the construct; otherwise a later `while` at the same indent would
+ * be mistaken for the tail of a do-while loop.
+ */
+void skein_lexer_finish_do_expression() {
+    if (!do_stack.empty() && do_stack.back() == indent_count)
+        do_stack.pop_back();
+}
+
 static void start_header_context(int kind) {
     if (pending_header_kind != 0)
         header_stack.push_back(

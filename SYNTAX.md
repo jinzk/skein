@@ -1607,6 +1607,27 @@ load() on error(e) {
 };
 ```
 
+需要保护一整段语句时，用 `do { ... } on error`：
+
+```text
+let n = do {
+  let a = parse_positive(input);
+  a * 2;
+} on error(e) {
+  print("bad: " + str(e));
+  recover 0;
+};
+```
+
+规则：
+
+- `do { ... }` 只能和 `on error` 一起使用，单独的 `do { ... }` 不是表达式；
+- 块的值是最后一个语句的值：表达式和赋值取其值；`let` / `const` / 函数等声明、`while` / `for`、空块为 `null`；
+- 块内语句仍然必须写分号，包括最后一条；
+- `recover` 的值成为整个 `do ... on error` 表达式的值；
+- `return` / `break` / `continue` 直接穿出受保护块，不经过 handler；
+- `do ... on error` 是表达式，作为独立语句时末尾仍需要 `;`。
+
 `fail` 接受任意值，但统一转换成 `error`：
 
 ```text

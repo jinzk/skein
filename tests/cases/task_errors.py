@@ -519,6 +519,173 @@ def run_cases():
         stdout_all=["= true", "= y"],
     )
     check(
+        "do block on error value",
+        "import std;\n"
+        "let v = do {\n"
+        "  let a = 3;\n"
+        "  a + 4;\n"
+        "} on error(e) { recover 0; };\n"
+        "v\n",
+        stdout="= 7",
+    )
+    check(
+        "do block on error catches fail",
+        "import std;\n"
+        "let v = do {\n"
+        "  fail \"boom\";\n"
+        "  1;\n"
+        "} on error(e) {\n"
+        "  print(str(e));\n"
+        "  recover 42;\n"
+        "};\n"
+        "v\n",
+        stdout_all=["boom", "= 42"],
+    )
+    check(
+        "do block on error catches runtime",
+        "import std;\n"
+        "let v = do {\n"
+        "  1 / 0;\n"
+        "} on error(e) {\n"
+        "  print(std.error.kind(e));\n"
+        "  recover -1;\n"
+        "};\n"
+        "v\n",
+        stdout_all=["runtime", "= -1"],
+    )
+    check(
+        "do block on error result unwrap",
+        "import std;\n"
+        "let v = do {\n"
+        "  std.result.ok(11);\n"
+        "} on error(e) { recover 0; };\n"
+        "v\n",
+        stdout="= 11",
+    )
+    check(
+        "do block on error result error",
+        "import std;\n"
+        "let v = do {\n"
+        "  std.result.err(\"bad\");\n"
+        "} on error(e) {\n"
+        "  print(str(e));\n"
+        "  recover 12;\n"
+        "};\n"
+        "v\n",
+        stdout_all=["bad", "= 12"],
+    )
+    check(
+        "do block on error declaration value",
+        "import std;\n"
+        "let a = do {\n"
+        "  let x = 5;\n"
+        "} on error(e) { recover 1; };\n"
+        "let b = do {\n"
+        "} on error(e) { recover 2; };\n"
+        "print(a);\n"
+        "print(b);\n",
+        stdout_all=["null", "null"],
+    )
+    check(
+        "do block on error pass",
+        "import std;\n"
+        "func inner() {\n"
+        "  return do {\n"
+        "    fail \"deep\";\n"
+        "  } on error(e) { pass e; };\n"
+        "}\n"
+        "let v = inner() on error(e) {\n"
+        "  print(\"outer \" + str(e));\n"
+        "  recover 8;\n"
+        "};\n"
+        "v\n",
+        stdout_all=["outer deep", "= 8"],
+    )
+    check(
+        "do block on error return",
+        "import std;\n"
+        "func f() {\n"
+        "  let v = do {\n"
+        "    return 5;\n"
+        "  } on error(e) { recover 0; };\n"
+        "  return v + 1;\n"
+        "}\n"
+        "f()\n",
+        stdout="= 5",
+    )
+    check(
+        "do block on error break continue",
+        "import std;\n"
+        "let total = 0;\n"
+        "let i = 0;\n"
+        "while (i < 5) {\n"
+        "  let v = do {\n"
+        "    i = i + 1;\n"
+        "    if (i == 2) { continue; }\n"
+        "    if (i == 4) { break; }\n"
+        "    i * 10;\n"
+        "  } on error(e) { recover 0; };\n"
+        "  total = total + v;\n"
+        "}\n"
+        "print(total);\n"
+        "print(i);\n",
+        stdout_all=["40", "4"],
+    )
+    check(
+        "do block on error then while",
+        "import std;\n"
+        "func f(n) {\n"
+        "  let v = do { n + 1; } on error(e) { recover 0; };\n"
+        "  let i = 0;\n"
+        "  while (i < 3) { i = i + 1; }\n"
+        "  return v + i;\n"
+        "}\n"
+        "f(10)\n",
+        stdout="= 14",
+    )
+    check(
+        "do block on error closure capture",
+        "import std;\n"
+        "func make(base) {\n"
+        "  return func(x) {\n"
+        "    return do { base + x; } on error(e) { recover -1; };\n"
+        "  };\n"
+        "}\n"
+        "make(10)(5)\n",
+        stdout="= 15",
+    )
+    check(
+        "do block on error defer",
+        "import std;\n"
+        "func f(flag) {\n"
+        "  return do {\n"
+        "    defer print(\"deferred\");\n"
+        "    if (flag) { fail \"flagged\"; }\n"
+        "    1;\n"
+        "  } on error(e) { recover 2; };\n"
+        "}\n"
+        "print(f(false));\n"
+        "print(f(true));\n",
+        stdout_all=["deferred", "1", "deferred", "2"],
+    )
+    check(
+        "do block requires on error",
+        "import std;\n"
+        "do {\n"
+        "  1;\n"
+        "};\n",
+        stderr="syntax error",
+    )
+    check(
+        "do block keeps statement semicolons",
+        "import std;\n"
+        "let v = do {\n"
+        "  1\n"
+        "} on error(e) { recover 0; };\n"
+        "v\n",
+        stderr="syntax error",
+    )
+    check(
         "result on error task",
         "import std;\n"
         "func bad() { fail \"task boom\"; }\n"

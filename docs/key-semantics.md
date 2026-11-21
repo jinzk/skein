@@ -171,10 +171,11 @@ by_id[user.id]
 - hash cache 不传输，接收端重新计算
 - 自定义 `dict_hash` / `key_eq` 方法必须随类型元数据可用
 - 依赖不可传输值（函数、heap 等）的 key 方法会在传输时被拒绝
-- `spawn_script` / `spawn_source` 会在父线程预编译消息值触达的
-  `dict_hash` / `key_eq` 方法体，使 AST worker 也能调用
+- `spawn_script` / `spawn_source` 会在父线程尽量预编译消息值触达类型的方法体，
+  使 AST worker 也能调用；`dict_hash` / `key_eq` 编译失败会终止启动，其他方法
+  失败则忽略，由实际调用时报错
 - `spawn_entry` / `spawn_function` / 进程传输会为接收端缺少可用方法体的类型
-  附加传输过来的自定义 key 方法
+  附加传输过来的方法；类型方法表的附加操作已串行化
 
 ## 9. 错误速查
 

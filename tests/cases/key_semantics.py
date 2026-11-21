@@ -285,6 +285,50 @@ def run_cases():
             stdout_all=["true", "x"],
         )
 
+    with tempfile.TemporaryDirectory() as method_tmp:
+        method_worker = os.path.join(method_tmp, "method_worker.skein")
+        with open(method_worker, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "import std;\n"
+                "func main(ctx) {\n"
+                '  let u = ctx.payload["u"];\n'
+                "  return u.describe();\n"
+                "}\n"
+            )
+        check(
+            "struct method across script threads",
+            "import std;\n"
+            "struct User { id: int; }\n"
+            "impl User {\n"
+            "  func describe(self) { return \"user:\" + str(self.id); }\n"
+            "}\n"
+            f'let t = std.thread.spawn_script({skein_string(method_worker)}, '
+            'std.thread.Message.from({"u": User { id: 7 }}));\n'
+            "let r = t.join();\n"
+            'println(str(r["ok"]));\n'
+            'println(str(r["value"]));\n',
+            stdout_all=["true", "user:7"],
+        )
+
+    check(
+        "struct method across entry threads",
+        "import std;\n"
+        "struct User { id: int; }\n"
+        "impl User {\n"
+        "  func describe(self) { return \"user:\" + str(self.id); }\n"
+        "}\n"
+        "func worker(ctx) {\n"
+        '  return ctx.payload["u"].describe();\n'
+        "}\n"
+        "let blob = std.entry.encode(worker);\n"
+        'let t = std.thread.spawn_entry(blob, '
+        'std.thread.Message.from({"u": User { id: 8 }}));\n'
+        "let r = t.join();\n"
+        'println(str(r["ok"]));\n'
+        'println(str(r["value"]));\n',
+        stdout_all=["true", "user:8"],
+    )
+
     check(
         "key custom hash and KeyEq across entry threads",
         USER_KEYEQ +

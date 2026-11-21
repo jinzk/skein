@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1472,6 +1473,12 @@ bool skein_vm_apply_thread_types(
     const std::shared_ptr<thread_transfer_context> &context,
     const std::vector<struct thread_transfer_type> &types,
     std::string &error) {
+    /*
+     * Struct/enum definitions are process-global.  Serialize method
+     * attachment so concurrent workers cannot race on the same method table.
+     */
+    static std::mutex type_attach_mutex;
+    std::lock_guard<std::mutex> type_attach_lock(type_attach_mutex);
     if (!context) {
         error = "missing thread transfer context";
         return false;
@@ -1825,7 +1832,7 @@ bool skein_vm_function_body_available(
     return cache_for(def->code.get())->proto != NULL;
 }
 
-static bool prepare_key_methods_inner(
+static bool prepare_value_methods_inner(
     const struct value_t *value, std::unordered_set<const type_def *> &types,
     std::unordered_set<const void *> &visiting) {
     if (!value)
@@ -1839,9 +1846,9 @@ static bool prepare_key_methods_inner(
         for (const auto &method : def->methods) {
             if (!method.second)
                 continue;
-            if (method.first != "dict_hash" && method.first != "key_eq")
-                continue;
-            if (!prepare_function_body(method.second))
+            bool prepared = prepare_function_body(method.second) != nullptr;
+            if (!prepared &&
+                (method.first == "dict_hash" || method.first == "key_eq"))
                 return false;
         }
     }
@@ -1852,7 +1859,7 @@ static bool prepare_key_methods_inner(
     bool ok = true;
     for_each_value_child(value, [&](const struct value_t *child) {
         if (ok)
-            ok = prepare_key_methods_inner(child, types, visiting);
+            ok = prepare_value_methods_inner(child, types, visiting);
     });
     return ok;
 }
@@ -1860,7 +1867,7 @@ static bool prepare_key_methods_inner(
 bool skein_vm_prepare_value_methods(const struct value_t *value) {
     std::unordered_set<const type_def *> types;
     std::unordered_set<const void *> visiting;
-    return prepare_key_methods_inner(value, types, visiting);
+    return prepare_value_methods_inner(value, types, visiting);
 }
 
 bool skein_vm_try_execute_function_body(

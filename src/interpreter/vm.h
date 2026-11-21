@@ -151,8 +151,10 @@ bool skein_vm_function_body_available(
     const std::shared_ptr<function_def> &def);
 
 /*
- * Compile methods reachable from a value into shared bytecode caches before
- * the value is handed to an AST-mode worker thread.
+ * Best-effort compile of methods reachable from a value into shared bytecode
+ * caches before the value is handed to an AST-mode worker thread.  Custom key
+ * methods are mandatory; other method failures are ignored so unused methods
+ * do not block transfer.
  */
 bool skein_vm_prepare_value_methods(const struct value_t *value);
 

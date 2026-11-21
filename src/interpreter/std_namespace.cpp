@@ -80,6 +80,7 @@ value_t *build_namespace_impl() {
         {"items", B_dict_items},
         {"delete", B_dict_delete},
         {"merge", B_dict_merge},
+        {"index_by", B_dict_index_by},
     });
     value_t *bytes_module = builtin_module({
         {"len", B_bytes_len},

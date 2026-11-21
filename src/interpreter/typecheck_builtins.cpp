@@ -353,6 +353,36 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
+    if (path == "std.dict.index_by") {
+        if (!require_kind(0, TYPE_LIST))
+            return true;
+        const TypeNode *list_type =
+            container_type(arg_type(0), TYPE_LIST, 1);
+        const TypeNode *element = type_element(list_type, 0);
+        if (args.size() > 1 &&
+            !context.check_expr(args[1], function_type({element}, type_any()),
+                                env, false, false))
+            return true;
+        const TypeNode *key = type_any();
+        if (args.size() > 1) {
+            struct ast *mapper = args[1];
+            if (mapper->nodetype == 'Z') {
+                key = context.infer_lambda_result(mapper, element, env);
+            } else {
+                const TypeNode *mapper_type = context.infer(mapper, env);
+                if (type_is_function_signature(mapper_type))
+                    key = type_function_result(mapper_type);
+                else if (mapper->nodetype == 'N') {
+                    const char *mapper_name = ((struct symref *)mapper)->name;
+                    key = context.named_function_result(
+                        mapper_name ? mapper_name : "");
+                }
+            }
+        }
+        result = type_container(TYPE_DICT, {key, element});
+        return true;
+    }
+
     if (path.rfind("std.dict.", 0) == 0) {
         std::string name = path.substr(9);
         if (!require_kind(0, TYPE_DICT))
@@ -925,6 +955,9 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({dict_kv, K}, dict_kv);
     if (path == "std.dict.merge")
         return poly_builtin({dict_kv, dict_kv}, dict_kv);
+    if (path == "std.dict.index_by")
+        return poly_builtin({poly_list(T), poly_callback({T}, K)},
+                            poly_dict(K, T));
 
     if (path == "std.set.from_list")
         return poly_builtin({list_t}, set_t);

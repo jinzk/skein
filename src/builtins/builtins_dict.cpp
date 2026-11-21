@@ -139,6 +139,49 @@ struct value_t *call_dict_builtin(
             ret = (struct value_t *)out;
             break;
         }
+        case B_dict_index_by: {
+            if (args.size() < 2 || args[0]->type != T_list) {
+                yyerror("std.dict.index_by expects a list and a key function");
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)args[0];
+            struct value_t *key_fn = args[1];
+            struct dict_value_t *out = newdictval();
+            gc_root_scope roots(active_scope_context());
+            roots.add(key_fn);
+            roots.add((struct value_t *)out);
+            for (struct value_t *item : list->payload->items) {
+                std::vector<struct value_t *> call_args;
+                call_args.push_back(dupval(item));
+                struct value_t *key =
+                    skein_call_function(key_fn, std::move(call_args));
+                if (!key) {
+                    roots.reset();
+                    freeval((struct value_t *)out);
+                    return NULL;
+                }
+                if (!dict_key_allowed(key)) {
+                    yyerror("std.dict.index_by: %s, got %s",
+                            dict_key_error(), typename_of(key));
+                    freeval(key);
+                    roots.reset();
+                    freeval((struct value_t *)out);
+                    return NULL;
+                }
+                int found = dict_find_index(out, key);
+                if (found >= 0) {
+                    freeval(key);
+                    freeval(out->payload->items[(size_t)found].second);
+                    out->payload->items[(size_t)found].second =
+                        dupval(item);
+                } else {
+                    dict_append_item(out, key, dupval(item));
+                }
+            }
+            roots.reset();
+            ret = (struct value_t *)out;
+            break;
+        }
         default:
             yyerror("unknown built-in function %d", functype);
             break;

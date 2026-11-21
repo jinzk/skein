@@ -2555,6 +2555,7 @@ std.dict.values
 std.dict.items
 std.dict.delete
 std.dict.merge
+std.dict.index_by
 
 std.enum.decode
 std.enum.tag
@@ -3041,6 +3042,7 @@ std.thread.capabilities
 - `std.dict.items` 返回 `[[key, value], ...]`；
 - `std.dict.delete` 删除缺失键时返回原 dict 的副本；单次删除 O(n)（重建），批量删除请尽量一次构造；
 - `std.dict.merge` 中右侧 dict 覆盖同名键；`dict` 的 `==` 使用哈希索引逐键比较，O(n)；
+- `std.dict.index_by(xs, key_fn)` 返回新 dict，key 是 `key_fn(element)`，值是元素本身；重复 key 时后者覆盖值并保留首次出现位置；key 必须是合法 dict key；
 - JSON 编码中 `deque` / `heap` / `set` 按数组输出；
 - 循环拼接字符串是 O(n²)，建议用 list/deque 收集片段后 `std.string.join`；
 - `std.json.parse` 把 JSON object 映射为 `dict`，key 一律是 `string`；参数可以是 `string` 或 `bytes`；

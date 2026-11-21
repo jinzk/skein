@@ -14,6 +14,42 @@ def run_cases():
           "d[2] = 'z';\n"
           "println(std.dict.keys(d));\n",
           stdout_all=["[1, 3, 2]"])
+    check("dict index_by",
+          'import std;\n'
+          'struct User { id: int; name: string; }\n'
+          'let users = [User { id: 1, name: "a" }, '
+          'User { id: 2, name: "b" }];\n'
+          'let by_id = std.dict.index_by(users, func(u) { return u.id; });\n'
+          'println(by_id[1].name);\n'
+          'println(by_id[2].name);\n'
+          'println(std.dict.keys(by_id));\n',
+          stdout_all=["a", "b", "[1, 2]"])
+    check("dict index_by duplicate keys last wins",
+          'import std;\n'
+          'struct User { id: int; name: string; }\n'
+          'let users = [User { id: 1, name: "a" }, '
+          'User { id: 1, name: "b" }];\n'
+          'let by_id = std.dict.index_by(users, func(u) { return u.id; });\n'
+          'println(by_id[1].name);\n'
+          'println(len(by_id));\n',
+          stdout_all=["b", "1"])
+    check("dict index_by composite keys",
+          'import std;\n'
+          'let xs = [{"region": "eu", "id": 1}, '
+          '{"region": "us", "id": 1}];\n'
+          'let by_key = std.dict.index_by(xs, '
+          'func(x) { return (x["region"], x["id"]); });\n'
+          'println(by_key[("eu", 1)]["region"]);\n'
+          'println(by_key[("us", 1)]["region"]);\n',
+          stdout_all=["eu", "us"])
+    check("dict index_by empty list",
+          'import std;\n'
+          'println(len(std.dict.index_by([], func(x) { return x; })));\n',
+          stdout_all=["0"])
+    check("dict index_by invalid key",
+          'import std;\n'
+          'std.dict.index_by([1], func(x) { return 1.5; });\n',
+          stderr="std.dict.index_by: dict key must be")
     check("dict large indexed reads",
           "import std;\n"
           "let d = {};\n"

@@ -840,7 +840,8 @@ struct value_t *call_builtin(int functype,
             return NULL;
         }
     } else if (functype == B_list_append || functype == B_dict_delete ||
-               functype == B_dict_merge || functype == B_string_contains ||
+               functype == B_dict_merge || functype == B_dict_index_by ||
+               functype == B_string_contains ||
                functype == B_string_repeat || functype == B_list_map ||
                functype == B_list_filter) {
         if (args.size() != 2) {
@@ -848,6 +849,7 @@ struct value_t *call_builtin(int functype,
                 functype == B_list_append ? "std.list.append" :
                 functype == B_dict_delete ? "std.dict.delete" :
                 functype == B_dict_merge ? "std.dict.merge" :
+                functype == B_dict_index_by ? "std.dict.index_by" :
                 functype == B_string_contains ? "std.string.contains" :
                 functype == B_string_repeat ? "std.string.repeat" :
                 functype == B_list_map ? "std.list.map" : "std.list.filter";
@@ -1075,6 +1077,8 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_list_slice && functype <= B_list_binary_search)
         return call_list_builtin(functype, args);
     if (functype >= B_dict_get && functype <= B_dict_merge)
+        return call_dict_builtin(functype, args);
+    if (functype == B_dict_index_by)
         return call_dict_builtin(functype, args);
     if (functype >= B_string_join && functype <= B_string_to_upper)
         return call_string_builtin(functype, args);

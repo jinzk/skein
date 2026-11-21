@@ -98,6 +98,20 @@ CASES = [
         expect_debug="[jit] enter add",
     ),
     case(
+        "dict-index-by",
+        "import std;\n"
+        "struct User { id: int; name: string; }\n"
+        "func lookup(i) {\n"
+        '  let xs = [User { id: 1, name: "a" }, '
+        'User { id: 2, name: "b" }];\n'
+        "  let d = std.dict.index_by(xs, func(u) { return u.id; });\n"
+        "  return d[i].name;\n"
+        "}\n"
+        "let i = 1;\n"
+        "while (i <= 2) { println(lookup(i)); i = i + 1; }\n",
+        expect_debug="[jit] enter lookup",
+    ),
+    case(
         "tuple-dict-keys",
         "func roundtrip(i) {\n"
         "  let d = {(1, 'a'): i, (2, 'b'): i + 1};\n"

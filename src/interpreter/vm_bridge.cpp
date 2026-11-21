@@ -3,6 +3,7 @@
 
 #include "ast.h"
 #include "compiler.h"
+#include "cycle.h"
 #include "diagnostics.h"
 #include "dict.h"
 #include "eval.h"
@@ -1497,7 +1498,9 @@ bool skein_vm_apply_thread_types(
                 error = "thread payload method is missing: " + method.first;
                 return false;
             }
-            if (definition->methods.count(method.first))
+            auto existing = definition->methods.find(method.first);
+            if (existing != definition->methods.end() && existing->second &&
+                skein_vm_function_body_available(existing->second))
                 continue;
             struct value_t *function_value = nullptr;
             thread_transfer_value transfer;
@@ -1520,13 +1523,18 @@ bool skein_vm_apply_thread_types(
                 error = "thread payload method has no function definition";
                 return false;
             }
-            std::string method_error;
-            if (!structtype_add_method(definition, method.first,
-                                       std::move(method_def), method_error)) {
-                error = method_error.empty()
-                            ? "cannot attach thread payload method"
-                            : method_error;
-                return false;
+            if (existing != definition->methods.end()) {
+                existing->second = std::move(method_def);
+            } else {
+                std::string method_error;
+                if (!structtype_add_method(definition, method.first,
+                                           std::move(method_def),
+                                           method_error)) {
+                    error = method_error.empty()
+                                ? "cannot attach thread payload method"
+                                : method_error;
+                    return false;
+                }
             }
         }
         auto attach_default = [&](struct field_def &field,
@@ -1808,18 +1816,69 @@ ParamPatternResult skein_vm_match_parameter_pattern(
                    : ParamPatternResult::NotMatched;
 }
 
+bool skein_vm_function_body_available(
+    const std::shared_ptr<function_def> &def) {
+    if (!def || !def->code)
+        return false;
+    if (function_body_ast(def->code.get()))
+        return true;
+    return cache_for(def->code.get())->proto != NULL;
+}
+
+static bool prepare_key_methods_inner(
+    const struct value_t *value, std::unordered_set<const type_def *> &types,
+    std::unordered_set<const void *> &visiting) {
+    if (!value)
+        return true;
+    const struct type_def *def = nullptr;
+    if (value->type == T_struct)
+        def = ((const struct struct_value_t *)value)->def;
+    else if (value->type == T_enum)
+        def = ((const struct enum_value_t *)value)->def;
+    if (def && types.insert(def).second) {
+        for (const auto &method : def->methods) {
+            if (!method.second)
+                continue;
+            if (method.first != "dict_hash" && method.first != "key_eq")
+                continue;
+            if (!prepare_function_body(method.second))
+                return false;
+        }
+    }
+
+    const void *identity = value_payload(value);
+    if (identity && !visiting.insert(identity).second)
+        return true;
+    bool ok = true;
+    for_each_value_child(value, [&](const struct value_t *child) {
+        if (ok)
+            ok = prepare_key_methods_inner(child, types, visiting);
+    });
+    return ok;
+}
+
+bool skein_vm_prepare_value_methods(const struct value_t *value) {
+    std::unordered_set<const type_def *> types;
+    std::unordered_set<const void *> visiting;
+    return prepare_key_methods_inner(value, types, visiting);
+}
+
 bool skein_vm_try_execute_function_body(
     const std::shared_ptr<function_def> &def, struct value_t *&out) {
     ensure_vm_host();
     out = NULL;
     if (!def || !def->code)
         return false;
-    if (!skein_vm_enabled())
-        return false;
 
     function_code *code = def->code.get();
     function_vm_cache *cached = cache_for(code);
-    if (!cached->proto && !skein_vm_enabled())
+    /*
+     * Transferred functions carry precompiled bytecode instead of an AST.
+     * They must remain executable even when the surrounding worker uses the
+     * AST backend, otherwise transferred methods and callbacks fail with
+     * "function body is unavailable".
+     */
+    if (!skein_vm_enabled() && !cached->proto)
         return false;
 
     skein::bc::ProtoPtr proto = prepare_function_body(def);

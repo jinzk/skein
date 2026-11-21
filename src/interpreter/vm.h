@@ -146,6 +146,16 @@ struct value_t *skein_vm_eval_statement(struct ast *statement);
 bool skein_vm_try_execute_function_body(
     const std::shared_ptr<function_def> &def, struct value_t *&out);
 
+/* True when this thread can execute the function body (AST or bytecode). */
+bool skein_vm_function_body_available(
+    const std::shared_ptr<function_def> &def);
+
+/*
+ * Compile methods reachable from a value into shared bytecode caches before
+ * the value is handed to an AST-mode worker thread.
+ */
+bool skein_vm_prepare_value_methods(const struct value_t *value);
+
 /* Try to evaluate one default-parameter expression in the current scope. */
 bool skein_vm_try_eval_default(const std::shared_ptr<function_def> &def,
                                int index, struct value_t *&out);

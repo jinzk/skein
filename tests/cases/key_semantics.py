@@ -6,6 +6,9 @@ optional KeyEq equality, and std.dict.index_by.
 """
 from harness import *  # noqa: F401,F403
 
+import os
+import tempfile
+
 USER_HASH = (
     "import std;\n"
     "import std.dict_key;\n"
@@ -255,4 +258,49 @@ def run_cases():
         '}\n'
         'println(launch worker().wait());\n',
         stdout_all=["x"],
+    )
+
+    with tempfile.TemporaryDirectory() as thread_tmp:
+        worker = os.path.join(thread_tmp, "keyeq_worker.skein")
+        with open(worker, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "import std;\n"
+                "func main(ctx) {\n"
+                '  let d = ctx.payload["d"];\n'
+                '  let k = ctx.payload["k"];\n'
+                "  return d[k];\n"
+                "}\n"
+            )
+        check(
+            "key custom hash and KeyEq across threads",
+            USER_KEYEQ +
+            'let a = User { id: 1, cache: [] };\n'
+            'let b = User { id: 1, cache: [1] };\n'
+            'let d = {a: "x"};\n'
+            f'let t = std.thread.spawn_script({skein_string(worker)}, '
+            'std.thread.Message.from({"d": d, "k": b}));\n'
+            "let r = t.join();\n"
+            'println(str(r["ok"]));\n'
+            'println(str(r["value"]));\n',
+            stdout_all=["true", "x"],
+        )
+
+    check(
+        "key custom hash and KeyEq across entry threads",
+        USER_KEYEQ +
+        'func worker(ctx) {\n'
+        '  let d = ctx.payload["d"];\n'
+        '  let k = ctx.payload["k"];\n'
+        '  return d[k];\n'
+        '}\n'
+        'let a = User { id: 1, cache: [] };\n'
+        'let b = User { id: 1, cache: [1] };\n'
+        'let d = {a: "x"};\n'
+        'let blob = std.entry.encode(worker);\n'
+        'let t = std.thread.spawn_entry(blob, '
+        'std.thread.Message.from({"d": d, "k": b}));\n'
+        "let r = t.join();\n"
+        'println(str(r["ok"]));\n'
+        'println(str(r["value"]));\n',
+        stdout_all=["true", "x"],
     )

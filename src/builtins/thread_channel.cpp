@@ -3391,6 +3391,12 @@ struct value_t *thread_spawn_script(
         yyerror("std.thread.spawn_script expects a Message");
         return nullptr;
     }
+    if (!skein_vm_prepare_value_methods(message->payload) ||
+        (message->handles &&
+         !skein_vm_prepare_value_methods(message->handles))) {
+        yyerror("std.thread.spawn_script: cannot prepare custom key methods");
+        return nullptr;
+    }
     std::string entry = "main";
     if (args.size() == 3) {
         if (args[2]->type != T_dict) {
@@ -3466,6 +3472,14 @@ static struct value_t *thread_spawn_payload(
     std::vector<thread_transfer_module> modules,
     std::vector<thread_transfer_type> types,
     struct value_t *message, const char *what) {
+    std::shared_ptr<message_state> message_payload;
+    if (get_message_state(message, message_payload) &&
+        (!skein_vm_prepare_value_methods(message_payload->payload) ||
+         (message_payload->handles &&
+          !skein_vm_prepare_value_methods(message_payload->handles)))) {
+        yyerror("%s: cannot prepare custom key methods", what);
+        return nullptr;
+    }
     std::shared_ptr<thread_state> state = std::make_shared<thread_state>();
     state->id = next_thread_id.fetch_add(1);
     struct value_t *argument = dupval(message);

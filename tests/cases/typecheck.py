@@ -857,7 +857,7 @@ def run_cases():
 
     check("pair indexing and destructuring",
           "import std;\n"
-          "let p: pair[int, string] = [1, \"a\"];\n"
+          "let p: pair[int, string] = (1, \"a\");\n"
           "let xs: list[int] = [p[0]];\n"
           "let ys: list[string] = [p[1]];\n"
           "let [n, s] = p;\n"
@@ -867,12 +867,12 @@ def run_cases():
           stdout_all=["[1]", "[a]", "[1]", "[a]"], not_stderr="type warning")
 
     check("pair literal mismatch",
-          "let p: pair[int, string] = [\"a\", 1];\n",
+          "let p: pair[int, string] = (\"a\", 1);\n",
           stderr="type error: expected int, got string")
 
     check("pair length mismatch",
-          "let p: pair[int, string] = [1];\n",
-          stderr="type error: pair expects 2 element(s), got 1")
+          "let p: pair[int, string] = (1, \"a\", true);\n",
+          stderr="type error: pair expects 2 element(s), got 3")
 
     check("zip pair type",
           "import std;\n"
@@ -1070,7 +1070,7 @@ def run_cases():
           not_stderr="type warning")
 
     check("flat pair arity rejected",
-          "let p: pair[int, string, bool] = [1, \"a\", true];\n",
+          "let p: pair[int, string, bool] = (1, \"a\", true);\n",
           stderr="type error: type pair expects 2 type argument(s)")
 
     check("tuple literal inference",

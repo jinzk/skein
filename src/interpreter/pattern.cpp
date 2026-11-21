@@ -129,6 +129,28 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
             }
             return index == list->payload->items.size();
         }
+        case NODE_PATTERN_TUPLE: {
+            if (value->type != T_list)
+                return false;
+            struct list_value_t *list = (struct list_value_t *)value;
+            if (!list->payload || !list->payload->frozen)
+                return false;
+            size_t count = 0;
+            for (struct ast *item = pattern->items; item;
+                 item = ((struct pattern_node *)item)->next)
+                ++count;
+            if (count != list->payload->items.size())
+                return false;
+            size_t index = 0;
+            for (struct ast *item_ast = pattern->items; item_ast;
+                 item_ast = ((struct pattern_node *)item_ast)->next,
+                 ++index) {
+                if (!match_pattern(item_ast,
+                                   list->payload->items[index], bindings))
+                    return false;
+            }
+            return true;
+        }
         case NODE_PATTERN_CONTAINER: {
             if (pattern->variant) {
                 if (value->type != T_enum)

@@ -66,6 +66,7 @@ void collect_pattern_bindings(const struct ast *node,
             return;
         case NODE_PATTERN_OR:
         case NODE_PATTERN_LIST:
+        case NODE_PATTERN_TUPLE:
             for (struct pattern_node *item =
                      (struct pattern_node *)pattern->items;
                  item; item = (struct pattern_node *)item->next) {

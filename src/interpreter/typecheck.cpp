@@ -542,30 +542,39 @@ struct Checker : public BuiltinContext {
 
         if (expected &&
             (expected->kind == TYPE_PAIR ||
-             expected->kind == TYPE_TUPLE) &&
-            (expr->nodetype == 'l' || expr->nodetype == NODE_TUPLE)) {
-            std::size_t index = 0;
-            for (struct list_node *item = (struct list_node *)expr; item;
-                 item = (struct list_node *)item->next, ++index) {
-                const TypeNode *element =
-                    index < expected->args.size()
-                        ? expected->args[index]
-                        : type_any();
-                if (!check_expr(item->value, element, env,
-                                explicit_cast, true))
-                    return false;
-            }
-            if (index != expected->args.size()) {
-                char message[128];
-                std::snprintf(message, sizeof(message),
-                              "%s expects %zu element(s), got %zu",
-                              expected->kind == TYPE_PAIR ? "pair"
-                                                          : "tuple",
-                              expected->args.size(), index);
-                report_error(expr->line, expr->column, message);
+             expected->kind == TYPE_TUPLE)) {
+            if (expr->nodetype == 'l') {
+                report_error(
+                    expr->line, expr->column,
+                    expected->kind == TYPE_PAIR
+                        ? "pair expects a tuple literal; use (a, b)"
+                        : "tuple expects a tuple literal; use (a, b)");
                 return false;
             }
-            return true;
+            if (expr->nodetype == NODE_TUPLE) {
+                std::size_t index = 0;
+                for (struct list_node *item = (struct list_node *)expr;
+                     item; item = (struct list_node *)item->next, ++index) {
+                    const TypeNode *element =
+                        index < expected->args.size()
+                            ? expected->args[index]
+                            : type_any();
+                    if (!check_expr(item->value, element, env,
+                                    explicit_cast, true))
+                        return false;
+                }
+                if (index != expected->args.size()) {
+                    char message[128];
+                    std::snprintf(message, sizeof(message),
+                                  "%s expects %zu element(s), got %zu",
+                                  expected->kind == TYPE_PAIR ? "pair"
+                                                              : "tuple",
+                                  expected->args.size(), index);
+                    report_error(expr->line, expr->column, message);
+                    return false;
+                }
+                return true;
+            }
         }
 
         if (expected && expected->kind == TYPE_LIST &&
@@ -1799,7 +1808,8 @@ struct Checker : public BuiltinContext {
 
     void bind_pattern_types(const struct ast *node,
                             const TypeNode *value, Env &env,
-                            bool fixed = false) {
+                            bool fixed = false,
+                            bool allow_unproven_tuple = false) {
         if (!node)
             return;
         const struct pattern_node *pattern =
@@ -1814,7 +1824,8 @@ struct Checker : public BuiltinContext {
                 return;
             case NODE_PATTERN_AS: {
                 if (pattern->items)
-                    bind_pattern_types(pattern->items, value, env, fixed);
+                    bind_pattern_types(pattern->items, value, env, fixed,
+                                       allow_unproven_tuple);
                 if (pattern->name && *pattern->name &&
                     std::strcmp(pattern->name, "_") != 0) {
                     const struct pattern_node *inner =
@@ -1835,6 +1846,72 @@ struct Checker : public BuiltinContext {
                 }
                 return;
             }
+            case NODE_PATTERN_TUPLE: {
+                std::size_t arity = 0;
+                for (const struct pattern_node *item =
+                         (const struct pattern_node *)pattern->items;
+                     item; item = (const struct pattern_node *)item->next)
+                    ++arity;
+                /*
+                 * A nullable pair/tuple (union[T, null]) still has a unique
+                 * tuple shape.  A union with another non-null member is not
+                 * proven at this point and stays rejected.
+                 */
+                const TypeNode *tuple_value = value;
+                if (tuple_value && tuple_value->kind == TYPE_UNION) {
+                    const TypeNode *found = nullptr;
+                    bool ambiguous = false;
+                    for (const TypeNode *member : tuple_value->args) {
+                        if (!member || member->kind == TYPE_NULL)
+                            continue;
+                        if (member->kind == TYPE_PAIR ||
+                            member->kind == TYPE_TUPLE) {
+                            if (found) {
+                                ambiguous = true;
+                                break;
+                            }
+                            found = member;
+                        } else {
+                            ambiguous = true;
+                            break;
+                        }
+                    }
+                    tuple_value = ambiguous ? nullptr : found;
+                }
+                const bool proven =
+                    tuple_value && (tuple_value->kind == TYPE_PAIR ||
+                                    tuple_value->kind == TYPE_TUPLE);
+                if (!proven && !allow_unproven_tuple) {
+                    char message[192];
+                    std::snprintf(
+                        message, sizeof(message),
+                        "tuple pattern requires a pair or tuple, got %s",
+                        value ? type_display(value) : "null");
+                    report_error(node->line, node->column, message);
+                }
+                if (proven && tuple_value->args.size() != arity) {
+                    char message[192];
+                    std::snprintf(
+                        message, sizeof(message),
+                        "tuple pattern expects %zu element(s), got %zu",
+                        arity, tuple_value->args.size());
+                    report_error(node->line, node->column, message);
+                }
+                std::size_t index = 0;
+                for (const struct pattern_node *item =
+                         (const struct pattern_node *)pattern->items;
+                     item;
+                     item = (const struct pattern_node *)item->next,
+                     ++index) {
+                    const TypeNode *element =
+                        proven && index < tuple_value->args.size()
+                            ? tuple_value->args[index]
+                            : type_any();
+                    bind_pattern_types((const struct ast *)item, element,
+                                       env, fixed, allow_unproven_tuple);
+                }
+                return;
+            }
             case NODE_PATTERN_LIST: {
                 if (value && (value->kind == TYPE_PAIR ||
                               value->kind == TYPE_TUPLE)) {
@@ -1852,14 +1929,16 @@ struct Checker : public BuiltinContext {
                          item = (const struct pattern_node *)item->next) {
                         if (item->nodetype == NODE_PATTERN_REST) {
                             bind_pattern_types((const struct ast *)item,
-                                               rest, env, fixed);
+                                               rest, env, fixed,
+                                               allow_unproven_tuple);
                         } else {
                             const TypeNode *element =
                                 index < value->args.size()
                                     ? value->args[index]
                                     : type_any();
                             bind_pattern_types((const struct ast *)item,
-                                               element, env, fixed);
+                                               element, env, fixed,
+                                               allow_unproven_tuple);
                             ++index;
                         }
                     }
@@ -1877,10 +1956,12 @@ struct Checker : public BuiltinContext {
                      item; item = (const struct pattern_node *)item->next) {
                     if (item->nodetype == NODE_PATTERN_REST)
                         bind_pattern_types((const struct ast *)item, rest,
-                                           env, fixed);
+                                           env, fixed,
+                                           allow_unproven_tuple);
                     else
                         bind_pattern_types((const struct ast *)item, element,
-                                           env, fixed);
+                                           env, fixed,
+                                           allow_unproven_tuple);
                 }
                 return;
             }
@@ -1947,7 +2028,8 @@ struct Checker : public BuiltinContext {
                                     field_type = fit->second;
                             }
                             bind_pattern_types(field->pattern, field_type,
-                                               env, fixed);
+                                               env, fixed,
+                                               allow_unproven_tuple);
                         } else if (field->rest_name) {
                             env.define(field->rest_name, type_any(), fixed);
                         }
@@ -1967,7 +2049,7 @@ struct Checker : public BuiltinContext {
                      field = field->next) {
                     if (field->pattern)
                         bind_pattern_types(field->pattern, field_type, env,
-                                           fixed);
+                                           fixed, allow_unproven_tuple);
                     else if (field->rest_name)
                         env.define(field->rest_name, rest_type, fixed);
                 }
@@ -1978,7 +2060,7 @@ struct Checker : public BuiltinContext {
                          (const struct pattern_node *)pattern->items;
                      item; item = (const struct pattern_node *)item->next)
                     bind_pattern_types((const struct ast *)item, value, env,
-                                       fixed);
+                                       fixed, allow_unproven_tuple);
                 return;
             case NODE_PATTERN_TYPE:
             case NODE_PATTERN_LITERAL:
@@ -2112,16 +2194,23 @@ struct Checker : public BuiltinContext {
             const TypeNode *type = type_from_constraint(item->type);
             if (item->variadic)
                 type = type_container(TYPE_LIST, {type});
-            bool fixed = item->type != NULL;
+            const bool annotated = item->type != NULL;
+            bool fixed = annotated;
             if (effective_self && std::string(name) == "self") {
                 type = effective_self;
                 fixed = true;
             }
+            struct ast *pattern = symlist_pattern_ast(item);
+            if (pattern && !annotated) {
+                if (const TypeNode *implied =
+                        tuple_pattern_param_type(item))
+                    type = implied;
+            }
             invalidate_root_facts(local, name);
             local.define(name, type, fixed);
-            struct ast *pattern = symlist_pattern_ast(item);
             if (pattern)
-                bind_pattern_types(pattern, type, local, fixed);
+                bind_pattern_types(pattern, type, local, fixed,
+                                   !annotated);
         }
 
         /*
@@ -2948,6 +3037,22 @@ struct Checker : public BuiltinContext {
             case 'X':
                 check_stmt(((struct nscope *)expr)->ast, env);
                 return type_any();
+            case NODE_MATCH: {
+                const struct match_node *match =
+                    (const struct match_node *)expr;
+                const TypeNode *subject = infer(match->expr, env);
+                bool fixed = expr_fixed(match->expr, env);
+                for (const struct match_arm *arm =
+                         (const struct match_arm *)match->arms;
+                     arm; arm = (const struct match_arm *)arm->next) {
+                    if (!arm->pattern)
+                        continue;
+                    Env child;
+                    child.parent = &env;
+                    bind_pattern_types(arm->pattern, subject, child, fixed);
+                }
+                return type_any();
+            }
             case 'o': {
                 struct on_error_node *handler =
                     (struct on_error_node *)expr;

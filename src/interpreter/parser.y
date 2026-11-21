@@ -1060,7 +1060,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> slice_bound
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
-%type <a> match_arms match_arm pattern pattern_list pattern_items value_pattern match_values
+%type <a> match_arms match_arm pattern pattern_list pattern_items tuple_pattern_items value_pattern match_values
 %type <a> tuple_body
 %type <pf> pattern_fields pattern_field_items pattern_field
 %type <a> let_pattern
@@ -1477,6 +1477,7 @@ let_pattern: NAME '{' pattern_fields '}'  {
     | '{' pattern_fields '}'              { $$ = newpatterndict($2); }
     | '{' EMPTY_DICT_CLOSE                { $$ = newpatterndict(NULL); }
     | '[' pattern_list ']'                { $$ = newpatternlist($2); }
+    | '(' tuple_pattern_items ')'          { $$ = $2; }
     ;
 
 struct_decl: STRUCT NAME '{' empty_body  {
@@ -2087,6 +2088,7 @@ pattern: INT                              { $$ = newpatternlit(newint($1)); }
     | '{' pattern_fields '}'              { $$ = newpatterndict($2); }
     | '{' EMPTY_DICT_CLOSE                { $$ = newpatterndict(NULL); }
     | '[' pattern_list ']'                { $$ = newpatternlist($2); }
+    | '(' tuple_pattern_items ')'          { $$ = $2; }
     | pattern '|' pattern                  { $$ = newpatternor($1, $3); }
     | INT DOTDOT INT                       { $$ = newpatternrange($1, $3); }
     | '-' INT DOTDOT INT                   { $$ = newpatternrange(-$2, $4); }
@@ -2158,6 +2160,10 @@ pattern_items: pattern                    { $$ = $1; }
     | pattern_items ',' pattern           { $$ = append_patternitem($1, $3); }
     ;
 
+tuple_pattern_items: pattern ',' pattern_items {
+        $$ = newpatterntuple(append_patternitem($1, $3));
+      }
+    ;
 tuple_body: exp ',' exp                   {
         $$ = newtuple($1, newlist($3, NULL));
       }
@@ -2212,6 +2218,9 @@ param: NAME {
       }
     | '[' pattern_list ']' {
         $$ = new_destructure_param(newpatternlist($2));
+      }
+    | '(' tuple_pattern_items ')' {
+        $$ = new_destructure_param($2);
       }
     | '{' pattern_fields '}' {
         $$ = new_destructure_param(newpatterndict($2));

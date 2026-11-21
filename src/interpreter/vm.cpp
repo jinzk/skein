@@ -4836,6 +4836,22 @@ public:
                 }
                 return item_index == list->payload->items.size();
             }
+            case skein::bc::PatternDesc::Kind::Tuple: {
+                if (value->type != T_list)
+                    return false;
+                struct list_value_t *list = (struct list_value_t *)value;
+                if (!list->payload || !list->payload->frozen)
+                    return false;
+                if (pattern.items.size() != list->payload->items.size())
+                    return false;
+                for (size_t i = 0; i < pattern.items.size(); ++i) {
+                    if (!match_pattern_proto(
+                            proto, pattern.items[i],
+                            list->payload->items[i], bindings))
+                        return false;
+                }
+                return true;
+            }
             case skein::bc::PatternDesc::Kind::Container: {
                 if (!pattern.variant.empty()) {
                     if (value->type != T_enum)

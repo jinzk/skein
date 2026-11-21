@@ -33,6 +33,7 @@ from cases import (
     stdlib_builtins,
     task_errors,
     task_methods,
+    tuple_semantics,
     typecheck,
 )
 
@@ -61,6 +62,7 @@ MODULES = [
     lint,
     logging,
     lsp,
+    tuple_semantics,
     typecheck,
 ]
 

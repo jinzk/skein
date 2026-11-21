@@ -360,8 +360,9 @@ std.string.builder          29 ms
 6. 是否支持 vendor 和多模块 workspace？
 7. 私有模块认证与 proxy 鉴权做到什么程度？
 8. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
-9. 是否按 [`tuple-semantics-plan.md`](tuple-semantics-plan.md) 严格化 pair/tuple
-   字面量并引入 `(a, b)` 解构模式？
+9. ~~是否按 [`tuple-semantics-plan.md`](tuple-semantics-plan.md) 严格化 pair/tuple
+   字面量并引入 `(a, b)` 解构模式？~~ 已实施：pair/tuple 字面量要求 `(a, b)`，
+   `(a, b)` 可用于 let/const、函数参数和 match。
 
 ---
 

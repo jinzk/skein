@@ -46,6 +46,8 @@ std::string canonical_builtin_path(const std::string &path,
 
 FunctionSig signature_from_symlist(struct symlist *sl,
                                    bool skip_self = false);
+/* Type implied by an unannotated tuple parameter pattern, or null. */
+const TypeNode *tuple_pattern_param_type(struct symlist *item);
 const TypeNode *signature_result_type(const FunctionSig &sig);
 FunctionSig method_signature_from_code(const struct function_code *code);
 FunctionSig method_signature_from_def(const struct funcdef *def);

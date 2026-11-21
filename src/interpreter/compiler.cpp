@@ -3291,6 +3291,17 @@ struct Compiler {
                     desc.items.push_back(child);
                 }
                 break;
+            case NODE_PATTERN_TUPLE:
+                desc.kind = skein::bc::PatternDesc::Kind::Tuple;
+                for (struct pattern_node *item =
+                         (struct pattern_node *)pattern->items;
+                     item; item = (struct pattern_node *)item->next) {
+                    uint32_t child = add_pattern((struct ast *)item);
+                    if (!ok)
+                        return UINT32_MAX;
+                    desc.items.push_back(child);
+                }
+                break;
             case NODE_PATTERN_CONTAINER:
                 desc.kind = skein::bc::PatternDesc::Kind::Container;
                 desc.source = pattern->source ? pattern->source : "";

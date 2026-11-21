@@ -657,6 +657,12 @@ struct ast *newpatternlist(struct ast *items) {
     return (struct ast *)a;
 }
 
+struct ast *newpatterntuple(struct ast *items) {
+    struct pattern_node *a = new_pattern_node(NODE_PATTERN_TUPLE);
+    a->items = items;
+    return (struct ast *)a;
+}
+
 struct ast *newpatternstruct(char *name, char *source,
                              struct pattern_field *fields) {
     struct pattern_node *a = new_pattern_node(NODE_PATTERN_CONTAINER);
@@ -1609,7 +1615,8 @@ void treefree(struct ast *a) {
             treefree(p->next);
             break;
         }
-        case NODE_PATTERN_LIST: {
+        case NODE_PATTERN_LIST:
+        case NODE_PATTERN_TUPLE: {
             struct pattern_node *p = (struct pattern_node *)a;
             treefree(p->items);
             treefree(p->next);

@@ -253,6 +253,7 @@ struct PatternDesc {
         Rest,
         Never,
         List,
+        Tuple,
         Container
     };
 

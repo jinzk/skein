@@ -37,6 +37,7 @@ constexpr int NODE_PATTERN_NEVER = '#';
 constexpr int NODE_PATTERN_TYPE = 0x100;
 constexpr int NODE_PATTERN_OR = 0x101;
 constexpr int NODE_PATTERN_RANGE = 0x102;
+constexpr int NODE_PATTERN_TUPLE = 0x103;
 constexpr int NODE_CAST = 0x110;
 constexpr int NODE_TUPLE = 0x120;
 constexpr int NODE_DESTRUCTURE = '`';
@@ -511,6 +512,7 @@ struct ast *newpatternor(struct ast *left, struct ast *right);
 struct ast *newpatternrange(long long start, long long end);
 struct ast *newpatterndict(struct pattern_field *fields);
 struct ast *newpatternlist(struct ast *items);
+struct ast *newpatterntuple(struct ast *items);
 struct ast *newpatternstruct(char *name, char *source,
                              struct pattern_field *fields);
 struct ast *newpatternvariant(char *name, char *source, char *variant,

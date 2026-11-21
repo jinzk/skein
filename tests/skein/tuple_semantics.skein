@@ -1,0 +1,75 @@
+import std;
+include "_support.skein";
+
+func tuple_add((x, y)) {
+  return x + y;
+}
+
+func tuple_add_defaults(p: pair[int, int]) {
+  let (x, y) = p;
+  return x + y;
+}
+
+ts_test("tuple let value", func() {
+  let (a, b) = (1, 2);
+  ts_eq(a, 1);
+  ts_eq(b, 2);
+});
+
+ts_test("tuple let nested", func() {
+  let (a, [b, c]) = (1, (2, 3));
+  ts_eq(a, 1);
+  ts_eq(b, 2);
+  ts_eq(c, 3);
+});
+
+ts_test("tuple parameter", func() {
+  ts_eq(tuple_add((3, 4)), 7);
+});
+
+ts_test("typed pair parameter and destructuring", func() {
+  ts_eq(tuple_add_defaults((5, 6)), 11);
+  let p: pair[int, int] = (7, 8);
+  let (a, b) = p;
+  ts_eq(a + b, 15);
+});
+
+ts_test("tuple match", func() {
+  let v = (5, 6);
+  ts_eq(match v {
+    case (x, y) => x * y;
+  }, 30);
+});
+
+ts_test("tuple as pattern", func() {
+  let v = (7, 8);
+  ts_eq(match v {
+    case (x, y) as whole => len(whole) + x + y;
+  }, 17);
+});
+
+ts_test("loose list pattern still accepts tuple", func() {
+  let [a, b] = (9, 10);
+  ts_eq(a + b, 19);
+  let v = (11, 12);
+  ts_eq(match v {
+    case [x, y] => x + y;
+  }, 23);
+});
+
+ts_test("tuple pattern only matches tuple", func() {
+  let v = (1, 2);
+  ts_eq(match v {
+    case (x, y) => "tuple";
+    default => "other";
+  }, "tuple");
+});
+
+ts_test("tuple literal indexing", func() {
+  let t = (1, "a", true);
+  ts_eq(t[0], 1);
+  ts_eq(t[1], "a");
+  ts_eq(t[2], true);
+});
+
+ts_finish();

@@ -497,13 +497,19 @@ let zero = () -> 7;
 ```text
 func sum([a, b]) { return a + b; }
 func pair({x, y}) { return x * y; }
+func tuple_pair((a, b)) { return a + b; }
 struct P { x: int; y: int; }
 func point(P {x, y}) { return x + y; }
 func first([head, ...tail]) { return head; }
 ```
 
-解构参数占一个参数位置；支持 list、dict、struct 和 enum 变体模式。解构失败会报
+解构参数占一个参数位置；支持 list、dict、struct、enum 变体和 tuple 模式。解构失败会报
 `function parameter does not match its pattern`。
+
+- `[a, b]` 是序列模式，接受 list、pair 和 tuple；
+- `(a, b)` 是 tuple 模式，只接受 pair/tuple；
+- 无类型标注的 tuple 参数会推导为 `pair[any, any]` / `tuple[any, ...]`，
+  调用时传 list 会被拒绝。
 
 匿名函数体使用 `list` 语法，支持多语句和显式 `return`。
 
@@ -1093,8 +1099,14 @@ struct Handler {
 
   对字段/变量写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄。赋值后收窄会回退到声明类型。
 - `tuple[A, B, C, ...]` 表示三元及以上异构结构，值语法为 `(a, b, c, ...)`；索引和解构按位置得到类型；
-- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，union 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查。
-- `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`。
+- `pair[A, B]` / `tuple[...]` 的初始化只接受 tuple 字面量 `(a, b, ...)`；`[a, b]` 是 list 字面量，不是 pair/tuple：
+  - `let p: pair[int, int] = (1, 2);` 合法；
+  - `let p: pair[int, int] = [1, 2];` 报 `pair expects a tuple literal; use (a, b)`；
+  - 函数参数同理：`f((1, 2))` 合法，`f([1, 2])` 在参数类型为 pair/tuple 时被拒绝；
+- tuple 解构模式 `(a, b, ...)` 要求 subject 的静态类型是 `pair` / `tuple`，元素个数必须一致；
+  `[a, b]` 仍是宽松序列模式，可以匹配 list、pair 和 tuple；
+- `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 frozen list，union 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查。
+- `match (a, b)` 统一按 tuple/pair subject 处理，tuple 模式 `(x, y)` 只匹配 tuple，序列模式 `[x, y]` 匹配任意二元素序列；传单个 tuple 参数使用 `f((a, b))`。
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：
 
   ```text
@@ -1128,6 +1140,8 @@ let {a, b} = {"a": 1, "b": 2};
 let {a: x} = {"a": 9};              // key "a" 绑定到 x
 let {"a-b": z} = {"a-b": 7};        // 非标识符 key 用字符串
 let [h, ...t] = [1, 2, 3];
+let (a, b) = (1, 2);                // tuple 模式
+let (c, [d, e]) = (1, (2, 3));      // tuple 外层 + list 内层
 let {user: {name}} = {"user": {"name": "alice"}};
 
 struct P { x: int; y: int; }
@@ -1140,6 +1154,9 @@ let P {x, y} = P { x: 1, y: 2 };
 - dict 开放匹配：只要求列出的 key 存在，多余的忽略；
 - `...rest` 收集未列出的键或剩余元素；
 - list 没有 `...rest` 时要求长度完全相等；
+- `(a, b, ...)` 是 tuple 模式：至少 2 个元素，禁止 `...rest`，要求 subject 是 pair/tuple，元素个数一致；
+- `(a)` 是分组表达式，不是单元素 tuple 模式；
+- `[a, b]` 是宽松序列模式，仍可解构 pair/tuple；
 - 缺 key、长度不匹配、struct 字段不匹配 → 运行时错误；
 - 绑定进入当前作用域：`let` 可写，`const` 只读；
 - 不支持默认值、解构赋值、多变量声明、`as` 整体绑定；
@@ -1418,7 +1435,7 @@ let next = match (state) {
 - 不支持 float 字面量，浮点判断用 `if/else`；
 - `as` 可以把整个匹配值绑定到变量：`case Point {x} as p => ...`；
 - `case == CONST` 匹配一个常量/名字/无载荷枚举变体；
-- `match (a, b)` 是 tuple/pair subject，模式 `[x, y]` 按位置解构。
+- `match (a, b)` 是 tuple/pair subject；tuple 模式 `(x, y)` 只匹配 tuple，序列模式 `[x, y]` 匹配任意二元素序列。
 
 支持的模式：
 
@@ -1436,6 +1453,7 @@ let next = match (state) {
 | dict rest | `{kind, ...rest}` | `rest` 收集未列出的键 |
 | list | `[a, b]` | 定长匹配 |
 | list rest | `[h, ...t]` | `t` 是剩余元素组成的新 list |
+| tuple | `(a, b)` | 只匹配 pair/tuple，固定长度，禁止 rest |
 | struct | `Point {x, y}` | 按字段匹配，未知字段报错 |
 | struct 任意 | `Point {}` / `Point { ... }` | 只校验类型 |
 | dict 任意 | `{...}` | 匹配任意 dict |

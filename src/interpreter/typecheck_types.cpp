@@ -360,6 +360,24 @@ std::string canonical_builtin_path(const std::string &path,
     return path;
 }
 
+const TypeNode *tuple_pattern_param_type(struct symlist *item) {
+    if (!item || item->type || item->variadic)
+        return nullptr;
+    const struct pattern_node *pattern =
+        (const struct pattern_node *)symlist_pattern_ast(item);
+    if (!pattern || pattern->nodetype != NODE_PATTERN_TUPLE)
+        return nullptr;
+    std::size_t count = 0;
+    for (const struct pattern_node *node =
+             (const struct pattern_node *)pattern->items;
+         node; node = (const struct pattern_node *)node->next)
+        ++count;
+    if (count < 2)
+        return nullptr;
+    std::vector<const TypeNode *> args(count, type_any());
+    return type_container(count == 2 ? TYPE_PAIR : TYPE_TUPLE, args);
+}
+
 FunctionSig signature_from_symlist(struct symlist *sl, bool skip_self) {
     FunctionSig sig;
     bool skipped = false;
@@ -369,6 +387,10 @@ FunctionSig signature_from_symlist(struct symlist *sl, bool skip_self) {
             continue;
         }
         const TypeNode *type = type_from_constraint(item->type);
+        if (!item->type) {
+            if (const TypeNode *implied = tuple_pattern_param_type(item))
+                type = implied;
+        }
         if (item->variadic) {
             sig.variadic = true;
             sig.rest = type;

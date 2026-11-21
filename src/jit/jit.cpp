@@ -241,9 +241,8 @@ SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
     value_t *container, value_t *index,
     skein::bc::IndexReadCacheEntry *cache, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
-                                value_t **indices, uint32_t count,
-                                value_t *value, value_t **base_slot,
-                                uint64_t packed_loc);
+                                value_t **indices, value_t *value,
+                                value_t **base_slot, uint64_t packed_loc);
 SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
 SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
@@ -1658,31 +1657,30 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.lea(asmjit::x86::rsi,
                       asmjit::x86::ptr(asmjit::x86::rbp,
                                        stack_off(indices_start)));
-                a.mov(asmjit::x86::edx, asmjit::imm(count));
-                a.mov(asmjit::x86::rcx,
+                a.mov(asmjit::x86::rdx,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(value_depth)));
                 switch (desc.base_kind) {
                     case skein::bc::IndexBaseKind::Slot:
-                        a.lea(asmjit::x86::r8,
+                        a.lea(asmjit::x86::rcx,
                               asmjit::x86::ptr(asmjit::x86::rbp,
                                                slot_off(desc.base_index)));
                         break;
                     case skein::bc::IndexBaseKind::Param:
-                        a.lea(asmjit::x86::r8,
+                        a.lea(asmjit::x86::rcx,
                               asmjit::x86::ptr(asmjit::x86::rbp,
                                                param_off(desc.base_index)));
                         break;
                     case skein::bc::IndexBaseKind::Upvalue:
-                        a.mov(asmjit::x86::r8,
+                        a.mov(asmjit::x86::rcx,
                               asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                                      -kDefOff));
                         break;
                     default:
-                        a.xor_(asmjit::x86::r8d, asmjit::x86::r8d);
+                        a.xor_(asmjit::x86::ecx, asmjit::x86::ecx);
                         break;
                 }
-                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_assign_index));
                 for (int i = value_depth; i < depth; ++i)
                     clear_slot(i);

@@ -672,6 +672,48 @@ value_t *assign_index_symbol(struct symbol *base, const char *base_name,
     return assign_index_resolved(base, base_name, indices, fields, value);
 }
 
+value_t *assign_dict_index_fast(value_t *container, value_t *key,
+                                value_t *value) {
+    if (!container || container->type != T_dict || !key || !value) {
+        freeval(key);
+        freeval(value);
+        return NULL;
+    }
+    struct dict_value_t *dv = (struct dict_value_t *)container;
+    if (!dict_key_allowed(key)) {
+        yyerror("%s, got %s", dict_key_error(), typename_of(key));
+        freeval(key);
+        freeval(value);
+        return NULL;
+    }
+    /*
+     * The generic path rejects values that would make the dictionary reach
+     * itself.  Scalars cannot form a cycle, so only inspect container values.
+     */
+    if (value_payload(value)) {
+        std::vector<const void *> targets;
+        targets.push_back(dv->payload.get());
+        if (value_reaches_any(value, targets)) {
+            yyerror("recursive value would create a cycle");
+            freeval(key);
+            freeval(value);
+            return NULL;
+        }
+    }
+    ensure_unique_dict(dv);
+    auto &items = dv->payload->items;
+    int found = dict_find_index(dv, key);
+    if (found >= 0) {
+        freeval(items[(size_t)found].second);
+        items[(size_t)found].second = value;
+        value_t *ret = dupval(value);
+        freeval(key);
+        return ret;
+    }
+    dict_append_item(dv, key, value);
+    return dupval(items.back().second);
+}
+
 static value_t *compound_index_resolved(struct symbol *s,
                                         const char *base_name, int op,
                                         std::vector<value_t *> &indices,

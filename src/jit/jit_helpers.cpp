@@ -1923,19 +1923,17 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
 }
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
-    const skein::bc::IndexDesc *desc, value_t **indices, uint32_t count,
+    const skein::bc::IndexDesc *desc, value_t **indices,
     value_t *value, value_t **base_slot, uint64_t packed_loc) {
     int line = 0;
     int column = 0;
     unpack_loc(packed_loc, line, column);
     diag_set_location(line, column);
-    if (!desc || !indices || !value || desc->fields.empty() ||
-        count != desc->fields.size()) {
+    if (!desc || !indices || !value || desc->fields.empty()) {
         freeval(value);
-        for (uint32_t i = 0; i < count; ++i)
-            freeval(indices[i]);
         return nullptr;
     }
+    const uint32_t count = static_cast<uint32_t>(desc->fields.size());
 
     using skein::bc::IndexBaseKind;
     struct symbol view {};
@@ -1988,6 +1986,17 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
                                      desc->base_name.c_str());
     } else if (desc->base_kind == IndexBaseKind::Name) {
         base = lookupsym(desc->base_name.c_str());
+    }
+
+    /*
+     * Common case: one non-field write into a dictionary.  The generic path
+     * builds argument vectors and re-resolves the container; do the same
+     * checks directly.  `assign_dict_index_fast` consumes the key and value,
+     * and generated code clears the matching frame slots.
+     */
+    if (count == 1 && !desc->fields[0] && base && base->val &&
+        base->val->type == T_dict) {
+        return assign_dict_index_fast(base->val, indices[0], value);
     }
 
     std::vector<value_t *> args(indices, indices + count);

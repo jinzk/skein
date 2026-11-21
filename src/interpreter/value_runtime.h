@@ -28,6 +28,14 @@ struct value_t *assign_index_symbol(
     struct symbol *base, const char *base_name,
     std::vector<struct value_t *> &indices,
     const std::vector<bool> &fields, struct value_t *value);
+/*
+ * Fast path for a single non-field write into a dictionary
+ * (`dict[key] = value`).  Consumes `key` and `value` and returns a new
+ * reference to the stored value, or NULL after reporting an error.
+ */
+struct value_t *assign_dict_index_fast(struct value_t *container,
+                                       struct value_t *key,
+                                       struct value_t *value);
 struct value_t *compound_index_symbol(
     struct symbol *base, const char *base_name, int op,
     std::vector<struct value_t *> &indices,

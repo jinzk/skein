@@ -181,6 +181,77 @@ print(std.set.size(s));
 """,
     },
     {
+        "name": "dict.key_eq.insert",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std", "std.dict_key"),
+        "src": """
+struct User { id: int; cache: list[int]; }
+impl dict_key.DictKey for User {
+  func dict_hash(self) { return self.id; }
+}
+impl dict_key.KeyEq for User {
+  func key_eq(self, other) { return self.id == other.id; }
+}
+let d = {};
+let i = 0;
+while (i < {n}) { d[User { id: i, cache: [] }] = i; i = i + 1; }
+print(len(d));
+""",
+    },
+    {
+        "name": "dict.key_eq.read",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std", "std.dict_key"),
+        "src": """
+struct User { id: int; cache: list[int]; }
+impl dict_key.DictKey for User {
+  func dict_hash(self) { return self.id; }
+}
+impl dict_key.KeyEq for User {
+  func key_eq(self, other) { return self.id == other.id; }
+}
+let d = {};
+let i = 0;
+while (i < {n}) { d[User { id: i, cache: [] }] = i; i = i + 1; }
+let s = 0; i = 0;
+while (i < 4 * {n}) {
+  s = s + d[User { id: i % {n}, cache: [i] }];
+  i = i + 1;
+}
+print(s);
+""",
+    },
+    {
+        "name": "dict.index_by",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std",),
+        "src": """
+struct User { id: int; cache: list[int]; }
+let users = std.list.map(range({n}), func(i) {
+  return User { id: i, cache: [] };
+});
+let d = std.dict.index_by(users, func(u) { return u.id; });
+print(len(d));
+""",
+    },
+    {
+        "name": "dict.index_by.duplicates",
+        "sizes": (20000, 40000),
+        "expect": "linear",
+        "imports": ("std",),
+        "src": """
+struct User { id: int; cache: list[int]; }
+let users = std.list.map(range({n}), func(i) {
+  return User { id: i % 1000, cache: [] };
+});
+let d = std.dict.index_by(users, func(u) { return u.id; });
+print(len(d));
+""",
+    },
+    {
         "name": "set.from_list",
         "sizes": (20000, 40000),
         "expect": "nlog",

@@ -245,3 +245,14 @@ def run_cases():
         'std.dict.index_by([1], func(x) { return 1.5; });\n',
         stderr="std.dict.index_by: dict key must be",
     )
+
+    check(
+        "key custom hash and KeyEq inside task",
+        USER_KEYEQ +
+        'func worker() {\n'
+        '  let d = {User { id: 1, cache: [] }: "x"};\n'
+        '  return d[User { id: 1, cache: [1] }];\n'
+        '}\n'
+        'println(launch worker().wait());\n',
+        stdout_all=["x"],
+    )

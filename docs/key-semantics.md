@@ -171,6 +171,9 @@ by_id[user.id]
 - hash cache 不传输，接收端重新计算
 - 自定义 `dict_hash` / `key_eq` 方法必须随类型元数据可用
 - 依赖不可传输值（函数、heap 等）的 key 方法会在传输时被拒绝
+- 当前跨脚本线程传输自定义 key 方法仍受方法体可用性限制；如果接收端报
+  `function body is unavailable`，应避免跨线程传递该 key，或在接收端提供对应
+  类型方法
 
 ## 9. 错误速查
 

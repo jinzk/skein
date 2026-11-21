@@ -178,6 +178,8 @@ by_id[user.id]
   方法覆盖，不修改进程共享的类型方法表；嵌套传输和反射会看到这些覆盖
 - 类型注册表读写使用全局锁，方法查找使用共享锁；方法声明/附加使用独占锁
 - 跨线程传输的 bytecode proto 会在接收线程复制一份，inline cache 不跨线程共享
+- 类型、方法和函数缓存的完整线程安全模型见
+  [thread-type-safety.md](thread-type-safety.md)
 
 ## 9. 错误速查
 

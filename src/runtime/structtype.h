@@ -206,6 +206,8 @@ std::shared_ptr<function_def> structtype_method(const type_def *def,
 void structtype_set_thread_method(const type_def *def, const std::string &name,
                                   std::shared_ptr<function_def> method);
 std::vector<std::string> structtype_method_names(const type_def *def);
+std::shared_ptr<function_def> structtype_trait_default(
+    const trait_def *trait, const std::string &name);
 bool structtype_add_trait(type_def *def, trait_def *trait,
                           std::string &error);
 

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -25,6 +27,10 @@ thread_local std::unordered_map<
     const type_def *,
     std::unordered_map<std::string, std::shared_ptr<function_def>>>
     thread_methods;
+
+/* Registry mutations are rare and recursive; method lookups are hot. */
+std::recursive_mutex type_registry_mutex;
+std::shared_mutex type_method_mutex;
 
 std::string type_key(const char *source, const char *name) {
     std::string key = source ? source : "";
@@ -143,6 +149,8 @@ struct_payload::~struct_payload() {
 }
 
 void structtype_shutdown() {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
+    std::unique_lock<std::shared_mutex> method_lock(type_method_mutex);
     struct_types.clear();
     trait_types.clear();
     enum_types.clear();
@@ -156,37 +164,47 @@ void structtype_visit_functions(
     const std::function<void(const std::shared_ptr<function_def> &)> &visit) {
     if (!visit)
         return;
-    for (auto &entry : struct_types) {
-        struct_def *def = entry.second.get();
-        for (auto &method : def->methods)
-            visit(method.second);
-        for (const field_def &field : def->fields) {
-            if (field.default_value)
-                visit(field.default_value);
-        }
-    }
-    for (auto &entry : enum_types) {
-        enum_def *def = entry.second.get();
-        for (auto &method : def->methods)
-            visit(method.second);
-        for (const variant_def &variant : def->variants) {
-            for (const field_def &field : variant.fields) {
+    std::vector<std::shared_ptr<function_def>> functions;
+    {
+        std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
+        std::shared_lock<std::shared_mutex> method_lock(type_method_mutex);
+        for (auto &entry : struct_types) {
+            struct_def *def = entry.second.get();
+            for (auto &method : def->methods)
+                if (method.second)
+                    functions.push_back(method.second);
+            for (const field_def &field : def->fields)
                 if (field.default_value)
-                    visit(field.default_value);
+                    functions.push_back(field.default_value);
+        }
+        for (auto &entry : enum_types) {
+            enum_def *def = entry.second.get();
+            for (auto &method : def->methods)
+                if (method.second)
+                    functions.push_back(method.second);
+            for (const variant_def &variant : def->variants) {
+                for (const field_def &field : variant.fields)
+                    if (field.default_value)
+                        functions.push_back(field.default_value);
             }
         }
-    }
-    for (auto &entry : trait_types) {
-        for (auto &method : entry.second->defaults)
-            visit(method.second);
+        for (auto &entry : trait_types) {
+            for (auto &method : entry.second->defaults)
+                if (method.second)
+                    functions.push_back(method.second);
+        }
     }
     for (auto &entry : thread_methods) {
         for (auto &method : entry.second)
-            visit(method.second);
+            if (method.second)
+                functions.push_back(method.second);
     }
+    for (const auto &function : functions)
+        visit(function);
 }
 
 struct_def *structtype_find_struct(const char *source, const char *name) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return NULL;
     auto it = struct_types.find(type_key(source, name));
     return it == struct_types.end() ? NULL : it->second.get();
@@ -195,6 +213,7 @@ struct_def *structtype_find_struct(const char *source, const char *name) {
 struct_def *structtype_find_struct_by_name(const char *package,
                                            const char *name,
                                            bool *ambiguous) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
     if (package && *package) {
@@ -215,6 +234,7 @@ struct_def *structtype_find_struct_by_name(const char *package,
 }
 
 type_def *structtype_find_type(const char *source, const char *name) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return NULL;
     auto sit = struct_types.find(type_key(source, name));
     if (sit != struct_types.end())
@@ -226,6 +246,7 @@ type_def *structtype_find_type(const char *source, const char *name) {
 }
 
 trait_def *structtype_find_trait(const char *source, const char *name) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return NULL;
     auto it = trait_types.find(type_key(source, name));
     return it == trait_types.end() ? NULL : it->second.get();
@@ -234,6 +255,7 @@ trait_def *structtype_find_trait(const char *source, const char *name) {
 trait_def *structtype_find_trait_by_name(const char *package,
                                          const char *name,
                                          bool *ambiguous) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
     if (package && *package) {
@@ -256,6 +278,7 @@ trait_def *structtype_find_trait_by_name(const char *package,
 trait_def *structtype_resolve_trait(const char *source, const char *name,
                                     bool require_exported,
                                     std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     error.clear();
     if (!name) {
         error = "invalid trait name";
@@ -284,6 +307,7 @@ trait_def *structtype_resolve_trait(const char *source, const char *name,
 }
 
 enum_def *structtype_find_enum(const char *source, const char *name) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return NULL;
     auto it = enum_types.find(type_key(source, name));
     return it == enum_types.end() ? NULL : it->second.get();
@@ -292,6 +316,7 @@ enum_def *structtype_find_enum(const char *source, const char *name) {
 enum_def *structtype_find_enum_by_name(const char *package,
                                        const char *name,
                                        bool *ambiguous) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (ambiguous) *ambiguous = false;
     if (!name) return NULL;
     if (package && *package) {
@@ -343,6 +368,7 @@ enum structtype_lookup_status structtype_lookup_type(
     const char *importer_source, const char *importer_package,
     const char *name, struct structtype_lookup_result &out,
     std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     out = structtype_lookup_result();
     error.clear();
     if (!name || !*name) {
@@ -528,6 +554,7 @@ enum structtype_lookup_status structtype_lookup_type(
 }
 
 bool structtype_type_exists(const char *source, const char *name) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return false;
     std::string key = type_key(source, name);
     if (struct_types.count(key) != 0 || trait_types.count(key) != 0 ||
@@ -541,6 +568,7 @@ bool structtype_type_exists(const char *source, const char *name) {
 bool structtype_prepare_struct(const char *source, const char *package,
                                const char *module, const char *name, bool exported,
                                struct_def *&out, std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     out = NULL;
     if (!name || !*name) {
         error = "invalid struct name";
@@ -575,6 +603,7 @@ bool structtype_prepare_struct(const char *source, const char *package,
 bool structtype_finalize_struct(struct_def *def,
                                 std::vector<field_def> fields,
                                 std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def) {
         error = "invalid struct";
         return false;
@@ -599,6 +628,7 @@ bool structtype_finalize_struct(struct_def *def,
 }
 
 void structtype_rollback_struct(struct_def *def) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def)
         return;
     for (auto it = logical_structs.begin(); it != logical_structs.end(); ++it) {
@@ -619,6 +649,7 @@ bool structtype_create_struct(const char *source, const char *package,
                               const char *module, const char *name, bool exported,
                               std::vector<field_def> fields,
                               struct_def *&out, std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!structtype_prepare_struct(source, package, module, name, exported, out,
                                    error))
         return false;
@@ -634,6 +665,7 @@ bool structtype_create_trait(const char *source, const char *package,
                              const char *module, const char *name, bool exported,
                              std::vector<method_sig> methods,
                              trait_def *&out, std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     out = NULL;
     if (!name || !*name) {
         error = "invalid trait name";
@@ -693,6 +725,7 @@ bool structtype_create_trait(const char *source, const char *package,
 bool structtype_prepare_enum(const char *source, const char *package,
                              const char *module, const char *name, bool exported,
                              enum_def *&out, std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     out = NULL;
     if (!name || !*name) {
         error = "invalid enum name";
@@ -726,6 +759,7 @@ bool structtype_prepare_enum(const char *source, const char *package,
 
 bool structtype_finalize_enum(enum_def *def, std::vector<variant_def> variants,
                               std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def) {
         error = "invalid enum";
         return false;
@@ -769,6 +803,7 @@ bool structtype_finalize_enum(enum_def *def, std::vector<variant_def> variants,
 }
 
 void structtype_rollback_enum(enum_def *def) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def)
         return;
     for (auto it = logical_enums.begin(); it != logical_enums.end(); ++it) {
@@ -789,6 +824,7 @@ bool structtype_create_enum(const char *source, const char *package,
                             const char *module, const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!structtype_prepare_enum(source, package, module, name, exported, out,
                                  error))
         return false;
@@ -803,6 +839,8 @@ bool structtype_create_enum(const char *source, const char *package,
 bool structtype_add_method(type_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,
                            std::string &error) {
+    std::lock_guard<std::recursive_mutex> registry_lock(type_registry_mutex);
+    std::unique_lock<std::shared_mutex> method_lock(type_method_mutex);
     if (!def || name.empty() || !code) {
         error = "invalid method";
         return false;
@@ -845,6 +883,7 @@ bool structtype_add_method(type_def *def, const std::string &name,
 
 std::shared_ptr<function_def> structtype_method(const type_def *def,
                                                 const std::string &name) {
+    std::shared_lock<std::shared_mutex> lock(type_method_mutex);
     if (!def)
         return NULL;
     auto type = thread_methods.find(def);
@@ -864,7 +903,17 @@ void structtype_set_thread_method(const type_def *def, const std::string &name,
     thread_methods[def][name] = std::move(method);
 }
 
+std::shared_ptr<function_def> structtype_trait_default(
+    const trait_def *trait, const std::string &name) {
+    std::shared_lock<std::shared_mutex> lock(type_method_mutex);
+    if (!trait)
+        return NULL;
+    auto method = trait->defaults.find(name);
+    return method == trait->defaults.end() ? NULL : method->second;
+}
+
 std::vector<std::string> structtype_method_names(const type_def *def) {
+    std::shared_lock<std::shared_mutex> lock(type_method_mutex);
     std::vector<std::string> names;
     if (!def)
         return names;
@@ -888,6 +937,8 @@ std::vector<std::string> structtype_method_names(const type_def *def) {
 bool structtype_add_trait_default(trait_def *trait, const std::string &name,
                                   std::shared_ptr<function_def> code,
                                   std::string &error) {
+    std::lock_guard<std::recursive_mutex> registry_lock(type_registry_mutex);
+    std::unique_lock<std::shared_mutex> method_lock(type_method_mutex);
     if (!trait || name.empty() || !code || !code->code) {
         error = "invalid trait default method";
         return false;
@@ -904,6 +955,7 @@ bool structtype_add_trait_default(trait_def *trait, const std::string &name,
 
 bool structtype_add_trait(type_def *def, trait_def *trait,
                           std::string &error) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def || !trait) {
         error = "invalid trait implementation";
         return false;
@@ -917,6 +969,7 @@ bool structtype_add_trait(type_def *def, trait_def *trait,
 }
 
 bool structtype_has_trait(const type_def *def, const trait_def *trait) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def || !trait) return false;
     for (size_t i = 0; i < def->traits.size(); ++i)
         if (def->traits[i] == trait)
@@ -1011,6 +1064,7 @@ void ensure_unique_struct(struct struct_value_t *value) {
 
 void structtype_register_alias(const char *importer, const char *alias,
                                const char *target) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!importer || !alias || !target || !*alias || !*target)
         return;
     source_aliases[alias_key(importer, alias)] = target;
@@ -1018,6 +1072,7 @@ void structtype_register_alias(const char *importer, const char *alias,
 
 bool named_type_matches(const char *source, const char *name,
                         const struct value_t *value) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!source || !name || !value)
         return false;
 
@@ -1055,6 +1110,7 @@ bool named_type_matches(const char *source, const char *name,
 
 bool structtype_named_types_equal(const char *module_a, const char *name_a,
                                   const char *module_b, const char *name_b) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name_a || !name_b)
         return false;
     if (std::strcmp(name_a, name_b) == 0 &&

@@ -73,13 +73,10 @@ std::shared_ptr<function_def> custom_method(const struct type_def *def,
     std::shared_ptr<function_def> method = structtype_method(def, name);
     if (method)
         return method;
-    for (const trait_def *trait : def->traits) {
-        if (!trait)
-            continue;
-        auto fallback = trait->defaults.find(name);
-        if (fallback != trait->defaults.end() && fallback->second)
-            return fallback->second;
-    }
+    for (const trait_def *trait : def->traits)
+        if (std::shared_ptr<function_def> fallback =
+                structtype_trait_default(trait, name))
+            return fallback;
     return NULL;
 }
 

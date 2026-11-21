@@ -18,6 +18,13 @@ struct value_t *call_task(skein_task_work_fn work, skein_task_finish_fn finish,
 /* True when the standard task has been cancelled.  Safe from worker threads. */
 bool task_cancelled(struct value_t *task);
 
+/* ABI v4: copy `callee`/`args` and queue them for execution on the owner
+ * thread.  Thread-safe, including from call_task workers.  Returns 0 on
+ * failure.  `cancel_post_callback` is also thread-safe. */
+skein_post_id post_callback(skein_context *ctx, const struct value_t *callee,
+                            const struct value_t *const *args, size_t argc);
+bool cancel_post_callback(skein_context *ctx, skein_post_id id);
+
 /* Drain completed native jobs on the owner thread.  Called by fiber_pump(). */
 void background_drain();
 

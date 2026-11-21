@@ -2,7 +2,7 @@
 #define SKEIN_MODULE_H
 
 /*
- * Skein native module ABI, version 3.
+ * Skein native module ABI, version 4.
  *
  * This header is pure C and is the only contract between the host and a
  * native module.  Modules never link against runtime symbols: the host
@@ -11,15 +11,16 @@
  * them only through the API table.
  *
  * The table is append-only: v1 added new_list/new_dict/as_userdata, v2 added
- * call_task/task_cancelled, and v3 added new_string_len.  Check `size` before
- * using a field that may not exist in an older host.
+ * call_task/task_cancelled, v3 added new_string_len, and v4 added
+ * post_callback/cancel_post_callback.  Check `size` before using a field that
+ * may not exist in an older host.
  */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#define SKEIN_MODULE_ABI_VERSION 3
+#define SKEIN_MODULE_ABI_VERSION 4
 
 #if defined(_WIN32)
 #define SKEIN_MODULE_EXPORT __declspec(dllexport)
@@ -105,6 +106,9 @@ typedef struct skein_constant {
 typedef void (*skein_task_work_fn)(void *data);
 typedef skein_value *(*skein_task_finish_fn)(skein_context *ctx, void *data);
 typedef void (*skein_task_destroy_fn)(void *data);
+
+/* ABI v4 posted-callback identifier.  Zero is never a valid id. */
+typedef uint64_t skein_post_id;
 
 /*
  * Value API.  The table is append-only: new entries are added at the end and
@@ -192,6 +196,33 @@ typedef struct skein_api {
      */
     skein_value *(*new_string_len)(skein_context *ctx, const char *data,
                                    size_t len);
+
+    /*
+     * ABI v4: owner-thread callback delivery from worker threads.
+     *
+     * `post_callback` is safe to call from any thread, including a `call_task`
+     * worker.  It copies `callee` and `args` and queues them for execution on
+     * the owner thread; the caller keeps ownership of its handles and may free
+     * them as soon as this function returns.  The callback may then use the
+     * value API normally.  Returns a non-zero id, or zero on failure.
+     *
+     * `cancel_post_callback` removes a not-yet-executed callback.  It returns
+     * true when the callback was removed; false means it already ran, was
+     * cancelled, or the id is unknown.  Cancellation is safe from any thread;
+     * queued values are always released on the owner thread.
+     *
+     * Callbacks are drained while the script pumps its event loop.  A callback
+     * that is still pending when the interpreter shuts down is discarded.
+     * When posted from a `call_task` worker, the plugin library is kept loaded
+     * until the callback has executed; posts from other threads must keep the
+     * module loaded themselves.  Check `size` before using these fields on
+     * older hosts.
+     */
+    skein_post_id (*post_callback)(skein_context *ctx,
+                                   const skein_value *callee,
+                                   const skein_value *const *args,
+                                   size_t argc);
+    bool (*cancel_post_callback)(skein_context *ctx, skein_post_id id);
 } skein_api;
 
 typedef struct skein_module {

@@ -30,6 +30,15 @@ struct skein_context {
                                  skein_task_destroy_fn destroy,
                                  void *data) = nullptr;
     bool (*task_cancelled)(struct value_t *task) = nullptr;
+
+    /* ABI v4 posted callbacks.  `post_callback` is thread-safe and may be
+     * called from native task workers; it queues values for the owner thread.
+     * Installed by skein::native_async::install() alongside the task hooks. */
+    skein_post_id (*post_callback)(skein_context *ctx,
+                                   const struct value_t *callee,
+                                   const struct value_t *const *args,
+                                   size_t argc) = nullptr;
+    bool (*cancel_post_callback)(skein_context *ctx, skein_post_id id) = nullptr;
 };
 
 struct skein_context *skein_context_current();

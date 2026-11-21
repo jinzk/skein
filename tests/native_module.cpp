@@ -199,6 +199,85 @@ skein_status cancellable_fn(skein_context *ctx,
     return SKEIN_OK;
 }
 
+bool has_post_api() {
+    return g_api &&
+           g_api->size >=
+               offsetof(skein_api, cancel_post_callback) +
+                   sizeof(g_api->cancel_post_callback);
+}
+
+struct post_data {
+    skein_context *ctx = nullptr;
+    skein_value *callback = nullptr;
+    skein_value *arg = nullptr;
+    std::atomic<skein_post_id> id{0};
+};
+
+void post_work(void *data) {
+    post_data *job = static_cast<post_data *>(data);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    const skein_value *args[] = {job->arg};
+    job->id.store(g_api->post_callback(job->ctx, job->callback, args, 1));
+}
+
+skein_value *post_finish(skein_context *ctx, void *data) {
+    post_data *job = static_cast<post_data *>(data);
+    return g_api->new_int(ctx, static_cast<int64_t>(job->id.load()));
+}
+
+void post_destroy(void *data) {
+    post_data *job = static_cast<post_data *>(data);
+    if (job->callback)
+        g_api->free_value(job->ctx, job->callback);
+    if (job->arg)
+        g_api->free_value(job->ctx, job->arg);
+    delete job;
+}
+
+skein_status post_events_fn(skein_context *ctx,
+                            const skein_value *const *args, size_t argc,
+                            skein_value **result) {
+    if (!has_post_api())
+        return g_api->error(ctx, "type", "native post API is unavailable");
+    if (argc != 2)
+        return g_api->error(ctx, "type", "post_events expects 2 arguments");
+    post_data *job = new post_data();
+    job->ctx = ctx;
+    job->callback = g_api->dup_value(ctx, args[0]);
+    job->arg = g_api->dup_value(ctx, args[1]);
+    *result = g_api->call_task(ctx, post_work, post_finish, post_destroy, job);
+    if (!*result) {
+        post_destroy(job);
+        return SKEIN_ERROR;
+    }
+    return SKEIN_OK;
+}
+
+skein_status post_now_fn(skein_context *ctx, const skein_value *const *args,
+                         size_t argc, skein_value **result) {
+    if (!has_post_api())
+        return g_api->error(ctx, "type", "native post API is unavailable");
+    if (argc != 2)
+        return g_api->error(ctx, "type", "post_now expects 2 arguments");
+    skein_post_id id = g_api->post_callback(ctx, args[0], &args[1], 1);
+    *result = g_api->new_int(ctx, static_cast<int64_t>(id));
+    return *result ? SKEIN_OK : SKEIN_ERROR;
+}
+
+skein_status cancel_post_fn(skein_context *ctx,
+                            const skein_value *const *args, size_t argc,
+                            skein_value **result) {
+    if (!has_post_api())
+        return g_api->error(ctx, "type", "native post API is unavailable");
+    int64_t id = 0;
+    if (argc != 1 || !g_api->as_int(args[0], &id))
+        return g_api->error(ctx, "type", "cancel_post expects an id");
+    *result = g_api->new_bool(ctx,
+                              g_api->cancel_post_callback(
+                                  ctx, static_cast<skein_post_id>(id)));
+    return *result ? SKEIN_OK : SKEIN_ERROR;
+}
+
 const skein_function functions[] = {
     {"twice", twice_fn},
     {"counter_new", counter_new},
@@ -208,6 +287,9 @@ const skein_function functions[] = {
     {"string_len", string_len_fn},
     {"twice_async", twice_async_fn},
     {"cancellable", cancellable_fn},
+    {"post_events", post_events_fn},
+    {"post_now", post_now_fn},
+    {"cancel_post", cancel_post_fn},
 };
 
 const skein_native_type *const types[] = {&counter_type};
@@ -236,7 +318,7 @@ const skein_module module = {
     module_init,
     module_fini,
     functions,
-    8,
+    11,
     types,
     1,
     nullptr,

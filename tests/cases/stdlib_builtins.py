@@ -1220,6 +1220,31 @@ def run_cases():
             stdout="= err(task was cancelled)",
         )
         check(
+            "native module posted callback from worker",
+            "import std;\n"
+            f"std.plugin.load({native_module});\n"
+            "import test.dynamic;\n"
+            "let seen = 0;\n"
+            "func record(v) { seen = seen + v; }\n"
+            "let t = dynamic.post_events(record, 7);\n"
+            "t.wait();\n"
+            "seen\n",
+            stdout="= 7",
+        )
+        check(
+            "native module posted callback cancellation",
+            "import std;\n"
+            f"std.plugin.load({native_module});\n"
+            "import test.dynamic;\n"
+            "let seen = 0;\n"
+            "func record(v) { seen = seen + v; }\n"
+            "let id = dynamic.post_now(record, 7);\n"
+            "dynamic.cancel_post(id)\n"
+            "std.task.wait(std.task.sleep(5));\n"
+            "seen\n",
+            stdout_all=["= true", "= 0"],
+        )
+        check(
             "native module unload keeps live bindings",
             "import std;\n"
             f"std.plugin.load({native_module});\n"

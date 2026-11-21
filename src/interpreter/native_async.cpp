@@ -2,6 +2,7 @@
 
 #include "analysis_mode.h"
 #include "binding_registry.h"
+#include "eval.h"
 #include "event_loop.h"
 #include "symbol.h"
 #include "task.h"
@@ -9,6 +10,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -41,6 +43,40 @@ std::vector<std::shared_ptr<job>> &job_queue() {
     return queue;
 }
 
+/* ABI v4 posted callbacks.  Values are copied on the posting thread, then
+ * released on the owner thread when the callback runs or is cancelled. */
+struct post_job {
+    skein_post_id id = 0;
+    skein_context owner_context;
+    std::shared_ptr<void> module_owner;
+    value_t *callee = nullptr;
+    std::vector<value_t *> args;
+    std::atomic<bool> cancelled{false};
+};
+
+std::mutex &post_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::vector<std::shared_ptr<post_job>> &post_queue() {
+    static std::vector<std::shared_ptr<post_job>> queue;
+    return queue;
+}
+
+std::atomic<skein_post_id> &next_post_id() {
+    static std::atomic<skein_post_id> id{1};
+    return id;
+}
+
+void release_post_values(post_job &job) {
+    freeval(job.callee);
+    job.callee = nullptr;
+    for (value_t *arg : job.args)
+        freeval(arg);
+    job.args.clear();
+}
+
 } // namespace
 
 void install(skein_context *ctx) {
@@ -49,6 +85,8 @@ void install(skein_context *ctx) {
     ctx->drain_native_tasks = background_drain;
     ctx->call_task = call_task;
     ctx->task_cancelled = task_cancelled;
+    ctx->post_callback = post_callback;
+    ctx->cancel_post_callback = cancel_post_callback;
 }
 
 struct value_t *call_task(skein_task_work_fn work,
@@ -88,6 +126,8 @@ struct value_t *call_task(skein_task_work_fn work,
 
     auto state = pending;
     pending->thread = std::thread([state] {
+        /* Keep the owning plugin loaded if the worker posts callbacks. */
+        module_owner_guard owner_guard(state->module_owner);
         try {
             state->work(state->data);
         } catch (...) {
@@ -110,6 +150,105 @@ bool task_cancelled(struct value_t *task) {
     return task_get_state(handle) == TASK_STATE_CANCELLED;
 }
 
+skein_post_id post_callback(skein_context *ctx, const value_t *callee,
+                            const value_t *const *args, size_t argc) {
+    if (g_check_only) {
+        yyerror("native post_callback is disabled in check-only mode");
+        return 0;
+    }
+    if (!ctx || !ctx->call || !callee) {
+        yyerror("native post_callback requires a context and a callback");
+        return 0;
+    }
+    if (argc > 0 && !args) {
+        yyerror("native post_callback requires an argument array");
+        return 0;
+    }
+
+    auto job = std::make_shared<post_job>();
+    job->id = next_post_id().fetch_add(1);
+    if (job->id == 0)
+        job->id = next_post_id().fetch_add(1);
+    job->owner_context = *ctx;
+    job->module_owner = current_module_owner;
+    job->callee = dupval(const_cast<value_t *>(callee));
+    if (!job->callee) {
+        yyerror("native post_callback could not copy the callback");
+        return 0;
+    }
+    job->args.reserve(argc);
+    for (size_t i = 0; i < argc; ++i) {
+        value_t *arg = dupval(const_cast<value_t *>(args[i]));
+        if (!arg) {
+            yyerror("native post_callback could not copy an argument");
+            release_post_values(*job);
+            return 0;
+        }
+        job->args.push_back(arg);
+    }
+
+    skein_post_id id = job->id;
+    {
+        std::lock_guard<std::mutex> lock(post_mutex());
+        post_queue().push_back(std::move(job));
+    }
+    return id;
+}
+
+bool cancel_post_callback(skein_context *ctx, skein_post_id id) {
+    (void)ctx;
+    if (!id)
+        return false;
+    std::lock_guard<std::mutex> lock(post_mutex());
+    for (const std::shared_ptr<post_job> &job : post_queue()) {
+        if (job->id == id) {
+            /* Values are released by the owner-thread drain. */
+            job->cancelled.store(true);
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace {
+
+void drain_post_callbacks() {
+    std::vector<std::shared_ptr<post_job>> ready;
+    {
+        std::lock_guard<std::mutex> lock(post_mutex());
+        ready.swap(post_queue());
+    }
+
+    for (const std::shared_ptr<post_job> &job : ready) {
+        module_owner_guard owner_guard(job->module_owner);
+        if (!job->cancelled.load()) {
+            skein_context *previous = skein_context_current();
+            skein_context_set(&job->owner_context);
+            std::vector<value_t *> args = std::move(job->args);
+            eval_capture_snapshot snapshot;
+            eval_capture_begin(snapshot);
+            value_t *result =
+                skein_call_function(job->callee, std::move(args));
+            eval_capture_result captured = eval_capture_end(snapshot);
+            if (captured.failed || !result) {
+                std::string message =
+                    captured.failed ? error_message_of(captured.error)
+                                    : std::string("native callback failed");
+                freeval(captured.error);
+                freeval(result);
+                yyerror("native post_callback: %s", message.c_str());
+            } else {
+                freeval(captured.error);
+                freeval(result);
+            }
+            skein_context_set(previous);
+        }
+        release_post_values(*job);
+    }
+}
+
+} // namespace
+
 void background_drain() {
     static thread_local bool draining = false;
     if (draining)
@@ -119,6 +258,10 @@ void background_drain() {
         bool &flag;
         ~drain_guard() { flag = false; }
     } guard{draining};
+
+    /* Posted callbacks run before task completions in the same pump, so a
+     * worker that posts and then returns sees its callback delivered first. */
+    drain_post_callbacks();
 
     std::vector<std::shared_ptr<job>> ready;
     {
@@ -158,6 +301,15 @@ void background_drain() {
 }
 
 void shutdown() {
+    /* Discard rather than run callbacks still queued at interpreter exit. */
+    std::vector<std::shared_ptr<post_job>> posted;
+    {
+        std::lock_guard<std::mutex> lock(post_mutex());
+        posted.swap(post_queue());
+    }
+    for (const std::shared_ptr<post_job> &job : posted)
+        release_post_values(*job);
+
     std::vector<std::shared_ptr<job>> pending;
     {
         std::lock_guard<std::mutex> lock(job_mutex());

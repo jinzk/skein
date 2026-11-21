@@ -123,13 +123,15 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
 
 ## 6. 原生模块 ABI
 
-`skein_module` v1 / v2 / v3：
+`skein_module` v1 / v2 / v3 / v4：
 
 - 纯 C ABI、opaque handle；
 - `skein_api` 只追加字段，使用新字段前检查 `size`；v2 追加 `call_task` /
   `task_cancelled`，用于把耗时函数导出为标准 `task`（见 `docs/stdlib.md`）；
   v3 追加 `new_string_len`，从带长度的 buffer 构造字符串，不要求 NUL 结尾；
-- v1 描述符仍可加载：`abi_version` 接受 1、2 和 3；
+  v4 追加 `post_callback` / `cancel_post_callback`，让 worker 线程把 Skein
+  函数投递到 owner 线程执行（见下文）；
+- v1 描述符仍可加载：`abi_version` 接受 1、2、3 和 4；
 - 支持静态注册、`std.plugin.load` 动态加载、`std.plugin.unload` 延迟卸载；
 - 绑定函数和 userdata 持有模块状态，最后一份引用释放时调用 `fini` 并 `dlclose`；
 - 静态模块不可卸载；
@@ -145,83 +147,71 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
 ## 7. 稳定性策略
 
 - manifest v1 冻结；破坏性变更走 v2；
-- `skein_module` ABI v1/v2/v3 冻结，只追加字段；
+- `skein_module` ABI v1/v2/v3/v4 冻结，只追加字段；
 - FFI Beta 期间允许修正边缘语义和错误信息，但避免破坏常见用法；
 - 已知限制优先修正确性，不新增 ABI 功能。
 
-## 8. 原生模块 ABI 未来扩展计划
+## 8. 原生模块 ABI v4：owner 线程事件投递
 
-本节记录尚未实现的 ABI 能力及设计方向。目标是把 C++ 与 Skein 的集成从
-"包装库并暴露函数"推进到"双向深度集成"。所有条目均为计划，不是当前 API。
+### 8.1 归属：plugin，不是 FFI
 
-### 8.1 已具备的能力边界
-
-当前 v3 已能覆盖"用 C++ 实现任意同步/异步计算并把结果交给脚本"：opaque
-userdata 封装任意对象、完整值双向转换、`error` 错误传播、`api->call` 反向
-调用脚本、`call_task` 后台线程 + owner 线程 `finish`、三种分发路径。
-`contrib/mysql` 是完整的端到端验证。
-
-尚缺的是四类"双向集成"能力：事件推送、接口实现、惰性迭代、跨线程回调。
-
-### 8.2 P1：owner 线程事件投递 `post_callback`（ABI v4 候选）
-
-**归属：plugin（native module ABI），不是 FFI。** 两者都涉及"后台回调脚本"，
-但能力现状不同：
+两者都涉及"后台回调脚本"，但能力现状不同：
 
 - FFI 组件**已有**跨线程回调：`ffi.callback` 把 Skein 函数包装成 C 函数指针，
   后台线程中触发时由 `ffi_callback_entry` 走 `background_queue` / 阻塞 job，
   在 owner 线程的 `background_drain` 里执行（见
   `src/builtins/ffi/ffi_callbacks.cpp`）。FFI 不需要 `post_callback`；
-- plugin 组件**没有**对等机制：`call_task` 的 `work()` 在 worker 线程，ABI
-  禁止调用任何 `skein_api`，`finish` 只在任务完成时一次性回调。native module
-  的 worker 无法主动通知脚本。`post_callback` 正是补这个缺口，作为 `skein_api`
-  字段添加，只有 native module 能访问。
+- plugin 组件原先**没有**对等机制：`call_task` 的 `work()` 在 worker 线程，ABI
+  禁止调用任何 `skein_api`，`finish` 只在任务完成时一次性回调。v4 的
+  `post_callback` 补上这个缺口，作为 `skein_api` 字段添加，只有 native
+  module 能访问。
 
-**问题**：`call_task` 的 `work()` 运行在 worker 线程，ABI 明确禁止调用任何
-`skein_api`（值 API 非线程安全）。因此 C++ 后台线程无法主动通知脚本；只能由
-脚本侧轮询 task 或同步等待，做不到真正的事件推送（如 C++ 网络库收到数据后
-主动触发 Skein handler）。
-
-**设计**：在 `skein_api` 末尾追加一个可从 worker 线程调用的投递函数，把回调
-排进 owner 线程的事件循环执行：
+### 8.2 API
 
 ```c
-/* 线程安全；从任意线程调用。参数被复制，函数返回后可释放调用方句柄。
- * 回调在 owner 线程执行，可正常使用值 API。 */
-skein_status (*post_callback)(skein_context *ctx, skein_value *callee,
-                              const skein_value *const *args, size_t argc);
+typedef uint64_t skein_post_id;
+
+/* 可从任意线程调用，包括 call_task 的 worker。callee 与 args 被复制，
+ * 函数返回后调用方仍持有原句柄。返回值非 0 表示成功，0 表示失败。 */
+skein_post_id (*post_callback)(skein_context *ctx, const skein_value *callee,
+                               const skein_value *const *args, size_t argc);
+
+/* 撤销尚未执行的回调；线程安全。返回 false 表示已执行/已撤销/id 未知。 */
+bool (*cancel_post_callback)(skein_context *ctx, skein_post_id id);
 ```
 
-**实现要点**：
-- 复用 FFI 已有的回调投递队列（`ffi_callbacks.cpp` 的 `background_queue` +
-  `blocking_queue` + `background_drain`），而不是新建一套。两条路径共用 owner
-  线程的 `drain_background` 钩子（见 `builtins.cpp` / `fiber.cpp`），但 FFI 队列
-  存原始 C 参数字节，plugin 队列存 `skein_value`，需扩展 `pending_callback`
-  或新增独立的 plugin 队列由同一个 drain 驱动；
-- `ctx` 不能跨线程持有，投递时只复制 `skein_value` 参数，不复制 `skein_context`；
-- 脚本退出/`fini` 时清空未执行队列，避免悬空函数引用；
-- 需要配套的可取消 handle，便于 module 卸载时撤销未投递回调。
+回调在 owner 线程执行，可正常使用值 API。脚本 pump 事件循环时投递队列先于
+task 完成队列被 drain，因此 worker "先投递再返回" 能保证回调顺序。脚本退出时
+仍未执行的回调被丢弃而不是执行。
 
-**验证计划**：扩展 `tests/native_module.cpp` 增加 `post_callback` 导出，worker
-线程投递回调到 Skein 函数；覆盖卸载时清空队列、参数生命周期、多次投递顺序。
+### 8.3 实现要点
 
-### 8.3 P2：惰性迭代协议（ABI v4/v5 候选）
+- 投递队列在 `src/interpreter/native_async.cpp`，与 `call_task` 共用
+  `drain_native_tasks` 钩子（由 `fiber_pump` 驱动）；FFI 的 `drain_background`
+  是另一条队列，两者数据类型不同，不合并；
+- `post_callback` 在投递线程复制参数（值分配器与缓存均为 thread-local），
+  但 `skein_context` 只复制函数指针表，不跨线程持有原指针；
+- `call_task` 的 worker 线程会临时安装 module owner guard，投递的回调因此能
+  保持插件动态库存活到执行结束；
+- 可取消 id 为进程内单调递增的 `uint64_t`，取消只设置标记，值始终由 owner
+  线程释放；
+- 回调内的脚本错误通过 `eval_capture_*` 捕获并报告，不会中断宿主事件循环。
 
-**问题**：`fetch_all` 把全部结果物化成 list，大结果集占用内存且首行延迟高。
+### 8.4 验证
 
-**设计方向**：新增 native iterator userdata 类型，约定 `next()` / `close()`
-方法；Skein 侧提供统一的包装，让 `for (row in native_rows(...))` 能惰性拉取。
-优先用现有 userdata + wrapper 实现，不改 ABI；只有需要宿主 GC 感知迭代状态时
-才追加 ABI 字段。
+`tests/native_module.cpp` 增加 `post_events` / `post_now` / `cancel_post`
+导出；`tests/cases/stdlib_builtins.py` 覆盖 worker 线程投递、owner 线程取消、
+参数生命周期与回调错误隔离。
 
-### 8.4 P3：C++ 实现 Skein 接口/traits（暂不列入 ABI）
+### 8.5 后续计划
 
-当前 `get_field/set_field` 只模拟字段访问，方法必须在 Skein wrapper 里写。
-让 C++ 实现 Skein 侧定义的 interface 需要 vtable 双向绑定和跨语言类型检查，
-复杂度高、收益场景少，**暂不计划**。继续推荐 wrapper 模式：Skein struct 定义
-接口，方法体调用 native 函数。
+- **P2：惰性迭代协议（候选）**：新增 native iterator userdata，约定
+  `next()` / `close()`；优先用现有 userdata + wrapper 实现，不改 ABI；
+- **P3：C++ 实现 Skein 接口/traits（暂不计划）**：需要 vtable 双向绑定和
+  跨语言类型检查，复杂度高、收益场景少。继续推荐 wrapper 模式：Skein struct
+  定义接口，方法体调用 native 函数。
 
-### 8.5 兼容性与发布约束
+### 8.6 兼容性与发布约束
 
 - 所有新增字段只能 append 到 `skein_api` 末尾并 bump `abi_version`，旧模块
   通过 `size` 检查安全忽略；

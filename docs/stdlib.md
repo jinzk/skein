@@ -1989,6 +1989,9 @@ example.math.ANSWER;
   ABI v3 追加了 `new_string_len`，从 `(data, len)` 构造字符串（输入不必 NUL
   结尾，内嵌 NUL 会存入值缓冲；但脚本字符串操作仍是 UTF-8 语义），检查
   `api->size >= offsetof(skein_api, new_string_len) + sizeof(api->new_string_len)`；
+  ABI v4 追加了 `post_callback` / `cancel_post_callback`：worker 线程可把 Skein
+  函数投递到 owner 线程执行，参数被复制，投递可用 id 撤销；检查
+  `api->size >= offsetof(skein_api, cancel_post_callback) + sizeof(api->cancel_post_callback)`；
 - 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；
 - `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；

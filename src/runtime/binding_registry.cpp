@@ -366,6 +366,29 @@ bool api_task_cancelled(skein_context *ctx, skein_value *task) {
     return owner->task_cancelled(as_value(task));
 }
 
+skein_post_id api_post_callback(skein_context *ctx, const skein_value *callee,
+                                const skein_value *const *args, size_t argc) {
+    if (!ctx || !ctx->post_callback) {
+        yyerror("native posted callbacks are not available");
+        return 0;
+    }
+    if (argc > 0 && !args) {
+        yyerror("native post_callback requires an argument array");
+        return 0;
+    }
+    std::vector<const value_t *> call_args;
+    call_args.reserve(argc);
+    for (size_t i = 0; i < argc; ++i)
+        call_args.push_back(as_value(args[i]));
+    return ctx->post_callback(ctx, as_value(callee), call_args.data(), argc);
+}
+
+bool api_cancel_post_callback(skein_context *ctx, skein_post_id id) {
+    if (!ctx || !ctx->cancel_post_callback)
+        return false;
+    return ctx->cancel_post_callback(ctx, id);
+}
+
 const skein_api *api_table() {
     static const skein_api api = {
         SKEIN_MODULE_ABI_VERSION,
@@ -399,6 +422,8 @@ const skein_api *api_table() {
         api_call_task,
         api_task_cancelled,
         api_new_string_len,
+        api_post_callback,
+        api_cancel_post_callback,
     };
     return &api;
 }

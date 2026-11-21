@@ -4472,9 +4472,23 @@ impl dict_key.DictKey for User {
     return self.id;
   }
 }
+
+impl dict_key.KeyEq for User {
+  func key_eq(self, other) {
+    return self.id == other.id;
+  }
+}
 ```
 
-`dict_hash` 必须返回 `int`，并且是纯函数、确定性、无副作用；相等的 struct/enum 必须返回相同的 hash。实现后该值可以跳过字段递归可哈希检查直接作为 key，但其余字段仍参与结构相等比较。hash 期间禁止重入 dict/set key hash。
+`dict_hash` 必须返回 `int`，并且是纯函数、确定性、无副作用；相等的 key 必须返回相同的 hash。实现后该值可以跳过字段递归可哈希检查直接作为 key。
+
+`KeyEq` 是可选的 key 相等接口：
+
+- 只有同时实现 `DictKey` 的 struct/enum 才会使用 `key_eq`。
+- 未实现 `KeyEq` 时继续使用结构相等。
+- `key_eq` 只影响 dict/set（以及 unique、group_by、LRU 等内部使用 dict/set 的操作），不改变普通 `==`。
+- `key_eq` 必须返回 `bool`，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时 hash 必须相同。
+- key_eq 期间禁止重入 dict/set key equality。
 
 ### std.set / std.deque / std.heap
 

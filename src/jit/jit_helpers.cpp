@@ -1892,7 +1892,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_cached(
         int found = -1;
         if (cache && cache->index >= 0 && cache->size == items.size() &&
             (size_t)cache->index < items.size() &&
-            value_equals(items[(size_t)cache->index].first, index)) {
+            dict_key_equals(items[(size_t)cache->index].first, index)) {
             found = cache->index;
         } else {
             found = dict_find_index(dict, index);

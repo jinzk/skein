@@ -272,7 +272,7 @@ static struct value_t **index_slot_ptr(struct value_t *container,
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
         for (size_t i = 0; i < dv->payload->items.size(); ++i)
-            if (value_equals(dv->payload->items[i].first, idx))
+            if (dict_key_equals(dv->payload->items[i].first, idx))
                 return &dv->payload->items[i].second;
     }
     if (container->type == T_struct) {

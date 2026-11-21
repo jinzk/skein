@@ -3944,7 +3944,7 @@ private:
             const auto &items = dict->payload->items;
             if (cache && cache->index >= 0 && cache->size == items.size() &&
                 (size_t)cache->index < items.size() &&
-                value_equals(items[(size_t)cache->index].first, index)) {
+                dict_key_equals(items[(size_t)cache->index].first, index)) {
                 if (vm_stats_enabled)
                     ++vm_stats.index_ic_hits;
                 return dupval(items[(size_t)cache->index].second);

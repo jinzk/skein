@@ -66,20 +66,29 @@ const struct type_def *value_type_def(const struct value_t *value) {
     return NULL;
 }
 
-std::shared_ptr<function_def> custom_hash_method(const struct type_def *def) {
-    if (!def)
+std::shared_ptr<function_def> custom_method(const struct type_def *def,
+                                           const char *name) {
+    if (!def || !name)
         return NULL;
-    auto method = def->methods.find("dict_hash");
+    auto method = def->methods.find(name);
     if (method != def->methods.end() && method->second)
         return method->second;
     for (const trait_def *trait : def->traits) {
         if (!trait)
             continue;
-        auto fallback = trait->defaults.find("dict_hash");
+        auto fallback = trait->defaults.find(name);
         if (fallback != trait->defaults.end() && fallback->second)
             return fallback->second;
     }
     return NULL;
+}
+
+std::shared_ptr<function_def> custom_hash_method(const struct type_def *def) {
+    return custom_method(def, "dict_hash");
+}
+
+std::shared_ptr<function_def> custom_key_eq_method(const struct type_def *def) {
+    return custom_method(def, "key_eq");
 }
 
 thread_local bool g_custom_hash_active = false;
@@ -156,6 +165,128 @@ bool call_custom_hash(const struct value_t *value, std::uint64_t &out) {
     out = (std::uint64_t)((struct int_value_t *)result)->value;
     freeval(result);
     return true;
+}
+
+thread_local bool g_key_eq_active = false;
+
+bool call_custom_key_eq(const struct value_t *left,
+                        const struct value_t *right, bool &out) {
+    const struct type_def *def = value_type_def(left);
+    if (!def || def != value_type_def(right))
+        return false;
+    if (!custom_hash_method(def))
+        return false;
+    std::shared_ptr<function_def> method = custom_key_eq_method(def);
+    if (!method)
+        return false;
+    if (g_key_eq_active) {
+        yyerror("key_eq must not re-enter dict/set key equality");
+        return false;
+    }
+    if (!skein_context_current() || !skein_context_current()->call) {
+        yyerror("key_eq requires an interpreter context");
+        return false;
+    }
+
+    struct key_eq_guard {
+        key_eq_guard() { g_key_eq_active = true; }
+        ~key_eq_guard() { g_key_eq_active = false; }
+    } guard;
+
+    struct value_t *callee =
+        newmethodval(dupval((struct value_t *)left), method);
+    struct value_t *result =
+        callee ? skein_call_function(callee, {dupval((struct value_t *)right)})
+               : NULL;
+    freeval(callee);
+    if (!result)
+        return false;
+    if (result->type != T_bool) {
+        yyerror("key_eq must return a bool");
+        freeval(result);
+        return false;
+    }
+    out = ((struct bool_value_t *)result)->value;
+    freeval(result);
+    return true;
+}
+
+bool key_equals_inner(const struct value_t *a, const struct value_t *b,
+                      std::size_t depth) {
+    if (!a || !b)
+        return a == b;
+    if (depth > kMaxKeyDepth)
+        return false;
+    if (a->type != b->type)
+        return value_equals((struct value_t *)a, (struct value_t *)b);
+
+    if (a->type == T_struct) {
+        const struct struct_value_t *sa = (const struct struct_value_t *)a;
+        const struct struct_value_t *sb = (const struct struct_value_t *)b;
+        if (sa->def != sb->def)
+            return false;
+        if (!sa->payload || !sb->payload)
+            return sa->payload == sb->payload;
+        if (sa->payload == sb->payload)
+            return true;
+        if (custom_hash_method(sa->def) && custom_key_eq_method(sa->def)) {
+            bool equal = false;
+            if (!call_custom_key_eq(a, b, equal))
+                return false;
+            return equal;
+        }
+        if (sa->payload->fields.size() != sb->payload->fields.size())
+            return false;
+        for (std::size_t i = 0; i < sa->payload->fields.size(); ++i)
+            if (!key_equals_inner(sa->payload->fields[i],
+                                  sb->payload->fields[i], depth + 1))
+                return false;
+        return true;
+    }
+
+    if (a->type == T_enum) {
+        const struct enum_value_t *ea = (const struct enum_value_t *)a;
+        const struct enum_value_t *eb = (const struct enum_value_t *)b;
+        if (ea->def != eb->def || ea->variant != eb->variant)
+            return false;
+        if (!ea->payload || !eb->payload)
+            return ea->payload == eb->payload;
+        if (ea->payload == eb->payload)
+            return true;
+        if (custom_hash_method(ea->def) && custom_key_eq_method(ea->def)) {
+            bool equal = false;
+            if (!call_custom_key_eq(a, b, equal))
+                return false;
+            return equal;
+        }
+        if (ea->payload->fields.size() != eb->payload->fields.size())
+            return false;
+        for (std::size_t i = 0; i < ea->payload->fields.size(); ++i)
+            if (!key_equals_inner(ea->payload->fields[i],
+                                  eb->payload->fields[i], depth + 1))
+                return false;
+        return true;
+    }
+
+    if (a->type == T_list) {
+        const struct list_value_t *la = (const struct list_value_t *)a;
+        const struct list_value_t *lb = (const struct list_value_t *)b;
+        if (!la->payload || !lb->payload)
+            return la->payload == lb->payload;
+        if (!la->payload->frozen || !lb->payload->frozen)
+            return value_equals((struct value_t *)a, (struct value_t *)b);
+        if (la->payload == lb->payload)
+            return true;
+        if (la->payload->items.size() != lb->payload->items.size())
+            return false;
+        for (std::size_t i = 0; i < la->payload->items.size(); ++i)
+            if (!key_equals_inner(la->payload->items[i],
+                                  lb->payload->items[i], depth + 1))
+                return false;
+        return true;
+    }
+
+    return value_equals((struct value_t *)a, (struct value_t *)b);
 }
 
 bool key_allowed_inner(
@@ -356,6 +487,10 @@ std::uint64_t dict_key_hash(const struct value_t *key) {
     return hash_key_inner(key, stack, 0);
 }
 
+bool dict_key_equals(const struct value_t *a, const struct value_t *b) {
+    return key_equals_inner(a, b, 0);
+}
+
 int dict_find_index(const struct dict_value_t *dict,
                     const struct value_t *key) {
     if (!dict || !dict->payload || !dict_key_allowed(key))
@@ -366,7 +501,7 @@ int dict_find_index(const struct dict_value_t *dict,
 
     if (items.size() < kDictIndexThreshold) {
         for (std::size_t i = 0; i < items.size(); ++i) {
-            if (value_equals(items[i].first, (struct value_t *)key))
+            if (dict_key_equals(items[i].first, key))
                 return (int)i;
         }
         return -1;
@@ -383,7 +518,7 @@ int dict_find_index(const struct dict_value_t *dict,
         return -1;
     for (std::size_t index : it->second) {
         if (index < items.size() &&
-            value_equals(items[index].first, (struct value_t *)key))
+            dict_key_equals(items[index].first, key))
             return (int)index;
     }
     return -1;

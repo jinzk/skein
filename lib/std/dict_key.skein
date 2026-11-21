@@ -5,4 +5,10 @@ package dict_key {
   export trait DictKey {
     func dict_hash(self) -> int;
   }
+
+  // Optional key equality.  Only consulted for types that also implement
+  // DictKey, so a custom key equality is always paired with an explicit hash.
+  export trait KeyEq {
+    func key_eq(self, other) -> bool;
+  }
 }

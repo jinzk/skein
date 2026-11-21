@@ -8,6 +8,7 @@
 bool dict_key_allowed(const struct value_t *key);
 const char *dict_key_error();
 std::uint64_t dict_key_hash(const struct value_t *key);
+bool dict_key_equals(const struct value_t *a, const struct value_t *b);
 int dict_find_index(const struct dict_value_t *dict,
                     const struct value_t *key);
 void dict_append_item(struct dict_value_t *dict, struct value_t *key,

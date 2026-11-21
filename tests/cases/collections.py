@@ -464,6 +464,81 @@ def run_cases():
           'println(len(d));\n'
           'println(std.dict.has(d, User { id: 39, cache: [1] }));\n',
           stdout_all=["20", "40", "0"])
+    check("custom struct key equality",
+          'import std;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'impl dict_key.KeyEq for User {\n'
+          '  func key_eq(self, other) { return self.id == other.id; }\n'
+          '}\n'
+          'let d = {User { id: 1, cache: [] }: "a"};\n'
+          'println(d[User { id: 1, cache: [1] }]);\n'
+          'println(std.dict.has(d, User { id: 1, cache: [1] }));\n'
+          'let s = std.set.from_list([User { id: 1, cache: [] }, '
+          'User { id: 1, cache: [1] }]);\n'
+          'println(std.set.size(s));\n'
+          'let big = {};\nlet i = 0;\n'
+          'while (i < 40) { big[User { id: i, cache: [] }] = i; i = i + 1; }\n'
+          'println(big[User { id: 20, cache: [1] }]);\n',
+          stdout_all=["a", "1", "1", "20"])
+    check("custom hash keeps structural equality without KeyEq",
+          'import std;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'let d = {User { id: 1, cache: [] }: "a"};\n'
+          'println(std.dict.has(d, User { id: 1, cache: [1] }));\n',
+          stdout_all=["0"])
+    check("custom key equality in tuple keys",
+          'import std;\nimport std.dict_key;\n'
+          'struct User { id: int; cache: list[int]; }\n'
+          'impl dict_key.DictKey for User {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'impl dict_key.KeyEq for User {\n'
+          '  func key_eq(self, other) { return self.id == other.id; }\n'
+          '}\n'
+          'let d = {(User { id: 1, cache: [] }, "x"): true};\n'
+          'println(d[(User { id: 1, cache: [1] }, "x")]);\n',
+          stdout_all=["true"])
+    check("custom key equality return type",
+          'import std.dict_key;\n'
+          'struct Bad { id: int; }\n'
+          'impl dict_key.DictKey for Bad {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'impl dict_key.KeyEq for Bad {\n'
+          '  func key_eq(self, other) { return 1; }\n'
+          '}\n'
+          'let d = {Bad { id: 1 }: 1};\n'
+          'println(d[Bad { id: 1 }]);\n',
+          stderr="key_eq must return a bool")
+    check("custom key equality reentrancy",
+          'import std.dict_key;\n'
+          'struct A { id: int; }\n'
+          'struct B { id: int; }\n'
+          'impl dict_key.DictKey for A {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'impl dict_key.KeyEq for A {\n'
+          '  func key_eq(self, other) {\n'
+          '    let m = {B { id: 1 }: 1};\n'
+          '    let n = {B { id: 1 }: 1};\n'
+          '    return m[B { id: 1 }] == 1;\n'
+          '  }\n'
+          '}\n'
+          'impl dict_key.DictKey for B {\n'
+          '  func dict_hash(self) { return self.id; }\n'
+          '}\n'
+          'impl dict_key.KeyEq for B {\n'
+          '  func key_eq(self, other) { return self.id == other.id; }\n'
+          '}\n'
+          'let d = {A { id: 1 }: 1};\n'
+          'println(d[A { id: 1 }]);\n',
+          stderr="key_eq must not re-enter dict/set key equality")
     check("custom struct dict hash snapshot",
           'import std;\nimport std.dict_key;\n'
           'struct User { id: int; cache: list[int]; }\n'

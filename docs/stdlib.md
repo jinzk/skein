@@ -2257,9 +2257,23 @@ impl dict_key.DictKey for User {
     return self.id;
   }
 }
+
+impl dict_key.KeyEq for User {
+  func key_eq(self, other) {
+    return self.id == other.id;
+  }
+}
 ```
 
-`dict_hash` 必须是纯函数、确定性、无副作用，并且与 struct/enum 的结构相等一致：相等的值必须返回相同的 hash。实现后该 struct/enum 可以跳过字段递归可哈希检查，直接作为 `dict` key 或 `set` 元素；其余字段仍参与相等比较，hash 相同但字段不同的值只会在同一个桶里冲突。hash 期间禁止重入 dict/set key hash。
+`dict_hash` 必须是纯函数、确定性、无副作用，并且与 key 相等语义一致：相等的值必须返回相同的 hash。实现后该 struct/enum 可以跳过字段递归可哈希检查，直接作为 `dict` key 或 `set` 元素；hash 相同但 key 不相等的值只会在同一个桶里冲突。hash 期间禁止重入 dict/set key hash。
+
+`KeyEq` 是可选的 key 相等接口：
+
+- 只有同时实现 `DictKey` 的 struct/enum 才会使用 `key_eq`。
+- 未实现 `KeyEq` 时继续使用结构相等。
+- `key_eq` 只影响 dict/set（以及 unique、group_by、LRU 等内部使用 dict/set 的操作），**不改变普通 `==`**。
+- `key_eq` 必须是纯函数、确定性、无副作用，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时，`dict_hash(a)` 和 `dict_hash(b)` 必须相同。
+- key_eq 期间禁止重入 dict/set key equality。
 
 `std.set` / `std.deque` / `std.heap` 是原生实现（`import std.set` / `import std.deque` / `import std.heap` 仍然可用，也可以直接使用对应的 `std.*`）：
 

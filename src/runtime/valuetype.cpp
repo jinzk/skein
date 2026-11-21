@@ -566,7 +566,7 @@ bool bucket_has(const set_bucket *bucket, const value_t *key) {
     if (!bucket)
         return false;
     for (value_t *entry : bucket->keys) {
-        if (value_equals(entry, const_cast<value_t *>(key)))
+        if (dict_key_equals(entry, key))
             return true;
     }
     return false;
@@ -693,8 +693,7 @@ std::shared_ptr<set_node> set_erase_impl(
     if (hash == node->hash) {
         std::size_t index = node->bucket->keys.size();
         for (std::size_t i = 0; i < node->bucket->keys.size(); ++i) {
-            if (value_equals(node->bucket->keys[i],
-                             const_cast<value_t *>(key))) {
+            if (dict_key_equals(node->bucket->keys[i], key)) {
                 index = i;
                 break;
             }

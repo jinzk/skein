@@ -29,7 +29,9 @@
 #endif
 
 /* Returned by the cached method helper when the generic path must run. */
-extern "C" char skein_jit_method_fallback_marker = 0;
+extern "C" {
+char skein_jit_method_fallback_marker = 0;
+}
 #endif
 
 #include <chrono>
@@ -62,6 +64,15 @@ struct function_vm_cache {
     std::shared_ptr<function_code> keepalive;
     skein::bc::ProtoPtr proto;
     std::shared_ptr<const compiled_pattern_set> param_patterns;
+    struct ParamPatternPlan {
+        enum class Kind { None, List, Dict };
+        Kind kind = Kind::None;
+        bool checked = false;
+        bool valid = false;
+        std::vector<uint32_t> slots;
+        std::vector<std::string> keys;
+    };
+    std::vector<ParamPatternPlan> param_plans;
 #ifdef SKEIN_ENABLE_JIT
     skein::jit::JitCode *jit = nullptr;
     uint32_t jit_hits = 0;
@@ -631,6 +642,114 @@ bool skein_vm_try_jit_call_impl(value_t *callee, value_t **args,
     return true;
 }
 
+static bool find_param_binding_slot(
+    const std::vector<skein::bc::PatternSlotDesc> &slots,
+    const std::string &name, uint32_t &slot) {
+    for (const auto &entry : slots) {
+        if (entry.name == name && entry.slot != UINT32_MAX) {
+            slot = entry.slot;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool build_param_pattern_plan(
+    const skein::bc::Proto &proto, uint32_t root,
+    function_vm_cache::ParamPatternPlan &plan) {
+    plan.checked = true;
+    plan.valid = false;
+    plan.kind = function_vm_cache::ParamPatternPlan::Kind::None;
+    plan.slots.clear();
+    plan.keys.clear();
+    if (root == UINT32_MAX || root >= proto.patterns.size())
+        return false;
+    const skein::bc::PatternDesc &pattern = proto.patterns[root];
+
+    if (pattern.kind == skein::bc::PatternDesc::Kind::List) {
+        for (uint32_t item_index : pattern.items) {
+            if (item_index >= proto.patterns.size())
+                return false;
+            const skein::bc::PatternDesc &item = proto.patterns[item_index];
+            if (item.kind != skein::bc::PatternDesc::Kind::Binding)
+                return false;
+            uint32_t slot = UINT32_MAX;
+            if (!find_param_binding_slot(pattern.binding_slots, item.name,
+                                         slot))
+                return false;
+            plan.slots.push_back(slot);
+        }
+        plan.kind = function_vm_cache::ParamPatternPlan::Kind::List;
+        plan.valid = true;
+        return true;
+    }
+
+    if (pattern.kind == skein::bc::PatternDesc::Kind::Container &&
+        pattern.is_dict && pattern.variant.empty() &&
+        pattern.type_name.empty()) {
+        for (const auto &field : pattern.fields) {
+            if (field.rest || field.pattern >= proto.patterns.size())
+                return false;
+            const skein::bc::PatternDesc &item =
+                proto.patterns[field.pattern];
+            if (item.kind != skein::bc::PatternDesc::Kind::Binding)
+                return false;
+            uint32_t slot = UINT32_MAX;
+            if (!find_param_binding_slot(pattern.binding_slots, item.name,
+                                         slot))
+                return false;
+            plan.keys.push_back(field.key);
+            plan.slots.push_back(slot);
+        }
+        plan.kind = function_vm_cache::ParamPatternPlan::Kind::Dict;
+        plan.valid = true;
+        return true;
+    }
+    return false;
+}
+
+static bool bind_param_pattern_plan(
+    value_t *arg, const function_vm_cache::ParamPatternPlan &plan,
+    value_t **values, size_t slot_base) {
+    if (plan.kind == function_vm_cache::ParamPatternPlan::Kind::List) {
+        if (!arg || arg->type != T_list)
+            return false;
+        struct list_value_t *list = (struct list_value_t *)arg;
+        if (list->payload->items.size() != plan.slots.size())
+            return false;
+        for (size_t i = 0; i < plan.slots.size(); ++i)
+            values[slot_base + plan.slots[i]] =
+                dupval(list->payload->items[i]);
+        freeval(arg);
+        return true;
+    }
+    if (plan.kind == function_vm_cache::ParamPatternPlan::Kind::Dict) {
+        if (!arg || arg->type != T_dict)
+            return false;
+        struct dict_value_t *dict = (struct dict_value_t *)arg;
+        for (const std::string &key : plan.keys) {
+            struct string_value_t probe;
+            probe.type = T_string;
+            probe.value = const_cast<char *>(key.c_str());
+            if (dict_find_index(dict, (struct value_t *)&probe) < 0)
+                return false;
+        }
+        for (size_t i = 0; i < plan.keys.size(); ++i) {
+            struct string_value_t probe;
+            probe.type = T_string;
+            probe.value = const_cast<char *>(plan.keys[i].c_str());
+            int index = dict_find_index(dict, (struct value_t *)&probe);
+            if (index < 0)
+                return false;
+            values[slot_base + plan.slots[i]] =
+                dupval(dict->payload->items[(size_t)index].second);
+        }
+        freeval(arg);
+        return true;
+    }
+    return false;
+}
+
 int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
                                 uint32_t argc) {
     if (!def || !def->code)
@@ -645,6 +764,7 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
     skein::bc::ProtoPtr proto = prepare_function_body(def_ref);
     const bool slot_mode = proto && proto->param_patterns_bound;
     const size_t slot_base = proto ? (size_t)proto->nparams : 0;
+    function_vm_cache *cache = slot_mode ? cache_for(def->code.get()) : nullptr;
 
     int index = 0;
     for (struct symlist *sl = def->code->sl;
@@ -652,6 +772,26 @@ int skein_vm_bind_pattern_frame(function_def *def, value_t **values,
         if (index >= (int)argc)
             break;
         if (sl->has_pattern) {
+            if (slot_mode && cache) {
+                uint32_t root =
+                    (size_t)index < proto->param_patterns.size()
+                        ? proto->param_patterns[(size_t)index]
+                        : UINT32_MAX;
+                if (root != UINT32_MAX && root < proto->patterns.size()) {
+                    if (cache->param_plans.size() <= (size_t)index)
+                        cache->param_plans.resize((size_t)index + 1);
+                    function_vm_cache::ParamPatternPlan &plan =
+                        cache->param_plans[(size_t)index];
+                    if (!plan.checked)
+                        build_param_pattern_plan(*proto, root, plan);
+                    if (plan.valid &&
+                        bind_param_pattern_plan(values[(size_t)index], plan,
+                                                values, slot_base)) {
+                        values[(size_t)index] = NULL;
+                        continue;
+                    }
+                }
+            }
             std::vector<pattern_binding> bindings;
             ParamPatternResult native = skein_vm_match_parameter_pattern(
                 def_ref, index, values[(size_t)index], bindings);

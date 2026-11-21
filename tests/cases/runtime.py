@@ -615,7 +615,7 @@ def run_cases():
           stdout="{1: b}")
     check("dict float key rejected",
           '{1: "a", 1.0: "b"}\n',
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct, got float")
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got float")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("multiline list", "let a = [1,\n 2,\n 3];\na[2]\n", stdout="= 3")
     check("empty dict literal", "{}\n", stdout="= {}")
@@ -630,7 +630,7 @@ def run_cases():
     check("multi-line comment-only empty dict",
           "let d = {\n  // comment\n\n};\nd\n", stdout="= {}")
     check("dict key container rejected", "let d = {{}: 1};\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct, got dict")
+          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got dict")
     check("empty dict inside block statement", "{ {}; }\n", code=0)
     check("multi-line empty if block", "if (1) {\n}\n", code=0)
     check("comment-only empty if block", "if (1) { // comment\n}\n", code=0)

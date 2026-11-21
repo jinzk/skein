@@ -122,6 +122,16 @@ CASES = [
         expect_debug="[jit] enter roundtrip",
     ),
     case(
+        "enum-dict-keys",
+        "enum Key { A { id: int; }; B; }\n"
+        "func roundtrip(i) {\n"
+        "  let d = {Key.A { id: 1 }: i, Key.B: i + 1};\n"
+        "  return d[Key.A { id: 1 }] + d[Key.B];\n"
+        "}\n"
+        "let i = 0;\n"
+        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+    ),
+    case(
         "custom-struct-hash",
         "import std.dict_key;\n"
         "struct Key { id: int; cache: list[int]; }\n"

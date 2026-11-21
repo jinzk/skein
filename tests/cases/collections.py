@@ -499,6 +499,23 @@ def run_cases():
           '}\n'
           '{A { id: 1 }: 1}\n',
           stderr="dict_hash must not re-enter dict/set key hashing")
+    check("custom enum dict hash",
+          'import std;\nimport std.dict_key;\n'
+          'enum E { A { xs: list[int]; }; B { id: int; }; }\n'
+          'impl dict_key.DictKey for E {\n'
+          '  func dict_hash(self) {\n'
+          '    return match (self) {\n'
+          '      case E.A { xs } => 1;\n'
+          '      case E.B { id } => id;\n'
+          '    };\n'
+          '  }\n'
+          '}\n'
+          'let d = {E.A { xs: [] }: "a", E.B { id: 2 }: "b"};\n'
+          'println(d[E.A { xs: [] }]);\n'
+          'println(std.dict.has(d, E.A { xs: [1] }));\n'
+          'let s = std.set.from_list([E.A { xs: [] }, E.A { xs: [] }]);\n'
+          'println(std.set.size(s));\n',
+          stdout_all=["a", "0", "1"])
     check("lru custom struct hash keys",
           'import std;\nimport std.lru;\nimport std.dict_key;\n'
           'struct User { id: int; cache: list[int]; }\n'

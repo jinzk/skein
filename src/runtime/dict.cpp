@@ -56,7 +56,17 @@ bool scalar_key_allowed(const struct value_t *key) {
     }
 }
 
-std::shared_ptr<function_def> custom_hash_method(const struct_def *def) {
+const struct type_def *value_type_def(const struct value_t *value) {
+    if (!value)
+        return NULL;
+    if (value->type == T_struct)
+        return ((const struct struct_value_t *)value)->def;
+    if (value->type == T_enum)
+        return ((const struct enum_value_t *)value)->def;
+    return NULL;
+}
+
+std::shared_ptr<function_def> custom_hash_method(const struct type_def *def) {
     if (!def)
         return NULL;
     auto method = def->methods.find("dict_hash");
@@ -74,12 +84,9 @@ std::shared_ptr<function_def> custom_hash_method(const struct_def *def) {
 
 thread_local bool g_custom_hash_active = false;
 
-bool call_custom_hash(const struct_value_t *structure,
-                      std::uint64_t &out) {
-    if (!structure || !structure->def)
-        return false;
-    std::shared_ptr<function_def> method =
-        custom_hash_method(structure->def);
+bool call_custom_hash(const struct value_t *value, std::uint64_t &out) {
+    const struct type_def *def = value_type_def(value);
+    std::shared_ptr<function_def> method = custom_hash_method(def);
     if (!method)
         return false;
     if (g_custom_hash_active) {
@@ -97,7 +104,7 @@ bool call_custom_hash(const struct_value_t *structure,
     } guard;
 
     struct value_t *callee =
-        newmethodval(dupval((struct value_t *)structure), method);
+        newmethodval(dupval((struct value_t *)value), method);
     struct value_t *result =
         callee ? skein_call_function(callee, {}) : NULL;
     freeval(callee);
@@ -121,12 +128,14 @@ bool key_allowed_inner(
     if (scalar_key_allowed(key))
         return true;
 
+    const std::vector<struct value_t *> *children = NULL;
     const void *identity = NULL;
     if (key->type == T_list) {
         const struct list_value_t *list = (const struct list_value_t *)key;
         if (!list->payload || !list->payload->frozen)
             return false;
         identity = list->payload.get();
+        children = &list->payload->items;
     } else if (key->type == T_struct) {
         const struct struct_value_t *structure =
             (const struct struct_value_t *)key;
@@ -135,6 +144,16 @@ bool key_allowed_inner(
         if (custom_hash_method(structure->def))
             return true;
         identity = structure->payload.get();
+        children = &structure->payload->fields;
+    } else if (key->type == T_enum) {
+        const struct enum_value_t *enumeration =
+            (const struct enum_value_t *)key;
+        if (!enumeration->def || !enumeration->payload)
+            return false;
+        if (custom_hash_method(enumeration->def))
+            return true;
+        identity = enumeration->payload.get();
+        children = &enumeration->payload->fields;
     } else {
         return false;
     }
@@ -145,22 +164,10 @@ bool key_allowed_inner(
     stack.push_back(identity);
 
     bool ok = true;
-    if (key->type == T_list) {
-        const struct list_value_t *list = (const struct list_value_t *)key;
-        for (const struct value_t *item : list->payload->items) {
-            if (!key_allowed_inner(item, stack, depth + 1)) {
-                ok = false;
-                break;
-            }
-        }
-    } else {
-        const struct struct_value_t *structure =
-            (const struct struct_value_t *)key;
-        for (const struct value_t *field : structure->payload->fields) {
-            if (!key_allowed_inner(field, stack, depth + 1)) {
-                ok = false;
-                break;
-            }
+    for (const struct value_t *child : *children) {
+        if (!key_allowed_inner(child, stack, depth + 1)) {
+            ok = false;
+            break;
         }
     }
 
@@ -173,7 +180,7 @@ std::uint64_t hash_string(std::uint64_t hash,
     return mix_hash(hash, fnv1a(text.data(), text.size()));
 }
 
-std::uint64_t struct_type_hash(const struct_def *def) {
+std::uint64_t type_hash(const struct type_def *def) {
     std::uint64_t hash = 0x9;
     if (!def)
         return hash;
@@ -241,7 +248,7 @@ std::uint64_t hash_key_inner(
                 custom_hash_method(structure->def);
             if (custom) {
                 std::uint64_t hash = 0;
-                if (!call_custom_hash(structure, hash))
+                if (!call_custom_hash(key, hash))
                     return 0;
                 structure->payload->hash = hash;
                 structure->payload->hash_valid = true;
@@ -252,8 +259,7 @@ std::uint64_t hash_key_inner(
                 if (parent == identity)
                     return 0;
             stack.push_back(identity);
-            std::uint64_t hash = mix_hash(0xA,
-                                          struct_type_hash(structure->def));
+            std::uint64_t hash = mix_hash(0xA, type_hash(structure->def));
             hash = mix_hash(hash,
                             (std::uint64_t)structure->payload->fields.size());
             for (const struct value_t *field : structure->payload->fields)
@@ -261,6 +267,39 @@ std::uint64_t hash_key_inner(
             stack.pop_back();
             structure->payload->hash = hash;
             structure->payload->hash_valid = true;
+            return hash;
+        }
+        case T_enum: {
+            const struct enum_value_t *enumeration =
+                (const struct enum_value_t *)key;
+            if (!enumeration->def || !enumeration->payload)
+                return 0;
+            if (enumeration->payload->hash_valid)
+                return enumeration->payload->hash;
+            std::shared_ptr<function_def> custom =
+                custom_hash_method(enumeration->def);
+            if (custom) {
+                std::uint64_t hash = 0;
+                if (!call_custom_hash(key, hash))
+                    return 0;
+                enumeration->payload->hash = hash;
+                enumeration->payload->hash_valid = true;
+                return hash;
+            }
+            const void *identity = enumeration->payload.get();
+            for (const void *parent : stack)
+                if (parent == identity)
+                    return 0;
+            stack.push_back(identity);
+            std::uint64_t hash = mix_hash(0xB, type_hash(enumeration->def));
+            hash = mix_hash(hash, (std::uint64_t)enumeration->variant);
+            hash = mix_hash(hash,
+                            (std::uint64_t)enumeration->payload->fields.size());
+            for (const struct value_t *field : enumeration->payload->fields)
+                hash = mix_hash(hash, hash_key_inner(field, stack, depth + 1));
+            stack.pop_back();
+            enumeration->payload->hash = hash;
+            enumeration->payload->hash_valid = true;
             return hash;
         }
         default:
@@ -277,7 +316,7 @@ bool dict_key_allowed(const struct value_t *key) {
 
 const char *dict_key_error() {
     return "dict key must be int, bool, string, char, byte, bytes, null, "
-           "an immutable tuple of these, or a hashable struct";
+           "an immutable tuple of these, or a hashable struct/enum";
 }
 
 std::uint64_t dict_key_hash(const struct value_t *key) {
@@ -325,10 +364,9 @@ void dict_append_item(struct dict_value_t *dict, struct value_t *key,
     struct dict_payload *payload = dict->payload.get();
     std::size_t index = payload->items.size();
     const bool allowed = dict_key_allowed(key);
-    const bool custom_struct =
-        key && key->type == T_struct &&
-        custom_hash_method(((const struct struct_value_t *)key)->def);
-    if (allowed && (custom_struct ||
+    const struct type_def *key_def = value_type_def(key);
+    const bool custom_key = key_def && custom_hash_method(key_def);
+    if (allowed && (custom_key ||
                     (payload->index_valid && payload->index_size == index)))
         dict_key_hash(key);
     payload->items.push_back(std::make_pair(key, value));

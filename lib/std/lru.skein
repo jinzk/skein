@@ -22,10 +22,11 @@ package lru {
     let kind = kind_of(key);
     if (kind == "int" || kind == "bool" || kind == "string" ||
         kind == "char" || kind == "byte" || kind == "bytes" ||
-        kind == "null" || kind == "list" || kind == "struct") {
+        kind == "null" || kind == "list" || kind == "struct" ||
+        kind == "enum") {
       return;
     }
-    fail("std.lru key: dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct");
+    fail("std.lru key: dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum");
   }
 
   func _index(order, key) {

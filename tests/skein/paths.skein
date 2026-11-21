@@ -1,0 +1,250 @@
+import std;
+import std.path;
+include "_support.skein";
+
+ts_test("path parse posix", func() {
+  let p = path.parse("/a/b/../c.txt", "posix");
+  ts_eq(p["style"], "posix");
+  ts_eq(p["root"], "/");
+  ts_eq(p["dir"], "/a/b/..");
+  ts_eq(p["base"], "c.txt");
+  ts_eq(p["stem"], "c");
+  ts_eq(p["ext"], ".txt");
+  ts_eq(p["parts"], ["a", "b", "..", "c.txt"]);
+  ts_eq(p["absolute"], true);
+  ts_eq(p["normalized"], "/a/c.txt");
+});
+
+ts_test("path parse windows drive", func() {
+  let p = path.parse("C:/Users/alice/../notes.txt", "windows");
+  ts_eq(p["style"], "windows");
+  ts_eq(p["root"], "C:\\");
+  ts_eq(p["drive"], "C:");
+  ts_eq(p["dir"], "C:\\Users\\alice\\..");
+  ts_eq(p["base"], "notes.txt");
+  ts_eq(p["stem"], "notes");
+  ts_eq(p["ext"], ".txt");
+  ts_eq(p["parts"], ["Users", "alice", "..", "notes.txt"]);
+  ts_eq(p["absolute"], true);
+  ts_eq(p["normalized"], "C:\\Users\\notes.txt");
+});
+
+ts_test("path parse windows backslash", func() {
+  let p = path.parse("C:\\Users\\alice\\a.txt", "windows");
+  ts_eq(p["root"], "C:\\");
+  ts_eq(p["dir"], "C:\\Users\\alice");
+  ts_eq(p["base"], "a.txt");
+  ts_eq(p["normalized"], "C:\\Users\\alice\\a.txt");
+});
+
+ts_test("path parse unc", func() {
+  let p = path.parse("//server/share/a/b.txt", "windows");
+  ts_eq(p["root"], "\\\\server\\share\\");
+  ts_eq(p["drive"], "");
+  ts_eq(p["dir"], "\\\\server\\share\\a");
+  ts_eq(p["base"], "b.txt");
+  ts_eq(p["absolute"], true);
+  ts_eq(p["normalized"], "\\\\server\\share\\a\\b.txt");
+});
+
+ts_test("path parse verbatim", func() {
+  let p = path.parse("//?/C:/a/b.txt", "windows");
+  ts_eq(p["root"], "\\\\?\\C:\\");
+  ts_eq(p["normalized"], "\\\\?\\C:\\a\\b.txt");
+  let u = path.parse("//?/UNC/server/share/a", "windows");
+  ts_eq(u["root"], "\\\\?\\UNC\\server\\share\\");
+  ts_eq(u["normalized"], "\\\\?\\UNC\\server\\share\\a");
+});
+
+ts_test("path parse drive relative and rooted", func() {
+  let d = path.parse("C:foo/bar", "windows");
+  ts_eq(d["root"], "C:");
+  ts_eq(d["absolute"], false);
+  ts_eq(d["rooted"], false);
+  ts_eq(d["normalized"], "C:foo\\bar");
+  let r = path.parse("/foo", "windows");
+  ts_eq(r["root"], "\\");
+  ts_eq(r["absolute"], false);
+  ts_eq(r["rooted"], true);
+  ts_eq(r["normalized"], "\\foo");
+});
+
+ts_test("path normalize posix", func() {
+  ts_eq(path.normalize("/a/./b/../c", "posix"), "/a/c");
+  ts_eq(path.normalize("/../..", "posix"), "/");
+  ts_eq(path.normalize("a/../../b", "posix"), "../b");
+  ts_eq(path.normalize("", "posix"), ".");
+  ts_eq(path.normalize("/", "posix"), "/");
+});
+
+ts_test("path normalize windows", func() {
+  ts_eq(path.normalize("C:/a/./b/../c", "windows"), "C:\\a\\c");
+  ts_eq(path.normalize("C:/../../a", "windows"), "C:\\a");
+  ts_eq(path.normalize("C:/", "windows"), "C:\\");
+  ts_eq(path.normalize("C:", "windows"), "C:");
+  ts_eq(path.normalize("C:foo/../bar", "windows"), "C:bar");
+  ts_eq(path.normalize("//server/share/a/../../b", "windows"),
+         "\\\\server\\share\\b");
+  ts_eq(path.normalize("//?/C:/a/../b", "windows"), "\\\\?\\C:\\b");
+});
+
+ts_test("path join basic", func() {
+  ts_eq(path.join({"style": "posix"}), ".");
+  ts_eq(path.join("a", {"style": "posix"}), "a");
+  ts_eq(path.join("a", "b", "c", {"style": "posix"}), "a/b/c");
+  ts_eq(path.join("a", "/b", {"style": "posix"}), "/b");
+  ts_eq(path.join("C:/a", "b", {"style": "windows"}), "C:\\a\\b");
+  ts_eq(path.join("C:/a", "D:/b", {"style": "windows"}), "D:\\b");
+  ts_eq(path.join("C:/a", "/b", {"style": "windows"}), "\\b");
+  ts_eq(path.join_list(["a", "b"], "posix"), "a/b");
+  ts_eq(path.join_list(["C:/a", "D:/b"], "windows"), "D:\\b");
+});
+
+ts_test("path absolute", func() {
+  ts_eq(path.absolute("a/b", "posix", "/work"), "/work/a/b");
+  ts_eq(path.absolute("a/b", "windows", "C:/work"), "C:\\work\\a\\b");
+  ts_eq(path.absolute("C:/x", "windows", "C:/work"), "C:\\x");
+  ts_eq(path.absolute(".", "posix", "/work"), "/work");
+  ts_true(path.is_absolute(path.absolute("a/b")));
+});
+
+ts_test("path resolve", func() {
+  ts_eq(path.resolve("/work/a", "../b", "posix"), "/work/b");
+  ts_eq(path.resolve("C:/work", "/foo", "windows"), "C:\\foo");
+  ts_eq(path.resolve("C:/work", "C:foo", "windows"), "C:\\work\\foo");
+  ts_eq(path.resolve("C:/work", "C:../foo", "windows"), "C:\\foo");
+  ts_eq(path.resolve("C:/work", "\\foo", "windows"), "C:\\foo");
+  ts_eq(path.resolve("//server/share/a", "\\foo", "windows"),
+         "\\\\server\\share\\foo");
+  ts_eq(path.resolve("/work", "a", "posix"), "/work/a");
+});
+
+ts_test("path relative", func() {
+  ts_eq(path.relative("/a/b", "/a/c/d", "posix"), "../c/d");
+  ts_eq(path.relative("/a/b", "/a/b", "posix"), ".");
+  ts_eq(path.relative("/a/b/c", "/a", "posix"), "../..");
+  ts_eq(path.relative("/a/b", "/", "posix"), "../..");
+  ts_eq(path.relative("", "a", "posix"), "a");
+  ts_eq(path.relative(".", "a", "posix"), "a");
+  ts_eq(path.relative("C:/A/b", "c:/a/c", "windows"), "..\\c");
+  ts_eq(path.relative("C:/a", "D:/b", "windows"), "D:\\b");
+});
+
+ts_test("path basename dirname", func() {
+  ts_eq(path.basename("/", "posix"), "");
+  ts_eq(path.basename("a/b/", "posix"), "b");
+  ts_eq(path.basename(".", "posix"), ".");
+  ts_eq(path.dirname("/", "posix"), "/");
+  ts_eq(path.dirname("a", "posix"), ".");
+  ts_eq(path.dirname("a/b", "posix"), "a");
+  ts_eq(path.dirname("C:/foo", "windows"), "C:\\");
+  ts_eq(path.dirname("C:foo", "windows"), "C:");
+  ts_eq(path.basename("//server/share", "windows"), "");
+  ts_eq(path.dirname("//server/share", "windows"), "\\\\server\\share\\");
+});
+
+ts_test("path extname stem", func() {
+  ts_eq(path.extname(".bashrc"), "");
+  ts_eq(path.extname("foo."), ".");
+  ts_eq(path.extname("a.tar.gz"), ".gz");
+  ts_eq(path.stem("a.tar.gz"), "a.tar");
+  ts_eq(path.stem(".bashrc"), ".bashrc");
+  ts_eq(path.extname("C:/a.txt", "windows"), ".txt");
+});
+
+ts_test("path with_ext", func() {
+  ts_eq(path.with_ext("a/b.txt", "md", "posix"), "a/b.md");
+  ts_eq(path.with_ext("a/b.txt", ".md", "posix"), "a/b.md");
+  ts_eq(path.with_ext("a/b.txt", "", "posix"), "a/b");
+  ts_eq(path.with_ext("a/../b.txt", "md", "posix"), "b.md");
+  ts_eq(path.with_ext("目录/😀.txt", "md", "posix"), "目录/😀.md");
+  ts_eq(path.with_ext("C:/a.txt", "md", "windows"), "C:\\a.md");
+});
+
+ts_test("path equals", func() {
+  ts_eq(path.equals("/A/b", "/a/b", "posix"), false);
+  ts_eq(path.equals("C:/A/b", "c:/a/b", "windows"), true);
+  ts_eq(path.equals("C:/a/../b", "C:/b", "windows"), true);
+  ts_eq(path.equals("C:/a/b", "c:\\a\\b", "windows"), true);
+});
+
+ts_test("path separator helpers", func() {
+  ts_eq(path.sep("posix"), "/");
+  ts_eq(path.sep("windows"), "\\");
+  ts_eq(path.delimiter("posix"), ":");
+  ts_eq(path.delimiter("windows"), ";");
+  ts_eq(path.detect("C:/a"), "windows");
+  ts_eq(path.detect("a\\b"), "windows");
+  ts_true(path.detect("a/b") == path.host());
+  ts_eq(path.is_absolute("C:/a", "windows"), true);
+  ts_eq(path.is_relative("a/b", "posix"), true);
+  ts_eq(path.to_posix("C:\\a\\b"), "C:/a/b");
+  ts_eq(path.to_windows("/a/b"), "\\a\\b");
+  ts_eq(path.to_windows("C:/a/b", "windows"), "C:\\a\\b");
+});
+
+ts_test("path unicode components", func() {
+  ts_eq(path.basename("目录/😀.txt"), "😀.txt");
+  ts_eq(path.parse("目录/😀.txt", "posix")["parts"], ["目录", "😀.txt"]);
+  ts_eq(path.normalize("目录/../😀.txt", "posix"), "😀.txt");
+  ts_true(path.equals("/café/😀", "/café/😀", "posix"));
+});
+
+ts_test("path wrong type", func() {
+  ts_error(func() { return path.normalize(1); }, "expects a path string");
+});
+
+ts_test("path parse wrong type", func() {
+  ts_error(func() { return path.parse(1); }, "expects a path string");
+});
+
+ts_test("path invalid style", func() {
+  ts_error(func() { return path.normalize("a", "unix"); },
+           "style must be \"auto\", \"posix\" or \"windows\"");
+});
+
+ts_test("path join invalid options", func() {
+  ts_error(func() { return path.join("a", {}); },
+           "options must contain a style key");
+});
+
+ts_test("path join invalid style", func() {
+  ts_error(func() { return path.join("a", {"style": "unix"}); },
+           "style must be \"auto\", \"posix\" or \"windows\"");
+});
+
+ts_test("path with_ext no file name", func() {
+  ts_error(func() { return path.with_ext("/", "txt"); },
+           "path has no file name");
+});
+
+ts_test("path relative mixed", func() {
+  ts_error(func() { return path.relative("/a", "b", "posix"); },
+           "both be absolute or both be relative");
+});
+
+ts_test("path resolve relative base", func() {
+  ts_error(func() { return path.resolve("work", "a"); },
+           "base must be an absolute path");
+});
+
+ts_test("path resolve drive mismatch", func() {
+  ts_error(func() { return path.resolve("C:/work", "D:foo", "windows"); },
+           "needs a matching base drive");
+});
+
+ts_test("path absolute cwd required", func() {
+  let other = "windows";
+  if (path.host() == "windows") {
+    other = "posix";
+  }
+  ts_error(func() { return path.absolute("a", other); },
+           "cwd is required for non-host style");
+});
+
+ts_test("path absolute relative cwd", func() {
+  ts_error(func() { return path.absolute("a", "posix", "work"); },
+           "cwd must be an absolute path");
+});
+
+ts_finish();

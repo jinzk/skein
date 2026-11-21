@@ -1,0 +1,309 @@
+import std;
+import std.dict_key;
+include "_support.skein";
+
+// Types are declared once with case-specific names because all cases share the
+// file's global type registry.
+struct KeyCaseSnapshot {
+  id: int;
+  tag: string;
+}
+
+struct KeyCaseMutable {
+  xs: list[int];
+}
+
+enum KeyCaseEnumValues {
+  A;
+  B { id: int; }
+}
+
+enum KeyCaseEnumMutable {
+  A { xs: list[int]; }
+}
+
+struct KeyCaseHashUser {
+  id: int;
+  cache: list[int];
+}
+
+struct KeyCaseBadHash {
+  id: int;
+}
+
+struct KeyCaseEqUser {
+  id: int;
+  cache: list[int];
+}
+
+struct KeyCaseEqWrapper {
+  user: KeyCaseEqUser;
+}
+
+struct KeyCaseBadEq {
+  id: int;
+}
+
+struct KeyCaseReenterA {
+  id: int;
+}
+
+struct KeyCaseReenterB {
+  id: int;
+}
+
+struct KeyCaseIndexUser {
+  id: int;
+  name: string;
+}
+
+impl dict_key.DictKey for KeyCaseHashUser {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+
+impl dict_key.DictKey for KeyCaseBadHash {
+  func dict_hash(self) {
+    return "x";
+  }
+}
+
+impl dict_key.DictKey for KeyCaseEqUser {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+
+impl dict_key.KeyEq for KeyCaseEqUser {
+  func key_eq(self, other) {
+    return self.id == other.id;
+  }
+}
+
+impl dict_key.DictKey for KeyCaseBadEq {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+
+impl dict_key.KeyEq for KeyCaseBadEq {
+  func key_eq(self, other) {
+    return 1;
+  }
+}
+
+impl dict_key.DictKey for KeyCaseReenterA {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+
+impl dict_key.DictKey for KeyCaseReenterB {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+
+impl dict_key.KeyEq for KeyCaseReenterA {
+  func key_eq(self, other) {
+    let m = {KeyCaseReenterB { id: 1 }: 1};
+    let n = {KeyCaseReenterB { id: 1 }: 1};
+    return m[KeyCaseReenterB { id: 1 }] == 1;
+  }
+}
+
+impl dict_key.KeyEq for KeyCaseReenterB {
+  func key_eq(self, other) {
+    return self.id == other.id;
+  }
+}
+
+ts_test("key scalar types", func() {
+  let d = {
+    1: 'i',
+    true: 'b',
+    's': 's',
+    'a': 'c',
+    byte(65): 'y',
+    std.bytes.from_hex("00"): 'x',
+    null: 'n'
+  };
+  ts_eq(d[1], 'i');
+  ts_eq(d[true], 'b');
+  ts_eq(d['s'], 's');
+  ts_eq(d['a'], 'c');
+  ts_eq(d[byte(65)], 'y');
+  ts_eq(d[std.bytes.from_hex("00")], 'x');
+  ts_eq(d[null], 'n');
+});
+
+ts_test("key tuple and nested tuple", func() {
+  let d = {(1, 'a'): 10, ((2, 3), 'b'): 20};
+  ts_eq(d[(1, 'a')], 10);
+  ts_eq(d[((2, 3), 'b')], 20);
+});
+
+ts_test("key mutable list rejected", func() {
+  ts_error(func() {
+    let d = {[1]: 1};
+    return d;
+  }, "dict key must be");
+});
+
+ts_test("key tuple mutable element rejected", func() {
+  ts_error(func() {
+    let d = {(1, [2]): 1};
+    return d;
+  }, "dict key must be");
+});
+
+ts_test("key tuple is immutable", func() {
+  let t = (1, 2);
+  ts_error(func() {
+    t[0] = 9;
+  }, "cannot modify an immutable tuple");
+});
+
+ts_test("key struct snapshot", func() {
+  let k = KeyCaseSnapshot { id: 1, tag: "a" };
+  let d = {k: 42};
+  k.id = 2;
+  ts_eq(d[KeyCaseSnapshot { id: 1, tag: "a" }], 42);
+  ts_eq(std.dict.has(d, k), 0);
+});
+
+ts_test("key struct mutable field rejected", func() {
+  ts_error(func() {
+    let d = {KeyCaseMutable { xs: [1] }: 1};
+    return d;
+  }, "dict key must be");
+});
+
+ts_test("key enum values", func() {
+  let d = {KeyCaseEnumValues.A: "a",
+           KeyCaseEnumValues.B { id: 1 }: "b"};
+  ts_eq(d[KeyCaseEnumValues.A], "a");
+  ts_eq(d[KeyCaseEnumValues.B { id: 1 }], "b");
+});
+
+ts_test("key enum mutable payload rejected", func() {
+  ts_error(func() {
+    let d = {KeyCaseEnumMutable.A { xs: [1] }: 1};
+    return d;
+  }, "dict key must be");
+});
+
+ts_test("key custom hash ignores non-hashable fields", func() {
+  let u = KeyCaseHashUser { id: 1, cache: [] };
+  let d = {u: "x"};
+  ts_eq(d[KeyCaseHashUser { id: 1, cache: [] }], "x");
+  ts_eq(std.dict.has(d, KeyCaseHashUser { id: 1, cache: [1] }), 0);
+  let s = std.set.from_list([
+    KeyCaseHashUser { id: 1, cache: [] },
+    KeyCaseHashUser { id: 1, cache: [1] }
+  ]);
+  ts_eq(std.set.size(s), 2);
+});
+
+ts_test("key hash must return int", func() {
+  ts_error(func() {
+    let d = {KeyCaseBadHash { id: 1 }: 1};
+    return d;
+  }, "dict_hash must return an int");
+});
+
+ts_test("key KeyEq custom equality", func() {
+  let a = KeyCaseEqUser { id: 1, cache: [] };
+  let b = KeyCaseEqUser { id: 1, cache: [1] };
+  let d = {a: "x"};
+  ts_eq(d[b], "x");
+  ts_eq(std.dict.has(d, b), 1);
+  ts_false(a == b);
+  let s = std.set.from_list([a, b]);
+  ts_eq(std.set.size(s), 1);
+});
+
+ts_test("key hash without KeyEq stays structural", func() {
+  let a = KeyCaseHashUser { id: 1, cache: [] };
+  let b = KeyCaseHashUser { id: 1, cache: [1] };
+  let d = {a: "x"};
+  ts_eq(std.dict.has(d, b), 0);
+});
+
+ts_test("key KeyEq nested in tuple", func() {
+  let d = {(KeyCaseEqUser { id: 1, cache: [] }, "x"): true};
+  ts_true(d[(KeyCaseEqUser { id: 1, cache: [1] }, "x")]);
+});
+
+ts_test("key KeyEq nested in auto struct", func() {
+  let d = {KeyCaseEqWrapper {
+    user: KeyCaseEqUser { id: 1, cache: [] }
+  }: true};
+  ts_true(d[KeyCaseEqWrapper {
+    user: KeyCaseEqUser { id: 1, cache: [1] }
+  }]);
+});
+
+ts_test("key KeyEq must return bool", func() {
+  ts_error(func() {
+    let d = {KeyCaseBadEq { id: 1 }: 1};
+    return d[KeyCaseBadEq { id: 1 }];
+  }, "key_eq must return a bool");
+});
+
+ts_test("key KeyEq reentrancy rejected", func() {
+  ts_error(func() {
+    let d = {KeyCaseReenterA { id: 1 }: 1};
+    return d[KeyCaseReenterA { id: 1 }];
+  }, "key_eq must not re-enter dict/set key equality");
+});
+
+ts_test("key index_by", func() {
+  let users = [
+    KeyCaseIndexUser { id: 1, name: "a" },
+    KeyCaseIndexUser { id: 2, name: "b" }
+  ];
+  let by_id = std.dict.index_by(users, func(u) { return u.id; });
+  ts_eq(by_id[1].name, "a");
+  ts_eq(by_id[2].name, "b");
+  ts_eq(std.dict.keys(by_id), [1, 2]);
+});
+
+ts_test("key index_by duplicate last wins", func() {
+  let users = [
+    KeyCaseIndexUser { id: 1, name: "a" },
+    KeyCaseIndexUser { id: 1, name: "b" }
+  ];
+  let by_id = std.dict.index_by(users, func(u) { return u.id; });
+  ts_eq(by_id[1].name, "b");
+  ts_eq(len(by_id), 1);
+});
+
+ts_test("key index_by composite projection", func() {
+  let xs = [
+    {"region": "eu", "id": 1},
+    {"region": "us", "id": 1}
+  ];
+  let by_key = std.dict.index_by(xs,
+    func(x) { return (x["region"], x["id"]); });
+  ts_eq(by_key[("eu", 1)]["region"], "eu");
+  ts_eq(by_key[("us", 1)]["region"], "us");
+});
+
+ts_test("key index_by invalid key", func() {
+  ts_error(func() {
+    return std.dict.index_by([1], func(x) { return 1.5; });
+  }, "std.dict.index_by: dict key must be");
+});
+
+func key_case_task_worker() {
+  let d = {KeyCaseEqUser { id: 1, cache: [] }: "x"};
+  return d[KeyCaseEqUser { id: 1, cache: [1] }];
+}
+
+ts_test("key custom hash and KeyEq inside task", func() {
+  ts_eq(launch key_case_task_worker().wait(), "x");
+});
+
+ts_finish();

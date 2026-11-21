@@ -22,6 +22,10 @@ import urllib.request
 BIN = sys.argv[1] if len(sys.argv) > 1 else "./skein"
 FFI_SHIM = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
 DEFAULT_TIMEOUT = float(os.environ.get("SKEIN_TEST_TIMEOUT", "5"))
+SKEIN_CASES_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "skein")
+SKEIN_FILE_TIMEOUT = float(
+    os.environ.get("SKEIN_FILE_TEST_TIMEOUT", "300"))
 
 
 def _find_native_module():
@@ -101,6 +105,37 @@ def run_file(path, timeout=None):
         capture_output=True,
         timeout=timeout,
     )
+
+
+def run_skein(name, timeout=None):
+    """Run one self-checking test file from tests/skein/.
+
+    The file must end with ts_finish(), which prints "ok: ..." on success.
+    Requiring that marker catches a file that exits early without running any
+    cases.  The outer Python process still owns timeouts and crash isolation,
+    so a hang or interpreter crash is reported against the file.
+    """
+    path = os.path.join(SKEIN_CASES_DIR, name)
+    if timeout is None:
+        timeout = SKEIN_FILE_TIMEOUT
+    try:
+        proc = subprocess.run(
+            [BIN, path],
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssertionError(
+            f"{name}: timed out after {timeout:g}s") from exc
+    stdout = proc.stdout.replace("\r\n", "\n")
+    stderr = proc.stderr.replace("\r\n", "\n")
+    if proc.returncode != 0 or "ok: " not in stdout:
+        raise AssertionError(
+            f"{name}: exit {proc.returncode}, missing 'ok:' marker\n"
+            f"stdout:\n{stdout}\nstderr:\n{stderr}")
 
 
 TEST_SKIP = {
@@ -4632,6 +4667,7 @@ __all__ = [
     "skein_string",
     "run",
     "run_file",
+    "run_skein",
     "check",
     "ws_recv_exact",
     "ws_read_frame",

@@ -341,7 +341,7 @@ src/
 docs/            架构、编码、FFI、Unicode、字节码与 JIT 计划文档
 lib/std/         以 Skein 编写的标准库包（构建时嵌入）
 contrib/mysql/   可选的 MySQL native plugin 示例与 Skein 封装
-tests/           自动化回归测试（test_skein.py + cases/）
+tests/           自动化回归测试（test_skein.py + cases/ + skein/）
 tools/           生成器与一致性检查脚本
 third_party/     llhttp、utf8proc、asmjit
 cmake/           构建辅助脚本

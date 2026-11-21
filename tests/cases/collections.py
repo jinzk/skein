@@ -1,12 +1,26 @@
 #!/usr/bin/env python3
 """Lists, dicts, destructuring, LRU, sorting.
 
-Extracted from the original test_skein.py main() body, lines 1700-2303.
+Set/deque/heap cases live in tests/skein/collections_containers.skein.
 """
 from harness import *  # noqa: F401,F403
 
 
 def run_cases():
+    run_skein("collections_containers.skein")
+    check(
+        "collections containers golden",
+        "import std;\n"
+        "import std.set;\n"
+        "import std.deque;\n"
+        "let s = set.from_list([2, 1, 3]);\n"
+        "println(set.values(s));\n"
+        "println(std.json.stringify(s));\n"
+        "let d = deque.from_list([1, 2]);\n"
+        "println(deque.to_list(d));\n",
+        stdout_all=["[2, 1, 3]", "[2,1,3]", "[1, 2]"],
+    )
+
     check("dict delete reinsert order",
           "import std;\n"
           "let d = {1: 'a', 2: 'b', 3: 'c'};\n"
@@ -65,243 +79,6 @@ def run_cases():
           "}\n"
           "println(s);\nprintln(d[0]);\n",
           stdout_all=["1000150000", "5"])
-    check("set basics",
-          "import std;\nimport std.set;\n"
-          "let s = set.from_list([1, 2, 2, 3]);\n"
-          "println(set.size(s));\nprintln(set.values(s));\n"
-          "println(set.has(s, 2));\nprintln(set.has(s, 9));\n"
-          "s = set.remove(s, 2);\nprintln(set.values(s));\n",
-          stdout_all=["3", "[1, 2, 3]", "true", "false", "[1, 3]"])
-    check("set operations",
-          "import std;\nimport std.set;\n"
-          "let a = set.from_list([1, 2]);\n"
-          "let b = set.from_list([2, 3]);\n"
-          "println(set.values(set.union(a, b)));\n"
-          "println(set.values(set.intersect(a, b)));\n"
-          "println(set.values(set.difference(a, b)));\n"
-          "println(set.is_subset(set.from_list([1]), a));\n"
-          "println(set.is_subset(set.from_list([1, 9]), a));\n",
-          stdout_all=["[1, 2, 3]", "[2]", "[1]", "true", "false"])
-    check("set value semantics and order",
-          "import std;\nimport std.set;\n"
-          "let s = set.from_list([1, 2, 3]);\n"
-          "s = set.remove(s, 2);\n"
-          "s = set.add(s, 2);\n"
-          "println(set.values(s));\n"
-          "let t = set.add(set.from_list([1]), 2);\n"
-          "println(set.values(t));\n"
-          "let u = set.from_list([1]);\n"
-          "let v = set.add(u, 2);\n"
-          "println(set.size(u));\nprintln(set.size(v));\n",
-          stdout_all=["[1, 3, 2]", "[1, 2]", "1", "2"])
-    check("set len json iterate type",
-          "import std;\nimport std.set;\n"
-          "let s: set = set.from_list([2, 1, 3]);\n"
-          "println(len(s));\n"
-          "println(std.json.stringify(s));\n"
-          "let out = [];\n"
-          "for (let x in s) { out = std.list.append(out, x); }\n"
-          "println(out);\n",
-          stdout_all=["3", "[2,1,3]", "[2, 1, 3]"])
-    check("set differential",
-          "import std;\nimport std.set;\n"
-          "let s = set.new();\nlet ref = {};\n"
-          "let i = 0;\nlet seed = 12345;\n"
-          "while (i < 2000) {\n"
-          "  seed = (seed * 1103515245 + 12345) % 2147483648;\n"
-          "  let v = seed % 200;\n"
-          "  seed = (seed * 1103515245 + 12345) % 2147483648;\n"
-          "  if (seed % 3 == 0) {\n"
-          "    s = set.remove(s, v);\n"
-          "    ref = std.dict.delete(ref, v);\n"
-          "  } else {\n"
-          "    s = set.add(s, v);\n"
-          "    ref[v] = true;\n"
-          "  }\n"
-          "  if (set.size(s) != len(ref)) { fail(\"size mismatch\"); }\n"
-          "  if (set.has(s, v) != (std.dict.has(ref, v) != 0)) { fail(\"has mismatch\"); }\n"
-          "  i = i + 1;\n"
-          "}\n"
-          "println(std.list.sort(set.values(s)) == "
-          "std.list.sort(std.dict.keys(ref)));\n",
-          stdout_all=["true"])
-    check("set large add",
-          "import std;\nimport std.set;\n"
-          "let s = set.new();\n"
-          "let i = 0;\n"
-          "while (i < 20000) { s = set.add(s, i); i = i + 1; }\n"
-          "println(set.size(s));\nprintln(set.has(s, 19999));\n",
-          stdout_all=["20000", "true"])
-    check("deque basics",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.from_list([2, 3]);\n"
-          "d = deque.push_front(d, 1);\n"
-          "d = deque.push_back(d, 4);\n"
-          "println(deque.size(d));\n"
-          "println(deque.to_list(d));\n"
-          "println(deque.peek_front(d));\nprintln(deque.peek_back(d));\n"
-          "let r = deque.pop_front(d);\n"
-          "println(r[\"value\"]);\n"
-          "d = r[\"deque\"];\n"
-          "println(deque.to_list(d));\n",
-          stdout_all=["4", "[1, 2, 3, 4]", "1", "4", "1", "[2, 3, 4]"])
-    check("deque empty pop",
-          "import std;\nimport std.deque;\n"
-          "let r = deque.pop_front(deque.new());\n"
-          "println(r[\"ok\"]);\nprintln(r[\"error\"]);\n",
-          stdout_all=["false", "empty deque"])
-    check("deque pops both ends",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.from_list([1, 2, 3, 4, 5]);\n"
-          "let out = [];\n"
-          "while (deque.size(d) > 0) {\n"
-          "  let r = deque.pop_front(d);\n"
-          "  out = std.list.append(out, r[\"value\"]);\n"
-          "  d = r[\"deque\"];\n"
-          "}\n"
-          "println(out);\n"
-          "d = deque.from_list([1, 2, 3, 4, 5]);\n"
-          "out = [];\n"
-          "while (deque.size(d) > 0) {\n"
-          "  let r = deque.pop_back(d);\n"
-          "  out = std.list.append(out, r[\"value\"]);\n"
-          "  d = r[\"deque\"];\n"
-          "}\n"
-          "println(out);\n",
-          stdout_all=["[1, 2, 3, 4, 5]", "[5, 4, 3, 2, 1]"])
-    check("deque interleaved ends",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.new();\n"
-          "let i = 0;\n"
-          "while (i < 20) {\n"
-          "  if (i % 2 == 0) { d = deque.push_back(d, i); }\n"
-          "  else { d = deque.push_front(d, i); }\n"
-          "  i = i + 1;\n"
-          "}\n"
-          "println(deque.to_list(d));\n"
-          "println(deque.size(d));\n",
-          stdout_all=["[19, 17, 15, 13, 11, 9, 7, 5, 3, 1, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18]", "20"])
-    check("deque value semantics",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.from_list([1, 2]);\n"
-          "let e = deque.push_back(d, 3);\n"
-          "println(deque.size(d));\nprintln(deque.size(e));\n"
-          "println(deque.to_list(d));\nprintln(deque.to_list(e));\n",
-          stdout_all=["2", "3", "[1, 2]", "[1, 2, 3]"])
-    check("deque to_list is detached",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.from_list([1, 2, 3]);\n"
-          "let l = deque.to_list(d);\n"
-          "l[0] = 99;\n"
-          "println(deque.to_list(d));\nprintln(l);\n",
-          stdout_all=["[1, 2, 3]", "[99, 2, 3]"])
-    check("deque empty peek",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.new();\n"
-          "println(deque.peek_front(d));\nprintln(deque.peek_back(d));\n"
-          "println(deque.size(d));\nprintln(deque.to_list(d));\n",
-          stdout_all=["null", "null", "0", "[]"])
-    check("deque via std namespace",
-          "import std;\n"
-          "let d = std.deque.from_list([1, 2, 3]);\n"
-          "println(std.deque.to_list(d));\n"
-          "println(kind_of(d));\n"
-          "println(d == std.deque.from_list([1, 2, 3]));\n"
-          "println(d == std.deque.from_list([1, 2]));\n",
-          stdout_all=["[1, 2, 3]", "deque", "true", "false"])
-    check("deque large",
-          "import std;\nimport std.deque;\n"
-          "let d = deque.new();\n"
-          "let i = 0;\n"
-          "while (i < 50000) { d = deque.push_back(d, i); i = i + 1; }\n"
-          "println(deque.size(d));\n"
-          "println(deque.peek_front(d));\nprintln(deque.peek_back(d));\n",
-          stdout_all=["50000", "0", "49999"])
-    check("deque and heap len json iterate",
-          "import std;\nimport std.deque;\nimport std.heap;\n"
-          "let d = deque.from_list([1, 2, 3]);\n"
-          "println(len(d));\nprintln(std.json.stringify(d));\n"
-          "let out = [];\n"
-          "for (let x in d) { out = std.list.append(out, x); }\n"
-          "println(out);\n"
-          "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
-          "println(len(h));\nprintln(std.json.stringify(h));\n"
-          "out = [];\n"
-          "for (let x in h) { out = std.list.append(out, x); }\n"
-          "println(out);\n",
-          stdout_all=["3", "[1,2,3]", "[1, 2, 3]", "3", "[1,3,2]",
-                      "[1, 3, 2]"])
-    check("deque and heap type annotations",
-          "import std;\nimport std.deque;\nimport std.heap;\n"
-          "let d: deque = deque.new();\nprintln(len(d));\n"
-          "let h: heap = heap.from_list([1], func(a, b) { return a < b; });\n"
-          "println(len(h));\n"
-          "struct Box { items: deque; }\n"
-          "let b = Box { items: d };\nprintln(len(b.items));\n",
-          stdout_all=["0", "1", "0"])
-    check("heap min",
-          "import std;\nimport std.heap;\n"
-          "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
-          "println(heap.size(h));\nprintln(heap.peek(h));\n"
-          "let r = heap.pop(h); println(r[\"value\"]); h = r[\"heap\"];\n"
-          "r = heap.pop(h); println(r[\"value\"]); h = r[\"heap\"];\n"
-          "r = heap.pop(h); println(r[\"value\"]); h = r[\"heap\"];\n"
-          "println(heap.size(h));\n",
-          stdout_all=["3", "1", "1", "2", "3", "0"])
-    check("heap max",
-          "import std;\nimport std.heap;\n"
-          "let h = heap.from_list([3, 1, 2], func(a, b) { return a > b; });\n"
-          "println(heap.peek(h));\n"
-          "let r = heap.pop(h); println(r[\"value\"]);\n",
-          stdout_all=["3", "3"])
-    check("heap empty pop",
-          "import std;\nimport std.heap;\n"
-          "let h = heap.new(func(a, b) { return a < b; });\n"
-          "let r = heap.pop(h);\n"
-          "println(r[\"ok\"]);\nprintln(r[\"error\"]);\n",
-          stdout_all=["false", "empty heap"])
-    check("heap drains sorted",
-          "import std;\nimport std.heap;\n"
-          "let h = heap.from_list([5, 3, 8, 1, 9, 2, 7, 4, 6, 0], "
-          "func(a, b) { return a < b; });\n"
-          "let out = std.deque.new();\n"
-          "while (heap.size(h) > 0) {\n"
-          "  let r = heap.pop(h);\n"
-          "  out = std.deque.push_back(out, r[\"value\"]);\n"
-          "  h = r[\"heap\"];\n"
-          "}\n"
-          "println(std.deque.to_list(out));\n",
-          stdout_all=["[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]"])
-    check("heap value semantics",
-          "import std;\nimport std.heap;\n"
-          "let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });\n"
-          "let h2 = heap.push(h, 0);\n"
-          "println(heap.size(h));\nprintln(heap.size(h2));\n"
-          "println(heap.peek(h));\nprintln(heap.peek(h2));\n"
-          "let r = heap.pop(h);\n"
-          "println(r[\"value\"]);\nprintln(heap.size(h));\n",
-          stdout_all=["3", "4", "1", "0", "1", "3"])
-    check("heap via std namespace",
-          "import std;\n"
-          "let h = std.heap.from_list([2, 1, 3], "
-          "func(a, b) { return a < b; });\n"
-          "println(std.heap.peek(h));\n"
-          "println(kind_of(h));\n"
-          "println(len(std.heap.to_list(h)));\n"
-          "println(h == std.heap.from_list([2, 1, 3], "
-          "func(a, b) { return a < b; }));\n",
-          stdout_all=["1", "heap", "3", "true"])
-    check("heap large",
-          "import std;\nimport std.heap;\n"
-          "let h = heap.new(func(a, b) { return a < b; });\n"
-          "let i = 0;\n"
-          "while (i < 50000) { h = heap.push(h, i); i = i + 1; }\n"
-          "println(heap.size(h));\n"
-          "i = 0;\n"
-          "while (i < 50000) { h = heap.pop(h)[\"heap\"]; i = i + 1; }\n"
-          "println(heap.size(h));\n",
-          stdout_all=["50000", "0"])
-
     check("graph basics",
           'import std;\nimport std.graph;\n'
           'let g = graph.new();\n'

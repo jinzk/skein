@@ -1,0 +1,361 @@
+import std;
+import std.route;
+include "_support.skein";
+
+func ts_route_req(method, path) {
+  return {"method": method, "path": path};
+}
+
+ts_test("route basic", func() {
+  let app = route.new();
+  app.get("/users/:id", func(req) {
+    return {"status": 200, "body": req["params"]["id"]};
+  });
+  app.get("/users/me", func(req) {
+    return {"status": 200, "body": "me"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/users/42"))["body"], "42");
+  ts_eq(app.dispatch(ts_route_req("GET", "/users/me"))["body"], "me");
+  ts_eq(app.dispatch(ts_route_req("POST", "/users/42"))["status"], 405);
+  ts_eq(app.dispatch(ts_route_req("GET", "/nope"))["status"], 404);
+});
+
+ts_test("route static params empty", func() {
+  let app = route.new();
+  let seen = {"params": null};
+  app.get("/static", func(req) {
+    seen["params"] = req["params"];
+    return {"status": 200, "body": str(len(req["params"]))};
+  });
+  let resp = app.dispatch(ts_route_req("GET", "/static"));
+  ts_eq(seen["params"], {});
+  ts_eq(resp["body"], "0");
+});
+
+ts_test("route root and trailing slash", func() {
+  let app = route.new();
+  app.get("/", func(req) { return {"status": 200, "body": "root"}; });
+  app.get("/a/b", func(req) { return {"status": 200, "body": "ab"}; });
+  ts_eq(app.dispatch(ts_route_req("GET", "/"))["body"], "root");
+  ts_eq(app.dispatch(ts_route_req("GET", ""))["body"], "root");
+  ts_eq(app.dispatch(ts_route_req("GET", "/a/b/"))["body"], "ab");
+});
+
+ts_test("route wildcard", func() {
+  let app = route.new();
+  app.get("/files/*path", func(req) {
+    return {"status": 200, "body": "[" + req["params"]["path"] + "]"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/files/a/b.txt"))["body"],
+        "[a/b.txt]");
+  ts_eq(app.dispatch(ts_route_req("GET", "/files"))["body"], "[]");
+  ts_eq(app.dispatch(ts_route_req("GET", "/files/"))["body"], "[]");
+});
+
+ts_test("route wildcard method", func() {
+  let app = route.new();
+  app.add("*", "/any", func(req) {
+    return {"status": 200, "body": req["method"]};
+  });
+  ts_eq(app.dispatch(ts_route_req("PATCH", "/any"))["body"], "PATCH");
+});
+
+ts_test("route method specific beats wildcard method", func() {
+  let app = route.new();
+  app.add("*", "/any", func(req) {
+    return {"status": 200, "body": "any"};
+  });
+  app.get("/any", func(req) {
+    return {"status": 200, "body": "get"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/any"))["body"], "get");
+  ts_eq(app.dispatch(ts_route_req("POST", "/any"))["body"], "any");
+});
+
+ts_test("route middleware", func() {
+  let app = route.new();
+  app.get("/private", func(req) {
+    return {"status": 200, "body": "ok"};
+  });
+  app.use(func(req) {
+    if (req["path"] == "/private") {
+      return {"status": 401, "body": "no"};
+    }
+    return null;
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/private"))["status"], 401);
+  ts_eq(app.dispatch(ts_route_req("GET", "/public"))["status"], 404);
+});
+
+ts_test("route duplicate", func() {
+  let app = route.new();
+  app.get("/x", func(req) { return null; });
+  ts_error(func() {
+    app.get("/x", func(req) { return null; });
+  }, "duplicate route GET /x");
+});
+
+ts_test("route exact method fallthrough to param", func() {
+  let app = route.new();
+  app.post("/users/me", func(req) {
+    return {"status": 200, "body": "post"};
+  });
+  app.get("/users/:id", func(req) {
+    return {"status": 200, "body": "get:" + req["params"]["id"]};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/users/me"))["body"], "get:me");
+});
+
+ts_test("route exact method mismatch", func() {
+  let app = route.new();
+  app.post("/only", func(req) {
+    return {"status": 200, "body": "p"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/only"))["status"], 405);
+});
+
+ts_test("route wildcard zero beats terminal method mismatch", func() {
+  let app = route.new();
+  app.post("/files", func(req) {
+    return {"status": 200, "body": "post"};
+  });
+  app.get("/files/*path", func(req) {
+    return {"status": 200,
+            "body": "wild:[" + req["params"]["path"] + "]"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/files"))["body"], "wild:[]");
+});
+
+ts_test("route static over param", func() {
+  let app = route.new();
+  app.get("/a/:x", func(req) {
+    return {"status": 200, "body": "param"};
+  });
+  app.get("/a/b", func(req) {
+    return {"status": 200, "body": "static"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/a/b"))["body"], "static");
+});
+
+ts_test("route lexicographic priority", func() {
+  let app = route.new();
+  app.get("/a/:x/c/d", func(req) {
+    return {"status": 200, "body": "first"};
+  });
+  app.get("/a/b/:y/:z", func(req) {
+    return {"status": 200, "body": "second"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/a/b/c/d"))["body"], "second");
+});
+
+ts_test("route param over wildcard", func() {
+  let app = route.new();
+  app.get("/w/*rest", func(req) {
+    return {"status": 200, "body": "wild"};
+  });
+  app.get("/w/:id", func(req) {
+    return {"status": 200, "body": "param"};
+  });
+  ts_eq(app.dispatch(ts_route_req("GET", "/w/1"))["body"], "param");
+});
+
+ts_test("route same path different methods", func() {
+  let app = route.new();
+  app.get("/same", func(req) { return {"status": 200, "body": "g"}; });
+  app.post("/same", func(req) { return {"status": 200, "body": "p"}; });
+  ts_eq(app.dispatch(ts_route_req("GET", "/same"))["body"], "g");
+  ts_eq(app.dispatch(ts_route_req("POST", "/same"))["body"], "p");
+});
+
+ts_test("route copy shares state", func() {
+  let a = route.new();
+  let b = a;
+  b.get("/x", func(req) {
+    return {"status": 200, "body": "shared"};
+  });
+  ts_eq(a.dispatch(ts_route_req("GET", "/x"))["body"], "shared");
+});
+
+ts_test("route inspect", func() {
+  let app = route.new();
+  app.get("/a", func(req) { return null; });
+  app.post("/b/:id", func(req) { return null; });
+  let items = app.inspect();
+  ts_eq(len(items), 2);
+  ts_eq(items[0]["method"] + " " + items[0]["pattern"], "GET /a");
+  ts_eq(items[1]["method"] + " " + items[1]["pattern"], "POST /b/:id");
+});
+
+ts_test("route task handler", func() {
+  let app = route.new();
+  app.get("/x", func(req) {
+    std.task.sleep(1).wait();
+    return {"status": 200, "body": "ok"};
+  });
+  let resp = app.dispatch(ts_route_req("GET", "/x"));
+  ts_eq(resp["body"], "ok");
+});
+
+ts_test("route task middleware continues", func() {
+  let state = {"order": []};
+  let app = route.new();
+  app.use(func(req) {
+    std.task.sleep(1).wait();
+    state["order"] = std.list.append(state["order"], "mw1");
+    return null;
+  });
+  app.use(func(req) {
+    state["order"] = std.list.append(state["order"], "mw2");
+    return null;
+  });
+  app.get("/x", func(req) {
+    return {"status": 200, "body": "ok"};
+  });
+  let resp = app.dispatch(ts_route_req("GET", "/x"));
+  ts_eq(state["order"], ["mw1", "mw2"]);
+  ts_eq(resp["body"], "ok");
+});
+
+ts_test("route sync then task middleware", func() {
+  let state = {"order": []};
+  let app = route.new();
+  app.use(func(req) {
+    state["order"] = std.list.append(state["order"], "sync");
+    return null;
+  });
+  app.use(func(req) {
+    std.task.sleep(1).wait();
+    state["order"] = std.list.append(state["order"], "async");
+    return null;
+  });
+  app.get("/x", func(req) {
+    return {"status": 200, "body": "ok"};
+  });
+  let resp = app.dispatch(ts_route_req("GET", "/x"));
+  ts_eq(state["order"], ["sync", "async"]);
+  ts_eq(resp["body"], "ok");
+});
+
+ts_test("route task middleware short circuit", func() {
+  let app = route.new();
+  app.use(func(req) {
+    std.task.sleep(1).wait();
+    return {"status": 401, "body": "no"};
+  });
+  app.get("/x", func(req) {
+    return {"status": 200, "body": "ok"};
+  });
+  let resp = app.dispatch(ts_route_req("GET", "/x"));
+  ts_eq(resp["status"], 401);
+  ts_eq(resp["body"], "no");
+});
+
+ts_test("route task middleware and handler", func() {
+  let app = route.new();
+  app.use(func(req) {
+    std.task.sleep(1).wait();
+    return null;
+  });
+  app.get("/x", func(req) {
+    std.task.sleep(1).wait();
+    return {"status": 200, "body": "both"};
+  });
+  let resp = app.dispatch(ts_route_req("GET", "/x"));
+  ts_eq(resp["body"], "both");
+});
+
+ts_test("route long wildcard path", func() {
+  let app = route.new();
+  app.get("/files/*path", func(req) {
+    return {"status": 200, "body": req["params"]["path"]};
+  });
+  let path = "/files";
+  for (let i in range(200)) {
+    path = path + "/" + str(i);
+  }
+  let resp = app.dispatch(ts_route_req("GET", path));
+  ts_eq(resp["status"], 200);
+  let expected = "";
+  for (let i in range(200)) {
+    if (i > 0) {
+      expected = expected + "/";
+    }
+    expected = expected + str(i);
+  }
+  ts_eq(resp["body"], expected);
+});
+
+ts_test("route many routes", func() {
+  let app = route.new();
+  for (let i in range(1000)) {
+    app.get("/r" + str(i), func(req) {
+      return {"status": 200, "body": "ok"};
+    });
+  }
+  ts_eq(app.dispatch(ts_route_req("GET", "/r999"))["body"], "ok");
+  ts_eq(len(app.inspect()), 1000);
+});
+
+ts_test("route param name conflict", func() {
+  let app = route.new();
+  app.get("/u/:id", func(req) { return null; });
+  ts_error(func() {
+    app.get("/u/:name", func(req) { return null; });
+  }, "conflicting route parameter name");
+});
+
+ts_test("route wildcard name conflict", func() {
+  let app = route.new();
+  app.get("/f/*a", func(req) { return null; });
+  ts_error(func() {
+    app.get("/f/*b", func(req) { return null; });
+  }, "conflicting route wildcard name");
+});
+
+ts_test("route wildcard must be last", func() {
+  let app = route.new();
+  ts_error(func() {
+    app.get("/f/*p/x", func(req) { return null; });
+  }, "route wildcard must be the last segment");
+});
+
+ts_test("route empty param name", func() {
+  let app = route.new();
+  ts_error(func() {
+    app.get("/u/:", func(req) { return null; });
+  }, "route parameter name is required");
+});
+
+ts_test("route pattern depth limit", func() {
+  let app = route.new();
+  let pattern = "";
+  for (let i in range(33)) {
+    pattern = pattern + "/s" + str(i);
+  }
+  ts_error(func() {
+    app.get(pattern, func(req) { return null; });
+  }, "route pattern is too deep");
+});
+
+ts_test("route non-callable handler", func() {
+  let app = route.new();
+  ts_error(func() {
+    app.get("/x", 1);
+  }, "route handler must be callable");
+});
+
+ts_test("route non-callable middleware", func() {
+  let app = route.new();
+  ts_error(func() {
+    app.use(1);
+  }, "route middleware must be callable");
+});
+
+ts_test("route request validation", func() {
+  let app = route.new();
+  ts_error(func() {
+    app.dispatch({"method": "GET"});
+  }, "route.dispatch requires a string path");
+});
+
+ts_finish();

@@ -2,7 +2,8 @@
 """Core language: literals, operators, control flow, switch.
 
 Numeric literal and operator cases live in
-tests/skein/language_core_numbers.skein.
+tests/skein/language_core_numbers.skein.  Iteration cases live in
+tests/skein/language_core_iteration.skein.
 """
 import os
 
@@ -11,11 +12,17 @@ from harness import *  # noqa: F401,F403
 
 def run_cases():
     run_skein("language_core_numbers.skein")
+    run_skein("language_core_iteration.skein")
     check(
         "numeric golden output",
         "1.5*2\n"
         "0.1 + 0.2\n",
         stdout_all=["= 3.0", "= 0.30000000000000004"],
+    )
+    check(
+        "iteration golden output",
+        "for x in [1, 2] { println(x); }\n",
+        stdout="1\n2\n",
     )
 
     check("addition", "1+2\n", stdout="= 3")
@@ -40,65 +47,12 @@ def run_cases():
           stderr="invalid numeric literal")
 
 
-    check("for in without let over list",
-          "for x in [1, 2, 3] { println(x); }\n",
-          stdout="1\n2\n3\n")
-    check("for in without let over dict keys",
-          'for k in ({"a": 1, "b": 2}) { println(k); }\n',
-          stdout="a\nb\n")
-    check("for in without let dict pairs",
-          'for k, v in ({"a": 1, "b": 2}) { println(k + "=" + str(v)); }\n',
-          stdout="a=1\nb=2\n")
-    check("for in without let range builtin",
-          "for i in range(3) { println(i); }\n",
-          stdout="0\n1\n2\n")
-    check("for in without let empty body",
-          "for x in [] {}\n", code=0)
-    check("for in without let shadows outer variable",
-          "let x = 99;\nfor x in [1, 2] { println(x); }\nprintln(x);\n",
-          stdout="1\n2\n99\n")
-    check("for in without let iterable uses outer binding",
-          "let x = [4, 5];\nfor x in x { println(x); }\nprintln(len(x));\n",
-          stdout="4\n5\n2\n")
-    check("for in without let string",
-          'for c in "ab" { println(c); }\n', stdout="a\nb\n")
-    check("for in without let bytes",
-          'for b in std.bytes.from_hex("00ff") { println(b); }\n',
-          stdout="0\n255\n")
-    check("for in without let generator",
-          "func gen() { yield 1; yield 2; }\n"
-          "for x in gen() { println(x); }\n",
-          stdout="1\n2\n")
-    check("for in without let nested label",
-          "label outer: for i in [1, 2] {\n"
-          "  for j in [1, 2] {\n"
-          "    if (j == 2) { continue outer; }\n"
-          "    println(i * 10 + j);\n"
-          "  }\n"
-          "}\n",
-          stdout="11\n21\n")
-    check("for in without let break",
-          "for x in [1, 2, 3] { if (x == 2) { break; } println(x); }\n",
-          stdout="1\n")
-    check("for in without let set",
-          "import std;\n"
-          "let s = std.set.from_list([1, 2, 3]);\n"
-          "let n = 0;\n"
-          "for v in s { n = n + v; }\n"
-          "println(n);\n",
-          stdout="6\n")
     check("for in without let infers element type",
           "for x in [1, 2] { let y: string = x; }\n",
           stderr="variable y expects string, got int")
     check("for in without let requires block",
           "let xs = [1, 2];\nfor x in xs println(x);\n",
           stderr="syntax error")
-    check("for in without let dict literal operand",
-          'for k, v in {1: 10, 2: 20} { println(str(k) + "=" + str(v)); }\n',
-          stdout="1=10\n2=20\n")
-    check("for in without let empty dict literal operand",
-          'for k in {} { println(k); }\n',
-          stdout="")
     check("for in without let struct literal requires parens",
           "struct P { x: int = 1; }\n"
           'for p in P { x: 1 } { println(p.x); }\n',
@@ -168,70 +122,6 @@ def run_cases():
           'switch (1) { case 1 => println("switch"); }\n'
           'for (let j = 0; j < 1; j = j + 1) { println("for"); }\n',
           stdout_all=["if\n", "while\n", "switch\n", "for\n"])
-    check("std.iter.for_each over list",
-          "import std;\n"
-          'std.iter.for_each([1, 2, 3], func(x) { print(x); })\n'
-          'println("");\n',
-          stdout="123\n")
-    check("std.iter.for_each over dict keys",
-          "import std;\n"
-          'std.iter.for_each({"a": 1, "b": 2}, func(k) { print(k); })\n'
-          'println("");\n',
-          stdout="ab\n")
-    check("std.iter.for_each list index and value",
-          "import std;\n"
-          "std.iter.for_each([10, 20], func(i, x) {"
-          ' print(str(i) + ":" + str(x) + " "); })\n'
-          'println("");\n',
-          stdout="0:10 1:20 \n")
-    check("std.iter.for_each dict key and value",
-          "import std;\n"
-          'std.iter.for_each({"a": 1, "b": 2}, func(k, v) {'
-          ' print(k + "=" + str(v) + " "); })\n'
-          'println("");\n',
-          stdout="a=1 b=2 \n")
-    check("std.iter.for_each string index and char",
-          "import std;\n"
-          'std.iter.for_each("ab", func(i, c) {'
-          ' print(str(i) + ":" + str(c) + " "); })\n'
-          'println("");\n',
-          stdout="0:a 1:b \n")
-    check("std.iter.for_each closure accumulator",
-          "import std;\n"
-          "let total = 0;\n"
-          "std.iter.for_each([1, 2, 3], func(x) { total = total + x; })\n"
-          "println(total);\n",
-          stdout="6\n")
-    check("std.iter.for_each string and bytes",
-          "import std;\n"
-          'std.iter.for_each("ab", func(c) { print(c); })\n'
-          'std.iter.for_each(std.bytes.from_hex("00ff"), func(b) { print(b); })\n'
-          'println("");\n',
-          stdout="ab0255\n")
-    check("std.iter.for_each generator",
-          "import std;\n"
-          "func gen() { yield 1; yield 2; }\n"
-          'std.iter.for_each(gen(), func(v) { print(v); })\n'
-          'println("");\n',
-          stdout="12\n")
-    check("std.iter.for_each set",
-          "import std;\n"
-          "let n = 0;\n"
-          "std.iter.for_each(std.set.from_list([1, 2, 3]),"
-          " func(v) { n = n + v; })\n"
-          "println(n);\n",
-          stdout="6\n")
-    check("std.iter.for_each first class",
-          "import std;\n"
-          "let f = std.iter.for_each;\n"
-          'f([1, 2], func(x) { print(x); })\nprintln("");\n',
-          stdout="12\n")
-    check("std.iter.for_each return exits callback only",
-          "import std;\n"
-          "std.iter.for_each([1, 2, 3], func(x) {"
-          " if (x == 2) { return; } print(x); })\n"
-          'println("");\n',
-          stdout="13\n")
     check("std.iter.for_each requires callable",
           "import std;\nstd.iter.for_each([1], 42)\n",
           stderr="std.iter.for_each expects a callable")

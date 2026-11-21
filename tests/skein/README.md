@@ -105,8 +105,9 @@ Helpers:
 | `collections` (graph/lru/list utilities) | Skein (partial) | 35 Skein cases in `collections_more.skein`; the rest stay in Python. |
 | `meta` | Skein (pure) | 13 Skein cases; package-visibility tests and 1 golden stay in Python. |
 | `language_core` (numeric literals/operators) | Skein (partial) | 48 Skein cases in `language_core_numbers.skein`; parse errors, REPL, and control-flow cases stay in Python. |
+| `language_core` (for-in / for_each) | Skein (partial) | 26 Skein cases in `language_core_iteration.skein`; syntax/type-error cases stay in Python. |
 
-Current coverage: 203 Skein cases across the files above.
+Current coverage: 229 Skein cases across the files above.
 
 `diagnostics`, `typecheck`, `lint`, `fmt`, `lsp`, `build`, `get`, `net`,
 `io_scripts`, `ffi_real`, stress/differential tests, and all host/REPL checks

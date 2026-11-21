@@ -1,0 +1,237 @@
+import std;
+include "_support.skein";
+
+func lang_iter_gen() {
+  yield 1;
+  yield 2;
+}
+
+ts_test("for in without let over list", func() {
+  let out = [];
+  for x in [1, 2, 3] {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+});
+
+ts_test("for in without let over dict keys", func() {
+  let out = [];
+  for k in ({"a": 1, "b": 2}) {
+    out = std.list.append(out, k);
+  }
+  ts_eq(out, ["a", "b"]);
+});
+
+ts_test("for in without let dict pairs", func() {
+  let out = [];
+  for k, v in ({"a": 1, "b": 2}) {
+    out = std.list.append(out, k + "=" + str(v));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("for in without let range builtin", func() {
+  let out = [];
+  for i in range(3) {
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [0, 1, 2]);
+});
+
+ts_test("for in without let empty body", func() {
+  let n = 0;
+  for x in [] {
+    n = n + 1;
+  }
+  ts_eq(n, 0);
+});
+
+ts_test("for in without let shadows outer variable", func() {
+  let x = 99;
+  let out = [];
+  for x in [1, 2] {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2]);
+  ts_eq(x, 99);
+});
+
+ts_test("for in without let iterable uses outer binding", func() {
+  let x = [4, 5];
+  let out = [];
+  for x in x {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [4, 5]);
+  ts_eq(len(x), 2);
+});
+
+ts_test("for in without let string", func() {
+  let out = [];
+  for c in "ab" {
+    out = std.list.append(out, str(c));
+  }
+  ts_eq(out, ["a", "b"]);
+});
+
+ts_test("for in without let bytes", func() {
+  let out = [];
+  for b in std.bytes.from_hex("00ff") {
+    out = std.list.append(out, b);
+  }
+  ts_eq(out, [0, 255]);
+});
+
+ts_test("for in without let generator", func() {
+  let out = [];
+  for x in lang_iter_gen() {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2]);
+});
+
+ts_test("for in without let nested label", func() {
+  let out = [];
+  label outer: for i in [1, 2] {
+    for j in [1, 2] {
+      if (j == 2) {
+        continue outer;
+      }
+      out = std.list.append(out, i * 10 + j);
+    }
+  }
+  ts_eq(out, [11, 21]);
+});
+
+ts_test("for in without let break", func() {
+  let out = [];
+  for x in [1, 2, 3] {
+    if (x == 2) {
+      break;
+    }
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1]);
+});
+
+ts_test("for in without let set", func() {
+  let s = std.set.from_list([1, 2, 3]);
+  let n = 0;
+  for v in s {
+    n = n + v;
+  }
+  ts_eq(n, 6);
+});
+
+ts_test("for in without let dict literal operand", func() {
+  let out = [];
+  for k, v in {1: 10, 2: 20} {
+    out = std.list.append(out, str(k) + "=" + str(v));
+  }
+  ts_eq(out, ["1=10", "2=20"]);
+});
+
+ts_test("for in without let empty dict literal operand", func() {
+  let n = 0;
+  for k in {} {
+    n = n + 1;
+  }
+  ts_eq(n, 0);
+});
+
+ts_test("std.iter.for_each over list", func() {
+  let out = [];
+  std.iter.for_each([1, 2, 3], func(x) {
+    out = std.list.append(out, x);
+  });
+  ts_eq(out, [1, 2, 3]);
+});
+
+ts_test("std.iter.for_each over dict keys", func() {
+  let out = [];
+  std.iter.for_each({"a": 1, "b": 2}, func(k) {
+    out = std.list.append(out, k);
+  });
+  ts_eq(out, ["a", "b"]);
+});
+
+ts_test("std.iter.for_each list index and value", func() {
+  let out = [];
+  std.iter.for_each([10, 20], func(i, x) {
+    out = std.list.append(out, str(i) + ":" + str(x));
+  });
+  ts_eq(out, ["0:10", "1:20"]);
+});
+
+ts_test("std.iter.for_each dict key and value", func() {
+  let out = [];
+  std.iter.for_each({"a": 1, "b": 2}, func(k, v) {
+    out = std.list.append(out, k + "=" + str(v));
+  });
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("std.iter.for_each string index and char", func() {
+  let out = [];
+  std.iter.for_each("ab", func(i, c) {
+    out = std.list.append(out, str(i) + ":" + str(c));
+  });
+  ts_eq(out, ["0:a", "1:b"]);
+});
+
+ts_test("std.iter.for_each closure accumulator", func() {
+  let total = 0;
+  std.iter.for_each([1, 2, 3], func(x) {
+    total = total + x;
+  });
+  ts_eq(total, 6);
+});
+
+ts_test("std.iter.for_each string and bytes", func() {
+  let out = [];
+  std.iter.for_each("ab", func(c) {
+    out = std.list.append(out, str(c));
+  });
+  std.iter.for_each(std.bytes.from_hex("00ff"), func(b) {
+    out = std.list.append(out, str(b));
+  });
+  ts_eq(out, ["a", "b", "0", "255"]);
+});
+
+ts_test("std.iter.for_each generator", func() {
+  let out = [];
+  std.iter.for_each(lang_iter_gen(), func(v) {
+    out = std.list.append(out, v);
+  });
+  ts_eq(out, [1, 2]);
+});
+
+ts_test("std.iter.for_each set", func() {
+  let n = 0;
+  std.iter.for_each(std.set.from_list([1, 2, 3]), func(v) {
+    n = n + v;
+  });
+  ts_eq(n, 6);
+});
+
+ts_test("std.iter.for_each first class", func() {
+  let f = std.iter.for_each;
+  let out = [];
+  f([1, 2], func(x) {
+    out = std.list.append(out, x);
+  });
+  ts_eq(out, [1, 2]);
+});
+
+ts_test("std.iter.for_each return exits callback only", func() {
+  let out = [];
+  std.iter.for_each([1, 2, 3], func(x) {
+    if (x == 2) {
+      return;
+    }
+    out = std.list.append(out, x);
+  });
+  ts_eq(out, [1, 3]);
+});
+
+ts_finish();

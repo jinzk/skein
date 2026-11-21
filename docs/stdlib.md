@@ -1986,6 +1986,9 @@ example.math.ANSWER;
   应检查 `size`，旧 host 的 ABI 表会更短；
 - ABI v2 追加了 `call_task` / `task_cancelled`：v1 模块仍可加载，使用新字段前
   检查 `api->size >= offsetof(skein_api, task_cancelled) + sizeof(api->task_cancelled)`；
+  ABI v3 追加了 `new_string_len`，从 `(data, len)` 构造字符串（输入不必 NUL
+  结尾，内嵌 NUL 会存入值缓冲；但脚本字符串操作仍是 UTF-8 语义），检查
+  `api->size >= offsetof(skein_api, new_string_len) + sizeof(api->new_string_len)`；
 - 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；
 - `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；

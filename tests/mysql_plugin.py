@@ -87,6 +87,19 @@ def test_abi():
         stdout_all=["0.1.0"],
     )
     check(
+        "mysql type helpers",
+        "import mysql;\n"
+        'println(mysql.as_int("42"));\n'
+        'println(mysql.as_int(""));\n'
+        'println(mysql.as_float("3.5"));\n'
+        'println(mysql.as_float(null));\n'
+        'println(mysql.as_bool("1"));\n'
+        'println(mysql.as_bool("0"));\n'
+        "println(mysql.as_bool(null));\n",
+        stdout_all=["42", "null", "3.5", "null",
+                    "true", "false", "null"],
+    )
+    check(
         "mysql plugin connect error",
         "import std;\n"
         "import mysql;\n"
@@ -187,6 +200,10 @@ def test_integration(config):
         "println(rows[0][\"name\"]);\n"
         "println(rows[0][\"note\"] == null);\n"
         "println(type_name(rows[0][\"payload\"]));\n"
+        "println(mysql.as_int(rows[0][\"id\"]));\n"
+        "println(mysql.as_int(rows[0][\"note\"]));\n"
+        "println(mysql.as_float(\"3.5\"));\n"
+        "println(mysql.as_bool(\"1\"));\n"
         "let at = c.query_task(\"SELECT 42 AS answer\");\n"
         "println(type_name(at));\n"
         "let ar = mysql.wrap_result(at);\n"
@@ -214,8 +231,8 @@ def test_integration(config):
         source,
         stdout_all=[
             "true", "1", "[id, name, note, payload]", "1",
-            "O'Reilly", "true", "bytes", "task", "42", "runtime",
-            "true",
+            "O'Reilly", "true", "bytes", "1", "null", "3.5", "true",
+            "task", "42", "runtime", "true",
         ],
     )
 

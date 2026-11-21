@@ -188,6 +188,17 @@ struct value_t *newstrval(const char *s) {
     return (struct value_t *)v;
 }
 
+struct value_t *newstrval(const char *s, size_t len) {
+    struct string_value_t *v = new string_value_t;
+    v->type = T_string;
+    if (len > 0 && !s)
+        len = 0;
+    v->storage = std::make_shared<std::string>(s ? std::string(s, len)
+                                                 : std::string());
+    v->value = v->storage->data();
+    return (struct value_t *)v;
+}
+
 struct value_t *newcharval(unsigned int codepoint) {
     struct char_value_t *v = new char_value_t;
     v->type = T_char;

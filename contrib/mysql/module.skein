@@ -4,6 +4,9 @@ module mysql {
   export api.mysql.VERSION as VERSION;
   export api.mysql.connect as connect;
   export api.mysql.wrap_result as wrap_result;
+  export api.mysql.as_int as as_int;
+  export api.mysql.as_float as as_float;
+  export api.mysql.as_bool as as_bool;
   export api.mysql.library_version as library_version;
 
   native {

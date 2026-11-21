@@ -57,6 +57,12 @@ bool has_async_api() {
                                sizeof(g_api->task_cancelled);
 }
 
+bool has_string_len() {
+    return g_api &&
+           g_api->size >= offsetof(skein_api, new_string_len) +
+                               sizeof(g_api->new_string_len);
+}
+
 skein_status fail(skein_context *ctx, const std::string &message) {
     return g_api->error(ctx, "mysql", message.c_str());
 }
@@ -491,6 +497,10 @@ skein_status fetch_all(skein_context *ctx, const skein_value *const *args,
                 value = g_api->new_null(ctx);
             } else if (is_binary_field(&fields[column])) {
                 value = g_api->new_bytes(ctx, row[column], lengths[column]);
+            } else if (has_string_len()) {
+                /* Length-aware: preserves embedded NUL in TEXT columns. */
+                value = g_api->new_string_len(ctx, row[column],
+                                              lengths[column]);
             } else {
                 value = g_api->new_string(ctx, row[column]);
             }

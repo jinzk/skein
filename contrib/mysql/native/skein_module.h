@@ -2,20 +2,24 @@
 #define SKEIN_MODULE_H
 
 /*
- * Skein native module ABI, version 1.
+ * Skein native module ABI, version 3.
  *
  * This header is pure C and is the only contract between the host and a
  * native module.  Modules never link against runtime symbols: the host
  * passes a `skein_api` table to `skein_module::init`, and the module stores
  * it.  Values are opaque handles owned by the host; modules create and read
  * them only through the API table.
+ *
+ * The table is append-only: v1 added new_list/new_dict/as_userdata, v2 added
+ * call_task/task_cancelled, and v3 added new_string_len.  Check `size` before
+ * using a field that may not exist in an older host.
  */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#define SKEIN_MODULE_ABI_VERSION 2
+#define SKEIN_MODULE_ABI_VERSION 3
 
 #if defined(_WIN32)
 #define SKEIN_MODULE_EXPORT __declspec(dllexport)
@@ -177,6 +181,17 @@ typedef struct skein_api {
                               skein_task_finish_fn finish,
                               skein_task_destroy_fn destroy, void *data);
     bool (*task_cancelled)(skein_context *ctx, skein_value *task);
+
+    /*
+     * ABI v3: length-aware string construction.  Builds a string from an
+     * explicit (data, len) buffer, so the input need not be NUL-terminated and
+     * embedded NUL bytes are stored in the value's buffer.  Note that script
+     * string operations still use UTF-8/NUL-terminated semantics; use bytes
+     * values for arbitrary binary data.  Check `size` before using this field
+     * on older hosts.
+     */
+    skein_value *(*new_string_len)(skein_context *ctx, const char *data,
+                                   size_t len);
 } skein_api;
 
 typedef struct skein_module {

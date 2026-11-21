@@ -93,6 +93,23 @@ package mysql {
     return Result { handle: task.wait() };
   }
 
+  // Path C type helpers: MySQL returns all scalars as strings.  Convert on
+  // demand; NULL/empty values become null instead of raising an error.
+  export func as_int(value) {
+    if (value == null || value == "") { return null; }
+    return int(value);
+  }
+
+  export func as_float(value) {
+    if (value == null || value == "") { return null; }
+    return float(value);
+  }
+
+  export func as_bool(value) {
+    if (value == null || value == "") { return null; }
+    return value != "0" && value != "false";
+  }
+
   export func library_version() {
     return native.library_version();
   }

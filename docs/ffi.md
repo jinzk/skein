@@ -123,12 +123,13 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
 
 ## 6. 原生模块 ABI
 
-`skein_module` v1 / v2：
+`skein_module` v1 / v2 / v3：
 
 - 纯 C ABI、opaque handle；
 - `skein_api` 只追加字段，使用新字段前检查 `size`；v2 追加 `call_task` /
   `task_cancelled`，用于把耗时函数导出为标准 `task`（见 `docs/stdlib.md`）；
-- v1 描述符仍可加载：`abi_version` 接受 1 和 2；
+  v3 追加 `new_string_len`，从带长度的 buffer 构造字符串，不要求 NUL 结尾；
+- v1 描述符仍可加载：`abi_version` 接受 1、2 和 3；
 - 支持静态注册、`std.plugin.load` 动态加载、`std.plugin.unload` 延迟卸载；
 - 绑定函数和 userdata 持有模块状态，最后一份引用释放时调用 `fini` 并 `dlclose`；
 - 静态模块不可卸载；
@@ -137,14 +138,14 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
   `0` / `false` / `off` / `no` 会全局禁用原生加载。源码形式发布的 module
   用 `skein build` 显式编译，详见 `docs/tutorial.md`；
 - `contrib/mysql` 是用真实 MySQL C client 验证上述 ABI 的可选示例插件，
-  也演示源码形式 native module 的 `skein get` / `skein build` 流程和
-  ABI v2 异步 `query_task`，见
+  也演示源码形式 native module 的 `skein get` / `skein build` 流程、
+  ABI v2 异步 `query_task` 和 ABI v3 `new_string_len` 的安全文本传输，见
   [`contrib/mysql/README.md`](../contrib/mysql/README.md)。
 
 ## 7. 稳定性策略
 
 - manifest v1 冻结；破坏性变更走 v2；
-- `skein_module` ABI v1/v2 冻结，只追加字段；
+- `skein_module` ABI v1/v2/v3 冻结，只追加字段；
 - FFI Beta 期间允许修正边缘语义和错误信息，但避免破坏常见用法；
 - 已知限制优先修正确性，不新增 ABI 功能。
 

@@ -113,6 +113,14 @@ skein_value *api_new_string(skein_context *ctx, const char *value) {
     return as_handle(newstrval(value ? value : ""));
 }
 
+skein_value *api_new_string_len(skein_context *ctx, const char *data,
+                                size_t len) {
+    (void)ctx;
+    if (len > 0 && !data)
+        return NULL;
+    return as_handle(newstrval(data, len));
+}
+
 skein_value *api_new_bytes(skein_context *ctx, const void *data, size_t len) {
     (void)ctx;
     if (len > 0 && !data)
@@ -390,6 +398,7 @@ const skein_api *api_table() {
         api_as_userdata,
         api_call_task,
         api_task_cancelled,
+        api_new_string_len,
     };
     return &api;
 }

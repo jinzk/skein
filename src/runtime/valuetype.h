@@ -396,6 +396,7 @@ struct value_t *newintval(long long i);
 struct value_t *newfloatval(double f);
 struct value_t *newboolval(bool b);
 struct value_t *newstrval(const char *s);
+struct value_t *newstrval(const char *s, size_t len);
 struct value_t *newcharval(unsigned int codepoint);
 struct value_t *newbyteval(unsigned int value);
 struct value_t *newbytesval(std::string data);

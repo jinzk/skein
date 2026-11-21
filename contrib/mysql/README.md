@@ -82,6 +82,9 @@ mysql.VERSION
 mysql.library_version()
 mysql.connect(host, user, password, database, port = 3306) -> client.Connection
 mysql.wrap_result(task)              -> client.Result
+mysql.as_int(value)                  -> int | null
+mysql.as_float(value)                -> float | null
+mysql.as_bool(value)                 -> bool | null
 
 client.Connection.query(sql)        -> client.Result
 client.Connection.query_task(sql)   -> task[userdata]
@@ -104,9 +107,34 @@ client.Result.close()               -> null
 原生插件导出模块名 `skein.mysql`，函数都是同步的；错误通过
 `skein_api.error` 返回，Skein 侧看到 `runtime` 错误类别。
 
-`fetch_all` 的转换规则：SQL `NULL` → `null`，文本/数值列 → `string`，
-BLOB/BINARY/VARBINARY/BIT 列 → `bytes`。结果对象持有连接 userdata 的引用，
-连接不会在结果仍存活时被释放。
+## 数据类型对齐
+
+MySQL 列类型不需要显式声明映射关系。native 层根据 `MYSQL_FIELD` 元数据自动
+转换，规则如下：
+
+| MySQL 类型 | Skein 类型 | 说明 |
+|---|---|---|
+| `NULL` | `null` | `row[col] == NULL` |
+| `BLOB` / `TINY_BLOB` / `MEDIUM_BLOB` / `LONG_BLOB` / `BIT` | `bytes` | `new_bytes(data, len)`，保留内嵌 NUL |
+| `BINARY` / `VARBINARY` | `bytes` | `charsetnr == 63` 的字符串列 |
+| 数值 (`INT`, `BIGINT`, `DECIMAL`, `FLOAT`, ...) | `string` | 文本协议原样透传，避免精度/溢出问题 |
+| 时间 (`DATE`, `DATETIME`, `TIMESTAMP`, `YEAR`) | `string` | 保留可读格式 |
+| 文本 (`CHAR`, `VARCHAR`, `TEXT`, `ENUM`, `SET`, `JSON`) | `string` | 用 ABI v3 `new_string_len` 按长度构造 |
+
+文本/数值列统一是 `string`，避免 `BIGINT` 溢出和 `DECIMAL` 精度丢失；调用方
+按需用 `mysql.as_int` / `mysql.as_float` / `mysql.as_bool` 转成 Skein 原生类型，
+`null` 或空字符串返回 `null`，不抛错：
+
+```text
+let row = conn.query("SELECT id, score, active FROM t").rows()[0];
+let id = mysql.as_int(row["id"]);        // int | null
+let score = mysql.as_float(row["score"]); // float | null
+let active = mysql.as_bool(row["active"]); // bool | null
+```
+
+`new_string_len` 是 ABI v3 新增的 `skein_api` 字段，从 `(data, len)` 构造
+字符串，不要求 NUL 结尾；v1/v2 host 上会自动回退到 `new_string`。结果对象
+持有连接 userdata 的引用，连接不会在结果仍存活时被释放。
 
 ## 异步查询（ABI v2）
 
@@ -136,12 +164,12 @@ result.close();
 ctest --test-dir build -R mysql_plugin_test --output-on-failure
 ```
 
-未配置数据库时测试 ABI、源码 native module 打包路径、异步导出存在性、错误
-传播、参数校验、`std.plugin.unload` 后已有绑定继续可用。设置
-`SKEIN_TEST_MYSQL_HOST/USER/PASSWORD/DATABASE` 和可选的
-`SKEIN_TEST_MYSQL_PORT` 后，还会跑建表、插入、同步查询、NULL/BLOB、
-异步查询、task 失败与取消、错误恢复、unload 后继续使用 userdata、资源关闭
-等真实集成用例。
+未配置数据库时测试 ABI、源码 native module 打包路径、`new_string_len`、类型
+转换 helper、异步导出存在性、错误传播、参数校验、`std.plugin.unload` 后已有
+绑定继续可用。设置 `SKEIN_TEST_MYSQL_HOST/USER/PASSWORD/DATABASE` 和可选的
+`SKEIN_TEST_MYSQL_PORT` 后，还会跑建表、插入、同步查询、NULL/BLOB、类型
+转换、异步查询、task 失败与取消、错误恢复、unload 后继续使用 userdata、
+资源关闭等真实集成用例。
 
 ## 当前范围与限制
 
@@ -150,4 +178,6 @@ ctest --test-dir build -R mysql_plugin_test --output-on-failure
 - `Connection` 是 copy-on-write struct，但里面的 userdata 是共享句柄：
   复制出来的多个 `Connection` 指向同一个 MySQL 连接；
 - MySQL 连接不要跨线程共享。插件内部用 mutex 防止同一连接的并发 C API
-  调用，但这不等于连接池或事务隔离。
+  调用，但这不等于连接池或事务隔离；
+- 文本列通过 `new_string_len` 保留底层长度，但 Skein 的 `len()` / 字符串操作
+  基于 UTF-8 文本语义，内嵌 NUL 的展示仍可能截断；需要完整字节请用 BLOB 列。

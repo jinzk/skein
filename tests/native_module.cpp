@@ -93,6 +93,25 @@ skein_status dict_value(skein_context *ctx, const skein_value *const *args,
     return SKEIN_OK;
 }
 
+bool has_string_len() {
+    return g_api &&
+           g_api->size >=
+               offsetof(skein_api, new_string_len) +
+                   sizeof(g_api->new_string_len);
+}
+
+skein_status string_len_fn(skein_context *ctx, const skein_value *const *args,
+                           size_t argc, skein_value **result) {
+    (void)args;
+    (void)argc;
+    if (!has_string_len())
+        return g_api->error(ctx, "type", "new_string_len is unavailable");
+    /* Buffer without a trailing NUL: new_string() could not safely read it. */
+    const char data[] = {'h', 'e', 'l', 'l', 'o'};
+    *result = g_api->new_string_len(ctx, data, sizeof(data));
+    return *result ? SKEIN_OK : SKEIN_ERROR;
+}
+
 struct async_job {
     int64_t input = 0;
     int64_t output = 0;
@@ -186,6 +205,7 @@ const skein_function functions[] = {
     {"counter_value", counter_value},
     {"list_pair", list_pair},
     {"dict_value", dict_value},
+    {"string_len", string_len_fn},
     {"twice_async", twice_async_fn},
     {"cancellable", cancellable_fn},
 };
@@ -216,7 +236,7 @@ const skein_module module = {
     module_init,
     module_fini,
     functions,
-    7,
+    8,
     types,
     1,
     nullptr,

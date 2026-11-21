@@ -1187,6 +1187,16 @@ def run_cases():
             stdout_all=["= 7", "= 6", "= 4"],
         )
         check(
+            "native module new_string_len",
+            "import std;\n"
+            f"std.plugin.load({native_module});\n"
+            "import test.dynamic;\n"
+            "let s = dynamic.string_len();\n"
+            "s\n"
+            "len(s)\n",
+            stdout_all=["= hello", "= 5"],
+        )
+        check(
             "native module async export",
             "import std;\n"
             f"std.plugin.load({native_module});\n"

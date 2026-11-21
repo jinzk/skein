@@ -1,0 +1,177 @@
+import std;
+import std.meta;
+include "_support.skein";
+
+struct MetaStructInfo {
+  x: int;
+  y: int? = null;
+}
+
+impl MetaStructInfo {
+  func moved(self, dx: int, dy: int = 0) {
+    return self;
+  }
+}
+
+struct MetaStructFromValue {
+  x: int;
+}
+
+enum MetaEnumInfo {
+  A { n: int = 3; }
+  B;
+}
+
+trait MetaTraitD {
+  func draw(self);
+}
+
+struct MetaTraitP {
+  x: int;
+}
+
+impl MetaTraitD for MetaTraitP {
+  func draw(self) {
+    return self.x;
+  }
+}
+
+struct MetaKindP {
+  x: int;
+}
+
+struct MetaIsolationP {
+  x: int;
+}
+
+struct MetaMethodsP {
+  x: int;
+}
+
+impl MetaMethodsP {
+  func zed(self) {
+    return 1;
+  }
+
+  func alpha(self) {
+    return 2;
+  }
+}
+
+ts_test("meta struct info", func() {
+  let info = std.meta.type_info("MetaStructInfo");
+  ts_eq(info["kind"], "struct");
+  ts_eq(info["name"], "MetaStructInfo");
+  ts_eq(info["fields"][0]["name"], "x");
+  ts_eq(info["fields"][1]["type"], "int?");
+  ts_true(info["fields"][1]["nullable"]);
+  ts_true(info["fields"][1]["has_default"]);
+  ts_false(info["fields"][0]["readonly"]);
+  ts_eq(info["methods"][0]["name"], "moved");
+  ts_eq(info["methods"][0]["params"], ["int", "int"]);
+  ts_true(info["methods"][0]["has_defaults"]);
+});
+
+ts_test("meta struct from value", func() {
+  ts_eq(std.meta.type_info(MetaStructFromValue { x: 1 })["name"],
+        "MetaStructFromValue");
+  ts_eq(std.meta.fields(MetaStructFromValue { x: 1 })[0]["type"], "int");
+});
+
+ts_test("meta enum info", func() {
+  let info = std.meta.type_info(MetaEnumInfo.B);
+  ts_eq(info["kind"], "enum");
+  ts_eq(info["variants"][0]["name"], "A");
+  ts_true(info["variants"][0]["fields"][0]["readonly"]);
+  ts_true(info["variants"][0]["fields"][0]["has_default"]);
+  ts_eq(std.meta.fields(MetaEnumInfo.B), []);
+  ts_eq(std.meta.variants("MetaEnumInfo")[1]["name"], "B");
+});
+
+ts_test("meta trait info", func() {
+  ts_true(std.meta.implements(MetaTraitP { x: 1 }, "MetaTraitD"));
+  ts_true(std.meta.implements("MetaTraitP", "MetaTraitD"));
+  ts_eq(std.meta.traits("MetaTraitP"), ["main.MetaTraitD"]);
+  ts_eq(std.meta.type_info("MetaTraitD")["kind"], "trait");
+  ts_eq(len(std.meta.type_info("MetaTraitD")["methods"][0]["params"]), 0);
+  ts_eq(std.meta.fields("MetaTraitD"), []);
+  ts_eq(std.meta.variants("MetaTraitD"), []);
+});
+
+ts_test("meta builtin types", func() {
+  ts_eq(std.meta.type_info("str")["name"], "string");
+  ts_eq(std.meta.type_info("func")["name"], "function");
+  ts_eq(std.meta.type_info(1)["kind"], "builtin");
+  ts_eq(std.meta.type_info([1])["name"], "list");
+  ts_eq(std.meta.type_info(std.math.sqrt)["name"], "builtin");
+  ts_eq(std.meta.type_info(null)["name"], "null");
+  ts_true(std.meta.has_type("list"));
+  ts_false(std.meta.has_type("nope"));
+  ts_eq(std.meta.fields("int"), []);
+  ts_eq(std.meta.variants("int"), []);
+  ts_eq(std.meta.methods("int"), []);
+  ts_eq(std.meta.traits("int"), []);
+});
+
+ts_test("meta builtin descriptor fields", func() {
+  let info = std.meta.type_info("int");
+  ts_eq(info["package"], "");
+  ts_eq(info["source"], "");
+  ts_true(info["exported"]);
+  ts_eq(info["fields"], []);
+  ts_eq(info["variants"], []);
+  ts_eq(info["methods"], []);
+  ts_eq(info["traits"], []);
+});
+
+ts_test("meta builtin name table", func() {
+  let names = [
+    "any", "int", "float", "number", "bool", "string", "str",
+    "char", "byte", "bytes", "list", "dict", "deque", "heap", "set",
+    "function", "func", "builtin", "callable", "null", "userdata",
+    "result", "error"
+  ];
+  let missing = [];
+  for (let name in names) {
+    if (!std.meta.has_type(name)) {
+      missing = std.list.append(missing, name);
+    }
+  }
+  ts_eq(missing, []);
+});
+
+ts_test("meta kind tag is not a type name", func() {
+  ts_error(func() {
+    return std.meta.type_info(kind_of(MetaKindP { x: 1 }));
+  }, "unknown type struct");
+});
+
+ts_test("meta unknown type", func() {
+  ts_error(func() {
+    return std.meta.type_info("Nope");
+  }, "unknown type Nope");
+});
+
+ts_test("meta unknown trait", func() {
+  ts_error(func() {
+    return std.meta.implements("int", "Nope");
+  }, "unknown trait Nope");
+});
+
+ts_test("meta result isolation", func() {
+  let fields = std.meta.fields("MetaIsolationP");
+  fields[0]["name"] = "z";
+  ts_eq(std.meta.fields("MetaIsolationP")[0]["name"], "x");
+});
+
+ts_test("meta methods sorted", func() {
+  let methods = std.meta.methods("MetaMethodsP");
+  ts_eq(methods[0]["name"], "alpha");
+  ts_eq(methods[1]["name"], "zed");
+});
+
+ts_test("meta import submodule", func() {
+  ts_eq(meta.type_info("int")["name"], "int");
+});
+
+ts_finish();

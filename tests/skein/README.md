@@ -102,8 +102,10 @@ Helpers:
 | `route` | Skein | 32 Skein cases; 1 Python golden for dispatch output. |
 | `key_semantics` | Skein (non-thread) | 22 Skein cases; 5 thread/transfer cases and 1 golden stay in Python for TSan. |
 | `collections` (set/deque/heap) | Skein (partial) | 24 Skein cases in `collections_containers.skein`; the rest stay in Python. |
+| `collections` (graph/lru/list utilities) | Skein (partial) | 35 Skein cases in `collections_more.skein`; the rest stay in Python. |
+| `meta` | Skein (pure) | 13 Skein cases; package-visibility tests and 1 golden stay in Python. |
 
-Current coverage: 107 Skein cases across the files above.
+Current coverage: 155 Skein cases across the files above.
 
 `diagnostics`, `typecheck`, `lint`, `fmt`, `lsp`, `build`, `get`, `net`,
 `io_scripts`, `ffi_real`, stress/differential tests, and all host/REPL checks

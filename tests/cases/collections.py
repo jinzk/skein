@@ -2,12 +2,14 @@
 """Lists, dicts, destructuring, LRU, sorting.
 
 Set/deque/heap cases live in tests/skein/collections_containers.skein.
+Graph, lru, and list utility cases live in tests/skein/collections_more.skein.
 """
 from harness import *  # noqa: F401,F403
 
 
 def run_cases():
     run_skein("collections_containers.skein")
+    run_skein("collections_more.skein")
     check(
         "collections containers golden",
         "import std;\n"
@@ -19,6 +21,17 @@ def run_cases():
         "let d = deque.from_list([1, 2]);\n"
         "println(deque.to_list(d));\n",
         stdout_all=["[2, 1, 3]", "[2,1,3]", "[1, 2]"],
+    )
+    check(
+        "collections more golden",
+        "import std;\n"
+        "import std.graph;\n"
+        "import std.lru;\n"
+        "let g = graph.from_edges(2, [[1, 2]]);\n"
+        "println(graph.path(g, 1, 2));\n"
+        "println(std.json.stringify(lru.new(2)));\n",
+        stdout_all=["{ok: true, path: [1, 2]}",
+                    '{"cap":2,"map":{},"order":[]}'],
     )
 
     check("dict delete reinsert order",
@@ -79,178 +92,8 @@ def run_cases():
           "}\n"
           "println(s);\nprintln(d[0]);\n",
           stdout_all=["1000150000", "5"])
-    check("graph basics",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
-          'r = graph.add_edge(g, a, b, "next"); g = r["graph"];\n'
-          'r = graph.add_edge(g, b, c, "next"); g = r["graph"];\n'
-          'println(graph.node_count(g));\nprintln(graph.edge_count(g));\n'
-          'println(graph.neighbors(g, a));\n'
-          'println(graph.neighbors(g, a, "next"));\n'
-          'println(graph.bfs(g, a));\nprintln(graph.dfs(g, a));\n',
-          stdout_all=["3", "2", "[2]", "[2]", "[1, 2, 3]", "[1, 2, 3]"])
-    check("graph topo and cycle",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'println(graph.topo_sort(g)["ok"]);\nprintln(graph.has_cycle(g));\n'
-          'r = graph.add_edge(g, b, a); g = r["graph"];\n'
-          'println(graph.topo_sort(g)["ok"]);\nprintln(graph.has_cycle(g));\n',
-          stdout_all=["true", "false", "false", "true"])
-    check("graph path",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
-          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'r = graph.add_edge(g, b, c); g = r["graph"];\n'
-          'println(graph.path(g, a, c));\n'
-          'println(graph.path(g, c, a)["ok"]);\n',
-          stdout_all=["{ok: true, path: [1, 2, 3]}", "false"])
-    check("graph remove node cascades",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'g = graph.remove_node(g, a);\n'
-          'println(graph.node_count(g));\nprintln(graph.edge_count(g));\n',
-          stdout_all=["1", "0"])
-    check("graph batch build",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.from_edges(5, [[1, 2], [2, 3], [3, 4], [4, 5]]);\n'
-          'println(graph.node_count(g));\nprintln(graph.edge_count(g));\n'
-          'println(graph.bfs(g, 1));\n'
-          'println(graph.dfs(g, 1));\n'
-          'println(graph.path(g, 1, 5)["path"]);\n'
-          'println(graph.topo_sort(g)["order"]);\n'
-          'println(graph.components(g));\n',
-          stdout_all=["5", "4", "[1, 2, 3, 4, 5]", "[1, 2, 3, 4, 5]",
-                      "[1, 2, 3, 4, 5]", "[1, 2, 3, 4, 5]",
-                      "[[1, 2, 3, 4, 5]]"])
-    check("graph batch add nodes and edges",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_nodes(g, ["a", "b", "c"]);\n'
-          'g = r["graph"];\nlet ids = r["ids"];\n'
-          'g = graph.add_edges(g, [[ids[0], ids[1], "x", 2], '
-          '[ids[1], ids[2]]]);\n'
-          'println(ids);\nprintln(graph.edge_count(g));\n'
-          'println(graph.neighbors(g, ids[0]));\n'
-          'println(graph.shortest_path(g, ids[0], ids[2])["cost"]);\n',
-          stdout_all=["[1, 2, 3]", "2", "[2]", "3"])
 
-    check("lru basics",
-          'import std;\n'
-          'let l = lru.new(2);\n'
-          'let r = lru.put(l, "a", 1); l = r["lru"];\n'
-          'r = lru.put(l, "b", 2); l = r["lru"];\n'
-          'println(lru.keys(l));\n'
-          'r = lru.get(l, "a"); l = r["lru"];\n'
-          'println(lru.keys(l));\n'
-          'r = lru.put(l, "c", 3); l = r["lru"];\n'
-          'println(r["evicted"]["key"]);\n'
-          'println(lru.keys(l));\n'
-          'let p = lru.peek(l, "a")["lru"];\n'
-          'println(lru.keys(p));\n'
-          'r = lru.delete(l, "a"); l = r["lru"];\n'
-          'println(r["removed"]);\n'
-          'println(lru.size(l));\n'
-          'println(lru.capacity(l));\n'
-          'println(lru.keys(lru.clear(l)));\n',
-          stdout_all=["[a, b]", "[b, a]", "b", "[a, c]", "[a, c]",
-                      "true", "1", "2", "[]"])
-    check("lru get default",
-          'import std;\n'
-          'let l = lru.new(2);\n'
-          'let r = lru.get(l, "missing", 42);\n'
-          'println(r["found"]);\nprintln(r["value"]);\n',
-          stdout_all=["false", "42"])
-    check("lru value semantics",
-          'import std;\n'
-          'let a = lru.new(2);\n'
-          'let r = lru.put(a, 1, "x");\n'
-          'let b = r["lru"];\n'
-          'println(lru.size(a));\nprintln(lru.size(b));\n'
-          'let r2 = lru.put(a, 1, "x");\n'
-          'println(b == r2["lru"]);\n',
-          stdout_all=["0", "1", "true"])
-    check("lru capacity must be positive",
-          'import std;\nlru.new(0);\n',
-          stderr="std.lru.new capacity must be at least 1")
-    check("lru key restrictions",
-          'import std;\nlet l = lru.new(2);\nlru.get(l, 1.5);\n',
-          stderr="std.lru key: dict key must be")
-    check("lru json encoding",
-          'import std;\nstd.json.stringify(lru.new(2));\n',
-          stdout='= {"cap":2,"map":{},"order":[]}')
-    check("lru tuple keys",
-          'import std;\n'
-          'let l = lru.new(2);\n'
-          'let r = lru.put(l, (1, 2), "x"); l = r["lru"];\n'
-          'println(lru.get(l, (1, 2))["value"]);\n'
-          'println(lru.has(l, (1, 2)));\n',
-          stdout_all=["x", "true"])
-    check("lru struct keys",
-          'import std;\n'
-          'struct Key { id: int; }\n'
-          'let l = lru.new(2);\n'
-          'let r = lru.put(l, Key { id: 1 }, "x"); l = r["lru"];\n'
-          'println(lru.get(l, Key { id: 1 })["value"]);\n'
-          'println(lru.has(l, Key { id: 1 }));\n',
-          stdout_all=["x", "true"])
 
-    check("list unique and group_by",
-          'import std;\n'
-          'println(std.list.unique([1, 2, 1, 3, 2]));\n'
-          'println(std.list.unique(["a", "b", "a"]));\n'
-          'println(std.list.unique_by([{"n": 1}, {"n": 1}, {"n": 2}], '
-          'func(p) { return p["n"]; }));\n'
-          'println(std.list.group_by([1, 2, 3, 4], '
-          'func(x) { return x % 2; }));\n',
-          stdout_all=["[1, 2, 3]", "[a, b]", "[{n: 1}, {n: 2}]",
-                      "{1: [1, 3], 0: [2, 4]}"])
-    check("list unique large and non-hashable",
-          'import std;\n'
-          'let xs = range(20000);\n'
-          'println(len(std.list.unique(xs)));\n'
-          'let ys = std.list.map(xs, func(i) { return i % 1000; });\n'
-          'println(len(std.list.unique(ys)));\n'
-          'println(std.list.unique([[1], [1], [2]]));\n',
-          stdout_all=["20000", "1000", "[[1], [2]]"])
-    check("list unique tuple keys",
-          'import std;\n'
-          'println(std.list.unique([(1, 2), (1, 2), (3, 4)]));\n',
-          stdout_all=["[[1, 2], [3, 4]]"])
-    check("list group_by tuple keys",
-          'import std;\n'
-          'println(std.list.group_by([1, 2, 3], '
-          'func(x) { return (x % 2, x > 1); }));\n',
-          stdout_all=["{[1, false]: [1], [0, true]: [2], [1, true]: [3]}"])
-    check("set tuple elements",
-          'import std;\nimport std.set;\n'
-          'let s = set.from_list([(1, 2), (1, 2), (3, 4)]);\n'
-          'println(set.size(s));\nprintln(set.values(s));\n',
-          stdout_all=["2", "[[1, 2], [3, 4]]"])
-    check("set struct elements",
-          'import std;\nimport std.set;\n'
-          'struct Key { id: int; tag: string; }\n'
-          'let s = set.from_list([Key { id: 1, tag: "a" }, '
-          'Key { id: 1, tag: "a" }, Key { id: 2, tag: "b" }]);\n'
-          'println(set.size(s));\nprintln(set.values(s));\n',
-          stdout_all=["2", "[Key { id: 1, tag: a }, Key { id: 2, tag: b }]"])
-    check("list unique struct keys",
-          'import std;\n'
-          'struct Key { id: int; }\n'
-          'println(std.list.unique([Key { id: 1 }, Key { id: 1 }, '
-          'Key { id: 2 }]));\n',
-          stdout_all=["[Key { id: 1 }, Key { id: 2 }]"])
     check("custom struct dict hash",
           'import std;\nimport std.dict_key;\n'
           'struct User { id: int; cache: list[int]; }\n'
@@ -404,16 +247,6 @@ def run_cases():
           'let s = std.set.from_list([E.A { xs: [] }, E.A { xs: [] }]);\n'
           'println(std.set.size(s));\n',
           stdout_all=["a", "0", "1"])
-    check("lru custom struct hash keys",
-          'import std;\nimport std.lru;\nimport std.dict_key;\n'
-          'struct User { id: int; cache: list[int]; }\n'
-          'impl dict_key.DictKey for User {\n'
-          '  func dict_hash(self) { return self.id; }\n'
-          '}\n'
-          'let l = lru.new(2);\n'
-          'let r = lru.put(l, User { id: 1, cache: [] }, "x"); l = r["lru"];\n'
-          'println(lru.get(l, User { id: 1, cache: [] })["value"]);\n',
-          stdout_all=["x"])
     check("pair producers create hashable pairs",
           'import std;\n'
           'let z = std.list.zip([1], ["a"]);\n'
@@ -433,56 +266,6 @@ def run_cases():
           'c[19999] = -1;\n'
           'println(a == c);\n',
           stdout_all=["true", "false"])
-    check("list chunk and window",
-          'import std;\n'
-          'println(std.list.chunk([1, 2, 3, 4, 5], 2));\n'
-          'println(std.list.chunk([], 3));\n'
-          'println(std.list.window([1, 2, 3, 4, 5], 3));\n'
-          'println(std.list.window([1, 2, 3, 4, 5], 3, 2));\n'
-          'println(std.list.window([1, 2], 3));\n',
-          stdout_all=["[[1, 2], [3, 4], [5]]", "[]",
-                      "[[1, 2, 3], [2, 3, 4], [3, 4, 5]]",
-                      "[[1, 2, 3], [3, 4, 5]]", "[]"])
-    check("list zip and top_k",
-          'import std;\n'
-          'println(std.list.zip([1, 2, 3], ["a", "b"]));\n'
-          'println(std.list.zip([1, 2], ["a", "b"], [true, false]));\n'
-          'println(std.list.top_k([5, 1, 4, 2, 3], 3));\n'
-          'println(std.list.top_k([5, 1, 4, 2, 3], 2, '
-          'func(a, b) { return b - a; }));\n'
-          'println(std.list.top_k([1], 0));\n',
-          stdout_all=["[[1, a], [2, b]]",
-                      "[[1, a, true], [2, b, false]]",
-                      "[1, 2, 3]", "[5, 4]", "[]"])
-    check("list top_k large and full",
-          'import std;\n'
-          'let xs = range(20000);\n'
-          'println(std.list.top_k(xs, 5));\n'
-          'println(std.list.top_k([3, 1, 2], 10));\n'
-          'println(std.list.top_k(["b", "a", "c"], 2));\n',
-          stdout_all=["[0, 1, 2, 3, 4]", "[1, 2, 3]", "[a, b]"])
-    check("list binary_search",
-          'import std;\n'
-          'println(std.list.binary_search([1, 3, 5, 7], 5));\n'
-          'println(std.list.binary_search([1, 3, 5, 7], 4));\n'
-          'println(std.list.binary_search(["a", "c", "e"], "c"));\n'
-          'println(std.list.binary_search([], 1));\n',
-          stdout_all=["{found: true, index: 2}",
-                      "{found: false, index: 2}",
-                      "{found: true, index: 1}",
-                      "{found: false, index: 0}"])
-    check("list chunk size must be positive",
-          'import std;\nstd.list.chunk([1], 0);\n',
-          stderr="std.list.chunk size must be at least 1")
-    check("list window step must be positive",
-          'import std;\nstd.list.window([1], 1, 0);\n',
-          stderr="std.list.window step must be at least 1")
-    check("list top_k k must be non-negative",
-          'import std;\nstd.list.top_k([1], -1);\n',
-          stderr="std.list.top_k k must be non-negative")
-    check("list group_by key restrictions",
-          'import std;\nstd.list.group_by([1], func(x) { return 1.5; });\n',
-          stderr="std.list.group_by key: dict key must be")
 
     check("arena add get set remove",
           'import std;\nimport std.arena;\n'
@@ -887,57 +670,6 @@ def run_cases():
           + 'println(f());\n',
           stdout="42")
 
-    check("graph weighted shortest path",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
-          'r = graph.add_node(g, "d"); g = r["graph"]; let d = r["id"];\n'
-          'r = graph.add_edge(g, a, b, "x", 1); g = r["graph"];\n'
-          'r = graph.add_edge(g, b, c, "x", 1); g = r["graph"];\n'
-          'r = graph.add_edge(g, a, c, "y", 10); g = r["graph"];\n'
-          'r = graph.add_edge(g, c, d, "z", 2); g = r["graph"];\n'
-          'println(graph.shortest_path(g, a, c));\n'
-          'println(graph.shortest_path(g, a, d)["cost"]);\n'
-          'println(graph.shortest_path(g, a, d, '
-          'func(e) { return e["weight"] * 10; })["cost"]);\n',
-          stdout_all=["{ok: true, path: [1, 2, 3], cost: 2}",
-                      "4", "40"])
-    check("graph components",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_node(g, "c"); g = r["graph"];\n'
-          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'println(graph.components(g));\n',
-          stdout="[[1, 2], [3]]")
-    check("graph reverse and subgraph",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'r = graph.add_node(g, "c"); g = r["graph"]; let c = r["id"];\n'
-          'r = graph.add_edge(g, a, b); g = r["graph"];\n'
-          'r = graph.add_edge(g, b, c); g = r["graph"];\n'
-          'let rev = graph.reverse(g);\n'
-          'println(graph.path(rev, c, a));\n'
-          'let sub = graph.subgraph(g, [a, b]);\n'
-          'println(graph.node_count(sub));\n'
-          'println(graph.edge_count(sub));\n',
-          stdout_all=["{ok: true, path: [3, 2, 1]}", "2", "1"])
-    check("graph rejects negative edge weight",
-          'import std;\nimport std.graph;\n'
-          'let g = graph.new();\n'
-          'let r = graph.add_node(g, "a"); g = r["graph"]; let a = r["id"];\n'
-          'r = graph.add_node(g, "b"); g = r["graph"]; let b = r["id"];\n'
-          'graph.add_edge(g, a, b, "x", -1);\n',
-          stderr="graph edge weight must be non-negative")
-    check("graph shortest_path missing node",
-          'import std;\nimport std.graph;\n'
-          'println(graph.shortest_path(graph.new(), 1, 2));\n',
-          stdout="{ok: false, error: node not found}")
     check("list builder",
           "import std;\n"
           "let b = std.list.builder();\n"

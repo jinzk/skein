@@ -1,0 +1,427 @@
+import std;
+import std.graph;
+import std.lru;
+import std.set;
+import std.dict_key;
+include "_support.skein";
+
+struct CollectionsMoreLruKey {
+  id: int;
+}
+
+struct CollectionsMoreLruHashUser {
+  id: int;
+  cache: list[int];
+}
+
+struct CollectionsMoreSetKey {
+  id: int;
+  tag: string;
+}
+
+struct CollectionsMoreListKey {
+  id: int;
+}
+
+impl dict_key.DictKey for CollectionsMoreLruHashUser {
+  func dict_hash(self) {
+    return self.id;
+  }
+}
+
+ts_test("graph basics", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_node(g, "c");
+  g = r["graph"];
+  let c = r["id"];
+  r = graph.add_edge(g, a, b, "next");
+  g = r["graph"];
+  r = graph.add_edge(g, b, c, "next");
+  g = r["graph"];
+  ts_eq(graph.node_count(g), 3);
+  ts_eq(graph.edge_count(g), 2);
+  ts_eq(graph.neighbors(g, a), [2]);
+  ts_eq(graph.neighbors(g, a, "next"), [2]);
+  ts_eq(graph.bfs(g, a), [1, 2, 3]);
+  ts_eq(graph.dfs(g, a), [1, 2, 3]);
+});
+
+ts_test("graph topo and cycle", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_edge(g, a, b);
+  g = r["graph"];
+  ts_true(graph.topo_sort(g)["ok"]);
+  ts_false(graph.has_cycle(g));
+  r = graph.add_edge(g, b, a);
+  g = r["graph"];
+  ts_false(graph.topo_sort(g)["ok"]);
+  ts_true(graph.has_cycle(g));
+});
+
+ts_test("graph path", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_node(g, "c");
+  g = r["graph"];
+  let c = r["id"];
+  r = graph.add_edge(g, a, b);
+  g = r["graph"];
+  r = graph.add_edge(g, b, c);
+  g = r["graph"];
+  let found = graph.path(g, a, c);
+  ts_true(found["ok"]);
+  ts_eq(found["path"], [1, 2, 3]);
+  ts_false(graph.path(g, c, a)["ok"]);
+});
+
+ts_test("graph remove node cascades", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_edge(g, a, b);
+  g = r["graph"];
+  g = graph.remove_node(g, a);
+  ts_eq(graph.node_count(g), 1);
+  ts_eq(graph.edge_count(g), 0);
+});
+
+ts_test("graph batch build", func() {
+  let g = graph.from_edges(5, [[1, 2], [2, 3], [3, 4], [4, 5]]);
+  ts_eq(graph.node_count(g), 5);
+  ts_eq(graph.edge_count(g), 4);
+  ts_eq(graph.bfs(g, 1), [1, 2, 3, 4, 5]);
+  ts_eq(graph.dfs(g, 1), [1, 2, 3, 4, 5]);
+  ts_eq(graph.path(g, 1, 5)["path"], [1, 2, 3, 4, 5]);
+  ts_eq(graph.topo_sort(g)["order"], [1, 2, 3, 4, 5]);
+  ts_eq(graph.components(g), [[1, 2, 3, 4, 5]]);
+});
+
+ts_test("graph batch add nodes and edges", func() {
+  let g = graph.new();
+  let r = graph.add_nodes(g, ["a", "b", "c"]);
+  g = r["graph"];
+  let ids = r["ids"];
+  g = graph.add_edges(g, [[ids[0], ids[1], "x", 2], [ids[1], ids[2]]]);
+  ts_eq(ids, [1, 2, 3]);
+  ts_eq(graph.edge_count(g), 2);
+  ts_eq(graph.neighbors(g, ids[0]), [2]);
+  ts_eq(graph.shortest_path(g, ids[0], ids[2])["cost"], 3);
+});
+
+ts_test("graph weighted shortest path", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_node(g, "c");
+  g = r["graph"];
+  let c = r["id"];
+  r = graph.add_node(g, "d");
+  g = r["graph"];
+  let d = r["id"];
+  r = graph.add_edge(g, a, b, "x", 1);
+  g = r["graph"];
+  r = graph.add_edge(g, b, c, "x", 1);
+  g = r["graph"];
+  r = graph.add_edge(g, a, c, "y", 10);
+  g = r["graph"];
+  r = graph.add_edge(g, c, d, "z", 2);
+  g = r["graph"];
+  let found = graph.shortest_path(g, a, c);
+  ts_true(found["ok"]);
+  ts_eq(found["path"], [1, 2, 3]);
+  ts_eq(found["cost"], 2);
+  ts_eq(graph.shortest_path(g, a, d)["cost"], 4);
+  ts_eq(graph.shortest_path(g, a, d,
+    func(e) { return e["weight"] * 10; })["cost"], 40);
+});
+
+ts_test("graph components", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_node(g, "c");
+  g = r["graph"];
+  r = graph.add_edge(g, a, b);
+  g = r["graph"];
+  ts_eq(graph.components(g), [[1, 2], [3]]);
+});
+
+ts_test("graph reverse and subgraph", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  r = graph.add_node(g, "c");
+  g = r["graph"];
+  let c = r["id"];
+  r = graph.add_edge(g, a, b);
+  g = r["graph"];
+  r = graph.add_edge(g, b, c);
+  g = r["graph"];
+  let rev = graph.reverse(g);
+  let reversed = graph.path(rev, c, a);
+  ts_true(reversed["ok"]);
+  ts_eq(reversed["path"], [3, 2, 1]);
+  let sub = graph.subgraph(g, [a, b]);
+  ts_eq(graph.node_count(sub), 2);
+  ts_eq(graph.edge_count(sub), 1);
+});
+
+ts_test("graph rejects negative edge weight", func() {
+  let g = graph.new();
+  let r = graph.add_node(g, "a");
+  g = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(g, "b");
+  g = r["graph"];
+  let b = r["id"];
+  ts_error(func() {
+    return graph.add_edge(g, a, b, "x", -1);
+  }, "graph edge weight must be non-negative");
+});
+
+ts_test("graph shortest_path missing node", func() {
+  let found = graph.shortest_path(graph.new(), 1, 2);
+  ts_false(found["ok"]);
+  ts_eq(found["error"], "node not found");
+});
+
+ts_test("lru basics", func() {
+  let l = lru.new(2);
+  let r = lru.put(l, "a", 1);
+  l = r["lru"];
+  r = lru.put(l, "b", 2);
+  l = r["lru"];
+  ts_eq(lru.keys(l), ["a", "b"]);
+  r = lru.get(l, "a");
+  l = r["lru"];
+  ts_eq(lru.keys(l), ["b", "a"]);
+  r = lru.put(l, "c", 3);
+  l = r["lru"];
+  ts_eq(r["evicted"]["key"], "b");
+  ts_eq(lru.keys(l), ["a", "c"]);
+  let p = lru.peek(l, "a")["lru"];
+  ts_eq(lru.keys(p), ["a", "c"]);
+  r = lru.delete(l, "a");
+  l = r["lru"];
+  ts_true(r["removed"]);
+  ts_eq(lru.size(l), 1);
+  ts_eq(lru.capacity(l), 2);
+  ts_eq(lru.keys(lru.clear(l)), []);
+});
+
+ts_test("lru get default", func() {
+  let l = lru.new(2);
+  let r = lru.get(l, "missing", 42);
+  ts_false(r["found"]);
+  ts_eq(r["value"], 42);
+});
+
+ts_test("lru value semantics", func() {
+  let a = lru.new(2);
+  let r = lru.put(a, 1, "x");
+  let b = r["lru"];
+  ts_eq(lru.size(a), 0);
+  ts_eq(lru.size(b), 1);
+  let r2 = lru.put(a, 1, "x");
+  ts_true(b == r2["lru"]);
+});
+
+ts_test("lru capacity must be positive", func() {
+  ts_error(func() {
+    return lru.new(0);
+  }, "std.lru.new capacity must be at least 1");
+});
+
+ts_test("lru key restrictions", func() {
+  let l = lru.new(2);
+  ts_error(func() {
+    return lru.get(l, 1.5);
+  }, "std.lru key: dict key must be");
+});
+
+ts_test("lru json encoding", func() {
+  ts_eq(std.json.stringify(lru.new(2)),
+        "{\"cap\":2,\"map\":{},\"order\":[]}");
+});
+
+ts_test("lru tuple keys", func() {
+  let l = lru.new(2);
+  let r = lru.put(l, (1, 2), "x");
+  l = r["lru"];
+  ts_eq(lru.get(l, (1, 2))["value"], "x");
+  ts_true(lru.has(l, (1, 2)));
+});
+
+ts_test("lru struct keys", func() {
+  let l = lru.new(2);
+  let r = lru.put(l, CollectionsMoreLruKey { id: 1 }, "x");
+  l = r["lru"];
+  ts_eq(lru.get(l, CollectionsMoreLruKey { id: 1 })["value"], "x");
+  ts_true(lru.has(l, CollectionsMoreLruKey { id: 1 }));
+});
+
+ts_test("lru custom struct hash keys", func() {
+  let l = lru.new(2);
+  let r = lru.put(l, CollectionsMoreLruHashUser { id: 1, cache: [] }, "x");
+  l = r["lru"];
+  ts_eq(lru.get(l, CollectionsMoreLruHashUser { id: 1, cache: [] })["value"],
+        "x");
+});
+
+ts_test("list unique and group_by", func() {
+  ts_eq(std.list.unique([1, 2, 1, 3, 2]), [1, 2, 3]);
+  ts_eq(std.list.unique(["a", "b", "a"]), ["a", "b"]);
+  ts_eq(std.list.unique_by([{"n": 1}, {"n": 1}, {"n": 2}],
+                           func(p) { return p["n"]; }),
+        [{"n": 1}, {"n": 2}]);
+  ts_eq(std.list.group_by([1, 2, 3, 4], func(x) { return x % 2; }),
+        {1: [1, 3], 0: [2, 4]});
+});
+
+ts_test("list unique large and non-hashable", func() {
+  let xs = range(20000);
+  ts_eq(len(std.list.unique(xs)), 20000);
+  let ys = std.list.map(xs, func(i) { return i % 1000; });
+  ts_eq(len(std.list.unique(ys)), 1000);
+  ts_eq(std.list.unique([[1], [1], [2]]), [[1], [2]]);
+});
+
+ts_test("list unique tuple keys", func() {
+  ts_eq(std.list.unique([(1, 2), (1, 2), (3, 4)]),
+        [[1, 2], [3, 4]]);
+});
+
+ts_test("list group_by tuple keys", func() {
+  ts_eq(std.list.group_by([1, 2, 3],
+    func(x) { return (x % 2, x > 1); }),
+    {(1, false): [1], (0, true): [2], (1, true): [3]});
+});
+
+ts_test("set tuple elements", func() {
+  let s = set.from_list([(1, 2), (1, 2), (3, 4)]);
+  ts_eq(set.size(s), 2);
+  ts_eq(set.values(s), [[1, 2], [3, 4]]);
+});
+
+ts_test("set struct elements", func() {
+  let s = set.from_list([
+    CollectionsMoreSetKey { id: 1, tag: "a" },
+    CollectionsMoreSetKey { id: 1, tag: "a" },
+    CollectionsMoreSetKey { id: 2, tag: "b" }
+  ]);
+  ts_eq(set.size(s), 2);
+  ts_eq(set.values(s), [
+    CollectionsMoreSetKey { id: 1, tag: "a" },
+    CollectionsMoreSetKey { id: 2, tag: "b" }
+  ]);
+});
+
+ts_test("list unique struct keys", func() {
+  ts_eq(std.list.unique([
+    CollectionsMoreListKey { id: 1 },
+    CollectionsMoreListKey { id: 1 },
+    CollectionsMoreListKey { id: 2 }
+  ]), [
+    CollectionsMoreListKey { id: 1 },
+    CollectionsMoreListKey { id: 2 }
+  ]);
+});
+
+ts_test("list chunk and window", func() {
+  ts_eq(std.list.chunk([1, 2, 3, 4, 5], 2),
+        [[1, 2], [3, 4], [5]]);
+  ts_eq(std.list.chunk([], 3), []);
+  ts_eq(std.list.window([1, 2, 3, 4, 5], 3),
+        [[1, 2, 3], [2, 3, 4], [3, 4, 5]]);
+  ts_eq(std.list.window([1, 2, 3, 4, 5], 3, 2),
+        [[1, 2, 3], [3, 4, 5]]);
+  ts_eq(std.list.window([1, 2], 3), []);
+});
+
+ts_test("list zip and top_k", func() {
+  ts_eq(std.list.zip([1, 2, 3], ["a", "b"]),
+        [[1, "a"], [2, "b"]]);
+  ts_eq(std.list.zip([1, 2], ["a", "b"], [true, false]),
+        [[1, "a", true], [2, "b", false]]);
+  ts_eq(std.list.top_k([5, 1, 4, 2, 3], 3), [1, 2, 3]);
+  ts_eq(std.list.top_k([5, 1, 4, 2, 3], 2,
+                       func(a, b) { return b - a; }), [5, 4]);
+  ts_eq(std.list.top_k([1], 0), []);
+});
+
+ts_test("list top_k large and full", func() {
+  let xs = range(20000);
+  ts_eq(std.list.top_k(xs, 5), [0, 1, 2, 3, 4]);
+  ts_eq(std.list.top_k([3, 1, 2], 10), [1, 2, 3]);
+  ts_eq(std.list.top_k(["b", "a", "c"], 2), ["a", "b"]);
+});
+
+ts_test("list binary_search", func() {
+  ts_eq(std.list.binary_search([1, 3, 5, 7], 5),
+        {"found": true, "index": 2});
+  ts_eq(std.list.binary_search([1, 3, 5, 7], 4),
+        {"found": false, "index": 2});
+  ts_eq(std.list.binary_search(["a", "c", "e"], "c"),
+        {"found": true, "index": 1});
+  ts_eq(std.list.binary_search([], 1),
+        {"found": false, "index": 0});
+});
+
+ts_test("list chunk size must be positive", func() {
+  ts_error(func() {
+    return std.list.chunk([1], 0);
+  }, "std.list.chunk size must be at least 1");
+});
+
+ts_test("list window step must be positive", func() {
+  ts_error(func() {
+    return std.list.window([1], 1, 0);
+  }, "std.list.window step must be at least 1");
+});
+
+ts_test("list top_k k must be non-negative", func() {
+  ts_error(func() {
+    return std.list.top_k([1], -1);
+  }, "std.list.top_k k must be non-negative");
+});
+
+ts_test("list group_by key restrictions", func() {
+  ts_error(func() {
+    return std.list.group_by([1], func(x) { return 1.5; });
+  }, "std.list.group_by key: dict key must be");
+});
+
+ts_finish();

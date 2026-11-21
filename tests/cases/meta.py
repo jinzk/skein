@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""std.meta type introspection."""
+"""std.meta type introspection.
+
+Pure introspection cases live in tests/skein/meta.skein.  Package visibility
+tests stay here because they need temp modules and CLI diagnostics.
+"""
 import os
 import tempfile
 
@@ -7,172 +11,14 @@ from harness import *  # noqa: F401,F403
 
 
 def run_cases():
+    run_skein("meta.skein")
     check(
-        "meta struct info",
-        'import std;\n'
-        'struct P { x: int; y: int? = null; }\n'
-        'impl P {\n'
-        '  func moved(self, dx: int, dy: int = 0) { return self; }\n'
-        '}\n'
-        'let info = std.meta.type_info("P");\n'
-        'println(info["kind"]);\n'
-        'println(info["name"]);\n'
-        'println(info["fields"][0]["name"]);\n'
-        'println(info["fields"][1]["type"]);\n'
-        'println(info["fields"][1]["nullable"]);\n'
-        'println(info["fields"][1]["has_default"]);\n'
-        'println(info["fields"][0]["readonly"]);\n'
-        'println(info["methods"][0]["name"]);\n'
-        'println(info["methods"][0]["params"]);\n'
-        'println(info["methods"][0]["has_defaults"]);\n',
-        stdout_all=[
-            "struct", "P", "x", "int?", "true", "true", "false",
-            "moved", "[int, int]", "true",
-        ],
-    )
-
-    check(
-        "meta struct from value",
-        'import std;\n'
-        'struct P { x: int; }\n'
-        'println(std.meta.type_info(P { x: 1 })["name"]);\n'
-        'println(std.meta.fields(P { x: 1 })[0]["type"]);\n',
-        stdout_all=["P", "int"],
-    )
-
-    check(
-        "meta enum info",
-        'import std;\n'
-        'enum E { A { n: int = 3; }; B; }\n'
-        'let info = std.meta.type_info(E.B);\n'
-        'println(info["kind"]);\n'
-        'println(info["variants"][0]["name"]);\n'
-        'println(info["variants"][0]["fields"][0]["readonly"]);\n'
-        'println(info["variants"][0]["fields"][0]["has_default"]);\n'
-        'println(std.meta.fields(E.B));\n'
-        'println(std.meta.variants("E")[1]["name"]);\n',
-        stdout_all=["enum", "A", "true", "true", "[]", "B"],
-    )
-
-    check(
-        "meta trait info",
-        'import std;\n'
-        'trait D { func draw(self); }\n'
-        'struct P { x: int; }\n'
-        'impl D for P { func draw(self) { return self.x; } }\n'
-        'println(std.meta.implements(P { x: 1 }, "D"));\n'
-        'println(std.meta.implements("P", "D"));\n'
-        'println(std.meta.traits("P"));\n'
-        'println(std.meta.type_info("D")["kind"]);\n'
-        'println(len(std.meta.type_info("D")["methods"][0]["params"]));\n'
-        'println(std.meta.fields("D"));\n'
-        'println(std.meta.variants("D"));\n',
-        stdout_all=["true", "[main.D]", "trait", "0", "[]"],
-    )
-
-    check(
-        "meta builtin types",
-        'import std;\n'
-        'println(std.meta.type_info("str")["name"]);\n'
-        'println(std.meta.type_info("func")["name"]);\n'
-        'println(std.meta.type_info(1)["kind"]);\n'
-        'println(std.meta.type_info([1])["name"]);\n'
-        'println(std.meta.type_info(std.math.sqrt)["name"]);\n'
-        'println(std.meta.type_info(null)["name"]);\n'
-        'println(std.meta.has_type("list"));\n'
-        'println(std.meta.has_type("nope"));\n'
-        'println(std.meta.fields("int"));\n'
-        'println(std.meta.variants("int"));\n'
-        'println(std.meta.methods("int"));\n'
-        'println(std.meta.traits("int"));\n',
-        stdout_all=[
-            "string", "function", "builtin", "list", "builtin", "null",
-            "true", "false", "[]",
-        ],
-    )
-
-    check(
-        "meta builtin descriptor fields",
-        'import std;\n'
-        'let info = std.meta.type_info("int");\n'
-        'println(info["package"]);\n'
-        'println(info["source"]);\n'
-        'println(info["exported"]);\n'
-        'println(info["fields"]);\n'
-        'println(info["variants"]);\n'
-        'println(info["methods"]);\n'
-        'println(info["traits"]);\n',
-        stdout_all=["true", "[]"],
-    )
-
-    check(
-        "meta builtin name table",
-        'import std;\n'
-        'let names = [\n'
-        '  "any", "int", "float", "number", "bool", "string", "str",\n'
-        '  "char", "byte", "bytes", "list", "dict", "deque", "heap", "set",\n'
-        '  "function", "func", "builtin", "callable", "null", "userdata",\n'
-        '  "result", "error"\n'
-        '];\n'
-        'let missing = [];\n'
-        'for (let name in names) {\n'
-        '  if (!std.meta.has_type(name)) {\n'
-        '    missing = std.list.append(missing, name);\n'
-        '  }\n'
-        '}\n'
-        'println(missing);\n',
-        stdout="[]",
-    )
-
-    check(
-        "meta kind tag is not a type name",
-        'import std;\n'
-        'struct P { x: int; }\n'
-        'std.meta.type_info(kind_of(P { x: 1 }));\n',
-        stderr="unknown type struct",
-    )
-
-    check(
-        "meta unknown type",
-        'import std;\nstd.meta.type_info("Nope");\n',
-        stderr="unknown type Nope",
-    )
-
-    check(
-        "meta unknown trait",
-        'import std;\nstd.meta.implements("int", "Nope");\n',
-        stderr="unknown trait Nope",
-    )
-
-    check(
-        "meta result isolation",
-        'import std;\n'
-        'struct P { x: int; }\n'
-        'let fields = std.meta.fields("P");\n'
-        'fields[0]["name"] = "z";\n'
-        'println(std.meta.fields("P")[0]["name"]);\n',
-        stdout="x",
-    )
-
-    check(
-        "meta methods sorted",
-        'import std;\n'
-        'struct P { x: int; }\n'
-        'impl P {\n'
-        '  func zed(self) { return 1; }\n'
-        '  func alpha(self) { return 2; }\n'
-        '}\n'
-        'let methods = std.meta.methods("P");\n'
-        'println(methods[0]["name"]);\n'
-        'println(methods[1]["name"]);\n',
-        stdout_all=["alpha", "zed"],
-    )
-
-    check(
-        "meta import submodule",
-        'import std.meta;\n'
-        'println(meta.type_info("int")["name"]);\n',
-        stdout="int",
+        "meta golden output",
+        "import std;\n"
+        "struct MetaGolden { x: int; }\n"
+        "println(std.meta.type_info(MetaGolden { x: 1 })[\"name\"]);\n"
+        "println(std.meta.fields(MetaGolden { x: 1 })[0][\"type\"]);\n",
+        stdout_all=["MetaGolden", "int"],
     )
 
     with tempfile.TemporaryDirectory() as tmp:

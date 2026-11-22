@@ -664,7 +664,7 @@ value_t *build_namespace_impl() {
             {"close", B_http_close},
         })));
 #endif
-#ifdef SKEIN_ENABLE_SQLITE
+#ifdef SKEIN_ENABLE_DB
     root->payload->items.push_back(std::make_pair(
         newstrval("db"),
         builtin_module({

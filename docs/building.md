@@ -80,7 +80,7 @@ sudo apt install libuv1-dev libboost-context-dev libpcre2-dev
 
 HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），Unicode 归一化使用 vendored `utf8proc`（`third_party/utf8proc`），密码哈希使用 vendored `libargon2`（`third_party/argon2`），都不需要额外的系统包。
 
-`std.db` 使用系统的 SQLite 3；`SKEIN_ENABLE_SQLITE=ON`（默认）时如果找不到 `sqlite3.h` / `libsqlite3`，`std.db` 会自动禁用。
+`std.db` 的 SQLite 驱动使用系统 SQLite 3（`SKEIN_ENABLE_SQLITE=ON`，默认），PostgreSQL 驱动使用 libpq（`SKEIN_ENABLE_POSTGRES=ON`，默认）。找不到某个驱动的头文件或库时只禁用该驱动；两者都不可用时 `std.db` 整体禁用。Debian/Ubuntu 可安装 `libsqlite3-dev libpq-dev`。
 
 TLS 是可选模块；启用时需要 OpenSSL 开发文件：
 
@@ -114,6 +114,13 @@ ABI v2 异步查询和 ABI v3 `new_string_len` 安全文本传输；构建、脚
 
 ```bash
 ctest --test-dir build --output-on-failure
+```
+
+PostgreSQL 集成测试默认跳过；设置 `SKEIN_TEST_POSTGRES_DSN` 后会执行：
+
+```bash
+SKEIN_TEST_POSTGRES_DSN=postgresql://user:password@127.0.0.1:5432/skein_test \
+  ctest --test-dir build -R skein_tests --output-on-failure
 ```
 
 日常开发使用快速回归循环（增量构建 + core 标签，不跑基准和 sanitizer）：

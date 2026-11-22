@@ -2449,7 +2449,7 @@ let ok = std.password.verify("secret", encoded);
 - 当前 vendored `libargon2` 以 `ARGON2_NO_THREADS` 构建；`parallelism` 会写入
   PHC 参数并影响派生结果，但计算本身是单线程执行。
 
-`std.db` 是可选 SQLite 驱动（构建时找到 `sqlite3` 才启用）：
+`std.db` 是可选 SQLite / PostgreSQL 驱动（构建时找到对应客户端库才启用）：
 
 ```skein
 import std;
@@ -2467,19 +2467,38 @@ std.db.commit(db);
 std.db.close(db);
 ```
 
+PostgreSQL 使用 URI：
+
+```skein
+let db = std.db.open(
+  "postgresql://user:password@localhost:5432/app",
+  {"connect_timeout_ms": 5000});
+let rows = std.db.query(
+  db, "SELECT id, name FROM users WHERE id = $1", [1]);
+std.db.close(db);
+```
+
 API：
 
 ```text
-std.db.open(path[, options]) -> db
+std.db.open(path_or_uri[, options]) -> db
 std.db.exec(db, sql[, params]) -> {changes, last_insert_rowid}
 std.db.query(db, sql[, params]) -> list[dict]
 std.db.begin(db) / std.db.commit(db) / std.db.rollback(db)
 std.db.close(db)
 ```
 
-- 参数使用 `?` 占位，值可以是 int / float / bool / string / bytes / null；
+- 值可以是 int / float / bool / string / bytes / null；
+- SQLite 参数占位符是 `?`；PostgreSQL 使用原生 `$1`、`$2`，不做跨驱动改写；
 - 查询结果列名作为 dict key；
-- 当前只实现 SQLite；PostgreSQL 和连接池后续补齐；
+- SQLite 选项：`busy_timeout_ms`、`foreign_keys`；PostgreSQL 选项：
+  `connect_timeout_ms`；
+- PostgreSQL 的 bool / int2 / int4 / int8 / float4 / float8 映射为
+  bool / int / float，`bytea` 映射为 bytes；numeric、date、time、json 等
+  按 string 返回；
+- PostgreSQL 没有 `last_insert_rowid`，该字段固定为 0；需要新 id 时使用
+  `INSERT ... RETURNING` 配合 `query`；
+- 连接池和 migration 后续补齐；
 - 连接对象由 GC 管理，显式 `close` 后不可继续使用。
 
 `std.crypto.sha256` / `hmac_sha256` 返回十六进制字符串；

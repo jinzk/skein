@@ -10,7 +10,7 @@
 #include "builders.h"
 #include "compress_builtin.h"
 #include "crypto_builtin.h"
-#ifdef SKEIN_ENABLE_SQLITE
+#ifdef SKEIN_ENABLE_DB
 #include "db.h"
 #endif
 #include "dict.h"
@@ -624,7 +624,7 @@ struct value_t *call_builtin(int functype,
         return call_crypto_builtin(functype, args);
     if (functype >= B_password_hash && functype <= B_password_verify)
         return call_password_builtin(functype, args);
-#ifdef SKEIN_ENABLE_SQLITE
+#ifdef SKEIN_ENABLE_DB
     if (functype >= B_db_open && functype <= B_db_close)
         return call_db_builtin(functype, args);
 #endif

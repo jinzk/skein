@@ -725,21 +725,47 @@ if(SKEIN_ENABLE_FFI)
 endif()
 
 option(SKEIN_ENABLE_SQLITE "Enable the optional std.db SQLite driver" ON)
+option(SKEIN_ENABLE_POSTGRES
+  "Enable the optional std.db PostgreSQL driver when libpq is available" ON)
+
+set(SKEIN_DB_ENABLED OFF)
 if(SKEIN_ENABLE_SQLITE)
   find_path(SQLITE3_INCLUDE_DIR NAMES sqlite3.h)
   find_library(SQLITE3_LIBRARY NAMES sqlite3 libsqlite3)
   if(SQLITE3_INCLUDE_DIR AND SQLITE3_LIBRARY)
-    target_sources(skein_builtins PRIVATE src/builtins/db.cpp)
+    target_sources(skein_builtins PRIVATE src/builtins/db_sqlite.cpp)
     target_include_directories(skein_builtins PRIVATE
       ${SQLITE3_INCLUDE_DIR})
     target_compile_definitions(skein_builtins PRIVATE
       SKEIN_ENABLE_SQLITE=1)
-    target_compile_definitions(skein_interpreter PRIVATE
-      SKEIN_ENABLE_SQLITE=1)
     target_link_libraries(skein_builtins PUBLIC ${SQLITE3_LIBRARY})
+    set(SKEIN_DB_ENABLED ON)
   else()
-    message(STATUS "sqlite3 not found; std.db is disabled")
+    message(STATUS "sqlite3 not found; std.db SQLite driver is disabled")
   endif()
+endif()
+
+if(SKEIN_ENABLE_POSTGRES)
+  find_package(PostgreSQL QUIET)
+  if(PostgreSQL_FOUND)
+    target_sources(skein_builtins PRIVATE src/builtins/db_postgres.cpp)
+    target_include_directories(skein_builtins PRIVATE
+      ${PostgreSQL_INCLUDE_DIRS})
+    target_compile_definitions(skein_builtins PRIVATE
+      SKEIN_ENABLE_POSTGRES=1)
+    target_link_libraries(skein_builtins PUBLIC
+      ${PostgreSQL_LIBRARIES})
+    set(SKEIN_DB_ENABLED ON)
+  else()
+    message(STATUS
+      "PostgreSQL client not found; std.db PostgreSQL driver is disabled")
+  endif()
+endif()
+
+if(SKEIN_DB_ENABLED)
+  target_sources(skein_builtins PRIVATE src/builtins/db.cpp)
+  target_compile_definitions(skein_builtins PRIVATE SKEIN_ENABLE_DB=1)
+  target_compile_definitions(skein_interpreter PRIVATE SKEIN_ENABLE_DB=1)
 endif()
 
 # Optional example native module used to validate the plugin ABI against a

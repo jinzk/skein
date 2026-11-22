@@ -1,0 +1,86 @@
+import std;
+include "_support.skein";
+
+let dsn = std.env.get("SKEIN_TEST_POSTGRES_DSN", "");
+if (dsn == "") {
+  fail("SKEIN_TEST_POSTGRES_DSN is required");
+}
+
+ts_test("postgres exec and query", func() {
+  let db = std.db.open(dsn);
+  std.db.exec(db, "DROP TABLE IF EXISTS skein_db_test");
+  std.db.exec(db, "CREATE TABLE skein_db_test (id SERIAL PRIMARY KEY, name TEXT, score DOUBLE PRECISION, ok BOOLEAN, data BYTEA)");
+  let inserted = std.db.exec(
+    db,
+    "INSERT INTO skein_db_test(name, score, ok, data) VALUES ($1, $2, $3, $4)",
+    ["alice", 1.5, true, std.bytes.from_hex("00ff")]);
+  ts_eq(inserted["changes"], 1);
+  ts_eq(inserted["last_insert_rowid"], 0);
+
+  let rows = std.db.query(
+    db, "SELECT id, name, score, ok, data FROM skein_db_test");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["id"], 1);
+  ts_eq(rows[0]["name"], "alice");
+  ts_eq(rows[0]["score"], 1.5);
+  ts_eq(rows[0]["ok"], true);
+  ts_eq(rows[0]["data"], std.bytes.from_hex("00ff"));
+
+  std.db.exec(db, "DROP TABLE skein_db_test");
+  std.db.close(db);
+});
+
+ts_test("postgres null and numeric values", func() {
+  let db = std.db.open(dsn);
+  let row = std.db.query(
+    db,
+    "SELECT NULL::text AS note, 12.34::numeric AS amount, 'hello'::text AS text_value")[0];
+  ts_eq(row["note"], null);
+  ts_eq(row["amount"], "12.34");
+  ts_eq(row["text_value"], "hello");
+  std.db.close(db);
+});
+
+ts_test("postgres transaction", func() {
+  let db = std.db.open(dsn);
+  std.db.exec(db, "DROP TABLE IF EXISTS skein_db_tx");
+  std.db.exec(db, "CREATE TABLE skein_db_tx (n INTEGER)");
+  std.db.begin(db);
+  std.db.exec(db, "INSERT INTO skein_db_tx VALUES ($1)", [1]);
+  std.db.rollback(db);
+  ts_eq(len(std.db.query(db, "SELECT * FROM skein_db_tx")), 0);
+
+  std.db.begin(db);
+  std.db.exec(db, "INSERT INTO skein_db_tx VALUES ($1)", [2]);
+  std.db.commit(db);
+  let rows = std.db.query(db, "SELECT n FROM skein_db_tx");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["n"], 2);
+
+  std.db.exec(db, "DROP TABLE skein_db_tx");
+  std.db.close(db);
+});
+
+ts_test("postgres errors and closed handle", func() {
+  let db = std.db.open(dsn);
+  ts_error(func() {
+    std.db.query(db, "SELECT * FROM skein_missing_table");
+  }, "std.db query");
+  std.db.close(db);
+  ts_error(func() {
+    std.db.query(db, "SELECT 1");
+  }, "closed");
+});
+
+ts_test("postgres option and parameter validation", func() {
+  ts_error(func() {
+    std.db.open(dsn, {"connect_timeout_ms": -1});
+  }, "non-negative");
+  let db = std.db.open(dsn);
+  ts_error(func() {
+    std.db.query(db, "SELECT $1::text", [[1]]);
+  }, "cannot bind list");
+  std.db.close(db);
+});
+
+ts_finish();

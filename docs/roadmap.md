@@ -95,9 +95,6 @@
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
-| MySQL / MariaDB `std.db` 驱动 | 待实现 | P1-D 下一项；与 PostgreSQL 共用 `db_internal` 后端接口 |
-| 数据库 migration | 待实现 | 版本表、事务、回滚，SQLite / PostgreSQL / MySQL 共用 |
-| 数据库连接池 | 待实现 | 需先明确事务绑定、连接生命周期和并发语义 |
 | 多 worker 共享 Session / 限流 store | 待实现 | 首版内存 store 已完成；多进程生产部署前必做 |
 | Redis / Valkey `std.cache` 客户端 | 待实现 | 多 worker 共享 store 时启动；见 Milestone 7 |
 | 权限 / 角色 middleware | 按需 | 统一身份模型已完成，不阻塞 P1 验收 |
@@ -411,10 +408,9 @@ std.string.builder          29 ms
   `contrib/mysql` 只保留为 native module ABI 示例，不直接作为 `std.db` 实现。
 - Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
 
-当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础、SQLite 与
-PostgreSQL 已完成；MySQL / MariaDB 驱动已纳入 P1-D 待实现。距离单进程 P1
-验收还剩 MySQL / MariaDB、migration 和连接池；多进程生产部署还需要先完成
-共享 Session / 限流 store。
+当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 P1-D 数据库
+（SQLite / PostgreSQL / MySQL / MariaDB、migration、连接池）已完成。单进程
+P1 验收已满足；多进程生产部署还需要先完成共享 Session / 限流 store。
 
 范围：
 
@@ -447,19 +443,19 @@ PostgreSQL 已完成；MySQL / MariaDB 驱动已纳入 P1-D 待实现。距离�
    - `std.metrics`、Prometheus `/metrics`（已完成）
    - `/healthz`、`/readyz`（已完成）
    - 完整错误堆栈日志与 OpenTelemetry tracing（按需）
-5. P1-D 数据库（进行中）：
+5. P1-D 数据库（已完成）：
    - SQLite 驱动、参数化查询、事务（已完成，`std.db` 可选构建）
    - PostgreSQL 驱动（已完成：URI、`$n` 参数、基础类型映射、事务）
-   - MySQL / MariaDB 驱动（待实现，下一优先）：
-     - `mysql://` / `mariadb://` URI；共用 `db_internal` 后端接口；
-     - 使用 prepared statement，避免字符串拼接 SQL；
+   - MySQL / MariaDB 驱动（已完成）：
+     - `mysql://` / `mariadb://` URI，共用 `db_internal` 后端接口；
+     - prepared statement 参数绑定；
      - `?` 参数占位；`changes` 来自 affected rows，
        `last_insert_rowid` 来自 `mysql_insert_id`；
-     - integer / float / blob / null / text 做显式映射，decimal / date /
+     - integer / float / blob / null / text 显式映射，decimal / date /
        time / json 按 string 返回；
      - 现有 `contrib/mysql` 只作为 ABI 与行为参考。
-   - migration（待实现）
-   - 连接池（待实现；先明确事务绑定和并发语义）
+   - migration（已完成：版本表、forward migration、事务回滚、幂等执行）
+   - 连接池（已完成：`std.db.pool`、acquire/release、max、stats、close）
    - 暂不做完整 ORM
 
 验收：
@@ -468,9 +464,8 @@ PostgreSQL 已完成；MySQL / MariaDB 驱动已纳入 P1-D 待实现。距离�
 - 登录、登出、token 过期、CSRF、密码哈希可验证（已满足）；
 - 限流返回 429 与 `Retry-After`，伪造代理头不能绕过（已满足）；
 - 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取（已满足）；
-- SQLite 事务测试已通过；PostgreSQL 基础查询、事务和类型映射测试已通过；
-  MySQL / MariaDB 基础查询、事务和类型映射测试待补齐；连接池、migration
-  测试也待补齐。
+- SQLite、PostgreSQL、MySQL / MariaDB 的基础查询、事务、类型映射、migration
+  和连接池测试已通过。
 
 不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
 GraphQL、完整 ORM、OAuth 第三方登录。
@@ -560,11 +555,11 @@ RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Val
     `std.cache`，不放入 `std.db`。第一版只做最小 TTL key-value 客户端及
     Session / 限流共享 store adapter，不阻塞 P1；不使用动态 native plugin
     作为第一方实现方式。范围见 Milestone 7。
-13. ~~是否把 MySQL / MariaDB 纳入 `std.db` 支持范围？~~ 已决定：纳入 P1-D。
+13. ~~是否把 MySQL / MariaDB 纳入 `std.db` 支持范围？~~ 已实施（2026-11-22）：
     MySQL / MariaDB 共用一个 `db_internal` 后端，优先 MariaDB Connector/C，
-    兼容 libmysqlclient；使用 `mysql://` / `mariadb://` URI 和 `?` 参数。
-    现有 `contrib/mysql` 保留为 native module ABI 示例，不作为 `std.db` 的
-    实现路径。
+    兼容 libmysqlclient；支持 `mysql://` / `mariadb://` URI、prepared
+    statement、`?` 参数和基础类型映射。现有 `contrib/mysql` 保留为 native
+    module ABI 示例，不作为 `std.db` 的实现路径。
 
 ---
 
@@ -582,21 +577,20 @@ RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Val
 
 ## 5. 推荐执行顺序
 
-1. 当前主线回到 Milestone 6 P1：P1-D 先做 MySQL / MariaDB 驱动，再做
-   migration，最后连接池。连接池需先明确事务绑定、连接生命周期和并发语义。
-2. 多进程生产部署前启动 Milestone 7：先用 `std.cache` 最小客户端支撑共享
-   Session / 限流 store；单进程开发与测试继续使用内存实现即可。
-3. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
+1. P1-D 已完成，单进程 P1 验收已满足。下一步按部署需求决定是否启动
+   Milestone 7：多进程生产部署前用 `std.cache` 最小客户端支撑共享 Session /
+   限流 store；单进程开发与测试继续使用内存实现即可。
+2. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
    Milestone 2 已完成。
-4. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
-5. Milestone 4 的 GC root 审计、热点 opcode / frame 分配与 JIT 默认启用
+3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
+4. Milestone 4 的 GC root 审计、热点 opcode / frame 分配与 JIT 默认启用
    已完成；剩余是 moving GC / AOT / 字节码缓存的决策，以及移动 GC 决策后
    才会启动的 per-pc liveness / OSR / deopt。
-6. 测试稳定性已完成：
+5. 测试稳定性已完成：
    - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉
      probe-then-bind 竞态和定时就绪探测
    - `thread_bench` 门槛改用多次重复中的最好成绩，基线按实测重设
-7. 长尾能力按实际需求触发。
+6. 长尾能力按实际需求触发。
 
 ---
 

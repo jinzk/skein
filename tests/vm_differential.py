@@ -183,8 +183,8 @@ def task_program():
     return (
         "import std;\n"
         "func inc(x) -> x + 1;\n"
-        "print(launch inc(3).wait());\n"
-        "print(launch inc(launch inc(4).wait()).wait());\n"
+        "print(wait launch inc(3));\n"
+        "print(wait launch inc(wait launch inc(4)));\n"
         "print(wait launch inc(6));\n"
     )
 

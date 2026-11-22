@@ -59,7 +59,7 @@ def run_cases():
         "func work(n) { return n + 1; }\n"
         "let total = 0;\n"
         "for (let i = 0; i < 40; i = i + 1) {\n"
-        "  total = total + launch work(i).wait();\n"
+        "  total = total + wait launch work(i);\n"
         "}\n"
         "println(total);\n",
         env=env,
@@ -201,7 +201,7 @@ def run_cases():
         '  let c = launch ok("c");\n'
         "  return 0;\n"
         "}\n"
-        "println(launch parent().wait());\n",
+        "println(wait launch parent());\n",
         stderr="sibling-fail",
         not_stderr="ok-a",
     )

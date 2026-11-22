@@ -16,7 +16,9 @@
 
 - **已完成**：已经落地并有测试覆盖，不再作为主线计划。
 - **进行中**：当前正在推进。
+- **待实现**：设计已明确，可以排期。
 - **待决策**：需要产品/架构选择后才能排期。
+- **按需**：方向明确，但没有实际需求前不排期。
 - **暂缓**：明确不作为近期目标。
 
 ---
@@ -30,6 +32,10 @@
 - `dict` / `set` 支持 float key：NaN 拒绝，`-0.0` 归一化，整数值 float 与同值 int 等价
 - 10 种复合赋值运算符；静态检查按运算符推导结果类型，JIT 覆盖 param / index 目标
 - task / generator、线程、Channel
+- `wait e` task 前缀等待语法：等价于 `e.wait()`，支持 `wait launch f()`；
+  `.` 后的关键字与内置名按普通成员名解析
+- `launch` 遵循 `.` 的优先级，作用于完整调用链；`launch f().wait()` 解析为
+  `launch (f().wait())`，不再隐式下钻到 `f()`
 - HTTP/1.1、HTTP/2、WebSocket、TLS、FFI
 - Unicode 标识符、NFC、归一化 quick-check、完整大小写映射与折叠、常见源文件编码
 - GBK / GB18030-2005 编解码
@@ -83,7 +89,28 @@
 
 ## 2. 里程碑
 
-### Milestone 1：包管理安全与运维（进行中）
+### 当前待实现任务总览（2026-11-22）
+
+下表只列仍待处理的主线任务；已完成项保留在对应里程碑中作为基线。
+
+| 任务 | 状态 | 说明 |
+| --- | --- | --- |
+| PostgreSQL `std.db` 后端 | 待实现 | P1-D 当前优先项；复用现有 `std.db` API |
+| 数据库 migration | 待实现 | 版本表、事务、回滚；SQLite / PostgreSQL 共用 |
+| 数据库连接池 | 待实现 | 需先明确事务绑定、连接生命周期和并发语义 |
+| 多 worker 共享 Session / 限流 store | 待实现 | 首版内存 store 已完成；多进程生产部署前必做 |
+| 权限 / 角色 middleware | 按需 | 统一身份模型已完成，不阻塞 P1 验收 |
+| 账户锁定 / 登录失败保护 | 按需 | 可先用现有固定窗口限流组合实现 |
+| OpenTelemetry tracing / 完整错误栈日志 | 按需 | 结构化访问日志与 Prometheus 已完成 |
+| Milestone 3 包生态 | 待决策 | SumDB、proxy、私有模块认证、`mod graph` / `mod why` 等 |
+| moving GC / AOT / 字节码缓存 | 待决策 | 决策后再启动 per-pc liveness / OSR / deopt |
+| Milestone 5 长尾能力 | 按需 | GB18030-2022、旧编码、HTTP/2 extended CONNECT、vendor / workspace |
+| REPL / 工具链体验清单 | 按需 | 见 Milestone 5；不影响当前主线 |
+| macOS `flock` 并发验证 | 暂缓 | Linux 已通过 WSL 全量测试 |
+| 交叉编译 | 按需 | 见 `package-manager.md` |
+| FFI Windows / 32 位 / ARM CI 与 fuzz | 按需 | 见 `architecture.md`；不阻塞 P1 |
+
+### Milestone 1：包管理安全与运维（核心范围已完成；可选验证按需）
 
 目标：让包管理在长期运行服务、并发 CI 和 native 缓存场景下安全可运维。
 
@@ -114,7 +141,7 @@
 - `mod prune` 有明确安全边界
 - 多进程 `get` / `build` / `clean` 压力测试通过
 
-### Milestone 2：REPL / LSP 体验统一
+### Milestone 2：REPL / LSP 体验统一（已完成）
 
 目标：REPL 与 LSP 共享补全数据源和编辑体验。
 
@@ -135,7 +162,7 @@
 - 长行编辑光标位置正确
 - LSP 不再每次全量同步文档
 
-### Milestone 3：包生态与信任
+### Milestone 3：包生态与信任（待决策：是否做公共生态）
 
 前提：确认是否要做公共包生态。
 
@@ -156,7 +183,7 @@
 - CI 可输出机器可读依赖报告
 - 可追踪模块被引入的原因
 
-### Milestone 4：JIT / VM 性能与 GC
+### Milestone 4：JIT / VM 性能与 GC（暂缓：优化冻结，等待 GC / AOT 决策）
 
 前提：先决定 moving GC、AOT、字节码序列化是否在目标范围内。
 
@@ -343,7 +370,7 @@ std.string.builder          29 ms
 - 字符串会进入序列化、FFI 和跨线程边界，表示变更影响面大
 - AST 的 COW 阈值与 VM 不同（无栈副本时只允许 1 个 owner）
 
-### Milestone 5：长尾能力
+### Milestone 5：长尾能力（按需）
 
 按实际需求推进：
 
@@ -366,7 +393,7 @@ std.string.builder          29 ms
 - 补全候选弹窗 / 分栏
 - 多行历史条目
 
-### Milestone 6：JSON API 生产化（P1，计划中）
+### Milestone 6：JSON API 生产化（P1，进行中）
 
 目标：只做 JSON API 后端，不做 SSR、静态文件、WebSocket / SSE、multipart
 和模板引擎。
@@ -380,56 +407,62 @@ std.string.builder          29 ms
 - 数据库先做 SQLite，再做 PostgreSQL，MySQL 后续补齐；
 - Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
 
+当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 SQLite 已完成。
+距离单进程 P1 验收主要剩 P1-D 的 PostgreSQL、migration 和连接池；多进程
+生产部署还需要先完成共享 Session / 限流 store。
+
 范围：
 
-1. P1-0 API 基础设施（P0 最小切片，进行中）：
+1. P1-0 API 基础设施（已完成）：
    - `query` / `cookies` / 多值 header / `request_id` / `client_ip`
      （已完成，HTTP/1.1 + HTTP/2 + thread/process worker 传递）
    - 统一 `json_response` / `json_error`（已完成）
    - `route.use_after` 响应后处理与 JSON 错误边界（已完成）
    - 请求级超时（已完成 task handler 超时；同步 CPU-bound handler 无法安全抢占，
      文档标注限制）
-2. P1-A 认证与会话（进行中）：
+2. P1-A 认证与会话（基础完成）：
    - Cookie 构造、内存 Session store、CSRF、HMAC token（已完成）
    - Argon2id 密码哈希（已完成，vendor `libargon2` + `std.password`）
    - Cookie Session 与 Bearer Token 共用用户和权限模型（已完成）
    - 标准 HS256 JWT、`require_bearer`、`authenticate` 与 401/403 helper
      （已完成）
-   - 多 worker 共享 Session store（待补）
-   - 完整权限/角色 middleware（待按实际需求扩展）
-3. P1-B 限流与安全（基本完成）：
+   - 多 worker 共享 Session store（待实现；多进程生产必做）
+   - 完整权限/角色 middleware（按需，不阻塞 P1 验收）
+3. P1-B 限流与安全（基础完成）：
    - CORS before/after middleware（已完成）
    - 安全响应头（已完成）
    - 可信代理客户端 IP（已完成）
    - IP / token / 用户 / 路由维度固定窗口限流（已完成）
-   - 登录失败保护可用限流组合实现；账户级锁定策略待按需求扩展
+   - 登录失败保护可用限流组合实现；账户级锁定策略（按需）
    - 请求大小与超时限制（已有）
-4. P1-C 可观测性（基本完成）：
+   - 多 worker 共享限流 store（待实现；多进程生产必做）
+4. P1-C 可观测性（基础完成）：
    - 结构化访问日志（已完成）
    - JSON 错误边界与 request id 关联（已完成）
    - `std.metrics`、Prometheus `/metrics`（已完成）
    - `/healthz`、`/readyz`（已完成）
-   - 完整错误堆栈日志与 OpenTelemetry tracing（待按需求扩展）
+   - 完整错误堆栈日志与 OpenTelemetry tracing（按需）
 5. P1-D 数据库（进行中）：
    - SQLite 驱动、参数化查询、事务（已完成，`std.db` 可选构建）
-   - 连接池、migration（待补）
-   - PostgreSQL 驱动（待补）
+   - PostgreSQL 驱动（待实现，下一优先）
+   - migration（待实现）
+   - 连接池（待实现；先明确事务绑定和并发语义）
    - 暂不做完整 ORM
 
 验收：
 
-- 所有响应带 request id；handler 错误统一返回 JSON；
-- 登录、登出、token 过期、CSRF、密码哈希可验证；
-- 限流返回 429 与 `Retry-After`，伪造代理头不能绕过；
-- 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取；
-- SQLite 与 PostgreSQL 的事务、连接池、migration 测试通过。
+- 所有响应带 request id；handler 错误统一返回 JSON（已满足）；
+- 登录、登出、token 过期、CSRF、密码哈希可验证（已满足）；
+- 限流返回 429 与 `Retry-After`，伪造代理头不能绕过（已满足）；
+- 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取（已满足）；
+- SQLite 事务测试已通过；PostgreSQL、连接池、migration 测试待补齐。
 
 不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
 GraphQL、完整 ORM、OAuth 第三方登录。
 
 ---
 
-## 3. 待决策事项
+## 3. 决策记录与待决策事项
 
 1. 是否把 Skein 包生态做成公共生态？
 2. 是否引入 moving / compacting GC？
@@ -445,91 +478,21 @@ GraphQL、完整 ORM、OAuth 第三方登录。
    match；运行时同时校验不可变性与 arity。`[a, b]` 保持宽松的依据是结构化
    读取：它只按位置读取元素并创建新绑定，不改写源 tuple；因此
    `let l: list[int] = (1, 2);` 仍被 checker 拒绝。
-10. ~~是否引入 `wait t` 前缀写法并统一上下文相关词法？~~ 已决定：引入。
-    **规划完成，待实现；与第 11 项相互独立，建议先实现本项。**
-    - 语义：`wait e == e.wait()`，要求 `e: task[T]`，结果为 `T`；只等待已有
-      task，不 launch、不恢复 `async/await`、不引入函数染色。
-      `wait launch f()` 合法且等价于 `(launch f()).wait()`；`wait f()` 在
-      `f()` 不返回 task 时必须是静态类型错误。`wait` 不接受超时参数；需要
-      超时用 `t.wait(ms)` 或 `std.task.wait(t, ms)`。
-    - 词法：新增保留字 `wait`。同时统一 `.` 后关键字：`.` 后所有关键字与
-      内置函数名一律按 `NAME` 返回。实现方式是在 `tokens.l` 增加宏，在每个
-      关键字/内置规则入口先检查 `last_token == '.'`，命中则调用
-      `note_for_name_token()`、`make_name_token(yytext, yyleng)` 和
-      `YYRET(NAME)`，跳过 header context / declaration skip 副作用。
-      这样 `t.wait()`、`std.task.wait`、`std.process.wait`、`x.match`、
-      枚举变体与 import 路径无需逐个打补丁。
-    - 语法：parser 新增 `WAIT exp %prec UMINUS`，在 parse 阶段 desugar 为
-      `newcall(newast('j', exp, newstr("wait")), NULL)`。在 `ufncall` 上增加
-      `wait_sugar` 标记（`newcall` 默认置 0），只用于诊断，不改变执行语义。
-      已用 Bison 3.8.2 验证该规则不增加冲突，`%expect 3` 保持不变。
-    - 诊断（修正原方案）：现有 checker 对 `1.wait()` / `f().wait()` 不会报
-      类型错误，只会在运行时抛出 `cannot index int`。因此
-      `check_method_call` 增加 `wait_sugar` 参数：receiver 是明确的非
-      `task[...]` 类型（排除 `any`、泛型和 union，保持现有宽松行为）时报
-      `wait expects a task, got <type>`，位置指向 `wait` 的操作数；
-      `task[T]` 仍返回 `T`。直接 `.wait()` 的旧诊断保持不变，以免影响用户
-      自定义的 `wait()` 方法。
-    - `launch wait f()` 语义不清晰，实现时在 parser 拒绝，并提示改用
-      `wait (launch f())` 或 `(launch f()).wait()`；`wait launch f()` 保持
-      合法。
-    - 兼容：`wait` 在 `.` 之外成为保留字；当前仓库没有把 `wait` 用作独立
-      变量、函数、字段或类型名。已有 `t.wait()`、`std.task.wait`、
-      `std.process.wait` 因点号规则继续可用。新增声明不能命名为 `wait`
-      （与 `match` / `struct` 一致）；dict 字面量键需写成 `"wait"`。
-      编辑器高亮需同步加入 `wait`。
-    - 实施清单：
-      `src/interpreter/tokens.l`（`WAIT` 规则、点号后关键字宏）；
-      `src/interpreter/parser.y`（`%token`、`WAIT exp`、`launch wait` 拒绝）；
-      `src/interpreter/ast.h` + `ast.cpp`（`ufncall.wait_sugar` 默认 0）；
-      `src/interpreter/typecheck.cpp`（非 task 操作数的静态诊断）；
-      `src/interpreter/repl_ui.cpp`（REPL / completion 关键字列表）；
-      `src/interpreter/completion_index.cpp`（`wait` 补全说明）；
-      `SYNTAX.md`（关键字表、task 语法和示例）；
-      `editors/vim/syntax/skein.vim`、
-      `editors/vscode/syntaxes/skein.tmLanguage.json`。
-      VM、JIT、bytecode、ABI 不改。
-    - 测试矩阵：
-      `tests/skein/task_methods_basic.skein`：`wait t`、
-      `wait launch f()`、`wait (launch f())`、嵌套 `wait`、`task[void]`；
-      `tests/skein/task_methods_launch.skein`：与 structured task 组合；
-      `tests/cases/task_errors.py`：`wait 1`、`wait f()`（非 task）、
-      `let wait = 1`、`func wait()`、`launch wait f()`；
-      点号后关键字回归：`t.wait()`、`std.task.wait`、`std.process.wait`、
-      `std.regex.match`、枚举变体、`import std.list`；
-      `tests/vm_differential.py` 与 `tests/jit_differential.py` 增加
-      `wait` 程序，跑 AST/VM 与 VM/JIT 差分；
-      最后跑全量 `ctest`（JIT 与非 JIT 构建）。
-    - 不做：超时版 `wait e, ms`、`wait all` / `wait any` 新语义、
-      async/await 关键字、取消或恢复函数染色。
-11. 是否移除 `launch_target_call()` 特例，让 `.` 的高优先级真正生效？
-    - 与第 10 项独立；第 10 项完成后 `wait launch f()` 仍是推荐写法，不受
-      本项影响。本项只改变 `launch f().wait()` 的解析。
-    - 现状：`.` 在优先级表中（`parser.y:1053`）已高于 `UMINUS`（`1050`），而
-      `launch` 用 `%prec UMINUS`。按规则 `launch f().wait()` 本应解析为
-      `launch (f().wait())`，但 `launch_target_call()` 人为下钻到最内层 call，
-      把它改成了 `(launch f()).wait()`。
-    - 该特例导致三个问题：违反语言自己的优先级规则；`launch make().get()`
-      实际 launch 的是 `make()`（实测变量未定义）；`launch (make().get())`
-      中的括号因 AST 透明而失效。
-    - 改动：删除 `launch_target_call()` 及其调用处的下钻逻辑，`LAUNCH exp`
-      直接要求 `exp` 是 call 并打 `launch` 标志。
-    - 语义变化：`launch f().wait()` 变为 `launch (f().wait())`（返回
-      `task[T]`，通常无意义）；「launch f 并等待」的写法改为
-      `(launch f()).wait()`，或配合第 10 项写成 `wait (launch f())`。
-      `launch f()` 和 `launch obj.method()` 不受影响。
-    - 需迁移的写法（11 处，含嵌套）：
-      `tests/jit_differential.py:71`；
-      `tests/skein/task_methods_launch.skein:61,98,104`；
-      `tests/skein/key_semantics.skein:358`；
-      `tests/cases/task_methods.py:61,203`；
-      `tests/vm_differential.py:186,187`（187 含内外两处）；
-      `SYNTAX.md:3894`。
-      以下无需改：`tests/skein/task_methods_launch.skein:77` 已显式加括号；
-      `tests/cases/task_errors.py:265,692` 的 launch 目标是 `f()`，`.wait()`
-      作用于 `std.task.catch(...)` 的结果。
-    - 验证：改动后 `launch make().get()` 应 launch 整个 `make().get()`；
-      AST/VM 差分、JIT task-wait smoke 与全部 launch/task 测试通过。
+10. ~~是否引入 `wait t` 前缀写法并统一上下文相关词法？~~ 已实施（2026-11-22）：
+    `wait e` 等价于 `e.wait()`，要求 `e: task[T]` 并返回 `T`；
+    `wait launch f()` 合法，`launch wait f()` 被拒绝。`.` 后的关键字与内置名
+    统一按 `NAME` 解析，因此 `t.wait()`、`std.task.wait`、`std.regex.match`、
+    枚举变体和 import 路径均无需特判。非 task 操作数在类型检查阶段报
+    `wait expects a task, got <type>`；`any` / 泛型 / union 保持宽松。
+    测试已覆盖 `tests/skein/wait.skein`、`task_errors.py` 与 VM/JIT 差分，
+    JIT 35/35、非 JIT 33/33 通过。不做：超时版 `wait e, ms`、
+    `wait all` / `wait any`、async/await 关键字、取消或恢复函数染色。
+11. ~~是否移除 `launch_target_call()` 特例，让 `.` 的高优先级真正生效？~~
+    已实施（2026-11-22）：`LAUNCH exp` 直接作用于 `exp` 的完整调用链，
+    不再下钻到最内层 call。`launch make().get()` 启动整个 `make().get()`；
+    `launch f().wait()` 解析为 `launch (f().wait())`。需要“启动后等待”时
+    统一写 `wait launch f()` 或 `(launch f()).wait()`。已迁移相关测试和
+    `SYNTAX.md`，并增加 `launch make().get()` 调用链回归。
 
 ---
 
@@ -547,19 +510,22 @@ GraphQL、完整 ORM、OAuth 第三方登录。
 
 ## 5. 推荐执行顺序
 
-1. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
-2. Milestone 2 已完成。
-3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
-4. Milestone 4 的 GC root 审计、热点 opcode / frame 分配与 JIT 默认启用
+1. 语言层已无已决策待办。当前主线回到 Milestone 6 P1：P1-D 先做 PostgreSQL
+   驱动，再做 migration，最后连接池。连接池需先明确事务绑定、连接生命周期
+   和并发语义。
+2. 多进程生产部署前完成共享 Session / 限流 store；单进程开发与测试继续使用
+   内存实现即可。
+3. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
+   Milestone 2 已完成。
+4. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
+5. Milestone 4 的 GC root 审计、热点 opcode / frame 分配与 JIT 默认启用
    已完成；剩余是 moving GC / AOT / 字节码缓存的决策，以及移动 GC 决策后
    才会启动的 per-pc liveness / OSR / deopt。
-5. 测试稳定性已完成：
+6. 测试稳定性已完成：
    - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉
      probe-then-bind 竞态和定时就绪探测
    - `thread_bench` 门槛改用多次重复中的最好成绩，基线按实测重设
-6. 长尾能力按实际需求触发。
-7. Milestone 6（JSON API P1）：先完成 P1-0，再并行推进 P1-A / P1-B / P1-C；
-   P1-D 数据库单独排期，不阻塞前三项。
+7. 长尾能力按实际需求触发。
 
 ---
 

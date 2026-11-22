@@ -68,7 +68,7 @@ CASES = [
         "  return data[0] + data[1] + data[2];\n"
         "}\n"
         "println(str(work(3)));\n"
-        "println(str(launch work(10).wait()));\n"
+        "println(str(wait launch work(10)));\n"
         "println(str(wait launch work(20)));\n",
         expect_debug="[jit] enter work",
     ),

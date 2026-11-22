@@ -1027,7 +1027,7 @@ struct Handler {
   `wait` 只等待已有 task，不启动新 task，也不引入 `async` / `await`。
   `wait` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
   `std.task.wait(t, ms)`。`launch wait f()` 会被拒绝；请写
-  `wait (launch f())` 或 `(launch f()).wait()`。`wait` 是保留关键字。
+  `wait launch f()` 或 `wait (launch f())`。`wait` 是保留关键字。
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；旧 `*_async` 名称已移除；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；`std.task.retry` 返回 task，回调结果类型暂不精化；
@@ -3909,6 +3909,10 @@ let db = b.wait();
 
 - 普通函数可以直接调用会挂起的 API，并在当前 fiber 上隐式挂起；
 - `launch` 创建新 task 并立即返回 `task[T]`，不阻塞、不自动 `.wait()`；
+- `launch` 作用于其后的完整调用链：`launch make().get()` 启动的是
+  `make().get()`；`launch f().wait()` 解析为 `launch (f().wait())`，
+  不会先 launch 再 wait。需要“启动后等待”请写 `wait launch f()` 或
+  `(launch f()).wait()`；
 - `t.wait()` 等待并返回值；`std.task.wait(t)` 保留为兼容别名；
 - `wait t` 是 `t.wait()` 的前缀写法，`wait launch f()` 等价于
   `(launch f()).wait()`；
@@ -3930,7 +3934,7 @@ func fetch(port) {
   return socket;
 }
 
-let socket = launch fetch(8080).wait();
+let socket = wait launch fetch(8080);
 ```
 
 生成器：

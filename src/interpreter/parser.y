@@ -737,24 +737,6 @@ static struct ast *new_call_with_placeholders(
 }
 
 /*
- * `launch` binds to a call expression, but `launch f(x).wait()` must launch
- * `f(x)` and then call `.wait()` on the task instead of launching the whole
- * chain.  Attribute calls whose receiver is itself a call keep the historical
- * tight-binding behaviour by descending to the receiver call.
- */
-static struct ast *launch_target_call(struct ast *node) {
-    struct ast *current = node;
-    while (current && current->nodetype == 'C') {
-        struct ast *callee = ((struct ufncall *)current)->callee;
-        if (!callee || callee->nodetype != 'j' || !callee->l ||
-            callee->l->nodetype != 'C')
-            break;
-        current = callee->l;
-    }
-    return current;
-}
-
-/*
  * `wait value` desugars to `value.wait()`.  The extra flag only lets the
  * type checker report a targeted diagnostic; execution is identical to the
  * explicit method call.
@@ -1873,23 +1855,19 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                            { $$ = newmatch($2, $4); }
     | WAIT exp %prec UMINUS                { $$ = new_wait_call($2); }
     | LAUNCH exp %prec UMINUS {
-        if ($2 && $2->nodetype == 'C' &&
-            ((struct ufncall *)$2)->wait_sugar) {
+        if (!$2 || $2->nodetype != 'C') {
+            yyerror("launch expects a call expression");
+            treefree($2);
+            $$ = NULL;
+        } else if (((struct ufncall *)$2)->wait_sugar) {
             diag_set_location($2->line, $2->column);
             yyerror("launch cannot be applied to a wait expression; "
                     "use wait (launch f()) or (launch f()).wait()");
             treefree($2);
             $$ = NULL;
         } else {
-            struct ast *target = launch_target_call($2);
-            if (!target || target->nodetype != 'C') {
-                yyerror("launch expects a call expression");
-                treefree($2);
-                $$ = NULL;
-            } else {
-                ((struct ufncall *)target)->launch = 1;
-                $$ = $2;
-            }
+            ((struct ufncall *)$2)->launch = 1;
+            $$ = $2;
         }
       }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }

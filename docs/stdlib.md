@@ -2243,6 +2243,7 @@ std.deque（原生实现）
 std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
 std.auth（内嵌 Skein 源码包）
+std.web（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
@@ -2494,6 +2495,44 @@ let denied = auth.unauthorized_response("login required");
 - `constant_time_equal` 可用于比较签名或 CSRF token，支持 string 和 bytes。
 - `session_cookie` 默认 `HttpOnly`、`Secure`、`SameSite=Lax`；本地开发可显式
   传 `{"secure": false}`。
+
+`std.web` 提供 CORS、安全响应头、可信代理客户端 IP 和限流：
+
+```skein
+import std.web;
+
+let cors = web.cors({
+  "origins": ["https://app.example.com"],
+  "credentials": true
+});
+app.use(cors["before"]);
+app.use_after(cors["after"]);
+
+app.use_after(func(req, res) {
+  return web.apply_security_headers(res, {"hsts": true});
+});
+
+let limiter = web.rate_limit({
+  "limit": 100,
+  "window_ms": 60000,
+  "trusted_proxies": ["127.0.0.1"]
+});
+app.use(limiter.middleware);
+
+let ip = web.client_ip(req, {
+  "trusted_proxies": ["127.0.0.1"]
+});
+```
+
+- `web.cors` 返回 `before` / `after` 两个 middleware；`before` 处理 OPTIONS，
+  `after` 给允许的响应补 CORS 头。
+- `web.security_headers` 默认输出 `nosniff`、`X-Frame-Options: DENY`、
+  `Referrer-Policy: no-referrer`；`hsts`、`csp`、`permissions_policy` 按需开启。
+- `web.client_ip` 只有在 `remote_addr` 命中 `trusted_proxies` 时才信任
+  `X-Forwarded-For`。
+- `web.rate_limit` 是进程内固定窗口限流；返回 `429`、`Retry-After` 和
+  `X-RateLimit-*`。`limiter.reset()` 清空计数，`limiter.cleanup()` 清理过期
+  窗口。多 worker 部署需要后续接入共享 store。
 
 `std.graph` 提供有向图和常用算法：
 

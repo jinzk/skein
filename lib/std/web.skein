@@ -1,0 +1,287 @@
+package web {
+  import std;
+
+  func _list_has(values, target) {
+    if (kind_of(values) != "list") {
+      return false;
+    }
+    for (let item in values) {
+      if (item == target) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  func _header(req, name) {
+    let headers = req["headers"];
+    let value = std.dict.get(headers, name, null);
+    if (value == null || kind_of(value) != "string") {
+      return null;
+    }
+    return value;
+  }
+
+  func _cors_origin(req, options) {
+    let origins = std.dict.get(options, "origins", null);
+    if (origins == null) {
+      return null;
+    }
+    let origin = _header(req, "origin");
+    if (origin == null) {
+      return null;
+    }
+    if (kind_of(origins) == "string") {
+      if (origins == "*" || origins == origin) {
+        return origin;
+      }
+      return null;
+    }
+    if (_list_has(origins, origin)) {
+      return origin;
+    }
+    return null;
+  }
+
+  func _cors_headers(origin, options) {
+    let credentials = std.dict.get(options, "credentials", false);
+    let allow_origin = origin;
+    if (origin == "*" && !credentials) {
+      allow_origin = "*";
+    }
+    let headers = {
+      "Access-Control-Allow-Origin": allow_origin,
+      "Vary": "Origin",
+      "Access-Control-Allow-Methods": std.dict.get(
+        options, "methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS"),
+      "Access-Control-Allow-Headers": std.dict.get(
+        options, "headers", "Content-Type,Authorization"),
+      "Access-Control-Max-Age": str(std.dict.get(options, "max_age", 600))
+    };
+    if (credentials) {
+      headers["Access-Control-Allow-Credentials"] = "true";
+    }
+    let expose = std.dict.get(options, "expose_headers", null);
+    if (expose != null) {
+      if (kind_of(expose) == "list") {
+        expose = std.string.join(expose, ",");
+      }
+      headers["Access-Control-Expose-Headers"] = expose;
+    }
+    return headers;
+  }
+
+  export func cors(options = {}) {
+    let before = func(req) {
+      if (req["method"] != "OPTIONS") {
+        return null;
+      }
+      let origin = _cors_origin(req, options);
+      if (origin == null) {
+        return {"status": 403, "headers": {}, "body": ""};
+      }
+      return {
+        "status": 204,
+        "headers": _cors_headers(origin, options),
+        "body": ""
+      };
+    };
+    let after = func(req, response) {
+      let origin = _cors_origin(req, options);
+      if (origin == null) {
+        return response;
+      }
+      let headers = _cors_headers(origin, options);
+      let existing = response["headers"];
+      for (let key in headers) {
+        existing[key] = headers[key];
+      }
+      response["headers"] = existing;
+      return response;
+    };
+    return {"before": before, "after": after};
+  }
+
+  export func security_headers(options = {}) {
+    let headers = {
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": std.dict.get(options, "frame_options", "DENY"),
+      "Referrer-Policy": std.dict.get(
+        options, "referrer_policy", "no-referrer")
+    };
+    if (std.dict.get(options, "hsts", false)) {
+      headers["Strict-Transport-Security"] =
+        std.dict.get(options, "hsts_value",
+                     "max-age=31536000; includeSubDomains");
+    }
+    let csp = std.dict.get(options, "csp", null);
+    if (csp != null) {
+      headers["Content-Security-Policy"] = csp;
+    }
+    let permissions = std.dict.get(options, "permissions_policy", null);
+    if (permissions != null) {
+      headers["Permissions-Policy"] = permissions;
+    }
+    let extra = std.dict.get(options, "headers", null);
+    if (extra != null && kind_of(extra) == "dict") {
+      for (let key in extra) {
+        headers[key] = extra[key];
+      }
+    }
+    return headers;
+  }
+
+  export func apply_security_headers(response, options = {}) {
+    let headers = security_headers(options);
+    let existing = response["headers"];
+    for (let key in headers) {
+      existing[key] = headers[key];
+    }
+    response["headers"] = existing;
+    return response;
+  }
+
+  export func client_ip(req, options = {}) {
+    let remote = std.dict.get(req, "client_ip", null);
+    if (remote == null) {
+      remote = std.dict.get(req, "remote_addr", null);
+    }
+    let trusted = std.dict.get(options, "trusted_proxies", null);
+    if (trusted == null || !_list_has(trusted, remote)) {
+      return remote;
+    }
+    let forwarded = std.dict.get(req, "forwarded_for", null);
+    if (forwarded == null || kind_of(forwarded) != "string") {
+      return remote;
+    }
+    let first = std.string.split(forwarded, ",")[0];
+    first = std.string.trim(first);
+    if (first == "") {
+      return remote;
+    }
+    return first;
+  }
+
+  func _rate_response(result, message) {
+    let response = std.http.json_error(429, "rate_limited", message);
+    let headers = response["headers"];
+    headers["Retry-After"] =
+      str((result["retry_after_ms"] + 999) / 1000);
+    headers["X-RateLimit-Limit"] = str(result["limit"]);
+    headers["X-RateLimit-Remaining"] = str(result["remaining"]);
+    headers["X-RateLimit-Reset"] =
+      str((result["reset_ms"] + 999) / 1000);
+    response["headers"] = headers;
+    return response;
+  }
+
+  export struct Limiter {
+    check: callable;
+    middleware: callable;
+    reset: callable;
+    cleanup: callable;
+    limit: int;
+    window_ms: int;
+  }
+
+  export func rate_limit(options = {}) {
+    let limit = std.dict.get(options, "limit", 100);
+    let window_ms = std.dict.get(options, "window_ms", 60000);
+    if (kind_of(limit) != "int" || limit <= 0) {
+      fail("web.rate_limit limit must be a positive integer");
+    }
+    if (kind_of(window_ms) != "int" || window_ms <= 0) {
+      fail("web.rate_limit window_ms must be a positive integer");
+    }
+    let key_fn = std.dict.get(options, "key_fn", null);
+    if (key_fn == null) {
+      key_fn = func(req) {
+        return client_ip(req, options);
+      };
+    }
+    let message = std.dict.get(options, "message", "too many requests");
+    let buckets = {};
+
+    let check = func(req) {
+      let key = key_fn(req);
+      if (key == null) {
+        key = "unknown";
+      }
+      let now = std.time.now_ms();
+      let bucket = std.dict.get(buckets, key, null);
+      if (bucket == null || now - bucket["start"] >= window_ms) {
+        bucket = {"start": now, "count": 1};
+        buckets[key] = bucket;
+        return {
+          "allowed": true,
+          "limit": limit,
+          "remaining": limit - 1,
+          "retry_after_ms": 0,
+          "reset_ms": now + window_ms
+        };
+      }
+      if (bucket["count"] >= limit) {
+        let reset = bucket["start"] + window_ms;
+        return {
+          "allowed": false,
+          "limit": limit,
+          "remaining": 0,
+          "retry_after_ms": reset - now,
+          "reset_ms": reset
+        };
+      }
+      bucket["count"] = bucket["count"] + 1;
+      buckets[key] = bucket;
+      return {
+        "allowed": true,
+        "limit": limit,
+        "remaining": limit - bucket["count"],
+        "retry_after_ms": 0,
+        "reset_ms": bucket["start"] + window_ms
+      };
+    };
+
+    let middleware = func(req) {
+      let result = check(req);
+      if (!result["allowed"]) {
+        return _rate_response(result, message);
+      }
+      return null;
+    };
+
+    let reset = func(key = null) {
+      if (key == null) {
+        buckets = {};
+      } else {
+        buckets = std.dict.delete(buckets, key);
+      }
+      return true;
+    };
+
+    let cleanup = func() {
+      let now = std.time.now_ms();
+      let removed = 0;
+      let keys = [];
+      for (let key in buckets) {
+        keys = std.list.append(keys, key);
+      }
+      for (let key in keys) {
+        let bucket = buckets[key];
+        if (now - bucket["start"] >= window_ms) {
+          buckets = std.dict.delete(buckets, key);
+          removed = removed + 1;
+        }
+      }
+      return removed;
+    };
+
+    return Limiter {
+      check: check,
+      middleware: middleware,
+      reset: reset,
+      cleanup: cleanup,
+      limit: limit,
+      window_ms: window_ms
+    };
+  }
+}

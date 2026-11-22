@@ -397,9 +397,13 @@ std.string.builder          29 ms
      （已完成）
    - 多 worker 共享 Session store（待补）
    - 完整权限/角色 middleware（待按实际需求扩展）
-3. P1-B 限流与安全：
-   - IP / token / 用户 / 路由维度限流、登录失败保护
-   - 安全响应头、可信代理、请求大小与超时限制
+3. P1-B 限流与安全（基本完成）：
+   - CORS before/after middleware（已完成）
+   - 安全响应头（已完成）
+   - 可信代理客户端 IP（已完成）
+   - IP / token / 用户 / 路由维度固定窗口限流（已完成）
+   - 登录失败保护可用限流组合实现；账户级锁定策略待按需求扩展
+   - 请求大小与超时限制（已有）
 4. P1-C 可观测性：
    - 结构化访问日志、错误日志、`/healthz`、`/readyz`
    - `std.metrics` 与 Prometheus `/metrics`

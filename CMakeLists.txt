@@ -573,6 +573,7 @@ set(SKEIN_EMBEDDED_SOURCES
   heap.skein:kStdHeapSource:std_heap_source.inc
   route.skein:kStdRouteSource:std_route_source.inc
   auth.skein:kStdAuthSource:std_auth_source.inc
+  web.skein:kStdWebSource:std_web_source.inc
   graph.skein:kStdGraphSource:std_graph_source.inc
   arena.skein:kStdArenaSource:std_arena_source.inc
   path.skein:kStdPathSource:std_path_source.inc

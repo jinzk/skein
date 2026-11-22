@@ -153,7 +153,11 @@ package auth {
     let cleanup = func() {
       let now = std.time.now();
       let removed = 0;
+      let ids = [];
       for (let id in sessions) {
+        ids = std.list.append(ids, id);
+      }
+      for (let id in ids) {
         let record = sessions[id];
         if (record["expires"] <= now) {
           sessions = std.dict.delete(sessions, id);

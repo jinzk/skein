@@ -1,0 +1,104 @@
+import std;
+import std.web;
+include "_support.skein";
+
+ts_test("security headers", func() {
+  let defaults = web.security_headers();
+  ts_eq(defaults["X-Content-Type-Options"], "nosniff");
+  ts_eq(defaults["X-Frame-Options"], "DENY");
+  ts_eq(defaults["Referrer-Policy"], "no-referrer");
+  ts_eq(std.dict.has(defaults, "Strict-Transport-Security"), 0);
+
+  let strict = web.security_headers({
+    "hsts": true,
+    "csp": "default-src 'none'",
+    "permissions_policy": "camera=()",
+    "headers": {"X-Extra": "yes"}
+  });
+  ts_eq(strict["X-Extra"], "yes");
+  ts_eq(strict["Content-Security-Policy"], "default-src 'none'");
+  ts_eq(strict["Permissions-Policy"], "camera=()");
+  ts_eq(std.string.contains(
+          strict["Strict-Transport-Security"], "max-age="), 1);
+
+  let response = web.apply_security_headers(
+    {"status": 200, "headers": {"Content-Type": "application/json"},
+     "body": "{}"});
+  ts_eq(response["headers"]["X-Content-Type-Options"], "nosniff");
+});
+
+ts_test("cors middleware", func() {
+  let cors = web.cors({
+    "origins": ["https://app.example.com"],
+    "credentials": true,
+    "expose_headers": ["X-Request-Id"]
+  });
+  let request = {
+    "method": "OPTIONS",
+    "headers": {"origin": "https://app.example.com"}
+  };
+  let before = cors["before"](request);
+  ts_eq(before["status"], 204);
+  ts_eq(before["headers"]["Access-Control-Allow-Origin"],
+        "https://app.example.com");
+  ts_eq(before["headers"]["Access-Control-Allow-Credentials"], "true");
+  ts_eq(before["headers"]["Access-Control-Expose-Headers"], "X-Request-Id");
+
+  let response = cors["after"](
+    request, {"status": 200, "headers": {}, "body": ""});
+  ts_eq(response["headers"]["Access-Control-Allow-Origin"],
+        "https://app.example.com");
+
+  let denied = cors["before"]({
+    "method": "OPTIONS",
+    "headers": {"origin": "https://evil.example"}
+  });
+  ts_eq(denied["status"], 403);
+  ts_eq(std.dict.has(denied["headers"], "Access-Control-Allow-Origin"), 0);
+});
+
+ts_test("trusted proxy client ip", func() {
+  let request = {
+    "client_ip": "127.0.0.1",
+    "remote_addr": "127.0.0.1",
+    "forwarded_for": "203.0.113.9, 10.0.0.1",
+    "headers": {}
+  };
+  ts_eq(web.client_ip(request, {"trusted_proxies": ["127.0.0.1"]}),
+        "203.0.113.9");
+  ts_eq(web.client_ip(request, {"trusted_proxies": ["10.0.0.1"]}),
+        "127.0.0.1");
+  ts_eq(web.client_ip(request), "127.0.0.1");
+});
+
+ts_test("rate limit", func() {
+  let limiter = web.rate_limit({
+    "limit": 2,
+    "window_ms": 60000,
+    "key_fn": func(req) { return req["client_ip"]; }
+  });
+  let a1 = limiter.check({"client_ip": "1.1.1.1"});
+  ts_eq(a1["allowed"], true);
+  ts_eq(a1["remaining"], 1);
+  let a2 = limiter.check({"client_ip": "1.1.1.1"});
+  ts_eq(a2["allowed"], true);
+  ts_eq(a2["remaining"], 0);
+  let a3 = limiter.check({"client_ip": "1.1.1.1"});
+  ts_eq(a3["allowed"], false);
+  ts_true(a3["retry_after_ms"] > 0);
+  ts_eq(limiter.check({"client_ip": "2.2.2.2"})["allowed"], true);
+
+  limiter.reset();
+  ts_eq(limiter.check({"client_ip": "1.1.1.1"})["allowed"], true);
+
+  let middleware = limiter.middleware;
+  ts_eq(middleware({"client_ip": "3.3.3.3"}), null);
+  ts_eq(middleware({"client_ip": "3.3.3.3"}), null);
+  let denied = middleware({"client_ip": "3.3.3.3"});
+  ts_eq(denied["status"], 429);
+  ts_eq(denied["headers"]["X-RateLimit-Limit"], "2");
+  ts_eq(denied["headers"]["X-RateLimit-Remaining"], "0");
+  ts_eq(std.dict.has(denied["headers"], "Retry-After"), 1);
+});
+
+ts_finish();

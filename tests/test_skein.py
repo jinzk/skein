@@ -37,6 +37,7 @@ from cases import (
     task_methods,
     tuple_semantics,
     typecheck,
+    web,
 )
 
 MODULES = [
@@ -68,6 +69,7 @@ MODULES = [
     lsp,
     tuple_semantics,
     typecheck,
+    web,
 ]
 
 

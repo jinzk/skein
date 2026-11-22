@@ -399,6 +399,32 @@ std.string.builder          29 ms
       编辑器高亮需同步加入 `wait`。
     - 验证：`wait t` / `wait launch f()` / 非 task 操作数错误诊断、点号后
       关键字回归、AST/VM 差分与 JIT task-wait smoke。
+11. 是否移除 `launch_target_call()` 特例，让 `.` 的高优先级真正生效？
+    - 现状：`.` 在优先级表中（`parser.y:1053`）已高于 `UMINUS`（`1050`），而
+      `launch` 用 `%prec UMINUS`。按规则 `launch f().wait()` 本应解析为
+      `launch (f().wait())`，但 `launch_target_call()` 人为下钻到最内层 call，
+      把它改成了 `(launch f()).wait()`。
+    - 该特例导致三个问题：违反语言自己的优先级规则；`launch make().get()`
+      实际 launch 的是 `make()`（实测变量未定义）；`launch (make().get())`
+      中的括号因 AST 透明而失效。
+    - 改动：删除 `launch_target_call()` 及其调用处的下钻逻辑，`LAUNCH exp`
+      直接要求 `exp` 是 call 并打 `launch` 标志。
+    - 语义变化：`launch f().wait()` 变为 `launch (f().wait())`（返回
+      `task[T]`，通常无意义）；「launch f 并等待」的写法改为
+      `(launch f()).wait()`，或配合第 10 项写成 `wait (launch f())`。
+      `launch f()` 和 `launch obj.method()` 不受影响。
+    - 需迁移的写法（11 处，含嵌套）：
+      `tests/jit_differential.py:71`；
+      `tests/skein/task_methods_launch.skein:61,98,104`；
+      `tests/skein/key_semantics.skein:358`；
+      `tests/cases/task_methods.py:61,203`；
+      `tests/vm_differential.py:186,187`（187 含内外两处）；
+      `SYNTAX.md:3894`。
+      以下无需改：`tests/skein/task_methods_launch.skein:77` 已显式加括号；
+      `tests/cases/task_errors.py:265,692` 的 launch 目标是 `f()`，`.wait()`
+      作用于 `std.task.catch(...)` 的结果。
+    - 验证：改动后 `launch make().get()` 应 launch 整个 `make().get()`；
+      AST/VM 差分、JIT task-wait smoke 与全部 launch/task 测试通过。
 
 ---
 

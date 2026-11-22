@@ -634,6 +634,8 @@ value_t *build_namespace_impl() {
             {"read_body", B_http_read_body},
             {"close", B_http_close},
             {"thread_capabilities", B_http_thread_capabilities},
+            {"json_response", B_http_json_response},
+            {"json_error", B_http_json_error},
         })));
 #ifdef SKEIN_ENABLE_HTTP2
     root->payload->items.push_back(std::make_pair(

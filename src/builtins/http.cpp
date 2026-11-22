@@ -1,4 +1,4 @@
-#include "http.h"
+﻿#include "http.h"
 
 #include "net_internal.h"
 #include "text_internal.h"
@@ -6,12 +6,14 @@
 #include "ast.h"
 #include "compression.h"
 #include "cookie.h"
+#include "encoding.h"
 #include "eval.h"
 #include "fiber.h"
 #include "gc_roots.h"
 #include "event_loop.h"
 #include "http1_parser.h"
 #include "builtins_io.h"
+#include "json.h"
 #include "net.h"
 #include "package.h"
 #include "parser_lock.h"
@@ -44,6 +46,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <limits>
 #include <string>
@@ -61,6 +64,9 @@ namespace {
 
 value_t *await_task_value(value_t *task_value);
 bool await_task_timeout(const task_ptr &task, long long timeout_ms);
+value_t *json_error_response(long long status, const std::string &code,
+                             const std::string &message,
+                             const std::string &request_id);
 std::string http_platform_name();
 bool request_unsupported_feature(value_t *request,
                                  std::string &message, bool allow_sse,
@@ -280,9 +286,19 @@ std::string header_value(value_t *headers, const char *name) {
     for (size_t i = 0; i < dict->payload->items.size(); ++i) {
         value_t *key = dict->payload->items[i].first;
         value_t *value = dict->payload->items[i].second;
-        if (key->type == T_string && value->type == T_string &&
-            lower_ascii(((string_value_t *)key)->value) == target)
+        if (key->type != T_string ||
+            lower_ascii(((string_value_t *)key)->value) != target)
+            continue;
+        if (value->type == T_string)
             return ((string_value_t *)value)->value;
+        if (value->type == T_list) {
+            list_value_t *list = (list_value_t *)value;
+            if (!list->payload->items.empty()) {
+                value_t *first = list->payload->items[0];
+                if (first && first->type == T_string)
+                    return ((string_value_t *)first)->value;
+            }
+        }
     }
     return std::string();
 }
@@ -303,14 +319,34 @@ bool append_headers(std::string &out, value_t *headers, std::string &error) {
     for (size_t i = 0; i < dict->payload->items.size(); ++i) {
         value_t *key = dict->payload->items[i].first;
         value_t *value = dict->payload->items[i].second;
-        if (key->type != T_string || value->type != T_string) {
-            error = "header names and values must be strings";
+        if (key->type != T_string) {
+            error = "header names must be strings";
             return false;
         }
-        out += ((string_value_t *)key)->value;
-        out += ": ";
-        out += ((string_value_t *)value)->value;
-        out += "\r\n";
+        const char *name = ((string_value_t *)key)->value;
+        if (value->type == T_string) {
+            out += name;
+            out += ": ";
+            out += ((string_value_t *)value)->value;
+            out += "\r\n";
+            continue;
+        }
+        if (value->type == T_list) {
+            list_value_t *list = (list_value_t *)value;
+            for (value_t *item : list->payload->items) {
+                if (!item || item->type != T_string) {
+                    error = "header list values must be strings";
+                    return false;
+                }
+                out += name;
+                out += ": ";
+                out += ((string_value_t *)item)->value;
+                out += "\r\n";
+            }
+            continue;
+        }
+        error = "header names and values must be strings or string lists";
+        return false;
     }
     return true;
 }
@@ -350,11 +386,13 @@ const char *reason_phrase(int status) {
         case 409: return "Conflict";
         case 413: return "Payload Too Large";
         case 415: return "Unsupported Media Type";
+        case 422: return "Unprocessable Content";
         case 429: return "Too Many Requests";
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
         case 502: return "Bad Gateway";
         case 503: return "Service Unavailable";
+        case 504: return "Gateway Timeout";
         default: return "";
     }
 }
@@ -584,6 +622,256 @@ value_t *headers_dict(const http1::message &message) {
     return headers;
 }
 
+std::string trim_header_text(const std::string &text) {
+    size_t start = 0;
+    size_t end = text.size();
+    while (start < end &&
+           (text[start] == ' ' || text[start] == '\t' ||
+            text[start] == '\r' || text[start] == '\n'))
+        ++start;
+    while (end > start &&
+           (text[end - 1] == ' ' || text[end - 1] == '\t' ||
+            text[end - 1] == '\r' || text[end - 1] == '\n'))
+        --end;
+    return text.substr(start, end - start);
+}
+
+std::string decoded_query_part(const std::string &text) {
+    std::string decoded;
+    std::string ignored;
+    if (url_decode_component(text, decoded, ignored))
+        return decoded;
+    return text;
+}
+
+void add_query_value(value_t *query, const std::string &key,
+                     const std::string &value) {
+    value_t *existing = dict_get(query, key.c_str());
+    if (!existing) {
+        dict_set(query, key, newstrval(value.c_str()));
+        return;
+    }
+    if (existing->type == T_string) {
+        list_value_t *list = (list_value_t *)newlistval();
+        list->payload->items.push_back(dupval(existing));
+        list->payload->items.push_back(newstrval(value.c_str()));
+        dict_set(query, key, (value_t *)list);
+        return;
+    }
+    if (existing->type == T_list) {
+        ((list_value_t *)existing)->payload->items.push_back(
+            newstrval(value.c_str()));
+        return;
+    }
+    dict_set(query, key, newstrval(value.c_str()));
+}
+
+value_t *parse_query_string(const std::string &query) {
+    value_t *result = (value_t *)newdictval();
+    size_t start = 0;
+    while (start <= query.size()) {
+        size_t end = query.find('&', start);
+        if (end == std::string::npos)
+            end = query.size();
+        if (end > start) {
+            std::string pair = query.substr(start, end - start);
+            size_t equals = pair.find('=');
+            std::string key =
+                equals == std::string::npos ? pair : pair.substr(0, equals);
+            std::string value =
+                equals == std::string::npos ? "" : pair.substr(equals + 1);
+            add_query_value(result, decoded_query_part(key),
+                            decoded_query_part(value));
+        }
+        if (end == query.size())
+            break;
+        start = end + 1;
+    }
+    return result;
+}
+
+void split_request_target(const std::string &target, std::string &path,
+                          std::string &query) {
+    std::string value = target;
+    if (value.rfind("http://", 0) == 0 ||
+        value.rfind("https://", 0) == 0) {
+        size_t scheme = value.find("://");
+        size_t slash = value.find('/', scheme + 3);
+        value = slash == std::string::npos ? "/" : value.substr(slash);
+    }
+    size_t question = value.find('?');
+    if (question == std::string::npos) {
+        path = value;
+        query.clear();
+    } else {
+        path = value.substr(0, question);
+        query = value.substr(question + 1);
+    }
+    if (path.empty())
+        path = "/";
+}
+
+bool valid_request_id(const std::string &value) {
+    if (value.empty() || value.size() > 128)
+        return false;
+    for (unsigned char c : value) {
+        if (!(std::isalnum(c) || c == '-' || c == '_' || c == '.' ||
+              c == ':'))
+            return false;
+    }
+    return true;
+}
+
+std::string generate_request_id() {
+    static std::atomic<unsigned long long> sequence{0};
+    static const unsigned long long nonce = []() {
+        std::random_device device;
+        return (static_cast<unsigned long long>(device()) << 32) ^
+               static_cast<unsigned long long>(device());
+    }();
+    const unsigned long long stamp =
+        static_cast<unsigned long long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    const unsigned long long seq =
+        sequence.fetch_add(1, std::memory_order_relaxed);
+    char buffer[48];
+    std::snprintf(buffer, sizeof(buffer), "%016llx%012llx%08llx",
+                  nonce, stamp & 0xffffffffffffull,
+                  seq & 0xffffffffull);
+    return std::string(buffer);
+}
+
+value_t *make_header_values_dict() {
+    return (value_t *)newdictval();
+}
+
+void add_header_value(value_t *values, const std::string &name,
+                      const std::string &value) {
+    if (!values || values->type != T_dict)
+        return;
+    std::string key = lower_ascii(name);
+    value_t *existing = dict_get(values, key.c_str());
+    if (!existing) {
+        dict_set(values, key, newstrval(value.c_str()));
+        return;
+    }
+    if (existing->type == T_string) {
+        list_value_t *list = (list_value_t *)newlistval();
+        list->payload->items.push_back(dupval(existing));
+        list->payload->items.push_back(newstrval(value.c_str()));
+        dict_set(values, key, (value_t *)list);
+        return;
+    }
+    if (existing->type == T_list) {
+        ((list_value_t *)existing)->payload->items.push_back(
+            newstrval(value.c_str()));
+        return;
+    }
+    dict_set(values, key, newstrval(value.c_str()));
+}
+
+std::string first_header_value(value_t *values, const char *name) {
+    if (!values || values->type != T_dict)
+        return std::string();
+    value_t *value = dict_get(values, name);
+    if (!value)
+        return std::string();
+    if (value->type == T_string)
+        return ((string_value_t *)value)->value;
+    if (value->type == T_list) {
+        list_value_t *list = (list_value_t *)value;
+        if (!list->payload->items.empty()) {
+            value_t *first = list->payload->items[0];
+            if (first && first->type == T_string)
+                return ((string_value_t *)first)->value;
+        }
+    }
+    return std::string();
+}
+
+std::string compute_request_id(value_t *header_values) {
+    std::string incoming = first_header_value(header_values, "x-request-id");
+    if (valid_request_id(incoming))
+        return incoming;
+    return generate_request_id();
+}
+
+value_t *cookies_from_header_values(value_t *header_values) {
+    value_t *cookies = (value_t *)newdictval();
+    if (!header_values || header_values->type != T_dict)
+        return cookies;
+
+    auto add_cookie_header = [&](const std::string &header) {
+        size_t start = 0;
+        while (start <= header.size()) {
+            size_t end = header.find(';', start);
+            if (end == std::string::npos)
+                end = header.size();
+            std::string part = trim_header_text(
+                header.substr(start, end - start));
+            size_t equals = part.find('=');
+            if (equals != std::string::npos) {
+                std::string name = trim_header_text(part.substr(0, equals));
+                std::string value =
+                    trim_header_text(part.substr(equals + 1));
+                if (!name.empty()) {
+                    if (value.size() >= 2 && value.front() == '"' &&
+                        value.back() == '"')
+                        value = value.substr(1, value.size() - 2);
+                    dict_set(cookies, name, newstrval(value.c_str()));
+                }
+            }
+            if (end == header.size())
+                break;
+            start = end + 1;
+        }
+    };
+
+    value_t *value = dict_get(header_values, "cookie");
+    if (value && value->type == T_string) {
+        add_cookie_header(((string_value_t *)value)->value);
+    } else if (value && value->type == T_list) {
+        list_value_t *list = (list_value_t *)value;
+        for (value_t *item : list->payload->items)
+            if (item && item->type == T_string)
+                add_cookie_header(((string_value_t *)item)->value);
+    }
+    return cookies;
+}
+
+void fill_request_context(value_t *request, const std::string &target,
+                          value_t *header_values) {
+    if (!request || request->type != T_dict)
+        return;
+    std::string path;
+    std::string query;
+    split_request_target(target, path, query);
+    dict_set(request, "target", newstrval(target.c_str()));
+    dict_set(request, "path", newstrval(path.c_str()));
+    dict_set(request, "query", parse_query_string(query));
+    dict_set(request, "header_values", dupval(header_values));
+    dict_set(request, "cookies", cookies_from_header_values(header_values));
+    dict_set(request, "request_id",
+             newstrval(compute_request_id(header_values).c_str()));
+
+    std::string forwarded_for =
+        first_header_value(header_values, "x-forwarded-for");
+    if (!forwarded_for.empty())
+        dict_set(request, "forwarded_for",
+                 newstrval(forwarded_for.c_str()));
+    std::string forwarded_proto =
+        first_header_value(header_values, "x-forwarded-proto");
+    if (!forwarded_proto.empty())
+        dict_set(request, "forwarded_proto",
+                 newstrval(forwarded_proto.c_str()));
+
+    value_t *remote = dict_get(request, "remote_addr");
+    if (remote && remote->type == T_string)
+        dict_set(request, "client_ip", dupval(remote));
+}
+
 value_t *set_cookie_list(const std::vector<http1::header> &headers);
 
 value_t *make_response(const http1::message &message) {
@@ -602,13 +890,17 @@ value_t *make_response(const http1::message &message) {
 value_t *make_request(value_t *client, const http1::message &message) {
     value_t *request = (value_t *)newdictval();
     dict_set(request, "method", newstrval(message.method.c_str()));
-    dict_set(request, "path", newstrval(message.url.c_str()));
     dict_set(request, "headers", headers_dict(message));
     dict_set(request, "body", newbytesval(message.body));
     dict_set(request, "http_major", newintval(message.http_major));
     dict_set(request, "http_minor", newintval(message.http_minor));
     dict_set(request, "keep_alive", newboolval(message.keep_alive));
     dict_set(request, "socket", dupval(client));
+
+    value_t *header_values = make_header_values_dict();
+    for (const http1::header &header : message.headers)
+        add_header_value(header_values, header.name, header.value);
+
     value_t *peer = call_net(B_net_peer_addr, {dupval(client)});
     if (peer && peer->type == T_dict) {
         value_t *address = dict_get(peer, "address");
@@ -619,6 +911,8 @@ value_t *make_request(value_t *client, const http1::message &message) {
             dict_set(request, "remote_port", dupval(port));
     }
     freeval(peer);
+    fill_request_context(request, message.url, header_values);
+    freeval(header_values);
     return request;
 }
 
@@ -1437,6 +1731,32 @@ value_t *await_task_value(value_t *task_value) {
         return NULL;
     task_ptr task;
     if (!get_task_value(task_value, task)) {
+        freeval(task_value);
+        return NULL;
+    }
+    freeval(task_value);
+    return fiber_await_task(task);
+}
+
+value_t *await_task_value_timeout(value_t *task_value, long long timeout_ms,
+                                  bool &timed_out) {
+    timed_out = false;
+    if (!task_value)
+        return NULL;
+    task_ptr task;
+    if (!get_task_value(task_value, task)) {
+        freeval(task_value);
+        return NULL;
+    }
+    if (timeout_ms > 0 &&
+        task_get_state(task) == TASK_STATE_PENDING &&
+        !await_task_timeout(task, timeout_ms)) {
+        if (!g_interrupted) {
+            std::vector<value_t *> cancel_args;
+            cancel_args.push_back(dupval(task_value));
+            call_task_builtin(B_task_cancel, cancel_args);
+            timed_out = true;
+        }
         freeval(task_value);
         return NULL;
     }
@@ -2821,6 +3141,7 @@ struct http_server_state {
     long long max_requests = 0;
     long long max_per_connection = 100;
     long long idle_timeout_ms = 0;
+    long long handler_timeout_ms = 0;
     long long max_connections = 0;
     bool stream_request_body = false;
     value_t *on_request_body = NULL;
@@ -2947,19 +3268,37 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             connection_open = false;
             break;
         }
+        std::string request_id;
+        value_t *request_id_value = dict_get(request, "request_id");
+        if (request_id_value && request_id_value->type == T_string)
+            request_id = ((string_value_t *)request_id_value)->value;
         value_t *response =
             skein_call_function(handler, std::vector<value_t *>{request});
-        if (response && is_task_value(response))
-            response = await_task_value(response);
+        if (response && is_task_value(response)) {
+            bool handler_timed_out = false;
+            response = await_task_value_timeout(
+                response, state->handler_timeout_ms, handler_timed_out);
+            if (handler_timed_out)
+                response = json_error_response(
+                    504, "timeout", "handler timed out", request_id);
+        }
         if (!response) {
-            connection_open = false;
-            break;
+            response = json_error_response(
+                500, "internal_error", "handler failed", request_id);
+            if (!response) {
+                connection_open = false;
+                break;
+            }
         }
         if (response->type != T_dict) {
-            yyerror("std.http.serve handler must return a response dict");
             freeval(response);
-            connection_open = false;
-            break;
+            response = json_error_response(
+                500, "internal_error",
+                "handler must return a response dict", request_id);
+            if (!response) {
+                connection_open = false;
+                break;
+            }
         }
 
         value_t *status_value = dict_get(response, "status");
@@ -2990,6 +3329,14 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             connection_open = false;
             break;
         }
+        if (!headers || headers->type == T_null) {
+            headers = (value_t *)newdictval();
+            dict_set(response, "headers", headers);
+        }
+        if (!request_id.empty() &&
+            !header_exists(headers, "X-Request-Id"))
+            dict_set(headers, "X-Request-Id",
+                     newstrval(request_id.c_str()));
         std::string body;
         generator_ptr body_generator;
         bool chunked = false;
@@ -3470,10 +3817,26 @@ value_t *http_serve(const std::vector<value_t *> &args) {
         !positive_size_option(args[0], "max_body_bytes", max_body_bytes))
         return NULL;
 
+    long long handler_timeout_ms = 0;
+    value_t *handler_timeout_value =
+        dict_get(args[0], "handler_timeout_ms");
+    if (handler_timeout_value &&
+        handler_timeout_value->type != T_null) {
+        if (handler_timeout_value->type != T_int ||
+            ((int_value_t *)handler_timeout_value)->value < 0) {
+            yyerror("std.http.serve handler_timeout_ms must be a "
+                    "non-negative integer");
+            return NULL;
+        }
+        handler_timeout_ms =
+            ((int_value_t *)handler_timeout_value)->value;
+    }
+
     http_server_state state;
     state.max_requests = max_requests;
     state.max_per_connection = max_per_connection;
     state.idle_timeout_ms = idle_timeout_ms;
+    state.handler_timeout_ms = handler_timeout_ms;
     state.max_connections = max_connections;
     state.stream_request_body = stream_request_body;
     state.on_request_body = on_request_body;
@@ -3550,6 +3913,13 @@ while (true) {
     }
     if (len(request["params"]) > 7) {
         req["remote_port"] = request["params"][7];
+    }
+    if (len(request["params"]) > 8 &&
+        kind_of(request["params"][8]) == "dict") {
+        let context = request["params"][8];
+        for (let key in context) {
+            req[key] = context[key];
+        }
     }
     let future = pool.submit(req);
     let result = future.wait();
@@ -4881,6 +5251,17 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             value_t *remote_port = dict_get(request, "remote_port");
             items->payload->items.push_back(
                 remote_port ? dupval(remote_port) : newintval(0));
+            value_t *context = (value_t *)newdictval();
+            const char *context_fields[] = {
+                "target", "query", "cookies", "header_values",
+                "request_id", "client_ip", "forwarded_for",
+                "forwarded_proto"};
+            for (const char *field : context_fields) {
+                value_t *field_value = dict_get(request, field);
+                if (field_value)
+                    dict_set(context, field, dupval(field_value));
+            }
+            items->payload->items.push_back(context);
             value_t *method = newstrval("handle");
             value_t *body_arg = newbytesval(body);
             std::vector<value_t *> call{server->pool, method, params,
@@ -4986,6 +5367,116 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
     server->http = state;
     server->server_task = task;
     return newuserdataval(&kProcessServerType, server);
+}
+
+value_t *json_response_value(long long status, value_t *value,
+                             value_t *headers, std::string &error) {
+    std::string text = json_stringify_text(value, error);
+    if (!error.empty())
+        return NULL;
+    value_t *response = (value_t *)newdictval();
+    dict_set(response, "status", newintval(status));
+    value_t *out_headers =
+        headers && headers->type == T_dict ? dupval(headers)
+                                          : (value_t *)newdictval();
+    if (!header_exists(out_headers, "Content-Type"))
+        dict_set(out_headers, "Content-Type",
+                 newstrval("application/json; charset=utf-8"));
+    dict_set(response, "headers", out_headers);
+    dict_set(response, "body", newstrval(text.c_str()));
+    return response;
+}
+
+value_t *json_error_response(long long status, const std::string &code,
+                             const std::string &message,
+                             const std::string &request_id) {
+    value_t *error_object = (value_t *)newdictval();
+    dict_set(error_object, "code", newstrval(code.c_str()));
+    dict_set(error_object, "message", newstrval(message.c_str()));
+    if (!request_id.empty())
+        dict_set(error_object, "request_id", newstrval(request_id.c_str()));
+    value_t *body = (value_t *)newdictval();
+    dict_set(body, "error", error_object);
+    std::string error;
+    value_t *response = json_response_value(status, body, NULL, error);
+    freeval(body);
+    if (response && !request_id.empty()) {
+        value_t *headers = dict_get(response, "headers");
+        if (headers && headers->type == T_dict)
+            dict_set(headers, "X-Request-Id", newstrval(request_id.c_str()));
+    }
+    return response;
+}
+
+value_t *http_json_response(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3) {
+        yyerror("std.http.json_response expects 2 or 3 arguments, got %d",
+                (int)args.size());
+        return NULL;
+    }
+    if (!args[0] || args[0]->type != T_int) {
+        yyerror("std.http.json_response status must be an integer, got %s",
+                args[0] ? typename_of(args[0]) : "null");
+        return NULL;
+    }
+    long long status = ((int_value_t *)args[0])->value;
+    if (status < 100 || status > 999) {
+        yyerror("std.http.json_response status must be in 100..999");
+        return NULL;
+    }
+    if (args.size() == 3 && args[2] && args[2]->type != T_dict &&
+        args[2]->type != T_null) {
+        yyerror("std.http.json_response headers must be a dict, got %s",
+                typename_of(args[2]));
+        return NULL;
+    }
+    std::string error;
+    value_t *response = json_response_value(
+        status, args[1],
+        args.size() == 3 && args[2] && args[2]->type == T_dict ? args[2]
+                                                               : NULL,
+        error);
+    if (!response)
+        yyerror("std.http.json_response: %s", error.c_str());
+    return response;
+}
+
+value_t *http_json_error(const std::vector<value_t *> &args) {
+    if (args.size() < 3 || args.size() > 4) {
+        yyerror("std.http.json_error expects 3 or 4 arguments, got %d",
+                (int)args.size());
+        return NULL;
+    }
+    if (!args[0] || args[0]->type != T_int) {
+        yyerror("std.http.json_error status must be an integer, got %s",
+                args[0] ? typename_of(args[0]) : "null");
+        return NULL;
+    }
+    long long status = ((int_value_t *)args[0])->value;
+    if (status < 100 || status > 999) {
+        yyerror("std.http.json_error status must be in 100..999");
+        return NULL;
+    }
+    if (!args[1] || args[1]->type != T_string ||
+        !args[2] || args[2]->type != T_string) {
+        yyerror("std.http.json_error expects string code and message");
+        return NULL;
+    }
+    value_t *error_object = (value_t *)newdictval();
+    dict_set(error_object, "code",
+             newstrval(((string_value_t *)args[1])->value));
+    dict_set(error_object, "message",
+             newstrval(((string_value_t *)args[2])->value));
+    if (args.size() == 4 && args[3] && args[3]->type != T_null)
+        dict_set(error_object, "details", dupval(args[3]));
+    value_t *body = (value_t *)newdictval();
+    dict_set(body, "error", error_object);
+    std::string error;
+    value_t *response = json_response_value(status, body, NULL, error);
+    freeval(body);
+    if (!response)
+        yyerror("std.http.json_error: %s", error.c_str());
+    return response;
 }
 
 value_t *thread_server_response(int status, const std::string &message) {
@@ -5157,9 +5648,11 @@ value_t *make_reuse_handler(
             }
             value_t *request = (value_t *)newdictval();
             const char *fields[] = {
-                "method", "path", "headers", "body", "http_major",
-                "http_minor", "keep_alive", "body_reader", "socket",
-                "connection_id", "scheme", "authority"};
+                "method", "path", "target", "query", "cookies",
+                "header_values", "request_id", "client_ip",
+                "forwarded_for", "forwarded_proto", "headers", "body",
+                "http_major", "http_minor", "keep_alive", "body_reader",
+                "socket", "connection_id", "scheme", "authority"};
             for (const char *field : fields) {
                 value_t *value = dict_get(source, field);
                 if (value)
@@ -5515,8 +6008,10 @@ value_t *thread_dispatch(
 
     value_t *socket = dict_get(request, "socket");
     value_t *payload = (value_t *)newdictval();
-    const char *fields[] = {"method", "path", "headers", "body",
-                            "http_major", "http_minor", "keep_alive"};
+    const char *fields[] = {
+        "method", "path", "target", "query", "cookies", "header_values",
+        "request_id", "client_ip", "forwarded_for", "forwarded_proto",
+        "headers", "body", "http_major", "http_minor", "keep_alive"};
     for (const char *field : fields) {
         value_t *field_value = dict_get(request, field);
         if (field_value)
@@ -6447,6 +6942,30 @@ value_t *http_close(const std::vector<value_t *> &args) {
 
 } // namespace
 
+value_t *new_header_values_dict() {
+    return make_header_values_dict();
+}
+
+void header_values_add(value_t *values, const std::string &name,
+                       const std::string &value) {
+    add_header_value(values, name, value);
+}
+
+std::string http_request_id(value_t *header_values) {
+    return compute_request_id(header_values);
+}
+
+void add_request_context(value_t *request, const std::string &target,
+                         value_t *header_values) {
+    fill_request_context(request, target, header_values);
+}
+
+value_t *http_json_error_response(long long status, const std::string &code,
+                                  const std::string &message,
+                                  const std::string &request_id) {
+    return json_error_response(status, code, message, request_id);
+}
+
 namespace {
 
 std::string request_body_describe(const void *) {
@@ -6553,6 +7072,10 @@ struct value_t *call_http_builtin(
             return http_close(args);
         case B_http_thread_capabilities:
             return http_thread_capabilities(args);
+        case B_http_json_response:
+            return http_json_response(args);
+        case B_http_json_error:
+            return http_json_error(args);
         default:
             yyerror("unknown http function");
             return NULL;

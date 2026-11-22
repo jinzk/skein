@@ -617,6 +617,7 @@ struct h2_connection {
         std::string scheme;
         std::string authority;
         std::vector<header_pair> headers;
+        std::string request_id;
         std::string body;
         std::deque<std::string> body_chunks;
         task_ptr body_waiter;
@@ -627,6 +628,7 @@ struct h2_connection {
         bool responded = false;
         bool ready_enqueued = false;
         bool discard_body = false;
+        std::chrono::steady_clock::time_point handler_started;
     };
     std::map<int32_t, std::shared_ptr<server_request>> requests;
     std::vector<int32_t> ready;
@@ -2869,7 +2871,6 @@ value_t *make_request(
     value_t *stream, long long connection_id, bool stream_request_body) {
     value_t *object = (value_t *)newdictval();
     dict_set(object, "method", newstrval(request->method.c_str()));
-    dict_set(object, "path", newstrval(request->path.c_str()));
     dict_set(object, "scheme", newstrval(request->scheme.c_str()));
     dict_set(object, "authority", newstrval(request->authority.c_str()));
     dict_set(object, "headers", headers_dict(request->headers));
@@ -2878,6 +2879,26 @@ value_t *make_request(
     dict_set(object, "http_minor", newintval(0));
     dict_set(object, "socket", dupval(stream));
     dict_set(object, "connection_id", newintval(connection_id));
+
+    value_t *header_values = new_header_values_dict();
+    for (const header_pair &header : request->headers)
+        header_values_add(header_values, header.name, header.value);
+    value_t *peer = call_net(B_net_peer_addr, {dupval(stream)});
+    if (peer && peer->type == T_dict) {
+        value_t *address = dict_get(peer, "address");
+        value_t *port = dict_get(peer, "port");
+        if (address)
+            dict_set(object, "remote_addr", dupval(address));
+        if (port)
+            dict_set(object, "remote_port", dupval(port));
+    }
+    freeval(peer);
+    add_request_context(object, request->path, header_values);
+    value_t *request_id = dict_get(object, "request_id");
+    if (request_id && request_id->type == T_string)
+        request->request_id = ((string_value_t *)request_id)->value;
+    freeval(header_values);
+
     if (stream_request_body) {
         dict_set(object, "body_reader",
                  new_request_body_value(
@@ -2944,32 +2965,71 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
         return false;
     }
 
+    std::shared_ptr<h2_connection::server_request> request_meta =
+        server_request_at(&connection, stream_id);
     std::vector<header_pair> response_headers;
     header_pair status_header = {":status", std::to_string(status)};
     response_headers.push_back(status_header);
+    bool has_request_id_header = false;
+    auto add_response_header = [&](const std::string &name,
+                                   const std::string &value) {
+        if (name.empty() || name[0] == ':') {
+            yyerror("std.http2.serve header names must not be pseudo "
+                    "headers");
+            return false;
+        }
+        std::string lower = lower_ascii(name);
+        if (lower == "x-request-id")
+            has_request_id_header = true;
+        if (header_is_connection_specific(name))
+            return true;
+        header_pair pair;
+        pair.name = lower;
+        pair.value = value;
+        response_headers.push_back(pair);
+        return true;
+    };
     if (headers && headers->type == T_dict) {
         dict_value_t *dict = (dict_value_t *)headers;
         for (size_t i = 0; i < dict->payload->items.size(); ++i) {
             value_t *key = dict->payload->items[i].first;
             value_t *value = dict->payload->items[i].second;
-            if (key->type != T_string || value->type != T_string) {
-                yyerror("std.http2.serve header names and values must be "
-                        "strings");
+            if (key->type != T_string) {
+                yyerror("std.http2.serve header names must be strings");
                 return false;
             }
             std::string name = ((string_value_t *)key)->value;
-            if (name.empty() || name[0] == ':') {
-                yyerror("std.http2.serve header names must not be pseudo "
-                        "headers");
-                return false;
-            }
-            if (header_is_connection_specific(name))
+            if (value->type == T_string) {
+                if (!add_response_header(
+                        name, ((string_value_t *)value)->value))
+                    return false;
                 continue;
-            header_pair pair;
-            pair.name = lower_ascii(name);
-            pair.value = ((string_value_t *)value)->value;
-            response_headers.push_back(pair);
+            }
+            if (value->type == T_list) {
+                list_value_t *list = (list_value_t *)value;
+                for (value_t *item : list->payload->items) {
+                    if (!item || item->type != T_string) {
+                        yyerror("std.http2.serve header list values must be "
+                                "strings");
+                        return false;
+                    }
+                    if (!add_response_header(
+                            name, ((string_value_t *)item)->value))
+                        return false;
+                }
+                continue;
+            }
+            yyerror("std.http2.serve header names and values must be "
+                    "strings or string lists");
+            return false;
         }
+    }
+    if (!has_request_id_header && request_meta &&
+        !request_meta->request_id.empty()) {
+        header_pair pair;
+        pair.name = "x-request-id";
+        pair.value = request_meta->request_id;
+        response_headers.push_back(pair);
     }
 
     std::vector<nghttp2_nv> nva;
@@ -3015,6 +3075,7 @@ struct h2_server_state {
     long long max_requests = 0;
     long long max_per_connection = 100;
     long long idle_timeout_ms = 0;
+    long long handler_timeout_ms = 0;
     long long max_connections = 0;
     long long served = 0;
     bool stopping = false;
@@ -3165,6 +3226,8 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                     connection_open = false;
                     break;
                 }
+                it->second->handler_started =
+                    std::chrono::steady_clock::now();
                 handler_tasks[stream_id] = handler_task;
             }
             if (!connection_open)
@@ -3189,16 +3252,57 @@ void handle_h2_server_connection(value_t *stream, long long connection_id,
                 task_state_code handler_state =
                     task_get_state(it->second);
                 if (handler_state == TASK_STATE_PENDING) {
+                    int32_t pending_stream = it->first;
+                    std::shared_ptr<h2_connection::server_request> pending =
+                        server_request_at(&connection, pending_stream);
+                    if (state->handler_timeout_ms > 0 && pending &&
+                        std::chrono::steady_clock::now() -
+                                pending->handler_started >=
+                            std::chrono::milliseconds(
+                                state->handler_timeout_ms)) {
+                        std::vector<value_t *> cancel_args;
+                        cancel_args.push_back(new_task_value(it->second));
+                        call_task_builtin(B_task_cancel, cancel_args);
+                        value_t *error_response = http_json_error_response(
+                            504, "timeout", "handler timed out",
+                            pending->request_id);
+                        bool ok = error_response &&
+                                  submit_server_response(
+                                      connection, pending_stream,
+                                      error_response);
+                        freeval(error_response);
+                        it = handler_tasks.erase(it);
+                        if (!ok) {
+                            connection_open = false;
+                            break;
+                        }
+                        state->note_served();
+                        ++connection_requests;
+                        continue;
+                    }
                     ++it;
                     continue;
                 }
                 int32_t stream_id = it->first;
                 if (handler_state != TASK_STATE_DONE) {
-                    connection.failure = task_error_message(it->second);
-                    if (connection.failure.empty())
-                        connection.failure = "handler failed";
-                    connection_open = false;
-                    break;
+                    std::shared_ptr<h2_connection::server_request> meta =
+                        server_request_at(&connection, stream_id);
+                    const std::string request_id =
+                        meta ? meta->request_id : std::string();
+                    value_t *error_response = http_json_error_response(
+                        500, "internal_error", "handler failed", request_id);
+                    bool ok = error_response &&
+                              submit_server_response(connection, stream_id,
+                                                     error_response);
+                    freeval(error_response);
+                    it = handler_tasks.erase(it);
+                    if (!ok) {
+                        connection_open = false;
+                        break;
+                    }
+                    state->note_served();
+                    ++connection_requests;
+                    continue;
                 }
                 value_t *response = task_copy_result(it->second);
                 bool ok = submit_server_response(connection, stream_id,
@@ -3450,11 +3554,26 @@ value_t *http2_serve(const std::vector<value_t *> &args) {
         max_body_bytes =
             (std::size_t)((int_value_t *)max_body_value)->value;
     }
+    long long handler_timeout_ms = 0;
+    value_t *handler_timeout_value =
+        dict_get(args[0], "handler_timeout_ms");
+    if (handler_timeout_value &&
+        handler_timeout_value->type != T_null) {
+        if (handler_timeout_value->type != T_int ||
+            ((int_value_t *)handler_timeout_value)->value < 0) {
+            yyerror("std.http2.serve handler_timeout_ms must be a "
+                    "non-negative integer");
+            return NULL;
+        }
+        handler_timeout_ms =
+            ((int_value_t *)handler_timeout_value)->value;
+    }
 
     h2_server_state state;
     state.max_requests = max_requests;
     state.max_per_connection = max_per_connection;
     state.idle_timeout_ms = idle_timeout_ms;
+    state.handler_timeout_ms = handler_timeout_ms;
     state.max_connections = max_connections;
     state.stream_request_body = stream_request_body;
     state.on_request_body = on_request_body;

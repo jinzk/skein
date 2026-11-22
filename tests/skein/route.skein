@@ -358,4 +358,43 @@ ts_test("route request validation", func() {
   }, "route.dispatch requires a string path");
 });
 
+ts_test("route after middleware", func() {
+  let app = route.new();
+  app.use_after(func(req, res) {
+    res["headers"]["X-After"] = "yes";
+    return res;
+  });
+  app.get("/ok", func(req) {
+    return {"status": 200, "headers": {}, "body": "ok"};
+  });
+  let found = app.dispatch({"method": "GET", "path": "/ok"});
+  ts_eq(found["headers"]["X-After"], "yes");
+  let missing = app.dispatch({"method": "GET", "path": "/missing"});
+  ts_eq(missing["status"], 404);
+  ts_eq(missing["headers"]["X-After"], "yes");
+});
+
+ts_test("route after middleware can replace response", func() {
+  let app = route.new();
+  app.use_after(func(req, res) {
+    if (res["status"] == 500) {
+      return {"status": 503, "headers": {}, "body": "retry"};
+    }
+    return null;
+  });
+  app.get("/bad", func(req) {
+    return {"status": 500, "headers": {}, "body": "no"};
+  });
+  let response = app.dispatch({"method": "GET", "path": "/bad"});
+  ts_eq(response["status"], 503);
+  ts_eq(response["body"], "retry");
+});
+
+ts_test("route non-callable after middleware", func() {
+  let app = route.new();
+  ts_error(func() {
+    app.use_after(1);
+  }, "route after middleware must be callable");
+});
+
 ts_finish();

@@ -21,6 +21,10 @@ bool encode_text(const std::string &input, const std::string &encoding,
 bool decode_to_utf8(const std::string &input, const std::string &encoding,
                     std::string &output, std::string &error);
 
+/* Decode one URL component (percent escapes and '+') to UTF-8. */
+bool url_decode_component(const std::string &input, std::string &output,
+                          std::string &error);
+
 struct value_t *call_encoding_builtin(
     int functype, const std::vector<struct value_t *> &args);
 

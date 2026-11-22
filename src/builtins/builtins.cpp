@@ -620,7 +620,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_compress_gzip && functype <= B_compress_inflate)
         return call_compress_builtin(functype, args);
     if (functype >= B_http_request &&
-        functype <= B_http_thread_capabilities)
+        functype <= B_http_json_error)
         return call_http_builtin(functype, args);
 #ifdef SKEIN_ENABLE_HTTP2
     if (functype >= B_http2_request && functype <= B_http2_serve)

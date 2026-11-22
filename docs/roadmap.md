@@ -382,11 +382,13 @@ std.string.builder          29 ms
 
 范围：
 
-1. P1-0 API 基础设施（P0 最小切片）：
+1. P1-0 API 基础设施（P0 最小切片，进行中）：
    - `query` / `cookies` / 多值 header / `request_id` / `client_ip`
-   - 统一 `json_response` / `json_error`
-   - 响应后处理中间件与全局错误边界
-   - 请求级超时与错误隔离
+     （已完成，HTTP/1.1 + HTTP/2 + thread/process worker 传递）
+   - 统一 `json_response` / `json_error`（已完成）
+   - `route.use_after` 响应后处理与 JSON 错误边界（已完成）
+   - 请求级超时（已完成 task handler 超时；同步 CPU-bound handler 无法安全抢占，
+     文档标注限制）
 2. P1-A 认证与会话：
    - Cookie 构造、Session store、密码哈希、HMAC/JWT、CSRF
    - Cookie Session 与 Bearer Token 共用用户和权限模型

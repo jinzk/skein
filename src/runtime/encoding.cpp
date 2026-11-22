@@ -1214,6 +1214,11 @@ static bool read_error_mode(const std::vector<struct value_t *> &args,
 
 }  // namespace
 
+bool url_decode_component(const std::string &input, std::string &output,
+                          std::string &error) {
+    return url_decode(input, output, error);
+}
+
 std::string canonical_encoding_name(const std::string &name) {
     Encoding encoding;
     if (!lookup_encoding(name, encoding))

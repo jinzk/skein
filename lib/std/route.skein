@@ -13,6 +13,7 @@ package route {
     put: callable;
     delete: callable;
     use: callable;
+    use_after: callable;
     dispatch: callable;
     inspect: callable;
   }
@@ -317,6 +318,7 @@ package route {
     let root = _node_new();
     let exact = {};
     let middlewares = [];
+    let afterware = [];
     let entries = std.deque.new();
 
     let add = func(method, pattern, handler) {
@@ -378,10 +380,30 @@ package route {
       return _response(404, "not found");
     };
 
+    let apply_after = func(req, response) {
+      let i = 0;
+      while (i < len(afterware)) {
+        let value = afterware[i](req, response);
+        if (type_name(value) == "task") {
+          value = value.wait();
+        }
+        if (value != null) {
+          response = value;
+        }
+        i = i + 1;
+      }
+      return response;
+    };
+
+    let resume_after = func(req, pending) {
+      let response = pending.wait();
+      return apply_after(req, response);
+    };
+
     let resume = func(req, index, pending) {
       let result = pending.wait();
       if (result != null) {
-        return result;
+        return apply_after(req, result);
       }
 
       let i = index;
@@ -391,16 +413,16 @@ package route {
           value = value.wait();
         }
         if (value != null) {
-          return value;
+          return apply_after(req, value);
         }
         i = i + 1;
       }
 
       let response = route_request(req);
       if (type_name(response) == "task") {
-        response = response.wait();
+        return resume_after(req, response);
       }
-      return response;
+      return apply_after(req, response);
     };
 
     let dispatch = func(req) {
@@ -413,11 +435,15 @@ package route {
           return resume(req, i + 1, value);
         }
         if (value != null) {
-          return value;
+          return apply_after(req, value);
         }
         i = i + 1;
       }
-      return route_request(req);
+      let response = route_request(req);
+      if (type_name(response) == "task") {
+        return resume_after(req, response);
+      }
+      return apply_after(req, response);
     };
 
     let use = func(middleware) {
@@ -426,6 +452,14 @@ package route {
         fail("route middleware must be callable");
       }
       middlewares = std.list.append(middlewares, middleware);
+    };
+
+    let use_after = func(middleware) {
+      if (kind_of(middleware) != "function" &&
+          kind_of(middleware) != "builtin") {
+        fail("route after middleware must be callable");
+      }
+      afterware = std.list.append(afterware, middleware);
     };
 
     let inspect = func() {
@@ -439,6 +473,7 @@ package route {
       put: func(pattern, handler) { add("PUT", pattern, handler); },
       delete: func(pattern, handler) { add("DELETE", pattern, handler); },
       use: use,
+      use_after: use_after,
       dispatch: dispatch,
       inspect: inspect
     };

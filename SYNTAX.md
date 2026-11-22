@@ -3384,6 +3384,7 @@ std.http.close(s);
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置空闲超时；
+- `server["handler_timeout_ms"]` 默认 0；task handler 超时返回 504 JSON；
 - 达到限制或空闲超时后关闭连接；
 - 返回已处理请求数。
 
@@ -3493,8 +3494,17 @@ let served = std.http.serve(s, func(req) {
 请求 dict：
 
 ```text
-method, path, headers, body, http_major, http_minor, socket
+method, path, target, query, cookies, headers, header_values,
+body, http_major, http_minor, socket, request_id, client_ip,
+forwarded_for, forwarded_proto
 ```
+
+- `path` 不含 query string，原始目标在 `target`；
+- `query` / `cookies` 是解析后的 dict；重复 query 参数变成 list；
+- `header_values` 保留重复 header；
+- `request_id` 来自合法的 `X-Request-Id` 或自动生成；
+- `client_ip` 默认等于 `remote_addr`，代理头单独放在
+  `forwarded_for` / `forwarded_proto`。
 
 启用 `stream_request_body` 后请求 dict 还包含 `body_reader`。
 
@@ -3504,7 +3514,16 @@ method, path, headers, body, http_major, http_minor, socket
 status, status_text, headers, body, http_major, http_minor
 ```
 
-响应 dict 还可以使用 `body_stream` 代替 `body`。
+响应 dict 还可以使用 `body_stream` 代替 `body`。`headers` 的值可以是
+string 或 string list；list 会写成多个同名 header，例如多个 `Set-Cookie`。
+服务端会自动补充 `X-Request-Id`。
+
+JSON helper：
+
+```text
+std.http.json_response(status, value[, headers]) -> response
+std.http.json_error(status, code, message[, details]) -> response
+```
 
 限制：
 
@@ -3714,6 +3733,7 @@ std.http2.close(s);
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
+- `server["handler_timeout_ms"]` 默认 0；超时的 task handler 返回 504 JSON；
 - 同步和 task-returning 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
 - task-returning 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
@@ -4645,6 +4665,7 @@ route.new()                         -> Router
 app.add(method, pattern, handler)
 app.get/post/put/delete(pattern, handler)
 app.use(middleware)
+app.use_after(middleware)
 app.dispatch(request)               -> response | task
 app.inspect()                       -> [{method, pattern, handler}, ...]
 ```
@@ -4660,6 +4681,8 @@ app.inspect()                       -> [{method, pattern, handler}, ...]
 - 同一个 `(method, pattern)` 重复注册会 `fail`；
 - 方法不匹配但路径存在 → 405；完全不存在 → 404；
 - middleware 签名是 `func(req) -> response|null`，返回 `null` 继续，否则短路；
+- `use_after` 签名是 `func(req, response) -> response|null`，返回 `null`
+  保留响应，返回 dict 替换响应；响应产生后按注册顺序执行；
 - handler 返回 response dict；`req["params"]` 已填好；
 - handler 可以是普通函数；handler 内部等待 task 时会挂起；
 - middleware 也可以返回 task；`dispatch` 会在内部 `.wait()` 该 task，然后返回 response dict；

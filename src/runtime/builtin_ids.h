@@ -269,6 +269,8 @@ enum bifs {
     B_http_read_body,
     B_http_close,
     B_http_thread_capabilities,
+    B_http_json_response,
+    B_http_json_error,
     B_http2_request,
     B_http2_get,
     B_http2_post,

@@ -497,6 +497,8 @@ std.http.close(s);
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
+- `server["handler_timeout_ms"]` 默认 0；返回 task 的 handler 超时后取消 task
+  并返回 JSON 504；同步 CPU-bound handler 无法安全抢占；
 - 达到限制或空闲超时后发送 `Connection: close` 并关闭连接；
 - 返回已处理请求数。
 
@@ -858,8 +860,18 @@ let served = std.http.serve(s, func(req) {
 请求 dict：
 
 ```text
-method, path, headers, body, http_major, http_minor, socket
+method, path, target, query, cookies, headers, header_values,
+body, http_major, http_minor, socket, request_id, client_ip,
+forwarded_for, forwarded_proto
 ```
+
+- `path` 不含 query string；原始请求目标在 `target`；
+- `query` 是解析后的 query dict；同名参数会变成 list；
+- `cookies` 是解析后的 Cookie dict；
+- `header_values` 是“头名 → 原始值或值列表”，用于读取重复 header；
+- `request_id` 优先使用合法的 `X-Request-Id`，否则自动生成；
+- `client_ip` 默认等于 `remote_addr`；代理头只放入 `forwarded_for` /
+  `forwarded_proto`，是否信任由应用决定。
 
 启用 `stream_request_body` 后请求 dict 还包含 `body_reader`，供
 `std.http.read_body` 使用。
@@ -870,7 +882,41 @@ method, path, headers, body, http_major, http_minor, socket
 status, status_text, headers, body, http_major, http_minor
 ```
 
-响应 dict 还可以使用 `body_stream` 代替 `body`。
+响应 dict 还可以使用 `body_stream` 代替 `body`。`headers` 的值可以是
+string，也可以是 string list；list 会展开成多个同名响应头，适合
+`Set-Cookie`：
+
+```skein
+return {
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/json",
+    "Set-Cookie": ["a=1; Path=/", "b=2; Path=/"]
+  },
+  "body": "..."
+};
+```
+
+所有服务端响应都会自动补充 `X-Request-Id`，handler 显式设置时以 handler
+为准。handler 返回 null 或抛出错误时，`std.http.serve` / `std.http2.serve`
+会返回统一的 JSON 500 错误。
+
+JSON 响应 helper：
+
+```text
+std.http.json_response(status, value[, headers]) -> response
+std.http.json_error(status, code, message[, details]) -> response
+```
+
+```skein
+return std.http.json_response(200, {"ok": true});
+
+return std.http.json_error(422, "BAD_INPUT", "name is required",
+                           {"field": "name"});
+```
+
+`json_response` 自动设置 `Content-Type: application/json; charset=utf-8`；
+`json_error` 生成 `{"error": {"code", "message", "details"?}}`。
 
 限制：
 
@@ -1089,6 +1135,7 @@ std.http2.close(s);
 - `max_requests = 0` 表示总请求数不限制；
 - `max_per_connection` 默认 100，`0` 表示不限制；
 - `idle_timeout_ms` 默认 0，表示不设置连接空闲超时；
+- `server["handler_timeout_ms"]` 默认 0；超时的 task handler 会返回 504 JSON；
 - 同步和 task-returning 客户端共用 HTTP/2 连接池；
 - 同步请求按顺序复用连接；
 - task-returning 的 `get_task` / `post_task` / `request_task` 可以共享同一连接并并发执行；
@@ -2348,7 +2395,9 @@ app.use(func(req) {
 app.dispatch({"method": "GET", "path": "/users/42"});
 ```
 
-`Router` 是可变引用句柄，复制后共享路由表；注册方法原地更新，不返回新 Router。支持 `:name` 参数、`*name` 通配、404/405、全局 middleware 和 返回 task 的 middleware。静态路由走精确表，动态路由走段级 trie：静态 dispatch 为 O(1)，动态 dispatch 与路由总数基本无关。`*name` 必须是最后一段，并且可以匹配 0 段。装饰器可用于包装 handler，例如 `@logged func user(req) {...}` 后再 `app.get("/users/:id", user)`。
+`Router` 是可变引用句柄，复制后共享路由表；注册方法原地更新，不返回新 Router。支持 `:name` 参数、`*name` 通配、404/405、全局 middleware、返回 task 的 middleware 和响应后处理 middleware。静态路由走精确表，动态路由走段级 trie：静态 dispatch 为 O(1)，动态 dispatch 与路由总数基本无关。`*name` 必须是最后一段，并且可以匹配 0 段。装饰器可用于包装 handler，例如 `@logged func user(req) {...}` 后再 `app.get("/users/:id", user)`。
+
+`app.use_after(func(req, res) { ... })` 在路由或前置 middleware 产生响应后执行，适合统一补充 CORS、安全头、request id 和响应日志。返回 `null` 表示保留当前响应，返回 dict 表示替换响应；返回 task 会被等待。
 
 `std.graph` 提供有向图和常用算法：
 
@@ -2800,6 +2849,8 @@ std.http.cookies
 std.http.read_body
 std.http.close
 std.http.thread_capabilities
+std.http.json_response
+std.http.json_error
 
 std.http2.request
 std.http2.get

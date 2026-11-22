@@ -48,7 +48,7 @@ syntax match skeinEnumMember '\<\u\w*\ze\.'
 syntax match skeinEnumVariant '\.\zs\u\w*'
 
 " Keywords ------------------------------------------------------------------
-syntax keyword skeinKeyword let const func yield defer launch
+syntax keyword skeinKeyword let const func yield defer launch wait
 syntax keyword skeinKeyword in is as
 syntax keyword skeinConditional if else switch case default match
 syntax keyword skeinRepeat while do for

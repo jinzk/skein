@@ -14,6 +14,7 @@ from harness import *  # noqa: F401,F403
 def run_cases():
     run_skein("task_methods_basic.skein")
     run_skein("task_methods_launch.skein")
+    run_skein("wait.skein")
     check(
         "task methods golden output",
         "import std;\n"

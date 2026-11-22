@@ -27,7 +27,7 @@ const std::vector<std::string> &keyword_list() {
         "default", "match", "let", "const", "func", "struct", "enum",
         "trait", "impl", "extern", "package", "module", "import",
         "include", "export", "return", "break", "continue", "yield",
-        "defer", "launch", "try", "on", "error", "recover", "fail",
+        "defer", "launch", "wait", "try", "on", "error", "recover", "fail",
         "pass", "is", "as", "label", "true", "false", "null",
     };
     return words;

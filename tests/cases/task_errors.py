@@ -1037,3 +1037,29 @@ def run_cases():
           'import std;\n'
           'std.task.bounded_parallel_map([1], 0, func(x) { return x; });\n',
           stderr="std.task.bounded_parallel_map limit must be at least 1")
+    check("wait rejects non-task value",
+          'let v = wait 1;\n',
+          stderr="wait expects a task, got int")
+    check("wait rejects non-task call",
+          'func f(): int { return 1; }\n'
+          'let v = wait f();\n',
+          stderr="wait expects a task, got int")
+    check("wait is a reserved word",
+          'let wait = 1;\n',
+          stderr="syntax error")
+    check("wait cannot name a function",
+          'func wait() { return 1; }\n',
+          stderr="syntax error")
+    check("launch rejects wait expression",
+          'func f() { return 1; }\n'
+          'let t = launch wait f();\n',
+          stderr="launch cannot be applied to a wait expression")
+    check("member names may be keywords",
+          'import std;\n'
+          'func work(n) { return n + 1; }\n'
+          'let t = launch work(1);\n'
+          'print(t.wait());\n'
+          'print(std.task.wait(t));\n'
+          'print(std.regex.match("a", "a"));\n'
+          'print(kind_of(std.process.wait));\n',
+          stdout_all=["2", "2", "true", "builtin"])

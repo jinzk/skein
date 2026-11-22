@@ -169,6 +169,8 @@ struct ufncall {
     struct ast *args;
     /* `launch f(args)`: start the call on a new fiber and return its task. */
     int launch;
+    /* `wait value` lowered to `value.wait()`; used for diagnostics only. */
+    int wait_sugar;
 };
 
 struct flow {

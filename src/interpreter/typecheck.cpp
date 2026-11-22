@@ -1071,7 +1071,8 @@ struct Checker : public BuiltinContext {
 
     bool check_method_call(struct ast *callee,
                            const std::vector<struct ast *> &args,
-                           Env &env, const TypeNode *&result) {
+                           Env &env, const TypeNode *&result,
+                           bool wait_sugar) {
         if (!callee || callee->nodetype != 'j')
             return false;
         const struct ast *right = callee->r;
@@ -1087,6 +1088,18 @@ struct Checker : public BuiltinContext {
         std::string receiver_path;
         if (narrow_path(callee->l, receiver_path))
             invalidate_root_facts(env, path_root(receiver_path));
+
+        if (wait_sugar && receiver && receiver->kind != TYPE_TASK &&
+            receiver->kind != TYPE_ANY && receiver->kind != TYPE_VAR &&
+            receiver->kind != TYPE_UNION &&
+            receiver->kind != TYPE_INVALID) {
+            char message[512];
+            std::snprintf(message, sizeof(message),
+                          "wait expects a task, got %s",
+                          type_display(receiver));
+            report_error(callee->line, callee->column, message);
+            return false;
+        }
 
         if (receiver && receiver->kind == TYPE_TASK) {
             const TypeNode *element = type_element(receiver, 0);
@@ -1483,7 +1496,8 @@ struct Checker : public BuiltinContext {
         }
 
         if (call->callee && call->callee->nodetype == 'j') {
-            if (check_method_call(call->callee, args, env, result))
+            if (check_method_call(call->callee, args, env, result,
+                                  call->wait_sugar != 0))
                 return true;
         }
 

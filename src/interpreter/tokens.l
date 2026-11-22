@@ -237,6 +237,19 @@ static void note_for_name_token() {
 
 #define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
 
+
+/* After '.', keywords and builtin names are ordinary member names. */
+#define MEMBER_NAME_AFTER_DOT()                                   \
+    do {                                                            \
+        if (last_token == '.') {                                    \
+            int member_tok = make_name_token(yytext, yyleng);       \
+            if (member_tok == 0)                                    \
+                return 0;                                           \
+            note_for_name_token();                                  \
+            YYRET(member_tok);                                      \
+        }                                                           \
+    } while (0)
+
 #define YY_USER_ACTION diag_scan_token(yytext, yyleng);
 
 // 当 stdin 不是终端（管道、IDE 运行窗口等）时，内核不会处理退格，
@@ -820,17 +833,17 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 ">=" { yylval.fn = 5; YYRET(SKEIN_TOK_CMP); }
 "<=" { yylval.fn = 6; YYRET(SKEIN_TOK_CMP); }
 
-"if" {
+"if" { MEMBER_NAME_AFTER_DOT();
     start_header_context(SKEIN_TOK_IF);
     YYRET(SKEIN_TOK_IF);
 }
-"else" {
+"else" { MEMBER_NAME_AFTER_DOT();
     if (last_token_line != 0 && g_token_line != last_token_line)
         report_same_line_error(
             "else must be on the same line as the preceding token");
     YYRET(SKEIN_TOK_ELSE);
 }
-"while" {
+"while" { MEMBER_NAME_AFTER_DOT();
     while_kind kind = classify_while();
     if (kind != while_kind::Normal) {
         pending_do_while_paren = true;
@@ -840,11 +853,11 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(SKEIN_TOK_WHILE);
 }
-"do" {
+"do" { MEMBER_NAME_AFTER_DOT();
     do_stack.push_back(indent_count);
     YYRET(SKEIN_TOK_DO);
 }
-"for" {
+"for" { MEMBER_NAME_AFTER_DOT();
     if (!declaration_header) {
         for_header = FOR_HEADER_SEEN;
         c_for_pending = true;
@@ -854,46 +867,46 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(SKEIN_TOK_FOR);
 }
-"struct" {
+"struct" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
         pending_decl_kind = SKEIN_TOK_STRUCT;
         pending_decl_skip = true;
     }
     YYRET(SKEIN_TOK_STRUCT);
 }
-"extern" {
+"extern" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
         pending_decl_kind = SKEIN_TOK_EXTERN;
         pending_decl_skip = true;
     }
     YYRET(SKEIN_TOK_EXTERN);
 }
-"enum" {
+"enum" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
         pending_decl_kind = SKEIN_TOK_ENUM;
         pending_decl_skip = true;
     }
     YYRET(SKEIN_TOK_ENUM);
 }
-"impl" {
+"impl" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
         pending_decl_kind = SKEIN_TOK_IMPL;
         pending_decl_skip = true;
     }
     YYRET(SKEIN_TOK_IMPL);
 }
-"trait" {
+"trait" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
         pending_decl_kind = SKEIN_TOK_TRAIT;
         pending_decl_skip = true;
     }
     YYRET(SKEIN_TOK_TRAIT);
 }
-"switch" {
+"switch" { MEMBER_NAME_AFTER_DOT();
     start_header_context(SKEIN_TOK_SWITCH);
     YYRET(SKEIN_TOK_SWITCH);
 }
-"match" {
+"match" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
         if (pending_header_kind != 0) {
             header_stack.push_back(
@@ -906,29 +919,30 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(SKEIN_TOK_MATCH);
 }
-"case" { YYRET(SKEIN_TOK_CASE); }
-"default" { YYRET(SKEIN_TOK_DEFAULT); }
-"let" { YYRET(SKEIN_TOK_LET); }
-"const" { YYRET(SKEIN_TOK_CONST); }
-"func" { YYRET(SKEIN_TOK_FUNC); }
-"yield" { YYRET(SKEIN_TOK_YIELD); }
-"launch" { YYRET(SKEIN_TOK_LAUNCH); }
-"defer" { YYRET(SKEIN_TOK_DEFER); }
-"package" { YYRET(SKEIN_TOK_PACKAGE); }
-"import" { YYRET(SKEIN_TOK_IMPORT); }
-"include" { YYRET(SKEIN_TOK_INCLUDE); }
-"export" { YYRET(SKEIN_TOK_EXPORT); }
-"return" { YYRET(SKEIN_TOK_RETURN); }
-"break" { YYRET(SKEIN_TOK_BREAK); }
-"continue" { YYRET(SKEIN_TOK_CONTINUE); }
-"fail" { YYRET(SKEIN_TOK_FAIL); }
-"is" { YYRET(SKEIN_TOK_IS); }
-"label" { YYRET(SKEIN_TOK_LABEL); }
-"on" { YYRET(SKEIN_TOK_ON); }
-"error" { YYRET(SKEIN_TOK_ERROR); }
-"recover" { YYRET(SKEIN_TOK_RECOVER); }
-"pass" { YYRET(SKEIN_TOK_PASS); }
-"in" {
+"case" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CASE); }
+"default" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_DEFAULT); }
+"let" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LET); }
+"const" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONST); }
+"func" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FUNC); }
+"yield" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_YIELD); }
+"launch" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LAUNCH); }
+"wait" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WAIT); }
+"defer" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_DEFER); }
+"package" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_PACKAGE); }
+"import" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IMPORT); }
+"include" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_INCLUDE); }
+"export" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_EXPORT); }
+"return" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RETURN); }
+"break" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_BREAK); }
+"continue" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONTINUE); }
+"fail" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FAIL); }
+"is" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IS); }
+"label" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LABEL); }
+"on" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ON); }
+"error" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ERROR); }
+"recover" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RECOVER); }
+"pass" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_PASS); }
+"in" { MEMBER_NAME_AFTER_DOT();
     if (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO) {
         for_body_pending = true;
         for_operand_started = false;
@@ -938,43 +952,43 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     for_header = FOR_HEADER_NONE;
     YYRET(SKEIN_TOK_IN);
 }
-"as" { YYRET(SKEIN_TOK_AS); }
-"null" { YYRET(SKEIN_TOK_NULLVAL); }
-"true" { YYRET(SKEIN_TOK_TRUE); }
-"false" { YYRET(SKEIN_TOK_FALSE); }
+"as" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_AS); }
+"null" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_NULLVAL); }
+"true" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_TRUE); }
+"false" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FALSE); }
 
-"len" { yylval.fn = B_len; YYRET(SKEIN_TOK_BUILTIN); }
-"range" { yylval.fn = B_range; YYRET(SKEIN_TOK_BUILTIN); }
-"print" { yylval.fn = B_print; YYRET(SKEIN_TOK_BUILTIN); }
-"println" { yylval.fn = B_println; YYRET(SKEIN_TOK_BUILTIN); }
-"input" { yylval.fn = B_input; YYRET(SKEIN_TOK_BUILTIN); }
-"list"/"." {
+"len" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_len; YYRET(SKEIN_TOK_BUILTIN); }
+"range" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_range; YYRET(SKEIN_TOK_BUILTIN); }
+"print" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_print; YYRET(SKEIN_TOK_BUILTIN); }
+"println" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_println; YYRET(SKEIN_TOK_BUILTIN); }
+"input" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_input; YYRET(SKEIN_TOK_BUILTIN); }
+"list"/"." { MEMBER_NAME_AFTER_DOT();
     int token = make_name_token("list", 4);
     if (token)
         YYRET(token);
     yylval.fn = B_list;
     YYRET(SKEIN_TOK_BUILTIN);
 }
-"list" { yylval.fn = B_list; YYRET(SKEIN_TOK_BUILTIN); }
-"dict"/"." {
+"list" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_list; YYRET(SKEIN_TOK_BUILTIN); }
+"dict"/"." { MEMBER_NAME_AFTER_DOT();
     int token = make_name_token("dict", 4);
     if (token)
         YYRET(token);
     yylval.fn = B_dict;
     YYRET(SKEIN_TOK_BUILTIN);
 }
-"dict" { yylval.fn = B_dict; YYRET(SKEIN_TOK_BUILTIN); }
-"int" { yylval.fn = B_int; YYRET(SKEIN_TOK_BUILTIN); }
-"float" { yylval.fn = B_float; YYRET(SKEIN_TOK_BUILTIN); }
-"bool" { yylval.fn = B_bool; YYRET(SKEIN_TOK_BUILTIN); }
-"str" { yylval.fn = B_str; YYRET(SKEIN_TOK_BUILTIN); }
-"char" { yylval.fn = B_char; YYRET(SKEIN_TOK_BUILTIN); }
-"byte" { yylval.fn = B_byte; YYRET(SKEIN_TOK_BUILTIN); }
-"kind_of" { yylval.fn = B_kind_of; YYRET(SKEIN_TOK_BUILTIN); }
-"type_name" { yylval.fn = B_type_name; YYRET(SKEIN_TOK_BUILTIN); }
-"type_package" { yylval.fn = B_type_package; YYRET(SKEIN_TOK_BUILTIN); }
-"type_module_name" { yylval.fn = B_type_module_name; YYRET(SKEIN_TOK_BUILTIN); }
-"type_source" { yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
+"dict" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_dict; YYRET(SKEIN_TOK_BUILTIN); }
+"int" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_int; YYRET(SKEIN_TOK_BUILTIN); }
+"float" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_float; YYRET(SKEIN_TOK_BUILTIN); }
+"bool" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_bool; YYRET(SKEIN_TOK_BUILTIN); }
+"str" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_str; YYRET(SKEIN_TOK_BUILTIN); }
+"char" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_char; YYRET(SKEIN_TOK_BUILTIN); }
+"byte" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_byte; YYRET(SKEIN_TOK_BUILTIN); }
+"kind_of" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_kind_of; YYRET(SKEIN_TOK_BUILTIN); }
+"type_name" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_name; YYRET(SKEIN_TOK_BUILTIN); }
+"type_package" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_package; YYRET(SKEIN_TOK_BUILTIN); }
+"type_module_name" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_module_name; YYRET(SKEIN_TOK_BUILTIN); }
+"type_source" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
 
 {ASCII_NAME} {
     int tok = make_name_token(yytext, yyleng);

@@ -755,6 +755,19 @@ static struct ast *launch_target_call(struct ast *node) {
 }
 
 /*
+ * `wait value` desugars to `value.wait()`.  The extra flag only lets the
+ * type checker report a targeted diagnostic; execution is identical to the
+ * explicit method call.
+ */
+static struct ast *new_wait_call(struct ast *value) {
+    struct ast *callee = newast('j', value, newstr("wait"));
+    struct ufncall *call =
+        (struct ufncall *)newcall(callee, NULL);
+    call->wait_sugar = 1;
+    return (struct ast *)call;
+}
+
+/*
  * `struct Name with Trait, pkg.Other { ... }` and the enum form lower to
  * the declaration followed by `impl Trait for Name;` statements.  `with` is
  * not a reserved word: it is parsed as a NAME and validated here, so code
@@ -1005,6 +1018,7 @@ static struct type_constraint *runtime_type_or_error(
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token YIELD "yield" DEFER "defer"
 %token LAUNCH "launch"
+%token WAIT "wait"
 %token STRUCT "struct" IMPL "impl" TRAIT "trait" ENUM "enum"
 %token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
@@ -1857,15 +1871,25 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
       }
     | MATCH exp BODY_LBRACE match_arms '}'
                                            { $$ = newmatch($2, $4); }
+    | WAIT exp %prec UMINUS                { $$ = new_wait_call($2); }
     | LAUNCH exp %prec UMINUS {
-        struct ast *target = launch_target_call($2);
-        if (!target || target->nodetype != 'C') {
-            yyerror("launch expects a call expression");
+        if ($2 && $2->nodetype == 'C' &&
+            ((struct ufncall *)$2)->wait_sugar) {
+            diag_set_location($2->line, $2->column);
+            yyerror("launch cannot be applied to a wait expression; "
+                    "use wait (launch f()) or (launch f()).wait()");
             treefree($2);
             $$ = NULL;
         } else {
-            ((struct ufncall *)target)->launch = 1;
-            $$ = $2;
+            struct ast *target = launch_target_call($2);
+            if (!target || target->nodetype != 'C') {
+                yyerror("launch expects a call expression");
+                treefree($2);
+                $$ = NULL;
+            } else {
+                ((struct ufncall *)target)->launch = 1;
+                $$ = $2;
+            }
         }
       }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }

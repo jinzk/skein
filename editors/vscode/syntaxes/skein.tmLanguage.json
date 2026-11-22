@@ -178,7 +178,7 @@
       "patterns": [
         {
           "name": "keyword.control.skein",
-          "match": "\\b(?:if|else|while|do|for|switch|case|default|match|return|break|continue|fail|on|error|recover|pass|yield|defer|launch)\\b"
+          "match": "\\b(?:if|else|while|do|for|switch|case|default|match|return|break|continue|fail|on|error|recover|pass|yield|defer|launch|wait)\\b"
         },
         {
           "name": "keyword.other.skein",

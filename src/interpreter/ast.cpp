@@ -179,6 +179,7 @@ struct ast *newcall(struct ast *callee, struct ast *l) {
     a->callee = callee;
     a->args = l;
     a->launch = 0;
+    a->wait_sugar = 0;
     return (struct ast *)a;
 }
 

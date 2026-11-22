@@ -185,6 +185,7 @@ def task_program():
         "func inc(x) -> x + 1;\n"
         "print(launch inc(3).wait());\n"
         "print(launch inc(launch inc(4).wait()).wait());\n"
+        "print(wait launch inc(6));\n"
     )
 
 

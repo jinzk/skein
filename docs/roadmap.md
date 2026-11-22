@@ -445,22 +445,66 @@ GraphQL、完整 ORM、OAuth 第三方登录。
    match；运行时同时校验不可变性与 arity。`[a, b]` 保持宽松的依据是结构化
    读取：它只按位置读取元素并创建新绑定，不改写源 tuple；因此
    `let l: list[int] = (1, 2);` 仍被 checker 拒绝。
-10. 是否引入 `wait t` 前缀写法并统一上下文相关词法？方案要点：
+10. ~~是否引入 `wait t` 前缀写法并统一上下文相关词法？~~ 已决定：引入。
+    **规划完成，待实现；与第 11 项相互独立，建议先实现本项。**
     - 语义：`wait e == e.wait()`，要求 `e: task[T]`，结果为 `T`；只等待已有
       task，不 launch、不恢复 `async/await`、不引入函数染色。
       `wait launch f()` 合法且等价于 `(launch f()).wait()`；`wait f()` 在
-      `f()` 不返回 task 时是类型错误。
-    - 词法：`.` 后的关键字一律作为 `NAME` 返回，适用于 `wait` 及现有
-      `match` / `struct` / `enum` / `yield` 等；非点号分支保留原有 header
-      context 与 declaration skip 副作用。这样 `t.wait()`、`std.task.wait`、
-      变体名、import 路径无需逐个打补丁。
-    - 语法：parser 新增 `WAIT exp %prec UMINUS`，在 parse 阶段 desugar 成
-      `.wait()` 成员调用；不改 typecheck、VM、JIT、ABI。
-    - 兼容：`wait` 在 `.` 之外成为保留字；当前仓库无脚本将其用作独立标识符。
+      `f()` 不返回 task 时必须是静态类型错误。`wait` 不接受超时参数；需要
+      超时用 `t.wait(ms)` 或 `std.task.wait(t, ms)`。
+    - 词法：新增保留字 `wait`。同时统一 `.` 后关键字：`.` 后所有关键字与
+      内置函数名一律按 `NAME` 返回。实现方式是在 `tokens.l` 增加宏，在每个
+      关键字/内置规则入口先检查 `last_token == '.'`，命中则调用
+      `note_for_name_token()`、`make_name_token(yytext, yyleng)` 和
+      `YYRET(NAME)`，跳过 header context / declaration skip 副作用。
+      这样 `t.wait()`、`std.task.wait`、`std.process.wait`、`x.match`、
+      枚举变体与 import 路径无需逐个打补丁。
+    - 语法：parser 新增 `WAIT exp %prec UMINUS`，在 parse 阶段 desugar 为
+      `newcall(newast('j', exp, newstr("wait")), NULL)`。在 `ufncall` 上增加
+      `wait_sugar` 标记（`newcall` 默认置 0），只用于诊断，不改变执行语义。
+      已用 Bison 3.8.2 验证该规则不增加冲突，`%expect 3` 保持不变。
+    - 诊断（修正原方案）：现有 checker 对 `1.wait()` / `f().wait()` 不会报
+      类型错误，只会在运行时抛出 `cannot index int`。因此
+      `check_method_call` 增加 `wait_sugar` 参数：receiver 是明确的非
+      `task[...]` 类型（排除 `any`、泛型和 union，保持现有宽松行为）时报
+      `wait expects a task, got <type>`，位置指向 `wait` 的操作数；
+      `task[T]` 仍返回 `T`。直接 `.wait()` 的旧诊断保持不变，以免影响用户
+      自定义的 `wait()` 方法。
+    - `launch wait f()` 语义不清晰，实现时在 parser 拒绝，并提示改用
+      `wait (launch f())` 或 `(launch f()).wait()`；`wait launch f()` 保持
+      合法。
+    - 兼容：`wait` 在 `.` 之外成为保留字；当前仓库没有把 `wait` 用作独立
+      变量、函数、字段或类型名。已有 `t.wait()`、`std.task.wait`、
+      `std.process.wait` 因点号规则继续可用。新增声明不能命名为 `wait`
+      （与 `match` / `struct` 一致）；dict 字面量键需写成 `"wait"`。
       编辑器高亮需同步加入 `wait`。
-    - 验证：`wait t` / `wait launch f()` / 非 task 操作数错误诊断、点号后
-      关键字回归、AST/VM 差分与 JIT task-wait smoke。
+    - 实施清单：
+      `src/interpreter/tokens.l`（`WAIT` 规则、点号后关键字宏）；
+      `src/interpreter/parser.y`（`%token`、`WAIT exp`、`launch wait` 拒绝）；
+      `src/interpreter/ast.h` + `ast.cpp`（`ufncall.wait_sugar` 默认 0）；
+      `src/interpreter/typecheck.cpp`（非 task 操作数的静态诊断）；
+      `src/interpreter/repl_ui.cpp`（REPL / completion 关键字列表）；
+      `src/interpreter/completion_index.cpp`（`wait` 补全说明）；
+      `SYNTAX.md`（关键字表、task 语法和示例）；
+      `editors/vim/syntax/skein.vim`、
+      `editors/vscode/syntaxes/skein.tmLanguage.json`。
+      VM、JIT、bytecode、ABI 不改。
+    - 测试矩阵：
+      `tests/skein/task_methods_basic.skein`：`wait t`、
+      `wait launch f()`、`wait (launch f())`、嵌套 `wait`、`task[void]`；
+      `tests/skein/task_methods_launch.skein`：与 structured task 组合；
+      `tests/cases/task_errors.py`：`wait 1`、`wait f()`（非 task）、
+      `let wait = 1`、`func wait()`、`launch wait f()`；
+      点号后关键字回归：`t.wait()`、`std.task.wait`、`std.process.wait`、
+      `std.regex.match`、枚举变体、`import std.list`；
+      `tests/vm_differential.py` 与 `tests/jit_differential.py` 增加
+      `wait` 程序，跑 AST/VM 与 VM/JIT 差分；
+      最后跑全量 `ctest`（JIT 与非 JIT 构建）。
+    - 不做：超时版 `wait e, ms`、`wait all` / `wait any` 新语义、
+      async/await 关键字、取消或恢复函数染色。
 11. 是否移除 `launch_target_call()` 特例，让 `.` 的高优先级真正生效？
+    - 与第 10 项独立；第 10 项完成后 `wait launch f()` 仍是推荐写法，不受
+      本项影响。本项只改变 `launch f().wait()` 的解析。
     - 现状：`.` 在优先级表中（`parser.y:1053`）已高于 `UMINUS`（`1050`），而
       `launch` 用 `%prec UMINUS`。按规则 `launch f().wait()` 本应解析为
       `launch (f().wait())`，但 `launch_target_call()` 人为下钻到最内层 call，

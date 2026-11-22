@@ -21,17 +21,6 @@
 
 #ifdef SKEIN_ENABLE_JIT
 #include "jit.h"
-
-#if defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
-#define SKEIN_VM_JIT_SYSV __attribute__((sysv_abi))
-#else
-#define SKEIN_VM_JIT_SYSV
-#endif
-
-/* Returned by the cached method helper when the generic path must run. */
-extern "C" {
-char skein_jit_method_fallback_marker = 0;
-}
 #endif
 
 #include <chrono>
@@ -1023,13 +1012,12 @@ bool skein_vm_try_jit_call_args(value_t *callee,
  * Cached method dispatch used by generated CALL_METHOD sites.  The cache is
  * per Proto call site and is cleared whenever a Proto crosses threads.
  */
-extern "C" SKEIN_VM_JIT_SYSV value_t *skein_jit_invoke_method_cached(
+value_t *skein_vm_jit_invoke_method_cached(
     value_t *receiver, const char *name, value_t **args, uint32_t argc,
     skein::bc::MethodCallCacheEntry *cache,
     skein::jit::thread_state *ts) {
     auto fallback = []() {
-        return reinterpret_cast<value_t *>(
-            &skein_jit_method_fallback_marker);
+        return skein::jit::method_fallback_marker();
     };
     if (!cache || !ts || !receiver || !name)
         return fallback();
@@ -1183,6 +1171,8 @@ static void ensure_vm_host() {
         skein::jit::set_invoke(&skein_vm_jit_invoke);
         skein::jit::set_direct(&jit_resolve_direct_target);
         skein::jit::set_tail_invoke(&skein_vm_jit_tail_invoke);
+        skein::jit::set_invoke_method_cached(
+            &skein_vm_jit_invoke_method_cached);
         skein::jit::set_construct(&skein_vm_build_struct);
         skein::jit::set_bind_frame(&skein_vm_bind_pattern_frame);
         skein::jit::set_generator_test(&fiber_is_generator);

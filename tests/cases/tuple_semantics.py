@@ -63,6 +63,30 @@ def run_cases():
           "a[0] = 9;\n",
           stderr="cannot modify an immutable tuple")
 
+    check("typed pair runtime rejects mutable list",
+          "let p: pair[int, int] = [1, 2];\n"
+          "print(p);\n",
+          stderr="expects pair[int, int], got list",
+          env=OFF_ENV)
+
+    check("typed pair runtime rejects wrong arity",
+          "let p: pair[int, int] = (1, 2, 3);\n"
+          "print(p);\n",
+          stderr="expects pair[int, int], got list",
+          env=OFF_ENV)
+
+    check("typed tuple runtime rejects wrong arity",
+          "let t: tuple[int, int, int] = (1, 2);\n"
+          "print(t);\n",
+          stderr="expects tuple[int, int, int], got list",
+          env=OFF_ENV)
+
+    check("typed pair parameter runtime rejects mutable list",
+          "func f(p: pair[int, int]) { return p[0] + p[1]; }\n"
+          "print(f([1, 2]));\n",
+          stderr="expects pair[int, int], got list",
+          env=OFF_ENV)
+
     check("tuple pattern runtime rejects mutable list",
           "let v = [1, 2];\n"
           "let (a, b) = v;\n"

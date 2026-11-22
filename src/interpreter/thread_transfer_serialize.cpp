@@ -24,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 10u;
+constexpr uint32_t kPayloadVersion = 11u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -228,6 +228,7 @@ bool write_type(writer &out, const struct type_constraint *type) {
     out.str(type->name ? type->name : "");
     out.str(type->source ? type->source : "");
     out.u8(type->nullable ? 1 : 0);
+    out.u32((uint32_t)type->arity);
     out.str(type->display ? type->display : "");
     return true;
 }
@@ -245,8 +246,9 @@ bool read_type_ptr(reader &in, owned_type &type, std::string &error) {
     std::string source;
     std::string display;
     uint8_t nullable = 0;
+    uint32_t arity = 0;
     if (!in.u8(kind) || !in.str(name) || !in.str(source) ||
-        !in.u8(nullable) || !in.str(display)) {
+        !in.u8(nullable) || !in.u32(arity) || !in.str(display)) {
         error = in.error;
         return false;
     }
@@ -254,6 +256,7 @@ bool read_type_ptr(reader &in, owned_type &type, std::string &error) {
         new_named_type_constraint(name.c_str(), source.c_str());
     value->kind = (enum type_constraint_kind)kind;
     value->nullable = nullable != 0;
+    value->arity = (int)arity;
     value->display = display.empty() ? nullptr : nullptr;
     value->detail = nullptr;
     type = make_owned_type(value);

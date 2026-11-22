@@ -26,6 +26,7 @@ eq(a, b)   -> 确认两个 key 是否为同一个 key
 以下类型自动满足 hash + eq：
 
 - `int`
+- `float`（非 NaN；整数值 float 与同值 int 等价，`-0.0` 规范化为 `0.0`）
 - `bool`
 - `string`
 - `char`
@@ -48,7 +49,7 @@ let d = {
 d[(1, "a")]
 ```
 
-含可变 list/dict、`float` 等不可哈希值的 tuple/struct/enum 不能自动作为 key。
+含可变 list/dict 等不可哈希值的 tuple/struct/enum 不能自动作为 key；`float` 标量（NaN 除外）可以作为 key。
 
 ## 3. 自定义 hash：`DictKey`
 
@@ -185,7 +186,8 @@ by_id[user.id]
 
 | 情况 | 结果 |
 |---|---|
-| `float` 标量 key | 拒绝 |
+| `float` 标量 key（非 NaN） | 允许；整数值 float 与同值 int 等价 |
+| `NaN` key | 拒绝 |
 | mutable list key | 拒绝 |
 | tuple 含 mutable list | 拒绝 |
 | struct 含 mutable list 且无自定义 hash | 拒绝 |

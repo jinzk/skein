@@ -311,6 +311,27 @@ def main():
         )
         ok &= compare(binary, "compound-and-bitops", ops)
 
+        ops_param = tmp_path / "ops_param.skein"
+        ops_param.write_text(
+            "func calc(p, xs, i) {\n"
+            "  p += 2;\n"
+            "  xs[i] += 3;\n"
+            "  let a = p++;\n"
+            "  let b = ++xs[i];\n"
+            "  return p + xs[i] + a + b;\n"
+            "}\n"
+            "func nested(m) {\n"
+            "  m[0][1] += 5;\n"
+            "  return m[0][1];\n"
+            "}\n"
+            "let xs = [10, 20];\n"
+            "println(calc(1, xs, 1));\n"
+            "println(xs);\n"
+            "println(nested([[1, 2], [3, 4]]));\n",
+            encoding="utf-8",
+        )
+        ok &= compare(binary, "compound-param-index", ops_param)
+
         compound_const = tmp_path / "compound_const.skein"
         compound_const.write_text(
             "func f(n) {\n"

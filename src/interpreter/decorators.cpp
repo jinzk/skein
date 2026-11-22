@@ -100,6 +100,7 @@ struct type_constraint *copy_type_constraint(
     copy->name = source->name;
     copy->source = source->source;
     copy->nullable = source->nullable;
+    copy->arity = source->arity;
     copy->display = source->display;
     copy->detail = source->detail;
     return copy;

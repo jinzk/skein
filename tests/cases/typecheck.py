@@ -41,11 +41,61 @@ def run_cases():
           'xs = xs + ["a"];\n',
           stderr="type error: expected int, got string")
 
+    check("compound assignment widens untyped target",
+          "let x = 1;\n"
+          "x += 2.5;\n"
+          "println(x);\n",
+          stdout_all=["3.5"])
+
+    check("compound list accepts tuple",
+          "let xs: list[int] = [1];\n"
+          "xs += (2, 3);\n"
+          "println(xs);\n",
+          stdout_all=["[1, 2, 3]"])
+
+    check("compound int rejects float result",
+          "let x: int = 1;\n"
+          "x += 2.5;\n",
+          stderr="type error: expected int, got float")
+
+    check("compound bitwise rejects float",
+          "let f: float = 1.0;\n"
+          "f &= 1;\n",
+          stderr="type error: bitwise operator expects ints, got float and int")
+
+    check("compound string rejects multiplication",
+          'let s: string = "a";\n'
+          "s *= 2;\n",
+          stderr="type error: cannot use * on string and int")
+
+    check("compound list rejects subtraction",
+          "let xs: list[int] = [1];\n"
+          "xs -= [1];\n",
+          stderr="type error: cannot use - on list[int] and list[int]")
+
+    check("compound pair result arity",
+          "let p: pair[int, int] = (1, 2);\n"
+          "p += (3, 4);\n",
+          stderr="type error: expected pair[int, int], "
+                 "got tuple[int, int, int, int]")
+
+    check("compound tuple result arity",
+          "let t: tuple[int, int, int] = (1, 2, 3);\n"
+          "t += (4, 5);\n",
+          stderr="type error: expected tuple[int, int, int], "
+                 "got tuple[int, int, int, int, int]")
+
     check("generic dict initialization and insert",
           "let d: dict[int, int] = {1: 2};\n"
           "d[3] = 4;\n"
           "println(d);\n",
           stdout_all=["{1: 2, 3: 4}"])
+
+    check("generic dict float keys",
+          "let d: dict[float, int] = {1.5: 1};\n"
+          "d[2.5] = 2;\n"
+          "println(d[1.5]);\nprintln(d[2.5]);\n",
+          stdout_all=["1", "2"])
 
     check("generic dict key error",
           'let d: dict[int, int] = {1: 2};\n'

@@ -164,6 +164,36 @@ std::string node_display(enum type_constraint_kind kind,
     return text;
 }
 
+/*
+ * The runtime cannot walk TypeNode, so it keeps only the pair/tuple arity
+ * needed to reject values whose shape contradicts the annotation.
+ */
+void attach_type_detail(struct type_constraint *type, const TypeNode *node) {
+    if (!type)
+        return;
+    type->detail = node;
+    type->arity = 0;
+    if (!node)
+        return;
+    /*
+     * Nullable pair/tuple annotations keep their runtime kind (the nullable
+     * flag handles null), so look through the union wrapper to recover the
+     * shape.  Genuine unions are validated statically and stay permissive at
+     * runtime, so their arity is irrelevant.
+     */
+    const TypeNode *shape = node;
+    if (node->kind == TYPE_UNION) {
+        for (const TypeNode *member : node->args) {
+            if (member && member->kind != TYPE_NULL) {
+                shape = member;
+                break;
+            }
+        }
+    }
+    if (shape->kind == TYPE_PAIR || shape->kind == TYPE_TUPLE)
+        type->arity = static_cast<int>(shape->args.size());
+}
+
 const TypeNode *intern_type(enum type_constraint_kind kind,
                             const std::string &name,
                             const std::string &source, bool nullable,
@@ -241,13 +271,13 @@ struct type_constraint *finish_union_constraint(
         base->source = NULL;
         base->nullable = false;
         base->display = any->display.c_str();
-        base->detail = any;
+        attach_type_detail(base, any);
         return base;
     }
 
     const TypeNode *node = type_container(TYPE_UNION, members, base->nullable);
     base->display = node->display.c_str();
-    base->detail = node;
+    attach_type_detail(base, node);
     if (has_null) {
         /* A union containing null is nullable: it shares the default and
          * runtime check of T?.  For union[T, null], reduce the runtime
@@ -473,7 +503,7 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
         const TypeNode *node =
             type_container(TYPE_GENERATOR, args, base->nullable);
         base->display = node->display.c_str();
-        base->detail = node;
+        attach_type_detail(base, node);
         return base;
     }
 
@@ -527,7 +557,7 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
 
     const TypeNode *node = type_container(base->kind, args, base->nullable);
     base->display = node->display.c_str();
-    base->detail = node;
+    attach_type_detail(base, node);
     return base;
 }
 
@@ -560,7 +590,7 @@ struct type_constraint *type_apply_generic_list(
         const TypeNode *node =
             type_container(TYPE_TUPLE, members, base->nullable);
         base->display = node->display.c_str();
-        base->detail = node;
+        attach_type_detail(base, node);
         return base;
     }
 
@@ -620,7 +650,7 @@ struct type_constraint *type_apply_generic_list(
     const TypeNode *node =
         type_container(base->kind, members, base->nullable);
     base->display = node->display.c_str();
-    base->detail = node;
+    attach_type_detail(base, node);
     return base;
 }
 
@@ -636,7 +666,7 @@ struct type_constraint *type_apply_function(
     const TypeNode *node = type_container(TYPE_CALLABLE, args);
     struct type_constraint *type = new_type_constraint(TYPE_CALLABLE);
     type->display = node->display.c_str();
-    type->detail = node;
+    attach_type_detail(type, node);
 
     for (struct type_constraint *param : params)
         free_type_constraint(param);
@@ -651,7 +681,7 @@ struct type_constraint *type_apply_nullable(struct type_constraint *base) {
     const TypeNode *nullable = type_nullable(node);
     base->nullable = true;
     base->display = nullable->display.c_str();
-    base->detail = nullable;
+    attach_type_detail(base, nullable);
     return base;
 }
 

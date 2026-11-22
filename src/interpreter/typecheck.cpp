@@ -643,8 +643,171 @@ struct Checker : public BuiltinContext {
                              explicit_cast, force_element);
     }
 
+    static bool compound_type_known(const TypeNode *type) {
+        return type && type->kind != TYPE_ANY &&
+               type->kind != TYPE_INVALID && type->kind != TYPE_VAR &&
+               type->kind != TYPE_UNION;
+    }
+
+    static bool compound_number(const TypeNode *type) {
+        return type && (type->kind == TYPE_INT ||
+                        type->kind == TYPE_FLOAT ||
+                        type->kind == TYPE_NUMBER);
+    }
+
+    static bool compound_chars(const TypeNode *type) {
+        return type && (type->kind == TYPE_STRING ||
+                        type->kind == TYPE_CHAR);
+    }
+
+    static bool compound_sequence(const TypeNode *type) {
+        return type && (type->kind == TYPE_LIST ||
+                        type->kind == TYPE_PAIR ||
+                        type->kind == TYPE_TUPLE);
+    }
+
+    static const TypeNode *compound_number_result(const TypeNode *left,
+                                                  const TypeNode *right) {
+        if (left->kind == TYPE_NUMBER || right->kind == TYPE_NUMBER)
+            return type_builtin(TYPE_NUMBER);
+        if (left->kind == TYPE_FLOAT || right->kind == TYPE_FLOAT)
+            return type_builtin(TYPE_FLOAT);
+        return type_builtin(TYPE_INT);
+    }
+
+    static const TypeNode *compound_sequence_element(const TypeNode *type) {
+        if (type->kind == TYPE_LIST)
+            return type->args.empty() ? type_any() : type->args[0];
+        if (type->args.empty())
+            return type_any();
+        const TypeNode *joined = type->args[0];
+        for (std::size_t i = 1; i < type->args.size(); ++i)
+            joined = join_types(joined, type->args[i]);
+        return joined;
+    }
+
+    static const TypeNode *compound_sequence_result(const TypeNode *left,
+                                                    const TypeNode *right) {
+        if (left->kind == TYPE_LIST || right->kind == TYPE_LIST) {
+            return type_container(
+                TYPE_LIST,
+                {join_types(compound_sequence_element(left),
+                            compound_sequence_element(right))});
+        }
+        if (left->args.empty() || right->args.empty())
+            return type_any();
+        std::vector<const TypeNode *> args = left->args;
+        args.insert(args.end(), right->args.begin(), right->args.end());
+        return type_container(TYPE_TUPLE, args);
+    }
+
+    /*
+     * Compute the static result type of `target op value` for a compound
+     * assignment.  Unknown types (any, generics, unions) stay permissive; a
+     * definite mismatch is reported with the same wording the runtime uses
+     * for the corresponding binary operator.
+     */
+    static const TypeNode *compound_result_type(
+        int op, const TypeNode *left, const TypeNode *right, bool &invalid,
+        std::string &message) {
+        invalid = false;
+        if (!compound_type_known(left) || !compound_type_known(right))
+            return type_any();
+        const std::string left_name = type_display(left);
+        const std::string right_name = type_display(right);
+
+        if (op == '&' || op == '|' || op == '^' || op == 's' || op == 'r') {
+            if (left->kind == TYPE_INT && right->kind == TYPE_INT)
+                return type_builtin(TYPE_INT);
+            /* `number` may hold an int at runtime; leave that to the VM. */
+            if (left->kind == TYPE_NUMBER || right->kind == TYPE_NUMBER)
+                return type_any();
+            invalid = true;
+            message = (op == 's' || op == 'r')
+                          ? "shift operator expects ints, got "
+                          : "bitwise operator expects ints, got ";
+            message += left_name;
+            message += " and ";
+            message += right_name;
+            return nullptr;
+        }
+
+        if (op == '+') {
+            if (compound_number(left) && compound_number(right))
+                return compound_number_result(left, right);
+            if (compound_chars(left) && compound_chars(right))
+                return type_builtin(TYPE_STRING);
+            if (compound_sequence(left) && compound_sequence(right))
+                return compound_sequence_result(left, right);
+            invalid = true;
+            message = "cannot add ";
+            message += left_name;
+            message += " and ";
+            message += right_name;
+            return nullptr;
+        }
+
+        if (op == '-' || op == '*' || op == '/' || op == '%') {
+            if (compound_number(left) && compound_number(right))
+                return compound_number_result(left, right);
+            invalid = true;
+            if (op == '/') {
+                message = "cannot divide ";
+                message += left_name;
+                message += " by ";
+                message += right_name;
+            } else if (op == '%') {
+                message = "cannot take ";
+                message += left_name;
+                message += " modulo ";
+                message += right_name;
+            } else {
+                message = "cannot use ";
+                message.push_back(static_cast<char>(op));
+                message += " on ";
+                message += left_name;
+                message += " and ";
+                message += right_name;
+            }
+            return nullptr;
+        }
+
+        return type_any();
+    }
+
+    bool check_compound_op(struct ast *target, struct ast *value,
+                           const TypeNode *target_type, int op,
+                           bool enforce_target, Env &env,
+                           const TypeNode *&result_out) {
+        result_out = type_any();
+        if (!value)
+            return true;
+        const TypeNode *rhs = infer(value, env);
+        bool invalid = false;
+        std::string message;
+        const TypeNode *result =
+            compound_result_type(op, target_type, rhs, invalid, message);
+        if (invalid) {
+            report_error(target->line, target->column, message.c_str());
+            return false;
+        }
+        result_out = result;
+        if (!enforce_target || !target_type ||
+            target_type->kind == TYPE_ANY)
+            return true;
+        if (match_type(result, target_type) == MatchResult::Mismatch) {
+            char diagnostic[512];
+            std::snprintf(diagnostic, sizeof(diagnostic),
+                          "expected %s, got %s",
+                          type_display(target_type), type_display(result));
+            report_error(target->line, target->column, diagnostic);
+            return false;
+        }
+        return true;
+    }
+
     bool check_lvalue(struct ast *target, struct ast *value, Env &env,
-                      bool compound) {
+                      bool compound, int op = 0) {
         if (!target)
             return true;
         const TypeNode *target_type = type_any();
@@ -652,9 +815,13 @@ struct Checker : public BuiltinContext {
             return false;
         if (!value)
             return true;
+        if (compound) {
+            const TypeNode *result = type_any();
+            return check_compound_op(target, value, target_type, op, true,
+                                     env, result);
+        }
         bool force_element =
             target->nodetype == 'G' || needs_static_check(target_type);
-        (void)compound;
         return check_expr(value, target_type, env, false, force_element);
     }
 
@@ -1513,7 +1680,7 @@ struct Checker : public BuiltinContext {
     }
 
     bool check_assignment(struct ast *target, struct ast *value, Env &env,
-                          bool compound) {
+                          bool compound, int op = 0) {
         if (!target)
             return true;
         invalidate_lvalue_facts(target, env);
@@ -1524,14 +1691,37 @@ struct Checker : public BuiltinContext {
                                ? owner->vars[name ? name : ""]
                                : lookup_var(name ? name : "", env);
             if (info.fixed) {
-                const TypeNode *target =
+                const TypeNode *declared_target =
                     info.declared ? info.declared : info.type;
-                bool ok = check_expr(value, target, env, false,
-                                     needs_static_check(target));
+                bool ok;
+                if (compound) {
+                    const TypeNode *result = type_any();
+                    ok = check_compound_op(target, value, declared_target,
+                                           op, true, env, result);
+                } else {
+                    ok = check_expr(value, declared_target, env, false,
+                                    needs_static_check(declared_target));
+                }
                 if (info.declared && owner)
                     owner->vars[name ? name : ""].type =
                         info.declared;
                 return ok;
+            }
+            if (compound) {
+                const TypeNode *result = type_any();
+                if (!check_compound_op(target, value, info.type, op, false,
+                                       env, result))
+                    return false;
+                if (owner) {
+                    VarInfo &assigned = owner->vars[name ? name : ""];
+                    assigned.type = owner == &env ? result : type_any();
+                    assigned.declared = nullptr;
+                    assigned.fixed = false;
+                    if (assigned.exported && !package.empty())
+                        g_exported_types[package][name ? name : ""] =
+                            assigned;
+                }
+                return true;
             }
             const TypeNode *rhs =
                 value ? infer(value, env) : type_any();
@@ -1548,7 +1738,7 @@ struct Checker : public BuiltinContext {
 
         bool fixed = expr_fixed(lvalue_root(target), env);
         if (fixed)
-            return check_lvalue(target, value, env, compound);
+            return check_lvalue(target, value, env, compound, op);
 
         if (value)
             infer(value, env);
@@ -1611,6 +1801,7 @@ struct Checker : public BuiltinContext {
             TYPE_GENERATOR, {element ? element : type_any(),
                              send ? send : type_any()});
         annotation->display = node->display.c_str();
+        annotation->arity = 0;
         annotation->detail = node;
         def->ret_type = annotation;
     }
@@ -2458,7 +2649,8 @@ struct Checker : public BuiltinContext {
             case 'a': {
                 struct compound_asgn *asgn =
                     (struct compound_asgn *)stmt;
-                return check_assignment(asgn->target, asgn->v, env, true);
+                return check_assignment(asgn->target, asgn->v, env, true,
+                                        asgn->op);
             }
             case 'U': {
                 struct incdec_node *inc = (struct incdec_node *)stmt;
@@ -2921,7 +3113,8 @@ struct Checker : public BuiltinContext {
             case 'a': {
                 struct compound_asgn *asgn =
                     (struct compound_asgn *)expr;
-                check_assignment(asgn->target, asgn->v, env, true);
+                check_assignment(asgn->target, asgn->v, env, true,
+                                 asgn->op);
                 return infer(asgn->target, env);
             }
             case 'U': {

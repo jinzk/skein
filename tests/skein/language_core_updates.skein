@@ -141,6 +141,39 @@ ts_test("compound index and field", func() {
   ts_eq(q.x, 5);
 });
 
+func lang_bump_param(p) {
+  p += 2;
+  return p;
+}
+
+func lang_bump_index(xs, i) {
+  xs[i] += 3;
+  return xs[i];
+}
+
+func lang_bump_nested(items) {
+  items[0].x += 4;
+  return items[0].x;
+}
+
+ts_test("compound parameter target", func() {
+  ts_eq(lang_bump_param(1), 3);
+  let p = 1;
+  ts_eq(lang_bump_param(p), 3);
+  ts_eq(p, 1);
+});
+
+ts_test("compound index target", func() {
+  let xs = [1, 2];
+  ts_eq(lang_bump_index(xs, 1), 5);
+  ts_eq(xs[0]++, 1);
+  ts_eq(++xs[0], 3);
+});
+
+ts_test("compound nested field target", func() {
+  ts_eq(lang_bump_nested([UpdateFieldP { x: 1 }]), 5);
+});
+
 ts_test("const scalar propagation", func() {
   ts_eq(lang_const_scale(), 7);
 });

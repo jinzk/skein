@@ -138,6 +138,58 @@ ts_test("key scalar types", func() {
   ts_eq(d[null], 'n');
 });
 
+ts_test("key float types", func() {
+  let d = {1.5: 'a', 1: 'i', -0.0: 'z', (2.5, 3): 't'};
+  ts_eq(d[1.5], 'a');
+  ts_eq(d[1], 'i');
+  ts_eq(d[1.0], 'i');
+  ts_eq(d[0.0], 'z');
+  ts_eq(d[-0.0], 'z');
+  ts_eq(d[(2.5, 3.0)], 't');
+  let s = std.set.from_list([1, 1.0, 2.5, 2.5, -0.0, 0.0]);
+  ts_eq(std.set.size(s), 3);
+});
+
+ts_test("key float large dict", func() {
+  let d = {};
+  let i = 0;
+  while (i < 40) {
+    d[i + 0.5] = i;
+    i = i + 1;
+  }
+  let total = 0;
+  i = 0;
+  while (i < 40) {
+    total = total + d[i + 0.5];
+    i = i + 1;
+  }
+  ts_eq(total, 780);
+  d[1] = 100;
+  ts_eq(d[1.0], 100);
+});
+
+ts_test("key NaN rejected", func() {
+  let n = std.math.log2(-1);
+  ts_error(func() {
+    let d = {n: 1};
+    return d;
+  }, "dict key must be");
+  let d = {};
+  ts_error(func() {
+    d[n] = 1;
+  }, "dict key must be");
+  ts_error(func() {
+    return d[n];
+  }, "dict key must be");
+  ts_error(func() {
+    d[n]++;
+  }, "dict key must be");
+  ts_error(func() {
+    let nested = {(n, 1): 1};
+    return nested;
+  }, "dict key must be");
+});
+
 ts_test("key tuple and nested tuple", func() {
   let d = {(1, 'a'): 10, ((2, 3), 'b'): 20};
   ts_eq(d[(1, 'a')], 10);
@@ -293,7 +345,7 @@ ts_test("key index_by composite projection", func() {
 
 ts_test("key index_by invalid key", func() {
   ts_error(func() {
-    return std.dict.index_by([1], func(x) { return 1.5; });
+    return std.dict.index_by([1], func(x) { return [x]; });
   }, "std.dict.index_by: dict key must be");
 });
 

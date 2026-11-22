@@ -192,6 +192,20 @@ using direct_fn = void *(*)(value_t *callee, value_t **args, uint32_t argc,
 void set_direct(direct_fn fn);
 direct_fn direct();
 
+/*
+ * Cached method dispatch installed by the VM bridge.  Generated CALL_METHOD
+ * sites use this to skip the generic member lookup when the receiver's type
+ * and method are already known.  On success it consumes the receiver and the
+ * argument pointers; when the generic path must run it returns
+ * method_fallback_marker() and leaves them untouched.
+ */
+using invoke_method_cached_fn = value_t *(
+    *)(value_t *receiver, const char *name, value_t **args, uint32_t argc,
+       skein::bc::MethodCallCacheEntry *cache, thread_state *ts);
+void set_invoke_method_cached(invoke_method_cached_fn fn);
+invoke_method_cached_fn invoke_method_cached();
+value_t *method_fallback_marker();
+
 /* True when the runtime switch (SKEIN_JIT=1) enables the JIT. */
 bool available();
 

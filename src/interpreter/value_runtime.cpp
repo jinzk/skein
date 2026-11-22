@@ -539,6 +539,8 @@ static struct value_t *increment_member_value(struct value_t *container,
         struct dict_value_t *dv = (struct dict_value_t *)container;
         if (field_access && !dv->payload->is_namespace) {
             yyerror("cannot access dict key with '.', use [\"...\"]");
+        } else if (!dict_key_allowed(idx)) {
+            yyerror("%s, got %s", dict_key_error(), typename_of(idx));
         } else {
             ensure_unique_dict(dv);
             int index = dict_find_index(dv, idx);

@@ -215,10 +215,10 @@ let d = {
 字典 key 只允许：
 
 ```text
-int / bool / string / char / byte / bytes / null
+int / float / bool / string / char / byte / bytes / null
 ```
 
-`float`、`list`、`dict`、`struct`、`enum`、`function` 等不能作为 key，会报错。
+`NaN`、`list`、`dict`、`struct`、`enum`、`function` 等不能作为 key，会报错；整数值 float 与同值 int 视为同一个 key，`-0.0` 规范化为 `0.0`。
 
 - key 按值相等比较；
 - 字典保持插入顺序；
@@ -560,6 +560,7 @@ x >>= 1
 - `a[i] += 1` 的下标表达式只求值一次；
 - 字符串和 list 支持 `+=`；
 - 复合赋值也遵守变量和字段的类型约束；
+- 静态检查按运算符推导结果类型；例如 `int += float` 的结果是 float，会因目标类型为 int 而报错；
 - `const` 变量不能复合赋值。
 
 不能给字面量或表达式结果赋值。
@@ -4565,7 +4566,7 @@ set.difference(a, b)
 set.is_subset(a, b)
 ```
 
-元素必须是合法 dict key：`int / bool / string / char / byte / bytes / null`、由这些类型递归组成的 tuple/pair、字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictKey` 的 struct/enum。
+元素必须是合法 dict key：`int / float / bool / string / char / byte / bytes / null`、由这些类型递归组成的 tuple/pair、字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictKey` 的 struct/enum。
 
 `std.set` 是 C++ 原生持久化集合（哈希 treap + 插入日志），具有值语义：`add` / `remove` 返回新 set，不修改原 set。`add` / `remove` / `has` 为 O(log n)，`from_list` 为 O(n log n)，`values` 为 O(n log n) 并保持插入顺序（删除后重新添加会排到末尾）。也可以只 `import std;` 然后使用 `std.set.*`。`len(s)`、`for ... in s`、JSON 编码（数组）和类型标注 `set` 均支持；`set` 默认值为空集合。
 

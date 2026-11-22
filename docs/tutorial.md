@@ -666,8 +666,8 @@ struct Handler {
 - 对字段/变量的写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄；
 - 收窄绑定在发生赋值后回退到声明类型，避免在分支中继续使用过期的窄化类型；
 - `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，但 tuple/pair 字面量以及 `zip`、`dict.items`、`iter.enumerate` 产生的 pair 是不可变 list，不能索引赋值；`union` 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查；
-- tuple/pair 可以作为 `dict` key 或 `set` 元素，前提是所有元素递归地属于合法 key 类型（`int/bool/string/char/byte/bytes/null`、嵌套 tuple/pair、可哈希 struct/enum）；含可变 list/dict、float 等元素的 tuple 不能作为 key；
-- struct 也可以作为 `dict` key 或 `set` 元素：所有字段递归地属于合法 key 类型时可以自动哈希；否则可以实现 `std.dict_key.DictKey` 并提供纯函数 `dict_hash(self) -> int` 来自定义哈希；如果还需要自定义 key 相等，再实现 `std.dict_key.KeyEq` 的 `key_eq(self, other) -> bool`，它只影响 dict/set 的 key 语义，不改变普通 `==`；含可变 list/dict、float 等字段且没有自定义 hash 的 struct 不能作为 key；
+- tuple/pair 可以作为 `dict` key 或 `set` 元素，前提是所有元素递归地属于合法 key 类型（`int/float/bool/string/char/byte/bytes/null`、嵌套 tuple/pair、可哈希 struct/enum）；含可变 list/dict、NaN 等元素的 tuple 不能作为 key；
+- struct 也可以作为 `dict` key 或 `set` 元素：所有字段递归地属于合法 key 类型时可以自动哈希；否则可以实现 `std.dict_key.DictKey` 并提供纯函数 `dict_hash(self) -> int` 来自定义哈希；如果还需要自定义 key 相等，再实现 `std.dict_key.KeyEq` 的 `key_eq(self, other) -> bool`，它只影响 dict/set 的 key 语义，不改变普通 `==`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 struct 不能作为 key；
 - key 的完整规则、错误和 `std.dict.index_by` 用法见 [key-semantics.md](key-semantics.md)；
 - `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
@@ -1586,7 +1586,7 @@ match (a) {
 - `kind_of(e)` 是 `"enum"`，`type_name(e)` 是枚举名；
 - `match` 支持变体模式、字段模式和守卫；
 - JSON 编码为 `{"$enum":"Event.UserMsg","payload":{...}}`；
-- enum 可以作为 `dict` key 或 `set` 元素：所有载荷字段递归可哈希时自动哈希；也可以实现 `std.dict_key.DictKey` 自定义 `dict_hash`；含可变 list/dict、float 等字段且没有自定义 hash 的 enum 不能作为 key；
+- enum 可以作为 `dict` key 或 `set` 元素：所有载荷字段递归可哈希时自动哈希；也可以实现 `std.dict_key.DictKey` 自定义 `dict_hash`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 enum 不能作为 key；
 - 暂不支持互递归 enum（自引用 enum 已支持）、enum 的 JSON 自动解码。
 
 ```text

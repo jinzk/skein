@@ -444,12 +444,14 @@ def run_cases():
           "println(d[1]); println(d[true]); println(d['s']); println(d['a']);\n"
           "println(d[byte(65)]); println(d[std.bytes.from_hex(\"00\")]); println(d[null]);\n",
           stdout_all=["i", "b", "s", "c", "y", "x", "n"])
-    check("dict float key rejected",
-          "{1.5: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got float")
+    check("dict float key",
+          "let d = {1.5: 1, 1: 2, 2.5: 3};\n"
+          "println(d[1.5]);\nprintln(d[1.0]);\nprintln(d[2.5]);\n"
+          "println(len(d));\n",
+          stdout_all=["1", "2", "3", "3"])
     check("dict list key rejected",
           "{[1]: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got list")
+          stderr="dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got list")
     check("dict struct key",
           "struct P { x: int; }\n"
           "let d = {P { x: 1 }: 'a'};\n"
@@ -474,7 +476,7 @@ def run_cases():
     check("dict struct with mutable field rejected",
           "struct P { xs: list[int]; }\n"
           "{P { xs: [1] }: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
+          stderr="dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
     check("dict enum key",
           "enum E { A; B { id: int; } }\n"
           "let d = {E.A: 'a', E.B { id: 1 }: 'b'};\n"
@@ -484,7 +486,7 @@ def run_cases():
     check("dict enum mutable payload rejected",
           "enum E { A { xs: list[int]; } }\n"
           "{E.A { xs: [1] }: 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
+          stderr="dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
     check("dict tuple keys",
           "let d = {(1, 'a'): 10, (2, 'b'): 20};\n"
           "println(d[(1, 'a')]);\n"
@@ -506,10 +508,12 @@ def run_cases():
           stdout_all=["20", "40", "39"])
     check("dict tuple mutable element rejected",
           "{(1, [2]): 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
-    check("dict tuple float element rejected",
-          "{(1, 2.0): 1}\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
+          stderr="dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum")
+    check("dict tuple float element",
+          "let d = {(1, 2.0): 1, (3, 4.5): 2};\n"
+          "println(d[(1, 2)]);\nprintln(d[(3.0, 4.5)]);\n"
+          "println(len(d));\n",
+          stdout_all=["1", "2", "2"])
     check("tuple index assignment rejected",
           "let t = (1, 2);\nt[0] = 9;\n",
           stderr="cannot modify an immutable tuple")

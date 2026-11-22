@@ -536,12 +536,17 @@ def run_cases():
           stderr='cannot access dict key with \'.\'')
     check("dict dot increment rejected", 'let p = {"x": 1};\np.x++;\n',
           stderr='cannot access dict key with \'.\'')
-    check("dict float key rejected",
-          '{1: "a", 1.0: "b"}\n',
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got float")
+    check("dict float keys canonically match ints",
+          'let d = {1: "a", 1.0: "b", 2.5: "c", -0.0: "z"};\n'
+          'println(d[1]);\nprintln(d[2.5]);\nprintln(d[0.0]);\n'
+          'println(len(d));\n',
+          stdout_all=["b", "c", "z", "3"])
+    check("dict NaN key rejected",
+          'import std;\nlet n = std.math.log2(-1);\n{n: 1}\n',
+          stderr="dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got float")
     check("print list", "print([1,2,3])\n", stdout="[1, 2, 3]")
     check("dict key container rejected", "let d = {{}: 1};\n",
-          stderr="dict key must be int, bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got dict")
+          stderr="dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum, got dict")
     check("multi-line empty package body", "package p {\n}\n", code=0)
 
     check("index assignment out of range", "let a = [1];\na[3] = 9;\n",

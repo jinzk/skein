@@ -268,7 +268,7 @@ ts_test("lru capacity must be positive", func() {
 ts_test("lru key restrictions", func() {
   let l = lru.new(2);
   ts_error(func() {
-    return lru.get(l, 1.5);
+    return lru.get(l, func() { return 1; });
   }, "std.lru key: dict key must be");
 });
 
@@ -420,7 +420,7 @@ ts_test("list top_k k must be non-negative", func() {
 
 ts_test("list group_by key restrictions", func() {
   ts_error(func() {
-    return std.list.group_by([1], func(x) { return 1.5; });
+    return std.list.group_by([1], func(x) { return [x]; });
   }, "std.list.group_by key: dict key must be");
 });
 

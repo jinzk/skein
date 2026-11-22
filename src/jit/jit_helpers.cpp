@@ -263,6 +263,97 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_slot(
     return ret;
 }
 
+static struct symlist *jit_param_meta(function_def *def, uint32_t index) {
+    if (!def || !def->code)
+        return nullptr;
+    uint32_t current = 0;
+    for (struct symlist *sl = def->code->sl; sl; sl = sl->next, ++current)
+        if (current == index)
+            return sl;
+    return nullptr;
+}
+
+static const char *jit_param_name(struct symlist *meta) {
+    if (meta && meta->sym && meta->sym->name && *meta->sym->name)
+        return meta->sym->name;
+    return "parameter";
+}
+
+static bool jit_check_param_type(struct symlist *meta, value_t *value) {
+    if (!meta || !meta->type)
+        return true;
+    if (!validate_type_constraint(meta->type))
+        return false;
+    if (type_constraint_matches(meta->type, value))
+        return true;
+    yyerror("variable %s expects %s, got %s", jit_param_name(meta),
+            type_constraint_name(meta->type), typename_of(value));
+    return false;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compound_param(
+    function_def *def, uint32_t index, value_t *value, value_t **dest,
+    int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    struct symlist *meta = jit_param_meta(def, index);
+    if (!def || !def->code || !dest || !*dest || !value) {
+        freeval(value);
+        yyerror("invalid bytecode parameter slot");
+        return nullptr;
+    }
+    if (index == 0 && def->code->is_method) {
+        freeval(value);
+        yyerror("cannot assign to constant self");
+        return nullptr;
+    }
+    string_refresh_cache(*dest, value);
+    value_t *result = apply_binary_value(op, *dest, value);
+    freeval(value);
+    if (!result)
+        return nullptr;
+    if (!jit_check_param_type(meta, result)) {
+        freeval(result);
+        return nullptr;
+    }
+    freeval(*dest);
+    *dest = result;
+    return dupval(result);
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_param(
+    function_def *def, uint32_t index, int delta, int prefix,
+    value_t **dest, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    struct symlist *meta = jit_param_meta(def, index);
+    if (!def || !def->code || !dest || !*dest) {
+        yyerror("invalid bytecode parameter slot");
+        return nullptr;
+    }
+    if (index == 0 && def->code->is_method) {
+        yyerror("cannot assign to constant self");
+        return nullptr;
+    }
+    value_t *delta_value = newintval(delta);
+    value_t *result = apply_binary_value('+', *dest, delta_value);
+    freeval(delta_value);
+    if (!result)
+        return nullptr;
+    if (!jit_check_param_type(meta, result)) {
+        freeval(result);
+        return nullptr;
+    }
+    value_t *ret = prefix ? dupval(result) : dupval(*dest);
+    freeval(*dest);
+    *dest = result;
+    return ret;
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_slot_binary(value_t *left, value_t *right,
                                           value_t **dest,
                                           const skein::bc::SlotDesc *desc,
@@ -1981,6 +2072,101 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_index_base_cached(
     return result;
 }
 
+static void jit_free_indices(value_t **indices, uint32_t count) {
+    if (!indices)
+        return;
+    for (uint32_t i = 0; i < count; ++i) {
+        freeval(indices[i]);
+        indices[i] = nullptr;
+    }
+}
+
+struct jit_index_base_state {
+    struct symbol view {};
+    symbol *base = nullptr;
+    upvalue_cell *upvalue = nullptr;
+    value_t *upvalue_before = nullptr;
+    value_t **base_slot_ptr = nullptr;
+};
+
+static symbol *jit_resolve_index_base(const skein::bc::IndexDesc *desc,
+                                      value_t **base_slot,
+                                      jit_index_base_state &state) {
+    using skein::bc::IndexBaseKind;
+    if (desc->base_kind == IndexBaseKind::Slot ||
+        desc->base_kind == IndexBaseKind::Param) {
+        if (!base_slot || !*base_slot) {
+            yyerror("symbol not found %s", desc->base_name.c_str());
+            return nullptr;
+        }
+        state.base_slot_ptr = base_slot;
+        state.view.name = const_cast<char *>(desc->base_name.c_str());
+        state.view.name_len = desc->base_name.size();
+        state.view.val = *base_slot;
+        state.view.type.kind = TYPE_ANY;
+        state.base = &state.view;
+        return state.base;
+    }
+    if (desc->base_kind == IndexBaseKind::Upvalue) {
+        function_def *def = reinterpret_cast<function_def *>(base_slot);
+        if (!def || desc->base_index >= def->upvalues.size()) {
+            yyerror("invalid bytecode upvalue");
+            return nullptr;
+        }
+        state.upvalue = def->upvalues[desc->base_index].get();
+        state.view.name = const_cast<char *>(desc->base_name.c_str());
+        state.view.name_len = desc->base_name.size();
+        state.view.type.kind = TYPE_ANY;
+        if (state.upvalue) {
+            state.upvalue_before = upvalue_cell_value(state.upvalue);
+            state.view.val = state.upvalue_before;
+            state.base = &state.view;
+            return state.base;
+        }
+        symbol *sym = lookupsym(desc->base_name.c_str());
+        scope_context &scopes = active_scope_context();
+        if (!sym || !scopes.global_scope ||
+            scopes.global_scope->syms.find(desc->base_name) != sym) {
+            yyerror("upvalue %s is not captured by a frame slot",
+                    desc->base_name.c_str());
+            return nullptr;
+        }
+        state.base = sym;
+        return state.base;
+    }
+    if (desc->base_kind == IndexBaseKind::Global) {
+        state.base = resolve_global_symbol(desc->base_index,
+                                           desc->base_name.c_str());
+    } else if (desc->base_kind == IndexBaseKind::Name) {
+        state.base = lookupsym(desc->base_name.c_str());
+    } else {
+        yyerror("invalid bytecode index descriptor");
+        return nullptr;
+    }
+    if (!state.base)
+        yyerror("symbol not found %s", desc->base_name.c_str());
+    return state.base;
+}
+
+static void jit_sync_index_base(jit_index_base_state &state) {
+    if (state.base != &state.view)
+        return;
+    if (state.upvalue && state.view.val != state.upvalue_before) {
+        if (state.upvalue->slot)
+            *state.upvalue->slot = state.view.val;
+        else
+            state.upvalue->value = state.view.val;
+        freeval(state.upvalue_before);
+        state.upvalue_before = nullptr;
+        state.view.val = nullptr;
+    } else if (state.base_slot_ptr &&
+               *state.base_slot_ptr != state.view.val) {
+        freeval(*state.base_slot_ptr);
+        *state.base_slot_ptr = state.view.val;
+        state.view.val = nullptr;
+    }
+}
+
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     const skein::bc::IndexDesc *desc, value_t **indices,
     value_t *value, value_t **base_slot, uint64_t packed_loc) {
@@ -1994,57 +2180,12 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     }
     const uint32_t count = static_cast<uint32_t>(desc->fields.size());
 
-    using skein::bc::IndexBaseKind;
-    struct symbol view {};
-    symbol *base = nullptr;
-    upvalue_cell *upvalue = nullptr;
-    value_t *upvalue_before = nullptr;
-    value_t **base_slot_ptr = nullptr;
-    if (desc->base_kind == IndexBaseKind::Slot ||
-        desc->base_kind == IndexBaseKind::Param) {
-        if (!base_slot || !*base_slot) {
-            yyerror("symbol not found %s", desc->base_name.c_str());
-            freeval(value);
-            return nullptr;
-        }
-        base_slot_ptr = base_slot;
-        view.name = const_cast<char *>(desc->base_name.c_str());
-        view.name_len = desc->base_name.size();
-        view.val = *base_slot;
-        view.type.kind = TYPE_ANY;
-        base = &view;
-    } else if (desc->base_kind == IndexBaseKind::Upvalue) {
-        function_def *def = reinterpret_cast<function_def *>(base_slot);
-        if (!def || desc->base_index >= def->upvalues.size()) {
-            yyerror("invalid bytecode upvalue");
-            freeval(value);
-            return nullptr;
-        }
-        upvalue = def->upvalues[desc->base_index].get();
-        view.name = const_cast<char *>(desc->base_name.c_str());
-        view.name_len = desc->base_name.size();
-        view.type.kind = TYPE_ANY;
-        if (upvalue) {
-            upvalue_before = upvalue_cell_value(upvalue);
-            view.val = upvalue_before;
-            base = &view;
-        } else {
-            symbol *sym = lookupsym(desc->base_name.c_str());
-            scope_context &scopes = active_scope_context();
-            if (!sym || !scopes.global_scope ||
-                scopes.global_scope->syms.find(desc->base_name) != sym) {
-                yyerror("upvalue %s is not captured by a frame slot",
-                        desc->base_name.c_str());
-                freeval(value);
-                return nullptr;
-            }
-            base = sym;
-        }
-    } else if (desc->base_kind == IndexBaseKind::Global) {
-        base = resolve_global_symbol(desc->base_index,
-                                     desc->base_name.c_str());
-    } else if (desc->base_kind == IndexBaseKind::Name) {
-        base = lookupsym(desc->base_name.c_str());
+    jit_index_base_state state;
+    symbol *base = jit_resolve_index_base(desc, base_slot, state);
+    if (!base) {
+        jit_free_indices(indices, count);
+        freeval(value);
+        return nullptr;
     }
 
     /*
@@ -2053,7 +2194,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
      * checks directly.  `assign_dict_index_fast` consumes the key and value,
      * and generated code clears the matching frame slots.
      */
-    if (count == 1 && !desc->fields[0] && base && base->val &&
+    if (count == 1 && !desc->fields[0] && base->val &&
         base->val->type == T_dict) {
         return assign_dict_index_fast(base->val, indices[0], value);
     }
@@ -2062,18 +2203,63 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_assign_index(
     value_t *result =
         assign_index_symbol(base, desc->base_name.c_str(), args,
                             desc->fields, value);
-    if (base == &view && view.val != upvalue_before && upvalue) {
-        if (upvalue->slot)
-            *upvalue->slot = view.val;
-        else
-            upvalue->value = view.val;
-        freeval(upvalue_before);
-        view.val = nullptr;
-    } else if (base == &view && base_slot_ptr && *base_slot_ptr != view.val) {
-        freeval(*base_slot_ptr);
-        *base_slot_ptr = view.val;
-        view.val = nullptr;
+    jit_sync_index_base(state);
+    return result;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_compound_index(
+    const skein::bc::IndexDesc *desc, value_t **indices, value_t *value,
+    value_t **base_slot, int op, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!desc || !indices || !value || desc->fields.empty()) {
+        freeval(value);
+        return nullptr;
     }
+    const uint32_t count = static_cast<uint32_t>(desc->fields.size());
+
+    jit_index_base_state state;
+    symbol *base = jit_resolve_index_base(desc, base_slot, state);
+    if (!base) {
+        jit_free_indices(indices, count);
+        freeval(value);
+        return nullptr;
+    }
+
+    std::vector<value_t *> args(indices, indices + count);
+    value_t *result =
+        compound_index_symbol(base, desc->base_name.c_str(), op, args,
+                              desc->fields, value);
+    jit_sync_index_base(state);
+    return result;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_incdec_index(
+    const skein::bc::IndexDesc *desc, value_t **indices, int delta,
+    int prefix, value_t **base_slot, uint64_t packed_loc) {
+    int line = 0;
+    int column = 0;
+    unpack_loc(packed_loc, line, column);
+    diag_set_location(line, column);
+    if (!desc || !indices || desc->fields.empty()) {
+        return nullptr;
+    }
+    const uint32_t count = static_cast<uint32_t>(desc->fields.size());
+
+    jit_index_base_state state;
+    symbol *base = jit_resolve_index_base(desc, base_slot, state);
+    if (!base) {
+        jit_free_indices(indices, count);
+        return nullptr;
+    }
+
+    std::vector<value_t *> args(indices, indices + count);
+    value_t *result =
+        increment_index_symbol(base, desc->base_name.c_str(), delta,
+                               prefix != 0, args, desc->fields);
+    jit_sync_index_base(state);
     return result;
 }
 
@@ -2099,6 +2285,17 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke(value_t *callee, value_t **a
         return nullptr;
     }
     return result;
+}
+
+extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method_cached(
+    value_t *receiver, const char *name, value_t **args, uint32_t argc,
+    skein::bc::MethodCallCacheEntry *cache,
+    skein::jit::thread_state *ts) {
+    skein::jit::invoke_method_cached_fn fn =
+        skein::jit::invoke_method_cached();
+    if (!fn)
+        return skein::jit::method_fallback_marker();
+    return fn(receiver, name, args, argc, cache, ts);
 }
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(

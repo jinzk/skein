@@ -21,6 +21,9 @@ struct type_constraint any_type_constraint() {
     type.name = NULL;
     type.source = NULL;
     type.nullable = false;
+    type.arity = 0;
+    type.display = NULL;
+    type.detail = NULL;
     return type;
 }
 

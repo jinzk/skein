@@ -4,6 +4,7 @@
 #include "structtype.h"
 #include "value_ops.h"
 
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -51,6 +52,13 @@ bool scalar_key_allowed(const struct value_t *key) {
         case T_bytes:
         case T_null:
             return true;
+        case T_float:
+            /*
+             * NaN is not equal to itself, so it cannot be a stable dict key.
+             * Every other float is accepted; hashing canonicalizes -0.0 and
+             * integral floats so they agree with the matching int keys.
+             */
+            return !std::isnan(((const struct float_value_t *)key)->value);
         default:
             return false;
     }
@@ -360,6 +368,27 @@ std::uint64_t hash_key_inner(
         case T_int:
             return mix_hash(0x1,
                             (std::uint64_t)((struct int_value_t *)key)->value);
+        case T_float: {
+            double value = ((struct float_value_t *)key)->value;
+            if (std::isnan(value))
+                return 0;
+            /* Canonicalize -0.0 so it hashes like 0.0 and int 0. */
+            if (value == 0.0)
+                value = 0.0;
+            /*
+             * Integral floats hash exactly like the int with the same value.
+             * This keeps 1 and 1.0 (which compare equal) in the same bucket.
+             * Values outside the int64 range fall back to the IEEE bits.
+             */
+            const double two63 = 9223372036854775808.0;
+            if (value >= -two63 && value < two63 &&
+                std::trunc(value) == value) {
+                return mix_hash(0x1, (std::uint64_t)(long long)value);
+            }
+            std::uint64_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return mix_hash(0x9, bits);
+        }
         case T_bool:
             return mix_hash(0x2,
                             ((struct bool_value_t *)key)->value ? 1 : 0);
@@ -475,8 +504,9 @@ bool dict_key_allowed(const struct value_t *key) {
 }
 
 const char *dict_key_error() {
-    return "dict key must be int, bool, string, char, byte, bytes, null, "
-           "an immutable tuple of these, or a hashable struct/enum";
+    return "dict key must be int, float (not NaN), bool, string, char, "
+           "byte, bytes, null, an immutable tuple of these, or a hashable "
+           "struct/enum";
 }
 
 std::uint64_t dict_key_hash(const struct value_t *key) {

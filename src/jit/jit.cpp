@@ -186,7 +186,7 @@ SKEIN_JIT_SYSV value_t *skein_jit_invoke_method_cached(
     value_t *receiver, const char *name, value_t **args, uint32_t argc,
     skein::bc::MethodCallCacheEntry *cache,
     skein::jit::thread_state *ts);
-extern "C" char skein_jit_method_fallback_marker;
+char skein_jit_method_fallback_marker = 0;
 SKEIN_JIT_SYSV value_t *skein_jit_tail_invoke(value_t *callee, value_t **args,
                                uint32_t argc, int line, int column);
 SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
@@ -224,6 +224,12 @@ SKEIN_JIT_SYSV value_t *skein_jit_compound_slot(const skein::bc::SlotDesc *desc,
 SKEIN_JIT_SYSV value_t *skein_jit_incdec_slot(const skein::bc::SlotDesc *desc,
                                value_t **dest, int delta, int prefix,
                                uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_compound_param(
+    function_def *def, uint32_t index, value_t *value, value_t **dest,
+    int op, uint64_t loc);
+SKEIN_JIT_SYSV value_t *skein_jit_incdec_param(
+    function_def *def, uint32_t index, int delta, int prefix,
+    value_t **dest, uint64_t loc);
 SKEIN_JIT_SYSV value_t *skein_jit_slot_binary(value_t *left, value_t *right,
                                value_t **dest,
                                const skein::bc::SlotDesc *desc, int op,
@@ -246,6 +252,12 @@ SKEIN_JIT_SYSV value_t *skein_jit_get_index_base_cached(
 SKEIN_JIT_SYSV value_t *skein_jit_assign_index(const skein::bc::IndexDesc *desc,
                                 value_t **indices, value_t *value,
                                 value_t **base_slot, uint64_t packed_loc);
+SKEIN_JIT_SYSV value_t *skein_jit_compound_index(
+    const skein::bc::IndexDesc *desc, value_t **indices, value_t *value,
+    value_t **base_slot, int op, uint64_t packed_loc);
+SKEIN_JIT_SYSV value_t *skein_jit_incdec_index(
+    const skein::bc::IndexDesc *desc, value_t **indices, int delta,
+    int prefix, value_t **base_slot, uint64_t packed_loc);
 SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts, function_def *def);
 SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts);
 SKEIN_JIT_SYSV void skein_jit_cleanup(skein::jit::thread_state *ts, value_t **values,
@@ -343,6 +355,12 @@ invoke_fn g_tail_invoke = nullptr;
 construct_fn g_build_struct = nullptr;
 bind_frame_fn g_bind_frame = nullptr;
 direct_fn g_direct = nullptr;
+/*
+ * The VM bridge installs the cached method dispatcher at runtime.  Keeping it
+ * behind a callback lets libskein_jit stay independent of the interpreter
+ * layer that owns struct/type metadata.
+ */
+invoke_method_cached_fn g_invoke_method_cached = nullptr;
 generator_test_fn g_generator_test = nullptr;
 generator_step_fn g_generator_step = nullptr;
 build_enum_fn g_build_enum = nullptr;
@@ -361,6 +379,15 @@ void set_bind_frame(bind_frame_fn fn) { g_bind_frame = fn; }
 bind_frame_fn bind_frame() { return g_bind_frame; }
 void set_direct(direct_fn fn) { g_direct = fn; }
 direct_fn direct() { return g_direct; }
+void set_invoke_method_cached(invoke_method_cached_fn fn) {
+    g_invoke_method_cached = fn;
+}
+invoke_method_cached_fn invoke_method_cached() {
+    return g_invoke_method_cached;
+}
+value_t *method_fallback_marker() {
+    return reinterpret_cast<value_t *>(&skein_jit_method_fallback_marker);
+}
 void set_generator_test(generator_test_fn fn) { g_generator_test = fn; }
 generator_test_fn generator_test() { return g_generator_test; }
 void set_generator_step(generator_step_fn fn) { g_generator_step = fn; }
@@ -430,7 +457,6 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
         switch (static_cast<skein::bc::Op>(ins.op)) {
             case skein::bc::Op::Nop:
             case skein::bc::Op::LoadNull:
-            case skein::bc::Op::LoadParam:
             case skein::bc::Op::Add:
             case skein::bc::Op::Sub:
             case skein::bc::Op::Mul:
@@ -454,6 +480,18 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::CmpLe:
             case skein::bc::Op::CmpGt:
             case skein::bc::Op::CmpGe:
+                break;
+            case skein::bc::Op::LoadParam:
+                if (ins.b >= proto.nparams)
+                    return reject("parameter index");
+                break;
+            case skein::bc::Op::CompoundParam:
+                if (ins.b >= proto.nparams || !is_binary_op_char(ins.flags))
+                    return reject("compound parameter");
+                break;
+            case skein::bc::Op::IncDecParam:
+                if (ins.b >= proto.nparams)
+                    return reject("incdec parameter");
                 break;
             case skein::bc::Op::Call:
                 /* `launch f()` uses flags & 1 to start a new fiber.  The JIT
@@ -689,9 +727,15 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                 }
                 break;
             }
-            case skein::bc::Op::AssignIndex: {
+            case skein::bc::Op::AssignIndex:
+            case skein::bc::Op::CompoundIndex:
+            case skein::bc::Op::IncDecIndex: {
                 if (ins.b >= proto.index_ops.size())
                     return reject("index-write descriptor");
+                if (static_cast<skein::bc::Op>(ins.op) ==
+                        skein::bc::Op::CompoundIndex &&
+                    !is_binary_op_char(ins.flags))
+                    return reject("compound index operator");
                 const skein::bc::IndexDesc &desc =
                     proto.index_ops[ins.b];
                 if (desc.fields.empty())
@@ -1509,6 +1553,45 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.jz(abort_label);
                 break;
 
+            case skein::bc::Op::CompoundParam: {
+                const int value_depth = depth - 1;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                a.lea(asmjit::x86::rcx,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       param_off(ins.b)));
+                a.mov(asmjit::x86::r8d, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_compound_param));
+                clear_slot(value_depth);
+                push_reg(value_depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IncDecParam:
+                a.mov(asmjit::x86::rdi,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp, -kDefOff));
+                a.mov(asmjit::x86::esi, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::edx,
+                      asmjit::imm(ins.a ? 1 : -1));
+                a.mov(asmjit::x86::ecx,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                a.lea(asmjit::x86::r8,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       param_off(ins.b)));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_incdec_param));
+                push_reg(depth, asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+
             case skein::bc::Op::ClearSlot:
                 a.mov(asmjit::x86::rdi,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
@@ -1771,6 +1854,99 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                     clear_slot(i);
                 a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              stack_off(value_depth)),
+                      asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::CompoundIndex: {
+                const skein::bc::IndexDesc &desc =
+                    proto.index_ops[ins.b];
+                const int count = static_cast<int>(desc.fields.size());
+                const int value_depth = depth - count - 1;
+                const int indices_start = depth - count;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&desc)));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(indices_start)));
+                a.mov(asmjit::x86::rdx,
+                      asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)));
+                switch (desc.base_kind) {
+                    case skein::bc::IndexBaseKind::Slot:
+                        a.lea(asmjit::x86::rcx,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               slot_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Param:
+                        a.lea(asmjit::x86::rcx,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               param_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Upvalue:
+                        a.mov(asmjit::x86::rcx,
+                              asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                     -kDefOff));
+                        break;
+                    default:
+                        a.xor_(asmjit::x86::ecx, asmjit::x86::ecx);
+                        break;
+                }
+                a.mov(asmjit::x86::r8d, asmjit::imm(ins.flags));
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_compound_index));
+                for (int i = value_depth; i < depth; ++i)
+                    clear_slot(i);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(value_depth)),
+                      asmjit::x86::rax);
+                a.test(asmjit::x86::rax, asmjit::x86::rax);
+                a.jz(abort_label);
+                break;
+            }
+
+            case skein::bc::Op::IncDecIndex: {
+                const skein::bc::IndexDesc &desc =
+                    proto.index_ops[ins.b];
+                const int count = static_cast<int>(desc.fields.size());
+                const int base_depth = depth - count;
+                a.mov(asmjit::x86::rdi,
+                      asmjit::imm(fn_address(&desc)));
+                a.lea(asmjit::x86::rsi,
+                      asmjit::x86::ptr(asmjit::x86::rbp,
+                                       stack_off(base_depth)));
+                a.mov(asmjit::x86::edx,
+                      asmjit::imm(ins.a ? 1 : -1));
+                a.mov(asmjit::x86::ecx,
+                      asmjit::imm((ins.flags & 1) ? 1 : 0));
+                switch (desc.base_kind) {
+                    case skein::bc::IndexBaseKind::Slot:
+                        a.lea(asmjit::x86::r8,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               slot_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Param:
+                        a.lea(asmjit::x86::r8,
+                              asmjit::x86::ptr(asmjit::x86::rbp,
+                                               param_off(desc.base_index)));
+                        break;
+                    case skein::bc::IndexBaseKind::Upvalue:
+                        a.mov(asmjit::x86::r8,
+                              asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                                     -kDefOff));
+                        break;
+                    default:
+                        a.xor_(asmjit::x86::r8d, asmjit::x86::r8d);
+                        break;
+                }
+                a.mov(asmjit::x86::r9, asmjit::imm(pack_loc(loc)));
+                call_addr(fn_address(&skein_jit_incdec_index));
+                for (int i = base_depth; i < depth; ++i)
+                    clear_slot(i);
+                a.mov(asmjit::x86::qword_ptr(asmjit::x86::rbp,
+                                             stack_off(base_depth)),
                       asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);
                 a.jz(abort_label);

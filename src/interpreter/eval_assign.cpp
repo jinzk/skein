@@ -303,6 +303,10 @@ static bool index_read_step(struct value_t *container, struct value_t *index,
 
     if (container->type == T_dict) {
         struct dict_value_t *dv = (struct dict_value_t *)container;
+        if (!dict_key_allowed(index)) {
+            yyerror("%s, got %s", dict_key_error(), typename_of(index));
+            return false;
+        }
         int found = dict_find_index(dv, index);
         if (found >= 0) {
             *next = dv->payload->items[(size_t)found].second;

@@ -53,6 +53,13 @@ struct type_constraint {
     const char *source;
     bool nullable;
     /*
+     * Runtime arity for pair/tuple constraints; zero means "not fixed" (or
+     * not applicable).  The runtime cannot inspect the static detail graph,
+     * so this small piece of shape information is copied onto the
+     * constraint itself.
+     */
+    int arity = 0;
+    /*
      * Static-checker metadata.  Both pointers are interned and non-owning;
      * the runtime never interprets detail and only uses display for
      * diagnostics/meta output.  Plain annotations leave them NULL.

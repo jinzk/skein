@@ -2,6 +2,7 @@
 
 #include "structtype.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,6 +26,7 @@ struct symbol *newsym(const char *name) {
     s->type.name = NULL;
     s->type.source = NULL;
     s->type.nullable = false;
+    s->type.arity = 0;
     s->type.display = NULL;
     s->type.detail = NULL;
     s->exported = false;
@@ -82,6 +84,7 @@ struct type_constraint *new_type_constraint(enum type_constraint_kind kind) {
     type->name = NULL;
     type->source = NULL;
     type->nullable = false;
+    type->arity = 0;
     type->display = NULL;
     type->detail = NULL;
     return type;
@@ -107,6 +110,7 @@ void type_constraint_assign(struct type_constraint *dst,
     dst->name = src->name;
     dst->source = src->source;
     dst->nullable = src->nullable;
+    dst->arity = src->arity;
     dst->display = src->display;
     dst->detail = src->detail;
 }
@@ -118,6 +122,7 @@ void type_constraint_set_any(struct type_constraint *dst) {
     dst->name = NULL;
     dst->source = NULL;
     dst->nullable = false;
+    dst->arity = 0;
     dst->display = NULL;
     dst->detail = NULL;
 }
@@ -276,9 +281,19 @@ bool type_constraint_matches(const struct type_constraint *type,
                    ((const struct userdata_value_t *)value)->meta &&
                    ((const struct userdata_value_t *)value)->meta->stream;
         case TYPE_PAIR:
-            return value->type == T_list;
-        case TYPE_TUPLE:
-            return value->type == T_list;
+        case TYPE_TUPLE: {
+            if (value->type != T_list)
+                return false;
+            const struct list_value_t *list =
+                (const struct list_value_t *)value;
+            if (!list->payload || !list->payload->frozen)
+                return false;
+            if (type->arity > 0 &&
+                list->payload->items.size() !=
+                    static_cast<std::size_t>(type->arity))
+                return false;
+            return true;
+        }
         case TYPE_UNION:
             /* Union membership is enforced by the static checker. */
             return true;
@@ -297,6 +312,9 @@ bool type_constraint_equal(const struct type_constraint *a,
     if (a->kind != b->kind)
         return false;
     if (a->nullable != b->nullable)
+        return false;
+    if ((a->kind == TYPE_PAIR || a->kind == TYPE_TUPLE) &&
+        a->arity != b->arity)
         return false;
     if (a->kind == TYPE_NAMED) {
         if (!a->name || !b->name)

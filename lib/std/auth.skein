@@ -1,0 +1,411 @@
+package auth {
+  import std;
+
+  func _b64url_encode_bytes(data) {
+    let encoded = std.encoding.base64_encode(data);
+    encoded = std.string.replace(encoded, "+", "-");
+    encoded = std.string.replace(encoded, "/", "_");
+    while (std.string.ends_with(encoded, "=")) {
+      encoded = std.string.substr(encoded, 0, len(encoded) - 1);
+    }
+    return encoded;
+  }
+
+  func _b64url_decode_bytes(text) {
+    let encoded = std.string.replace(text, "-", "+");
+    encoded = std.string.replace(encoded, "_", "/");
+    while (len(encoded) % 4 != 0) {
+      encoded = encoded + "=";
+    }
+    return std.encoding.base64_decode(encoded);
+  }
+
+  func _b64url_valid(text) {
+    if (kind_of(text) != "string" || text == "" ||
+        len(text) % 4 == 1) {
+      return false;
+    }
+    for (let c in text) {
+      if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_') {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  func _b64url_encode(text) {
+    return _b64url_encode_bytes(std.bytes.from_string(text));
+  }
+
+  func _b64url_decode(text) {
+    return std.bytes.to_string(_b64url_decode_bytes(text));
+  }
+
+  func _session_id() {
+    return std.bytes.hex(std.random.bytes(32));
+  }
+
+  export func constant_time_equal(a, b) {
+    if (a == null || b == null || kind_of(a) != kind_of(b) ||
+        (kind_of(a) != "string" && kind_of(a) != "bytes") ||
+        len(a) != len(b)) {
+      return false;
+    }
+    let different = 0;
+    let i = 0;
+    while (i < len(a)) {
+      if (a[i] != b[i]) {
+        different = 1;
+      }
+      i = i + 1;
+    }
+    return different == 0;
+  }
+
+  export func csrf_token() {
+    return std.bytes.hex(std.random.bytes(32));
+  }
+
+  export func csrf_verify(token, expected) {
+    return constant_time_equal(token, expected);
+  }
+
+  export struct SessionStore {
+    create: callable;
+    get: callable;
+    set: callable;
+    delete: callable;
+    rotate: callable;
+    cleanup: callable;
+    cookie_name: string;
+    ttl: int;
+  }
+
+  export func new_store(options = {}) {
+    let ttl = std.dict.get(options, "ttl", 3600);
+    if (kind_of(ttl) != "int" || ttl <= 0) {
+      fail("auth.new_store ttl must be a positive integer");
+    }
+    let cookie_name = std.dict.get(options, "cookie_name", "sid");
+    if (kind_of(cookie_name) != "string" || cookie_name == "") {
+      fail("auth.new_store cookie_name must be a non-empty string");
+    }
+
+    let sessions = {};
+
+    let create = func(value) {
+      let id = _session_id();
+      sessions[id] = {
+        "value": value,
+        "expires": std.time.now() + ttl
+      };
+      return id;
+    };
+
+    let get = func(id) {
+      if (id == null || kind_of(id) != "string" ||
+          !std.dict.has(sessions, id)) {
+        return null;
+      }
+      let record = std.dict.get(sessions, id, null);
+      if (record == null) {
+        return null;
+      }
+      if (record["expires"] <= std.time.now()) {
+        sessions = std.dict.delete(sessions, id);
+        return null;
+      }
+      return record["value"];
+    };
+
+    let set = func(id, value) {
+      if (id == null || kind_of(id) != "string" ||
+          !std.dict.has(sessions, id)) {
+        return false;
+      }
+      sessions[id] = {
+        "value": value,
+        "expires": std.time.now() + ttl
+      };
+      return true;
+    };
+
+    let remove = func(id) {
+      if (id == null || kind_of(id) != "string" ||
+          !std.dict.has(sessions, id)) {
+        return false;
+      }
+      sessions = std.dict.delete(sessions, id);
+      return true;
+    };
+
+    let rotate = func(id) {
+      let value = get(id);
+      if (value == null) {
+        return null;
+      }
+      remove(id);
+      return create(value);
+    };
+
+    let cleanup = func() {
+      let now = std.time.now();
+      let removed = 0;
+      for (let id in sessions) {
+        let record = sessions[id];
+        if (record["expires"] <= now) {
+          sessions = std.dict.delete(sessions, id);
+          removed = removed + 1;
+        }
+      }
+      return removed;
+    };
+
+    return SessionStore {
+      create: create,
+      get: get,
+      set: set,
+      delete: remove,
+      rotate: rotate,
+      cleanup: cleanup,
+      cookie_name: cookie_name,
+      ttl: ttl
+    };
+  }
+
+  export func session_from_request(store, req) {
+    let id = std.dict.get(req["cookies"], store.cookie_name, null);
+    return store.get(id);
+  }
+
+  export func session_cookie(store, id, options = {}) {
+    let settings = {
+      "path": "/",
+      "http_only": true,
+      "secure": true,
+      "same_site": "Lax"
+    };
+    for (let key in options) {
+      settings[key] = options[key];
+    }
+    return std.http.set_cookie(store.cookie_name, id, settings);
+  }
+
+  export func clear_session_cookie(store, options = {}) {
+    let settings = {
+      "path": "/",
+      "http_only": true,
+      "secure": true,
+      "same_site": "Lax",
+      "max_age": 0
+    };
+    for (let key in options) {
+      settings[key] = options[key];
+    }
+    return std.http.set_cookie(store.cookie_name, null, settings);
+  }
+
+  export func bearer(req) {
+    let headers = req["headers"];
+    let authorization = std.dict.get(headers, "authorization", null);
+    if (authorization == null || kind_of(authorization) != "string") {
+      return null;
+    }
+    if (!std.string.starts_with(authorization, "Bearer ")) {
+      return null;
+    }
+    let token = std.string.substr(authorization, 7);
+    if (token == "") {
+      return null;
+    }
+    return token;
+  }
+
+  func _decode_json_object(text) {
+    let parsed = std.json.try_parse(text);
+    if (std.result.is_err(parsed)) {
+      return null;
+    }
+    let value = std.result.value(parsed);
+    if (kind_of(value) != "dict") {
+      return null;
+    }
+    return value;
+  }
+
+  func _audience_matches(claim, expected) {
+    if (kind_of(claim) == "string") {
+      return claim == expected;
+    }
+    if (kind_of(claim) == "list") {
+      for (let item in claim) {
+        if (item == expected) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  export func jwt_sign(payload, secret, ttl = 3600) {
+    if (kind_of(payload) != "dict") {
+      fail("auth.jwt_sign payload must be a dict");
+    }
+    if (kind_of(secret) != "string" || secret == "") {
+      fail("auth.jwt_sign secret must be a non-empty string");
+    }
+    if (kind_of(ttl) != "int" || ttl <= 0) {
+      fail("auth.jwt_sign ttl must be a positive integer");
+    }
+    let claims = {};
+    for (let key in payload) {
+      claims[key] = payload[key];
+    }
+    let now = std.time.now();
+    if (!std.dict.has(claims, "iat")) {
+      claims["iat"] = now;
+    }
+    if (!std.dict.has(claims, "exp")) {
+      claims["exp"] = now + ttl;
+    }
+    let header = {"alg": "HS256", "typ": "JWT"};
+    let header_part = _b64url_encode(std.json.stringify(header));
+    let payload_part = _b64url_encode(std.json.stringify(claims));
+    let signing_input = header_part + "." + payload_part;
+    let signature = _b64url_encode_bytes(
+      std.crypto.hmac_sha256_bytes(secret, signing_input));
+    return signing_input + "." + signature;
+  }
+
+  export func jwt_verify(token, secret, options = {}) {
+    if (kind_of(token) != "string" || kind_of(secret) != "string" ||
+        secret == "") {
+      return null;
+    }
+    let parts = std.string.split(token, ".");
+    if (len(parts) != 3 || !_b64url_valid(parts[0]) ||
+        !_b64url_valid(parts[1]) || !_b64url_valid(parts[2])) {
+      return null;
+    }
+    let header = _decode_json_object(_b64url_decode(parts[0]));
+    if (header == null ||
+        std.dict.get(header, "alg", null) != "HS256") {
+      return null;
+    }
+    let signing_input = parts[0] + "." + parts[1];
+    let expected = std.crypto.hmac_sha256_bytes(secret, signing_input);
+    let actual = _b64url_decode_bytes(parts[2]);
+    if (!constant_time_equal(expected, actual)) {
+      return null;
+    }
+    let claims = _decode_json_object(_b64url_decode(parts[1]));
+    if (claims == null) {
+      return null;
+    }
+
+    let clock_skew = std.dict.get(options, "clock_skew", 0);
+    if (kind_of(clock_skew) != "int" || clock_skew < 0) {
+      fail("auth.jwt_verify clock_skew must be a non-negative integer");
+    }
+    let now = std.time.now();
+    if (std.dict.has(claims, "exp")) {
+      if (claims["exp"] <= now - clock_skew) {
+        return null;
+      }
+    }
+    if (std.dict.has(claims, "nbf")) {
+      if (claims["nbf"] > now + clock_skew) {
+        return null;
+      }
+    }
+    if (std.dict.has(options, "iss") &&
+        std.dict.get(claims, "iss", null) != options["iss"]) {
+      return null;
+    }
+    if (std.dict.has(options, "aud") &&
+        !_audience_matches(std.dict.get(claims, "aud", null),
+                           options["aud"])) {
+      return null;
+    }
+    if (std.dict.has(options, "sub") &&
+        std.dict.get(claims, "sub", null) != options["sub"]) {
+      return null;
+    }
+    return claims;
+  }
+
+  export func require_bearer(req, secret, options = {}) {
+    let token = bearer(req);
+    if (token == null) {
+      return null;
+    }
+    return jwt_verify(token, secret, options);
+  }
+
+  export func authenticate(store, req, secret, options = {}) {
+    let session = session_from_request(store, req);
+    if (session != null) {
+      return {"kind": "session", "identity": session, "claims": null};
+    }
+    let claims = require_bearer(req, secret, options);
+    if (claims != null) {
+      return {"kind": "bearer", "identity": claims, "claims": claims};
+    }
+    return null;
+  }
+
+  export func unauthorized_response(message = "unauthorized") {
+    let response = std.http.json_error(401, "unauthorized", message);
+    response["headers"]["WWW-Authenticate"] = "Bearer";
+    return response;
+  }
+
+  export func forbidden_response(message = "forbidden") {
+    return std.http.json_error(403, "forbidden", message);
+  }
+
+  export func sign_token(value, secret, ttl = 3600) {
+    if (kind_of(secret) != "string" || secret == "") {
+      fail("auth.sign_token secret must be a non-empty string");
+    }
+    if (kind_of(ttl) != "int" || ttl <= 0) {
+      fail("auth.sign_token ttl must be a positive integer");
+    }
+    let payload = std.json.stringify({
+      "value": value,
+      "expires": std.time.now() + ttl
+    });
+    let body = _b64url_encode(payload);
+    let signature = std.crypto.hmac_sha256(secret, body);
+    return body + "." + signature;
+  }
+
+  export func verify_token(token, secret) {
+    if (kind_of(token) != "string" || kind_of(secret) != "string" ||
+        secret == "") {
+      return null;
+    }
+    let parts = std.string.split(token, ".");
+    if (len(parts) != 2 || parts[0] == "" || parts[1] == "") {
+      return null;
+    }
+    let expected = std.crypto.hmac_sha256(secret, parts[0]);
+    if (!constant_time_equal(expected, parts[1])) {
+      return null;
+    }
+    let parsed = std.json.try_parse(_b64url_decode(parts[0]));
+    if (std.result.is_err(parsed)) {
+      return null;
+    }
+    let payload = std.result.value(parsed);
+    if (kind_of(payload) != "dict" || !std.dict.has(payload, "expires")) {
+      return null;
+    }
+    if (payload["expires"] <= std.time.now()) {
+      return null;
+    }
+    return std.dict.get(payload, "value", null);
+  }
+}

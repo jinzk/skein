@@ -62,6 +62,33 @@ std::string trim_ascii_ws(const std::string &value) {
     return value.substr(start, end - start);
 }
 
+bool valid_cookie_name(const std::string &name) {
+    if (name.empty())
+        return false;
+    for (unsigned char c : name) {
+        if (std::isalnum(c))
+            continue;
+        switch (c) {
+            case '!': case '#': case '$': case '%': case '&': case '\'':
+            case '*': case '+': case '-': case '.': case '^': case '_':
+            case '`': case '|': case '~':
+                break;
+            default:
+                return false;
+        }
+    }
+    return true;
+}
+
+bool valid_cookie_value(const std::string &value) {
+    for (unsigned char c : value) {
+        if (c < 0x21 || c > 0x7e || c == ';' || c == ',' || c == '"' ||
+            c == '\\')
+            return false;
+    }
+    return true;
+}
+
 std::string normalize_cookie_domain(std::string domain) {
     domain = lower_ascii(trim_ascii_ws(domain));
     while (!domain.empty() && domain[0] == '.')
@@ -399,4 +426,50 @@ value_t *parse_cookie_header(const std::string &raw,
                              const std::string &request_host,
                              const std::string &request_path, bool &ok) {
     return parse_set_cookie(raw, request_host, request_path, ok);
+}
+
+std::string cookie_set_header(const std::string &name,
+                              const std::string &value,
+                              const std::string &path,
+                              const std::string &domain, long long max_age,
+                              bool secure, bool http_only,
+                              const std::string &same_site) {
+    if (!valid_cookie_name(name) || !valid_cookie_value(value))
+        return std::string();
+    if (!path.empty() && path[0] != '/')
+        return std::string();
+    if (!domain.empty() && !valid_cookie_value(domain))
+        return std::string();
+
+    std::string header = name;
+    header += '=';
+    header += value;
+    if (!path.empty()) {
+        header += "; Path=";
+        header += path;
+    }
+    if (!domain.empty()) {
+        header += "; Domain=";
+        header += domain;
+    }
+    if (max_age >= 0) {
+        header += "; Max-Age=";
+        header += std::to_string(max_age);
+    }
+    if (secure)
+        header += "; Secure";
+    if (http_only)
+        header += "; HttpOnly";
+    if (!same_site.empty()) {
+        std::string mode = lower_ascii(same_site);
+        if (mode == "lax")
+            header += "; SameSite=Lax";
+        else if (mode == "strict")
+            header += "; SameSite=Strict";
+        else if (mode == "none")
+            header += "; SameSite=None";
+        else
+            return std::string();
+    }
+    return header;
 }

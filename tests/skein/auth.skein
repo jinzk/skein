@@ -1,0 +1,137 @@
+import std;
+import std.auth;
+include "_support.skein";
+
+ts_test("set cookie header", func() {
+  let header = std.http.set_cookie("sid", "abc", {
+    "path": "/",
+    "http_only": true,
+    "secure": true,
+    "same_site": "Lax",
+    "max_age": 60
+  });
+  ts_eq(header,
+        "sid=abc; Path=/; Max-Age=60; Secure; HttpOnly; SameSite=Lax");
+});
+
+ts_test("delete cookie", func() {
+  let header = std.http.set_cookie("sid", null, {
+    "path": "/",
+    "secure": false,
+    "same_site": "Strict"
+  });
+  ts_eq(header, "sid=; Path=/; Max-Age=0; SameSite=Strict");
+});
+
+ts_test("invalid cookie option", func() {
+  ts_error(func() {
+    std.http.set_cookie("sid", "abc", {"same_site": "sometimes"});
+  }, "invalid name, value or option");
+});
+
+ts_test("session store lifecycle", func() {
+  let store = auth.new_store({"ttl": 3600, "cookie_name": "sid"});
+  let id = store.create({"user_id": 1});
+  ts_true(len(id) > 0);
+  ts_eq(store.cookie_name, "sid");
+  ts_eq(store.get(id), {"user_id": 1});
+  ts_true(store.set(id, {"user_id": 2}));
+  ts_eq(store.get(id), {"user_id": 2});
+  let next = store.rotate(id);
+  ts_true(next != null);
+  ts_eq(store.get(id), null);
+  ts_eq(store.get(next), {"user_id": 2});
+  ts_true(store.delete(next));
+  ts_eq(store.get(next), null);
+});
+
+ts_test("session cookie helper", func() {
+  let store = auth.new_store({"ttl": 60, "cookie_name": "sid"});
+  let id = store.create({"user_id": 1});
+  ts_eq(auth.session_from_request(
+          store, {"cookies": {"sid": id}}), {"user_id": 1});
+  let header = auth.session_cookie(store, id, {"secure": false});
+  ts_eq(std.string.starts_with(header, "sid=" + id + "; Path=/"), 1);
+  ts_eq(std.string.contains(header, "HttpOnly"), 1);
+  ts_eq(std.string.contains(header, "SameSite=Lax"), 1);
+  let cleared = auth.clear_session_cookie(store, {"secure": false});
+  ts_eq(cleared, "sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+});
+
+ts_test("signed token round trip", func() {
+  let secret = "test-secret";
+  let token = auth.sign_token({"user_id": 7}, secret, 3600);
+  ts_eq(auth.verify_token(token, secret), {"user_id": 7});
+  ts_eq(auth.verify_token(token + "x", secret), null);
+  ts_eq(auth.verify_token(token, "wrong-secret"), null);
+});
+
+ts_test("bearer token", func() {
+  let req = {"headers": {"authorization": "Bearer abc.def"}};
+  ts_eq(auth.bearer(req), "abc.def");
+  ts_eq(auth.bearer({"headers": {}}), null);
+  ts_eq(auth.bearer({"headers": {"authorization": "Basic x"}}), null);
+});
+
+ts_test("jwt round trip", func() {
+  let secret = "jwt-secret";
+  let token = auth.jwt_sign({"sub": "user-1", "role": "admin"}, secret);
+  let claims = auth.jwt_verify(token, secret);
+  ts_eq(claims["sub"], "user-1");
+  ts_eq(claims["role"], "admin");
+  ts_eq(std.dict.has(claims, "iat"), 1);
+  ts_eq(std.dict.has(claims, "exp"), 1);
+  ts_eq(auth.jwt_verify(token + "x", secret), null);
+  ts_eq(auth.jwt_verify(token, "wrong"), null);
+});
+
+ts_test("jwt claims validation", func() {
+  let secret = "jwt-secret";
+  let now = std.time.now();
+  let expired = auth.jwt_sign({"sub": "u", "exp": now - 10}, secret);
+  ts_eq(auth.jwt_verify(expired, secret), null);
+  let future = auth.jwt_sign({"sub": "u", "nbf": now + 100}, secret);
+  ts_eq(auth.jwt_verify(future, secret), null);
+  let scoped = auth.jwt_sign(
+    {"sub": "u", "iss": "issuer", "aud": ["api", "web"]}, secret);
+  ts_true(auth.jwt_verify(scoped, secret,
+                          {"iss": "issuer", "aud": "api"}) != null);
+  ts_eq(auth.jwt_verify(scoped, secret, {"iss": "other"}), null);
+  ts_eq(auth.jwt_verify(scoped, secret, {"aud": "mobile"}), null);
+});
+
+ts_test("auth middleware helpers", func() {
+  let store = auth.new_store({"ttl": 60});
+  let sid = store.create({"user_id": 1});
+  let session = auth.authenticate(
+    store, {"cookies": {"sid": sid}, "headers": {}}, "secret");
+  ts_eq(session["kind"], "session");
+  ts_eq(session["identity"], {"user_id": 1});
+
+  let token = auth.jwt_sign({"sub": "user-2"}, "secret");
+  let bearer = auth.authenticate(
+    store, {"cookies": {}, "headers": {"authorization": "Bearer " + token}},
+    "secret");
+  ts_eq(bearer["kind"], "bearer");
+  ts_eq(bearer["identity"]["sub"], "user-2");
+
+  ts_eq(auth.authenticate(store, {"cookies": {}, "headers": {}}, "secret"),
+        null);
+
+  let unauthorized = auth.unauthorized_response();
+  ts_eq(unauthorized["status"], 401);
+  ts_eq(unauthorized["headers"]["WWW-Authenticate"], "Bearer");
+  let forbidden = auth.forbidden_response();
+  ts_eq(forbidden["status"], 403);
+});
+
+ts_test("csrf helpers", func() {
+  let a = auth.csrf_token();
+  let b = auth.csrf_token();
+  ts_true(a != b);
+  ts_true(auth.csrf_verify(a, a));
+  ts_false(auth.csrf_verify(a, b));
+  ts_false(auth.csrf_verify(a, null));
+});
+
+ts_finish();

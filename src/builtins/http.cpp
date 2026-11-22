@@ -5479,6 +5479,101 @@ value_t *http_json_error(const std::vector<value_t *> &args) {
     return response;
 }
 
+value_t *http_set_cookie(const std::vector<value_t *> &args) {
+    if (args.size() < 2 || args.size() > 3) {
+        yyerror("std.http.set_cookie expects 2 or 3 arguments, got %d",
+                (int)args.size());
+        return NULL;
+    }
+    if (!args[0] || args[0]->type != T_string) {
+        yyerror("std.http.set_cookie name must be a string");
+        return NULL;
+    }
+    bool delete_cookie = false;
+    std::string value;
+    if (!args[1] || args[1]->type == T_null) {
+        delete_cookie = true;
+    } else if (args[1]->type == T_string) {
+        value = ((string_value_t *)args[1])->value;
+    } else {
+        yyerror("std.http.set_cookie value must be a string or null");
+        return NULL;
+    }
+
+    std::string path = "/";
+    std::string domain;
+    long long max_age = delete_cookie ? 0 : -1;
+    bool secure = false;
+    bool http_only = false;
+    std::string same_site;
+    if (args.size() == 3 && args[2] && args[2]->type != T_null) {
+        if (args[2]->type != T_dict) {
+            yyerror("std.http.set_cookie options must be a dict");
+            return NULL;
+        }
+        value_t *option = dict_get(args[2], "path");
+        if (option && option->type != T_null) {
+            if (option->type != T_string) {
+                yyerror("std.http.set_cookie path must be a string");
+                return NULL;
+            }
+            path = ((string_value_t *)option)->value;
+        }
+        option = dict_get(args[2], "domain");
+        if (option && option->type != T_null) {
+            if (option->type != T_string) {
+                yyerror("std.http.set_cookie domain must be a string");
+                return NULL;
+            }
+            domain = ((string_value_t *)option)->value;
+        }
+        option = dict_get(args[2], "max_age");
+        if (option && option->type != T_null) {
+            if (option->type != T_int ||
+                ((int_value_t *)option)->value < 0) {
+                yyerror("std.http.set_cookie max_age must be a "
+                        "non-negative integer");
+                return NULL;
+            }
+            max_age = ((int_value_t *)option)->value;
+        }
+        option = dict_get(args[2], "secure");
+        if (option && option->type != T_null) {
+            if (option->type != T_bool) {
+                yyerror("std.http.set_cookie secure must be a bool");
+                return NULL;
+            }
+            secure = ((bool_value_t *)option)->value;
+        }
+        option = dict_get(args[2], "http_only");
+        if (option && option->type != T_null) {
+            if (option->type != T_bool) {
+                yyerror("std.http.set_cookie http_only must be a bool");
+                return NULL;
+            }
+            http_only = ((bool_value_t *)option)->value;
+        }
+        option = dict_get(args[2], "same_site");
+        if (option && option->type != T_null) {
+            if (option->type != T_string) {
+                yyerror("std.http.set_cookie same_site must be a string");
+                return NULL;
+            }
+            same_site = ((string_value_t *)option)->value;
+        }
+    }
+
+    std::string header = cookie_set_header(
+        ((string_value_t *)args[0])->value, value, path, domain, max_age,
+        secure, http_only, same_site);
+    if (header.empty()) {
+        yyerror("std.http.set_cookie received an invalid name, value or "
+                "option");
+        return NULL;
+    }
+    return newstrval(header.c_str());
+}
+
 value_t *thread_server_response(int status, const std::string &message) {
     value_t *response = (value_t *)newdictval();
     value_t *headers = (value_t *)newdictval();
@@ -7076,6 +7171,8 @@ struct value_t *call_http_builtin(
             return http_json_response(args);
         case B_http_json_error:
             return http_json_error(args);
+        case B_http_set_cookie:
+            return http_set_cookie(args);
         default:
             yyerror("unknown http function");
             return NULL;

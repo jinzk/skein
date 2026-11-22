@@ -9,6 +9,7 @@ import os
 import harness
 
 from cases import (
+    auth,
     build,
     collections,
     decorators,
@@ -39,6 +40,7 @@ from cases import (
 )
 
 MODULES = [
+    auth,
     build,
     language_core,
     match_types,

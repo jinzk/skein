@@ -27,6 +27,7 @@
 #include "std_deque_source.inc"
 #include "std_heap_source.inc"
 #include "std_route_source.inc"
+#include "std_auth_source.inc"
 #include "std_graph_source.inc"
 #include "std_arena_source.inc"
 #include "std_path_source.inc"
@@ -99,6 +100,7 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.deque", kStdDequeSource},
     {"std.heap", kStdHeapSource},
     {"std.route", kStdRouteSource},
+    {"std.auth", kStdAuthSource},
     {"std.graph", kStdGraphSource},
     {"std.arena", kStdArenaSource},
     {"std.path", kStdPathSource},

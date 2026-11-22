@@ -30,6 +30,7 @@
 #include "modfile.h"
 #include "net.h"
 #include "package.h"
+#include "password.h"
 #include "result.h"
 #include "task.h"
 #ifdef SKEIN_ENABLE_TLS
@@ -615,12 +616,15 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_thread_message_from &&
         functype <= B_thread_capabilities)
         return call_thread_channel_builtin(functype, args);
-    if (functype >= B_crypto_sha256 && functype <= B_crypto_hmac_sha256)
+    if (functype >= B_crypto_sha256 &&
+        functype <= B_crypto_hmac_sha256_bytes)
         return call_crypto_builtin(functype, args);
+    if (functype >= B_password_hash && functype <= B_password_verify)
+        return call_password_builtin(functype, args);
     if (functype >= B_compress_gzip && functype <= B_compress_inflate)
         return call_compress_builtin(functype, args);
     if (functype >= B_http_request &&
-        functype <= B_http_json_error)
+        functype <= B_http_set_cookie)
         return call_http_builtin(functype, args);
 #ifdef SKEIN_ENABLE_HTTP2
     if (functype >= B_http2_request && functype <= B_http2_serve)

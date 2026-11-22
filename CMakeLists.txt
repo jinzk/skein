@@ -152,6 +152,26 @@ set_target_properties(skein_llhttp PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
+add_library(skein_argon2 STATIC
+  third_party/argon2/src/argon2.c
+  third_party/argon2/src/core.c
+  third_party/argon2/src/encoding.c
+  third_party/argon2/src/ref.c
+  third_party/argon2/src/blake2/blake2b.c
+)
+target_include_directories(skein_argon2 PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/argon2/include
+)
+target_include_directories(skein_argon2 PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/argon2/src
+)
+target_compile_definitions(skein_argon2 PRIVATE ARGON2_NO_THREADS=1)
+set_target_properties(skein_argon2 PROPERTIES
+  C_STANDARD 99
+  C_STANDARD_REQUIRED ON
+  POSITION_INDEPENDENT_CODE ON
+)
+
 add_library(skein_utf8proc STATIC
   third_party/utf8proc/utf8proc.c
 )
@@ -433,6 +453,7 @@ add_library(skein_builtins STATIC
   src/builtins/http1_parser.cpp
   src/builtins/io.cpp
   src/builtins/net.cpp
+  src/builtins/password.cpp
   src/builtins/process_builtin.cpp
   src/builtins/process_spawn.cpp
   src/builtins/random_builtin.cpp
@@ -458,6 +479,7 @@ target_link_libraries(skein_builtins PUBLIC
   skein_interpreter
   skein_runtime
   skein_llhttp
+  skein_argon2
   ${SKEIN_LIBUV_TARGET}
   ${SKEIN_PCRE2_TARGET}
   Boost::context
@@ -550,6 +572,7 @@ set(SKEIN_EMBEDDED_SOURCES
   deque.skein:kStdDequeSource:std_deque_source.inc
   heap.skein:kStdHeapSource:std_heap_source.inc
   route.skein:kStdRouteSource:std_route_source.inc
+  auth.skein:kStdAuthSource:std_auth_source.inc
   graph.skein:kStdGraphSource:std_graph_source.inc
   arena.skein:kStdArenaSource:std_arena_source.inc
   path.skein:kStdPathSource:std_path_source.inc

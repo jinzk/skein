@@ -78,7 +78,7 @@ cmake --build build-vm-only
 sudo apt install libuv1-dev libboost-context-dev libpcre2-dev
 ```
 
-HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），Unicode 归一化使用 vendored `utf8proc`（`third_party/utf8proc`），都不需要额外的系统包。
+HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），Unicode 归一化使用 vendored `utf8proc`（`third_party/utf8proc`），密码哈希使用 vendored `libargon2`（`third_party/argon2`），都不需要额外的系统包。
 
 TLS 是可选模块；启用时需要 OpenSSL 开发文件：
 

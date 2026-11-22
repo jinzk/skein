@@ -348,6 +348,14 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"sha256", B_crypto_sha256},
             {"hmac_sha256", B_crypto_hmac_sha256},
+            {"sha256_bytes", B_crypto_sha256_bytes},
+            {"hmac_sha256_bytes", B_crypto_hmac_sha256_bytes},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("password"),
+        builtin_module({
+            {"hash", B_password_hash},
+            {"verify", B_password_verify},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("compress"),
@@ -636,6 +644,7 @@ value_t *build_namespace_impl() {
             {"thread_capabilities", B_http_thread_capabilities},
             {"json_response", B_http_json_response},
             {"json_error", B_http_json_error},
+            {"set_cookie", B_http_set_cookie},
         })));
 #ifdef SKEIN_ENABLE_HTTP2
     root->payload->items.push_back(std::make_pair(

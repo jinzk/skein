@@ -65,6 +65,31 @@ struct value_t *call_crypto_builtin(
         return newstrval(
             hex_encode(hmac_sha256_bytes(key, data)).c_str());
     }
+    if (functype == B_crypto_sha256_bytes) {
+        if (args.size() != 1) {
+            yyerror("std.crypto.sha256_bytes expects 1 argument, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        std::string data;
+        if (!data_bytes(args[0], "std.crypto.sha256_bytes", data))
+            return NULL;
+        return newbytesval(sha256_bytes(data));
+    }
+    if (functype == B_crypto_hmac_sha256_bytes) {
+        if (args.size() != 2) {
+            yyerror("std.crypto.hmac_sha256_bytes expects 2 arguments, "
+                    "got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        std::string key;
+        std::string data;
+        if (!data_bytes(args[0], "std.crypto.hmac_sha256_bytes", key) ||
+            !data_bytes(args[1], "std.crypto.hmac_sha256_bytes", data))
+            return NULL;
+        return newbytesval(hmac_sha256_bytes(key, data));
+    }
     yyerror("unknown crypto function");
     return NULL;
 }

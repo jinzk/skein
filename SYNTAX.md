@@ -2530,6 +2530,7 @@ std.random
 std.env
 std.sys
 std.crypto
+std.password
 std.compress
 std.math
 std.io
@@ -2557,6 +2558,7 @@ std.set（原生实现）
 std.deque（原生实现）
 std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
+std.auth（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）

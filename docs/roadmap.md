@@ -389,9 +389,14 @@ std.string.builder          29 ms
    - `route.use_after` 响应后处理与 JSON 错误边界（已完成）
    - 请求级超时（已完成 task handler 超时；同步 CPU-bound handler 无法安全抢占，
      文档标注限制）
-2. P1-A 认证与会话：
-   - Cookie 构造、Session store、密码哈希、HMAC/JWT、CSRF
-   - Cookie Session 与 Bearer Token 共用用户和权限模型
+2. P1-A 认证与会话（进行中）：
+   - Cookie 构造、内存 Session store、CSRF、HMAC token（已完成）
+   - Argon2id 密码哈希（已完成，vendor `libargon2` + `std.password`）
+   - Cookie Session 与 Bearer Token 共用用户和权限模型（已完成）
+   - 标准 HS256 JWT、`require_bearer`、`authenticate` 与 401/403 helper
+     （已完成）
+   - 多 worker 共享 Session store（待补）
+   - 完整权限/角色 middleware（待按实际需求扩展）
 3. P1-B 限流与安全：
    - IP / token / 用户 / 路由维度限流、登录失败保护
    - 安全响应头、可信代理、请求大小与超时限制

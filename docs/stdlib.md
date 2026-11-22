@@ -918,6 +918,31 @@ return std.http.json_error(422, "BAD_INPUT", "name is required",
 `json_response` 自动设置 `Content-Type: application/json; charset=utf-8`；
 `json_error` 生成 `{"error": {"code", "message", "details"?}}`。
 
+Cookie helper：
+
+```text
+std.http.set_cookie(name, value[, options]) -> string
+```
+
+`options` 支持 `path`（默认 `/`）、`domain`、`max_age`、`secure`、
+`http_only`、`same_site`（`Lax` / `Strict` / `None`）。`value = null` 表示
+删除 Cookie（自动设置 `Max-Age=0`）。返回值可直接放进响应 headers：
+
+```skein
+return {
+  "status": 200,
+  "headers": {
+    "Set-Cookie": [
+      std.http.set_cookie("sid", sid, {
+        "path": "/", "http_only": true, "secure": true,
+        "same_site": "Lax", "max_age": 3600
+      })
+    ]
+  },
+  "body": "{}"
+};
+```
+
 限制：
 
 - 支持 `http://` 和 `https://`；
@@ -2189,6 +2214,7 @@ std.random
 std.env
 std.sys
 std.crypto
+std.password
 std.compress
 std.math
 std.io
@@ -2216,6 +2242,7 @@ std.set（原生实现）
 std.deque（原生实现）
 std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
+std.auth（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
@@ -2398,6 +2425,75 @@ app.dispatch({"method": "GET", "path": "/users/42"});
 `Router` 是可变引用句柄，复制后共享路由表；注册方法原地更新，不返回新 Router。支持 `:name` 参数、`*name` 通配、404/405、全局 middleware、返回 task 的 middleware 和响应后处理 middleware。静态路由走精确表，动态路由走段级 trie：静态 dispatch 为 O(1)，动态 dispatch 与路由总数基本无关。`*name` 必须是最后一段，并且可以匹配 0 段。装饰器可用于包装 handler，例如 `@logged func user(req) {...}` 后再 `app.get("/users/:id", user)`。
 
 `app.use_after(func(req, res) { ... })` 在路由或前置 middleware 产生响应后执行，适合统一补充 CORS、安全头、request id 和响应日志。返回 `null` 表示保留当前响应，返回 dict 表示替换响应；返回 task 会被等待。
+
+`std.password` 提供 Argon2id 密码哈希：
+
+```skein
+import std.password;
+
+let encoded = std.password.hash("secret", {
+  "memory_kib": 65536,
+  "iterations": 3,
+  "parallelism": 1
+});
+let ok = std.password.verify("secret", encoded);
+```
+
+- 默认参数：64 MiB、3 次迭代、并行度 1、32 字节 hash、16 字节 salt；
+- 返回 PHC 字符串（`$argon2id$v=19$...`），salt 和参数已编码在内；
+- `verify` 对错误密码或损坏的 encoded 返回 `false`；
+- 密码参数只接受 string 或 bytes。
+- 当前 vendored `libargon2` 以 `ARGON2_NO_THREADS` 构建；`parallelism` 会写入
+  PHC 参数并影响派生结果，但计算本身是单线程执行。
+
+`std.crypto.sha256` / `hmac_sha256` 返回十六进制字符串；
+`std.crypto.sha256_bytes` / `hmac_sha256_bytes` 返回原始 bytes，适合 JWT、
+二进制签名和协议字段。
+
+`std.auth` 提供 Cookie Session、CSRF、HMAC token 和 JWT 的基础能力：
+
+```skein
+import std.auth;
+
+let store = auth.new_store({"ttl": 3600, "cookie_name": "sid"});
+let sid = store.create({"user_id": 1});
+let value = store.get(sid);
+store.set(sid, {"user_id": 2});
+let new_sid = store.rotate(sid);
+store.delete(sid);
+
+let current = auth.session_from_request(store, req);  // session value / null
+let set_cookie = auth.session_cookie(store, sid, {"secure": false});
+let clear_cookie = auth.clear_session_cookie(store, {"secure": false});
+
+let token = auth.sign_token({"user_id": 1}, secret, 900);
+let payload = auth.verify_token(token, secret);   // dict / null
+
+let jwt = auth.jwt_sign({"sub": "user-1"}, secret, 900);
+let claims = auth.jwt_verify(jwt, secret, {
+  "iss": "issuer", "aud": "api", "clock_skew": 30
+});
+
+let csrf = auth.csrf_token();
+let ok = auth.csrf_verify(request_token, csrf);
+
+let bearer = auth.bearer(req);                    // token / null
+let identity = auth.require_bearer(req, secret, {"aud": "api"});
+let who = auth.authenticate(store, req, secret);  // session / bearer / null
+let denied = auth.unauthorized_response("login required");
+```
+
+- Session store 首版是进程内内存实现，不跨 thread/process worker 共享；
+  多 worker 部署需要后续接入共享 store。
+- `sign_token` / `verify_token` 是简化的 HMAC token；`jwt_sign` / `jwt_verify`
+  生成标准 HS256 JWT（`header.payload.signature`）。
+- JWT 校验 `alg=HS256`、签名、`exp`、`nbf`，可选校验 `iss` / `aud` / `sub`
+  和 `clock_skew`。
+- `require_bearer` 解析 `Authorization: Bearer ...` 并校验 JWT。
+- `authenticate` 先查 Cookie Session，再查 Bearer JWT，返回统一身份结构。
+- `constant_time_equal` 可用于比较签名或 CSRF token，支持 string 和 bytes。
+- `session_cookie` 默认 `HttpOnly`、`Secure`、`SameSite=Lax`；本地开发可显式
+  传 `{"secure": false}`。
 
 `std.graph` 提供有向图和常用算法：
 
@@ -2851,6 +2947,7 @@ std.http.close
 std.http.thread_capabilities
 std.http.json_response
 std.http.json_error
+std.http.set_cookie
 
 std.http2.request
 std.http2.get
@@ -3032,6 +3129,10 @@ std.sys.is_main
 
 std.crypto.sha256
 std.crypto.hmac_sha256
+std.crypto.sha256_bytes
+std.crypto.hmac_sha256_bytes
+std.password.hash
+std.password.verify
 
 std.compress.gzip
 std.compress.gunzip

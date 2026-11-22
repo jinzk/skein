@@ -95,10 +95,11 @@
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
-| PostgreSQL `std.db` 后端 | 待实现 | P1-D 当前优先项；复用现有 `std.db` API |
-| 数据库 migration | 待实现 | 版本表、事务、回滚；SQLite / PostgreSQL 共用 |
+| MySQL / MariaDB `std.db` 驱动 | 待实现 | P1-D 下一项；与 PostgreSQL 共用 `db_internal` 后端接口 |
+| 数据库 migration | 待实现 | 版本表、事务、回滚，SQLite / PostgreSQL / MySQL 共用 |
 | 数据库连接池 | 待实现 | 需先明确事务绑定、连接生命周期和并发语义 |
 | 多 worker 共享 Session / 限流 store | 待实现 | 首版内存 store 已完成；多进程生产部署前必做 |
+| Redis / Valkey `std.cache` 客户端 | 待实现 | 多 worker 共享 store 时启动；见 Milestone 7 |
 | 权限 / 角色 middleware | 按需 | 统一身份模型已完成，不阻塞 P1 验收 |
 | 账户锁定 / 登录失败保护 | 按需 | 可先用现有固定窗口限流组合实现 |
 | OpenTelemetry tracing / 完整错误栈日志 | 按需 | 结构化访问日志与 Prometheus 已完成 |
@@ -404,12 +405,16 @@ std.string.builder          29 ms
 - 密码哈希使用 Argon2id，vendor `libargon2`，新增 `std.password`；
 - 多 worker 的 session / 限流首版使用内存 store，并保留可插拔存储接口；
   生产多进程部署需要共享 store；
-- 数据库先做 SQLite，再做 PostgreSQL，MySQL 后续补齐；
+- 数据库支持范围是 SQLite、PostgreSQL、MySQL 和 MariaDB；四个驱动都通过
+  `std.db` 统一 API，MySQL / MariaDB 共用一个后端实现。
+- MySQL / MariaDB 优先使用 MariaDB Connector/C，兼容 libmysqlclient；
+  `contrib/mysql` 只保留为 native module ABI 示例，不直接作为 `std.db` 实现。
 - Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
 
-当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 SQLite 已完成。
-距离单进程 P1 验收主要剩 P1-D 的 PostgreSQL、migration 和连接池；多进程
-生产部署还需要先完成共享 Session / 限流 store。
+当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础、SQLite 与
+PostgreSQL 已完成；MySQL / MariaDB 驱动已纳入 P1-D 待实现。距离单进程 P1
+验收还剩 MySQL / MariaDB、migration 和连接池；多进程生产部署还需要先完成
+共享 Session / 限流 store。
 
 范围：
 
@@ -444,7 +449,15 @@ std.string.builder          29 ms
    - 完整错误堆栈日志与 OpenTelemetry tracing（按需）
 5. P1-D 数据库（进行中）：
    - SQLite 驱动、参数化查询、事务（已完成，`std.db` 可选构建）
-   - PostgreSQL 驱动（待实现，下一优先）
+   - PostgreSQL 驱动（已完成：URI、`$n` 参数、基础类型映射、事务）
+   - MySQL / MariaDB 驱动（待实现，下一优先）：
+     - `mysql://` / `mariadb://` URI；共用 `db_internal` 后端接口；
+     - 使用 prepared statement，避免字符串拼接 SQL；
+     - `?` 参数占位；`changes` 来自 affected rows，
+       `last_insert_rowid` 来自 `mysql_insert_id`；
+     - integer / float / blob / null / text 做显式映射，decimal / date /
+       time / json 按 string 返回；
+     - 现有 `contrib/mysql` 只作为 ABI 与行为参考。
    - migration（待实现）
    - 连接池（待实现；先明确事务绑定和并发语义）
    - 暂不做完整 ORM
@@ -455,10 +468,60 @@ std.string.builder          29 ms
 - 登录、登出、token 过期、CSRF、密码哈希可验证（已满足）；
 - 限流返回 429 与 `Retry-After`，伪造代理头不能绕过（已满足）；
 - 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取（已满足）；
-- SQLite 事务测试已通过；PostgreSQL、连接池、migration 测试待补齐。
+- SQLite 事务测试已通过；PostgreSQL 基础查询、事务和类型映射测试已通过；
+  MySQL / MariaDB 基础查询、事务和类型映射测试待补齐；连接池、migration
+  测试也待补齐。
 
 不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
 GraphQL、完整 ORM、OAuth 第三方登录。
+
+### Milestone 7：std.cache / Redis-Valkey（计划中，按需触发）
+
+目标：为 Redis / Valkey 提供独立的 TTL key-value 客户端，并作为多 worker
+Session / 限流共享 store 的候选后端。Redis / Valkey 不放入 `std.db`，避免和
+SQL 事务、结果集、参数绑定模型混合。
+
+触发条件：单进程内存 store 不再满足部署需求，或明确需要跨进程共享缓存。
+本里程碑不阻塞 P1 验收。
+
+范围：
+
+1. 公共 API（第一版最小集合）：
+   - `std.cache.drivers()`；
+   - `std.cache.open("redis://...")` / `std.cache.open("valkey://...")`；
+   - `get` / `set` / `delete` / `exists` / `incr` / `expire` / `ttl` / `close`；
+   - `set` 支持 TTL、`NX`、`XX`；
+   - 值支持 string / bytes，保持二进制安全。
+2. 连接与安全：
+   - AUTH、TLS、DB index、连接 / 读写超时；
+   - 单句柄串行访问；连接池后续补齐；
+   - 错误映射、基础重连策略和关闭语义。
+3. 实现：
+   - Redis / Valkey 共用一套 RESP2 实现，基于现有 socket / TLS；
+   - 编译期开关（暂定 `SKEIN_ENABLE_CACHE_REDIS`，默认 OFF）；
+   - 不使用动态 native plugin；未启用的构建通过 `std.cache.drivers()` 和
+     明确错误报告，不依赖 import 失败判断。
+4. 共享状态集成：
+   - `std.auth` Session store 接受 `std.cache` 后端；
+   - `std.web` 限流器接受共享 store，并保证计数与过期时间的原子性；
+   - adapter 复用现有身份和限流模型，不另起一套 API。
+5. 测试：
+   - 协议解析、二进制值、TTL、NX/XX、超时和错误路径单测；
+   - 默认 CI 使用 Valkey，另跑 Redis 兼容性验证；
+   - 多 worker Session / 限流集成测试；
+   - 未启用驱动、不可达服务、AUTH/TLS 失败诊断。
+
+不做：Redis Cluster / Sentinel、pub/sub、Streams、任意命令透传、Lua 通用脚本、
+RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Valkey 服务端。
+后续如需要 pub/sub，另立 `std.pubsub` 或底层 `std.redis`，不扩展 `std.cache`
+的语义。
+
+验收：
+
+- Redis 与 Valkey 下最小 API 行为一致；
+- 多 worker 能共享 Session 和限流状态；
+- 未启用该模块的构建仍能完整构建并运行；
+- 默认测试不依赖外部 Redis/Valkey 服务，集成测试显式启用。
 
 ---
 
@@ -493,6 +556,15 @@ GraphQL、完整 ORM、OAuth 第三方登录。
     `launch f().wait()` 解析为 `launch (f().wait())`。需要“启动后等待”时
     统一写 `wait launch f()` 或 `(launch f()).wait()`。已迁移相关测试和
     `SYNTAX.md`，并增加 `launch make().get()` 调用链回归。
+12. ~~是否把 Redis / Valkey 纳入支持范围？~~ 已决定：纳入计划，作为独立的
+    `std.cache`，不放入 `std.db`。第一版只做最小 TTL key-value 客户端及
+    Session / 限流共享 store adapter，不阻塞 P1；不使用动态 native plugin
+    作为第一方实现方式。范围见 Milestone 7。
+13. ~~是否把 MySQL / MariaDB 纳入 `std.db` 支持范围？~~ 已决定：纳入 P1-D。
+    MySQL / MariaDB 共用一个 `db_internal` 后端，优先 MariaDB Connector/C，
+    兼容 libmysqlclient；使用 `mysql://` / `mariadb://` URI 和 `?` 参数。
+    现有 `contrib/mysql` 保留为 native module ABI 示例，不作为 `std.db` 的
+    实现路径。
 
 ---
 
@@ -510,11 +582,10 @@ GraphQL、完整 ORM、OAuth 第三方登录。
 
 ## 5. 推荐执行顺序
 
-1. 语言层已无已决策待办。当前主线回到 Milestone 6 P1：P1-D 先做 PostgreSQL
-   驱动，再做 migration，最后连接池。连接池需先明确事务绑定、连接生命周期
-   和并发语义。
-2. 多进程生产部署前完成共享 Session / 限流 store；单进程开发与测试继续使用
-   内存实现即可。
+1. 当前主线回到 Milestone 6 P1：P1-D 先做 MySQL / MariaDB 驱动，再做
+   migration，最后连接池。连接池需先明确事务绑定、连接生命周期和并发语义。
+2. 多进程生产部署前启动 Milestone 7：先用 `std.cache` 最小客户端支撑共享
+   Session / 限流 store；单进程开发与测试继续使用内存实现即可。
 3. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
    Milestone 2 已完成。
 4. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。

@@ -366,6 +366,51 @@ std.string.builder          29 ms
 - 补全候选弹窗 / 分栏
 - 多行历史条目
 
+### Milestone 6：JSON API 生产化（P1，计划中）
+
+目标：只做 JSON API 后端，不做 SSR、静态文件、WebSocket / SSE、multipart
+和模板引擎。
+
+已确认决策：
+
+- 认证同时支持 Cookie Session 与 Bearer Token；
+- 密码哈希使用 Argon2id，vendor `libargon2`，新增 `std.password`；
+- 多 worker 的 session / 限流首版使用内存 store，并保留可插拔存储接口；
+  生产多进程部署需要共享 store；
+- 数据库先做 SQLite，再做 PostgreSQL，MySQL 后续补齐；
+- Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
+
+范围：
+
+1. P1-0 API 基础设施（P0 最小切片）：
+   - `query` / `cookies` / 多值 header / `request_id` / `client_ip`
+   - 统一 `json_response` / `json_error`
+   - 响应后处理中间件与全局错误边界
+   - 请求级超时与错误隔离
+2. P1-A 认证与会话：
+   - Cookie 构造、Session store、密码哈希、HMAC/JWT、CSRF
+   - Cookie Session 与 Bearer Token 共用用户和权限模型
+3. P1-B 限流与安全：
+   - IP / token / 用户 / 路由维度限流、登录失败保护
+   - 安全响应头、可信代理、请求大小与超时限制
+4. P1-C 可观测性：
+   - 结构化访问日志、错误日志、`/healthz`、`/readyz`
+   - `std.metrics` 与 Prometheus `/metrics`
+5. P1-D 数据库：
+   - SQLite / PostgreSQL 驱动、连接池、参数化查询、事务、migration
+   - 暂不做完整 ORM
+
+验收：
+
+- 所有响应带 request id；handler 错误统一返回 JSON；
+- 登录、登出、token 过期、CSRF、密码哈希可验证；
+- 限流返回 429 与 `Retry-After`，伪造代理头不能绕过；
+- 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取；
+- SQLite 与 PostgreSQL 的事务、连接池、migration 测试通过。
+
+不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
+GraphQL、完整 ORM、OAuth 第三方登录。
+
 ---
 
 ## 3. 待决策事项
@@ -453,6 +498,8 @@ std.string.builder          29 ms
      probe-then-bind 竞态和定时就绪探测
    - `thread_bench` 门槛改用多次重复中的最好成绩，基线按实测重设
 6. 长尾能力按实际需求触发。
+7. Milestone 6（JSON API P1）：先完成 P1-0，再并行推进 P1-A / P1-B / P1-C；
+   P1-D 数据库单独排期，不阻塞前三项。
 
 ---
 

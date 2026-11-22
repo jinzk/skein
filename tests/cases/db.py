@@ -16,3 +16,5 @@ def run_cases():
         run_skein("db.skein")
     if os.environ.get("SKEIN_TEST_POSTGRES_DSN"):
         run_skein("db_postgres.skein")
+    if os.environ.get("SKEIN_TEST_MYSQL_DSN"):
+        run_skein("db_mysql.skein")

@@ -380,6 +380,8 @@ enum bifs {
     B_db_commit,
     B_db_rollback,
     B_db_close,
+    B_db_migrate,
+    B_db_pool,
     B_compress_gzip,
     B_compress_gunzip,
     B_compress_zlib,

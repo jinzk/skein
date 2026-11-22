@@ -31,6 +31,8 @@ struct postgres_backend final : db_backend {
 
     ~postgres_backend() override { close(); }
 
+    db_dialect dialect() const override { return db_dialect::postgres; }
+
     bool is_open() const override { return conn != nullptr; }
 
     void close() override {

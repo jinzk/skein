@@ -1,0 +1,132 @@
+import std;
+include "_support.skein";
+
+let dsn = std.env.get("SKEIN_TEST_MYSQL_DSN", "");
+if (dsn == "") {
+  fail("SKEIN_TEST_MYSQL_DSN is required");
+}
+
+ts_test("mysql exec and query", func() {
+  let db = std.db.open(dsn);
+  std.db.exec(db, "CREATE TEMPORARY TABLE skein_db_mysql (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT, score DOUBLE, amount DECIMAL(10,2), ok BOOLEAN, data BLOB, note TEXT)");
+  let inserted = std.db.exec(
+    db,
+    "INSERT INTO skein_db_mysql(name, score, amount, ok, data, note) VALUES (?, ?, ?, ?, ?, ?)",
+    ["alice", 1.5, "12.34", true, std.bytes.from_hex("00ff"), null]);
+  ts_eq(inserted["changes"], 1);
+  ts_eq(inserted["last_insert_rowid"], 1);
+
+  let rows = std.db.query(
+    db,
+    "SELECT id, name, score, amount, ok, data, note FROM skein_db_mysql WHERE id = ?",
+    [1]);
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["id"], 1);
+  ts_eq(rows[0]["name"], "alice");
+  ts_eq(rows[0]["score"], 1.5);
+  ts_eq(rows[0]["amount"], "12.34");
+  ts_eq(rows[0]["ok"], 1);
+  ts_eq(rows[0]["data"], std.bytes.from_hex("00ff"));
+  ts_eq(rows[0]["note"], null);
+
+  let all_rows = std.db.query(
+    db, "SELECT id, name FROM skein_db_mysql ORDER BY id");
+  ts_eq(len(all_rows), 1);
+  ts_eq(all_rows[0]["name"], "alice");
+
+  let updated = std.db.exec(
+    db, "UPDATE skein_db_mysql SET name = ? WHERE id = ?", ["bob", 1]);
+  ts_eq(updated["changes"], 1);
+  ts_eq(std.db.query(
+    db, "SELECT name FROM skein_db_mysql WHERE id = ?", [1])[0]["name"],
+    "bob");
+
+  std.db.close(db);
+});
+
+ts_test("mysql transaction", func() {
+  let db = std.db.open(dsn);
+  std.db.exec(db, "CREATE TEMPORARY TABLE skein_db_mysql_tx (n INTEGER)");
+  std.db.begin(db);
+  std.db.exec(db, "INSERT INTO skein_db_mysql_tx VALUES (?)", [1]);
+  std.db.rollback(db);
+  ts_eq(len(std.db.query(db, "SELECT * FROM skein_db_mysql_tx")), 0);
+
+  std.db.begin(db);
+  std.db.exec(db, "INSERT INTO skein_db_mysql_tx VALUES (?)", [2]);
+  std.db.commit(db);
+  let rows = std.db.query(db, "SELECT n FROM skein_db_mysql_tx");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["n"], 2);
+
+  std.db.close(db);
+});
+
+ts_test("mysql errors and closed handle", func() {
+  let db = std.db.open(dsn);
+  ts_error(func() {
+    std.db.query(db, "SELECT * FROM skein_missing_table");
+  }, "std.db query");
+  std.db.close(db);
+  ts_error(func() {
+    std.db.query(db, "SELECT 1");
+  }, "closed");
+});
+
+ts_test("mysql option and parameter validation", func() {
+  ts_error(func() {
+    std.db.open(dsn, {"connect_timeout_ms": -1});
+  }, "non-negative");
+  let db = std.db.open(dsn);
+  ts_error(func() {
+    std.db.query(db, "SELECT ?", [[1]]);
+  }, "cannot bind list");
+  std.db.close(db);
+});
+
+ts_test("mysql migrations", func() {
+  let db = std.db.open(dsn);
+  let suffix = str(std.time.now_ms()) + "_" +
+               str(std.random.int(0, 999999));
+  let version_table = "skein_migrate_mysql_" + suffix;
+  let migrations = [
+    {"version": 1, "name": "create",
+     "up": "CREATE TEMPORARY TABLE migrate_t (id INTEGER PRIMARY KEY, name TEXT)"},
+    {"version": 2, "name": "insert",
+     "up": "INSERT INTO migrate_t VALUES (1, 'alice')"},
+    {"version": 3, "name": "column",
+     "up": "ALTER TABLE migrate_t ADD COLUMN note TEXT"}
+  ];
+  let first = std.db.migrate(db, migrations, {"table": version_table});
+  ts_eq(first["applied"], [1, 2, 3]);
+  ts_eq(first["current"], 3);
+  let rows = std.db.query(db, "SELECT id, name, note FROM migrate_t");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["name"], "alice");
+
+  let second = std.db.migrate(db, migrations, {"table": version_table});
+  ts_eq(second["applied"], []);
+  ts_eq(second["current"], 3);
+  std.db.exec(db, "DROP TABLE " + version_table);
+  std.db.close(db);
+});
+
+ts_test("mysql connection pool", func() {
+  let pool = std.db.pool(dsn, {"max": 1});
+  let db = pool.acquire();
+  std.db.exec(db, "CREATE TEMPORARY TABLE pool_t (n INTEGER)");
+  std.db.exec(db, "INSERT INTO pool_t VALUES (?)", [1]);
+  ts_eq(pool.stats()["leased"], 1);
+  ts_eq(pool.release(db), true);
+
+  let db2 = pool.acquire();
+  ts_eq(std.db.query(db2, "SELECT n FROM pool_t")[0]["n"], 1);
+  ts_eq(pool.release(db2), true);
+  ts_eq(pool.close(), true);
+  ts_eq(pool.stats()["open"], 0);
+  ts_error(func() {
+    pool.acquire();
+  }, "closed");
+});
+
+ts_finish();

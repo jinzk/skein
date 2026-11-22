@@ -16,6 +16,8 @@ struct sqlite_backend final : db_backend {
 
     ~sqlite_backend() override { close(); }
 
+    db_dialect dialect() const override { return db_dialect::sqlite; }
+
     bool is_open() const override { return handle != nullptr; }
 
     void close() override {

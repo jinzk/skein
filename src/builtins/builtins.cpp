@@ -625,7 +625,7 @@ struct value_t *call_builtin(int functype,
     if (functype >= B_password_hash && functype <= B_password_verify)
         return call_password_builtin(functype, args);
 #ifdef SKEIN_ENABLE_DB
-    if (functype >= B_db_open && functype <= B_db_close)
+    if (functype >= B_db_open && functype <= B_db_pool)
         return call_db_builtin(functype, args);
 #endif
     if (functype >= B_compress_gzip && functype <= B_compress_inflate)

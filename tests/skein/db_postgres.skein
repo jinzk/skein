@@ -8,8 +8,7 @@ if (dsn == "") {
 
 ts_test("postgres exec and query", func() {
   let db = std.db.open(dsn);
-  std.db.exec(db, "DROP TABLE IF EXISTS skein_db_test");
-  std.db.exec(db, "CREATE TABLE skein_db_test (id SERIAL PRIMARY KEY, name TEXT, score DOUBLE PRECISION, ok BOOLEAN, data BYTEA)");
+  std.db.exec(db, "CREATE TEMP TABLE skein_db_test (id SERIAL PRIMARY KEY, name TEXT, score DOUBLE PRECISION, ok BOOLEAN, data BYTEA)");
   let inserted = std.db.exec(
     db,
     "INSERT INTO skein_db_test(name, score, ok, data) VALUES ($1, $2, $3, $4)",
@@ -26,7 +25,6 @@ ts_test("postgres exec and query", func() {
   ts_eq(rows[0]["ok"], true);
   ts_eq(rows[0]["data"], std.bytes.from_hex("00ff"));
 
-  std.db.exec(db, "DROP TABLE skein_db_test");
   std.db.close(db);
 });
 
@@ -43,8 +41,7 @@ ts_test("postgres null and numeric values", func() {
 
 ts_test("postgres transaction", func() {
   let db = std.db.open(dsn);
-  std.db.exec(db, "DROP TABLE IF EXISTS skein_db_tx");
-  std.db.exec(db, "CREATE TABLE skein_db_tx (n INTEGER)");
+  std.db.exec(db, "CREATE TEMP TABLE skein_db_tx (n INTEGER)");
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO skein_db_tx VALUES ($1)", [1]);
   std.db.rollback(db);
@@ -57,7 +54,6 @@ ts_test("postgres transaction", func() {
   ts_eq(len(rows), 1);
   ts_eq(rows[0]["n"], 2);
 
-  std.db.exec(db, "DROP TABLE skein_db_tx");
   std.db.close(db);
 });
 
@@ -81,6 +77,51 @@ ts_test("postgres option and parameter validation", func() {
     std.db.query(db, "SELECT $1::text", [[1]]);
   }, "cannot bind list");
   std.db.close(db);
+});
+
+ts_test("postgres migrations", func() {
+  let db = std.db.open(dsn);
+  let suffix = str(std.time.now_ms()) + "_" +
+               str(std.random.int(0, 999999));
+  let version_table = "skein_migrate_pg_" + suffix;
+  let migrations = [
+    {"version": 1, "name": "create",
+     "up": "CREATE TEMP TABLE migrate_t (id INTEGER PRIMARY KEY, name TEXT)"},
+    {"version": 2, "name": "insert",
+     "up": "INSERT INTO migrate_t VALUES (1, 'alice')"},
+    {"version": 3, "name": "column",
+     "up": "ALTER TABLE migrate_t ADD COLUMN note TEXT"}
+  ];
+  let first = std.db.migrate(db, migrations, {"table": version_table});
+  ts_eq(first["applied"], [1, 2, 3]);
+  ts_eq(first["current"], 3);
+  let rows = std.db.query(db, "SELECT id, name, note FROM migrate_t");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["name"], "alice");
+
+  let second = std.db.migrate(db, migrations, {"table": version_table});
+  ts_eq(second["applied"], []);
+  ts_eq(second["current"], 3);
+  std.db.exec(db, "DROP TABLE " + version_table);
+  std.db.close(db);
+});
+
+ts_test("postgres connection pool", func() {
+  let pool = std.db.pool(dsn, {"max": 1});
+  let db = pool.acquire();
+  std.db.exec(db, "CREATE TEMP TABLE pool_t (n INTEGER)");
+  std.db.exec(db, "INSERT INTO pool_t VALUES ($1)", [1]);
+  ts_eq(pool.stats()["leased"], 1);
+  ts_eq(pool.release(db), true);
+
+  let db2 = pool.acquire();
+  ts_eq(std.db.query(db2, "SELECT n FROM pool_t")[0]["n"], 1);
+  ts_eq(pool.release(db2), true);
+  ts_eq(pool.close(), true);
+  ts_eq(pool.stats()["open"], 0);
+  ts_error(func() {
+    pool.acquire();
+  }, "closed");
 });
 
 ts_finish();

@@ -2449,7 +2449,7 @@ let ok = std.password.verify("secret", encoded);
 - 当前 vendored `libargon2` 以 `ARGON2_NO_THREADS` 构建；`parallelism` 会写入
   PHC 参数并影响派生结果，但计算本身是单线程执行。
 
-`std.db` 是可选 SQLite / PostgreSQL 驱动（构建时找到对应客户端库才启用）：
+`std.db` 是可选 SQLite / PostgreSQL / MySQL / MariaDB 驱动（构建时找到对应客户端库才启用）：
 
 ```skein
 import std;
@@ -2478,6 +2478,19 @@ let rows = std.db.query(
 std.db.close(db);
 ```
 
+MySQL / MariaDB 也使用 URI：
+
+```skein
+let db = std.db.open(
+  "mysql://user:password@localhost:3306/app",
+  {"connect_timeout_ms": 5000});
+let rows = std.db.query(
+  db, "SELECT id, name FROM users WHERE id = ?", [1]);
+std.db.close(db);
+```
+
+`mariadb://` 与 `mysql://` 等价。
+
 API：
 
 ```text
@@ -2486,20 +2499,74 @@ std.db.exec(db, sql[, params]) -> {changes, last_insert_rowid}
 std.db.query(db, sql[, params]) -> list[dict]
 std.db.begin(db) / std.db.commit(db) / std.db.rollback(db)
 std.db.close(db)
+std.db.migrate(db, migrations[, options]) -> {applied, current}
+std.db.pool(path_or_uri[, options]) -> pool
+pool.acquire() / pool.release(db) / pool.stats() / pool.close()
 ```
 
 - 值可以是 int / float / bool / string / bytes / null；
-- SQLite 参数占位符是 `?`；PostgreSQL 使用原生 `$1`、`$2`，不做跨驱动改写；
+- SQLite / MySQL / MariaDB 参数占位符是 `?`；PostgreSQL 使用原生
+  `$1`、`$2`，不做跨驱动改写；
 - 查询结果列名作为 dict key；
 - SQLite 选项：`busy_timeout_ms`、`foreign_keys`；PostgreSQL 选项：
-  `connect_timeout_ms`；
+  `connect_timeout_ms`；MySQL / MariaDB 选项：`connect_timeout_ms`、
+  `unix_socket`、`charset`；
 - PostgreSQL 的 bool / int2 / int4 / int8 / float4 / float8 映射为
   bool / int / float，`bytea` 映射为 bytes；numeric、date、time、json 等
   按 string 返回；
+- MySQL / MariaDB 的 TINYINT / INT / BIGINT 映射为 int，FLOAT / DOUBLE
+  映射为 float，BINARY / VARBINARY / BLOB / BIT 映射为 bytes；DECIMAL、
+  DATE、TIME、JSON 等按 string 返回；参数查询使用 prepared statement；
+- MySQL / MariaDB 的 `last_insert_rowid` 来自 `mysql_insert_id`；
 - PostgreSQL 没有 `last_insert_rowid`，该字段固定为 0；需要新 id 时使用
   `INSERT ... RETURNING` 配合 `query`；
-- 连接池和 migration 后续补齐；
 - 连接对象由 GC 管理，显式 `close` 后不可继续使用。
+
+Migration：
+
+```skein
+let migrations = [
+  {"version": 1, "name": "create_users",
+   "up": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"},
+  {"version": 2, "name": "add_email",
+   "up": "ALTER TABLE users ADD COLUMN email TEXT"}
+];
+let result = std.db.migrate(db, migrations);
+// {applied: [1, 2], current: 2}
+```
+
+- 每个 migration 包含正整数 `version`、非空 `name`，以及 `up` 字符串或字符串列表；
+- 默认版本表是 `skein_schema_migrations`，可用
+  `{"table": "my_migrations"}` 覆盖；表名必须是合法标识符；
+- 已应用的 version 不会重复执行；名称不一致会报错；
+- migration 按 version 排序，每个 migration 在事务中执行；
+- `std.db.migrate` 自己管理事务，不要在已打开的 `begin` 事务中调用；
+- MySQL / MariaDB 的 DDL 会隐式提交，无法保证整个 DDL migration 的回滚，
+  需要把风险较高的 DDL 拆成小 migration；
+- 当前只支持 forward migration，不执行 down migration。
+
+Connection pool：
+
+```skein
+let pool = std.db.pool("postgresql://user:password@localhost/app",
+                       {"max": 8});
+let db = pool.acquire();
+let rows = std.db.query(db, "SELECT * FROM users");
+pool.release(db);
+
+let stats = pool.stats();
+// {open, idle, leased, max, closed}
+pool.close();
+```
+
+- 连接按需创建，最多 `max` 个；`stats` 反映当前连接数；
+- `acquire` 在没有空闲连接且达到上限时会等待；
+- pooled handle 必须通过 `pool.release(db)` 归还，不能对 pooled handle 调用
+  `std.db.close`；
+- 归还后的 handle 不能继续使用；同一 handle 不能重复归还；
+- `pool.close()` 关闭空闲连接；仍在使用的连接会在归还时关闭；
+- 当前事务仍由调用方显式 `begin` / `commit` / `rollback`，pool 不会自动
+  绑定或回滚事务。
 
 `std.crypto.sha256` / `hmac_sha256` 返回十六进制字符串；
 `std.crypto.sha256_bytes` / `hmac_sha256_bytes` 返回原始 bytes，适合 JWT、
@@ -3270,6 +3337,8 @@ std.db.begin
 std.db.commit
 std.db.rollback
 std.db.close
+std.db.migrate
+std.db.pool
 
 std.compress.gzip
 std.compress.gunzip

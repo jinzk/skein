@@ -727,6 +727,8 @@ endif()
 option(SKEIN_ENABLE_SQLITE "Enable the optional std.db SQLite driver" ON)
 option(SKEIN_ENABLE_POSTGRES
   "Enable the optional std.db PostgreSQL driver when libpq is available" ON)
+option(SKEIN_ENABLE_MYSQL
+  "Enable the optional std.db MySQL/MariaDB driver when a client is available" ON)
 
 set(SKEIN_DB_ENABLED OFF)
 if(SKEIN_ENABLE_SQLITE)
@@ -759,6 +761,24 @@ if(SKEIN_ENABLE_POSTGRES)
   else()
     message(STATUS
       "PostgreSQL client not found; std.db PostgreSQL driver is disabled")
+  endif()
+endif()
+
+if(SKEIN_ENABLE_MYSQL)
+  find_path(MYSQL_INCLUDE_DIR NAMES mysql.h PATH_SUFFIXES mysql mariadb)
+  find_library(MYSQL_CLIENT_LIBRARY NAMES mariadb mysqlclient libmysql)
+  if(MYSQL_INCLUDE_DIR AND MYSQL_CLIENT_LIBRARY)
+    target_sources(skein_builtins PRIVATE src/builtins/db_mysql.cpp)
+    target_include_directories(skein_builtins PRIVATE
+      ${MYSQL_INCLUDE_DIR})
+    target_compile_definitions(skein_builtins PRIVATE
+      SKEIN_ENABLE_MYSQL=1)
+    target_link_libraries(skein_builtins PUBLIC
+      ${MYSQL_CLIENT_LIBRARY})
+    set(SKEIN_DB_ENABLED ON)
+  else()
+    message(STATUS
+      "MySQL/MariaDB client not found; std.db MySQL driver is disabled")
   endif()
 endif()
 

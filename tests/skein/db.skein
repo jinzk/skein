@@ -51,4 +51,73 @@ ts_test("sqlite closed handle", func() {
   }, "closed");
 });
 
+ts_test("sqlite migrations", func() {
+  let db = std.db.open(":memory:");
+  let migrations = [
+    {"version": 1, "name": "create",
+     "up": "CREATE TABLE migrate_t (id INTEGER PRIMARY KEY, name TEXT)"},
+    {"version": 2, "name": "insert",
+     "up": "INSERT INTO migrate_t VALUES (1, 'alice')"},
+    {"version": 3, "name": "column",
+     "up": "ALTER TABLE migrate_t ADD COLUMN note TEXT"}
+  ];
+  let first = std.db.migrate(
+    db, migrations, {"table": "skein_migrate_test"});
+  ts_eq(first["applied"], [1, 2, 3]);
+  ts_eq(first["current"], 3);
+  let rows = std.db.query(db, "SELECT id, name, note FROM migrate_t");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["name"], "alice");
+  ts_eq(rows[0]["note"], null);
+
+  let second = std.db.migrate(
+    db, migrations, {"table": "skein_migrate_test"});
+  ts_eq(second["applied"], []);
+  ts_eq(second["current"], 3);
+  std.db.close(db);
+});
+
+ts_test("sqlite migration rollback", func() {
+  let db = std.db.open(":memory:");
+  let broken = [
+    {"version": 1, "name": "create",
+     "up": "CREATE TABLE migrate_rollback (n INTEGER)"},
+    {"version": 2, "name": "broken", "up": [
+      "INSERT INTO migrate_rollback VALUES (1)",
+      "INSERT INTO missing_table VALUES (1)"
+    ]}
+  ];
+  ts_error(func() {
+    std.db.migrate(db, broken, {"table": "skein_migrate_rollback"});
+  }, "std.db exec");
+  ts_eq(len(std.db.query(db, "SELECT * FROM migrate_rollback")), 0);
+  std.db.close(db);
+});
+
+ts_test("sqlite connection pool", func() {
+  let pool = std.db.pool(":memory:", {"max": 1});
+  ts_eq(pool.stats()["open"], 0);
+  let db = pool.acquire();
+  std.db.exec(db, "CREATE TABLE pool_t (n INTEGER)");
+  std.db.exec(db, "INSERT INTO pool_t VALUES (1)");
+  ts_eq(pool.stats()["leased"], 1);
+
+  ts_eq(pool.release(db), true);
+  ts_eq(pool.stats()["idle"], 1);
+  let db2 = pool.acquire();
+  ts_eq(std.db.query(db2, "SELECT n FROM pool_t")[0]["n"], 1);
+  ts_error(func() {
+    std.db.query(db, "SELECT * FROM pool_t");
+  }, "released");
+  ts_error(func() {
+    pool.release(db);
+  }, "already released");
+  ts_eq(pool.release(db2), true);
+  ts_eq(pool.close(), true);
+  ts_eq(pool.stats()["open"], 0);
+  ts_error(func() {
+    pool.acquire();
+  }, "closed");
+});
+
 ts_finish();

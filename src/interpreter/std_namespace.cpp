@@ -675,6 +675,8 @@ value_t *build_namespace_impl() {
             {"commit", B_db_commit},
             {"rollback", B_db_rollback},
             {"close", B_db_close},
+            {"migrate", B_db_migrate},
+            {"pool", B_db_pool},
         })));
 #endif
 #ifdef SKEIN_ENABLE_TLS

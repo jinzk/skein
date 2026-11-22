@@ -11,9 +11,16 @@
  * Internal database driver interface.  It is deliberately C++ and not a
  * stable ABI: all drivers are linked into the same builtins target.
  */
+enum class db_dialect {
+    sqlite,
+    postgres,
+    mysql,
+};
+
 struct db_backend {
     virtual ~db_backend() = default;
 
+    virtual db_dialect dialect() const = 0;
     virtual struct value_t *exec(const char *sql, struct value_t *params) = 0;
     virtual struct value_t *query(const char *sql, struct value_t *params) = 0;
     virtual struct value_t *transaction(const char *sql) = 0;
@@ -35,5 +42,7 @@ std::unique_ptr<db_backend> db_open_sqlite(const std::string &path,
                                            struct value_t *options);
 std::unique_ptr<db_backend> db_open_postgres(const std::string &conninfo,
                                              struct value_t *options);
+std::unique_ptr<db_backend> db_open_mysql(const std::string &uri,
+                                          struct value_t *options);
 
 #endif

@@ -73,7 +73,7 @@ L0  platform          src/platform/：OS 原语（文件/时间/线程/进程/so
 - `std.set` / `deque` / `heap` 的值类型在 L1，`std.lru` / `std.route` / `std.graph` / `std.arena` / `std.path` 等 `lib/std/*.skein` 包由 L2 的 package loader 加载。
 - `lib/std/internal/container_adapter.skein` 是私有嵌入源，只由 `src/interpreter/std_namespace.cpp` 解析，不进入公开 package 列表。
 - `std.regex` 依赖 PCRE2、`std.compress` 依赖 zlib/brotli、`std.net` 依赖 libuv、`std.tls` 依赖 OpenSSL、`std.http2` 依赖 nghttp2、`std.ffi` 依赖 libffi：都属于 L3 可选模块。
-- `std.db` 的 SQLite / PostgreSQL 驱动分别依赖 sqlite3 / libpq；驱动通过 `db_internal.h` 的 C++ 接口静态链接，不跨越 native module ABI。
+- `std.db` 的 SQLite / PostgreSQL / MySQL / MariaDB 驱动分别依赖 sqlite3 / libpq / MariaDB Connector/C（或 libmysqlclient）；驱动通过 `db_internal.h` 的 C++ 接口静态链接，不跨越 native module ABI。
 
 ## 5. 关键接口
 

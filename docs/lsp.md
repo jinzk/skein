@@ -145,4 +145,4 @@ augroup END
 - `rangeFormatting` 返回整个文档的替换编辑；
 - 诊断在每次文档变化时立即发布，没有 debounce；大文件可能需要客户端侧节流。
 
-实现设计见 [`tooling-plan.md`](tooling-plan.md)，会话测试见 `tests/cases/lsp.py`。
+实现与配置见本文，后续路线见 [`roadmap.md`](roadmap.md)，会话测试见 `tests/cases/lsp.py`。

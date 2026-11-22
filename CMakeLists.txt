@@ -278,7 +278,7 @@ target_link_libraries(skein_value_runtime PUBLIC skein_runtime)
 # Optional JIT backend.  asmjit is pinned under third_party/asmjit so the
 # experimental JIT always builds against the API version it was written for.
 # A system asmjit (>= 1.11) is used as a fallback if the vendored copy is
-# absent.  See docs/jit-plan.md.
+# absent.  See docs/roadmap.md.
 if(SKEIN_ENABLE_JIT)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/asmjit/CMakeLists.txt")
     set(ASMJIT_STATIC ON)

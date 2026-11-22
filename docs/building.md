@@ -15,7 +15,7 @@ cmake --build build
 `--vm` / `SKEIN_VM=1` 仍可用于显式指定 VM。`SKEIN_VM_TRACE=1` 会打印
 字节码和每步执行，`SKEIN_VM_DEBUG=1` 会说明哪些结构回退到了 AST。详见
 [bytecode.md](bytecode.md)。JIT spike 的路线、依赖和验收标准见
-[jit-plan.md](jit-plan.md)。
+[roadmap.md](roadmap.md)。
 
 JIT 使用仓库内置的 `third_party/asmjit`（固定 1.11.0，版本与来源见
 `third_party/asmjit/VERSION.md`），无需额外安装 asmjit。在 Linux / Windows 的 x86-64
@@ -41,7 +41,7 @@ python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check
 基准脚本在进程内预热后只对工作负载计时，并输出 `SKEIN_BENCH_MS=`，因此不包含
 进程启动和 JIT 编译时间。工具会先探测目标二进制是否真正进入 JIT；如果构建时
 `SKEIN_ENABLE_JIT=OFF`，会直接报错而不是给出误导性的 1.0x 数据。
-各平台收益见 [jit-plan.md](jit-plan.md#23-2026-11-稳态复测)。
+各平台收益见 [roadmap.md](roadmap.md)。
 
 Windows 上可选用 mimalloc 降低小对象分配开销：
 

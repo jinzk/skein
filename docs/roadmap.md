@@ -1,15 +1,16 @@
 # Skein 总路线图
 
-本文是当前唯一的总路线图。详细技术设计仍保留在专项文档中：
+本文是当前唯一的总路线图。长期有效的技术设计见专项文档：
 
 - [`package-manager.md`](package-manager.md)
-- [`repl-plan.md`](repl-plan.md)
-- [`tooling-plan.md`](tooling-plan.md)
-- [`jit-plan.md`](jit-plan.md)
+- [`architecture.md`](architecture.md)
 - [`bytecode.md`](bytecode.md)
 - [`encoding.md`](encoding.md)
 - [`unicode.md`](unicode.md)
-- [`tuple-semantics-plan.md`](tuple-semantics-plan.md)
+- [`lsp.md`](lsp.md)
+- [`key-semantics.md`](key-semantics.md)
+
+已实现的专项计划（REPL、工具链、JIT、tuple 语义）中有长期价值的内容已合并到本文，其余实现细节不再单独维护，需要时可查 git 历史。
 
 ## 状态说明
 
@@ -25,6 +26,9 @@
 ### 语言与运行时
 
 - 词法、语法、类型检查、AST/VM 双后端
+- `pair` / `tuple`：字面量要求 `(a, b)`，`(a, b)` 可用于 let/const、函数参数和 match；带注解的值在运行时校验不可变性与 arity
+- `dict` / `set` 支持 float key：NaN 拒绝，`-0.0` 归一化，整数值 float 与同值 int 等价
+- 10 种复合赋值运算符；静态检查按运算符推导结果类型，JIT 覆盖 param / index 目标
 - task / generator、线程、Channel
 - HTTP/1.1、HTTP/2、WebSocket、TLS、FFI
 - Unicode 标识符、NFC、归一化 quick-check、完整大小写映射与折叠、常见源文件编码
@@ -277,12 +281,15 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
   collector 遍历通道缓冲
 - per-pc liveness / safepoint 表仍未做，属于 moving GC 前置工作
 
-若计划 moving GC 或 OSR/deopt：
+若重启 JIT / GC 优化：
 
 - per-pc liveness
 - safepoint 表
-- frame reuse
+- frame reuse / 零帧分配
 - OSR / deopt（Handler JIT 已完成）
+- 类型特化 / unboxed int / 单态字段与调用缓存内联
+- 如仍有收益，再评估 tracing
+- asmjit `x86::Compiler` 的 prologue / regalloc 能力
 
 验收：
 
@@ -345,7 +352,19 @@ std.string.builder          29 ms
 - Unicode 完整大小写映射与 case folding（已完成）/ grapheme cluster
 - HTTP/2 extended CONNECT
 - vendor / workspace
-- AOT / 字节码序列化
+- AOT / 字节码序列化、预编译 stdlib、字节码 ABI 冻结
+
+#### REPL / 工具链体验（按需）
+
+- 可配置缩进宽度
+- 同一行连续多个闭合符逐级回退
+- 语义高亮：类型、函数、builtin
+- 括号匹配
+- 签名提示 / hover
+- Ctrl-R 历史搜索
+- 模糊补全排序
+- 补全候选弹窗 / 分栏
+- 多行历史条目
 
 ---
 
@@ -360,9 +379,9 @@ std.string.builder          29 ms
 6. 是否支持 vendor 和多模块 workspace？
 7. 私有模块认证与 proxy 鉴权做到什么程度？
 8. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
-9. ~~是否按 [`tuple-semantics-plan.md`](tuple-semantics-plan.md) 严格化 pair/tuple
-   字面量并引入 `(a, b)` 解构模式？~~ 已实施：pair/tuple 字面量要求 `(a, b)`，
-   `(a, b)` 可用于 let/const、函数参数和 match。
+9. ~~是否严格化 pair/tuple 字面量并引入 `(a, b)` 解构模式？~~ 已实施：
+   pair/tuple 字面量要求 `(a, b)`，`(a, b)` 可用于 let/const、函数参数和
+   match；运行时同时校验不可变性与 arity。
 
 ---
 
@@ -447,8 +466,8 @@ SKEIN_VM_STATS=1 SKEIN_JIT_DEBUG=1 ./build/skein <script>
 ```
 
 关注 `[vm-stats] jit compiled/declined`、`jit declines` 原因、
-`[jit] unsupported op` / `reject` 与 `statements compiled`，再对照
-`docs/jit-plan.md` 的覆盖表决定是否值得投入。
+`[jit] unsupported op` / `reject` 与 `statements compiled`，再对照本文件 JIT
+章节的覆盖与缺口决定是否值得投入。
 
 已知既有问题（不是本次 JIT 闭包支持引入）：在单条顶层语句内的长循环中创建
 闭包时，`scope ↔ closure` 环只能等 cycle collector 在语句边界回收，循环

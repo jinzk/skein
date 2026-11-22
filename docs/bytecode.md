@@ -370,7 +370,7 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
   边界审计补上了 C++ 局部值的临时根（`gc_root_scope`）：跨用户回调仍需
   访问的 builtin 累加器、以及 `call_value_args` 的 callee/实参都会登记。
   尚未实现 per-pc liveness / moving GC，见
-  [jit-plan.md](jit-plan.md)；AOT、字节码序列化与磁盘缓存待决策。
+  [roadmap.md](roadmap.md)；AOT、字节码序列化与磁盘缓存待决策。
 
 ## 7. 后续阶段
 
@@ -381,7 +381,7 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
    （已完成，后续只保留签名元数据）；
 5. GC root 表第一版已落地；下一步是 per-pc liveness / moving GC 准备；
    Handler JIT、尾调用 frame reuse、OSR/deopt 依赖这一步（见
-   [jit-plan.md](jit-plan.md)）；AOT、字节码序列化待决策；
+   [roadmap.md](roadmap.md)）；AOT、字节码序列化待决策；
 6. generator/task 与 VM 状态整合；
 7. unboxed slot、内联缓存、超指令、computed goto；
 8. AST 后端降级为可选参考实现。

@@ -294,12 +294,11 @@ tools/check_all.sh --clean
 | [SYNTAX.md](SYNTAX.md) | 词法、语法、类型、内置函数的完整参考 |
 | [docs/stdlib.md](docs/stdlib.md) | `std` 各模块的 API、参数和行为细节 |
 | [docs/package-manager.md](docs/package-manager.md) | module、缓存、锁、信任模型和包管理计划 |
-| [docs/repl-plan.md](docs/repl-plan.md) | REPL 当前能力与后续计划 |
-| [docs/tooling-plan.md](docs/tooling-plan.md) | lint / fmt / LSP 工具链计划 |
+| [docs/lsp.md](docs/lsp.md) | LSP 协议、配置和编辑器接入 |
+| [docs/key-semantics.md](docs/key-semantics.md) | dict / set key 的类型、哈希和相等规则 |
 | [docs/building.md](docs/building.md) | 构建选项、依赖、sanitizer / TSan 和平台说明 |
 | [docs/architecture.md](docs/architecture.md) | 运行时、解释器和 builtins 的分层架构 |
 | [docs/bytecode.md](docs/bytecode.md) | 字节码 VM、指令和 AST 回退策略 |
-| [docs/jit-plan.md](docs/jit-plan.md) | JIT 路线、依赖和验收标准 |
 | [docs/ffi.md](docs/ffi.md) | FFI 契约、类型映射和示例 |
 | [contrib/mysql/README.md](contrib/mysql/README.md) | 用真实 MySQL client 验证 native module / plugin ABI 的示例 |
 | [docs/encoding.md](docs/encoding.md) | 源文件编码、转码和编码表 |

@@ -175,6 +175,101 @@ package web {
     return response;
   }
 
+  export func access_log(options = {}) {
+    let logger = std.dict.get(options, "logger", null);
+    if (logger == null) {
+      logger = std.log.new({
+        "format": "json",
+        "output": "stdout",
+        "name": "access"
+      });
+    }
+    let before = func(req) {
+      req["__access_start_ms"] = std.time.now_ms();
+      return null;
+    };
+    let after = func(req, response) {
+      let start = std.dict.get(
+        req, "__access_start_ms", std.time.now_ms());
+      let now = std.time.now_ms();
+      let body = std.dict.get(response, "body", null);
+      let size = 0;
+      if (body != null && (kind_of(body) == "string" ||
+                           kind_of(body) == "bytes")) {
+        size = len(body);
+      }
+      logger.info("request", {
+        "request_id": std.dict.get(req, "request_id", null),
+        "method": std.dict.get(req, "method", null),
+        "path": std.dict.get(req, "path", null),
+        "status": std.dict.get(response, "status", 0),
+        "latency_ms": now - start,
+        "response_bytes": size,
+        "client_ip": std.dict.get(req, "client_ip", null),
+        "user_id": std.dict.get(req, "user_id", null)
+      });
+      return response;
+    };
+    return {"before": before, "after": after};
+  }
+
+  export func metrics_middleware(registry, options = {}) {
+    let counter_name = std.dict.get(
+      options, "counter", "http_requests_total");
+    let duration_name = std.dict.get(
+      options, "duration", "http_request_duration_seconds");
+    let before = func(req) {
+      req["__metrics_start_ms"] = std.time.now_ms();
+      return null;
+    };
+    let after = func(req, response) {
+      let start = std.dict.get(
+        req, "__metrics_start_ms", std.time.now_ms());
+      let now = std.time.now_ms();
+      let method = std.dict.get(req, "method", "");
+      let status = str(std.dict.get(response, "status", 0));
+      registry.counter(counter_name,
+                       {"method": method, "status": status});
+      registry.observe(duration_name, {"method": method},
+                       (now - start) / 1000.0);
+      return response;
+    };
+    return {"before": before, "after": after};
+  }
+
+  export func metrics_route(app, registry, options = {}) {
+    let path = std.dict.get(options, "path", "/metrics");
+    app.get(path, func(req) {
+      return {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+          "Cache-Control": "no-store"
+        },
+        "body": registry.render()
+      };
+    });
+  }
+
+  export func health_routes(app, options = {}) {
+    let health_path = std.dict.get(options, "health_path", "/healthz");
+    let ready_path = std.dict.get(options, "ready_path", "/readyz");
+    let ready = std.dict.get(options, "ready", null);
+    app.get(health_path, func(req) {
+      return std.http.json_response(200, {"ok": true});
+    });
+    app.get(ready_path, func(req) {
+      let ok = true;
+      if (ready != null) {
+        ok = ready();
+      }
+      let response = std.http.json_response(
+        ok ? 200 : 503, {"ok": ok});
+      response["headers"]["Cache-Control"] = "no-store";
+      return response;
+    });
+  }
+
   export struct Limiter {
     check: callable;
     middleware: callable;

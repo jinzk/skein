@@ -2215,6 +2215,7 @@ std.env
 std.sys
 std.crypto
 std.password
+std.db（可选）
 std.compress
 std.math
 std.io
@@ -2244,6 +2245,7 @@ std.heap（原生实现）
 std.route（内嵌 Skein 源码包）
 std.auth（内嵌 Skein 源码包）
 std.web（内嵌 Skein 源码包）
+std.metrics（内嵌 Skein 源码包）
 std.graph（内嵌 Skein 源码包）
 std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
@@ -2447,6 +2449,39 @@ let ok = std.password.verify("secret", encoded);
 - 当前 vendored `libargon2` 以 `ARGON2_NO_THREADS` 构建；`parallelism` 会写入
   PHC 参数并影响派生结果，但计算本身是单线程执行。
 
+`std.db` 是可选 SQLite 驱动（构建时找到 `sqlite3` 才启用）：
+
+```skein
+import std;
+
+let db = std.db.open("app.db", {"busy_timeout_ms": 5000});
+
+std.db.exec(db, "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)");
+let inserted = std.db.exec(db, "INSERT INTO users(name) VALUES (?)", ["alice"]);
+let rows = std.db.query(db, "SELECT id, name FROM users WHERE id = ?", [1]);
+
+std.db.begin(db);
+std.db.exec(db, "UPDATE users SET name = ? WHERE id = ?", ["bob", 1]);
+std.db.commit(db);
+
+std.db.close(db);
+```
+
+API：
+
+```text
+std.db.open(path[, options]) -> db
+std.db.exec(db, sql[, params]) -> {changes, last_insert_rowid}
+std.db.query(db, sql[, params]) -> list[dict]
+std.db.begin(db) / std.db.commit(db) / std.db.rollback(db)
+std.db.close(db)
+```
+
+- 参数使用 `?` 占位，值可以是 int / float / bool / string / bytes / null；
+- 查询结果列名作为 dict key；
+- 当前只实现 SQLite；PostgreSQL 和连接池后续补齐；
+- 连接对象由 GC 管理，显式 `close` 后不可继续使用。
+
 `std.crypto.sha256` / `hmac_sha256` 返回十六进制字符串；
 `std.crypto.sha256_bytes` / `hmac_sha256_bytes` 返回原始 bytes，适合 JWT、
 二进制签名和协议字段。
@@ -2533,6 +2568,43 @@ let ip = web.client_ip(req, {
 - `web.rate_limit` 是进程内固定窗口限流；返回 `429`、`Retry-After` 和
   `X-RateLimit-*`。`limiter.reset()` 清空计数，`limiter.cleanup()` 清理过期
   窗口。多 worker 部署需要后续接入共享 store。
+- `web.access_log` 返回 `before` / `after` middleware，按请求输出结构化
+  access log（request id、method、path、status、latency、bytes、client ip）。
+- `web.metrics_middleware` 记录 `http_requests_total` 和
+  `http_request_duration_seconds`，需要传入 `std.metrics` registry。
+- `web.metrics_route(app, registry)` 注册 `/metrics`，输出 Prometheus
+  `text/plain; version=0.0.4`。
+- `web.health_routes(app, {"ready": func() { ... }})` 注册 `/healthz` 和
+  `/readyz`；`ready` 返回 false 时 `/readyz` 返回 503。
+
+`std.metrics` 提供进程内 Prometheus 指标：
+
+```skein
+import std.metrics;
+
+let registry = metrics.new();
+registry.counter("http_requests_total",
+                 {"method": "GET", "status": "200"});
+registry.gauge("active_connections", {}, 3);
+registry.observe("http_request_duration_seconds", {"method": "GET"}, 0.012);
+let text = registry.render();
+```
+
+API：
+
+```text
+metrics.new() -> Registry
+registry.counter(name[, labels[, delta]])
+registry.gauge(name, labels, value)
+registry.observe(name, labels, value[, buckets])
+registry.render() -> string
+registry.reset()
+```
+
+- `render()` 输出 Prometheus 文本格式；
+- histogram 自动输出 `_bucket` / `_sum` / `_count`；
+- 当前是进程内、非跨 worker 共享；多 worker 需要聚合或共享存储；
+- `std.metrics` 与 `std.web.metrics_middleware` 配合使用。
 
 `std.graph` 提供有向图和常用算法：
 
@@ -3172,6 +3244,13 @@ std.crypto.sha256_bytes
 std.crypto.hmac_sha256_bytes
 std.password.hash
 std.password.verify
+std.db.open
+std.db.exec
+std.db.query
+std.db.begin
+std.db.commit
+std.db.rollback
+std.db.close
 
 std.compress.gzip
 std.compress.gunzip

@@ -404,11 +404,16 @@ std.string.builder          29 ms
    - IP / token / 用户 / 路由维度固定窗口限流（已完成）
    - 登录失败保护可用限流组合实现；账户级锁定策略待按需求扩展
    - 请求大小与超时限制（已有）
-4. P1-C 可观测性：
-   - 结构化访问日志、错误日志、`/healthz`、`/readyz`
-   - `std.metrics` 与 Prometheus `/metrics`
-5. P1-D 数据库：
-   - SQLite / PostgreSQL 驱动、连接池、参数化查询、事务、migration
+4. P1-C 可观测性（基本完成）：
+   - 结构化访问日志（已完成）
+   - JSON 错误边界与 request id 关联（已完成）
+   - `std.metrics`、Prometheus `/metrics`（已完成）
+   - `/healthz`、`/readyz`（已完成）
+   - 完整错误堆栈日志与 OpenTelemetry tracing（待按需求扩展）
+5. P1-D 数据库（进行中）：
+   - SQLite 驱动、参数化查询、事务（已完成，`std.db` 可选构建）
+   - 连接池、migration（待补）
+   - PostgreSQL 驱动（待补）
    - 暂不做完整 ORM
 
 验收：

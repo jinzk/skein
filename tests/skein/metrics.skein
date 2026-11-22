@@ -1,0 +1,101 @@
+import std;
+import std.metrics;
+import std.route;
+import std.web;
+include "_support.skein";
+
+ts_test("counter and gauge", func() {
+  let registry = metrics.new();
+  registry.counter("requests_total", {"method": "GET"});
+  registry.counter("requests_total", {"method": "GET"});
+  registry.counter("errors_total", {"code": "500"}, 2);
+  registry.gauge("active", {}, 3);
+  let text = registry.render();
+  ts_eq(std.string.contains(
+          text, "requests_total{method=\"GET\"} 2.0"), 1);
+  ts_eq(std.string.contains(
+          text, "errors_total{code=\"500\"} 2.0"), 1);
+  ts_eq(std.string.contains(text, "active 3.0"), 1);
+});
+
+ts_test("histogram", func() {
+  let registry = metrics.new();
+  registry.observe("latency_seconds", {"method": "GET"}, 0.003);
+  registry.observe("latency_seconds", {"method": "GET"}, 0.2);
+  let text = registry.render();
+  ts_eq(std.string.contains(
+          text,
+          "latency_seconds_bucket{method=\"GET\",le=\"0.005\"} 1"), 1);
+  ts_eq(std.string.contains(
+          text,
+          "latency_seconds_bucket{method=\"GET\",le=\"+Inf\"} 2"), 1);
+  ts_eq(std.string.contains(
+          text, "latency_seconds_count{method=\"GET\"} 2"), 1);
+  ts_eq(std.string.contains(
+          text, "latency_seconds_sum{method=\"GET\"}"), 1);
+  registry.reset();
+  ts_eq(registry.render(), "\n");
+});
+
+ts_test("metrics middleware", func() {
+  let registry = metrics.new();
+  let middleware = web.metrics_middleware(registry);
+  let req = {"method": "POST"};
+  ts_eq(middleware["before"](req), null);
+  middleware["after"](req, {"status": 201, "headers": {}, "body": ""});
+  let text = registry.render();
+  ts_eq(std.string.contains(
+          text,
+          "http_requests_total{method=\"POST\",status=\"201\"} 1.0"), 1);
+  ts_eq(std.string.contains(
+          text,
+          "http_request_duration_seconds_count{method=\"POST\"} 1"), 1);
+});
+
+ts_test("metrics route", func() {
+  let app = route.new();
+  let registry = metrics.new();
+  registry.counter("requests_total");
+  web.metrics_route(app, registry);
+  let response = app.dispatch({"method": "GET", "path": "/metrics"});
+  ts_eq(response["status"], 200);
+  ts_eq(std.string.contains(response["body"], "requests_total 1.0"), 1);
+  ts_eq(std.string.contains(
+          response["headers"]["Content-Type"], "text/plain"), 1);
+});
+
+ts_test("health routes", func() {
+  let app = route.new();
+  web.health_routes(app, {"ready": func() { return false; }});
+  let health = app.dispatch({"method": "GET", "path": "/healthz"});
+  ts_eq(health["status"], 200);
+  let ready = app.dispatch({"method": "GET", "path": "/readyz"});
+  ts_eq(ready["status"], 503);
+  ts_eq(ready["headers"]["Cache-Control"], "no-store");
+});
+
+ts_test("access log", func() {
+  let path = std.fs.temp_dir() + "/skein_access_" +
+             std.random.uuid() + ".log";
+  let logger = std.log.new({
+    "format": "json", "output": "file", "path": path, "append": false
+  });
+  let middleware = web.access_log({"logger": logger});
+  let req = {
+    "request_id": "req-1",
+    "method": "GET",
+    "path": "/api/users",
+    "client_ip": "127.0.0.1",
+    "headers": {}
+  };
+  middleware["before"](req);
+  middleware["after"](req, {"status": 200, "headers": {}, "body": "hello"});
+  logger.flush();
+  let text = std.fs.read_file(path);
+  ts_eq(std.string.contains(text, "\"request_id\":\"req-1\""), 1);
+  ts_eq(std.string.contains(text, "\"method\":\"GET\""), 1);
+  ts_eq(std.string.contains(text, "\"path\":\"/api/users\""), 1);
+  ts_eq(std.string.contains(text, "\"response_bytes\":5"), 1);
+});
+
+ts_finish();

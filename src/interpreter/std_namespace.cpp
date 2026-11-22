@@ -664,6 +664,19 @@ value_t *build_namespace_impl() {
             {"close", B_http_close},
         })));
 #endif
+#ifdef SKEIN_ENABLE_SQLITE
+    root->payload->items.push_back(std::make_pair(
+        newstrval("db"),
+        builtin_module({
+            {"open", B_db_open},
+            {"exec", B_db_exec},
+            {"query", B_db_query},
+            {"begin", B_db_begin},
+            {"commit", B_db_commit},
+            {"rollback", B_db_rollback},
+            {"close", B_db_close},
+        })));
+#endif
 #ifdef SKEIN_ENABLE_TLS
     root->payload->items.push_back(std::make_pair(
         newstrval("tls"),

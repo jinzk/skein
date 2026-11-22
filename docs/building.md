@@ -80,6 +80,8 @@ sudo apt install libuv1-dev libboost-context-dev libpcre2-dev
 
 HTTP/1.1 解析器使用 vendored `llhttp`（`third_party/llhttp`），Unicode 归一化使用 vendored `utf8proc`（`third_party/utf8proc`），密码哈希使用 vendored `libargon2`（`third_party/argon2`），都不需要额外的系统包。
 
+`std.db` 使用系统的 SQLite 3；`SKEIN_ENABLE_SQLITE=ON`（默认）时如果找不到 `sqlite3.h` / `libsqlite3`，`std.db` 会自动禁用。
+
 TLS 是可选模块；启用时需要 OpenSSL 开发文件：
 
 ```bash

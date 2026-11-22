@@ -1,0 +1,54 @@
+import std;
+include "_support.skein";
+
+ts_test("sqlite exec and query", func() {
+  let db = std.db.open(":memory:");
+  std.db.exec(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, score REAL)");
+  let r = std.db.exec(db, "INSERT INTO users(name, score) VALUES (?, ?)",
+                      ["alice", 1.5]);
+  ts_eq(r["changes"], 1);
+  ts_eq(r["last_insert_rowid"], 1);
+  let rows = std.db.query(db, "SELECT id, name, score FROM users");
+  ts_eq(len(rows), 1);
+  ts_eq(rows[0]["id"], 1);
+  ts_eq(rows[0]["name"], "alice");
+  ts_eq(rows[0]["score"], 1.5);
+  std.db.close(db);
+});
+
+ts_test("sqlite bool null bytes", func() {
+  let db = std.db.open(":memory:");
+  std.db.exec(db, "CREATE TABLE t (ok INTEGER, note TEXT, data BLOB)");
+  std.db.exec(db, "INSERT INTO t VALUES (?, ?, ?)",
+              [true, null, std.bytes.from_hex("00ff")]);
+  let row = std.db.query(db, "SELECT ok, note, data FROM t")[0];
+  ts_eq(row["ok"], 1);
+  ts_eq(row["note"], null);
+  ts_eq(row["data"], std.bytes.from_hex("00ff"));
+  std.db.close(db);
+});
+
+ts_test("sqlite transaction", func() {
+  let db = std.db.open(":memory:");
+  std.db.exec(db, "CREATE TABLE t (n INTEGER)");
+  std.db.begin(db);
+  std.db.exec(db, "INSERT INTO t VALUES (1)");
+  std.db.rollback(db);
+  ts_eq(len(std.db.query(db, "SELECT * FROM t")), 0);
+
+  std.db.begin(db);
+  std.db.exec(db, "INSERT INTO t VALUES (2)");
+  std.db.commit(db);
+  ts_eq(len(std.db.query(db, "SELECT * FROM t")), 1);
+  std.db.close(db);
+});
+
+ts_test("sqlite closed handle", func() {
+  let db = std.db.open(":memory:");
+  std.db.close(db);
+  ts_error(func() {
+    std.db.query(db, "SELECT 1");
+  }, "closed");
+});
+
+ts_finish();

@@ -12,6 +12,7 @@ from cases import (
     auth,
     build,
     collections,
+    db,
     decorators,
     diagnostics,
     ffi_real,
@@ -43,6 +44,7 @@ from cases import (
 MODULES = [
     auth,
     build,
+    db,
     language_core,
     match_types,
     meta,

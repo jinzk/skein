@@ -574,6 +574,7 @@ set(SKEIN_EMBEDDED_SOURCES
   route.skein:kStdRouteSource:std_route_source.inc
   auth.skein:kStdAuthSource:std_auth_source.inc
   web.skein:kStdWebSource:std_web_source.inc
+  metrics.skein:kStdMetricsSource:std_metrics_source.inc
   graph.skein:kStdGraphSource:std_graph_source.inc
   arena.skein:kStdArenaSource:std_arena_source.inc
   path.skein:kStdPathSource:std_path_source.inc
@@ -720,6 +721,24 @@ if(SKEIN_ENABLE_FFI)
     target_link_libraries(skein_builtins PUBLIC PkgConfig::LIBFFI)
   else()
     message(STATUS "libffi not found; std.ffi is disabled")
+  endif()
+endif()
+
+option(SKEIN_ENABLE_SQLITE "Enable the optional std.db SQLite driver" ON)
+if(SKEIN_ENABLE_SQLITE)
+  find_path(SQLITE3_INCLUDE_DIR NAMES sqlite3.h)
+  find_library(SQLITE3_LIBRARY NAMES sqlite3 libsqlite3)
+  if(SQLITE3_INCLUDE_DIR AND SQLITE3_LIBRARY)
+    target_sources(skein_builtins PRIVATE src/builtins/db.cpp)
+    target_include_directories(skein_builtins PRIVATE
+      ${SQLITE3_INCLUDE_DIR})
+    target_compile_definitions(skein_builtins PRIVATE
+      SKEIN_ENABLE_SQLITE=1)
+    target_compile_definitions(skein_interpreter PRIVATE
+      SKEIN_ENABLE_SQLITE=1)
+    target_link_libraries(skein_builtins PUBLIC ${SQLITE3_LIBRARY})
+  else()
+    message(STATUS "sqlite3 not found; std.db is disabled")
   endif()
 endif()
 

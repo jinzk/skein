@@ -6,3 +6,4 @@ from harness import *  # noqa: F401,F403
 
 def run_cases():
     run_skein("web.skein")
+    run_skein("metrics.skein")

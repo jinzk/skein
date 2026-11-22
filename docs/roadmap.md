@@ -381,7 +381,24 @@ std.string.builder          29 ms
 8. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
 9. ~~是否严格化 pair/tuple 字面量并引入 `(a, b)` 解构模式？~~ 已实施：
    pair/tuple 字面量要求 `(a, b)`，`(a, b)` 可用于 let/const、函数参数和
-   match；运行时同时校验不可变性与 arity。
+   match；运行时同时校验不可变性与 arity。`[a, b]` 保持宽松的依据是结构化
+   读取：它只按位置读取元素并创建新绑定，不改写源 tuple；因此
+   `let l: list[int] = (1, 2);` 仍被 checker 拒绝。
+10. 是否引入 `wait t` 前缀写法并统一上下文相关词法？方案要点：
+    - 语义：`wait e == e.wait()`，要求 `e: task[T]`，结果为 `T`；只等待已有
+      task，不 launch、不恢复 `async/await`、不引入函数染色。
+      `wait launch f()` 合法且等价于 `(launch f()).wait()`；`wait f()` 在
+      `f()` 不返回 task 时是类型错误。
+    - 词法：`.` 后的关键字一律作为 `NAME` 返回，适用于 `wait` 及现有
+      `match` / `struct` / `enum` / `yield` 等；非点号分支保留原有 header
+      context 与 declaration skip 副作用。这样 `t.wait()`、`std.task.wait`、
+      变体名、import 路径无需逐个打补丁。
+    - 语法：parser 新增 `WAIT exp %prec UMINUS`，在 parse 阶段 desugar 成
+      `.wait()` 成员调用；不改 typecheck、VM、JIT、ABI。
+    - 兼容：`wait` 在 `.` 之外成为保留字；当前仓库无脚本将其用作独立标识符。
+      编辑器高亮需同步加入 `wait`。
+    - 验证：`wait t` / `wait launch f()` / 非 task 操作数错误诊断、点号后
+      关键字回归、AST/VM 差分与 JIT task-wait smoke。
 
 ---
 

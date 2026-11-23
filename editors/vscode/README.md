@@ -4,7 +4,7 @@ Skein 的 VS Code 扩展：
 
 - `.skein` 文件识别；
 - TextMate 语法高亮（关键字、类型、内置函数、`std.*`、struct/enum、字符串、数字、注释）；
-- 常用结构片段（`main`、`fn`、`if`、`forin`、`match`、`struct`、`impl`、`enum` 等）；
+- 常用结构片段（`main`、`fn`、`lambda`、`doblock`、`if`、`forin`、`match`、`struct`、`impl`、`enum` 等）；
 - 括号自动闭合、`//` 注释、简单缩进规则；
 - 通过 `vscode-languageclient` 自动启动 `skein lsp --stdio`，提供诊断、补全、悬停提示、跳转定义、文档符号与格式化；
 - `Skein: Run Current File` 在终端运行当前文件；

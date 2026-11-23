@@ -369,6 +369,62 @@ def run_cases():
             )
             assert any(item["name"] == "value" for item in symbols), symbols
 
+            # `do` block returns surface as warnings; lambda block returns do not.
+            did_change(
+                session,
+                uri,
+                7,
+                "func f() {\n"
+                "  let v = do { return 5; };\n"
+                "  return v;\n"
+                "}\n"
+                "f();\n",
+            )
+            diagnostics = session.wait_for_diagnostics(uri)
+            assert any(
+                "return inside a do block" in item["message"]
+                for item in diagnostics
+            ), diagnostics
+            assert any(item["severity"] == 2 for item in diagnostics), diagnostics
+
+            did_change(
+                session,
+                uri,
+                8,
+                "func f() {\n"
+                "  let g = (x) -> { return x + 1; };\n"
+                "  return g(1);\n"
+                "}\n"
+                "f();\n",
+            )
+            diagnostics = session.wait_for_diagnostics(uri)
+            assert not any(
+                "return inside a do block" in item["message"]
+                for item in diagnostics
+            ), diagnostics
+
+            # Formatting keeps lambda block bodies intact.
+            did_change(
+                session,
+                uri,
+                9,
+                "let f=(x)->{\n"
+                "let y=x+1;\n"
+                "y*2;\n"
+                "};\n",
+            )
+            session.wait_for_diagnostics(uri)
+            edits = session.request(
+                "textDocument/formatting", {"textDocument": {"uri": uri}}
+            )
+            assert len(edits) == 1, edits
+            assert edits[0]["newText"] == (
+                "let f = (x) -> {\n"
+                "  let y = x + 1;\n"
+                "  y * 2;\n"
+                "};\n"
+            ), repr(edits[0]["newText"])
+
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
             assert session.process.returncode == 0, session.process.returncode

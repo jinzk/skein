@@ -130,3 +130,53 @@ def run_cases():
             os.unlink(formatted_path)
     finally:
         os.unlink(crlf_path)
+
+    lambda_source = (
+        "let f=(x)->{\n"
+        "let y=x+1;\n"
+        "y*2;\n"
+        "};\n"
+        "let g=()->do{\n"
+        "let a=1;\n"
+        "a+1;\n"
+        "};\n"
+        "let h=()->{};\n"
+        'let d=(x)->({"v":x});\n'
+    )
+    lambda_expected = (
+        "let f = (x) -> {\n"
+        "  let y = x + 1;\n"
+        "  y * 2;\n"
+        "};\n"
+        "let g = () -> do {\n"
+        "  let a = 1;\n"
+        "  a + 1;\n"
+        "};\n"
+        "let h = () -> {};\n"
+        'let d = (x) -> ({ "v": x});\n'
+    )
+    lambda_path = write_temp(lambda_source)
+    try:
+        formatted = run_fmt(lambda_path)
+        assert formatted.returncode == 0, decode(formatted.stderr)
+        assert decode(formatted.stdout) == lambda_expected, decode(
+            formatted.stdout
+        )
+
+        second = run_fmt("-", stdin=formatted.stdout)
+        assert second.returncode == 0, decode(second.stderr)
+        assert second.stdout == formatted.stdout, (
+            "fmt must be idempotent for lambda blocks\n"
+            f"first:\n{decode(formatted.stdout)}\n"
+            f"second:\n{decode(second.stdout)}"
+        )
+
+        check_messy = run_fmt("--check", lambda_path)
+        assert check_messy.returncode == 1, decode(check_messy.stderr)
+
+        written = run_fmt("-w", lambda_path)
+        assert written.returncode == 0, decode(written.stderr)
+        check_clean = run_fmt("--check", lambda_path)
+        assert check_clean.returncode == 0, decode(check_clean.stderr)
+    finally:
+        os.unlink(lambda_path)

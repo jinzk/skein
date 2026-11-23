@@ -21,6 +21,24 @@
     ],
     "description": "Named function"
   },
+  "Skein lambda block": {
+    "prefix": "lambda",
+    "body": [
+      "(${1:x}) -> {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Block-bodied lambda"
+  },
+  "Skein do block": {
+    "prefix": "doblock",
+    "body": [
+      "let ${1:value} = do {",
+      "\t$0",
+      "};"
+    ],
+    "description": "Block expression that produces a value"
+  },
   "Skein if": {
     "prefix": "if",
     "body": [

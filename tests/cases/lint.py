@@ -85,6 +85,42 @@ def run_cases():
     assert len(warning_payload["diagnostics"]) == 1, warning_payload
     assert warning_payload["diagnostics"][0]["severity"] == "warning"
 
+    do_return_source = (
+        "func f() {\n"
+        "  let v = do { return 5; };\n"
+        "  return v;\n"
+        "}\n"
+        "f();\n"
+    )
+    do_return = run_lint(do_return_source)
+    assert do_return.returncode == 0, do_return.stderr
+    assert "return inside a do block" in do_return.stderr, do_return.stderr
+    assert do_return.stdout == "", "lint must not execute warned scripts"
+
+    do_return_json = run_lint(do_return_source, "--format=json")
+    assert do_return_json.returncode == 0, do_return_json.stderr
+    do_return_payload = json.loads(do_return_json.stdout)
+    assert len(do_return_payload["diagnostics"]) == 1, do_return_payload
+    do_return_item = do_return_payload["diagnostics"][0]
+    assert do_return_item["severity"] == "warning", do_return_item
+    assert do_return_item["category"] == "warning", do_return_item
+    assert "return inside a do block" in do_return_item["message"], (
+        do_return_item
+    )
+
+    lambda_return_source = (
+        "func f() {\n"
+        "  let g = (x) -> { return x + 1; };\n"
+        "  return g(1);\n"
+        "}\n"
+        "f();\n"
+    )
+    lambda_return = run_lint(lambda_return_source)
+    assert lambda_return.returncode == 0, lambda_return.stderr
+    assert "return inside a do block" not in lambda_return.stderr, (
+        lambda_return.stderr
+    )
+
     syntax_error = run_lint("let = ;\n", "--typecheck=strict")
     assert syntax_error.returncode == 1, syntax_error.stderr
     assert "syntax error" in syntax_error.stderr, syntax_error.stderr

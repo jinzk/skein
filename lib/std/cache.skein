@@ -1,0 +1,495 @@
+package cache {
+  import std;
+
+  let _CRLF = std.bytes.from_string("\r\n");
+  let _DEFAULT_PORT = 6379;
+
+  func _option(options, key, fallback) {
+    if (kind_of(options) != "dict") {
+      return fallback;
+    }
+    return std.dict.get(options, key, fallback);
+  }
+
+  func _last_index(text, needle) {
+    let index = -1;
+    let i = 0;
+    while (i < len(text)) {
+      if (std.string.substr(text, i, 1) == needle) {
+        index = i;
+      }
+      i = i + 1;
+    }
+    return index;
+  }
+
+  func _percent_decode(text) {
+    let output = std.bytes.from_string("");
+    let i = 0;
+    while (i < len(text)) {
+      let c = std.string.substr(text, i, 1);
+      if (c == "%" && i + 2 < len(text)) {
+        let pair = std.string.substr(text, i + 1, 2);
+        output = std.bytes.concat(output, std.bytes.from_hex(pair));
+        i = i + 3;
+      } else {
+        output = std.bytes.concat(output, std.bytes.from_char(text[i]));
+        i = i + 1;
+      }
+    }
+    return std.bytes.to_string(output);
+  }
+
+  func _timeout_option(options, key) {
+    let value = _option(options, key, 5000);
+    if (kind_of(value) != "int" || value < 0) {
+      fail("std.cache " + key + " must be a non-negative integer");
+    }
+    return value;
+  }
+
+  func _parse_uri(uri, options) {
+    if (kind_of(uri) != "string") {
+      fail("std.cache.open expects a URI string");
+    }
+    let scheme_end = std.string.find(uri, "://");
+    if (scheme_end < 0) {
+      fail("std.cache.open URI must contain ://");
+    }
+    let scheme = std.string.substr(uri, 0, scheme_end);
+    let rest = std.string.substr(uri, scheme_end + 3);
+    let tls = false;
+    if (scheme == "redis" || scheme == "valkey") {
+      tls = false;
+    } else if (scheme == "rediss" || scheme == "valkeys") {
+      tls = true;
+    } else {
+      fail("std.cache.open unsupported scheme: " + scheme);
+    }
+
+    let slash = std.string.find(rest, "/");
+    let authority = rest;
+    let path = "";
+    if (slash >= 0) {
+      authority = std.string.substr(rest, 0, slash);
+      path = std.string.substr(rest, slash + 1);
+    }
+    let query = std.string.find(path, "?");
+    if (query >= 0) {
+      path = std.string.substr(path, 0, query);
+    }
+
+    let user = "";
+    let password = "";
+    let at = _last_index(authority, "@");
+    if (at >= 0) {
+      let userinfo = std.string.substr(authority, 0, at);
+      authority = std.string.substr(authority, at + 1);
+      let colon = std.string.find(userinfo, ":");
+      if (colon >= 0) {
+        user = _percent_decode(std.string.substr(userinfo, 0, colon));
+        password = _percent_decode(
+          std.string.substr(userinfo, colon + 1));
+      } else {
+        user = _percent_decode(userinfo);
+      }
+    }
+
+    let host = authority;
+    let port = _DEFAULT_PORT;
+    if (std.string.starts_with(authority, "[")) {
+      let close = std.string.find(authority, "]");
+      if (close < 0) {
+        fail("std.cache.open invalid IPv6 host");
+      }
+      host = std.string.substr(authority, 1, close - 1);
+      let tail = std.string.substr(authority, close + 1);
+      if (tail != "") {
+        if (!std.string.starts_with(tail, ":")) {
+          fail("std.cache.open invalid host");
+        }
+        port = int(std.string.substr(tail, 1));
+      }
+    } else {
+      let colon = std.string.find(authority, ":");
+      if (colon >= 0 &&
+          std.string.find(std.string.substr(authority, colon + 1), ":") < 0) {
+        host = std.string.substr(authority, 0, colon);
+        port = int(std.string.substr(authority, colon + 1));
+      }
+    }
+    if (host == "") {
+      fail("std.cache.open URI must contain a host");
+    }
+    if (port < 1 || port > 65535) {
+      fail("std.cache.open invalid port");
+    }
+
+    let database = 0;
+    if (path != "") {
+      database = int(path);
+    }
+    if (database < 0) {
+      fail("std.cache.open database must be non-negative");
+    }
+
+    let configured_user = _option(options, "username", user);
+    let configured_password = _option(options, "password", password);
+    let configured_tls = _option(options, "tls", tls);
+    if (kind_of(configured_user) != "string" ||
+        kind_of(configured_password) != "string") {
+      fail("std.cache.open username/password must be strings");
+    }
+    if (kind_of(configured_tls) != "bool") {
+      fail("std.cache.open tls must be a bool");
+    }
+    let verify = _option(options, "verify", true);
+    if (kind_of(verify) != "bool") {
+      fail("std.cache.open verify must be a bool");
+    }
+    let ca_file = _option(options, "ca_file", "");
+    let server_name = _option(options, "server_name", host);
+    if (kind_of(ca_file) != "string" ||
+        kind_of(server_name) != "string") {
+      fail("std.cache.open ca_file/server_name must be strings");
+    }
+    return {
+      "host": host,
+      "port": port,
+      "user": configured_user,
+      "password": configured_password,
+      "database": database,
+      "tls": configured_tls,
+      "verify": verify,
+      "ca_file": ca_file,
+      "server_name": server_name,
+      "connect_timeout_ms": _timeout_option(
+        options, "connect_timeout_ms"),
+      "read_timeout_ms": _timeout_option(options, "read_timeout_ms"),
+      "write_timeout_ms": _timeout_option(options, "write_timeout_ms")
+    };
+  }
+
+  func _ensure(state, count) {
+    while (len(state["buffer"]) < count) {
+      let chunk = std.io.read(state["stream"], 4096,
+                              state["read_timeout_ms"]);
+      if (chunk == null || len(chunk) == 0) {
+        state["closed"] = true;
+        fail("std.cache: connection closed");
+      }
+      state["buffer"] = std.bytes.concat(state["buffer"], chunk);
+    }
+    return state;
+  }
+
+  func _consume(state, count) {
+    state["buffer"] = std.bytes.slice(state["buffer"], count);
+    return state;
+  }
+
+  func _read_exact(state, count) {
+    state = _ensure(state, count);
+    let data = std.bytes.slice(state["buffer"], 0, count);
+    state = _consume(state, count);
+    return {"state": state, "value": data};
+  }
+
+  func _line_end(data) {
+    let i = 0;
+    while (i + 1 < len(data)) {
+      if (std.bytes.get(data, i) == 13 &&
+          std.bytes.get(data, i + 1) == 10) {
+        return i;
+      }
+      i = i + 1;
+    }
+    return -1;
+  }
+
+  func _read_line(state) {
+    state = _ensure(state, 2);
+    let end = _line_end(state["buffer"]);
+    while (end < 0) {
+      let chunk = std.io.read(state["stream"], 4096,
+                              state["read_timeout_ms"]);
+      if (chunk == null || len(chunk) == 0) {
+        state["closed"] = true;
+        fail("std.cache: connection closed");
+      }
+      state["buffer"] = std.bytes.concat(state["buffer"], chunk);
+      end = _line_end(state["buffer"]);
+    }
+    let line = std.bytes.slice(state["buffer"], 0, end);
+    state = _consume(state, end + 2);
+    return {"state": state, "value": line};
+  }
+
+  func _expect_crlf(state) {
+    let result = _read_exact(state, 2);
+    if (result["value"] != _CRLF) {
+      fail("std.cache: malformed RESP response");
+    }
+    return result["state"];
+  }
+
+  func _parse(state) {
+    state = _ensure(state, 1);
+    let tag = std.bytes.get(state["buffer"], 0);
+    state = _consume(state, 1);
+    if (tag == 43) { // +
+      let result = _read_line(state);
+      return {"state": result["state"],
+              "value": std.bytes.to_string(result["value"])};
+    }
+    if (tag == 45) { // -
+      let result = _read_line(state);
+      fail("std.cache: " + std.bytes.to_string(result["value"]));
+    }
+    if (tag == 58) { // :
+      let result = _read_line(state);
+      return {"state": result["state"],
+              "value": int(std.bytes.to_string(result["value"]))};
+    }
+    if (tag == 36) { // $
+      let result = _read_line(state);
+      let count = int(std.bytes.to_string(result["value"]));
+      if (count < 0) {
+        return {"state": result["state"], "value": null};
+      }
+      let data = _read_exact(result["state"], count);
+      state = _expect_crlf(data["state"]);
+      return {"state": state, "value": data["value"]};
+    }
+    if (tag == 42) { // *
+      let result = _read_line(state);
+      let count = int(std.bytes.to_string(result["value"]));
+      if (count < 0) {
+        return {"state": result["state"], "value": null};
+      }
+      let values = [];
+      state = result["state"];
+      let i = 0;
+      while (i < count) {
+        let item = _parse(state);
+        state = item["state"];
+        values = std.list.append(values, item["value"]);
+        i = i + 1;
+      }
+      return {"state": state, "value": values};
+    }
+    if (tag == 95) { // _ (RESP3 null)
+      return {"state": state, "value": null};
+    }
+    fail("std.cache: unsupported RESP response");
+  }
+
+  func _arg_bytes(value) {
+    let kind = kind_of(value);
+    if (kind == "bytes") {
+      return value;
+    }
+    if (kind == "string") {
+      return std.bytes.from_string(value);
+    }
+    if (kind == "int" || kind == "float" || kind == "bool" ||
+        kind == "char" || kind == "byte") {
+      return std.bytes.from_string(str(value));
+    }
+    fail("std.cache command arguments must be string, bytes or scalar");
+  }
+
+  func _command(state, args) {
+    if (state["closed"]) {
+      fail("std.cache: connection is closed");
+    }
+    let payload = std.bytes.from_string("*" + str(len(args)) + "\r\n");
+    for (let arg in args) {
+      let data = _arg_bytes(arg);
+      payload = std.bytes.concat(
+        payload, std.bytes.from_string("$" + str(len(data)) + "\r\n"));
+      payload = std.bytes.concat(payload, data);
+      payload = std.bytes.concat(payload, _CRLF);
+    }
+    let written = std.io.write_all(state["stream"], payload,
+                                   state["write_timeout_ms"]);
+    if (written == null || written != len(payload)) {
+      state["closed"] = true;
+      fail("std.cache: failed to write command");
+    }
+    return _parse(state);
+  }
+
+  func _set(state, key, value, options) {
+    let args = ["SET", key, value];
+    let ttl = _option(options, "ttl_ms", 0);
+    if (kind_of(ttl) != "int" || ttl < 0) {
+      fail("std.cache.set ttl_ms must be a non-negative integer");
+    }
+    let nx = _option(options, "nx", false);
+    let xx = _option(options, "xx", false);
+    if (kind_of(nx) != "bool" || kind_of(xx) != "bool") {
+      fail("std.cache.set nx/xx must be bool");
+    }
+    if (nx && xx) {
+      fail("std.cache.set cannot use nx and xx together");
+    }
+    if (ttl > 0) {
+      args = std.list.append(args, "PX");
+      args = std.list.append(args, ttl);
+    }
+    if (nx) {
+      args = std.list.append(args, "NX");
+    }
+    if (xx) {
+      args = std.list.append(args, "XX");
+    }
+    let result = _command(state, args);
+    return {"state": result["state"], "value": result["value"] != null};
+  }
+
+  func _make_client(state) {
+    let get = func(key) {
+      let result = _command(state, ["GET", key]);
+      state = result["state"];
+      return result["value"];
+    };
+    let set = func(key, value, options = {}) {
+      let result = _set(state, key, value, options);
+      state = result["state"];
+      return result["value"];
+    };
+    let remove = func(key) {
+      let result = _command(state, ["DEL", key]);
+      state = result["state"];
+      return result["value"];
+    };
+    let exists = func(key) {
+      let result = _command(state, ["EXISTS", key]);
+      state = result["state"];
+      return result["value"] > 0;
+    };
+    let incr = func(key, amount = 1) {
+      if (kind_of(amount) != "int") {
+        fail("std.cache.incr amount must be an integer");
+      }
+      let result = _command(state, ["INCRBY", key, amount]);
+      state = result["state"];
+      return result["value"];
+    };
+    let expire = func(key, ttl_ms) {
+      if (kind_of(ttl_ms) != "int" || ttl_ms < 0) {
+        fail("std.cache.expire ttl_ms must be a non-negative integer");
+      }
+      let result = _command(state, ["PEXPIRE", key, ttl_ms]);
+      state = result["state"];
+      return result["value"] == 1;
+    };
+    let ttl = func(key) {
+      let result = _command(state, ["TTL", key]);
+      state = result["state"];
+      return result["value"];
+    };
+    let pttl = func(key) {
+      let result = _command(state, ["PTTL", key]);
+      state = result["state"];
+      return result["value"];
+    };
+    let incr_window = func(key, window_ms) {
+      if (kind_of(window_ms) != "int" || window_ms <= 0) {
+        fail("std.cache.incr_window window_ms must be a positive integer");
+      }
+      let script = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('PEXPIRE',KEYS[1],ARGV[1]) end; return {n,redis.call('PTTL',KEYS[1])}";
+      let result = _command(state, ["EVAL", script, "1", key, window_ms]);
+      state = result["state"];
+      if (kind_of(result["value"]) != "list" ||
+          len(result["value"]) != 2) {
+        fail("std.cache.incr_window received an invalid response");
+      }
+      return {"count": result["value"][0],
+              "ttl_ms": result["value"][1]};
+    };
+    let ping = func() {
+      let result = _command(state, ["PING"]);
+      state = result["state"];
+      return result["value"];
+    };
+    let close = func() {
+      if (!state["closed"]) {
+        state["closed"] = true;
+        std.io.close(state["stream"]);
+      }
+      return true;
+    };
+    return Client {
+      get: get,
+      set: set,
+      delete: remove,
+      exists: exists,
+      incr: incr,
+      expire: expire,
+      ttl: ttl,
+      pttl: pttl,
+      incr_window: incr_window,
+      ping: ping,
+      close: close
+    };
+  }
+
+  export struct Client {
+    get: callable;
+    set: callable;
+    delete: callable;
+    exists: callable;
+    incr: callable;
+    expire: callable;
+    ttl: callable;
+    pttl: callable;
+    incr_window: callable;
+    ping: callable;
+    close: callable;
+  }
+
+  export func drivers() {
+    return ["redis", "valkey"];
+  }
+
+  export func open(uri, options = {}) {
+    let config = _parse_uri(uri, options);
+    let stream = std.net.tcp_connect(
+      config["host"], config["port"], config["connect_timeout_ms"]);
+    if (config["tls"]) {
+      if (!std.dict.has(std, "tls")) {
+        std.io.close(stream);
+        fail("std.cache: TLS is not available in this build");
+      }
+      let tls_options = {"verify": config["verify"]};
+      if (config["ca_file"] != "") {
+        tls_options["ca_file"] = config["ca_file"];
+      }
+      stream = std.tls.client(stream, config["server_name"], tls_options);
+    }
+    let state = {
+      "stream": stream,
+      "buffer": std.bytes.from_string(""),
+      "read_timeout_ms": config["read_timeout_ms"],
+      "write_timeout_ms": config["write_timeout_ms"],
+      "closed": false
+    };
+    if (config["user"] != "" || config["password"] != "") {
+      let auth = null;
+      if (config["user"] != "") {
+        auth = _command(state, ["AUTH", config["user"],
+                                config["password"]]);
+      } else {
+        auth = _command(state, ["AUTH", config["password"]]);
+      }
+      state = auth["state"];
+    }
+    if (config["database"] != 0) {
+      let selected = _command(state, ["SELECT", config["database"]]);
+      state = selected["state"];
+    }
+    return _make_client(state);
+  }
+}

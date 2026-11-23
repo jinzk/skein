@@ -28,6 +28,8 @@
 #include "std_heap_source.inc"
 #include "std_route_source.inc"
 #include "std_auth_source.inc"
+#include "std_cache_source.inc"
+#include "std_kv_source.inc"
 #include "std_web_source.inc"
 #include "std_metrics_source.inc"
 #include "std_graph_source.inc"
@@ -103,6 +105,8 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.heap", kStdHeapSource},
     {"std.route", kStdRouteSource},
     {"std.auth", kStdAuthSource},
+    {"std.cache", kStdCacheSource},
+    {"std.kv", kStdKvSource},
     {"std.web", kStdWebSource},
     {"std.metrics", kStdMetricsSource},
     {"std.graph", kStdGraphSource},

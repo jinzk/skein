@@ -14,6 +14,7 @@ def run_cases():
     )
     if probe.returncode == 0 and not probe.stderr.strip():
         run_skein("db.skein")
+        run_skein("kv.skein")
     if os.environ.get("SKEIN_TEST_POSTGRES_DSN"):
         run_skein("db_postgres.skein")
     if os.environ.get("SKEIN_TEST_MYSQL_DSN"):

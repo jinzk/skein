@@ -41,6 +41,8 @@
 - GBK / GB18030-2005 编解码
 - `error` 值保留抛出点位置与调用栈，支持 `std.error.location` / `trace` / `format_trace`
 - `std.log` 结构化日志：级别过滤、text/JSON、stderr/stdout/file、自定义 writer
+- `std.kv` 嵌入式 KV：SQLite 单文件默认后端，BLOB key/value、prefix scan、
+  count / clear
 
 ### 工具链
 
@@ -95,14 +97,14 @@
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
-| 多 worker 共享 Session / 限流 store | 待实现 | 首版内存 store 已完成；多进程生产部署前必做 |
-| Redis / Valkey `std.cache` 客户端 | 待实现 | 多 worker 共享 store 时启动；见 Milestone 7 |
+| Valkey 独立 CI 服务验证 | 按需 | 客户端使用同一 RESP2；Redis 8.0 已验证 |
 | 权限 / 角色 middleware | 按需 | 统一身份模型已完成，不阻塞 P1 验收 |
 | 账户锁定 / 登录失败保护 | 按需 | 可先用现有固定窗口限流组合实现 |
 | OpenTelemetry tracing / 完整错误栈日志 | 按需 | 结构化访问日志与 Prometheus 已完成 |
 | Milestone 3 包生态 | 待决策 | SumDB、proxy、私有模块认证、`mod graph` / `mod why` 等 |
 | moving GC / AOT / 字节码缓存 | 待决策 | 决策后再启动 per-pc liveness / OSR / deopt |
 | Milestone 5 长尾能力 | 按需 | GB18030-2022、旧编码、HTTP/2 extended CONNECT、vendor / workspace |
+| LevelDB / RocksDB `std.kv` 后端 | 暂缓（未来能力） | SQLite 单文件默认后端已完成；LSM 仅作可选目录后端 |
 | REPL / 工具链体验清单 | 按需 | 见 Milestone 5；不影响当前主线 |
 | macOS `flock` 并发验证 | 暂缓 | Linux 已通过 WSL 全量测试 |
 | 交叉编译 | 按需 | 见 `package-manager.md` |
@@ -378,6 +380,8 @@ std.string.builder          29 ms
 - HTTP/2 extended CONNECT
 - vendor / workspace
 - AOT / 字节码序列化、预编译 stdlib、字节码 ABI 冻结
+- `std.kv` 嵌入式 KV：SQLite 单文件默认后端已完成；LevelDB / RocksDB
+  仅作为可选目录后端，暂不实施，不放进 `std.db` 或 `std.cache`
 
 #### REPL / 工具链体验（按需）
 
@@ -409,8 +413,9 @@ std.string.builder          29 ms
 - Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
 
 当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 P1-D 数据库
-（SQLite / PostgreSQL / MySQL / MariaDB、migration、连接池）已完成。单进程
-P1 验收已满足；多进程生产部署还需要先完成共享 Session / 限流 store。
+（SQLite / PostgreSQL / MySQL / MariaDB、migration、连接池）已完成。
+`std.cache` 已提供 Redis / Valkey 客户端并接入共享 Session / 限流 store；
+单进程和多进程生产部署路径均已具备。
 
 范围：
 
@@ -427,7 +432,7 @@ P1 验收已满足；多进程生产部署还需要先完成共享 Session / 限
    - Cookie Session 与 Bearer Token 共用用户和权限模型（已完成）
    - 标准 HS256 JWT、`require_bearer`、`authenticate` 与 401/403 helper
      （已完成）
-   - 多 worker 共享 Session store（待实现；多进程生产必做）
+   - 多 worker 共享 Session store（已完成，通过 `std.cache`）
    - 完整权限/角色 middleware（按需，不阻塞 P1 验收）
 3. P1-B 限流与安全（基础完成）：
    - CORS before/after middleware（已完成）
@@ -436,7 +441,7 @@ P1 验收已满足；多进程生产部署还需要先完成共享 Session / 限
    - IP / token / 用户 / 路由维度固定窗口限流（已完成）
    - 登录失败保护可用限流组合实现；账户级锁定策略（按需）
    - 请求大小与超时限制（已有）
-   - 多 worker 共享限流 store（待实现；多进程生产必做）
+   - 多 worker 共享限流 store（已完成，通过 `std.cache`）
 4. P1-C 可观测性（基础完成）：
    - 结构化访问日志（已完成）
    - JSON 错误边界与 request id 关联（已完成）
@@ -470,52 +475,51 @@ P1 验收已满足；多进程生产部署还需要先完成共享 Session / 限
 不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
 GraphQL、完整 ORM、OAuth 第三方登录。
 
-### Milestone 7：std.cache / Redis-Valkey（计划中，按需触发）
+### Milestone 7：std.cache / Redis-Valkey（客户端与共享 store 已完成）
 
 目标：为 Redis / Valkey 提供独立的 TTL key-value 客户端，并作为多 worker
-Session / 限流共享 store 的候选后端。Redis / Valkey 不放入 `std.db`，避免和
-SQL 事务、结果集、参数绑定模型混合。
-
-触发条件：单进程内存 store 不再满足部署需求，或明确需要跨进程共享缓存。
-本里程碑不阻塞 P1 验收。
+Session / 限流共享 store。Redis / Valkey 不放入 `std.db`，避免和 SQL 事务、
+结果集、参数绑定模型混合。
 
 范围：
 
-1. 公共 API（第一版最小集合）：
-   - `std.cache.drivers()`；
-   - `std.cache.open("redis://...")` / `std.cache.open("valkey://...")`；
-   - `get` / `set` / `delete` / `exists` / `incr` / `expire` / `ttl` / `close`；
+1. 公共 API（已完成）：
+   - `cache.drivers()`；
+   - `cache.open("redis://...")` / `cache.open("valkey://...")` /
+     `rediss://` / `valkeys://`；
+   - `get` / `set` / `delete` / `exists` / `incr` / `expire` / `ttl` /
+     `pttl` / `incr_window` / `ping` / `close`；
    - `set` 支持 TTL、`NX`、`XX`；
    - 值支持 string / bytes，保持二进制安全。
-2. 连接与安全：
+2. 连接与安全（已完成）：
    - AUTH、TLS、DB index、连接 / 读写超时；
-   - 单句柄串行访问；连接池后续补齐；
-   - 错误映射、基础重连策略和关闭语义。
-3. 实现：
-   - Redis / Valkey 共用一套 RESP2 实现，基于现有 socket / TLS；
-   - 编译期开关（暂定 `SKEIN_ENABLE_CACHE_REDIS`，默认 OFF）；
-   - 不使用动态 native plugin；未启用的构建通过 `std.cache.drivers()` 和
-     明确错误报告，不依赖 import 失败判断。
-4. 共享状态集成：
-   - `std.auth` Session store 接受 `std.cache` 后端；
-   - `std.web` 限流器接受共享 store，并保证计数与过期时间的原子性；
-   - adapter 复用现有身份和限流模型，不另起一套 API。
-5. 测试：
-   - 协议解析、二进制值、TTL、NX/XX、超时和错误路径单测；
-   - 默认 CI 使用 Valkey，另跑 Redis 兼容性验证；
-   - 多 worker Session / 限流集成测试；
-   - 未启用驱动、不可达服务、AUTH/TLS 失败诊断。
+   - 单句柄串行访问；
+   - 错误和关闭语义。
+3. 实现（已完成）：
+   - 纯 Skein 内嵌包 `lib/std/cache.skein`，不是 native plugin；
+   - RESP2 基于现有 `std.net` / `std.tls`，不引入外部客户端库或额外 CMake
+     开关；
+   - `lib/std/cache.skein` 随标准库一起构建。
+4. 共享状态集成（已完成）：
+   - `std.auth` Session store 接受 `std.cache` 后端，值使用 JSON 序列化；
+   - `std.web` 限流器接受共享 store，使用原子 `incr_window`；
+   - 默认仍是进程内 store，显式传入 cache 客户端后切换。
+5. 测试（已完成）：
+   - Redis 8.0 集成覆盖协议、二进制值、TTL、NX/XX、AUTH；
+   - Session store 和共享限流器集成测试通过；
+   - 默认测试在未设置 `SKEIN_TEST_REDIS_DSN` 时跳过外部服务；
+   - Valkey 使用同一 RESP2 协议，独立 CI 服务待补。
 
-不做：Redis Cluster / Sentinel、pub/sub、Streams、任意命令透传、Lua 通用脚本、
-RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Valkey 服务端。
-后续如需要 pub/sub，另立 `std.pubsub` 或底层 `std.redis`，不扩展 `std.cache`
-的语义。
+不做：Redis Cluster / Sentinel、pub/sub、Streams、任意命令透传、通用 Lua
+暴露、RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Valkey
+服务端。后续如需要 pub/sub，另立 `std.pubsub` 或底层 `std.redis`，不扩展
+`std.cache` 的语义。
 
 验收：
 
-- Redis 与 Valkey 下最小 API 行为一致；
-- 多 worker 能共享 Session 和限流状态；
-- 未启用该模块的构建仍能完整构建并运行；
+- Redis 8.0 下最小 API 行为通过；
+- Valkey 使用同一 RESP2 客户端，独立服务验证待补；
+- Session 和限流共享 store 集成测试通过；
 - 默认测试不依赖外部 Redis/Valkey 服务，集成测试显式启用。
 
 ---
@@ -551,15 +555,18 @@ RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Val
     `launch f().wait()` 解析为 `launch (f().wait())`。需要“启动后等待”时
     统一写 `wait launch f()` 或 `(launch f()).wait()`。已迁移相关测试和
     `SYNTAX.md`，并增加 `launch make().get()` 调用链回归。
-12. ~~是否把 Redis / Valkey 纳入支持范围？~~ 已决定：纳入计划，作为独立的
-    `std.cache`，不放入 `std.db`。第一版只做最小 TTL key-value 客户端及
-    Session / 限流共享 store adapter，不阻塞 P1；不使用动态 native plugin
-    作为第一方实现方式。范围见 Milestone 7。
+12. ~~是否把 Redis / Valkey 纳入支持范围？~~ 已实施（2026-11-23）：
+    作为独立的 `std.cache`，不放入 `std.db`。采用纯 Skein 内嵌包，基于
+    `std.net` / `std.tls` 实现 RESP2，不依赖动态 native plugin。Session 和
+    限流共享 store 已接入；Valkey 独立 CI 服务待补。
 13. ~~是否把 MySQL / MariaDB 纳入 `std.db` 支持范围？~~ 已实施（2026-11-22）：
     MySQL / MariaDB 共用一个 `db_internal` 后端，优先 MariaDB Connector/C，
     兼容 libmysqlclient；支持 `mysql://` / `mariadb://` URI、prepared
     statement、`?` 参数和基础类型映射。现有 `contrib/mysql` 保留为 native
     module ABI 示例，不作为 `std.db` 的实现路径。
+14. ~~是否提供嵌入式 KV？~~ 已实施（2026-11-23）：新增 `std.kv`，默认 SQLite
+    单文件后端；key/value 使用 BLOB，支持 prefix scan。LevelDB / RocksDB
+    只保留为未来可选目录后端，不承诺单文件。
 
 ---
 
@@ -572,14 +579,15 @@ RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Val
 - 没有实际用户需求前，不扩展旧编码后端。
 - 未确认公共生态前，不先做 vendor / workspace。
 - 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明 `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
+- SQLite 单文件 `std.kv` 已完成；没有明确的高写入/大数据量需求前，不实现 LevelDB / RocksDB 目录后端，也不承诺单文件。
 
 ---
 
 ## 5. 推荐执行顺序
 
-1. P1-D 已完成，单进程 P1 验收已满足。下一步按部署需求决定是否启动
-   Milestone 7：多进程生产部署前用 `std.cache` 最小客户端支撑共享 Session /
-   限流 store；单进程开发与测试继续使用内存实现即可。
+1. P1-D 与 `std.cache` 已完成，单进程和多进程共享 store 路径均已具备。
+   剩余的 Valkey 独立 CI、权限/角色、账户锁定和 OpenTelemetry 按实际部署需求
+   推进。
 2. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
    Milestone 2 已完成。
 3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。

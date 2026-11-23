@@ -2544,6 +2544,8 @@ std.sys
 std.crypto
 std.password
 std.db（可选）
+std.cache（内嵌 Skein 源码包）
+std.kv（内嵌 Skein 源码包）
 std.compress
 std.math
 std.io

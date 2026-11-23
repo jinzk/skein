@@ -295,6 +295,67 @@ package web {
       };
     }
     let message = std.dict.get(options, "message", "too many requests");
+    let cache_client = std.dict.get(options, "cache", null);
+    if (cache_client != null) {
+      if (kind_of(cache_client) != "struct") {
+        fail("web.rate_limit cache must be a std.cache client");
+      }
+      let prefix = std.dict.get(options, "prefix", "skein:rate:");
+      if (kind_of(prefix) != "string" || prefix == "") {
+        fail("web.rate_limit prefix must be a non-empty string");
+      }
+      let shared_check = func(req) {
+        let key = key_fn(req);
+        if (key == null) {
+          key = "unknown";
+        }
+        let now = std.time.now_ms();
+        let result = cache_client.incr_window(prefix + str(key),
+                                               window_ms);
+        let count = result["count"];
+        let ttl_ms = result["ttl_ms"];
+        if (ttl_ms <= 0) {
+          ttl_ms = window_ms;
+        }
+        let remaining = limit - count;
+        if (remaining < 0) {
+          remaining = 0;
+        }
+        return {
+          "allowed": count <= limit,
+          "limit": limit,
+          "remaining": remaining,
+          "retry_after_ms": count > limit ? ttl_ms : 0,
+          "reset_ms": now + ttl_ms
+        };
+      };
+      let shared_middleware = func(req) {
+        let result = shared_check(req);
+        if (!result["allowed"]) {
+          return _rate_response(result, message);
+        }
+        return null;
+      };
+      let shared_reset = func(key = null) {
+        if (key == null) {
+          fail("web.rate_limit shared reset requires a key");
+        }
+        return cache_client.delete(prefix + str(key)) > 0;
+      };
+      let shared_cleanup = func() {
+        // Redis expiration handles cleanup.
+        return 0;
+      };
+      return Limiter {
+        check: shared_check,
+        middleware: shared_middleware,
+        reset: shared_reset,
+        cleanup: shared_cleanup,
+        limit: limit,
+        window_ms: window_ms
+      };
+    }
+
     let buckets = {};
 
     let check = func(req) {

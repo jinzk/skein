@@ -74,6 +74,8 @@ L0  platform          src/platform/：OS 原语（文件/时间/线程/进程/so
 - `lib/std/internal/container_adapter.skein` 是私有嵌入源，只由 `src/interpreter/std_namespace.cpp` 解析，不进入公开 package 列表。
 - `std.regex` 依赖 PCRE2、`std.compress` 依赖 zlib/brotli、`std.net` 依赖 libuv、`std.tls` 依赖 OpenSSL、`std.http2` 依赖 nghttp2、`std.ffi` 依赖 libffi：都属于 L3 可选模块。
 - `std.db` 的 SQLite / PostgreSQL / MySQL / MariaDB 驱动分别依赖 sqlite3 / libpq / MariaDB Connector/C（或 libmysqlclient）；驱动通过 `db_internal.h` 的 C++ 接口静态链接，不跨越 native module ABI。
+- `std.cache` 是 `lib/std/cache.skein` 内嵌包，基于 `std.net` / `std.tls` 实现 RESP2，不引入额外 native 依赖。
+- `std.kv` 是 `lib/std/kv.skein` 内嵌包，默认复用 `std.db` 的 SQLite 后端；LevelDB / RocksDB 目录后端仅保留为未来能力。
 
 ## 5. 关键接口
 

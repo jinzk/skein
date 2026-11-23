@@ -11,6 +11,7 @@ import harness
 from cases import (
     auth,
     build,
+    cache,
     collections,
     db,
     decorators,
@@ -44,6 +45,7 @@ from cases import (
 MODULES = [
     auth,
     build,
+    cache,
     db,
     language_core,
     match_types,

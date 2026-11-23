@@ -2216,6 +2216,8 @@ std.sys
 std.crypto
 std.password
 std.db（可选）
+std.cache（内嵌 Skein 源码包）
+std.kv（内嵌 Skein 源码包）
 std.compress
 std.math
 std.io
@@ -2568,6 +2570,85 @@ pool.close();
 - 当前事务仍由调用方显式 `begin` / `commit` / `rollback`，pool 不会自动
   绑定或回滚事务。
 
+`std.cache` 提供 Redis / Valkey 的最小 TTL key-value 客户端：
+
+```skein
+import std.cache;
+
+let c = cache.open("redis://127.0.0.1:6379");
+c.set("user:1", "alice", {"ttl_ms": 60000});
+let value = c.get("user:1");       // bytes / null
+let ok = c.exists("user:1");
+let n = c.incr("counter");
+c.expire("counter", 60000);
+c.close();
+```
+
+API：
+
+```text
+cache.drivers() -> list[string]
+cache.open(uri[, options]) -> Client
+client.get(key) -> bytes / null
+client.set(key, value[, options]) -> bool
+client.delete(key) -> int
+client.exists(key) -> bool
+client.incr(key[, amount]) -> int
+client.expire(key, ttl_ms) -> bool
+client.ttl(key) -> int
+client.pttl(key) -> int
+client.incr_window(key, window_ms) -> {count, ttl_ms}
+client.ping() -> string
+client.close() -> bool
+```
+
+- URI 支持 `redis://`、`valkey://`、`rediss://`、`valkeys://`；
+- `set` 选项：`ttl_ms`、`nx`、`xx`；
+- 值支持 string / bytes，`get` 返回 bytes；
+- `incr_window` 原子地执行 `INCR` 和首次 `PEXPIRE`，供固定窗口限流使用；
+- 选项：`connect_timeout_ms`、`read_timeout_ms`、`write_timeout_ms`、
+  `username`、`password`、`database`、`tls`、`verify`、`ca_file`、
+  `server_name`；
+- 使用现有 `std.net` / `std.tls`，不依赖外部客户端库；
+- 当前不做 Cluster / Sentinel、pub/sub、Streams、任意命令透传或 Lua；
+- Session / 限流共享 store adapter 后续接入。
+
+`std.kv` 是嵌入式持久化 KV，当前默认后端为 SQLite 单文件：
+
+```skein
+import std.kv;
+
+let store = kv.open("app.kv");
+store.put("user:1", std.bytes.from_string("alice"));
+let value = store.get("user:1");
+let page = store.scan("user:", 100);
+store.delete("user:1");
+store.close();
+```
+
+API：
+
+```text
+kv.drivers() -> list[string]
+kv.open(path[, options]) -> Store
+store.put(key, value) -> bool
+store.get(key) -> bytes / null
+store.delete(key) -> bool
+store.has(key) -> bool
+store.scan([prefix[, limit]]) -> list[{key, value}]
+store.count() -> int
+store.clear() -> int
+store.close() -> bool
+store.backend -> string
+```
+
+- key / value 支持 string 或 bytes，内部按 BLOB 存储；
+- 表结构为 `(key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID`；
+- `scan` 按 key 字典序返回，prefix 和 limit 可选；
+- 选项：`table`（默认 `skein_kv`）、`busy_timeout_ms`；
+- 当前只有 SQLite 后端；LevelDB / RocksDB 目录后端仅保留为未来能力；
+- 不等同于 `std.cache`：`std.kv` 是本地持久化，`std.cache` 是 Redis/Valkey。
+
 `std.crypto.sha256` / `hmac_sha256` 返回十六进制字符串；
 `std.crypto.sha256_bytes` / `hmac_sha256_bytes` 返回原始 bytes，适合 JWT、
 二进制签名和协议字段。
@@ -2605,8 +2686,10 @@ let who = auth.authenticate(store, req, secret);  // session / bearer / null
 let denied = auth.unauthorized_response("login required");
 ```
 
-- Session store 首版是进程内内存实现，不跨 thread/process worker 共享；
-  多 worker 部署需要后续接入共享 store。
+- Session store 默认是进程内内存实现；传入 `{"cache": cache_client}` 可切换到
+  `std.cache` 共享 store，此时 `prefix` 默认是 `skein:session:`。
+- 共享 Session store 的 value 必须可 JSON 序列化；TTL 由 Redis/Valkey 维护，
+  `cleanup()` 返回 0。
 - `sign_token` / `verify_token` 是简化的 HMAC token；`jwt_sign` / `jwt_verify`
   生成标准 HS256 JWT（`header.payload.signature`）。
 - JWT 校验 `alg=HS256`、签名、`exp`、`nbf`，可选校验 `iss` / `aud` / `sub`
@@ -2651,9 +2734,11 @@ let ip = web.client_ip(req, {
   `Referrer-Policy: no-referrer`；`hsts`、`csp`、`permissions_policy` 按需开启。
 - `web.client_ip` 只有在 `remote_addr` 命中 `trusted_proxies` 时才信任
   `X-Forwarded-For`。
-- `web.rate_limit` 是进程内固定窗口限流；返回 `429`、`Retry-After` 和
-  `X-RateLimit-*`。`limiter.reset()` 清空计数，`limiter.cleanup()` 清理过期
-  窗口。多 worker 部署需要后续接入共享 store。
+- `web.rate_limit` 默认是进程内固定窗口限流；传入 `{"cache": cache_client}`
+  可切换到 `std.cache` 共享 store，`prefix` 默认是 `skein:rate:`。
+- 共享限流使用 `cache.incr_window` 原子计数；返回 `429`、`Retry-After` 和
+  `X-RateLimit-*`。共享模式下 `limiter.reset(key)` 必须提供 key；
+  `limiter.cleanup()` 返回 0，过期由 Redis/Valkey 维护。
 - `web.access_log` 返回 `before` / `after` middleware，按请求输出结构化
   access log（request id、method、path、status、latency、bytes、client ip）。
 - `web.metrics_middleware` 记录 `http_requests_total` 和

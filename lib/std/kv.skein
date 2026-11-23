@@ -1,0 +1,174 @@
+package kv {
+  import std;
+
+  export struct Store {
+    put: callable;
+    get: callable;
+    delete: callable;
+    has: callable;
+    scan: callable;
+    count: callable;
+    clear: callable;
+    close: callable;
+    backend: string;
+  }
+
+  func _as_bytes(value, what) {
+    let kind = kind_of(value);
+    if (kind == "bytes") {
+      return value;
+    }
+    if (kind == "string") {
+      return std.bytes.from_string(value);
+    }
+    fail("std.kv " + what + " must be string or bytes");
+  }
+
+  func _valid_table(name) {
+    if (kind_of(name) != "string" || name == "" || len(name) > 64) {
+      return false;
+    }
+    let i = 0;
+    while (i < len(name)) {
+      let c = name[i];
+      if (c == '_') {
+        i = i + 1;
+        continue;
+      }
+      if (c >= 'a' && c <= 'z') {
+        i = i + 1;
+        continue;
+      }
+      if (c >= 'A' && c <= 'Z') {
+        i = i + 1;
+        continue;
+      }
+      if (i > 0 && c >= '0' && c <= '9') {
+        i = i + 1;
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  func _prefix_upper(prefix) {
+    let i = len(prefix) - 1;
+    while (i >= 0) {
+      let current = std.bytes.get(prefix, i);
+      if (current < 255) {
+        let head = std.bytes.slice(prefix, 0, i);
+        let tail = std.bytes.from_int(current + 1, 1, "big");
+        return std.bytes.concat(head, tail);
+      }
+      i = i - 1;
+    }
+    return null;
+  }
+
+  func _make_store(db, backend, table) {
+    let put = func(key, value) {
+      let k = _as_bytes(key, "key");
+      let v = _as_bytes(value, "value");
+      std.db.exec(db,
+        "INSERT OR REPLACE INTO " + table +
+        "(key, value) VALUES (?, ?)", [k, v]);
+      return true;
+    };
+    let get = func(key) {
+      let k = _as_bytes(key, "key");
+      let rows = std.db.query(
+        db, "SELECT value FROM " + table + " WHERE key = ?", [k]);
+      if (len(rows) == 0) {
+        return null;
+      }
+      return rows[0]["value"];
+    };
+    let remove = func(key) {
+      let k = _as_bytes(key, "key");
+      let result = std.db.exec(
+        db, "DELETE FROM " + table + " WHERE key = ?", [k]);
+      return result["changes"] > 0;
+    };
+    let has = func(key) {
+      let k = _as_bytes(key, "key");
+      let rows = std.db.query(
+        db, "SELECT 1 AS found FROM " + table + " WHERE key = ?", [k]);
+      return len(rows) > 0;
+    };
+    let scan = func(prefix = "", limit = 0) {
+      let p = _as_bytes(prefix, "prefix");
+      if (kind_of(limit) != "int" || limit < 0) {
+        fail("std.kv scan limit must be a non-negative integer");
+      }
+      let sql = "SELECT key, value FROM " + table;
+      let params = [];
+      if (len(p) > 0) {
+        let upper = _prefix_upper(p);
+        if (upper == null) {
+          sql = sql + " WHERE key >= ?";
+          params = [p];
+        } else {
+          sql = sql + " WHERE key >= ? AND key < ?";
+          params = [p, upper];
+        }
+      }
+      sql = sql + " ORDER BY key";
+      if (limit > 0) {
+        sql = sql + " LIMIT ?";
+        params = std.list.append(params, limit);
+      }
+      return std.db.query(db, sql, params);
+    };
+    let count = func() {
+      let rows = std.db.query(
+        db, "SELECT COUNT(*) AS n FROM " + table);
+      return rows[0]["n"];
+    };
+    let clear = func() {
+      let result = std.db.exec(db, "DELETE FROM " + table);
+      return result["changes"];
+    };
+    let close = func() {
+      std.db.close(db);
+      return true;
+    };
+    return Store {
+      put: put,
+      get: get,
+      delete: remove,
+      has: has,
+      scan: scan,
+      count: count,
+      clear: clear,
+      close: close,
+      backend: backend
+    };
+  }
+
+  export func drivers() {
+    return ["sqlite"];
+  }
+
+  export func open(path, options = {}) {
+    if (kind_of(path) != "string" || path == "") {
+      fail("std.kv.open expects a non-empty path");
+    }
+    if (std.string.starts_with(path, "rocksdb://") ||
+        std.string.starts_with(path, "leveldb://")) {
+      fail("std.kv: directory LSM backend is not enabled");
+    }
+    if (!std.dict.has(std, "db")) {
+      fail("std.kv requires the std.db SQLite backend");
+    }
+    let table = std.dict.get(options, "table", "skein_kv");
+    if (!_valid_table(table)) {
+      fail("std.kv table must be a valid identifier");
+    }
+    let db = std.db.open(path, options);
+    std.db.exec(db,
+      "CREATE TABLE IF NOT EXISTS " + table +
+      " (key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID");
+    return _make_store(db, "sqlite", table);
+  }
+}

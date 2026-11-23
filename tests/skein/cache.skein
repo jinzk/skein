@@ -1,0 +1,139 @@
+import std;
+import std.auth;
+import std.cache;
+import std.web;
+include "_support.skein";
+
+let dsn = std.env.get("SKEIN_TEST_REDIS_DSN", "");
+if (dsn == "") {
+  fail("SKEIN_TEST_REDIS_DSN is required");
+}
+
+let prefix = "skein:cache:" + str(std.time.now_ms()) + ":" + str(std.random.int(0, 999999));
+
+ts_test("cache core commands", func() {
+  let c = cache.open(dsn);
+  ts_eq(c.ping(), "PONG");
+  let key = prefix + ":key";
+  ts_eq(c.set(key, "hello"), true);
+  ts_eq(std.bytes.to_string(c.get(key)), "hello");
+  ts_eq(c.exists(key), true);
+  ts_eq(c.delete(key), 1);
+  ts_eq(c.exists(key), false);
+
+  let counter = prefix + ":counter";
+  ts_eq(c.incr(counter), 1);
+  ts_eq(c.incr(counter, 2), 3);
+  ts_eq(c.expire(counter, 5000), true);
+  let ttl = c.ttl(counter);
+  ts_true(ttl >= 0 && ttl <= 5);
+  c.delete(counter);
+  c.close();
+});
+
+ts_test("cache binary and conditional set", func() {
+  let c = cache.open(dsn);
+  let binary_key = prefix + ":binary";
+  let binary = std.bytes.from_hex("00ff0a0d");
+  ts_eq(c.set(binary_key, binary), true);
+  ts_eq(c.get(binary_key), binary);
+
+  let nx_key = prefix + ":nx";
+  ts_eq(c.set(nx_key, "one", {"nx": true}), true);
+  ts_eq(c.set(nx_key, "two", {"nx": true}), false);
+  ts_eq(std.bytes.to_string(c.get(nx_key)), "one");
+  ts_eq(c.set(nx_key, "two", {"xx": true}), true);
+  ts_eq(std.bytes.to_string(c.get(nx_key)), "two");
+
+  let ttl_key = prefix + ":ttl";
+  ts_eq(c.set(ttl_key, "x", {"ttl_ms": 5000}), true);
+  let ttl = c.ttl(ttl_key);
+  ts_true(ttl >= 0 && ttl <= 5);
+
+  c.delete(binary_key);
+  c.delete(nx_key);
+  c.delete(ttl_key);
+  c.close();
+});
+
+ts_test("cache errors", func() {
+  let c = cache.open(dsn);
+  c.close();
+  ts_error(func() {
+    c.get("closed");
+  }, "closed");
+  ts_error(func() {
+    cache.open("http://127.0.0.1:6379");
+  }, "unsupported scheme");
+  ts_error(func() {
+    let other = cache.open(dsn);
+    other.set("bad", "x", {"nx": true, "xx": true});
+  }, "nx and xx");
+});
+
+ts_test("cache auth", func() {
+  let auth_dsn = std.env.get("SKEIN_TEST_REDIS_AUTH_DSN", "");
+  if (auth_dsn == "") {
+    return;
+  }
+  let c = cache.open(auth_dsn);
+  ts_eq(c.ping(), "PONG");
+  ts_eq(c.set(prefix + ":auth", "ok"), true);
+  ts_eq(std.bytes.to_string(c.get(prefix + ":auth")), "ok");
+  c.delete(prefix + ":auth");
+  c.close();
+});
+
+ts_test("cache session store", func() {
+  let c = cache.open(dsn);
+  let store = auth.new_store({
+    "ttl": 30,
+    "cache": c,
+    "prefix": prefix + ":session:"
+  });
+  let id = store.create({"user_id": 7, "role": "admin"});
+  ts_true(id != "");
+  ts_eq(store.get(id)["user_id"], 7);
+  ts_eq(store.set(id, {"user_id": 8}), true);
+  ts_eq(store.get(id)["user_id"], 8);
+  let rotated = store.rotate(id);
+  ts_true(rotated != null);
+  ts_eq(store.get(id), null);
+  ts_eq(store.get(rotated)["user_id"], 8);
+  ts_eq(store.delete(rotated), true);
+  ts_eq(store.get(rotated), null);
+  ts_eq(store.cleanup(), 0);
+  c.close();
+});
+
+ts_test("cache rate limiter", func() {
+  let c = cache.open(dsn);
+  let limiter = web.rate_limit({
+    "limit": 2,
+    "window_ms": 5000,
+    "cache": c,
+    "prefix": prefix + ":rate:",
+    "key_fn": func(req) { return req["key"]; }
+  });
+  let first = limiter.check({"key": "a"});
+  ts_eq(first["allowed"], true);
+  ts_eq(first["remaining"], 1);
+  let second = limiter.check({"key": "a"});
+  ts_eq(second["allowed"], true);
+  ts_eq(second["remaining"], 0);
+  let third = limiter.check({"key": "a"});
+  ts_eq(third["allowed"], false);
+  ts_true(third["retry_after_ms"] > 0);
+  ts_eq(limiter.check({"key": "b"})["allowed"], true);
+  ts_eq(limiter.reset("a"), true);
+  ts_eq(limiter.check({"key": "a"})["allowed"], true);
+  ts_eq(limiter.cleanup(), 0);
+  ts_error(func() {
+    limiter.reset();
+  }, "requires a key");
+  limiter.reset("a");
+  limiter.reset("b");
+  c.close();
+});
+
+ts_finish();

@@ -1,0 +1,60 @@
+import std;
+import std.kv;
+include "_support.skein";
+
+let temp = std.fs.temp_dir("skein-kv-");
+let path = std.fs.path_join(temp, "test.kv");
+
+ts_test("kv put get delete", func() {
+  let store = kv.open(path);
+  ts_eq(store.backend, "sqlite");
+  ts_eq(store.put("a", "1"), true);
+  ts_eq(std.bytes.to_string(store.get("a")), "1");
+  ts_eq(store.has("a"), true);
+  ts_eq(store.put("a", "2"), true);
+  ts_eq(std.bytes.to_string(store.get("a")), "2");
+  ts_eq(store.delete("a"), true);
+  ts_eq(store.get("a"), null);
+  ts_eq(store.count(), 0);
+  store.close();
+});
+
+ts_test("kv binary values", func() {
+  let store = kv.open(path);
+  let key = std.bytes.from_hex("00ff");
+  let value = std.bytes.from_hex("000a0dff");
+  ts_eq(store.put(key, value), true);
+  ts_eq(store.get(key), value);
+  ts_eq(store.delete(key), true);
+  store.close();
+});
+
+ts_test("kv scan and clear", func() {
+  let store = kv.open(path);
+  store.clear();
+  store.put("p:1", "a");
+  store.put("p:2", "b");
+  store.put("q:1", "c");
+  let page = store.scan("p:");
+  ts_eq(len(page), 2);
+  ts_eq(std.bytes.to_string(page[0]["key"]), "p:1");
+  ts_eq(std.bytes.to_string(page[1]["key"]), "p:2");
+  let limited = store.scan("p:", 1);
+  ts_eq(len(limited), 1);
+  ts_eq(std.bytes.to_string(limited[0]["key"]), "p:1");
+  ts_eq(store.count(), 3);
+  ts_eq(store.clear(), 3);
+  ts_eq(store.count(), 0);
+  store.close();
+});
+
+ts_test("kv custom table", func() {
+  let store = kv.open(path, {"table": "custom_kv"});
+  ts_eq(store.put("x", "y"), true);
+  ts_eq(std.bytes.to_string(store.get("x")), "y");
+  store.clear();
+  store.close();
+});
+
+std.fs.remove_all(temp);
+ts_finish();

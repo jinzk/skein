@@ -83,6 +83,66 @@ package auth {
     ttl: int;
   }
 
+  func _cache_store(cache_client, prefix, ttl, cookie_name) {
+    let key = func(id) {
+      return prefix + id;
+    };
+    let create = func(value) {
+      let id = _session_id();
+      let encoded = std.json.stringify(value);
+      if (!cache_client.set(key(id), encoded, {"ttl_ms": ttl * 1000})) {
+        fail("auth: failed to store session");
+      }
+      return id;
+    };
+    let get = func(id) {
+      if (id == null || kind_of(id) != "string") {
+        return null;
+      }
+      let data = cache_client.get(key(id));
+      if (data == null) {
+        return null;
+      }
+      return std.json.parse(std.bytes.to_string(data));
+    };
+    let set = func(id, value) {
+      if (id == null || kind_of(id) != "string" ||
+          !cache_client.exists(key(id))) {
+        return false;
+      }
+      let encoded = std.json.stringify(value);
+      return cache_client.set(key(id), encoded, {"ttl_ms": ttl * 1000});
+    };
+    let remove = func(id) {
+      if (id == null || kind_of(id) != "string") {
+        return false;
+      }
+      return cache_client.delete(key(id)) > 0;
+    };
+    let rotate = func(id) {
+      let value = get(id);
+      if (value == null) {
+        return null;
+      }
+      remove(id);
+      return create(value);
+    };
+    let cleanup = func() {
+      // Redis expiration handles cleanup.
+      return 0;
+    };
+    return SessionStore {
+      create: create,
+      get: get,
+      set: set,
+      delete: remove,
+      rotate: rotate,
+      cleanup: cleanup,
+      cookie_name: cookie_name,
+      ttl: ttl
+    };
+  }
+
   export func new_store(options = {}) {
     let ttl = std.dict.get(options, "ttl", 3600);
     if (kind_of(ttl) != "int" || ttl <= 0) {
@@ -91,6 +151,17 @@ package auth {
     let cookie_name = std.dict.get(options, "cookie_name", "sid");
     if (kind_of(cookie_name) != "string" || cookie_name == "") {
       fail("auth.new_store cookie_name must be a non-empty string");
+    }
+    let cache_client = std.dict.get(options, "cache", null);
+    if (cache_client != null) {
+      if (kind_of(cache_client) != "struct") {
+        fail("auth.new_store cache must be a std.cache client");
+      }
+      let prefix = std.dict.get(options, "prefix", "skein:session:");
+      if (kind_of(prefix) != "string" || prefix == "") {
+        fail("auth.new_store prefix must be a non-empty string");
+      }
+      return _cache_store(cache_client, prefix, ttl, cookie_name);
     }
 
     let sessions = {};

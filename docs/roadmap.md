@@ -23,97 +23,148 @@
 
 ---
 
-## 1. 已完成基线
+## 1. 当前状态
 
-### 语言与运行时
+### 1.1 主线概览（2026-11-23）
 
-- 词法、语法、类型检查、AST/VM 双后端
-- `pair` / `tuple`：字面量要求 `(a, b)`，`(a, b)` 可用于 let/const、函数参数和 match；带注解的值在运行时校验不可变性与 arity
-- `dict` / `set` 支持 float key：NaN 拒绝，`-0.0` 归一化，整数值 float 与同值 int 等价
-- 10 种复合赋值运算符；静态检查按运算符推导结果类型，JIT 覆盖 param / index 目标
-- task / generator、线程、Channel
-- `wait e` task 前缀等待语法：等价于 `e.wait()`，支持 `wait launch f()`；
-  `.` 后的关键字与内置名按普通成员名解析
-- `launch` 遵循 `.` 的优先级，作用于完整调用链；`launch f().wait()` 解析为
-  `launch (f().wait())`，不再隐式下钻到 `f()`
-- HTTP/1.1、HTTP/2、WebSocket、TLS、FFI
-- Unicode 标识符、NFC、归一化 quick-check、完整大小写映射与折叠、常见源文件编码
-- GBK / GB18030-2005 编解码
-- `error` 值保留抛出点位置与调用栈，支持 `std.error.location` / `trace` / `format_trace`
-- `std.log` 结构化日志：级别过滤、text/JSON、stderr/stdout/file、自定义 writer
-- `std.kv` 嵌入式 KV：SQLite 单文件默认后端，BLOB key/value、prefix scan、
-  count / clear
+| 主线 | 状态 | 下一步 |
+| --- | --- | --- |
+| JSON API 生产化（M6，P1） | 基础完成 | 账户锁定、OpenTelemetry exporter、完整 stack 捕获按部署需求推进 |
+| 包管理安全与运维（M1） | 核心完成 | macOS `flock` 验证暂缓；交叉编译按需 |
+| 包生态与信任（M3） | 待决策 | 先确认是否做公共生态，再排 SumDB / proxy / 私有认证 |
+| JIT / VM 与 GC（M4） | 优化冻结 | 等待 moving GC / AOT / 字节码缓存决策；已完成记录见第 3 节 |
+| 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
+| `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
+| FFI 平台 CI / fuzz | 按需 | Windows / 32 位 / ARM 和 fuzz，见 `architecture.md`；不阻塞 P1 |
 
-### 工具链
+最近完成：
 
-- `skein lint`
-- `skein fmt`
-- `skein lsp --stdio`
-- VS Code / Vim / Neovim 接入
-- diagnostics / completion / hover / definition / document symbol 基础能力
-- GitHub Actions CI：Valkey / PostgreSQL / MySQL 集成服务与全量 ctest
+- 服务 CI：PostgreSQL / MySQL / Valkey 集成服务与全量 ctest
+- RBAC / 角色、权限 middleware、W3C trace context 与访问日志 trace 字段
+- `std.cache` Redis / Valkey 客户端与共享 Session / 限流 store
+- SQLite 单文件 `std.kv`
+- 启动 profiling、AST arena、内存输入 fast path
 
-### 包管理
+### 1.2 推荐执行顺序
 
-- `skein.mod` / `skein.sum`
-- `skein get` / `skein build`
-- MVS、菱形依赖、`/vN`
-- checksum 硬校验、`--force`
-- 项目锁、缓存锁、模块锁
-- `mod clean` / `mod verify` / `mod download` / `mod tidy`
-- `get --offline`
-- 原子写入 `skein.mod` / `skein.sum`
-- 运行时模块加载持有缓存共享锁
-
-### REPL
-
-- 历史、行编辑、Windows 控制台编辑
-- 词法高亮
-- Tab 补全：关键字 / REPL 命令 / 全局符号 / `std.*`
-- 自动缩进、闭合符回退
-
-### JIT / VM
-
-- baseline JIT
-- Win64 ABI
-- GC root map 第一版
-- `SKEIN_GC_STRESS`
-- 尾调用 trampoline
-
-### Native / FFI
-
-- `std.ffi`
-- plugin async ABI v2
-- source-native module MVP
-- `SKEIN_ALLOW_NATIVE`
-- check-only 模式下禁止加载/执行 native
+1. P1 JSON API 基础已完成；账户锁定、外部 OpenTelemetry exporter 和完整
+   stack 捕获按实际部署需求推进。
+2. M1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
+3. 先确认公共包生态目标，再决定 M3 的 SumDB / proxy 范围。
+4. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
+   启动解析优化和 JIT 默认启用已完成；剩余是 moving GC / AOT / 字节码缓存
+   的决策，以及移动 GC 决策后才会启动的 per-pc liveness / OSR / deopt。
+5. 测试稳定性已完成：服务端测试改为子进程内绑定端口 0 并回读实际端口；
+   `thread_bench` 门槛使用多次重复中的最好成绩。
+6. 长尾能力按实际需求触发。
 
 ---
 
-## 2. 里程碑
+## 2. 主线与里程碑
 
-### 当前待实现任务总览（2026-11-23）
+### 2.1 JSON API 生产化（M6，P1；基础完成）
 
-下表只列仍待处理的主线任务；已完成项保留在对应里程碑中作为基线。
+目标：只做 JSON API 后端，不做 SSR、静态文件、WebSocket / SSE、multipart
+和模板引擎。
 
-| 任务 | 状态 | 说明 |
-| --- | --- | --- |
-| 账户锁定 / 登录失败保护 | 按需 | 可先用现有固定窗口限流组合实现 |
-| OpenTelemetry exporter / 完整 stack 捕获 | 按需 | W3C trace context、5xx 错误日志已完成；外部 exporter 未接入 |
-| Milestone 3 包生态 | 待决策 | SumDB、proxy、私有模块认证、`mod graph` / `mod why` 等 |
-| moving GC / AOT / 字节码缓存 | 待决策 | 决策后再启动 per-pc liveness / OSR / deopt |
-| Milestone 5 长尾能力 | 按需 | GB18030-2022、旧编码、HTTP/2 extended CONNECT、vendor / workspace |
-| LevelDB / RocksDB `std.kv` 后端 | 暂缓（未来能力） | SQLite 单文件默认后端已完成；LSM 仅作可选目录后端 |
-| REPL / 工具链体验清单 | 按需 | 见 Milestone 5；不影响当前主线 |
-| macOS `flock` 并发验证 | 暂缓 | Linux 已通过 WSL 全量测试 |
-| 交叉编译 | 按需 | 见 `package-manager.md` |
-| FFI Windows / 32 位 / ARM CI 与 fuzz | 按需 | 见 `architecture.md`；不阻塞 P1 |
+已确认决策：
 
-### Milestone 1：包管理安全与运维（核心范围已完成；可选验证按需）
+- 认证同时支持 Cookie Session 与 Bearer Token；
+- 密码哈希使用 Argon2id，vendor `libargon2`，新增 `std.password`；
+- 多 worker 的 session / 限流首版使用内存 store，并保留可插拔存储接口；
+  生产多进程部署使用 `std.cache` 共享 store；
+- 数据库支持 SQLite、PostgreSQL、MySQL 和 MariaDB；四个驱动都通过
+  `std.db` 统一 API，MySQL / MariaDB 共用一个后端实现；
+- MySQL / MariaDB 优先使用 MariaDB Connector/C，兼容 libmysqlclient；
+  `contrib/mysql` 只保留为 native module ABI 示例；
+- Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
+
+当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 P1-D 数据库
+（SQLite / PostgreSQL / MySQL / MariaDB、migration、连接池）已完成。
+`std.cache` 已提供 Redis / Valkey 客户端并接入共享 Session / 限流 store；
+单进程和多进程生产部署路径均已具备。
+
+范围与状态：
+
+1. P1-0 API 基础设施（已完成）
+   - `query` / `cookies` / 多值 header / `request_id` / `client_ip`
+     （HTTP/1.1 + HTTP/2 + thread/process worker 传递）
+   - 统一 `json_response` / `json_error`
+   - `route.use_after` 响应后处理与 JSON 错误边界
+   - 请求级超时（task handler 超时；同步 CPU-bound handler 无法安全抢占，
+     文档标注限制）
+2. P1-A 认证与会话（基础完成）
+   - Cookie 构造、内存 Session store、CSRF、HMAC token
+   - Argon2id 密码哈希（vendor `libargon2` + `std.password`）
+   - Cookie Session 与 Bearer Token 共用用户和权限模型
+   - 标准 HS256 JWT、`require_bearer`、`authenticate` 与 401/403 helper
+   - 多 worker 共享 Session store（通过 `std.cache`）
+   - 完整权限/角色 middleware（`auth.require_roles` /
+     `auth.require_permissions`）
+3. P1-B 限流与安全（基础完成）
+   - CORS before/after middleware、安全响应头、可信代理客户端 IP
+   - IP / token / 用户 / 路由维度固定窗口限流
+   - 登录失败保护可用限流组合实现；账户级锁定策略按需
+   - 请求大小与超时限制
+   - 多 worker 共享限流 store（通过 `std.cache`）
+4. P1-C 可观测性（基础完成）
+   - 结构化访问日志、JSON 错误边界与 request id 关联
+   - `std.metrics`、Prometheus `/metrics`
+   - `/healthz`、`/readyz`
+   - W3C trace context、`X-Trace-Id`、`web.error_log`
+   - 外部 OpenTelemetry exporter / 完整 stack 捕获按需
+5. P1-D 数据库（已完成）
+   - SQLite 驱动、参数化查询、事务（`std.db` 可选构建）
+   - PostgreSQL 驱动：URI、`$n` 参数、基础类型映射、事务
+   - MySQL / MariaDB 驱动：
+     - `mysql://` / `mariadb://` URI，共用 `db_internal` 后端接口
+     - prepared statement 参数绑定、`?` 参数占位
+     - `changes` 来自 affected rows，`last_insert_rowid` 来自
+       `mysql_insert_id`
+     - integer / float / blob / null / text 显式映射；decimal / date /
+       time / json 按 string 返回
+   - migration：版本表、forward migration、事务回滚、幂等执行
+   - 连接池：`std.db.pool`、acquire/release、max、stats、close
+   - 暂不做完整 ORM
+
+验收：
+
+- 所有响应带 request id；handler 错误统一返回 JSON（已满足）
+- 登录、登出、token 过期、CSRF、密码哈希可验证（已满足）
+- 限流返回 429 与 `Retry-After`，伪造代理头不能绕过（已满足）
+- 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取（已满足）
+- SQLite、PostgreSQL、MySQL / MariaDB 的基础查询、事务、类型映射、
+  migration 和连接池测试已通过
+
+不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
+GraphQL、完整 ORM、OAuth 第三方登录。
+
+### 2.2 包生态与信任（M3；待决策）
+
+前提：确认是否要做公共包生态。
+
+范围：
+
+1. SumDB / 首次下载信任
+2. Go 风格 proxy
+3. `direct` / `off` 回退
+4. 私有模块认证
+5. `mod graph` / `mod why`
+6. JSON 输出
+7. `retract` / `exclude`
+
+验收：
+
+- 首次下载不只信任镜像
+- 代理不可信时仍可验证
+- CI 可输出机器可读依赖报告
+- 可追踪模块被引入的原因
+
+### 2.3 包管理安全与运维（M1；核心完成）
 
 目标：让包管理在长期运行服务、并发 CI 和 native 缓存场景下安全可运维。
 
-范围：
+范围与状态：
 
 1. 运行时模块加载持有缓存共享锁（已完成）
 2. `mod clean` 与运行中脚本协调（已完成）
@@ -140,86 +191,201 @@
 - `mod prune` 有明确安全边界
 - 多进程 `get` / `build` / `clean` 压力测试通过
 
-### Milestone 2：REPL / LSP 体验统一（已完成）
-
-目标：REPL 与 LSP 共享补全数据源和编辑体验。
-
-范围：
-
-1. 共享 `completion_index`（已完成）
-2. REPL struct 字段补全（已完成）
-3. REPL `:load` 路径补全（已完成）
-4. 长行水平滚动（已完成）
-5. 运算符/逗号 continuation 缩进（已完成）
-6. LSP incremental sync / debounce（已完成）
-7. resolution-only import 校验（已完成，基于 skein.mod + 缓存 manifest）
-
-验收：
-
-- `user.<Tab>` 能列出字段
-- `:load <Tab>` 能列出文件
-- 长行编辑光标位置正确
-- LSP 不再每次全量同步文档
-
-### Milestone 3：包生态与信任（待决策：是否做公共生态）
-
-前提：确认是否要做公共包生态。
-
-范围：
-
-1. SumDB / 首次下载信任
-2. Go 风格 proxy
-3. `direct` / `off` 回退
-4. 私有模块认证
-5. `mod graph` / `mod why`
-6. JSON 输出
-7. `retract` / `exclude`
-
-验收：
-
-- 首次下载不只信任镜像
-- 代理不可信时仍可验证
-- CI 可输出机器可读依赖报告
-- 可追踪模块被引入的原因
-
-### Milestone 4：JIT / VM 性能与 GC（暂缓：优化冻结，等待 GC / AOT 决策）
+### 2.4 JIT / VM 性能与 GC（M4；优化冻结）
 
 前提：先决定 moving GC、AOT、字节码序列化是否在目标范围内。
 
-已确认的优化点：
+当前状态：
 
+- JIT 运行时默认启用；`SKEIN_JIT=0` 可完全关闭
+- 测试基线：Windows JIT 35/35、Windows 非 JIT 33/33、WSL 35/35，0 警告
+- JIT 覆盖率与性能工作自 2026-11-20 起冻结，遇到具体场景再重启
+- 已完成：帧分配 / 热点 opcode、GC root 审计、字符串增量拼接、
+  启动解析优化（详见第 3 节）
+
+明确保留 VM、不再主动实现：
+
+- 顶层 `DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM`
+- 顶层 handler / defer，以及 handler + defer 组合
+- variadic / generator 等边缘函数
+- OSR / deopt、per-pc liveness
+
+理由：声明与顶层 handler/defer 都是一次性元数据 / 初始化操作，没有热路径；
+JIT 编译成本高于执行收益，且顶层 `global scope` 与 handler 记账更容易引入
+语义回归。
+
+若暂不做 moving GC：
+
+- 只做 GC root 边界审计（已完成）
+- 继续优化 frame 分配与热点 opcode（已完成）
+- per-pc liveness 不阻塞主线
+
+重启条件（满足其一）：
+
+- 真实负载的 p50/p95 明确退化，且 profiling 指向 JIT 覆盖或生成代码；
+- 具体程序的热点落在只有 OSR 才能覆盖的 VM 帧；
+- 内存 / 延迟成为明确需求；
+- 决定引入精确 / 移动 GC 或类型特化，需要 per-pc liveness / deopt。
+
+重启时先量化再写代码：
+
+```bash
+SKEIN_VM_STATS=1 SKEIN_JIT_DEBUG=1 ./build/skein <script>
+```
+
+关注 `[vm-stats] jit compiled/declined`、`jit declines` 原因、
+`[jit] unsupported op` / `reject` 与 `statements compiled`，再对照第 3.5 节
+的 JIT 覆盖与缺口决定是否值得投入。
+
+重启时评估：
+
+- per-pc liveness、safepoint 表
+- frame reuse / 零帧分配
+- OSR / deopt（Handler JIT 已完成）
+- 类型特化 / unboxed int / 单态字段与调用缓存内联
+- 如仍有收益，再评估 tracing
+- asmjit `x86::Compiler` 的 prologue / regalloc 能力
+
+验收：
+
+- `SKEIN_GC_STRESS` 下无漏根
+- JIT/VM 差分测试稳定
+- 有明确性能回归门槛
+
+### 2.5 长尾能力与体验（M5；按需）
+
+能力：
+
+- GB18030-2022
+- Big5 / Shift_JIS / EUC-JP 等旧编码后端
+- Unicode 完整大小写映射与 case folding（已完成）/ grapheme cluster
+- HTTP/2 extended CONNECT
+- vendor / workspace
+- AOT / 字节码序列化、预编译 stdlib、字节码 ABI 冻结
+- `std.kv`：SQLite 单文件默认后端已完成；LevelDB / RocksDB 仅作为可选
+  目录后端，暂不实施，不放进 `std.db` 或 `std.cache`
+
+REPL / 工具链体验：
+
+- 可配置缩进宽度
+- 同一行连续多个闭合符逐级回退
+- 语义高亮：类型、函数、builtin
+- 括号匹配
+- 签名提示 / hover
+- Ctrl-R 历史搜索
+- 模糊补全排序
+- 补全候选弹窗 / 分栏
+- 多行历史条目
+
+---
+
+## 3. 已完成基线与技术记录
+
+### 3.1 语言与运行时
+
+- 词法、语法、类型检查、AST/VM 双后端
+- `pair` / `tuple`：字面量要求 `(a, b)`，`(a, b)` 可用于 let/const、
+  函数参数和 match；带注解的值在运行时校验不可变性与 arity
+- `dict` / `set` 支持 float key：NaN 拒绝，`-0.0` 归一化，整数值 float
+  与同值 int 等价
+- 10 种复合赋值运算符；静态检查按运算符推导结果类型，JIT 覆盖
+  param / index 目标
+- task / generator、线程、Channel
+- `wait e` task 前缀等待语法：等价于 `e.wait()`，支持 `wait launch f()`；
+  `.` 后的关键字与内置名按普通成员名解析
+- `launch` 遵循 `.` 的优先级，作用于完整调用链；`launch f().wait()` 解析为
+  `launch (f().wait())`，不再隐式下钻到 `f()`
+- HTTP/1.1、HTTP/2、WebSocket、TLS、FFI
+- Unicode 标识符、NFC、归一化 quick-check、完整大小写映射与折叠、
+  常见源文件编码
+- GBK / GB18030-2005 编解码
+- `error` 值保留抛出点位置与调用栈，支持 `std.error.location` /
+  `trace` / `format_trace`
+- `std.log` 结构化日志：级别过滤、text/JSON、stderr/stdout/file、
+  自定义 writer
+- `std.kv` 嵌入式 KV：SQLite 单文件默认后端，BLOB key/value、prefix scan、
+  count / clear
+
+### 3.2 工具链、REPL 与 LSP
+
+工具链：
+
+- `skein lint`、`skein fmt`、`skein lsp --stdio`
+- VS Code / Vim / Neovim 接入
+- diagnostics / completion / hover / definition / document symbol 基础能力
+- GitHub Actions CI：Valkey / PostgreSQL / MySQL 集成服务与全量 ctest
+
+REPL：
+
+- 历史、行编辑、Windows 控制台编辑
+- 词法高亮
+- Tab 补全：关键字 / REPL 命令 / 全局符号 / `std.*`
+- 自动缩进、闭合符回退
+
+REPL / LSP 体验统一（M2，已完成）：
+
+- 共享 `completion_index`
+- REPL struct 字段补全
+- REPL `:load` 路径补全
+- 长行水平滚动
+- 运算符/逗号 continuation 缩进
+- LSP incremental sync / debounce
+- resolution-only import 校验（基于 `skein.mod` + 缓存 manifest）
+
+### 3.3 包管理
+
+- `skein.mod` / `skein.sum`
+- `skein get` / `skein build`
+- MVS、菱形依赖、`/vN`
+- checksum 硬校验、`--force`
+- 项目锁、缓存锁、模块锁
+- `mod clean` / `mod verify` / `mod download` / `mod tidy`
+- `get --offline`
+- 原子写入 `skein.mod` / `skein.sum`
+- 运行时模块加载持有缓存共享锁
+
+### 3.4 数据库、缓存与 KV
+
+- `std.db`：SQLite / PostgreSQL / MySQL / MariaDB、migration、连接池
+- `std.cache`（M7，已完成）：
+  - 独立 Redis / Valkey 客户端，不并入 `std.db`，避免与 SQL 事务、
+    结果集、参数绑定模型混合
+  - `cache.drivers()`、`cache.open("redis://...")` /
+    `open("valkey://...")` / `rediss://` / `valkeys://`
+  - `get` / `set` / `delete` / `exists` / `incr` / `expire` / `ttl` /
+    `pttl` / `incr_window` / `ping` / `close`；`set` 支持 TTL、NX、XX
+  - 值支持 string / bytes，保持二进制安全
+  - AUTH、TLS、DB index、连接 / 读写超时；单句柄串行访问
+  - 纯 Skein 内嵌包 `lib/std/cache.skein`，RESP2 基于 `std.net` /
+    `std.tls`，不引入外部客户端库或额外 CMake 开关
+  - Session store 与限流共享 store 已接入；默认仍是进程内 store
+  - Redis 8.0 集成覆盖协议、二进制值、TTL、NX/XX、AUTH；Valkey 使用同一
+    RESP2 协议，独立 CI 服务按需补
+  - 默认测试在未设置 `SKEIN_TEST_REDIS_DSN` 时跳过外部服务，集成测试
+    显式启用
+- `std.kv`：SQLite 单文件、BLOB key/value、prefix scan、count / clear
+
+### 3.5 JIT / VM / Native 基线
+
+- baseline JIT、Win64 ABI、GC root map 第一版
+- `SKEIN_GC_STRESS`、尾调用 trampoline
 - benchmark 改为进程内稳态计时（`SKEIN_BENCH_MS`），排除启动和 JIT 编译
 - 函数调用帧不再复制函数名/源路径（改为 intern 指针）
 - JIT 在 Linux 与 Windows 上收益一致（fib 约 5x，overall 1.5–3.5x）
 - `obj.method(args)` 使用 `CALL_METHOD` 快路径，VM 的 method 调用已快于 AST
-- `std.list.builder` / `std.string.builder`，以及 `xs = std.list.append(xs, v)` 的 COW 原地增长
-- JIT 运行时默认启用（`SKEIN_JIT=0` 可关闭；`SKEIN_JIT_TOP_LEVEL=0`
-  关闭顶层语句 JIT；`SKEIN_JIT_THRESHOLD` 默认 100 次调用）
-- 含回边（循环）的函数在首次调用即编译，不再等调用次数阈值；
-  `SKEIN_JIT_LOOPS=0` 可关闭该策略
-- JIT 支持闭包 / upvalue 访问（`LOAD/STORE/COMPOUND/INCDEC_UPVALUE`）
-  与闭包创建（`CLOSURE` + cell 生命周期）
-- JIT 支持名字模式局部变量（`*_NAME`、`DEFINE_NAME`、`CHECK_REDEFINE`）
-  与 `for-in` 迭代器（`ITER_NEW/NEXT/END`，含 list/dict/string/bytes/
-  deque/heap/set/generator），并放开 Slot/Param/Upvalue base 的
-  `ASSIGN_INDEX`、值比较、`DUP`、`GET_FIELD_OR_ENUM` 与 `FAIL`
-- JIT 支持 `on error` handler（`PUSH/POP_HANDLER`、`CHECK_RESULT`、
-  `BIND_NAME`、`ENTER/LEAVE_HANDLER_BODY`、`PASS`、`RECOVER`）
-- JIT 支持 `defer`（`DEFER_PUSH`、块级 defer 作用域、返回/fail/abort 时
-  执行，捕获 Slot/Param/Upvalue）；顶层与 handler+defer 组合仍回退 VM
-- JIT 支持常规顶层语句（`IMPORT`、`BIND_FUNC`、循环、调用等）；
-  `DECLARE_PACKAGE`/`DECLARE_STRUCT`/`DECLARE_ENUM` 与顶层 handler/defer
-  仍回退 VM
-- builtin 回调（map/filter/sort/reduce/compose/task）通过 `invoke_value`
-  直接进入 JIT，不再因为通用调用路径绕过 JIT
+- `std.list.builder` / `std.string.builder`，以及
+  `xs = std.list.append(xs, v)` 的 COW 原地增长
+- JIT 运行时默认启用；`SKEIN_JIT_TOP_LEVEL=0` 关闭顶层语句 JIT；
+  `SKEIN_JIT_THRESHOLD` 默认 100 次调用
+- 含回边（循环）的函数在首次调用即编译；`SKEIN_JIT_LOOPS=0` 可关闭
+- JIT 支持闭包 / upvalue、名字模式局部变量、`for-in` 迭代器、enum、
+  `fail`、`on error` handler、`defer`、常规顶层语句（`IMPORT` /
+  `BIND_FUNC` / 循环 / 调用）、builtin 回调（map/filter/sort/reduce/
+  compose/task）；顶层声明与 handler + defer 组合仍回退 VM
+- `std.ffi`、plugin async ABI v2、source-native module MVP、
+  `SKEIN_ALLOW_NATIVE`；check-only 模式下禁止加载/执行 native
 
-若暂不做 moving GC：
-
-- 只做 GC root 边界审计（已完成，见下）
-- 继续优化 frame 分配与热点 opcode（已完成，见下）
-- per-pc liveness 不阻塞主线
-
-#### 热点 opcode / frame 分配（已完成）
+### 3.6 热点 opcode / frame 分配（已完成）
 
 VM fast frame 的每调用开销：
 
@@ -260,7 +426,7 @@ VM 现在在所有 `bench_vm` 用例上都快于 AST（VM/AST ratio 0.36–0.90�
 已知（既有问题，不在测试矩阵内）：`SKEIN_VM_SLOT_POOL=0` 与嵌套闭包组合时
 VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受影响。
 
-#### GC root 边界审计（已完成）
+### 3.7 GC root 边界审计（已完成）
 
 根来源清单：
 
@@ -307,23 +473,15 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
   collector 遍历通道缓冲
 - per-pc liveness / safepoint 表仍未做，属于 moving GC 前置工作
 
-若重启 JIT / GC 优化：
+已知问题：在单条顶层语句内的长循环中创建闭包时，`scope ↔ closure` 环只能
+等 cycle collector 在语句边界回收，循环期间 `all_scopes` 持续增长。
+`register_scope` 原先固定在 4096 触发全量 prune，导致每次 push 都扫描整个
+列表，表现为二次复杂度（40k 次闭包创建约 2.2s）。现已把 prune 触发阈值改为
+几何增长（每次扫描后取 `max(4096, size * 2)`），40k 次闭包创建降到约 36ms，
+10k/20k/40k 呈线性（VM 与 AST 相同）。残留：单条语句内的峰值内存仍随累计
+闭包数线性增长，后续可在循环回边加入低频 cycle collection 来收敛。
 
-- per-pc liveness
-- safepoint 表
-- frame reuse / 零帧分配
-- OSR / deopt（Handler JIT 已完成）
-- 类型特化 / unboxed int / 单态字段与调用缓存内联
-- 如仍有收益，再评估 tracing
-- asmjit `x86::Compiler` 的 prologue / regalloc 能力
-
-验收：
-
-- `SKEIN_GC_STRESS` 下无漏根
-- JIT/VM 差分测试稳定
-- 有明确性能回归门槛
-
-#### 字符串增量拼接（路线 1，已完成）
+### 3.8 字符串增量拼接（已完成）
 
 目标：让 `s = s + expr` 在 VM/JIT 下变成 O(1) 摊销，语义保持不变。
 
@@ -357,19 +515,13 @@ struct string_value_t {
 std.string.builder          29 ms
 ```
 
-后续可选：
-
-- **rope / 分块字符串表示**：能让所有拼接/切片 O(1)，但会波及 `len`、下标、
-  `find`、序列化、FFI 和 Unicode 索引；除非同时规划 moving GC / 值表示重构，
-  否则不做。
-
 风险与约束：
 
 - `value` 是缓存指针；任何原地修改都必须同步所有已知共享者
 - 字符串会进入序列化、FFI 和跨线程边界，表示变更影响面大
 - AST 的 COW 阈值与 VM 不同（无栈副本时只允许 1 个 owner）
 
-#### 启动解析优化（已完成）
+### 3.9 启动解析优化（已完成）
 
 已完成：`SKEIN_STARTUP_STATS` + `tools/startup_profile.py`、去掉
 `tmpfile()`、跳过内嵌 std 包类型检查、避免入口目录的 eager
@@ -381,7 +533,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 约 0.09 ms、adapter 约 0.17 ms。**解析器优化只影响冷启动，不影响 HTTP
 请求解析或请求处理热路径。**
 
-1. **AST arena（已完成）**
+1. **AST arena**
    - `ast.cpp` 的节点改由 size-class arena 分配；`treefree` 通过
      `ast_node_free()` 归还，节点不再逐次 `malloc` / `free`
    - 块来自进程级 64 KiB chunk，按线程 free list 复用；chunk 保持到进程
@@ -391,7 +543,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
      0.83 → 0.80 ms，`parse std.auth` 0.94 → 0.89 ms，
      `parse std.cache` 0.92 → 0.86 ms；整体 `main()` 下降约 0.03–0.06 ms
    - 结论：分配不是主要瓶颈，收益低于原估计；保留该实现，但不再扩展
-2. **内存输入 fast path（已完成）**
+2. **内存输入 fast path**
    - 内存输入不再把每行复制到 `input_line`：`input_line` 直接引用源缓冲区，
      `YY_INPUT` 从视图读取
    - `diag_record_line` 接受 `string_view`，去掉中间 `std::string` 拷贝
@@ -401,259 +553,95 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
    - 结论：解析和诊断行存储仍是剩余成本；除非冷启动成为硬指标，否则
      不再继续拆分 `read_input_line` / `source_lines`
 
-不做：
-
-- 延迟解析函数体（改动大，诊断顺序会变）
-- 把 std 包改成动态插件
-- 为解析速度裁剪 `std.web` API
-- 跨进程缓存 AST；预编译 stdlib 属于 Milestone 5，先不单独做
-
-### Milestone 5：长尾能力（按需）
-
-按实际需求推进：
-
-- GB18030-2022
-- Big5 / Shift_JIS / EUC-JP 等旧编码后端
-- Unicode 完整大小写映射与 case folding（已完成）/ grapheme cluster
-- HTTP/2 extended CONNECT
-- vendor / workspace
-- AOT / 字节码序列化、预编译 stdlib、字节码 ABI 冻结
-- `std.kv` 嵌入式 KV：SQLite 单文件默认后端已完成；LevelDB / RocksDB
-  仅作为可选目录后端，暂不实施，不放进 `std.db` 或 `std.cache`
-
-#### REPL / 工具链体验（按需）
-
-- 可配置缩进宽度
-- 同一行连续多个闭合符逐级回退
-- 语义高亮：类型、函数、builtin
-- 括号匹配
-- 签名提示 / hover
-- Ctrl-R 历史搜索
-- 模糊补全排序
-- 补全候选弹窗 / 分栏
-- 多行历史条目
-
-### Milestone 6：JSON API 生产化（P1，进行中）
-
-目标：只做 JSON API 后端，不做 SSR、静态文件、WebSocket / SSE、multipart
-和模板引擎。
-
-已确认决策：
-
-- 认证同时支持 Cookie Session 与 Bearer Token；
-- 密码哈希使用 Argon2id，vendor `libargon2`，新增 `std.password`；
-- 多 worker 的 session / 限流首版使用内存 store，并保留可插拔存储接口；
-  生产多进程部署需要共享 store；
-- 数据库支持范围是 SQLite、PostgreSQL、MySQL 和 MariaDB；四个驱动都通过
-  `std.db` 统一 API，MySQL / MariaDB 共用一个后端实现。
-- MySQL / MariaDB 优先使用 MariaDB Connector/C，兼容 libmysqlclient；
-  `contrib/mysql` 只保留为 native module ABI 示例，不直接作为 `std.db` 实现。
-- Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
-
-当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 P1-D 数据库
-（SQLite / PostgreSQL / MySQL / MariaDB、migration、连接池）已完成。
-`std.cache` 已提供 Redis / Valkey 客户端并接入共享 Session / 限流 store；
-单进程和多进程生产部署路径均已具备。
-
-范围：
-
-1. P1-0 API 基础设施（已完成）：
-   - `query` / `cookies` / 多值 header / `request_id` / `client_ip`
-     （已完成，HTTP/1.1 + HTTP/2 + thread/process worker 传递）
-   - 统一 `json_response` / `json_error`（已完成）
-   - `route.use_after` 响应后处理与 JSON 错误边界（已完成）
-   - 请求级超时（已完成 task handler 超时；同步 CPU-bound handler 无法安全抢占，
-     文档标注限制）
-2. P1-A 认证与会话（基础完成）：
-   - Cookie 构造、内存 Session store、CSRF、HMAC token（已完成）
-   - Argon2id 密码哈希（已完成，vendor `libargon2` + `std.password`）
-   - Cookie Session 与 Bearer Token 共用用户和权限模型（已完成）
-   - 标准 HS256 JWT、`require_bearer`、`authenticate` 与 401/403 helper
-     （已完成）
-   - 多 worker 共享 Session store（已完成，通过 `std.cache`）
-   - 完整权限/角色 middleware（已完成：`auth.require_roles` /
-     `auth.require_permissions`）
-3. P1-B 限流与安全（基础完成）：
-   - CORS before/after middleware（已完成）
-   - 安全响应头（已完成）
-   - 可信代理客户端 IP（已完成）
-   - IP / token / 用户 / 路由维度固定窗口限流（已完成）
-   - 登录失败保护可用限流组合实现；账户级锁定策略（按需）
-   - 请求大小与超时限制（已有）
-   - 多 worker 共享限流 store（已完成，通过 `std.cache`）
-4. P1-C 可观测性（基础完成）：
-   - 结构化访问日志（已完成）
-   - JSON 错误边界与 request id 关联（已完成）
-   - `std.metrics`、Prometheus `/metrics`（已完成）
-   - `/healthz`、`/readyz`（已完成）
-   - W3C trace context、`X-Trace-Id`、`web.error_log`（已完成）；外部
-     OpenTelemetry exporter / 完整 stack 捕获（按需）
-5. P1-D 数据库（已完成）：
-   - SQLite 驱动、参数化查询、事务（已完成，`std.db` 可选构建）
-   - PostgreSQL 驱动（已完成：URI、`$n` 参数、基础类型映射、事务）
-   - MySQL / MariaDB 驱动（已完成）：
-     - `mysql://` / `mariadb://` URI，共用 `db_internal` 后端接口；
-     - prepared statement 参数绑定；
-     - `?` 参数占位；`changes` 来自 affected rows，
-       `last_insert_rowid` 来自 `mysql_insert_id`；
-     - integer / float / blob / null / text 显式映射，decimal / date /
-       time / json 按 string 返回；
-     - 现有 `contrib/mysql` 只作为 ABI 与行为参考。
-   - migration（已完成：版本表、forward migration、事务回滚、幂等执行）
-   - 连接池（已完成：`std.db.pool`、acquire/release、max、stats、close）
-   - 暂不做完整 ORM
-
-验收：
-
-- 所有响应带 request id；handler 错误统一返回 JSON（已满足）；
-- 登录、登出、token 过期、CSRF、密码哈希可验证（已满足）；
-- 限流返回 429 与 `Retry-After`，伪造代理头不能绕过（已满足）；
-- 每个请求有一条结构化日志，`/metrics` 可被 Prometheus 抓取（已满足）；
-- SQLite、PostgreSQL、MySQL / MariaDB 的基础查询、事务、类型映射、migration
-  和连接池测试已通过。
-
-不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
-GraphQL、完整 ORM、OAuth 第三方登录。
-
-### Milestone 7：std.cache / Redis-Valkey（客户端与共享 store 已完成）
-
-目标：为 Redis / Valkey 提供独立的 TTL key-value 客户端，并作为多 worker
-Session / 限流共享 store。Redis / Valkey 不放入 `std.db`，避免和 SQL 事务、
-结果集、参数绑定模型混合。
-
-范围：
-
-1. 公共 API（已完成）：
-   - `cache.drivers()`；
-   - `cache.open("redis://...")` / `cache.open("valkey://...")` /
-     `rediss://` / `valkeys://`；
-   - `get` / `set` / `delete` / `exists` / `incr` / `expire` / `ttl` /
-     `pttl` / `incr_window` / `ping` / `close`；
-   - `set` 支持 TTL、`NX`、`XX`；
-   - 值支持 string / bytes，保持二进制安全。
-2. 连接与安全（已完成）：
-   - AUTH、TLS、DB index、连接 / 读写超时；
-   - 单句柄串行访问；
-   - 错误和关闭语义。
-3. 实现（已完成）：
-   - 纯 Skein 内嵌包 `lib/std/cache.skein`，不是 native plugin；
-   - RESP2 基于现有 `std.net` / `std.tls`，不引入外部客户端库或额外 CMake
-     开关；
-   - `lib/std/cache.skein` 随标准库一起构建。
-4. 共享状态集成（已完成）：
-   - `std.auth` Session store 接受 `std.cache` 后端，值使用 JSON 序列化；
-   - `std.web` 限流器接受共享 store，使用原子 `incr_window`；
-   - 默认仍是进程内 store，显式传入 cache 客户端后切换。
-5. 测试（已完成）：
-   - Redis 8.0 集成覆盖协议、二进制值、TTL、NX/XX、AUTH；
-   - Session store 和共享限流器集成测试通过；
-   - 默认测试在未设置 `SKEIN_TEST_REDIS_DSN` 时跳过外部服务；
-   - Valkey 使用同一 RESP2 协议，独立 CI 服务待补。
-
-不做：Redis Cluster / Sentinel、pub/sub、Streams、任意命令透传、通用 Lua
-暴露、RedisJSON / RediSearch、复制与故障转移编排；仓库不捆绑 Redis/Valkey
-服务端。后续如需要 pub/sub，另立 `std.pubsub` 或底层 `std.redis`，不扩展
-`std.cache` 的语义。
-
-验收：
-
-- Redis 8.0 下最小 API 行为通过；
-- Valkey 使用同一 RESP2 客户端，独立服务验证待补；
-- Session 和限流共享 store 集成测试通过；
-- 默认测试不依赖外部 Redis/Valkey 服务，集成测试显式启用。
-
 ---
 
-## 3. 决策记录与待决策事项
+## 4. 决策记录
+
+### 4.1 待决策
 
 1. 是否把 Skein 包生态做成公共生态？
 2. 是否引入 moving / compacting GC？
 3. 是否需要 AOT 或字节码磁盘缓存？
-4. ~~`SKEIN_JIT` 运行时是否默认开启？~~ 已决定：默认开启（JIT 构建），
-   `SKEIN_JIT=0` 保留 kill switch。
-5. Windows/MinGW 是否进入正式发布范围？
-6. 是否支持 vendor 和多模块 workspace？
-7. 私有模块认证与 proxy 鉴权做到什么程度？
-8. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
-9. ~~是否严格化 pair/tuple 字面量并引入 `(a, b)` 解构模式？~~ 已实施：
-   pair/tuple 字面量要求 `(a, b)`，`(a, b)` 可用于 let/const、函数参数和
-   match；运行时同时校验不可变性与 arity。`[a, b]` 保持宽松的依据是结构化
-   读取：它只按位置读取元素并创建新绑定，不改写源 tuple；因此
-   `let l: list[int] = (1, 2);` 仍被 checker 拒绝。
-10. ~~是否引入 `wait t` 前缀写法并统一上下文相关词法？~~ 已实施（2026-11-22）：
-    `wait e` 等价于 `e.wait()`，要求 `e: task[T]` 并返回 `T`；
-    `wait launch f()` 合法，`launch wait f()` 被拒绝。`.` 后的关键字与内置名
-    统一按 `NAME` 解析，因此 `t.wait()`、`std.task.wait`、`std.regex.match`、
-    枚举变体和 import 路径均无需特判。非 task 操作数在类型检查阶段报
-    `wait expects a task, got <type>`；`any` / 泛型 / union 保持宽松。
-    测试已覆盖 `tests/skein/wait.skein`、`task_errors.py` 与 VM/JIT 差分，
-    JIT 35/35、非 JIT 33/33 通过。不做：超时版 `wait e, ms`、
-    `wait all` / `wait any`、async/await 关键字、取消或恢复函数染色。
-11. ~~是否移除 `launch_target_call()` 特例，让 `.` 的高优先级真正生效？~~
-    已实施（2026-11-22）：`LAUNCH exp` 直接作用于 `exp` 的完整调用链，
-    不再下钻到最内层 call。`launch make().get()` 启动整个 `make().get()`；
-    `launch f().wait()` 解析为 `launch (f().wait())`。需要“启动后等待”时
-    统一写 `wait launch f()` 或 `(launch f()).wait()`。已迁移相关测试和
-    `SYNTAX.md`，并增加 `launch make().get()` 调用链回归。
-12. ~~是否把 Redis / Valkey 纳入支持范围？~~ 已实施（2026-11-23）：
-    作为独立的 `std.cache`，不放入 `std.db`。采用纯 Skein 内嵌包，基于
-    `std.net` / `std.tls` 实现 RESP2，不依赖动态 native plugin。Session 和
-    限流共享 store 已接入；Valkey 独立 CI 服务待补。
-13. ~~是否把 MySQL / MariaDB 纳入 `std.db` 支持范围？~~ 已实施（2026-11-22）：
-    MySQL / MariaDB 共用一个 `db_internal` 后端，优先 MariaDB Connector/C，
-    兼容 libmysqlclient；支持 `mysql://` / `mariadb://` URI、prepared
-    statement、`?` 参数和基础类型映射。现有 `contrib/mysql` 保留为 native
-    module ABI 示例，不作为 `std.db` 的实现路径。
-14. ~~是否提供嵌入式 KV？~~ 已实施（2026-11-23）：新增 `std.kv`，默认 SQLite
-    单文件后端；key/value 使用 BLOB，支持 prefix scan。LevelDB / RocksDB
-    只保留为未来可选目录后端，不承诺单文件。
-15. ~~是否支持 `wait t on error(...)` / `wait launch f() on error(...)` 与
-    `on error()`？~~ 已实施（2026-11-23）：`on error` 绑定高于前缀
-    `wait`/`launch`，parser 通过 AST 重排把 handler 移到 `wait` 外侧，使任务
-    内 `fail` 能被捕获；错误绑定可省略。detached 诊断改为任务销毁时才上报，
-    因此先 launch 后 wait（含变量形式）也不再误报。裸写
-    `launch f() on error(...)` 仍可解析，但会给出 `launch` warning，提示 handler
-    不能覆盖任务体。保留 `launch` 关键字：不改为 `task`（与 `task[T]` /
-    `std.task` 撞名），也不改为 `spawn`（与 `std.thread.spawn_*` /
-    `std.process.spawn_*` 撞名）；不新增 `std.task.call`，需要 task 边界的
-    同步调用沿用 `std.task.scope(fn)`。
+4. Windows / MinGW 是否进入正式发布范围？
+5. 是否支持 vendor 和多模块 workspace？
+6. 私有模块认证与 proxy 鉴权做到什么程度？
+7. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
+
+### 4.2 已决定
+
+- `SKEIN_JIT` 运行时默认开启（JIT 构建）；`SKEIN_JIT=0` 保留 kill switch。
+- pair/tuple 字面量要求 `(a, b)`，可用于 let/const、函数参数和 match；
+  运行时校验不可变性与 arity。`[a, b]` 保持宽松的依据是结构化读取：
+  它只按位置读取元素并创建新绑定，不改写源 tuple；因此
+  `let l: list[int] = (1, 2);` 仍被 checker 拒绝。
+- `wait t` 前缀写法（2026-11-22）：`wait e` 等价于 `e.wait()`，要求
+  `e: task[T]` 并返回 `T`；`wait launch f()` 合法，`launch wait f()` 被拒绝。
+  `.` 后的关键字与内置名统一按 `NAME` 解析，因此 `t.wait()`、
+  `std.task.wait`、`std.regex.match`、枚举变体和 import 路径均无需特判。
+  非 task 操作数在类型检查阶段报 `wait expects a task, got <type>`；
+  `any` / 泛型 / union 保持宽松。不做：超时版 `wait e, ms`、
+  `wait all` / `wait any`、async/await 关键字、取消或恢复函数染色。
+- `launch` 直接作用于完整调用链（2026-11-22），不再下钻到最内层 call。
+  `launch make().get()` 启动整个 `make().get()`；`launch f().wait()` 解析为
+  `launch (f().wait())`。需要“启动后等待”时统一写 `wait launch f()` 或
+  `(launch f()).wait()`。已迁移相关测试和 `SYNTAX.md`。
+- Redis / Valkey 作为独立的 `std.cache`（2026-11-23），不放入 `std.db`。
+  采用纯 Skein 内嵌包，基于 `std.net` / `std.tls` 实现 RESP2，不依赖动态
+  native plugin。Session 和限流共享 store 已接入；Valkey 独立 CI 服务
+  按需补。
+- MySQL / MariaDB 纳入 `std.db`（2026-11-22），共用一个 `db_internal` 后端，
+  优先 MariaDB Connector/C，兼容 libmysqlclient；支持 `mysql://` /
+  `mariadb://` URI、prepared statement、`?` 参数和基础类型映射。
+  `contrib/mysql` 保留为 native module ABI 示例。
+- 嵌入式 KV（2026-11-23）：新增 `std.kv`，默认 SQLite 单文件后端；
+  key/value 使用 BLOB，支持 prefix scan。LevelDB / RocksDB 只保留为未来
+  可选目录后端。
+- `wait t on error(...)` / `wait launch f() on error(...)` 与 `on error()`
+  （2026-11-23）：`on error` 绑定高于前缀 `wait`/`launch`，parser 通过
+  AST 重排把 handler 移到 `wait` 外侧，使任务内 `fail` 能被捕获；错误
+  绑定可省略。detached 诊断改为任务销毁时才上报。裸写
+  `launch f() on error(...)` 仍可解析，但会给出 `launch` warning，提示
+  handler 不能覆盖任务体。保留 `launch` 关键字：不改为 `task` 或
+  `spawn`；不新增 `std.task.call`，同步 task 边界沿用
+  `std.task.scope(fn)`。
 
 ---
 
-## 4. 暂缓事项
+## 5. 暂缓与不做
+
+包管理与生态：
 
 - 没有可信镜像运营方前，不先做完整 proxy。
-- 没有明确性能目标前，不引入 moving GC。
-- JIT 优化已暂停（2026-11-20，见第 6 节），Handler JIT 已完成；
-  OSR/deopt、per-pc liveness 与顶层声明类 JIT 等明确场景再重启。
-- 没有实际用户需求前，不扩展旧编码后端。
 - 未确认公共生态前，不先做 vendor / workspace。
-- 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明 `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
-- SQLite 单文件 `std.kv` 已完成；没有明确的高写入/大数据量需求前，不实现 LevelDB / RocksDB 目录后端，也不承诺单文件。
-- 冷启动已完成 profiling、内存扫描、内嵌 std 包类型检查跳过、入口目录规范化和 AST arena；没有明确的冷启动目标前，不启动内存输入 fast path，也不单独做跨进程 AST 缓存。
+- 没有实际用户需求前，不扩展旧编码后端。
+- SQLite 单文件 `std.kv` 已完成；没有明确的高写入/大数据量需求前，
+  不实现 LevelDB / RocksDB 目录后端，也不承诺单文件。
+
+性能与运行时：
+
+- 没有明确性能目标前，不引入 moving GC。
+- JIT 优化已暂停；OSR/deopt、per-pc liveness 与顶层声明类 JIT 等明确
+  场景再重启。
+- 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明
+  `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
+- 冷启动已完成 profiling、内存扫描、内嵌 std 包类型检查跳过、入口目录
+  规范化、AST arena 和内存输入 fast path；没有明确的冷启动目标前，不再
+  继续拆分解析输入或诊断行存储，也不单独做跨进程 AST 缓存。
+- 不做延迟解析函数体、把 std 包改成动态插件、为解析速度裁剪 `std.web`
+  API；预编译 stdlib 属于 M5。
+
+Web / 数据：
+
+- JSON API 不包含 SSR、HTML 模板、静态文件服务器、WebSocket / SSE、
+  multipart、GraphQL、完整 ORM、OAuth 第三方登录。
+- `std.cache` 不做 Redis Cluster / Sentinel、pub/sub、Streams、任意命令
+  透传、通用 Lua 暴露、RedisJSON / RediSearch、复制与故障转移编排；
+  仓库不捆绑 Redis/Valkey 服务端。后续如需要 pub/sub，另立 `std.pubsub`
+  或底层 `std.redis`。
 
 ---
 
-## 5. 推荐执行顺序
-
-1. P1-D、`std.cache`、权限/角色 middleware 和三数据库 + Valkey CI 已完成。
-   剩余账户锁定、外部 OpenTelemetry exporter 和完整 stack 捕获按实际部署需求
-   推进。
-2. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
-   Milestone 2 已完成。
-3. 先确认公共包生态目标，再决定 Milestone 3 的 SumDB / proxy 范围。
-4. Milestone 4 的 GC root 审计、热点 opcode / frame 分配与 JIT 默认启用
-   已完成；剩余是 moving GC / AOT / 字节码缓存的决策，以及移动 GC 决策后
-   才会启动的 per-pc liveness / OSR / deopt。
-5. 测试稳定性已完成：
-   - 服务端测试改为子进程内绑定端口 0 并回读实际端口，去掉
-     probe-then-bind 竞态和定时就绪探测
-   - `thread_bench` 门槛改用多次重复中的最好成绩，基线按实测重设
-6. 长尾能力按实际需求触发。
-
----
-
-## 6. 性能看板（优化冻结后）
+## 6. 性能看板与回归
 
 解释器/JIT 性能优化暂停后，用以下命令做固定回归检查：
 
@@ -673,50 +661,14 @@ python tools/bench_threads.py --bin ./build/skein --check
 python3 tools/startup_profile.py --bin ./build/skein --runs 12
 ```
 
-### JIT 优化暂停（2026-11-20）
-
-JIT 覆盖率 / 性能工作暂时冻结，遇到具体场景再重启。
-
-冻结时状态：
-
-- JIT 默认开启；`SKEIN_JIT=0` 可完全关闭
-- 测试基线：Windows JIT 35/35、Windows 非 JIT 33/33、WSL 35/35，0 警告
-- 已覆盖：函数、闭包 / upvalue、名字模式、`for-in` 迭代器、enum、
-  `fail`、`on error` handler、`defer`、常规顶层语句（`IMPORT` /
-  `BIND_FUNC` / 循环 / 调用）、builtin 回调（map/filter/sort/reduce/
-  compose/task）
-- 明确保留 VM、不再主动实现：
-  - 顶层 `DECLARE_PACKAGE` / `DECLARE_STRUCT` / `DECLARE_ENUM`
-  - 顶层 handler / defer
-  - variadic / generator 等边缘函数
-  - OSR / deopt、per-pc liveness
-
-  理由：声明与顶层 handler/defer 都是一次性元数据 / 初始化操作，没有热
-  路径；JIT 编译成本高于执行收益，且顶层 `global scope` 与 handler 记账
-  更容易引入语义回归。
-
-重启条件（满足其一）：
-
-- 真实负载的 p50/p95 明确退化，且 profiling 指向 JIT 覆盖或生成代码；
-- 具体程序的热点落在只有 OSR 才能覆盖的 VM 帧；
-- 内存 / 延迟成为明确需求；
-- 决定引入精确 / 移动 GC 或类型特化，需要 per-pc liveness / deopt。
-
-重启时先量化再写代码：
+JIT 重启前先量化：
 
 ```bash
 SKEIN_VM_STATS=1 SKEIN_JIT_DEBUG=1 ./build/skein <script>
 ```
 
-关注 `[vm-stats] jit compiled/declined`、`jit declines` 原因、
-`[jit] unsupported op` / `reject` 与 `statements compiled`，再对照本文件 JIT
-章节的覆盖与缺口决定是否值得投入。
+固定基线（JIT 冻结时）：
 
-已知既有问题（不是本次 JIT 闭包支持引入）：在单条顶层语句内的长循环中创建
-闭包时，`scope ↔ closure` 环只能等 cycle collector 在语句边界回收，循环
-期间 `all_scopes` 持续增长。`register_scope` 原先固定在 4096 触发全量 prune，
-导致每次 push 都扫描整个列表，表现为二次复杂度（40k 次闭包创建约 2.2s）。
-现已把 prune 触发阈值改为几何增长（每次扫描后取 `max(4096, size * 2)`），
-40k 次闭包创建降到约 36ms，10k/20k/40k 呈线性（VM 与 AST 相同）。
-残留：单条语句内的峰值内存仍随累计闭包数线性增长，后续可在循环回边加入
-低频 cycle collection 来收敛。
+- Windows JIT 35/35、Windows 非 JIT 33/33、WSL 35/35，0 警告
+- VM 在所有 `bench_vm` 用例上快于 AST（ratio 0.36–0.90）
+- `thread_bench` 使用多次重复中的最好成绩作为门槛

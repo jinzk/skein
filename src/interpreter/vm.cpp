@@ -234,15 +234,16 @@ void free_stack(std::vector<value_t *> &stack) {
     stack.clear();
 }
 
-value_t *fiber_launch_host(value_t *callee,
-                           std::vector<value_t *> args) {
+value_t *fiber_launch_host(value_t *callee, std::vector<value_t *> args,
+                           bool observed) {
     if (!skein_vm_host().fn_fiber_launch_value) {
         for (value_t *arg : args)
             freeval(arg);
         yyerror("launch is not available");
         return NULL;
     }
-    return skein_vm_host().fn_fiber_launch_value(callee, std::move(args));
+    return skein_vm_host().fn_fiber_launch_value(callee, std::move(args),
+                                                 observed);
 }
 
 struct vm_unwind {
@@ -2615,7 +2616,8 @@ public:
                     }
                     value_t *result =
                         (ins.flags & 1)
-                            ? fiber_launch_host(callee, std::move(args))
+                            ? fiber_launch_host(callee, std::move(args),
+                                                (ins.flags & 2) != 0)
                             : skein_vm_call_value_args(callee,
                                                        std::move(args));
                     freeval(callee);
@@ -2664,7 +2666,8 @@ public:
                     if (ins.flags & 1) {
                         std::vector<value_t *> owned(args, args + argc);
                         value_t *result =
-                            fiber_launch_host(callee, std::move(owned));
+                            fiber_launch_host(callee, std::move(owned),
+                                              (ins.flags & 2) != 0);
                         freeval(callee);
                         if (g_interrupted) {
                             freeval(result);

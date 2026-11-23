@@ -742,10 +742,29 @@ static struct ast *new_call_with_placeholders(
  * explicit method call.
  */
 static struct ast *new_wait_call(struct ast *value) {
+    /*
+     * `on error` binds tighter than `wait`, so `wait t on error(...)` arrives
+     * here as `wait (t on error(...))`.  Move the wait inside the handler so
+     * the handler covers the task failure raised by wait, for variables and
+     * for `launch` calls alike.
+     */
+    if (value && value->nodetype == 'o') {
+        struct on_error_node *handler = (struct on_error_node *)value;
+        handler->call = new_wait_call(handler->call);
+        return (struct ast *)handler;
+    }
     struct ast *callee = newast('j', value, newstr("wait"));
     struct ufncall *call =
         (struct ufncall *)newcall(callee, NULL);
     call->wait_sugar = 1;
+    /*
+     * `wait launch f()` observes the task before it can fail.  Mark the
+     * launch call so the task is not reported as detached when a fast body
+     * fails before `.wait()` is entered.
+     */
+    if (value && value->nodetype == 'C' &&
+        ((struct ufncall *)value)->launch)
+        ((struct ufncall *)value)->awaited = 1;
     return (struct ast *)call;
 }
 
@@ -1054,6 +1073,7 @@ static struct type_constraint *runtime_type_or_error(
 
 %type <a> exp value stmt list scope do_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
+%type <str> on_error_name
 %type <a> forinit forcond forend
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> match_arms match_arm pattern pattern_list pattern_items tuple_pattern_items value_pattern match_values
@@ -1855,18 +1875,28 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                            { $$ = newmatch($2, $4); }
     | WAIT exp %prec UMINUS                { $$ = new_wait_call($2); }
     | LAUNCH exp %prec UMINUS {
-        if (!$2 || $2->nodetype != 'C') {
+        struct ast *target = $2;
+        /*
+         * `on error` binds tighter than `launch`; `launch f() on error(...)`
+         * reaches here as a handler wrapping the call.  Keep the handler and
+         * mark its inner call as launched so `wait` can move the handler
+         * outside the wait later.
+         */
+        if (target && target->nodetype == 'o' &&
+            ((struct on_error_node *)target)->call)
+            target = ((struct on_error_node *)target)->call;
+        if (!target || target->nodetype != 'C') {
             yyerror("launch expects a call expression");
             treefree($2);
             $$ = NULL;
-        } else if (((struct ufncall *)$2)->wait_sugar) {
-            diag_set_location($2->line, $2->column);
+        } else if (((struct ufncall *)target)->wait_sugar) {
+            diag_set_location(target->line, target->column);
             yyerror("launch cannot be applied to a wait expression; "
                     "use wait (launch f()) or (launch f()).wait()");
             treefree($2);
             $$ = NULL;
         } else {
-            ((struct ufncall *)$2)->launch = 1;
+            ((struct ufncall *)target)->launch = 1;
             $$ = $2;
         }
       }
@@ -1894,10 +1924,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
       }
     | exp AS type %prec AS                { $$ = newcast($1, $3); }
     | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
-    | exp ON ERROR '(' NAME ')' '{' empty_body %prec ON {
+    | exp ON ERROR '(' on_error_name ')' '{' empty_body %prec ON {
         $$ = newonerror($1, $5, NULL);
       }
-    | exp ON ERROR '(' NAME ')' '{' list '}' %prec ON {
+    | exp ON ERROR '(' on_error_name ')' '{' list '}' %prec ON {
         $$ = newonerror($1, $5, $8);
       }
     | NAME                                { $$ = newref($1); }
@@ -1964,6 +1994,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | funcstart '(' symlist ')' func_ret_opt RARROW exp
                                            { $$ = newfunc(NULL, $3, newret($7), false, finish_function(), $5); }
     | value
+    ;
+
+on_error_name: %empty                     { $$ = NULL; }
+    | NAME                                { $$ = $1; }
     ;
 
 slice_bound: %empty                       { $$ = NULL; }

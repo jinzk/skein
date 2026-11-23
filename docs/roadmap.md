@@ -568,6 +568,16 @@ Session / 限流共享 store。Redis / Valkey 不放入 `std.db`，避免和 SQL
 14. ~~是否提供嵌入式 KV？~~ 已实施（2026-11-23）：新增 `std.kv`，默认 SQLite
     单文件后端；key/value 使用 BLOB，支持 prefix scan。LevelDB / RocksDB
     只保留为未来可选目录后端，不承诺单文件。
+15. ~~是否支持 `wait t on error(...)` / `wait launch f() on error(...)` 与
+    `on error()`？~~ 已实施（2026-11-23）：`on error` 绑定高于前缀
+    `wait`/`launch`，parser 通过 AST 重排把 handler 移到 `wait` 外侧，使任务
+    内 `fail` 能被捕获；错误绑定可省略。detached 诊断改为任务销毁时才上报，
+    因此先 launch 后 wait（含变量形式）也不再误报。裸写
+    `launch f() on error(...)` 仍可解析，但会给出 `launch` warning，提示 handler
+    不能覆盖任务体。保留 `launch` 关键字：不改为 `task`（与 `task[T]` /
+    `std.task` 撞名），也不改为 `spawn`（与 `std.thread.spawn_*` /
+    `std.process.spawn_*` 撞名）；不新增 `std.task.call`，需要 task 边界的
+    同步调用沿用 `std.task.scope(fn)`。
 
 ---
 

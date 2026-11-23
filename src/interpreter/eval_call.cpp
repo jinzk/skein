@@ -587,7 +587,8 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     return invoke_value(callee, args);
 }
 
-struct value_t *launch_value(struct value_t *callee, struct ast *args_ast) {
+struct value_t *launch_value(struct value_t *callee, struct ast *args_ast,
+                             bool observed) {
     if (!callee)
         return NULL;
     std::vector<struct value_t *> args;
@@ -601,7 +602,7 @@ struct value_t *launch_value(struct value_t *callee, struct ast *args_ast) {
         free_args(args);
         throw;
     }
-    return fiber_launch_value(callee, std::move(args));
+    return fiber_launch_value(callee, std::move(args), observed);
 }
 
 struct value_t *call_method_value(struct value_t *receiver,

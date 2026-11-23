@@ -3684,7 +3684,7 @@ struct Compiler {
             }
             if (!ok) return;
             emit(tail ? Op::TailCall : Op::Call,
-                 call->launch ? 1 : 0,
+                 (call->launch ? 1 : 0) | (call->awaited ? 2 : 0),
                  static_cast<uint16_t>(args.size()),
                  static_cast<uint32_t>(args.size()), loc_of(node));
             if (!tail && return_value)
@@ -3705,8 +3705,9 @@ struct Compiler {
             if (!ok) return;
         }
         uint32_t descriptor = add_call_desc(std::move(spread));
-        emit(Op::CallSpread, call->launch ? 1 : 0, 0, descriptor,
-             loc_of(node));
+        emit(Op::CallSpread,
+             (call->launch ? 1 : 0) | (call->awaited ? 2 : 0),
+             0, descriptor, loc_of(node));
         if (tail || (!tail && return_value))
             emit(Op::Return, 0, 0, 0, loc_of(node));
     }

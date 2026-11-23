@@ -61,7 +61,27 @@ struct task : std::enable_shared_from_this<task> {
         task_registry().push_back(this);
     }
 
+    void report_unobserved_failure() {
+        if (!detached || observed || failure_reported ||
+            status != TASK_FAILED)
+            return;
+        failure_reported = true;
+        /* Teardown can fail many tasks with the same message; report once. */
+        static thread_local std::set<std::string> reported;
+        if (!reported.insert(error).second)
+            return;
+        std::string message = "detached task failed: " + error;
+        diag_report_warning(0, 0, "detached task", message.c_str());
+    }
+
     ~task() {
+        /*
+         * Report only once the task is really gone.  A task may fail while
+         * its creator has not yet attached a wait (`let t = launch f();
+         * wait t on error(...)`); reporting at completion produced a false
+         * detached-task diagnostic for an error the caller later observes.
+         */
+        report_unobserved_failure();
         if (status == TASK_PENDING)
             cancel();
         else
@@ -1155,6 +1175,11 @@ void task_add_child(const task_ptr &parent, const task_ptr &child) {
     parent->children.push_back(child);
 }
 
+void task_mark_observed(const task_ptr &task) {
+    if (task)
+        task->observed = true;
+}
+
 void task_detach(const task_ptr &task) {
     if (!task || task->detached)
         return;
@@ -1167,7 +1192,6 @@ void task_detach(const task_ptr &task) {
             children.end());
     }
     task->parent.reset();
-    task_report_unobserved_failure(task);
 }
 
 bool task_detached(const task_ptr &task) {
@@ -1175,22 +1199,8 @@ bool task_detached(const task_ptr &task) {
 }
 
 void task_report_unobserved_failure(const task_ptr &task) {
-    if (!task || !task->detached || task->observed ||
-        task->failure_reported || task->status != TASK_FAILED)
-        return;
-    task->failure_reported = true;
-    /*
-     * Server/worker teardown can fail many detached tasks with the same
-     * message.  Report each distinct failure once so diagnostics stay useful
-     * without flooding stderr (which can block a piped parent process).
-     */
-    static thread_local std::set<std::string> reported;
-    const std::string &error = task_error_message(task);
-    if (!reported.insert(error).second)
-        return;
-    std::string message = "detached task failed: ";
-    message += error;
-    diag_report_warning(0, 0, "detached task", message.c_str());
+    if (task)
+        task->report_unobserved_failure();
 }
 
 std::vector<task_ptr> task_children(const task_ptr &task) {

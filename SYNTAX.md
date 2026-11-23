@@ -1588,6 +1588,13 @@ let n = parse_positive("0") on error(e) {
 - `str(e)` 或 `std.error.message(e)` 取得消息；
 - `std.error.kind(e)` 取得错误类别；
 - handler 必须以 `recover`、`pass` 或 `fail` 结束；
+- `on error()` 可以不绑定错误值；需要检查错误时用 `on error(e)`；
+- `wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }` 的
+  handler 覆盖 `wait` 抛出的任务错误，可直接捕获任务内的 `fail`；
+  `wait (launch f()) on error(...)` 等价；被 `wait` 观察的任务不会再报
+  detached task 诊断；
+- `launch f() on error(...)` 会给出 `launch` warning：handler 只覆盖启动调用，
+  不能捕获任务体内的 `fail`；请改用上面的 `wait` 形式；
 - `recover expr;` 结束 handler，并把 `expr` 作为整个 `on error` 表达式的值；
 - `recover;` 等价于 `recover null;`；
 - `pass e;` 继续向外层传播错误；

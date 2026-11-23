@@ -228,3 +228,84 @@ def run_cases():
         'import std;\nlaunch 1;\n',
         stderr="launch expects a call expression",
     )
+
+    check(
+        "launch on error warns about task failures",
+        "import std;\n"
+        "func noop() {}\n"
+        "let t = launch noop() on error(e) { recover null; };\n"
+        "wait t;\n",
+        stderr="on error does not catch failures from the launched function",
+    )
+
+    check(
+        "wait with on error does not warn",
+        "func noop() {}\n"
+        "let t = launch noop();\n"
+        "wait t on error(e) { recover null; };\n"
+        "wait launch noop() on error(e) { recover null; };\n",
+        not_stderr="on error does not catch failures from the launched function",
+    )
+
+    check(
+        "wait launch with on error catches task failure",
+        "import std;\n"
+        "func boom() {\n"
+        '  fail "boom";\n'
+        "}\n"
+        "let r = wait launch boom() on error(e) {\n"
+        "  recover str(e);\n"
+        "};\n"
+        "println(r);\n",
+        stdout="boom",
+        not_stderr="detached task failed",
+    )
+
+    check(
+        "wait launch with unbound on error",
+        "func boom() {\n"
+        '  fail "boom";\n'
+        "}\n"
+        "let r = wait launch boom() on error() {\n"
+        '  recover "caught";\n'
+        "};\n"
+        "println(r);\n",
+        stdout="caught",
+        not_stderr="detached task failed",
+    )
+
+    check(
+        "wait task variable with on error catches task failure",
+        "import std;\n"
+        "func boom() {\n"
+        "  std.task.sleep(1);\n"
+        '  fail "boom";\n'
+        "}\n"
+        "let t = launch boom();\n"
+        "let r = wait t on error(e) {\n"
+        "  recover str(e);\n"
+        "};\n"
+        "println(r);\n",
+        stdout="boom",
+        not_stderr="detached task failed",
+    )
+
+    check(
+        "wait parenthesized launch with on error",
+        "func boom() {\n"
+        '  fail "boom";\n'
+        "}\n"
+        "let r = wait (launch boom()) on error(e) {\n"
+        "  recover str(e);\n"
+        "};\n"
+        "println(r);\n",
+        stdout="boom",
+        not_stderr="detached task failed",
+    )
+
+    check(
+        "on error without a binding",
+        "let r = (1 / 0) on error() { recover 7; };\n"
+        "println(r);\n",
+        stdout="7",
+    )

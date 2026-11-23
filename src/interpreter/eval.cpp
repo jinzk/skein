@@ -1555,7 +1555,8 @@ struct value_t *eval(struct ast *a) {
                 struct value_t *callee = eval(call->callee);
                 if (callee) {
                     value_release_guard callee_guard(callee);
-                    ret = launch_value(callee, call->args);
+                    ret = launch_value(callee, call->args,
+                                       call->awaited != 0);
                 }
                 break;
             }

@@ -1587,6 +1587,11 @@ let n = parse(input) on error(e) {
 - `ok` 只解包一层；
 - `on error` 不会自动解包嵌套在普通表达式里的 result；
 - 如果只想拿到 result 本身，不要对它使用 `on error`。
+- `on error()` 可以不绑定错误值；
+- `wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }` 可直接
+  捕获任务内的 `fail`，等价于先写 `(wait t) on error(e) { ... }`；
+- `launch f() on error(...)` 会产生 `launch` warning，因为 handler 不能捕获
+  任务体内的 `fail`；请改写为 `wait` 形式。
 
 `do { ... }` 是块表达式，值为最后一个语句的值：
 

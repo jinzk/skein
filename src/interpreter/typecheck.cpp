@@ -108,6 +108,30 @@ struct Checker : public BuiltinContext {
         diag_report_warning(line, column, "type warning", message);
     }
 
+    void warn_launch_on_error(const struct ast *node) {
+        if (!node || node->nodetype != 'o')
+            return;
+        const struct on_error_node *handler =
+            (const struct on_error_node *)node;
+        const struct ast *call = handler->call;
+        if (!call || call->nodetype != 'C')
+            return;
+        const struct ufncall *uf = (const struct ufncall *)call;
+        if (!uf->launch || uf->wait_sugar)
+            return;
+        std::string key = "launch-on-error:";
+        key += std::to_string(handler->line);
+        key += ':';
+        key += std::to_string(handler->column);
+        if (!warnings.insert(key).second)
+            return;
+        diag_report_warning(
+            handler->line, handler->column, "launch",
+            "on error does not catch failures from the launched function; "
+            "attach it to wait instead: wait t on error(e) { ... } or "
+            "wait launch f() on error(e) { ... }");
+    }
+
     explicit Checker(const std::string &source_name,
                      const std::string &module_name)
         : source(source_name), package(module_name) {}
@@ -502,6 +526,8 @@ struct Checker : public BuiltinContext {
                     bool explicit_cast = false, bool force_element = false) {
         if (!expr)
             return true;
+        if (expr->nodetype == 'o')
+            warn_launch_on_error(expr);
         if (expr->nodetype == 'w' && expected &&
             expected->kind != TYPE_ANY &&
             !generator_send_types.empty()) {
@@ -2873,6 +2899,7 @@ struct Checker : public BuiltinContext {
             case 'o': {
                 struct on_error_node *handler =
                     (struct on_error_node *)stmt;
+                warn_launch_on_error(stmt);
                 if (!check_expr(handler->call, type_any(), env, false,
                                 false))
                     return false;
@@ -3263,6 +3290,7 @@ struct Checker : public BuiltinContext {
             case 'o': {
                 struct on_error_node *handler =
                     (struct on_error_node *)expr;
+                warn_launch_on_error(expr);
                 /*
                  * Check a protected do-block.  Plain expression handlers keep
                  * their existing lax treatment, but a statement block should

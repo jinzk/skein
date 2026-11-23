@@ -13,10 +13,11 @@ using generator_ptr = std::shared_ptr<generator>;
 bool fiber_available();
 bool fiber_in_fiber();
 task_ptr fiber_start_async(std::function<value_t *()> body,
-                           const task_ptr &parent = nullptr);
+                           const task_ptr &parent = nullptr,
+                           bool observed = false);
 /* `launch callee(args)`: start a fiber running the call and return a task. */
-value_t *fiber_launch_value(value_t *callee,
-                            std::vector<value_t *> args);
+value_t *fiber_launch_value(value_t *callee, std::vector<value_t *> args,
+                            bool observed = false);
 value_t *fiber_await_task(const task_ptr &task);
 bool fiber_wait_for(std::function<bool()> ready, long long timeout_ms);
 value_t *fiber_yield_value(value_t *value);

@@ -465,7 +465,6 @@ void fiber::fiber_main() {
         value_t *error = newerrorval("fiber_stack", stack_error.c_str());
         if (kind == FIBER_TASK) {
             task_fail_error(task, error);
-            task_report_unobserved_failure(task);
         } else {
             failed = true;
             error_value = error;
@@ -486,7 +485,6 @@ void fiber::fiber_main() {
                 child_error =
                     newerrorval("runtime", "child task failed");
             task_fail_error(task, child_error);
-            task_report_unobserved_failure(task);
             if (root_context)
                 adopt_scopes(eval.scopes, root_context->scopes);
             state = FIBER_DONE;
@@ -518,7 +516,6 @@ void fiber::fiber_main() {
         } else if (!result) {
             task_fail_error(task,
                             take_fiber_error(this, "task function failed"));
-            task_report_unobserved_failure(task);
         } else {
             task_complete(task, result);
         }
@@ -538,9 +535,12 @@ bool fiber_in_fiber() {
 }
 
 task_ptr fiber_start_async(std::function<value_t *()> body,
-                           const task_ptr &parent) {
+                           const task_ptr &parent, bool observed) {
     ensure_fiber_gc_roots();
     task_ptr task = task_create();
+    /* Set before the first resume: a fast body can fail synchronously. */
+    if (observed)
+        task_mark_observed(task);
     fiber *value = new fiber(std::move(body), FIBER_TASK);
     value->task = task;
     task_add_child(parent, task);
@@ -570,7 +570,8 @@ task_ptr fiber_start_async(std::function<value_t *()> body,
     return task;
 }
 
-value_t *fiber_launch_value(value_t *callee, std::vector<value_t *> args) {
+value_t *fiber_launch_value(value_t *callee, std::vector<value_t *> args,
+                            bool observed) {
     if (!callee) {
         for (value_t *arg : args)
             freeval(arg);
@@ -606,7 +607,7 @@ value_t *fiber_launch_value(value_t *callee, std::vector<value_t *> args) {
             }
             return result;
         },
-        parent);
+        parent, observed);
     return new_task_value(task);
 }
 

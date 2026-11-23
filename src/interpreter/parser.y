@@ -1087,7 +1087,7 @@ static struct type_constraint *runtime_type_or_error(
 %precedence NOELSE
 %precedence ELSE
 
-%type <a> exp value stmt list scope do_block explist arg top_expression top_statement line valuelist pairlist
+%type <a> exp value stmt list scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
 %type <str> on_error_name
 %type <a> forinit forcond forend
@@ -1826,6 +1826,13 @@ do_block: '{' EMPTY_BLOCK_CLOSE           { $$ = newscope(NULL); }
         | '{' list '}'                    { $$ = newscope($2); }
         ;
 
+/* A `-> { ... }` lambda body.  The lexer emits BODY_LBRACE only for the
+ * brace directly following `->`, so this cannot be confused with a dict
+ * literal; `({...})` remains the escape for a dict-valued lambda body. */
+lambda_block: BODY_LBRACE EMPTY_BLOCK_CLOSE { $$ = newscope(NULL); }
+            | BODY_LBRACE list '}'          { $$ = newscope($2); }
+            ;
+
 list: %empty                              { $$ = NULL; }
     | scope list {
         if ($2 == NULL)
@@ -1870,6 +1877,21 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
       }
     | '(' tuple_body ')'                 { $$ = $2; }
     | '(' tuple_body ')' RARROW lambda_start exp {
+        $$ = make_tuple_lambda($2, $6);
+      }
+    | NAME RARROW lambda_start lambda_block {
+        $$ = newfunc(NULL, newsymlist(newsym($1), NULL, NULL),
+                     newret($4), false, finish_function());
+        free($1);
+      }
+    | '(' ')' RARROW lambda_start lambda_block {
+        $$ = newfunc(NULL, NULL, newret($5), false,
+                     finish_function());
+      }
+    | '(' exp ')' RARROW lambda_start lambda_block {
+        $$ = make_single_lambda($2, $6);
+      }
+    | '(' tuple_body ')' RARROW lambda_start lambda_block {
         $$ = make_tuple_lambda($2, $6);
       }
     | '(' exp ')'                         { $$ = $2; }

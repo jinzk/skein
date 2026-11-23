@@ -61,6 +61,26 @@ ts_test("parenthesized single parameter lambda", func() {
   ts_eq([1, 2] |> std.list.map((x) -> x + 1), [2, 3]);
 });
 
+ts_test("lambda brace block body", func() {
+  let f = (x) -> {
+    let product = x * 2;
+    product + 1;
+  };
+  ts_eq(f(3), 7);
+
+  let empty = () -> {};
+  ts_eq(empty(), null);
+
+  let single = x -> { x + 1; };
+  ts_eq(single(2), 3);
+
+  let dict_body = (x) -> ({ "v": x });
+  ts_eq(dict_body(4)["v"], 4);
+
+  let explicit = (x) -> do { x + 1; };
+  ts_eq(explicit(5), 6);
+});
+
 ts_test("nested expression lambdas", func() {
   let add = func(x) -> func(y) -> x + y;
   ts_eq(add(2)(3), 5);

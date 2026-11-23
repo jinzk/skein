@@ -53,6 +53,9 @@ int last_token_line = 0;
 int prev_token_line = 0;
 static bool declaration_header = false;
 static bool extern_header = false;
+/* Set after `->`; the next `{` (possibly after newlines/comments) starts a
+ * lambda body block instead of a dict literal.  Any other token cancels it. */
+static bool lambda_brace_pending = false;
 
 struct brace_frame {
     bool is_dict;
@@ -236,7 +239,7 @@ static void note_for_name_token() {
         for_header = FOR_HEADER_NONE;
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; return yyret_tok; } while (0)
 
 
 /* After '.', keywords and builtin names are ordinary member names. */
@@ -794,6 +797,15 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     int prev_line = last_token_line;
     if (!brace_stack.empty())
         brace_stack.back().empty = false;
+    if (lambda_brace_pending) {
+        lambda_brace_pending = false;
+        for_header = FOR_HEADER_NONE;
+        declaration_header = false;
+        extern_header = false;
+        brace_stack.push_back(brace_frame{false, true});
+        indent_count++;
+        YYRET(SKEIN_TOK_BODY_LBRACE);
+    }
     bool header_body = false;
     if (!header_stack.empty() &&
         header_stack.back().indent == indent_count) {
@@ -1286,6 +1298,7 @@ static void reset_scanner_common() {
     brace_stack.clear();
     reset_for_header_state();
     for_body_indent = 0;
+    lambda_brace_pending = false;
 }
 
 void reset_scanner_state(std::FILE *in) {
@@ -1333,6 +1346,7 @@ struct scanner_checkpoint {
     bool for_body_pending;
     bool for_operand_started;
     int for_body_indent;
+    bool lambda_brace_pending;
     std::vector<header_context> headers;
     int pending_header_kind;
     int pending_header_indent;
@@ -1380,6 +1394,7 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->for_body_pending = for_body_pending;
     checkpoint->for_operand_started = for_operand_started;
     checkpoint->for_body_indent = for_body_indent;
+    checkpoint->lambda_brace_pending = lambda_brace_pending;
     checkpoint->headers = header_stack;
     checkpoint->pending_header_kind = pending_header_kind;
     checkpoint->pending_header_indent = pending_header_indent;
@@ -1431,6 +1446,7 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     for_body_pending = checkpoint->for_body_pending;
     for_operand_started = checkpoint->for_operand_started;
     for_body_indent = checkpoint->for_body_indent;
+    lambda_brace_pending = checkpoint->lambda_brace_pending;
     header_stack = checkpoint->headers;
     pending_header_kind = checkpoint->pending_header_kind;
     pending_header_indent = checkpoint->pending_header_indent;

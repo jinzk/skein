@@ -152,14 +152,27 @@ std.task.acquire(limiter[, tokens]) → bool
 std.task.bounded_parallel_map(items, limit, fn) → list[result]
 ```
 
-`std.task.scope(fn)` 把 `fn` 放进一个子 task/fiber 中执行，并等待它以及所有未 detach 的子任务：
+`std.task.scope(fn)` 把 `fn` 放进一个子 task/fiber 中执行。`fn` 返回后，scope 会等待其内部所有未 detach 的子任务，再返回 `fn` 的结果：
 
 ```skein
 let v = std.task.scope(func() {
+  launch work(1);   // 不需要显式 wait
+  launch work(2);
+  return 42;
+});
+// 两个任务都完成后 scope 才返回 42；
+// 任一任务失败会取消另一个，并把首个错误抛给调用者。
+```
+
+如果 `fn` 自己已经等待了所有任务，直接调用也能得到相同结果；`scope` 的价值主要是自动 join、失败取消和错误传播：
+
+```skein
+func work_all() {
   let a = launch work(1);
   let b = launch work(2);
   return a.wait() + b.wait();
-});
+}
+let v = work_all();   // 显式等待，等价于同步调用
 ```
 
 - `fn` 必须是可调用值，接收 0 个参数；

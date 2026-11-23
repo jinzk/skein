@@ -602,8 +602,9 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   绑定可省略。detached 诊断改为任务销毁时才上报。裸写
   `launch f() on error(...)` 仍可解析，但会给出 `launch` warning，提示
   handler 不能覆盖任务体。保留 `launch` 关键字：不改为 `task` 或
-  `spawn`；不新增 `std.task.call`，同步 task 边界沿用
-  `std.task.scope(fn)`。
+  `spawn`；不新增 `std.task.call`。需要结构化并发边界时使用
+  `std.task.scope(fn)`：它在作用域结束时等待所有未 detach 的任务，
+  并返回 `fn` 的结果。
 
 ---
 

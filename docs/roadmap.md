@@ -609,6 +609,8 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 
 ## 5. 暂缓与不做
 
+本节按领域汇总明确不做或暂缓的能力，仅用于归类，不是里程碑划分。
+
 包管理与生态：
 
 - 没有可信镜像运营方前，不先做完整 proxy。
@@ -630,7 +632,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 - 不做延迟解析函数体、把 std 包改成动态插件、为解析速度裁剪 `std.web`
   API；预编译 stdlib 属于 M5。
 
-Web / 数据：
+Web 服务与数据层（JSON API、`std.cache`）：
 
 - JSON API 不包含 SSR、HTML 模板、静态文件服务器、WebSocket / SSE、
   multipart、GraphQL、完整 ORM、OAuth 第三方登录。

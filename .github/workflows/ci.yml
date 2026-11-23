@@ -60,7 +60,7 @@ jobs:
       SKEIN_TEST_REDIS_DSN: redis://127.0.0.1:6379
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |

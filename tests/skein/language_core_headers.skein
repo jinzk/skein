@@ -1,6 +1,10 @@
 import std;
 include "_support.skein";
 
+struct ForHeaderBox {
+  n: int;
+};
+
 ts_test("if without condition parens", func() {
   let x = true;
   let seen = "";
@@ -86,6 +90,15 @@ ts_test("c for without header parens uses existing variable", func() {
     out = out + str(i);
   }
   ts_eq(out, "01");
+});
+
+ts_test("c for initializer can target a field", func() {
+  let box = ForHeaderBox { n: 0 };
+  let out = "";
+  for box.n = 0; box.n < 3; box.n = box.n + 1 {
+    out = out + str(box.n);
+  }
+  ts_eq(out, "012");
 });
 
 ts_test("if condition composite literal in parens", func() {

@@ -929,6 +929,21 @@ static struct ast *append_tuple_explist(struct ast *chain,
     return chain;
 }
 
+static struct ast *make_single_lambda(struct ast *param, struct ast *body) {
+    if (!param || param->nodetype != 'N') {
+        yyerror("lambda parameter must be a name");
+        treefree(param);
+        treefree(body);
+        return newnullast();
+    }
+    const char *name = ((struct symref *)param)->name;
+    struct symlist *params =
+        newsymlist(newsym(name ? name : ""), NULL, NULL);
+    treefree(param);
+    return newfunc(NULL, params, newret(body), false,
+                   finish_function());
+}
+
 static struct ast *make_tuple_lambda(struct ast *tuple, struct ast *body) {
     struct symlist *head = NULL;
     struct symlist *tail = NULL;
@@ -1064,6 +1079,7 @@ static struct type_constraint *runtime_type_or_error(
 %left PIPE
 %precedence UMINUS NOT BITNOT
 %right INC DEC
+%precedence PRIMARY
 %precedence '['
 %precedence '.'
 %precedence '('
@@ -1098,11 +1114,13 @@ static struct type_constraint *runtime_type_or_error(
 %destructor { free_type_constraint($$); } <type>
 %destructor { free_type_list($$); } <tl>
 
-/* `NAME '.' NAME` is deliberately shifted for field/enum dot access instead
- * of reducing `NAME` to `exp` first.  The conflicts are resolved as shifts;
- * the no-parenthesis `for` header adds one more instance of the same
- * ambiguity, and this count keeps future grammar changes visible. */
-%expect 3
+/* Postfix `.` binds tighter than a bare identifier, so field/enum access and
+ * qualified structure literals are shifted instead of reducing `NAME` to
+ * `exp` first.  The remaining conflict is the qualified type name in
+ * `exp is identifier . identifier`, where the type path must win over
+ * `(exp is type) . field`.  Keep that one visible so future grammar changes
+ * cannot silently add a new ambiguity. */
+%expect 1
 
 %start program
 %%
@@ -1847,6 +1865,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newfunc(NULL, NULL, newret($5), false,
                      finish_function());
       }
+    | '(' exp ')' RARROW lambda_start exp {
+        $$ = make_single_lambda($2, $6);
+      }
     | '(' tuple_body ')'                 { $$ = $2; }
     | '(' tuple_body ')' RARROW lambda_start exp {
         $$ = make_tuple_lambda($2, $6);
@@ -1930,7 +1951,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp ON ERROR '(' on_error_name ')' '{' list '}' %prec ON {
         $$ = newonerror($1, $5, $8);
       }
-    | NAME                                { $$ = newref($1); }
+    | NAME %prec PRIMARY                  { $$ = newref($1); }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
     | exp PLUS_ASSIGN exp                 { $$ = newcompound($1, '+', $3); }
     | exp MINUS_ASSIGN exp                { $$ = newcompound($1, '-', $3); }

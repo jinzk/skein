@@ -369,6 +369,9 @@ def run_cases():
           'func h(x) { return y -> x + y; }\n'
           'println(4 |>> h(3));\n',
           stderr="syntax error")
+    check("parenthesized lambda parameter must be a name",
+          "let f = (1) -> 2;\n",
+          stderr="lambda parameter must be a name")
     check("numbered placeholder rejects gaps",
           'func f(a, b) { return a; }\n'
           'let g = f($2);\n',

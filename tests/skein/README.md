@@ -111,9 +111,9 @@ Helpers:
 | `language_core` (match) | Skein (partial) | 25 Skein cases in `language_core_match.skein`; binding/compile diagnostics stay in Python. |
 | `language_core` (increment/compound/slice) | Skein (partial) | 20 Skein cases in `language_core_updates.skein`; update error diagnostics stay in Python. |
 | `language_core` (default parameters/closures) | Skein (partial) | 15 Skein cases in `language_core_defaults.skein`; default-parameter diagnostics stay in Python. |
-| `language_core` (lambdas/pipe/placeholders/string append) | Skein (partial) | 21 Skein cases in `language_core_functions.skein`; placeholder syntax errors and append errors stay in Python. |
+| `language_core` (lambdas/pipe/placeholders/string append) | Skein (partial) | 23 Skein cases in `language_core_functions.skein`; placeholder syntax errors and append errors stay in Python. |
 | `language_core` (traits) | Skein (partial) | 6 Skein cases in `language_core_traits.skein`; trait conflict diagnostics stay in Python. |
-| `language_core` (control-flow headers) | Skein (partial) | 12 Skein cases in `language_core_headers.skein`; brace/paren syntax errors stay in Python. |
+| `language_core` (control-flow headers) | Skein (partial) | 13 Skein cases in `language_core_headers.skein`; brace/paren syntax errors stay in Python. |
 | `decorators` | Skein (partial) | 21 Skein cases in `decorators_behavior.skein`; generator/typecheck/temp-package cases stay in Python. |
 | `collections` (arena/builder/append/dict equality) | Skein (partial) | 12 Skein cases in `collections_mutation.skein`; error diagnostics stay in Python. |
 | `match_types` (sorting) | Skein (partial) | 13 Skein cases in `match_types_sorting.skein`; sort error diagnostics stay in Python. |
@@ -127,7 +127,7 @@ Helpers:
 | `runtime` (loop/control flow) | Skein (partial) | 20 Skein cases in `runtime_control.skein`; loop/range/import diagnostics stay in Python. |
 | `runtime` (const/value semantics) | Skein (partial) | 8 Skein cases in `runtime_misc.skein`; const/package/error cases stay in Python. |
 
-Current coverage: 602 Skein cases across the files above.
+Current coverage: 605 Skein cases across the files above.
 
 `diagnostics`, `typecheck`, `lint`, `fmt`, `lsp`, `build`, `get`, `net`,
 `io_scripts`, `ffi_real`, stress/differential tests, and all host/REPL checks

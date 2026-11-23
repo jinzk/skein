@@ -47,6 +47,20 @@ ts_test("expression lambda precedence", func() {
   ts_eq(f(3), 7);
 });
 
+ts_test("lambda do block body", func() {
+  let f = (x, y) -> do {
+    let product = x * y;
+    product + 1;
+  };
+  ts_eq(f(3, 4), 13);
+});
+
+ts_test("parenthesized single parameter lambda", func() {
+  let double = (x) -> x * 2;
+  ts_eq(double(21), 42);
+  ts_eq([1, 2] |> std.list.map((x) -> x + 1), [2, 3]);
+});
+
 ts_test("nested expression lambdas", func() {
   let add = func(x) -> func(y) -> x + y;
   ts_eq(add(2)(3), 5);

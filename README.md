@@ -226,6 +226,10 @@ func work(n) {
   return n * 2;
 }
 
+let t = launch work(21);
+let value = wait t;       // 等价于 t.wait()
+print(value);
+
 let total = std.task.scope(func() {
   let a = launch work(1);
   let b = launch work(2);
@@ -233,6 +237,8 @@ let total = std.task.scope(func() {
 });
 ```
 
+- `wait t` 是 `t.wait()` 的前缀写法；`wait launch f()` 等价于 `(launch f()).wait()`；
+- `launch` 作用于完整调用链，`.` 优先级高于前缀 `wait` / `launch`：`launch f().wait()` 启动的是 `f().wait()`，不是“启动后再等待”；
 - `std.task.scope` 等待并管理一组子任务，支持取消和错误传播；
 - `std.thread.Channel` 支持有界、无界和 rendezvous 队列，以及 `select` / `broadcast`；
 - 线程池、worker 池、进程入口 `std.entry` / `std.process.run_entry`；

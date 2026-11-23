@@ -27,6 +27,7 @@
   - [Base64、URL 和哈希](#base64url-和哈希)
   - [目录、路径和压缩](#目录路径和压缩)
 - [第四部分：并发与进程](#第四部分并发与进程)
+  - [launch 与 wait](#launch-与-wait)
   - [线程、Channel 与并发](#线程channel-与并发)
   - [环境变量和进程捕获](#环境变量和进程捕获)
   - [外部命令](#外部命令)
@@ -2196,6 +2197,34 @@ std.fs.close(h);
 ## 第四部分：并发与进程
 
 目标：理解 fiber/task、线程 Channel、环境变量和外部命令的边界与用法。
+
+### launch 与 wait
+
+`launch f()` 创建新 task 并立即返回 `task[T]`；`wait` 是等待 task 的前缀关键字，`wait t` 等价于 `t.wait()`：
+
+```skein
+import std;
+
+func work(n) {
+  std.task.sleep(10).wait();
+  return n * 2;
+}
+
+let t = launch work(21);
+let value = wait t;              // 等价于 t.wait()
+let same = wait launch work(21); // 启动后立即等待
+print(value + same);
+```
+
+规则：
+
+- `wait` 只等待 task（或静态类型尚未知的表达式），不是通用 `await`；普通函数可以直接调用会挂起的 API，并在当前 fiber 上隐式挂起；
+- `wait launch f()` 等价于 `(launch f()).wait()`，不引入 `async` / `await` 或函数颜色；
+- `launch` 作用于其后的完整调用链，且 `.` 的优先级高于前缀 `launch` / `wait`：`launch make().get()` 启动的是 `make().get()`，`launch f().wait()` 启动的是 `f().wait()`，不是“启动后再等待”；
+- 需要“启动后再等待”时写 `wait launch f()` 或 `(launch f()).wait()`；`launch wait f()` 会报错；
+- task 内部错误在 `wait` 观察点抛出，可用 `wait t on error(e) { ... }` 或 `wait launch f() on error(e) { ... }` 捕获；
+- `launch f() on error(...)` 只覆盖启动调用，不能捕获任务体错误，会产生 warning；
+- `t.try_wait()` 返回 `result[T, error]`，可在不抛出的情况下检查结果。
 
 ### 线程、Channel 与并发
 

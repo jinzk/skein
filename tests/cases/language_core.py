@@ -185,7 +185,69 @@ def run_cases():
           "  return v + 1;\n"
           "}\n"
           "f()\n",
-          stdout="= 5")
+          stdout="= 5",
+          stderr="return inside a do block exits the enclosing function")
+    check("do while body return does not warn",
+          "func f() {\n"
+          "  do { return 5; } while (0);\n"
+          "  return 1;\n"
+          "}\n"
+          "f()\n",
+          stdout="= 5",
+          not_stderr="return inside a do block")
+    check("lambda brace block return does not warn",
+          "func f() {\n"
+          "  let g = (x) -> {\n"
+          "    return x + 1;\n"
+          "  };\n"
+          "  return g(2);\n"
+          "}\n"
+          "f()\n",
+          stdout="= 3",
+          not_stderr="return inside a do block")
+    check("lambda do body return warns",
+          "func f() {\n"
+          "  let g = (x) -> do {\n"
+          "    return x + 1;\n"
+          "  };\n"
+          "  return g(2);\n"
+          "}\n"
+          "f()\n",
+          stdout="= 3",
+          stderr="return inside a do block exits the enclosing function")
+    check("lambda return inside do block does not warn",
+          "func f() {\n"
+          "  let v = do {\n"
+          "    let g = (x) -> { return x + 1; };\n"
+          "    g(1);\n"
+          "  };\n"
+          "  return v;\n"
+          "}\n"
+          "f()\n",
+          stdout="= 2",
+          not_stderr="return inside a do block")
+    check("do block inside lambda body warns",
+          "func f() {\n"
+          "  let g = () -> {\n"
+          "    let v = do { return 5; };\n"
+          "    v;\n"
+          "  };\n"
+          "  return g();\n"
+          "}\n"
+          "f()\n",
+          stdout="= 5",
+          stderr="return inside a do block exits the enclosing function")
+    check("nested func return inside do block does not warn",
+          "func f() {\n"
+          "  let v = do {\n"
+          "    let g = func() { return 5; };\n"
+          "    g();\n"
+          "  };\n"
+          "  return v;\n"
+          "}\n"
+          "f()\n",
+          stdout="= 5",
+          not_stderr="return inside a do block")
     check("do block expression break continue",
           "let i = 0;\n"
           "let total = 0;\n"

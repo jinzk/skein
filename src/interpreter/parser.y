@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "analysis_mode.h"
@@ -62,8 +63,42 @@ static int flow_keyword_line = 0;
 static int flow_keyword_column = 0;
 static std::vector<int> func_yield_counts;
 
+enum block_context_kind {
+    BLOCK_FUNCTION,
+    BLOCK_DO_BLOCK,
+};
+
+struct block_context {
+    block_context_kind kind;
+    /*
+     * Returns seen directly in this block.  Do blocks defer reporting because
+     * `do { ... }` is an expression while `do { ... } while (...)` is a loop;
+     * only the expression form is warned about.
+     */
+    std::vector<std::pair<int, int>> returns;
+};
+
+static std::vector<block_context> block_contexts;
+
+static void push_block_context(block_context_kind kind) {
+    block_contexts.push_back(block_context{kind, {}});
+}
+
+static void pop_block_context(block_context_kind kind) {
+    if (!block_contexts.empty() && block_contexts.back().kind == kind)
+        block_contexts.pop_back();
+}
+
+static void report_do_return(int line, int column) {
+    diag_report_warning(
+        line, column, "warning",
+        "return inside a do block exits the enclosing function; "
+        "use a block value or move the return outside");
+}
+
 static void start_function() {
     func_yield_counts.push_back(0);
+    push_block_context(BLOCK_FUNCTION);
 }
 
 static void note_yield() {
@@ -76,9 +111,59 @@ static bool finish_function() {
         !func_yield_counts.empty() && func_yield_counts.back() > 0;
     if (!func_yield_counts.empty())
         func_yield_counts.pop_back();
+    pop_block_context(BLOCK_FUNCTION);
     if (g_include_function_depth > 0)
         --g_include_function_depth;
     return generator;
+}
+
+/* Called when a `return` token is parsed. */
+static void note_return_context() {
+    if (block_contexts.empty())
+        return;
+    block_context &ctx = block_contexts.back();
+    if (ctx.kind == BLOCK_DO_BLOCK)
+        ctx.returns.emplace_back(g_token_line, g_token_column);
+    /*
+     * BLOCK_FUNCTION is a function boundary: `return` exits that function,
+     * which is normal usage.  Lambdas push BLOCK_FUNCTION via lambda_start,
+     * so a `return` inside `-> { ... }` is treated the same way.
+     */
+}
+
+/* Hand deferred returns from a do-while body to its surrounding context. */
+static void forward_do_returns(std::vector<std::pair<int, int>> &returns) {
+    for (const auto &item : returns) {
+        if (block_contexts.empty())
+            continue;
+        block_context &parent = block_contexts.back();
+        if (parent.kind == BLOCK_DO_BLOCK)
+            parent.returns.push_back(item);
+        /* BLOCK_FUNCTION: the return belongs to that function. */
+    }
+}
+
+/* `do { ... }` used as an expression: deferred returns exit the function. */
+static void finish_do_expression_block() {
+    if (block_contexts.empty() ||
+        block_contexts.back().kind != BLOCK_DO_BLOCK)
+        return;
+    std::vector<std::pair<int, int>> returns =
+        std::move(block_contexts.back().returns);
+    block_contexts.pop_back();
+    for (const auto &item : returns)
+        report_do_return(item.first, item.second);
+}
+
+/* `do { ... } while (...)` is a loop; keep the previous behavior. */
+static void finish_do_while_block() {
+    if (block_contexts.empty() ||
+        block_contexts.back().kind != BLOCK_DO_BLOCK)
+        return;
+    std::vector<std::pair<int, int>> returns =
+        std::move(block_contexts.back().returns);
+    block_contexts.pop_back();
+    forward_do_returns(returns);
 }
 
 static char *join_import_path(const char *left, const char *right) {
@@ -1154,10 +1239,12 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newflow('W', $2, newscope(NULL), NULL); }
     | WHILE exp BODY_LBRACE list '}'
                                            { $$ = newflow('W', $2, newscope($4), NULL); }
-    | DO scope WHILE DO_WHILE_LPAREN exp ')' {
+    | do_start scope WHILE DO_WHILE_LPAREN exp ')' {
+        finish_do_while_block();
         $$ = newflow('E', $5, $2, NULL);
       }
-    | DO scope WHILE exp ';' {
+    | do_start scope WHILE exp ';' {
+        finish_do_while_block();
         $$ = newflow('E', $4, $2, NULL);
       }
     | SWITCH HEADER_LPAREN exp ')' '{' EMPTY_BLOCK_CLOSE
@@ -1780,8 +1867,8 @@ fieldname: NAME                           { $$ = $1; }
       }
     ;
 
-line: RETURN exp                          { $$ = newret($2); }
-    | RETURN                              { $$ = newret(NULL); }
+line: returnstart exp                     { $$ = newret($2); }
+    | returnstart                         { $$ = newret(NULL); }
     | breakstart                          {
         $$ = newbrk(NULL, flow_keyword_line, flow_keyword_column);
       }
@@ -1802,6 +1889,11 @@ line: RETURN exp                          { $$ = newret($2); }
     | exp                                 { $$ = $1; }
     ;
 
+returnstart: RETURN {
+        note_return_context();
+      }
+    ;
+
 breakstart: BREAK {
         flow_keyword_line = g_token_line;
         flow_keyword_column = g_token_column;
@@ -1820,6 +1912,14 @@ scope: stmt                               { $$ = $1; }
      | '{' EMPTY_BLOCK_CLOSE              { $$ = newscope(NULL); }
      | '{' list '}'                       { $$ = newscope($2); }
      ;
+
+/*
+ * Push the do-block return context at `do` rather than at its opening brace:
+ * `do { ... }` and `do { ... } while (...)` share that brace, so a mid-rule
+ * action there would make the parser decide the block kind too early.
+ */
+do_start: DO { push_block_context(BLOCK_DO_BLOCK); }
+    ;
 
 /* The protected block of `do { ... } on error ...`. */
 do_block: '{' EMPTY_BLOCK_CLOSE           { $$ = newscope(NULL); }
@@ -1950,7 +2050,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
      * the lexer keeps a following `while` on the same logical line, so this
      * expression is only reduced when no do-while tail follows.
      */
-    | DO do_block {
+    | do_start do_block {
+        finish_do_expression_block();
         skein_lexer_finish_do_expression();
         $$ = $2;
       }
@@ -2381,6 +2482,7 @@ top_expression: exp { $$ = $1; }
 
 top_statement: top_expression EOL {
         func_yield_counts.clear();
+        block_contexts.clear();
         active_eval_context().runtime_error_count = 0;
         diag_set_location(0, 0);
 
@@ -2474,6 +2576,8 @@ top_statement: top_expression EOL {
     | error EOL {
         yyerrok;
         g_statement_invalid = false;
+        func_yield_counts.clear();
+        block_contexts.clear();
         if (!g_interactive && g_script_stop)
             YYABORT;
         $$ = NULL;
@@ -2488,6 +2592,7 @@ program: %empty
 void parser_begin_nested_parse() {
     yychar = SKEIN_TOK_YYEMPTY;
     yynerrs = 0;
+    block_contexts.clear();
 }
 
 int yyreport_syntax_error(const yypcontext_t *ctx) {

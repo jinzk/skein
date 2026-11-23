@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 
 from harness import *  # noqa: F401,F403
 
@@ -26,6 +27,8 @@ def start_server(source, label):
         proc.terminate()
         proc.wait(timeout=5)
         raise AssertionError(f"{label} did not listen: {line!r}")
+    # The port is printed before worker pools finish binding their handlers.
+    time.sleep(0.1)
     return proc, int(line)
 
 
@@ -82,7 +85,12 @@ let n = std.http.serve(s, func(req) {
     "cookies": req["cookies"],
     "request_id": req["request_id"],
     "client_ip": req["client_ip"],
-    "x_values": req["header_values"]["x-multi"]
+    "x_values": req["header_values"]["x-multi"],
+    "trace_id": req["trace_id"],
+    "span_id": req["span_id"],
+    "parent_span_id": req["parent_span_id"],
+    "trace_flags": req["trace_flags"],
+    "traceparent": req["traceparent"]
   }, {
     "Set-Cookie": ["a=1; Path=/", "b=2; Path=/"]
   });
@@ -100,6 +108,9 @@ println("served " + str(n));
                 ("X-Request-Id", "req-123"),
                 ("X-Multi", "one"),
                 ("X-Multi", "two"),
+                ("traceparent",
+                 "00-4bf92f3577b34da6a3ce929d0e0e4736-"
+                 "00f067aa0ba902b7-01"),
             ],
         )
         assert status == 200, status
@@ -114,6 +125,17 @@ println("served " + str(n));
         assert payload["request_id"] == "req-123", payload
         assert payload["client_ip"] == "127.0.0.1", payload
         assert payload["x_values"] == ["one", "two"], payload
+        assert payload["trace_id"] == (
+            "4bf92f3577b34da6a3ce929d0e0e4736"), payload
+        assert payload["parent_span_id"] == "00f067aa0ba902b7", payload
+        assert len(payload["span_id"]) == 16, payload
+        assert payload["span_id"] != payload["parent_span_id"], payload
+        assert payload["trace_flags"] == "01", payload
+        assert payload["traceparent"] == (
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-"
+            + payload["span_id"] + "-01"), payload
+        assert header_values(headers, "X-Trace-Id") == [
+            "4bf92f3577b34da6a3ce929d0e0e4736"], headers
     finally:
         stop_server(proc)
 

@@ -2699,6 +2699,14 @@ let denied = auth.unauthorized_response("login required");
 - `constant_time_equal` 可用于比较签名或 CSRF token，支持 string 和 bytes。
 - `session_cookie` 默认 `HttpOnly`、`Secure`、`SameSite=Lax`；本地开发可显式
   传 `{"secure": false}`。
+- `auth.auth_middleware(store, secret[, options])` 只负责认证门禁；
+  `options.jwt` 传给 JWT 校验，`options.required=false` 时允许匿名。
+- `auth.require_roles(store, secret, roles[, options])` 和
+  `auth.require_permissions(store, secret, permissions[, options])` 会重新认证并
+  检查 identity / claims 中的 `roles` / `permissions`；默认任一匹配，
+  `{"all": true}` 要求全部匹配。
+- `auth.has_role(identity, role)` / `auth.has_permission(identity, permission)`
+  可用于 handler 内部判断。
 
 `std.web` 提供 CORS、安全响应头、可信代理客户端 IP 和限流：
 
@@ -2739,8 +2747,16 @@ let ip = web.client_ip(req, {
 - 共享限流使用 `cache.incr_window` 原子计数；返回 `429`、`Retry-After` 和
   `X-RateLimit-*`。共享模式下 `limiter.reset(key)` 必须提供 key；
   `limiter.cleanup()` 返回 0，过期由 Redis/Valkey 维护。
+- HTTP 请求 dict 包含 W3C trace context：`trace_id`、`span_id`、
+  `parent_span_id`、`trace_flags`、`traceparent`；入站 `traceparent` 合法时
+  继承 trace id，否则生成新的 trace/span。
+- 响应自动带 `X-Trace-Id`；`traceparent` 目前只做入站传播，不内置 OTel
+  exporter。
 - `web.access_log` 返回 `before` / `after` middleware，按请求输出结构化
-  access log（request id、method、path、status、latency、bytes、client ip）。
+  access log（request id、trace id、span id、method、path、status、latency、
+  bytes、client ip）。
+- `web.error_log([options])` 是 after middleware，对 5xx 响应输出结构化错误
+  日志，包含 request id、trace id、span id、路径、状态和截断后的响应 body。
 - `web.metrics_middleware` 记录 `http_requests_total` 和
   `http_request_duration_seconds`，需要传入 `std.metrics` registry。
 - `web.metrics_route(app, registry)` 注册 `/metrics`，输出 Prometheus

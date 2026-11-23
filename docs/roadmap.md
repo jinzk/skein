@@ -51,6 +51,7 @@
 - `skein lsp --stdio`
 - VS Code / Vim / Neovim 接入
 - diagnostics / completion / hover / definition / document symbol 基础能力
+- GitHub Actions CI：Valkey / PostgreSQL / MySQL 集成服务与全量 ctest
 
 ### 包管理
 
@@ -91,16 +92,14 @@
 
 ## 2. 里程碑
 
-### 当前待实现任务总览（2026-11-22）
+### 当前待实现任务总览（2026-11-23）
 
 下表只列仍待处理的主线任务；已完成项保留在对应里程碑中作为基线。
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
-| Valkey 独立 CI 服务验证 | 按需 | 客户端使用同一 RESP2；Redis 8.0 已验证 |
-| 权限 / 角色 middleware | 按需 | 统一身份模型已完成，不阻塞 P1 验收 |
 | 账户锁定 / 登录失败保护 | 按需 | 可先用现有固定窗口限流组合实现 |
-| OpenTelemetry tracing / 完整错误栈日志 | 按需 | 结构化访问日志与 Prometheus 已完成 |
+| OpenTelemetry exporter / 完整 stack 捕获 | 按需 | W3C trace context、5xx 错误日志已完成；外部 exporter 未接入 |
 | Milestone 3 包生态 | 待决策 | SumDB、proxy、私有模块认证、`mod graph` / `mod why` 等 |
 | moving GC / AOT / 字节码缓存 | 待决策 | 决策后再启动 per-pc liveness / OSR / deopt |
 | Milestone 5 长尾能力 | 按需 | GB18030-2022、旧编码、HTTP/2 extended CONNECT、vendor / workspace |
@@ -433,7 +432,8 @@ std.string.builder          29 ms
    - 标准 HS256 JWT、`require_bearer`、`authenticate` 与 401/403 helper
      （已完成）
    - 多 worker 共享 Session store（已完成，通过 `std.cache`）
-   - 完整权限/角色 middleware（按需，不阻塞 P1 验收）
+   - 完整权限/角色 middleware（已完成：`auth.require_roles` /
+     `auth.require_permissions`）
 3. P1-B 限流与安全（基础完成）：
    - CORS before/after middleware（已完成）
    - 安全响应头（已完成）
@@ -447,7 +447,8 @@ std.string.builder          29 ms
    - JSON 错误边界与 request id 关联（已完成）
    - `std.metrics`、Prometheus `/metrics`（已完成）
    - `/healthz`、`/readyz`（已完成）
-   - 完整错误堆栈日志与 OpenTelemetry tracing（按需）
+   - W3C trace context、`X-Trace-Id`、`web.error_log`（已完成）；外部
+     OpenTelemetry exporter / 完整 stack 捕获（按需）
 5. P1-D 数据库（已完成）：
    - SQLite 驱动、参数化查询、事务（已完成，`std.db` 可选构建）
    - PostgreSQL 驱动（已完成：URI、`$n` 参数、基础类型映射、事务）
@@ -585,8 +586,8 @@ Session / 限流共享 store。Redis / Valkey 不放入 `std.db`，避免和 SQL
 
 ## 5. 推荐执行顺序
 
-1. P1-D 与 `std.cache` 已完成，单进程和多进程共享 store 路径均已具备。
-   剩余的 Valkey 独立 CI、权限/角色、账户锁定和 OpenTelemetry 按实际部署需求
+1. P1-D、`std.cache`、权限/角色 middleware 和三数据库 + Valkey CI 已完成。
+   剩余账户锁定、外部 OpenTelemetry exporter 和完整 stack 捕获按实际部署需求
    推进。
 2. Milestone 1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）；
    Milestone 2 已完成。

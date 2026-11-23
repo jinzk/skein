@@ -137,6 +137,9 @@ SKEIN_TEST_REDIS_DSN=redis://127.0.0.1:6379 \
   ctest --test-dir build -R skein_tests --output-on-failure
 ```
 
+`.github/workflows/ci.yml` 的 Linux job 会自动启动 PostgreSQL、MySQL 和
+Valkey 服务，并设置上述 DSN 跑完整 `ctest`。
+
 日常开发使用快速回归循环（增量构建 + core 标签，不跑基准和 sanitizer）：
 
 ```bash

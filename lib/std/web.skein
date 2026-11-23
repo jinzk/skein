@@ -162,6 +162,49 @@ package web {
     return first;
   }
 
+  export func error_log(options = {}) {
+    let logger = std.dict.get(options, "logger", null);
+    if (logger == null) {
+      logger = std.log.new({
+        "format": "json",
+        "output": "stderr",
+        "name": "error"
+      });
+    }
+    let max_body = std.dict.get(options, "max_body", 4096);
+    if (kind_of(max_body) != "int" || max_body < 0) {
+      fail("web.error_log max_body must be a non-negative integer");
+    }
+    return func(req, response) {
+      let status = std.dict.get(response, "status", 0);
+      if (status < 500) {
+        return response;
+      }
+      let body = std.dict.get(response, "body", "");
+      let detail = "";
+      if (kind_of(body) == "string") {
+        detail = body;
+      } else if (kind_of(body) == "bytes") {
+        detail = std.bytes.to_string(body);
+      } else if (body != null) {
+        detail = std.json.stringify(body);
+      }
+      if (len(detail) > max_body) {
+        detail = std.string.substr(detail, 0, max_body);
+      }
+      logger.error("request_failed", {
+        "request_id": std.dict.get(req, "request_id", null),
+        "trace_id": std.dict.get(req, "trace_id", null),
+        "span_id": std.dict.get(req, "span_id", null),
+        "method": std.dict.get(req, "method", null),
+        "path": std.dict.get(req, "path", null),
+        "status": status,
+        "body": detail
+      });
+      return response;
+    };
+  }
+
   func _rate_response(result, message) {
     let response = std.http.json_error(429, "rate_limited", message);
     let headers = response["headers"];
@@ -206,7 +249,9 @@ package web {
         "latency_ms": now - start,
         "response_bytes": size,
         "client_ip": std.dict.get(req, "client_ip", null),
-        "user_id": std.dict.get(req, "user_id", null)
+        "user_id": std.dict.get(req, "user_id", null),
+        "trace_id": std.dict.get(req, "trace_id", null),
+        "span_id": std.dict.get(req, "span_id", null)
       });
       return response;
     };

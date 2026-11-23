@@ -431,6 +431,126 @@ package auth {
     return null;
   }
 
+  export func auth_middleware(store, secret, options = {}) {
+    let required = std.dict.get(options, "required", true);
+    if (kind_of(required) != "bool") {
+      fail("auth.auth_middleware required must be a bool");
+    }
+    let jwt_options = std.dict.get(options, "jwt", {});
+    if (kind_of(jwt_options) != "dict") {
+      fail("auth.auth_middleware jwt must be a dict");
+    }
+    return func(req) {
+      let context = authenticate(store, req, secret, jwt_options);
+      if (context == null) {
+        if (!required) {
+          return null;
+        }
+        return unauthorized_response();
+      }
+      return null;
+    };
+  }
+
+  func _required_values(value, what) {
+    if (kind_of(value) == "string") {
+      if (value == "") {
+        fail("auth." + what + " must not be empty");
+      }
+      return [value];
+    }
+    if (kind_of(value) != "list" || len(value) == 0) {
+      fail("auth." + what + " must be a string or non-empty list");
+    }
+    for (let item in value) {
+      if (kind_of(item) != "string" || item == "") {
+        fail("auth." + what + " entries must be non-empty strings");
+      }
+    }
+    return value;
+  }
+
+  func _identity_values(identity, field) {
+    if (identity == null || kind_of(identity) != "dict") {
+      return null;
+    }
+    return std.dict.get(identity, field, null);
+  }
+
+  func _value_has(values, target) {
+    if (kind_of(values) == "string") {
+      return values == target;
+    }
+    if (kind_of(values) != "list") {
+      return false;
+    }
+    for (let item in values) {
+      if (item == target) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  export func has_role(identity, role, field = "roles") {
+    return _value_has(_identity_values(identity, field), role);
+  }
+
+  export func has_permission(identity, permission) {
+    return has_role(identity, permission, "permissions");
+  }
+
+  func _require_field(store, secret, field, required, options) {
+    let all = std.dict.get(options, "all", false);
+    if (kind_of(all) != "bool") {
+      fail("auth.require_* all must be a bool");
+    }
+    let jwt_options = std.dict.get(options, "jwt", {});
+    if (kind_of(jwt_options) != "dict") {
+      fail("auth.require_* jwt must be a dict");
+    }
+    return func(req) {
+      let context = authenticate(store, req, secret, jwt_options);
+      if (context == null) {
+        return unauthorized_response();
+      }
+      let identity = std.dict.get(context, "identity", null);
+      let values = _identity_values(identity, field);
+      if (values == null) {
+        values = _identity_values(
+          std.dict.get(context, "claims", null), field);
+      }
+      let ok = all;
+      for (let item in required) {
+        if (all) {
+          if (!_value_has(values, item)) {
+            ok = false;
+            break;
+          }
+        } else if (_value_has(values, item)) {
+          ok = true;
+          break;
+        }
+      }
+      if (!ok) {
+        return forbidden_response();
+      }
+      return null;
+    };
+  }
+
+  export func require_roles(store, secret, roles, options = {}) {
+    let required = _required_values(roles, "require_roles");
+    return _require_field(store, secret, "roles", required, options);
+  }
+
+  export func require_permissions(store, secret, permissions, options = {}) {
+    let required = _required_values(
+      permissions, "require_permissions");
+    return _require_field(
+      store, secret, "permissions", required, options);
+  }
+
   export func unauthorized_response(message = "unauthorized") {
     let response = std.http.json_error(401, "unauthorized", message);
     response["headers"]["WWW-Authenticate"] = "Bearer";

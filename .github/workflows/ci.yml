@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: skein
+          POSTGRES_PASSWORD: skein
+          POSTGRES_DB: skein_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skein -d skein_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: skein_test
+          MYSQL_USER: skein
+          MYSQL_PASSWORD: skein
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -proot --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+      valkey:
+        image: valkey/valkey:8.1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      SKEIN_TEST_POSTGRES_DSN: postgresql://skein:skein@127.0.0.1:5432/skein_test
+      SKEIN_TEST_MYSQL_DSN: mysql://skein:skein@127.0.0.1:3306/skein_test
+      SKEIN_TEST_REDIS_DSN: redis://127.0.0.1:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bison \
+            cmake \
+            flex \
+            g++ \
+            libboost-context-dev \
+            libbrotli-dev \
+            libffi-dev \
+            liblz4-dev \
+            libmariadb-dev \
+            libnghttp2-dev \
+            libpcre2-dev \
+            libpq-dev \
+            libsqlite3-dev \
+            libssl-dev \
+            libuv1-dev \
+            libzstd-dev \
+            ninja-build \
+            pkg-config \
+            python3 \
+            zlib1g-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DSKEIN_ENABLE_SQLITE=ON \
+            -DSKEIN_ENABLE_POSTGRES=ON \
+            -DSKEIN_ENABLE_MYSQL=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test with PostgreSQL, MySQL and Valkey
+        run: ctest --test-dir build --output-on-failure

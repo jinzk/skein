@@ -125,6 +125,37 @@ ts_test("auth middleware helpers", func() {
   ts_eq(forbidden["status"], 403);
 });
 
+ts_test("auth middleware roles and permissions", func() {
+  let store = auth.new_store({"ttl": 60});
+  let sid = store.create({
+    "user_id": 1,
+    "roles": ["admin", "editor"],
+    "permissions": ["users:read", "users:write"]
+  });
+  let middleware = auth.auth_middleware(store, "secret");
+  let req = {"cookies": {"sid": sid}, "headers": {}};
+  ts_eq(middleware(req), null);
+  let identity = auth.authenticate(store, req, "secret")["identity"];
+  ts_true(auth.has_role(identity, "admin"));
+  ts_true(auth.has_permission(identity, "users:read"));
+
+  ts_eq(auth.require_roles(store, "secret", "admin")(req), null);
+  ts_eq(auth.require_roles(store, "secret", ["owner"])(req)["status"], 403);
+  ts_eq(auth.require_roles(
+          store, "secret", ["admin", "owner"], {"all": true})(req)["status"],
+        403);
+  ts_eq(auth.require_permissions(
+          store, "secret", "users:write")(req), null);
+  ts_eq(auth.require_permissions(
+          store, "secret", ["files:write"])(req)["status"], 403);
+
+  let anonymous = {"cookies": {}, "headers": {}};
+  ts_eq(middleware(anonymous)["status"], 401);
+  let optional = auth.auth_middleware(
+    store, "secret", {"required": false});
+  ts_eq(optional(anonymous), null);
+});
+
 ts_test("csrf helpers", func() {
   let a = auth.csrf_token();
   let b = auth.csrf_token();

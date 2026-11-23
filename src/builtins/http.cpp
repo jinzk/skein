@@ -798,6 +798,101 @@ std::string compute_request_id(value_t *header_values) {
     return generate_request_id();
 }
 
+std::string random_hex_id(size_t bytes) {
+    static const char hex[] = "0123456789abcdef";
+    std::random_device device;
+    std::string result;
+    result.reserve(bytes * 2);
+    for (size_t i = 0; i < bytes; ++i) {
+        unsigned int value = device() & 0xff;
+        result.push_back(hex[(value >> 4) & 0x0f]);
+        result.push_back(hex[value & 0x0f]);
+    }
+    return result;
+}
+
+bool hex_string(const std::string &value, size_t expected) {
+    if (value.size() != expected)
+        return false;
+    for (unsigned char c : value) {
+        if (!std::isxdigit(c))
+            return false;
+    }
+    return true;
+}
+
+bool all_zero_hex(const std::string &value) {
+    for (char c : value) {
+        if (c != '0')
+            return false;
+    }
+    return true;
+}
+
+struct trace_context {
+    std::string trace_id;
+    std::string span_id;
+    std::string parent_span_id;
+    std::string flags;
+};
+
+trace_context compute_trace_context(value_t *header_values) {
+    trace_context result;
+    result.trace_id = random_hex_id(16);
+    result.span_id = random_hex_id(8);
+    result.flags = "01";
+
+    std::string incoming = first_header_value(header_values, "traceparent");
+    std::string version;
+    std::string trace_id;
+    std::string parent_id;
+    std::string flags;
+    size_t start = 0;
+    for (int part = 0; part < 4; ++part) {
+        size_t end = incoming.find('-', start);
+        if (end == std::string::npos) {
+            end = incoming.size();
+            if (part != 3)
+                return result;
+        }
+        std::string value = incoming.substr(start, end - start);
+        if (part == 0)
+            version = value;
+        else if (part == 1)
+            trace_id = value;
+        else if (part == 2)
+            parent_id = value;
+        else
+            flags = value;
+        start = end + 1;
+    }
+    if (start != incoming.size() + 1)
+        return result;
+    if (version != "00" || !hex_string(trace_id, 32) ||
+        all_zero_hex(trace_id) || !hex_string(parent_id, 16) ||
+        all_zero_hex(parent_id) || !hex_string(flags, 2))
+        return result;
+
+    result.trace_id = trace_id;
+    result.parent_span_id = parent_id;
+    result.flags = flags;
+    return result;
+}
+
+void add_trace_context(value_t *request, value_t *header_values) {
+    trace_context trace = compute_trace_context(header_values);
+    dict_set(request, "trace_id", newstrval(trace.trace_id.c_str()));
+    dict_set(request, "span_id", newstrval(trace.span_id.c_str()));
+    dict_set(request, "trace_flags", newstrval(trace.flags.c_str()));
+    if (!trace.parent_span_id.empty()) {
+        dict_set(request, "parent_span_id",
+                 newstrval(trace.parent_span_id.c_str()));
+    }
+    std::string traceparent = "00-" + trace.trace_id + "-" +
+                              trace.span_id + "-" + trace.flags;
+    dict_set(request, "traceparent", newstrval(traceparent.c_str()));
+}
+
 value_t *cookies_from_header_values(value_t *header_values) {
     value_t *cookies = (value_t *)newdictval();
     if (!header_values || header_values->type != T_dict)
@@ -855,6 +950,7 @@ void fill_request_context(value_t *request, const std::string &target,
     dict_set(request, "cookies", cookies_from_header_values(header_values));
     dict_set(request, "request_id",
              newstrval(compute_request_id(header_values).c_str()));
+    add_trace_context(request, header_values);
 
     std::string forwarded_for =
         first_header_value(header_values, "x-forwarded-for");
@@ -3272,6 +3368,10 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
         value_t *request_id_value = dict_get(request, "request_id");
         if (request_id_value && request_id_value->type == T_string)
             request_id = ((string_value_t *)request_id_value)->value;
+        std::string trace_id;
+        value_t *trace_id_value = dict_get(request, "trace_id");
+        if (trace_id_value && trace_id_value->type == T_string)
+            trace_id = ((string_value_t *)trace_id_value)->value;
         value_t *response =
             skein_call_function(handler, std::vector<value_t *>{request});
         if (response && is_task_value(response)) {
@@ -3337,6 +3437,11 @@ void handle_http_server_connection(value_t *stream, value_t *handler,
             !header_exists(headers, "X-Request-Id"))
             dict_set(headers, "X-Request-Id",
                      newstrval(request_id.c_str()));
+        if (!trace_id.empty() &&
+            !header_exists(headers, "X-Trace-Id")) {
+            dict_set(headers, "X-Trace-Id",
+                     newstrval(trace_id.c_str()));
+        }
         std::string body;
         generator_ptr body_generator;
         bool chunked = false;
@@ -5255,7 +5360,8 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             const char *context_fields[] = {
                 "target", "query", "cookies", "header_values",
                 "request_id", "client_ip", "forwarded_for",
-                "forwarded_proto"};
+                "forwarded_proto", "trace_id", "span_id",
+                "parent_span_id", "trace_flags", "traceparent"};
             for (const char *field : context_fields) {
                 value_t *field_value = dict_get(request, field);
                 if (field_value)
@@ -5745,9 +5851,11 @@ value_t *make_reuse_handler(
             const char *fields[] = {
                 "method", "path", "target", "query", "cookies",
                 "header_values", "request_id", "client_ip",
-                "forwarded_for", "forwarded_proto", "headers", "body",
-                "http_major", "http_minor", "keep_alive", "body_reader",
-                "socket", "connection_id", "scheme", "authority"};
+                "forwarded_for", "forwarded_proto", "trace_id", "span_id",
+                "parent_span_id", "trace_flags", "traceparent", "headers",
+                "body", "http_major", "http_minor", "keep_alive",
+                "body_reader", "socket", "connection_id", "scheme",
+                "authority"};
             for (const char *field : fields) {
                 value_t *value = dict_get(source, field);
                 if (value)
@@ -6106,7 +6214,9 @@ value_t *thread_dispatch(
     const char *fields[] = {
         "method", "path", "target", "query", "cookies", "header_values",
         "request_id", "client_ip", "forwarded_for", "forwarded_proto",
-        "headers", "body", "http_major", "http_minor", "keep_alive"};
+        "trace_id", "span_id", "parent_span_id", "trace_flags",
+        "traceparent", "headers", "body", "http_major", "http_minor",
+        "keep_alive"};
     for (const char *field : fields) {
         value_t *field_value = dict_get(request, field);
         if (field_value)

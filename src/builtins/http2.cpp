@@ -618,6 +618,7 @@ struct h2_connection {
         std::string authority;
         std::vector<header_pair> headers;
         std::string request_id;
+        std::string trace_id;
         std::string body;
         std::deque<std::string> body_chunks;
         task_ptr body_waiter;
@@ -2897,6 +2898,9 @@ value_t *make_request(
     value_t *request_id = dict_get(object, "request_id");
     if (request_id && request_id->type == T_string)
         request->request_id = ((string_value_t *)request_id)->value;
+    value_t *trace_id = dict_get(object, "trace_id");
+    if (trace_id && trace_id->type == T_string)
+        request->trace_id = ((string_value_t *)trace_id)->value;
     freeval(header_values);
 
     if (stream_request_body) {
@@ -2971,6 +2975,7 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
     header_pair status_header = {":status", std::to_string(status)};
     response_headers.push_back(status_header);
     bool has_request_id_header = false;
+    bool has_trace_id_header = false;
     auto add_response_header = [&](const std::string &name,
                                    const std::string &value) {
         if (name.empty() || name[0] == ':') {
@@ -2981,6 +2986,8 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
         std::string lower = lower_ascii(name);
         if (lower == "x-request-id")
             has_request_id_header = true;
+        if (lower == "x-trace-id")
+            has_trace_id_header = true;
         if (header_is_connection_specific(name))
             return true;
         header_pair pair;
@@ -3029,6 +3036,13 @@ bool submit_server_response(h2_connection &connection, int32_t stream_id,
         header_pair pair;
         pair.name = "x-request-id";
         pair.value = request_meta->request_id;
+        response_headers.push_back(pair);
+    }
+    if (!has_trace_id_header && request_meta &&
+        !request_meta->trace_id.empty()) {
+        header_pair pair;
+        pair.name = "x-trace-id";
+        pair.value = request_meta->trace_id;
         response_headers.push_back(pair);
     }
 

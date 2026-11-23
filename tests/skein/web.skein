@@ -71,6 +71,32 @@ ts_test("trusted proxy client ip", func() {
   ts_eq(web.client_ip(request), "127.0.0.1");
 });
 
+ts_test("error log middleware", func() {
+  let records = [];
+  let logger = std.log.new({
+    "format": "json",
+    "writer": func(record) {
+      records = std.list.append(records, record);
+    },
+    "name": "test"
+  });
+  let middleware = web.error_log({"logger": logger});
+  let request = {
+    "request_id": "req-1",
+    "trace_id": "trace-1",
+    "span_id": "span-1",
+    "method": "GET",
+    "path": "/boom"
+  };
+  let response = {"status": 500, "headers": {}, "body": "boom"};
+  middleware(request, response);
+  logger.flush();
+  ts_eq(len(records), 1);
+  ts_eq(std.string.contains(records[0], "request_failed"), 1);
+  ts_eq(std.string.contains(records[0], "trace-1"), 1);
+  ts_eq(std.string.contains(records[0], "boom"), 1);
+});
+
 ts_test("rate limit", func() {
   let limiter = web.rate_limit({
     "limit": 2,

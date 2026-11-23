@@ -722,7 +722,7 @@ let n = do {
 };
 ```
 
-`return` / `break` / `continue` 会直接穿出块。`do { ... } while (...)` 仍是 do-while 语句，`while` 必须和 `}` 同一行；如果要写“块表达式后接 while 循环”，用分号分开。
+`return` / `break` / `continue` 会直接穿出块；在 `do { ... }` 块表达式中使用 `return` 会发出警告，推荐让最后一条表达式作为值。`do { ... }` 用于需要块值的场景（如 `let v = do { ... };`），普通代码块（函数体、`if` / `while` / `for` 体、`-> { ... }` lambda 体）继续用裸 `{ ... }`。`do { ... } while (...)` 仍是 do-while 语句，`while` 必须和 `}` 同一行；如果要写“块表达式后接 while 循环”，用分号分开。
 
 #### 日志
 

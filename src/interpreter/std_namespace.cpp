@@ -590,6 +590,7 @@ value_t *build_namespace_impl() {
             {"wait_all", B_task_wait_all},
             {"cancel", B_task_cancel},
             {"done", B_task_done},
+            {"detach", B_task_detach},
             {"catch", B_task_catch},
             {"try_wait", B_task_try_wait},
             {"try_wait_all", B_task_try_wait_all},

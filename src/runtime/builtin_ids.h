@@ -195,6 +195,7 @@ enum bifs {
     B_task_wait_all,
     B_task_cancel,
     B_task_done,
+    B_task_detach,
     B_task_catch,
     B_task_try_wait,
     B_task_try_wait_all,

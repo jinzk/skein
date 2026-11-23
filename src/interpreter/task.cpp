@@ -517,6 +517,18 @@ value_t *task_done(const std::vector<value_t *> &args) {
     return newboolval(value->done());
 }
 
+value_t *task_detach_value(const std::vector<value_t *> &args) {
+    if (args.size() != 1) {
+        yyerror("std.task.detach expects 1 argument");
+        return NULL;
+    }
+    std::shared_ptr<task> value;
+    if (!get_task_value(args[0], value))
+        return NULL;
+    task_detach(value);
+    return new_task_value(std::move(value));
+}
+
 task_ptr task_create() {
     return std::make_shared<task>();
 }
@@ -1235,6 +1247,8 @@ struct value_t *call_task_builtin(
             return task_cancel(args);
         case B_task_done:
             return task_done(args);
+        case B_task_detach:
+            return task_detach_value(args);
         case B_task_catch:
             return task_catch(args);
         case B_task_try_wait:

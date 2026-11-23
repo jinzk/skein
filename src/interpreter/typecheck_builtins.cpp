@@ -794,6 +794,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
             {poly_list(poly_task(T)), integer_type}, poly_list(T), 1);
     if (path == "std.task.done" || path == "std.task.cancel")
         return poly_builtin({poly_task(T)}, bool_type);
+    if (path == "std.task.detach")
+        return poly_builtin({poly_task(T)}, poly_task(T));
     if (path == "std.task.sleep")
         return poly_builtin({integer_type},
                             poly_task(type_builtin(TYPE_NULL)));

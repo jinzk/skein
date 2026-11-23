@@ -224,6 +224,28 @@ def run_cases():
     )
 
     check(
+        "std.task.detach free function",
+        "import std;\n"
+        "func work() { return 7; }\n"
+        "let t = launch work();\n"
+        "let d = std.task.detach(t);\n"
+        "println(d.detached());\n"
+        "println(d.wait());\n",
+        stdout_all=["true", "7"],
+    )
+
+    check(
+        "task pipeline wait and detach",
+        "import std;\n"
+        "func work(n) { return n; }\n"
+        "println(launch work(9) |> std.task.wait);\n"
+        "let d = launch work(3) |> std.task.detach;\n"
+        "println(d.detached());\n"
+        "println(d.wait());\n",
+        stdout_all=["9", "true", "3"],
+    )
+
+    check(
         "launch expects a call",
         'import std;\nlaunch 1;\n',
         stderr="launch expects a call expression",

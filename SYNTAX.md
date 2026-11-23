@@ -1009,6 +1009,7 @@ struct Handler {
   t.done()
   t.detach()      // 不再由父作用域等待/取消
   t.detached()
+  std.task.detach(t)  // 函数形式，便于 |>
   ```
 
   `launch` 默认 structured：当前 task/fiber 退出时等待未 detach 的子任务；

@@ -142,6 +142,7 @@ std.task.wait(task[, timeout_ms]) → result
 std.task.wait_all(tasks[, timeout_ms]) → list
 std.task.cancel(task)         → true / false
 std.task.done(task)           → true / false
+std.task.detach(task)         → task
 std.task.catch(task)          → result task
 std.task.try_wait(task[, timeout_ms]) → result
 std.task.try_wait_all(tasks[, timeout_ms]) → result
@@ -243,6 +244,8 @@ t.detached() -> bool
 - 子任务失败会取消同作用域其他子任务，并把首个错误传播给父任务；
 - 父任务取消会递归取消未 detach 的子任务；
 - `t.detach()` 后父作用域不再等待/取消它，但仍可 `wait()` / `cancel()`；
+- `std.task.wait(t)` / `std.task.detach(t)` 提供函数形式，可配合管道：
+  `launch f() |> std.task.wait`、`launch f() |> std.task.detach`；
 - 顶层脚本没有父 task，顶层 `launch` 默认 detached，需要显式 `wait()`；
 - generator fiber 没有 task 父级，其中的 `launch` 也按 detached 处理。
 
@@ -3302,6 +3305,7 @@ std.task.wait
 std.task.wait_all
 std.task.cancel
 std.task.done
+std.task.detach
 std.task.catch
 std.task.try_wait
 std.task.try_wait_all

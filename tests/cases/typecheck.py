@@ -788,6 +788,14 @@ def run_cases():
           "println(rs); println(s);\n",
           stdout_all=["[ok, ok]", "ok"], not_stderr="type warning")
 
+    check("task detach builtin type",
+          "import std;\n"
+          "func fetch(): string { return \"ok\"; }\n"
+          "let d: task[string] = std.task.detach(launch fetch());\n"
+          "let s: string = d.wait();\n"
+          "println(s);\n",
+          stdout="ok", not_stderr="type warning")
+
     check("generator element type",
           "import std;\n"
           "func parts() { yield \"hello\"; yield \"world\"; }\n"

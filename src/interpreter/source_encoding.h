@@ -1,7 +1,6 @@
 #ifndef SKEIN_SOURCE_ENCODING_H
 #define SKEIN_SOURCE_ENCODING_H
 
-#include <cstdio>
 #include <string>
 
 /* Encoding selected with --encoding; empty means auto-detect BOM or UTF-8. */
@@ -17,8 +16,5 @@ bool decode_source_bytes(const std::string &raw,
 bool load_source_file(const std::string &path,
                       const std::string &forced_encoding,
                       std::string &text, std::string &error);
-
-/* Create a temporary FILE* containing decoded UTF-8 source. */
-FILE *source_text_file(const std::string &text, std::string &error);
 
 #endif

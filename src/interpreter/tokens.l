@@ -257,6 +257,12 @@ static void note_for_name_token() {
 static std::string input_line;
 static size_t input_pos = 0;
 
+// 内嵌包、include 和已被完整读入的脚本可以直接从内存扫描，避免为了
+// 传给 flex 而先写入 tmpfile。data 必须活到本次解析结束。
+static const char *input_memory = NULL;
+static size_t input_memory_size = 0;
+static size_t input_memory_pos = 0;
+
 enum input_status {
     INPUT_LINE,       // 读到完整的一行（含 \n）
     INPUT_PARTIAL,    // 读到 EOF，但还有一行没有换行符
@@ -281,6 +287,25 @@ static input_status read_input_line() {
     input_line.clear();
     input_pos = 0;
     diag_start_input_line();
+
+    if (input_memory) {
+        if (g_interrupted)
+            return INPUT_INTERRUPTED;
+        if (input_memory_pos >= input_memory_size)
+            return INPUT_EOF;
+        const size_t begin = input_memory_pos;
+        size_t end = begin;
+        while (end < input_memory_size && input_memory[end] != '\n')
+            ++end;
+        const bool complete = end < input_memory_size;
+        if (complete)
+            ++end;
+        input_line.assign(input_memory + begin, end - begin);
+        input_memory_pos = end;
+        strip_utf8_bom_once();
+        diag_record_line(diag_current_line(), input_line);
+        return complete ? INPUT_LINE : INPUT_PARTIAL;
+    }
 
     if (g_show_prompt && (yyin == NULL || yyin == stdin)) {
         repl_line_status st = repl_read_line(input_line, indent_count > 0);
@@ -1194,7 +1219,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 
 %%
 
-void reset_scanner_state(std::FILE *in) {
+static void reset_scanner_common() {
     BEGIN(INITIAL);
     string_buffer.clear();
     clear_func_locations();
@@ -1225,12 +1250,31 @@ void reset_scanner_state(std::FILE *in) {
     brace_stack.clear();
     reset_for_header_state();
     for_body_indent = 0;
+}
+
+void reset_scanner_state(std::FILE *in) {
+    reset_scanner_common();
+    input_memory = NULL;
+    input_memory_size = 0;
+    input_memory_pos = 0;
     std::clearerr(in);
     yyrestart(in);
 }
 
+void reset_scanner_state_memory(const char *data, size_t size) {
+    reset_scanner_common();
+    input_memory = data;
+    input_memory_size = size;
+    input_memory_pos = 0;
+    /* Flush flex's private buffer; YY_INPUT does not read from yyin here. */
+    yyrestart(NULL);
+}
+
 struct scanner_checkpoint {
     std::FILE *in;
+    const char *memory;
+    size_t memory_size;
+    size_t memory_pos;
     std::string input;
     size_t position;
     std::string strings;
@@ -1272,6 +1316,9 @@ struct scanner_checkpoint {
 scanner_checkpoint *scanner_checkpoint_save() {
     scanner_checkpoint *checkpoint = new scanner_checkpoint;
     checkpoint->in = yyin;
+    checkpoint->memory = input_memory;
+    checkpoint->memory_size = input_memory_size;
+    checkpoint->memory_pos = input_memory_pos;
     checkpoint->input = input_line;
     checkpoint->position = input_pos;
     checkpoint->strings = string_buffer;
@@ -1314,9 +1361,15 @@ scanner_checkpoint *scanner_checkpoint_save() {
 void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     if (!checkpoint)
         return;
-    reset_scanner_state(checkpoint->in);
+    if (checkpoint->memory)
+        reset_scanner_state_memory(checkpoint->memory,
+                                   checkpoint->memory_size);
+    else
+        reset_scanner_state(checkpoint->in);
     input_line = checkpoint->input;
     input_pos = checkpoint->position;
+    if (checkpoint->memory)
+        input_memory_pos = checkpoint->memory_pos;
     string_buffer = checkpoint->strings;
     string_start_line = checkpoint->string_line;
     string_start_column = checkpoint->string_column;

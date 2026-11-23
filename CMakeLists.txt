@@ -190,6 +190,7 @@ set(SKEIN_EMBEDDED_DIR ${CMAKE_CURRENT_BINARY_DIR}/embedded)
 set(SKEIN_PLATFORM_SOURCES
   src/platform/dynamic_library.cpp
   src/platform/runtime_state.cpp
+  src/platform/startup_profile.cpp
 )
 if(WIN32)
   list(APPEND SKEIN_PLATFORM_SOURCES src/platform/platform_win.cpp)

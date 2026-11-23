@@ -17,8 +17,10 @@
 #include "runtime_state.h"
 #include "scopestack.h"
 #include "source_encoding.h"
+#include "startup_profile.h"
 #include "stdio_stream.h"
 #include "symbol.h"
+#include "typecheck.h"
 #include "unicode_ident.h"
 #include "valuetype.h"
 
@@ -166,6 +168,19 @@ std::string normalize_dir(const std::string &dir) {
     fs::path canonical = fs::weakly_canonical(path, ec);
     if (!ec)
         return path_to_utf8(canonical);
+    return path_to_utf8(path.lexically_normal());
+}
+
+/* Like normalize_dir, but without touching the filesystem.  Used for the
+ * entry script's directory so a run that never resolves a project module does
+ * not pay for the first weakly_canonical call. */
+std::string absolute_dir(const std::string &dir) {
+    std::error_code ec;
+    fs::path path = path_from_utf8(dir);
+    if (path.is_relative())
+        path = fs::absolute(path, ec);
+    if (ec)
+        return dir;
     return path_to_utf8(path.lexically_normal());
 }
 
@@ -869,7 +884,7 @@ bool parse_package_source(const std::string &source_text,
                           const std::string &package_name,
                           const std::string &module_name,
                           const std::string &base_dir, value_t *&result,
-                          std::string &error);
+                          std::string &error, bool check_types = true);
 
 value_t *import_resolved(const std::string &dotted,
                          resolved_package &resolved,
@@ -1343,6 +1358,7 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
     import_spec spec;
     if (!parse_import_spec(dotted_path, spec, error))
         return NULL;
+    skein::startup_profile::span_scope import_span("import " + spec.dotted);
 
     /* `main` is the entry script's package and is never importable. */
     if (is_reserved_main_package(spec.dotted)) {
@@ -1387,7 +1403,12 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
         std::string hidden = package_cache_key("builtin:std");
         if (value_t *cached = lookup_global_symbol(hidden.c_str()))
             return dupval(cached);
-        value_t *namespace_value = skein::stdlib::build_namespace();
+        value_t *namespace_value = NULL;
+        {
+            skein::startup_profile::span_scope namespace_span(
+                "std_namespace");
+            namespace_value = skein::stdlib::build_namespace();
+        }
         save_global_symbol(hidden.c_str(), namespace_value);
 
         auto parse_adapter = [](const std::string &source,
@@ -1397,14 +1418,18 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                                 value_t *&result, std::string &parse_error) {
             return parse_package_source(source, source_name, expected_name,
                                         package_name, "", import_base, result,
-                                        parse_error);
+                                        parse_error, false);
         };
         std::string adapter_error;
-        if (!skein::stdlib::install_adapters(namespace_value, parse_adapter,
-                                             adapter_error)) {
-            error = "cannot load std container adapter: " + adapter_error;
-            save_global_symbol(hidden.c_str(), newnull());
-            return NULL;
+        {
+            skein::startup_profile::span_scope adapter_span("std_adapters");
+            if (!skein::stdlib::install_adapters(namespace_value,
+                                                 parse_adapter,
+                                                 adapter_error)) {
+                error = "cannot load std container adapter: " + adapter_error;
+                save_global_symbol(hidden.c_str(), newnull());
+                return NULL;
+            }
         }
         return dupval(namespace_value);
     }
@@ -1594,11 +1619,6 @@ bool evaluate_include_source_impl(const char *path, std::string &error) {
         error = "cannot load include file " + canonical + ": " + error;
         return false;
     }
-    FILE *file = source_text_file(source_text, error);
-    if (!file) {
-        error = "cannot open include file " + canonical + ": " + error;
-        return false;
-    }
 
     std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
     parser_lock_depth_guard depth_guard;
@@ -1627,9 +1647,8 @@ bool evaluate_include_source_impl(const char *path, std::string &error) {
     g_interactive = false;
     g_statement_invalid = false;
     parser_begin_nested_parse();
-    yyin = file;
     indent_count = 0;
-    reset_scanner_state(file);
+    reset_scanner_state_memory(source_text.data(), source_text.size());
     diag_start_source();
     diag_set_source_name(canonical);
     import_base = normalize_dir(
@@ -1637,7 +1656,6 @@ bool evaluate_include_source_impl(const char *path, std::string &error) {
 
     int status = yyparse();
     g_include_collect = false;
-    std::fclose(file);
 
     bool ok = status == 0 && !g_include_invalid &&
               diag_error_count() == errors_before;
@@ -1674,19 +1692,23 @@ bool evaluate_include_source_impl(const char *path, std::string &error) {
     return ok;
 }
 
+bool embedded_typecheck_enabled() {
+    const char *value = std::getenv("SKEIN_TYPECHECK_EMBEDDED");
+    if (!value || !*value)
+        return false;
+    return std::strcmp(value, "0") != 0 && std::strcmp(value, "false") != 0;
+}
+
 bool parse_package_source(const std::string &source_text,
                           const std::string &source_name,
                           const std::string &expected_name,
                           const std::string &package_name,
                           const std::string &module_name,
                           const std::string &base_dir, value_t *&result,
-                          std::string &error) {
-    FILE *file = source_text_file(source_text, error);
-    if (!file) {
-        error = "cannot open package source " + source_name + ": " + error;
-        return false;
-    }
-
+                          std::string &error, bool check_types) {
+    skein::startup_profile::span_scope parse_span("parse " + package_name);
+    skein::typecheck::suppress_scope typecheck_scope(
+        !check_types && !embedded_typecheck_enabled());
     std::lock_guard<std::recursive_timed_mutex> parse_gate(
         package_parse_gate());
     std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
@@ -1705,14 +1727,15 @@ bool parse_package_source(const std::string &source_text,
     int errors_before = diag_error_count();
     std::string saved_import_base = import_base;
 
-    if (!base_dir.empty())
+    /* Nested parses usually pass the current import_base back in; it already
+     * has the form this function would produce. */
+    if (!base_dir.empty() && base_dir != import_base)
         import_base = normalize_dir(base_dir);
     g_interactive = false;
     g_statement_invalid = false;
     ++g_package_loading;
     parser_begin_nested_parse();
-    yyin = file;
-    reset_scanner_state(file);
+    reset_scanner_state_memory(source_text.data(), source_text.size());
     diag_start_source();
     diag_set_source_name(source_name);
     diag_set_package_name(package_name);
@@ -1729,7 +1752,6 @@ bool parse_package_source(const std::string &source_text,
     load_stack.pop_back();
 
     eval_popscope();
-    std::fclose(file);
 
     scanner_checkpoint_restore(scan_cp);
     diag_restore_source(diag_cp);
@@ -1762,11 +1784,6 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
         error = "cannot load worker script " + path + ": " + error;
         return false;
     }
-    FILE *file = source_text_file(source, error);
-    if (!file) {
-        error = "cannot open worker script " + path + ": " + error;
-        return false;
-    }
 
     std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
     parser_lock_depth_guard depth_guard;
@@ -1790,8 +1807,7 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
     g_statement_invalid = false;
     ++g_package_loading;
     parser_begin_nested_parse();
-    yyin = file;
-    reset_scanner_state(file);
+    reset_scanner_state_memory(source.data(), source.size());
     diag_start_source();
     diag_set_source_name(path);
     diag_set_package_name("worker");
@@ -1808,7 +1824,6 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
     --g_package_loading;
     active_eval_context().runtime_error_count = saved_runtime_errors;
     g_statement_invalid = saved_invalid;
-    std::fclose(file);
 
     if (status != 0 || diag_error_count() != errors_before) {
         if (error.empty())
@@ -1853,7 +1868,7 @@ value_t *import_embedded_package(const std::string &dotted,
     value_t *namespace_value = NULL;
     bool ok = parse_package_source(
         source, "<" + dotted + ">", split_dotted(dotted).back(), dotted, "",
-        import_base, namespace_value, error);
+        import_base, namespace_value, error, false);
     loading_paths.pop_back();
 
     if (!ok) {
@@ -1939,7 +1954,7 @@ void package_configure(const std::string &source_path,
             fs::path directory = source.parent_path();
             if (!directory.empty()) {
                 main_directory =
-                    path_from_utf8(normalize_dir(path_to_utf8(directory)));
+                    path_from_utf8(absolute_dir(path_to_utf8(directory)));
                 search_roots.push_back(path_to_utf8(main_directory));
             }
         }
@@ -1948,7 +1963,7 @@ void package_configure(const std::string &source_path,
     if (main_directory.empty()) {
         const std::string cwd = thread_cwd();
         main_directory =
-            path_from_utf8(normalize_dir(cwd.empty() ? "." : cwd));
+            path_from_utf8(absolute_dir(cwd.empty() ? "." : cwd));
         search_roots.push_back(path_to_utf8(main_directory));
     }
 

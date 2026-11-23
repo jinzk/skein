@@ -43,6 +43,51 @@ python3 tools/bench_jit.py --bin ./build/skein --repeats 5 --check
 `SKEIN_ENABLE_JIT=OFF`，会直接报错而不是给出误导性的 1.0x 数据。
 各平台收益见 [roadmap.md](roadmap.md)。
 
+## 启动性能分析
+
+`SKEIN_STARTUP_STATS=1` 会在进程退出时向 stderr 输出各阶段耗时：
+
+```bash
+SKEIN_STARTUP_STATS=1 ./build/skein - <<'EOF'
+import std;
+EOF
+```
+
+带 `spans:` 的部分是嵌套区间，按缩进表示层级，例如：
+`import std.web` → `parse std.web` → `import std` → `std_adapters` →
+`parse std.adapter`。缩进不参与计时。
+
+`tools/startup_profile.py` 会多次采样，并给出 wall time 与 `main()` 内部各阶段
+的中位数：
+
+```bash
+python3 tools/startup_profile.py --bin ./build/skein --runs 12
+python3 tools/startup_profile.py --bin ./build/skein --verbose
+```
+
+列的含义：
+
+- `wall`：从创建进程到退出的总时间
+- `main`：`[startup]` 覆盖的 `main()` 内部时间
+- `config`：`runtime_config`
+- `imports`：顶层 `import ...` span 的总和
+- `std_ns`：`build_namespace()`（创建 `std` 命名空间）
+- `eval_rest`：`parse_eval` 中不属于顶层 import 的剩余部分
+
+在 Windows 的 RelWithDebInfo 构建上，空脚本 `wall ≈ 10 ms`，其中 `main`
+只占约 `0.4 ms`。其余来自进程创建、OS loader、CRT 和动态库初始化。因此：
+
+- `std` 命名空间的 eager 构建本身约 `0.1 ms`，不是启动瓶颈；
+- `import std` 的 `main()` 成本约 `0.9 ms`，主要花在容器 adapter 的解析与执行；
+- `lib/std/*.skein` 已经是按需加载，导入单个内嵌包约 `1.2–1.6 ms`，主要成本是
+  解析对应源码；
+- 内嵌包由编译器内置并随解释器一起测试，启动时不再跑类型检查；
+  需要重新检查它们时设置 `SKEIN_TYPECHECK_EMBEDDED=1`
+  （`tests/cases/typecheck.py` 用它做回归）；
+- 源码直接从内存扫描，不再为内嵌包或已读入的脚本创建 `tmpfile()`；
+- 想缩短短脚本启动时间，应优先看进程/动态库初始化和解析器，而不是把
+  `std.*` 改成懒加载。
+
 Windows 上可选用 mimalloc 降低小对象分配开销：
 
 ```bash

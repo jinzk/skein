@@ -131,20 +131,6 @@ analysis_result analyze_source_text(const std::string &source,
     g_script_stop = false;
     g_statement_invalid = false;
 
-    std::string source_error;
-    FILE *script = source_text_file(source, source_error);
-    if (!script) {
-        result.error_count = 2;
-        result.diagnostics.push_back(diagnostic_record{});
-        result.diagnostics.back().source = options.source_name;
-        result.diagnostics.back().severity = DiagnosticSeverity::Error;
-        result.diagnostics.back().code = "IO0001";
-        result.diagnostics.back().category = "source error";
-        result.diagnostics.back().message = source_error;
-        return result;
-    }
-    yyin = script;
-
     diag_reset_errors();
     diag_start_source();
     diag_set_source_name(options.source_name);
@@ -155,7 +141,7 @@ analysis_result analyze_source_text(const std::string &source,
     eval_context context;
     set_active_eval_context(&context);
     initscope();
-    reset_scanner_state(yyin);
+    reset_scanner_state_memory(source.data(), source.size());
 
     diag_collect_begin(options.suppress_text);
     {
@@ -170,6 +156,5 @@ analysis_result analyze_source_text(const std::string &source,
     shutdown_analysis_runtime();
     set_active_eval_context(NULL);
     drain_finish();
-    std::fclose(script);
     return result;
 }

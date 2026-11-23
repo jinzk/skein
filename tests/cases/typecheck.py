@@ -1367,3 +1367,18 @@ def run_cases():
         "func f(a: int, b: string) { return a; }\n"
         'f("x", 1);\n')
     assert proc.stderr.count("type error:") == 1, proc.stderr
+
+    # Embedded std packages skip the checker at startup for speed.  The
+    # SKEIN_TYPECHECK_EMBEDDED override keeps them covered by this suite.
+    embedded_env = dict(os.environ, SKEIN_TYPECHECK="strict",
+                        SKEIN_TYPECHECK_EMBEDDED="1")
+    proc = run("import std.web;\n"
+               "import std.auth;\n"
+               "import std.cache;\n"
+               "import std.kv;\n"
+               "import std.fsm;\n"
+               'println("ok");\n',
+               env=embedded_env)
+    assert proc.returncode == 0, proc.stderr
+    assert "type error" not in proc.stderr, proc.stderr
+    assert "ok" in proc.stdout, proc.stdout

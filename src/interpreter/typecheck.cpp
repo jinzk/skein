@@ -3321,6 +3321,21 @@ void set_mode(Mode mode) {
     g_mode = mode;
 }
 
+namespace {
+thread_local bool g_suppressed = false;
+}
+
+suppress_scope::suppress_scope(bool enabled)
+    : active_(enabled), previous_(g_suppressed) {
+    if (active_)
+        g_suppressed = true;
+}
+
+suppress_scope::~suppress_scope() {
+    if (active_)
+        g_suppressed = previous_;
+}
+
 Mode mode() {
     return g_mode;
 }
@@ -3358,7 +3373,7 @@ const char *mode_name(Mode mode) {
 }
 
 bool check_statement(struct ast *statement) {
-    if (g_mode == Mode::Off || !statement)
+    if (g_suppressed || g_mode == Mode::Off || !statement)
         return true;
     Checker checker(diag_current_source_name(),
                     diag_current_package_name());

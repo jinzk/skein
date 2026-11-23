@@ -3,15 +3,7 @@
 #include "encoding.h"
 #include "platform.h"
 
-#include <cerrno>
-#include <cstdio>
-#include <cstring>
 #include <string>
-
-#ifdef _WIN32
-#include <fcntl.h>
-#include <io.h>
-#endif
 
 namespace {
 
@@ -133,35 +125,4 @@ bool load_source_file(const std::string &path,
     if (!platform_read_file(path, raw, error))
         return false;
     return decode_source_bytes(raw, forced_encoding, text, error);
-}
-
-FILE *source_text_file(const std::string &text, std::string &error) {
-    error.clear();
-    FILE *file = std::tmpfile();
-    if (!file) {
-        error = std::strerror(errno);
-        return nullptr;
-    }
-#ifdef _WIN32
-    if (_setmode(_fileno(file), _O_BINARY) == -1) {
-        const int saved = errno;
-        std::fclose(file);
-        error = std::strerror(saved);
-        return nullptr;
-    }
-#endif
-    if (!text.empty() &&
-        std::fwrite(text.data(), 1, text.size(), file) != text.size()) {
-        const int saved = errno;
-        std::fclose(file);
-        error = std::strerror(saved);
-        return nullptr;
-    }
-    if (std::fflush(file) != 0 || std::fseek(file, 0, SEEK_SET) != 0) {
-        const int saved = errno;
-        std::fclose(file);
-        error = std::strerror(saved);
-        return nullptr;
-    }
-    return file;
 }

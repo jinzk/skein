@@ -614,6 +614,8 @@ let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
   - `loose` 只报确定冲突；
   - `warn` 额外对隐式 `any -> 容器[T]` 发 warning；
   - `strict` 把该 warning 提升为 error；
+- 内嵌在解释器里的 std 包启动时不做类型检查（它们由构建和测试覆盖）；
+  设置 `SKEIN_TYPECHECK_EMBEDDED=1` 可以恢复检查，用于验证标准库源码；
 - `as` 只改变静态类型，运行时是恒等操作，不做转换；确定的元素冲突仍然报错；
 - `as` 不能作为赋值目标；`x is list[int]` 和模式中的泛型参数会被拒绝；
 - 函数和方法调用会检查显式参数类型；方法还要求接收者有静态类型；

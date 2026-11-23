@@ -27,6 +27,9 @@ void repl_set_last_result(struct value_t *value);
 /* Discard buffered input and repoint the scanner at `in`. */
 void reset_scanner_state(std::FILE *in);
 
+/* Parse from memory; `data` must stay alive until the parse finishes. */
+void reset_scanner_state_memory(const char *data, size_t size);
+
 /* Save/restore the scanner between outer source and imported packages. */
 struct scanner_checkpoint;
 scanner_checkpoint *scanner_checkpoint_save();

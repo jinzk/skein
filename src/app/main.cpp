@@ -3,6 +3,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "parser.hpp"
@@ -30,6 +31,7 @@
 #include "runtime_state.h"
 #include "scopestack.h"
 #include "source_encoding.h"
+#include "startup_profile.h"
 #include "structtype.h"
 #include "task.h"
 #include "thread_channel.h"
@@ -52,6 +54,15 @@
 
 extern FILE *yyin;
 extern int indent_count;
+
+namespace {
+
+/* Flush the shared startup profile when main returns, including early exits. */
+struct startup_profile_guard {
+    ~startup_profile_guard() { skein::startup_profile::finish(); }
+};
+
+} // namespace
 
 static struct value_t *runtime_call(struct value_t *callee,
                                     std::vector<struct value_t *> args) {
@@ -95,8 +106,12 @@ static void print_usage(const char *program) {
 }
 
 int main(int argc, char **argv) {
+    skein::startup_profile::begin();
+    startup_profile_guard startup;
+
     platform_init();
     platform_install_interrupt_handler();
+    skein::startup_profile::mark("platform_init");
 
     skein::typecheck::Mode typecheck_mode = skein::typecheck::Mode::Warn;
     if (const char *env_mode = std::getenv("SKEIN_TYPECHECK")) {
@@ -110,6 +125,7 @@ int main(int argc, char **argv) {
                          env_mode);
     }
     skein::typecheck::set_mode(typecheck_mode);
+    skein::startup_profile::mark("typecheck_setup");
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--check-ffi") == 0) {
@@ -141,20 +157,24 @@ int main(int argc, char **argv) {
             return code;
         }
     }
+    skein::startup_profile::mark("pre_scan");
 
     struct skein_context runtime_hooks = {runtime_call,
                                           runtime_call_builtin,
                                           runtime_error_report};
     skein::native_async::install(&runtime_hooks);
     skein_context_set(&runtime_hooks);
+    skein::startup_profile::mark("runtime_hooks");
 
     std::string module_error;
     if (!builtins_register_modules(module_error)) {
         std::fprintf(stderr, "skein: %s\n", module_error.c_str());
         return 1;
     }
+    skein::startup_profile::mark("builtin_modules");
 
     std::vector<std::string> args = platform_command_line_args(argc, argv);
+    skein::startup_profile::mark("command_line");
     const char *program =
         args.empty() || args[0].empty() ? "skein" : args[0].c_str();
 
@@ -294,6 +314,7 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
+    skein::startup_profile::mark("arg_parse");
 
     std::string executable = platform_executable_path();
     if (executable.empty())
@@ -370,6 +391,7 @@ int main(int argc, char **argv) {
 
     sys_invocation_set(std::move(script_args), script_path,
                        std::move(executable));
+    skein::startup_profile::mark("sys_invocation");
 
     source_encoding_set(source_encoding);
     if (run_entry) {
@@ -399,12 +421,15 @@ int main(int argc, char **argv) {
         return 0;
     }
     package_configure(script_path, package_dirs);
+    skein::startup_profile::mark("package_configure");
     diag_set_package_name("main");
     diag_set_module_name("");
     if (!script_path.empty() && script_path != "-")
         diag_set_source_name(script_path);
+    skein::startup_profile::mark("runtime_config");
 
-    FILE *script = NULL;
+    std::string script_source;
+    bool script_in_memory = false;
     if (!script_path.empty()) {
         g_interactive = false;
     } else {
@@ -412,23 +437,17 @@ int main(int argc, char **argv) {
     }
     if (!script_path.empty()) {
         if (script_path != "-") {
-            std::string source_text;
             std::string source_error;
             if (!load_source_file(script_path, source_encoding_get(),
-                                  source_text, source_error)) {
+                                  script_source, source_error)) {
                 std::fprintf(stderr, "%s: %s\n", script_path.c_str(),
                              source_error.c_str());
                 return 2;
             }
-            script = source_text_file(source_text, source_error);
-            if (!script) {
-                std::fprintf(stderr, "%s: %s\n", script_path.c_str(),
-                             source_error.c_str());
-                return 2;
-            }
-            yyin = script;
+            script_in_memory = true;
         }
     }
+    skein::startup_profile::mark("source_load");
 
     eval_context context;
     set_active_eval_context(&context);
@@ -436,6 +455,10 @@ int main(int argc, char **argv) {
     initscope();
     if (g_show_prompt)
         repl_history_load();
+    if (script_in_memory)
+        reset_scanner_state_memory(script_source.data(),
+                                   script_source.size());
+    skein::startup_profile::mark("eval_init");
 
     int status = 0;
     for (;;) {
@@ -452,6 +475,7 @@ int main(int argc, char **argv) {
         indent_count = 0;
         reset_scanner_state(yyin ? yyin : stdin);
     }
+    skein::startup_profile::mark("parse_eval");
 
     if (g_show_prompt)
         repl_history_save();
@@ -472,8 +496,7 @@ int main(int argc, char **argv) {
     event_loop_shutdown();
     process_spawn_finish();
     set_active_eval_context(NULL);
-    if (script)
-        std::fclose(script);
+    skein::startup_profile::mark("shutdown");
 
     skein_vm_stats_report();
 
@@ -492,5 +515,6 @@ int main(int argc, char **argv) {
         status = 1;
     }
     drain_finish();
+    skein::startup_profile::mark("finalize");
     return status;
 }
